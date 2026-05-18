@@ -38,6 +38,8 @@ def parse_ts_sheet(
     model: dict[str, list[dict[str, Any]]],
     sheet_name: str,
     snapshots: pd.Index,
+    snapshot_start: int = 0,
+    snapshot_window: int | None = None,
     step: int = 1,
 ) -> dict[str, np.ndarray] | None:
     """Parse a time-series sheet (rows = timesteps, columns = component names).
@@ -61,9 +63,11 @@ def parse_ts_sheet(
     for key in data_keys:
         vals = [number(r.get(key), 0.0) for r in rows]
         arr = np.array(vals, dtype=float)
-        # Downsample when the raw array is longer than the (already-sliced) snapshot index.
-        if step > 1 and len(arr) != n_snap:
-            arr = arr[::step]
+        if len(arr) != n_snap:
+            stop = len(arr) if snapshot_window is None else min(len(arr), snapshot_start + snapshot_window)
+            arr = arr[snapshot_start:stop]
+            if step > 1:
+                arr = arr[::step]
         if len(arr) == n_snap:
             result[key] = arr
     return result if result else None
@@ -73,12 +77,21 @@ def add_loads(
     network: pypsa.Network,
     model: dict[str, list[dict[str, Any]]],
     snapshots: pd.Index,
+    snapshot_start: int = 0,
+    snapshot_window: int | None = None,
     step: int = 1,
 ) -> dict[str, float]:
     """Add loads using workbook data only.
     If 'loads-p_set' sheet is present its time-series takes priority;
     otherwise the static p_set is used as a flat constant."""
-    ts_p_set = parse_ts_sheet(model, "loads-p_set", snapshots, step=step)
+    ts_p_set = parse_ts_sheet(
+        model,
+        "loads-p_set",
+        snapshots,
+        snapshot_start=snapshot_start,
+        snapshot_window=snapshot_window,
+        step=step,
+    )
     load_totals: dict[str, float] = defaultdict(float)
 
     for row in workbook_rows(model, "loads"):

@@ -23,7 +23,8 @@ import {
 import { API_BASE, DEFAULT_CONSTRAINTS, DEFAULT_SHEET_ROWS } from './constants';
 import { createEmptyWorkbook, exportWorkbook, loadSampleWorkbook, parseWorkbook, workbookToArrayBuffer, parseCsvToGridRows } from './shared/utils/workbook';
 import { exportFullResults } from './shared/utils/exportResults';
-import { getBounds, getBusIndex, carrierColor, hashColor, numberValue, snapshotMaxFromWorkbook } from './shared/utils/helpers';
+import { getBounds, getBusIndex, carrierColor, hashColor, numberValue, setCarrierColorOverrides as setSharedCarrierColorOverrides, snapshotMaxFromWorkbook } from './shared/utils/helpers';
+import { setCarrierColorOverrides as setLegacyCarrierColorOverrides } from './utils/helpers';
 import { buildRowsFromGeneratorDetails, buildSystemLoadRows, normalizeSeriesPoint } from './shared/utils/analytics';
 import { RunDialog } from './features/run/RunDialog';
 import { Sidebar } from './layout/Sidebar';
@@ -121,6 +122,11 @@ function AppInner() {
       setModel(sampleModel);
     }).catch(() => null);
   }, []);
+
+  useEffect(() => {
+    setSharedCarrierColorOverrides(model.carriers);
+    setLegacyCarrierColorOverrides(model.carriers);
+  }, [model.carriers]);
 
   const bounds = useMemo(() => getBounds(model), [model.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
   const busIndex = useMemo(() => getBusIndex(model), [model.buses]);  // eslint-disable-line react-hooks/exhaustive-deps

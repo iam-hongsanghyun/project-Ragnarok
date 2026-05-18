@@ -31,6 +31,7 @@ def build_network(payload: RunPayload) -> tuple[pypsa.Network, list[str]]:
     date_format: str = str(options.get("dateFormat", "auto"))
 
     wb_index = workbook_snapshot_index(snapshot_rows, date_format=date_format)
+    window, _step, snapshot_start = snapshot_settings(payload)
 
     # step = temporal resolution: every `step`-th hourly snapshot is modelled;
     # each kept snapshot carries snapshot_weightings = step (hours it represents).
@@ -38,16 +39,17 @@ def build_network(payload: RunPayload) -> tuple[pypsa.Network, list[str]]:
     step = max(1, int(round(number(options.get("snapshotWeight"), 1.0))))
 
     if wb_index is not None:
-        # Downsample workbook timestamps by the requested step.
-        snapshots = wb_index[::step]
+        snapshot_start = max(0, min(len(wb_index) - 1, snapshot_start))
+        snapshot_stop = min(len(wb_index), snapshot_start + window)
+        snapshots = wb_index[snapshot_start:snapshot_stop:step]
         snapshot_weight = float(step)
         snapshot_count = len(snapshots)
         notes.append(
             f"Using {snapshot_count} workbook snapshots at {step}h resolution "
-            f"({snapshots[0]} → {snapshots[-1]})."
+            f"(rows {snapshot_start} → {snapshot_stop} of {len(wb_index)}; "
+            f"{snapshots[0]} → {snapshots[-1]})."
         )
     else:
-        window, _step, snapshot_start = snapshot_settings(payload)
         start_date = load_system_defaults().get("simulation", {}).get("start_date", "2024-01-01")
         start_ts = pd.Timestamp(start_date) + pd.Timedelta(hours=snapshot_start)
         # Generate the full hourly window, then keep every `step`-th snapshot.
@@ -78,7 +80,13 @@ def build_network(payload: RunPayload) -> tuple[pypsa.Network, list[str]]:
     for row in workbook_rows(model, "carriers"):
         carrier_name = text(row.get("name"))
         if carrier_name and carrier_name not in network.carriers.index:
-            network.add("Carrier", carrier_name, co2_emissions=number(row.get("co2_emissions"), 0.0))
+            color = text(row.get("color"))
+            kwargs: dict[str, Any] = {
+                "co2_emissions": number(row.get("co2_emissions"), 0.0),
+            }
+            if color:
+                kwargs["color"] = color
+            network.add("Carrier", carrier_name, **kwargs)
         system_carriers.discard(carrier_name)
     for carrier_name in system_carriers:
         network.add("Carrier", carrier_name, co2_emissions=0.0)
@@ -89,7 +97,14 @@ def build_network(payload: RunPayload) -> tuple[pypsa.Network, list[str]]:
 
     # Topology
     add_buses(network, model)
-    load_totals = add_loads(network, model, snapshots, step=step)
+    load_totals = add_loads(
+        network,
+        model,
+        snapshots,
+        snapshot_start=snapshot_start,
+        snapshot_window=window,
+        step=step,
+    )
     add_stores(network, model, period_factor, notes)
     add_storage_units(network, model, period_factor, notes, discount_rate=discount_rate)
     add_shunt_impedances(network, model)
@@ -99,6 +114,8 @@ def build_network(payload: RunPayload) -> tuple[pypsa.Network, list[str]]:
     add_generators(
         network, model, snapshots, period_factor,
         carbon_price, notes,
+        snapshot_start=snapshot_start,
+        snapshot_window=window,
         step=step, discount_rate=discount_rate,
         force_lp=force_lp,
     )

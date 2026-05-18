@@ -1,6 +1,17 @@
 import { LatLngBoundsExpression } from 'leaflet';
-import { CARRIER_COLORS, DEFAULT_SHEET_ROWS } from '../constants';
+import { DEFAULT_SHEET_ROWS } from '../constants';
 import { GridRow, Primitive, SheetName, WorkbookModel } from '../types';
+
+const DEFAULT_CARRIER_PALETTE = [
+  '#4e79a7', '#f28e2b', '#e15759', '#76b7b2', '#59a14f',
+  '#edc948', '#b07aa1', '#ff9da7', '#9c755f', '#bab0ab',
+  '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+  '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
+  '#393b79', '#637939', '#8c6d31', '#843c39', '#7b4173',
+  '#3182bd', '#31a354', '#756bb1', '#636363', '#e6550d',
+];
+
+let carrierColorOverrides: Record<string, string> = {};
 
 export function numberValue(value: Primitive | string | number | undefined): number {
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
@@ -24,6 +35,33 @@ export function hashColor(value: string): string {
   }
   const hue = Math.abs(hash) % 360;
   return `hsl(${hue} 65% 46%)`;
+}
+
+function hashIndex(value: string, size: number): number {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = value.charCodeAt(index) + ((hash << 5) - hash);
+  }
+  return Math.abs(hash) % size;
+}
+
+function normalizeCarrierKey(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function paletteColor(value: string): string {
+  return DEFAULT_CARRIER_PALETTE[hashIndex(normalizeCarrierKey(value), DEFAULT_CARRIER_PALETTE.length)];
+}
+
+export function setCarrierColorOverrides(rows: GridRow[]): void {
+  const next: Record<string, string> = {};
+  rows.forEach((row) => {
+    const name = String(row.name ?? '').trim();
+    const color = String(row.color ?? '').trim();
+    if (!name || !color) return;
+    next[normalizeCarrierKey(name)] = color;
+  });
+  carrierColorOverrides = next;
 }
 
 export function clamp(value: number, min: number, max: number) {
@@ -70,7 +108,9 @@ export function getTsFirstCol(rows: GridRow[]): string {
 }
 
 export function carrierColor(carrier: string): string {
-  return CARRIER_COLORS[carrier] || CARRIER_COLORS.Other;
+  const raw = String(carrier || '').trim();
+  if (!raw) return '#94a3b8';
+  return carrierColorOverrides[normalizeCarrierKey(raw)] ?? paletteColor(raw);
 }
 
 /**

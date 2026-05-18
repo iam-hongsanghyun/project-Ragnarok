@@ -25,6 +25,8 @@ def add_generators(
     period_factor: float,
     carbon_price: float,
     notes: list[str],
+    snapshot_start: int = 0,
+    snapshot_window: int | None = None,
     step: int = 1,
     discount_rate: float = 0.05,
     force_lp: bool = False,
@@ -35,8 +37,22 @@ def add_generators(
         raise HTTPException(status_code=400, detail="Workbook has no generators.")
 
     # Load time-series override sheets — downsample by step to match snapshot index
-    ts_p_max_pu = parse_ts_sheet(model, "generators-p_max_pu", snapshots, step=step)
-    ts_p_min_pu = parse_ts_sheet(model, "generators-p_min_pu", snapshots, step=step)
+    ts_p_max_pu = parse_ts_sheet(
+        model,
+        "generators-p_max_pu",
+        snapshots,
+        snapshot_start=snapshot_start,
+        snapshot_window=snapshot_window,
+        step=step,
+    )
+    ts_p_min_pu = parse_ts_sheet(
+        model,
+        "generators-p_min_pu",
+        snapshots,
+        snapshot_start=snapshot_start,
+        snapshot_window=snapshot_window,
+        step=step,
+    )
 
     for row in generators:
         name = text(row.get("name"))

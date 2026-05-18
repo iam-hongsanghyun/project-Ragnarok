@@ -6,7 +6,7 @@ from typing import Any
 import pandas as pd
 import pypsa
 
-from ...constants import CARRIER_COLORS
+from ...constants import carrier_color
 from ...utils.coerce import text
 from ...utils.series import maybe_series, safe_series, weighted_sum
 
@@ -74,7 +74,7 @@ def build_bus_details(
             "hasVoltageMagnitude": v_mag is not None,
             "hasVoltageAngle": v_ang is not None,
             "carrierMix": [
-                {"label": c, "value": v, "color": CARRIER_COLORS.get(c, "#94a3b8")}
+                {"label": c, "value": v, "color": carrier_color(network, c)}
                 for c, v in sorted(carrier_mix.items(), key=lambda x: x[1], reverse=True)
                 if v > 0.0
             ],

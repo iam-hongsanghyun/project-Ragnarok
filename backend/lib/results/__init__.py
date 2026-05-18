@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from fastapi import HTTPException
 
-from ..constants import CARRIER_COLORS
+from ..constants import carrier_color
 from ..models import RunPayload
 from ..network import build_network
 from ..profiles import snapshot_settings
@@ -110,7 +110,7 @@ def run_pypsa(payload: RunPayload) -> dict[str, Any]:
         emission_totals[carrier] += weighted_sum(positive * emissions_factors.get(carrier, 0.0), generator_weights)
 
     carrier_mix = [
-        {"label": c, "value": v, "color": CARRIER_COLORS.get(c, "#94a3b8")}
+        {"label": c, "value": v, "color": carrier_color(network, c)}
         for c, v in sorted(carrier_energy.items(), key=lambda x: x[1], reverse=True)
         if v > 0.0
     ]
