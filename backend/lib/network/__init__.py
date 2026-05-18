@@ -94,6 +94,7 @@ def build_network(payload: RunPayload) -> tuple[pypsa.Network, list[str]]:
     # Run parameters
     carbon_price = number(scenario.get("carbonPrice"), 0.0)
     discount_rate = number(scenario.get("discountRate"), 0.05)
+    currency = str(options.get("currencySymbol", "$"))
 
     # Topology
     add_buses(network, model)
@@ -106,7 +107,7 @@ def build_network(payload: RunPayload) -> tuple[pypsa.Network, list[str]]:
         step=step,
     )
     add_stores(network, model, period_factor, notes)
-    add_storage_units(network, model, period_factor, notes, discount_rate=discount_rate)
+    add_storage_units(network, model, period_factor, notes, discount_rate=discount_rate, currency=currency)
     add_shunt_impedances(network, model)
 
     # Generation
@@ -117,7 +118,7 @@ def build_network(payload: RunPayload) -> tuple[pypsa.Network, list[str]]:
         snapshot_start=snapshot_start,
         snapshot_window=window,
         step=step, discount_rate=discount_rate,
-        force_lp=force_lp,
+        force_lp=force_lp, currency=currency,
     )
     enable_load_shedding = bool(options.get("enableLoadShedding", False))
     add_grid_imports_and_shedding(network, load_totals, carbon_price, notes, enable_load_shedding)

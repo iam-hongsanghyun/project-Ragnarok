@@ -6,6 +6,9 @@ export { SHEETS, TS_SHEETS } from './sheets';
 export const API_BASE =
   window.location.hostname === 'localhost' ? 'http://127.0.0.1:8000' : '';
 
+// Maximum number of unpinned run-history entries to retain (pinned entries are unaffected).
+export const MAX_UNPINNED_HISTORY = 5;
+
 // ── Default row templates ─────────────────────────────────────────────────────
 
 export const DEFAULT_SHEET_ROWS: Record<SheetName, GridRow> = {

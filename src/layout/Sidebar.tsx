@@ -10,11 +10,10 @@ import { SidebarGroup } from '../shared/components/SidebarGroup';
 import { GlobalConstraintsSection } from '../features/constraints/GlobalConstraintsSection';
 import { RunHistoryList } from '../features/run-history/RunHistoryList';
 import { DateFormat, SolverType } from '../features/settings/useSettings';
-import { API_BASE } from '../constants';
+import { API_BASE, MAX_UNPINNED_HISTORY } from '../constants';
 
 interface Currency { code: string; symbol: string; name: string; }
 
-const MAX_UNPINNED = 5;
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
 
@@ -125,13 +124,10 @@ export function Sidebar({
       </SidebarGroup>
 
       <SidebarGroup
-        title="Model Parameters"
+        title="Carbon price"
         badge={carbonPrice > 0 ? <span className="sg-badge">{currencySymbol}{carbonPrice}/t</span> : undefined}
       >
         <div className="sg-setting-row">
-          <label className="sg-setting-label" htmlFor="sg-carbon-price">
-            Carbon price
-          </label>
           <div className="sg-carbon-row">
             <span className="sg-carbon-sym">{currencySymbol}</span>
             <input
@@ -148,26 +144,6 @@ export function Sidebar({
           </div>
           <p className="sg-setting-hint">
             Added to each generator's marginal cost proportional to CO₂ emissions.
-          </p>
-        </div>
-
-        <div className="sg-setting-divider" />
-
-        <div className="sg-setting-row">
-          <label className="sg-setting-label">Load shedding</label>
-          <div className="sg-btn-row">
-            {([false, true] as boolean[]).map((v) => (
-              <button
-                key={String(v)}
-                className={`tb-btn sg-solver-btn${enableLoadShedding === v ? '' : ' tb-btn--muted'}`}
-                onClick={() => onEnableLoadSheddingChange(v)}
-              >
-                {v ? 'On' : 'Off'}
-              </button>
-            ))}
-          </div>
-          <p className="sg-setting-hint">
-            When off, supply shortfalls surface as solver infeasibility instead of being silently absorbed.
           </p>
         </div>
       </SidebarGroup>
@@ -201,7 +177,7 @@ export function Sidebar({
             currencySymbol={currencySymbol}
           />
           <p className="hist-footnote">
-            Last {MAX_UNPINNED} runs kept · pin to preserve
+            Last {MAX_UNPINNED_HISTORY} runs kept · pin to preserve
           </p>
         </SidebarGroup>
       )}
@@ -252,6 +228,26 @@ export function Sidebar({
             </p>
           </div>
         )}
+
+        <div className="sg-setting-divider" />
+
+        <div className="sg-setting-row">
+          <label className="sg-setting-label">Load shedding</label>
+          <div className="sg-btn-row">
+            {([false, true] as boolean[]).map((v) => (
+              <button
+                key={String(v)}
+                className={`tb-btn sg-solver-btn${enableLoadShedding === v ? '' : ' tb-btn--muted'}`}
+                onClick={() => onEnableLoadSheddingChange(v)}
+              >
+                {v ? 'On' : 'Off'}
+              </button>
+            ))}
+          </div>
+          <p className="sg-setting-hint">
+            When off, supply shortfalls surface as solver infeasibility instead of being silently absorbed.
+          </p>
+        </div>
 
         <div className="sg-setting-divider" />
 

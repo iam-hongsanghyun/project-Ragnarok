@@ -20,7 +20,7 @@ import {
   ModelSubTab,
   AnalyticsSubTab,
 } from './types';
-import { API_BASE, DEFAULT_CONSTRAINTS, DEFAULT_SHEET_ROWS } from './constants';
+import { API_BASE, DEFAULT_CONSTRAINTS, DEFAULT_SHEET_ROWS, MAX_UNPINNED_HISTORY } from './constants';
 import { createEmptyWorkbook, exportWorkbook, loadSampleWorkbook, parseWorkbook, workbookToArrayBuffer, parseCsvToGridRows } from './shared/utils/workbook';
 import { exportFullResults } from './shared/utils/exportResults';
 import { getBounds, getBusIndex, carrierColor, hashColor, numberValue, setCarrierColorOverrides as setSharedCarrierColorOverrides, snapshotMaxFromWorkbook } from './shared/utils/helpers';
@@ -58,7 +58,6 @@ function AppInner() {
   const [dryRun, setDryRun] = useState(false);
   const [runHistory, setRunHistory] = useState<RunHistoryEntry[]>([]);
   const [runCount, setRunCount] = useState(0);
-  const MAX_UNPINNED = 5;
   const [validateResult, setValidateResult] = useState<{
     valid: boolean;
     errors: string[];
@@ -274,7 +273,7 @@ function AppInner() {
     setRunHistory((h) => {
       const updated = h.map((e) => (e.id === id ? { ...e, pinned } : e));
       const pinnedEntries = updated.filter((e) => e.pinned);
-      const unpinnedEntries = updated.filter((e) => !e.pinned).slice(0, MAX_UNPINNED);
+      const unpinnedEntries = updated.filter((e) => !e.pinned).slice(0, MAX_UNPINNED_HISTORY);
       return [...pinnedEntries, ...unpinnedEntries];
     });
   };
@@ -345,6 +344,8 @@ function AppInner() {
   };
 
   const handleRunModel = async () => {
+    // Guard against double-submit while a job is already in flight
+    if (runStatus === 'running') return;
     const snapshotCount = snapshotEnd - snapshotStart;
     const runOptions = {
       model,
@@ -439,7 +440,7 @@ function AppInner() {
         setRunHistory((hist) => {
           const withNew = [entry, ...hist];
           const pinned = withNew.filter((e) => e.pinned);
-          const unpinned = withNew.filter((e) => !e.pinned).slice(0, MAX_UNPINNED);
+          const unpinned = withNew.filter((e) => !e.pinned).slice(0, MAX_UNPINNED_HISTORY);
           return [...pinned, ...unpinned];
         });
         return next;
@@ -564,7 +565,14 @@ function AppInner() {
         <div className="topbar-left">
           <span className="topbar-brand">Ragnarok</span>
           <div className="topbar-divider" />
-          <button className="run-button" onClick={() => setRunDialogOpen(true)}>Run</button>
+          <button
+            className="run-button"
+            onClick={() => setRunDialogOpen(true)}
+            disabled={runStatus === 'running'}
+            title={runStatus === 'running' ? 'A run is already in progress' : undefined}
+          >
+            Run
+          </button>
           <button className="tb-btn" onClick={handleOpenWorkbook}>Open</button>
           <div className="topbar-divider" />
           <span className="topbar-file">{filename}</span>

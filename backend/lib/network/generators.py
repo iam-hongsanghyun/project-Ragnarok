@@ -30,6 +30,7 @@ def add_generators(
     step: int = 1,
     discount_rate: float = 0.05,
     force_lp: bool = False,
+    currency: str = "$",
 ) -> None:
     generators = workbook_rows(model, "generators")
     if not generators:
@@ -83,7 +84,7 @@ def add_generators(
             annualised_capital_cost = raw_capital_cost * af
             notes.append(
                 f"Generator '{name}' is extendable (lifetime={lifetime:.0f}yr, "
-                f"AF={af:.4f}, annualised capex={annualised_capital_cost:.0f} $/MW/yr)."
+                f"AF={af:.4f}, annualised capex={annualised_capital_cost:.0f} {currency}/MW/yr)."
             )
         else:
             annualised_capital_cost = 0.0

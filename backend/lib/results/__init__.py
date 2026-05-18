@@ -141,7 +141,7 @@ def run_pypsa(payload: RunPayload) -> dict[str, Any]:
 
     # Market analysis — merit order + CO₂ shadow price (pure post-processing)
     merit_order = build_merit_order(network)
-    co2_shadow = build_co2_shadow(network, float(scenario.get("carbonPrice", 0.0)))
+    co2_shadow = build_co2_shadow(network, float(scenario.get("carbonPrice", 0.0)), currency)
     emissions_breakdown = build_emissions_breakdown(network, emissions_factors)
 
     cost_breakdown = [

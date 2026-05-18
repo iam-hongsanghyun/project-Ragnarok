@@ -46,6 +46,7 @@ def add_storage_units(
     period_factor: float,
     notes: list[str],
     discount_rate: float = 0.05,
+    currency: str = "$",
 ) -> None:
     for row in workbook_rows(model, "storage_units"):
         name = text(row.get("name"))
@@ -63,7 +64,7 @@ def add_storage_units(
             annualised_capital_cost = raw_capital_cost * af
             notes.append(
                 f"StorageUnit '{name}' is extendable (lifetime={lifetime:.0f}yr, "
-                f"AF={af:.4f}, annualised capex={annualised_capital_cost:.0f} $/MW/yr)."
+                f"AF={af:.4f}, annualised capex={annualised_capital_cost:.0f} {currency}/MW/yr)."
             )
         else:
             annualised_capital_cost = 0.0

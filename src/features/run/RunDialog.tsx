@@ -125,8 +125,10 @@ export function RunDialog({
 
   if (!open) return null;
 
-  const startLabel = hasDatetimes ? formatSnapLabel(snapshotStart, snapshots, multiYear, dateFormat) : null;
-  const endLabel   = hasDatetimes ? formatSnapLabel(snapshotEnd,   snapshots, multiYear, dateFormat) : null;
+  // snapshotEnd is exclusive (can equal snapshots.length); clamp to last valid row for label display.
+  const lastIdx = Math.max(0, snapshots.length - 1);
+  const startLabel = hasDatetimes ? formatSnapLabel(Math.min(snapshotStart, lastIdx), snapshots, multiYear, dateFormat) : null;
+  const endLabel   = hasDatetimes ? formatSnapLabel(Math.min(snapshotEnd,   lastIdx), snapshots, multiYear, dateFormat) : null;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>

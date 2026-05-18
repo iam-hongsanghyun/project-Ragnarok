@@ -85,7 +85,9 @@ def _linopy_dual(network: pypsa.Network, cname: str) -> float:
         return 0.0
 
 
-def build_co2_shadow(network: pypsa.Network, carbon_price: float) -> dict[str, Any]:
+def build_co2_shadow(
+    network: pypsa.Network, carbon_price: float, currency: str = "$"
+) -> dict[str, Any]:
     """Return CO₂ shadow price information from the solved network.
 
     Checks two sources in order:
@@ -147,7 +149,7 @@ def build_co2_shadow(network: pypsa.Network, carbon_price: float) -> dict[str, A
                 result["status"] = "binding"
                 result["note"] = (
                     f"GlobalConstraint '{name}' is binding. "
-                    f"Shadow price = ${abs(mu):.4f}/tCO₂."
+                    f"Shadow price = {currency}{abs(mu):.4f}/tCO₂."
                 )
             else:
                 result["status"] = "slack"
@@ -181,14 +183,14 @@ def build_co2_shadow(network: pypsa.Network, carbon_price: float) -> dict[str, A
         result["status"] = "binding"
         result["note"] = (
             f"CO₂ intensity constraint is binding. "
-            f"Shadow price = ${abs(mu):.4f}/tCO₂ — relaxing the intensity cap "
-            f"by 1 kg CO₂e/MWh would reduce system cost by ${abs(mu)/1000:.6f} per MWh dispatched."
+            f"Shadow price = {currency}{abs(mu):.4f}/tCO₂ — relaxing the intensity cap "
+            f"by 1 kg CO₂e/MWh would reduce system cost by {currency}{abs(mu)/1000:.6f} per MWh dispatched."
         )
     else:
         result["status"] = "slack"
         result["note"] = (
             f"CO₂ intensity constraint exists but is not binding — "
-            f"actual intensity is below the cap. Shadow price ≈ $0."
+            f"actual intensity is below the cap. Shadow price ≈ {currency}0."
         )
 
     return result
