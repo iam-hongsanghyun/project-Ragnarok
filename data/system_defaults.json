@@ -6,14 +6,18 @@
     "default_snapshot_weight": 1.0
   },
   "grid_imports": {
+    "_comment": "Backstop import generator. marginal_cost = max(marginal_cost_base, max_real_generator_mc * safety_multiplier). Currency-agnostic.",
     "carrier": "Imports",
     "p_nom_floor": 5000,
-    "marginal_cost_base": 180.0
+    "marginal_cost_base": 180.0,
+    "safety_multiplier": 10.0
   },
   "load_shedding": {
+    "_comment": "Per-bus load shedding (only added when enableLoadShedding=true). marginal_cost = max(marginal_cost floor, max_real_mc * safety_multiplier, grid_imports_mc * 10). Represents VOLL.",
     "carrier": "LoadShedding",
     "p_nom_floor": 1000,
-    "marginal_cost": 2000.0
+    "marginal_cost": 2000.0,
+    "safety_multiplier": 100.0
   },
   "system_bess": {
     "carrier": "Storage",

@@ -17,9 +17,19 @@ export function createEmptyWorkbook(): WorkbookModel {
 export function parseSheets(workbook: ReturnType<typeof XLSX.read>): WorkbookModel {
   const model = createEmptyWorkbook();
   const allSheets: AnySheetName[] = [...SHEETS, ...TS_SHEETS];
+  // Workbooks exported by some PyPSA tooling use underscore-joined names
+  // (e.g. "loads_p_set") rather than the hyphen-joined canonical form
+  // ("loads-p_set"). Accept either by falling back to the underscore variant.
+  const resolveSheet = (canonical: string): string | undefined => {
+    if (workbook.Sheets[canonical]) return canonical;
+    const underscore = canonical.replace('-', '_');
+    if (underscore !== canonical && workbook.Sheets[underscore]) return underscore;
+    return undefined;
+  };
   allSheets.forEach((sheet) => {
-    const ws = workbook.Sheets[sheet];
-    if (!ws) return;
+    const sheetName = resolveSheet(sheet);
+    if (!sheetName) return;
+    const ws = workbook.Sheets[sheetName];
     const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: null });
     (model as any)[sheet] = rows.map((row) =>
       Object.fromEntries(Object.entries(row).map(([key, value]) => [key, normalizeCell(value)])),

@@ -25,7 +25,7 @@ export const DEFAULT_SHEET_ROWS: Record<SheetName, GridRow> = {
     marginal_cost: 75, capital_cost: 0, committable: true, color: '',
     extendable: false, asset_lifetime: 20,
   },
-  loads: { name: 'new_load', bus: 'New Bus', carrier: 'load', p_set: 100, q_set: 0, sign: 1 },
+  loads: { name: 'new_load', bus: 'New Bus', carrier: 'load', p_set: 100, q_set: 0, sign: -1 },
   links: {
     name: 'new_link', bus0: 'New Bus', bus1: 'New Bus', carrier: 'HVDC',
     p_nom: 250, p_min_pu: -1, p_max_pu: 1, efficiency: 0.97, marginal_cost: 0,
