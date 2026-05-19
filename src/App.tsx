@@ -356,21 +356,31 @@ function AppInner() {
     // Guard against double-submit while a job is already in flight
     if (runStatus === 'running') return;
     const snapshotCount = snapshotEnd - snapshotStart;
-    const runOptions = {
-      model,
-      scenario: { constraints: constraints.filter((c) => c.enabled), carbonPrice, discountRate: settings.discountRate },
-      options: { snapshotCount, snapshotStart, snapshotWeight, forceLp, dateFormat: settings.dateFormat, solverThreads: settings.solverThreads, solverType: settings.solverType, currencySymbol: settings.currencySymbol, enableLoadShedding: settings.enableLoadShedding, loadSheddingCost: settings.loadSheddingCost },
+    const scenario = {
+      constraints: constraints.filter((c) => c.enabled),
+      carbonPrice,
+      discountRate: settings.discountRate,
+    };
+    const options = {
+      snapshotCount, snapshotStart, snapshotWeight, forceLp,
+      dateFormat: settings.dateFormat,
+      solverThreads: settings.solverThreads, solverType: settings.solverType,
+      currencySymbol: settings.currencySymbol,
+      enableLoadShedding: settings.enableLoadShedding,
+      loadSheddingCost: settings.loadSheddingCost,
     };
 
     setRunDialogOpen(false);
 
     if (dryRun) {
+      // Validate still receives JSON model — it's a cheap structural check
+      // and does not need to round-trip through Excel.
       setStatus('Validating model structure...');
       try {
         const response = await fetch(`${API_BASE}/api/validate`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(runOptions),
+          body: JSON.stringify({ model, scenario, options }),
         });
         const result = await response.json();
         setValidateResult(result);
@@ -389,12 +399,22 @@ function AppInner() {
     setStatus(`Running — ${snapshotCount} snapshots…`);
 
     // ── Step 1: Start the job ────────────────────────────────────────────────
+    // Round-trip the in-memory model to xlsx bytes and POST as multipart so
+    // the backend can load it via `pypsa.Network.import_from_excel`.
     let jobId: string;
     try {
+      const xlsxBytes = workbookToArrayBuffer(model);
+      const formData = new FormData();
+      formData.append(
+        'workbook',
+        new Blob([xlsxBytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+        'model.xlsx',
+      );
+      formData.append('scenario', JSON.stringify(scenario));
+      formData.append('options', JSON.stringify(options));
       const startResp = await fetch(`${API_BASE}/api/run`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(runOptions),
+        body: formData,
       });
       if (!startResp.ok) {
         const msg = await startResp.text();

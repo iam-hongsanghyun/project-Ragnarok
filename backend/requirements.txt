@@ -1,5 +1,6 @@
 fastapi>=0.115
 uvicorn[standard]>=0.30
+python-multipart>=0.0.9
 pypsa @ git+https://github.com/PyPSA/PyPSA.git  # Process component not yet in stable release
 pandas>=2.2
 numpy>=2.1
@@ -7,4 +8,5 @@ scipy>=1.14
 linopy>=0.5
 highspy>=1.8
 openpyxl>=3.1
+python-calamine>=0.2  # PyPSA's preferred excel engine for import_from_excel
 xarray<2026

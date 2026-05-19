@@ -104,31 +104,24 @@ def validate_model(payload: RunPayload) -> dict[str, Any]:
             if bus and bus not in bus_names:
                 errors.append(f"Link '{name}' {end} references non-existent bus '{bus}'.")
 
-    # ── Try building the network if no errors ────────────────────────────────────
-    network_summary: dict[str, int] = {}
-    build_notes: list[str] = []
-    if not errors:
-        try:
-            from . import build_network  # local import to avoid circular dependency at module level
-            network, build_notes = build_network(payload)
-            network_summary = {
-                "buses": len(network.buses),
-                "generators": len(network.generators),
-                "loads": len(network.loads),
-                "lines": len(network.lines),
-                "links": len(network.links),
-                "storageUnits": len(network.storage_units),
-                "stores": len(network.stores),
-                "snapshots": len(network.snapshots),
-            }
-        except Exception as exc:
-            errors.append(f"Network build failed: {exc}")
+    # Structural counts only — PyPSA validation happens at Run time, when the
+    # backend round-trips the workbook through `pypsa.Network.import_from_excel`.
+    network_summary = {
+        "buses": len(buses),
+        "generators": len(generators),
+        "loads": len(loads),
+        "lines": len(workbook_rows(model, "lines")),
+        "links": len(workbook_rows(model, "links")),
+        "storageUnits": len(workbook_rows(model, "storage_units")),
+        "stores": len(workbook_rows(model, "stores")),
+        "snapshots": snapshot_count,
+    }
 
     return {
         "valid": len(errors) == 0,
         "errors": errors,
         "warnings": warnings,
-        "notes": build_notes,
+        "notes": [],
         "snapshotCount": snapshot_count,
         "networkSummary": network_summary,
     }

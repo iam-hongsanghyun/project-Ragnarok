@@ -8,9 +8,7 @@ import pandas as pd
 from fastapi import HTTPException
 
 from ..constants import carrier_color
-from ..models import RunPayload
 from ..network import build_network
-from ..profiles import snapshot_settings
 from ..utils.series import weighted_sum
 from .assets import (
     build_branch_details,
@@ -31,10 +29,16 @@ from .expansion import build_expansion_results
 from .market import build_co2_shadow, build_merit_order
 
 
-def run_pypsa(payload: RunPayload) -> dict[str, Any]:
-    network, notes = build_network(payload)
-    scenario = payload.scenario
-    snapshot_count, snapshot_weight, _start = snapshot_settings(payload)
+def run_pypsa(
+    xlsx_bytes: bytes,
+    scenario: dict[str, Any],
+    options: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build the network from the uploaded workbook, optimise, and return results."""
+    options = options or {}
+    network, notes = build_network(xlsx_bytes, scenario, options)
+    snapshot_count = len(network.snapshots)
+    snapshot_weight = float(network.snapshot_weightings["objective"].iloc[0]) if snapshot_count else 1.0
     emissions_factors: dict[str, float] = (
         network.carriers["co2_emissions"].to_dict()
         if "co2_emissions" in network.carriers.columns
@@ -46,7 +50,6 @@ def run_pypsa(payload: RunPayload) -> dict[str, Any]:
     def extra_functionality(n, snapshots):
         apply_custom_constraints(n, custom_constraints, emissions_factors, notes)
 
-    options: dict = payload.options or {}
 
     # Currency symbol for formatted output strings
     currency = str(options.get("currencySymbol", "$"))

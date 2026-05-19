@@ -1,98 +1,51 @@
+"""Build a PyPSA Network from an uploaded Excel workbook.
+
+We delegate row-by-row workbook parsing to PyPSA's own `import_from_excel`
+reader. This avoids hand-rolled, per-component importers that would silently
+drop unknown columns or fabricate defaults. After import, we apply a small
+set of derived transformations (snapshot windowing, carbon adder, capex
+annuitisation, force-LP, load shedding) that depend on Settings rather than
+on the workbook itself.
+"""
 from __future__ import annotations
 
+import os
+import tempfile
+from collections import defaultdict
 from typing import Any
 
 import pandas as pd
 import pypsa
 
-from ..config import load_system_defaults
-from ..models import RunPayload
-from ..profiles import modeled_period_factor, snapshot_settings, workbook_snapshot_index
-from ..utils.coerce import number, text
-from ..utils.workbook import workbook_rows
-from .buses import add_buses, add_loads
-from .constraints import add_global_constraints
-from .generators import add_generators, add_load_shedding
-from .lines import add_links, add_lines, add_shunt_impedances, add_transformers
-from .processes import add_processes
-from .storage import add_storage_units, add_stores
-from .validators import validate_model
+from ..utils.annuity import annuity_factor
+from ..utils.coerce import number
+from .generators import add_load_shedding
+from .validators import validate_model  # re-export for backend.main
+
+__all__ = ["build_network", "validate_model"]
 
 
-def build_network(payload: RunPayload) -> tuple[pypsa.Network, list[str]]:
-    model = payload.model
-    scenario = payload.scenario
+def build_network(
+    xlsx_bytes: bytes,
+    scenario: dict[str, Any],
+    options: dict[str, Any] | None = None,
+) -> tuple[pypsa.Network, list[str]]:
+    """Build a solved-ready PyPSA Network from the uploaded workbook bytes.
+
+    Args:
+        xlsx_bytes: raw bytes of the user's Excel workbook (the same workbook
+            shown in the GUI; round-tripped via `workbookToArrayBuffer`).
+        scenario:   {carbonPrice, discountRate, constraints, ...}
+        options:    {snapshotStart, snapshotCount, snapshotWeight, forceLp,
+                    enableLoadShedding, loadSheddingCost, currencySymbol, ...}
+
+    Returns:
+        (network, notes) — the configured network and a list of human-readable
+        notes for the Run narrative panel.
+    """
     notes: list[str] = []
+    options = options or {}
 
-    # Determine snapshot index: use workbook timestamps if available, else synthetic
-    snapshot_rows = workbook_rows(model, "snapshots")
-
-    options = payload.options or {}
-    date_format: str = str(options.get("dateFormat", "auto"))
-
-    wb_index = workbook_snapshot_index(snapshot_rows, date_format=date_format)
-    window, _step, snapshot_start = snapshot_settings(payload)
-
-    # step = temporal resolution: every `step`-th hourly snapshot is modelled;
-    # each kept snapshot carries snapshot_weightings = step (hours it represents).
-    # This matches the PyPSA convention: n.snapshots[::step] + weightings = step.
-    step = max(1, int(round(number(options.get("snapshotWeight"), 1.0))))
-
-    if wb_index is not None:
-        snapshot_start = max(0, min(len(wb_index) - 1, snapshot_start))
-        snapshot_stop = min(len(wb_index), snapshot_start + window)
-        snapshots = wb_index[snapshot_start:snapshot_stop:step]
-        snapshot_weight = float(step)
-        snapshot_count = len(snapshots)
-        notes.append(
-            f"Using {snapshot_count} workbook snapshots at {step}h resolution "
-            f"(rows {snapshot_start} → {snapshot_stop} of {len(wb_index)}; "
-            f"{snapshots[0]} → {snapshots[-1]})."
-        )
-    else:
-        start_date = load_system_defaults().get("simulation", {}).get("start_date", "2024-01-01")
-        start_ts = pd.Timestamp(start_date) + pd.Timedelta(hours=snapshot_start)
-        # Generate the full hourly window, then keep every `step`-th snapshot.
-        hourly = pd.date_range(start_ts, periods=window, freq="h")
-        snapshots = hourly[::step]
-        snapshot_weight = float(step)
-        snapshot_count = len(snapshots)
-        notes.append(
-            f"Synthetic {snapshot_count} snapshots at {step}h resolution "
-            f"(window {window}h from {start_ts}; each snapshot = {step}h)."
-        )
-
-    period_factor = modeled_period_factor(snapshot_count, snapshot_weight)
-
-    network = pypsa.Network()
-    network.set_snapshots(snapshots)
-    network.snapshot_weightings.loc[:, "objective"] = snapshot_weight
-    network.snapshot_weightings.loc[:, "stores"] = snapshot_weight
-    network.snapshot_weightings.loc[:, "generators"] = snapshot_weight
-    network.name = text(
-        workbook_rows(model, "network")[0].get("name")
-        if workbook_rows(model, "network")
-        else "Ragnarok Case"
-    )
-
-    # Carriers
-    system_carriers = {"LoadShedding"}
-    for row in workbook_rows(model, "carriers"):
-        carrier_name = text(row.get("name"))
-        if carrier_name and carrier_name not in network.carriers.index:
-            color = text(row.get("color"))
-            kwargs: dict[str, Any] = {
-                "co2_emissions": number(row.get("co2_emissions"), 0.0),
-            }
-            if color:
-                kwargs["color"] = color
-            network.add("Carrier", carrier_name, **kwargs)
-        system_carriers.discard(carrier_name)
-    for carrier_name in system_carriers:
-        network.add("Carrier", carrier_name, co2_emissions=0.0)
-
-    # Run parameters
-    carbon_price = number(scenario.get("carbonPrice"), 0.0)
     if "discountRate" not in scenario:
         from fastapi import HTTPException
         raise HTTPException(
@@ -100,33 +53,131 @@ def build_network(payload: RunPayload) -> tuple[pypsa.Network, list[str]]:
             detail="discountRate is required (set it in Settings).",
         )
     discount_rate = number(scenario.get("discountRate"))
+    carbon_price = number(scenario.get("carbonPrice"), 0.0)
     currency = str(options.get("currencySymbol", "$"))
 
-    # Topology
-    add_buses(network, model, notes)
-    load_totals = add_loads(
-        network,
-        model,
-        snapshots,
-        notes,
-        snapshot_start=snapshot_start,
-        snapshot_window=window,
-        step=step,
-    )
-    add_stores(network, model, period_factor, notes)
-    add_storage_units(network, model, period_factor, notes, discount_rate=discount_rate, currency=currency)
-    add_shunt_impedances(network, model, notes)
+    # ── Load via PyPSA's native Excel importer ────────────────────────────────
+    # PyPSA's reader handles every standard sheet (buses, generators, lines,
+    # storage_units, …) and every standard time-series sheet (loads-p_set,
+    # generators-p_max_pu, …) without us having to enumerate columns.
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+        tmp.write(xlsx_bytes)
+        tmp_path = tmp.name
+    try:
+        network = pypsa.Network()
+        network.import_from_excel(tmp_path)
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
 
-    # Generation
-    force_lp = bool(options.get("forceLp", False))
-    add_generators(
-        network, model, snapshots, period_factor,
-        carbon_price, notes, discount_rate,
-        snapshot_start=snapshot_start,
-        snapshot_window=window,
-        step=step,
-        force_lp=force_lp, currency=currency,
+    notes.append(
+        f"Imported workbook via pypsa.Network.import_from_excel: "
+        f"{len(network.buses)} buses, {len(network.generators)} generators, "
+        f"{len(network.loads)} loads, {len(network.lines)} lines, "
+        f"{len(network.links)} links, {len(network.storage_units)} storage units, "
+        f"{len(network.stores)} stores, {len(network.snapshots)} snapshots."
     )
+
+    # ── Snapshot windowing & downsampling ─────────────────────────────────────
+    # The user selects (start, count, weight) in the Run dialog. We keep every
+    # `weight`-th snapshot from the [start, start+count) slice and set
+    # snapshot_weightings = weight so total energy is preserved.
+    start = max(0, int(number(options.get("snapshotStart"), 0)))
+    count = max(1, int(number(options.get("snapshotCount"), len(network.snapshots) or 1)))
+    step = max(1, int(number(options.get("snapshotWeight"), 1)))
+
+    full = network.snapshots
+    if len(full) > 0:
+        stop = min(len(full), start + count)
+        windowed = full[start:stop]
+        if step > 1:
+            windowed = windowed[::step]
+        if len(windowed) == 0:
+            windowed = full[:1]
+        network.set_snapshots(windowed)
+        for col in ("objective", "stores", "generators"):
+            network.snapshot_weightings[col] = float(step)
+        notes.append(
+            f"Modelled {len(windowed)} snapshots at {step}h resolution "
+            f"(rows {start} → {stop} of {len(full)})."
+        )
+
+    # Period factor: how much of a full year (8760 h) is modelled, used to
+    # scale workbook-supplied annual energy caps (`*_sum_min`, `*_sum_max`)
+    # down to the partial window.
+    hours_in_year = 8760.0
+    modelled_hours = float(len(network.snapshots)) * float(step)
+    period_factor = min(1.0, modelled_hours / hours_in_year) if modelled_hours > 0 else 1.0
+    if period_factor < 1.0:
+        for frame in (network.generators, network.storage_units, network.stores):
+            for col in list(frame.columns):
+                if col.endswith("_sum_min") or col.endswith("_sum_max"):
+                    frame[col] = frame[col] * period_factor
+        notes.append(f"Scaled annual energy-sum caps by period factor {period_factor:.3f}.")
+
+    # ── Carbon-price adder on generator marginal cost ─────────────────────────
+    if carbon_price > 0 and "co2_emissions" in network.carriers.columns:
+        ef = network.carriers["co2_emissions"]
+        gen_ef = network.generators["carrier"].map(ef).fillna(0.0)
+        if (gen_ef > 0).any():
+            network.generators["marginal_cost"] = (
+                network.generators["marginal_cost"].fillna(0.0)
+                + carbon_price * gen_ef
+            )
+            notes.append(
+                f"Applied carbon price {carbon_price:.2f} {currency}/t to "
+                f"{(gen_ef > 0).sum()} emitting generator(s)."
+            )
+
+    # ── Annuitise CAPEX for extendable assets ─────────────────────────────────
+    for class_name, frame in (
+        ("Generator", network.generators),
+        ("StorageUnit", network.storage_units),
+        ("Store", network.stores),
+        ("Line", network.lines),
+        ("Link", network.links),
+    ):
+        ext_col = "e_nom_extendable" if class_name == "Store" else "p_nom_extendable" if class_name in ("Generator", "StorageUnit", "Link") else "s_nom_extendable"
+        if ext_col not in frame.columns or "capital_cost" not in frame.columns:
+            continue
+        ext = frame[ext_col].astype(bool)
+        if not ext.any():
+            continue
+        lifetime_col = "lifetime" if "lifetime" in frame.columns else None
+        if lifetime_col is None:
+            lifetimes = pd.Series(20.0, index=frame.index[ext])
+        else:
+            lifetimes = frame.loc[ext, lifetime_col].replace(0, pd.NA).fillna(20.0)
+        afs = lifetimes.apply(lambda L: annuity_factor(discount_rate, float(L)))
+        frame.loc[ext, "capital_cost"] = frame.loc[ext, "capital_cost"].fillna(0.0) * afs
+        notes.append(
+            f"Annualised CAPEX for {int(ext.sum())} extendable {class_name}(s) "
+            f"at discount rate {discount_rate:.3f}."
+        )
+
+    # ── Force-LP override (ignore committable=True flags) ─────────────────────
+    if bool(options.get("forceLp", False)) and "committable" in network.generators.columns:
+        n_committable = int(network.generators["committable"].astype(bool).sum())
+        if n_committable > 0:
+            network.generators["committable"] = False
+            notes.append(
+                f"Force-LP enabled: overrode committable=True on {n_committable} generator(s)."
+            )
+
+    # ── Carbon-price emission factor sanity warning ───────────────────────────
+    if "co2_emissions" in network.carriers.columns:
+        suspect = network.carriers[network.carriers["co2_emissions"] > 5.0]
+        for carrier_name in suspect.index:
+            val = float(suspect.at[carrier_name, "co2_emissions"])
+            notes.append(
+                f"Warning: carrier '{carrier_name}' has co2_emissions={val} "
+                f"(expected tCO₂/MWh, real fuels ≤ ~1). If this is kg/MWh, divide by 1000."
+            )
+
+    # ── Per-bus load shedding (optional VOLL backstop) ────────────────────────
+    load_totals = _peak_load_per_bus(network)
     enable_load_shedding = bool(options.get("enableLoadShedding", False))
     load_shedding_cost = options.get("loadSheddingCost")
     add_load_shedding(
@@ -138,19 +189,29 @@ def build_network(payload: RunPayload) -> tuple[pypsa.Network, list[str]]:
         currency=currency,
     )
 
-    # Transmission
-    add_lines(network, model, notes)
-    add_links(network, model, notes)
-    add_transformers(network, model, notes)
-
-    # Processes (multi-input/output energy conversion — PyPSA Process component)
-    add_processes(network, model, notes)
-
-    # Constraints
-    add_global_constraints(network, model, period_factor, notes)
-
     notes.append(
         f"Prepared PyPSA case with {len(network.buses)} buses, "
         f"{len(network.generators)} generators, {len(network.loads)} loads."
     )
     return network, notes
+
+
+def _peak_load_per_bus(network: pypsa.Network) -> dict[str, float]:
+    """Sum of peak load (across snapshots) at each bus. Used to size the
+    load-shedding generator's p_nom uncapped."""
+    totals: dict[str, float] = defaultdict(float)
+    if network.loads.empty:
+        return {}
+    load_to_bus = network.loads["bus"].to_dict()
+    if not network.loads_t.p_set.empty:
+        peaks = network.loads_t.p_set.max(axis=0)
+        for load_name, bus in load_to_bus.items():
+            if load_name in peaks.index:
+                totals[bus] += float(peaks[load_name])
+            elif "p_set" in network.loads.columns:
+                totals[bus] += float(network.loads.at[load_name, "p_set"])
+    else:
+        for load_name, bus in load_to_bus.items():
+            if "p_set" in network.loads.columns:
+                totals[bus] += float(network.loads.at[load_name, "p_set"])
+    return dict(totals)
