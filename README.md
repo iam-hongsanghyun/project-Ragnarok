@@ -47,7 +47,6 @@ Ragnarok ships a fully operational v1 plugin system for `user-installed trusted 
 
 | Plugin | Stage | Capability | Description |
 |---|---|---|---|
-| `ragnarok-dashboard-importer` | pre-build | data-importer | Calls the `simplePyPSA_KR` dashboard export pipeline, converts the exported XLSX into a Ragnarok workbook model, and can preserve Ragnarok-authored loads |
 | `ragnarok-cost-reporter` | post-solve | analytics-pack | Total system cost, LCOE, nodal price stats, carrier cost breakdown |
 | `ragnarok-renewable-floor` | in-solve | constraint-pack | Adds a minimum renewable energy share constraint via `extra_functionality` |
 | `ragnarok-network-patcher` | post-build | data-manipulator | Logs topology stats, clamps negative `p_nom_min`, warns zero-capacity generators |

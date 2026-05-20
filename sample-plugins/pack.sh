@@ -13,7 +13,6 @@ DIST="$SCRIPT_DIR/dist"
 mkdir -p "$DIST"
 
 plugins=(
-  ragnarok-dashboard-importer
   ragnarok-log-importer
   ragnarok-network-patcher
   ragnarok-renewable-floor
