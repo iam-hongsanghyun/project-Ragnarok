@@ -959,6 +959,151 @@ button {
   align-self: flex-start;
   font-size: 0.75rem;
 }
+
+/* ── Section divider (group field type) ───────────────────────────────── */
+.sg-module-config-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0 -2px;
+  padding: 4px 0;
+  position: relative;
+}
+.sg-module-config-group::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--border), transparent);
+}
+.sg-module-config-group-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.sg-module-config-group:first-of-type {
+  margin-top: 0;
+}
+
+/* ── Primary action button (action field type) ────────────────────────── */
+.sg-module-config-row--action {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  padding: 4px 0 2px;
+}
+.sg-module-action-btn {
+  width: 100%;
+  height: 34px;
+  padding: 0 14px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: transform 100ms ease, box-shadow 150ms ease, opacity 100ms ease;
+}
+.sg-module-action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
+}
+.sg-module-action-hint {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+  line-height: 1.35;
+}
+.sg-module-action-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255,255,255,0.45);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: sg-spin 0.8s linear infinite;
+}
+@keyframes sg-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Polish: focus rings, hover states on form inputs ──────────────────── */
+.sg-module-config-input,
+.sg-module-config-select {
+  transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+.sg-module-config-input:hover,
+.sg-module-config-select:hover {
+  border-color: rgba(37, 99, 235, 0.45);
+  background: #ffffff;
+}
+.sg-module-config-input:focus,
+.sg-module-config-select:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
+  background: #ffffff;
+}
+
+/* Bigger, branded checkboxes inside config rows */
+.sg-module-config-row input[type="checkbox"] {
+  accent-color: var(--brand);
+}
+
+/* Polish: form container — softer card */
+.sg-module-config-form {
+  gap: 12px;
+}
+
+/* Polish: labels — clearer hierarchy */
+.sg-module-config-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text);
+}
+
+/* Polish: table editor — striped rows, sticky-feel header, focus state */
+.sg-module-table thead th {
+  position: sticky;
+  top: 0;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.sg-module-table tbody tr:nth-child(odd) td {
+  background: rgba(15, 23, 42, 0.015);
+}
+.sg-module-table tbody tr:hover td {
+  background: rgba(37, 99, 235, 0.05);
+}
+.sg-module-table-cell-input {
+  transition: background 100ms ease;
+}
+.sg-module-table-cell-input:focus {
+  background: rgba(37, 99, 235, 0.12);
+  outline: none;
+}
+
+/* Polish: file picker name — accent when set */
+.sg-module-file-name {
+  font-weight: 500;
+  color: var(--brand);
+}
+
+/* Polish: card body — slightly more breathing room */
+.sg-module-card-body {
+  padding-top: 12px;
+  margin-top: 12px;
+}
+
 .sg-module-root-label,
 .sg-module-meta {
   font-size: 12px;

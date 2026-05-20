@@ -371,7 +371,7 @@ export interface ModuleHostRoot {
   managed: boolean;
 }
 
-export type ModuleConfigFieldType = 'number' | 'boolean' | 'string' | 'select' | 'carrier-select' | 'file' | 'table';
+export type ModuleConfigFieldType = 'number' | 'boolean' | 'string' | 'select' | 'carrier-select' | 'file' | 'table' | 'action' | 'group';
 
 /** Column descriptor for an editable 'table' config field. */
 export interface ModuleConfigTableColumn {
@@ -418,6 +418,17 @@ export interface ModuleConfigField {
   columns?: ModuleConfigTableColumn[];
   /** Field is hidden unless this gate is satisfied. */
   visibleWhen?: ModuleConfigVisibleWhen;
+  /**
+   * For 'action' fields: the name of the plugin hook to invoke when the
+   * button is clicked. Currently only "transform" is supported — it runs
+   * the plugin's pre-build transform in isolation and the returned model
+   * replaces the current Ragnarok workbook (no solve).
+   */
+  hook?: 'transform';
+  /** For 'action' fields: button style. Defaults to 'primary'. */
+  variant?: 'primary' | 'secondary';
+  /** For 'action' fields: toast text on success. */
+  successMessage?: string;
 }
 
 export interface PluginFileValue {
