@@ -8,6 +8,17 @@ This repository is a local React + FastAPI application for editing a PyPSA-style
 
 This README is written as a handoff document for another AI or engineer. It explains the current structure, how data flows through the app, where the key logic lives, and which parts are still fragile.
 
+## Module System Proposal
+
+The repository now includes a design-only proposal for a full v1 module system based on
+`user-installed trusted local modules`.
+
+- host/runtime/SDK spec: [docs/module-system-v1.md](./docs/module-system-v1.md)
+- module authoring guide: [docs/module-authoring-guide.md](./docs/module-authoring-guide.md)
+
+This is intentionally documentation-first. No runtime module loader or bundled module is part of
+this proposal branch.
+
 ## 1. High-Level Architecture
 
 - Frontend: React + TypeScript in `/Users/sanghyun/github/pypsa_gui/src`
@@ -458,4 +469,3 @@ That will reveal whether the bug is:
 - stale dev bundle
 - frontend normalization
 - chart metric mapping
-
