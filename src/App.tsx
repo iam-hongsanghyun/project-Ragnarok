@@ -712,19 +712,14 @@ function AppInner() {
               )}
             </button>
           ))}
-          {/* Plugins tab — only shown when at least one plugin is in main-panel mode */}
-          {moduleHost.modules.some(
-            (m) => moduleHost.pluginDisplayModes[m.id] === 'panel' && moduleHost.isEnableEligible(m)
-          ) && (
+          {moduleHost.enabledIds.length > 0 && (
             <button
               className={`tab-button ${tab === 'Plugins' ? 'is-active' : ''}`}
               onClick={() => setTab('Plugins')}
             >
               Plugins
               <span className="tab-badge tab-badge--ok">
-                {moduleHost.modules.filter(
-                  (m) => moduleHost.pluginDisplayModes[m.id] === 'panel' && moduleHost.isEnableEligible(m)
-                ).length}
+                {moduleHost.enabledIds.length}
               </span>
             </button>
           )}
@@ -789,13 +784,8 @@ function AppInner() {
               isModuleEnabled={moduleHost.isEnabled}
               isModuleEnableEligible={moduleHost.isEnableEligible}
               onToggleModuleEnabled={moduleHost.toggleEnabled}
-              moduleConfigs={moduleHost.moduleConfigs}
-              onModuleConfigChange={moduleHost.setModuleConfig}
               onInstallModule={handleInstallModule}
               onUninstallModule={handleUninstallModule}
-              pluginDisplayModes={moduleHost.pluginDisplayModes}
-              onPluginDisplayModeChange={moduleHost.setPluginDisplayMode}
-              onModuleAction={handleModuleAction}
               onCarrierColorChange={(rowIndex, color) => updateRowValue('carriers', rowIndex, 'color', color)}
               onCarrierMove={(rowIndex, direction) => moveRow('carriers', rowIndex, direction)}
             />
@@ -935,15 +925,15 @@ function AppInner() {
           )}
 
           {tab === 'Plugins' && (() => {
-            const panelModules = moduleHost.modules.filter(
-              (m) => moduleHost.pluginDisplayModes[m.id] === 'panel' && moduleHost.isEnableEligible(m)
+            const enabledModules = moduleHost.modules.filter(
+              (m) => moduleHost.enabledIds.includes(m.id) && moduleHost.isEnableEligible(m)
             );
             const carriers = Array.from(
               new Set(model.carriers.map((c) => String(c.name ?? '')).filter(Boolean))
             );
             return (
               <PluginPanel
-                modules={panelModules}
+                modules={enabledModules}
                 moduleConfigs={moduleHost.moduleConfigs}
                 onModuleConfigChange={moduleHost.setModuleConfig}
                 carriers={carriers}

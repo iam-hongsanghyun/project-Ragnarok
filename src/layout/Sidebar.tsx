@@ -5,14 +5,13 @@
  * The parent (<App>) keeps the <aside> shell and the collapse toggle button.
  */
 import React, { useEffect, useState } from 'react';
-import { CustomConstraint, ModuleConfigField, ModuleDescriptor, ModuleHostInventory, RunHistoryEntry, RunResults, WorkbookModel } from '../shared/types';
+import { CustomConstraint, ModuleDescriptor, ModuleHostInventory, RunHistoryEntry, RunResults, WorkbookModel } from '../shared/types';
 import { SidebarGroup } from '../shared/components/SidebarGroup';
 import { GlobalConstraintsSection } from '../features/constraints/GlobalConstraintsSection';
 import { ModuleManagerSection } from '../features/modules/ModuleManagerSection';
 import { RunHistoryList } from '../features/run-history/RunHistoryList';
 import { DateFormat, SolverType } from '../features/settings/useSettings';
 import { CURRENCIES, MAX_UNPINNED_HISTORY, SETTINGS_CONFIG } from '../constants';
-import { PluginDisplayMode } from '../shared/types';
 import { resolvedColor, stringValue } from '../shared/utils/helpers';
 
 interface Currency { code: string; symbol: string; name: string; }
@@ -60,13 +59,8 @@ export interface SidebarProps {
   isModuleEnabled: (moduleId: string) => boolean;
   isModuleEnableEligible: (module: ModuleDescriptor) => boolean;
   onToggleModuleEnabled: (moduleId: string, enabled: boolean) => void;
-  moduleConfigs: Record<string, Record<string, unknown>>;
-  onModuleConfigChange: (moduleId: string, key: string, value: unknown) => void;
   onInstallModule: (file: File) => void;
   onUninstallModule: (module: ModuleDescriptor) => void;
-  pluginDisplayModes: Record<string, PluginDisplayMode>;
-  onPluginDisplayModeChange: (moduleId: string, mode: PluginDisplayMode) => void;
-  onModuleAction?: (moduleId: string, fieldKey: string, field: ModuleConfigField) => Promise<void>;
   onCarrierColorChange: (rowIndex: number, color: string) => void;
   onCarrierMove: (rowIndex: number, direction: -1 | 1) => void;
 }
@@ -111,13 +105,8 @@ export function Sidebar({
   isModuleEnabled,
   isModuleEnableEligible,
   onToggleModuleEnabled,
-  moduleConfigs,
-  onModuleConfigChange,
   onInstallModule,
   onUninstallModule,
-  pluginDisplayModes,
-  onPluginDisplayModeChange,
-  onModuleAction,
   onCarrierColorChange,
   onCarrierMove,
 }: SidebarProps) {
@@ -442,14 +431,8 @@ export function Sidebar({
           isEnabled={isModuleEnabled}
           isEnableEligible={isModuleEnableEligible}
           onToggleEnabled={onToggleModuleEnabled}
-          moduleConfigs={moduleConfigs}
-          onModuleConfigChange={onModuleConfigChange}
           onInstall={onInstallModule}
           onUninstall={onUninstallModule}
-          carriers={carriers}
-          pluginDisplayModes={pluginDisplayModes}
-          onPluginDisplayModeChange={onPluginDisplayModeChange}
-          onModuleAction={onModuleAction}
         />
       </SidebarGroup>
     </>

@@ -197,6 +197,7 @@ def discover_modules() -> dict[str, Any]:
                 "modulePath": str(module_dir),
                 "isManaged": True,
                 "config": manifest.get("config", {}),
+                "panel": manifest.get("panel", {}),
             })
 
     summary = {

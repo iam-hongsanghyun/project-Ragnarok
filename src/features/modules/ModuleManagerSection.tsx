@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { ModuleConfigField, ModuleConfigTableColumn, ModuleConfigVisibleWhen, ModuleDescriptor, ModuleHostInventory, PluginDisplayMode, PluginFileValue } from '../../shared/types';
+import { ModuleConfigField, ModuleConfigTableColumn, ModuleConfigVisibleWhen, ModuleDescriptor, ModuleHostInventory, PluginFileValue } from '../../shared/types';
 
 interface ModuleManagerSectionProps {
   inventory: ModuleHostInventory | null;
@@ -9,21 +9,8 @@ interface ModuleManagerSectionProps {
   isEnabled: (moduleId: string) => boolean;
   isEnableEligible: (module: ModuleDescriptor) => boolean;
   onToggleEnabled: (moduleId: string, enabled: boolean) => void;
-  moduleConfigs: Record<string, Record<string, unknown>>;
-  onModuleConfigChange: (moduleId: string, key: string, value: unknown) => void;
   onInstall: (file: File) => void;
   onUninstall: (module: ModuleDescriptor) => void;
-  /** Carrier names from the current workbook, used by carrier-select fields. */
-  carriers?: string[];
-  pluginDisplayModes?: Record<string, PluginDisplayMode>;
-  onPluginDisplayModeChange?: (moduleId: string, mode: PluginDisplayMode) => void;
-  /**
-   * Called when a plugin's `action`-typed field is clicked. The host
-   * looks up the module's hook (currently always `transform`), POSTs the
-   * current workbook to `/api/modules/{moduleId}/preview`, and applies
-   * the returned model to the workbook state.
-   */
-  onModuleAction?: (moduleId: string, fieldKey: string, field: ModuleConfigField) => Promise<void>;
 }
 
 function statusLabel(module: ModuleDescriptor): string {
@@ -431,24 +418,14 @@ interface ModuleCardProps {
   module: ModuleDescriptor;
   enabled: boolean;
   eligible: boolean;
-  config: Record<string, unknown>;
   onToggleEnabled: () => void;
-  onModuleConfigChange: (key: string, value: unknown) => void;
   onUninstall: () => void;
-  carriers?: string[];
-  displayMode?: PluginDisplayMode;
-  onDisplayModeChange?: (mode: PluginDisplayMode) => void;
-  onModuleAction?: (moduleId: string, fieldKey: string, field: ModuleConfigField) => Promise<void>;
 }
 
 function ModuleCard({
-  module, enabled, eligible, config, carriers,
-  onToggleEnabled, onModuleConfigChange, onUninstall,
-  displayMode = 'sidebar', onDisplayModeChange,
-  onModuleAction,
+  module, enabled, eligible, onToggleEnabled, onUninstall,
 }: ModuleCardProps) {
   const [expanded, setExpanded] = useState(false);
-  const hasConfig = module.config && Object.keys(module.config).length > 0;
 
   return (
     <div className={`sg-module-card${expanded ? ' sg-module-card--open' : ''}`}>
@@ -474,36 +451,9 @@ function ModuleCard({
       {/* ── Body (expanded only) ────────────────────────────────────── */}
       {expanded && (
         <div className="sg-module-card-body">
-          {module.description && (
-            <p className="sg-setting-hint" style={{ marginBottom: 8 }}>{module.description}</p>
-          )}
-
           <p className="sg-module-meta">
             Capabilities: {module.capabilities.length > 0 ? module.capabilities.join(', ') : '—'}
           </p>
-
-          {/* Config form — hidden when plugin is set to main panel mode */}
-          {hasConfig && displayMode === 'sidebar' && (
-            <div className="sg-module-config-form">
-              {Object.entries(module.config!).map(([key, field]) => (
-                <ConfigFieldRow
-                  key={key}
-                  fieldKey={key}
-                  field={field}
-                  value={config[key]}
-                  onChange={(v) => onModuleConfigChange(key, v)}
-                  carriers={carriers}
-                  formValues={config}
-                  onAction={onModuleAction ? (fk, f) => onModuleAction(module.id, fk, f) : undefined}
-                />
-              ))}
-            </div>
-          )}
-          {hasConfig && displayMode === 'panel' && (
-            <p className="sg-setting-hint" style={{ margin: '6px 0' }}>
-              Config and results are shown in the <strong>Plugins</strong> tab.
-            </p>
-          )}
 
           {module.diagnostics.length > 0 && (
             <div className="sg-module-diag-list">
@@ -516,23 +466,6 @@ function ModuleCard({
           <div className="sg-module-action-row">
             <code className="sg-module-root-path">{module.modulePath}</code>
             <div className="sg-module-action-bottom">
-              {/* Location toggle */}
-              {onDisplayModeChange && (
-                <div className="sg-module-location-row">
-                  <span className="sg-module-location-label">Location</span>
-                  <div className="sg-module-location-btns">
-                    {(['sidebar', 'panel'] as PluginDisplayMode[]).map((m) => (
-                      <button
-                        key={m}
-                        className={`tb-btn sg-location-btn${displayMode === m ? '' : ' tb-btn--muted'}`}
-                        onClick={() => onDisplayModeChange(m)}
-                      >
-                        {m === 'sidebar' ? 'Sidebar' : 'Main panel'}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
               <div className="sg-module-btn-row">
                 <button
                   className={`tb-btn sg-module-toggle-btn${enabled ? '' : ' tb-btn--muted'}`}
@@ -563,10 +496,7 @@ function ModuleCard({
 export function ModuleManagerSection({
   inventory, loading, error,
   enabledIds, isEnabled, isEnableEligible,
-  onToggleEnabled, moduleConfigs, onModuleConfigChange,
-  onInstall, onUninstall, carriers,
-  pluginDisplayModes, onPluginDisplayModeChange,
-  onModuleAction,
+  onToggleEnabled, onInstall, onUninstall,
 }: ModuleManagerSectionProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const modules = inventory?.modules ?? [];
@@ -610,19 +540,11 @@ export function ModuleManagerSection({
               module={module}
               enabled={isEnabled(module.id) && isEnableEligible(module)}
               eligible={isEnableEligible(module)}
-              config={moduleConfigs[module.id] ?? {}}
-              carriers={carriers}
-              displayMode={pluginDisplayModes?.[module.id] ?? 'sidebar'}
-              onDisplayModeChange={onPluginDisplayModeChange
-                ? (mode) => onPluginDisplayModeChange(module.id, mode)
-                : undefined}
               onToggleEnabled={() => {
                 const enabled = isEnabled(module.id) && isEnableEligible(module);
                 onToggleEnabled(module.id, !enabled);
               }}
-              onModuleConfigChange={(key, value) => onModuleConfigChange(module.id, key, value)}
               onUninstall={() => onUninstall(module)}
-              onModuleAction={onModuleAction}
             />
           ))}
         </div>

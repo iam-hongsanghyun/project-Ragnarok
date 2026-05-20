@@ -11,7 +11,7 @@ individual plugins.
 What is working:
 
 - local module discovery, `module.json` manifest validation, install/uninstall via the UI
-- frontend sidebar manager: enable/disable, per-plugin config editing, display-mode toggle
+- frontend sidebar manager: install/uninstall, enable/disable, status display
 - full backend execution pipeline across four stages (pre-build, post-build, in-solve, post-solve)
 - post-solve analytics returned in `RunResults.pluginAnalytics` and rendered in the Plugins tab
 - four sample plugins covering all four capability types (`sample-plugins/`)

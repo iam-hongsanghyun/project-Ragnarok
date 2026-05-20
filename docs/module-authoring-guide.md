@@ -12,7 +12,8 @@ Current host reality:
 
 - the host already discovers local modules and validates manifests
 - the host already exposes a sidebar module manager and persisted enable/disable state
-- the host does not yet execute third-party module code
+- enabled plugins execute through the backend run pipeline
+- the main Plugins workspace renders Description / Input / Output tabs for each enabled plugin
 
 ## Module types in v1
 
@@ -84,6 +85,40 @@ export const module = {
 - `sdkVersion`: currently `"1"`
 - `entry`: relative path to the built entrypoint
 - `capabilities`: one or more supported module categories
+
+## Optional panel metadata
+
+Plugins can declare an optional `panel` object in `module.json` to control how the main
+Plugins workspace lays out each plugin's Description, Input, and Output views.
+
+Example:
+
+```json
+{
+  "panel": {
+    "descriptionLayout": "single",
+    "inputLayout": "2x1",
+    "outputLayout": "2x2",
+    "descriptionSections": [
+      { "title": "Purpose", "body": "What this plugin does." },
+      { "title": "Assumptions", "body": "How to interpret the outputs." }
+    ]
+  }
+}
+```
+
+Supported layout values:
+
+- `single`
+- `2x1`
+- `1x2`
+- `2x2`
+
+The host uses:
+
+- `descriptionSections` for the Description tab
+- grouped config fields for the Input tab
+- result-field `ui.section` hints for the Output tab
 
 ## Choosing a module category
 

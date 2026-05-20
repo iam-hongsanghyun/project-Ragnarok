@@ -70,14 +70,18 @@ Custom hook that owns all module-system state:
 - `inventory` — fetched from `/api/modules` on mount
 - `enabledIds` — persisted to `localStorage`
 - `moduleConfigs` — per-plugin config values, persisted to `localStorage`
-- `pluginDisplayModes` — `'sidebar' | 'panel'` per plugin, persisted to `localStorage`
 - `installFromFile()` / `uninstall()` — call the install/delete endpoints and re-fetch inventory
 
 **`src/features/modules/ModuleManagerSection.tsx`**
 
 Sidebar section rendered inside the `Modules` `SidebarGroup`. Each plugin gets a
-collapsible `ModuleCard` showing status, version, capabilities, config form, and action
-buttons. Config field types rendered:
+collapsible `ModuleCard` showing status, version, capabilities, diagnostics, and manager
+buttons.
+
+The plugin input form no longer lives in the sidebar. It lives in the main **Plugins**
+workspace instead.
+
+Config field types rendered in the main plugin input view:
 
 | `type` in `module.json` | Rendered as |
 |---|---|
@@ -87,16 +91,14 @@ buttons. Config field types rendered:
 | `select` | `<select>` dropdown |
 | `carrier-select` | multi-checkbox list populated from workbook carriers |
 
-Each card has a **Location** toggle: **Sidebar** (config lives in the sidebar card) or
-**Main panel** (config and results move to the dedicated Plugins workspace tab).
-
 **`src/features/plugins/PluginPanel.tsx`**
 
-Full-page workspace tab (labelled **Plugins**) shown only when at least one enabled
-plugin is in Main panel mode. Renders a tab bar — one tab per plugin — with a blue dot
-indicator once post-solve results arrive. Each tab shows:
-- left column: config form (same `ConfigFieldRow` components as the sidebar card)
-- right column: `PluginResults` table, formatted via the `ui` hints from `module.json`
+Full-page workspace tab (labelled **Plugins**) shown when at least one plugin is enabled.
+Renders:
+- a tab bar with one tab per enabled plugin
+- nested **Description / Input / Output** subtabs
+- layout-aware section grids driven by `module.json` panel metadata
+- `PluginResults` tables formatted via the `ui` hints from `module.json`
 
 Result `format` values supported: `number`, `currency` (locale-formatted), `table`
 (nested sub-table for `Record<string, unknown>` values), plain string fallback.

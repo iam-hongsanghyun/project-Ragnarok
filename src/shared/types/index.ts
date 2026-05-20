@@ -15,7 +15,6 @@ export type BrowserFileHandle = any;
 // ── UI state ──────────────────────────────────────────────────────────────────
 
 export type WorkspaceTab = 'Model' | 'Analytics' | 'Plugins';
-export type PluginDisplayMode = 'sidebar' | 'panel';
 export type ModelSubTab = 'Map' | 'Table';
 export type AnalyticsSubTab = 'Validation' | 'Result' | 'Analytics' | 'Comparison';
 export type ChartMode = 'line' | 'area' | 'bar';
@@ -243,6 +242,21 @@ export interface PluginFieldHint {
   label?: string;
   unit?: string;
   format?: PluginFieldFormat;
+  section?: string;
+}
+
+export type PluginPanelLayout = 'single' | '2x1' | '1x2' | '2x2';
+
+export interface ModulePanelTextSection {
+  title?: string;
+  body: string;
+}
+
+export interface ModulePanelConfig {
+  descriptionLayout?: PluginPanelLayout;
+  inputLayout?: PluginPanelLayout;
+  outputLayout?: PluginPanelLayout;
+  descriptionSections?: ModulePanelTextSection[];
 }
 
 export interface PluginAnalyticsEntry {
@@ -458,6 +472,7 @@ export interface ModuleDescriptor {
   modulePath: string;
   isManaged: boolean;
   config?: ModuleConfigSchema;
+  panel?: ModulePanelConfig;
 }
 
 export interface ModuleHostInventory {

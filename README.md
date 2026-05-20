@@ -36,9 +36,9 @@ Ragnarok ships a fully operational v1 plugin system for `user-installed trusted 
 - Plugin analytics results (`pluginAnalytics` dict) returned inside the `RunResults` payload alongside model results
 
 **Frontend**
-- `ModuleManagerSection` in the sidebar: install, uninstall, enable/disable, per-plugin config editing, display-mode toggle (Sidebar / Main panel)
-- `useModuleHost` hook: localStorage persistence for enabled IDs, module configs, and display modes
-- `PluginPanel` workspace tab: shown only when at least one plugin is set to Main panel mode; renders per-plugin tabs with config form and results table
+- `ModuleManagerSection` in the sidebar: install, uninstall, enable/disable, and module status
+- `useModuleHost` hook: localStorage persistence for enabled IDs and module configs
+- `PluginPanel` workspace tab: shown when at least one plugin is enabled; renders per-plugin tabs with nested Description / Input / Output views
 - Config field types supported: `boolean`, `number` (bare input or slider when `min`/`max` are set), `select`, `carrier-select` (multi-checkbox populated from workbook carriers)
 - Result rendering: scalar values, formatted numbers/currencies, and nested sub-tables (keyed by `format` in `module.json`'s `ui` map)
 - Blue dot indicator on plugin tabs that have received post-solve results
