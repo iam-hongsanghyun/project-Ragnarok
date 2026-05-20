@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { API_BASE, MODULES_CONFIG } from '../../constants';
-import { ModuleDescriptor, ModuleHostInventory } from '../../shared/types';
+import { ModuleDescriptor, ModuleHostInventory, PluginDisplayMode } from '../../shared/types';
 
 const STORAGE_KEY = MODULES_CONFIG.storageKey;
 const CONFIGS_KEY = `${MODULES_CONFIG.storageKey}_configs`;
+const DISPLAY_KEY = `${MODULES_CONFIG.storageKey}_display`;
 
 function loadEnabledIds(): string[] {
   try {
@@ -33,6 +34,18 @@ function saveModuleConfigs(configs: Record<string, Record<string, unknown>>): vo
   try { localStorage.setItem(CONFIGS_KEY, JSON.stringify(configs)); } catch { /* ignore */ }
 }
 
+function loadDisplayModes(): Record<string, PluginDisplayMode> {
+  try {
+    const raw = localStorage.getItem(DISPLAY_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return typeof parsed === 'object' && parsed !== null ? parsed : {};
+  } catch { return {}; }
+}
+
+function saveDisplayModes(modes: Record<string, PluginDisplayMode>): void {
+  try { localStorage.setItem(DISPLAY_KEY, JSON.stringify(modes)); } catch { /* ignore */ }
+}
+
 function isEnableEligible(module: ModuleDescriptor): boolean {
   return module.status === 'ready' && module.valid && module.compatible && module.entryExists;
 }
@@ -41,6 +54,7 @@ export function useModuleHost() {
   const [inventory, setInventory] = useState<ModuleHostInventory | null>(null);
   const [enabledIds, setEnabledIds] = useState<string[]>(loadEnabledIds);
   const [moduleConfigs, setModuleConfigsState] = useState<Record<string, Record<string, unknown>>>(loadModuleConfigs);
+  const [pluginDisplayModes, setPluginDisplayModesState] = useState<Record<string, PluginDisplayMode>>(loadDisplayModes);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -121,6 +135,14 @@ export function useModuleHost() {
     });
   }, []);
 
+  const setPluginDisplayMode = useCallback((moduleId: string, mode: PluginDisplayMode) => {
+    setPluginDisplayModesState((prev) => {
+      const next = { ...prev, [moduleId]: mode };
+      saveDisplayModes(next);
+      return next;
+    });
+  }, []);
+
   const toggleEnabled = useCallback((moduleId: string, enabled: boolean) => {
     setEnabledIds((prev) => {
       const next = enabled
@@ -145,10 +167,12 @@ export function useModuleHost() {
     error,
     enabledIds: effectiveEnabledIds,
     moduleConfigs,
+    pluginDisplayModes,
     isEnabled: (moduleId: string) => enabledSet.has(moduleId),
     isEnableEligible,
     toggleEnabled,
     setModuleConfig,
+    setPluginDisplayMode,
     installFromFile,
     uninstall,
   };

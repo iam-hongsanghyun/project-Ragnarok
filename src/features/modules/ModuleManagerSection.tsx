@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { ModuleConfigField, ModuleDescriptor, ModuleHostInventory } from '../../shared/types';
+import { ModuleConfigField, ModuleDescriptor, ModuleHostInventory, PluginDisplayMode } from '../../shared/types';
 
 interface ModuleManagerSectionProps {
   inventory: ModuleHostInventory | null;
@@ -15,6 +15,8 @@ interface ModuleManagerSectionProps {
   onUninstall: (module: ModuleDescriptor) => void;
   /** Carrier names from the current workbook, used by carrier-select fields. */
   carriers?: string[];
+  pluginDisplayModes?: Record<string, PluginDisplayMode>;
+  onPluginDisplayModeChange?: (moduleId: string, mode: PluginDisplayMode) => void;
 }
 
 function statusLabel(module: ModuleDescriptor): string {
@@ -33,7 +35,7 @@ interface ConfigFieldProps {
   carriers?: string[];
 }
 
-function ConfigFieldRow({ fieldKey, field, value, onChange, carriers }: ConfigFieldProps) {
+export function ConfigFieldRow({ fieldKey, field, value, onChange, carriers }: ConfigFieldProps) {
   const resolved = value !== undefined ? value : field.default;
   const label = field.label ?? fieldKey;
 
@@ -170,11 +172,14 @@ interface ModuleCardProps {
   onModuleConfigChange: (key: string, value: unknown) => void;
   onUninstall: () => void;
   carriers?: string[];
+  displayMode?: PluginDisplayMode;
+  onDisplayModeChange?: (mode: PluginDisplayMode) => void;
 }
 
 function ModuleCard({
   module, enabled, eligible, config, carriers,
   onToggleEnabled, onModuleConfigChange, onUninstall,
+  displayMode = 'sidebar', onDisplayModeChange,
 }: ModuleCardProps) {
   const [expanded, setExpanded] = useState(false);
   const hasConfig = module.config && Object.keys(module.config).length > 0;
@@ -211,8 +216,8 @@ function ModuleCard({
             Capabilities: {module.capabilities.length > 0 ? module.capabilities.join(', ') : '—'}
           </p>
 
-          {/* Config form */}
-          {hasConfig && (
+          {/* Config form — hidden when plugin is set to main panel mode */}
+          {hasConfig && displayMode === 'sidebar' && (
             <div className="sg-module-config-form">
               {Object.entries(module.config!).map(([key, field]) => (
                 <ConfigFieldRow
@@ -226,6 +231,11 @@ function ModuleCard({
               ))}
             </div>
           )}
+          {hasConfig && displayMode === 'panel' && (
+            <p className="sg-setting-hint" style={{ margin: '6px 0' }}>
+              Config and results are shown in the <strong>Plugins</strong> tab.
+            </p>
+          )}
 
           {module.diagnostics.length > 0 && (
             <div className="sg-module-diag-list">
@@ -237,22 +247,41 @@ function ModuleCard({
 
           <div className="sg-module-action-row">
             <code className="sg-module-root-path">{module.modulePath}</code>
-            <div className="sg-module-btn-row">
-              <button
-                className={`tb-btn sg-module-toggle-btn${enabled ? '' : ' tb-btn--muted'}`}
-                disabled={!eligible}
-                onClick={onToggleEnabled}
-                title={eligible ? 'Enable for future runs.' : 'Only ready modules can be enabled.'}
-              >
-                {enabled ? 'Enabled' : 'Enable'}
-              </button>
-              <button
-                className="tb-btn tb-btn--muted"
-                onClick={onUninstall}
-                title="Remove this module completely."
-              >
-                Uninstall
-              </button>
+            <div className="sg-module-action-bottom">
+              {/* Location toggle */}
+              {onDisplayModeChange && (
+                <div className="sg-module-location-row">
+                  <span className="sg-module-location-label">Location</span>
+                  <div className="sg-module-location-btns">
+                    {(['sidebar', 'panel'] as PluginDisplayMode[]).map((m) => (
+                      <button
+                        key={m}
+                        className={`tb-btn sg-location-btn${displayMode === m ? '' : ' tb-btn--muted'}`}
+                        onClick={() => onDisplayModeChange(m)}
+                      >
+                        {m === 'sidebar' ? 'Sidebar' : 'Main panel'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="sg-module-btn-row">
+                <button
+                  className={`tb-btn sg-module-toggle-btn${enabled ? '' : ' tb-btn--muted'}`}
+                  disabled={!eligible}
+                  onClick={onToggleEnabled}
+                  title={eligible ? 'Enable for future runs.' : 'Only ready modules can be enabled.'}
+                >
+                  {enabled ? 'Enabled' : 'Enable'}
+                </button>
+                <button
+                  className="tb-btn tb-btn--muted"
+                  onClick={onUninstall}
+                  title="Remove this module completely."
+                >
+                  Uninstall
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -268,6 +297,7 @@ export function ModuleManagerSection({
   enabledIds, isEnabled, isEnableEligible,
   onToggleEnabled, moduleConfigs, onModuleConfigChange,
   onInstall, onUninstall, carriers,
+  pluginDisplayModes, onPluginDisplayModeChange,
 }: ModuleManagerSectionProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const modules = inventory?.modules ?? [];
@@ -313,6 +343,10 @@ export function ModuleManagerSection({
               eligible={isEnableEligible(module)}
               config={moduleConfigs[module.id] ?? {}}
               carriers={carriers}
+              displayMode={pluginDisplayModes?.[module.id] ?? 'sidebar'}
+              onDisplayModeChange={onPluginDisplayModeChange
+                ? (mode) => onPluginDisplayModeChange(module.id, mode)
+                : undefined}
               onToggleEnabled={() => {
                 const enabled = isEnabled(module.id) && isEnableEligible(module);
                 onToggleEnabled(module.id, !enabled);

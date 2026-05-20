@@ -35,6 +35,7 @@ import { useModelIssues } from './features/validation/useModelIssues';
 import { AnalyticsPane, EmptyAnalytics } from './features/analytics/AnalyticsPane';
 import { ComparisonPane } from './features/analytics/ComparisonPane';
 import { useModuleHost } from './features/modules/useModuleHost';
+import { PluginPanel } from './features/plugins/PluginPanel';
 import { ToastProvider, useToast } from './shared/components/Toast';
 
 function AppInner() {
@@ -664,6 +665,22 @@ function AppInner() {
               )}
             </button>
           ))}
+          {/* Plugins tab — only shown when at least one plugin is in main-panel mode */}
+          {moduleHost.modules.some(
+            (m) => moduleHost.pluginDisplayModes[m.id] === 'panel' && moduleHost.isEnableEligible(m)
+          ) && (
+            <button
+              className={`tab-button ${tab === 'Plugins' ? 'is-active' : ''}`}
+              onClick={() => setTab('Plugins')}
+            >
+              Plugins
+              <span className="tab-badge tab-badge--ok">
+                {moduleHost.modules.filter(
+                  (m) => moduleHost.pluginDisplayModes[m.id] === 'panel' && moduleHost.isEnableEligible(m)
+                ).length}
+              </span>
+            </button>
+          )}
         </nav>
       </header>
 
@@ -729,6 +746,8 @@ function AppInner() {
               onModuleConfigChange={moduleHost.setModuleConfig}
               onInstallModule={handleInstallModule}
               onUninstallModule={handleUninstallModule}
+              pluginDisplayModes={moduleHost.pluginDisplayModes}
+              onPluginDisplayModeChange={moduleHost.setPluginDisplayMode}
               onCarrierColorChange={(rowIndex, color) => updateRowValue('carriers', rowIndex, 'color', color)}
               onCarrierMove={(rowIndex, direction) => moveRow('carriers', rowIndex, direction)}
             />
@@ -861,11 +880,34 @@ function AppInner() {
                       exportFullResults(model, results, filename.replace(/\.xlsx$/i, ''));
                       showToast('Full results exported to Excel', 'success');
                     }}
+                    panelModeModuleIds={new Set(
+                      moduleHost.modules
+                        .filter((m) => moduleHost.pluginDisplayModes[m.id] === 'panel')
+                        .map((m) => m.id)
+                    )}
                   />
                 )
               )}
             </div>
           )}
+
+          {tab === 'Plugins' && (() => {
+            const panelModules = moduleHost.modules.filter(
+              (m) => moduleHost.pluginDisplayModes[m.id] === 'panel' && moduleHost.isEnableEligible(m)
+            );
+            const carriers = Array.from(
+              new Set(model.carriers.map((c) => String(c.name ?? '')).filter(Boolean))
+            );
+            return (
+              <PluginPanel
+                modules={panelModules}
+                moduleConfigs={moduleHost.moduleConfigs}
+                onModuleConfigChange={moduleHost.setModuleConfig}
+                carriers={carriers}
+                pluginAnalytics={results?.pluginAnalytics ?? {}}
+              />
+            );
+          })()}
         </div>
       </div>
 

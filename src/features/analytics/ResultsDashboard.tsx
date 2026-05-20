@@ -159,6 +159,8 @@ interface Props {
   storageRows: TimeSeriesRow[];
   currencySymbol?: string;
   onExportAll?: () => void;
+  /** Module IDs that are in 'panel' mode — their analytics are shown in the Plugins tab, not here. */
+  panelModeModuleIds?: Set<string>;
 }
 
 export function ResultsDashboard({
@@ -170,6 +172,7 @@ export function ResultsDashboard({
   storageRows,
   currencySymbol = '$',
   onExportAll,
+  panelModeModuleIds,
 }: Props) {
   const { showToast } = useToast();
 
@@ -392,12 +395,16 @@ export function ResultsDashboard({
             currencySymbol={currencySymbol}
           />
         </DashboardSection>
-        {results.pluginAnalytics && Object.keys(results.pluginAnalytics).length > 0 && (
+        {results.pluginAnalytics && Object.entries(results.pluginAnalytics).some(
+          ([id]) => !panelModeModuleIds?.has(id)
+        ) && (
           <DashboardSection title="Plugin results" defaultOpen>
             <div className="plugin-result-list">
-              {Object.entries(results.pluginAnalytics).map(([moduleId, entry]) => (
-                <PluginResultCard key={moduleId} moduleId={moduleId} entry={entry} />
-              ))}
+              {Object.entries(results.pluginAnalytics)
+                .filter(([id]) => !panelModeModuleIds?.has(id))
+                .map(([moduleId, entry]) => (
+                  <PluginResultCard key={moduleId} moduleId={moduleId} entry={entry} />
+                ))}
             </div>
           </DashboardSection>
         )}

@@ -12,6 +12,7 @@ import { ModuleManagerSection } from '../features/modules/ModuleManagerSection';
 import { RunHistoryList } from '../features/run-history/RunHistoryList';
 import { DateFormat, SolverType } from '../features/settings/useSettings';
 import { CURRENCIES, MAX_UNPINNED_HISTORY, SETTINGS_CONFIG } from '../constants';
+import { PluginDisplayMode } from '../shared/types';
 import { resolvedColor, stringValue } from '../shared/utils/helpers';
 
 interface Currency { code: string; symbol: string; name: string; }
@@ -63,6 +64,8 @@ export interface SidebarProps {
   onModuleConfigChange: (moduleId: string, key: string, value: unknown) => void;
   onInstallModule: (file: File) => void;
   onUninstallModule: (module: ModuleDescriptor) => void;
+  pluginDisplayModes: Record<string, PluginDisplayMode>;
+  onPluginDisplayModeChange: (moduleId: string, mode: PluginDisplayMode) => void;
   onCarrierColorChange: (rowIndex: number, color: string) => void;
   onCarrierMove: (rowIndex: number, direction: -1 | 1) => void;
 }
@@ -111,6 +114,8 @@ export function Sidebar({
   onModuleConfigChange,
   onInstallModule,
   onUninstallModule,
+  pluginDisplayModes,
+  onPluginDisplayModeChange,
   onCarrierColorChange,
   onCarrierMove,
 }: SidebarProps) {
@@ -440,6 +445,8 @@ export function Sidebar({
           onInstall={onInstallModule}
           onUninstall={onUninstallModule}
           carriers={carriers}
+          pluginDisplayModes={pluginDisplayModes}
+          onPluginDisplayModeChange={onPluginDisplayModeChange}
         />
       </SidebarGroup>
     </>
