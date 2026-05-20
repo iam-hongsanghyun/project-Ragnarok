@@ -17,6 +17,13 @@ interface ModuleManagerSectionProps {
   carriers?: string[];
   pluginDisplayModes?: Record<string, PluginDisplayMode>;
   onPluginDisplayModeChange?: (moduleId: string, mode: PluginDisplayMode) => void;
+  /**
+   * Called when a plugin's `action`-typed field is clicked. The host
+   * looks up the module's hook (currently always `transform`), POSTs the
+   * current workbook to `/api/modules/{moduleId}/preview`, and applies
+   * the returned model to the workbook state.
+   */
+  onModuleAction?: (moduleId: string, fieldKey: string, field: ModuleConfigField) => Promise<void>;
 }
 
 function statusLabel(module: ModuleDescriptor): string {
@@ -35,6 +42,11 @@ interface ConfigFieldProps {
   carriers?: string[];
   /** Sibling field values, used to evaluate `visibleWhen` gates. */
   formValues?: Record<string, unknown>;
+  /**
+   * Called when an `action`-typed field's button is clicked. Async — the
+   * button shows a spinner while the promise is pending.
+   */
+  onAction?: (fieldKey: string, field: ModuleConfigField) => Promise<void>;
 }
 
 function evaluateVisibleWhen(
@@ -54,13 +66,71 @@ function evaluateVisibleWhen(
   return String(resolved ?? '') === String(gate.equals);
 }
 
-export function ConfigFieldRow({ fieldKey, field, value, onChange, carriers, formValues }: ConfigFieldProps) {
+interface ActionFieldRowProps {
+  fieldKey: string;
+  field: ModuleConfigField;
+  label: string;
+  onAction?: (fieldKey: string, field: ModuleConfigField) => Promise<void>;
+}
+
+function ActionFieldRow({ fieldKey, field, label, onAction }: ActionFieldRowProps) {
+  const [pending, setPending] = useState(false);
+  const variant = field.variant ?? 'primary';
+  const cls = variant === 'primary'
+    ? 'primary-button sg-module-action-btn'
+    : 'tb-btn sg-module-action-btn';
+  const handleClick = async () => {
+    if (!onAction || pending) return;
+    setPending(true);
+    try { await onAction(fieldKey, field); }
+    finally { setPending(false); }
+  };
+  return (
+    <div className="sg-module-config-row sg-module-config-row--action">
+      <button
+        type="button"
+        className={cls}
+        onClick={handleClick}
+        disabled={pending || !onAction}
+        title={!onAction ? 'Action handler not available in this context.' : undefined}
+      >
+        {pending
+          ? <><span className="sg-module-action-spinner" aria-hidden="true" />Working…</>
+          : label}
+      </button>
+      {field.description && (
+        <p className="sg-setting-hint sg-module-action-hint">{field.description}</p>
+      )}
+    </div>
+  );
+}
+
+export function ConfigFieldRow({ fieldKey, field, value, onChange, carriers, formValues, onAction }: ConfigFieldProps) {
   if (!evaluateVisibleWhen(field.visibleWhen, formValues)) {
     return null;
   }
 
   const resolved = value !== undefined ? value : field.default;
   const label = field.label ?? fieldKey;
+
+  if (field.type === 'group') {
+    return (
+      <div className="sg-module-config-group" role="separator" aria-label={label}>
+        <span className="sg-module-config-group-label">{label}</span>
+      </div>
+    );
+  }
+
+  if (field.type === 'action') {
+    return (
+      <ActionFieldRow
+        fieldKey={fieldKey}
+        field={field}
+        label={label}
+        onAction={onAction}
+      />
+    );
+  }
 
   if (field.type === 'boolean') {
     return (
@@ -368,12 +438,14 @@ interface ModuleCardProps {
   carriers?: string[];
   displayMode?: PluginDisplayMode;
   onDisplayModeChange?: (mode: PluginDisplayMode) => void;
+  onModuleAction?: (moduleId: string, fieldKey: string, field: ModuleConfigField) => Promise<void>;
 }
 
 function ModuleCard({
   module, enabled, eligible, config, carriers,
   onToggleEnabled, onModuleConfigChange, onUninstall,
   displayMode = 'sidebar', onDisplayModeChange,
+  onModuleAction,
 }: ModuleCardProps) {
   const [expanded, setExpanded] = useState(false);
   const hasConfig = module.config && Object.keys(module.config).length > 0;
@@ -422,6 +494,7 @@ function ModuleCard({
                   onChange={(v) => onModuleConfigChange(key, v)}
                   carriers={carriers}
                   formValues={config}
+                  onAction={onModuleAction ? (fk, f) => onModuleAction(module.id, fk, f) : undefined}
                 />
               ))}
             </div>
@@ -493,6 +566,7 @@ export function ModuleManagerSection({
   onToggleEnabled, moduleConfigs, onModuleConfigChange,
   onInstall, onUninstall, carriers,
   pluginDisplayModes, onPluginDisplayModeChange,
+  onModuleAction,
 }: ModuleManagerSectionProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const modules = inventory?.modules ?? [];
@@ -548,6 +622,7 @@ export function ModuleManagerSection({
               }}
               onModuleConfigChange={(key, value) => onModuleConfigChange(module.id, key, value)}
               onUninstall={() => onUninstall(module)}
+              onModuleAction={onModuleAction}
             />
           ))}
         </div>

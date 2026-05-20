@@ -257,7 +257,7 @@ Each config key maps to a field descriptor:
 
 | Field | Required | Description |
 |---|---|---|
-| `type` | yes | `"boolean"`, `"number"`, `"string"`, `"select"`, `"carrier-select"`, `"file"`, `"table"` |
+| `type` | yes | `"boolean"`, `"number"`, `"string"`, `"select"`, `"carrier-select"`, `"file"`, `"table"`, `"action"`, `"group"` |
 | `label` | no | Display label shown in the UI. Defaults to the key name. |
 | `description` | no | Hint text shown below the field. |
 | `default` | no | Default value used before the user edits the field. |
@@ -269,6 +269,9 @@ Each config key maps to a field descriptor:
 | `binary` | no | For `"file"` — when `true`, the picker reads the file as a base64 data URL instead of UTF-8 text. Use for xlsx, png, parquet, or any non-text format. |
 | `columns` | yes for `"table"` | Column schema for editable tables — see below. |
 | `visibleWhen` | no | Conditional visibility — see below. |
+| `hook` | no | For `"action"` — name of the plugin hook to invoke. Currently only `"transform"` is supported. |
+| `variant` | no | For `"action"` — `"primary"` (default, brand-gradient button) or `"secondary"` (muted button). |
+| `successMessage` | no | For `"action"` — toast text shown after a successful run. |
 
 **`carrier-select`** is a multi-checkbox field populated from the carriers defined in the
 current workbook. The config value is a `list[str]` of selected carrier names.
@@ -319,6 +322,36 @@ field type — boolean, string, table, file, etc. The gate uses tolerant equalit
 
 ```json
 "visibleWhen": { "field": "use_aggregation", "equals": true }
+```
+
+**`action`** renders a button that runs the plugin's hook in isolation (no solver) and
+applies the returned model to the current Ragnarok workbook. Use for "Send model"
+or "Apply preview" buttons inside the plugin config panel. The plugin must declare
+`stage: "pre-build"` and a matching hook (currently always `transform`).
+
+```json
+"send_to_ragnarok": {
+  "type": "action",
+  "label": "Send model to Ragnarok",
+  "hook": "transform",
+  "variant": "primary",
+  "successMessage": "Model loaded into Ragnarok workbook."
+}
+```
+
+Backend: `POST /api/modules/{module_id}/preview` invokes the plugin and returns
+`{ "model": <dict> }`. The frontend replaces the current workbook via the same code
+path used by file import. No `Run` is triggered — the user clicks Run separately
+when they're ready to solve.
+
+**`group`** renders a section divider with a label. No interaction, no value — purely
+visual. Use to organize long config forms into logical groups.
+
+```json
+"sec_aggregation": {
+  "type": "group",
+  "label": "Aggregation"
+}
 ```
 
 Example:

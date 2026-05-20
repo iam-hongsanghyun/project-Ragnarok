@@ -8,6 +8,7 @@ import {
   ChartSectionConfig,
   CustomConstraint,
   GridRow,
+  ModuleConfigField,
   ModuleDescriptor,
   Primitive,
   RunHistoryEntry,
@@ -114,6 +115,52 @@ function AppInner() {
     showToast(`Module uninstalled (${module.id})`, 'success');
     setStatus(`Uninstalled local module ${module.id}.`);
   }, [moduleHost, showToast]);
+
+  const handleModuleAction = useCallback(async (
+    moduleId: string,
+    fieldKey: string,
+    field: ModuleConfigField,
+  ) => {
+    if (field.type !== 'action') return;
+    if (field.hook && field.hook !== 'transform') {
+      showToast(`Unsupported action hook "${field.hook}".`, 'error');
+      return;
+    }
+    const scenario = {
+      constraints: constraints.filter((c) => c.enabled),
+      carbonPrice,
+      discountRate: settings.discountRate,
+    };
+    const options = {
+      moduleConfigs: moduleHost.moduleConfigs,
+    };
+    try {
+      const resp = await fetch(`${API_BASE}/api/modules/${encodeURIComponent(moduleId)}/preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model, scenario, options }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        const detail = typeof data.detail === 'string' ? data.detail : `Preview failed (${resp.status}).`;
+        showToast(detail, 'error');
+        setStatus(detail);
+        return;
+      }
+      if (!data.model) {
+        showToast('Plugin returned no model.', 'error');
+        return;
+      }
+      resetForNewModel(data.model as WorkbookModel);
+      const msg = field.successMessage || 'Model loaded into Ragnarok workbook.';
+      showToast(msg, 'success');
+      setStatus(msg);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Plugin preview failed.';
+      showToast(msg, 'error');
+      setStatus(msg);
+    }
+  }, [model, constraints, carbonPrice, settings.discountRate, moduleHost.moduleConfigs, showToast]);
 
   // Elapsed-time ticker while running
   useEffect(() => {
@@ -748,6 +795,7 @@ function AppInner() {
               onUninstallModule={handleUninstallModule}
               pluginDisplayModes={moduleHost.pluginDisplayModes}
               onPluginDisplayModeChange={moduleHost.setPluginDisplayMode}
+              onModuleAction={handleModuleAction}
               onCarrierColorChange={(rowIndex, color) => updateRowValue('carriers', rowIndex, 'color', color)}
               onCarrierMove={(rowIndex, direction) => moveRow('carriers', rowIndex, direction)}
             />
@@ -900,6 +948,7 @@ function AppInner() {
                 onModuleConfigChange={moduleHost.setModuleConfig}
                 carriers={carriers}
                 pluginAnalytics={results?.pluginAnalytics ?? {}}
+                onModuleAction={handleModuleAction}
               />
             );
           })()}

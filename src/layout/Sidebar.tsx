@@ -5,7 +5,7 @@
  * The parent (<App>) keeps the <aside> shell and the collapse toggle button.
  */
 import React, { useEffect, useState } from 'react';
-import { CustomConstraint, ModuleDescriptor, ModuleHostInventory, RunHistoryEntry, RunResults, WorkbookModel } from '../shared/types';
+import { CustomConstraint, ModuleConfigField, ModuleDescriptor, ModuleHostInventory, RunHistoryEntry, RunResults, WorkbookModel } from '../shared/types';
 import { SidebarGroup } from '../shared/components/SidebarGroup';
 import { GlobalConstraintsSection } from '../features/constraints/GlobalConstraintsSection';
 import { ModuleManagerSection } from '../features/modules/ModuleManagerSection';
@@ -66,6 +66,7 @@ export interface SidebarProps {
   onUninstallModule: (module: ModuleDescriptor) => void;
   pluginDisplayModes: Record<string, PluginDisplayMode>;
   onPluginDisplayModeChange: (moduleId: string, mode: PluginDisplayMode) => void;
+  onModuleAction?: (moduleId: string, fieldKey: string, field: ModuleConfigField) => Promise<void>;
   onCarrierColorChange: (rowIndex: number, color: string) => void;
   onCarrierMove: (rowIndex: number, direction: -1 | 1) => void;
 }
@@ -116,6 +117,7 @@ export function Sidebar({
   onUninstallModule,
   pluginDisplayModes,
   onPluginDisplayModeChange,
+  onModuleAction,
   onCarrierColorChange,
   onCarrierMove,
 }: SidebarProps) {
@@ -447,6 +449,7 @@ export function Sidebar({
           carriers={carriers}
           pluginDisplayModes={pluginDisplayModes}
           onPluginDisplayModeChange={onPluginDisplayModeChange}
+          onModuleAction={onModuleAction}
         />
       </SidebarGroup>
     </>

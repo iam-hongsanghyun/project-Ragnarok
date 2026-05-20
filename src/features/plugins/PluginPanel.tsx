@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  ModuleConfigField,
   ModuleDescriptor,
   PluginAnalyticsEntry,
   PluginFieldHint,
@@ -123,9 +124,10 @@ interface PluginTabContentProps {
   onConfigChange: (key: string, value: unknown) => void;
   carriers?: string[];
   analytics: PluginAnalyticsEntry | null;
+  onModuleAction?: (moduleId: string, fieldKey: string, field: ModuleConfigField) => Promise<void>;
 }
 
-function PluginTabContent({ module, config, onConfigChange, carriers, analytics }: PluginTabContentProps) {
+function PluginTabContent({ module, config, onConfigChange, carriers, analytics, onModuleAction }: PluginTabContentProps) {
   const hasConfig = module.config && Object.keys(module.config).length > 0;
   return (
     <div className="plugin-panel-content">
@@ -146,6 +148,7 @@ function PluginTabContent({ module, config, onConfigChange, carriers, analytics 
                   onChange={(v) => onConfigChange(key, v)}
                   carriers={carriers}
                   formValues={config}
+                  onAction={onModuleAction ? (fk, f) => onModuleAction(module.id, fk, f) : undefined}
                 />
               ))}
             </div>
@@ -172,10 +175,11 @@ interface PluginPanelProps {
   onModuleConfigChange: (moduleId: string, key: string, value: unknown) => void;
   carriers?: string[];
   pluginAnalytics: Record<string, PluginAnalyticsEntry>;
+  onModuleAction?: (moduleId: string, fieldKey: string, field: ModuleConfigField) => Promise<void>;
 }
 
 export function PluginPanel({
-  modules, moduleConfigs, onModuleConfigChange, carriers, pluginAnalytics,
+  modules, moduleConfigs, onModuleConfigChange, carriers, pluginAnalytics, onModuleAction,
 }: PluginPanelProps) {
   const [activeId, setActiveId] = useState<string>(modules[0]?.id ?? '');
 
@@ -230,6 +234,7 @@ export function PluginPanel({
         onConfigChange={(key, value) => onModuleConfigChange(active.id, key, value)}
         carriers={carriers}
         analytics={pluginAnalytics[active.id] ?? null}
+        onModuleAction={onModuleAction}
       />
     </div>
   );
