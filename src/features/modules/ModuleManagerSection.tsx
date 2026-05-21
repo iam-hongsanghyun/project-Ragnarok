@@ -274,6 +274,7 @@ export function ConfigFieldRow({ fieldKey, field, value, onChange, carriers, for
           columns={field.columns}
           rows={rows}
           onChange={(next) => onChange(next)}
+          maxHeight={field.maxHeight}
         />
       </div>
     );
@@ -303,6 +304,7 @@ interface TableEditorProps {
   columns: ModuleConfigTableColumn[];
   rows: Array<Record<string, unknown>>;
   onChange: (rows: Array<Record<string, unknown>>) => void;
+  maxHeight?: number;
 }
 
 function emptyRow(columns: ModuleConfigTableColumn[]): Record<string, unknown> {
@@ -350,7 +352,7 @@ function cellInput(
   );
 }
 
-function TableEditor({ columns, rows, onChange }: TableEditorProps) {
+function TableEditor({ columns, rows, onChange, maxHeight }: TableEditorProps) {
   const updateCell = (rowIdx: number, key: string, val: unknown) => {
     const next = rows.map((r, i) => (i === rowIdx ? { ...r, [key]: val } : r));
     onChange(next);
@@ -363,7 +365,7 @@ function TableEditor({ columns, rows, onChange }: TableEditorProps) {
 
   return (
     <div className="sg-module-table-editor">
-      <div className="sg-module-table-scroll">
+      <div className="sg-module-table-scroll" style={maxHeight !== undefined ? { maxHeight } : undefined}>
       <table className="sg-module-table">
         <thead>
           <tr>

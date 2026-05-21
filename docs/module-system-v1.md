@@ -268,6 +268,7 @@ Each config key maps to a field descriptor:
 | `accept` | no | For `"file"` — MIME types or extension filter passed to the browser file picker (e.g. `".csv,text/csv"`). |
 | `binary` | no | For `"file"` — when `true`, the picker reads the file as a base64 data URL instead of UTF-8 text. Use for xlsx, png, parquet, or any non-text format. |
 | `columns` | yes for `"table"` | Column schema for editable tables — see below. |
+| `maxHeight` | no | For `"table"` — max visible height in px before the table body scrolls. Defaults to 260. |
 | `visibleWhen` | no | Conditional visibility — see below. |
 | `hook` | no | For `"action"` — name of the plugin hook to invoke. Currently only `"transform"` is supported. |
 | `variant` | no | For `"action"` — `"primary"` (default, brand-gradient button) or `"secondary"` (muted button). |

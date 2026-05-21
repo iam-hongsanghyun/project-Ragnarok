@@ -430,6 +430,8 @@ export interface ModuleConfigField {
   binary?: boolean;
   /** For 'table' fields: column schema. Required when type === 'table'. */
   columns?: ModuleConfigTableColumn[];
+  /** For 'table' fields: max visible height in px before the body scrolls. Defaults to 260. */
+  maxHeight?: number;
   /** Field is hidden unless this gate is satisfied. */
   visibleWhen?: ModuleConfigVisibleWhen;
   /**
