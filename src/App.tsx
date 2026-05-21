@@ -633,6 +633,8 @@ function AppInner() {
         focusType: 'system',
         focusKeys: [],
         groupBy: 'carrier',
+        busFilter: [],
+        carrierFilter: [],
         metricKey: 'dispatch',
         chartType: 'area',
         timeframe: 'hourly',

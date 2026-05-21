@@ -18,6 +18,14 @@ import { DonutChart } from './DonutChart';
 import { InteractiveTimeSeriesCard } from './InteractiveTimeSeriesCard';
 import { TimelineSlider } from '../../../shared/components/DualRangeSlider';
 import { useMetricOptions } from '../useMetricOptions';
+import { AssetPills } from './AssetPills';
+
+const BUS_AGG_METRIC_KEYS = new Set([
+  'gen_output_by_bus',
+  'gen_available_by_bus',
+  'gen_curtailment_by_bus',
+  'gen_emissions_by_bus',
+]);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 type FocusType = AnalyticsFocus['type'];
@@ -46,57 +54,6 @@ function assetNamesFor(focusType: FocusType, model: WorkbookModel): string[] {
   }
 }
 
-// ── Asset pill multi-select ───────────────────────────────────────────────────
-function AssetPills({
-  assetNames,
-  focusKeys,
-  onChange,
-}: {
-  assetNames: string[];
-  focusKeys: string[];
-  onChange: (keys: string[]) => void;
-}) {
-  const allSelected = focusKeys.length === 0;
-
-  const toggle = (name: string) => {
-    if (allSelected) {
-      // Start with everything selected except the clicked one
-      onChange(assetNames.filter((n) => n !== name));
-    } else if (focusKeys.includes(name)) {
-      const next = focusKeys.filter((k) => k !== name);
-      onChange(next.length === 0 ? [] : next); // empty = all
-    } else {
-      onChange([...focusKeys, name]);
-    }
-  };
-
-  return (
-    <div className="asset-pills">
-      {/* "All" pill */}
-      <button
-        type="button"
-        className={`asset-pill${allSelected ? ' asset-pill--active' : ''}`}
-        onClick={() => onChange([])}
-      >
-        All
-      </button>
-      {assetNames.map((name) => {
-        const active = allSelected || focusKeys.includes(name);
-        return (
-          <button
-            key={name}
-            type="button"
-            className={`asset-pill${active ? ' asset-pill--active' : ''}`}
-            onClick={() => toggle(name)}
-          >
-            {name}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 // ── Main component ────────────────────────────────────────────────────────────
 export function UserDefinedChartCard({
   section,
@@ -120,7 +77,13 @@ export function UserDefinedChartCard({
 
   const assetNames = assetNamesFor(section.focusType, model);
 
-  // Per-card metric options from the card's own focus/keys/groupBy
+  // Bus + carrier filter source lists (used by the secondary pill rows below)
+  const busNames = model.buses.map((r) => stringValue(r.name)).filter(Boolean);
+  const carrierNames = Array.from(
+    new Set(model.generators.map((r) => stringValue(r.carrier)).filter(Boolean)),
+  );
+
+  // Per-card metric options from the card's own focus/keys/groupBy/filters
   const metricOptions: MetricOption[] = useMetricOptions(
     results,
     model,
@@ -128,6 +91,8 @@ export function UserDefinedChartCard({
     section.focusKeys,
     section.groupBy,
     currencySymbol,
+    section.busFilter ?? [],
+    section.carrierFilter ?? [],
   );
 
   const metric     = metricOptions.find((m) => m.key === section.metricKey);
@@ -144,9 +109,17 @@ export function UserDefinedChartCard({
     ? aggregateMetricRows(metric!, safeStart, safeEnd, section.timeframe)
     : [];
 
-  // Show Group by only when: non-system, multi/all selected, generator type (carriers meaningful)
+  // Show Group by when:
+  //   - Generator focus with multi/all selection, OR
+  //   - Bus focus with one of the generator-aggregated metrics picked
   const isMultiOrAll  = section.focusType !== 'system' && section.focusKeys.length !== 1;
-  const showGroupBy   = isMultiOrAll && section.focusType === 'generator';
+  const showGroupBy   =
+    (isMultiOrAll && section.focusType === 'generator') ||
+    (section.focusType === 'bus' && BUS_AGG_METRIC_KEYS.has(section.metricKey));
+
+  // Filter rows visibility
+  const showBusFilter     = ['generator', 'storageUnit', 'store'].includes(section.focusType) && busNames.length > 0;
+  const showCarrierFilter = section.focusType === 'generator' && carrierNames.length > 0;
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
@@ -159,6 +132,8 @@ export function UserDefinedChartCard({
       focusType: newType,
       focusKeys: newType === 'system' ? [] : [],  // start with "All" for non-system too
       groupBy: 'carrier',
+      busFilter: [],
+      carrierFilter: [],
     });
     void names; // suppress lint
   };
@@ -315,9 +290,33 @@ export function UserDefinedChartCard({
         <div className="chart-control-row">
           <span className="chart-control-label">Assets</span>
           <AssetPills
-            assetNames={assetNames}
-            focusKeys={section.focusKeys}
+            names={assetNames}
+            selected={section.focusKeys}
             onChange={(keys) => onChange({ ...section, focusKeys: keys })}
+          />
+        </div>
+      )}
+
+      {/* Secondary filter: bus (generator / storage unit / store) */}
+      {showBusFilter && (
+        <div className="chart-control-row">
+          <span className="chart-control-label">Filter by bus</span>
+          <AssetPills
+            names={busNames}
+            selected={section.busFilter ?? []}
+            onChange={(keys) => onChange({ ...section, busFilter: keys })}
+          />
+        </div>
+      )}
+
+      {/* Secondary filter: carrier (generator only) */}
+      {showCarrierFilter && (
+        <div className="chart-control-row">
+          <span className="chart-control-label">Filter by carrier</span>
+          <AssetPills
+            names={carrierNames}
+            selected={section.carrierFilter ?? []}
+            onChange={(keys) => onChange({ ...section, carrierFilter: keys })}
           />
         </div>
       )}

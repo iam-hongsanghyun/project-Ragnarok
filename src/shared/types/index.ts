@@ -361,6 +361,8 @@ export interface ChartSectionConfig {
   focusType: AnalyticsFocus['type'];  // per-card component selection
   focusKeys: string[];                // [] = all assets of that type; ['x'] = single
   groupBy: GroupByOption;             // how multi-asset series are combined
+  busFilter: string[];                // secondary filter: keep only assets on these buses ([] = all)
+  carrierFilter: string[];            // secondary filter: keep only generators with these carriers ([] = all)
   metricKey: string;
   chartType: ChartSectionType;
   timeframe: TimeframeOption;

@@ -210,9 +210,11 @@ export function useMetricOptions(
   results: RunResults | null,
   _model: WorkbookModel,
   focusType: AnalyticsFocus['type'],
-  focusKeys: string[],    // [] = all assets of that type; ['x'] = single
-  groupBy: GroupByOption, // how multi-asset series are combined
+  focusKeys: string[],       // [] = all assets of that type; ['x'] = single
+  groupBy: GroupByOption,    // how multi-asset series are combined
   currencySymbol: string = '$',
+  busFilter: string[] = [],     // narrow generator/storage/store assets to these buses ([] = all)
+  carrierFilter: string[] = [], // narrow generators to these carriers ([] = all)
 ): MetricOption[] {
   // ── System-level derived rows (always computed, cheap) ──────────────────────
   const rawDispatch  = (results?.dispatchSeries          || []).map(normalizeSeriesPoint);
@@ -233,8 +235,10 @@ export function useMetricOptions(
   const storageRows      = (results?.storageSeries         || []).map((p) => ({ label: p.label, timestamp: p.timestamp, charge: p.charge, discharge: p.discharge, state: p.state }));
   const sysLoadRows      = buildSystemLoadRows(results);
 
-  // Stable key for memoisation of focusKeys array
-  const focusKeysSig = focusKeys.join(',');
+  // Stable keys for memoisation of array deps
+  const focusKeysSig    = focusKeys.join(',');
+  const busFilterSig    = busFilter.join(',');
+  const carrierFilterSig = carrierFilter.join(',');
 
   return useMemo(() => {
     if (!results) return [];
@@ -256,6 +260,7 @@ export function useMetricOptions(
 
     // ── Single asset ──────────────────────────────────────────────────────────
     if (!isMulti) {
+      // Single-asset selection ignores bus/carrier filters by design.
       return buildSingleAssetOptions(results.assetDetails, { type: focusType, key: focusKeys[0] } as AnalyticsFocus, currencySymbol);
     }
 
@@ -273,13 +278,91 @@ export function useMetricOptions(
     })();
     const resolved = focusKeys.length === 0 ? allKeys : focusKeys;
 
+    const busSet     = new Set(busFilter);
+    const carrierSet = new Set(carrierFilter);
+
     if (focusType === 'generator') {
-      return buildMultiGenOptions(results.assetDetails, resolved, groupBy, _model);
+      const filtered = resolved.filter((name) => {
+        const g = results.assetDetails.generators[name];
+        if (!g) return false;
+        if (busSet.size     > 0 && !busSet.has(g.bus))         return false;
+        if (carrierSet.size > 0 && !carrierSet.has(g.carrier)) return false;
+        return true;
+      });
+      return buildMultiGenOptions(results.assetDetails, filtered, groupBy, _model);
     }
-    // Other types: merge by asset name
+
+    if (focusType === 'storageUnit') {
+      const filtered = busSet.size > 0
+        ? resolved.filter((n) => busSet.has(results.assetDetails.storageUnits[n]?.bus ?? ''))
+        : resolved;
+      return buildMultiAssetOptions(results.assetDetails, filtered, focusType, currencySymbol);
+    }
+
+    if (focusType === 'store') {
+      const filtered = busSet.size > 0
+        ? resolved.filter((n) => busSet.has(results.assetDetails.stores[n]?.bus ?? ''))
+        : resolved;
+      return buildMultiAssetOptions(results.assetDetails, filtered, focusType, currencySymbol);
+    }
+
+    if (focusType === 'bus') {
+      // Built-in per-bus metrics (load/gen/smp/emissions/voltage)
+      const baseOptions = buildMultiAssetOptions(results.assetDetails, resolved, focusType, currencySymbol);
+
+      // Generator-derived metrics aggregated over generators attached to the selected buses.
+      const busNameSet = new Set(resolved);
+      const matchingGenerators = Object.values(results.assetDetails.generators).filter(
+        (g) => busNameSet.has(g.bus),
+      );
+      const genFields: Array<{ key: string; label: string; unit: string; field: 'output' | 'available' | 'curtailment' | 'emissions'; reducer: MetricOption['reducer'] }> = [
+        { key: 'gen_output_by_bus',       label: 'Generator output',       unit: 'MW',    field: 'output',      reducer: 'mean' },
+        { key: 'gen_available_by_bus',    label: 'Generator available',    unit: 'MW',    field: 'available',   reducer: 'mean' },
+        { key: 'gen_curtailment_by_bus',  label: 'Generator curtailment',  unit: 'MW',    field: 'curtailment', reducer: 'mean' },
+        { key: 'gen_emissions_by_bus',    label: 'Generator emissions',    unit: 'tCO2e', field: 'emissions',   reducer: 'sum'  },
+      ];
+      const genMetrics: MetricOption[] = genFields.map(({ key, label, unit, field, reducer }) => {
+        const byTimestamp = new Map<string, { label: string; timestamp: string; vals: Record<string, number> }>();
+        for (const gen of matchingGenerators) {
+          const seriesKey = groupBy === 'carrier' ? (gen.carrier || 'Unknown') : gen.name;
+          const series =
+            field === 'output'      ? gen.outputSeries :
+            field === 'available'   ? gen.availableSeries :
+            field === 'curtailment' ? gen.curtailmentSeries :
+                                      gen.emissionsSeries;
+          for (const pt of series) {
+            const ts  = String((pt as any).timestamp ?? pt.label);
+            const val = Number((pt as any)[field] ?? 0);
+            if (!byTimestamp.has(ts)) {
+              byTimestamp.set(ts, { label: String(pt.label), timestamp: ts, vals: {} });
+            }
+            const e = byTimestamp.get(ts)!;
+            e.vals[seriesKey] = (e.vals[seriesKey] || 0) + val;
+          }
+        }
+        const rawSeriesKeys = Array.from(
+          new Set(Array.from(byTimestamp.values()).flatMap((e) => Object.keys(e.vals))),
+        );
+        const seriesKeys = groupBy === 'carrier' ? orderByCarrierRows(_model.carriers, rawSeriesKeys) : rawSeriesKeys;
+        const rows: TimeSeriesRow[] = Array.from(byTimestamp.values())
+          .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+          .map((e) => ({ label: e.label, timestamp: e.timestamp, ...e.vals }));
+        const series: TimeSeriesSeries[] = seriesKeys.map((k) => ({
+          key: k,
+          label: k,
+          color: groupBy === 'carrier'
+            ? carrierColor(k)
+            : (results.assetDetails.generators[k]?.color || hashColor(k)),
+        }));
+        return { key, label, unit, rows, series, reducer, allowDonut: groupBy === 'carrier' };
+      });
+      return [...baseOptions, ...genMetrics];
+    }
+
+    // Branch falls through here — merge by asset name, no bus filter.
     return buildMultiAssetOptions(results.assetDetails, resolved, focusType, currencySymbol);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [results, focusType, focusKeysSig, groupBy, currencySymbol,
+  }, [results, focusType, focusKeysSig, groupBy, busFilterSig, carrierFilterSig, currencySymbol,
       sysDispatchRows, sysDispSeries, sysGenDispRows, sysGenDispSeries,
       sysLoadRows, sysPriceRows, sysEmissionsRows, storageRows]);
 }
