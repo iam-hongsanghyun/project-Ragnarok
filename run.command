@@ -72,6 +72,24 @@ if [ ! -d "node_modules" ]; then
   npm install
 fi
 
+# ── Free ports 3000 + 8000 (kill stale frontend / backend) ────────────────────
+
+free_port() {
+  local port="$1"
+  local pids
+  pids="$(lsof -ti tcp:"$port" 2>/dev/null || true)"
+  if [ -n "$pids" ]; then
+    echo "Port $port busy — killing PID(s): $pids"
+    kill $pids >/dev/null 2>&1 || true
+    sleep 1
+    pids="$(lsof -ti tcp:"$port" 2>/dev/null || true)"
+    [ -n "$pids" ] && kill -9 $pids >/dev/null 2>&1 || true
+  fi
+}
+
+free_port 3000
+free_port 8000
+
 # ── Launch ────────────────────────────────────────────────────────────────────
 
 cleanup() {

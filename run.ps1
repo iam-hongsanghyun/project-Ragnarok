@@ -84,6 +84,25 @@ if (-not (Test-Path (Join-Path $PSScriptRoot 'node_modules'))) {
     npm install
 }
 
+# ── Free ports 3000 + 8000 (kill stale frontend / backend) ────────────────────
+
+function Free-Port([int]$port) {
+    $pids = @()
+    try {
+        $pids = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction Stop |
+            Select-Object -ExpandProperty OwningProcess -Unique
+    } catch { }
+    foreach ($p in $pids) {
+        if ($p -and $p -ne 0) {
+            Write-Host "Port $port busy — killing PID $p"
+            try { Stop-Process -Id $p -Force -ErrorAction Stop } catch { }
+        }
+    }
+}
+
+Free-Port 3000
+Free-Port 8000
+
 # ── Launch ────────────────────────────────────────────────────────────────────
 
 Write-Host 'Starting backend...'
