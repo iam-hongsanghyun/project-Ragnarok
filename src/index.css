@@ -3327,21 +3327,24 @@ path.leaflet-interactive:focus {
 /* Row-number column body cells stay above horizontally-scrolled data */
 .spreadsheet-table tbody .rn-col { z-index: 1; }
 
-/* Frozen first data column (name / snapshot) */
+/* Frozen first data column (name / snapshot).
+ * border-right is unreliable with `border-collapse: collapse` + `position: sticky`
+ * (the border fails to paint in some browsers and adjacent cells bleed through).
+ * We use box-shadow for the divider — it always paints. */
 .spreadsheet-table thead .col-frozen {
   position: sticky;
   left: 40px;   /* width of .rn-col */
   z-index: 3;
   background: #f1f5f9;
-  border-right: 2px solid #cbd5e1 !important;
+  box-shadow: 1px 0 0 #cbd5e1;
   font-weight: 600;
 }
 .spreadsheet-table tbody .col-frozen {
   position: sticky;
   left: 40px;
-  z-index: 1;
+  z-index: 2;
   background: #f8fafc;
-  border-right: 2px solid #e2e8f0 !important;
+  box-shadow: 1px 0 0 #e2e8f0;
   font-weight: 500;
   white-space: nowrap;
 }

@@ -197,7 +197,7 @@ def run_pypsa(
         gen_names = list(network.generators.index[network.generators.bus == bus])
         gen_val = float(dispatch_frame.reindex(columns=gen_names, fill_value=0.0).sum(axis=1).mean()) if gen_names else 0.0
         nodal_balance.append({"label": bus, "load": load_val, "generation": gen_val})
-    nodal_balance = sorted(nodal_balance, key=lambda x: x["load"], reverse=True)[:12]
+    nodal_balance = sorted(nodal_balance, key=lambda x: x["load"], reverse=True)
 
     # Line loading
     line_loading = []

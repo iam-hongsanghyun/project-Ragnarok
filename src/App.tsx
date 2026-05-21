@@ -219,7 +219,10 @@ function AppInner() {
   const resetForNewModel = (nextModel: WorkbookModel, name?: string) => {
     const snapshotMax = snapshotMaxFromWorkbook(nextModel.snapshots);
     setMaxSnapshots(snapshotMax);
-    setSnapshotEnd(Math.min(RUN_WINDOW.defaultSnapshotEnd, snapshotMax));
+    // Default run window covers the FULL snapshot range of the loaded model,
+    // so analytics charts show the entire output. Users can shrink the window
+    // in the Run dialog if they want a shorter solve.
+    setSnapshotEnd(snapshotMax);
     setSnapshotStart(RUN_WINDOW.initialSnapshotStart);
     setModel(nextModel);
     setResults(null);
@@ -680,6 +683,19 @@ function AppInner() {
             Run
           </button>
           <button className="tb-btn" onClick={handleOpenWorkbook}>Open</button>
+          <button
+            className="tb-btn tb-btn--muted"
+            onClick={() => {
+              if (!window.confirm('Clear the loaded model? All unsaved edits and results will be lost.')) return;
+              resetForNewModel(createEmptyWorkbook(), 'untitled.xlsx');
+              setFileHandle(null);
+              setStatus('Model cleared.');
+              showToast('Model cleared', 'success');
+            }}
+            title="Remove the currently loaded model and start from an empty workbook"
+          >
+            Clear
+          </button>
           <div className="topbar-divider" />
           <span className="topbar-file">{filename}</span>
           {results && (

@@ -38,7 +38,10 @@ function buildMultiGenMetric(
   groupBy: GroupByOption,
   model: WorkbookModel,
 ): { rows: TimeSeriesRow[]; series: TimeSeriesSeries[] } {
-  const byLabel = new Map<string, { timestamp?: string; vals: Record<string, number> }>();
+  // Bucket by full timestamp, not label. Backend labels are "HH:MM" which
+  // collide every 24 h — bucketing by label collapses a multi-day window
+  // into 24 rows.
+  const byTimestamp = new Map<string, { label: string; timestamp: string; vals: Record<string, number> }>();
 
   for (const name of genNames) {
     const gen = assetDetails.generators[name];
@@ -47,22 +50,23 @@ function buildMultiGenMetric(
 
     for (const pt of getGenSeries(gen, field)) {
       const val = getGenFieldValue(pt as any, field);
-      if (!byLabel.has(pt.label)) byLabel.set(pt.label, { timestamp: pt.timestamp, vals: {} });
-      const e = byLabel.get(pt.label)!;
+      const ts = String(pt.timestamp ?? pt.label);
+      if (!byTimestamp.has(ts)) {
+        byTimestamp.set(ts, { label: String(pt.label), timestamp: ts, vals: {} });
+      }
+      const e = byTimestamp.get(ts)!;
       e.vals[seriesKey] = (e.vals[seriesKey] || 0) + val;
     }
   }
 
   const rawSeriesKeys = Array.from(
-    new Set(Array.from(byLabel.values()).flatMap((e) => Object.keys(e.vals))),
+    new Set(Array.from(byTimestamp.values()).flatMap((e) => Object.keys(e.vals))),
   );
   const seriesKeys = groupBy === 'carrier' ? orderByCarrierRows(model.carriers, rawSeriesKeys) : rawSeriesKeys;
 
-  const rows: TimeSeriesRow[] = Array.from(byLabel.entries()).map(([label, e]) => ({
-    label,
-    timestamp: e.timestamp,
-    ...e.vals,
-  }));
+  const rows: TimeSeriesRow[] = Array.from(byTimestamp.values())
+    .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+    .map((e) => ({ label: e.label, timestamp: e.timestamp, ...e.vals }));
 
   const series: TimeSeriesSeries[] = seriesKeys.map((k) => ({
     key: k,
