@@ -1,10 +1,23 @@
 import React from 'react';
 
 /**
- * Multi-select pill row. Empty `selected` array = "All" (every name implicitly active).
- * Clicking "All" returns an empty selection; clicking any individual pill toggles it.
- * Clicking a single pill while "All" is active starts a selection that excludes only
- * the clicked pill (matches the legacy behaviour from UserDefinedChartCard).
+ * Sentinel value placed in the selection array to represent "explicitly nothing
+ * selected" — distinct from `[]` which means "All". Downstream code that filters
+ * by Set membership (bus / carrier filters) naturally drops it because no real
+ * asset, bus, or carrier is named `__none__`.
+ */
+const NONE_SENTINEL = '__none__';
+
+/**
+ * Multi-select pill row with three logical states:
+ *   - `selected = []`                        → All selected
+ *   - `selected = ['__none__']`              → Nothing selected (explicit)
+ *   - `selected = ['a', 'b', ...]`           → Specific items selected
+ *
+ * The "All" pill is a toggle: click it while all are selected to deselect
+ * everything, click again to re-select all. Individual pills behave like
+ * before — clicking one while in "All" mode starts an "all except clicked"
+ * selection; the last pill removed transitions to the explicit "none" state.
  */
 export function AssetPills({
   names,
@@ -15,14 +28,21 @@ export function AssetPills({
   selected: string[];
   onChange: (next: string[]) => void;
 }) {
-  const allSelected = selected.length === 0;
+  const allSelected  = selected.length === 0;
+  const noneSelected = selected.length === 1 && selected[0] === NONE_SENTINEL;
 
-  const toggle = (name: string) => {
+  const toggleAll = () => {
+    onChange(allSelected ? [NONE_SENTINEL] : []);
+  };
+
+  const togglePill = (name: string) => {
     if (allSelected) {
-      onChange(names.filter((n) => n !== name));
+      onChange(names.filter((n) => n !== name));   // "all except clicked"
+    } else if (noneSelected) {
+      onChange([name]);                            // start fresh from none
     } else if (selected.includes(name)) {
       const next = selected.filter((k) => k !== name);
-      onChange(next);
+      onChange(next.length === 0 ? [NONE_SENTINEL] : next);
     } else {
       onChange([...selected, name]);
     }
@@ -33,18 +53,19 @@ export function AssetPills({
       <button
         type="button"
         className={`asset-pill${allSelected ? ' asset-pill--active' : ''}`}
-        onClick={() => onChange([])}
+        onClick={toggleAll}
+        title={allSelected ? 'Click to deselect all' : 'Click to select all'}
       >
         All
       </button>
       {names.map((name) => {
-        const active = allSelected || selected.includes(name);
+        const active = allSelected || (!noneSelected && selected.includes(name));
         return (
           <button
             key={name}
             type="button"
             className={`asset-pill${active ? ' asset-pill--active' : ''}`}
-            onClick={() => toggle(name)}
+            onClick={() => togglePill(name)}
           >
             {name}
           </button>
