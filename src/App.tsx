@@ -10,6 +10,7 @@ import {
   GridRow,
   ModuleConfigField,
   ModuleDescriptor,
+  PathwayConfig,
   Primitive,
   RunHistoryEntry,
   RunResults,
@@ -30,6 +31,7 @@ import { getBounds, getBusIndex, carrierColor, numberValue, orderByCarrierRows, 
 import { buildRowsFromGeneratorDetails, buildSystemLoadRows, normalizeSeriesPoint } from './shared/utils/analytics';
 import { withDerivedAssetDetails } from './shared/utils/deriveAssetDetails';
 import { deriveRunResults } from './shared/utils/deriveRunResults';
+import { defaultPathwayConfig, getDefaultSelectedPeriod, readPathwayConfigFromModel, samePathwayConfig, writePathwayConfigToModel } from './shared/utils/pathway';
 import { RunDialog } from './features/run/RunDialog';
 import { Sidebar } from './layout/Sidebar';
 import { MapPane } from './features/map/MapPane';
@@ -67,6 +69,7 @@ function AppInner() {
   const [runDialogOpen, setRunDialogOpen] = useState(false);
   const [dryRun, setDryRun] = useState(false);
   const [runHistory, setRunHistory] = useState<RunHistoryEntry[]>([]);
+  const [pathwayConfig, setPathwayConfig] = useState<PathwayConfig>(() => defaultPathwayConfig());
   const [validateResult, setValidateResult] = useState<{
     valid: boolean;
     errors: string[];
@@ -93,6 +96,48 @@ function AppInner() {
   const [settings, updateSettings] = useSettings();
   const moduleHost = useModuleHost();
   const modelIssues = useModelIssues(model);
+
+  const displayResults = useMemo(() => {
+    if (!results) return null;
+    if (!results.pathway?.enabled || !results.outputs) {
+      return withDerivedAssetDetails(model, results, settings.currencySymbol);
+    }
+    const selectedPeriod =
+      getDefaultSelectedPeriod({
+        ...pathwayConfig,
+        selectedPeriod: pathwayConfig.selectedPeriod ?? results.pathway.selectedPeriod,
+        periods: pathwayConfig.periods.length
+          ? pathwayConfig.periods
+          : results.pathway.periods.map((period, index) => ({
+            period,
+            objectiveWeight: results.pathway?.summaries[index]?.objectiveWeight ?? 1,
+            yearsWeight: results.pathway?.summaries[index]?.yearsWeight ?? 1,
+          })),
+      });
+    const derived = deriveRunResults(model, results.outputs, {
+      carbonPrice,
+      currencySymbol: settings.currencySymbol,
+      discountRate: settings.discountRate,
+      snapshotWeight,
+      narrative: results.narrative,
+      selectedPeriod,
+      pathway: {
+        ...results.pathway,
+        selectedPeriod,
+      },
+    });
+    return {
+      ...results,
+      ...derived,
+      pluginAnalytics: results.pluginAnalytics,
+      meritOrder: results.meritOrder,
+      co2Shadow: results.co2Shadow,
+      emissionsBreakdown: results.emissionsBreakdown,
+      outputs: results.outputs,
+      pathway: derived.pathway,
+      runMeta: derived.runMeta,
+    };
+  }, [results, model, settings.currencySymbol, settings.discountRate, carbonPrice, snapshotWeight, pathwayConfig]);
 
   const handleInstallModule = useCallback(async (file: File) => {
     const result = await moduleHost.installFromFile(file);
@@ -202,6 +247,13 @@ function AppInner() {
     setCarrierColorOverrides(model.carriers);
   }, [model.carriers]);
 
+  useEffect(() => {
+    setModel((current) => {
+      const next = writePathwayConfigToModel(current, pathwayConfig);
+      return samePathwayConfig(readPathwayConfigFromModel(current), pathwayConfig) ? current : next;
+    });
+  }, [pathwayConfig]);
+
   const bounds = useMemo(() => getBounds(model), [model.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
   const busIndex = useMemo(() => getBusIndex(model), [model.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -211,17 +263,18 @@ function AppInner() {
     // focus is already 'system' (otherwise a new {type:'system'} object would
     // trigger an infinite re-render loop on every effect tick).
     if (analyticsFocus.type === 'system') return;
-    if (!results) { setAnalyticsFocus({ type: 'system' }); return; }
-    if (analyticsFocus.type === 'generator' && results.assetDetails.generators[analyticsFocus.key]) return;
-    if (analyticsFocus.type === 'bus' && results.assetDetails.buses[analyticsFocus.key]) return;
-    if (analyticsFocus.type === 'storageUnit' && results.assetDetails.storageUnits[analyticsFocus.key]) return;
-    if (analyticsFocus.type === 'store' && results.assetDetails.stores[analyticsFocus.key]) return;
-    if (analyticsFocus.type === 'branch' && results.assetDetails.branches[analyticsFocus.key]) return;
+    if (!displayResults) { setAnalyticsFocus({ type: 'system' }); return; }
+    if (analyticsFocus.type === 'generator' && displayResults.assetDetails.generators[analyticsFocus.key]) return;
+    if (analyticsFocus.type === 'bus' && displayResults.assetDetails.buses[analyticsFocus.key]) return;
+    if (analyticsFocus.type === 'storageUnit' && displayResults.assetDetails.storageUnits[analyticsFocus.key]) return;
+    if (analyticsFocus.type === 'store' && displayResults.assetDetails.stores[analyticsFocus.key]) return;
+    if (analyticsFocus.type === 'branch' && displayResults.assetDetails.branches[analyticsFocus.key]) return;
     setAnalyticsFocus({ type: 'system' });
-  }, [results, analyticsFocus]);
+  }, [displayResults, analyticsFocus]);
 
   const resetForNewModel = (nextModel: WorkbookModel, name?: string) => {
     const snapshotMax = snapshotMaxFromWorkbook(nextModel.snapshots);
+    const nextPathway = readPathwayConfigFromModel(nextModel);
     setMaxSnapshots(snapshotMax);
     // Default run window covers the FULL snapshot range of the loaded model,
     // so analytics charts show the entire output. Users can shrink the window
@@ -234,6 +287,10 @@ function AppInner() {
     setChartSections([]);
     setValidateResult(null);
     setAnalyticsFocus({ type: 'system' });
+    setPathwayConfig({
+      ...nextPathway,
+      selectedPeriod: getDefaultSelectedPeriod(nextPathway),
+    });
     if (name) setFilename(name);
   };
 
@@ -260,6 +317,7 @@ function AppInner() {
     if (!file) return;
     try {
       const { model: nextModel, outputs } = await parseProjectFile(file);
+      const importedPathway = readPathwayConfigFromModel(nextModel);
       resetForNewModel(nextModel, file.name || 'ragnarok_project.xlsx');
       setFileHandle(null);
       const hasOutputs =
@@ -274,6 +332,14 @@ function AppInner() {
           currencySymbol: settings.currencySymbol,
           discountRate: settings.discountRate,
           snapshotWeight,
+          selectedPeriod: getDefaultSelectedPeriod(importedPathway),
+          pathway: importedPathway.enabled ? {
+            enabled: true,
+            periods: importedPathway.periods.map((row) => row.period),
+            selectedPeriod: getDefaultSelectedPeriod(importedPathway),
+            snapshotMappingMode: importedPathway.snapshotMappingMode,
+            summaries: [],
+          } : null,
           narrative: [`Imported project from ${file.name}. Outputs restored from workbook.`],
         });
         setResults(imported);
@@ -431,6 +497,19 @@ function AppInner() {
 
   const handleRestoreRun = (entry: RunHistoryEntry) => {
     setResults(entry.results);
+    if (entry.results.pathway?.enabled) {
+      setPathwayConfig((current) => ({
+        ...current,
+        enabled: true,
+        planningMode: 'pathway',
+        periods: entry.results.pathway?.summaries?.map((row) => ({
+          period: row.period,
+          objectiveWeight: row.objectiveWeight,
+          yearsWeight: row.yearsWeight,
+        })) ?? current.periods,
+        selectedPeriod: entry.results.pathway?.selectedPeriod ?? current.selectedPeriod,
+      }));
+    }
     setTab('Analytics');
     setAnalyticsSubTab('Result');
     setAnalyticsFocus({ type: 'system' });
@@ -533,6 +612,10 @@ function AppInner() {
       loadSheddingCost: settings.loadSheddingCost,
       enabledModules: moduleHost.enabledIds,
       moduleConfigs: moduleHost.moduleConfigs,
+      pathwayConfig: {
+        ...pathwayConfig,
+        selectedPeriod: getDefaultSelectedPeriod(pathwayConfig),
+      },
     };
 
     setRunDialogOpen(false);
@@ -594,14 +677,37 @@ function AppInner() {
     const applyResult = (rawResults: RunResults) => {
       sessionStorage.removeItem('activeJobId');
       jobIdRef.current = null;
-      // Backend now sends only the schema-driven outputs cache; the frontend
-      // derives all per-asset detail records locally so plugins and analytics
-      // read from a single in-memory source.
-      const nextResults = withDerivedAssetDetails(model, rawResults, settings.currencySymbol);
-      setResults(nextResults);
+      const selectedPeriod = rawResults.pathway?.enabled
+        ? (rawResults.pathway.selectedPeriod ?? rawResults.pathway.periods[0] ?? null)
+        : null;
+      if (rawResults.pathway?.enabled) {
+        setPathwayConfig((current) => ({
+          ...current,
+          planningMode: 'pathway',
+          enabled: true,
+          periods: rawResults.pathway?.summaries?.map((row) => ({
+            period: row.period,
+            objectiveWeight: row.objectiveWeight,
+            yearsWeight: row.yearsWeight,
+          })) ?? current.periods,
+          selectedPeriod,
+        }));
+      }
+      setResults(rawResults);
       setRunStatus('done');
       setAnalyticsFocus({ type: 'system' });
-      const doneMsg = `Completed — ${nextResults.runMeta.snapshotCount} snapshots, ${nextResults.runMeta.modeledHours} h.`;
+      const visible = rawResults.pathway?.enabled && rawResults.outputs
+        ? deriveRunResults(model, rawResults.outputs, {
+          carbonPrice,
+          currencySymbol: settings.currencySymbol,
+          discountRate: settings.discountRate,
+          snapshotWeight,
+          narrative: rawResults.narrative,
+          selectedPeriod,
+          pathway: rawResults.pathway,
+        })
+        : withDerivedAssetDetails(model, rawResults, settings.currencySymbol);
+      const doneMsg = `Completed — ${visible.runMeta.snapshotCount} snapshots, ${visible.runMeta.modeledHours} h.`;
       setStatus(doneMsg);
       showToast(doneMsg, 'success');
       setRunHistory((hist) => {
@@ -621,7 +727,7 @@ function AppInner() {
           ),
           pinned: false,
           inComparison: true,
-          results: nextResults,
+          results: rawResults,
         };
         const withNew = [entry, ...hist];
         const pinned = withNew.filter((e) => e.pinned);
@@ -684,29 +790,29 @@ function AppInner() {
 
   // ── Metric series derived data ────────────────────────────────────────────
 
-  const rawSystemDispatchRows: TimeSeriesRow[] = (results?.dispatchSeries || []).map(normalizeSeriesPoint);
+  const rawSystemDispatchRows: TimeSeriesRow[] = (displayResults?.dispatchSeries || []).map(normalizeSeriesPoint);
   const systemDispatchRows: TimeSeriesRow[] =
     rawSystemDispatchRows.some((row) =>
       Object.keys(row).some((key) => !['label', 'timestamp', 'total'].includes(key) && Math.abs(numberValue(row[key] as string | number | undefined)) > 1e-6),
     )
       ? rawSystemDispatchRows
-      : buildRowsFromGeneratorDetails(results?.assetDetails.generators || {}, 'carrier');
+      : buildRowsFromGeneratorDetails(displayResults?.assetDetails.generators || {}, 'carrier');
   const inferredDispatchKeys = Array.from(
     new Set(systemDispatchRows.flatMap((row) => Object.keys(row).filter((key) => !['label', 'timestamp', 'total'].includes(key)))),
   );
   const dispatchKeys =
     inferredDispatchKeys.length > 0
       ? orderByCarrierRows(model.carriers, inferredDispatchKeys)
-      : (results?.carrierMix || []).map((item) => item.label).filter(Boolean);
+      : (displayResults?.carrierMix || []).map((item) => item.label).filter(Boolean);
   const systemDispatchSeries: TimeSeriesSeries[] = dispatchKeys.map((key) => ({ key, label: key, color: carrierColor(key) }));
 
-  const systemPriceRows: TimeSeriesRow[] = (results?.systemPriceSeries || []).map((point) => ({ label: point.label, timestamp: point.timestamp, price: point.value }));
-  const storageRows: TimeSeriesRow[] = (results?.storageSeries || []).map((point) => ({ label: point.label, timestamp: point.timestamp, charge: point.charge, discharge: point.discharge, state: point.state }));
-  const systemLoadRows: TimeSeriesRow[] = buildSystemLoadRows(results);
+  const systemPriceRows: TimeSeriesRow[] = (displayResults?.systemPriceSeries || []).map((point) => ({ label: point.label, timestamp: point.timestamp, price: point.value }));
+  const storageRows: TimeSeriesRow[] = (displayResults?.storageSeries || []).map((point) => ({ label: point.label, timestamp: point.timestamp, charge: point.charge, discharge: point.discharge, state: point.state }));
+  const systemLoadRows: TimeSeriesRow[] = buildSystemLoadRows(displayResults);
 
   // Seed a default chart card when results first arrive; don't reset on map-focus changes.
   useEffect(() => {
-    if (!results) {
+    if (!displayResults) {
       setChartSections([]);
       return;
     }
@@ -722,12 +828,12 @@ function AppInner() {
         chartType: 'area',
         timeframe: 'hourly',
         startIndex: 0,
-        endIndex: Math.max((results.dispatchSeries.length || 1) - 1, 0),
+        endIndex: Math.max((displayResults.dispatchSeries.length || 1) - 1, 0),
         stacked: true,
       },
     ]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [results]);
+  }, [displayResults]);
 
   // ── Sidebar resize handlers ──────────────────────────────────────────────────
   const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
@@ -784,8 +890,8 @@ function AppInner() {
           </button>
           <div className="topbar-divider" />
           <span className="topbar-file">{filename}</span>
-          {results && (
-            <span className="topbar-run-meta">{results.runMeta.snapshotCount} snaps · {results.runMeta.snapshotWeight}h res</span>
+          {displayResults && (
+            <span className="topbar-run-meta">{displayResults.runMeta.snapshotCount} snaps · {displayResults.runMeta.snapshotWeight}h res</span>
           )}
           {runStatus === 'running' ? (
             <>
@@ -849,20 +955,22 @@ function AppInner() {
               onImportProject={() => projectImportInputRef.current?.click()}
               onExportProject={handleExportProject}
               onExportResult={() => {
-                if (!results) return;
-                exportFullResults(model, results, filename.replace(/\.xlsx$/i, ''));
+                if (!displayResults) return;
+                exportFullResults(model, displayResults, filename.replace(/\.xlsx$/i, ''));
                 showToast('Result workbook exported', 'success');
               }}
               onExportReport={() => {
-                if (!results) return;
+                if (!displayResults) return;
                 const base = filename.replace(/\.xlsx$/i, '') || 'ragnarok_report';
-                exportReportHtml(results, {
+                exportReportHtml(displayResults, {
                   filename: `${base}_report`,
                   projectName: base,
                   currencySymbol: settings.currencySymbol,
                 });
                 showToast('HTML report exported', 'success');
               }}
+              pathwayConfig={pathwayConfig}
+              onPathwayConfigChange={setPathwayConfig}
               runHistory={runHistory}
               onRestoreRun={handleRestoreRun}
               onRenameHistoryEntry={handleRenameHistoryEntry}
@@ -974,11 +1082,11 @@ function AppInner() {
                     </button>
                   ))}
                 </nav>
-                {results && analyticsSubTab !== 'Validation' && (
+                {displayResults && analyticsSubTab !== 'Validation' && (
                   <div className="inline-stats">
                     <span>{filename}</span>
-                    <span>{results.runMeta.snapshotCount} snapshots</span>
-                    <span>{results.runMeta.snapshotWeight}h weight</span>
+                    <span>{displayResults.runMeta.snapshotCount} snapshots</span>
+                    <span>{displayResults.runMeta.snapshotWeight}h weight</span>
                   </div>
                 )}
               </div>
@@ -998,15 +1106,15 @@ function AppInner() {
               )}
 
               {analyticsSubTab === 'Comparison' && (
-                <ComparisonPane runHistory={runHistory} activeResults={results} onToggleComparison={handleToggleComparison} currencySymbol={settings.currencySymbol} />
-              )}
+              <ComparisonPane runHistory={runHistory} activeResults={displayResults} onToggleComparison={handleToggleComparison} currencySymbol={settings.currencySymbol} />
+            )}
 
               {(analyticsSubTab === 'Result' || analyticsSubTab === 'Analytics') && (
-                !results ? (
+                !displayResults ? (
                   <EmptyAnalytics />
                 ) : (
                   <AnalyticsPane
-                    results={results}
+                    results={displayResults}
                     filename={filename}
                     model={model}
                     bounds={bounds}
@@ -1023,8 +1131,10 @@ function AppInner() {
                     runHistory={runHistory}
                     subTab={analyticsSubTab}
                     currencySymbol={settings.currencySymbol}
+                    pathwayConfig={pathwayConfig}
+                    onSelectedPeriodChange={(period) => setPathwayConfig((current) => ({ ...current, selectedPeriod: period }))}
                     onExportAll={() => {
-                      exportFullResults(model, results, filename.replace(/\.xlsx$/i, ''));
+                      exportFullResults(model, displayResults, filename.replace(/\.xlsx$/i, ''));
                       showToast('Full results exported to Excel', 'success');
                     }}
                   />
@@ -1046,7 +1156,7 @@ function AppInner() {
                 moduleConfigs={moduleHost.moduleConfigs}
                 onModuleConfigChange={moduleHost.setModuleConfig}
                 carriers={carriers}
-                pluginAnalytics={results?.pluginAnalytics ?? {}}
+                pluginAnalytics={displayResults?.pluginAnalytics ?? {}}
                 onModuleAction={handleModuleAction}
               />
             );
@@ -1072,6 +1182,8 @@ function AppInner() {
         onForceLpChange={setForceLp}
         onDryRunChange={setDryRun}
         onRun={handleRunModel}
+        pathwayConfig={pathwayConfig}
+        onPathwayConfigChange={setPathwayConfig}
       />
     </div>
   );

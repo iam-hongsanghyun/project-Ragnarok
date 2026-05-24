@@ -5,7 +5,7 @@
  * The parent (<App>) keeps the <aside> shell and the collapse toggle button.
  */
 import React, { useEffect, useState } from 'react';
-import { CustomConstraint, ModuleDescriptor, ModuleHostInventory, RunHistoryEntry, RunResults, WorkbookModel } from '../shared/types';
+import { CustomConstraint, ModuleDescriptor, ModuleHostInventory, PathwayConfig, RunHistoryEntry, RunResults, WorkbookModel } from '../shared/types';
 import { SidebarGroup } from '../shared/components/SidebarGroup';
 import { GlobalConstraintsSection } from '../features/constraints/GlobalConstraintsSection';
 import { ModuleManagerSection } from '../features/modules/ModuleManagerSection';
@@ -31,6 +31,8 @@ export interface SidebarProps {
   onExportProject: () => void;
   onExportResult: () => void;
   onExportReport: () => void;
+  pathwayConfig: PathwayConfig;
+  onPathwayConfigChange: (config: PathwayConfig) => void;
   runHistory: RunHistoryEntry[];
   onRestoreRun: (entry: RunHistoryEntry) => void;
   onRenameHistoryEntry: (id: string, label: string) => void;
@@ -79,6 +81,8 @@ export function Sidebar({
   onExportProject,
   onExportResult,
   onExportReport,
+  pathwayConfig,
+  onPathwayConfigChange,
   runHistory,
   onRestoreRun,
   onRenameHistoryEntry,
@@ -186,6 +190,141 @@ export function Sidebar({
           carriers={carriers}
           onChange={onConstraintsChange}
         />
+      </SidebarGroup>
+
+      <SidebarGroup
+        title="Multi-year planning"
+        badge={
+          pathwayConfig.enabled
+            ? <span className="sg-badge">{pathwayConfig.periods.length} periods</span>
+            : undefined
+        }
+      >
+        <div className="sg-setting-row">
+          <label className="sg-setting-label">Mode</label>
+          <div className="sg-btn-row">
+            <button
+              className={`tb-btn sg-solver-btn${!pathwayConfig.enabled ? '' : ' tb-btn--muted'}`}
+              onClick={() => onPathwayConfigChange({ ...pathwayConfig, enabled: false, planningMode: 'single_period' })}
+            >
+              Single period
+            </button>
+            <button
+              className={`tb-btn sg-solver-btn${pathwayConfig.enabled ? '' : ' tb-btn--muted'}`}
+              onClick={() => onPathwayConfigChange({
+                ...pathwayConfig,
+                enabled: true,
+                planningMode: 'pathway',
+                periods: pathwayConfig.periods.length
+                  ? pathwayConfig.periods
+                  : [
+                    { period: 2030, objectiveWeight: 1, yearsWeight: 5 },
+                    { period: 2040, objectiveWeight: 1, yearsWeight: 10 },
+                  ],
+                selectedPeriod: pathwayConfig.selectedPeriod ?? 2030,
+              })}
+            >
+              Pathway
+            </button>
+          </div>
+          <p className="sg-setting-hint">
+            Single period solves one snapshot window. Pathway optimises investment + dispatch jointly across all configured periods.
+          </p>
+        </div>
+
+        {pathwayConfig.enabled && (
+          <>
+            <div className="sg-setting-divider" />
+            <div className="sg-setting-row">
+              <label className="sg-setting-label">Investment periods</label>
+              <div className="sg-pathway-grid">
+                <strong>Period</strong>
+                <strong>Obj. weight</strong>
+                <strong>Years</strong>
+                <span />
+                {pathwayConfig.periods.map((row, index) => (
+                  <React.Fragment key={`${row.period}-${index}`}>
+                    <input
+                      type="number"
+                      className="sg-pathway-input"
+                      value={row.period}
+                      onChange={(e) => onPathwayConfigChange({
+                        ...pathwayConfig,
+                        periods: pathwayConfig.periods.map((item, i) =>
+                          i === index ? { ...item, period: Number(e.target.value) || item.period } : item,
+                        ),
+                      })}
+                    />
+                    <input
+                      type="number"
+                      step="0.1"
+                      className="sg-pathway-input"
+                      value={row.objectiveWeight}
+                      onChange={(e) => onPathwayConfigChange({
+                        ...pathwayConfig,
+                        periods: pathwayConfig.periods.map((item, i) =>
+                          i === index ? { ...item, objectiveWeight: Number(e.target.value) || 1 } : item,
+                        ),
+                      })}
+                    />
+                    <input
+                      type="number"
+                      step="0.1"
+                      className="sg-pathway-input"
+                      value={row.yearsWeight}
+                      onChange={(e) => onPathwayConfigChange({
+                        ...pathwayConfig,
+                        periods: pathwayConfig.periods.map((item, i) =>
+                          i === index ? { ...item, yearsWeight: Number(e.target.value) || 1 } : item,
+                        ),
+                      })}
+                    />
+                    <button
+                      className="tb-btn tb-btn--muted sg-pathway-remove"
+                      onClick={() => onPathwayConfigChange({
+                        ...pathwayConfig,
+                        periods: pathwayConfig.periods.filter((_, i) => i !== index),
+                      })}
+                    >
+                      ×
+                    </button>
+                  </React.Fragment>
+                ))}
+              </div>
+              <button
+                className="tb-btn sg-full"
+                style={{ marginTop: 8 }}
+                onClick={() => {
+                  const last = pathwayConfig.periods[pathwayConfig.periods.length - 1]?.period ?? 2030;
+                  onPathwayConfigChange({
+                    ...pathwayConfig,
+                    periods: [...pathwayConfig.periods, { period: last + 10, objectiveWeight: 1, yearsWeight: 10 }],
+                  });
+                }}
+              >
+                Add period
+              </button>
+            </div>
+            <div className="sg-setting-row">
+              <label className="sg-setting-label" htmlFor="sg-pathway-mapping">Snapshot mapping</label>
+              <select
+                id="sg-pathway-mapping"
+                className="sg-setting-select"
+                value={pathwayConfig.snapshotMappingMode}
+                onChange={(e) => onPathwayConfigChange({
+                  ...pathwayConfig,
+                  snapshotMappingMode: e.target.value as PathwayConfig['snapshotMappingMode'],
+                })}
+              >
+                <option value="explicit_period_column">Use snapshots.period column</option>
+                <option value="repeat_all_snapshots">Repeat all snapshots for each period</option>
+              </select>
+              <p className="sg-setting-hint">
+                Pathway runs need either a <code>period</code> column on the snapshots sheet, or repeat-all mapping.
+              </p>
+            </div>
+          </>
+        )}
       </SidebarGroup>
 
       <SidebarGroup

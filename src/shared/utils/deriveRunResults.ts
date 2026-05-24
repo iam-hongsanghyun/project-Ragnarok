@@ -16,7 +16,9 @@ import {
   GridRow,
   MeritOrderEntry,
   MixItem,
+  PlanningMode,
   Primitive,
+  PathwayPeriodSummary,
   RunResults,
   SeriesPoint,
   StoragePoint,
@@ -33,6 +35,8 @@ export interface DeriveRunResultsOptions {
   discountRate?: number;
   snapshotWeight?: number;
   narrative?: string[];
+  selectedPeriod?: number | null;
+  pathway?: RunResults['pathway'] | null;
 }
 
 type SeriesMap = NonNullable<RunResults['outputs']>['series'];
@@ -64,6 +68,30 @@ function pickSnapshots(series: SeriesMap): string[] {
     if (rows && rows.length) return rows.map((r) => stringValue(r.name));
   }
   return [];
+}
+
+function detectPeriods(series: SeriesMap): number[] {
+  const found = new Set<number>();
+  for (const rows of Object.values(series)) {
+    for (const row of rows ?? []) {
+      const raw = row.period;
+      if (typeof raw === 'number' && Number.isFinite(raw)) found.add(raw);
+      else if (typeof raw === 'string' && raw.trim() !== '') {
+        const parsed = Number(raw);
+        if (Number.isFinite(parsed)) found.add(parsed);
+      }
+    }
+  }
+  return Array.from(found).sort((left, right) => left - right);
+}
+
+function filterSeriesByPeriod(series: SeriesMap, period: number | null): SeriesMap {
+  if (period === null) return series;
+  const filtered: SeriesMap = {};
+  Object.entries(series).forEach(([sheet, rows]) => {
+    filtered[sheet] = (rows ?? []).filter((row) => numberValue(row.period) === period);
+  });
+  return filtered;
 }
 
 function seriesValueAt(rows: GridRow[] | undefined, i: number, col: string): number {
@@ -112,9 +140,18 @@ export function deriveRunResults(
     discountRate = 0.05,
     snapshotWeight: weightHint,
     narrative = ['Imported project. Outputs restored from workbook — no fresh solve.'],
+    selectedPeriod = null,
+    pathway = null,
   } = options;
 
-  const snapshots = pickSnapshots(outputs.series);
+  const detectedPeriods = detectPeriods(outputs.series);
+  const activePeriod =
+    detectedPeriods.length > 0
+      ? (selectedPeriod !== null && detectedPeriods.includes(selectedPeriod) ? selectedPeriod : detectedPeriods[0])
+      : null;
+  const visibleSeries = filterSeriesByPeriod(outputs.series, activePeriod);
+  const visibleOutputs = { ...outputs, series: visibleSeries };
+  const snapshots = pickSnapshots(visibleOutputs.series);
   const labels = snapshots.map(isoToLabel);
   const W = weightHint ?? 1;
 
@@ -127,10 +164,10 @@ export function deriveRunResults(
   const linksStatic = indexByName(model.links);
   const transformersStatic = indexByName(model.transformers);
 
-  const pGen = outputs.series['generators-p'];
-  const pStore = outputs.series['storage_units-p'];
-  const socStore = outputs.series['storage_units-state_of_charge'];
-  const priceBus = outputs.series['buses-marginal_price'];
+  const pGen = visibleOutputs.series['generators-p'];
+  const pStore = visibleOutputs.series['storage_units-p'];
+  const socStore = visibleOutputs.series['storage_units-state_of_charge'];
+  const priceBus = visibleOutputs.series['buses-marginal_price'];
   const loadInputTs = model['loads-p_set'];
 
   const generators = Object.keys(genStatic);
@@ -508,14 +545,71 @@ export function deriveRunResults(
   };
 
   // ── Asset details (reuse existing deriver) ────────────────────────────────
-  const assetDetails = deriveAssetDetails(model, outputs, currencySymbol, W);
+  const assetDetails = deriveAssetDetails(model, visibleOutputs, currencySymbol, W);
+
+  const pathwayPeriods = pathway?.periods?.length ? pathway.periods : detectedPeriods;
+  const pathwaySummaries: PathwayPeriodSummary[] =
+    pathway?.summaries?.length
+      ? pathway.summaries
+      : pathwayPeriods.map((period) => {
+        const periodSeries = filterSeriesByPeriod(outputs.series, period);
+        const periodSnapshots = pickSnapshots(periodSeries);
+        const periodPGen = periodSeries['generators-p'];
+        const periodPStore = periodSeries['storage_units-p'];
+        const periodPriceBus = periodSeries['buses-marginal_price'];
+        const loadTs = model['loads-p_set'];
+        let totalDispatch = 0;
+        let totalEmissions = 0;
+        let peakLoad = 0;
+        let priceSum = 0;
+        let priceCount = 0;
+        for (let i = 0; i < periodSnapshots.length; i++) {
+          let loadAtT = 0;
+          for (const ln of Object.keys(loadStatic)) {
+            loadAtT += inputSeriesValueAt(loadTs, i, ln, numberValue(loadStatic[ln].p_set));
+          }
+          peakLoad = Math.max(peakLoad, loadAtT);
+          let dispatchAtT = 0;
+          for (const name of generators) {
+            const value = Math.max(seriesValueAt(periodPGen, i, name), 0);
+            dispatchAtT += value;
+            totalEmissions += value * genEf[name] * W;
+          }
+          for (const name of storageUnits) {
+            const value = Math.max(seriesValueAt(periodPStore, i, name), 0);
+            dispatchAtT += value;
+          }
+          totalDispatch += dispatchAtT * W;
+          const prices = buses.map((bus) => seriesValueAt(periodPriceBus, i, bus));
+          const avg = prices.length ? prices.reduce((sum, value) => sum + value, 0) / prices.length : 0;
+          priceSum += avg;
+          priceCount += 1;
+        }
+        const weighting =
+          pathway?.summaries?.find((row) => row.period === period)
+          ?? { objectiveWeight: 1, yearsWeight: 1 };
+        return {
+          period,
+          snapshotCount: periodSnapshots.length,
+          modeledHours: periodSnapshots.length * W,
+          totalDispatch,
+          totalEmissions,
+          averagePrice: priceCount ? priceSum / priceCount : 0,
+          peakLoad,
+          objectiveWeight: weighting.objectiveWeight,
+          yearsWeight: weighting.yearsWeight,
+        };
+      });
 
   // ── runMeta ───────────────────────────────────────────────────────────────
+  const planningMode: PlanningMode = pathwayPeriods.length > 0 ? 'pathway' : 'single_period';
   const runMeta = {
     snapshotCount: snapshots.length,
     snapshotWeight: W,
     modeledHours: snapshots.length * W,
     storeWeight: W,
+    planningMode,
+    investmentPeriods: pathwayPeriods,
   };
 
   return {
@@ -536,6 +630,13 @@ export function deriveRunResults(
     emissionsBreakdown: { byGenerator, byCarrier },
     narrative,
     runMeta,
+    pathway: pathwayPeriods.length > 0 ? {
+      enabled: true,
+      periods: pathwayPeriods,
+      selectedPeriod: activePeriod,
+      snapshotMappingMode: pathway?.snapshotMappingMode ?? 'explicit_period_column',
+      summaries: pathwaySummaries,
+    } : undefined,
     assetDetails,
     outputs,
   };

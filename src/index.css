@@ -656,6 +656,45 @@ button {
   font-size: 0.78rem;
   padding: 3px 7px;
 }
+.sg-pathway-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr auto;
+  gap: 4px 6px;
+  margin-top: 6px;
+  align-items: center;
+  font-size: 0.78rem;
+}
+.sg-pathway-grid strong {
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.sg-pathway-input {
+  width: 100%;
+  padding: 3px 6px;
+  font-size: 0.78rem;
+  box-sizing: border-box;
+}
+.sg-pathway-remove {
+  min-width: 22px;
+  padding: 1px 6px;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.period-pill-row {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.period-pill {
+  min-width: 60px;
+  font-size: 0.82rem;
+  padding: 4px 10px;
+}
 .sg-color-list {
   display: flex;
   flex-direction: column;

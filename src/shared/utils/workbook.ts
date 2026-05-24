@@ -7,6 +7,7 @@ import {
   PYPSA_COMPONENT_BY_SHEET,
 } from '../../constants/pypsa_schema';
 import { GridRow, Primitive, RunResults, WorkbookModel } from '../types';
+import { PATHWAY_CONFIG_SHEET, PATHWAY_PERIODS_SHEET } from './pathway';
 
 export function normalizeCell(value: unknown): Primitive {
   if (value === undefined || value === null) return null;
@@ -17,7 +18,12 @@ export function normalizeCell(value: unknown): Primitive {
 export function createEmptyWorkbook(): WorkbookModel {
   const base = Object.fromEntries(SHEETS.map((s) => [s, []]));
   const ts = Object.fromEntries(TS_SHEETS.map((s) => [s, []]));
-  return { ...base, ...ts } as WorkbookModel;
+  return {
+    ...base,
+    ...ts,
+    [PATHWAY_CONFIG_SHEET]: [],
+    [PATHWAY_PERIODS_SHEET]: [],
+  } as WorkbookModel;
 }
 
 export function parseSheets(workbook: ReturnType<typeof XLSX.read>): WorkbookModel {
@@ -77,6 +83,12 @@ export function buildWorkbook(model: WorkbookModel) {
   });
 
   [...TS_SHEETS, ...Object.keys(model).filter((sheet) => isInputTemporalSheet(sheet) && !TS_SHEETS.includes(sheet))].forEach((sheet) => {
+    const rows = (model as any)[sheet] as GridRow[] | undefined;
+    if (!rows || rows.length === 0) return;
+    const ws = XLSX.utils.json_to_sheet(rows);
+    XLSX.utils.book_append_sheet(workbook, ws, sheet);
+  });
+  [PATHWAY_CONFIG_SHEET, PATHWAY_PERIODS_SHEET].forEach((sheet) => {
     const rows = (model as any)[sheet] as GridRow[] | undefined;
     if (!rows || rows.length === 0) return;
     const ws = XLSX.utils.json_to_sheet(rows);
@@ -210,6 +222,13 @@ export function buildProjectWorkbook(
 
   // ── Output time-series sheets ────────────────────────────────────────
   Object.entries(outputs.series).forEach(([sheet, rows]) => {
+    if (!rows || rows.length === 0) return;
+    const ws = XLSX.utils.json_to_sheet(rows);
+    XLSX.utils.book_append_sheet(workbook, ws, sheet);
+  });
+
+  [PATHWAY_CONFIG_SHEET, PATHWAY_PERIODS_SHEET].forEach((sheet) => {
+    const rows = (model as any)[sheet] as GridRow[] | undefined;
     if (!rows || rows.length === 0) return;
     const ws = XLSX.utils.json_to_sheet(rows);
     XLSX.utils.book_append_sheet(workbook, ws, sheet);

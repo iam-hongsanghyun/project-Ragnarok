@@ -4,12 +4,13 @@ import { numberValue } from './helpers';
 export function normalizeSeriesPoint(point: SeriesPoint): TimeSeriesRow {
   const fallbackValues = Object.fromEntries(
     Object.entries(point as unknown as Record<string, unknown>).filter(
-      ([key, value]) => !['label', 'timestamp', 'total', 'values'].includes(key) && typeof value === 'number',
+      ([key, value]) => !['label', 'timestamp', 'total', 'values', 'period'].includes(key) && typeof value === 'number',
     ),
   ) as Record<string, number>;
   return {
     label: point.label,
     timestamp: point.timestamp,
+    period: point.period ?? undefined,
     total: point.total || 0,
     ...fallbackValues,
     ...(point.values || {}),

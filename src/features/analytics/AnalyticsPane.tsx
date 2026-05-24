@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { CircleMarker, MapContainer, Polyline, TileLayer, Tooltip } from 'react-leaflet';
 import { LatLngBoundsExpression } from 'leaflet';
 import {
-  AnalyticsFocus, AnalyticsSubTab, ChartSectionConfig, GridRow, RunHistoryEntry, RunResults, TimeSeriesRow, TimeSeriesSeries, WorkbookModel,
+  AnalyticsFocus, AnalyticsSubTab, ChartSectionConfig, GridRow, PathwayConfig, RunHistoryEntry, RunResults, TimeSeriesRow, TimeSeriesSeries, WorkbookModel,
 } from '../../shared/types';
 import { EMPTY_METRIC_KEY } from '../../constants';
 import { numberValue, stringValue, loadingColor, priceColor, resolvedColor } from '../../shared/utils/helpers';
@@ -32,6 +32,8 @@ interface Props {
   subTab: AnalyticsSubTab;
   currencySymbol: string;
   onExportAll?: () => void;
+  pathwayConfig?: PathwayConfig;
+  onSelectedPeriodChange?: (period: number) => void;
 }
 
 function EmptyAnalytics() {
@@ -57,6 +59,8 @@ export function AnalyticsPane({
   subTab,
   currencySymbol,
   onExportAll,
+  pathwayConfig,
+  onSelectedPeriodChange,
 }: Props) {
   const focusTitle =
     analyticsFocus.type === 'system' ? 'System analytics' : analyticsFocus.key;
@@ -136,10 +140,35 @@ export function AnalyticsPane({
 
   return (
     <div className="pane analytics-pane">
+      {results.pathway?.enabled && results.pathway.periods.length > 0 && (() => {
+        const active = pathwayConfig?.selectedPeriod ?? results.pathway.selectedPeriod ?? results.pathway.periods[0];
+        return (
+          <section className="chart-card" style={{ marginBottom: 16 }}>
+            <div className="chart-card-header">
+              <div>
+                <h3>Pathway period</h3>
+                <p>Detailed charts and asset analytics use the selected investment period.</p>
+              </div>
+              <div className="period-pill-row">
+                {results.pathway.periods.map((period) => (
+                  <button
+                    key={period}
+                    className={`tb-btn period-pill${period === active ? '' : ' tb-btn--muted'}`}
+                    onClick={() => onSelectedPeriodChange?.(period)}
+                  >
+                    {period}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </section>
+        );
+      })()}
       {/* ── Result sub-tab — predefined charts ───────────────────────── */}
       {subTab === 'Result' && (
         <ResultsDashboard
           results={results}
+          model={model}
           dispatchRows={dispatchRows}
           dispatchSeries={dispatchSeries}
           systemLoadRows={systemLoadRows}
@@ -147,6 +176,7 @@ export function AnalyticsPane({
           storageRows={storageRows}
           currencySymbol={currencySymbol}
           onExportAll={onExportAll}
+          selectedPeriod={pathwayConfig?.selectedPeriod ?? results.pathway?.selectedPeriod ?? null}
         />
       )}
 

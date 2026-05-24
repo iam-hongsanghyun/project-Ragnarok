@@ -6,7 +6,7 @@
  * price, dry-run toggle) live here; the parent owns the state values.
  */
 import React, { useMemo } from 'react';
-import { GridRow } from '../../shared/types';
+import { GridRow, PathwayConfig } from '../../shared/types';
 import { DualRangeSlider } from '../../shared/components/DualRangeSlider';
 import { RUN_WINDOW } from '../../constants';
 
@@ -22,12 +22,14 @@ export interface RunDialogProps {
   dryRun: boolean;
   snapshots: GridRow[];
   dateFormat: string;
+  pathwayConfig: PathwayConfig;
 
   onSnapshotStartChange: (v: number) => void;
   onSnapshotEndChange: (v: number) => void;
   onSnapshotWeightChange: (v: number) => void;
   onForceLpChange: (v: boolean) => void;
   onDryRunChange: (v: boolean) => void;
+  onPathwayConfigChange: (config: PathwayConfig) => void;
 
   onRun: () => void;
 }
@@ -85,11 +87,13 @@ export function RunDialog({
   dryRun,
   snapshots,
   dateFormat,
+  pathwayConfig,
   onSnapshotStartChange,
   onSnapshotEndChange,
   onSnapshotWeightChange,
   onForceLpChange,
   onDryRunChange,
+  onPathwayConfigChange,
   onRun,
 }: RunDialogProps) {
   // Detect whether snapshots have real datetimes and whether they span multiple years
@@ -130,6 +134,7 @@ export function RunDialog({
   const lastIdx = Math.max(0, snapshots.length - 1);
   const startLabel = hasDatetimes ? formatSnapLabel(Math.min(snapshotStart, lastIdx), snapshots, multiYear, dateFormat) : null;
   const endLabel   = hasDatetimes ? formatSnapLabel(Math.min(snapshotEnd,   lastIdx), snapshots, multiYear, dateFormat) : null;
+  const pathwayEnabled = pathwayConfig.enabled;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -141,11 +146,81 @@ export function RunDialog({
           </div>
         </div>
 
-        {maxSnapshots <= 1 ? (
+        <div className="run-static-notice" style={{ marginBottom: 12 }}>
+          <strong>Planning mode</strong>
+          <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+            <button
+              className={`tb-btn${!pathwayEnabled ? '' : ' tb-btn--muted'}`}
+              onClick={() => onPathwayConfigChange({ ...pathwayConfig, enabled: false, planningMode: 'single_period' })}
+            >
+              Single period
+            </button>
+            <button
+              className={`tb-btn${pathwayEnabled ? '' : ' tb-btn--muted'}`}
+              onClick={() => onPathwayConfigChange({
+                ...pathwayConfig,
+                enabled: true,
+                planningMode: 'pathway',
+                periods: pathwayConfig.periods.length
+                  ? pathwayConfig.periods
+                  : [
+                    { period: 2030, objectiveWeight: 1, yearsWeight: 5 },
+                    { period: 2040, objectiveWeight: 1, yearsWeight: 10 },
+                  ],
+                selectedPeriod: pathwayConfig.selectedPeriod ?? 2030,
+              })}
+            >
+              Pathway
+            </button>
+          </div>
+          {pathwayEnabled && (
+            <p style={{ marginTop: 10 }}>
+              Periods and snapshot mapping are configured in the sidebar's <strong>Multi-year planning</strong> panel.
+              <br />
+              {pathwayConfig.periods.length > 0
+                ? <>Currently {pathwayConfig.periods.length} period(s): {pathwayConfig.periods.map((p) => p.period).join(', ')}.</>
+                : <>No investment periods configured — add at least one in the sidebar.</>}
+            </p>
+          )}
+        </div>
+
+        {!pathwayEnabled && maxSnapshots <= 1 ? (
           <div className="run-static-notice">
             <strong>Static single-period model</strong>
             <p>The workbook defines 1 snapshot (<code>now</code>). This runs as a single dispatch period.</p>
           </div>
+        ) : pathwayEnabled ? (
+          <>
+            <div className="run-static-notice">
+              <strong>Pathway run</strong>
+              <p>The full pathway horizon is solved together. Snapshot window cropping is disabled in pathway mode; only time-resolution downsampling is available.</p>
+            </div>
+            <div className="field" style={{ marginBottom: 8 }}>
+              {(() => {
+                const modeledSnapshots = Math.ceil(maxSnapshots / snapshotWeight);
+                return (
+                  <>
+                    <span style={{ color: 'var(--muted)', fontSize: '0.88rem' }}>
+                      Time resolution — <strong>every {snapshotWeight}h</strong>
+                      {' '}({modeledSnapshots} snapshots across all configured periods)
+                    </span>
+                    <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                      {RUN_WINDOW.weightOptions.map((n) => (
+                        <button
+                          key={n}
+                          className={`tb-btn${snapshotWeight === n ? '' : ' tb-btn--muted'}`}
+                          style={{ minWidth: 40 }}
+                          onClick={() => onSnapshotWeightChange(n)}
+                        >
+                          {n}h
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          </>
         ) : (
           <>
             <div className="field" style={{ marginBottom: yearMarkers.length ? 4 : 16 }}>
