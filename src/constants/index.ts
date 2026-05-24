@@ -5,6 +5,8 @@ export {
   PYPSA_SCHEMA,
   PYPSA_SCHEMA_META,
   PYPSA_COMPONENTS,
+  NETWORK_IMPORT_POLICY,
+  NETWORK_RUNTIME_IMPORT_FIELDS,
   TABLE_GROUPS,
   getAddableAttributes,
   getComponentSchema,

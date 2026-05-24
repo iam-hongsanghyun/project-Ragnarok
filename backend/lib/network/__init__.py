@@ -24,12 +24,13 @@ from typing import Any
 
 import pandas as pd
 import pypsa
+from pyproj import CRS
 
 from ..config import load_system_defaults
 from ..pypsa_schema import (
     input_static_attributes,
     input_temporal_attributes,
-    non_component_sheets,
+    network_runtime_import_fields,
 )
 from ..utils.annuity import annuity_factor
 from ..utils.coerce import number
@@ -70,6 +71,8 @@ def build_network(
 
     network = pypsa.Network()
 
+    _apply_network_sheet(network, model, notes)
+
     # ── Snapshots ─────────────────────────────────────────────────────────────
     snaps_idx = _snapshots_index(model)
     if len(snaps_idx) > 0:
@@ -78,6 +81,8 @@ def build_network(
     # ── Bulk-add every component class PyPSA knows about ──────────────────────
     # Iterate the official component registry — order is dependency-safe
     # (buses before everything that references them, carriers before buses).
+    # `network` and `snapshots` are handled explicitly; every other schema-
+    # defined sheet should flow through the generic component path.
     ordered = _ordered_component_sheets(network)
     for sheet_name, cls in ordered:
         rows = [r for r in (model.get(sheet_name) or []) if _has_name(r)]
@@ -266,15 +271,62 @@ def _ordered_component_sheets(network: pypsa.Network) -> list[tuple[str, str]]:
     """
     keys = list(network.components.keys())
     priority = {"carriers": 0, "buses": 1}
-    skip = non_component_sheets()
     sortable: list[tuple[int, int, str, str]] = []
     for i, list_name in enumerate(keys):
-        if list_name in skip:
-            continue
         comp = network.components[list_name]
         sortable.append((priority.get(list_name, 99), i, list_name, comp.name))
     sortable.sort()
     return [(list_name, cls) for _, _, list_name, cls in sortable]
+
+
+def _apply_network_sheet(
+    network: pypsa.Network,
+    model: dict[str, list[dict[str, Any]]],
+    notes: list[str],
+) -> None:
+    rows = model.get("network") or []
+    network_row = next(
+        (
+            row for row in rows
+            if any(value not in (None, "") for value in row.values())
+        ),
+        None,
+    )
+    if not network_row:
+        return
+
+    applied_fields: list[str] = []
+    for policy in network_runtime_import_fields():
+        field = str(policy.get("field", "")).strip()
+        if not field:
+            continue
+        value = network_row.get(field)
+        if value in (None, ""):
+            continue
+        coercion = str(policy.get("coercion", "any"))
+        if field == "name":
+            network.name = str(value)
+        elif field == "srid":
+            _override_network_crs(network, CRS.from_epsg(int(number(value))))
+        elif field == "crs":
+            _override_network_crs(network, CRS.from_user_input(value))
+        elif field == "now":
+            network.now = value
+        else:
+            continue
+        applied_fields.append(field)
+
+    if applied_fields:
+        notes.append(
+            "Applied network sheet fields: " + ", ".join(applied_fields) + "."
+        )
+
+
+def _override_network_crs(network: pypsa.Network, crs: CRS) -> None:
+    shapes = network.c.shapes.static
+    shapes = shapes.set_crs(crs, allow_override=True)
+    network.c.shapes.static = shapes
+    network._crs = shapes.crs
 
 
 def _snapshots_index(model: dict[str, list[dict[str, Any]]]) -> pd.Index:

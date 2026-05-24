@@ -10,9 +10,18 @@ def _schema_path() -> Path:
     return Path(__file__).resolve().parents[2] / "src" / "config" / "pypsa_schema.json"
 
 
+def _network_import_policy_path() -> Path:
+    return Path(__file__).resolve().parents[2] / "src" / "config" / "network_import_policy.json"
+
+
 @lru_cache(maxsize=1)
 def load_pypsa_schema() -> dict[str, Any]:
     return json.loads(_schema_path().read_text())
+
+
+@lru_cache(maxsize=1)
+def load_network_import_policy() -> dict[str, Any]:
+    return json.loads(_network_import_policy_path().read_text())
 
 
 def component_schema(sheet_name: str) -> dict[str, Any] | None:
@@ -20,15 +29,17 @@ def component_schema(sheet_name: str) -> dict[str, Any] | None:
 
 
 def non_component_sheets() -> set[str]:
-    """Sheets in the schema that are NOT user-editable component tables.
-
-    `network` is the top-level Network attribute row, `snapshots` is the time
-    index (handled separately), `shapes` is optional geo metadata, and
-    `sub_networks` is computed by PyPSA itself. The network builder skips
-    these in the bulk-add loop.
-    """
+    """Sheets recorded in schema metadata as non-component workbook sheets."""
     meta = load_pypsa_schema().get("meta", {})
     return set(meta.get("non_component_sheets", []))
+
+
+def network_runtime_import_fields() -> list[dict[str, Any]]:
+    return [
+        field
+        for field in load_network_import_policy().get("fields", [])
+        if field.get("enabled_for_runtime_import")
+    ]
 
 
 def input_static_attributes(sheet_name: str) -> set[str]:

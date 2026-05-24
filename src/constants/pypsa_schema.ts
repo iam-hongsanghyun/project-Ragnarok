@@ -1,4 +1,5 @@
 import rawSchema from '../config/pypsa_schema.json';
+import rawNetworkImportPolicy from '../config/network_import_policy.json';
 import { GridRow, Primitive } from '../shared/types';
 
 export type PypsaAttrStatus = 'input' | 'output';
@@ -52,6 +53,18 @@ interface PypsaSchemaFile {
   components: Record<string, PypsaComponentSchema>;
 }
 
+export interface NetworkImportPolicyField {
+  field: string;
+  enabled_for_runtime_import: boolean;
+  target: string;
+  coercion: string;
+  notes?: string;
+}
+
+interface NetworkImportPolicyFile {
+  fields: NetworkImportPolicyField[];
+}
+
 export interface TableGroup {
   uniqueId: string;
   label: string;
@@ -61,6 +74,7 @@ export interface TableGroup {
 }
 
 export const PYPSA_SCHEMA = rawSchema as PypsaSchemaFile;
+export const NETWORK_IMPORT_POLICY = rawNetworkImportPolicy as NetworkImportPolicyFile;
 export const PYPSA_SCHEMA_META = PYPSA_SCHEMA.meta;
 /** Sheets that the backend does not bulk-add as standard PyPSA components. */
 export const NON_COMPONENT_SHEETS: ReadonlySet<string> = new Set(PYPSA_SCHEMA_META.non_component_sheets ?? []);
@@ -71,6 +85,10 @@ export const PYPSA_COMPONENTS = Object.values(PYPSA_SCHEMA.components)
 export const PYPSA_COMPONENT_BY_SHEET = Object.fromEntries(
   PYPSA_COMPONENTS.map((component) => [component.sheet_name, component]),
 ) as Record<string, PypsaComponentSchema>;
+
+export const NETWORK_RUNTIME_IMPORT_FIELDS = NETWORK_IMPORT_POLICY.fields.filter(
+  (field) => field.enabled_for_runtime_import,
+);
 
 export const STATIC_INPUT_COMPONENTS = PYPSA_COMPONENTS.filter((component) => component.sheet_name !== 'snapshots');
 
