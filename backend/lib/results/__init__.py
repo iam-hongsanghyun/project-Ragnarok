@@ -9,6 +9,7 @@ from fastapi import HTTPException
 
 from ..constants import carrier_color
 from ..network import build_network
+from ..pathway import parse_pathway_config
 from ..utils.series import weighted_sum
 from ..network.custom_constraints import apply_custom_constraints
 from ..module_host import execute_plugins_at_stage, get_module_metadata
@@ -24,6 +25,42 @@ from .full_outputs import build_full_outputs
 from .market import build_co2_shadow, build_merit_order
 
 
+def _pathway_period_summaries(
+    network: pypsa.Network,
+    dispatch_frame: pd.DataFrame,
+    load_dispatch: pd.Series,
+    price_series: pd.Series,
+    emissions_factors: dict[str, float],
+) -> list[dict[str, Any]]:
+    if not isinstance(network.snapshots, pd.MultiIndex):
+        return []
+    summaries: list[dict[str, Any]] = []
+    dispatch_only = dispatch_frame.clip(lower=0.0)
+    for period in network.snapshots.get_level_values("period").unique():
+        period_index = network.snapshots[network.snapshots.get_level_values("period") == period]
+        weight = network.snapshot_weightings["objective"].reindex(period_index).fillna(1.0)
+        dispatch_period = dispatch_only.loc[period_index]
+        total_dispatch = float((dispatch_period.sum(axis=1) * weight).sum())
+        total_emissions = 0.0
+        for name in dispatch_period.columns:
+            if name not in network.generators.index:
+                continue
+            carrier = str(network.generators.at[name, "carrier"])
+            total_emissions += float((dispatch_period[name] * emissions_factors.get(carrier, 0.0) * weight).sum())
+        summaries.append({
+            "period": int(period),
+            "snapshotCount": int(len(period_index)),
+            "modeledHours": float(weight.sum()),
+            "totalDispatch": total_dispatch,
+            "totalEmissions": total_emissions,
+            "averagePrice": float(price_series.loc[period_index].mean()) if len(period_index) else 0.0,
+            "peakLoad": float(load_dispatch.loc[period_index].max()) if len(period_index) else 0.0,
+            "objectiveWeight": float(network.investment_period_weightings.at[int(period), "objective"]),
+            "yearsWeight": float(network.investment_period_weightings.at[int(period), "years"]),
+        })
+    return summaries
+
+
 def run_pypsa(
     model: dict[str, list[dict[str, Any]]],
     scenario: dict[str, Any],
@@ -32,6 +69,7 @@ def run_pypsa(
     """Build the network from the JSON workbook model, optimise, return results."""
     options = options or {}
     enabled_modules: list[str] = list(options.get("enabledModules") or [])
+    pathway = parse_pathway_config(options.get("pathwayConfig"))
 
     # ── pre-build ─────────────────────────────────────────────────────────────
     pre_outputs = execute_plugins_at_stage(
@@ -82,6 +120,7 @@ def run_pypsa(
 
     try:
         network.optimize(
+            multi_investment_periods=pathway.enabled,
             solver_name="highs",
             solver_options=solver_options if solver_options else {},
             extra_functionality=extra_functionality,
@@ -182,6 +221,13 @@ def run_pypsa(
     dispatch_s, gen_dispatch_s = build_dispatch_series(network, by_carrier, load_dispatch, generator_dispatch_frame)
     price_s, emissions_s = build_price_emissions_series(network, by_carrier, price_series, emissions_factors)
     storage_s = build_storage_series(network)
+    pathway_summaries = _pathway_period_summaries(
+        network,
+        generator_dispatch_frame,
+        load_dispatch,
+        price_series,
+        emissions_factors,
+    )
 
     # Nodal balance
     nodal_balance = []
@@ -273,7 +319,16 @@ def run_pypsa(
             "snapshotWeight": snapshot_weight,
             "modeledHours": snapshot_count * snapshot_weight,
             "storeWeight": float(store_weights.iloc[0]) if len(store_weights) else snapshot_weight,
+            "planningMode": pathway.planning_mode,
+            "investmentPeriods": [row.period for row in pathway.periods],
         },
+        "pathway": {
+            "enabled": pathway.enabled,
+            "periods": [row.period for row in pathway.periods],
+            "selectedPeriod": pathway.selected_period or (pathway.periods[0].period if pathway.periods else None),
+            "snapshotMappingMode": pathway.snapshot_mapping_mode,
+            "summaries": pathway_summaries,
+        } if pathway.enabled else None,
         # Full PyPSA-native output dataset (every output attribute, every
         # component, every snapshot). The frontend turns this into per-asset
         # detail records (`assetDetails`) locally and uses the same cache for

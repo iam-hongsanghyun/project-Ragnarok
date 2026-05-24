@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..models import RunPayload
+from ..pathway import parse_pathway_config
 from ..utils.coerce import number, text
 from ..utils.workbook import workbook_rows
 
@@ -12,6 +13,7 @@ def validate_model(payload: RunPayload) -> dict[str, Any]:
     errors: list[str] = []
     warnings: list[str] = []
     model = payload.model
+    pathway = parse_pathway_config((payload.options or {}).get("pathwayConfig") if payload.options else None)
 
     # ── Snapshots ──────────────────────────────────────────────────────────────
     snapshot_rows = workbook_rows(model, "snapshots")
@@ -28,6 +30,37 @@ def validate_model(payload: RunPayload) -> dict[str, Any]:
                 "Snapshot series contains a single 'now' entry — static single-period model. "
                 "The simulation will run as one dispatch period."
             )
+    if pathway.enabled:
+        if not pathway.periods:
+            errors.append("Pathway mode requires at least one investment period.")
+        configured_periods = [row.period for row in pathway.periods]
+        if configured_periods != sorted(set(configured_periods)):
+            errors.append("Investment periods must be unique increasing integers.")
+        snapshot_periods: list[int] = []
+        missing_period_rows = 0
+        for row in snapshot_rows:
+            period_value = row.get("period")
+            if period_value in (None, ""):
+                missing_period_rows += 1
+                continue
+            try:
+                snapshot_periods.append(int(number(period_value)))
+            except Exception:
+                errors.append(f"Invalid snapshot period value: {period_value}")
+                break
+        if pathway.snapshot_mapping_mode == "explicit_period_column":
+            if missing_period_rows > 0:
+                errors.append(
+                    "Pathway mode with explicit period mapping requires every snapshots row to have a period value."
+                )
+            if snapshot_periods:
+                observed = sorted(set(snapshot_periods))
+                if observed != configured_periods:
+                    errors.append(
+                        "Snapshot periods must match the configured investment periods exactly."
+                    )
+        elif snapshot_count == 0:
+            errors.append("Pathway mode requires at least one snapshot row.")
 
     # ── Topology ────────────────────────────────────────────────────────────────
     buses = workbook_rows(model, "buses")

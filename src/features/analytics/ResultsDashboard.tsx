@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { RunResults, TimeSeriesRow, TimeSeriesSeries } from '../../shared/types';
+import { RunResults, TimeSeriesRow, TimeSeriesSeries, WorkbookModel } from '../../shared/types';
 import { numberValue } from '../../shared/utils/helpers';
 import { exportChartToExcel } from '../../shared/utils/exportChart';
 import { useToast } from '../../shared/components/Toast';
@@ -10,6 +10,7 @@ import { CapacityExpansionCard } from './cards/CapacityExpansionCard';
 import { MeritOrderCard } from './cards/MeritOrderCard';
 import { Co2ShadowCard } from './cards/Co2ShadowCard';
 import { EmissionsBreakdownCard } from './cards/EmissionsBreakdownCard';
+import { CapacityByPeriodCard } from './cards/CapacityByPeriodCard';
 
 // ── KPI card ──────────────────────────────────────────────────────────────────
 
@@ -85,6 +86,7 @@ const COST_COLORS: Record<string, string> = {
 
 interface Props {
   results: RunResults;
+  model: WorkbookModel;
   dispatchRows: TimeSeriesRow[];
   dispatchSeries: TimeSeriesSeries[];
   systemLoadRows: TimeSeriesRow[];
@@ -92,10 +94,12 @@ interface Props {
   storageRows: TimeSeriesRow[];
   currencySymbol?: string;
   onExportAll?: () => void;
+  selectedPeriod?: number | null;
 }
 
 export function ResultsDashboard({
   results,
+  model,
   dispatchRows,
   dispatchSeries,
   systemLoadRows,
@@ -103,6 +107,7 @@ export function ResultsDashboard({
   storageRows,
   currencySymbol = '$',
   onExportAll,
+  selectedPeriod = null,
 }: Props) {
   const { showToast } = useToast();
 
@@ -145,6 +150,7 @@ export function ResultsDashboard({
 
   const storageStateSeries: TimeSeriesSeries[] = [{ key: 'state', label: 'State of charge', color: '#14b8a6' }];
   const hasStorage = storageRows.length > 0 && storageRows.some((r) => numberValue(r['state'] as number | string | undefined) > 0);
+  const activePathwaySummary = results.pathway?.summaries.find((row) => row.period === selectedPeriod) ?? null;
 
   // ── Export helpers ────────────────────────────────────────────────────────
 
@@ -207,6 +213,65 @@ export function ResultsDashboard({
         <KpiCard label="Avg price" value={`${avgPrice.toFixed(1)}`} unit={`${currencySymbol}/MWh`} />
         <KpiCard label="Emissions" value={emissionsDisplay} unit="" />
       </div>
+
+      {results.pathway?.enabled && (
+        <DashboardSection title="Pathway period summary" defaultOpen>
+          <div className="kpi-strip">
+            <KpiCard
+              label="Selected period"
+              value={selectedPeriod !== null ? String(selectedPeriod) : '—'}
+              unit=""
+            />
+            <KpiCard
+              label="Period dispatch"
+              value={Math.round(activePathwaySummary?.totalDispatch ?? 0).toLocaleString()}
+              unit="MWh"
+            />
+            <KpiCard
+              label="Period peak load"
+              value={Math.round(activePathwaySummary?.peakLoad ?? 0).toLocaleString()}
+              unit="MW"
+            />
+            <KpiCard
+              label="Period avg price"
+              value={(activePathwaySummary?.averagePrice ?? 0).toFixed(1)}
+              unit={`${currencySymbol}/MWh`}
+            />
+          </div>
+          <div style={{ overflowX: 'auto', marginTop: 12 }}>
+            <table className="comparison-table">
+              <thead>
+                <tr>
+                  <th>Period</th>
+                  <th>Snapshots</th>
+                  <th>Hours</th>
+                  <th>Dispatch</th>
+                  <th>Peak load</th>
+                  <th>Avg price</th>
+                </tr>
+              </thead>
+              <tbody>
+                {results.pathway.summaries.map((row) => (
+                  <tr key={row.period} className={row.period === selectedPeriod ? 'is-active' : undefined}>
+                    <td>{row.period}</td>
+                    <td>{row.snapshotCount}</td>
+                    <td>{row.modeledHours.toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
+                    <td>{row.totalDispatch.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                    <td>{row.peakLoad.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                    <td>{row.averagePrice.toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </DashboardSection>
+      )}
+
+      {results.pathway?.enabled && results.pathway.periods.length > 1 && (
+        <DashboardSection title="Capacity changes across investment periods" defaultOpen>
+          <CapacityByPeriodCard model={model} results={results} />
+        </DashboardSection>
+      )}
 
       {/* Dispatch stack */}
       <DashboardSection title="Generation dispatch" defaultOpen onExport={exportDispatch}>

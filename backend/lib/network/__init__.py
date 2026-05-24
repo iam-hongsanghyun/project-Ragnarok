@@ -27,6 +27,7 @@ import pypsa
 from pyproj import CRS
 
 from ..config import load_system_defaults
+from ..pathway import PathwayConfig, parse_pathway_config
 from ..pypsa_schema import (
     input_static_attributes,
     input_temporal_attributes,
@@ -58,6 +59,7 @@ def build_network(
     """
     notes: list[str] = []
     options = options or {}
+    pathway = parse_pathway_config(options.get("pathwayConfig"))
 
     if "discountRate" not in scenario:
         from fastapi import HTTPException
@@ -74,9 +76,10 @@ def build_network(
     _apply_network_sheet(network, model, notes)
 
     # ── Snapshots ─────────────────────────────────────────────────────────────
-    snaps_idx = _snapshots_index(model)
+    snaps_idx = _snapshots_index(model, pathway)
     if len(snaps_idx) > 0:
         network.set_snapshots(snaps_idx)
+    _apply_pathway_config(network, pathway, notes)
 
     # ── Bulk-add every component class PyPSA knows about ──────────────────────
     # Iterate the official component registry — order is dependency-safe
@@ -135,6 +138,7 @@ def build_network(
         if not bool(comp.defaults.at[attr, "varying"]):
             continue
         _apply_ts_sheet(network, rows, list_name, attr)
+    _normalize_dynamic_snapshot_index_names(network)
 
     # ── Snapshot windowing & downsampling ─────────────────────────────────────
     start = max(0, int(number(options.get("snapshotStart"), 0)))
@@ -142,10 +146,28 @@ def build_network(
     step = max(1, int(number(options.get("snapshotWeight"), 1)))
     full = network.snapshots
     if len(full) > 0:
-        stop = min(len(full), start + count)
-        windowed = full[start:stop]
-        if step > 1:
-            windowed = windowed[::step]
+        if pathway.enabled:
+            windowed = full
+            if step > 1:
+                if isinstance(full, pd.MultiIndex):
+                    period_levels = list(full.get_level_values("period").unique())
+                    pieces = []
+                    for period in period_levels:
+                        period_index = full[full.get_level_values("period") == period]
+                        pieces.append(period_index[::step])
+                    if pieces:
+                        windowed = pieces[0]
+                        for piece in pieces[1:]:
+                            windowed = windowed.append(piece)
+                else:
+                    windowed = full[::step]
+            stop = len(full)
+            start = 0
+        else:
+            stop = min(len(full), start + count)
+            windowed = full[start:stop]
+            if step > 1:
+                windowed = windowed[::step]
         if len(windowed) == 0:
             windowed = full[:1]
         network.set_snapshots(windowed)
@@ -155,12 +177,17 @@ def build_network(
             f"Modelled {len(windowed)} snapshots at {step}h resolution "
             f"(rows {start} → {stop} of {len(full)})."
         )
+        _normalize_dynamic_snapshot_index_names(network)
 
     # ── Period-factor scaling of annual energy caps ───────────────────────────
     sim_cfg = load_system_defaults().get("simulation", {})
     hours_in_year = float(sim_cfg.get("hours_in_year", 8760.0))
-    modelled_hours = float(len(network.snapshots)) * float(step)
-    period_factor = min(1.0, modelled_hours / hours_in_year) if modelled_hours > 0 else 1.0
+    if pathway.enabled and isinstance(network.snapshots, pd.MultiIndex):
+        period_sizes = network.snapshot_weightings["objective"].groupby(level="period").sum()
+        period_factor = min(float(period_sizes.min()) / hours_in_year, 1.0) if len(period_sizes) > 0 else 1.0
+    else:
+        modelled_hours = float(len(network.snapshots)) * float(step)
+        period_factor = min(1.0, modelled_hours / hours_in_year) if modelled_hours > 0 else 1.0
     if period_factor < 1.0:
         for frame in (network.generators, network.storage_units, network.stores):
             for col in list(frame.columns):
@@ -242,6 +269,7 @@ def build_network(
         for list_name in network.components.keys()
         if len(network.components[list_name].static) > 0
     )
+    _normalize_dynamic_snapshot_index_names(network)
     notes.append(f"Prepared PyPSA case with {final_counts}.")
     return network, notes
 
@@ -329,22 +357,71 @@ def _override_network_crs(network: pypsa.Network, crs: CRS) -> None:
     network._crs = shapes.crs
 
 
-def _snapshots_index(model: dict[str, list[dict[str, Any]]]) -> pd.Index:
+def _snapshots_index(
+    model: dict[str, list[dict[str, Any]]],
+    pathway: PathwayConfig,
+) -> pd.Index:
     """Build the snapshot index from the `snapshots` sheet, if present."""
     rows = model.get("snapshots") or []
     labels: list[str] = []
+    periods: list[int] = []
     for r in rows:
         for k in ("snapshot", "name", "datetime", "timestep", "index"):
             v = r.get(k)
             if v not in (None, ""):
                 labels.append(str(v))
                 break
+        if pathway.enabled and pathway.snapshot_mapping_mode == "explicit_period_column":
+            period_value = r.get("period")
+            if period_value in (None, ""):
+                periods.append(0)
+            else:
+                periods.append(int(number(period_value)))
     if not labels:
         return pd.Index([], dtype="object")
+    if pathway.enabled and pathway.snapshot_mapping_mode == "explicit_period_column":
+        try:
+            timesteps = pd.to_datetime(labels)
+        except Exception:
+            timesteps = pd.Index(labels, dtype="object")
+        snapshots = pd.MultiIndex.from_arrays([periods, timesteps], names=["period", "timestep"])
+        snapshots.name = "snapshot"
+        return snapshots
+    # Single-period run: dedupe labels so a pathway workbook (which lists the
+    # same timestamp once per period via the `period` column) still produces
+    # a unique snapshot index. Without this PyPSA's internal reindexing
+    # raises "Reindexing only valid with uniquely valued Index objects".
+    seen: set[str] = set()
+    unique_labels: list[str] = []
+    for label in labels:
+        if label in seen:
+            continue
+        seen.add(label)
+        unique_labels.append(label)
     try:
-        return pd.to_datetime(labels)
+        return pd.to_datetime(unique_labels)
     except Exception:
-        return pd.Index(labels, dtype="object")
+        return pd.Index(unique_labels, dtype="object")
+
+
+def _apply_pathway_config(
+    network: pypsa.Network,
+    pathway: PathwayConfig,
+    notes: list[str],
+) -> None:
+    if not pathway.enabled or not pathway.periods:
+        return
+    periods = [row.period for row in pathway.periods]
+    network.set_investment_periods(periods)
+    network.investment_period_weightings = network.investment_period_weightings.reindex(periods).fillna(1.0)
+    for row in pathway.periods:
+        network.investment_period_weightings.at[row.period, "objective"] = float(row.objective_weight)
+        network.investment_period_weightings.at[row.period, "years"] = float(row.years_weight)
+    notes.append(
+        "Enabled pathway planning for periods "
+        + ", ".join(str(period) for period in periods)
+        + "."
+    )
 
 
 def _bus_ref_columns(network: pypsa.Network, cls: str) -> list[str]:
@@ -422,21 +499,57 @@ def _apply_ts_sheet(
     )
     if label_col is None:
         return
-    try:
-        idx = pd.to_datetime(df[label_col])
-    except Exception:
-        idx = pd.Index(df[label_col].astype(str))
-    data = df.drop(columns=[label_col])
+    data = df.drop(columns=[label_col, *([c for c in ("period",) if c in df.columns])])
     if data.empty:
         return
-    data.index = idx
     static_frame = network.components[list_name].static
     valid_cols = [c for c in data.columns if c in static_frame.index]
     if not valid_cols:
         return
     data = data[valid_cols].apply(pd.to_numeric, errors="coerce")
+    if isinstance(network.snapshots, pd.MultiIndex):
+        if "period" in df.columns:
+            periods = df["period"].apply(lambda v: int(number(v))).tolist()
+            labels = df[label_col]
+            try:
+                timesteps = pd.to_datetime(labels)
+            except Exception:
+                timesteps = pd.Index(labels.astype(str))
+            data.index = pd.MultiIndex.from_arrays([periods, timesteps], names=["period", "timestep"])
+            data.index.name = "snapshot"
+        elif len(df.index) == len(network.snapshots):
+            data.index = network.snapshots
+        else:
+            try:
+                idx = pd.to_datetime(df[label_col])
+            except Exception:
+                idx = pd.Index(df[label_col].astype(str))
+            pieces = []
+            periods = list(network.snapshots.get_level_values("period").unique())
+            for period in periods:
+                period_data = data.copy()
+                period_data.index = idx
+                period_data = pd.concat({period: period_data}, names=["period", "timestep"])
+                period_data.index.name = "snapshot"
+                pieces.append(period_data)
+            if not pieces:
+                return
+            data = pd.concat(pieces)
+    else:
+        try:
+            data.index = pd.to_datetime(df[label_col])
+        except Exception:
+            data.index = pd.Index(df[label_col].astype(str))
+        # Single-period: dedupe input time-series rows when the same timestamp
+        # appears more than once (pathway workbooks list each timestep once
+        # per period). Keep first occurrence so reindex succeeds.
+        if data.index.has_duplicates:
+            data = data[~data.index.duplicated(keep="first")]
     if len(network.snapshots) > 0:
-        data = data.reindex(network.snapshots)
+        if isinstance(network.snapshots, pd.MultiIndex) and not isinstance(data.index, pd.MultiIndex):
+            data = data.reindex(network.snapshots, level="timestep")
+        else:
+            data = data.reindex(network.snapshots)
     t_frame = getattr(network, list_name + "_t")
     current = getattr(t_frame, attr)
     # Re-stitch via concat (avoid the per-column-insert performance warning).
@@ -445,6 +558,13 @@ def _apply_ts_sheet(
         axis=1,
     )
     setattr(t_frame, attr, merged)
+
+
+def _normalize_dynamic_snapshot_index_names(network: pypsa.Network) -> None:
+    for component in network.all_components:
+        dynamic = network.c[component].dynamic
+        for attr in dynamic:
+            dynamic[attr].index.name = "snapshot"
 
 
 def _peak_load_per_bus(network: pypsa.Network) -> dict[str, float]:

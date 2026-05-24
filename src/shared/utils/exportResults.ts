@@ -29,11 +29,11 @@ function autoFitCols(ws: XLSX.WorkSheet) {
 }
 
 function pivotSeries(
-  rows: Array<{ timestamp?: string; label?: string; values?: Record<string, number>; total?: number }>,
+  rows: Array<{ timestamp?: string; label?: string; period?: number | null; values?: Record<string, number>; total?: number }>,
 ): Record<string, unknown>[] {
   return rows.map((row) => {
-    const { timestamp, label, values = {}, total } = row;
-    return { timestamp: timestamp ?? label, ...values, ...(total !== undefined ? { total } : {}) };
+    const { timestamp, label, period, values = {}, total } = row;
+    return { ...(period !== undefined && period !== null ? { period } : {}), timestamp: timestamp ?? label, ...values, ...(total !== undefined ? { total } : {}) };
   });
 }
 
@@ -61,16 +61,25 @@ export function exportFullResults(
 
   appendSheet(
     'OUT_SysPrice',
-    results.systemPriceSeries.map((p) => ({ timestamp: p.timestamp ?? p.label, price_per_MWh: p.value })),
+    results.systemPriceSeries.map((p) => ({
+      ...(p.period !== undefined && p.period !== null ? { period: p.period } : {}),
+      timestamp: p.timestamp ?? p.label,
+      price_per_MWh: p.value,
+    })),
   );
   appendSheet(
     'OUT_Emissions',
-    results.systemEmissionsSeries.map((p) => ({ timestamp: p.timestamp ?? p.label, emissions_t: p.value })),
+    results.systemEmissionsSeries.map((p) => ({
+      ...(p.period !== undefined && p.period !== null ? { period: p.period } : {}),
+      timestamp: p.timestamp ?? p.label,
+      emissions_t: p.value,
+    })),
   );
 
   appendSheet(
     'OUT_Storage',
     results.storageSeries.map((s) => ({
+      ...(s.period !== undefined && s.period !== null ? { period: s.period } : {}),
       timestamp: s.timestamp ?? s.label,
       charge_MW: s.charge,
       discharge_MW: s.discharge,

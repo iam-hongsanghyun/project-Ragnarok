@@ -20,6 +20,9 @@ export type AnalyticsSubTab = 'Validation' | 'Result' | 'Analytics' | 'Compariso
 export type ChartMode = 'line' | 'area' | 'bar';
 export type ChartSectionType = ChartMode | 'donut';
 export type TimeframeOption = 'aggregated' | 'yearly' | 'monthly' | 'weekly' | 'daily' | 'hourly';
+export type PlanningMode = 'single_period' | 'pathway';
+export type SnapshotMappingMode = 'explicit_period_column' | 'repeat_all_snapshots';
+export type PathwayOverridePolicy = 'reuse_base_inputs';
 
 export type ConstraintMetric =
   | 'co2_cap' | 'max_load_shed'
@@ -70,6 +73,33 @@ export interface CustomConstraint {
   unit: string;
 }
 
+export interface PathwayPeriodConfig {
+  period: number;
+  objectiveWeight: number;
+  yearsWeight: number;
+}
+
+export interface PathwayConfig {
+  planningMode: PlanningMode;
+  enabled: boolean;
+  snapshotMappingMode: SnapshotMappingMode;
+  overridePolicy: PathwayOverridePolicy;
+  periods: PathwayPeriodConfig[];
+  selectedPeriod: number | null;
+}
+
+export interface PathwayPeriodSummary {
+  period: number;
+  snapshotCount: number;
+  modeledHours: number;
+  totalDispatch: number;
+  totalEmissions: number;
+  averagePrice: number;
+  peakLoad: number;
+  objectiveWeight: number;
+  yearsWeight: number;
+}
+
 // ── Result types ──────────────────────────────────────────────────────────────
 
 export interface SummaryItem {
@@ -83,12 +113,14 @@ export interface SeriesPoint {
   timestamp: string;
   values: Record<string, number>;
   total?: number;
+  period?: number | null;
 }
 
 export interface ValuePoint {
   label: string;
   timestamp?: string;
   value: number;
+  period?: number | null;
 }
 
 export interface StoragePoint {
@@ -97,6 +129,7 @@ export interface StoragePoint {
   charge: number;
   discharge: number;
   state: number;
+  period?: number | null;
 }
 
 export interface MixItem {
@@ -278,6 +311,15 @@ export interface RunResults {
     snapshotWeight: number;
     modeledHours: number;
     storeWeight: number;
+    planningMode?: PlanningMode;
+    investmentPeriods?: number[];
+  };
+  pathway?: {
+    enabled: boolean;
+    periods: number[];
+    selectedPeriod: number | null;
+    snapshotMappingMode: SnapshotMappingMode;
+    summaries: PathwayPeriodSummary[];
   };
   assetDetails: {
     generators: Record<string, GeneratorDetail>;

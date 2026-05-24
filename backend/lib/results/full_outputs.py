@@ -78,6 +78,22 @@ def _component_output_attrs(sheet_name: str) -> tuple[list[str], list[str]]:
     return static, series
 
 
+def _series_snapshot_row(snapshot: Any) -> dict[str, Any]:
+    if isinstance(snapshot, tuple) and len(snapshot) == 2:
+        period = int(snapshot[0])
+        timestep = snapshot[1]
+        try:
+            stamp = pd.Timestamp(timestep).isoformat()
+        except Exception:
+            stamp = str(timestep)
+        return {"period": period, "name": stamp, "timestamp": stamp}
+    try:
+        stamp = pd.Timestamp(snapshot).isoformat()
+    except Exception:
+        stamp = str(snapshot)
+    return {"name": stamp, "timestamp": stamp}
+
+
 def build_full_outputs(network: pypsa.Network) -> dict[str, Any]:
     """Walk every documented component and return its solved output values.
 
@@ -127,7 +143,7 @@ def build_full_outputs(network: pypsa.Network) -> dict[str, Any]:
                 continue
             rows: list[dict[str, Any]] = []
             for snapshot in df.index:
-                row: dict[str, Any] = {"name": str(pd.Timestamp(snapshot).isoformat())}
+                row = _series_snapshot_row(snapshot)
                 for component_name in df.columns:
                     safe = _safe_scalar(df.at[snapshot, component_name])
                     if safe is not None:
