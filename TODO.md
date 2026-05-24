@@ -33,6 +33,10 @@ This list is derived from the current support matrix in [README.md](/Users/sangh
 
 | Priority | Area | Gap | Why it matters | Estimated token cost |
 |---|---|---|---|---:|
+| `High` | Data platform | Add location-based wind and solar profile generation/import | Users should be able to choose a location and populate renewable profiles without preparing time series manually. This needs source selection, caching/database design, and workbook write-back into PyPSA time-series sheets. | 22,000 |
+| `High` | Data platform | Add a renewable/weather profile database layer | Location-based profiles should not be one-off fetches only. Ragnarok needs persistent storage or cache/indexing for reusable wind/solar resources by location, year, and source. | 18,000 |
+| `High` | Data platform | Add national-level starter model imports | Users should be able to import a prebuilt country-scale baseline model instead of constructing one workbook from scratch. | 24,000 |
+| `High` | Data platform | Add a source registry for national models and profile datasets | National model import and profile generation need a managed catalogue of sources, versions, coverage, and provenance. | 16,000 |
 | `High` | Optimization UX | Add scenario and multi-period run configuration UX | Multi-year and stochastic support are not useful without a first-class configuration surface. | 18,000 |
 | `High` | Analytics | Add multi-period and scenario-aware result analytics | Pathway/stochastic support requires different result views, comparisons, and summaries. | 20,000 |
 | `High` | Analytics | Add workbook-import restoration for more solve-derived metrics beyond current derivation set | Imported project analytics should match a fresh solve more closely. | 12,000 |
@@ -47,6 +51,8 @@ This list is derived from the current support matrix in [README.md](/Users/sangh
 
 | Priority | Area | Gap | Why it matters | Estimated token cost |
 |---|---|---|---|---:|
+| `Medium` | Data platform | Add data-source health checks and provenance reporting | Imported profiles and national baseline models should expose where they came from, which version was used, and whether the source is still reachable. | 12,000 |
+| `Medium` | Data platform | Add user-facing data import presets by country/region | A curated “import baseline model for country X” flow reduces setup effort and keeps national models consistent. | 14,000 |
 | `Medium` | File formats | Support PyPSA CSV folder import/export in the UI | Useful for advanced users and larger cases. | 15,000 |
 | `Medium` | File formats | Support netCDF/HDF5 workflows in the UI | Better aligned with PyPSA’s broader I/O model than Excel-only workflows. | 18,000 |
 | `Low` | Analytics | Add a dedicated carrier-level analytics view | Carrier data exists indirectly today. | 6,000 |
@@ -58,7 +64,9 @@ This list is derived from the current support matrix in [README.md](/Users/sangh
 1. Retain solved backend network/workbook artifacts.
 2. Add metadata-backed full project export/import.
 3. Implement multi-investment / pathway planning support.
-4. Fix `network` sheet application and broaden validation.
-5. Add round-trip tests for project workflows.
-6. Add rolling-horizon, stochastic, and security-constrained workflows.
-7. Expand analytics/component coverage after the project exchange path and core optimization modes are trustworthy.
+4. Add location-based renewable profile import and the supporting data registry/database layer.
+5. Add national-level starter model imports.
+6. Fix `network` sheet application and broaden validation.
+7. Add round-trip tests for project workflows.
+8. Add rolling-horizon, stochastic, and security-constrained workflows.
+9. Expand analytics/component coverage after the project exchange path, data layer, and core optimization modes are trustworthy.
