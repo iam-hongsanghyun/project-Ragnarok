@@ -95,7 +95,7 @@ def build_full_outputs(network: pypsa.Network) -> dict[str, Any]:
     for list_name in schema.get("components", {}).keys():
         if list_name in skip:
             continue
-        if list_name not in network.components:
+        if list_name not in network.components.keys():
             continue
 
         static_attrs, series_attrs = _component_output_attrs(list_name)
