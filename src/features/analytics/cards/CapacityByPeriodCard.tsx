@@ -174,9 +174,7 @@ export function CapacityByPeriodCard({ model, results }: Props) {
       </div>
       <InteractiveTimeSeriesCard
         title={`Capacity over investment periods — ${viewMode === 'cumulative' ? 'cumulative' : 'new additions'} (${groupMode === 'carrier' ? 'by carrier' : 'by generator'})`}
-        description={viewMode === 'cumulative'
-          ? 'Active installed capacity in each period. Extendable assets use p_nom_opt; fixed assets use p_nom. Entries drop out when build_year + lifetime ≤ period.'
-          : 'Capacity commissioned in each period (build_year == period). For extendable assets the bar is p_nom_opt − p_nom; for fixed assets it is p_nom.'}
+        description="MW"
         data={rows}
         series={series}
         mode="bar"

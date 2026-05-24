@@ -278,7 +278,7 @@ export function ResultsDashboard({
         <div ref={dispatchRef}>
           <InteractiveTimeSeriesCard
             title="Generation dispatch by carrier"
-            description="Stacked area of generation over all snapshots"
+            description="MW"
             data={dispatchRows}
             series={dispatchSeries}
             mode="area"
