@@ -2590,7 +2590,9 @@ path.leaflet-interactive:focus {
 .spreadsheet-table thead {
   position: sticky;
   top: 0;
-  z-index: 1;
+  /* Must be higher than any tbody sticky z-index (col-frozen=2, rn-col=1),
+   * otherwise body cells paint over the header as they scroll past. */
+  z-index: 5;
 }
 
 .spreadsheet-table th {
