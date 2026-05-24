@@ -28,6 +28,7 @@ import { exportFullResults } from './shared/utils/exportResults';
 import { getBounds, getBusIndex, carrierColor, numberValue, orderByCarrierRows, setCarrierColorOverrides, snapshotMaxFromWorkbook } from './shared/utils/helpers';
 import { buildRowsFromGeneratorDetails, buildSystemLoadRows, normalizeSeriesPoint } from './shared/utils/analytics';
 import { withDerivedAssetDetails } from './shared/utils/deriveAssetDetails';
+import { deriveRunResults } from './shared/utils/deriveRunResults';
 import { RunDialog } from './features/run/RunDialog';
 import { Sidebar } from './layout/Sidebar';
 import { MapPane } from './features/map/MapPane';
@@ -263,14 +264,44 @@ function AppInner() {
       const hasOutputs =
         Object.keys(outputs.static).length > 0 || Object.keys(outputs.series).length > 0;
       if (hasOutputs) {
-        // Re-attach imported outputs and rebuild assetDetails locally so the
-        // Result / Analytics tabs work immediately without re-running.
-        setResults((prev) => {
-          if (!prev) return prev;
-          const next: RunResults = { ...prev, outputs };
-          return withDerivedAssetDetails(nextModel, next, settings.currencySymbol);
+        // Build a full RunResults from (model, outputs) — same shape as a
+        // fresh backend run — so Result / Analytics tabs render immediately
+        // without re-solving. Also append a history entry so the user can
+        // bookmark / compare the imported case like any other run.
+        const imported = deriveRunResults(nextModel, outputs, {
+          carbonPrice,
+          currencySymbol: settings.currencySymbol,
+          discountRate: settings.discountRate,
+          snapshotWeight,
+          narrative: [`Imported project from ${file.name}. Outputs restored from workbook.`],
         });
-        setStatus(`Imported project: ${file.name}. Outputs restored — Analytics ready.`);
+        setResults(imported);
+        setAnalyticsFocus({ type: 'system' });
+        setRunHistory((hist) => {
+          const next = hist.length + 1;
+          const entry: RunHistoryEntry = {
+            id: Date.now().toString(),
+            label: `Import ${next}`,
+            savedAt: new Date().toISOString(),
+            filename: file.name,
+            carbonPrice,
+            snapshotStart,
+            snapshotEnd,
+            snapshotWeight,
+            activeConstraints: constraints.filter((c) => c.enabled),
+            componentCounts: Object.fromEntries(
+              SHEETS.map((sheet) => [sheet, nextModel[sheet]?.length ?? 0]).filter(([, n]) => n > 0),
+            ),
+            pinned: false,
+            inComparison: true,
+            results: imported,
+          };
+          const withNew = [entry, ...hist];
+          const pinned = withNew.filter((e) => e.pinned);
+          const unpinned = withNew.filter((e) => !e.pinned).slice(0, MAX_UNPINNED_HISTORY);
+          return [...pinned, ...unpinned];
+        });
+        setStatus(`Imported project: ${file.name}. Outputs restored — Result & Analytics ready.`);
       } else {
         setStatus(`Imported project (inputs only): ${file.name}.`);
       }
