@@ -1,13 +1,17 @@
 /**
- * CapacityByPeriodCard — for pathway runs, shows how active installed
- * capacity (MW) evolves across investment periods, stacked by carrier or
- * grouped by generator. Driven entirely off `(model, outputs)` so it
- * matches whatever data is currently cached — works on imported projects
- * too, with no backend call.
+ * CapacityByPeriodCard — for pathway runs, shows how installed capacity
+ * (MW) evolves across investment periods, stacked by carrier or by
+ * generator. Driven entirely off `(model, outputs)` so it matches whatever
+ * data is currently cached — works on imported projects too.
  *
- * Activity rule for a generator g in period P:
- *   active = build_year ≤ P < build_year + lifetime
- *   capacity = p_nom_opt if p_nom_extendable else p_nom
+ * Two view modes:
+ *   • Cumulative  — total active capacity in each period
+ *                   (build_year ≤ P < build_year + lifetime).
+ *                   Capacity = p_nom_opt for extendable assets, else p_nom.
+ *   • New additions — only capacity commissioned in that period
+ *                     (build_year == P). For extendable assets the
+ *                     newly-added capacity is p_nom_opt − p_nom; for
+ *                     fixed assets it is p_nom (a one-period bar).
  */
 import React, { useMemo, useState } from 'react';
 import { GridRow, RunResults, TimeSeriesRow, WorkbookModel } from '../../../shared/types';
@@ -20,41 +24,66 @@ interface Props {
 }
 
 type GroupMode = 'carrier' | 'generator';
+type ViewMode = 'cumulative' | 'new';
 
-interface ActiveRow {
+interface GenSpec {
   name: string;
   carrier: string;
-  capacity: number;
-  isInvested: boolean;
+  buildYear: number;
+  lifetime: number;
+  pNom: number;
+  pNomOpt: number;
+  extendable: boolean;
+  color: string;
 }
 
-function activeCapacityAt(row: GridRow, optStatic: Record<string, Record<string, unknown>>, period: number): ActiveRow | null {
+function parseGenerator(
+  row: GridRow,
+  optStatic: Record<string, Record<string, unknown>>,
+): GenSpec | null {
   const name = stringValue(row.name);
   if (!name) return null;
-  const buildYear = numberValue(row.build_year);
-  const lifetime = numberValue(row.lifetime);
-  if (buildYear > 0 && period < buildYear) return null;
-  if (buildYear > 0 && lifetime > 0 && period >= buildYear + lifetime) return null;
-  const extendable = row.p_nom_extendable === true ||
+  const extendable =
+    row.p_nom_extendable === true ||
     String(row.p_nom_extendable ?? '').toLowerCase() === 'true';
-  const fallback = numberValue(row.p_nom);
+  const pNom = numberValue(row.p_nom);
   const optAttrs = optStatic[name] ?? {};
-  const opt = optAttrs.p_nom_opt;
-  const capacity = extendable && opt !== undefined && opt !== null && opt !== ''
-    ? Number(opt)
-    : fallback;
-  if (!Number.isFinite(capacity) || capacity <= 0) return null;
+  const optRaw = optAttrs.p_nom_opt;
+  const pNomOpt =
+    optRaw !== undefined && optRaw !== null && optRaw !== '' ? Number(optRaw) : pNom;
   return {
     name,
     carrier: stringValue(row.carrier) || 'Other',
-    capacity,
-    isInvested: extendable && capacity > fallback + 1e-6,
+    buildYear: numberValue(row.build_year),
+    lifetime: numberValue(row.lifetime),
+    pNom: Number.isFinite(pNom) ? pNom : 0,
+    pNomOpt: Number.isFinite(pNomOpt) ? pNomOpt : 0,
+    extendable,
+    color: resolvedColor(row.color, row.carrier),
   };
 }
 
+/** Active capacity for a generator at the given period (cumulative view). */
+function activeCapacity(g: GenSpec, period: number): number {
+  if (g.buildYear > 0 && period < g.buildYear) return 0;
+  if (g.buildYear > 0 && g.lifetime > 0 && period >= g.buildYear + g.lifetime) return 0;
+  const cap = g.extendable ? g.pNomOpt : g.pNom;
+  return cap > 0 ? cap : 0;
+}
+
+/** New capacity added in this period only (build_year == period). */
+function newAdditionCapacity(g: GenSpec, period: number): number {
+  if (g.buildYear !== period) return 0;
+  if (g.extendable) {
+    const delta = g.pNomOpt - g.pNom;
+    return delta > 0 ? delta : 0;
+  }
+  return g.pNom > 0 ? g.pNom : 0;
+}
+
 export function CapacityByPeriodCard({ model, results }: Props) {
-  const [mode, setMode] = useState<GroupMode>('carrier');
-  const [investedOnly, setInvestedOnly] = useState(false);
+  const [groupMode, setGroupMode] = useState<GroupMode>('carrier');
+  const [viewMode, setViewMode] = useState<ViewMode>('cumulative');
 
   const periods = useMemo(() => results.pathway?.periods ?? [], [results.pathway]);
   const optStatic = useMemo(
@@ -62,26 +91,22 @@ export function CapacityByPeriodCard({ model, results }: Props) {
     [results.outputs],
   );
 
+  const generators = useMemo(
+    () => (model.generators ?? []).map((row) => parseGenerator(row, optStatic)).filter((g): g is GenSpec => !!g),
+    [model.generators, optStatic],
+  );
+
   const { rows, series } = useMemo(() => {
-    if (!periods.length) return { rows: [], series: [] };
-    const generators = model.generators ?? [];
+    if (!periods.length) return { rows: [] as TimeSeriesRow[], series: [] };
 
-    // For each period, gather active generators
-    const perPeriod = periods.map((p) => {
-      const active = generators
-        .map((g) => activeCapacityAt(g, optStatic, p))
-        .filter((x): x is ActiveRow => !!x)
-        .filter((g) => !investedOnly || g.isInvested);
-      return { period: p, active };
-    });
-
-    // Pivot to rows: one row per period, one column per key (carrier or generator)
     const keys = new Set<string>();
-    const tableRows: TimeSeriesRow[] = perPeriod.map(({ period, active }) => {
+    const tableRows: TimeSeriesRow[] = periods.map((period) => {
       const row: TimeSeriesRow = { label: String(period), timestamp: String(period) };
-      for (const g of active) {
-        const key = mode === 'carrier' ? g.carrier : g.name;
-        row[key] = (Number(row[key]) || 0) + g.capacity;
+      for (const g of generators) {
+        const cap = viewMode === 'cumulative' ? activeCapacity(g, period) : newAdditionCapacity(g, period);
+        if (cap <= 0) continue;
+        const key = groupMode === 'carrier' ? g.carrier : g.name;
+        row[key] = (Number(row[key]) || 0) + cap;
         keys.add(key);
       }
       return row;
@@ -89,26 +114,21 @@ export function CapacityByPeriodCard({ model, results }: Props) {
 
     const keyList = Array.from(keys);
     const seriesList = keyList.map((k) => {
-      if (mode === 'carrier') {
+      if (groupMode === 'carrier') {
         return { key: k, label: k, color: carrierColor(k) };
       }
-      // For generator mode, colour by carrier of any matching generator
-      const sample = generators.find((g) => stringValue(g.name) === k);
-      const colour = sample
-        ? resolvedColor(sample.color, sample.carrier)
-        : hashColor(k);
-      return { key: k, label: k, color: colour };
+      const sample = generators.find((g) => g.name === k);
+      return { key: k, label: k, color: sample?.color ?? hashColor(k) };
     });
 
-    // Sort series by total descending so largest sits on the bottom of the stack
     const totals: Record<string, number> = {};
     for (const r of tableRows) for (const k of keyList) totals[k] = (totals[k] ?? 0) + (Number(r[k]) || 0);
     seriesList.sort((a, b) => (totals[b.key] ?? 0) - (totals[a.key] ?? 0));
 
     return { rows: tableRows, series: seriesList };
-  }, [periods, model.generators, optStatic, mode, investedOnly]);
+  }, [periods, generators, groupMode, viewMode]);
 
-  if (!periods.length || rows.length === 0) {
+  if (!periods.length || rows.length === 0 || series.length === 0) {
     return (
       <p style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>
         No capacity changes to display — confirm <code>build_year</code> /
@@ -120,38 +140,46 @@ export function CapacityByPeriodCard({ model, results }: Props) {
 
   return (
     <div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', marginBottom: 12 }}>
         <div className="period-pill-row" role="group" aria-label="Group capacity by">
           <button
-            className={`tb-btn period-pill${mode === 'carrier' ? '' : ' tb-btn--muted'}`}
-            onClick={() => setMode('carrier')}
+            className={`tb-btn period-pill${groupMode === 'carrier' ? '' : ' tb-btn--muted'}`}
+            onClick={() => setGroupMode('carrier')}
           >
             By carrier
           </button>
           <button
-            className={`tb-btn period-pill${mode === 'generator' ? '' : ' tb-btn--muted'}`}
-            onClick={() => setMode('generator')}
+            className={`tb-btn period-pill${groupMode === 'generator' ? '' : ' tb-btn--muted'}`}
+            onClick={() => setGroupMode('generator')}
           >
             By generator
           </button>
         </div>
-        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.85rem' }}>
-          <input
-            type="checkbox"
-            checked={investedOnly}
-            onChange={(e) => setInvestedOnly(e.target.checked)}
-          />
-          Show only newly-invested assets
-        </label>
+        <div className="period-pill-row" role="group" aria-label="Capacity view">
+          <button
+            className={`tb-btn period-pill${viewMode === 'cumulative' ? '' : ' tb-btn--muted'}`}
+            onClick={() => setViewMode('cumulative')}
+            title="Total active capacity in each period"
+          >
+            Cumulative
+          </button>
+          <button
+            className={`tb-btn period-pill${viewMode === 'new' ? '' : ' tb-btn--muted'}`}
+            onClick={() => setViewMode('new')}
+            title="Only capacity commissioned in that period"
+          >
+            New additions
+          </button>
+        </div>
       </div>
       <InteractiveTimeSeriesCard
-        title={`Installed capacity over investment periods (${mode === 'carrier' ? 'by carrier' : 'by generator'})`}
-        description={investedOnly
-          ? 'Only extendable generators whose optimal capacity exceeds the input p_nom (new investments).'
-          : 'Active capacity per period: extendable assets use p_nom_opt, fixed assets use p_nom. Lifetime-bound entries drop out when build_year + lifetime ≤ period.'}
+        title={`Capacity over investment periods — ${viewMode === 'cumulative' ? 'cumulative' : 'new additions'} (${groupMode === 'carrier' ? 'by carrier' : 'by generator'})`}
+        description={viewMode === 'cumulative'
+          ? 'Active installed capacity in each period. Extendable assets use p_nom_opt; fixed assets use p_nom. Entries drop out when build_year + lifetime ≤ period.'
+          : 'Capacity commissioned in each period (build_year == period). For extendable assets the bar is p_nom_opt − p_nom; for fixed assets it is p_nom.'}
         data={rows}
         series={series}
-        mode="area"
+        mode="bar"
         stacked
       />
     </div>
