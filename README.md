@@ -122,11 +122,11 @@ optimization envelope is broader than the workflow Ragnarok currently exposes.
 | Force-LP dispatch mode | `Full` | Explicit Ragnarok run option. |
 | Custom/global system-wide constraints | `Partial` | Useful subset implemented, but not the full optimization space. |
 | Multi-carrier optimization | `Partial` | The backend can ingest multi-carrier workbook structures, but the UX and analytics remain electricity-centric. |
-| Rolling-horizon optimization | `Not supported` | No backend orchestration or UI flow for rolling windows. |
+| Rolling-horizon optimization | `Partial` | Backend stitching and a dedicated frontend configuration surface are implemented; analytics remain stitched-result-first rather than window-first. |
 | Multi-investment / pathway planning | `Partial` | Opt-in pathway mode is implemented with backend multi-investment expansion, pathway metadata, and period-aware analytics. Authoring remains flat/workbook-first rather than native PyPSA MultiIndex editing. |
 | Stochastic optimization | `Not supported` | No scenario-tree, two-stage, or CVaR workflow. |
 | Security-constrained optimization / SCLOPF | `Not supported` | No branch-outage or contingency solve path. |
-| Scenario-based planning UX | `Not supported` | No first-class scenario manager or uncertainty workflow. |
+| Scenario-based planning UX | `Partial` | Frontend scenario presets now capture window, constraints, carbon price, pathway, and rolling settings in workbook metadata, but there is still no stochastic backend workflow. |
 | Multi-period result analytics | `Partial` | Period summaries and selected-period detailed charts are supported; not every analytics surface is natively multi-period. |
 
 ## Support Matrix: PyPSA Features vs Ragnarok

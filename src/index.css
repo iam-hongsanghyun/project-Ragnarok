@@ -683,6 +683,50 @@ button {
   font-size: 0.95rem;
   line-height: 1;
 }
+.sg-scenario-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.sg-scenario-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #22c55e;
+  flex-shrink: 0;
+}
+.sg-scenario-dot.is-dirty {
+  background: #f59e0b;
+}
+.sg-scenario-notes {
+  width: 100%;
+  resize: vertical;
+  min-height: 72px;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+  color: var(--text);
+  background: #fff;
+  box-sizing: border-box;
+}
+.sg-scenario-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.sg-scenario-summary span {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.06);
+  color: var(--text);
+  font-size: 0.72rem;
+}
 
 .period-pill-row {
   display: inline-flex;

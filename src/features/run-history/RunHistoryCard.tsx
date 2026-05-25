@@ -75,6 +75,7 @@ export function RunHistoryCard({ entry, onView, onRename, onPin, onDelete, onTog
       </div>
 
       <div className="hist-settings">
+        {entry.scenarioLabel && <span>{entry.scenarioLabel}</span>}
         <span>{entry.results.runMeta.snapshotCount} snaps</span>
         <span>{entry.snapshotWeight}h</span>
         {entry.carbonPrice > 0 && <span>{currencySymbol}{entry.carbonPrice}/t CO₂</span>}
