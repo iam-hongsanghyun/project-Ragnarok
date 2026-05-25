@@ -144,7 +144,7 @@ optimization envelope is broader than the workflow Ragnarok currently exposes.
 | Restore analytics from imported solved workbook | `Full` | Frontend reconstructs analytics locally from `(model, outputs)` and restores plugin analytics / solve metadata from workbook metadata sheets. |
 | Result workbook export for reporting | `Full` | `Export Result` keeps a dedicated reporting workbook. |
 | HTML report export | `Full` | Implemented in [src/shared/utils/exportReport.ts](/Users/sanghyun/github/pypsa_gui/src/shared/utils/exportReport.ts). |
-| Structural validation before solve | `Partial` | Validation is useful but still focused on common components and common failure modes. |
+| Structural validation before solve | `Partial` | Validation is now schema-aware across documented component sheets and time-series sheets, but it still stops short of full PyPSA semantic validation. |
 | HiGHS optimization | `Full` | Uses `network.optimize()` with HiGHS. |
 | Carbon price adder | `Full` | Applied to generator marginal costs from carrier emission factors. |
 | Capacity expansion for extendable assets | `Full` | Annualized CAPEX applied for extendable generators, storage units, stores, lines, and links. |
@@ -203,8 +203,8 @@ optimization envelope is broader than the workflow Ragnarok currently exposes.
 3. Pathway planning is still v1-level.
    It supports flat-workbook authoring, backend multi-investment expansion, and selected-period analytics, but it does not yet provide a native frontend MultiIndex editing workflow.
 
-4. Validation is still selective.
-   The schema is generic, but the validator remains focused on common electricity-model cases.
+4. Validation is broader, but still not full PyPSA semantic validation.
+   The validator is now schema-aware across documented sheets, but it still focuses on structural/runtime-invalid data rather than reproducing every PyPSA modeling rule.
 
 5. Ragnarok does not yet cover all of PyPSA’s broader planning modes.
    The largest optimization gaps today are:

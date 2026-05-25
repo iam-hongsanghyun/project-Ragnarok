@@ -39,7 +39,7 @@ This is the single living todo for Ragnarok. Tasks stay here after completion an
 | `Open` | `High` | Optimization capability | Add stochastic optimization support | PyPSA supports two-stage stochastic planning; Ragnarok has no scenario or uncertainty model. | 30,000 | |
 | `Open` | `High` | Optimization capability | Add security-constrained optimization / SCLOPF workflow | Important missing transmission-planning capability for serious network studies. | 24,000 | |
 | `Done` | `High` | Import fidelity | Restore plugin analytics and non-derivable solve metadata on project import | Imported projects currently lose plugin analytics and CO2 shadow information. | 10,000 | Fulfilled in the import-metadata follow-up PR: project workbooks now carry `RAGNAROK_ResultMeta` and `RAGNAROK_PluginAnalytics` sheets, and import restores `pluginAnalytics`, `co2Shadow`, `runMeta`, `pathway`, and solver narrative without any backend round-trip or plugin re-execution. |
-| `Open` | `High` | Validation | Expand validation from common electricity checks to schema-aware coverage | The input schema is broad, but validation still focuses on buses, loads, generators, lines, and links. | 12,000 | |
+| `Done` | `High` | Validation | Expand validation from common electricity checks to schema-aware coverage | The input schema is broad, but validation still focuses on buses, loads, generators, lines, and links. | 12,000 | Fulfilled with schema-driven frontend and backend validation. Local input checks now cover all schema-defined component sheets with generic duplicate-name, required-field, bus-reference, carrier-reference, numeric sanity, and time-series column/row checks. Backend dry-run validation now operates over the shared schema catalogue, accepts documented sheets generically, expands network summary counts, and reports pathway / rolling horizon effective-horizon notes plus ignored output-sheet/input-column notes. |
 | `Open` | `High` | Data platform | Add location-based wind and solar profile generation/import | Users should be able to choose a location and populate renewable profiles without preparing time series manually. This needs source selection, caching/database design, and workbook write-back into PyPSA time-series sheets. | 22,000 | |
 | `Open` | `High` | Data platform | Add a renewable/weather profile database layer | Location-based profiles should not be one-off fetches only. Ragnarok needs persistent storage or cache/indexing for reusable wind/solar resources by location, year, and source. | 18,000 | |
 | `Open` | `High` | Data platform | Add national-level starter model imports | Users should be able to import a prebuilt country-scale baseline model instead of constructing one workbook from scratch. | 24,000 | |
@@ -68,7 +68,7 @@ This is the single living todo for Ragnarok. Tasks stay here after completion an
 2. Finish full project-state metadata round-trip: settings, constraints, run window, run history, and provenance.
 3. Add location-based renewable profile import and the supporting data registry/database layer.
 4. Add national-level starter model imports.
-5. Broaden validation and lock down sheet-import behavior with regression tests.
+5. Lock down sheet-import behavior with regression tests.
 6. Add round-trip tests for project workflows.
-7. Add rolling-horizon, stochastic, and security-constrained workflows.
+7. Add stochastic and security-constrained workflows.
 8. Expand scenario-aware analytics and remaining component-specific result UX after the project exchange path, data layer, and core optimization modes are trustworthy.

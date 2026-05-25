@@ -1,8 +1,13 @@
 import { useMemo } from 'react';
-import { WorkbookModel } from '../../shared/types';
+import { Primitive, WorkbookModel } from '../../shared/types';
+import {
+  ALL_KNOWN_TS_SHEETS,
+  PYPSA_COMPONENTS,
+  getComponentSchema,
+  isInputTemporalSheet,
+  parseTemporalSheetName,
+} from '../../constants/pypsa_schema';
 import { numberValue, stringValue } from '../../shared/utils/helpers';
-
-// ── Issue type ────────────────────────────────────────────────────────────────
 
 export interface ModelIssue {
   sheet: string;
@@ -12,203 +17,222 @@ export interface ModelIssue {
   message: string;
 }
 
-// ── Rule helpers ──────────────────────────────────────────────────────────────
+type Row = Record<string, Primitive>;
 
-type Row = Record<string, string | number | boolean | null>;
+const TS_INDEX_KEYS = new Set(['snapshot', 'name', 'datetime', 'timestamp', 'time', 'timestep', 'index', 'period', '']);
+const NON_NEGATIVE_ATTRS = new Set([
+  'p_nom', 'p_nom_min', 'p_nom_max',
+  's_nom', 's_nom_min', 's_nom_max',
+  'e_nom', 'e_nom_min', 'e_nom_max',
+  'p_set', 'q_set', 'inflow',
+  'capital_cost', 'marginal_cost', 'marginal_cost_quadratic',
+  'start_up_cost', 'shut_down_cost', 'stand_by_cost',
+  'co2_emissions',
+]);
 
-function checkDuplicateNames(sheet: string, rows: Row[], issues: ModelIssue[]) {
+function staticInputAttributes(sheet: string): string[] {
+  const component = getComponentSchema(sheet);
+  if (!component) return [];
+  return component.attributes
+    .filter((attr) => attr.status === 'input' && attr.storage !== 'series')
+    .map((attr) => attr.attribute);
+}
+
+function requiredStaticAttributes(sheet: string): string[] {
+  const component = getComponentSchema(sheet);
+  if (!component) return [];
+  return component.attributes
+    .filter((attr) => attr.status === 'input' && attr.storage !== 'series' && attr.required)
+    .map((attr) => attr.attribute);
+}
+
+function busReferenceAttributes(sheet: string): Array<{ attribute: string; required: boolean }> {
+  const component = getComponentSchema(sheet);
+  if (!component) return [];
+  return component.attributes
+    .filter((attr) => {
+      const name = attr.attribute;
+      return attr.status === 'input'
+        && attr.storage !== 'series'
+        && (name === 'bus' || (name.startsWith('bus') && /^\d+$/.test(name.slice(3))));
+    })
+    .map((attr) => ({ attribute: attr.attribute, required: attr.required }));
+}
+
+function addDuplicateNameIssues(sheet: string, rows: Row[], issues: ModelIssue[]) {
   const seen = new Map<string, number>();
-  rows.forEach((row, i) => {
-    const name = stringValue(row.name);
+  rows.forEach((row, rowIndex) => {
+    const name = stringValue(row.name).trim();
     if (!name) {
-      issues.push({ sheet, rowIndex: i, col: 'name', severity: 'error', message: 'Name is empty' });
+      issues.push({ sheet, rowIndex, col: 'name', severity: 'error', message: 'Name is empty' });
       return;
     }
     if (seen.has(name)) {
-      issues.push({ sheet, rowIndex: i, col: 'name', severity: 'error',
-        message: `Duplicate name "${name}" (first at row ${seen.get(name)! + 1})` });
-    } else {
-      seen.set(name, i);
+      issues.push({
+        sheet,
+        rowIndex,
+        col: 'name',
+        severity: 'error',
+        message: `Duplicate name "${name}" (first at row ${seen.get(name)! + 1})`,
+      });
+      return;
     }
+    seen.set(name, rowIndex);
   });
 }
 
-function checkBusRef(
+function addStaticValueIssues(sheet: string, rows: Row[], carrierNames: Set<string>, issues: ModelIssue[]) {
+  const allowed = new Set(staticInputAttributes(sheet));
+  rows.forEach((row, rowIndex) => {
+    Object.entries(row).forEach(([col, raw]) => {
+      if (!allowed.has(col) || raw === '' || raw === null || raw === undefined) return;
+      const value = numberValue(raw);
+      if ((NON_NEGATIVE_ATTRS.has(col) || col.endsWith('_nom')) && value < 0) {
+        issues.push({ sheet, rowIndex, col, severity: 'error', message: `${col} is negative (${value})` });
+      }
+      if (col.endsWith('_pu') && (value < 0 || value > 1)) {
+        issues.push({ sheet, rowIndex, col, severity: 'warning', message: `${col}=${value} outside [0, 1]` });
+      }
+      if (col === 'efficiency' && value > 5) {
+        issues.push({ sheet, rowIndex, col, severity: 'warning', message: `efficiency ${value} > 5 — check units (use ratio/COP, not %)` });
+      }
+      if (col === 'co2_emissions' && value > 5) {
+        issues.push({ sheet, rowIndex, col, severity: 'warning', message: `co2_emissions ${value} looks too large for tCO₂/MWh — check if this should be divided by 1000` });
+      }
+      if (col === 'sense') {
+        const sense = String(raw).trim();
+        if (sense && !['<=', '>=', '==', '<', '>'].includes(sense)) {
+          issues.push({ sheet, rowIndex, col, severity: 'warning', message: `Unexpected sense "${sense}"` });
+        }
+      }
+      if (col === 'carrier') {
+        const carrier = stringValue(raw).trim();
+        if (carrier && carrierNames.size > 0 && !carrierNames.has(carrier)) {
+          issues.push({ sheet, rowIndex, col, severity: 'warning', message: `Carrier "${carrier}" not in carriers sheet` });
+        }
+      }
+    });
+  });
+}
+
+function addRequiredFieldIssues(sheet: string, rows: Row[], issues: ModelIssue[]) {
+  const required = requiredStaticAttributes(sheet).filter((attr) => attr !== 'name');
+  rows.forEach((row, rowIndex) => {
+    required.forEach((attr) => {
+      if (row[attr] === '' || row[attr] === null || row[attr] === undefined) {
+        issues.push({ sheet, rowIndex, col: attr, severity: 'error', message: `${attr} is required` });
+      }
+    });
+  });
+}
+
+function addBusReferenceIssues(sheet: string, rows: Row[], busNames: Set<string>, issues: ModelIssue[]) {
+  const refs = busReferenceAttributes(sheet);
+  rows.forEach((row, rowIndex) => {
+    refs.forEach(({ attribute, required }) => {
+      const ref = stringValue(row[attribute]).trim();
+      if (!ref) {
+        if (required) issues.push({ sheet, rowIndex, col: attribute, severity: 'error', message: `${attribute}: missing bus reference` });
+        return;
+      }
+      if (!busNames.has(ref)) {
+        issues.push({ sheet, rowIndex, col: attribute, severity: 'error', message: `${attribute} "${ref}" not found in buses` });
+      }
+    });
+  });
+}
+
+function addTemporalSheetIssues(
+  model: WorkbookModel,
   sheet: string,
   rows: Row[],
-  busNames: Set<string>,
   issues: ModelIssue[],
-  col = 'bus',
 ) {
-  rows.forEach((row, i) => {
-    const ref = stringValue(row[col]);
-    if (!ref) {
-      issues.push({ sheet, rowIndex: i, col, severity: 'error', message: `${col}: missing bus reference` });
-    } else if (!busNames.has(ref)) {
-      issues.push({ sheet, rowIndex: i, col, severity: 'error',
-        message: `${col} "${ref}" not found in buses` });
+  const parsed = parseTemporalSheetName(sheet);
+  if (!parsed) return;
+  const { componentSheet, attribute } = parsed;
+  const componentRows = model[componentSheet] ?? [];
+  const knownNames = new Set(componentRows.map((row) => stringValue(row.name).trim()).filter(Boolean));
+  if (rows.length === 0) return;
+
+  const snapshotCount = model.snapshots.length;
+  if (snapshotCount > 0 && rows.length !== snapshotCount) {
+    issues.push({
+      sheet,
+      rowIndex: 0,
+      severity: 'warning',
+      message: `Row count ${rows.length} ≠ snapshot count ${snapshotCount}`,
+    });
+  }
+
+  const labelKey = Object.keys(rows[0]).find((key) => ['snapshot', 'name', 'datetime', 'timestamp', 'time', 'timestep', 'index'].includes(key.toLowerCase()));
+  if (!labelKey) {
+    issues.push({ sheet, rowIndex: 0, severity: 'error', message: 'Time-series sheet is missing a snapshot label column' });
+    return;
+  }
+
+  const cols = Object.keys(rows[0]).filter((key) => !TS_INDEX_KEYS.has(key.toLowerCase()));
+  if (cols.length === 0) {
+    issues.push({ sheet, rowIndex: 0, severity: 'warning', message: 'Time-series sheet has no component columns' });
+    return;
+  }
+
+  cols.forEach((col) => {
+    if (!knownNames.has(col)) {
+      issues.push({ sheet, rowIndex: 0, col, severity: 'error', message: `"${col}" does not exist in ${componentSheet}` });
+      return;
+    }
+    let firstBadRow = -1;
+    let badCount = 0;
+    rows.forEach((row, rowIndex) => {
+      const raw = row[col];
+      if (raw === '' || raw === null || raw === undefined) return;
+      const value = numberValue(raw);
+      const outsideNormalizedRange = attribute.endsWith('_pu') && (value < 0 || value > 1);
+      const belowZero = ['p_set', 'inflow'].includes(attribute) && value < 0;
+      if (outsideNormalizedRange || belowZero) {
+        if (firstBadRow === -1) firstBadRow = rowIndex;
+        badCount += 1;
+      }
+    });
+    if (firstBadRow !== -1) {
+      const range = attribute.endsWith('_pu') ? '[0, 1]' : '≥ 0';
+      issues.push({
+        sheet,
+        rowIndex: firstBadRow,
+        col,
+        severity: 'warning',
+        message: `"${col}": ${badCount} value${badCount > 1 ? 's' : ''} outside ${range}${badCount > 1 ? ` (first at row ${firstBadRow + 1})` : ''}`,
+      });
     }
   });
 }
-
-// ── Main hook ─────────────────────────────────────────────────────────────────
 
 export function useModelIssues(model: WorkbookModel): ModelIssue[] {
   return useMemo(() => {
     const issues: ModelIssue[] = [];
+    const busNames = new Set((model.buses ?? []).map((row) => stringValue(row.name).trim()).filter(Boolean));
+    const carrierNames = new Set((model.carriers ?? []).map((row) => stringValue(row.name).trim()).filter(Boolean));
 
-    const busNames = new Set(
-      model.buses.map((b) => stringValue(b.name)).filter(Boolean),
-    );
-    const carrierNames = new Set(
-      model.carriers.map((c) => stringValue(c.name)).filter(Boolean),
-    );
+    for (const component of PYPSA_COMPONENTS) {
+      const sheet = component.sheet_name;
+      if (sheet === 'snapshots' || sheet === 'network') continue;
+      const rows = (model[sheet] ?? []) as Row[];
+      if (!rows.length) continue;
 
-    // ── Buses ─────────────────────────────────────────────────────────────
-    checkDuplicateNames('buses', model.buses, issues);
-
-    // ── Generators ────────────────────────────────────────────────────────
-    checkDuplicateNames('generators', model.generators, issues);
-    checkBusRef('generators', model.generators, busNames, issues);
-    model.generators.forEach((g, i) => {
-      const carrier = stringValue(g.carrier);
-      if (carrier && carrierNames.size > 0 && !carrierNames.has(carrier)) {
-        issues.push({ sheet: 'generators', rowIndex: i, col: 'carrier', severity: 'warning',
-          message: `Carrier "${carrier}" not in carriers sheet` });
+      if (requiredStaticAttributes(sheet).includes('name')) {
+        addDuplicateNameIssues(sheet, rows, issues);
       }
-      const pNom = numberValue(g.p_nom);
-      if (g.p_nom !== undefined && g.p_nom !== null && g.p_nom !== '' && pNom < 0) {
-        issues.push({ sheet: 'generators', rowIndex: i, col: 'p_nom', severity: 'error',
-          message: `p_nom is negative (${pNom})` });
-      }
-    });
+      addRequiredFieldIssues(sheet, rows, issues);
+      addBusReferenceIssues(sheet, rows, busNames, issues);
+      addStaticValueIssues(sheet, rows, carrierNames, issues);
+    }
 
-    // ── Loads ─────────────────────────────────────────────────────────────
-    checkDuplicateNames('loads', model.loads, issues);
-    checkBusRef('loads', model.loads, busNames, issues);
-
-    // ── Lines ─────────────────────────────────────────────────────────────
-    checkDuplicateNames('lines', model.lines, issues);
-    model.lines.forEach((line, i) => {
-      const b0 = stringValue(line.bus0);
-      const b1 = stringValue(line.bus1);
-      if (!b0) issues.push({ sheet: 'lines', rowIndex: i, col: 'bus0', severity: 'error', message: 'bus0 is empty' });
-      else if (!busNames.has(b0)) issues.push({ sheet: 'lines', rowIndex: i, col: 'bus0', severity: 'error', message: `bus0 "${b0}" not found in buses` });
-      if (!b1) issues.push({ sheet: 'lines', rowIndex: i, col: 'bus1', severity: 'error', message: 'bus1 is empty' });
-      else if (!busNames.has(b1)) issues.push({ sheet: 'lines', rowIndex: i, col: 'bus1', severity: 'error', message: `bus1 "${b1}" not found in buses` });
-      if (b0 && b1 && b0 === b1) issues.push({ sheet: 'lines', rowIndex: i, col: 'bus0', severity: 'warning', message: 'bus0 equals bus1 (self-loop)' });
-    });
-
-    // ── Links ─────────────────────────────────────────────────────────────
-    checkDuplicateNames('links', model.links, issues);
-    model.links.forEach((link, i) => {
-      const b0 = stringValue(link.bus0);
-      const b1 = stringValue(link.bus1);
-      if (!b0) issues.push({ sheet: 'links', rowIndex: i, col: 'bus0', severity: 'error', message: 'bus0 is empty' });
-      else if (!busNames.has(b0)) issues.push({ sheet: 'links', rowIndex: i, col: 'bus0', severity: 'error', message: `bus0 "${b0}" not found in buses` });
-      if (!b1) issues.push({ sheet: 'links', rowIndex: i, col: 'bus1', severity: 'error', message: 'bus1 is empty' });
-      else if (!busNames.has(b1)) issues.push({ sheet: 'links', rowIndex: i, col: 'bus1', severity: 'error', message: `bus1 "${b1}" not found in buses` });
-      // Multi-output bus references (sector coupling)
-      for (const col of ['bus2', 'bus3'] as const) {
-        const b = stringValue(link[col]);
-        if (b && !busNames.has(b)) {
-          issues.push({ sheet: 'links', rowIndex: i, col, severity: 'error', message: `${col} "${b}" not found in buses` });
-        }
-      }
-      // Sanity-check efficiency (should be a ratio or COP, not %)
-      const eff = numberValue(link.efficiency);
-      if (link.efficiency !== undefined && link.efficiency !== null && link.efficiency !== '' && eff > 5) {
-        issues.push({ sheet: 'links', rowIndex: i, col: 'efficiency', severity: 'warning',
-          message: `efficiency ${eff} > 5 — check units (use ratio/COP, not %)` });
-      }
-    });
-
-    // ── Storage units ─────────────────────────────────────────────────────
-    checkDuplicateNames('storage_units', model.storage_units, issues);
-    checkBusRef('storage_units', model.storage_units, busNames, issues);
-    model.storage_units.forEach((u, i) => {
-      const pNom = numberValue(u.p_nom);
-      if (u.p_nom !== undefined && u.p_nom !== null && u.p_nom !== '' && pNom < 0) {
-        issues.push({ sheet: 'storage_units', rowIndex: i, col: 'p_nom', severity: 'error',
-          message: `p_nom is negative (${pNom})` });
-      }
-    });
-
-    // ── Stores ────────────────────────────────────────────────────────────
-    checkDuplicateNames('stores', model.stores, issues);
-    checkBusRef('stores', model.stores, busNames, issues);
-
-    // ── Transformers ──────────────────────────────────────────────────────
-    checkDuplicateNames('transformers', model.transformers, issues);
-    model.transformers.forEach((t, i) => {
-      const b0 = stringValue(t.bus0);
-      const b1 = stringValue(t.bus1);
-      if (!b0) issues.push({ sheet: 'transformers', rowIndex: i, col: 'bus0', severity: 'error', message: 'bus0 is empty' });
-      else if (!busNames.has(b0)) issues.push({ sheet: 'transformers', rowIndex: i, col: 'bus0', severity: 'error', message: `bus0 "${b0}" not found in buses` });
-      if (!b1) issues.push({ sheet: 'transformers', rowIndex: i, col: 'bus1', severity: 'error', message: 'bus1 is empty' });
-      else if (!busNames.has(b1)) issues.push({ sheet: 'transformers', rowIndex: i, col: 'bus1', severity: 'error', message: `bus1 "${b1}" not found in buses` });
-    });
-
-    // ── Time-series sheets ────────────────────────────────────────────────
-    const snapshotCount = model.snapshots.length;
-
-    // Helper: check TS sheet for value range and row-count mismatches.
-    // Reports one issue per column (not per row) to avoid flooding the list.
-    const checkTsSheet = (
-      sheetKey: keyof typeof model,
-      label: string,
-      minVal: number | null,
-      maxVal: number | null,
-    ) => {
-      const tsRows = model[sheetKey] as Row[];
-      if (!tsRows || tsRows.length === 0) return;
-
-      // Row-count check
-      if (snapshotCount > 0 && tsRows.length !== snapshotCount) {
-        issues.push({
-          sheet: sheetKey as string,
-          rowIndex: 0,
-          severity: 'warning',
-          message: `Row count ${tsRows.length} ≠ snapshot count ${snapshotCount}`,
-        });
-      }
-
-      // Per-column range check — report only the first offending row per column
-      const ignoreCols = new Set(['snapshot', 'name', 'datetime', 'timestep', 'period', '']);
-      const cols = Object.keys(tsRows[0]).filter((c) => !ignoreCols.has(c.toLowerCase()));
-
-      cols.forEach((col) => {
-        let firstBadRow = -1;
-        let badCount = 0;
-        for (let i = 0; i < tsRows.length; i++) {
-          const raw = tsRows[i][col];
-          if (raw === null || raw === '' || raw === undefined) continue;
-          const v = numberValue(raw);
-          if ((minVal !== null && v < minVal) || (maxVal !== null && v > maxVal)) {
-            if (firstBadRow === -1) firstBadRow = i;
-            badCount++;
-          }
-        }
-        if (firstBadRow !== -1) {
-          const rangeStr = minVal !== null && maxVal !== null
-            ? `[${minVal}, ${maxVal}]`
-            : minVal !== null ? `≥ ${minVal}` : `≤ ${maxVal}`;
-          issues.push({
-            sheet: sheetKey as string,
-            rowIndex: firstBadRow,
-            col,
-            severity: 'warning',
-            message: `"${col}": ${badCount} value${badCount > 1 ? 's' : ''} outside ${rangeStr}${badCount > 1 ? ` (first at row ${firstBadRow + 1})` : ''}`,
-          });
-        }
-      });
-    };
-
-    checkTsSheet('generators-p_max_pu', 'generators-p_max_pu', 0, 1);
-    checkTsSheet('generators-p_min_pu', 'generators-p_min_pu', 0, 1);
-    checkTsSheet('loads-p_set', 'loads-p_set', 0, null);
-    checkTsSheet('storage_units-inflow', 'storage_units-inflow', 0, null);
-    checkTsSheet('links-p_max_pu', 'links-p_max_pu', 0, 1);
+    for (const sheet of ALL_KNOWN_TS_SHEETS) {
+      const rows = model[sheet] as Row[] | undefined;
+      if (!rows || !rows.length || !isInputTemporalSheet(sheet)) continue;
+      addTemporalSheetIssues(model, sheet, rows, issues);
+    }
 
     return issues;
   }, [model]);

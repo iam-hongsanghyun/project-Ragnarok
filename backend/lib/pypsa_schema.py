@@ -28,6 +28,10 @@ def component_schema(sheet_name: str) -> dict[str, Any] | None:
     return load_pypsa_schema().get("components", {}).get(sheet_name)
 
 
+def component_sheets() -> list[str]:
+    return list(load_pypsa_schema().get("components", {}).keys())
+
+
 def non_component_sheets() -> set[str]:
     """Sheets recorded in schema metadata as non-component workbook sheets."""
     meta = load_pypsa_schema().get("meta", {})
@@ -83,3 +87,30 @@ def output_attributes(sheet_name: str) -> set[str]:
     if not component:
         return set()
     return set(component.get("output_attributes", []))
+
+
+def required_input_static_attributes(sheet_name: str) -> set[str]:
+    component = component_schema(sheet_name)
+    if not component:
+        return set()
+    return {
+        attr["attribute"]
+        for attr in component.get("attributes", [])
+        if attr.get("status") == "input"
+        and attr.get("required")
+        and attr.get("storage") != "series"
+    }
+
+
+def bus_reference_attributes(sheet_name: str) -> list[dict[str, Any]]:
+    component = component_schema(sheet_name)
+    if not component:
+        return []
+    attrs = []
+    for attr in component.get("attributes", []):
+        name = str(attr.get("attribute", ""))
+        if attr.get("status") != "input" or attr.get("storage") == "series":
+            continue
+        if name == "bus" or (name.startswith("bus") and name[3:].isdigit()):
+            attrs.append(attr)
+    return attrs
