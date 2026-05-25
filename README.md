@@ -186,6 +186,14 @@ optimization envelope is broader than the workflow Ragnarok currently exposes.
 | `shapes` | `Partial` | `Implicit` | `Partial` | `Not supported` | Accepted by the backend through the generic schema-driven path, but no dedicated UX or result handling exists. |
 | `sub_networks` | `Implicit` | `Implicit` | `Implicit` | `Not supported` | Accepted/preserved through the generic schema-driven path without dedicated UX. |
 
+### Backend Import Contract
+
+- `network`: explicit runtime import
+- `snapshots`: explicit runtime special case for snapshot index construction
+- all other schema-defined sheets: generic schema-driven import
+
+Ragnarok does not maintain a separate backend skip policy for schema-defined sheets beyond those two special cases.
+
 ## Important Current Limitations
 
 1. `Export Project` is workbook-driven, not backend-solved-network-driven.
