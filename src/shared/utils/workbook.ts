@@ -8,6 +8,7 @@ import {
 } from '../../constants/pypsa_schema';
 import { GridRow, Primitive, RunResults, WorkbookModel } from '../types';
 import { PATHWAY_CONFIG_SHEET, PATHWAY_PERIODS_SHEET } from './pathway';
+import { ROLLING_CONFIG_SHEET } from './rolling';
 
 export const RESULT_META_SHEET = 'RAGNAROK_ResultMeta';
 export const PLUGIN_ANALYTICS_SHEET = 'RAGNAROK_PluginAnalytics';
@@ -26,6 +27,7 @@ export function createEmptyWorkbook(): WorkbookModel {
     ...ts,
     [PATHWAY_CONFIG_SHEET]: [],
     [PATHWAY_PERIODS_SHEET]: [],
+    [ROLLING_CONFIG_SHEET]: [],
   } as WorkbookModel;
 }
 
@@ -91,7 +93,7 @@ export function buildWorkbook(model: WorkbookModel) {
     const ws = XLSX.utils.json_to_sheet(rows);
     XLSX.utils.book_append_sheet(workbook, ws, sheet);
   });
-  [PATHWAY_CONFIG_SHEET, PATHWAY_PERIODS_SHEET].forEach((sheet) => {
+  [PATHWAY_CONFIG_SHEET, PATHWAY_PERIODS_SHEET, ROLLING_CONFIG_SHEET].forEach((sheet) => {
     const rows = (model as any)[sheet] as GridRow[] | undefined;
     if (!rows || rows.length === 0) return;
     const ws = XLSX.utils.json_to_sheet(rows);
@@ -163,6 +165,7 @@ export interface ProjectMetadata {
   pluginAnalytics?: RunResults['pluginAnalytics'];
   runMeta?: RunResults['runMeta'];
   pathway?: RunResults['pathway'];
+  rolling?: RunResults['rolling'];
 }
 
 const EMPTY_OUTPUTS: ProjectOutputs = { static: {}, series: {} };
@@ -239,7 +242,7 @@ export function buildProjectWorkbook(
     XLSX.utils.book_append_sheet(workbook, ws, sheet);
   });
 
-  [PATHWAY_CONFIG_SHEET, PATHWAY_PERIODS_SHEET].forEach((sheet) => {
+  [PATHWAY_CONFIG_SHEET, PATHWAY_PERIODS_SHEET, ROLLING_CONFIG_SHEET].forEach((sheet) => {
     const rows = (model as any)[sheet] as GridRow[] | undefined;
     if (!rows || rows.length === 0) return;
     const ws = XLSX.utils.json_to_sheet(rows);
@@ -249,6 +252,7 @@ export function buildProjectWorkbook(
   const resultMetaRows: GridRow[] = [];
   if (metadata.runMeta) resultMetaRows.push({ key: 'runMeta', json: JSON.stringify(metadata.runMeta) });
   if (metadata.pathway) resultMetaRows.push({ key: 'pathway', json: JSON.stringify(metadata.pathway) });
+  if (metadata.rolling) resultMetaRows.push({ key: 'rolling', json: JSON.stringify(metadata.rolling) });
   if (metadata.co2Shadow) resultMetaRows.push({ key: 'co2Shadow', json: JSON.stringify(metadata.co2Shadow) });
   if (metadata.narrative) resultMetaRows.push({ key: 'narrative', json: JSON.stringify(metadata.narrative) });
   if (resultMetaRows.length > 0) {
@@ -305,6 +309,7 @@ export function parseProjectWorkbook(
           const parsed = JSON.parse(json);
           if (key === 'runMeta') metadata.runMeta = parsed;
           else if (key === 'pathway') metadata.pathway = parsed;
+          else if (key === 'rolling') metadata.rolling = parsed;
           else if (key === 'co2Shadow') metadata.co2Shadow = parsed;
           else if (key === 'narrative') metadata.narrative = parsed;
         } catch {

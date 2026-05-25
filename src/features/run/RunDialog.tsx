@@ -1,140 +1,47 @@
 /**
- * RunDialog — floating modal for single-year run configuration.
+ * RunDialog — minimal modal for kicking off a solve.
  *
- * Extracted from App.tsx to keep the root component focused on state
- * and routing. All run options (snapshot window, resolution, carbon
- * price, dry-run toggle) live here; the parent owns the state values.
+ * Only the two mode toggles (Single period / Pathway, Rolling horizon On / Off)
+ * plus Force-LP and Dry-run options live here. Snapshot window, time resolution,
+ * investment periods, and rolling-horizon details are configured in the sidebar.
  */
-import React, { useMemo } from 'react';
-import { GridRow, PathwayConfig } from '../../shared/types';
-import { DualRangeSlider } from '../../shared/components/DualRangeSlider';
-import { RUN_WINDOW } from '../../constants';
+import React from 'react';
+import { PathwayConfig, RollingHorizonConfig } from '../../shared/types';
 
 export interface RunDialogProps {
   open: boolean;
   onClose: () => void;
 
-  maxSnapshots: number;
-  snapshotStart: number;
-  snapshotEnd: number;
-  snapshotWeight: number;
   forceLp: boolean;
   dryRun: boolean;
-  snapshots: GridRow[];
-  dateFormat: string;
   pathwayConfig: PathwayConfig;
+  rollingConfig: RollingHorizonConfig;
 
-  onSnapshotStartChange: (v: number) => void;
-  onSnapshotEndChange: (v: number) => void;
-  onSnapshotWeightChange: (v: number) => void;
   onForceLpChange: (v: boolean) => void;
   onDryRunChange: (v: boolean) => void;
   onPathwayConfigChange: (config: PathwayConfig) => void;
+  onRollingConfigChange: (config: RollingHorizonConfig) => void;
 
   onRun: () => void;
 }
 
-// ── Snapshot datetime helpers ─────────────────────────────────────────────────
-
-function getRawSnapshotStr(index: number, snapshots: GridRow[]): string {
-  const row = snapshots[index];
-  if (!row) return '';
-  const raw = String(row.snapshot ?? row.name ?? row.datetime ?? '').trim();
-  return raw.toLowerCase() === 'now' ? '' : raw;
-}
-
-function parseDateWithFormat(raw: string, dateFormat: string): Date {
-  // For dmy: rewrite "dd/mm/yyyy hh:mm" or "dd-mm-yyyy hh:mm" to ISO
-  if (dateFormat === 'dmy') {
-    // Match dd/mm/yyyy or dd-mm-yyyy optionally followed by time
-    const m = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})(.*)$/);
-    if (m) return new Date(`${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}${m[4]}`);
-  }
-  if (dateFormat === 'mdy') {
-    // Match mm/dd/yyyy or mm-dd-yyyy optionally followed by time
-    const m = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})(.*)$/);
-    if (m) return new Date(`${m[3]}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}${m[4]}`);
-  }
-  // auto / ymd: let the browser parse (works for ISO and most unambiguous formats)
-  return new Date(raw);
-}
-
-function formatSnapLabel(index: number, snapshots: GridRow[], multiYear: boolean, dateFormat: string): string {
-  const raw = getRawSnapshotStr(index, snapshots);
-  if (!raw) return String(index);
-  try {
-    const d = parseDateWithFormat(raw, dateFormat);
-    if (isNaN(d.getTime())) return raw;
-    const mo = d.toLocaleString('en', { month: 'short' });
-    const day = d.getDate();
-    const hr = d.getHours().toString().padStart(2, '0') + ':00';
-    return multiYear ? `${d.getFullYear()} ${mo} ${day}` : `${mo} ${day} ${hr}`;
-  } catch {
-    return raw;
-  }
-}
-
-// ── RunDialog ─────────────────────────────────────────────────────────────────
-
 export function RunDialog({
   open,
   onClose,
-  maxSnapshots,
-  snapshotStart,
-  snapshotEnd,
-  snapshotWeight,
   forceLp,
   dryRun,
-  snapshots,
-  dateFormat,
   pathwayConfig,
-  onSnapshotStartChange,
-  onSnapshotEndChange,
-  onSnapshotWeightChange,
+  rollingConfig,
   onForceLpChange,
   onDryRunChange,
   onPathwayConfigChange,
+  onRollingConfigChange,
   onRun,
 }: RunDialogProps) {
-  // Detect whether snapshots have real datetimes and whether they span multiple years
-  const { hasDatetimes, multiYear, yearMarkers } = useMemo(() => {
-    if (!snapshots.length) return { hasDatetimes: false, multiYear: false, yearMarkers: [] };
-
-    const firstRaw = getRawSnapshotStr(0, snapshots);
-    if (!firstRaw) return { hasDatetimes: false, multiYear: false, yearMarkers: [] };
-    const firstDate = parseDateWithFormat(firstRaw, dateFormat);
-    if (isNaN(firstDate.getTime())) return { hasDatetimes: false, multiYear: false, yearMarkers: [] };
-
-    // Compute year boundary markers across the full snapshot array
-    const seen = new Set<number>();
-    const markers: Array<{ year: number; pct: number }> = [];
-    const total = snapshots.length;
-    for (let i = 0; i < total; i++) {
-      const raw = getRawSnapshotStr(i, snapshots);
-      if (!raw) break;
-      const d = parseDateWithFormat(raw, dateFormat);
-      if (isNaN(d.getTime())) break;
-      const yr = d.getFullYear();
-      if (!seen.has(yr)) {
-        seen.add(yr);
-        markers.push({ year: yr, pct: total > 1 ? (i / (total - 1)) * 100 : 0 });
-      }
-    }
-
-    return {
-      hasDatetimes: true,
-      multiYear: markers.length > 1,
-      yearMarkers: markers.length > 1 ? markers : [],
-    };
-  }, [snapshots, dateFormat]);
-
   if (!open) return null;
 
-  // snapshotEnd is exclusive (can equal snapshots.length); clamp to last valid row for label display.
-  const lastIdx = Math.max(0, snapshots.length - 1);
-  const startLabel = hasDatetimes ? formatSnapLabel(Math.min(snapshotStart, lastIdx), snapshots, multiYear, dateFormat) : null;
-  const endLabel   = hasDatetimes ? formatSnapLabel(Math.min(snapshotEnd,   lastIdx), snapshots, multiYear, dateFormat) : null;
   const pathwayEnabled = pathwayConfig.enabled;
+  const rollingEnabled = rollingConfig.enabled;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -146,17 +53,17 @@ export function RunDialog({
           </div>
         </div>
 
-        <div className="run-static-notice" style={{ marginBottom: 12 }}>
-          <strong>Planning mode</strong>
-          <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+        <div className="field">
+          <label className="sg-setting-label">Planning</label>
+          <div className="sg-btn-row">
             <button
-              className={`tb-btn${!pathwayEnabled ? '' : ' tb-btn--muted'}`}
+              className={`tb-btn sg-solver-btn${!pathwayEnabled ? '' : ' tb-btn--muted'}`}
               onClick={() => onPathwayConfigChange({ ...pathwayConfig, enabled: false, planningMode: 'single_period' })}
             >
               Single period
             </button>
             <button
-              className={`tb-btn${pathwayEnabled ? '' : ' tb-btn--muted'}`}
+              className={`tb-btn sg-solver-btn${pathwayEnabled ? '' : ' tb-btn--muted'}`}
               onClick={() => onPathwayConfigChange({
                 ...pathwayConfig,
                 enabled: true,
@@ -173,137 +80,33 @@ export function RunDialog({
               Pathway
             </button>
           </div>
-          {pathwayEnabled && (
-            <p style={{ marginTop: 10 }}>
-              Periods and snapshot mapping are configured in the sidebar's <strong>Multi-year planning</strong> panel.
-              <br />
-              {pathwayConfig.periods.length > 0
-                ? <>Currently {pathwayConfig.periods.length} period(s): {pathwayConfig.periods.map((p) => p.period).join(', ')}.</>
-                : <>No investment periods configured — add at least one in the sidebar.</>}
-            </p>
-          )}
         </div>
 
-        {!pathwayEnabled && maxSnapshots <= 1 ? (
-          <div className="run-static-notice">
-            <strong>Static single-period model</strong>
-            <p>The workbook defines 1 snapshot (<code>now</code>). This runs as a single dispatch period.</p>
+        <div className="field">
+          <label className="sg-setting-label">Rolling horizon</label>
+          <div className="sg-btn-row">
+            <button
+              className={`tb-btn sg-solver-btn${!rollingEnabled ? '' : ' tb-btn--muted'}`}
+              onClick={() => onRollingConfigChange({ ...rollingConfig, enabled: false })}
+            >
+              Off
+            </button>
+            <button
+              className={`tb-btn sg-solver-btn${rollingEnabled ? '' : ' tb-btn--muted'}`}
+              onClick={() => onRollingConfigChange({ ...rollingConfig, enabled: true })}
+            >
+              On
+            </button>
           </div>
-        ) : pathwayEnabled ? (
-          <>
-            <div className="run-static-notice">
-              <strong>Pathway run</strong>
-              <p>The full pathway horizon is solved together. Snapshot window cropping is disabled in pathway mode; only time-resolution downsampling is available.</p>
-            </div>
-            <div className="field" style={{ marginBottom: 8 }}>
-              {(() => {
-                const modeledSnapshots = Math.ceil(maxSnapshots / snapshotWeight);
-                return (
-                  <>
-                    <span style={{ color: 'var(--muted)', fontSize: '0.88rem' }}>
-                      Time resolution — <strong>every {snapshotWeight}h</strong>
-                      {' '}({modeledSnapshots} snapshots across all configured periods)
-                    </span>
-                    <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
-                      {RUN_WINDOW.weightOptions.map((n) => (
-                        <button
-                          key={n}
-                          className={`tb-btn${snapshotWeight === n ? '' : ' tb-btn--muted'}`}
-                          style={{ minWidth: 40 }}
-                          onClick={() => onSnapshotWeightChange(n)}
-                        >
-                          {n}h
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                );
-              })()}
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="field" style={{ marginBottom: yearMarkers.length ? 4 : 16 }}>
-              <span style={{ color: 'var(--muted)', fontSize: '0.88rem' }}>
-                Simulation window — <strong>{snapshotEnd - snapshotStart} hourly steps</strong>
-                {' '}
-                {hasDatetimes
-                  ? <span>({startLabel} → {endLabel})</span>
-                  : <span>(step {snapshotStart} → {snapshotEnd} of {maxSnapshots})</span>
-                }
-              </span>
-              <DualRangeSlider
-                min={0}
-                max={maxSnapshots}
-                low={snapshotStart}
-                high={snapshotEnd}
-                formatLabel={(v) => formatSnapLabel(v, snapshots, multiYear, dateFormat)}
-                onChange={(lo, hi) => { onSnapshotStartChange(lo); onSnapshotEndChange(hi); }}
-              />
-              {yearMarkers.length > 0 && (
-                <div className="snap-year-track">
-                  {yearMarkers.map(({ year, pct }) => (
-                    <span key={year} className="snap-year-chip" style={{ left: `${pct}%` }}>
-                      {year}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
+        </div>
 
-            <div className="field" style={{ marginBottom: 8 }}>
-              {(() => {
-                const windowSize = snapshotEnd - snapshotStart;
-                const modeledSnapshots = Math.ceil(windowSize / snapshotWeight);
-                return (
-                  <>
-                    <span style={{ color: 'var(--muted)', fontSize: '0.88rem' }}>
-                      Time resolution — <strong>every {snapshotWeight}h</strong>
-                      {' '}({modeledSnapshots} snapshots of {windowSize} hourly steps)
-                    </span>
-                    <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
-                      {RUN_WINDOW.weightOptions.map((n) => (
-                        <button
-                          key={n}
-                          className={`tb-btn${snapshotWeight === n ? '' : ' tb-btn--muted'}`}
-                          style={{ minWidth: 40 }}
-                          onClick={() => onSnapshotWeightChange(n)}
-                        >
-                          {n}h
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                );
-              })()}
-            </div>
-
-          </>
-        )}
-
-        {/* Force LP — override all committable=True generators to LP (faster) */}
-        <label style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, marginBottom: 8, cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            checked={forceLp}
-            onChange={(e) => onForceLpChange(e.target.checked)}
-            style={{ width: 16, height: 16, cursor: 'pointer' }}
-          />
-          <span style={{ fontSize: '0.9rem' }}>
-            <strong>Force LP</strong> — ignore <code>committable</code> flags; solve as linear programme (faster)
-          </span>
+        <label className="rd-checkbox">
+          <input type="checkbox" checked={forceLp} onChange={(e) => onForceLpChange(e.target.checked)} />
+          <span>Force LP</span>
         </label>
-
-        <label style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            checked={dryRun}
-            onChange={(e) => onDryRunChange(e.target.checked)}
-            style={{ width: 16, height: 16, cursor: 'pointer' }}
-          />
-          <span style={{ fontSize: '0.9rem' }}>
-            <strong>Dry run</strong> — validate model structure without optimising
-          </span>
+        <label className="rd-checkbox">
+          <input type="checkbox" checked={dryRun} onChange={(e) => onDryRunChange(e.target.checked)} />
+          <span>Dry run</span>
         </label>
 
         <div className="modal-actions">

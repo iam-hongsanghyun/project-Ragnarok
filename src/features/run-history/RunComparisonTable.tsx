@@ -38,6 +38,10 @@ export function RunComparisonTable({ runHistory, activeResults, onToggleComparis
 
   const settingRows: Array<{ label: string; fn: (e: RunHistoryEntry) => string }> = [
     { label: 'Planning mode', fn: (e) => e.results.pathway?.enabled ? 'Pathway' : 'Single period' },
+    { label: 'Rolling horizon', fn: (e) => e.results.rolling?.enabled ? 'On' : 'Off' },
+    { label: 'Rolling horizon size', fn: (e) => e.results.rolling?.enabled ? String(e.results.rolling.horizonSnapshots) : '—' },
+    { label: 'Rolling overlap', fn: (e) => e.results.rolling?.enabled ? String(e.results.rolling.overlapSnapshots) : '—' },
+    { label: 'Rolling windows', fn: (e) => e.results.rolling?.enabled ? String(e.results.rolling.windowCount) : '—' },
     { label: 'Periods',       fn: (e) => e.results.pathway?.enabled ? e.results.pathway.periods.join(', ') : '—' },
     { label: 'Active period', fn: (e) => e.results.pathway?.selectedPeriod != null ? String(e.results.pathway.selectedPeriod) : '—' },
     { label: 'Carbon price',  fn: (e) => e.carbonPrice > 0 ? `${currencySymbol}${e.carbonPrice}/t` : '—' },

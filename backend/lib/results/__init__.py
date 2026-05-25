@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from ..constants import carrier_color
 from ..network import build_network
 from ..pathway import parse_pathway_config
+from ..rolling import parse_rolling_config
 from ..utils.series import weighted_sum
 from ..network.custom_constraints import apply_custom_constraints
 from ..module_host import execute_plugins_at_stage, get_module_metadata
@@ -23,6 +24,45 @@ from .emissions import build_emissions_breakdown
 from .expansion import build_expansion_results
 from .full_outputs import build_full_outputs
 from .market import build_co2_shadow, build_merit_order
+
+
+def _snapshot_label(snapshot: Any) -> str:
+    if isinstance(snapshot, tuple) and len(snapshot) == 2:
+        period, timestep = snapshot
+        return f"{int(period)}|{pd.Timestamp(timestep).isoformat() if not isinstance(timestep, str) else timestep}"
+    try:
+        return pd.Timestamp(snapshot).isoformat()
+    except Exception:
+        return str(snapshot)
+
+
+def _rolling_window_summaries(
+    snapshots: pd.Index,
+    horizon: int,
+    overlap: int,
+) -> list[dict[str, Any]]:
+    step = max(1, horizon - overlap)
+    windows: list[dict[str, Any]] = []
+    starts = list(range(0, len(snapshots), step))
+    for index, start in enumerate(starts):
+        end = min(len(snapshots), start + horizon)
+        accepted_end = end if index == len(starts) - 1 else min(len(snapshots), start + step)
+        solved = snapshots[start:end]
+        accepted = snapshots[start:accepted_end]
+        periods: list[int] = []
+        if isinstance(snapshots, pd.MultiIndex):
+            periods = sorted({int(p) for p in solved.get_level_values("period").unique()})
+        windows.append({
+            "index": index + 1,
+            "solvedStart": _snapshot_label(solved[0]),
+            "solvedEnd": _snapshot_label(solved[-1]),
+            "acceptedStart": _snapshot_label(accepted[0]),
+            "acceptedEnd": _snapshot_label(accepted[-1]),
+            "solvedCount": int(len(solved)),
+            "acceptedCount": int(len(accepted)),
+            "periods": periods,
+        })
+    return windows
 
 
 def _pathway_period_summaries(
@@ -70,6 +110,7 @@ def run_pypsa(
     options = options or {}
     enabled_modules: list[str] = list(options.get("enabledModules") or [])
     pathway = parse_pathway_config(options.get("pathwayConfig"))
+    rolling = parse_rolling_config(options.get("rollingConfig"))
 
     # ── pre-build ─────────────────────────────────────────────────────────────
     pre_outputs = execute_plugins_at_stage(
@@ -118,19 +159,42 @@ def run_pypsa(
     if solver_type in ("ipm", "simplex"):
         solver_options["solver"] = solver_type
 
+    rolling_windows: list[dict[str, Any]] = []
     try:
-        network.optimize(
-            multi_investment_periods=pathway.enabled,
-            solver_name="highs",
-            solver_options=solver_options if solver_options else {},
-            extra_functionality=extra_functionality,
-        )
+        if rolling.enabled:
+            rolling_windows = _rolling_window_summaries(
+                network.snapshots,
+                rolling.horizon_snapshots,
+                rolling.overlap_snapshots,
+            )
+            network.optimize.optimize_with_rolling_horizon(
+                horizon=rolling.horizon_snapshots,
+                overlap=rolling.overlap_snapshots,
+                multi_investment_periods=pathway.enabled,
+                solver_name="highs",
+                solver_options=solver_options if solver_options else {},
+                extra_functionality=extra_functionality,
+            )
+        else:
+            network.optimize(
+                multi_investment_periods=pathway.enabled,
+                solver_name="highs",
+                solver_options=solver_options if solver_options else {},
+                extra_functionality=extra_functionality,
+            )
         solver_note = "HiGHS"
         if solver_options.get("threads"):
             solver_note += f" ({solver_options['threads']} threads)"
         if solver_options.get("solver"):
             solver_note += f", {solver_options['solver'].upper()}"
-        notes.append(f"PyPSA optimize() solved with {solver_note}.")
+        if rolling.enabled:
+            notes.append(
+                "PyPSA rolling horizon solved with "
+                f"{solver_note}: horizon {rolling.horizon_snapshots}, overlap {rolling.overlap_snapshots}, "
+                f"{len(rolling_windows)} window(s)."
+            )
+        else:
+            notes.append(f"PyPSA optimize() solved with {solver_note}.")
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"PyPSA optimization failed: {exc}") from exc
 
@@ -321,6 +385,13 @@ def run_pypsa(
             "storeWeight": float(store_weights.iloc[0]) if len(store_weights) else snapshot_weight,
             "planningMode": pathway.planning_mode,
             "investmentPeriods": [row.period for row in pathway.periods],
+            "rolling": {
+                "enabled": rolling.enabled,
+                "horizonSnapshots": rolling.horizon_snapshots,
+                "overlapSnapshots": rolling.overlap_snapshots,
+                "stepSnapshots": rolling.step_snapshots,
+                "windowCount": len(rolling_windows),
+            } if rolling.enabled else None,
         },
         "pathway": {
             "enabled": pathway.enabled,
@@ -329,6 +400,14 @@ def run_pypsa(
             "snapshotMappingMode": pathway.snapshot_mapping_mode,
             "summaries": pathway_summaries,
         } if pathway.enabled else None,
+        "rolling": {
+            "enabled": rolling.enabled,
+            "horizonSnapshots": rolling.horizon_snapshots,
+            "overlapSnapshots": rolling.overlap_snapshots,
+            "stepSnapshots": rolling.step_snapshots,
+            "windowCount": len(rolling_windows),
+            "windows": rolling_windows,
+        } if rolling.enabled else None,
         # Full PyPSA-native output dataset (every output attribute, every
         # component, every snapshot). The frontend turns this into per-asset
         # detail records (`assetDetails`) locally and uses the same cache for

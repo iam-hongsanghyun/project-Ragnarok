@@ -37,6 +37,7 @@ export interface DeriveRunResultsOptions {
   narrative?: string[];
   selectedPeriod?: number | null;
   pathway?: RunResults['pathway'] | null;
+  rolling?: RunResults['rolling'] | null;
 }
 
 type SeriesMap = NonNullable<RunResults['outputs']>['series'];
@@ -142,6 +143,7 @@ export function deriveRunResults(
     narrative = ['Imported project. Outputs restored from workbook — no fresh solve.'],
     selectedPeriod = null,
     pathway = null,
+    rolling = null,
   } = options;
 
   const detectedPeriods = detectPeriods(outputs.series);
@@ -610,6 +612,13 @@ export function deriveRunResults(
     storeWeight: W,
     planningMode,
     investmentPeriods: pathwayPeriods,
+    rolling: rolling ? {
+      enabled: rolling.enabled,
+      horizonSnapshots: rolling.horizonSnapshots,
+      overlapSnapshots: rolling.overlapSnapshots,
+      stepSnapshots: rolling.stepSnapshots,
+      windowCount: rolling.windowCount,
+    } : undefined,
   };
 
   return {
@@ -639,5 +648,6 @@ export function deriveRunResults(
     } : undefined,
     assetDetails,
     outputs,
+    rolling: rolling ?? undefined,
   };
 }

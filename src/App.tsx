@@ -11,6 +11,7 @@ import {
   ModuleConfigField,
   ModuleDescriptor,
   PathwayConfig,
+  RollingHorizonConfig,
   Primitive,
   RunHistoryEntry,
   RunResults,
@@ -32,6 +33,7 @@ import { buildRowsFromGeneratorDetails, buildSystemLoadRows, normalizeSeriesPoin
 import { withDerivedAssetDetails } from './shared/utils/deriveAssetDetails';
 import { deriveRunResults } from './shared/utils/deriveRunResults';
 import { defaultPathwayConfig, getDefaultSelectedPeriod, readPathwayConfigFromModel, samePathwayConfig, writePathwayConfigToModel } from './shared/utils/pathway';
+import { defaultRollingConfig, normalizeRollingConfig, readRollingConfigFromModel, sameRollingConfig, writeRollingConfigToModel } from './shared/utils/rolling';
 import { RunDialog } from './features/run/RunDialog';
 import { Sidebar } from './layout/Sidebar';
 import { MapPane } from './features/map/MapPane';
@@ -70,6 +72,7 @@ function AppInner() {
   const [dryRun, setDryRun] = useState(false);
   const [runHistory, setRunHistory] = useState<RunHistoryEntry[]>([]);
   const [pathwayConfig, setPathwayConfig] = useState<PathwayConfig>(() => defaultPathwayConfig());
+  const [rollingConfig, setRollingConfig] = useState<RollingHorizonConfig>(() => defaultRollingConfig());
   const [validateResult, setValidateResult] = useState<{
     valid: boolean;
     errors: string[];
@@ -125,6 +128,7 @@ function AppInner() {
         ...results.pathway,
         selectedPeriod,
       },
+      rolling: results.rolling,
     });
     return {
       ...results,
@@ -254,6 +258,13 @@ function AppInner() {
     });
   }, [pathwayConfig]);
 
+  useEffect(() => {
+    setModel((current) => {
+      const next = writeRollingConfigToModel(current, rollingConfig);
+      return sameRollingConfig(readRollingConfigFromModel(current), rollingConfig) ? current : next;
+    });
+  }, [rollingConfig]);
+
   const bounds = useMemo(() => getBounds(model), [model.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
   const busIndex = useMemo(() => getBusIndex(model), [model.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -275,6 +286,7 @@ function AppInner() {
   const resetForNewModel = (nextModel: WorkbookModel, name?: string) => {
     const snapshotMax = snapshotMaxFromWorkbook(nextModel.snapshots);
     const nextPathway = readPathwayConfigFromModel(nextModel);
+    const nextRolling = readRollingConfigFromModel(nextModel);
     setMaxSnapshots(snapshotMax);
     // Default run window covers the FULL snapshot range of the loaded model,
     // so analytics charts show the entire output. Users can shrink the window
@@ -291,6 +303,7 @@ function AppInner() {
       ...nextPathway,
       selectedPeriod: getDefaultSelectedPeriod(nextPathway),
     });
+    setRollingConfig(normalizeRollingConfig(nextRolling));
     if (name) setFilename(name);
   };
 
@@ -340,12 +353,23 @@ function AppInner() {
             snapshotMappingMode: importedPathway.snapshotMappingMode,
             summaries: [],
           } : null),
+          rolling: metadata.rolling ?? null,
           narrative: metadata.narrative ?? [`Imported project from ${file.name}. Outputs restored from workbook.`],
         });
         imported.pluginAnalytics = metadata.pluginAnalytics;
         imported.co2Shadow = metadata.co2Shadow ?? imported.co2Shadow;
         imported.runMeta = metadata.runMeta ?? imported.runMeta;
         imported.pathway = metadata.pathway ?? imported.pathway;
+        imported.rolling = metadata.rolling ?? imported.rolling;
+        if (metadata.rolling) {
+          setRollingConfig((current) => normalizeRollingConfig({
+            ...current,
+            enabled: metadata.rolling?.enabled ?? current.enabled,
+            horizonSnapshots: metadata.rolling?.horizonSnapshots ?? current.horizonSnapshots,
+            overlapSnapshots: metadata.rolling?.overlapSnapshots ?? current.overlapSnapshots,
+            stepSnapshots: metadata.rolling?.stepSnapshots ?? current.stepSnapshots,
+          }));
+        }
         setResults(imported);
         setAnalyticsFocus({ type: 'system' });
         setRunHistory((hist) => {
@@ -396,6 +420,7 @@ function AppInner() {
         narrative: results.narrative,
         runMeta: results.runMeta,
         pathway: results.pathway,
+        rolling: results.rolling,
       } : undefined, out);
       showToast(
         results?.outputs
@@ -507,19 +532,32 @@ function AppInner() {
 
   const handleRestoreRun = (entry: RunHistoryEntry) => {
     setResults(entry.results);
-    if (entry.results.pathway?.enabled) {
-      setPathwayConfig((current) => ({
-        ...current,
-        enabled: true,
-        planningMode: 'pathway',
-        periods: entry.results.pathway?.summaries?.map((row) => ({
-          period: row.period,
-          objectiveWeight: row.objectiveWeight,
-          yearsWeight: row.yearsWeight,
-        })) ?? current.periods,
-        selectedPeriod: entry.results.pathway?.selectedPeriod ?? current.selectedPeriod,
-      }));
-    }
+    setPathwayConfig((current) => entry.results.pathway?.enabled ? ({
+      ...current,
+      enabled: true,
+      planningMode: 'pathway',
+      periods: entry.results.pathway?.summaries?.map((row) => ({
+        period: row.period,
+        objectiveWeight: row.objectiveWeight,
+        yearsWeight: row.yearsWeight,
+      })) ?? current.periods,
+      selectedPeriod: entry.results.pathway?.selectedPeriod ?? current.selectedPeriod,
+    }) : {
+      ...current,
+      enabled: false,
+      planningMode: 'single_period',
+      selectedPeriod: null,
+    });
+    setRollingConfig((current) => entry.results.rolling ? normalizeRollingConfig({
+      ...current,
+      enabled: entry.results.rolling?.enabled ?? current.enabled,
+      horizonSnapshots: entry.results.rolling?.horizonSnapshots ?? current.horizonSnapshots,
+      overlapSnapshots: entry.results.rolling?.overlapSnapshots ?? current.overlapSnapshots,
+      stepSnapshots: entry.results.rolling?.stepSnapshots ?? current.stepSnapshots,
+    }) : {
+      ...current,
+      enabled: false,
+    });
     setTab('Analytics');
     setAnalyticsSubTab('Result');
     setAnalyticsFocus({ type: 'system' });
@@ -626,6 +664,7 @@ function AppInner() {
         ...pathwayConfig,
         selectedPeriod: getDefaultSelectedPeriod(pathwayConfig),
       },
+      rollingConfig: normalizeRollingConfig(rollingConfig),
     };
 
     setRunDialogOpen(false);
@@ -690,19 +729,32 @@ function AppInner() {
       const selectedPeriod = rawResults.pathway?.enabled
         ? (rawResults.pathway.selectedPeriod ?? rawResults.pathway.periods[0] ?? null)
         : null;
-      if (rawResults.pathway?.enabled) {
-        setPathwayConfig((current) => ({
-          ...current,
-          planningMode: 'pathway',
-          enabled: true,
-          periods: rawResults.pathway?.summaries?.map((row) => ({
-            period: row.period,
-            objectiveWeight: row.objectiveWeight,
-            yearsWeight: row.yearsWeight,
-          })) ?? current.periods,
-          selectedPeriod,
-        }));
-      }
+      setPathwayConfig((current) => rawResults.pathway?.enabled ? ({
+        ...current,
+        planningMode: 'pathway',
+        enabled: true,
+        periods: rawResults.pathway?.summaries?.map((row) => ({
+          period: row.period,
+          objectiveWeight: row.objectiveWeight,
+          yearsWeight: row.yearsWeight,
+        })) ?? current.periods,
+        selectedPeriod,
+      }) : {
+        ...current,
+        enabled: false,
+        planningMode: 'single_period',
+        selectedPeriod: null,
+      });
+      setRollingConfig((current) => rawResults.rolling ? normalizeRollingConfig({
+        ...current,
+        enabled: rawResults.rolling?.enabled ?? current.enabled,
+        horizonSnapshots: rawResults.rolling?.horizonSnapshots ?? current.horizonSnapshots,
+        overlapSnapshots: rawResults.rolling?.overlapSnapshots ?? current.overlapSnapshots,
+        stepSnapshots: rawResults.rolling?.stepSnapshots ?? current.stepSnapshots,
+      }) : {
+        ...current,
+        enabled: false,
+      });
       setResults(rawResults);
       setRunStatus('done');
       setAnalyticsFocus({ type: 'system' });
@@ -715,6 +767,7 @@ function AppInner() {
           narrative: rawResults.narrative,
           selectedPeriod,
           pathway: rawResults.pathway,
+          rolling: rawResults.rolling,
         })
         : withDerivedAssetDetails(model, rawResults, settings.currencySymbol);
       const doneMsg = `Completed — ${visible.runMeta.snapshotCount} snapshots, ${visible.runMeta.modeledHours} h.`;
@@ -981,6 +1034,15 @@ function AppInner() {
               }}
               pathwayConfig={pathwayConfig}
               onPathwayConfigChange={setPathwayConfig}
+              rollingConfig={rollingConfig}
+              onRollingConfigChange={(config) => setRollingConfig(normalizeRollingConfig(config))}
+              maxSnapshots={maxSnapshots}
+              snapshotStart={snapshotStart}
+              snapshotEnd={snapshotEnd}
+              snapshotWeight={snapshotWeight}
+              onSnapshotStartChange={setSnapshotStart}
+              onSnapshotEndChange={setSnapshotEnd}
+              onSnapshotWeightChange={setSnapshotWeight}
               runHistory={runHistory}
               onRestoreRun={handleRestoreRun}
               onRenameHistoryEntry={handleRenameHistoryEntry}
@@ -1178,22 +1240,15 @@ function AppInner() {
       <RunDialog
         open={runDialogOpen}
         onClose={() => setRunDialogOpen(false)}
-        maxSnapshots={maxSnapshots}
-        snapshotStart={snapshotStart}
-        snapshotEnd={snapshotEnd}
-        snapshotWeight={snapshotWeight}
         forceLp={forceLp}
         dryRun={dryRun}
-        snapshots={model.snapshots}
-        dateFormat={settings.dateFormat}
-        onSnapshotStartChange={setSnapshotStart}
-        onSnapshotEndChange={setSnapshotEnd}
-        onSnapshotWeightChange={setSnapshotWeight}
+        pathwayConfig={pathwayConfig}
+        rollingConfig={rollingConfig}
         onForceLpChange={setForceLp}
         onDryRunChange={setDryRun}
-        onRun={handleRunModel}
-        pathwayConfig={pathwayConfig}
         onPathwayConfigChange={setPathwayConfig}
+        onRollingConfigChange={(c) => setRollingConfig(normalizeRollingConfig(c))}
+        onRun={handleRunModel}
       />
     </div>
   );

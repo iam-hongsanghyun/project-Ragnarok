@@ -5,13 +5,15 @@
  * The parent (<App>) keeps the <aside> shell and the collapse toggle button.
  */
 import React, { useEffect, useState } from 'react';
-import { CustomConstraint, ModuleDescriptor, ModuleHostInventory, PathwayConfig, RunHistoryEntry, RunResults, WorkbookModel } from '../shared/types';
+import { CustomConstraint, ModuleDescriptor, ModuleHostInventory, PathwayConfig, RollingHorizonConfig, RunHistoryEntry, RunResults, WorkbookModel } from '../shared/types';
+import { normalizeRollingConfig } from '../shared/utils/rolling';
 import { SidebarGroup } from '../shared/components/SidebarGroup';
 import { GlobalConstraintsSection } from '../features/constraints/GlobalConstraintsSection';
 import { ModuleManagerSection } from '../features/modules/ModuleManagerSection';
 import { RunHistoryList } from '../features/run-history/RunHistoryList';
+import { DualRangeSlider } from '../shared/components/DualRangeSlider';
 import { DateFormat, SolverType } from '../features/settings/useSettings';
-import { CURRENCIES, MAX_UNPINNED_HISTORY, SETTINGS_CONFIG } from '../constants';
+import { CURRENCIES, MAX_UNPINNED_HISTORY, RUN_WINDOW, SETTINGS_CONFIG } from '../constants';
 import { resolvedColor, stringValue } from '../shared/utils/helpers';
 
 interface Currency { code: string; symbol: string; name: string; }
@@ -33,6 +35,15 @@ export interface SidebarProps {
   onExportReport: () => void;
   pathwayConfig: PathwayConfig;
   onPathwayConfigChange: (config: PathwayConfig) => void;
+  rollingConfig: RollingHorizonConfig;
+  onRollingConfigChange: (config: RollingHorizonConfig) => void;
+  maxSnapshots: number;
+  snapshotStart: number;
+  snapshotEnd: number;
+  snapshotWeight: number;
+  onSnapshotStartChange: (v: number) => void;
+  onSnapshotEndChange: (v: number) => void;
+  onSnapshotWeightChange: (v: number) => void;
   runHistory: RunHistoryEntry[];
   onRestoreRun: (entry: RunHistoryEntry) => void;
   onRenameHistoryEntry: (id: string, label: string) => void;
@@ -83,6 +94,15 @@ export function Sidebar({
   onExportReport,
   pathwayConfig,
   onPathwayConfigChange,
+  rollingConfig,
+  onRollingConfigChange,
+  maxSnapshots,
+  snapshotStart,
+  snapshotEnd,
+  snapshotWeight,
+  onSnapshotStartChange,
+  onSnapshotEndChange,
+  onSnapshotWeightChange,
   runHistory,
   onRestoreRun,
   onRenameHistoryEntry,
@@ -322,6 +342,109 @@ export function Sidebar({
               <p className="sg-setting-hint">
                 Pathway runs need either a <code>period</code> column on the snapshots sheet, or repeat-all mapping.
               </p>
+            </div>
+          </>
+        )}
+      </SidebarGroup>
+
+      <SidebarGroup title="Simulation window">
+        <div className="sg-setting-row">
+          <label className="sg-setting-label">
+            Window — {pathwayConfig.enabled
+              ? `${maxSnapshots} steps (pathway uses full horizon)`
+              : `${snapshotEnd - snapshotStart} of ${maxSnapshots} steps`}
+          </label>
+          {!pathwayConfig.enabled && maxSnapshots > 1 && (
+            <DualRangeSlider
+              min={0}
+              max={maxSnapshots}
+              low={snapshotStart}
+              high={snapshotEnd}
+              onChange={(lo, hi) => { onSnapshotStartChange(lo); onSnapshotEndChange(hi); }}
+            />
+          )}
+        </div>
+        <div className="sg-setting-row">
+          <label className="sg-setting-label">Resolution — every {snapshotWeight}h</label>
+          <div className="sg-btn-row">
+            {RUN_WINDOW.weightOptions.map((n) => (
+              <button
+                key={n}
+                className={`tb-btn sg-solver-btn${snapshotWeight === n ? '' : ' tb-btn--muted'}`}
+                onClick={() => onSnapshotWeightChange(n)}
+              >
+                {n}h
+              </button>
+            ))}
+          </div>
+        </div>
+      </SidebarGroup>
+
+      <SidebarGroup
+        title="Rolling horizon"
+        badge={
+          rollingConfig.enabled
+            ? <span className="sg-badge">{rollingConfig.stepSnapshots} step</span>
+            : undefined
+        }
+      >
+        <div className="sg-setting-row">
+          <label className="sg-setting-label">Mode</label>
+          <div className="sg-btn-row">
+            <button
+              className={`tb-btn sg-solver-btn${!rollingConfig.enabled ? '' : ' tb-btn--muted'}`}
+              onClick={() => onRollingConfigChange({ ...normalizeRollingConfig(rollingConfig), enabled: false })}
+            >
+              Off
+            </button>
+            <button
+              className={`tb-btn sg-solver-btn${rollingConfig.enabled ? '' : ' tb-btn--muted'}`}
+              onClick={() => onRollingConfigChange({ ...normalizeRollingConfig(rollingConfig), enabled: true })}
+            >
+              On
+            </button>
+          </div>
+          <p className="sg-setting-hint">
+            Rolling horizon is independent from single-period vs pathway mode. The backend stitches windows into one result.
+          </p>
+        </div>
+
+        {rollingConfig.enabled && (
+          <>
+            <div className="sg-setting-divider" />
+            <div className="sg-setting-row">
+              <label className="sg-setting-label" htmlFor="sg-rolling-horizon">Horizon (snapshots)</label>
+              <input
+                id="sg-rolling-horizon"
+                type="number"
+                min={1}
+                step={1}
+                className="sg-num-input"
+                value={rollingConfig.horizonSnapshots}
+                onChange={(e) => onRollingConfigChange({
+                  ...rollingConfig,
+                  horizonSnapshots: Number(e.target.value) || 1,
+                })}
+              />
+            </div>
+            <div className="sg-setting-row">
+              <label className="sg-setting-label" htmlFor="sg-rolling-overlap">Overlap (snapshots)</label>
+              <input
+                id="sg-rolling-overlap"
+                type="number"
+                min={0}
+                step={1}
+                className="sg-num-input"
+                value={rollingConfig.overlapSnapshots}
+                onChange={(e) => onRollingConfigChange({
+                  ...rollingConfig,
+                  overlapSnapshots: Math.max(0, Number(e.target.value) || 0),
+                })}
+              />
+            </div>
+            <div className="sg-setting-row">
+              <label className="sg-setting-label">Effective step</label>
+              <div className="sg-setting-value">{rollingConfig.stepSnapshots} snapshots</div>
             </div>
           </>
         )}

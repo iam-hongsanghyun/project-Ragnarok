@@ -4,6 +4,7 @@ from typing import Any
 
 from ..models import RunPayload
 from ..pathway import parse_pathway_config
+from ..rolling import parse_rolling_config
 from ..utils.coerce import number, text
 from ..utils.workbook import workbook_rows
 
@@ -14,6 +15,7 @@ def validate_model(payload: RunPayload) -> dict[str, Any]:
     warnings: list[str] = []
     model = payload.model
     pathway = parse_pathway_config((payload.options or {}).get("pathwayConfig") if payload.options else None)
+    rolling = parse_rolling_config((payload.options or {}).get("rollingConfig") if payload.options else None)
 
     # ── Snapshots ──────────────────────────────────────────────────────────────
     snapshot_rows = workbook_rows(model, "snapshots")
@@ -61,6 +63,37 @@ def validate_model(payload: RunPayload) -> dict[str, Any]:
                     )
         elif snapshot_count == 0:
             errors.append("Pathway mode requires at least one snapshot row.")
+
+    effective_snapshot_count = snapshot_count
+    if not pathway.enabled:
+        seen_labels: set[str] = set()
+        effective_snapshot_count = 0
+        for row in snapshot_rows:
+            label = str(
+                row.get("snapshot")
+                or row.get("name")
+                or row.get("datetime")
+                or row.get("timestep")
+                or row.get("index")
+                or ""
+            ).strip()
+            if not label:
+                continue
+            if label in seen_labels:
+                continue
+            seen_labels.add(label)
+            effective_snapshot_count += 1
+        effective_snapshot_count = max(effective_snapshot_count, 1 if snapshot_count else 0)
+
+    if rolling.enabled:
+        if effective_snapshot_count <= 0:
+            errors.append("Rolling horizon requires at least one snapshot.")
+        if rolling.horizon_snapshots <= 0:
+            errors.append("Rolling horizon size must be a positive integer.")
+        if rolling.overlap_snapshots < 0:
+            errors.append("Rolling overlap must be zero or greater.")
+        if rolling.overlap_snapshots >= rolling.horizon_snapshots:
+            errors.append("Rolling overlap must be smaller than the horizon size.")
 
     # ── Topology ────────────────────────────────────────────────────────────────
     buses = workbook_rows(model, "buses")

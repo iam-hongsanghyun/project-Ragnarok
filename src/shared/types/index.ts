@@ -23,6 +23,7 @@ export type TimeframeOption = 'aggregated' | 'yearly' | 'monthly' | 'weekly' | '
 export type PlanningMode = 'single_period' | 'pathway';
 export type SnapshotMappingMode = 'explicit_period_column' | 'repeat_all_snapshots';
 export type PathwayOverridePolicy = 'reuse_base_inputs';
+export type RollingStepPolicy = 'derived';
 
 export type ConstraintMetric =
   | 'co2_cap' | 'max_load_shed'
@@ -86,6 +87,27 @@ export interface PathwayConfig {
   overridePolicy: PathwayOverridePolicy;
   periods: PathwayPeriodConfig[];
   selectedPeriod: number | null;
+}
+
+export interface RollingWindowSummary {
+  index: number;
+  solvedStart: string;
+  solvedEnd: string;
+  acceptedStart: string;
+  acceptedEnd: string;
+  solvedCount: number;
+  acceptedCount: number;
+  periods: number[];
+}
+
+export interface RollingHorizonConfig {
+  enabled: boolean;
+  horizonSnapshots: number;
+  overlapSnapshots: number;
+  stepPolicy: RollingStepPolicy;
+  stepSnapshots: number;
+  preserveTerminalState: boolean;
+  selectedWindow: number | null;
 }
 
 export interface PathwayPeriodSummary {
@@ -313,6 +335,13 @@ export interface RunResults {
     storeWeight: number;
     planningMode?: PlanningMode;
     investmentPeriods?: number[];
+    rolling?: {
+      enabled: boolean;
+      horizonSnapshots: number;
+      overlapSnapshots: number;
+      stepSnapshots: number;
+      windowCount: number;
+    };
   };
   pathway?: {
     enabled: boolean;
@@ -320,6 +349,14 @@ export interface RunResults {
     selectedPeriod: number | null;
     snapshotMappingMode: SnapshotMappingMode;
     summaries: PathwayPeriodSummary[];
+  };
+  rolling?: {
+    enabled: boolean;
+    horizonSnapshots: number;
+    overlapSnapshots: number;
+    stepSnapshots: number;
+    windowCount: number;
+    windows: RollingWindowSummary[];
   };
   assetDetails: {
     generators: Record<string, GeneratorDetail>;
