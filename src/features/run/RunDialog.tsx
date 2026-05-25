@@ -1,9 +1,10 @@
 /**
  * RunDialog — minimal modal for kicking off a solve.
  *
- * Only the two mode toggles (Single period / Pathway, Rolling horizon On / Off)
- * plus Force-LP and Dry-run options live here. Snapshot window, time resolution,
- * investment periods, and rolling-horizon details are configured in the sidebar.
+ * Two groups only: Planning (Single period / Pathway toggle) and
+ * Optimisation settings (Rolling horizon / Force LP / Dry run — each a
+ * single button that lights up when active). Everything else lives in
+ * the sidebar.
  */
 import React from 'react';
 import { PathwayConfig, RollingHorizonConfig } from '../../shared/types';
@@ -57,13 +58,13 @@ export function RunDialog({
           <label className="sg-setting-label">Planning</label>
           <div className="sg-btn-row">
             <button
-              className={`tb-btn sg-solver-btn${!pathwayEnabled ? '' : ' tb-btn--muted'}`}
+              className={`tb-btn${!pathwayEnabled ? '' : ' tb-btn--muted'}`}
               onClick={() => onPathwayConfigChange({ ...pathwayConfig, enabled: false, planningMode: 'single_period' })}
             >
               Single period
             </button>
             <button
-              className={`tb-btn sg-solver-btn${pathwayEnabled ? '' : ' tb-btn--muted'}`}
+              className={`tb-btn${pathwayEnabled ? '' : ' tb-btn--muted'}`}
               onClick={() => onPathwayConfigChange({
                 ...pathwayConfig,
                 enabled: true,
@@ -83,31 +84,28 @@ export function RunDialog({
         </div>
 
         <div className="field">
-          <label className="sg-setting-label">Rolling horizon</label>
+          <label className="sg-setting-label">Optimisation settings</label>
           <div className="sg-btn-row">
             <button
-              className={`tb-btn sg-solver-btn${!rollingEnabled ? '' : ' tb-btn--muted'}`}
-              onClick={() => onRollingConfigChange({ ...rollingConfig, enabled: false })}
+              className={`tb-btn${rollingEnabled ? '' : ' tb-btn--muted'}`}
+              onClick={() => onRollingConfigChange({ ...rollingConfig, enabled: !rollingEnabled })}
             >
-              Off
+              Rolling horizon
             </button>
             <button
-              className={`tb-btn sg-solver-btn${rollingEnabled ? '' : ' tb-btn--muted'}`}
-              onClick={() => onRollingConfigChange({ ...rollingConfig, enabled: true })}
+              className={`tb-btn${forceLp ? '' : ' tb-btn--muted'}`}
+              onClick={() => onForceLpChange(!forceLp)}
             >
-              On
+              Force LP
+            </button>
+            <button
+              className={`tb-btn${dryRun ? '' : ' tb-btn--muted'}`}
+              onClick={() => onDryRunChange(!dryRun)}
+            >
+              Dry run
             </button>
           </div>
         </div>
-
-        <label className="rd-checkbox">
-          <input type="checkbox" checked={forceLp} onChange={(e) => onForceLpChange(e.target.checked)} />
-          <span>Force LP</span>
-        </label>
-        <label className="rd-checkbox">
-          <input type="checkbox" checked={dryRun} onChange={(e) => onDryRunChange(e.target.checked)} />
-          <span>Dry run</span>
-        </label>
 
         <div className="modal-actions">
           <button className="secondary-button" onClick={onClose}>Cancel</button>
