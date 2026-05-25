@@ -243,7 +243,7 @@ export function Sidebar({
                 <strong>Years</strong>
                 <span />
                 {pathwayConfig.periods.map((row, index) => (
-                  <React.Fragment key={`${row.period}-${index}`}>
+                  <React.Fragment key={`pathway-row-${index}`}>
                     <input
                       type="number"
                       className="sg-pathway-input"
