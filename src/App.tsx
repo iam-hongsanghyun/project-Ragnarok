@@ -15,6 +15,8 @@ import {
   Primitive,
   RunHistoryEntry,
   RunResults,
+  ScenarioCatalog,
+  ScenarioPreset,
   SheetName,
   TimeSeriesRow,
   TimeSeriesSeries,
@@ -34,6 +36,7 @@ import { withDerivedAssetDetails } from './shared/utils/deriveAssetDetails';
 import { deriveRunResults } from './shared/utils/deriveRunResults';
 import { defaultPathwayConfig, getDefaultSelectedPeriod, readPathwayConfigFromModel, samePathwayConfig, writePathwayConfigToModel } from './shared/utils/pathway';
 import { defaultRollingConfig, normalizeRollingConfig, readRollingConfigFromModel, sameRollingConfig, writeRollingConfigToModel } from './shared/utils/rolling';
+import { buildScenarioPreset, defaultScenarioCatalog, readScenarioCatalogFromModel, sameScenarioCatalog, writeScenarioCatalogToModel } from './shared/utils/scenarios';
 import { RunDialog } from './features/run/RunDialog';
 import { Sidebar } from './layout/Sidebar';
 import { MapPane } from './features/map/MapPane';
@@ -97,6 +100,19 @@ function AppInner() {
   }, []);
 
   const [settings, updateSettings] = useSettings();
+  const [scenarioCatalog, setScenarioCatalog] = useState<ScenarioCatalog>(() => defaultScenarioCatalog({
+    snapshotStart: RUN_WINDOW.initialSnapshotStart,
+    snapshotEnd: RUN_WINDOW.defaultSnapshotEnd,
+    snapshotWeight: RUN_WINDOW.defaultSnapshotWeight,
+    carbonPrice: 0,
+    discountRate: settings.discountRate,
+    forceLp: false,
+    enableLoadShedding: settings.enableLoadShedding,
+    loadSheddingCost: settings.loadSheddingCost,
+    pathwayConfig: defaultPathwayConfig(),
+    rollingConfig: defaultRollingConfig(),
+    constraints: DEFAULT_CONSTRAINTS,
+  }));
   const moduleHost = useModuleHost();
   const modelIssues = useModelIssues(model);
 
@@ -142,6 +158,130 @@ function AppInner() {
       runMeta: derived.runMeta,
     };
   }, [results, model, settings.currencySymbol, settings.discountRate, carbonPrice, snapshotWeight, pathwayConfig]);
+
+  const captureCurrentScenario = useCallback((overrides: Partial<ScenarioPreset> = {}): ScenarioPreset => (
+    buildScenarioPreset({
+      id: overrides.id,
+      label: overrides.label,
+      notes: overrides.notes,
+      snapshotStart,
+      snapshotEnd,
+      snapshotWeight,
+      carbonPrice,
+      discountRate: settings.discountRate,
+      forceLp,
+      enableLoadShedding: settings.enableLoadShedding,
+      loadSheddingCost: settings.loadSheddingCost,
+      pathwayConfig: {
+        ...pathwayConfig,
+        selectedPeriod: getDefaultSelectedPeriod(pathwayConfig),
+      },
+      rollingConfig: normalizeRollingConfig(rollingConfig),
+      constraints,
+    })
+  ), [
+    snapshotStart,
+    snapshotEnd,
+    snapshotWeight,
+    carbonPrice,
+    settings.discountRate,
+    settings.enableLoadShedding,
+    settings.loadSheddingCost,
+    forceLp,
+    pathwayConfig,
+    rollingConfig,
+    constraints,
+  ]);
+
+  const activeScenario = useMemo(
+    () => scenarioCatalog.scenarios.find((scenario) => scenario.id === scenarioCatalog.activeScenarioId) ?? null,
+    [scenarioCatalog],
+  );
+
+  const scenarioDirty = useMemo(() => {
+    if (!activeScenario) return false;
+    return JSON.stringify(captureCurrentScenario({
+      id: activeScenario.id,
+      label: activeScenario.label,
+      notes: activeScenario.notes,
+    })) !== JSON.stringify(activeScenario);
+  }, [activeScenario, captureCurrentScenario]);
+
+  const resetForNewModel = useCallback((nextModel: WorkbookModel, name?: string) => {
+    const snapshotMax = snapshotMaxFromWorkbook(nextModel.snapshots);
+    const nextPathway = readPathwayConfigFromModel(nextModel);
+    const nextRolling = readRollingConfigFromModel(nextModel);
+    const nextScenarioCatalog = readScenarioCatalogFromModel(nextModel);
+    const activeImportedScenario = nextScenarioCatalog.scenarios.find(
+      (scenario) => scenario.id === nextScenarioCatalog.activeScenarioId,
+    ) ?? null;
+    setMaxSnapshots(snapshotMax);
+    setSnapshotEnd(snapshotMax);
+    setSnapshotStart(RUN_WINDOW.initialSnapshotStart);
+    setModel(nextModel);
+    setResults(null);
+    setRunStatus('idle');
+    setChartSections([]);
+    setValidateResult(null);
+    setAnalyticsFocus({ type: 'system' });
+    const fallbackPathway = {
+      ...nextPathway,
+      selectedPeriod: getDefaultSelectedPeriod(nextPathway),
+    };
+    const fallbackRolling = normalizeRollingConfig(nextRolling);
+    const fallbackScenarioCatalog = defaultScenarioCatalog({
+      snapshotStart: RUN_WINDOW.initialSnapshotStart,
+      snapshotEnd: snapshotMax,
+      snapshotWeight,
+      carbonPrice,
+      discountRate: settings.discountRate,
+      forceLp,
+      enableLoadShedding: settings.enableLoadShedding,
+      loadSheddingCost: settings.loadSheddingCost,
+      pathwayConfig: fallbackPathway,
+      rollingConfig: fallbackRolling,
+      constraints,
+    });
+    const catalogToApply = nextScenarioCatalog.scenarios.length > 0
+      ? nextScenarioCatalog
+      : fallbackScenarioCatalog;
+    const activeScenarioToApply = activeImportedScenario
+      ?? catalogToApply.scenarios.find((scenario) => scenario.id === catalogToApply.activeScenarioId)
+      ?? null;
+
+    if (activeScenarioToApply) {
+      setSnapshotStart(activeScenarioToApply.snapshotStart);
+      setSnapshotEnd(activeScenarioToApply.snapshotEnd);
+      setSnapshotWeight(activeScenarioToApply.snapshotWeight);
+      setCarbonPrice(activeScenarioToApply.carbonPrice);
+      setForceLp(activeScenarioToApply.forceLp);
+      setConstraints(activeScenarioToApply.constraints.map((row) => ({ ...row })));
+      updateSettings({
+        discountRate: activeScenarioToApply.discountRate,
+        enableLoadShedding: activeScenarioToApply.enableLoadShedding,
+        loadSheddingCost: activeScenarioToApply.loadSheddingCost,
+      });
+      setPathwayConfig({
+        ...activeScenarioToApply.pathwayConfig,
+        selectedPeriod: getDefaultSelectedPeriod(activeScenarioToApply.pathwayConfig),
+      });
+      setRollingConfig(normalizeRollingConfig(activeScenarioToApply.rollingConfig));
+    } else {
+      setPathwayConfig(fallbackPathway);
+      setRollingConfig(fallbackRolling);
+    }
+    setScenarioCatalog(catalogToApply);
+    if (name) setFilename(name);
+  }, [
+    snapshotWeight,
+    carbonPrice,
+    settings.discountRate,
+    settings.enableLoadShedding,
+    settings.loadSheddingCost,
+    forceLp,
+    constraints,
+    updateSettings,
+  ]);
 
   const handleInstallModule = useCallback(async (file: File) => {
     const result = await moduleHost.installFromFile(file);
@@ -212,7 +352,7 @@ function AppInner() {
       showToast(msg, 'error');
       setStatus(msg);
     }
-  }, [model, constraints, carbonPrice, settings.discountRate, moduleHost.moduleConfigs, showToast]);
+  }, [model, constraints, carbonPrice, settings.discountRate, moduleHost.moduleConfigs, resetForNewModel, showToast]);
 
   // Elapsed-time ticker while running
   useEffect(() => {
@@ -265,6 +405,13 @@ function AppInner() {
     });
   }, [rollingConfig]);
 
+  useEffect(() => {
+    setModel((current) => {
+      const next = writeScenarioCatalogToModel(current, scenarioCatalog);
+      return sameScenarioCatalog(readScenarioCatalogFromModel(current), scenarioCatalog) ? current : next;
+    });
+  }, [scenarioCatalog]);
+
   const bounds = useMemo(() => getBounds(model), [model.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
   const busIndex = useMemo(() => getBusIndex(model), [model.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -283,29 +430,32 @@ function AppInner() {
     setAnalyticsFocus({ type: 'system' });
   }, [displayResults, analyticsFocus]);
 
-  const resetForNewModel = (nextModel: WorkbookModel, name?: string) => {
-    const snapshotMax = snapshotMaxFromWorkbook(nextModel.snapshots);
-    const nextPathway = readPathwayConfigFromModel(nextModel);
-    const nextRolling = readRollingConfigFromModel(nextModel);
-    setMaxSnapshots(snapshotMax);
-    // Default run window covers the FULL snapshot range of the loaded model,
-    // so analytics charts show the entire output. Users can shrink the window
-    // in the Run dialog if they want a shorter solve.
-    setSnapshotEnd(snapshotMax);
-    setSnapshotStart(RUN_WINDOW.initialSnapshotStart);
-    setModel(nextModel);
-    setResults(null);
-    setRunStatus('idle');
-    setChartSections([]);
-    setValidateResult(null);
-    setAnalyticsFocus({ type: 'system' });
-    setPathwayConfig({
-      ...nextPathway,
-      selectedPeriod: getDefaultSelectedPeriod(nextPathway),
+  const applyScenarioPreset = useCallback((scenario: ScenarioPreset) => {
+    setScenarioCatalog((current) => ({
+      ...current,
+      activeScenarioId: scenario.id,
+    }));
+    const nextEnd = Math.max(1, Math.min(maxSnapshots, scenario.snapshotEnd));
+    const nextStart = Math.max(0, Math.min(scenario.snapshotStart, nextEnd - 1));
+    setSnapshotStart(nextStart);
+    setSnapshotEnd(nextEnd);
+    setSnapshotWeight(scenario.snapshotWeight);
+    setCarbonPrice(scenario.carbonPrice);
+    setForceLp(scenario.forceLp);
+    setConstraints(scenario.constraints.map((row) => ({ ...row })));
+    updateSettings({
+      discountRate: scenario.discountRate,
+      enableLoadShedding: scenario.enableLoadShedding,
+      loadSheddingCost: scenario.loadSheddingCost,
     });
-    setRollingConfig(normalizeRollingConfig(nextRolling));
-    if (name) setFilename(name);
-  };
+    setPathwayConfig({
+      ...scenario.pathwayConfig,
+      selectedPeriod: getDefaultSelectedPeriod(scenario.pathwayConfig),
+    });
+    setRollingConfig(normalizeRollingConfig(scenario.rollingConfig));
+    setStatus(`Applied scenario: ${scenario.label}`);
+    showToast(`Scenario applied: ${scenario.label}`, 'success');
+  }, [maxSnapshots, showToast, updateSettings]);
 
   const handleImport = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -377,6 +527,7 @@ function AppInner() {
           const entry: RunHistoryEntry = {
             id: Date.now().toString(),
             label: `Import ${next}`,
+            scenarioLabel: activeScenario?.label ?? null,
             savedAt: new Date().toISOString(),
             filename: file.name,
             carbonPrice,
@@ -585,6 +736,90 @@ function AppInner() {
     setRunHistory((h) => h.map((e) => (e.id === id ? { ...e, inComparison } : e)));
   };
 
+  const handleSelectScenario = (scenarioId: string) => {
+    const scenario = scenarioCatalog.scenarios.find((row) => row.id === scenarioId);
+    if (!scenario) return;
+    applyScenarioPreset(scenario);
+  };
+
+  const handleCreateScenarioFromCurrent = () => {
+    const nextIndex = scenarioCatalog.scenarios.length + 1;
+    const scenario = captureCurrentScenario({
+      label: `Scenario ${nextIndex}`,
+      notes: '',
+    });
+    setScenarioCatalog((current) => ({
+      activeScenarioId: scenario.id,
+      scenarios: [...current.scenarios, scenario],
+    }));
+    setStatus(`Created scenario: ${scenario.label}`);
+    showToast(`Scenario created: ${scenario.label}`, 'success');
+  };
+
+  const handleDuplicateScenario = () => {
+    if (!activeScenario) return;
+    const duplicate = buildScenarioPreset({
+      ...activeScenario,
+      id: undefined,
+      label: `${activeScenario.label} copy`,
+    });
+    setScenarioCatalog((current) => ({
+      activeScenarioId: duplicate.id,
+      scenarios: [...current.scenarios, duplicate],
+    }));
+    showToast(`Scenario duplicated: ${duplicate.label}`, 'success');
+  };
+
+  const handleUpdateActiveScenarioFromCurrent = () => {
+    if (!activeScenario) return;
+    const updated = captureCurrentScenario({
+      id: activeScenario.id,
+      label: activeScenario.label,
+      notes: activeScenario.notes,
+    });
+    setScenarioCatalog((current) => ({
+      ...current,
+      scenarios: current.scenarios.map((scenario) => (
+        scenario.id === activeScenario.id ? updated : scenario
+      )),
+    }));
+    setStatus(`Updated scenario: ${activeScenario.label}`);
+    showToast(`Scenario updated: ${activeScenario.label}`, 'success');
+  };
+
+  const handleDeleteScenario = () => {
+    if (!activeScenario || scenarioCatalog.scenarios.length <= 1) return;
+    const remaining = scenarioCatalog.scenarios.filter((scenario) => scenario.id !== activeScenario.id);
+    const nextActive = remaining[0] ?? null;
+    setScenarioCatalog({
+      activeScenarioId: nextActive?.id ?? null,
+      scenarios: remaining,
+    });
+    if (nextActive) applyScenarioPreset(nextActive);
+  };
+
+  const handleRenameScenario = (scenarioId: string, label: string) => {
+    setScenarioCatalog((current) => ({
+      ...current,
+      scenarios: current.scenarios.map((scenario) => (
+        scenario.id === scenarioId
+          ? { ...scenario, label: label.trim() || scenario.label }
+          : scenario
+      )),
+    }));
+  };
+
+  const handleScenarioNotesChange = (scenarioId: string, notes: string) => {
+    setScenarioCatalog((current) => ({
+      ...current,
+      scenarios: current.scenarios.map((scenario) => (
+        scenario.id === scenarioId
+          ? { ...scenario, notes }
+          : scenario
+      )),
+    }));
+  };
+
   const handleImportTsSheet = (sheet: TsSheetName, rows: GridRow[]) => {
     setModel((current) => ({ ...current, [sheet]: rows }));
     if (rows.length > 0) {
@@ -778,6 +1013,7 @@ function AppInner() {
         const entry: RunHistoryEntry = {
           id: Date.now().toString(),
           label: `Run ${next}`,
+          scenarioLabel: activeScenario?.label ?? null,
           savedAt: new Date().toISOString(),
           filename,
           carbonPrice,
@@ -1032,6 +1268,16 @@ function AppInner() {
                 });
                 showToast('HTML report exported', 'success');
               }}
+              scenarioCatalog={scenarioCatalog}
+              activeScenarioLabel={activeScenario?.label ?? null}
+              scenarioDirty={scenarioDirty}
+              onSelectScenario={handleSelectScenario}
+              onCreateScenarioFromCurrent={handleCreateScenarioFromCurrent}
+              onDuplicateScenario={handleDuplicateScenario}
+              onUpdateActiveScenarioFromCurrent={handleUpdateActiveScenarioFromCurrent}
+              onDeleteScenario={handleDeleteScenario}
+              onRenameScenario={handleRenameScenario}
+              onScenarioNotesChange={handleScenarioNotesChange}
               pathwayConfig={pathwayConfig}
               onPathwayConfigChange={setPathwayConfig}
               rollingConfig={rollingConfig}
@@ -1242,12 +1488,15 @@ function AppInner() {
         onClose={() => setRunDialogOpen(false)}
         forceLp={forceLp}
         dryRun={dryRun}
+        activeScenarioLabel={activeScenario?.label ?? null}
+        activeConstraintCount={constraints.filter((row) => row.enabled).length}
+        snapshotStart={snapshotStart}
+        snapshotEnd={snapshotEnd}
+        snapshotWeight={snapshotWeight}
         pathwayConfig={pathwayConfig}
         rollingConfig={rollingConfig}
         onForceLpChange={setForceLp}
         onDryRunChange={setDryRun}
-        onPathwayConfigChange={setPathwayConfig}
-        onRollingConfigChange={(c) => setRollingConfig(normalizeRollingConfig(c))}
         onRun={handleRunModel}
       />
     </div>

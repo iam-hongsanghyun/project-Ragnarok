@@ -37,6 +37,7 @@ export function RunComparisonTable({ runHistory, activeResults, onToggleComparis
   const summaryLabels = sorted[0].results.summary.map((s) => s.label);
 
   const settingRows: Array<{ label: string; fn: (e: RunHistoryEntry) => string }> = [
+    { label: 'Scenario', fn: (e) => e.scenarioLabel ?? '—' },
     { label: 'Planning mode', fn: (e) => e.results.pathway?.enabled ? 'Pathway' : 'Single period' },
     { label: 'Rolling horizon', fn: (e) => e.results.rolling?.enabled ? 'On' : 'Off' },
     { label: 'Rolling horizon size', fn: (e) => e.results.rolling?.enabled ? String(e.results.rolling.horizonSnapshots) : '—' },

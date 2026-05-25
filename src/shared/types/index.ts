@@ -110,6 +110,28 @@ export interface RollingHorizonConfig {
   selectedWindow: number | null;
 }
 
+export interface ScenarioPreset {
+  id: string;
+  label: string;
+  notes: string;
+  snapshotStart: number;
+  snapshotEnd: number;
+  snapshotWeight: number;
+  carbonPrice: number;
+  discountRate: number;
+  forceLp: boolean;
+  enableLoadShedding: boolean;
+  loadSheddingCost: number;
+  pathwayConfig: PathwayConfig;
+  rollingConfig: RollingHorizonConfig;
+  constraints: CustomConstraint[];
+}
+
+export interface ScenarioCatalog {
+  activeScenarioId: string | null;
+  scenarios: ScenarioPreset[];
+}
+
 export interface PathwayPeriodSummary {
   period: number;
   snapshotCount: number;
@@ -389,6 +411,7 @@ export interface RunResults {
 export interface RunHistoryEntry {
   id: string;
   label: string;
+  scenarioLabel?: string | null;
   savedAt: string;
   filename: string;
   carbonPrice: number;

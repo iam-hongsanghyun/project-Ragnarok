@@ -5,7 +5,7 @@
  * The parent (<App>) keeps the <aside> shell and the collapse toggle button.
  */
 import React, { useEffect, useState } from 'react';
-import { CustomConstraint, ModuleDescriptor, ModuleHostInventory, PathwayConfig, RollingHorizonConfig, RunHistoryEntry, RunResults, WorkbookModel } from '../shared/types';
+import { CustomConstraint, ModuleDescriptor, ModuleHostInventory, PathwayConfig, RollingHorizonConfig, RunHistoryEntry, RunResults, ScenarioCatalog, WorkbookModel } from '../shared/types';
 import { normalizeRollingConfig } from '../shared/utils/rolling';
 import { SidebarGroup } from '../shared/components/SidebarGroup';
 import { GlobalConstraintsSection } from '../features/constraints/GlobalConstraintsSection';
@@ -33,6 +33,16 @@ export interface SidebarProps {
   onExportProject: () => void;
   onExportResult: () => void;
   onExportReport: () => void;
+  scenarioCatalog: ScenarioCatalog;
+  activeScenarioLabel: string | null;
+  scenarioDirty: boolean;
+  onSelectScenario: (scenarioId: string) => void;
+  onCreateScenarioFromCurrent: () => void;
+  onDuplicateScenario: () => void;
+  onUpdateActiveScenarioFromCurrent: () => void;
+  onDeleteScenario: () => void;
+  onRenameScenario: (scenarioId: string, label: string) => void;
+  onScenarioNotesChange: (scenarioId: string, notes: string) => void;
   pathwayConfig: PathwayConfig;
   onPathwayConfigChange: (config: PathwayConfig) => void;
   rollingConfig: RollingHorizonConfig;
@@ -92,6 +102,16 @@ export function Sidebar({
   onExportProject,
   onExportResult,
   onExportReport,
+  scenarioCatalog,
+  activeScenarioLabel,
+  scenarioDirty,
+  onSelectScenario,
+  onCreateScenarioFromCurrent,
+  onDuplicateScenario,
+  onUpdateActiveScenarioFromCurrent,
+  onDeleteScenario,
+  onRenameScenario,
+  onScenarioNotesChange,
   pathwayConfig,
   onPathwayConfigChange,
   rollingConfig,
@@ -152,6 +172,7 @@ export function Sidebar({
   const carrierRows = model.carriers
     .map((row, index) => ({ row, index, name: stringValue(row.name) }))
     .filter((item) => item.name);
+  const activeScenario = scenarioCatalog.scenarios.find((scenario) => scenario.id === scenarioCatalog.activeScenarioId) ?? null;
 
   return (
     <>
@@ -210,6 +231,95 @@ export function Sidebar({
           carriers={carriers}
           onChange={onConstraintsChange}
         />
+      </SidebarGroup>
+
+      <SidebarGroup
+        title="Scenarios"
+        badge={<span className="sg-badge">{scenarioCatalog.scenarios.length}</span>}
+      >
+        <div className="sg-setting-row">
+          <label className="sg-setting-label">Scenario library</label>
+          <div className="period-pill-row">
+            {scenarioCatalog.scenarios.map((scenario) => (
+              <button
+                key={scenario.id}
+                className={`tb-btn period-pill${scenario.id === scenarioCatalog.activeScenarioId ? '' : ' tb-btn--muted'}`}
+                onClick={() => onSelectScenario(scenario.id)}
+                title={scenario.notes || scenario.label}
+              >
+                {scenario.label}
+              </button>
+            ))}
+          </div>
+          <p className="sg-setting-hint">
+            Scenario presets capture the current constraints, window, carbon price, pathway, and rolling settings without changing the backend contract.
+          </p>
+        </div>
+
+        <div className="sg-setting-row">
+          <div className="sg-btn-row">
+            <button className="tb-btn sg-solver-btn" onClick={onCreateScenarioFromCurrent}>New from current</button>
+            <button
+              className={`tb-btn sg-solver-btn${scenarioDirty ? '' : ' tb-btn--muted'}`}
+              onClick={onUpdateActiveScenarioFromCurrent}
+              disabled={!activeScenario}
+            >
+              Update active
+            </button>
+            <button className="tb-btn sg-solver-btn tb-btn--muted" onClick={onDuplicateScenario} disabled={!activeScenario}>
+              Duplicate
+            </button>
+            <button
+              className="tb-btn sg-solver-btn tb-btn--muted"
+              onClick={onDeleteScenario}
+              disabled={!activeScenario || scenarioCatalog.scenarios.length <= 1}
+            >
+              Delete
+            </button>
+          </div>
+          {activeScenario && (
+            <div className="sg-scenario-status">
+              <span className={`sg-scenario-dot${scenarioDirty ? ' is-dirty' : ''}`} />
+              <span>{scenarioDirty ? 'Current controls differ from the active scenario.' : 'Current controls match the active scenario.'}</span>
+            </div>
+          )}
+        </div>
+
+        {activeScenario && (
+          <>
+            <div className="sg-setting-divider" />
+            <div className="sg-setting-row">
+              <label className="sg-setting-label" htmlFor="sg-scenario-label">Active scenario label</label>
+              <input
+                id="sg-scenario-label"
+                type="text"
+                className="sg-num-input"
+                value={activeScenario.label}
+                onChange={(e) => onRenameScenario(activeScenario.id, e.target.value)}
+              />
+            </div>
+            <div className="sg-setting-row">
+              <label className="sg-setting-label" htmlFor="sg-scenario-notes">Notes</label>
+              <textarea
+                id="sg-scenario-notes"
+                className="sg-scenario-notes"
+                rows={3}
+                value={activeScenario.notes}
+                onChange={(e) => onScenarioNotesChange(activeScenario.id, e.target.value)}
+              />
+            </div>
+            <div className="sg-setting-row">
+              <label className="sg-setting-label">Snapshot strategy</label>
+              <div className="sg-scenario-summary">
+                <span>{pathwayConfig.enabled ? `${pathwayConfig.periods.length} pathway periods` : 'Single-period solve'}</span>
+                <span>{rollingConfig.enabled ? `Rolling ${rollingConfig.horizonSnapshots}/${rollingConfig.overlapSnapshots}` : 'Full-horizon solve'}</span>
+                <span>{activeScenario.snapshotStart} → {activeScenario.snapshotEnd} @ {activeScenario.snapshotWeight}h</span>
+                <span>{constraints.filter((row) => row.enabled).length} active constraints</span>
+                {activeScenarioLabel && <span>Active: {activeScenarioLabel}</span>}
+              </div>
+            </div>
+          </>
+        )}
       </SidebarGroup>
 
       <SidebarGroup
