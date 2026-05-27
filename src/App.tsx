@@ -1,6 +1,5 @@
 import React, { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSettings } from './features/settings/useSettings';
-import { DateFormatProvider } from './features/settings/dateFormatContext';
 import 'leaflet/dist/leaflet.css';
 
 import {
@@ -1204,7 +1203,6 @@ function AppInner() {
   }, [sidebarWidth]);
 
   return (
-    <DateFormatProvider value={settings.dateFormat}>
     <div className="studio-shell">
       <input ref={fileInputRef} type="file" accept=".xlsx,.xls" hidden onChange={handleImport} />
       <input ref={projectImportInputRef} type="file" accept=".xlsx,.xls" hidden onChange={handleImportProject} />
@@ -1549,7 +1547,6 @@ function AppInner() {
         onRun={handleRunModel}
       />
     </div>
-    </DateFormatProvider>
   );
 }
 

@@ -1,20 +1,22 @@
 import React, { useState } from 'react';
 import { ChartMode, TimeSeriesRow, TimeSeriesSeries } from '../../../shared/types';
-import { numberValue, formatDatePart } from '../../../shared/utils/helpers';
-import { useDateFormat } from '../../settings/dateFormatContext';
-import type { DateFormat } from '../../settings/useSettings';
+import { numberValue } from '../../../shared/utils/helpers';
 
 const H24 = 86_400_000;
 const H7D = 7 * H24;
+const H90D = 90 * H24;
 
-function formatXLabel(ts: string | undefined, spanMs: number, fmt: DateFormat): string {
+function formatXLabel(ts: string | undefined, spanMs: number): string {
   if (!ts) return '';
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return ts;
-  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  if (spanMs <= H24) return time;
-  if (spanMs <= H7D) return `${formatDatePart(d, fmt)} ${time}`;
-  return formatDatePart(d, fmt);
+  if (spanMs <= H24)
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (spanMs <= H7D)
+    return d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  if (spanMs <= H90D)
+    return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  return d.toLocaleDateString([], { month: 'short', year: 'numeric' });
 }
 
 export function InteractiveTimeSeriesCard({
@@ -33,7 +35,6 @@ export function InteractiveTimeSeriesCard({
   stacked: boolean;
 }) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
-  const dateFormat = useDateFormat();
 
   if (!series.length) {
     return (
@@ -87,8 +88,9 @@ export function InteractiveTimeSeriesCard({
     ? new Date(lastTs).getTime() - new Date(firstTs).getTime()
     : 0;
   const targetTicks =
-    spanMs <= H24 ? Math.min(visible.length, 12) :
-    spanMs <= H7D ? 7 :
+    spanMs <= H24  ? Math.min(visible.length, 12) :
+    spanMs <= H7D  ? 7  :
+    spanMs <= H90D ? 13 :
     8;
   const stride = Math.max(1, Math.ceil(visible.length / targetTicks));
 
@@ -183,7 +185,7 @@ export function InteractiveTimeSeriesCard({
             {visible.map((row, index) => (
               <text key={`${row.label}-${index}`} x={xForIndex(index)} y={height - 8} className="chart-axis chart-axis-x">
                 {index % stride === 0
-                  ? (row.timestamp ? formatXLabel(row.timestamp, spanMs, dateFormat) : row.label)
+                  ? (row.timestamp ? formatXLabel(row.timestamp, spanMs) : row.label)
                   : ''}
               </text>
             ))}
