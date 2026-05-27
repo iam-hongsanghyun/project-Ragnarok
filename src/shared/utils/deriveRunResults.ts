@@ -113,30 +113,60 @@ function staticOutValue(
 const SNAPSHOT_LABEL_KEYS = ['snapshot', 'datetime', 'name', 'index', 'timestep'];
 
 /**
+ * Normalise a snapshot timestamp so input and output sheets compare equal.
+ * PyPSA writes outputs in ISO form (`2024-08-01T00:00:00`) while the input
+ * temporal sheets often carry the space-separated form (`2024-08-01 00:00:00`).
+ * Without this, the timestamp lookup misses and the code falls back to the
+ * static value — flattening any profile whose static p_set is non-zero.
+ */
+function normalizeStamp(stamp: string): string {
+  return stamp.trim().replace('T', ' ');
+}
+
+interface InputTemporalIndex {
+  /** Rows keyed by normalised snapshot timestamp. */
+  byStamp: Record<string, GridRow>;
+  /** Component names that have a column in the temporal sheet. */
+  columns: Set<string>;
+}
+
+/**
  * Build a timestamp → row lookup from an input temporal sheet so values can be
  * read by snapshot timestamp instead of by position. Positional indexing breaks
  * once outputs are filtered to a non-first investment period, because the input
- * sheet still holds every period's rows in order.
+ * sheet still holds every period's rows in order. Also records which component
+ * columns are present so the temporal series can win over the static scalar.
  */
-function indexInputByTimestamp(rows: GridRow[] | undefined): Record<string, GridRow> {
-  const out: Record<string, GridRow> = {};
-  if (!rows || rows.length === 0) return out;
+function indexInputByTimestamp(rows: GridRow[] | undefined): InputTemporalIndex {
+  const byStamp: Record<string, GridRow> = {};
+  const columns = new Set<string>();
+  if (!rows || rows.length === 0) return { byStamp, columns };
   const labelCol = SNAPSHOT_LABEL_KEYS.find((k) => k in rows[0]);
-  if (!labelCol) return out;
+  if (!labelCol) return { byStamp, columns };
+  for (const key of Object.keys(rows[0])) {
+    if (key !== labelCol) columns.add(key);
+  }
   for (const row of rows) {
     const stamp = stringValue(row[labelCol]);
-    if (stamp) out[stamp] = row;
+    if (stamp) byStamp[normalizeStamp(stamp)] = row;
   }
-  return out;
+  return { byStamp, columns };
 }
 
+/**
+ * Resolve a component's value at a snapshot. The temporal series wins over the
+ * static scalar whenever the component has a column in the time-series sheet —
+ * matching PyPSA's convention that `loads_t.p_set` overrides `loads.p_set`.
+ * The static `fallback` is used only for components absent from the temporal
+ * sheet entirely.
+ */
 function inputSeriesValueAtStamp(
-  byStamp: Record<string, GridRow>, stamp: string, col: string, fallback: number,
+  idx: InputTemporalIndex, stamp: string, col: string, fallback: number,
 ): number {
-  const row = byStamp[stamp];
-  if (!row) return fallback;
-  const cell = row[col];
-  if (cell === undefined || cell === null || cell === '') return fallback;
+  if (!idx.columns.has(col)) return fallback;
+  const row = idx.byStamp[normalizeStamp(stamp)];
+  const cell = row?.[col];
+  if (cell === undefined || cell === null || cell === '') return 0;
   return numberValue(cell);
 }
 

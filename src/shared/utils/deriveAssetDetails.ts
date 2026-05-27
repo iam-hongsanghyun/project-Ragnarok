@@ -97,6 +97,12 @@ function staticOrInput(
  * Look up an input time-series value at a given snapshot row index.
  * The input ts sheet stores rows aligned with the snapshots sheet; we trust
  * the row order matches the solved snapshot order (PyPSA's invariant).
+ *
+ * The temporal series wins over the static scalar whenever the component has a
+ * column in the time-series sheet — matching PyPSA's convention that
+ * `loads_t.p_set` overrides `loads.p_set`. The static `fallback` is used only
+ * for components absent from the temporal sheet entirely; otherwise a non-zero
+ * static value would shadow the profile and flatten it.
  */
 function inputSeriesValue(
   inputTs: GridRow[] | undefined,
@@ -104,9 +110,11 @@ function inputSeriesValue(
   column: string,
   fallback: number,
 ): number {
-  if (!inputTs || rowIndex >= inputTs.length) return fallback;
-  const cell = inputTs[rowIndex]?.[column];
-  if (cell === undefined || cell === null || cell === '') return fallback;
+  const hasTemporalColumn = !!inputTs && inputTs.length > 0 && column in inputTs[0];
+  if (!hasTemporalColumn) return fallback;
+  if (rowIndex >= inputTs!.length) return 0;
+  const cell = inputTs![rowIndex]?.[column];
+  if (cell === undefined || cell === null || cell === '') return 0;
   return numberValue(cell);
 }
 
