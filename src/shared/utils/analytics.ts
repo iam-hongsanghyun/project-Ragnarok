@@ -1,5 +1,36 @@
-import { MetricOption, RunResults, SeriesPoint, TimeframeOption, TimeSeriesRow } from '../types';
-import { numberValue } from './helpers';
+import { MetricOption, RunResults, SeriesPoint, TimeframeOption, TimeSeriesRow, TimeSeriesSeries, WorkbookModel } from '../types';
+import { carrierColor, numberValue, orderByCarrierRows } from './helpers';
+
+const SERIES_META_KEYS = ['label', 'timestamp', 'total'];
+
+/**
+ * System-level chart series derived from a solved/display result. Pure: called
+ * once per render with the current model + display results, mirroring the prior
+ * inline computation in App.
+ */
+export function deriveSystemSeries(model: WorkbookModel, displayResults: RunResults | null) {
+  const rawSystemDispatchRows: TimeSeriesRow[] = (displayResults?.dispatchSeries || []).map(normalizeSeriesPoint);
+  const systemDispatchRows: TimeSeriesRow[] =
+    rawSystemDispatchRows.some((row) =>
+      Object.keys(row).some((key) => !SERIES_META_KEYS.includes(key) && Math.abs(numberValue(row[key] as string | number | undefined)) > 1e-6),
+    )
+      ? rawSystemDispatchRows
+      : buildRowsFromGeneratorDetails(displayResults?.assetDetails.generators || {}, 'carrier');
+  const inferredDispatchKeys = Array.from(
+    new Set(systemDispatchRows.flatMap((row) => Object.keys(row).filter((key) => !SERIES_META_KEYS.includes(key)))),
+  );
+  const dispatchKeys =
+    inferredDispatchKeys.length > 0
+      ? orderByCarrierRows(model.carriers, inferredDispatchKeys)
+      : (displayResults?.carrierMix || []).map((item) => item.label).filter(Boolean);
+  const systemDispatchSeries: TimeSeriesSeries[] = dispatchKeys.map((key) => ({ key, label: key, color: carrierColor(key) }));
+
+  const systemPriceRows: TimeSeriesRow[] = (displayResults?.systemPriceSeries || []).map((point) => ({ label: point.label, timestamp: point.timestamp, price: point.value }));
+  const storageRows: TimeSeriesRow[] = (displayResults?.storageSeries || []).map((point) => ({ label: point.label, timestamp: point.timestamp, charge: point.charge, discharge: point.discharge, state: point.state }));
+  const systemLoadRows: TimeSeriesRow[] = buildSystemLoadRows(displayResults);
+
+  return { systemDispatchRows, systemDispatchSeries, systemPriceRows, storageRows, systemLoadRows };
+}
 
 export function normalizeSeriesPoint(point: SeriesPoint): TimeSeriesRow {
   const fallbackValues = Object.fromEntries(

@@ -1,4 +1,4 @@
-import React, { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSettings } from './features/settings/useSettings';
 import 'leaflet/dist/leaflet.css';
 
@@ -13,26 +13,22 @@ import {
   PathwayConfig,
   ProjectImportProvenance,
   RollingHorizonConfig,
-  Primitive,
   RunHistoryEntry,
   RunResults,
   ScenarioCatalog,
   ScenarioPreset,
-  SheetName,
-  TimeSeriesRow,
-  TimeSeriesSeries,
   TsSheetName,
   WorkbookModel,
   WorkspaceTab,
   ModelSubTab,
   AnalyticsSubTab,
 } from './shared/types';
-import { API_BASE, DEFAULT_CONSTRAINTS, getDefaultRowForSheet, MAX_UNPINNED_HISTORY, PYPSA_SCHEMA_META, RUN_POLLING, RUN_WINDOW, SHEETS } from './constants';
+import { API_BASE, DEFAULT_CONSTRAINTS, MAX_UNPINNED_HISTORY, PYPSA_SCHEMA_META, RUN_POLLING, RUN_WINDOW, SHEETS } from './constants';
 import { createEmptyWorkbook, exportProjectWorkbook, exportWorkbook, normalizeInputDatesToIso, parseProjectFile, parseWorkbook, workbookToArrayBuffer } from './shared/utils/workbook';
 import { exportFullResults } from './shared/utils/exportResults';
 import { exportReportHtml } from './shared/utils/exportReport';
-import { getBounds, getBusIndex, carrierColor, numberValue, orderByCarrierRows, setCarrierColorOverrides, snapshotMaxFromWorkbook } from './shared/utils/helpers';
-import { buildRowsFromGeneratorDetails, buildSystemLoadRows, normalizeSeriesPoint } from './shared/utils/analytics';
+import { getBounds, getBusIndex, setCarrierColorOverrides, snapshotMaxFromWorkbook } from './shared/utils/helpers';
+import { deriveSystemSeries } from './shared/utils/analytics';
 import { withDerivedAssetDetails } from './shared/utils/deriveAssetDetails';
 import { deriveRunResults } from './shared/utils/deriveRunResults';
 import { defaultPathwayConfig, getDefaultSelectedPeriod, readPathwayConfigFromModel, samePathwayConfig, writePathwayConfigToModel } from './shared/utils/pathway';
@@ -40,6 +36,9 @@ import { defaultRollingConfig, normalizeRollingConfig, readRollingConfigFromMode
 import { buildScenarioPreset, defaultScenarioCatalog, readScenarioCatalogFromModel, sameScenarioCatalog, writeScenarioCatalogToModel } from './shared/utils/scenarios';
 import { RunDialog } from './features/run/RunDialog';
 import { Sidebar } from './layout/Sidebar';
+import { TopBar } from './layout/TopBar';
+import { useSidebarLayout } from './layout/useSidebarLayout';
+import { useModelEditor } from './features/input/useModelEditor';
 import { MapPane } from './features/map/MapPane';
 import { TablesPane } from './features/input/TablesPane';
 import { ValidationPane } from './features/validation/ValidationPane';
@@ -52,7 +51,12 @@ import { ToastProvider, useToast } from './shared/components/Toast';
 
 function AppInner() {
   const { showToast } = useToast();
-  const [model, setModel] = useState<WorkbookModel>(() => createEmptyWorkbook());
+  const [status, setStatus] = useState('Ready. Open a workbook or import a project.');
+  const {
+    model, setModel,
+    updateRowValue, addRow, deleteRow, moveRow, addColumn, deleteColumn, renameColumn,
+  } = useModelEditor(setStatus);
+  const { sidebarOpen, setSidebarOpen, sidebarWidth, isDraggingSidebar, handleResizeMouseDown } = useSidebarLayout();
   const [tab, setTab] = useState<WorkspaceTab>('Model');
   const [modelSubTab, setModelSubTab] = useState<ModelSubTab>('Map');
   const [analyticsSubTab, setAnalyticsSubTab] = useState<AnalyticsSubTab>('Result');
@@ -65,11 +69,6 @@ function AppInner() {
   const [constraints, setConstraints] = useState<CustomConstraint[]>(DEFAULT_CONSTRAINTS);
   const [carbonPrice, setCarbonPrice] = useState<number>(0);
   const [forceLp, setForceLp] = useState<boolean>(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [sidebarWidth, setSidebarWidth] = useState(252);
-  const [isDraggingSidebar, setIsDraggingSidebar] = useState(false);
-  const dragStartX = useRef<number>(0);
-  const dragStartWidth = useRef<number>(252);
   const [analyticsFocus, setAnalyticsFocus] = useState<AnalyticsFocus>({ type: 'system' });
   const [chartSections, setChartSections] = useState<ChartSectionConfig[]>([]);
   const [runDialogOpen, setRunDialogOpen] = useState(false);
@@ -85,7 +84,6 @@ function AppInner() {
     snapshotCount: number;
     networkSummary: Record<string, number>;
   } | null>(null);
-  const [status, setStatus] = useState('Ready. Open a workbook or import a project.');
   const [fileHandle, setFileHandle] = useState<BrowserFileHandle | null>(null);
   const [projectProvenance, setProjectProvenance] = useState<ProjectImportProvenance | null>(null);
   const [jumpTo, setJumpTo] = useState<{ sheet: string; rowIndex: number } | null>(null);
@@ -284,6 +282,7 @@ function AppInner() {
     forceLp,
     constraints,
     updateSettings,
+    setModel,
   ]);
 
   const handleInstallModule = useCallback(async (file: File) => {
@@ -399,21 +398,21 @@ function AppInner() {
       const next = writePathwayConfigToModel(current, pathwayConfig);
       return samePathwayConfig(readPathwayConfigFromModel(current), pathwayConfig) ? current : next;
     });
-  }, [pathwayConfig]);
+  }, [pathwayConfig, setModel]);
 
   useEffect(() => {
     setModel((current) => {
       const next = writeRollingConfigToModel(current, rollingConfig);
       return sameRollingConfig(readRollingConfigFromModel(current), rollingConfig) ? current : next;
     });
-  }, [rollingConfig]);
+  }, [rollingConfig, setModel]);
 
   useEffect(() => {
     setModel((current) => {
       const next = writeScenarioCatalogToModel(current, scenarioCatalog);
       return sameScenarioCatalog(readScenarioCatalogFromModel(current), scenarioCatalog) ? current : next;
     });
-  }, [scenarioCatalog]);
+  }, [scenarioCatalog, setModel]);
 
   const bounds = useMemo(() => getBounds(model), [model.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
   const busIndex = useMemo(() => getBusIndex(model), [model.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
@@ -660,75 +659,6 @@ function AppInner() {
         showToast('Workbook open failed.', 'error');
       }
     }
-  };
-
-  const updateRowValue = (sheet: SheetName, rowIndex: number, key: string, value: Primitive) => {
-    setModel((current) => {
-      const nextRows = current[sheet].map((row, index) => (index === rowIndex ? { ...row, [key]: value } : row));
-      return { ...current, [sheet]: nextRows };
-    });
-  };
-
-  const addRow = (sheet: SheetName) => {
-    setModel((current) => {
-      const nextRows = [...(current[sheet] ?? []), { ...getDefaultRowForSheet(sheet) }];
-      return { ...current, [sheet]: nextRows };
-    });
-    setStatus(`Added a new row to ${sheet}.`);
-  };
-
-  const deleteRow = (sheet: SheetName, rowIndex: number) => {
-    setModel((current) => {
-      const nextRows = current[sheet].filter((_, i) => i !== rowIndex);
-      return { ...current, [sheet]: nextRows };
-    });
-    setStatus(`Removed row ${rowIndex + 1} from ${sheet}.`);
-  };
-
-  const moveRow = (sheet: SheetName, rowIndex: number, direction: -1 | 1) => {
-    setModel((current) => {
-      const nextIndex = rowIndex + direction;
-      if (nextIndex < 0 || nextIndex >= current[sheet].length) return current;
-      const nextRows = [...current[sheet]];
-      const [row] = nextRows.splice(rowIndex, 1);
-      nextRows.splice(nextIndex, 0, row);
-      return { ...current, [sheet]: nextRows };
-    });
-  };
-
-  const addColumn = (sheet: SheetName, col: string, defaultValue: string | number | boolean) => {
-    setModel((current) => {
-      const nextRows = current[sheet].map((row) =>
-        col in row ? row : { ...row, [col]: defaultValue },
-      );
-      return { ...current, [sheet]: nextRows };
-    });
-    setStatus(`Added column "${col}" to ${sheet}.`);
-  };
-
-  const deleteColumn = (sheet: SheetName, col: string) => {
-    setModel((current) => {
-      const nextRows = current[sheet].map((row) => {
-        const { [col]: _removed, ...rest } = row as Record<string, Primitive>;
-        return rest as GridRow;
-      });
-      return { ...current, [sheet]: nextRows };
-    });
-    setStatus(`Removed column "${col}" from ${sheet}.`);
-  };
-
-  const renameColumn = (sheet: SheetName, oldCol: string, newCol: string) => {
-    if (!newCol || newCol === oldCol) return;
-    setModel((current) => {
-      const nextRows = current[sheet].map((row) => {
-        const r = row as Record<string, Primitive>;
-        if (!(oldCol in r)) return row;
-        const { [oldCol]: val, ...rest } = r;
-        return { ...rest, [newCol]: val } as GridRow;
-      });
-      return { ...current, [sheet]: nextRows };
-    });
-    setStatus(`Renamed column "${oldCol}" to "${newCol}" in ${sheet}.`);
   };
 
   const handleRestoreRun = (entry: RunHistoryEntry) => {
@@ -1139,25 +1069,8 @@ function AppInner() {
 
   // ── Metric series derived data ────────────────────────────────────────────
 
-  const rawSystemDispatchRows: TimeSeriesRow[] = (displayResults?.dispatchSeries || []).map(normalizeSeriesPoint);
-  const systemDispatchRows: TimeSeriesRow[] =
-    rawSystemDispatchRows.some((row) =>
-      Object.keys(row).some((key) => !['label', 'timestamp', 'total'].includes(key) && Math.abs(numberValue(row[key] as string | number | undefined)) > 1e-6),
-    )
-      ? rawSystemDispatchRows
-      : buildRowsFromGeneratorDetails(displayResults?.assetDetails.generators || {}, 'carrier');
-  const inferredDispatchKeys = Array.from(
-    new Set(systemDispatchRows.flatMap((row) => Object.keys(row).filter((key) => !['label', 'timestamp', 'total'].includes(key)))),
-  );
-  const dispatchKeys =
-    inferredDispatchKeys.length > 0
-      ? orderByCarrierRows(model.carriers, inferredDispatchKeys)
-      : (displayResults?.carrierMix || []).map((item) => item.label).filter(Boolean);
-  const systemDispatchSeries: TimeSeriesSeries[] = dispatchKeys.map((key) => ({ key, label: key, color: carrierColor(key) }));
-
-  const systemPriceRows: TimeSeriesRow[] = (displayResults?.systemPriceSeries || []).map((point) => ({ label: point.label, timestamp: point.timestamp, price: point.value }));
-  const storageRows: TimeSeriesRow[] = (displayResults?.storageSeries || []).map((point) => ({ label: point.label, timestamp: point.timestamp, charge: point.charge, discharge: point.discharge, state: point.state }));
-  const systemLoadRows: TimeSeriesRow[] = buildSystemLoadRows(displayResults);
+  const { systemDispatchRows, systemDispatchSeries, systemPriceRows, storageRows, systemLoadRows } =
+    deriveSystemSeries(model, displayResults);
 
   // Seed a default chart card when results first arrive; don't reset on map-focus changes.
   useEffect(() => {
@@ -1184,104 +1097,33 @@ function AppInner() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [displayResults]);
 
-  // ── Sidebar resize handlers ──────────────────────────────────────────────────
-  const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    dragStartX.current = e.clientX;
-    dragStartWidth.current = sidebarWidth;
-    setIsDraggingSidebar(true);
-
-    const onMove = (ev: MouseEvent) => {
-      const delta = ev.clientX - dragStartX.current;
-      const next  = Math.min(520, Math.max(180, dragStartWidth.current + delta));
-      setSidebarWidth(next);
-    };
-    const onUp = () => {
-      setIsDraggingSidebar(false);
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-  }, [sidebarWidth]);
-
   return (
     <div className="studio-shell">
       <input ref={fileInputRef} type="file" accept=".xlsx,.xls" hidden onChange={handleImport} />
       <input ref={projectImportInputRef} type="file" accept=".xlsx,.xls" hidden onChange={handleImportProject} />
 
       {/* ── Top bar ── */}
-      <header className="topbar">
-        <div className="topbar-left">
-          <span className="topbar-brand">Ragnarok</span>
-          <div className="topbar-divider" />
-          <button
-            className="run-button"
-            onClick={() => setRunDialogOpen(true)}
-            disabled={runStatus === 'running'}
-            title={runStatus === 'running' ? 'A run is already in progress' : undefined}
-          >
-            Run
-          </button>
-          <button className="tb-btn" onClick={handleOpenWorkbook}>Open</button>
-          <button
-            className="tb-btn tb-btn--muted"
-            onClick={() => {
-              if (!window.confirm('Clear the loaded model? All unsaved edits and results will be lost.')) return;
-              resetForNewModel(createEmptyWorkbook(), 'untitled.xlsx');
-              setFileHandle(null);
-              setStatus('Model cleared.');
-              showToast('Model cleared', 'success');
-            }}
-            title="Remove the currently loaded model and start from an empty workbook"
-          >
-            Clear
-          </button>
-          <div className="topbar-divider" />
-          <span className="topbar-file">{filename}</span>
-          {displayResults && (
-            <span className="topbar-run-meta">{displayResults.runMeta.snapshotCount} snaps · {displayResults.runMeta.snapshotWeight}h res</span>
-          )}
-          {runStatus === 'running' ? (
-            <>
-              <span className="topbar-running">
-                <span className="topbar-spinner" />
-                Running… {Math.floor(runElapsed / 60) > 0 ? `${Math.floor(runElapsed / 60)}m ` : ''}{(runElapsed % 60).toString().padStart(2, '0')}s
-              </span>
-              <button className="tb-btn tb-btn--muted topbar-cancel" onClick={handleCancelRun}>Cancel</button>
-            </>
-          ) : (
-            <span className="topbar-status" title={status}>{status}</span>
-          )}
-        </div>
-        <nav className="tab-nav">
-          {(['Model', 'Analytics'] as WorkspaceTab[]).map((item) => (
-            <button
-              key={item}
-              className={`tab-button ${tab === item ? 'is-active' : ''}`}
-              onClick={() => setTab(item)}
-            >
-              {item}
-              {item === 'Analytics' && validateResult && (
-                <span className={`tab-badge ${validateResult.valid ? 'tab-badge--ok' : 'tab-badge--error'}`}>
-                  {validateResult.valid ? 'ok' : `${validateResult.errors.length + validateResult.warnings.length}`}
-                </span>
-              )}
-            </button>
-          ))}
-          {moduleHost.enabledIds.length > 0 && (
-            <button
-              className={`tab-button ${tab === 'Plugins' ? 'is-active' : ''}`}
-              onClick={() => setTab('Plugins')}
-            >
-              Plugins
-              <span className="tab-badge tab-badge--ok">
-                {moduleHost.enabledIds.length}
-              </span>
-            </button>
-          )}
-        </nav>
-      </header>
+      <TopBar
+        runStatus={runStatus}
+        runElapsed={runElapsed}
+        status={status}
+        filename={filename}
+        displayResults={displayResults}
+        validateResult={validateResult}
+        tab={tab}
+        enabledModuleCount={moduleHost.enabledIds.length}
+        onOpenRunDialog={() => setRunDialogOpen(true)}
+        onOpen={handleOpenWorkbook}
+        onClear={() => {
+          if (!window.confirm('Clear the loaded model? All unsaved edits and results will be lost.')) return;
+          resetForNewModel(createEmptyWorkbook(), 'untitled.xlsx');
+          setFileHandle(null);
+          setStatus('Model cleared.');
+          showToast('Model cleared', 'success');
+        }}
+        onCancelRun={handleCancelRun}
+        onSelectTab={setTab}
+      />
 
       {/* ── Sidebar + Main ── */}
       <div className="workspace-body" style={isDraggingSidebar ? { userSelect: 'none', cursor: 'col-resize' } : undefined}>
