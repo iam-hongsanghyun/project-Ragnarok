@@ -90,19 +90,27 @@ def build_price_emissions_series(
 
 
 def build_storage_series(network: pypsa.Network) -> list[dict]:
+    """System storage series, aggregated across all storage units.
+
+    Aggregate-then-derive convention (matches the frontend deriveRunResults):
+    sum the raw power ``p`` across every unit per snapshot, then split the
+    aggregate into charge (abs of the negative part) and discharge (positive
+    part). State of charge is summed directly across units.
+    """
     state: list[dict] = []
     if len(network.storage_units.index) > 0:
-        unit = network.storage_units.index[0]
-        charge = safe_series(network.storage_units_t.p, unit).clip(upper=0.0).abs()
-        discharge = safe_series(network.storage_units_t.p, unit).clip(lower=0.0)
-        soc = safe_series(network.storage_units_t.state_of_charge, unit)
+        units = list(network.storage_units.index)
+        total_p = sum(safe_series(network.storage_units_t.p, unit) for unit in units)
+        total_soc = sum(safe_series(network.storage_units_t.state_of_charge, unit) for unit in units)
+        charge = total_p.clip(upper=0.0).abs()
+        discharge = total_p.clip(lower=0.0)
         for snapshot in network.snapshots:
             label, stamp, period = _snapshot_label(snapshot)
             state.append({
                 "label": label, "timestamp": stamp, "period": period,
                 "charge": float(charge.loc[snapshot]),
                 "discharge": float(discharge.loc[snapshot]),
-                "state": float(soc.loc[snapshot]),
+                "state": float(total_soc.loc[snapshot]),
             })
     else:
         for snapshot in network.snapshots:

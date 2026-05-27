@@ -91,15 +91,6 @@ export function samePathwayConfig(left: PathwayConfig, right: PathwayConfig): bo
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-export function getPathwaySnapshotPeriods(model: WorkbookModel): number[] {
-  const periods = new Set<number>();
-  (model.snapshots ?? []).forEach((row) => {
-    const period = primitiveNumber(row.period as Primitive, null);
-    if (period !== null) periods.add(period);
-  });
-  return Array.from(periods).sort((left, right) => left - right);
-}
-
 export function getDefaultSelectedPeriod(config: PathwayConfig): number | null {
   if (!config.periods.length) return null;
   if (config.selectedPeriod !== null && config.periods.some((row) => row.period === config.selectedPeriod)) {

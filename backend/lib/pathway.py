@@ -3,8 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-import pandas as pd
-
 from .utils.coerce import number
 
 
@@ -55,7 +53,3 @@ def parse_pathway_config(raw: dict[str, Any] | None) -> PathwayConfig:
       periods=periods,
       selected_period=selected_period,
     )
-
-
-def pathway_period_index(config: PathwayConfig) -> pd.Index:
-    return pd.Index([row.period for row in config.periods], name="period", dtype="int64")

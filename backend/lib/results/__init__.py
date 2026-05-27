@@ -24,81 +24,7 @@ from .emissions import build_emissions_breakdown
 from .expansion import build_expansion_results
 from .full_outputs import build_full_outputs
 from .market import build_co2_shadow, build_merit_order
-
-
-def _snapshot_label(snapshot: Any) -> str:
-    if isinstance(snapshot, tuple) and len(snapshot) == 2:
-        period, timestep = snapshot
-        return f"{int(period)}|{pd.Timestamp(timestep).isoformat() if not isinstance(timestep, str) else timestep}"
-    try:
-        return pd.Timestamp(snapshot).isoformat()
-    except Exception:
-        return str(snapshot)
-
-
-def _rolling_window_summaries(
-    snapshots: pd.Index,
-    horizon: int,
-    overlap: int,
-) -> list[dict[str, Any]]:
-    step = max(1, horizon - overlap)
-    windows: list[dict[str, Any]] = []
-    starts = list(range(0, len(snapshots), step))
-    for index, start in enumerate(starts):
-        end = min(len(snapshots), start + horizon)
-        accepted_end = end if index == len(starts) - 1 else min(len(snapshots), start + step)
-        solved = snapshots[start:end]
-        accepted = snapshots[start:accepted_end]
-        periods: list[int] = []
-        if isinstance(snapshots, pd.MultiIndex):
-            periods = sorted({int(p) for p in solved.get_level_values("period").unique()})
-        windows.append({
-            "index": index + 1,
-            "solvedStart": _snapshot_label(solved[0]),
-            "solvedEnd": _snapshot_label(solved[-1]),
-            "acceptedStart": _snapshot_label(accepted[0]),
-            "acceptedEnd": _snapshot_label(accepted[-1]),
-            "solvedCount": int(len(solved)),
-            "acceptedCount": int(len(accepted)),
-            "periods": periods,
-        })
-    return windows
-
-
-def _pathway_period_summaries(
-    network: pypsa.Network,
-    dispatch_frame: pd.DataFrame,
-    load_dispatch: pd.Series,
-    price_series: pd.Series,
-    emissions_factors: dict[str, float],
-) -> list[dict[str, Any]]:
-    if not isinstance(network.snapshots, pd.MultiIndex):
-        return []
-    summaries: list[dict[str, Any]] = []
-    dispatch_only = dispatch_frame.clip(lower=0.0)
-    for period in network.snapshots.get_level_values("period").unique():
-        period_index = network.snapshots[network.snapshots.get_level_values("period") == period]
-        weight = network.snapshot_weightings["objective"].reindex(period_index).fillna(1.0)
-        dispatch_period = dispatch_only.loc[period_index]
-        total_dispatch = float((dispatch_period.sum(axis=1) * weight).sum())
-        total_emissions = 0.0
-        for name in dispatch_period.columns:
-            if name not in network.generators.index:
-                continue
-            carrier = str(network.generators.at[name, "carrier"])
-            total_emissions += float((dispatch_period[name] * emissions_factors.get(carrier, 0.0) * weight).sum())
-        summaries.append({
-            "period": int(period),
-            "snapshotCount": int(len(period_index)),
-            "modeledHours": float(weight.sum()),
-            "totalDispatch": total_dispatch,
-            "totalEmissions": total_emissions,
-            "averagePrice": float(price_series.loc[period_index].mean()) if len(period_index) else 0.0,
-            "peakLoad": float(load_dispatch.loc[period_index].max()) if len(period_index) else 0.0,
-            "objectiveWeight": float(network.investment_period_weightings.at[int(period), "objective"]),
-            "yearsWeight": float(network.investment_period_weightings.at[int(period), "years"]),
-        })
-    return summaries
+from .summaries import _snapshot_label, _rolling_window_summaries, _pathway_period_summaries
 
 
 def run_pypsa(
@@ -220,9 +146,21 @@ def run_pypsa(
     total_load = float(load_dispatch.max())
     reserve_requirement = total_load  # installed capacity vs peak demand
 
+    # Carriers used only by the injected load-shedding backstop are not real
+    # generation: exclude them from energy mix and emission totals so shed
+    # (unserved) load is never counted as supply or as emissions. emissions.py
+    # makes the same exclusion by the ``load_shedding_`` name prefix.
+    shed_carriers = set(
+        network.generators.loc[
+            network.generators.index.str.startswith("load_shedding_"), "carrier"
+        ].unique()
+    )
+
     emission_totals: dict[str, float] = defaultdict(float)
     carrier_energy: dict[str, float] = defaultdict(float)
     for carrier, series in by_carrier.items():
+        if carrier in shed_carriers:
+            continue
         positive = series.clip(lower=0.0)
         carrier_energy[carrier] += weighted_sum(positive, generator_weights)
         emission_totals[carrier] += weighted_sum(positive * emissions_factors.get(carrier, 0.0), generator_weights)
@@ -233,25 +171,29 @@ def run_pypsa(
         if v > 0.0
     ]
 
-    # Cost breakdown
+    # Cost breakdown. Use the effective per-snapshot marginal cost
+    # (``get_switchable_as_dense`` resolves static vs time-varying inputs) so
+    # the fuel/carbon split is correct even when a generator's marginal_cost is
+    # supplied as a time series. The carbon adder (carbon_price * emission
+    # factor) was folded into marginal_cost by build_network, so we back it out
+    # per snapshot to report the fuel component separately.
     fuel_cost = 0.0
     carbon_cost = 0.0
     shed_cost = 0.0
+    carbon_c = float(scenario.get("carbonPrice", 0.0))
+    mc_dense = network.get_switchable_as_dense("Generator", "marginal_cost")
     for name in network.generators.index:
         if name not in generator_dispatch_frame.columns:
             continue
-        mc = float(network.generators.at[name, "marginal_cost"])
-        dispatch_mwh = weighted_sum(generator_dispatch_frame[name].clip(lower=0.0), generator_weights)
         carrier = network.generators.at[name, "carrier"]
         ef = emissions_factors.get(carrier, 0.0)
-        carbon_c = float(scenario.get("carbonPrice", 0.0))
-        carbon_component = dispatch_mwh * ef * carbon_c
-        fuel_component = dispatch_mwh * max(0.0, mc - ef * carbon_c)
+        dispatch_pos = generator_dispatch_frame[name].clip(lower=0.0)
+        mc_s = mc_dense[name]
         if name.startswith("load_shedding_"):
-            shed_cost += dispatch_mwh * mc
+            shed_cost += weighted_sum(dispatch_pos * mc_s, generator_weights)
         else:
-            fuel_cost += fuel_component
-            carbon_cost += carbon_component
+            carbon_cost += weighted_sum(dispatch_pos * ef * carbon_c, generator_weights)
+            fuel_cost += weighted_sum(dispatch_pos * (mc_s - ef * carbon_c).clip(lower=0.0), generator_weights)
 
     # Expansion CAPEX (annualised)
     expansion_results = build_expansion_results(network)

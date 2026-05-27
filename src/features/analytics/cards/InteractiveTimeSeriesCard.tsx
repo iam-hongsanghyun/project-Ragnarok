@@ -66,12 +66,21 @@ export function InteractiveTimeSeriesCard({
 
   let maxValue = 1, minValue = 0;
   if (stacked && (mode === 'area' || mode === 'bar' || mode === 'line')) {
-    maxValue = Math.max(1, ...visible.map((row) =>
-      visibleSeries.reduce((sum, item) => sum + Math.max(0, numberValue(row[item.key] as string | number | undefined)), 0),
-    ));
+    maxValue = visible.reduce((max, row) => {
+      const stackTotal = visibleSeries.reduce(
+        (sum, item) => sum + Math.max(0, numberValue(row[item.key] as string | number | undefined)), 0,
+      );
+      return stackTotal > max ? stackTotal : max;
+    }, 1);
   } else {
-    maxValue = Math.max(1, ...visible.flatMap((row) => visibleSeries.map((item) => Math.abs(numberValue(row[item.key] as string | number | undefined)))));
-    minValue = Math.min(0, ...visible.flatMap((row) => visibleSeries.map((item) => numberValue(row[item.key] as string | number | undefined))));
+    for (const row of visible) {
+      for (const item of visibleSeries) {
+        const v = numberValue(row[item.key] as string | number | undefined);
+        const abs = Math.abs(v);
+        if (abs > maxValue) maxValue = abs;
+        if (v < minValue) minValue = v;
+      }
+    }
   }
 
   const range = Math.max(maxValue - minValue, 1);

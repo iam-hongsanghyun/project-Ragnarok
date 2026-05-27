@@ -19,24 +19,36 @@ Settings rather than on the workbook:
 """
 from __future__ import annotations
 
-from collections import defaultdict
 from typing import Any
 
 import pandas as pd
 import pypsa
-from pyproj import CRS
 
 from ..config import load_system_defaults
 from ..pathway import PathwayConfig, parse_pathway_config
 from ..pypsa_schema import (
     input_static_attributes,
     input_temporal_attributes,
-    network_runtime_import_fields,
 )
 from ..utils.annuity import annuity_factor
 from ..utils.coerce import number
 from .load_shedding import add_load_shedding
 from .validators import validate_model  # re-export for backend.main
+from .snapshots import (
+    _snapshots_index,
+    _apply_pathway_config,
+    _normalize_dynamic_snapshot_index_names,
+)
+from .components import (
+    _has_name,
+    _strip_blank_columns,
+    _ordered_component_sheets,
+    _bus_ref_columns_for_list,
+    _drop_broken_bus_refs,
+    _ensure_carriers,
+    _apply_ts_sheet,
+)
+from .network_sheet import _apply_network_sheet, _override_network_crs, _peak_load_per_bus
 
 __all__ = ["build_network", "validate_model"]
 
@@ -201,14 +213,23 @@ def build_network(
     if carbon_price > 0 and "co2_emissions" in network.carriers.columns:
         ef = network.carriers["co2_emissions"]
         gen_ef = network.generators["carrier"].map(ef).fillna(0.0)
-        if (gen_ef > 0).any():
+        emitting = gen_ef[gen_ef > 0]
+        if not emitting.empty:
             network.generators["marginal_cost"] = (
                 network.generators["marginal_cost"].fillna(0.0)
                 + carbon_price * gen_ef
             )
+            # PyPSA's optimiser prefers a generator's time-varying marginal_cost
+            # column over the static value, so the adder must also be applied
+            # there or it is silently ignored for generators with a time series.
+            # (No double-count: a generator uses either its _t column or the
+            # static value, never both.)
+            mc_t = network.generators_t.marginal_cost
+            for gen in mc_t.columns.intersection(emitting.index):
+                mc_t[gen] = mc_t[gen].fillna(0.0) + carbon_price * float(emitting[gen])
             notes.append(
                 f"Applied carbon price {carbon_price:.2f} {currency}/t to "
-                f"{(gen_ef > 0).sum()} emitting generator(s)."
+                f"{len(emitting)} emitting generator(s)."
             )
 
     # ── Annuitise CAPEX for extendable assets ─────────────────────────────────
@@ -276,322 +297,3 @@ def build_network(
     return network, notes
 
 
-# ── Helpers ─────────────────────────────────────────────────────────────────
-
-
-def _has_name(row: dict[str, Any]) -> bool:
-    name = row.get("name")
-    return name is not None and str(name).strip() != ""
-
-
-def _strip_blank_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Drop columns that are entirely null or blank — let PyPSA defaults apply."""
-    df = df.dropna(axis=1, how="all")
-    for col in list(df.columns):
-        if df[col].astype(str).str.strip().eq("").all():
-            df = df.drop(columns=[col])
-    return df
-
-
-def _ordered_component_sheets(network: pypsa.Network) -> list[tuple[str, str]]:
-    """Return [(sheet_name, pypsa_class_name), …] in dependency-safe order.
-
-    Carriers and buses must be added before anything that references them. The
-    remainder follows PyPSA's own component registry order.
-    """
-    keys = list(network.components.keys())
-    priority = {"carriers": 0, "buses": 1}
-    sortable: list[tuple[int, int, str, str]] = []
-    for i, list_name in enumerate(keys):
-        comp = network.components[list_name]
-        sortable.append((priority.get(list_name, 99), i, list_name, comp.name))
-    sortable.sort()
-    return [(list_name, cls) for _, _, list_name, cls in sortable]
-
-
-def _apply_network_sheet(
-    network: pypsa.Network,
-    model: dict[str, list[dict[str, Any]]],
-    notes: list[str],
-) -> None:
-    rows = model.get("network") or []
-    network_row = next(
-        (
-            row for row in rows
-            if any(value not in (None, "") for value in row.values())
-        ),
-        None,
-    )
-    if not network_row:
-        return
-
-    applied_fields: list[str] = []
-    for policy in network_runtime_import_fields():
-        field = str(policy.get("field", "")).strip()
-        if not field:
-            continue
-        value = network_row.get(field)
-        if value in (None, ""):
-            continue
-        coercion = str(policy.get("coercion", "any"))
-        if field == "name":
-            network.name = str(value)
-        elif field == "srid":
-            _override_network_crs(network, CRS.from_epsg(int(number(value))))
-        elif field == "crs":
-            _override_network_crs(network, CRS.from_user_input(value))
-        elif field == "now":
-            network.now = value
-        else:
-            continue
-        applied_fields.append(field)
-
-    if applied_fields:
-        notes.append(
-            "Applied network sheet fields: " + ", ".join(applied_fields) + "."
-        )
-
-
-def _override_network_crs(network: pypsa.Network, crs: CRS) -> None:
-    shapes = network.c.shapes.static
-    shapes = shapes.set_crs(crs, allow_override=True)
-    network.c.shapes.static = shapes
-    network._crs = shapes.crs
-
-
-def _snapshots_index(
-    model: dict[str, list[dict[str, Any]]],
-    pathway: PathwayConfig,
-) -> pd.Index:
-    """Build the snapshot index from the `snapshots` sheet, if present.
-
-    Snapshot date strings are expected to already be ISO (the frontend
-    normalizes input dates to ISO using the user's Date format setting before
-    the model is sent here), so they parse unambiguously.
-    """
-    rows = model.get("snapshots") or []
-    labels: list[str] = []
-    periods: list[int] = []
-    for r in rows:
-        for k in ("snapshot", "name", "datetime", "timestep", "index"):
-            v = r.get(k)
-            if v not in (None, ""):
-                labels.append(str(v))
-                break
-        if pathway.enabled and pathway.snapshot_mapping_mode == "explicit_period_column":
-            period_value = r.get("period")
-            if period_value in (None, ""):
-                periods.append(0)
-            else:
-                periods.append(int(number(period_value)))
-    if not labels:
-        return pd.Index([], dtype="object")
-    if pathway.enabled and pathway.snapshot_mapping_mode == "explicit_period_column":
-        try:
-            timesteps = pd.to_datetime(labels)
-        except Exception:
-            timesteps = pd.Index(labels, dtype="object")
-        snapshots = pd.MultiIndex.from_arrays([periods, timesteps], names=["period", "timestep"])
-        snapshots.name = "snapshot"
-        return snapshots
-    # Single-period run: dedupe labels so a pathway workbook (which lists the
-    # same timestamp once per period via the `period` column) still produces
-    # a unique snapshot index. Without this PyPSA's internal reindexing
-    # raises "Reindexing only valid with uniquely valued Index objects".
-    seen: set[str] = set()
-    unique_labels: list[str] = []
-    for label in labels:
-        if label in seen:
-            continue
-        seen.add(label)
-        unique_labels.append(label)
-    try:
-        return pd.to_datetime(unique_labels)
-    except Exception:
-        return pd.Index(unique_labels, dtype="object")
-
-
-def _apply_pathway_config(
-    network: pypsa.Network,
-    pathway: PathwayConfig,
-    notes: list[str],
-) -> None:
-    if not pathway.enabled or not pathway.periods:
-        return
-    periods = [row.period for row in pathway.periods]
-    network.set_investment_periods(periods)
-    network.investment_period_weightings = network.investment_period_weightings.reindex(periods).fillna(1.0)
-    for row in pathway.periods:
-        network.investment_period_weightings.at[row.period, "objective"] = float(row.objective_weight)
-        network.investment_period_weightings.at[row.period, "years"] = float(row.years_weight)
-    notes.append(
-        "Enabled pathway planning for periods "
-        + ", ".join(str(period) for period in periods)
-        + "."
-    )
-
-
-def _bus_ref_columns(network: pypsa.Network, cls: str) -> list[str]:
-    """Return the column names of bus references for a PyPSA component class.
-
-    Looks up PyPSA's attribute schema rather than hardcoding which classes
-    have `bus` vs `bus0/bus1` vs `bus0..bus3`.
-    """
-    # Find the component by class name
-    for list_name in network.components.keys():
-        if network.components[list_name].name != cls:
-            return _bus_ref_columns_for_list(network, list_name)
-    return []
-
-
-def _bus_ref_columns_for_list(network: pypsa.Network, list_name: str) -> list[str]:
-    defaults = network.components[list_name].defaults
-    return [a for a in defaults.index if a == "bus" or (a.startswith("bus") and a[3:].isdigit())]
-
-
-def _drop_broken_bus_refs(
-    df: pd.DataFrame,
-    cls: str,
-    network: pypsa.Network,
-    sheet: str,
-    notes: list[str],
-) -> pd.DataFrame:
-    """Drop rows where a required bus reference points to a missing bus."""
-    bus_cols = _bus_ref_columns_for_list(network, sheet)
-    if not bus_cols:
-        return df
-    # Only the primary bus (bus or bus0/bus1) is required; bus2/bus3 are optional.
-    required = [c for c in bus_cols if c in ("bus", "bus0", "bus1")]
-    if not required:
-        return df
-    valid_buses = set(network.buses.index)
-    keep_mask = pd.Series(True, index=df.index)
-    skipped: list[str] = []
-    for col in required:
-        if col not in df.columns:
-            notes.append(f"Sheet '{sheet}' has no '{col}' column — all rows skipped.")
-            return df.iloc[0:0]
-        for name, bus in df[col].items():
-            if pd.isna(bus) or str(bus).strip() == "" or str(bus) not in valid_buses:
-                keep_mask[name] = False
-                skipped.append(f"{name} ({col}='{bus}')")
-    dropped = (~keep_mask).sum()
-    if dropped:
-        notes.append(
-            f"{cls}: {int(dropped)} row(s) skipped — bus reference missing: "
-            f"{', '.join(skipped[:5])}{' …' if len(skipped) > 5 else ''}"
-        )
-    return df[keep_mask]
-
-
-def _ensure_carriers(network: pypsa.Network, carriers: pd.Series) -> None:
-    """Auto-add any carrier referenced by a component but missing from carriers sheet."""
-    referenced = {str(c).strip() for c in carriers.dropna().unique() if str(c).strip()}
-    missing = referenced - set(network.carriers.index)
-    for name in missing:
-        network.add("Carrier", name)
-
-
-def _apply_ts_sheet(
-    network: pypsa.Network,
-    rows: list[dict[str, Any]],
-    list_name: str,
-    attr: str,
-) -> None:
-    """Assign a time-series sheet to ``network.<list_name>_t.<attr>``."""
-    df = pd.DataFrame(rows)
-    label_col = next(
-        (k for k in ("snapshot", "datetime", "name", "index", "timestep") if k in df.columns),
-        None,
-    )
-    if label_col is None:
-        return
-    data = df.drop(columns=[label_col, *([c for c in ("period",) if c in df.columns])])
-    if data.empty:
-        return
-    static_frame = network.components[list_name].static
-    valid_cols = [c for c in data.columns if c in static_frame.index]
-    if not valid_cols:
-        return
-    data = data[valid_cols].apply(pd.to_numeric, errors="coerce")
-    if isinstance(network.snapshots, pd.MultiIndex):
-        if "period" in df.columns:
-            periods = df["period"].apply(lambda v: int(number(v))).tolist()
-            labels = df[label_col]
-            try:
-                timesteps = pd.to_datetime(labels)
-            except Exception:
-                timesteps = pd.Index(labels.astype(str))
-            data.index = pd.MultiIndex.from_arrays([periods, timesteps], names=["period", "timestep"])
-            data.index.name = "snapshot"
-        elif len(df.index) == len(network.snapshots):
-            data.index = network.snapshots
-        else:
-            try:
-                idx = pd.to_datetime(df[label_col])
-            except Exception:
-                idx = pd.Index(df[label_col].astype(str))
-            pieces = []
-            periods = list(network.snapshots.get_level_values("period").unique())
-            for period in periods:
-                period_data = data.copy()
-                period_data.index = idx
-                period_data = pd.concat({period: period_data}, names=["period", "timestep"])
-                period_data.index.name = "snapshot"
-                pieces.append(period_data)
-            if not pieces:
-                return
-            data = pd.concat(pieces)
-    else:
-        try:
-            data.index = pd.to_datetime(df[label_col])
-        except Exception:
-            data.index = pd.Index(df[label_col].astype(str))
-        # Single-period: dedupe input time-series rows when the same timestamp
-        # appears more than once (pathway workbooks list each timestep once
-        # per period). Keep first occurrence so reindex succeeds.
-        if data.index.has_duplicates:
-            data = data[~data.index.duplicated(keep="first")]
-    if len(network.snapshots) > 0:
-        if isinstance(network.snapshots, pd.MultiIndex) and not isinstance(data.index, pd.MultiIndex):
-            data = data.reindex(network.snapshots, level="timestep")
-        else:
-            data = data.reindex(network.snapshots)
-    t_frame = getattr(network, list_name + "_t")
-    current = getattr(t_frame, attr)
-    # Re-stitch via concat (avoid the per-column-insert performance warning).
-    merged = pd.concat(
-        [current.drop(columns=[c for c in current.columns if c in data.columns]), data],
-        axis=1,
-    )
-    setattr(t_frame, attr, merged)
-
-
-def _normalize_dynamic_snapshot_index_names(network: pypsa.Network) -> None:
-    for component in network.all_components:
-        dynamic = network.c[component].dynamic
-        for attr in dynamic:
-            dynamic[attr].index.name = "snapshot"
-
-
-def _peak_load_per_bus(network: pypsa.Network) -> dict[str, float]:
-    """Sum of peak load (across snapshots) at each bus.
-
-    Used to size the load-shedding generator's p_nom uncapped.
-    """
-    totals: dict[str, float] = defaultdict(float)
-    if network.loads.empty:
-        return {}
-    load_to_bus = network.loads["bus"].to_dict()
-    if not network.loads_t.p_set.empty:
-        peaks = network.loads_t.p_set.max(axis=0)
-        for load_name, bus in load_to_bus.items():
-            if load_name in peaks.index:
-                totals[bus] += float(peaks[load_name])
-            elif "p_set" in network.loads.columns:
-                totals[bus] += float(network.loads.at[load_name, "p_set"])
-    else:
-        for load_name, bus in load_to_bus.items():
-            if "p_set" in network.loads.columns:
-                totals[bus] += float(network.loads.at[load_name, "p_set"])
-    return dict(totals)

@@ -24,11 +24,3 @@ def text(value: Any, default: str = "") -> str:
         return default
     string = str(value).strip()
     return string if string else default
-
-
-def bool_value(value: Any, default: bool = False) -> bool:
-    if isinstance(value, bool):
-        return value
-    if value in (None, ""):
-        return default
-    return str(value).lower() in {"1", "true", "yes", "y"}

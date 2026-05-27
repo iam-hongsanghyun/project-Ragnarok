@@ -108,11 +108,34 @@ function staticOutValue(
   return numberValue(v as Primitive);
 }
 
-function inputSeriesValueAt(
-  rows: GridRow[] | undefined, i: number, col: string, fallback: number,
+// Candidate time-index column names for input temporal sheets, mirroring
+// workbook.ts SNAPSHOT_LABEL_KEYS.
+const SNAPSHOT_LABEL_KEYS = ['snapshot', 'datetime', 'name', 'index', 'timestep'];
+
+/**
+ * Build a timestamp → row lookup from an input temporal sheet so values can be
+ * read by snapshot timestamp instead of by position. Positional indexing breaks
+ * once outputs are filtered to a non-first investment period, because the input
+ * sheet still holds every period's rows in order.
+ */
+function indexInputByTimestamp(rows: GridRow[] | undefined): Record<string, GridRow> {
+  const out: Record<string, GridRow> = {};
+  if (!rows || rows.length === 0) return out;
+  const labelCol = SNAPSHOT_LABEL_KEYS.find((k) => k in rows[0]);
+  if (!labelCol) return out;
+  for (const row of rows) {
+    const stamp = stringValue(row[labelCol]);
+    if (stamp) out[stamp] = row;
+  }
+  return out;
+}
+
+function inputSeriesValueAtStamp(
+  byStamp: Record<string, GridRow>, stamp: string, col: string, fallback: number,
 ): number {
-  if (!rows || i >= rows.length) return fallback;
-  const cell = rows[i]?.[col];
+  const row = byStamp[stamp];
+  if (!row) return fallback;
+  const cell = row[col];
   if (cell === undefined || cell === null || cell === '') return fallback;
   return numberValue(cell);
 }
@@ -171,6 +194,7 @@ export function deriveRunResults(
   const socStore = visibleOutputs.series['storage_units-state_of_charge'];
   const priceBus = visibleOutputs.series['buses-marginal_price'];
   const loadInputTs = model['loads-p_set'];
+  const loadInputByStamp = indexInputByTimestamp(loadInputTs);
 
   const generators = Object.keys(genStatic);
   const storageUnits = Object.keys(storageStatic);
@@ -226,7 +250,9 @@ export function deriveRunResults(
   for (let i = 0; i < snapshots.length; i++) {
     let total = 0;
     for (const ln of Object.keys(loadStatic)) {
-      total += inputSeriesValueAt(loadInputTs, i, ln, numberValue(loadStatic[ln].p_set));
+      total += inputSeriesValueAtStamp(
+        loadInputByStamp, snapshots[i], ln, numberValue(loadStatic[ln].p_set),
+      );
     }
     loadPerSnapshot[i] = total;
   }
@@ -275,18 +301,23 @@ export function deriveRunResults(
     }
   }
 
-  // ── Storage system series (aggregate of all storage units, matches backend) ──
+  // ── Storage system series ─────────────────────────────────────────────────
+  // Aggregate-then-derive: sum raw p across all storage units per snapshot,
+  // then split the aggregate into charge/discharge. SOC is summed directly.
+  // Backend build_storage_series uses the same aggregate-then-derive convention.
   const storageSeries: StoragePoint[] = [];
   if (storageUnits.length > 0) {
-    const firstUnit = storageUnits[0];
     for (let i = 0; i < snapshots.length; i++) {
-      const p = seriesValueAt(pStore, i, firstUnit);
-      const soc = seriesValueAt(socStore, i, firstUnit);
+      let sumP = 0;
+      let state = 0;
+      for (const unit of storageUnits) {
+        sumP += seriesValueAt(pStore, i, unit);
+        state += seriesValueAt(socStore, i, unit);
+      }
+      const charge = Math.abs(Math.min(sumP, 0));
+      const discharge = Math.max(sumP, 0);
       storageSeries.push({
-        label: labels[i], timestamp: snapshots[i],
-        charge: Math.abs(Math.min(p, 0)),
-        discharge: Math.max(p, 0),
-        state: soc,
+        label: labels[i], timestamp: snapshots[i], charge, discharge, state,
       });
     }
   } else {
@@ -402,7 +433,9 @@ export function deriveRunResults(
     for (let i = 0; i < snapshots.length; i++) {
       let lT = 0;
       for (const ln of loadsByBus[bus] ?? []) {
-        lT += inputSeriesValueAt(loadInputTs, i, ln, numberValue(loadStatic[ln]?.p_set));
+        lT += inputSeriesValueAtStamp(
+          loadInputByStamp, snapshots[i], ln, numberValue(loadStatic[ln]?.p_set),
+        );
       }
       let gT = 0;
       for (const gn of gensByBus[bus] ?? []) gT += Math.max(generatorDispatch[gn][i], 0);
@@ -508,12 +541,13 @@ export function deriveRunResults(
   let totalCap = 0;
   for (const n of generators) totalCap += numberValue(genStatic[n].p_nom);
   for (const n of storageUnits) totalCap += numberValue(storageStatic[n].p_nom);
-  const peakLoad = Math.max(...loadPerSnapshot, 0);
+  const peakLoad = loadPerSnapshot.reduce((m, v) => (v > m ? v : m), 0);
   const avgPrice = systemPriceSeries.length
     ? systemPriceSeries.reduce((s, p) => s + p.value, 0) / systemPriceSeries.length
     : 0;
   const peakPrice = systemPriceSeries.length
-    ? Math.max(...systemPriceSeries.map((p) => p.value)) : 0;
+    ? systemPriceSeries.reduce((m, p) => (p.value > m ? p.value : m), -Infinity)
+    : 0;
   const totalEmissionsKt =
     Object.values(carrierEmissionsMap).reduce((a, b) => a + b, 0) / 1000;
   const avgLoading = lineLoading.length
@@ -559,7 +593,7 @@ export function deriveRunResults(
         const periodPGen = periodSeries['generators-p'];
         const periodPStore = periodSeries['storage_units-p'];
         const periodPriceBus = periodSeries['buses-marginal_price'];
-        const loadTs = model['loads-p_set'];
+        const loadByStamp = indexInputByTimestamp(model['loads-p_set']);
         let totalDispatch = 0;
         let totalEmissions = 0;
         let peakLoad = 0;
@@ -568,7 +602,9 @@ export function deriveRunResults(
         for (let i = 0; i < periodSnapshots.length; i++) {
           let loadAtT = 0;
           for (const ln of Object.keys(loadStatic)) {
-            loadAtT += inputSeriesValueAt(loadTs, i, ln, numberValue(loadStatic[ln].p_set));
+            loadAtT += inputSeriesValueAtStamp(
+              loadByStamp, periodSnapshots[i], ln, numberValue(loadStatic[ln].p_set),
+            );
           }
           peakLoad = Math.max(peakLoad, loadAtT);
           let dispatchAtT = 0;
