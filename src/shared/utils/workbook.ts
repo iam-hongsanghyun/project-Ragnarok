@@ -27,6 +27,18 @@ export function normalizeCell(value: unknown): Primitive {
   return String(value);
 }
 
+// Excel hard-limits any single cell to 32,767 characters. Long JSON payloads
+// (results, plugin data, run history) are split into chunks written across
+// multiple rows (with a `part` index) and reassembled in order on import.
+const MAX_CELL_CHARS = 30000;
+
+function chunkText(text: string): string[] {
+  if (text.length <= MAX_CELL_CHARS) return [text];
+  const parts: string[] = [];
+  for (let i = 0; i < text.length; i += MAX_CELL_CHARS) parts.push(text.slice(i, i + MAX_CELL_CHARS));
+  return parts;
+}
+
 // Candidate time-index column names, mirroring the backend's label lookup.
 const SNAPSHOT_LABEL_KEYS = ['snapshot', 'datetime', 'name', 'index', 'timestep'];
 
@@ -325,22 +337,32 @@ export function buildProjectWorkbook(
     XLSX.utils.book_append_sheet(workbook, ws, sheet);
   });
 
+  const resultMetaEntries: Array<[string, unknown]> = [];
+  if (metadata.runMeta) resultMetaEntries.push(['runMeta', metadata.runMeta]);
+  if (metadata.pathway) resultMetaEntries.push(['pathway', metadata.pathway]);
+  if (metadata.rolling) resultMetaEntries.push(['rolling', metadata.rolling]);
+  if (metadata.co2Shadow) resultMetaEntries.push(['co2Shadow', metadata.co2Shadow]);
+  if (metadata.narrative) resultMetaEntries.push(['narrative', metadata.narrative]);
   const resultMetaRows: GridRow[] = [];
-  if (metadata.runMeta) resultMetaRows.push({ key: 'runMeta', json: JSON.stringify(metadata.runMeta) });
-  if (metadata.pathway) resultMetaRows.push({ key: 'pathway', json: JSON.stringify(metadata.pathway) });
-  if (metadata.rolling) resultMetaRows.push({ key: 'rolling', json: JSON.stringify(metadata.rolling) });
-  if (metadata.co2Shadow) resultMetaRows.push({ key: 'co2Shadow', json: JSON.stringify(metadata.co2Shadow) });
-  if (metadata.narrative) resultMetaRows.push({ key: 'narrative', json: JSON.stringify(metadata.narrative) });
+  resultMetaEntries.forEach(([key, value]) => {
+    chunkText(JSON.stringify(value)).forEach((chunk, part) => resultMetaRows.push({ key, part, json: chunk }));
+  });
   if (resultMetaRows.length > 0) {
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(resultMetaRows), RESULT_META_SHEET);
   }
 
-  const pluginRows = Object.entries(metadata.pluginAnalytics ?? {}).map(([moduleId, entry]) => ({
-    moduleId,
-    name: entry.name,
-    ui: JSON.stringify(entry.ui ?? {}),
-    data: JSON.stringify(entry.data ?? {}),
-  }));
+  const pluginRows: GridRow[] = [];
+  Object.entries(metadata.pluginAnalytics ?? {}).forEach(([moduleId, entry]) => {
+    const fields: Array<[string, string]> = [
+      ['ui', JSON.stringify(entry.ui ?? {})],
+      ['data', JSON.stringify(entry.data ?? {})],
+    ];
+    fields.forEach(([field, value]) => {
+      chunkText(value).forEach((chunk, part) =>
+        pluginRows.push({ moduleId, name: entry.name, field, part, value: chunk }),
+      );
+    });
+  });
   if (pluginRows.length > 0) {
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(pluginRows), PLUGIN_ANALYTICS_SHEET);
   }
@@ -360,13 +382,20 @@ export function buildProjectWorkbook(
   }
 
   if (metadata.runHistory && metadata.runHistory.length > 0) {
-    const runHistoryRows: GridRow[] = metadata.runHistory.map((entry) => ({
-      id: entry.id,
-      label: entry.label,
-      savedAt: entry.savedAt,
-      scenarioLabel: entry.scenarioLabel ?? null,
-      json: JSON.stringify(serializeRunHistoryEntry(entry)),
-    }));
+    const runHistoryRows: GridRow[] = [];
+    metadata.runHistory.forEach((entry) => {
+      const json = JSON.stringify(serializeRunHistoryEntry(entry));
+      chunkText(json).forEach((chunk, part) =>
+        runHistoryRows.push({
+          id: entry.id,
+          label: entry.label,
+          savedAt: entry.savedAt,
+          scenarioLabel: entry.scenarioLabel ?? null,
+          part,
+          json: chunk,
+        }),
+      );
+    });
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(runHistoryRows), RUN_HISTORY_SHEET);
   }
 
@@ -407,10 +436,16 @@ export function parseProjectWorkbook(
     const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: null });
 
     if (sheetName === RESULT_META_SHEET) {
+      const byKey: Record<string, string[]> = {};
       rawRows.forEach((row) => {
         const key = String(row.key ?? '').trim();
-        const json = row.json;
-        if (!key || typeof json !== 'string' || !json.trim()) return;
+        if (!key || typeof row.json !== 'string') return;
+        if (!byKey[key]) byKey[key] = [];
+        byKey[key][Number(row.part ?? 0)] = row.json;
+      });
+      Object.entries(byKey).forEach(([key, parts]) => {
+        const json = parts.join('');
+        if (!json.trim()) return;
         try {
           const parsed = JSON.parse(json);
           if (key === 'runMeta') metadata.runMeta = parsed;
@@ -469,9 +504,17 @@ export function parseProjectWorkbook(
     }
 
     if (sheetName === RUN_HISTORY_SHEET) {
-      const runHistory = rawRows.flatMap((row) => {
-        const json = row.json;
-        if (typeof json !== 'string' || !json.trim()) return [];
+      const byId: Record<string, string[]> = {};
+      const order: string[] = [];
+      rawRows.forEach((row) => {
+        if (typeof row.json !== 'string') return;
+        const id = String(row.id ?? '').trim() || `row-${order.length}`;
+        if (!byId[id]) { byId[id] = []; order.push(id); }
+        byId[id][Number(row.part ?? 0)] = row.json;
+      });
+      const runHistory = order.flatMap((id) => {
+        const json = byId[id].join('');
+        if (!json.trim()) return [];
         try {
           const parsed = JSON.parse(json) as RunHistoryExportEntry;
           return [{ ...parsed, results: parsed.results as RunResults }];
@@ -503,22 +546,36 @@ export function parseProjectWorkbook(
     }
 
     if (sheetName === PLUGIN_ANALYTICS_SHEET) {
-      const pluginAnalytics: NonNullable<ProjectMetadata['pluginAnalytics']> = {};
+      // New format: long rows {moduleId, name, field, part, value}. Old format:
+      // one row per module {moduleId, name, ui, data}. Support both.
+      const isChunked = rawRows.some((r) => 'field' in r);
+      const acc: Record<string, { name: string; ui: string[]; data: string[] }> = {};
       rawRows.forEach((row) => {
         const moduleId = String(row.moduleId ?? '').trim();
         if (!moduleId) return;
+        if (!acc[moduleId]) acc[moduleId] = { name: String(row.name ?? moduleId), ui: [], data: [] };
+        if (isChunked) {
+          const part = Number(row.part ?? 0);
+          const value = typeof row.value === 'string' ? row.value : '';
+          if (String(row.field) === 'ui') acc[moduleId].ui[part] = value;
+          else if (String(row.field) === 'data') acc[moduleId].data[part] = value;
+        } else {
+          acc[moduleId].ui[0] = typeof row.ui === 'string' ? row.ui : '';
+          acc[moduleId].data[0] = typeof row.data === 'string' ? row.data : '';
+        }
+      });
+      const pluginAnalytics: NonNullable<ProjectMetadata['pluginAnalytics']> = {};
+      Object.entries(acc).forEach(([moduleId, p]) => {
+        const uiStr = p.ui.join('');
+        const dataStr = p.data.join('');
         try {
           pluginAnalytics[moduleId] = {
-            name: String(row.name ?? moduleId),
-            ui: typeof row.ui === 'string' && row.ui.trim() ? JSON.parse(row.ui) : {},
-            data: typeof row.data === 'string' && row.data.trim() ? JSON.parse(row.data) : {},
+            name: p.name,
+            ui: uiStr.trim() ? JSON.parse(uiStr) : {},
+            data: dataStr.trim() ? JSON.parse(dataStr) : {},
           };
         } catch {
-          pluginAnalytics[moduleId] = {
-            name: String(row.name ?? moduleId),
-            ui: {},
-            data: {},
-          };
+          pluginAnalytics[moduleId] = { name: p.name, ui: {}, data: {} };
         }
       });
       if (Object.keys(pluginAnalytics).length > 0) metadata.pluginAnalytics = pluginAnalytics;
