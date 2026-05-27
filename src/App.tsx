@@ -28,7 +28,7 @@ import {
   AnalyticsSubTab,
 } from './shared/types';
 import { API_BASE, DEFAULT_CONSTRAINTS, getDefaultRowForSheet, MAX_UNPINNED_HISTORY, PYPSA_SCHEMA_META, RUN_POLLING, RUN_WINDOW, SHEETS } from './constants';
-import { createEmptyWorkbook, exportProjectWorkbook, exportWorkbook, parseProjectFile, parseWorkbook, workbookToArrayBuffer } from './shared/utils/workbook';
+import { createEmptyWorkbook, exportProjectWorkbook, exportWorkbook, normalizeInputDatesToIso, parseProjectFile, parseWorkbook, workbookToArrayBuffer } from './shared/utils/workbook';
 import { exportFullResults } from './shared/utils/exportResults';
 import { exportReportHtml } from './shared/utils/exportReport';
 import { getBounds, getBusIndex, carrierColor, numberValue, orderByCarrierRows, setCarrierColorOverrides, snapshotMaxFromWorkbook } from './shared/utils/helpers';
@@ -465,6 +465,7 @@ function AppInner() {
     if (!file) return;
     try {
       const nextModel = await parseWorkbook(file);
+      normalizeInputDatesToIso(nextModel, settings.dateFormat);
       resetForNewModel(nextModel, file.name || 'ragnarok_case.xlsx');
       setFileHandle(null);
       setStatus(`Imported workbook: ${file.name}. Analytics will populate after the next run.`);
@@ -487,6 +488,7 @@ function AppInner() {
       const importedScenarios = readScenarioCatalogFromModel(nextModel);
       const importedRunState = metadata.runState;
       const importedSettings = metadata.settings;
+      normalizeInputDatesToIso(nextModel, importedSettings?.dateFormat ?? settings.dateFormat);
       const importedSnapshotWeight = importedRunState?.snapshotWeight ?? snapshotWeight;
       const importedCarbonPrice = importedRunState?.carbonPrice ?? carbonPrice;
       const importedDiscountRate = importedSettings?.discountRate ?? settings.discountRate;
@@ -647,6 +649,7 @@ function AppInner() {
       });
       const file = await handle.getFile();
       const nextModel = await parseWorkbook(file);
+      normalizeInputDatesToIso(nextModel, settings.dateFormat);
       resetForNewModel(nextModel, file.name || 'ragnarok_case.xlsx');
       setFileHandle(handle);
       setStatus(`Opened workbook: ${file.name}`);

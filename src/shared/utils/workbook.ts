@@ -6,8 +6,9 @@ import {
   stripOutputStaticAttributes,
   PYPSA_COMPONENT_BY_SHEET,
 } from '../../constants/pypsa_schema';
-import type { AppSettings } from '../../features/settings/useSettings';
+import type { AppSettings, DateFormat } from '../../features/settings/useSettings';
 import { CustomConstraint, GridRow, Primitive, ProjectImportProvenance, ProjectRunState, RunHistoryEntry, RunResults, WorkbookModel } from '../types';
+import { normalizeDateToIso } from './helpers';
 import { PATHWAY_CONFIG_SHEET, PATHWAY_PERIODS_SHEET } from './pathway';
 import { ROLLING_CONFIG_SHEET } from './rolling';
 import { SCENARIO_SHEET } from './scenarios';
@@ -24,6 +25,40 @@ export function normalizeCell(value: unknown): Primitive {
   if (value === undefined || value === null) return null;
   if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'string') return value;
   return String(value);
+}
+
+// Candidate time-index column names, mirroring the backend's label lookup.
+const SNAPSHOT_LABEL_KEYS = ['snapshot', 'datetime', 'name', 'index', 'timestep'];
+
+/**
+ * Rewrite every input date cell into the canonical ISO target format,
+ * interpreting raw strings with the user's declared input format (`fmt`).
+ * Covers the `snapshots` sheet (all string cells) and the time-index column
+ * of every input temporal sheet, so the model is uniformly ISO before it
+ * reaches the backend or an export. Mutates `model` in place; non-date cells
+ * pass through unchanged.
+ */
+export function normalizeInputDatesToIso(model: WorkbookModel, fmt: DateFormat): void {
+  const sheets = model as unknown as Record<string, GridRow[] | undefined>;
+  for (const sheet of Object.keys(sheets)) {
+    const rows = sheets[sheet];
+    if (!rows || rows.length === 0) continue;
+    if (sheet === 'snapshots') {
+      for (const row of rows) {
+        for (const key of Object.keys(row)) {
+          const v = row[key];
+          if (typeof v === 'string') row[key] = normalizeDateToIso(v, fmt);
+        }
+      }
+    } else if (isInputTemporalSheet(sheet)) {
+      const labelCol = SNAPSHOT_LABEL_KEYS.find((k) => k in rows[0]);
+      if (!labelCol) continue;
+      for (const row of rows) {
+        const v = row[labelCol];
+        if (typeof v === 'string') row[labelCol] = normalizeDateToIso(v, fmt);
+      }
+    }
+  }
 }
 
 export function createEmptyWorkbook(): WorkbookModel {

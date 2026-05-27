@@ -1,6 +1,7 @@
 import { LatLngBoundsExpression } from 'leaflet';
 import { getDefaultRowForSheet } from '../../constants';
 import { GridRow, Primitive, SheetName, WorkbookModel } from '../types';
+import type { DateFormat } from '../../features/settings/useSettings';
 
 const DEFAULT_CARRIER_PALETTE = [
   '#4e79a7', '#f28e2b', '#e15759', '#76b7b2', '#59a14f',
@@ -196,11 +197,54 @@ export function getBusIndex(model: WorkbookModel): Record<string, GridRow> {
   return index;
 }
 
+const pad2 = (n: number): string => String(n).padStart(2, '0');
+
+/** Canonical ISO date portion (YYYY-MM-DD) from local components — never UTC, so the calendar day never shifts. */
+export function isoDate(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+/** Canonical 24h time portion (HH:MM) from local components. */
+export function isoTime(d: Date): string {
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
 export function formatTimestamp(raw?: string) {
   if (!raw) return '';
   const date = new Date(raw);
   if (Number.isNaN(date.getTime())) return raw;
-  return date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return `${isoDate(date)} ${isoTime(date)}`;
+}
+
+const DATE_RE = /^(\d{1,4})[-/.](\d{1,2})[-/.](\d{1,4})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$/;
+
+/**
+ * Convert a date string written in the user's declared INPUT format (`fmt`)
+ * into the canonical ISO target (YYYY-MM-DD, plus THH:MM:SS when a time part
+ * is present). Strings that don't match a numeric date are returned unchanged,
+ * so non-date cells pass through safely.
+ */
+export function normalizeDateToIso(raw: string, fmt: DateFormat = 'auto'): string {
+  const m = DATE_RE.exec(raw.trim());
+  if (!m) return raw;
+  const parts = [parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10)];
+  let order: DateFormat = fmt;
+  if (order === 'auto') {
+    if (m[1].length === 4) order = 'ymd';
+    else if (m[3].length === 4) order = parts[0] > 12 ? 'dmy' : 'mdy';
+    else order = 'mdy';
+  }
+  let y: number, mo: number, d: number;
+  if (order === 'ymd') [y, mo, d] = parts;
+  else if (order === 'dmy') [d, mo, y] = parts;
+  else [mo, d, y] = parts; // mdy
+  if (y < 100) y += 2000;
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return raw;
+  let iso = `${y}-${pad2(mo)}-${pad2(d)}`;
+  if (m[4] !== undefined) {
+    iso += `T${pad2(parseInt(m[4], 10))}:${pad2(parseInt(m[5], 10))}:${pad2(m[6] ? parseInt(m[6], 10) : 0)}`;
+  }
+  return iso;
 }
 
 export function snapshotMaxFromWorkbook(rows: GridRow[]): number {

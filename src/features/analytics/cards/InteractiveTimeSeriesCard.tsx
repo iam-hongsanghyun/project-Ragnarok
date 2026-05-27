@@ -1,22 +1,20 @@
 import React, { useState } from 'react';
 import { ChartMode, TimeSeriesRow, TimeSeriesSeries } from '../../../shared/types';
-import { numberValue } from '../../../shared/utils/helpers';
+import { numberValue, isoDate, isoTime } from '../../../shared/utils/helpers';
 
 const H24 = 86_400_000;
 const H7D = 7 * H24;
 const H90D = 90 * H24;
 
+// All x-axis labels use the canonical ISO target format (YYYY-MM-DD), never locale month names.
 function formatXLabel(ts: string | undefined, spanMs: number): string {
   if (!ts) return '';
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return ts;
-  if (spanMs <= H24)
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  if (spanMs <= H7D)
-    return d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-  if (spanMs <= H90D)
-    return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
-  return d.toLocaleDateString([], { month: 'short', year: 'numeric' });
+  if (spanMs <= H24)  return isoTime(d);                      // HH:MM
+  if (spanMs <= H7D)  return `${isoDate(d)} ${isoTime(d)}`;   // YYYY-MM-DD HH:MM
+  if (spanMs <= H90D) return isoDate(d);                      // YYYY-MM-DD
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; // YYYY-MM
 }
 
 export function InteractiveTimeSeriesCard({
