@@ -26,7 +26,7 @@ import {
   ValuePoint,
   WorkbookModel,
 } from '../types';
-import { carrierColor, numberValue, resolvedColor, stringValue } from './helpers';
+import { carrierColor, normalizeDateToIso, numberValue, resolvedColor, stringValue } from './helpers';
 import { deriveAssetDetails } from './deriveAssetDetails';
 
 export interface DeriveRunResultsOptions {
@@ -112,15 +112,11 @@ function staticOutValue(
 // workbook.ts SNAPSHOT_LABEL_KEYS.
 const SNAPSHOT_LABEL_KEYS = ['snapshot', 'datetime', 'name', 'index', 'timestep'];
 
-/**
- * Normalise a snapshot timestamp so input and output sheets compare equal.
- * PyPSA writes outputs in ISO form (`2024-08-01T00:00:00`) while the input
- * temporal sheets often carry the space-separated form (`2024-08-01 00:00:00`).
- * Without this, the timestamp lookup misses and the code falls back to the
- * static value — flattening any profile whose static p_set is non-zero.
- */
+/** Canonical ISO snapshot key for matching input rows to output timestamps. */
 function normalizeStamp(stamp: string): string {
-  return stamp.trim().replace('T', ' ');
+  const trimmed = stamp.trim();
+  if (!trimmed) return trimmed;
+  return normalizeDateToIso(trimmed, 'auto');
 }
 
 interface InputTemporalIndex {

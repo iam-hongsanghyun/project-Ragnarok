@@ -78,6 +78,14 @@ def _component_output_attrs(sheet_name: str) -> tuple[list[str], list[str]]:
     return static, series
 
 
+def _iso_timestamp(value: Any) -> str:
+    """Naive ISO-8601 timestamp (``YYYY-MM-DDTHH:MM:SS``) for workbook export."""
+    try:
+        return pd.Timestamp(value).strftime("%Y-%m-%dT%H:%M:%S")
+    except Exception:
+        return str(value)
+
+
 def _series_snapshot_row(snapshot: Any) -> dict[str, Any]:
     """Build the index cell(s) for one output time-series row.
 
@@ -91,16 +99,9 @@ def _series_snapshot_row(snapshot: Any) -> dict[str, Any]:
     if isinstance(snapshot, tuple) and len(snapshot) == 2:
         period = int(snapshot[0])
         timestep = snapshot[1]
-        try:
-            stamp = pd.Timestamp(timestep).isoformat()
-        except Exception:
-            stamp = str(timestep)
+        stamp = _iso_timestamp(timestep)
         return {"period": period, "snapshot": stamp}
-    try:
-        stamp = pd.Timestamp(snapshot).isoformat()
-    except Exception:
-        stamp = str(snapshot)
-    return {"snapshot": stamp}
+    return {"snapshot": _iso_timestamp(snapshot)}
 
 
 def build_full_outputs(network: pypsa.Network) -> dict[str, Any]:

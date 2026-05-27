@@ -28,7 +28,7 @@ import {
   AnalyticsSubTab,
 } from './shared/types';
 import { API_BASE, DEFAULT_CONSTRAINTS, getDefaultRowForSheet, MAX_UNPINNED_HISTORY, PYPSA_SCHEMA_META, RUN_POLLING, RUN_WINDOW, SHEETS } from './constants';
-import { createEmptyWorkbook, exportProjectWorkbook, exportWorkbook, normalizeInputDatesToIso, parseProjectFile, parseWorkbook, projectWorkbookToArrayBuffer, workbookToArrayBuffer } from './shared/utils/workbook';
+import { createEmptyWorkbook, exportProjectWorkbook, exportWorkbook, normalizeInputDatesToIso, parseProjectFile, parseWorkbook, prepareTemporalRowsForExport, projectWorkbookToArrayBuffer, workbookToArrayBuffer } from './shared/utils/workbook';
 import { exportFullResults } from './shared/utils/exportResults';
 import { exportReportHtml } from './shared/utils/exportReport';
 import { getBounds, getBusIndex, carrierColor, numberValue, orderByCarrierRows, setCarrierColorOverrides, snapshotMaxFromWorkbook } from './shared/utils/helpers';
@@ -488,7 +488,12 @@ function AppInner() {
       const importedScenarios = readScenarioCatalogFromModel(nextModel);
       const importedRunState = metadata.runState;
       const importedSettings = metadata.settings;
-      normalizeInputDatesToIso(nextModel, importedSettings?.dateFormat ?? settings.dateFormat);
+      const importDateFormat = importedSettings?.dateFormat ?? settings.dateFormat;
+      normalizeInputDatesToIso(nextModel, importDateFormat);
+      Object.keys(outputs.series).forEach((sheet) => {
+        const rows = outputs.series[sheet];
+        if (rows?.length) outputs.series[sheet] = prepareTemporalRowsForExport(rows, importDateFormat);
+      });
       const importedSnapshotWeight = importedRunState?.snapshotWeight ?? snapshotWeight;
       const importedCarbonPrice = importedRunState?.carbonPrice ?? carbonPrice;
       const importedDiscountRate = importedSettings?.discountRate ?? settings.discountRate;
@@ -908,7 +913,7 @@ function AppInner() {
     const suggestedName = filename || 'ragnarok_case.xlsx';
     if (!saver) {
       const requested = window.prompt('Save workbook as', suggestedName) || suggestedName;
-      exportWorkbook(model, requested);
+      exportWorkbook(model, requested, settings.dateFormat);
       setFilename(requested);
       setStatus(`Saved workbook as ${requested}.`);
       showToast(`Saved as ${requested}`, 'success');
@@ -920,7 +925,7 @@ function AppInner() {
         types: [{ description: 'Excel Workbook', accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] } }],
       });
       const writable = await handle.createWritable();
-      await writable.write(workbookToArrayBuffer(model));
+      await writable.write(workbookToArrayBuffer(model, settings.dateFormat));
       await writable.close();
       setFileHandle(handle);
       setFilename(handle.name || suggestedName);
@@ -941,7 +946,7 @@ function AppInner() {
     }
     try {
       const writable = await fileHandle.createWritable();
-      await writable.write(workbookToArrayBuffer(model));
+      await writable.write(workbookToArrayBuffer(model, settings.dateFormat));
       await writable.close();
       setStatus(`Saved workbook ${filename}.`);
     } catch {
@@ -976,6 +981,12 @@ function AppInner() {
 
     setRunDialogOpen(false);
 
+    // Same ISO normalization as import/open so the backend always receives
+    // canonical snapshot timestamps (and the grid stays in sync).
+    const modelForRun = JSON.parse(JSON.stringify(model)) as WorkbookModel;
+    normalizeInputDatesToIso(modelForRun, settings.dateFormat);
+    setModel(modelForRun);
+
     if (dryRun) {
       // Validate still receives JSON model — it's a cheap structural check
       // and does not need to round-trip through Excel.
@@ -984,7 +995,7 @@ function AppInner() {
         const response = await fetch(`${API_BASE}/api/validate`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model, scenario, options }),
+          body: JSON.stringify({ model: modelForRun, scenario, options }),
         });
         const result = await response.json();
         setValidateResult(result);
@@ -1010,7 +1021,7 @@ function AppInner() {
       const startResp = await fetch(`${API_BASE}/api/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model, scenario, options }),
+        body: JSON.stringify({ model: modelForRun, scenario, options }),
       });
       if (!startResp.ok) {
         const msg = await startResp.text();

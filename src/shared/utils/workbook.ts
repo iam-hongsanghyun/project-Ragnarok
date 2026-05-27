@@ -42,6 +42,65 @@ function chunkText(text: string): string[] {
 // Candidate time-index column names, mirroring the backend's label lookup.
 const SNAPSHOT_LABEL_KEYS = ['snapshot', 'datetime', 'name', 'index', 'timestep'];
 
+/** Label column on a temporal sheet, if any. */
+export function findSnapshotLabelCol(rows: GridRow[]): string | null {
+  if (!rows.length) return null;
+  return SNAPSHOT_LABEL_KEYS.find((k) => k in rows[0]) ?? null;
+}
+
+/**
+ * Pin ``period`` (when present) and the snapshot label column as the leading
+ * columns so SheetJS / Excel column order is stable across input and output sheets.
+ */
+export function orderTemporalRow(row: GridRow, labelCol: string): GridRow {
+  const ordered: GridRow = {};
+  if (row.period !== undefined && row.period !== null && row.period !== '') {
+    ordered.period = row.period;
+  }
+  if (labelCol in row) {
+    ordered[labelCol] = row[labelCol];
+  }
+  for (const [key, value] of Object.entries(row)) {
+    if (key === 'period' || key === labelCol) continue;
+    ordered[key] = value;
+  }
+  return ordered;
+}
+
+/** Canonical ISO timestamps and leading index columns for export. */
+export function prepareTemporalRowsForExport(rows: GridRow[], fmt: DateFormat): GridRow[] {
+  if (!rows.length) return rows;
+  const labelCol = findSnapshotLabelCol(rows);
+  if (!labelCol) return rows;
+  return rows.map((row) => {
+    const copy = { ...row };
+    const v = copy[labelCol];
+    if (typeof v === 'string') {
+      copy[labelCol] = normalizeDateToIso(v, fmt);
+    }
+    return orderTemporalRow(copy, labelCol);
+  });
+}
+
+/** ISO-normalise every string cell on the ``snapshots`` sheet and order columns. */
+export function prepareSnapshotsSheetForExport(rows: GridRow[], fmt: DateFormat): GridRow[] {
+  return rows.map((row) => {
+    const copy = { ...row };
+    for (const key of Object.keys(copy)) {
+      const v = copy[key];
+      if (typeof v === 'string') copy[key] = normalizeDateToIso(v, fmt);
+    }
+    const labelCol = findSnapshotLabelCol([copy]) ?? 'snapshot';
+    return orderTemporalRow(copy, labelCol in copy ? labelCol : 'snapshot');
+  });
+}
+
+function temporalSheetRowsForExport(sheet: string, rows: GridRow[], fmt: DateFormat): GridRow[] {
+  if (sheet === 'snapshots') return prepareSnapshotsSheetForExport(rows, fmt);
+  if (isInputTemporalSheet(sheet)) return prepareTemporalRowsForExport(rows, fmt);
+  return rows;
+}
+
 /**
  * Rewrite every input date cell into the canonical ISO target format,
  * interpreting raw strings with the user's declared input format (`fmt`).
@@ -133,11 +192,12 @@ function nonEmptyRows(rows: GridRow[]): GridRow[] {
   });
 }
 
-export function buildWorkbook(model: WorkbookModel) {
+export function buildWorkbook(model: WorkbookModel, dateFormat: DateFormat = 'auto') {
   const workbook = XLSX.utils.book_new();
   SHEETS.forEach((sheet) => {
-    const rows = nonEmptyRows((model[sheet] ?? []).map((row) => stripOutputStaticAttributes(sheet, row)));
-    if (rows.length === 0) return;   // skip empty sheets entirely; PyPSA will treat them as absent
+    const raw = nonEmptyRows((model[sheet] ?? []).map((row) => stripOutputStaticAttributes(sheet, row)));
+    if (raw.length === 0) return;   // skip empty sheets entirely; PyPSA will treat them as absent
+    const rows = temporalSheetRowsForExport(sheet, raw, dateFormat);
     const ws = XLSX.utils.json_to_sheet(rows);
     XLSX.utils.book_append_sheet(workbook, ws, sheet);
   });
@@ -145,7 +205,8 @@ export function buildWorkbook(model: WorkbookModel) {
   [...TS_SHEETS, ...Object.keys(model).filter((sheet) => isInputTemporalSheet(sheet) && !TS_SHEETS.includes(sheet))].forEach((sheet) => {
     const rows = (model as any)[sheet] as GridRow[] | undefined;
     if (!rows || rows.length === 0) return;
-    const ws = XLSX.utils.json_to_sheet(rows);
+    const prepared = prepareTemporalRowsForExport(rows, dateFormat);
+    const ws = XLSX.utils.json_to_sheet(prepared);
     XLSX.utils.book_append_sheet(workbook, ws, sheet);
   });
   [PATHWAY_CONFIG_SHEET, PATHWAY_PERIODS_SHEET, ROLLING_CONFIG_SHEET, SCENARIO_SHEET].forEach((sheet) => {
@@ -157,12 +218,16 @@ export function buildWorkbook(model: WorkbookModel) {
   return workbook;
 }
 
-export function exportWorkbook(model: WorkbookModel, filename = 'ragnarok_case.xlsx') {
-  XLSX.writeFile(buildWorkbook(model), filename);
+export function exportWorkbook(
+  model: WorkbookModel,
+  filename = 'ragnarok_case.xlsx',
+  dateFormat: DateFormat = 'auto',
+) {
+  XLSX.writeFile(buildWorkbook(model, dateFormat), filename);
 }
 
-export function workbookToArrayBuffer(model: WorkbookModel): ArrayBuffer {
-  return XLSX.write(buildWorkbook(model), { bookType: 'xlsx', type: 'array' }) as ArrayBuffer;
+export function workbookToArrayBuffer(model: WorkbookModel, dateFormat: DateFormat = 'auto'): ArrayBuffer {
+  return XLSX.write(buildWorkbook(model, dateFormat), { bookType: 'xlsx', type: 'array' }) as ArrayBuffer;
 }
 
 /**
@@ -271,6 +336,7 @@ export function buildProjectWorkbook(
   metadata: ProjectMetadata = EMPTY_METADATA,
 ): XLSX.WorkBook {
   const workbook = XLSX.utils.book_new();
+  const dateFormat = metadata.settings?.dateFormat ?? 'auto';
 
   // ── Static component sheets: input columns + output columns merged ────
   SHEETS.forEach((sheet) => {
@@ -289,7 +355,7 @@ export function buildProjectWorkbook(
         merged.push({ name: compName, ...attrs });
       }
     });
-    const rows = nonEmptyRows(merged);
+    const rows = temporalSheetRowsForExport(sheet, nonEmptyRows(merged), dateFormat);
     if (rows.length === 0) return;
     const ws = XLSX.utils.json_to_sheet(rows);
     XLSX.utils.book_append_sheet(workbook, ws, sheet);
@@ -303,14 +369,16 @@ export function buildProjectWorkbook(
   inputTsKeys.forEach((sheet) => {
     const rows = (model as any)[sheet] as GridRow[] | undefined;
     if (!rows || rows.length === 0) return;
-    const ws = XLSX.utils.json_to_sheet(rows);
+    const prepared = prepareTemporalRowsForExport(rows, dateFormat);
+    const ws = XLSX.utils.json_to_sheet(prepared);
     XLSX.utils.book_append_sheet(workbook, ws, sheet);
   });
 
   // ── Output time-series sheets ────────────────────────────────────────
   Object.entries(outputs.series).forEach(([sheet, rows]) => {
     if (!rows || rows.length === 0) return;
-    const ws = XLSX.utils.json_to_sheet(rows);
+    const prepared = prepareTemporalRowsForExport(rows, dateFormat);
+    const ws = XLSX.utils.json_to_sheet(prepared);
     XLSX.utils.book_append_sheet(workbook, ws, sheet);
   });
 

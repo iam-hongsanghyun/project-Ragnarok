@@ -32,8 +32,8 @@ function makeBaseModel(): WorkbookModel {
     { name: 'gen_wind', bus: 'bus_south', carrier: 'wind', p_nom: 300, marginal_cost: 0 },
   ];
   model.snapshots = [
-    { snapshot: '2024-01-01 00:00' },
-    { snapshot: '2024-01-01 01:00' },
+    { snapshot: '2024-01-01T00:00:00' },
+    { snapshot: '2024-01-01T01:00:00' },
   ];
   return model;
 }
@@ -72,8 +72,8 @@ describe('workbook project round-trip', () => {
       series: {
         // PyPSA-standard single `snapshot` index column (matches input sheets).
         'generators-p': [
-          { snapshot: '2024-01-01 00:00', gen_coal: 200, gen_wind: 120 },
-          { snapshot: '2024-01-01 01:00', gen_coal: 180, gen_wind: 140 },
+          { snapshot: '2024-01-01T00:00:00', gen_coal: 200, gen_wind: 120 },
+          { snapshot: '2024-01-01T01:00:00', gen_coal: 180, gen_wind: 140 },
         ],
       },
     };
@@ -97,7 +97,7 @@ describe('workbook project round-trip', () => {
     expect(series?.[1]?.gen_wind).toBe(140);
     // Single PyPSA-standard `snapshot` index column survives the round-trip
     // (no redundant `name`/`timestamp` duplicate columns).
-    expect(series?.[0]?.snapshot).toBe('2024-01-01 00:00');
+    expect(series?.[0]?.snapshot).toBe('2024-01-01T00:00:00');
     expect('timestamp' in (series?.[0] ?? {})).toBe(false);
   });
 
@@ -248,6 +248,44 @@ describe('input date normalization', () => {
 
     // Non-date strings pass through unchanged.
     expect(normalizeDateToIso('not-a-date', 'dmy')).toBe('not-a-date');
+  });
+});
+
+describe('export temporal sheet formatting', () => {
+  test('snapshot column is first and dates are ISO on export', () => {
+    const model = createEmptyWorkbook();
+    model.snapshots = [{ snapshot: '2024-01-01 00:00' }, { snapshot: '2024-01-01 01:00' }];
+    model['loads-p_set'] = [
+      { load_a: 100, snapshot: '2024-01-01 00:00' },
+      { load_a: 120, snapshot: '2024-01-01 01:00' },
+    ];
+
+    const wb = buildProjectWorkbook(model);
+    const snapHeader = XLSX.utils.sheet_to_json<string[]>(wb.Sheets.snapshots!, { header: 1 })[0];
+    expect(snapHeader[0]).toBe('snapshot');
+
+    const loadHeader = XLSX.utils.sheet_to_json<string[]>(wb.Sheets['loads-p_set']!, { header: 1 })[0];
+    expect(loadHeader[0]).toBe('snapshot');
+
+    const loadRows = XLSX.utils.sheet_to_json<Record<string, string>>(wb.Sheets['loads-p_set']!);
+    expect(loadRows[0].snapshot).toBe('2024-01-01T00:00:00');
+    expect(loadRows[0].snapshot).not.toContain(' ');
+  });
+
+  test('output series sheets use ISO snapshot in the first column on export', () => {
+    const outputs: ProjectOutputs = {
+      static: {},
+      series: {
+        'generators-p': [
+          { gen_coal: 200, snapshot: '2024-01-01 00:00' },
+        ],
+      },
+    };
+    const wb = buildProjectWorkbook(makeBaseModel(), outputs);
+    const header = XLSX.utils.sheet_to_json<string[]>(wb.Sheets['generators-p']!, { header: 1 })[0];
+    expect(header[0]).toBe('snapshot');
+    const rows = XLSX.utils.sheet_to_json<Record<string, string>>(wb.Sheets['generators-p']!);
+    expect(rows[0].snapshot).toBe('2024-01-01T00:00:00');
   });
 });
 
