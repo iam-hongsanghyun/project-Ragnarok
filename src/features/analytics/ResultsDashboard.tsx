@@ -11,6 +11,8 @@ import { MeritOrderCard } from './cards/MeritOrderCard';
 import { Co2ShadowCard } from './cards/Co2ShadowCard';
 import { EmissionsBreakdownCard } from './cards/EmissionsBreakdownCard';
 import { CapacityByPeriodCard } from './cards/CapacityByPeriodCard';
+import { LoadAnalysisCard } from './cards/LoadAnalysisCard';
+import { CarrierAnalysisCard } from './cards/CarrierAnalysisCard';
 
 // ── KPI card ──────────────────────────────────────────────────────────────────
 
@@ -301,6 +303,11 @@ export function ResultsDashboard({
         </DashboardSection>
       )}
 
+      {/* Load drill-down — per-bus demand stats */}
+      <DashboardSection title="Load analysis" defaultOpen={false}>
+        <LoadAnalysisCard model={model} results={results} />
+      </DashboardSection>
+
       {/* System marginal price time series */}
       {systemPriceRows.length > 0 && (
         <DashboardSection title="System marginal price">
@@ -334,6 +341,11 @@ export function ResultsDashboard({
           </div>
         </DashboardSection>
       </div>
+
+      {/* Carrier-level summary table */}
+      <DashboardSection title="Carrier analysis" defaultOpen={false}>
+        <CarrierAnalysisCard model={model} results={results} />
+      </DashboardSection>
 
       {/* Duration curves side by side */}
       <div className="dashboard-row">
