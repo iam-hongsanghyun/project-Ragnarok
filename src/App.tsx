@@ -28,7 +28,7 @@ import {
   AnalyticsSubTab,
 } from './shared/types';
 import { API_BASE, DEFAULT_CONSTRAINTS, getDefaultRowForSheet, MAX_UNPINNED_HISTORY, PYPSA_SCHEMA_META, RUN_POLLING, RUN_WINDOW, SHEETS } from './constants';
-import { createEmptyWorkbook, exportProjectWorkbook, exportWorkbook, normalizeInputDatesToIso, parseProjectFile, parseWorkbook, workbookToArrayBuffer } from './shared/utils/workbook';
+import { createEmptyWorkbook, exportProjectWorkbook, exportWorkbook, normalizeInputDatesToIso, parseProjectFile, parseWorkbook, projectWorkbookToArrayBuffer, workbookToArrayBuffer } from './shared/utils/workbook';
 import { exportFullResults } from './shared/utils/exportResults';
 import { exportReportHtml } from './shared/utils/exportReport';
 import { getBounds, getBusIndex, carrierColor, numberValue, orderByCarrierRows, setCarrierColorOverrides, snapshotMaxFromWorkbook } from './shared/utils/helpers';
@@ -591,43 +591,65 @@ function AppInner() {
     }
   };
 
-  const handleExportProject = () => {
+  const handleExportProject = async () => {
     const base = filename.replace(/\.xlsx$/i, '') || 'ragnarok_project';
     const out = `${base}_project.xlsx`;
+    const metadata = {
+      pluginAnalytics: results?.pluginAnalytics,
+      co2Shadow: results?.co2Shadow,
+      narrative: results?.narrative,
+      runMeta: results?.runMeta,
+      pathway: results?.pathway,
+      rolling: results?.rolling,
+      settings,
+      constraints,
+      runState: {
+        snapshotStart,
+        snapshotEnd,
+        snapshotWeight,
+        carbonPrice,
+        forceLp,
+        activeScenarioId: scenarioCatalog.activeScenarioId,
+      },
+      runHistory,
+      provenance: {
+        exportedAt: new Date().toISOString(),
+        exportedFilename: filename,
+        schemaCommitSha: PYPSA_SCHEMA_META.commit_sha,
+        schemaGeneratedAt: PYPSA_SCHEMA_META.generated_at,
+        importedFromFilename: projectProvenance?.importedFromFilename ?? null,
+        importedAt: projectProvenance?.importedAt ?? null,
+      },
+    };
+    const successMsg = results?.outputs
+      ? 'Project (inputs + solved outputs) exported'
+      : 'Project (inputs only) exported';
+
+    // Prefer the File System Access API so the user picks the directory and
+    // file name. Fall back to a plain download where it's unavailable.
+    const saver = (window as any).showSaveFilePicker;
+    if (saver) {
+      try {
+        const handle = await saver({
+          suggestedName: out,
+          types: [{ description: 'Excel Workbook', accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] } }],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(projectWorkbookToArrayBuffer(model, results?.outputs, metadata));
+        await writable.close();
+        showToast(`${successMsg} → ${handle.name || out}`, 'success');
+      } catch (error) {
+        if ((error as Error)?.name === 'AbortError') return;   // user cancelled
+        const msg = error instanceof Error ? error.message : 'Project export failed.';
+        setStatus(msg);
+        showToast(msg, 'error');
+      }
+      return;
+    }
+
     try {
-      exportProjectWorkbook(model, results?.outputs, {
-        pluginAnalytics: results?.pluginAnalytics,
-        co2Shadow: results?.co2Shadow,
-        narrative: results?.narrative,
-        runMeta: results?.runMeta,
-        pathway: results?.pathway,
-        rolling: results?.rolling,
-        settings,
-        constraints,
-        runState: {
-          snapshotStart,
-          snapshotEnd,
-          snapshotWeight,
-          carbonPrice,
-          forceLp,
-          activeScenarioId: scenarioCatalog.activeScenarioId,
-        },
-        runHistory,
-        provenance: {
-          exportedAt: new Date().toISOString(),
-          exportedFilename: filename,
-          schemaCommitSha: PYPSA_SCHEMA_META.commit_sha,
-          schemaGeneratedAt: PYPSA_SCHEMA_META.generated_at,
-          importedFromFilename: projectProvenance?.importedFromFilename ?? null,
-          importedAt: projectProvenance?.importedAt ?? null,
-        },
-      }, out);
-      showToast(
-        results?.outputs
-          ? 'Project (inputs + solved outputs) exported'
-          : 'Project (inputs only) exported',
-        'success',
-      );
+      exportProjectWorkbook(model, results?.outputs, metadata, out);
+      showToast(successMsg, 'success');
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Project export failed.';
       setStatus(msg);

@@ -387,6 +387,19 @@ export function exportProjectWorkbook(
   XLSX.writeFile(buildProjectWorkbook(model, outputs ?? EMPTY_OUTPUTS, metadata ?? EMPTY_METADATA), filename);
 }
 
+/** Serialise a full project workbook to an ArrayBuffer (for the File System
+ *  Access API, where the caller owns writing to a user-chosen file). */
+export function projectWorkbookToArrayBuffer(
+  model: WorkbookModel,
+  outputs: ProjectOutputs | null | undefined,
+  metadata: ProjectMetadata | null | undefined,
+): ArrayBuffer {
+  return XLSX.write(
+    buildProjectWorkbook(model, outputs ?? EMPTY_OUTPUTS, metadata ?? EMPTY_METADATA),
+    { bookType: 'xlsx', type: 'array' },
+  ) as ArrayBuffer;
+}
+
 /**
  * Parse a project workbook back into `{ model, outputs }`. Output static
  * columns inside component sheets are split out into `outputs.static`;
