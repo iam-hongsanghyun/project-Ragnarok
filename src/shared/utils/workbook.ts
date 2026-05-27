@@ -231,22 +231,6 @@ export interface ProjectMetadata {
 const EMPTY_OUTPUTS: ProjectOutputs = { static: {}, series: {} };
 const EMPTY_METADATA: ProjectMetadata = {};
 
-type RunHistoryExportEntry = Omit<RunHistoryEntry, 'results'> & {
-  results: Omit<RunResults, 'outputs'>;
-};
-
-function stripOutputsFromResults(results: RunResults): Omit<RunResults, 'outputs'> {
-  const { outputs: _outputs, ...rest } = results;
-  return rest;
-}
-
-function serializeRunHistoryEntry(entry: RunHistoryEntry): RunHistoryExportEntry {
-  return {
-    ...entry,
-    results: stripOutputsFromResults(entry.results),
-  };
-}
-
 function isProjectMetadataSheet(sheetName: string): boolean {
   return [
     RESULT_META_SHEET,
@@ -381,23 +365,10 @@ export function buildProjectWorkbook(
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(runStateRows), RUN_STATE_SHEET);
   }
 
-  if (metadata.runHistory && metadata.runHistory.length > 0) {
-    const runHistoryRows: GridRow[] = [];
-    metadata.runHistory.forEach((entry) => {
-      const json = JSON.stringify(serializeRunHistoryEntry(entry));
-      chunkText(json).forEach((chunk, part) =>
-        runHistoryRows.push({
-          id: entry.id,
-          label: entry.label,
-          savedAt: entry.savedAt,
-          scenarioLabel: entry.scenarioLabel ?? null,
-          part,
-          json: chunk,
-        }),
-      );
-    });
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(runHistoryRows), RUN_HISTORY_SHEET);
-  }
+  // Run history is intentionally not exported: each entry's full RunResults is
+  // large and redundant for re-analysis/re-run. The current run's analysis is
+  // rebuilt from the exported `outputs` sheets on import, and a fresh
+  // single-entry history is synthesized there.
 
   if (metadata.provenance) {
     const provenanceRows: GridRow[] = Object.entries(metadata.provenance).map(([key, value]) => ({ key, value }));
@@ -500,29 +471,6 @@ export function parseProjectWorkbook(
           activeScenarioId: typeof rawState.activeScenarioId === 'string' ? rawState.activeScenarioId : null,
         };
       }
-      return;
-    }
-
-    if (sheetName === RUN_HISTORY_SHEET) {
-      const byId: Record<string, string[]> = {};
-      const order: string[] = [];
-      rawRows.forEach((row) => {
-        if (typeof row.json !== 'string') return;
-        const id = String(row.id ?? '').trim() || `row-${order.length}`;
-        if (!byId[id]) { byId[id] = []; order.push(id); }
-        byId[id][Number(row.part ?? 0)] = row.json;
-      });
-      const runHistory = order.flatMap((id) => {
-        const json = byId[id].join('');
-        if (!json.trim()) return [];
-        try {
-          const parsed = JSON.parse(json) as RunHistoryExportEntry;
-          return [{ ...parsed, results: parsed.results as RunResults }];
-        } catch {
-          return [];
-        }
-      });
-      if (runHistory.length > 0) metadata.runHistory = runHistory;
       return;
     }
 
