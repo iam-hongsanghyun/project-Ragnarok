@@ -43,6 +43,8 @@ import { buildScenarioPreset, defaultScenarioCatalog, readScenarioCatalogFromMod
 import { RunDialog } from './features/run/RunDialog';
 import { Sidebar } from './layout/Sidebar';
 import { ConstraintsWorkspaceView } from './features/constraints/ConstraintsWorkspaceView';
+import { RunSetupWorkspaceView } from './features/run-setup/RunSetupWorkspaceView';
+import { SettingsWorkspaceView } from './features/settings/SettingsWorkspaceView';
 import { MapPane } from './features/map/MapPane';
 import { TablesPane } from './features/input/TablesPane';
 import { ValidationPane } from './features/validation/ValidationPane';
@@ -77,7 +79,7 @@ function AppInner() {
   const [chartSections, setChartSections] = useState<ChartSectionConfig[]>([]);
   const [runDialogOpen, setRunDialogOpen] = useState(false);
   const [dryRun, setDryRun] = useState(false);
-  const [activeWorkspaceOverlay, setActiveWorkspaceOverlay] = useState<'constraints' | null>(null);
+  const [activeWorkspaceOverlay, setActiveWorkspaceOverlay] = useState<'constraints' | 'run-setup' | 'settings' | null>(null);
   const [runHistory, setRunHistory] = useState<RunHistoryEntry[]>([]);
   const [pathwayConfig, setPathwayConfig] = useState<PathwayConfig>(() => defaultPathwayConfig());
   const [rollingConfig, setRollingConfig] = useState<RollingHorizonConfig>(() => defaultRollingConfig());
@@ -1486,8 +1488,9 @@ function AppInner() {
               model={model}
               results={results}
               constraints={constraints}
-              onConstraintsChange={setConstraints}
               onOpenConstraintsWorkspace={() => setActiveWorkspaceOverlay('constraints')}
+              onOpenRunSetupWorkspace={() => setActiveWorkspaceOverlay('run-setup')}
+              onOpenSettingsWorkspace={() => setActiveWorkspaceOverlay('settings')}
               onOpen={handleOpenWorkbook}
               onSave={saveWorkbook}
               onSaveAs={saveAsWorkbook}
@@ -1525,43 +1528,20 @@ function AppInner() {
               onRenameScenario={handleRenameScenario}
               onScenarioNotesChange={handleScenarioNotesChange}
               pathwayConfig={pathwayConfig}
-              onPathwayConfigChange={setPathwayConfig}
               rollingConfig={rollingConfig}
-              onRollingConfigChange={(config) => setRollingConfig(normalizeRollingConfig(config))}
               stochasticConfig={stochasticConfig}
-              onStochasticConfigChange={setStochasticConfig}
               sclopfConfig={sclopfConfig}
-              onSclopfConfigChange={setSclopfConfig}
-              maxSnapshots={maxSnapshots}
               snapshotStart={snapshotStart}
               snapshotEnd={snapshotEnd}
               snapshotWeight={snapshotWeight}
-              onSnapshotStartChange={setSnapshotStart}
-              onSnapshotEndChange={setSnapshotEnd}
-              onSnapshotWeightChange={setSnapshotWeight}
+              carbonPrice={carbonPrice}
+              currencySymbol={settings.currencySymbol}
               runHistory={runHistory}
               onRestoreRun={handleRestoreRun}
               onRenameHistoryEntry={handleRenameHistoryEntry}
               onPinHistoryEntry={handlePinHistoryEntry}
               onDeleteHistoryEntry={handleDeleteHistoryEntry}
               onToggleComparison={handleToggleComparison}
-              dateFormat={settings.dateFormat}
-              onDateFormatChange={(f) => updateSettings({ dateFormat: f })}
-              solverThreads={settings.solverThreads}
-              solverType={settings.solverType}
-              onSolverThreadsChange={(v) => updateSettings({ solverThreads: v })}
-              onSolverTypeChange={(v) => updateSettings({ solverType: v })}
-              currencyCode={settings.currencyCode}
-              currencySymbol={settings.currencySymbol}
-              onCurrencyChange={(code, symbol) => updateSettings({ currencyCode: code, currencySymbol: symbol })}
-              carbonPrice={carbonPrice}
-              onCarbonPriceChange={setCarbonPrice}
-              enableLoadShedding={settings.enableLoadShedding}
-              onEnableLoadSheddingChange={(v) => updateSettings({ enableLoadShedding: v })}
-              loadSheddingCost={settings.loadSheddingCost}
-              onLoadSheddingCostChange={(v) => updateSettings({ loadSheddingCost: v })}
-              discountRate={settings.discountRate}
-              onDiscountRateChange={(v) => updateSettings({ discountRate: v })}
               moduleInventory={moduleHost.inventory}
               moduleHostLoading={moduleHost.loading}
               moduleHostError={moduleHost.error}
@@ -1571,8 +1551,6 @@ function AppInner() {
               onToggleModuleEnabled={moduleHost.toggleEnabled}
               onInstallModule={handleInstallModule}
               onUninstallModule={handleUninstallModule}
-              onCarrierColorChange={(rowIndex, color) => updateRowValue('carriers', rowIndex, 'color', color)}
-              onCarrierMove={(rowIndex, direction) => moveRow('carriers', rowIndex, direction)}
             />
           )}
         </aside>
@@ -1598,6 +1576,58 @@ function AppInner() {
               onUpdateRow={updateRowValue}
               onAddRow={addRow}
               onDeleteRow={deleteRow}
+              onClose={() => setActiveWorkspaceOverlay(null)}
+            />
+          )}
+
+          {/* ── Workspace overlay (run setup) ── */}
+          {activeWorkspaceOverlay === 'run-setup' && (
+            <RunSetupWorkspaceView
+              pathwayConfig={pathwayConfig}
+              onPathwayConfigChange={setPathwayConfig}
+              rollingConfig={rollingConfig}
+              onRollingConfigChange={(config) => setRollingConfig(normalizeRollingConfig(config))}
+              stochasticConfig={stochasticConfig}
+              onStochasticConfigChange={setStochasticConfig}
+              sclopfConfig={sclopfConfig}
+              onSclopfConfigChange={setSclopfConfig}
+              maxSnapshots={maxSnapshots}
+              snapshotStart={snapshotStart}
+              snapshotEnd={snapshotEnd}
+              snapshotWeight={snapshotWeight}
+              onSnapshotStartChange={setSnapshotStart}
+              onSnapshotEndChange={setSnapshotEnd}
+              onSnapshotWeightChange={setSnapshotWeight}
+              carbonPrice={carbonPrice}
+              onCarbonPriceChange={setCarbonPrice}
+              currencySymbol={settings.currencySymbol}
+              lineCount={model.lines.length}
+              transformerCount={model.transformers.length}
+              onClose={() => setActiveWorkspaceOverlay(null)}
+            />
+          )}
+
+          {/* ── Workspace overlay (settings) ── */}
+          {activeWorkspaceOverlay === 'settings' && (
+            <SettingsWorkspaceView
+              model={model}
+              dateFormat={settings.dateFormat}
+              onDateFormatChange={(f) => updateSettings({ dateFormat: f })}
+              currencyCode={settings.currencyCode}
+              currencySymbol={settings.currencySymbol}
+              onCurrencyChange={(code, symbol) => updateSettings({ currencyCode: code, currencySymbol: symbol })}
+              discountRate={settings.discountRate}
+              onDiscountRateChange={(v) => updateSettings({ discountRate: v })}
+              enableLoadShedding={settings.enableLoadShedding}
+              onEnableLoadSheddingChange={(v) => updateSettings({ enableLoadShedding: v })}
+              loadSheddingCost={settings.loadSheddingCost}
+              onLoadSheddingCostChange={(v) => updateSettings({ loadSheddingCost: v })}
+              solverThreads={settings.solverThreads}
+              solverType={settings.solverType}
+              onSolverThreadsChange={(v) => updateSettings({ solverThreads: v })}
+              onSolverTypeChange={(v) => updateSettings({ solverType: v })}
+              onCarrierColorChange={(rowIndex, color) => updateRowValue('carriers', rowIndex, 'color', color)}
+              onCarrierMove={(rowIndex, direction) => moveRow('carriers', rowIndex, direction)}
               onClose={() => setActiveWorkspaceOverlay(null)}
             />
           )}
