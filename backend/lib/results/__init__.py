@@ -11,6 +11,11 @@ from ..constants import carrier_color
 from ..network import build_network
 from ..pathway import parse_pathway_config
 from ..rolling import parse_rolling_config
+from ..stochastic import (
+    collapse_to_representative_scenario,
+    parse_stochastic_config,
+    per_scenario_summaries,
+)
 from ..utils.series import weighted_sum
 from ..network.custom_constraints import apply_custom_constraints
 from ..module_host import execute_plugins_at_stage, get_module_metadata
@@ -37,6 +42,12 @@ def run_pypsa(
     enabled_modules: list[str] = list(options.get("enabledModules") or [])
     pathway = parse_pathway_config(options.get("pathwayConfig"))
     rolling = parse_rolling_config(options.get("rollingConfig"))
+    stochastic = parse_stochastic_config(options.get("stochasticConfig"))
+    if stochastic.enabled and rolling.enabled:
+        raise HTTPException(
+            status_code=400,
+            detail="Stochastic mode and rolling horizon cannot be combined.",
+        )
 
     # ── pre-build ─────────────────────────────────────────────────────────────
     pre_outputs = execute_plugins_at_stage(
@@ -56,11 +67,16 @@ def run_pypsa(
 
     snapshot_count = len(network.snapshots)
     snapshot_weight = float(network.snapshot_weightings["objective"].iloc[0]) if snapshot_count else 1.0
-    emissions_factors: dict[str, float] = (
-        network.carriers["co2_emissions"].to_dict()
-        if "co2_emissions" in network.carriers.columns
-        else {}
-    )
+    # CO₂ emission factors are a static carrier property, shared across
+    # scenarios. Strip any scenario level from the MultiIndex so emission
+    # totals key by carrier name only.
+    if "co2_emissions" in network.carriers.columns:
+        _carriers_ef = network.carriers["co2_emissions"]
+        if isinstance(_carriers_ef.index, pd.MultiIndex) and "name" in _carriers_ef.index.names:
+            _carriers_ef = _carriers_ef.groupby(level="name").first()
+        emissions_factors: dict[str, float] = _carriers_ef.to_dict()
+    else:
+        emissions_factors = {}
 
     custom_constraints: list[dict] = scenario.get("constraints") or []
 
@@ -123,6 +139,27 @@ def run_pypsa(
             notes.append(f"PyPSA optimize() solved with {solver_note}.")
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"PyPSA optimization failed: {exc}") from exc
+
+    # ── Stochastic post-processing ──────────────────────────────────────────
+    # After the stochastic solve, every static / dynamic frame is indexed by
+    # (scenario, name). Summarise per-scenario totals for the new GUI card,
+    # then collapse to the highest-weighted scenario so the existing
+    # deterministic result-extraction pipeline keeps working unchanged.
+    stochastic_result: dict[str, Any] | None = None
+    if stochastic.enabled:
+        scenario_summaries = per_scenario_summaries(
+            network, stochastic, emissions_factors, currency
+        )
+        representative_scenario = collapse_to_representative_scenario(network, stochastic)
+        stochastic_result = {
+            "enabled": True,
+            "representativeScenario": representative_scenario,
+            "scenarios": scenario_summaries,
+        }
+        notes.append(
+            f"Showing scenario \"{representative_scenario}\" for detailed analytics; "
+            "expected values across all scenarios are available in the Stochastic scenarios card."
+        )
 
     generator_dispatch_frame = network.generators_t.p.copy()
     dispatch_frame = generator_dispatch_frame.copy()
@@ -350,6 +387,7 @@ def run_pypsa(
             "windowCount": len(rolling_windows),
             "windows": rolling_windows,
         } if rolling.enabled else None,
+        "stochastic": stochastic_result,
         # Full PyPSA-native output dataset (every output attribute, every
         # component, every snapshot). The frontend turns this into per-asset
         # detail records (`assetDetails`) locally and uses the same cache for

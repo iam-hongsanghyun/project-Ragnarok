@@ -11,6 +11,7 @@ import { MeritOrderCard } from './cards/MeritOrderCard';
 import { Co2ShadowCard } from './cards/Co2ShadowCard';
 import { EmissionsBreakdownCard } from './cards/EmissionsBreakdownCard';
 import { CapacityByPeriodCard } from './cards/CapacityByPeriodCard';
+import { StochasticScenariosCard } from './cards/StochasticScenariosCard';
 
 // ── KPI card ──────────────────────────────────────────────────────────────────
 
@@ -213,6 +214,13 @@ export function ResultsDashboard({
         <KpiCard label="Avg price" value={`${avgPrice.toFixed(1)}`} unit={`${currencySymbol}/MWh`} />
         <KpiCard label="Emissions" value={emissionsDisplay} unit="" />
       </div>
+
+      {results.stochastic?.enabled && (
+        <StochasticScenariosCard
+          stochastic={results.stochastic}
+          currencySymbol={currencySymbol}
+        />
+      )}
 
       {results.pathway?.enabled && (
         <DashboardSection title="Pathway period summary" defaultOpen>

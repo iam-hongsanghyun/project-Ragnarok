@@ -5,7 +5,7 @@
  * The parent (<App>) keeps the <aside> shell and the collapse toggle button.
  */
 import React, { useEffect, useState } from 'react';
-import { CustomConstraint, GridRow, ModuleDescriptor, ModuleHostInventory, PathwayConfig, RollingHorizonConfig, RunHistoryEntry, RunResults, ScenarioCatalog, WorkbookModel } from '../shared/types';
+import { CustomConstraint, GridRow, ModuleDescriptor, ModuleHostInventory, PathwayConfig, RollingHorizonConfig, RunHistoryEntry, RunResults, ScenarioCatalog, StochasticConfig, StochasticScenarioConfig, WorkbookModel } from '../shared/types';
 import { normalizeRollingConfig } from '../shared/utils/rolling';
 import { SidebarGroup } from '../shared/components/SidebarGroup';
 import { ModuleManagerSection } from '../features/modules/ModuleManagerSection';
@@ -47,6 +47,8 @@ export interface SidebarProps {
   onPathwayConfigChange: (config: PathwayConfig) => void;
   rollingConfig: RollingHorizonConfig;
   onRollingConfigChange: (config: RollingHorizonConfig) => void;
+  stochasticConfig: StochasticConfig;
+  onStochasticConfigChange: (config: StochasticConfig) => void;
   maxSnapshots: number;
   snapshotStart: number;
   snapshotEnd: number;
@@ -117,6 +119,8 @@ export function Sidebar({
   onPathwayConfigChange,
   rollingConfig,
   onRollingConfigChange,
+  stochasticConfig,
+  onStochasticConfigChange,
   maxSnapshots,
   snapshotStart,
   snapshotEnd,
@@ -559,6 +563,21 @@ export function Sidebar({
       </SidebarGroup>
 
       <SidebarGroup
+        title="Stochastic uncertainty"
+        badge={
+          stochasticConfig.enabled && stochasticConfig.scenarios.length >= 2
+            ? <span className="sg-badge">{stochasticConfig.scenarios.length}</span>
+            : undefined
+        }
+      >
+        <StochasticEditor
+          config={stochasticConfig}
+          onChange={onStochasticConfigChange}
+          rollingEnabled={rollingConfig.enabled}
+        />
+      </SidebarGroup>
+
+      <SidebarGroup
         title="Carbon price"
         badge={carbonPrice > 0 ? <span className="sg-badge">{currencySymbol}{carbonPrice}/t</span> : undefined}
       >
@@ -887,6 +906,123 @@ function ConstraintsSummary({
       <button className="tb-btn constraints-summary-open" onClick={onOpen} title="Open the constraints editor">
         Open constraints editor →
       </button>
+    </div>
+  );
+}
+
+// ── Stochastic scenarios editor ──────────────────────────────────────────────
+
+function StochasticEditor({
+  config,
+  onChange,
+  rollingEnabled,
+}: {
+  config: StochasticConfig;
+  onChange: (next: StochasticConfig) => void;
+  rollingEnabled: boolean;
+}) {
+  const update = (patch: Partial<StochasticConfig>) => onChange({ ...config, ...patch });
+  const setScenarios = (scenarios: StochasticScenarioConfig[]) => update({ scenarios });
+
+  const addScenario = () => {
+    const id = `sc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const n = config.scenarios.length + 1;
+    setScenarios([
+      ...config.scenarios,
+      { id, name: `scenario_${n}`, weight: 0.5, loadMultiplier: 1.0 },
+    ]);
+  };
+
+  const updateScenario = (id: string, patch: Partial<StochasticScenarioConfig>) =>
+    setScenarios(config.scenarios.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+
+  const removeScenario = (id: string) =>
+    setScenarios(config.scenarios.filter((s) => s.id !== id));
+
+  const totalWeight = config.scenarios.reduce((sum, s) => sum + (Number(s.weight) || 0), 0);
+  const enoughScenarios = config.scenarios.length >= 2;
+  const hasZeroOrNegative = config.scenarios.some((s) => Number(s.weight) <= 0);
+
+  return (
+    <div className="sg-stochastic">
+      <div className="sg-setting-row">
+        <label className="sg-setting-label">Mode</label>
+        <div className="sg-btn-row">
+          <button
+            className={`tb-btn sg-solver-btn${!config.enabled ? '' : ' tb-btn--muted'}`}
+            onClick={() => update({ enabled: false })}
+          >
+            Off
+          </button>
+          <button
+            className={`tb-btn sg-solver-btn${config.enabled ? '' : ' tb-btn--muted'}`}
+            disabled={rollingEnabled}
+            title={rollingEnabled ? 'Disable rolling horizon to enable stochastic' : undefined}
+            onClick={() => update({ enabled: true })}
+          >
+            On
+          </button>
+        </div>
+        <p className="sg-setting-hint">
+          Two-stage stochastic planning: shared capacity decisions, scenario-specific dispatch.
+          Weights are normalised to sum=1 at solve time.
+          {rollingEnabled && (
+            <strong> Rolling horizon must be off to use stochastic mode.</strong>
+          )}
+        </p>
+      </div>
+
+      {config.enabled && (
+        <>
+          <div className="sg-setting-divider" />
+          {config.scenarios.length === 0 && (
+            <p className="sg-setting-hint" style={{ marginTop: 0 }}>
+              Add at least two scenarios with positive weights.
+            </p>
+          )}
+          {config.scenarios.map((s) => (
+            <div key={s.id} className="sg-stochastic-row">
+              <input
+                className="sg-stochastic-name"
+                type="text"
+                value={s.name}
+                onChange={(e) => updateScenario(s.id, { name: e.target.value })}
+                placeholder="name"
+              />
+              <label className="sg-stochastic-field" title="Probability weight">
+                <span>w</span>
+                <input
+                  type="number"
+                  step="0.05"
+                  min="0"
+                  value={s.weight}
+                  onChange={(e) => updateScenario(s.id, { weight: Number(e.target.value) || 0 })}
+                />
+              </label>
+              <label className="sg-stochastic-field" title="Load multiplier — scales every load.p_set in this scenario">
+                <span>×load</span>
+                <input
+                  type="number"
+                  step="0.05"
+                  min="0"
+                  value={s.loadMultiplier}
+                  onChange={(e) => updateScenario(s.id, { loadMultiplier: Number(e.target.value) || 0 })}
+                />
+              </label>
+              <button className="gcc-del" onClick={() => removeScenario(s.id)} title="Remove scenario">x</button>
+            </div>
+          ))}
+          <button className="tb-btn sg-full" onClick={addScenario}>+ Add scenario</button>
+
+          {config.scenarios.length > 0 && (
+            <p className="sg-setting-hint">
+              {enoughScenarios ? 'Total weight ' : 'Need ≥ 2 scenarios. Total weight '}
+              <strong>{totalWeight.toFixed(2)}</strong> (normalised to 1.00 on solve).
+              {hasZeroOrNegative && <span style={{ color: 'var(--danger, #dc2626)' }}> Weights must be positive.</span>}
+            </p>
+          )}
+        </>
+      )}
     </div>
   );
 }

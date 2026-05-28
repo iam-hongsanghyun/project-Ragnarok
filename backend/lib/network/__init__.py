@@ -26,6 +26,7 @@ import pypsa
 
 from ..config import load_system_defaults
 from ..pathway import PathwayConfig, parse_pathway_config
+from ..stochastic import apply_scenarios, parse_stochastic_config
 from ..pypsa_schema import (
     input_static_attributes,
     input_temporal_attributes,
@@ -286,6 +287,20 @@ def build_network(
         load_shedding_cost=load_shedding_cost,
         currency=currency,
     )
+
+    # ── Stochastic scenarios (must run after every deterministic setup is in
+    # place so the scenario dimension can broadcast over the final values) ──
+    stochastic = parse_stochastic_config(options.get("stochasticConfig"))
+    if stochastic.enabled:
+        apply_scenarios(network, stochastic)
+        notes.append(
+            "Enabled stochastic mode with "
+            + ", ".join(
+                f"{s.name} (w={s.weight:.2f}, load×{s.load_multiplier:.2f})"
+                for s in stochastic.scenarios
+            )
+            + "."
+        )
 
     final_counts = ", ".join(
         f"{len(network.components[list_name].static)} {list_name}"

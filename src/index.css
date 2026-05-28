@@ -4731,3 +4731,91 @@ th:hover .col-delete-btn {
 .constraints-cell-input--num {
   text-align: right;
 }
+
+/* ── Stochastic scenarios editor ─────────────────────────────────────────── */
+.sg-stochastic {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sg-stochastic-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sg-stochastic-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px 8px;
+  font-size: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+}
+.sg-stochastic-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.sg-stochastic-field input {
+  width: 56px;
+  padding: 4px 6px;
+  font-size: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  text-align: right;
+}
+
+/* ── Stochastic result card ─────────────────────────────────────────────── */
+.stochastic-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  background: var(--surface, #fff);
+  margin-bottom: 16px;
+}
+.stochastic-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.stochastic-card-header h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+.stochastic-card-header p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.stochastic-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+  margin-top: 12px;
+}
+.stochastic-table th,
+.stochastic-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: right;
+}
+.stochastic-table th:first-child,
+.stochastic-table td:first-child {
+  text-align: left;
+}
+.stochastic-table th {
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 0.78rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.stochastic-representative {
+  background: var(--accent-soft, #eff6ff);
+}

@@ -110,6 +110,35 @@ export interface RollingHorizonConfig {
   selectedWindow: number | null;
 }
 
+export interface StochasticScenarioConfig {
+  id: string;
+  name: string;
+  weight: number;
+  loadMultiplier: number;
+}
+
+export interface StochasticConfig {
+  enabled: boolean;
+  scenarios: StochasticScenarioConfig[];
+}
+
+export interface StochasticScenarioResult {
+  name: string;
+  weight: number;
+  loadMultiplier: number;
+  totalEnergyMwh: number;
+  totalEmissionsTco2: number;
+  totalOperatingCost: number;
+  totalOperatingCostFormatted: string;
+  loadShedEnergyMwh: number;
+}
+
+export interface StochasticResult {
+  enabled: boolean;
+  representativeScenario: string;
+  scenarios: StochasticScenarioResult[];
+}
+
 export interface ScenarioPreset {
   id: string;
   label: string;
@@ -413,6 +442,7 @@ export interface RunResults {
     windowCount: number;
     windows: RollingWindowSummary[];
   };
+  stochastic?: StochasticResult | null;
   assetDetails: {
     generators: Record<string, GeneratorDetail>;
     buses: Record<string, BusDetail>;
