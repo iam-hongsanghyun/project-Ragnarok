@@ -28,7 +28,9 @@ function chartConfig(patch: Partial<ChartSectionConfig>): ChartSectionConfig {
     chartType: 'line',
     timeframe: 'hourly',
     startIndex: 0,
-    endIndex: 0,
+    // Deliberately set very large; UserDefinedChartCard clamps to the
+    // actual data length so this means "show all snapshots".
+    endIndex: 100000,
     stacked: false,
     ...patch,
   };
@@ -53,9 +55,9 @@ export const PRESETS: Preset[] = [
       const notesId = id('notes');
       return {
         cards: [
-          { id: dispatchCardId, kind: 'chart', config: chartConfig({ focusType: 'system', chartType: 'line', stacked: true, metricKey: 'gen_mw' }) },
-          { id: loadCardId,     kind: 'chart', config: chartConfig({ focusType: 'system', chartType: 'line', metricKey: 'load_mw' }) },
-          { id: priceCardId,    kind: 'chart', config: chartConfig({ focusType: 'system', chartType: 'line', metricKey: 'price' }) },
+          { id: dispatchCardId, kind: 'chart', config: chartConfig({ focusType: 'system', chartType: 'line', stacked: true, metricKey: 'dispatch' }) },
+          { id: loadCardId,     kind: 'chart', config: chartConfig({ focusType: 'system', chartType: 'line', metricKey: 'load' }) },
+          { id: priceCardId,    kind: 'chart', config: chartConfig({ focusType: 'system', chartType: 'line', metricKey: 'system_price' }) },
           { id: notesId,        kind: 'notes' },
         ],
         rows: [
@@ -77,10 +79,10 @@ export const PRESETS: Preset[] = [
       const a = id('chart'); const b = id('chart'); const c = id('chart'); const d = id('chart');
       return {
         cards: [
-          { id: a, kind: 'chart', config: chartConfig({ focusType: 'system', chartType: 'line', stacked: true, metricKey: 'gen_mw' }) },
-          { id: b, kind: 'chart', config: chartConfig({ focusType: 'system', chartType: 'area', stacked: true, metricKey: 'gen_mw' }) },
-          { id: c, kind: 'chart', config: chartConfig({ focusType: 'system', chartType: 'bar', metricKey: 'gen_mw', timeframe: 'daily' }) },
-          { id: d, kind: 'chart', config: chartConfig({ focusType: 'system', chartType: 'line', metricKey: 'load_mw' }) },
+          { id: a, kind: 'chart', config: chartConfig({ focusType: 'system', chartType: 'line', stacked: true, metricKey: 'dispatch' }) },
+          { id: b, kind: 'chart', config: chartConfig({ focusType: 'system', chartType: 'area', stacked: true, metricKey: 'dispatch' }) },
+          { id: c, kind: 'chart', config: chartConfig({ focusType: 'system', chartType: 'bar', metricKey: 'dispatch', timeframe: 'daily' }) },
+          { id: d, kind: 'chart', config: chartConfig({ focusType: 'system', chartType: 'line', metricKey: 'load' }) },
         ],
         rows: [
           { id: id('row'), height: 280, cells: [
@@ -96,14 +98,14 @@ export const PRESETS: Preset[] = [
   {
     key: 'storage-focus',
     label: 'Storage focus',
-    description: 'System dispatch on top, two storage charts below for state-of-charge and inflow/outflow.',
+    description: 'System dispatch on top, then system-level storage state-of-charge and charge/discharge power side-by-side.',
     build: () => {
       const a = id('chart'); const b = id('chart'); const c = id('chart');
       return {
         cards: [
-          { id: a, kind: 'chart', config: chartConfig({ focusType: 'system', chartType: 'line', stacked: true, metricKey: 'gen_mw' }) },
-          { id: b, kind: 'chart', config: chartConfig({ focusType: 'storageUnit', chartType: 'line', metricKey: 'state_of_charge_mwh' }) },
-          { id: c, kind: 'chart', config: chartConfig({ focusType: 'storageUnit', chartType: 'line', metricKey: 'dispatch_mw' }) },
+          { id: a, kind: 'chart', config: chartConfig({ focusType: 'system', chartType: 'line', stacked: true, metricKey: 'dispatch' }) },
+          { id: b, kind: 'chart', config: chartConfig({ focusType: 'system', chartType: 'line', metricKey: 'storage_state' }) },
+          { id: c, kind: 'chart', config: chartConfig({ focusType: 'system', chartType: 'line', metricKey: 'storage_power' }) },
         ],
         rows: [
           { id: id('row'), height: 280, cells: [{ id: id('cell'), flex: 1, cardId: a }] },

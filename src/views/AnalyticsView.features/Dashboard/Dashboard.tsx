@@ -223,7 +223,7 @@ export function Dashboard({ layout, onLayoutChange, editing, renderCard, cardTit
       {layout.rows.map((row) => (
         <div
           key={row.id}
-          className="dashboard-row"
+          className="db-row"
           style={{ height: row.height }}
         >
           {row.cells.map((cell, index) => {

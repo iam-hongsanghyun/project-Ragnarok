@@ -338,32 +338,34 @@ export function ResultsDashboard({
         </div>
       </DashboardSection>
 
-      {/* System load time series */}
-      {systemLoadRows.length > 0 && (
-        <DashboardSection title="System load">
-          <InteractiveTimeSeriesCard
-            title="Total system load"
-            description="Load (MW) over all snapshots"
-            data={systemLoadRows}
-            series={[{ key: 'load', label: 'Load MW', color: '#f97316' }]}
-            mode="area"
-            stacked={false}
-          />
-        </DashboardSection>
-      )}
-
-      {/* System marginal price time series */}
-      {systemPriceRows.length > 0 && (
-        <DashboardSection title="System marginal price">
-          <InteractiveTimeSeriesCard
-            title="System marginal price"
-            description={`${currencySymbol}/MWh over all snapshots`}
-            data={systemPriceRows}
-            series={[{ key: 'price', label: `SMP ${currencySymbol}/MWh`, color: '#111827' }]}
-            mode="line"
-            stacked={false}
-          />
-        </DashboardSection>
+      {/* Load + price side-by-side */}
+      {(systemLoadRows.length > 0 || systemPriceRows.length > 0) && (
+        <div className="dashboard-row">
+          {systemLoadRows.length > 0 && (
+            <DashboardSection title="System load">
+              <InteractiveTimeSeriesCard
+                title="Total system load"
+                description="Load (MW) over all snapshots"
+                data={systemLoadRows}
+                series={[{ key: 'load', label: 'Load MW', color: '#f97316' }]}
+                mode="area"
+                stacked={false}
+              />
+            </DashboardSection>
+          )}
+          {systemPriceRows.length > 0 && (
+            <DashboardSection title="System marginal price">
+              <InteractiveTimeSeriesCard
+                title="System marginal price"
+                description={`${currencySymbol}/MWh over all snapshots`}
+                data={systemPriceRows}
+                series={[{ key: 'price', label: `SMP ${currencySymbol}/MWh`, color: '#111827' }]}
+                mode="line"
+                stacked={false}
+              />
+            </DashboardSection>
+          )}
+        </div>
       )}
 
       {/* Energy mix + Cost breakdown side by side */}
@@ -400,27 +402,29 @@ export function ResultsDashboard({
         </DashboardSection>
       </div>
 
-      {/* Storage SoC */}
-      {hasStorage && (
-        <DashboardSection title="Storage state of charge" onExport={exportStorage}>
-          <div ref={storageRef}>
-            <InteractiveTimeSeriesCard
-              title="Storage state of charge"
-              description="State of charge (MWh) over all snapshots"
-              data={storageRows}
-              series={storageStateSeries}
-              mode="area"
-              stacked={false}
-            />
-          </div>
-        </DashboardSection>
-      )}
-
-      {/* Capacity expansion */}
-      {results.expansionResults && results.expansionResults.length > 0 && (
-        <DashboardSection title="Capacity expansion results" defaultOpen>
-          <CapacityExpansionCard assets={results.expansionResults} currencySymbol={currencySymbol} />
-        </DashboardSection>
+      {/* Storage SoC + Capacity expansion side-by-side */}
+      {(hasStorage || (results.expansionResults && results.expansionResults.length > 0)) && (
+        <div className="dashboard-row">
+          {hasStorage && (
+            <DashboardSection title="Storage state of charge" onExport={exportStorage}>
+              <div ref={storageRef}>
+                <InteractiveTimeSeriesCard
+                  title="Storage state of charge"
+                  description="State of charge (MWh) over all snapshots"
+                  data={storageRows}
+                  series={storageStateSeries}
+                  mode="area"
+                  stacked={false}
+                />
+              </div>
+            </DashboardSection>
+          )}
+          {results.expansionResults && results.expansionResults.length > 0 && (
+            <DashboardSection title="Capacity expansion results" defaultOpen>
+              <CapacityExpansionCard assets={results.expansionResults} currencySymbol={currencySymbol} />
+            </DashboardSection>
+          )}
+        </div>
       )}
 
       {/* Emissions breakdown */}

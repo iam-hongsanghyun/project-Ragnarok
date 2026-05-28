@@ -3016,13 +3016,18 @@ path.leaflet-interactive:focus {
 }
 
 .kpi-strip {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 1px;
   background: var(--border);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   overflow: hidden;
+}
+
+.kpi-strip .kpi-card {
+  flex: 1 1 140px;
+  min-width: 140px;
 }
 
 .kpi-card {
@@ -5954,8 +5959,8 @@ code, kbd, samp, tt,
   font-size: 0.82rem;
 }
 
-/* One row of cards */
-.dashboard-row {
+/* One row of cards (Bloomberg editable grid) */
+.db-row {
   position: relative;
   display: flex;
   flex-direction: row;
@@ -5965,7 +5970,7 @@ code, kbd, samp, tt,
   margin-bottom: 4px;
 }
 
-.dashboard.is-editing .dashboard-row {
+.dashboard.is-editing .db-row {
   border-bottom: 1px dashed var(--border);
   padding-bottom: 8px;
 }
