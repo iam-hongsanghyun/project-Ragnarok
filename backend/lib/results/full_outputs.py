@@ -144,7 +144,13 @@ def build_full_outputs(network: pypsa.Network) -> dict[str, Any]:
                 static_out[list_name] = sheet_static
 
         # ── Time-series output attributes ────────────────────────────────
+        # Prefer the historical `network.<list_name>_t` accessor (always present
+        # for older components like generators/loads/lines). New components
+        # (e.g. processes) only expose dynamic frames via `comp.dynamic`, so
+        # fall back to that — also a `Dict` supporting `getattr(t, attr)`.
         t_frame = getattr(network, f"{list_name}_t", None)
+        if t_frame is None:
+            t_frame = comp.dynamic
         if t_frame is None or not series_attrs:
             continue
         for attr in series_attrs:

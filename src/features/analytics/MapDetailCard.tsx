@@ -116,6 +116,15 @@ export function MapDetailCard({ focus, results, onClose, currencySymbol = '$' }:
     sparkValues = detail.flowSeries.map((p) => p.p0);
     sparkColor = '#f97316';
     sparkLabel = 'Flow p0 (MW)';
+  } else if (focus.type === 'process') {
+    const detail = results.assetDetails.processes[key];
+    if (!detail) return null;
+    subtitle = detail.carrier ? `Process · ${detail.carrier}` : 'Process';
+    dotColor = detail.color || carrierColor(detail.carrier);
+    kpis = detail.summary.slice(0, 4).map((s) => ({ label: s.label, value: s.value }));
+    sparkValues = detail.throughputSeries.map((p) => p.throughput);
+    sparkColor = dotColor;
+    sparkLabel = 'Throughput |p0| (MW)';
   }
 
   const hasSparkline = sparkValues.length >= 2 && sparkValues.some((v) => Math.abs(v) > 0.001);

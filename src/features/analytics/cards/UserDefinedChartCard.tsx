@@ -37,6 +37,7 @@ const FOCUS_LABELS: Record<FocusType, string> = {
   storageUnit: 'Storage Unit',
   store:       'Store',
   branch:      'Branch',
+  process:     'Process',
 };
 
 function assetNamesFor(focusType: FocusType, model: WorkbookModel): string[] {
@@ -50,6 +51,7 @@ function assetNamesFor(focusType: FocusType, model: WorkbookModel): string[] {
       ...model.links.map((r)        => stringValue(r.name)),
       ...model.transformers.map((r) => stringValue(r.name)),
     ].filter(Boolean);
+    case 'process':     return (model.processes || []).map((r) => stringValue(r.name)).filter(Boolean);
     default:            return [];
   }
 }

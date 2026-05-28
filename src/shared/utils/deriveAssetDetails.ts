@@ -14,6 +14,7 @@ import {
   GeneratorDetail,
   GridRow,
   MixItem,
+  ProcessDetail,
   RunResults,
   StorageUnitDetail,
   StoreDetail,
@@ -40,6 +41,7 @@ const EMPTY_DETAILS: AssetDetails = {
   storageUnits: {},
   stores: {},
   branches: {},
+  processes: {},
 };
 
 /** Build a `name -> row` index for a static input sheet. */
@@ -453,6 +455,74 @@ function buildBranches(input: DeriveInput, snapshots: string[]): Record<string, 
   };
 }
 
+// ── Processes ────────────────────────────────────────────────────────────────
+
+function buildProcesses(input: DeriveInput, snapshots: string[]): Record<string, ProcessDetail> {
+  const { model, outputs, currencySymbol = '$', snapshotWeight = 1 } = input;
+  const series = outputs.series;
+  const staticOut = outputs.static;
+  const processStatic = indexByName(model.processes);
+  const labels = snapshots.map(isoToLabel);
+
+  const p0Series = series['processes-p0'];
+  const p1Series = series['processes-p1'];
+
+  const details: Record<string, ProcessDetail> = {};
+  for (const name of Object.keys(processStatic)) {
+    const row = processStatic[name];
+    const carrier = stringValue(row.carrier) || 'Other';
+    const color = resolvedColor(row.color, row.carrier);
+    const bus0 = stringValue(row.bus0);
+    const bus1 = stringValue(row.bus1);
+    const pNomInput = numberValue(row.p_nom);
+    const pNom = staticOrInput(staticOut, 'processes', name, 'p_nom_opt', pNomInput);
+    const mc = numberValue(row.marginal_cost);
+
+    const p0Out: ProcessDetail['p0Series'] = [];
+    const p1Out: ProcessDetail['p1Series'] = [];
+    const throughputOut: ProcessDetail['throughputSeries'] = [];
+
+    let throughputEnergy = 0;
+    let weightedRatioNum = 0;
+    let weightedRatioDen = 0;
+
+    for (let i = 0; i < snapshots.length; i++) {
+      const p0 = seriesValue(p0Series, i, name);
+      const p1 = seriesValue(p1Series, i, name);
+      const throughput = Math.abs(p0);
+      throughputEnergy += throughput * snapshotWeight;
+      if (Math.abs(p0) > 1e-9) {
+        // efficiency_t ≈ |p1| / |p0| weighted by throughput so quiet hours
+        // don't dominate the mean.
+        weightedRatioNum += (Math.abs(p1) / Math.abs(p0)) * throughput;
+        weightedRatioDen += throughput;
+      }
+      const label = labels[i];
+      const stamp = snapshots[i];
+      p0Out.push({ label, timestamp: stamp, p0 });
+      p1Out.push({ label, timestamp: stamp, p1 });
+      throughputOut.push({ label, timestamp: stamp, throughput });
+    }
+
+    const realisedEfficiency = weightedRatioDen > 0 ? weightedRatioNum / weightedRatioDen : 0;
+    const summary: SummaryItem[] = [
+      { label: 'Power rating', value: `${fmt(pNom)} MW`, detail: pNom !== pNomInput ? 'Solved p_nom_opt' : 'Input p_nom' },
+      { label: 'Throughput', value: `${fmt(throughputEnergy)} MWh`, detail: `${snapshotWeight} h weighting applied` },
+      { label: 'Realised efficiency', value: realisedEfficiency > 0 ? realisedEfficiency.toFixed(3) : '—', detail: 'Throughput-weighted |p1|/|p0|' },
+      { label: 'Operating cost', value: `${fmt(throughputEnergy * mc)} ${currencySymbol}`, detail: `${mc.toFixed(1)} ${currencySymbol}/MWh marginal cost` },
+    ];
+
+    details[name] = {
+      name, carrier, color, bus0, bus1,
+      summary,
+      p0Series: p0Out,
+      p1Series: p1Out,
+      throughputSeries: throughputOut,
+    };
+  }
+  return details;
+}
+
 // ── Public entry point ──────────────────────────────────────────────────────
 
 export function deriveAssetDetails(
@@ -464,7 +534,7 @@ export function deriveAssetDetails(
   if (!outputs) return EMPTY_DETAILS;
   const input: DeriveInput = { model, outputs, currencySymbol, snapshotWeight };
   const snapshots = pickSnapshots(outputs.series, [
-    'generators-p', 'buses-marginal_price', 'storage_units-p', 'stores-p',
+    'generators-p', 'buses-marginal_price', 'storage_units-p', 'stores-p', 'processes-p0',
   ]);
   return {
     generators: buildGenerators(input, snapshots),
@@ -472,6 +542,7 @@ export function deriveAssetDetails(
     storageUnits: buildStorageUnits(input, snapshots),
     stores: buildStores(input, snapshots),
     branches: buildBranches(input, snapshots),
+    processes: buildProcesses(input, snapshots),
   };
 }
 

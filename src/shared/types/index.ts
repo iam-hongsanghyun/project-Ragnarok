@@ -259,6 +259,21 @@ export interface BranchDetail {
   lossesSeries: Array<{ label: string; timestamp: string; losses: number }>;
 }
 
+export interface ProcessDetail {
+  name: string;
+  carrier: string;
+  color?: string;
+  bus0: string;
+  bus1: string;
+  summary: SummaryItem[];
+  /** Power drawn from bus0 (MW). Positive = into the process. */
+  p0Series: Array<{ label: string; timestamp: string; p0: number }>;
+  /** Power delivered to bus1 (MW). Positive = out of the process. */
+  p1Series: Array<{ label: string; timestamp: string; p1: number }>;
+  /** Net throughput |p0| (MW), used as the primary timeline. */
+  throughputSeries: Array<{ label: string; timestamp: string; throughput: number }>;
+}
+
 // ── Emissions breakdown types ─────────────────────────────────────────────────
 
 export interface GeneratorEmission {
@@ -404,6 +419,7 @@ export interface RunResults {
     storageUnits: Record<string, StorageUnitDetail>;
     stores: Record<string, StoreDetail>;
     branches: Record<string, BranchDetail>;
+    processes: Record<string, ProcessDetail>;
   };
   /**
    * Full PyPSA-native output dataset built directly from the solved network.
@@ -455,7 +471,8 @@ export type AnalyticsFocus =
   | { type: 'bus'; key: string }
   | { type: 'storageUnit'; key: string }
   | { type: 'store'; key: string }
-  | { type: 'branch'; key: string };
+  | { type: 'branch'; key: string }
+  | { type: 'process'; key: string };
 
 // ── Analytics / chart types ───────────────────────────────────────────────────
 

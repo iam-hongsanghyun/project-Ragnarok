@@ -201,6 +201,15 @@ function buildSingleAssetOptions(
       { key: 'losses',         label: 'Losses',         unit: 'MW', rows: br.lossesSeries.map((p)  => ({ label: p.label, timestamp: p.timestamp, losses: p.losses })),           series: [{ key: 'losses',  label: 'Losses MW', color: '#dc2626' }], reducer: 'mean', allowDonut: false },
     ];
   }
+  if (focus.type === 'process') {
+    const pr = assetDetails.processes[focus.key];
+    if (!pr) return [];
+    const c = pr.color || carrierColor(pr.carrier || 'Other');
+    return [
+      { key: 'throughput',     label: 'Throughput',     unit: 'MW', rows: pr.throughputSeries.map((p) => ({ label: p.label, timestamp: p.timestamp, throughput: p.throughput })), series: [{ key: 'throughput', label: 'Throughput MW', color: c }],                                                          reducer: 'mean', allowDonut: false },
+      { key: 'terminal_flows', label: 'Terminal flows', unit: 'MW', rows: pr.p0Series.map((p, i)      => ({ label: p.label, timestamp: p.timestamp, p0: p.p0, p1: pr.p1Series[i]?.p1 ?? 0 })), series: [{ key: 'p0', label: 'P0 MW', color: '#2563eb' }, { key: 'p1', label: 'P1 MW', color: '#1d4ed8' }],  reducer: 'mean', allowDonut: true  },
+    ];
+  }
   return [];
 }
 
@@ -273,6 +282,7 @@ export function useMetricOptions(
         case 'storageUnit': return Object.keys(results.assetDetails.storageUnits);
         case 'store':       return Object.keys(results.assetDetails.stores);
         case 'branch':      return Object.keys(results.assetDetails.branches);
+        case 'process':     return Object.keys(results.assetDetails.processes);
         default:            return [];
       }
     })();
