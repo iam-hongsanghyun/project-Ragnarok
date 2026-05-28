@@ -22,6 +22,42 @@ import { PRESETS } from './presets';
 
 const DEFAULT_LAYOUT: DashboardLayout = { rows: [], cards: [] };
 
+/** Human-readable label for a chart card based on its focus + metric.
+ *  Mirrors the labels emitted by useMetricOptions so cell titles match
+ *  what the user picks inside the settings modal. */
+const SYSTEM_METRIC_LABEL: Record<string, string> = {
+  dispatch:          'Dispatch by carrier',
+  dispatch_by_gen:   'Dispatch by generator',
+  load:              'Total load',
+  system_price:      'Marginal price',
+  system_emissions:  'Emissions',
+  storage_power:     'Storage power',
+  storage_state:     'State of charge',
+};
+
+const FOCUS_TYPE_LABEL: Record<string, string> = {
+  system:         'System',
+  generator:      'Generator',
+  bus:            'Bus',
+  storageUnit:    'Storage unit',
+  store:          'Store',
+  branch:         'Branch',
+  process:        'Process',
+  shuntImpedance: 'Shunt impedance',
+};
+
+function chartCardTitle(cfg: ChartSectionConfig): string {
+  if (cfg.metricKey === EMPTY_METRIC_KEY) return 'Empty chart';
+  if (cfg.focusType === 'system') {
+    return SYSTEM_METRIC_LABEL[cfg.metricKey] ?? 'System chart';
+  }
+  const focus = FOCUS_TYPE_LABEL[cfg.focusType] ?? cfg.focusType;
+  const scope = cfg.focusKeys.length === 1
+    ? cfg.focusKeys[0]
+    : cfg.focusKeys.length === 0 ? 'all' : `${cfg.focusKeys.length} selected`;
+  return `${focus} · ${scope}`;
+}
+
 function newChartCard(): Card {
   return {
     id: newId('chart'),
@@ -140,8 +176,10 @@ export function AnalyticsDashboard({ results, model, currencySymbol }: Props) {
 
   const cardTitle = (card: Card): string => {
     if (card.kind === 'chart') {
-      const f = card.config.focusType;
-      return f === 'system' ? 'System chart' : `${f} · chart`;
+      const label = chartCardTitle(card.config);
+      const tf = card.config.timeframe;
+      const tfSuffix = tf && tf !== 'hourly' ? ` · ${tf}` : '';
+      return `${label}${tfSuffix}`;
     }
     if (card.kind === 'notes') return 'Run notes';
     return 'Card';
