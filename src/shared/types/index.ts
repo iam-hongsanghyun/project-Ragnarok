@@ -110,11 +110,24 @@ export interface RollingHorizonConfig {
   selectedWindow: number | null;
 }
 
+export interface StochasticScenarioOverride {
+  id: string;
+  sheet: string;
+  attribute: string;
+  scopeType: 'all' | 'name' | 'carrier';
+  scopeValue: string;
+  operation: 'multiply' | 'set';
+  value: number;
+}
+
 export interface StochasticScenarioConfig {
   id: string;
   name: string;
   weight: number;
   loadMultiplier: number;
+  marginalCostMultiplier: number;
+  renewableAvailabilityMultiplier: number;
+  overrides: StochasticScenarioOverride[];
 }
 
 export interface StochasticConfig {

@@ -1607,6 +1607,7 @@ function AppInner() {
               carbonPriceSchedule={carbonPriceSchedule}
               onCarbonPriceScheduleChange={setCarbonPriceSchedule}
               currencySymbol={settings.currencySymbol}
+              model={model}
               lineCount={model.lines.length}
               transformerCount={model.transformers.length}
               onClose={() => setActiveWorkspaceOverlay(null)}

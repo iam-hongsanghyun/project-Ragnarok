@@ -19,7 +19,11 @@ import {
   SecurityConstrainedConfig,
   StochasticConfig,
   StochasticScenarioConfig,
+  StochasticScenarioOverride,
+  WorkbookModel,
 } from '../../shared/types';
+import { PYPSA_COMPONENTS } from '../../constants/pypsa_schema';
+import { stringValue } from '../../shared/utils/helpers';
 import { DualRangeSlider } from '../../shared/components/DualRangeSlider';
 import { normalizeRollingConfig } from '../../shared/utils/rolling';
 import { RUN_WINDOW, SETTINGS_CONFIG } from '../../constants';
@@ -47,6 +51,7 @@ interface Props {
   carbonPriceSchedule: CarbonPriceScheduleEntry[];
   onCarbonPriceScheduleChange: (next: CarbonPriceScheduleEntry[]) => void;
   currencySymbol: string;
+  model: WorkbookModel;
   lineCount: number;
   transformerCount: number;
   onClose: () => void;
@@ -495,7 +500,7 @@ function CarbonPriceTab(props: Props) {
 // ── Stochastic ───────────────────────────────────────────────────────────────
 
 function StochasticTab(props: Props) {
-  const { stochasticConfig, onStochasticConfigChange, rollingConfig } = props;
+  const { stochasticConfig, onStochasticConfigChange, rollingConfig, model } = props;
   const config = stochasticConfig;
   const onChange = onStochasticConfigChange;
   const rollingEnabled = rollingConfig.enabled;
@@ -508,7 +513,15 @@ function StochasticTab(props: Props) {
     const n = config.scenarios.length + 1;
     setScenarios([
       ...config.scenarios,
-      { id, name: `scenario_${n}`, weight: 0.5, loadMultiplier: 1.0 },
+      {
+        id,
+        name: `scenario_${n}`,
+        weight: 0.5,
+        loadMultiplier: 1.0,
+        marginalCostMultiplier: 1.0,
+        renewableAvailabilityMultiplier: 1.0,
+        overrides: [],
+      },
     ]);
   };
   const updateScenario = (id: string, patch: Partial<StochasticScenarioConfig>) =>
@@ -522,7 +535,12 @@ function StochasticTab(props: Props) {
     <section className="constraints-workspace-section">
       <header className="constraints-workspace-section-header">
         <h3>Stochastic uncertainty</h3>
-        <p>Two-stage stochastic planning: shared capacity decisions, scenario-specific dispatch. Weights are normalised to sum=1 at solve time. Minimum 2 scenarios; single-scenario configs fall back to deterministic.</p>
+        <p>
+          Two-stage stochastic planning: shared capacity decisions,
+          scenario-specific dispatch. Each row gets four quick knobs;
+          per-cell uncertainty drops into "Advanced overrides". Weights
+          normalise to sum=1 at solve time; minimum 2 scenarios.
+        </p>
       </header>
       <div className="sg-setting-row">
         <label className="sg-setting-label">Mode</label>
@@ -552,36 +570,13 @@ function StochasticTab(props: Props) {
         <>
           <div className="sg-setting-divider" />
           {config.scenarios.map((s) => (
-            <div key={s.id} className="sg-stochastic-row">
-              <input
-                className="sg-stochastic-name"
-                type="text"
-                value={s.name}
-                onChange={(e) => updateScenario(s.id, { name: e.target.value })}
-                placeholder="name"
-              />
-              <label className="sg-stochastic-field" title="Probability weight">
-                <span>w</span>
-                <input
-                  type="number"
-                  step="0.05"
-                  min="0"
-                  value={s.weight}
-                  onChange={(e) => updateScenario(s.id, { weight: Number(e.target.value) || 0 })}
-                />
-              </label>
-              <label className="sg-stochastic-field" title="Load multiplier — scales every load.p_set in this scenario">
-                <span>×load</span>
-                <input
-                  type="number"
-                  step="0.05"
-                  min="0"
-                  value={s.loadMultiplier}
-                  onChange={(e) => updateScenario(s.id, { loadMultiplier: Number(e.target.value) || 0 })}
-                />
-              </label>
-              <button className="gcc-del" onClick={() => removeScenario(s.id)} title="Remove scenario">x</button>
-            </div>
+            <StochasticScenarioRow
+              key={s.id}
+              scenario={s}
+              model={model}
+              onUpdate={(patch) => updateScenario(s.id, patch)}
+              onRemove={() => removeScenario(s.id)}
+            />
           ))}
           <button className="tb-btn" onClick={addScenario}>+ Add scenario</button>
           {config.scenarios.length > 0 && (
@@ -652,5 +647,223 @@ function SclopfTab(props: Props) {
         </>
       )}
     </section>
+  );
+}
+
+// ── One scenario row: quick knobs + advanced-overrides disclosure ────────────
+
+const OVERRIDABLE_SHEETS = PYPSA_COMPONENTS
+  .filter((c) => !['snapshots', 'network', 'carriers'].includes(c.sheet_name) && c.input_static_attributes.length > 0)
+  .map((c) => c.sheet_name);
+
+function StochasticScenarioRow({
+  scenario,
+  model,
+  onUpdate,
+  onRemove,
+}: {
+  scenario: StochasticScenarioConfig;
+  model: WorkbookModel;
+  onUpdate: (patch: Partial<StochasticScenarioConfig>) => void;
+  onRemove: () => void;
+}) {
+  const [showOverrides, setShowOverrides] = useState((scenario.overrides ?? []).length > 0);
+
+  const setOverrides = (next: StochasticScenarioOverride[]) => onUpdate({ overrides: next });
+  const addOverride = () => {
+    const id = `ov_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const firstSheet = OVERRIDABLE_SHEETS[0] ?? 'generators';
+    const sheetSchema = PYPSA_COMPONENTS.find((c) => c.sheet_name === firstSheet);
+    const firstAttr = sheetSchema?.input_static_attributes[0] ?? 'marginal_cost';
+    setOverrides([
+      ...scenario.overrides,
+      { id, sheet: firstSheet, attribute: firstAttr, scopeType: 'all', scopeValue: '', operation: 'multiply', value: 1.0 },
+    ]);
+  };
+  const updateOverride = (id: string, patch: Partial<StochasticScenarioOverride>) =>
+    setOverrides(scenario.overrides.map((o) => (o.id === id ? { ...o, ...patch } : o)));
+  const removeOverride = (id: string) =>
+    setOverrides(scenario.overrides.filter((o) => o.id !== id));
+
+  return (
+    <div className="stochastic-scenario-row">
+      <div className="sg-stochastic-row">
+        <input
+          className="sg-stochastic-name"
+          type="text"
+          value={scenario.name}
+          onChange={(e) => onUpdate({ name: e.target.value })}
+          placeholder="name"
+        />
+        <label className="sg-stochastic-field" title="Probability weight">
+          <span>w</span>
+          <input
+            type="number"
+            step="0.05"
+            min="0"
+            value={scenario.weight}
+            onChange={(e) => onUpdate({ weight: Number(e.target.value) || 0 })}
+          />
+        </label>
+        <label className="sg-stochastic-field" title="Scales every load.p_set in this scenario">
+          <span>×load</span>
+          <input
+            type="number"
+            step="0.05"
+            min="0"
+            value={scenario.loadMultiplier}
+            onChange={(e) => onUpdate({ loadMultiplier: Number(e.target.value) || 0 })}
+          />
+        </label>
+        <label className="sg-stochastic-field" title="Scales every generator's marginal_cost (post-carbon adder) — proxy for fuel-price uncertainty">
+          <span>×fuel</span>
+          <input
+            type="number"
+            step="0.05"
+            min="0"
+            value={scenario.marginalCostMultiplier}
+            onChange={(e) => onUpdate({ marginalCostMultiplier: Number(e.target.value) || 0 })}
+          />
+        </label>
+        <label className="sg-stochastic-field" title="Scales p_max_pu for renewable-carrier generators (solar / wind / hydro …) — proxy for weather uncertainty">
+          <span>×renew</span>
+          <input
+            type="number"
+            step="0.05"
+            min="0"
+            value={scenario.renewableAvailabilityMultiplier}
+            onChange={(e) => onUpdate({ renewableAvailabilityMultiplier: Number(e.target.value) || 0 })}
+          />
+        </label>
+        <button className="gcc-del" onClick={onRemove} title="Remove scenario">x</button>
+      </div>
+
+      <div style={{ marginLeft: 6, marginTop: 4, marginBottom: 8 }}>
+        <button
+          className="tb-btn tb-btn--muted"
+          style={{ fontSize: '0.78rem', padding: '2px 8px' }}
+          onClick={() => setShowOverrides((v) => !v)}
+        >
+          {showOverrides ? '− Advanced overrides' : `+ Advanced overrides${scenario.overrides.length > 0 ? ` (${scenario.overrides.length})` : ''}`}
+        </button>
+
+        {showOverrides && (
+          <div style={{ marginTop: 8, marginLeft: 12 }}>
+            {scenario.overrides.length === 0 ? (
+              <p className="sg-setting-hint" style={{ marginTop: 0 }}>
+                Add an override to vary a specific (sheet, attribute) by name, carrier, or for the whole sheet.
+              </p>
+            ) : (
+              <table className="constraints-table" style={{ marginBottom: 6 }}>
+                <thead>
+                  <tr>
+                    <th>Sheet</th>
+                    <th>Attribute</th>
+                    <th>Scope</th>
+                    <th>Filter</th>
+                    <th>Op</th>
+                    <th>Value</th>
+                    <th aria-label="actions" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {scenario.overrides.map((o) => {
+                    const sheetSchema = PYPSA_COMPONENTS.find((c) => c.sheet_name === o.sheet);
+                    const attrOptions = sheetSchema?.input_static_attributes ?? [];
+                    const carriers = Array.from(
+                      new Set((model.carriers ?? []).map((r) => stringValue(r.name)).filter(Boolean)),
+                    );
+                    const names = ((model[o.sheet] ?? []) as Array<Record<string, unknown>>)
+                      .map((r) => String(r.name ?? '').trim())
+                      .filter(Boolean);
+                    return (
+                      <tr key={o.id}>
+                        <td>
+                          <select
+                            className="constraints-cell-input"
+                            value={o.sheet}
+                            onChange={(e) => {
+                              const nextSheet = e.target.value;
+                              const next = PYPSA_COMPONENTS.find((c) => c.sheet_name === nextSheet);
+                              const nextAttr = next?.input_static_attributes[0] ?? o.attribute;
+                              updateOverride(o.id, { sheet: nextSheet, attribute: nextAttr, scopeValue: '' });
+                            }}
+                          >
+                            {OVERRIDABLE_SHEETS.map((s) => (<option key={s} value={s}>{s}</option>))}
+                          </select>
+                        </td>
+                        <td>
+                          <select
+                            className="constraints-cell-input"
+                            value={o.attribute}
+                            onChange={(e) => updateOverride(o.id, { attribute: e.target.value })}
+                          >
+                            {attrOptions.map((a) => (<option key={a} value={a}>{a}</option>))}
+                          </select>
+                        </td>
+                        <td>
+                          <select
+                            className="constraints-cell-input"
+                            value={o.scopeType}
+                            onChange={(e) => updateOverride(o.id, { scopeType: e.target.value as 'all' | 'name' | 'carrier', scopeValue: '' })}
+                          >
+                            <option value="all">all rows</option>
+                            <option value="name">by name</option>
+                            <option value="carrier">by carrier</option>
+                          </select>
+                        </td>
+                        <td>
+                          {o.scopeType === 'all' ? (
+                            <span style={{ color: 'var(--muted)', fontStyle: 'italic' }}>—</span>
+                          ) : (
+                            <input
+                              className="constraints-cell-input"
+                              value={o.scopeValue}
+                              list={`ov-${o.id}-list`}
+                              onChange={(e) => updateOverride(o.id, { scopeValue: e.target.value })}
+                              placeholder={o.scopeType === 'name' ? 'row name' : 'carrier'}
+                            />
+                          )}
+                          {o.scopeType !== 'all' && (
+                            <datalist id={`ov-${o.id}-list`}>
+                              {(o.scopeType === 'carrier' ? carriers : names).map((v) => (
+                                <option key={v} value={v} />
+                              ))}
+                            </datalist>
+                          )}
+                        </td>
+                        <td>
+                          <select
+                            className="constraints-cell-input"
+                            value={o.operation}
+                            onChange={(e) => updateOverride(o.id, { operation: e.target.value as 'multiply' | 'set' })}
+                          >
+                            <option value="multiply">×</option>
+                            <option value="set">=</option>
+                          </select>
+                        </td>
+                        <td>
+                          <input
+                            type="number"
+                            className="constraints-cell-input constraints-cell-input--num"
+                            value={o.value}
+                            step="0.1"
+                            onChange={(e) => updateOverride(o.id, { value: Number(e.target.value) || 0 })}
+                          />
+                        </td>
+                        <td>
+                          <button className="gcc-del" onClick={() => removeOverride(o.id)} title="Delete override">×</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+            <button className="tb-btn" style={{ fontSize: '0.85rem' }} onClick={addOverride}>+ Add override</button>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
