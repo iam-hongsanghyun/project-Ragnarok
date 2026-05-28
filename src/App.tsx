@@ -28,7 +28,7 @@ import {
   AnalyticsSubTab,
 } from './shared/types';
 import { API_BASE, DEFAULT_CONSTRAINTS, getDefaultRowForSheet, MAX_UNPINNED_HISTORY, PYPSA_SCHEMA_META, RUN_POLLING, RUN_WINDOW, SHEETS } from './constants';
-import { createEmptyWorkbook, exportProjectWorkbook, exportWorkbook, normalizeInputDatesToIso, parseProjectFile, parseWorkbook, prepareTemporalRowsForExport, projectWorkbookToArrayBuffer, workbookToArrayBuffer } from './shared/utils/workbook';
+import { canonicalizeOutputSeries, canonicalizeTemporalRows, createEmptyWorkbook, exportProjectWorkbook, exportWorkbook, normalizeInputDatesToIso, parseProjectFile, parseWorkbook, projectWorkbookToArrayBuffer, workbookToArrayBuffer } from './shared/utils/workbook';
 import { exportFullResults } from './shared/utils/exportResults';
 import { exportReportHtml } from './shared/utils/exportReport';
 import { getBounds, getBusIndex, carrierColor, numberValue, orderByCarrierRows, setCarrierColorOverrides, snapshotMaxFromWorkbook } from './shared/utils/helpers';
@@ -490,10 +490,7 @@ function AppInner() {
       const importedSettings = metadata.settings;
       const importDateFormat = importedSettings?.dateFormat ?? settings.dateFormat;
       normalizeInputDatesToIso(nextModel, importDateFormat);
-      Object.keys(outputs.series).forEach((sheet) => {
-        const rows = outputs.series[sheet];
-        if (rows?.length) outputs.series[sheet] = prepareTemporalRowsForExport(rows, importDateFormat);
-      });
+      canonicalizeOutputSeries(outputs.series, importDateFormat);
       const importedSnapshotWeight = importedRunState?.snapshotWeight ?? snapshotWeight;
       const importedCarbonPrice = importedRunState?.carbonPrice ?? carbonPrice;
       const importedDiscountRate = importedSettings?.discountRate ?? settings.discountRate;
@@ -759,6 +756,12 @@ function AppInner() {
   };
 
   const handleRestoreRun = (entry: RunHistoryEntry) => {
+    // Older persisted entries may predate canonicalisation — re-canonicalise
+    // the restored outputs in place so display/derivation see ISO-`T` + leading
+    // `snapshot` consistently.
+    if (entry.results.outputs?.series) {
+      canonicalizeOutputSeries(entry.results.outputs.series, settings.dateFormat);
+    }
     setResults(entry.results);
     setPathwayConfig((current) => entry.results.pathway?.enabled ? ({
       ...current,
@@ -898,10 +901,13 @@ function AppInner() {
   };
 
   const handleImportTsSheet = (sheet: TsSheetName, rows: GridRow[]) => {
-    setModel((current) => ({ ...current, [sheet]: rows }));
-    if (rows.length > 0) {
-      showToast(`Imported ${rows.length} rows into ${sheet}`, 'success');
-      setStatus(`Imported ${rows.length} rows into ${sheet}.`);
+    // Canonicalise to ISO-`T` snapshots + `snapshot`-first column order at the
+    // CSV/manual import boundary so the in-memory model stays PyPSA-canonical.
+    const canonical = canonicalizeTemporalRows(rows, settings.dateFormat);
+    setModel((current) => ({ ...current, [sheet]: canonical }));
+    if (canonical.length > 0) {
+      showToast(`Imported ${canonical.length} rows into ${sheet}`, 'success');
+      setStatus(`Imported ${canonical.length} rows into ${sheet}.`);
     } else {
       showToast(`Cleared ${sheet}`, 'success');
       setStatus(`Cleared ${sheet}.`);
@@ -1044,6 +1050,12 @@ function AppInner() {
     const applyResult = (rawResults: RunResults) => {
       sessionStorage.removeItem('activeJobId');
       jobIdRef.current = null;
+      // Canonicalise backend output time-series in place (ISO-`T` snapshots,
+      // `snapshot` column leading) so all downstream rendering, derivation,
+      // and re-exports see uniformly PyPSA-canonical data.
+      if (rawResults.outputs?.series) {
+        canonicalizeOutputSeries(rawResults.outputs.series, settings.dateFormat);
+      }
       const selectedPeriod = rawResults.pathway?.enabled
         ? (rawResults.pathway.selectedPeriod ?? rawResults.pathway.periods[0] ?? null)
         : null;

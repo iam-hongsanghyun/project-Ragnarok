@@ -4,6 +4,10 @@ import {
   buildProjectWorkbook,
   parseProjectWorkbook,
   normalizeInputDatesToIso,
+  canonicalizeTemporalRows,
+  canonicalizeTemporalSheets,
+  canonicalizeOutputSeries,
+  hasSnapshotColumn,
   createEmptyWorkbook,
   workbookToArrayBuffer,
   parseSheets,
@@ -286,6 +290,75 @@ describe('export temporal sheet formatting', () => {
     expect(header[0]).toBe('snapshot');
     const rows = XLSX.utils.sheet_to_json<Record<string, string>>(wb.Sheets['generators-p']!);
     expect(rows[0].snapshot).toBe('2024-01-01T00:00:00');
+  });
+});
+
+describe('canonicalizeTemporalSheets (in-memory normalization)', () => {
+  test('space-separated snapshots become ISO with T', () => {
+    const rows: GridRow[] = [
+      { snapshot: '2024-08-01 00:00:00', load_a: 100 },
+      { snapshot: '2024-08-01 01:00:00', load_a: 110 },
+    ];
+    const out = canonicalizeTemporalRows(rows, 'auto');
+    expect(out[0].snapshot).toBe('2024-08-01T00:00:00');
+    expect(out[1].snapshot).toBe('2024-08-01T01:00:00');
+    expect(out[0].load_a).toBe(100);
+  });
+
+  test('snapshot is moved to the first column', () => {
+    const rows: GridRow[] = [{ load_a: 100, load_b: 50, snapshot: '2024-08-01T00:00:00' }];
+    const out = canonicalizeTemporalRows(rows, 'auto');
+    expect(Object.keys(out[0])).toEqual(['snapshot', 'load_a', 'load_b']);
+  });
+
+  test('period leads then snapshot, then the rest (pathway runs)', () => {
+    const rows: GridRow[] = [
+      { load_a: 100, snapshot: '2024-08-01T00:00:00', period: 2030 },
+    ];
+    const out = canonicalizeTemporalRows(rows, 'auto');
+    expect(Object.keys(out[0])).toEqual(['period', 'snapshot', 'load_a']);
+  });
+
+  test('static sheet (no snapshot column) is left completely untouched', () => {
+    const generators: GridRow[] = [
+      { name: 'gen_coal', p_nom: 500, carrier: 'coal' },
+      { name: 'gen_wind', p_nom: 300, carrier: 'wind' },
+    ];
+    const sheets: Record<string, GridRow[] | undefined> = { generators };
+    canonicalizeTemporalSheets(sheets, 'auto');
+    expect(sheets.generators).toBe(generators);   // same reference, not rewritten
+    expect(Object.keys(sheets.generators![0])).toEqual(['name', 'p_nom', 'carrier']);
+  });
+
+  test('output series with snapshot in the LAST column gets reordered first + ISO', () => {
+    const series: Record<string, GridRow[]> = {
+      'generators-p': [
+        { gen_coal: 200, gen_wind: 50, snapshot: '2024-08-01 00:00:00' },
+        { gen_coal: 210, gen_wind: 70, snapshot: '2024-08-01 01:00:00' },
+      ],
+    };
+    canonicalizeOutputSeries(series, 'auto');
+    const out = series['generators-p'];
+    expect(Object.keys(out[0])[0]).toBe('snapshot');
+    expect(out[0].snapshot).toBe('2024-08-01T00:00:00');
+    expect(out[1].snapshot).toBe('2024-08-01T01:00:00');
+  });
+
+  test('sheet without a snapshot column is a no-op', () => {
+    const rows: GridRow[] = [{ name: 'bus_1', x: 0, y: 0 }];
+    expect(hasSnapshotColumn(rows)).toBe(false);
+    const out = canonicalizeTemporalRows(rows, 'auto');
+    expect(out).toBe(rows);   // same reference, untouched
+  });
+
+  test('canonicalisation is idempotent (twice == once)', () => {
+    const rows: GridRow[] = [
+      { snapshot: '2024-08-01 00:00:00', load_a: 100 },
+      { snapshot: '2024-08-01 01:00:00', load_a: 110 },
+    ];
+    const once = canonicalizeTemporalRows(rows, 'auto');
+    const twice = canonicalizeTemporalRows(once, 'auto');
+    expect(twice).toEqual(once);
   });
 });
 

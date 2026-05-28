@@ -26,7 +26,7 @@ import {
   ValuePoint,
   WorkbookModel,
 } from '../types';
-import { carrierColor, normalizeDateToIso, numberValue, resolvedColor, stringValue } from './helpers';
+import { carrierColor, numberValue, resolvedColor, stringValue } from './helpers';
 import { deriveAssetDetails } from './deriveAssetDetails';
 
 export interface DeriveRunResultsOptions {
@@ -108,19 +108,14 @@ function staticOutValue(
   return numberValue(v as Primitive);
 }
 
-// Candidate time-index column names for input temporal sheets, mirroring
-// workbook.ts SNAPSHOT_LABEL_KEYS.
-const SNAPSHOT_LABEL_KEYS = ['snapshot', 'datetime', 'name', 'index', 'timestep'];
-
-/** Canonical ISO snapshot key for matching input rows to output timestamps. */
-function normalizeStamp(stamp: string): string {
-  const trimmed = stamp.trim();
-  if (!trimmed) return trimmed;
-  return normalizeDateToIso(trimmed, 'auto');
-}
+// PyPSA's canonical time-index column. All temporal data is canonicalised to
+// this single column name + ISO-`T` values on entry (see
+// `canonicalizeTemporalSheets` in workbook.ts), so matching here is exact —
+// no format-tolerance band-aid.
+const SNAPSHOT_COL = 'snapshot';
 
 interface InputTemporalIndex {
-  /** Rows keyed by normalised snapshot timestamp. */
+  /** Rows keyed by canonical ISO snapshot timestamp. */
   byStamp: Record<string, GridRow>;
   /** Component names that have a column in the temporal sheet. */
   columns: Set<string>;
@@ -136,15 +131,13 @@ interface InputTemporalIndex {
 function indexInputByTimestamp(rows: GridRow[] | undefined): InputTemporalIndex {
   const byStamp: Record<string, GridRow> = {};
   const columns = new Set<string>();
-  if (!rows || rows.length === 0) return { byStamp, columns };
-  const labelCol = SNAPSHOT_LABEL_KEYS.find((k) => k in rows[0]);
-  if (!labelCol) return { byStamp, columns };
+  if (!rows || rows.length === 0 || !(SNAPSHOT_COL in rows[0])) return { byStamp, columns };
   for (const key of Object.keys(rows[0])) {
-    if (key !== labelCol) columns.add(key);
+    if (key !== SNAPSHOT_COL && key !== 'period') columns.add(key);
   }
   for (const row of rows) {
-    const stamp = stringValue(row[labelCol]);
-    if (stamp) byStamp[normalizeStamp(stamp)] = row;
+    const stamp = stringValue(row[SNAPSHOT_COL]);
+    if (stamp) byStamp[stamp] = row;
   }
   return { byStamp, columns };
 }
@@ -154,13 +147,13 @@ function indexInputByTimestamp(rows: GridRow[] | undefined): InputTemporalIndex 
  * static scalar whenever the component has a column in the time-series sheet —
  * matching PyPSA's convention that `loads_t.p_set` overrides `loads.p_set`.
  * The static `fallback` is used only for components absent from the temporal
- * sheet entirely.
+ * sheet entirely. Timestamps match exactly (both sides are canonical ISO-`T`).
  */
 function inputSeriesValueAtStamp(
   idx: InputTemporalIndex, stamp: string, col: string, fallback: number,
 ): number {
   if (!idx.columns.has(col)) return fallback;
-  const row = idx.byStamp[normalizeStamp(stamp)];
+  const row = idx.byStamp[stamp];
   const cell = row?.[col];
   if (cell === undefined || cell === null || cell === '') return 0;
   return numberValue(cell);

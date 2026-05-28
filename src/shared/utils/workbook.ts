@@ -39,97 +39,100 @@ function chunkText(text: string): string[] {
   return parts;
 }
 
-// Candidate time-index column names, mirroring the backend's label lookup.
-const SNAPSHOT_LABEL_KEYS = ['snapshot', 'datetime', 'name', 'index', 'timestep'];
+// PyPSA's canonical time-index column name. A dataset is "temporal" iff it
+// carries this column. Static component sheets are keyed by `name` and never
+// have a `snapshot` column, so this single-name gate can be applied to every
+// sheet without risk of corrupting static data. We recognise ONLY this name —
+// no datetime/index/timestep fallbacks (strict PyPSA convention).
+const SNAPSHOT_COL = 'snapshot';
 
-/** Label column on a temporal sheet, if any. */
-export function findSnapshotLabelCol(rows: GridRow[]): string | null {
-  if (!rows.length) return null;
-  return SNAPSHOT_LABEL_KEYS.find((k) => k in rows[0]) ?? null;
+/** True when a row set is a temporal sheet (has the canonical `snapshot` column). */
+export function hasSnapshotColumn(rows: GridRow[] | undefined): boolean {
+  return !!rows && rows.length > 0 && SNAPSHOT_COL in rows[0];
 }
 
 /**
- * Pin ``period`` (when present) and the snapshot label column as the leading
- * columns so SheetJS / Excel column order is stable across input and output sheets.
+ * Pin ``period`` (when present) then ``snapshot`` as the leading columns so
+ * SheetJS / Excel column order is stable and PyPSA-conventional across input
+ * and output sheets.
  */
-export function orderTemporalRow(row: GridRow, labelCol: string): GridRow {
+export function orderTemporalRow(row: GridRow): GridRow {
   const ordered: GridRow = {};
   if (row.period !== undefined && row.period !== null && row.period !== '') {
     ordered.period = row.period;
   }
-  if (labelCol in row) {
-    ordered[labelCol] = row[labelCol];
+  if (SNAPSHOT_COL in row) {
+    ordered[SNAPSHOT_COL] = row[SNAPSHOT_COL];
   }
   for (const [key, value] of Object.entries(row)) {
-    if (key === 'period' || key === labelCol) continue;
+    if (key === 'period' || key === SNAPSHOT_COL) continue;
     ordered[key] = value;
   }
   return ordered;
 }
 
-/** Canonical ISO timestamps and leading index columns for export. */
-export function prepareTemporalRowsForExport(rows: GridRow[], fmt: DateFormat): GridRow[] {
-  if (!rows.length) return rows;
-  const labelCol = findSnapshotLabelCol(rows);
-  if (!labelCol) return rows;
+/**
+ * Canonicalise a temporal sheet to the PyPSA shape: ISO-8601 (`T`-separated)
+ * ``snapshot`` values, with ``period?`` then ``snapshot`` as the leading
+ * columns. Sheets without a ``snapshot`` column (every static sheet) are
+ * returned unchanged.
+ */
+export function canonicalizeTemporalRows(rows: GridRow[], fmt: DateFormat): GridRow[] {
+  if (!hasSnapshotColumn(rows)) return rows;
   return rows.map((row) => {
     const copy = { ...row };
-    const v = copy[labelCol];
-    if (typeof v === 'string') {
-      copy[labelCol] = normalizeDateToIso(v, fmt);
-    }
-    return orderTemporalRow(copy, labelCol);
+    const v = copy[SNAPSHOT_COL];
+    if (typeof v === 'string') copy[SNAPSHOT_COL] = normalizeDateToIso(v, fmt);
+    return orderTemporalRow(copy);
   });
 }
 
-/** ISO-normalise every string cell on the ``snapshots`` sheet and order columns. */
-export function prepareSnapshotsSheetForExport(rows: GridRow[], fmt: DateFormat): GridRow[] {
-  return rows.map((row) => {
-    const copy = { ...row };
-    for (const key of Object.keys(copy)) {
-      const v = copy[key];
-      if (typeof v === 'string') copy[key] = normalizeDateToIso(v, fmt);
-    }
-    const labelCol = findSnapshotLabelCol([copy]) ?? 'snapshot';
-    return orderTemporalRow(copy, labelCol in copy ? labelCol : 'snapshot');
-  });
-}
+/** Back-compat alias: every temporal sheet (input, output, or `snapshots`) is
+ *  canonicalised by the same `snapshot`-gated transform. */
+export const prepareTemporalRowsForExport = canonicalizeTemporalRows;
 
-function temporalSheetRowsForExport(sheet: string, rows: GridRow[], fmt: DateFormat): GridRow[] {
-  if (sheet === 'snapshots') return prepareSnapshotsSheetForExport(rows, fmt);
-  if (isInputTemporalSheet(sheet)) return prepareTemporalRowsForExport(rows, fmt);
-  return rows;
+function temporalSheetRowsForExport(_sheet: string, rows: GridRow[], fmt: DateFormat): GridRow[] {
+  return canonicalizeTemporalRows(rows, fmt);
 }
 
 /**
- * Rewrite every input date cell into the canonical ISO target format,
- * interpreting raw strings with the user's declared input format (`fmt`).
- * Covers the `snapshots` sheet (all string cells) and the time-index column
- * of every input temporal sheet, so the model is uniformly ISO before it
- * reaches the backend or an export. Mutates `model` in place; non-date cells
- * pass through unchanged.
+ * Canonicalise every temporal dataset in a sheet-map IN PLACE: ISO-`T`
+ * ``snapshot`` values and ``period?``, ``snapshot``, …rest column order. Each
+ * sheet self-gates on the presence of a ``snapshot`` column, so static sheets
+ * pass through untouched and no schema lookup is required. Idempotent.
+ *
+ * Applied at every boundary where temporal data enters the frontend — model
+ * load, project import, plugin-produced file, backend run result, CSV import —
+ * so the in-memory representation is uniformly canonical before display,
+ * derivation, the backend POST, or an export.
  */
-export function normalizeInputDatesToIso(model: WorkbookModel, fmt: DateFormat): void {
-  const sheets = model as unknown as Record<string, GridRow[] | undefined>;
+export function canonicalizeTemporalSheets(
+  sheets: Record<string, GridRow[] | undefined>,
+  fmt: DateFormat,
+): void {
   for (const sheet of Object.keys(sheets)) {
     const rows = sheets[sheet];
-    if (!rows || rows.length === 0) continue;
-    if (sheet === 'snapshots') {
-      for (const row of rows) {
-        for (const key of Object.keys(row)) {
-          const v = row[key];
-          if (typeof v === 'string') row[key] = normalizeDateToIso(v, fmt);
-        }
-      }
-    } else if (isInputTemporalSheet(sheet)) {
-      const labelCol = SNAPSHOT_LABEL_KEYS.find((k) => k in rows[0]);
-      if (!labelCol) continue;
-      for (const row of rows) {
-        const v = row[labelCol];
-        if (typeof v === 'string') row[labelCol] = normalizeDateToIso(v, fmt);
-      }
-    }
+    if (!hasSnapshotColumn(rows)) continue;
+    sheets[sheet] = canonicalizeTemporalRows(rows as GridRow[], fmt);
   }
+}
+
+/** Canonicalise backend/imported output time-series (`outputs.series`) in place. */
+export function canonicalizeOutputSeries(
+  series: Record<string, GridRow[]>,
+  fmt: DateFormat,
+): void {
+  canonicalizeTemporalSheets(series, fmt);
+}
+
+/**
+ * Canonicalise every temporal sheet of a workbook model in place: ISO-`T`
+ * ``snapshot`` timestamps and leading ``period?``/``snapshot`` columns, so the
+ * model is uniformly PyPSA-canonical before it reaches the backend or an
+ * export. Non-temporal (static) sheets pass through unchanged.
+ */
+export function normalizeInputDatesToIso(model: WorkbookModel, fmt: DateFormat): void {
+  canonicalizeTemporalSheets(model as unknown as Record<string, GridRow[] | undefined>, fmt);
 }
 
 export function createEmptyWorkbook(): WorkbookModel {
