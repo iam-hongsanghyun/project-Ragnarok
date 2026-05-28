@@ -33,9 +33,6 @@ import {
 import { API_BASE, DEFAULT_CONSTRAINTS, getDefaultRowForSheet, MAX_UNPINNED_HISTORY, PYPSA_SCHEMA_META, RUN_POLLING, RUN_WINDOW, SHEETS } from './constants';
 import { canonicalizeOutputSeries, canonicalizeTemporalRows, createEmptyWorkbook, exportProjectWorkbook, exportWorkbook, normalizeInputDatesToIso, parseProjectFile, parseWorkbook, projectWorkbookToArrayBuffer, workbookToArrayBuffer } from './shared/utils/workbook';
 import { exportFullResults } from './shared/utils/exportResults';
-import { ActivityId, usePersistedLayout } from './shared/utils/persistedLayout';
-import { ActivityBar } from './layout/ActivityBar';
-import { StatusBar } from './layout/StatusBar';
 import { exportReportHtml } from './shared/utils/exportReport';
 import { getBounds, getBusIndex, carrierColor, numberValue, orderByCarrierRows, setCarrierColorOverrides, snapshotMaxFromWorkbook } from './shared/utils/helpers';
 import { buildRowsFromGeneratorDetails, buildSystemLoadRows, normalizeSeriesPoint } from './shared/utils/analytics';
@@ -62,13 +59,9 @@ import { ToastProvider, useToast } from './shared/components/Toast';
 function AppInner() {
   const { showToast } = useToast();
   const [model, setModel] = useState<WorkbookModel>(() => createEmptyWorkbook());
-  const [layout, patchLayout] = usePersistedLayout();
-  const [tab, setTab] = useState<WorkspaceTab>(() => layout.activity === 'plugins' ? 'Plugins' : layout.activity === 'analytics' || layout.activity === 'solve' ? 'Analytics' : 'Model');
-  const [modelSubTab, setModelSubTab] = useState<ModelSubTab>(layout.modelSubTab);
-  const [analyticsSubTab, setAnalyticsSubTab] = useState<AnalyticsSubTab>(layout.activity === 'solve' ? 'Validation' : layout.analyticsSubTab);
-  // Keep persisted layout in sync as state changes.
-  useEffect(() => { patchLayout({ modelSubTab }); }, [modelSubTab]);  // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { patchLayout({ analyticsSubTab }); }, [analyticsSubTab]);  // eslint-disable-line react-hooks/exhaustive-deps
+  const [tab, setTab] = useState<WorkspaceTab>('Model');
+  const [modelSubTab, setModelSubTab] = useState<ModelSubTab>('Map');
+  const [analyticsSubTab, setAnalyticsSubTab] = useState<AnalyticsSubTab>('Result');
   const [results, setResults] = useState<RunResults | null>(null);
   const [runStatus, setRunStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
   const [maxSnapshots, setMaxSnapshots] = useState<number>(RUN_WINDOW.initialMaxSnapshots);
@@ -78,28 +71,8 @@ function AppInner() {
   const [constraints, setConstraints] = useState<CustomConstraint[]>(DEFAULT_CONSTRAINTS);
   const [carbonPrice, setCarbonPrice] = useState<number>(0);
   const [forceLp, setForceLp] = useState<boolean>(false);
-  const sidebarOpen = layout.sidebarOpen;
-  const toggleSidebarOpen = () => patchLayout({ sidebarOpen: !sidebarOpen });
-  const sidebarWidth = layout.sidebarWidth;
-  const setSidebarWidth = (next: number) => patchLayout({ sidebarWidth: next });
-  const activeActivity: ActivityId = layout.activity;
-  const setActiveActivity = (next: ActivityId) => {
-    patchLayout({ activity: next });
-    // Activity selection also drives the main-canvas tab.
-    if (next === 'plugins') {
-      setTab('Plugins');
-    } else if (next === 'analytics') {
-      setTab('Analytics');
-      setAnalyticsSubTab('Result');
-    } else if (next === 'solve') {
-      setTab('Analytics');
-      setAnalyticsSubTab('Validation');
-    } else if (next === 'model') {
-      setTab('Model');
-    } else if (next === 'settings') {
-      setActiveWorkspaceOverlay('settings');
-    }
-  };
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState(252);
   const [isDraggingSidebar, setIsDraggingSidebar] = useState(false);
   const dragStartX = useRef<number>(0);
   const dragStartWidth = useRef<number>(252);
@@ -1421,9 +1394,6 @@ function AppInner() {
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-    // setSidebarWidth is stable across renders (defined inline above the
-    // useCallback); intentionally not listed as a dep.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sidebarWidth]);
 
   return (
@@ -1509,16 +1479,11 @@ function AppInner() {
 
       {/* ── Sidebar + Main ── */}
       <div className="workspace-body" style={isDraggingSidebar ? { userSelect: 'none', cursor: 'col-resize' } : undefined}>
-        <ActivityBar
-          active={activeActivity}
-          onSelect={setActiveActivity}
-          pluginsAvailable={moduleHost.enabledIds.length > 0}
-        />
         <aside
           className={`app-sidebar${sidebarOpen ? '' : ' app-sidebar--collapsed'}`}
           style={sidebarOpen ? { width: sidebarWidth } : undefined}
         >
-          <button className="sidebar-toggle" onClick={toggleSidebarOpen} title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}>
+          <button className="sidebar-toggle" onClick={() => setSidebarOpen((o) => !o)} title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}>
             {sidebarOpen ? '<' : '>'}
           </button>
           {sidebarOpen && (
@@ -1590,7 +1555,6 @@ function AppInner() {
               onToggleModuleEnabled={moduleHost.toggleEnabled}
               onInstallModule={handleInstallModule}
               onUninstallModule={handleUninstallModule}
-              activity={activeActivity}
             />
           )}
         </aside>
@@ -1819,31 +1783,6 @@ function AppInner() {
           })()}
         </div>
       </div>
-
-      {/* ── Status bar ── */}
-      <StatusBar
-        filename={filename}
-        activeScenarioLabel={activeScenario?.label ?? null}
-        pathwayConfig={pathwayConfig}
-        rollingConfig={rollingConfig}
-        stochasticConfig={stochasticConfig}
-        sclopfConfig={sclopfConfig}
-        snapshotStart={snapshotStart}
-        snapshotEnd={snapshotEnd}
-        snapshotWeight={snapshotWeight}
-        carbonPrice={carbonPrice}
-        carbonPriceSchedule={carbonPriceSchedule}
-        currencySymbol={settings.currencySymbol}
-        constraints={constraints}
-        globalConstraintCount={(model.global_constraints ?? []).length}
-        validationErrors={modelIssues.filter((i) => i.severity === 'error').length}
-        validationWarnings={modelIssues.filter((i) => i.severity === 'warning').length}
-        runStatus={runStatus}
-        runElapsedSec={runElapsed}
-        onOpenRunSetup={() => setActiveWorkspaceOverlay('run-setup')}
-        onOpenConstraints={() => setActiveWorkspaceOverlay('constraints')}
-        onJumpToValidation={() => { setTab('Analytics'); setAnalyticsSubTab('Validation'); }}
-      />
 
       {/* ── Run dialog ── */}
       <RunDialog
