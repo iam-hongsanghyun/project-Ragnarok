@@ -9,7 +9,6 @@ export interface FileToolbarProps {
   onOpen: () => void;
   onSave: () => void;
   onSaveAs: () => void;
-  onClear: () => void;
   onImportProject: () => void;
   onExportProject: () => void;
   onExportResult: () => void;
@@ -28,13 +27,6 @@ export function FileToolbar(props: FileToolbarProps) {
       <button className="tb-btn" onClick={props.onOpen}>Open</button>
       <button className="tb-btn" onClick={props.onSave}>Save</button>
       <button className="tb-btn" onClick={props.onSaveAs}>Save As</button>
-      <button
-        className="tb-btn tb-btn--muted"
-        onClick={props.onClear}
-        title="Remove the currently loaded model and start from an empty workbook"
-      >
-        Clear
-      </button>
       <div className="view-toolbar-sep" />
       <button className="tb-btn" onClick={props.onImportProject} title="Import a project workbook (input + solved outputs)">
         Import Project

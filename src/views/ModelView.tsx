@@ -1,17 +1,15 @@
 /**
  * Model view — workbook input editor.
  *
- * Owns ALL file ops (open/save/import/export) in a top toolbar, and the
- * Map / Table sub-tabs for the workbook itself. No scenarios, no run
- * knobs, no constraints — those live in Settings.
+ * Owns ALL file ops (open/save/import/export) in a top toolbar, plus
+ * a split body with the Table on the left and the Map on the right.
  *
- * The view file is a thin shell: layout + sub-tab routing only. The
- * toolbar and panes are in `ModelView.features/`.
+ * The view file is a thin shell: layout only. The toolbar and panes
+ * are in `ModelView.features/`.
  */
 import React from 'react';
 import {
   GridRow,
-  ModelSubTab,
   Primitive,
   SheetName,
   TsSheetName,
@@ -25,8 +23,6 @@ import { TablesPane } from '../features/input/TablesPane';
 
 export interface ModelViewProps extends FileToolbarProps {
   model: WorkbookModel;
-  modelSubTab: ModelSubTab;
-  onModelSubTabChange: (s: ModelSubTab) => void;
 
   // Map
   bounds: ReturnType<typeof import('../shared/utils/helpers').getBounds>;
@@ -47,43 +43,30 @@ export interface ModelViewProps extends FileToolbarProps {
 }
 
 export function ModelView(props: ModelViewProps) {
-  const subTabs: ModelSubTab[] = ['Map', 'Table'];
-
   return (
     <div className="pane model-pane">
       <FileToolbar {...props} />
-      <div className="pane-header model-pane-header">
-        <nav className="subnav">
-          {subTabs.map((s) => (
-            <button
-              key={s}
-              className={`subnav-btn${props.modelSubTab === s ? ' subnav-btn--active' : ''}`}
-              onClick={() => props.onModelSubTabChange(s)}
-            >
-              {s}
-            </button>
-          ))}
-        </nav>
+      <div className="model-split">
+        <section className="model-split-pane model-split-table">
+          <TablesPane
+            model={props.model}
+            onUpdate={props.onUpdateRow}
+            onAddRow={props.onAddRow}
+            onDeleteRow={props.onDeleteRow}
+            onAddColumn={props.onAddColumn}
+            onDeleteColumn={props.onDeleteColumn}
+            onRenameColumn={props.onRenameColumn}
+            onImportTsSheet={props.onImportTsSheet}
+            issues={props.modelIssues}
+            jumpTo={props.jumpTo}
+            currencySymbol={props.currencySymbol}
+            dateFormat={props.dateFormat}
+          />
+        </section>
+        <section className="model-split-pane model-split-map">
+          <MapPane model={props.model} bounds={props.bounds} busIndex={props.busIndex} />
+        </section>
       </div>
-      {props.modelSubTab === 'Map' && (
-        <MapPane model={props.model} bounds={props.bounds} busIndex={props.busIndex} />
-      )}
-      {props.modelSubTab === 'Table' && (
-        <TablesPane
-          model={props.model}
-          onUpdate={props.onUpdateRow}
-          onAddRow={props.onAddRow}
-          onDeleteRow={props.onDeleteRow}
-          onAddColumn={props.onAddColumn}
-          onDeleteColumn={props.onDeleteColumn}
-          onRenameColumn={props.onRenameColumn}
-          onImportTsSheet={props.onImportTsSheet}
-          issues={props.modelIssues}
-          jumpTo={props.jumpTo}
-          currencySymbol={props.currencySymbol}
-          dateFormat={props.dateFormat}
-        />
-      )}
     </div>
   );
 }

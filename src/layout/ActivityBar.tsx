@@ -1,0 +1,66 @@
+/**
+ * Activity bar — vertical, far-left strip with the four view switches.
+ *
+ * Each button shows a single-letter glyph (M / S / A / P) plus the
+ * full view name as a tooltip. This is the only entry point into a
+ * view; there are no tabs anywhere else.
+ */
+import React from 'react';
+import { WorkspaceTab } from '../shared/types';
+
+interface ValidationResult {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
+interface Props {
+  tab: WorkspaceTab;
+  onTabChange: (t: WorkspaceTab) => void;
+  validateResult: ValidationResult | null;
+  enabledModuleCount: number;
+}
+
+interface Entry {
+  id: WorkspaceTab;
+  glyph: string;
+  label: string;
+}
+
+const ENTRIES: Entry[] = [
+  { id: 'Model',     glyph: 'M', label: 'Model' },
+  { id: 'Settings',  glyph: 'S', label: 'Settings' },
+  { id: 'Analytics', glyph: 'A', label: 'Analytics' },
+  { id: 'Plugins',   glyph: 'P', label: 'Plugins' },
+];
+
+export function ActivityBar({ tab, onTabChange, validateResult, enabledModuleCount }: Props) {
+  return (
+    <nav className="activity-bar" aria-label="Views">
+      {ENTRIES.map((e) => {
+        const showAnalyticsBadge = e.id === 'Analytics' && validateResult;
+        const showPluginsBadge = e.id === 'Plugins' && enabledModuleCount > 0;
+        return (
+          <button
+            key={e.id}
+            className={`activity-bar-btn${tab === e.id ? ' is-active' : ''}`}
+            onClick={() => onTabChange(e.id)}
+            title={e.label}
+            aria-label={e.label}
+            aria-current={tab === e.id ? 'page' : undefined}
+          >
+            <span className="activity-bar-glyph">{e.glyph}</span>
+            {showAnalyticsBadge && validateResult && (
+              <span className={`activity-bar-badge ${validateResult.valid ? 'is-ok' : 'is-error'}`}>
+                {validateResult.valid ? '✓' : (validateResult.errors.length + validateResult.warnings.length)}
+              </span>
+            )}
+            {showPluginsBadge && (
+              <span className="activity-bar-badge is-ok">{enabledModuleCount}</span>
+            )}
+          </button>
+        );
+      })}
+    </nav>
+  );
+}

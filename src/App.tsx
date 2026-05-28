@@ -27,7 +27,6 @@ import {
   TsSheetName,
   WorkbookModel,
   WorkspaceTab,
-  ModelSubTab,
   AnalyticsSubTab,
 } from './shared/types';
 import { API_BASE, DEFAULT_CONSTRAINTS, getDefaultRowForSheet, MAX_UNPINNED_HISTORY, PYPSA_SCHEMA_META, RUN_POLLING, RUN_WINDOW, SHEETS } from './constants';
@@ -46,6 +45,7 @@ import { SettingsView } from './views/SettingsView';
 import { PluginsView } from './views/PluginsView';
 import { ModelView } from './views/ModelView';
 import { AnalyticsView } from './views/AnalyticsView';
+import { ActivityBar } from './layout/ActivityBar';
 import { useModelIssues } from './features/validation/useModelIssues';
 import { useModuleHost } from './features/modules/useModuleHost';
 import { ToastProvider, useToast } from './shared/components/Toast';
@@ -54,7 +54,6 @@ function AppInner() {
   const { showToast } = useToast();
   const [model, setModel] = useState<WorkbookModel>(() => createEmptyWorkbook());
   const [tab, setTab] = useState<WorkspaceTab>('Model');
-  const [modelSubTab, setModelSubTab] = useState<ModelSubTab>('Map');
   const [analyticsSubTab, setAnalyticsSubTab] = useState<AnalyticsSubTab>('Result');
   const [results, setResults] = useState<RunResults | null>(null);
   const [runStatus, setRunStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
@@ -1372,43 +1371,12 @@ function AppInner() {
       <input ref={hdf5ImportInputRef} type="file" accept=".h5,.hdf5" hidden onChange={handleImportHdf5} />
 
       {/* ── Top bar ──
-        Layout: [Brand] [Model | Settings | Analytics | Plugins]   …spacer…   <filename> <Run> <status>
-        Tabs live top-left (one entry point per view). File ops live inside
-        Model view's toolbar only. */}
+        Layout: [Brand] [Run] [Clear]   …spacer…   <filename> <status>
+        View switching lives in the far-left activity bar (see below).
+        File ops other than Clear live in Model view's toolbar only. */}
       <header className="topbar">
         <div className="topbar-left">
           <span className="topbar-brand">Ragnarok</span>
-          <nav className="tab-nav tab-nav--left">
-            {(['Model', 'Settings', 'Analytics'] as WorkspaceTab[]).map((item) => (
-              <button
-                key={item}
-                className={`tab-button ${tab === item ? 'is-active' : ''}`}
-                onClick={() => setTab(item)}
-              >
-                {item}
-                {item === 'Analytics' && validateResult && (
-                  <span className={`tab-badge ${validateResult.valid ? 'tab-badge--ok' : 'tab-badge--error'}`}>
-                    {validateResult.valid ? 'ok' : `${validateResult.errors.length + validateResult.warnings.length}`}
-                  </span>
-                )}
-              </button>
-            ))}
-            {moduleHost.enabledIds.length > 0 && (
-              <button
-                className={`tab-button ${tab === 'Plugins' ? 'is-active' : ''}`}
-                onClick={() => setTab('Plugins')}
-              >
-                Plugins
-                <span className="tab-badge tab-badge--ok">{moduleHost.enabledIds.length}</span>
-              </button>
-            )}
-          </nav>
-        </div>
-        <div className="topbar-right">
-          <span className="topbar-file" title={filename}>{filename}</span>
-          {displayResults && (
-            <span className="topbar-run-meta">{displayResults.runMeta.snapshotCount} snaps · {displayResults.runMeta.snapshotWeight}h</span>
-          )}
           <button
             className="run-button"
             onClick={() => setRunDialogOpen(true)}
@@ -1416,6 +1384,19 @@ function AppInner() {
             title={runStatus === 'running' ? 'A run is already in progress' : undefined}
           >
             Run
+          </button>
+          <button
+            className="tb-btn tb-btn--muted"
+            onClick={() => {
+              if (!window.confirm('Clear the loaded model? All unsaved edits and results will be lost.')) return;
+              resetForNewModel(createEmptyWorkbook(), 'untitled.xlsx');
+              setFileHandle(null);
+              setStatus('Model cleared.');
+              showToast('Model cleared', 'success');
+            }}
+            title="Remove the currently loaded model and start from an empty workbook"
+          >
+            Clear
           </button>
           {runStatus === 'running' ? (
             <>
@@ -1425,13 +1406,26 @@ function AppInner() {
               </span>
               <button className="tb-btn tb-btn--muted topbar-cancel" onClick={handleCancelRun}>Cancel</button>
             </>
-          ) : (
+          ) : null}
+        </div>
+        <div className="topbar-right">
+          <span className="topbar-file" title={filename}>{filename}</span>
+          {displayResults && (
+            <span className="topbar-run-meta">{displayResults.runMeta.snapshotCount} snaps · {displayResults.runMeta.snapshotWeight}h</span>
+          )}
+          {runStatus !== 'running' && (
             <span className="topbar-status" title={status}>{status}</span>
           )}
         </div>
       </header>
 
       <div className="workspace-body">
+        <ActivityBar
+          tab={tab}
+          onTabChange={setTab}
+          validateResult={validateResult}
+          enabledModuleCount={moduleHost.enabledIds.length}
+        />
         <div className="workspace-main">
 
           {/* ── Settings tab ── */}
@@ -1506,8 +1500,6 @@ function AppInner() {
           {tab === 'Model' && (
             <ModelView
               model={model}
-              modelSubTab={modelSubTab}
-              onModelSubTabChange={setModelSubTab}
               bounds={bounds}
               busIndex={busIndex}
               onUpdateRow={updateRowValue}
@@ -1525,13 +1517,6 @@ function AppInner() {
               onOpen={handleOpenWorkbook}
               onSave={saveWorkbook}
               onSaveAs={saveAsWorkbook}
-              onClear={() => {
-                if (!window.confirm('Clear the loaded model? All unsaved edits and results will be lost.')) return;
-                resetForNewModel(createEmptyWorkbook(), 'untitled.xlsx');
-                setFileHandle(null);
-                setStatus('Model cleared.');
-                showToast('Model cleared', 'success');
-              }}
               onImportProject={() => projectImportInputRef.current?.click()}
               onExportProject={handleExportProject}
               onExportResult={() => {
@@ -1568,7 +1553,6 @@ function AppInner() {
               onRun={() => { setDryRun(false); setRunDialogOpen(true); }}
               onNavigateToTable={(sheet, rowIndex) => {
                 setTab('Model');
-                setModelSubTab('Table');
                 setJumpTo({ sheet, rowIndex });
               }}
               displayResults={displayResults}
