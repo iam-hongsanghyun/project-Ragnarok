@@ -68,6 +68,8 @@ export interface DataGridProps {
   coerceEditedValue?: (col: string, raw: string, current: Primitive) => Primitive;
   getCellSuggestions?: (col: string) => string[] | null;
   onFocusRow?: (rowIndex: number) => void;
+  /** Fires with the column under the active cell, or a selected column header. */
+  onFocusColumn?: (col: string | null) => void;
   /** Atomic paste: apply edits and grow the table by `extraRows` in one shot. */
   onPasteEdits?: (edits: { rowIndex: number; col: string; val: Primitive }[], extraRows: number) => void;
 }
@@ -100,6 +102,7 @@ export function DataGrid({
   coerceEditedValue,
   getCellSuggestions,
   onFocusRow,
+  onFocusColumn,
   onPasteEdits,
 }: DataGridProps) {
   const gridRef = useRef<any>(null);
@@ -156,8 +159,12 @@ export function DataGrid({
       activeColRef.current = c;
       const orig = displayToOrig[r];
       if (orig != null) onFocusRow?.(orig);
+      onFocusColumn?.(cols[c] ?? null);
+    } else if (sel.columns.length > 0) {
+      const c = sel.columns.last();
+      onFocusColumn?.(c != null ? cols[c] ?? null : null);
     }
-  }, [displayToOrig, onFocusRow]);
+  }, [displayToOrig, onFocusRow, onFocusColumn, cols]);
 
   // ── Columns ───────────────────────────────────────────────────────────────
   const columns: GridColumn[] = useMemo(

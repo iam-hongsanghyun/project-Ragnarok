@@ -3,7 +3,8 @@ import ReactDOM from 'react-dom';
 import { GridRow, Primitive, SheetName, TableSel, TsSheetName, WorkbookModel } from '../../shared/types';
 import { ModelIssue } from '../validation/useModelIssues';
 import { getAddableAttributes, getProtectedColumns, TABLE_GROUPS } from '../../constants';
-import { PypsaAttribute, TableGroup } from '../../constants/pypsa_schema';
+import { getAttributeSchema, PypsaAttribute, TableGroup } from '../../constants/pypsa_schema';
+import { ResizablePanels } from '../../layout/ResizablePanels';
 import { getColumns, getTsFirstCol, stringValue } from '../../shared/utils/helpers';
 import { parseCsvToGridRows } from '../../shared/utils/workbook';
 import { normalizeDateToIso } from '../../shared/utils/helpers';
@@ -139,6 +140,8 @@ interface TablesPaneProps {
   dateFormat?: DateFormat;
   /** Forwarded to the grid — fires when the user clicks a row. */
   onFocusRow?: (rowIndex: number) => void;
+  /** Show the resizable attribute-description panel below the grid. */
+  showAttrDoc?: boolean;
   /** Atomic paste: apply many cell edits and grow the sheet by `extraRows`. */
   onBulkPaste?: (
     sheet: SheetName,
@@ -164,8 +167,13 @@ export function TablesPane({
   dateFormat = 'auto',
   onFocusRow,
   onBulkPaste,
+  showAttrDoc = false,
 }: TablesPaneProps) {
   const [jumpHighlight, setJumpHighlight] = useState<number | null>(null);
+  const [focusedCol, setFocusedCol] = useState<string | null>(null);
+
+  // The selected attribute is only meaningful within the current sheet.
+  useEffect(() => { setFocusedCol(null); }, [sel.sheet]);
 
   // When jumpTo changes: switch to the target sheet and flash the row
   useEffect(() => {
@@ -274,9 +282,8 @@ export function TablesPane({
     return inferInputValue(raw, current);
   };
 
-  return (
-
-      <div className="tables-content">
+  const header = (
+    <>
         <div className="tables-content-header">
           <div>
             <p className="eyebrow">{isTs ? 'Temporal (_t)' : 'Static'}</p>
@@ -378,7 +385,10 @@ export function TablesPane({
             currencySymbol={currencySymbol}
           />
         )}
+    </>
+  );
 
+  const grid = (
         <div className="tables-grid-wrap">
           {rows.length === 0 ? (
             <div className="grid-empty">
@@ -423,9 +433,73 @@ export function TablesPane({
                 return null;
               }}
               onFocusRow={onFocusRow}
+              onFocusColumn={setFocusedCol}
             />
           )}
         </div>
-      </div>
+  );
+
+  const docPanel = (
+    <AttributeDoc
+      attr={focusedCol ? getAttributeSchema(sel.sheet, focusedCol) : null}
+      colName={focusedCol}
+    />
+  );
+
+  return (
+    <div className="tables-content">
+      {header}
+      {showAttrDoc && !isTs ? (
+        <ResizablePanels
+          id="model-attr-doc"
+          direction="vertical"
+          className="tables-doc-split"
+          initialSizes={[76, 24]}
+          minSize={90}
+        >
+          {grid}
+          {docPanel}
+        </ResizablePanels>
+      ) : (
+        grid
+      )}
+    </div>
+  );
+}
+
+interface AttributeDocProps {
+  attr: PypsaAttribute | null;
+  colName: string | null;
+}
+
+function AttributeDoc({ attr, colName }: AttributeDocProps) {
+  return (
+    <div className="tables-attr-doc">
+      {!colName ? (
+        <p className="tables-attr-doc-hint">Select a cell or a column to see its description.</p>
+      ) : !attr ? (
+        <>
+          <div className="tables-attr-doc-head">
+            <span className="tables-attr-doc-name">{colName}</span>
+            <span className="tables-attr-doc-custom">custom column</span>
+          </div>
+          <p className="tables-attr-doc-hint">No PyPSA schema description for this column.</p>
+        </>
+      ) : (
+        <>
+          <div className="tables-attr-doc-head">
+            <span className="tables-attr-doc-name">{attr.attribute}</span>
+            {attr.unit && attr.unit !== 'n/a' && <span className="tables-attr-doc-unit">{attr.unit}</span>}
+            <span className={`tables-attr-doc-type tables-attr-doc-type--${attr.type}`}>{attr.type}</span>
+            {attr.required && <span className="tables-attr-doc-required">required</span>}
+            {attr.status === 'output' && <span className="tables-attr-doc-output">output</span>}
+            {attr.default && attr.default !== 'n/a' && (
+              <span className="tables-attr-doc-default">default <code>{attr.default}</code></span>
+            )}
+          </div>
+          <p className="tables-attr-doc-desc">{attr.description || 'No description available.'}</p>
+        </>
+      )}
+    </div>
   );
 }

@@ -83,6 +83,7 @@ export function ModelView(props: ModelViewProps) {
             jumpTo={props.jumpTo}
             currencySymbol={props.currencySymbol}
             dateFormat={props.dateFormat}
+            showAttrDoc
           />
         </section>
         <section className="model-column model-column-map">
