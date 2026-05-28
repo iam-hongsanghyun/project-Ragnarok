@@ -355,14 +355,22 @@ export function PluginPanel({
   const fallbackId = activeModules[0].id;
   const active = activeModules.find((m) => m.id === activeId) ?? activeModules[0];
 
+  const onlyOne = activeModules.length === 1;
+
   return (
     <div className="plugin-panel-root">
-      <div className="analytics-pane-header" style={{ padding: '14px 20px 10px' }}>
-        <nav className="analytics-subtab-nav">
-          {activeModules.map((m) => (
+      <div className="plugin-panel-header">
+        {onlyOne ? (
+          <h2 className="plugin-panel-title">
+            {active.name || active.id}
+            <span className="plugin-panel-title-meta">v{active.version || '—'} · {active.id}</span>
+          </h2>
+        ) : (
+          <nav className="plugin-module-tabs" aria-label="Active plugin">
+            {activeModules.map((m) => (
             <button
               key={m.id}
-              className={`analytics-subtab${(activeId || fallbackId) === m.id ? ' analytics-subtab--active' : ''}`}
+              className={`plugin-module-tab${(activeId || fallbackId) === m.id ? ' is-active' : ''}`}
               onClick={() => setActiveId(m.id)}
             >
               {m.name || m.id}
@@ -382,7 +390,8 @@ export function PluginPanel({
               )}
             </button>
           ))}
-        </nav>
+          </nav>
+        )}
       </div>
 
       <PluginTabContent

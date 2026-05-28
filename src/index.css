@@ -831,9 +831,9 @@ button {
 .sg-module-root,
 .sg-module-card {
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 10px 12px;
-  background: rgba(255,255,255,0.72);
+  border-radius: var(--radius-lg);
+  padding: 8px 10px;
+  background: var(--surface);
 }
 .sg-module-root {
   display: grid;
@@ -889,11 +889,11 @@ button {
 .sg-module-config-form {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin: 10px 0;
+  gap: 8px;
+  margin: 8px 0;
   padding: 10px;
-  background: rgba(15,23,42,0.03);
-  border-radius: 8px;
+  background: #f8fafc;
+  border-radius: var(--radius-lg);
   border: 1px solid var(--border);
 }
 .sg-module-config-row {
@@ -1243,45 +1243,48 @@ button {
 
 .sg-module-root-label,
 .sg-module-meta {
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
   color: var(--muted);
 }
 .sg-module-root-path {
   display: block;
   overflow-wrap: anywhere;
-  font-size: 12px;
-  color: var(--ink);
-  background: rgba(15, 23, 42, 0.04);
-  border-radius: 8px;
-  padding: 6px 8px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text);
+  background: #f1f5f9;
+  border-radius: var(--radius);
+  padding: 4px 6px;
 }
 .sg-module-root-status,
 .sg-module-status {
   display: inline-flex;
   align-items: center;
-  border-radius: 999px;
-  padding: 3px 8px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
+  border-radius: var(--radius);
+  padding: 1px 5px;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
   text-transform: uppercase;
 }
 .sg-module-root-status {
   width: fit-content;
-  background: rgba(148, 163, 184, 0.16);
-  color: #64748b;
+  background: #e2e8f0;
+  color: var(--muted);
 }
 .sg-module-root-status.is-ok,
 .sg-module-status--ready {
-  background: rgba(34, 197, 94, 0.14);
-  color: #166534;
+  background: #dcfce7;
+  color: #15803d;
 }
 .sg-module-status--invalid {
-  background: rgba(239, 68, 68, 0.14);
-  color: #991b1b;
+  background: #fee2e2;
+  color: #b91c1c;
 }
 .sg-module-status--incompatible {
-  background: rgba(245, 158, 11, 0.16);
+  background: #fef3c7;
   color: #92400e;
 }
 .sg-error-text {
@@ -5722,5 +5725,68 @@ code, kbd, samp, tt,
   padding: 5px 10px;
   cursor: pointer;
   transition: background 120ms ease, border-color 120ms ease;
+}
+
+
+/* ── Plugins view: header + module switcher ───────────────────────── */
+
+.plugin-panel-header {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: #f8fafc;
+}
+
+.plugin-panel-title {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--text);
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.plugin-panel-title-meta {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+/* Segmented chip selector for multiple modules (distinct from inner subtabs) */
+.plugin-module-tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: #e2e8f0;
+  border-radius: var(--radius-lg);
+}
+.plugin-module-tab {
+  padding: 3px 10px;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.plugin-module-tab:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.5);
+}
+.plugin-module-tab.is-active {
+  background: var(--surface);
+  color: var(--brand);
+}
+
+/* Inner sub-tabs row sits below the header with a thin top spacing */
+.plugin-panel-subtabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  margin: 0 -14px 12px;
+  padding: 0 14px;
 }
 
