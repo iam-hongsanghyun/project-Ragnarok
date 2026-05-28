@@ -24,6 +24,17 @@ export const PROVENANCE_SHEET = 'RAGNAROK_Provenance';
 export function normalizeCell(value: unknown): Primitive {
   if (value === undefined || value === null) return null;
   if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'string') return value;
+  // SheetJS returns Date instances for cells of type 'd' when raw:true. Emit
+  // ISO-`T` directly so downstream canonicalisation is a no-op and the data
+  // table displays the canonical form.
+  if (value instanceof Date) {
+    const d = value as Date;
+    const pad = (n: number) => (n < 10 ? `0${n}` : String(n));
+    return (
+      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+      `T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+    );
+  }
   return String(value);
 }
 
@@ -42,7 +53,6 @@ function chunkText(text: string): string[] {
 // Central temporal normalisation/export config.
 const TEMPORAL_CONFIG = {
   snapshotColumn: 'snapshot',
-  snapshotLabelColumns: ['snapshot', 'datetime', 'name', 'index', 'timestep'],
   periodColumn: 'period',
   defaultTimeSuffix: 'T00:00:00',
 } as const;
@@ -56,15 +66,18 @@ function normalizeSnapshotIso(raw: string, fmt: DateFormat): string {
     : iso;
 }
 
-function findTemporalLabelCol(rows: GridRow[] | undefined): string | null {
-  if (!rows || rows.length === 0) return null;
-  const keys = Object.keys(rows[0]);
-  return TEMPORAL_CONFIG.snapshotLabelColumns.find((key) => keys.includes(key)) ?? null;
-}
-
-/** True when a row set is a temporal sheet (has the canonical `snapshot` column). */
+/**
+ * True iff ANY row in the set carries a ``snapshot`` column. We do not look
+ * only at the first row — a malformed plugin sheet might have an empty first
+ * row but still be temporal. Detection is by column existence only (no
+ * heuristic name list); the canonical PyPSA index name is ``snapshot``.
+ */
 export function hasSnapshotColumn(rows: GridRow[] | undefined): boolean {
-  return !!rows && rows.length > 0 && SNAPSHOT_COL in rows[0];
+  if (!rows || rows.length === 0) return false;
+  for (const row of rows) {
+    if (SNAPSHOT_COL in row) return true;
+  }
+  return false;
 }
 
 /**
@@ -92,15 +105,48 @@ export function orderTemporalRow(row: GridRow): GridRow {
  * ``snapshot`` values, with ``period?`` then ``snapshot`` as the leading
  * columns. Sheets without a ``snapshot`` column (every static sheet) are
  * returned unchanged.
+ *
+ * Accepts any plausible source type for the ``snapshot`` value (string from
+ * SheetJS-with-raw:false, JavaScript Date from raw cells of type 'd', or an
+ * Excel serial number) and emits an ISO-`T` string regardless.
  */
 export function canonicalizeTemporalRows(rows: GridRow[], fmt: DateFormat): GridRow[] {
   if (!hasSnapshotColumn(rows)) return rows;
   return rows.map((row) => {
     const copy = { ...row };
-    const v = copy[SNAPSHOT_COL];
-    if (typeof v === 'string') copy[SNAPSHOT_COL] = normalizeSnapshotIso(v, fmt);
+    const v: unknown = copy[SNAPSHOT_COL];
+    if (typeof v === 'string') {
+      copy[SNAPSHOT_COL] = normalizeSnapshotIso(v, fmt);
+    } else if (v instanceof Date) {
+      copy[SNAPSHOT_COL] = isoFromDate(v);
+    } else if (typeof v === 'number' && Number.isFinite(v)) {
+      // Excel date serial → JS Date → ISO-T.
+      const d = excelSerialToDate(v);
+      if (d) copy[SNAPSHOT_COL] = isoFromDate(d);
+    }
     return orderTemporalRow(copy);
   });
+}
+
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : String(n);
+}
+
+function isoFromDate(d: Date): string {
+  return (
+    `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}` +
+    `T${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`
+  );
+}
+
+/** Convert an Excel date serial (days since 1899-12-30, fractional = time-of-day). */
+function excelSerialToDate(serial: number): Date | null {
+  if (!Number.isFinite(serial) || serial <= 0) return null;
+  const epoch = Date.UTC(1899, 11, 30);
+  const ms = epoch + Math.round(serial * 86400 * 1000);
+  const d = new Date(ms);
+  // Render in local time (xlsx serials carry no zone); shift back.
+  return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds());
 }
 
 /** Back-compat alias: every temporal sheet (input, output, or `snapshots`) is
@@ -121,15 +167,12 @@ export function temporalHeader(rows: GridRow[]): string[] {
 }
 
 function temporalSheetRowsForExport(_sheet: string, rows: GridRow[], fmt: DateFormat): GridRow[] {
-  const labelCol = findTemporalLabelCol(rows);
-  if (!labelCol) return rows;
-  if (labelCol === SNAPSHOT_COL) return canonicalizeTemporalRows(rows, fmt);
-  return rows.map((row) => {
-    const copy = { ...row };
-    const v = copy[labelCol];
-    if (typeof v === 'string') copy[labelCol] = normalizeSnapshotIso(v, fmt);
-    return copy;
-  });
+  // Self-gated: rows without a `snapshot` column (static sheets) pass through
+  // untouched. Temporal sheets get ISO-`T` snapshot values and `period?` /
+  // `snapshot` leading columns. No heuristic label-column fallback — by the
+  // time data reaches export, every temporal sheet has been canonicalised at
+  // the entry boundary (model load / project import / plugin / backend).
+  return canonicalizeTemporalRows(rows, fmt);
 }
 
 function temporalSheetToWorksheet(rows: GridRow[]): XLSX.WorkSheet {
@@ -172,24 +215,13 @@ export function canonicalizeOutputSeries(
 /**
  * Canonicalise every temporal sheet of a workbook model in place: ISO-`T`
  * ``snapshot`` values + ``period?``/``snapshot`` leading column order. A sheet
- * is considered temporal iff it carries a ``snapshot`` column (anywhere in the
- * row, not just the first key). Sheets without one are NEVER mutated — we do
- * not invent a snapshot index.
+ * is considered temporal iff it carries a ``snapshot`` column. Sheets without
+ * one are NEVER mutated — we do not invent a snapshot index. No schema lookup,
+ * no input/output gate: any in-memory sheet-map (raw model, plugin preview,
+ * backend output series) flows through the same transform.
  */
 export function normalizeInputDatesToIso(model: WorkbookModel, fmt: DateFormat): void {
-  const sheets = model as unknown as Record<string, GridRow[] | undefined>;
-  for (const sheetName of Object.keys(sheets)) {
-    if (sheetName !== 'snapshots' && !isInputTemporalSheet(sheetName)) continue;
-    const rows = sheets[sheetName];
-    const labelCol = findTemporalLabelCol(rows);
-    if (!rows || rows.length === 0 || !labelCol) continue;
-    sheets[sheetName] = rows.map((row) => {
-      const copy = { ...row };
-      const v = copy[labelCol];
-      if (typeof v === 'string') copy[labelCol] = normalizeSnapshotIso(v, fmt);
-      return copy;
-    });
-  }
+  canonicalizeTemporalSheets(model as unknown as Record<string, GridRow[] | undefined>, fmt);
 }
 
 export function createEmptyWorkbook(): WorkbookModel {
@@ -229,7 +261,7 @@ export function parseWorkbook(file: File): Promise<WorkbookModel> {
           reject(new Error('Could not read workbook.'));
           return;
         }
-        const wb = XLSX.read(arrayBuffer, { type: 'array' });
+        const wb = XLSX.read(arrayBuffer, { type: 'array', cellDates: true });
         resolve(parseSheets(wb));
       } catch (error) {
         reject(error instanceof Error ? error : new Error('Workbook import failed.'));
@@ -536,7 +568,7 @@ export function projectWorkbookToArrayBuffer(
 export function parseProjectWorkbook(
   arrayBuffer: ArrayBuffer,
 ): { model: WorkbookModel; outputs: ProjectOutputs; metadata: ProjectMetadata } {
-  const wb = XLSX.read(arrayBuffer, { type: 'array' });
+  const wb = XLSX.read(arrayBuffer, { type: 'array', cellDates: true });
   const model = createEmptyWorkbook();
   const outputs: ProjectOutputs = { static: {}, series: {} };
   const metadata: ProjectMetadata = {};

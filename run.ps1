@@ -84,6 +84,19 @@ if (-not (Test-Path (Join-Path $PSScriptRoot 'node_modules'))) {
     npm install
 }
 
+# ── Clear stale build caches ──────────────────────────────────────────────────
+# The CRA webpack cache survives across `npm start` invocations and has caused
+# users to keep seeing pre-fix bundles after a code change. Always wipe it on
+# launch so the dev server compiles a fresh bundle.
+
+$CacheDir = Join-Path $PSScriptRoot 'node_modules\.cache'
+$BuildDir = Join-Path $PSScriptRoot 'build'
+if ((Test-Path $CacheDir) -or (Test-Path $BuildDir)) {
+    Write-Host 'Clearing build caches (node_modules\.cache, build\)...'
+    if (Test-Path $CacheDir) { Remove-Item -Recurse -Force $CacheDir -ErrorAction SilentlyContinue }
+    if (Test-Path $BuildDir) { Remove-Item -Recurse -Force $BuildDir -ErrorAction SilentlyContinue }
+}
+
 # ── Free ports 3000 + 8000 (kill stale frontend / backend) ────────────────────
 
 function Free-Port([int]$port) {

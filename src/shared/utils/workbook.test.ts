@@ -252,9 +252,40 @@ describe('input date normalization', () => {
 
     // Non-date strings pass through unchanged.
     expect(normalizeDateToIso('not-a-date', 'dmy')).toBe('not-a-date');
+
+    // Regression: an unambiguous 4-digit-leading year must beat the user's
+    // input-format setting. Plugin output is always ISO/YMD (pd.Timestamp.
+    // isoformat), so a user with Date format = dmy or mdy must still see
+    // plugin snapshots canonicalised — otherwise [d,m,y]=[2024,1,1] silently
+    // fails the d<=31 guard and the raw string passes through.
+    expect(normalizeDateToIso('2024-01-01 00:00:00', 'dmy')).toBe('2024-01-01T00:00:00');
+    expect(normalizeDateToIso('2024-01-01 00:00:00', 'mdy')).toBe('2024-01-01T00:00:00');
   });
 
-  test('normalizeInputDatesToIso converts legacy temporal label columns too', () => {
+  test('plugin-returned model: every temporal sheet becomes ISO-T regardless of user Date format', () => {
+    // Simulates what /api/modules/{id}/preview returns from
+    // ragnarok-dashboard-importer (and any plugin using pd.Timestamp.isoformat
+    // with the default ' ' separator). User's Date format setting is `dmy`.
+    const model: any = createEmptyWorkbook();
+    model.snapshots = [
+      { snapshot: '2024-01-01 00:00:00', weightings: 1 },
+      { snapshot: '2024-01-01 01:00:00', weightings: 1 },
+    ];
+    model['loads-p_set'] = [
+      { snapshot: '2024-01-01 00:00:00', '1': 100, '2': 50 },
+      { snapshot: '2024-01-01 01:00:00', '1': 110, '2': 55 },
+    ];
+    model['generators-p_max_pu'] = [
+      { snapshot: '2024-01-01 00:00:00', gen_a: 0.8 },
+      { snapshot: '2024-01-01 01:00:00', gen_a: 0.7 },
+    ];
+    normalizeInputDatesToIso(model, 'dmy');
+    expect((model.snapshots[0] as GridRow).snapshot).toBe('2024-01-01T00:00:00');
+    expect((model['loads-p_set'][0] as GridRow).snapshot).toBe('2024-01-01T00:00:00');
+    expect((model['generators-p_max_pu'][0] as GridRow).snapshot).toBe('2024-01-01T00:00:00');
+  });
+
+  test('non-canonical label columns (e.g. datetime) are NOT touched — detection is by `snapshot` column only', () => {
     const model = createEmptyWorkbook();
     model['loads-p_set'] = [
       { datetime: '2024-08-01 00:00', load_a: 100 },
@@ -262,8 +293,10 @@ describe('input date normalization', () => {
     ];
     normalizeInputDatesToIso(model, 'auto');
     const ts = model['loads-p_set'] as GridRow[];
-    expect(ts[0].datetime).toBe('2024-08-01T00:00:00');
-    expect(ts[1].datetime).toBe('2024-08-01T01:00:00');
+    // Sheet has no `snapshot` column → left untouched. The plugin/source is
+    // responsible for emitting the canonical `snapshot` column name.
+    expect(ts[0].datetime).toBe('2024-08-01 00:00');
+    expect(ts[1].datetime).toBe('2024-08-01 01:00');
   });
 });
 

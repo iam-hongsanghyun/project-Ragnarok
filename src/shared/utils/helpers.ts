@@ -229,9 +229,15 @@ export function normalizeDateToIso(raw: string, fmt: DateFormat = 'auto'): strin
   if (!m) return raw;
   const parts = [parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10)];
   let order: DateFormat = fmt;
-  if (order === 'auto') {
-    if (m[1].length === 4) order = 'ymd';
-    else if (m[3].length === 4) order = parts[0] > 12 ? 'dmy' : 'mdy';
+  // A 4-digit leading component is unambiguously the year (no real date has a
+  // 4-digit day or month), so it always wins over the user's input-format
+  // setting. Without this, plugin output (always ISO/YMD via
+  // `pd.Timestamp.isoformat`) silently fails to canonicalise when the user's
+  // Date format setting is dmy/mdy: `[d,m,y] = [2024,1,1]` → d=2024 fails the
+  // `<= 31` guard and the function returns the raw string unchanged.
+  if (m[1].length === 4) order = 'ymd';
+  else if (order === 'auto') {
+    if (m[3].length === 4) order = parts[0] > 12 ? 'dmy' : 'mdy';
     else order = 'mdy';
   }
   let y: number, mo: number, d: number;

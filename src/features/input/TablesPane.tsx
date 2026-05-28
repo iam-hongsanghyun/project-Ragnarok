@@ -262,6 +262,18 @@ function SpreadsheetGrid({
     setOpenCol(null);
   }, [cols.join('|')]);   // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Progressive rendering: rendering all 8784 rows × 217 cols ≈ 1.9 M DOM
+  // nodes will crash the tab. We start with PAGE_SIZE rows and grow by
+  // PAGE_SIZE each time a sentinel <tr> below the last row scrolls into view.
+  // This keeps the table editable without a virtualisation library.
+  const PAGE_SIZE = 500;
+  const [visibleCount, setVisibleCount] = useState<number>(PAGE_SIZE);
+  const sentinelRef = useRef<HTMLTableRowElement | null>(null);
+  // Reset the window whenever the sheet, column set, or filter changes.
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [cols.join('|'), JSON.stringify(colFilters)]);   // eslint-disable-line react-hooks/exhaustive-deps
+
   // Unique values per column (computed from ALL rows, not filtered)
   const uniqueValues = (col: string): string[] => {
     const s = new Set(rows.map((r) => stringValue(r[col])));
@@ -289,6 +301,27 @@ function SpreadsheetGrid({
       return !f || f.has(stringValue(row[col]));
     }),
   );
+  const visibleRows = filteredRows.slice(0, visibleCount);
+  const hasMore = visibleRows.length < filteredRows.length;
+
+  // Observe the sentinel <tr> and bump visibleCount when it scrolls into view.
+  useEffect(() => {
+    if (!hasMore) return;
+    const el = sentinelRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            setVisibleCount((n) => n + PAGE_SIZE);
+          }
+        }
+      },
+      { rootMargin: '400px' },   // start loading before user reaches the bottom
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [hasMore, visibleCount]);
 
   const openDropdown = (col: string) => {
     if (openCol === col) { setOpenCol(null); return; }
@@ -331,6 +364,13 @@ function SpreadsheetGrid({
             Showing <strong>{filteredRows.length}</strong> of {rows.length} rows
           </span>
           <button className="ghost-button sm" onClick={clearAll}>Clear all filters</button>
+        </div>
+      )}
+      {filteredRows.length > PAGE_SIZE && (
+        <div className="filter-status-bar">
+          <span>
+            Showing <strong>{visibleRows.length}</strong> of {filteredRows.length} rows{hasMore ? ' (scroll for more)' : ''}
+          </span>
         </div>
       )}
       <table className="spreadsheet-table">
@@ -418,7 +458,7 @@ function SpreadsheetGrid({
           </tr>
         </thead>
         <tbody ref={tbodyRef}>
-          {filteredRows.map((row) => {
+          {visibleRows.map((row) => {
             const origIdx = rows.indexOf(row);
             const issueSeverity = rowIssues?.get(origIdx);
             const isHighlighted = highlightRow === origIdx;
@@ -542,6 +582,13 @@ function SpreadsheetGrid({
               </tr>
             );
           })}
+          {hasMore && (
+            <tr ref={sentinelRef} aria-hidden="true">
+              <td className="rn-col" colSpan={cols.length + 1} style={{ textAlign: 'center', padding: 12, color: 'var(--text-muted, #888)' }}>
+                Loading more rows…
+              </td>
+            </tr>
+          )}
         </tbody>
       </table>
 
@@ -670,9 +717,20 @@ export function TablesPane({
       ? isTs
         ? (() => {
             // Union all keys to avoid first-row integer-like key reordering issues.
-            const ordered = new Set<string>();
-            rows.forEach((row) => Object.keys(row).forEach((key) => ordered.add(key)));
-            return Array.from(ordered);
+            // JS engines float numeric-string keys (e.g. '1', '2', '216' — common
+            // for bus IDs in loads-p_set) ahead of non-numeric keys when iterating
+            // an object. We rebuild the column order explicitly so PyPSA-style
+            // `period?` and `snapshot` lead the table regardless of how the
+            // upstream rows were constructed.
+            const seen = new Set<string>();
+            rows.forEach((row) => Object.keys(row).forEach((key) => seen.add(key)));
+            const out: string[] = [];
+            if (seen.has('period')) out.push('period');
+            if (seen.has('snapshot')) out.push('snapshot');
+            seen.forEach((key) => {
+              if (key !== 'period' && key !== 'snapshot') out.push(key);
+            });
+            return out;
           })()
         : getColumns(rows, sel.sheet as SheetName)
       : isTs

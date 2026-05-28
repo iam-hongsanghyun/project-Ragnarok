@@ -72,6 +72,16 @@ if [ ! -d "node_modules" ]; then
   npm install
 fi
 
+# ── Clear stale build caches ──────────────────────────────────────────────────
+# The CRA webpack cache survives across `npm start` invocations and has caused
+# users to keep seeing pre-fix bundles after a code change. Always wipe it on
+# launch so the dev server compiles a fresh bundle.
+
+if [ -d "node_modules/.cache" ] || [ -d "build" ]; then
+  echo "Clearing build caches (node_modules/.cache, build/)..."
+  rm -rf node_modules/.cache build
+fi
+
 # ── Free ports 3000 + 8000 (kill stale frontend / backend) ────────────────────
 
 free_port() {
