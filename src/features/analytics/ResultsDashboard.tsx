@@ -12,6 +12,8 @@ import { Co2ShadowCard } from './cards/Co2ShadowCard';
 import { EmissionsBreakdownCard } from './cards/EmissionsBreakdownCard';
 import { CapacityByPeriodCard } from './cards/CapacityByPeriodCard';
 import { StochasticScenariosCard } from './cards/StochasticScenariosCard';
+import { CarrierAnalysisCard } from './cards/CarrierAnalysisCard';
+import { LoadAnalysisCard } from './cards/LoadAnalysisCard';
 
 // ── KPI card ──────────────────────────────────────────────────────────────────
 
@@ -404,6 +406,16 @@ export function ResultsDashboard({
           <EmissionsBreakdownCard data={results.emissionsBreakdown} />
         </DashboardSection>
       )}
+
+      {/* Carrier performance — capacity factor / curtailment / cost intensity */}
+      <DashboardSection title="Carrier performance" defaultOpen={false}>
+        <CarrierAnalysisCard results={results} currencySymbol={currencySymbol} />
+      </DashboardSection>
+
+      {/* Load analysis — per-bus + system load factor / coincidence */}
+      <DashboardSection title="Load analysis" defaultOpen={false}>
+        <LoadAnalysisCard results={results} currencySymbol={currencySymbol} />
+      </DashboardSection>
 
       {/* Market analysis row — merit order + CO₂ shadow price */}
       <div className="dashboard-row">
