@@ -1,0 +1,145 @@
+/**
+ * Analytics view — results dashboard with sub-tab routing.
+ *
+ * Sub-tabs: Validation · Result · Analytics · Comparison. No file ops,
+ * no run knobs — those live in Model and Settings respectively.
+ *
+ * The view file is a thin shell: layout + sub-tab routing only. Each
+ * sub-tab body is its own feature file.
+ */
+import React from 'react';
+import { LatLngBoundsExpression } from 'leaflet';
+import {
+  AnalyticsFocus,
+  AnalyticsSubTab,
+  ChartSectionConfig,
+  GridRow,
+  PathwayConfig,
+  RunHistoryEntry,
+  RunResults,
+  TimeSeriesRow,
+  TimeSeriesSeries,
+  WorkbookModel,
+} from '../shared/types';
+import { ModelIssue } from '../features/validation/useModelIssues';
+import { ValidationPane } from '../features/validation/ValidationPane';
+import { AnalyticsPane, EmptyAnalytics } from '../features/analytics/AnalyticsPane';
+import { ComparisonPane } from '../features/analytics/ComparisonPane';
+import { AnalyticsSubnav } from './AnalyticsView.features/AnalyticsSubnav';
+
+interface ValidationResult {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+  notes: string[];
+  snapshotCount: number;
+  networkSummary: Record<string, number>;
+}
+
+export interface AnalyticsViewProps {
+  analyticsSubTab: AnalyticsSubTab;
+  onAnalyticsSubTabChange: (s: AnalyticsSubTab) => void;
+
+  // Validation
+  validateResult: ValidationResult | null;
+  modelIssues: ModelIssue[];
+  onValidate: () => void;
+  onRun: () => void;
+  onNavigateToTable: (sheet: string, rowIndex: number) => void;
+
+  // Results
+  displayResults: RunResults | null;
+  filename: string;
+  model: WorkbookModel;
+  bounds: LatLngBoundsExpression | null;
+  busIndex: Record<string, GridRow>;
+  analyticsFocus: AnalyticsFocus;
+  setAnalyticsFocus: (focus: AnalyticsFocus) => void;
+  chartSections: ChartSectionConfig[];
+  setChartSections: React.Dispatch<React.SetStateAction<ChartSectionConfig[]>>;
+  dispatchRows: TimeSeriesRow[];
+  dispatchSeries: TimeSeriesSeries[];
+  systemLoadRows: TimeSeriesRow[];
+  systemPriceRows: TimeSeriesRow[];
+  storageRows: TimeSeriesRow[];
+  runHistory: RunHistoryEntry[];
+  currencySymbol: string;
+  pathwayConfig: PathwayConfig;
+  onSelectedPeriodChange: (period: number) => void;
+  onExportAll: () => void;
+
+  // Comparison
+  onToggleComparison: (id: string, inComparison: boolean) => void;
+}
+
+export function AnalyticsView(props: AnalyticsViewProps) {
+  const { analyticsSubTab, displayResults, filename } = props;
+
+  return (
+    <div className="pane analytics-outer-pane">
+      <div className="pane-header analytics-outer-header">
+        <AnalyticsSubnav
+          subTab={analyticsSubTab}
+          onChange={props.onAnalyticsSubTabChange}
+          validateResult={props.validateResult}
+          modelIssues={props.modelIssues}
+        />
+        {displayResults && analyticsSubTab !== 'Validation' && (
+          <div className="inline-stats">
+            <span>{filename}</span>
+            <span>{displayResults.runMeta.snapshotCount} snapshots</span>
+            <span>{displayResults.runMeta.snapshotWeight}h weight</span>
+          </div>
+        )}
+      </div>
+
+      {analyticsSubTab === 'Validation' && (
+        <ValidationPane
+          validateResult={props.validateResult}
+          issues={props.modelIssues}
+          onValidate={props.onValidate}
+          onRun={props.onRun}
+          onNavigate={props.onNavigateToTable}
+        />
+      )}
+
+      {analyticsSubTab === 'Comparison' && (
+        <ComparisonPane
+          runHistory={props.runHistory}
+          activeResults={displayResults}
+          onToggleComparison={props.onToggleComparison}
+          currencySymbol={props.currencySymbol}
+        />
+      )}
+
+      {(analyticsSubTab === 'Result' || analyticsSubTab === 'Analytics') && (
+        !displayResults ? (
+          <EmptyAnalytics />
+        ) : (
+          <AnalyticsPane
+            results={displayResults}
+            filename={filename}
+            model={props.model}
+            bounds={props.bounds}
+            busIndex={props.busIndex}
+            analyticsFocus={props.analyticsFocus}
+            setAnalyticsFocus={props.setAnalyticsFocus}
+            chartSections={props.chartSections}
+            setChartSections={props.setChartSections}
+            dispatchRows={props.dispatchRows}
+            dispatchSeries={props.dispatchSeries}
+            systemLoadRows={props.systemLoadRows}
+            systemPriceRows={props.systemPriceRows}
+            storageRows={props.storageRows}
+            runHistory={props.runHistory}
+            subTab={analyticsSubTab}
+            currencySymbol={props.currencySymbol}
+            pathwayConfig={props.pathwayConfig}
+            onSelectedPeriodChange={props.onSelectedPeriodChange}
+            onExportAll={props.onExportAll}
+          />
+        )
+      )}
+    </div>
+  );
+}

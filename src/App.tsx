@@ -44,12 +44,9 @@ import { buildScenarioPreset, defaultScenarioCatalog, readScenarioCatalogFromMod
 import { RunDialog } from './features/run/RunDialog';
 import { SettingsView } from './views/SettingsView';
 import { PluginsView } from './views/PluginsView';
-import { MapPane } from './features/map/MapPane';
-import { TablesPane } from './features/input/TablesPane';
-import { ValidationPane } from './features/validation/ValidationPane';
+import { ModelView } from './views/ModelView';
+import { AnalyticsView } from './views/AnalyticsView';
 import { useModelIssues } from './features/validation/useModelIssues';
-import { AnalyticsPane, EmptyAnalytics } from './features/analytics/AnalyticsPane';
-import { ComparisonPane } from './features/analytics/ComparisonPane';
 import { useModuleHost } from './features/modules/useModuleHost';
 import { ToastProvider, useToast } from './shared/components/Toast';
 
@@ -1506,186 +1503,99 @@ function AppInner() {
             />
           )}
 
-          {/* ── Model tab ── */}
           {tab === 'Model' && (
-            <div className="pane model-pane">
-              <div className="view-toolbar">
-                <button className="tb-btn" onClick={handleOpenWorkbook}>Open</button>
-                <button className="tb-btn" onClick={saveWorkbook}>Save</button>
-                <button className="tb-btn" onClick={saveAsWorkbook}>Save As</button>
-                <button
-                  className="tb-btn tb-btn--muted"
-                  onClick={() => {
-                    if (!window.confirm('Clear the loaded model? All unsaved edits and results will be lost.')) return;
-                    resetForNewModel(createEmptyWorkbook(), 'untitled.xlsx');
-                    setFileHandle(null);
-                    setStatus('Model cleared.');
-                    showToast('Model cleared', 'success');
-                  }}
-                  title="Remove the currently loaded model and start from an empty workbook"
-                >
-                  Clear
-                </button>
-                <div className="view-toolbar-sep" />
-                <button className="tb-btn" onClick={() => projectImportInputRef.current?.click()} title="Import a project workbook (input + solved outputs)">Import Project</button>
-                <button
-                  className="tb-btn"
-                  onClick={handleExportProject}
-                  title={results ? 'Export the full project: inputs + every solved output sheet' : 'Export the project workbook (inputs only — no run yet)'}
-                >
-                  Export Project
-                </button>
-                <button className="tb-btn" disabled={!results} onClick={() => {
-                  if (!displayResults) return;
-                  exportFullResults(model, displayResults, filename.replace(/\.xlsx$/i, ''));
-                  showToast('Result workbook exported', 'success');
-                }}>
-                  Export Result
-                </button>
-                <button className="tb-btn" disabled={!results} onClick={() => {
-                  if (!displayResults) return;
-                  const base = filename.replace(/\.xlsx$/i, '') || 'ragnarok_report';
-                  exportReportHtml(displayResults, {
-                    filename: `${base}_report`,
-                    projectName: base,
-                    currencySymbol: settings.currencySymbol,
-                  });
-                  showToast('HTML report exported', 'success');
-                }}>
-                  Export Report
-                </button>
-                <div className="view-toolbar-sep" />
-                <details className="view-toolbar-more">
-                  <summary className="tb-btn tb-btn--muted">More formats…</summary>
-                  <div className="view-toolbar-more-pop">
-                    <button className="tb-btn" onClick={() => csvFolderImportInputRef.current?.click()}>Import CSV folder</button>
-                    <button className="tb-btn" onClick={handleExportCsvFolder}>Export CSV folder</button>
-                    <button className="tb-btn" onClick={() => netcdfImportInputRef.current?.click()}>Import netCDF</button>
-                    <button className="tb-btn" onClick={handleExportNetcdf}>Export netCDF</button>
-                    <button className="tb-btn" onClick={() => hdf5ImportInputRef.current?.click()}>Import HDF5</button>
-                    <button className="tb-btn" onClick={handleExportHdf5}>Export HDF5</button>
-                  </div>
-                </details>
-              </div>
-              <div className="pane-header model-pane-header">
-                <nav className="subnav">
-                  {(['Map', 'Table'] as ModelSubTab[]).map((s) => (
-                    <button
-                      key={s}
-                      className={`subnav-btn${modelSubTab === s ? ' subnav-btn--active' : ''}`}
-                      onClick={() => setModelSubTab(s)}
-                    >{s}</button>
-                  ))}
-                </nav>
-              </div>
-              {modelSubTab === 'Map' && (
-                <MapPane model={model} bounds={bounds} busIndex={busIndex} />
-              )}
-              {modelSubTab === 'Table' && (
-                <TablesPane
-                  model={model}
-                  onUpdate={updateRowValue}
-                  onAddRow={addRow}
-                  onDeleteRow={deleteRow}
-                  onAddColumn={addColumn}
-                  onDeleteColumn={deleteColumn}
-                  onRenameColumn={renameColumn}
-                  onImportTsSheet={handleImportTsSheet}
-                  issues={modelIssues}
-                  jumpTo={jumpTo}
-                  currencySymbol={settings.currencySymbol}
-                  dateFormat={settings.dateFormat}
-                />
-              )}
-            </div>
+            <ModelView
+              model={model}
+              modelSubTab={modelSubTab}
+              onModelSubTabChange={setModelSubTab}
+              bounds={bounds}
+              busIndex={busIndex}
+              onUpdateRow={updateRowValue}
+              onAddRow={addRow}
+              onDeleteRow={deleteRow}
+              onAddColumn={addColumn}
+              onDeleteColumn={deleteColumn}
+              onRenameColumn={renameColumn}
+              onImportTsSheet={handleImportTsSheet}
+              modelIssues={modelIssues}
+              jumpTo={jumpTo}
+              currencySymbol={settings.currencySymbol}
+              dateFormat={settings.dateFormat}
+              hasResults={Boolean(results)}
+              onOpen={handleOpenWorkbook}
+              onSave={saveWorkbook}
+              onSaveAs={saveAsWorkbook}
+              onClear={() => {
+                if (!window.confirm('Clear the loaded model? All unsaved edits and results will be lost.')) return;
+                resetForNewModel(createEmptyWorkbook(), 'untitled.xlsx');
+                setFileHandle(null);
+                setStatus('Model cleared.');
+                showToast('Model cleared', 'success');
+              }}
+              onImportProject={() => projectImportInputRef.current?.click()}
+              onExportProject={handleExportProject}
+              onExportResult={() => {
+                if (!displayResults) return;
+                exportFullResults(model, displayResults, filename.replace(/\.xlsx$/i, ''));
+                showToast('Result workbook exported', 'success');
+              }}
+              onExportReport={() => {
+                if (!displayResults) return;
+                const base = filename.replace(/\.xlsx$/i, '') || 'ragnarok_report';
+                exportReportHtml(displayResults, {
+                  filename: `${base}_report`,
+                  projectName: base,
+                  currencySymbol: settings.currencySymbol,
+                });
+                showToast('HTML report exported', 'success');
+              }}
+              onImportCsvFolder={() => csvFolderImportInputRef.current?.click()}
+              onExportCsvFolder={handleExportCsvFolder}
+              onImportNetcdf={() => netcdfImportInputRef.current?.click()}
+              onExportNetcdf={handleExportNetcdf}
+              onImportHdf5={() => hdf5ImportInputRef.current?.click()}
+              onExportHdf5={handleExportHdf5}
+            />
           )}
 
-          {/* ── Analytics tab ── */}
           {tab === 'Analytics' && (
-            <div className="pane analytics-outer-pane">
-              <div className="pane-header analytics-outer-header">
-                <nav className="subnav">
-                  {(['Validation', 'Result', 'Analytics', 'Comparison'] as AnalyticsSubTab[]).map((s) => (
-                    <button
-                      key={s}
-                      className={`subnav-btn${analyticsSubTab === s ? ' subnav-btn--active' : ''}${
-                        s === 'Validation' && validateResult && !validateResult.valid ? ' subnav-btn--error' : ''}${
-                        s === 'Validation' && validateResult?.valid ? ' subnav-btn--ok' : ''}`}
-                      onClick={() => setAnalyticsSubTab(s)}
-                    >
-                      {s}
-                      {s === 'Validation' && modelIssues.filter(i => i.severity === 'error').length > 0 && (
-                        <span className="tab-badge tab-badge--error">
-                          {modelIssues.filter(i => i.severity === 'error').length}
-                        </span>
-                      )}
-                      {s === 'Validation' && modelIssues.filter(i => i.severity === 'error').length === 0 && validateResult && (
-                        <span className={`tab-badge ${validateResult.valid ? 'tab-badge--ok' : 'tab-badge--error'}`}>
-                          {validateResult.valid ? 'ok' : validateResult.errors.length + validateResult.warnings.length}
-                        </span>
-                      )}
-                    </button>
-                  ))}
-                </nav>
-                {displayResults && analyticsSubTab !== 'Validation' && (
-                  <div className="inline-stats">
-                    <span>{filename}</span>
-                    <span>{displayResults.runMeta.snapshotCount} snapshots</span>
-                    <span>{displayResults.runMeta.snapshotWeight}h weight</span>
-                  </div>
-                )}
-              </div>
-
-              {analyticsSubTab === 'Validation' && (
-                <ValidationPane
-                  validateResult={validateResult}
-                  issues={modelIssues}
-                  onValidate={() => { setDryRun(true); setRunDialogOpen(true); }}
-                  onRun={() => { setDryRun(false); setRunDialogOpen(true); }}
-                  onNavigate={(sheet, rowIndex) => {
-                    setTab('Model');
-                    setModelSubTab('Table');
-                    setJumpTo({ sheet, rowIndex });
-                  }}
-                />
-              )}
-
-              {analyticsSubTab === 'Comparison' && (
-              <ComparisonPane runHistory={runHistory} activeResults={displayResults} onToggleComparison={handleToggleComparison} currencySymbol={settings.currencySymbol} />
-            )}
-
-              {(analyticsSubTab === 'Result' || analyticsSubTab === 'Analytics') && (
-                !displayResults ? (
-                  <EmptyAnalytics />
-                ) : (
-                  <AnalyticsPane
-                    results={displayResults}
-                    filename={filename}
-                    model={model}
-                    bounds={bounds}
-                    busIndex={busIndex}
-                    analyticsFocus={analyticsFocus}
-                    setAnalyticsFocus={setAnalyticsFocus}
-                    chartSections={chartSections}
-                    setChartSections={setChartSections}
-                    dispatchRows={systemDispatchRows}
-                    dispatchSeries={systemDispatchSeries}
-                    systemLoadRows={systemLoadRows}
-                    systemPriceRows={systemPriceRows}
-                    storageRows={storageRows}
-                    runHistory={runHistory}
-                    subTab={analyticsSubTab}
-                    currencySymbol={settings.currencySymbol}
-                    pathwayConfig={pathwayConfig}
-                    onSelectedPeriodChange={(period) => setPathwayConfig((current) => ({ ...current, selectedPeriod: period }))}
-                    onExportAll={() => {
-                      exportFullResults(model, displayResults, filename.replace(/\.xlsx$/i, ''));
-                      showToast('Full results exported to Excel', 'success');
-                    }}
-                  />
-                )
-              )}
-            </div>
+            <AnalyticsView
+              analyticsSubTab={analyticsSubTab}
+              onAnalyticsSubTabChange={setAnalyticsSubTab}
+              validateResult={validateResult}
+              modelIssues={modelIssues}
+              onValidate={() => { setDryRun(true); setRunDialogOpen(true); }}
+              onRun={() => { setDryRun(false); setRunDialogOpen(true); }}
+              onNavigateToTable={(sheet, rowIndex) => {
+                setTab('Model');
+                setModelSubTab('Table');
+                setJumpTo({ sheet, rowIndex });
+              }}
+              displayResults={displayResults}
+              filename={filename}
+              model={model}
+              bounds={bounds}
+              busIndex={busIndex}
+              analyticsFocus={analyticsFocus}
+              setAnalyticsFocus={setAnalyticsFocus}
+              chartSections={chartSections}
+              setChartSections={setChartSections}
+              dispatchRows={systemDispatchRows}
+              dispatchSeries={systemDispatchSeries}
+              systemLoadRows={systemLoadRows}
+              systemPriceRows={systemPriceRows}
+              storageRows={storageRows}
+              runHistory={runHistory}
+              currencySymbol={settings.currencySymbol}
+              pathwayConfig={pathwayConfig}
+              onSelectedPeriodChange={(period) => setPathwayConfig((current) => ({ ...current, selectedPeriod: period }))}
+              onExportAll={() => {
+                if (!displayResults) return;
+                exportFullResults(model, displayResults, filename.replace(/\.xlsx$/i, ''));
+                showToast('Full results exported to Excel', 'success');
+              }}
+              onToggleComparison={handleToggleComparison}
+            />
           )}
 
           {tab === 'Plugins' && (
