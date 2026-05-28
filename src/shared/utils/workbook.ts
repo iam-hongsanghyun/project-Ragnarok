@@ -42,6 +42,7 @@ function chunkText(text: string): string[] {
 // Central temporal normalisation/export config.
 const TEMPORAL_CONFIG = {
   snapshotColumn: 'snapshot',
+  snapshotLabelColumns: ['snapshot', 'datetime', 'name', 'index', 'timestep'],
   periodColumn: 'period',
   defaultTimeSuffix: 'T00:00:00',
 } as const;
@@ -53,6 +54,12 @@ function normalizeSnapshotIso(raw: string, fmt: DateFormat): string {
   return /^\d{4}-\d{2}-\d{2}$/.test(iso)
     ? `${iso}${TEMPORAL_CONFIG.defaultTimeSuffix}`
     : iso;
+}
+
+function findTemporalLabelCol(rows: GridRow[] | undefined): string | null {
+  if (!rows || rows.length === 0) return null;
+  const keys = Object.keys(rows[0]);
+  return TEMPORAL_CONFIG.snapshotLabelColumns.find((key) => keys.includes(key)) ?? null;
 }
 
 /** True when a row set is a temporal sheet (has the canonical `snapshot` column). */
@@ -114,7 +121,15 @@ export function temporalHeader(rows: GridRow[]): string[] {
 }
 
 function temporalSheetRowsForExport(_sheet: string, rows: GridRow[], fmt: DateFormat): GridRow[] {
-  return canonicalizeTemporalRows(rows, fmt);
+  const labelCol = findTemporalLabelCol(rows);
+  if (!labelCol) return rows;
+  if (labelCol === SNAPSHOT_COL) return canonicalizeTemporalRows(rows, fmt);
+  return rows.map((row) => {
+    const copy = { ...row };
+    const v = copy[labelCol];
+    if (typeof v === 'string') copy[labelCol] = normalizeSnapshotIso(v, fmt);
+    return copy;
+  });
 }
 
 function temporalSheetToWorksheet(rows: GridRow[]): XLSX.WorkSheet {
@@ -162,7 +177,19 @@ export function canonicalizeOutputSeries(
  * not invent a snapshot index.
  */
 export function normalizeInputDatesToIso(model: WorkbookModel, fmt: DateFormat): void {
-  canonicalizeTemporalSheets(model as unknown as Record<string, GridRow[] | undefined>, fmt);
+  const sheets = model as unknown as Record<string, GridRow[] | undefined>;
+  for (const sheetName of Object.keys(sheets)) {
+    if (sheetName !== 'snapshots' && !isInputTemporalSheet(sheetName)) continue;
+    const rows = sheets[sheetName];
+    const labelCol = findTemporalLabelCol(rows);
+    if (!rows || rows.length === 0 || !labelCol) continue;
+    sheets[sheetName] = rows.map((row) => {
+      const copy = { ...row };
+      const v = copy[labelCol];
+      if (typeof v === 'string') copy[labelCol] = normalizeSnapshotIso(v, fmt);
+      return copy;
+    });
+  }
 }
 
 export function createEmptyWorkbook(): WorkbookModel {

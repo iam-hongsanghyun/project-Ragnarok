@@ -253,6 +253,18 @@ describe('input date normalization', () => {
     // Non-date strings pass through unchanged.
     expect(normalizeDateToIso('not-a-date', 'dmy')).toBe('not-a-date');
   });
+
+  test('normalizeInputDatesToIso converts legacy temporal label columns too', () => {
+    const model = createEmptyWorkbook();
+    model['loads-p_set'] = [
+      { datetime: '2024-08-01 00:00', load_a: 100 },
+      { datetime: '2024-08-01 01:00', load_a: 120 },
+    ];
+    normalizeInputDatesToIso(model, 'auto');
+    const ts = model['loads-p_set'] as GridRow[];
+    expect(ts[0].datetime).toBe('2024-08-01T00:00:00');
+    expect(ts[1].datetime).toBe('2024-08-01T01:00:00');
+  });
 });
 
 describe('export temporal sheet formatting', () => {
