@@ -8,6 +8,10 @@ import {
   parseTemporalSheetName,
 } from '../../constants/pypsa_schema';
 import { numberValue, stringValue } from '../../shared/utils/helpers';
+import {
+  PYPSA_STANDARD_LINE_TYPES,
+  PYPSA_STANDARD_TRANSFORMER_TYPES,
+} from '../../constants/pypsa_standard_types';
 
 export interface ModelIssue {
   sheet: string;
@@ -236,8 +240,18 @@ export function useModelIssues(model: WorkbookModel): ModelIssue[] {
     const issues: ModelIssue[] = [];
     const busNames = new Set((model.buses ?? []).map((row) => stringValue(row.name).trim()).filter(Boolean));
     const carrierNames = new Set((model.carriers ?? []).map((row) => stringValue(row.name).trim()).filter(Boolean));
-    const lineTypeNames = new Set((model.line_types ?? []).map((row) => stringValue(row.name).trim()).filter(Boolean));
-    const transformerTypeNames = new Set((model.transformer_types ?? []).map((row) => stringValue(row.name).trim()).filter(Boolean));
+    // Combine workbook-defined types with PyPSA's built-in catalogues — PyPSA
+    // pre-populates `network.line_types` / `.transformer_types` on every fresh
+    // network, so a `lines.type = "149-AL1/24-ST1A 110.0"` resolves at solve
+    // time even without a matching row in the workbook sheet.
+    const lineTypeNames = new Set([
+      ...(model.line_types ?? []).map((row) => stringValue(row.name).trim()),
+      ...PYPSA_STANDARD_LINE_TYPES.map((row) => stringValue(row.name).trim()),
+    ].filter(Boolean));
+    const transformerTypeNames = new Set([
+      ...(model.transformer_types ?? []).map((row) => stringValue(row.name).trim()),
+      ...PYPSA_STANDARD_TRANSFORMER_TYPES.map((row) => stringValue(row.name).trim()),
+    ].filter(Boolean));
 
     for (const component of PYPSA_COMPONENTS) {
       const sheet = component.sheet_name;

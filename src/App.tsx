@@ -41,7 +41,6 @@ import { buildScenarioPreset, defaultScenarioCatalog, readScenarioCatalogFromMod
 import { RunDialog } from './features/run/RunDialog';
 import { Sidebar } from './layout/Sidebar';
 import { ConstraintsWorkspaceView } from './features/constraints/ConstraintsWorkspaceView';
-import { TypesWorkspaceView } from './features/types/TypesWorkspaceView';
 import { MapPane } from './features/map/MapPane';
 import { TablesPane } from './features/input/TablesPane';
 import { ValidationPane } from './features/validation/ValidationPane';
@@ -76,7 +75,7 @@ function AppInner() {
   const [chartSections, setChartSections] = useState<ChartSectionConfig[]>([]);
   const [runDialogOpen, setRunDialogOpen] = useState(false);
   const [dryRun, setDryRun] = useState(false);
-  const [activeWorkspaceOverlay, setActiveWorkspaceOverlay] = useState<'constraints' | 'types' | null>(null);
+  const [activeWorkspaceOverlay, setActiveWorkspaceOverlay] = useState<'constraints' | null>(null);
   const [runHistory, setRunHistory] = useState<RunHistoryEntry[]>([]);
   const [pathwayConfig, setPathwayConfig] = useState<PathwayConfig>(() => defaultPathwayConfig());
   const [rollingConfig, setRollingConfig] = useState<RollingHorizonConfig>(() => defaultRollingConfig());
@@ -1361,7 +1360,6 @@ function AppInner() {
               constraints={constraints}
               onConstraintsChange={setConstraints}
               onOpenConstraintsWorkspace={() => setActiveWorkspaceOverlay('constraints')}
-              onOpenTypesWorkspace={() => setActiveWorkspaceOverlay('types')}
               onOpen={handleOpenWorkbook}
               onSave={saveWorkbook}
               onSaveAs={saveAsWorkbook}
@@ -1463,29 +1461,6 @@ function AppInner() {
               onAddRow={addRow}
               onDeleteRow={deleteRow}
               onClose={() => setActiveWorkspaceOverlay(null)}
-            />
-          )}
-
-          {/* ── Workspace overlay (component types catalogue) ── */}
-          {activeWorkspaceOverlay === 'types' && (
-            <TypesWorkspaceView
-              model={model}
-              onClose={() => setActiveWorkspaceOverlay(null)}
-              onOpenTable={(sheet) => {
-                setActiveWorkspaceOverlay(null);
-                setTab('Model');
-                setModelSubTab('Table');
-                setJumpTo({ sheet, rowIndex: 0 });
-              }}
-              onAddStandardType={(sheet, row) => {
-                setModel((current) => {
-                  const existing = (current[sheet] ?? []) as typeof current[typeof sheet];
-                  const name = String(row.name ?? '');
-                  if (!name || existing.some((r) => String(r.name) === name)) return current;
-                  return { ...current, [sheet]: [...existing, { ...row }] };
-                });
-                showToast(`Added ${String(row.name)} to ${sheet}`, 'success');
-              }}
             />
           )}
 

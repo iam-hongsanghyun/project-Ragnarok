@@ -26,7 +26,6 @@ export interface SidebarProps {
   constraints: CustomConstraint[];
   onConstraintsChange: (c: CustomConstraint[]) => void;
   onOpenConstraintsWorkspace: () => void;
-  onOpenTypesWorkspace: () => void;
   onOpen: () => void;
   onSave: () => void;
   onSaveAs: () => void;
@@ -97,7 +96,6 @@ export function Sidebar({
   constraints,
   onConstraintsChange,
   onOpenConstraintsWorkspace,
-  onOpenTypesWorkspace,
   onOpen,
   onSave,
   onSaveAs,
@@ -233,20 +231,6 @@ export function Sidebar({
           constraints={constraints}
           globalConstraintRows={model.global_constraints ?? []}
           onOpen={onOpenConstraintsWorkspace}
-        />
-      </SidebarGroup>
-
-      <SidebarGroup
-        title="Component types"
-        badge={(() => {
-          const total = (model.line_types?.length ?? 0) + (model.transformer_types?.length ?? 0);
-          return total > 0 ? <span className="sg-badge">{total}</span> : undefined;
-        })()}
-      >
-        <TypesSummary
-          lineTypes={model.line_types ?? []}
-          transformerTypes={model.transformer_types ?? []}
-          onOpen={onOpenTypesWorkspace}
         />
       </SidebarGroup>
 
@@ -910,32 +894,3 @@ function ConstraintsSummary({
   );
 }
 
-function TypesSummary({
-  lineTypes,
-  transformerTypes,
-  onOpen,
-}: {
-  lineTypes: GridRow[];
-  transformerTypes: GridRow[];
-  onOpen: () => void;
-}) {
-  return (
-    <div className="constraints-summary">
-      <div className="constraints-summary-line">
-        <span className="constraints-summary-label">Lines</span>
-        <span className="constraints-summary-value">
-          {lineTypes.length === 0 ? <em>no rows</em> : `${lineTypes.length} type${lineTypes.length === 1 ? '' : 's'}`}
-        </span>
-      </div>
-      <div className="constraints-summary-line">
-        <span className="constraints-summary-label">Xfmrs</span>
-        <span className="constraints-summary-value">
-          {transformerTypes.length === 0 ? <em>no rows</em> : `${transformerTypes.length} type${transformerTypes.length === 1 ? '' : 's'}`}
-        </span>
-      </div>
-      <button className="tb-btn constraints-summary-open" onClick={onOpen} title="Open the component types catalogue">
-        Open types catalogue →
-      </button>
-    </div>
-  );
-}

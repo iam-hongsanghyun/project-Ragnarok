@@ -8,6 +8,22 @@ import { getColumns, getTsFirstCol, stringValue } from '../../shared/utils/helpe
 import { parseCsvToGridRows } from '../../shared/utils/workbook';
 import { normalizeDateToIso } from '../../shared/utils/helpers';
 import type { DateFormat } from '../settings/useSettings';
+import { PYPSA_STANDARD_LINE_TYPES, PYPSA_STANDARD_TRANSFORMER_TYPES } from '../../constants/pypsa_standard_types';
+
+/** User-defined `*_types` rows first (so custom types shadow standards),
+ *  then the PyPSA built-in catalogue. Used to seed the `<datalist>` for
+ *  `lines.type` and `transformers.type` cells. */
+function mergeTypeNames(modelRows: GridRow[] | undefined, standardRows: GridRow[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const row of [...(modelRows ?? []), ...standardRows]) {
+    const name = stringValue(row.name);
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    out.push(name);
+  }
+  return out;
+}
 import { InputAnalyser } from './InputAnalyser';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -216,6 +232,10 @@ interface SpreadsheetGridProps {
   protectedCols?: string[];
   formatDisplayValue?: (col: string, val: Primitive) => string;
   coerceEditedValue?: (col: string, raw: string, current: Primitive) => Primitive;
+  /** Optional autocomplete suggestions for a column. Return null/empty to fall
+   *  back to a free-text input. Used to surface PyPSA standard line/transformer
+   *  type names in `lines.type` / `transformers.type` cells. */
+  getCellSuggestions?: (col: string) => string[] | null;
 }
 
 function SpreadsheetGrid({
@@ -231,6 +251,7 @@ function SpreadsheetGrid({
   protectedCols,
   formatDisplayValue,
   coerceEditedValue,
+  getCellSuggestions,
 }: SpreadsheetGridProps) {
   const [editCell, setEditCell] = useState<{ row: number; col: string; val: string } | null>(null);
   const [renamingCol, setRenamingCol] = useState<string | null>(null);
@@ -531,41 +552,53 @@ function SpreadsheetGrid({
                               }}
                             />
                           </div>
-                        ) : (
-                        <input
-                          autoFocus
-                          className="cell-input"
-                          value={editCell!.val}
-                          onChange={(e) =>
-                            setEditCell((prev) => (prev ? { ...prev, val: e.target.value } : null))
-                          }
-                          onBlur={() => {
-                            if (editCell && onUpdate)
-                              onUpdate(
-                                origIdx,
-                                editCell.col,
-                                coerceEditedValue
-                                  ? coerceEditedValue(editCell.col, editCell.val, row[editCell.col])
-                                  : inferInputValue(editCell.val, row[editCell.col]),
-                              );
-                            setEditCell(null);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' || e.key === 'Tab') {
-                              if (editCell && onUpdate)
-                                onUpdate(
-                                  origIdx,
-                                  editCell.col,
-                                  coerceEditedValue
-                                    ? coerceEditedValue(editCell.col, editCell.val, row[editCell.col])
-                                    : inferInputValue(editCell.val, row[editCell.col]),
-                                );
-                              setEditCell(null);
-                            }
-                            if (e.key === 'Escape') setEditCell(null);
-                          }}
-                        />
-                        )
+                        ) : (() => {
+                          const suggestions = getCellSuggestions?.(c) ?? null;
+                          const listId = suggestions && suggestions.length > 0 ? `cell-suggest-${c}` : undefined;
+                          return (
+                            <>
+                              <input
+                                autoFocus
+                                className="cell-input"
+                                list={listId}
+                                value={editCell!.val}
+                                onChange={(e) =>
+                                  setEditCell((prev) => (prev ? { ...prev, val: e.target.value } : null))
+                                }
+                                onBlur={() => {
+                                  if (editCell && onUpdate)
+                                    onUpdate(
+                                      origIdx,
+                                      editCell.col,
+                                      coerceEditedValue
+                                        ? coerceEditedValue(editCell.col, editCell.val, row[editCell.col])
+                                        : inferInputValue(editCell.val, row[editCell.col]),
+                                    );
+                                  setEditCell(null);
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' || e.key === 'Tab') {
+                                    if (editCell && onUpdate)
+                                      onUpdate(
+                                        origIdx,
+                                        editCell.col,
+                                        coerceEditedValue
+                                          ? coerceEditedValue(editCell.col, editCell.val, row[editCell.col])
+                                          : inferInputValue(editCell.val, row[editCell.col]),
+                                      );
+                                    setEditCell(null);
+                                  }
+                                  if (e.key === 'Escape') setEditCell(null);
+                                }}
+                              />
+                              {listId && (
+                                <datalist id={listId}>
+                                  {suggestions!.map((s) => (<option key={s} value={s} />))}
+                                </datalist>
+                              )}
+                            </>
+                          );
+                        })()
                       ) : (
                         isColorColumn(c) && stringValue(row[c]) ? (
                           <span className="cell-value" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
@@ -980,6 +1013,16 @@ export function TablesPane({
               protectedCols={protectedCols}
               formatDisplayValue={formatDisplayValue}
               coerceEditedValue={coerceEditedValue}
+              getCellSuggestions={(col) => {
+                if (col !== 'type') return null;
+                if (sel.sheet === 'lines') {
+                  return mergeTypeNames(model.line_types, PYPSA_STANDARD_LINE_TYPES);
+                }
+                if (sel.sheet === 'transformers') {
+                  return mergeTypeNames(model.transformer_types, PYPSA_STANDARD_TRANSFORMER_TYPES);
+                }
+                return null;
+              }}
             />
           )}
         </div>

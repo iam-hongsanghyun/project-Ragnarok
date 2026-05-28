@@ -4731,10 +4731,3 @@ th:hover .col-delete-btn {
 .constraints-cell-input--num {
   text-align: right;
 }
-.types-catalogue-source {
-  color: var(--muted);
-  font-size: 0.78rem;
-  margin: 0;
-  padding-top: 8px;
-  border-top: 1px dashed var(--border);
-}
