@@ -42,10 +42,8 @@ import { defaultPathwayConfig, getDefaultSelectedPeriod, readPathwayConfigFromMo
 import { defaultRollingConfig, normalizeRollingConfig, readRollingConfigFromModel, sameRollingConfig, writeRollingConfigToModel } from './shared/utils/rolling';
 import { buildScenarioPreset, defaultScenarioCatalog, readScenarioCatalogFromModel, sameScenarioCatalog, writeScenarioCatalogToModel } from './shared/utils/scenarios';
 import { RunDialog } from './features/run/RunDialog';
-import { Sidebar } from './layout/Sidebar';
-import { ConstraintsWorkspaceView } from './features/constraints/ConstraintsWorkspaceView';
-import { RunSetupWorkspaceView } from './features/run-setup/RunSetupWorkspaceView';
-import { SettingsWorkspaceView } from './features/settings/SettingsWorkspaceView';
+import { SettingsView } from './views/SettingsView';
+import { PluginsView } from './views/PluginsView';
 import { MapPane } from './features/map/MapPane';
 import { TablesPane } from './features/input/TablesPane';
 import { ValidationPane } from './features/validation/ValidationPane';
@@ -53,7 +51,6 @@ import { useModelIssues } from './features/validation/useModelIssues';
 import { AnalyticsPane, EmptyAnalytics } from './features/analytics/AnalyticsPane';
 import { ComparisonPane } from './features/analytics/ComparisonPane';
 import { useModuleHost } from './features/modules/useModuleHost';
-import { PluginPanel } from './features/plugins/PluginPanel';
 import { ToastProvider, useToast } from './shared/components/Toast';
 
 function AppInner() {
@@ -71,16 +68,10 @@ function AppInner() {
   const [constraints, setConstraints] = useState<CustomConstraint[]>(DEFAULT_CONSTRAINTS);
   const [carbonPrice, setCarbonPrice] = useState<number>(0);
   const [forceLp, setForceLp] = useState<boolean>(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [sidebarWidth, setSidebarWidth] = useState(252);
-  const [isDraggingSidebar, setIsDraggingSidebar] = useState(false);
-  const dragStartX = useRef<number>(0);
-  const dragStartWidth = useRef<number>(252);
   const [analyticsFocus, setAnalyticsFocus] = useState<AnalyticsFocus>({ type: 'system' });
   const [chartSections, setChartSections] = useState<ChartSectionConfig[]>([]);
   const [runDialogOpen, setRunDialogOpen] = useState(false);
   const [dryRun, setDryRun] = useState(false);
-  const [activeWorkspaceOverlay, setActiveWorkspaceOverlay] = useState<'constraints' | 'run-setup' | 'settings' | null>(null);
   const [runHistory, setRunHistory] = useState<RunHistoryEntry[]>([]);
   const [pathwayConfig, setPathwayConfig] = useState<PathwayConfig>(() => defaultPathwayConfig());
   const [rollingConfig, setRollingConfig] = useState<RollingHorizonConfig>(() => defaultRollingConfig());
@@ -1375,27 +1366,6 @@ function AppInner() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [displayResults]);
 
-  // ── Sidebar resize handlers ──────────────────────────────────────────────────
-  const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    dragStartX.current = e.clientX;
-    dragStartWidth.current = sidebarWidth;
-    setIsDraggingSidebar(true);
-
-    const onMove = (ev: MouseEvent) => {
-      const delta = ev.clientX - dragStartX.current;
-      const next  = Math.min(520, Math.max(180, dragStartWidth.current + delta));
-      setSidebarWidth(next);
-    };
-    const onUp = () => {
-      setIsDraggingSidebar(false);
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-  }, [sidebarWidth]);
-
   return (
     <div className="studio-shell">
       <input ref={fileInputRef} type="file" accept=".xlsx,.xls" hidden onChange={handleImport} />
@@ -1404,11 +1374,44 @@ function AppInner() {
       <input ref={netcdfImportInputRef} type="file" accept=".nc" hidden onChange={handleImportNetcdf} />
       <input ref={hdf5ImportInputRef} type="file" accept=".h5,.hdf5" hidden onChange={handleImportHdf5} />
 
-      {/* ── Top bar ── */}
+      {/* ── Top bar ──
+        Layout: [Brand] [Model | Settings | Analytics | Plugins]   …spacer…   <filename> <Run> <status>
+        Tabs live top-left (one entry point per view). File ops live inside
+        Model view's toolbar only. */}
       <header className="topbar">
         <div className="topbar-left">
           <span className="topbar-brand">Ragnarok</span>
-          <div className="topbar-divider" />
+          <nav className="tab-nav tab-nav--left">
+            {(['Model', 'Settings', 'Analytics'] as WorkspaceTab[]).map((item) => (
+              <button
+                key={item}
+                className={`tab-button ${tab === item ? 'is-active' : ''}`}
+                onClick={() => setTab(item)}
+              >
+                {item}
+                {item === 'Analytics' && validateResult && (
+                  <span className={`tab-badge ${validateResult.valid ? 'tab-badge--ok' : 'tab-badge--error'}`}>
+                    {validateResult.valid ? 'ok' : `${validateResult.errors.length + validateResult.warnings.length}`}
+                  </span>
+                )}
+              </button>
+            ))}
+            {moduleHost.enabledIds.length > 0 && (
+              <button
+                className={`tab-button ${tab === 'Plugins' ? 'is-active' : ''}`}
+                onClick={() => setTab('Plugins')}
+              >
+                Plugins
+                <span className="tab-badge tab-badge--ok">{moduleHost.enabledIds.length}</span>
+              </button>
+            )}
+          </nav>
+        </div>
+        <div className="topbar-right">
+          <span className="topbar-file" title={filename}>{filename}</span>
+          {displayResults && (
+            <span className="topbar-run-meta">{displayResults.runMeta.snapshotCount} snaps · {displayResults.runMeta.snapshotWeight}h</span>
+          )}
           <button
             className="run-button"
             onClick={() => setRunDialogOpen(true)}
@@ -1417,30 +1420,11 @@ function AppInner() {
           >
             Run
           </button>
-          <button className="tb-btn" onClick={handleOpenWorkbook}>Open</button>
-          <button
-            className="tb-btn tb-btn--muted"
-            onClick={() => {
-              if (!window.confirm('Clear the loaded model? All unsaved edits and results will be lost.')) return;
-              resetForNewModel(createEmptyWorkbook(), 'untitled.xlsx');
-              setFileHandle(null);
-              setStatus('Model cleared.');
-              showToast('Model cleared', 'success');
-            }}
-            title="Remove the currently loaded model and start from an empty workbook"
-          >
-            Clear
-          </button>
-          <div className="topbar-divider" />
-          <span className="topbar-file">{filename}</span>
-          {displayResults && (
-            <span className="topbar-run-meta">{displayResults.runMeta.snapshotCount} snaps · {displayResults.runMeta.snapshotWeight}h res</span>
-          )}
           {runStatus === 'running' ? (
             <>
               <span className="topbar-running">
                 <span className="topbar-spinner" />
-                Running… {Math.floor(runElapsed / 60) > 0 ? `${Math.floor(runElapsed / 60)}m ` : ''}{(runElapsed % 60).toString().padStart(2, '0')}s
+                {Math.floor(runElapsed / 60) > 0 ? `${Math.floor(runElapsed / 60)}m ` : ''}{(runElapsed % 60).toString().padStart(2, '0')}s
               </span>
               <button className="tb-btn tb-btn--muted topbar-cancel" onClick={handleCancelRun}>Cancel</button>
             </>
@@ -1448,78 +1432,15 @@ function AppInner() {
             <span className="topbar-status" title={status}>{status}</span>
           )}
         </div>
-        <nav className="tab-nav">
-          {(['Model', 'Analytics'] as WorkspaceTab[]).map((item) => (
-            <button
-              key={item}
-              className={`tab-button ${tab === item ? 'is-active' : ''}`}
-              onClick={() => setTab(item)}
-            >
-              {item}
-              {item === 'Analytics' && validateResult && (
-                <span className={`tab-badge ${validateResult.valid ? 'tab-badge--ok' : 'tab-badge--error'}`}>
-                  {validateResult.valid ? 'ok' : `${validateResult.errors.length + validateResult.warnings.length}`}
-                </span>
-              )}
-            </button>
-          ))}
-          {moduleHost.enabledIds.length > 0 && (
-            <button
-              className={`tab-button ${tab === 'Plugins' ? 'is-active' : ''}`}
-              onClick={() => setTab('Plugins')}
-            >
-              Plugins
-              <span className="tab-badge tab-badge--ok">
-                {moduleHost.enabledIds.length}
-              </span>
-            </button>
-          )}
-        </nav>
       </header>
 
-      {/* ── Sidebar + Main ── */}
-      <div className="workspace-body" style={isDraggingSidebar ? { userSelect: 'none', cursor: 'col-resize' } : undefined}>
-        <aside
-          className={`app-sidebar${sidebarOpen ? '' : ' app-sidebar--collapsed'}`}
-          style={sidebarOpen ? { width: sidebarWidth } : undefined}
-        >
-          <button className="sidebar-toggle" onClick={() => setSidebarOpen((o) => !o)} title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}>
-            {sidebarOpen ? '<' : '>'}
-          </button>
-          {sidebarOpen && (
-            <Sidebar
+      <div className="workspace-body">
+        <div className="workspace-main">
+
+          {/* ── Settings tab ── */}
+          {tab === 'Settings' && (
+            <SettingsView
               model={model}
-              results={results}
-              constraints={constraints}
-              onOpenConstraintsWorkspace={() => setActiveWorkspaceOverlay('constraints')}
-              onOpenRunSetupWorkspace={() => setActiveWorkspaceOverlay('run-setup')}
-              onOpenSettingsWorkspace={() => setActiveWorkspaceOverlay('settings')}
-              onOpen={handleOpenWorkbook}
-              onSave={saveWorkbook}
-              onSaveAs={saveAsWorkbook}
-              onImportProject={() => projectImportInputRef.current?.click()}
-              onExportProject={handleExportProject}
-              onImportCsvFolder={() => csvFolderImportInputRef.current?.click()}
-              onExportCsvFolder={handleExportCsvFolder}
-              onImportNetcdf={() => netcdfImportInputRef.current?.click()}
-              onExportNetcdf={handleExportNetcdf}
-              onImportHdf5={() => hdf5ImportInputRef.current?.click()}
-              onExportHdf5={handleExportHdf5}
-              onExportResult={() => {
-                if (!displayResults) return;
-                exportFullResults(model, displayResults, filename.replace(/\.xlsx$/i, ''));
-                showToast('Result workbook exported', 'success');
-              }}
-              onExportReport={() => {
-                if (!displayResults) return;
-                const base = filename.replace(/\.xlsx$/i, '') || 'ragnarok_report';
-                exportReportHtml(displayResults, {
-                  filename: `${base}_report`,
-                  projectName: base,
-                  currencySymbol: settings.currencySymbol,
-                });
-                showToast('HTML report exported', 'success');
-              }}
               scenarioCatalog={scenarioCatalog}
               activeScenarioLabel={activeScenario?.label ?? null}
               scenarioDirty={scenarioDirty}
@@ -1530,63 +1451,6 @@ function AppInner() {
               onDeleteScenario={handleDeleteScenario}
               onRenameScenario={handleRenameScenario}
               onScenarioNotesChange={handleScenarioNotesChange}
-              pathwayConfig={pathwayConfig}
-              rollingConfig={rollingConfig}
-              stochasticConfig={stochasticConfig}
-              sclopfConfig={sclopfConfig}
-              snapshotStart={snapshotStart}
-              snapshotEnd={snapshotEnd}
-              snapshotWeight={snapshotWeight}
-              carbonPrice={carbonPrice}
-              carbonPriceSchedule={carbonPriceSchedule}
-              currencySymbol={settings.currencySymbol}
-              runHistory={runHistory}
-              onRestoreRun={handleRestoreRun}
-              onRenameHistoryEntry={handleRenameHistoryEntry}
-              onPinHistoryEntry={handlePinHistoryEntry}
-              onDeleteHistoryEntry={handleDeleteHistoryEntry}
-              onToggleComparison={handleToggleComparison}
-              moduleInventory={moduleHost.inventory}
-              moduleHostLoading={moduleHost.loading}
-              moduleHostError={moduleHost.error}
-              enabledModuleIds={moduleHost.enabledIds}
-              isModuleEnabled={moduleHost.isEnabled}
-              isModuleEnableEligible={moduleHost.isEnableEligible}
-              onToggleModuleEnabled={moduleHost.toggleEnabled}
-              onInstallModule={handleInstallModule}
-              onUninstallModule={handleUninstallModule}
-            />
-          )}
-        </aside>
-
-        {/* Drag-to-resize handle */}
-        {sidebarOpen && (
-          <div
-            className={`sidebar-resize-handle${isDraggingSidebar ? ' sidebar-resize-handle--dragging' : ''}`}
-            onMouseDown={handleResizeMouseDown}
-            title="Drag to resize sidebar"
-          />
-        )}
-
-        <div className="workspace-main">
-
-          {/* ── Workspace overlay (constraints editor) ── */}
-          {activeWorkspaceOverlay === 'constraints' && (
-            <ConstraintsWorkspaceView
-              model={model}
-              carriers={Array.from(new Set(model.carriers.map((c) => String(c.name ?? '')).filter(Boolean)))}
-              constraints={constraints}
-              onConstraintsChange={setConstraints}
-              onUpdateRow={updateRowValue}
-              onAddRow={addRow}
-              onDeleteRow={deleteRow}
-              onClose={() => setActiveWorkspaceOverlay(null)}
-            />
-          )}
-
-          {/* ── Workspace overlay (run setup) ── */}
-          {activeWorkspaceOverlay === 'run-setup' && (
-            <RunSetupWorkspaceView
               pathwayConfig={pathwayConfig}
               onPathwayConfigChange={setPathwayConfig}
               rollingConfig={rollingConfig}
@@ -1606,18 +1470,20 @@ function AppInner() {
               onCarbonPriceChange={setCarbonPrice}
               carbonPriceSchedule={carbonPriceSchedule}
               onCarbonPriceScheduleChange={setCarbonPriceSchedule}
-              currencySymbol={settings.currencySymbol}
-              model={model}
-              lineCount={model.lines.length}
-              transformerCount={model.transformers.length}
-              onClose={() => setActiveWorkspaceOverlay(null)}
-            />
-          )}
-
-          {/* ── Workspace overlay (settings) ── */}
-          {activeWorkspaceOverlay === 'settings' && (
-            <SettingsWorkspaceView
-              model={model}
+              constraints={constraints}
+              onConstraintsChange={setConstraints}
+              onUpdateRow={updateRowValue}
+              onAddRow={addRow}
+              onDeleteRow={deleteRow}
+              onAddStandardType={(sheet, row) => {
+                setModel((current) => {
+                  const existing = (current[sheet] ?? []) as typeof current[typeof sheet];
+                  const name = String(row.name ?? '');
+                  if (!name || existing.some((r) => String(r.name) === name)) return current;
+                  return { ...current, [sheet]: [...existing, { ...row }] };
+                });
+                showToast(`Added ${String(row.name)} to ${sheet}`, 'success');
+              }}
               dateFormat={settings.dateFormat}
               onDateFormatChange={(f) => updateSettings({ dateFormat: f })}
               currencyCode={settings.currencyCode}
@@ -1635,13 +1501,72 @@ function AppInner() {
               onSolverTypeChange={(v) => updateSettings({ solverType: v })}
               onCarrierColorChange={(rowIndex, color) => updateRowValue('carriers', rowIndex, 'color', color)}
               onCarrierMove={(rowIndex, direction) => moveRow('carriers', rowIndex, direction)}
-              onClose={() => setActiveWorkspaceOverlay(null)}
+              lineCount={model.lines.length}
+              transformerCount={model.transformers.length}
             />
           )}
 
           {/* ── Model tab ── */}
-          {activeWorkspaceOverlay === null && tab === 'Model' && (
+          {tab === 'Model' && (
             <div className="pane model-pane">
+              <div className="view-toolbar">
+                <button className="tb-btn" onClick={handleOpenWorkbook}>Open</button>
+                <button className="tb-btn" onClick={saveWorkbook}>Save</button>
+                <button className="tb-btn" onClick={saveAsWorkbook}>Save As</button>
+                <button
+                  className="tb-btn tb-btn--muted"
+                  onClick={() => {
+                    if (!window.confirm('Clear the loaded model? All unsaved edits and results will be lost.')) return;
+                    resetForNewModel(createEmptyWorkbook(), 'untitled.xlsx');
+                    setFileHandle(null);
+                    setStatus('Model cleared.');
+                    showToast('Model cleared', 'success');
+                  }}
+                  title="Remove the currently loaded model and start from an empty workbook"
+                >
+                  Clear
+                </button>
+                <div className="view-toolbar-sep" />
+                <button className="tb-btn" onClick={() => projectImportInputRef.current?.click()} title="Import a project workbook (input + solved outputs)">Import Project</button>
+                <button
+                  className="tb-btn"
+                  onClick={handleExportProject}
+                  title={results ? 'Export the full project: inputs + every solved output sheet' : 'Export the project workbook (inputs only — no run yet)'}
+                >
+                  Export Project
+                </button>
+                <button className="tb-btn" disabled={!results} onClick={() => {
+                  if (!displayResults) return;
+                  exportFullResults(model, displayResults, filename.replace(/\.xlsx$/i, ''));
+                  showToast('Result workbook exported', 'success');
+                }}>
+                  Export Result
+                </button>
+                <button className="tb-btn" disabled={!results} onClick={() => {
+                  if (!displayResults) return;
+                  const base = filename.replace(/\.xlsx$/i, '') || 'ragnarok_report';
+                  exportReportHtml(displayResults, {
+                    filename: `${base}_report`,
+                    projectName: base,
+                    currencySymbol: settings.currencySymbol,
+                  });
+                  showToast('HTML report exported', 'success');
+                }}>
+                  Export Report
+                </button>
+                <div className="view-toolbar-sep" />
+                <details className="view-toolbar-more">
+                  <summary className="tb-btn tb-btn--muted">More formats…</summary>
+                  <div className="view-toolbar-more-pop">
+                    <button className="tb-btn" onClick={() => csvFolderImportInputRef.current?.click()}>Import CSV folder</button>
+                    <button className="tb-btn" onClick={handleExportCsvFolder}>Export CSV folder</button>
+                    <button className="tb-btn" onClick={() => netcdfImportInputRef.current?.click()}>Import netCDF</button>
+                    <button className="tb-btn" onClick={handleExportNetcdf}>Export netCDF</button>
+                    <button className="tb-btn" onClick={() => hdf5ImportInputRef.current?.click()}>Import HDF5</button>
+                    <button className="tb-btn" onClick={handleExportHdf5}>Export HDF5</button>
+                  </div>
+                </details>
+              </div>
               <div className="pane-header model-pane-header">
                 <nav className="subnav">
                   {(['Map', 'Table'] as ModelSubTab[]).map((s) => (
@@ -1676,7 +1601,7 @@ function AppInner() {
           )}
 
           {/* ── Analytics tab ── */}
-          {activeWorkspaceOverlay === null && tab === 'Analytics' && (
+          {tab === 'Analytics' && (
             <div className="pane analytics-outer-pane">
               <div className="pane-header analytics-outer-header">
                 <nav className="subnav">
@@ -1763,24 +1688,27 @@ function AppInner() {
             </div>
           )}
 
-          {activeWorkspaceOverlay === null && tab === 'Plugins' && (() => {
-            const enabledModules = moduleHost.modules.filter(
-              (m) => moduleHost.enabledIds.includes(m.id) && moduleHost.isEnableEligible(m)
-            );
-            const carriers = Array.from(
-              new Set(model.carriers.map((c) => String(c.name ?? '')).filter(Boolean))
-            );
-            return (
-              <PluginPanel
-                modules={enabledModules}
-                moduleConfigs={moduleHost.moduleConfigs}
-                onModuleConfigChange={moduleHost.setModuleConfig}
-                carriers={carriers}
-                pluginAnalytics={displayResults?.pluginAnalytics ?? {}}
-                onModuleAction={handleModuleAction}
-              />
-            );
-          })()}
+          {tab === 'Plugins' && (
+            <PluginsView
+              model={model}
+              displayResults={displayResults}
+              moduleInventory={moduleHost.inventory}
+              moduleHostLoading={moduleHost.loading}
+              moduleHostError={moduleHost.error}
+              enabledModuleIds={moduleHost.enabledIds}
+              isModuleEnabled={moduleHost.isEnabled}
+              isModuleEnableEligible={moduleHost.isEnableEligible}
+              onToggleModuleEnabled={moduleHost.toggleEnabled}
+              onInstallModule={handleInstallModule}
+              onUninstallModule={handleUninstallModule}
+              enabledModules={moduleHost.modules.filter(
+                (m) => moduleHost.enabledIds.includes(m.id) && moduleHost.isEnableEligible(m),
+              )}
+              moduleConfigs={moduleHost.moduleConfigs as Record<string, Record<string, unknown>>}
+              onModuleConfigChange={moduleHost.setModuleConfig}
+              onModuleAction={handleModuleAction}
+            />
+          )}
         </div>
       </div>
 

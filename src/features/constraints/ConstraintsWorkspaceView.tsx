@@ -143,7 +143,7 @@ export function ConstraintsWorkspaceView({
   );
 }
 
-function GlobalConstraintsTableEditor({
+export function GlobalConstraintsTableEditor({
   rows,
   carriers,
   onAdd,

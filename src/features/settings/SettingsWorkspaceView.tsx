@@ -17,7 +17,7 @@ interface Currency { code: string; symbol: string; name: string; }
 
 type Tab = 'appearance' | 'project' | 'solver';
 
-interface Props {
+export interface Props {
   model: WorkbookModel;
   dateFormat: DateFormat;
   onDateFormatChange: (f: DateFormat) => void;
@@ -36,14 +36,14 @@ interface Props {
   onSolverTypeChange: (v: SolverType) => void;
   onCarrierColorChange: (rowIndex: number, color: string) => void;
   onCarrierMove: (rowIndex: number, direction: -1 | 1) => void;
-  onClose: () => void;
+  onClose?: () => void;
 }
 
 export function SettingsWorkspaceView(props: Props) {
   const [tab, setTab] = useState<Tab>('appearance');
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') props.onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') props.onClose?.(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [props]);
@@ -75,7 +75,7 @@ export function SettingsWorkspaceView(props: Props) {
 
 // ── Appearance ───────────────────────────────────────────────────────────────
 
-function AppearanceTab({ model, onCarrierColorChange, onCarrierMove }: Props) {
+export function AppearanceTab({ model, onCarrierColorChange, onCarrierMove }: Props) {
   const carrierRows = model.carriers
     .map((row, index) => ({ row, index, name: stringValue(row.name) }))
     .filter((item) => item.name);
@@ -123,7 +123,7 @@ function AppearanceTab({ model, onCarrierColorChange, onCarrierMove }: Props) {
 
 // ── Project defaults ─────────────────────────────────────────────────────────
 
-function ProjectDefaultsTab(props: Props) {
+export function ProjectDefaultsTab(props: Props) {
   const settingsRanges = SETTINGS_CONFIG.ranges;
   const loadSheddingOptions = SETTINGS_CONFIG.loadSheddingOptions as Array<{ value: boolean; label: string }>;
   const currencies: Currency[] = CURRENCIES;
@@ -237,7 +237,7 @@ function ProjectDefaultsTab(props: Props) {
 
 // ── Solver ───────────────────────────────────────────────────────────────────
 
-function SolverTab(props: Props) {
+export function SolverTab(props: Props) {
   const solverThreadOptions = SETTINGS_CONFIG.solverThreads.options;
   const solverTypes = SETTINGS_CONFIG.solverTypes as Array<{ value: SolverType; label: string }>;
 

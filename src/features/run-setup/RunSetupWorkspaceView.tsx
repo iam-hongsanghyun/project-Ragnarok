@@ -30,7 +30,7 @@ import { RUN_WINDOW, SETTINGS_CONFIG } from '../../constants';
 
 type Tab = 'window' | 'planning' | 'rolling' | 'carbon' | 'stochastic' | 'sclopf';
 
-interface Props {
+export interface Props {
   pathwayConfig: PathwayConfig;
   onPathwayConfigChange: (config: PathwayConfig) => void;
   rollingConfig: RollingHorizonConfig;
@@ -54,14 +54,14 @@ interface Props {
   model: WorkbookModel;
   lineCount: number;
   transformerCount: number;
-  onClose: () => void;
+  onClose?: () => void;
 }
 
 export function RunSetupWorkspaceView(props: Props) {
   const [tab, setTab] = useState<Tab>('window');
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') props.onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') props.onClose?.(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [props]);
@@ -141,7 +141,7 @@ export function RunSetupWorkspaceView(props: Props) {
 
 // ── Window & weights ─────────────────────────────────────────────────────────
 
-function WindowAndWeightsTab(props: Props) {
+export function WindowAndWeightsTab(props: Props) {
   return (
     <section className="constraints-workspace-section">
       <header className="constraints-workspace-section-header">
@@ -184,7 +184,7 @@ function WindowAndWeightsTab(props: Props) {
 
 // ── Multi-year planning ──────────────────────────────────────────────────────
 
-function PlanningTab(props: Props) {
+export function PlanningTab(props: Props) {
   const { pathwayConfig, onPathwayConfigChange } = props;
   return (
     <section className="constraints-workspace-section">
@@ -319,7 +319,7 @@ function PlanningTab(props: Props) {
 
 // ── Rolling horizon ──────────────────────────────────────────────────────────
 
-function RollingTab(props: Props) {
+export function RollingTab(props: Props) {
   const { rollingConfig, onRollingConfigChange } = props;
   return (
     <section className="constraints-workspace-section">
@@ -389,7 +389,7 @@ function RollingTab(props: Props) {
 
 // ── Carbon price ─────────────────────────────────────────────────────────────
 
-function CarbonPriceTab(props: Props) {
+export function CarbonPriceTab(props: Props) {
   const settingsRanges = SETTINGS_CONFIG.ranges;
   const schedule = props.carbonPriceSchedule;
   const scheduleActive = schedule.length > 0;
@@ -499,7 +499,7 @@ function CarbonPriceTab(props: Props) {
 
 // ── Stochastic ───────────────────────────────────────────────────────────────
 
-function StochasticTab(props: Props) {
+export function StochasticTab(props: Props) {
   const { stochasticConfig, onStochasticConfigChange, rollingConfig, model } = props;
   const config = stochasticConfig;
   const onChange = onStochasticConfigChange;
@@ -590,7 +590,7 @@ function StochasticTab(props: Props) {
 
 // ── SCLOPF ───────────────────────────────────────────────────────────────────
 
-function SclopfTab(props: Props) {
+export function SclopfTab(props: Props) {
   const blocked = props.rollingConfig.enabled || props.stochasticConfig.enabled || props.pathwayConfig.enabled;
   const blockReason =
     props.rollingConfig.enabled ? 'rolling horizon' :
