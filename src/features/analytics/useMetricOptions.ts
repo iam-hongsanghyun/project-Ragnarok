@@ -210,6 +210,14 @@ function buildSingleAssetOptions(
       { key: 'terminal_flows', label: 'Terminal flows', unit: 'MW', rows: pr.p0Series.map((p, i)      => ({ label: p.label, timestamp: p.timestamp, p0: p.p0, p1: pr.p1Series[i]?.p1 ?? 0 })), series: [{ key: 'p0', label: 'P0 MW', color: '#2563eb' }, { key: 'p1', label: 'P1 MW', color: '#1d4ed8' }],  reducer: 'mean', allowDonut: true  },
     ];
   }
+  if (focus.type === 'shuntImpedance') {
+    const sh = assetDetails.shuntImpedances[focus.key];
+    if (!sh) return [];
+    return [
+      { key: 'active_power',   label: 'Active power',   unit: 'MW',   rows: sh.pSeries.map((p) => ({ label: p.label, timestamp: p.timestamp, p: p.p })), series: [{ key: 'p', label: 'P MW',   color: '#0ea5e9' }], reducer: 'mean', allowDonut: false },
+      { key: 'reactive_power', label: 'Reactive power', unit: 'MVar', rows: sh.qSeries.map((p) => ({ label: p.label, timestamp: p.timestamp, q: p.q })), series: [{ key: 'q', label: 'Q MVar', color: '#7c3aed' }], reducer: 'mean', allowDonut: false },
+    ];
+  }
   return [];
 }
 
@@ -283,6 +291,7 @@ export function useMetricOptions(
         case 'store':       return Object.keys(results.assetDetails.stores);
         case 'branch':      return Object.keys(results.assetDetails.branches);
         case 'process':     return Object.keys(results.assetDetails.processes);
+        case 'shuntImpedance': return Object.keys(results.assetDetails.shuntImpedances);
         default:            return [];
       }
     })();

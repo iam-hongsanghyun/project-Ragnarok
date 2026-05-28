@@ -137,6 +137,7 @@ export function AnalyticsPane({
     : analyticsFocus.type === 'store' ? results.assetDetails.stores[analyticsFocus.key]?.summary || []
     : analyticsFocus.type === 'branch' ? results.assetDetails.branches[analyticsFocus.key]?.summary || []
     : analyticsFocus.type === 'process' ? results.assetDetails.processes[analyticsFocus.key]?.summary || []
+    : analyticsFocus.type === 'shuntImpedance' ? results.assetDetails.shuntImpedances[analyticsFocus.key]?.summary || []
     : results.summary;
 
   return (

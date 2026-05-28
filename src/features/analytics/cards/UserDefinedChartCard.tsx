@@ -38,6 +38,7 @@ const FOCUS_LABELS: Record<FocusType, string> = {
   store:       'Store',
   branch:      'Branch',
   process:     'Process',
+  shuntImpedance: 'Shunt impedance',
 };
 
 function assetNamesFor(focusType: FocusType, model: WorkbookModel): string[] {
@@ -52,6 +53,7 @@ function assetNamesFor(focusType: FocusType, model: WorkbookModel): string[] {
       ...model.transformers.map((r) => stringValue(r.name)),
     ].filter(Boolean);
     case 'process':     return (model.processes || []).map((r) => stringValue(r.name)).filter(Boolean);
+    case 'shuntImpedance': return (model.shunt_impedances || []).map((r) => stringValue(r.name)).filter(Boolean);
     default:            return [];
   }
 }

@@ -15,6 +15,7 @@ import {
   GridRow,
   MixItem,
   ProcessDetail,
+  ShuntImpedanceDetail,
   RunResults,
   StorageUnitDetail,
   StoreDetail,
@@ -42,6 +43,7 @@ const EMPTY_DETAILS: AssetDetails = {
   stores: {},
   branches: {},
   processes: {},
+  shuntImpedances: {},
 };
 
 /** Build a `name -> row` index for a static input sheet. */
@@ -523,6 +525,52 @@ function buildProcesses(input: DeriveInput, snapshots: string[]): Record<string,
   return details;
 }
 
+// ── Shunt impedances ────────────────────────────────────────────────────────
+
+function buildShuntImpedances(input: DeriveInput, snapshots: string[]): Record<string, ShuntImpedanceDetail> {
+  const { model, outputs } = input;
+  const series = outputs.series;
+  const shuntStatic = indexByName(model.shunt_impedances);
+  const labels = snapshots.map(isoToLabel);
+
+  const pSeries = series['shunt_impedances-p'];
+  const qSeries = series['shunt_impedances-q'];
+
+  const details: Record<string, ShuntImpedanceDetail> = {};
+  for (const name of Object.keys(shuntStatic)) {
+    const row = shuntStatic[name];
+    const bus = stringValue(row.bus);
+    const g = numberValue(row.g);
+    const b = numberValue(row.b);
+
+    const pOut: ShuntImpedanceDetail['pSeries'] = [];
+    const qOut: ShuntImpedanceDetail['qSeries'] = [];
+    let peakAbsP = 0;
+    let peakAbsQ = 0;
+
+    for (let i = 0; i < snapshots.length; i++) {
+      const p = seriesValue(pSeries, i, name);
+      const q = seriesValue(qSeries, i, name);
+      peakAbsP = Math.max(peakAbsP, Math.abs(p));
+      peakAbsQ = Math.max(peakAbsQ, Math.abs(q));
+      const label = labels[i];
+      const stamp = snapshots[i];
+      pOut.push({ label, timestamp: stamp, p });
+      qOut.push({ label, timestamp: stamp, q });
+    }
+
+    const summary: SummaryItem[] = [
+      { label: 'Conductance (g)', value: `${g.toFixed(3)} S`, detail: g === 0 ? 'No real-power coupling' : 'Real shunt admittance' },
+      { label: 'Susceptance (b)', value: `${b.toFixed(3)} S`, detail: b > 0 ? 'Capacitive (voltage support)' : b < 0 ? 'Inductive' : 'No reactive coupling' },
+      { label: 'Peak |P|', value: `${fmt(peakAbsP)} MW`, detail: 'Maximum active power absorbed' },
+      { label: 'Peak |Q|', value: `${fmt(peakAbsQ)} MVar`, detail: 'Maximum reactive power exchanged' },
+    ];
+
+    details[name] = { name, bus, summary, pSeries: pOut, qSeries: qOut };
+  }
+  return details;
+}
+
 // ── Public entry point ──────────────────────────────────────────────────────
 
 export function deriveAssetDetails(
@@ -534,7 +582,7 @@ export function deriveAssetDetails(
   if (!outputs) return EMPTY_DETAILS;
   const input: DeriveInput = { model, outputs, currencySymbol, snapshotWeight };
   const snapshots = pickSnapshots(outputs.series, [
-    'generators-p', 'buses-marginal_price', 'storage_units-p', 'stores-p', 'processes-p0',
+    'generators-p', 'buses-marginal_price', 'storage_units-p', 'stores-p', 'processes-p0', 'shunt_impedances-p',
   ]);
   return {
     generators: buildGenerators(input, snapshots),
@@ -543,6 +591,7 @@ export function deriveAssetDetails(
     stores: buildStores(input, snapshots),
     branches: buildBranches(input, snapshots),
     processes: buildProcesses(input, snapshots),
+    shuntImpedances: buildShuntImpedances(input, snapshots),
   };
 }
 

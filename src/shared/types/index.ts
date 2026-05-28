@@ -307,6 +307,16 @@ export interface ProcessDetail {
   throughputSeries: Array<{ label: string; timestamp: string; throughput: number }>;
 }
 
+export interface ShuntImpedanceDetail {
+  name: string;
+  bus: string;
+  summary: SummaryItem[];
+  /** Active power consumed by the shunt (MW). */
+  pSeries: Array<{ label: string; timestamp: string; p: number }>;
+  /** Reactive power consumed by the shunt (MVar). */
+  qSeries: Array<{ label: string; timestamp: string; q: number }>;
+}
+
 // ── Emissions breakdown types ─────────────────────────────────────────────────
 
 export interface GeneratorEmission {
@@ -455,6 +465,7 @@ export interface RunResults {
     stores: Record<string, StoreDetail>;
     branches: Record<string, BranchDetail>;
     processes: Record<string, ProcessDetail>;
+    shuntImpedances: Record<string, ShuntImpedanceDetail>;
   };
   /**
    * Full PyPSA-native output dataset built directly from the solved network.
@@ -507,7 +518,8 @@ export type AnalyticsFocus =
   | { type: 'storageUnit'; key: string }
   | { type: 'store'; key: string }
   | { type: 'branch'; key: string }
-  | { type: 'process'; key: string };
+  | { type: 'process'; key: string }
+  | { type: 'shuntImpedance'; key: string };
 
 // ── Analytics / chart types ───────────────────────────────────────────────────
 

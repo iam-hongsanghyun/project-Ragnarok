@@ -125,6 +125,14 @@ export function MapDetailCard({ focus, results, onClose, currencySymbol = '$' }:
     sparkValues = detail.throughputSeries.map((p) => p.throughput);
     sparkColor = dotColor;
     sparkLabel = 'Throughput |p0| (MW)';
+  } else if (focus.type === 'shuntImpedance') {
+    const detail = results.assetDetails.shuntImpedances[key];
+    if (!detail) return null;
+    subtitle = 'Shunt impedance';
+    kpis = detail.summary.slice(0, 4).map((s) => ({ label: s.label, value: s.value }));
+    sparkValues = detail.qSeries.map((p) => p.q);
+    sparkColor = '#0ea5e9';
+    sparkLabel = 'Reactive power Q (MVar)';
   }
 
   const hasSparkline = sparkValues.length >= 2 && sparkValues.some((v) => Math.abs(v) > 0.001);
