@@ -5816,3 +5816,259 @@ code, kbd, samp, tt,
   padding: 0 14px;
 }
 
+
+/* ════════════════════════════════════════════════════════════════════
+   BLOOMBERG-STYLE DASHBOARD GRID
+   ════════════════════════════════════════════════════════════════════ */
+
+.analytics-dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 12px 12px;
+  min-height: 0;
+}
+
+.dashboard-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  flex-wrap: wrap;
+}
+.dashboard-toolbar-sep {
+  width: 1px;
+  height: 22px;
+  background: var(--border);
+  margin: 0 2px;
+}
+.dashboard-toolbar-menu {
+  position: relative;
+}
+.dashboard-toolbar-pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 180px;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.12);
+}
+.dashboard-toolbar-pop .tb-btn {
+  width: 100%;
+  justify-content: flex-start;
+}
+.dashboard-saved-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.dashboard-saved-row .tb-btn:first-child { flex: 1; }
+
+.tb-btn--active {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+.tb-btn--active:hover {
+  background: var(--brand-strong);
+  border-color: var(--brand-strong);
+}
+
+.dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-height: 0;
+}
+
+.dashboard-empty {
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  padding: 32px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+/* One row of cards */
+.dashboard-row {
+  position: relative;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 8px;
+  border-bottom: 1px solid transparent;
+  margin-bottom: 4px;
+}
+
+.dashboard.is-editing .dashboard-row {
+  border-bottom: 1px dashed var(--border);
+  padding-bottom: 8px;
+}
+
+.dashboard-row-resize {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -2px;
+  height: 6px;
+  cursor: ns-resize;
+  background: transparent;
+  z-index: 5;
+}
+.dashboard-row-resize:hover {
+  background: rgba(37, 99, 235, 0.18);
+}
+
+.dashboard-row-edge {
+  position: absolute;
+  top: 4px;
+  right: -2px;
+  z-index: 4;
+}
+.dashboard-row-remove {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+.dashboard-row-remove:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+/* A cell hosting one card */
+.dashboard-cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.dashboard.is-editing .dashboard-cell {
+  cursor: grab;
+}
+.dashboard.is-editing .dashboard-cell:active {
+  cursor: grabbing;
+}
+
+.dashboard-cell-header {
+  height: 28px;
+  min-height: 28px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  border-bottom: 1px solid var(--border);
+  background: #f8fafc;
+}
+.dashboard-cell-title {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dashboard-cell-remove {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.dashboard-cell-remove:hover { color: var(--danger); border-color: var(--danger); }
+
+.dashboard-cell-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+}
+.dashboard-cell-missing {
+  color: var(--muted);
+  font-style: italic;
+  font-size: 0.82rem;
+  margin: 0;
+}
+
+.dashboard-cell-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -4px;
+  width: 8px;
+  cursor: ew-resize;
+  background: transparent;
+  z-index: 4;
+}
+.dashboard-cell-resize:hover {
+  background: rgba(37, 99, 235, 0.18);
+}
+
+/* Drop zones (visible only in edit mode) */
+.dashboard-drop-zone {
+  flex: 0 0 4px;
+  background: transparent;
+  align-self: stretch;
+  border-radius: 2px;
+  transition: background 100ms ease, flex-basis 100ms ease;
+}
+.dashboard-drop-zone.is-tail {
+  flex: 1 1 12px;
+  min-width: 12px;
+}
+.dashboard-drop-zone.is-active {
+  background: var(--brand);
+  flex: 0 0 12px;
+}
+
+/* Add-row affordance at the bottom */
+.dashboard-add-row {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0;
+}
+
+/* Notes card body */
+.dashboard-notes {
+  margin: 0;
+  padding: 0 0 0 18px;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: var(--text);
+}
+.dashboard-notes li { margin-bottom: 4px; }
+.dashboard-notes-empty {
+  list-style: none;
+  color: var(--muted);
+  font-style: italic;
+}
+
