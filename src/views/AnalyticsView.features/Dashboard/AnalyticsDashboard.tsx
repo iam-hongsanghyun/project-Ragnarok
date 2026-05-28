@@ -18,6 +18,7 @@ import { UserDefinedChartCard } from '../../../features/analytics/cards/UserDefi
 import { Dashboard, addCard, newId } from './Dashboard';
 import { Card, DashboardLayout } from './types';
 import { useDashboardLayout } from './useDashboardLayout';
+import { PRESETS } from './presets';
 
 const DEFAULT_LAYOUT: DashboardLayout = { rows: [], cards: [] };
 
@@ -55,7 +56,7 @@ interface Props {
 export function AnalyticsDashboard({ results, model, currencySymbol }: Props) {
   const { layout, setLayout, editing, setEditing, savedLayouts, saveAs, load, remove, resetToDefault } =
     useDashboardLayout(DEFAULT_LAYOUT);
-  const [openMenu, setOpenMenu] = useState<'add' | 'layouts' | null>(null);
+  const [openMenu, setOpenMenu] = useState<'add' | 'layouts' | 'presets' | null>(null);
 
   const updateChartConfig = (cardId: string, next: ChartSectionConfig) =>
     setLayout({
@@ -86,6 +87,12 @@ export function AnalyticsDashboard({ results, model, currencySymbol }: Props) {
   const handleDelete = (name: string) => {
     if (!window.confirm(`Delete saved layout "${name}"?`)) return;
     remove(name);
+  };
+
+  const handleLoadPreset = (key: string) => {
+    const preset = PRESETS.find((p) => p.key === key);
+    if (preset) setLayout(preset.build());
+    setOpenMenu(null);
   };
 
   const renderCard = (card: Card): React.ReactNode => {
@@ -149,9 +156,31 @@ export function AnalyticsDashboard({ results, model, currencySymbol }: Props) {
           {editing ? 'Done editing' : 'Edit layout'}
         </button>
 
+        <div className="dashboard-toolbar-sep" />
+
+        <div className="dashboard-toolbar-menu">
+          <button className="tb-btn" onClick={() => setOpenMenu(openMenu === 'presets' ? null : 'presets')}>
+            Presets ▾
+          </button>
+          {openMenu === 'presets' && (
+            <div className="dashboard-toolbar-pop dashboard-toolbar-pop--wide">
+              {PRESETS.map((p) => (
+                <button
+                  key={p.key}
+                  className="dashboard-preset-row"
+                  onClick={() => handleLoadPreset(p.key)}
+                  title={p.description}
+                >
+                  <span className="dashboard-preset-label">{p.label}</span>
+                  <span className="dashboard-preset-desc">{p.description}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
         {editing && (
           <>
-            <div className="dashboard-toolbar-sep" />
             <div className="dashboard-toolbar-menu">
               <button className="tb-btn" onClick={() => setOpenMenu(openMenu === 'add' ? null : 'add')}>
                 + Add card

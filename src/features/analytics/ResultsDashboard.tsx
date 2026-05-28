@@ -132,16 +132,35 @@ export function ResultsDashboard({
   const emissionsSummary = results.summary.find((s) => s.label === 'System emissions');
   const emissionsDisplay = emissionsSummary ? emissionsSummary.value : '—';
 
+  const totalCostSummary = results.summary.find((s) => s.label === 'Total cost')
+    ?? results.summary.find((s) => s.label === 'System cost');
+  const totalCostDisplay = totalCostSummary ? totalCostSummary.value : '—';
+
   const sortedLoad: number[] = systemLoadRows
     .map((r) => numberValue(r['load'] as number | string | undefined))
     .filter((v) => v > 0)
     .sort((a, b) => b - a);
 
   const peakLoad = sortedLoad.length > 0 ? sortedLoad[0] : undefined;
+  const avgLoad = sortedLoad.length > 0 ? sortedLoad.reduce((a, b) => a + b, 0) / sortedLoad.length : undefined;
+  const loadFactor = peakLoad && avgLoad ? (avgLoad / peakLoad) : undefined;
 
   const sortedPrice: number[] = systemPriceRows
     .map((r) => numberValue(r['price'] as number | string | undefined))
     .sort((a, b) => b - a);
+
+  const minPrice = sortedPrice.length > 0 ? sortedPrice[sortedPrice.length - 1] : undefined;
+  const maxPrice = sortedPrice.length > 0 ? sortedPrice[0] : undefined;
+
+  // Renewable share — sum of carrierMix entries whose co2_emissions == 0.
+  const carriersBySheet = new Map(model.carriers.map((c) => [String(c.name ?? ''), c]));
+  const renewableMwh = results.carrierMix.reduce((s, m) => {
+    const co2 = numberValue(carriersBySheet.get(m.label)?.co2_emissions);
+    return co2 <= 0 ? s + m.value : s;
+  }, 0);
+  const renewableShare = totalDispatch > 0 ? (renewableMwh / totalDispatch) * 100 : 0;
+
+  const snapshotCount = results.runMeta.snapshotCount;
 
   const costMix = results.costBreakdown
     .filter((item) => item.value > 0)
@@ -210,11 +229,17 @@ export function ResultsDashboard({
           </button>
         </div>
       )}
-      {/* KPI strip */}
+      {/* KPI strip — Bloomberg-style dense terminal row */}
       <div className="kpi-strip">
-        <KpiCard label="Total dispatch" value={Math.round(totalDispatch).toLocaleString()} unit="MWh" />
-        <KpiCard label="Avg price" value={`${avgPrice.toFixed(1)}`} unit={`${currencySymbol}/MWh`} />
-        <KpiCard label="Emissions" value={emissionsDisplay} unit="" />
+        <KpiCard label="Total cost"   value={totalCostDisplay} unit="" />
+        <KpiCard label="Dispatch"     value={Math.round(totalDispatch).toLocaleString()} unit="MWh" />
+        <KpiCard label="Avg price"    value={avgPrice.toFixed(1)} unit={`${currencySymbol}/MWh`} />
+        <KpiCard label="Min · Max"    value={minPrice !== undefined && maxPrice !== undefined ? `${minPrice.toFixed(0)} · ${maxPrice.toFixed(0)}` : '—'} unit={`${currencySymbol}/MWh`} />
+        <KpiCard label="Peak load"    value={peakLoad !== undefined ? Math.round(peakLoad).toLocaleString() : '—'} unit="MW" />
+        <KpiCard label="Load factor"  value={loadFactor !== undefined ? `${(loadFactor * 100).toFixed(1)}%` : '—'} unit="" />
+        <KpiCard label="Renewables"   value={`${renewableShare.toFixed(1)}%`} unit="" green={renewableShare >= 50} />
+        <KpiCard label="Emissions"    value={emissionsDisplay} unit="" />
+        <KpiCard label="Snapshots"    value={String(snapshotCount)} unit={`× ${results.runMeta.snapshotWeight}h`} />
       </div>
 
       {results.stochastic?.enabled && (

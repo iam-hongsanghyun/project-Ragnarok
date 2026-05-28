@@ -3006,61 +3006,110 @@ path.leaflet-interactive:focus {
 .sc-status--error   { background: #fee2e2; color: #dc2626; }
 
 /* ── Results dashboard ────────────────────────────────────────────────────── */
-.results-dashboard { display: flex; flex-direction: column; gap: 16px; margin-bottom: 24px; }
+/* ── Result tab — Bloomberg-style dense dashboard ─────────────────── */
 
-.kpi-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.results-dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 12px 24px;
+}
+
+.kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
 
 .kpi-card {
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 16px 20px;
-}
-.kpi-card .kpi-value {
-  font-size: 1.6rem;
-  font-weight: 700;
-  color: var(--text);
-  line-height: 1.1;
-  margin: 4px 0 2px;
+  background: var(--surface);
+  border: none;
+  border-radius: 0;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 .kpi-card .kpi-label {
-  font-size: 0.8rem;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--muted);
-  margin-bottom: 2px;
+  margin: 0;
 }
-.kpi-card .kpi-unit { font-size: 0.8rem; color: var(--muted); }
-.kpi-card--green .kpi-value { color: #16a34a; }
+.kpi-card .kpi-value {
+  font-family: var(--font-mono);
+  font-size: 1.0rem;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.1;
+  margin: 0;
+}
+.kpi-card .kpi-unit {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--muted);
+  margin: 0;
+}
+.kpi-card--green .kpi-value { color: var(--ok); }
+.kpi-card--danger .kpi-value { color: var(--danger); }
 
 .dashboard-section {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   overflow: hidden;
 }
 .dashboard-section-header-row {
   display: flex;
   align-items: stretch;
+  background: #f8fafc;
+  border-bottom: 1px solid var(--border);
 }
 .dashboard-section-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex: 1;
-  padding: 12px 16px;
+  padding: 6px 12px;
   cursor: pointer;
   user-select: none;
   background: transparent;
   border: none;
   text-align: left;
 }
-.dashboard-section-header:hover { background: rgba(0,0,0,0.02); }
+.dashboard-section-header:hover { background: rgba(37, 99, 235, 0.04); }
 .dashboard-section-header h3 {
   margin: 0;
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
-.dashboard-section-body { padding: 0 4px 8px; }
+.dashboard-section-body { padding: 8px 12px 12px; }
+.dashboard-section-header-row .chart-export-btn {
+  margin: 4px 8px;
+  padding: 3px 8px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--muted);
+  cursor: pointer;
+}
+.dashboard-section-header-row .chart-export-btn:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
 
 /* ── Plugin result cards ─────────────────────────────────────────────────── */
 .plugin-result-table {
@@ -4224,15 +4273,14 @@ th:hover .col-delete-btn {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
-  background: #f8fafc;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  margin-bottom: 16px;
+  padding: 4px 0 8px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
 }
 .dashboard-export-title {
-  font-size: 0.82rem;
-  font-weight: 600;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 500;
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -6079,5 +6127,38 @@ code, kbd, samp, tt,
   list-style: none;
   color: var(--muted);
   font-style: italic;
+}
+
+
+/* Preset selector in the Analytics dashboard toolbar */
+.dashboard-toolbar-pop--wide {
+  min-width: 280px;
+}
+.dashboard-preset-row {
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  transition: background 100ms ease, border-color 100ms ease;
+}
+.dashboard-preset-row:hover {
+  background: #f1f5f9;
+  border-color: var(--border);
+}
+.dashboard-preset-label {
+  font-family: var(--font-sans);
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.dashboard-preset-desc {
+  font-size: 0.74rem;
+  color: var(--muted);
+  line-height: 1.4;
 }
 
