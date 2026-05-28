@@ -5440,6 +5440,13 @@ th:hover .col-delete-btn {
   overflow: hidden;
 }
 .model-column-map .pane-header { padding: 0 14px; }
+/* The map column wraps its content in .pane, which otherwise carries the
+   shared 1px panel border — that double outline made the map look boxed
+   while the flush tree/table columns don't. Column separation is handled
+   by .model-column's own border-right. */
+.model-column-map .pane {
+  border: none;
+}
 .model-column-map .map-frame {
   flex: 1 1 auto;
   min-height: 0;
