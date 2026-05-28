@@ -441,15 +441,15 @@ function ModuleCard({
         aria-expanded={expanded}
       >
         <div className="sg-module-name-row">
-          <strong>{module.name || module.id}</strong>
+          <strong className="sg-module-name">{module.name || module.id}</strong>
           <span className={`sg-module-status sg-module-status--${module.status}`}>
             {statusLabel(module)}
           </span>
+          <span className="sg-module-card-chevron" aria-hidden>{expanded ? '▴' : '▾'}</span>
         </div>
         <p className="sg-module-meta">
           {module.id} · v{module.version || '—'} · sdk {module.sdkVersion || '—'}
         </p>
-        <span className="sg-module-card-chevron">{expanded ? '▲' : '▼'}</span>
       </button>
 
       {/* ── Body (expanded only) ────────────────────────────────────── */}
@@ -511,23 +511,18 @@ export function ModuleManagerSection({
   }
 
   return (
-    <div className="sg-setting-row">
+    <div className="sg-module-rail">
       <div className="sg-module-head">
-        <div>
-          <p className="sg-setting-section-title">Local module host</p>
-          <p className="sg-setting-hint">
-            {inventory
-              ? `SDK ${inventory.host.sdkVersion} · ${enabledIds.length} enabled`
-              : 'Install trusted local modules to extend Ragnarok.'}
-          </p>
-        </div>
-        <div className="sg-btn-row">
-          <button className="tb-btn" onClick={() => fileInputRef.current?.click()} disabled={loading}>
-            {loading ? 'Installing…' : 'Install'}
-          </button>
-          <input ref={fileInputRef} type="file" accept=".zip"
-            style={{ display: 'none' }} onChange={handleFileChange} />
-        </div>
+        <span className="sg-module-meta">
+          {inventory
+            ? `SDK ${inventory.host.sdkVersion} · ${enabledIds.length} enabled`
+            : 'No host'}
+        </span>
+        <button className="tb-btn" onClick={() => fileInputRef.current?.click()} disabled={loading}>
+          {loading ? 'Installing…' : 'Install'}
+        </button>
+        <input ref={fileInputRef} type="file" accept=".zip"
+          style={{ display: 'none' }} onChange={handleFileChange} />
       </div>
 
       {error && <p className="sg-error-text">{error}</p>}

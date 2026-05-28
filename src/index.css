@@ -814,10 +814,16 @@ button {
   padding: 2px 6px;
   font-size: 0.72rem;
 }
+.sg-module-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 4px;
+}
 .sg-module-head {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 10px;
 }
 .sg-module-roots,
@@ -842,9 +848,19 @@ button {
 .sg-module-card-top,
 .sg-module-name-row {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
+}
+
+.sg-module-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sg-module-card-header {
@@ -856,15 +872,13 @@ button {
   cursor: pointer;
   position: relative;
 }
-.sg-module-card-header:hover strong {
+.sg-module-card-header:hover .sg-module-name {
   color: var(--brand);
 }
 .sg-module-card-chevron {
-  position: absolute;
-  top: 2px;
-  right: 0;
-  font-size: 0.65rem;
+  font-size: 0.7rem;
   color: var(--muted);
+  flex-shrink: 0;
   pointer-events: none;
 }
 .sg-module-card-body {
@@ -4952,10 +4966,10 @@ th:hover .col-delete-btn {
   min-width: 0;
 }
 .view-rail {
-  width: 260px;
-  min-width: 200px;
+  width: 280px;
+  min-width: 240px;
   flex-shrink: 0;
-  background: #f8fafc;
+  background: var(--surface);
   border-right: 1px solid var(--border);
   overflow-y: auto;
   display: flex;
@@ -4965,13 +4979,20 @@ th:hover .col-delete-btn {
   /* nothing extra */
 }
 .view-rail-header {
-  padding: 12px 16px 8px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  font-family: var(--font-mono);
   font-size: 0.7rem;
-  font-weight: 700;
+  font-weight: 500;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted);
   border-bottom: 1px solid var(--border);
+  background: #f1f5f9;
+  box-sizing: border-box;
 }
 .view-main {
   flex: 1 1 auto;
@@ -5731,14 +5752,19 @@ code, kbd, samp, tt,
 /* ── Plugins view: header + module switcher ───────────────────────── */
 
 .plugin-panel-header {
-  padding: 10px 14px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0 14px;
   border-bottom: 1px solid var(--border);
-  background: #f8fafc;
+  background: #f1f5f9;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
 }
 
 .plugin-panel-title {
   margin: 0;
-  font-size: 0.92rem;
+  font-size: 0.86rem;
   font-weight: 600;
   color: var(--text);
   display: flex;
