@@ -1,14 +1,26 @@
 /**
  * Built-in preset layouts for the Analytics dashboard.
  *
- * Each preset gives a different analytical angle on the same run.
- * Loading one replaces the current layout (autosaved). The user can
- * then resize, rearrange, or save under a new name.
+ * Loading a preset replaces the active layout (autosaved). The user
+ * can then resize, rearrange, or save under a new name.
+ *
+ * Each preset is hand-shaped around the aspect rule the dashboard
+ * enforces for `autoHeight` rows:
+ *     1 cell → height = 0.5 × containerWidth   (wide hero chart)
+ *     N ≥ 2 → height =       containerWidth / N   (square cells)
+ * So:
+ *   single-cell rows  → big time-series charts
+ *   2-cell rows       → side-by-side comparisons in square panels
+ *   3-cell rows       → KPI-density tile strips
  *
  * All cards use `system` focus so the metric keys are stable across
- * any run. The known system-focus metric keys (see useMetricOptions):
- *   dispatch · dispatch_by_gen · load · system_price ·
- *   system_emissions · storage_power · storage_state
+ * any run. Known system-focus metric keys (see useMetricOptions):
+ *
+ *   Line / area / bar friendly:
+ *     dispatch · dispatch_by_gen · load · system_price ·
+ *     system_emissions · storage_state
+ *   Donut friendly (allowDonut === true):
+ *     dispatch · dispatch_by_gen · storage_power
  */
 import { ChartSectionConfig, ChartSectionType, TimeframeOption } from '../../../shared/types';
 import { EMPTY_METRIC_KEY } from '../../../constants';
@@ -43,12 +55,10 @@ interface CellSpec {
   flex?: number;
 }
 
-/** Build a chart card from a short spec. */
 function chartCard(spec: CellSpec): { card: Card; flex: number } {
-  const cardId = id('chart');
   return {
     card: {
-      id: cardId,
+      id: id('chart'),
       kind: 'chart',
       config: chartConfig({
         metricKey: spec.metric,
@@ -65,16 +75,6 @@ function notesCard(): { card: Card; flex: number } {
   return { card: { id: id('notes'), kind: 'notes' }, flex: 1 };
 }
 
-/** Shape a list of (card, flex) pairs into a Row.
- *
- * Heights are auto by default — the dashboard sizes each row from the
- * container width using the rule:
- *   1 cell  → 0.5 × width
- *   N ≥ 2   → width / N    (square cells)
- * So we don't need to hand-tune `height` per preset. The literal value
- * passed here is only a fallback for the unusual case where the user
- * later drags the resize handle and clears autoHeight.
- */
 function row(items: Array<{ card: Card; flex: number }>): {
   row: { id: string; height: number; autoHeight: boolean; cells: Array<{ id: string; flex: number; cardId: string }> };
   cards: Card[];
@@ -90,7 +90,6 @@ function row(items: Array<{ card: Card; flex: number }>): {
   };
 }
 
-/** Stitch rows into a layout, flattening their cards. */
 function layout(rows: Array<ReturnType<typeof row>>): DashboardLayout {
   return {
     rows: rows.map((r) => r.row),
@@ -106,119 +105,123 @@ export interface Preset {
 }
 
 export const PRESETS: Preset[] = [
-  // ── 1. Quick situational awareness ──────────────────────────────────────
+  // ── 1. Glance ───────────────────────────────────────────────────────────
   {
-    key: 'overview',
-    label: 'System overview',
-    description: 'Top-line situational awareness: stacked dispatch, then load + price side-by-side, then run notes.',
+    key: 'glance',
+    label: 'At a glance',
+    description: 'Three small donuts up top showing the energy / generator / storage mix; one big hero dispatch chart; then load and price side-by-side.',
     build: () => layout([
-      row([chartCard({ metric: 'dispatch',      chart: 'area', stacked: true })]),
+      row([
+        chartCard({ metric: 'dispatch',        chart: 'donut' }),
+        chartCard({ metric: 'dispatch_by_gen', chart: 'donut' }),
+        chartCard({ metric: 'storage_power',   chart: 'donut' }),
+      ]),
+      row([chartCard({ metric: 'dispatch', chart: 'area', stacked: true })]),
       row([
         chartCard({ metric: 'load' }),
         chartCard({ metric: 'system_price' }),
       ]),
-      row([notesCard()]),
     ]),
   },
 
-  // ── 2. Detailed dispatch viewing ────────────────────────────────────────
+  // ── 2. Operations log (hero stack) ─────────────────────────────────────
   {
-    key: 'dispatch-deep-dive',
-    label: 'Dispatch deep-dive',
-    description: 'Three ways to slice generation: stacked area by carrier, stacked area by generator, and a donut of total energy. Load reference below.',
+    key: 'ops-log',
+    label: 'Operations log',
+    description: 'Four full-width time series stacked vertically: dispatch · load · price · emissions. The hourly story of the system.',
+    build: () => layout([
+      row([chartCard({ metric: 'dispatch',         chart: 'area', stacked: true })]),
+      row([chartCard({ metric: 'load',             chart: 'line' })]),
+      row([chartCard({ metric: 'system_price',     chart: 'line' })]),
+      row([chartCard({ metric: 'system_emissions', chart: 'line' })]),
+    ]),
+  },
+
+  // ── 3. Daily digest ────────────────────────────────────────────────────
+  {
+    key: 'daily-digest',
+    label: 'Daily digest',
+    description: 'Daily-aggregated bars (dispatch · load · price · emissions) in a 2×2 grid, then the underlying hourly dispatch below.',
     build: () => layout([
       row([
-        chartCard({ metric: 'dispatch',        chart: 'area', stacked: true }),
-        chartCard({ metric: 'dispatch_by_gen', chart: 'area', stacked: true }),
-        chartCard({ metric: 'dispatch',        chart: 'donut' }),
+        chartCard({ metric: 'dispatch',         chart: 'bar',  stacked: true, timeframe: 'daily' }),
+        chartCard({ metric: 'load',             chart: 'bar',                 timeframe: 'daily' }),
       ]),
-      row([chartCard({ metric: 'load' })]),
-    ]),
-  },
-
-  // ── 3. Storage cycle inspection ─────────────────────────────────────────
-  {
-    key: 'storage-focus',
-    label: 'Storage operations',
-    description: 'Dispatch on top, then storage state-of-charge and charge/discharge power side-by-side.',
-    build: () => layout([
+      row([
+        chartCard({ metric: 'system_price',     chart: 'line',                timeframe: 'daily' }),
+        chartCard({ metric: 'system_emissions', chart: 'bar',                 timeframe: 'daily' }),
+      ]),
       row([chartCard({ metric: 'dispatch', chart: 'area', stacked: true })]),
+    ]),
+  },
+
+  // ── 4. Supply mix ──────────────────────────────────────────────────────
+  {
+    key: 'supply-mix',
+    label: 'Supply mix',
+    description: 'Where the energy is coming from: stacked by carrier, then stacked by individual generator, then donuts of each.',
+    build: () => layout([
+      row([chartCard({ metric: 'dispatch',        chart: 'area', stacked: true })]),
+      row([chartCard({ metric: 'dispatch_by_gen', chart: 'area', stacked: true })]),
       row([
-        chartCard({ metric: 'storage_state' }),
-        chartCard({ metric: 'storage_power' }),
+        chartCard({ metric: 'dispatch',        chart: 'donut' }),
+        chartCard({ metric: 'dispatch_by_gen', chart: 'donut' }),
+        notesCard(),
       ]),
     ]),
   },
 
-  // ── 4. Market & economics ───────────────────────────────────────────────
+  // ── 5. Market & price ──────────────────────────────────────────────────
   {
-    key: 'market-economics',
-    label: 'Market & economics',
-    description: 'Price front-and-centre, then load + dispatch composition + emissions side-by-side. For traders and economists.',
+    key: 'market',
+    label: 'Market & price',
+    description: 'Price front-and-centre with a daily summary, then the load and energy-mix context that drives it.',
     build: () => layout([
       row([chartCard({ metric: 'system_price', chart: 'line' })]),
       row([
-        chartCard({ metric: 'load' }),
-        chartCard({ metric: 'dispatch',         chart: 'donut' }),
-        chartCard({ metric: 'system_emissions', chart: 'line' }),
+        chartCard({ metric: 'system_price', chart: 'bar',   timeframe: 'daily' }),
+        chartCard({ metric: 'load',         chart: 'line' }),
+        chartCard({ metric: 'dispatch',     chart: 'donut' }),
       ]),
-      row([notesCard()]),
+      row([chartCard({ metric: 'dispatch_by_gen', chart: 'area', stacked: true })]),
     ]),
   },
 
-  // ── 5. Carrier mix and curtailment ──────────────────────────────────────
+  // ── 6. Storage cycle ───────────────────────────────────────────────────
   {
-    key: 'carrier-mix',
-    label: 'Carrier mix',
-    description: 'Large stacked dispatch view, then carrier-share donut + daily generator dispatch.',
+    key: 'storage',
+    label: 'Storage cycle',
+    description: 'State of charge over the run, then charge/discharge power, then the dispatch and load it interacts with.',
     build: () => layout([
-      row([chartCard({ metric: 'dispatch', chart: 'area', stacked: true })]),
+      row([chartCard({ metric: 'storage_state' })]),
+      row([chartCard({ metric: 'storage_power', chart: 'area' })]),
       row([
-        chartCard({ metric: 'dispatch',        chart: 'donut' }),
-        chartCard({ metric: 'dispatch_by_gen', chart: 'bar', stacked: true, timeframe: 'daily' }),
+        chartCard({ metric: 'dispatch', chart: 'area', stacked: true }),
+        chartCard({ metric: 'load' }),
       ]),
-      row([notesCard()]),
     ]),
   },
 
-  // ── 6. Emissions trajectory ─────────────────────────────────────────────
+  // ── 7. Emissions tracker ───────────────────────────────────────────────
   {
     key: 'emissions',
-    label: 'Emissions trajectory',
-    description: 'System emissions over time + daily emissions bars side-by-side, with dispatch context below.',
+    label: 'Emissions tracker',
+    description: 'Hourly emissions on top, then a daily bar comparison and the dispatch mix that produced them.',
     build: () => layout([
+      row([chartCard({ metric: 'system_emissions', chart: 'line' })]),
       row([
-        chartCard({ metric: 'system_emissions', chart: 'line' }),
-        chartCard({ metric: 'system_emissions', chart: 'bar', timeframe: 'daily' }),
+        chartCard({ metric: 'system_emissions', chart: 'bar',   timeframe: 'daily' }),
+        chartCard({ metric: 'dispatch',         chart: 'donut' }),
       ]),
       row([chartCard({ metric: 'dispatch', chart: 'area', stacked: true })]),
-      row([notesCard()]),
     ]),
   },
 
-  // ── 7. Daily summary ────────────────────────────────────────────────────
+  // ── 8. Trader board (3×3 density) ──────────────────────────────────────
   {
-    key: 'daily-summary',
-    label: 'Daily summary',
-    description: 'Everything aggregated to daily resolution: easier to read multi-week runs.',
-    build: () => layout([
-      row([
-        chartCard({ metric: 'dispatch',         chart: 'bar', stacked: true, timeframe: 'daily' }),
-        chartCard({ metric: 'load',             chart: 'bar',               timeframe: 'daily' }),
-      ]),
-      row([
-        chartCard({ metric: 'system_price',     chart: 'line',              timeframe: 'daily' }),
-        chartCard({ metric: 'system_emissions', chart: 'bar',               timeframe: 'daily' }),
-      ]),
-      row([notesCard()]),
-    ]),
-  },
-
-  // ── 8. Trader-style 3×3 tile board ──────────────────────────────────────
-  {
-    key: 'trader-board',
+    key: 'trader',
     label: 'Trader board (3×3)',
-    description: 'Nine small tiles: load, price, emissions, two dispatch views, donut, storage SoC, storage power, notes. Bloomberg-terminal density.',
+    description: 'Nine compact tiles in a Bloomberg-terminal grid: load · price · emissions; two dispatch views and energy donut; two storage views and run notes.',
     build: () => layout([
       row([
         chartCard({ metric: 'load' }),
@@ -238,11 +241,26 @@ export const PRESETS: Preset[] = [
     ]),
   },
 
-  // ── 9. Minimal blank starting point ─────────────────────────────────────
+  // ── 9. Notes-led briefing ──────────────────────────────────────────────
   {
-    key: 'minimal',
-    label: 'Blank minimal',
-    description: 'One empty chart card. Build the rest yourself.',
+    key: 'briefing',
+    label: 'Briefing',
+    description: 'Run-notes commentary at the top, then a hero dispatch chart, then load and price beneath. Good for screenshots / hand-offs.',
+    build: () => layout([
+      row([notesCard()]),
+      row([chartCard({ metric: 'dispatch', chart: 'area', stacked: true })]),
+      row([
+        chartCard({ metric: 'load' }),
+        chartCard({ metric: 'system_price' }),
+      ]),
+    ]),
+  },
+
+  // ── 10. Blank ──────────────────────────────────────────────────────────
+  {
+    key: 'blank',
+    label: 'Blank',
+    description: 'One empty chart card. Open its settings to choose what to plot.',
     build: () => layout([
       row([chartCard({ metric: EMPTY_METRIC_KEY })]),
     ]),

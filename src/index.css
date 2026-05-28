@@ -6347,6 +6347,28 @@ code, kbd, samp, tt,
   display: flex;
   gap: 6px;
   flex-shrink: 0;
+  align-items: center;
+}
+
+.chart-modal-close {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 4px;
+}
+.chart-modal-close:hover {
+  color: var(--danger);
+  border-color: var(--danger);
 }
 
 .chart-modal-body {

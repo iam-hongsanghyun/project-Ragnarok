@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   AnalyticsFocus,
@@ -84,6 +84,14 @@ export function UserDefinedChartCard({
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const { showToast } = useToast();
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // Esc closes the settings modal.
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSettingsOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [settingsOpen]);
 
   const assetNames = assetNamesFor(section.focusType, model);
 
@@ -390,6 +398,14 @@ export function UserDefinedChartCard({
                   {hasMetric && <button className="tb-btn" onClick={handleExport}>Export</button>}
                   <button className="tb-btn" onClick={onClean}>Clean</button>
                   <button className="tb-btn tb-btn--active" onClick={() => setSettingsOpen(false)}>Apply</button>
+                  <button
+                    className="chart-modal-close"
+                    onClick={() => setSettingsOpen(false)}
+                    aria-label="Close settings"
+                    title="Close (Esc)"
+                  >
+                    ×
+                  </button>
                 </div>
               </div>
               <div className="chart-modal-body">
