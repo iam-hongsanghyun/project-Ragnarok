@@ -39,12 +39,21 @@ function chunkText(text: string): string[] {
   return parts;
 }
 
-// PyPSA's canonical time-index column name. A dataset is "temporal" iff it
-// carries this column. Static component sheets are keyed by `name` and never
-// have a `snapshot` column, so this single-name gate can be applied to every
-// sheet without risk of corrupting static data. We recognise ONLY this name —
-// no datetime/index/timestep fallbacks (strict PyPSA convention).
-const SNAPSHOT_COL = 'snapshot';
+// Central temporal normalisation/export config.
+const TEMPORAL_CONFIG = {
+  snapshotColumn: 'snapshot',
+  periodColumn: 'period',
+  defaultTimeSuffix: 'T00:00:00',
+} as const;
+const SNAPSHOT_COL = TEMPORAL_CONFIG.snapshotColumn;
+const PERIOD_COL = TEMPORAL_CONFIG.periodColumn;
+
+function normalizeSnapshotIso(raw: string, fmt: DateFormat): string {
+  const iso = normalizeDateToIso(raw, fmt);
+  return /^\d{4}-\d{2}-\d{2}$/.test(iso)
+    ? `${iso}${TEMPORAL_CONFIG.defaultTimeSuffix}`
+    : iso;
+}
 
 /** True when a row set is a temporal sheet (has the canonical `snapshot` column). */
 export function hasSnapshotColumn(rows: GridRow[] | undefined): boolean {
@@ -58,14 +67,14 @@ export function hasSnapshotColumn(rows: GridRow[] | undefined): boolean {
  */
 export function orderTemporalRow(row: GridRow): GridRow {
   const ordered: GridRow = {};
-  if (row.period !== undefined && row.period !== null && row.period !== '') {
-    ordered.period = row.period;
+  if (row[PERIOD_COL] !== undefined && row[PERIOD_COL] !== null && row[PERIOD_COL] !== '') {
+    ordered[PERIOD_COL] = row[PERIOD_COL];
   }
   if (SNAPSHOT_COL in row) {
     ordered[SNAPSHOT_COL] = row[SNAPSHOT_COL];
   }
   for (const [key, value] of Object.entries(row)) {
-    if (key === 'period' || key === SNAPSHOT_COL) continue;
+    if (key === PERIOD_COL || key === SNAPSHOT_COL) continue;
     ordered[key] = value;
   }
   return ordered;
@@ -82,7 +91,7 @@ export function canonicalizeTemporalRows(rows: GridRow[], fmt: DateFormat): Grid
   return rows.map((row) => {
     const copy = { ...row };
     const v = copy[SNAPSHOT_COL];
-    if (typeof v === 'string') copy[SNAPSHOT_COL] = normalizeDateToIso(v, fmt);
+    if (typeof v === 'string') copy[SNAPSHOT_COL] = normalizeSnapshotIso(v, fmt);
     return orderTemporalRow(copy);
   });
 }
@@ -91,8 +100,28 @@ export function canonicalizeTemporalRows(rows: GridRow[], fmt: DateFormat): Grid
  *  canonicalised by the same `snapshot`-gated transform. */
 export const prepareTemporalRowsForExport = canonicalizeTemporalRows;
 
+/** Stable temporal column header for SheetJS export (`period?`, `snapshot`, then data cols). */
+export function temporalHeader(rows: GridRow[]): string[] {
+  if (!rows.length) return [];
+  const ordered = new Set<string>();
+  rows.forEach((row) => Object.keys(row).forEach((key) => ordered.add(key)));
+  const keys = Array.from(ordered);
+  const rest = keys.filter((key) => key !== PERIOD_COL && key !== SNAPSHOT_COL);
+  const header: string[] = [];
+  if (keys.includes(PERIOD_COL)) header.push(PERIOD_COL);
+  if (keys.includes(SNAPSHOT_COL)) header.push(SNAPSHOT_COL);
+  return [...header, ...rest];
+}
+
 function temporalSheetRowsForExport(_sheet: string, rows: GridRow[], fmt: DateFormat): GridRow[] {
   return canonicalizeTemporalRows(rows, fmt);
+}
+
+function temporalSheetToWorksheet(rows: GridRow[]): XLSX.WorkSheet {
+  const header = temporalHeader(rows);
+  return header.length > 0
+    ? XLSX.utils.json_to_sheet(rows, { header })
+    : XLSX.utils.json_to_sheet(rows);
 }
 
 /**
@@ -210,7 +239,7 @@ export function buildWorkbook(model: WorkbookModel, dateFormat: DateFormat = 'au
     const rows = (model as any)[sheet] as GridRow[] | undefined;
     if (!rows || rows.length === 0) return;
     const prepared = prepareTemporalRowsForExport(rows, dateFormat);
-    const ws = XLSX.utils.json_to_sheet(prepared);
+    const ws = temporalSheetToWorksheet(prepared);
     XLSX.utils.book_append_sheet(workbook, ws, sheet);
   });
   [PATHWAY_CONFIG_SHEET, PATHWAY_PERIODS_SHEET, ROLLING_CONFIG_SHEET, SCENARIO_SHEET].forEach((sheet) => {
@@ -374,7 +403,7 @@ export function buildProjectWorkbook(
     const rows = (model as any)[sheet] as GridRow[] | undefined;
     if (!rows || rows.length === 0) return;
     const prepared = prepareTemporalRowsForExport(rows, dateFormat);
-    const ws = XLSX.utils.json_to_sheet(prepared);
+    const ws = temporalSheetToWorksheet(prepared);
     XLSX.utils.book_append_sheet(workbook, ws, sheet);
   });
 
@@ -382,7 +411,7 @@ export function buildProjectWorkbook(
   Object.entries(outputs.series).forEach(([sheet, rows]) => {
     if (!rows || rows.length === 0) return;
     const prepared = prepareTemporalRowsForExport(rows, dateFormat);
-    const ws = XLSX.utils.json_to_sheet(prepared);
+    const ws = temporalSheetToWorksheet(prepared);
     XLSX.utils.book_append_sheet(workbook, ws, sheet);
   });
 

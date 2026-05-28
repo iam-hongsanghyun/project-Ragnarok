@@ -610,7 +610,12 @@ export function TablesPane({ model, onUpdate, onAddRow, onDeleteRow, onAddColumn
   const rawCols: string[] =
     rows.length > 0
       ? isTs
-        ? Object.keys(rows[0])
+        ? (() => {
+            // Union all keys to avoid first-row integer-like key reordering issues.
+            const ordered = new Set<string>();
+            rows.forEach((row) => Object.keys(row).forEach((key) => ordered.add(key)));
+            return Array.from(ordered);
+          })()
         : getColumns(rows, sel.sheet as SheetName)
       : isTs
         ? []

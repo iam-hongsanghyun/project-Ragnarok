@@ -291,6 +291,22 @@ describe('export temporal sheet formatting', () => {
     const rows = XLSX.utils.sheet_to_json<Record<string, string>>(wb.Sheets['generators-p']!);
     expect(rows[0].snapshot).toBe('2024-01-01T00:00:00');
   });
+
+  test('numeric-like TS column names never outrank snapshot column on export', () => {
+    const outputs: ProjectOutputs = {
+      static: {},
+      series: {
+        'generators-p': [
+          { '10': 1, '2': 2, snapshot: '2024-01-01 00:00', '101': 3 },
+          { '10': 4, '2': 5, snapshot: '2024-01-01 01:00', '101': 6 },
+        ],
+      },
+    };
+    const wb = buildProjectWorkbook(makeBaseModel(), outputs);
+    const header = XLSX.utils.sheet_to_json<string[]>(wb.Sheets['generators-p']!, { header: 1 })[0];
+    expect(header[0]).toBe('snapshot');
+    expect(header.slice(1)).toEqual(['2', '10', '101']);
+  });
 });
 
 describe('canonicalizeTemporalSheets (in-memory normalization)', () => {
@@ -303,6 +319,12 @@ describe('canonicalizeTemporalSheets (in-memory normalization)', () => {
     expect(out[0].snapshot).toBe('2024-08-01T00:00:00');
     expect(out[1].snapshot).toBe('2024-08-01T01:00:00');
     expect(out[0].load_a).toBe(100);
+  });
+
+  test('date-only snapshots are normalized to ISO timestamp with T00:00:00', () => {
+    const rows: GridRow[] = [{ snapshot: '2024-08-01', load_a: 100 }];
+    const out = canonicalizeTemporalRows(rows, 'auto');
+    expect(out[0].snapshot).toBe('2024-08-01T00:00:00');
   });
 
   test('snapshot is moved to the first column', () => {
