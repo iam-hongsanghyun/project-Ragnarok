@@ -25,6 +25,7 @@ import { ModelIssue } from '../features/validation/useModelIssues';
 import { ValidationPane } from '../features/validation/ValidationPane';
 import { AnalyticsPane, EmptyAnalytics } from '../features/analytics/AnalyticsPane';
 import { ComparisonPane } from '../features/analytics/ComparisonPane';
+import { RunHistoryList } from '../features/run-history/RunHistoryList';
 import { AnalyticsSubnav } from './AnalyticsView.features/AnalyticsSubnav';
 
 interface ValidationResult {
@@ -70,13 +71,20 @@ export interface AnalyticsViewProps {
 
   // Comparison
   onToggleComparison: (id: string, inComparison: boolean) => void;
+
+  // Run history rail
+  onRestoreRun: (entry: RunHistoryEntry) => void;
+  onRenameHistoryEntry: (id: string, label: string) => void;
+  onPinHistoryEntry: (id: string, pinned: boolean) => void;
+  onDeleteHistoryEntry: (id: string) => void;
 }
 
 export function AnalyticsView(props: AnalyticsViewProps) {
-  const { analyticsSubTab, displayResults, filename } = props;
+  const { analyticsSubTab, displayResults, filename, runHistory } = props;
 
   return (
-    <div className="pane analytics-outer-pane">
+    <div className="analytics-view">
+      <div className="analytics-view-main">
       <div className="pane-header analytics-outer-header">
         <AnalyticsSubnav
           subTab={analyticsSubTab}
@@ -131,7 +139,7 @@ export function AnalyticsView(props: AnalyticsViewProps) {
             systemLoadRows={props.systemLoadRows}
             systemPriceRows={props.systemPriceRows}
             storageRows={props.storageRows}
-            runHistory={props.runHistory}
+            runHistory={runHistory}
             subTab={analyticsSubTab}
             currencySymbol={props.currencySymbol}
             pathwayConfig={props.pathwayConfig}
@@ -139,6 +147,24 @@ export function AnalyticsView(props: AnalyticsViewProps) {
             onExportAll={props.onExportAll}
           />
         )
+      )}
+      </div>
+
+      {runHistory.length > 0 && (
+        <aside className="analytics-view-rail" aria-label="Run history">
+          <div className="analytics-view-rail-header">Run history</div>
+          <div className="analytics-view-rail-body">
+            <RunHistoryList
+              runHistory={runHistory}
+              onRestoreRun={props.onRestoreRun}
+              onRenameHistoryEntry={props.onRenameHistoryEntry}
+              onPinHistoryEntry={props.onPinHistoryEntry}
+              onDeleteHistoryEntry={props.onDeleteHistoryEntry}
+              onToggleComparison={props.onToggleComparison}
+              currencySymbol={props.currencySymbol}
+            />
+          </div>
+        </aside>
       )}
     </div>
   );

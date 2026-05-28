@@ -1579,6 +1579,10 @@ function AppInner() {
                 showToast('Full results exported to Excel', 'success');
               }}
               onToggleComparison={handleToggleComparison}
+              onRestoreRun={handleRestoreRun}
+              onRenameHistoryEntry={handleRenameHistoryEntry}
+              onPinHistoryEntry={handlePinHistoryEntry}
+              onDeleteHistoryEntry={handleDeleteHistoryEntry}
             />
           )}
 

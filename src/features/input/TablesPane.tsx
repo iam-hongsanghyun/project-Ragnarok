@@ -693,17 +693,6 @@ export function TablesPane({
   const addColBtnRef = useRef<HTMLButtonElement | null>(null);
   const csvInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Per-sheet issue counts for nav badges
-  const issueCounts = useMemo(() => {
-    const counts: Record<string, { errors: number; warnings: number }> = {};
-    issues.forEach((issue) => {
-      if (!counts[issue.sheet]) counts[issue.sheet] = { errors: 0, warnings: 0 };
-      if (issue.severity === 'error') counts[issue.sheet].errors++;
-      else counts[issue.sheet].warnings++;
-    });
-    return counts;
-  }, [issues]);
-
   // Row issue map for the currently visible sheet
   const rowIssueMap = useMemo(() => {
     const map = new Map<number, 'error' | 'warning'>();
