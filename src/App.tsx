@@ -36,9 +36,6 @@ import { exportFullResults } from './shared/utils/exportResults';
 import { ActivityId, usePersistedLayout } from './shared/utils/persistedLayout';
 import { ActivityBar } from './layout/ActivityBar';
 import { StatusBar } from './layout/StatusBar';
-import { CommandPalette } from './shared/commands/CommandPalette';
-import { Command } from './shared/commands/types';
-import { useKeyboardShortcuts } from './shared/commands/useKeyboardShortcuts';
 import { exportReportHtml } from './shared/utils/exportReport';
 import { getBounds, getBusIndex, carrierColor, numberValue, orderByCarrierRows, setCarrierColorOverrides, snapshotMaxFromWorkbook } from './shared/utils/helpers';
 import { buildRowsFromGeneratorDetails, buildSystemLoadRows, normalizeSeriesPoint } from './shared/utils/analytics';
@@ -111,7 +108,6 @@ function AppInner() {
   const [runDialogOpen, setRunDialogOpen] = useState(false);
   const [dryRun, setDryRun] = useState(false);
   const [activeWorkspaceOverlay, setActiveWorkspaceOverlay] = useState<'constraints' | 'run-setup' | 'settings' | null>(null);
-  const [paletteOpen, setPaletteOpen] = useState(false);
   const [runHistory, setRunHistory] = useState<RunHistoryEntry[]>([]);
   const [pathwayConfig, setPathwayConfig] = useState<PathwayConfig>(() => defaultPathwayConfig());
   const [rollingConfig, setRollingConfig] = useState<RollingHorizonConfig>(() => defaultRollingConfig());
@@ -1430,65 +1426,6 @@ function AppInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sidebarWidth]);
 
-  // ── Commands (palette + global keyboard shortcuts) ─────────────────────────
-  // Built fresh on every render so handlers always close over the latest
-  // state. Cheap — fewer than 30 entries and the palette mounts lazily.
-  // `useKeyboardShortcuts` reads commands via a ref so the listener stays
-  // registered across renders.
-  const commands: Command[] = [
-    // File
-    { id: 'file.open',         category: 'File', title: 'Open workbook…',          shortcut: 'Mod+O', handler: handleOpenWorkbook },
-    { id: 'file.save',         category: 'File', title: 'Save',                    shortcut: 'Mod+S', handler: saveWorkbook },
-    { id: 'file.saveAs',       category: 'File', title: 'Save As…',                shortcut: 'Mod+Shift+S', handler: saveAsWorkbook },
-    { id: 'file.importProject',  category: 'File', title: 'Import Project…',       handler: () => projectImportInputRef.current?.click() },
-    { id: 'file.exportProject',  category: 'File', title: 'Export Project…',       handler: handleExportProject },
-    { id: 'file.importCsv',      category: 'File', title: 'Import CSV folder (.zip)…',  handler: () => csvFolderImportInputRef.current?.click() },
-    { id: 'file.exportCsv',      category: 'File', title: 'Export CSV folder (.zip)', handler: handleExportCsvFolder },
-    { id: 'file.importNetcdf',   category: 'File', title: 'Import netCDF (.nc)…',  handler: () => netcdfImportInputRef.current?.click() },
-    { id: 'file.exportNetcdf',   category: 'File', title: 'Export netCDF (.nc)',   handler: handleExportNetcdf },
-    { id: 'file.importHdf5',     category: 'File', title: 'Import HDF5 (.h5)…',    handler: () => hdf5ImportInputRef.current?.click() },
-    { id: 'file.exportHdf5',     category: 'File', title: 'Export HDF5 (.h5)',     handler: handleExportHdf5 },
-    { id: 'file.exportResult',   category: 'File', title: 'Export Result',         disabled: !results, handler: () => {
-        if (!displayResults) return;
-        exportFullResults(model, displayResults, filename.replace(/\.xlsx$/i, ''));
-        showToast('Result workbook exported', 'success');
-      } },
-    { id: 'file.exportReport',   category: 'File', title: 'Export HTML Report',    disabled: !results, handler: () => {
-        if (!displayResults) return;
-        const base = filename.replace(/\.xlsx$/i, '') || 'ragnarok_report';
-        exportReportHtml(displayResults, { filename: `${base}_report`, projectName: base, currencySymbol: settings.currencySymbol });
-        showToast('HTML report exported', 'success');
-      } },
-
-    // Run
-    { id: 'run.open',          category: 'Run', title: 'Open run dialog…',        shortcut: 'Mod+R', handler: () => { setDryRun(false); setRunDialogOpen(true); } },
-    { id: 'run.validate',      category: 'Run', title: 'Validate model (dry run)…', handler: () => { setDryRun(true); setRunDialogOpen(true); } },
-    { id: 'run.cancel',        category: 'Run', title: 'Cancel running solve',    disabled: runStatus !== 'running', handler: handleCancelRun },
-
-    // Navigate (activity bar)
-    { id: 'nav.model',         category: 'Navigate', title: 'Go to Model',         shortcut: 'Mod+1', handler: () => setActiveActivity('model') },
-    { id: 'nav.solve',         category: 'Navigate', title: 'Go to Run setup',     shortcut: 'Mod+2', handler: () => setActiveActivity('solve') },
-    { id: 'nav.analytics',     category: 'Navigate', title: 'Go to Analytics',     shortcut: 'Mod+3', handler: () => setActiveActivity('analytics') },
-    { id: 'nav.plugins',       category: 'Navigate', title: 'Go to Plugins',       shortcut: 'Mod+4', disabled: moduleHost.enabledIds.length === 0, handler: () => setActiveActivity('plugins') },
-    { id: 'nav.validation',    category: 'Navigate', title: 'Go to Validation',    handler: () => { setTab('Analytics'); setAnalyticsSubTab('Validation'); } },
-    { id: 'nav.comparison',    category: 'Navigate', title: 'Go to Comparison',    handler: () => { setTab('Analytics'); setAnalyticsSubTab('Comparison'); } },
-
-    // View
-    { id: 'view.commandPalette', category: 'View', title: 'Command palette',       shortcut: 'Mod+K', hint: 'Mod+Shift+P', handler: () => setPaletteOpen((o) => !o) },
-    { id: 'view.commandPalette.alt', category: 'View', title: 'Command palette (alt)', shortcut: 'Mod+Shift+P', paletteHidden: true, handler: () => setPaletteOpen((o) => !o) },
-    { id: 'view.toggleSidebar', category: 'View', title: 'Toggle sidebar',         shortcut: 'Mod+B', handler: toggleSidebarOpen },
-    { id: 'overlay.runSetup',   category: 'View', title: 'Open Run setup',        handler: () => setActiveWorkspaceOverlay('run-setup') },
-    { id: 'overlay.constraints', category: 'View', title: 'Open Constraints',     handler: () => setActiveWorkspaceOverlay('constraints') },
-    { id: 'overlay.settings',   category: 'View', title: 'Open Settings',        shortcut: 'Mod+,', handler: () => setActiveWorkspaceOverlay('settings') },
-
-    // Scenarios
-    { id: 'scenario.new',       category: 'Scenarios', title: 'New scenario from current state', handler: handleCreateScenarioFromCurrent },
-    { id: 'scenario.duplicate', category: 'Scenarios', title: 'Duplicate active scenario',       disabled: !activeScenario, handler: handleDuplicateScenario },
-    { id: 'scenario.update',    category: 'Scenarios', title: 'Update active scenario from current', disabled: !activeScenario, handler: handleUpdateActiveScenarioFromCurrent },
-  ];
-
-  useKeyboardShortcuts(commands);
-
   return (
     <div className="studio-shell">
       <input ref={fileInputRef} type="file" accept=".xlsx,.xls" hidden onChange={handleImport} />
@@ -1906,12 +1843,6 @@ function AppInner() {
         onOpenRunSetup={() => setActiveWorkspaceOverlay('run-setup')}
         onOpenConstraints={() => setActiveWorkspaceOverlay('constraints')}
         onJumpToValidation={() => { setTab('Analytics'); setAnalyticsSubTab('Validation'); }}
-      />
-
-      <CommandPalette
-        open={paletteOpen}
-        commands={commands}
-        onClose={() => setPaletteOpen(false)}
       />
 
       {/* ── Run dialog ── */}
