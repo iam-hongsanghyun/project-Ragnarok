@@ -1,0 +1,94 @@
+/**
+ * Dashboard layout state hook with localStorage persistence.
+ *
+ * Owns the active layout plus a list of named saved layouts. Writes
+ * back to localStorage on every change so the user gets autosave; named
+ * layouts give them recall slots when they want to switch.
+ */
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { DashboardLayout, NamedLayout, STORAGE_KEY } from './types';
+
+interface Stored {
+  active: DashboardLayout;
+  saved: NamedLayout[];
+}
+
+interface UseDashboardLayout {
+  layout: DashboardLayout;
+  setLayout: (next: DashboardLayout) => void;
+  /** Edit-mode toggle (drag handles, resize bars, +/- buttons). */
+  editing: boolean;
+  setEditing: (v: boolean) => void;
+  /** Named layouts the user has saved. */
+  savedLayouts: NamedLayout[];
+  saveAs: (name: string) => void;
+  load: (name: string) => void;
+  remove: (name: string) => void;
+  resetToDefault: () => void;
+}
+
+function readStored(): Stored | null {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Stored;
+    if (!parsed?.active?.rows || !Array.isArray(parsed.saved)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeStored(value: Stored): void {
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
+  } catch {
+    /* quota or privacy mode — silently drop */
+  }
+}
+
+export function useDashboardLayout(defaultLayout: DashboardLayout): UseDashboardLayout {
+  const stored = useMemo(() => readStored(), []);
+  const [layout, setLayoutState] = useState<DashboardLayout>(stored?.active ?? defaultLayout);
+  const [savedLayouts, setSavedLayouts] = useState<NamedLayout[]>(stored?.saved ?? []);
+  const [editing, setEditing] = useState(false);
+
+  // Autosave: debounce writes to localStorage so resize-drag doesn't write 60x/s.
+  const writeTimer = useRef<number | null>(null);
+  useEffect(() => {
+    if (writeTimer.current !== null) window.clearTimeout(writeTimer.current);
+    writeTimer.current = window.setTimeout(() => {
+      writeStored({ active: layout, saved: savedLayouts });
+    }, 200);
+    return () => {
+      if (writeTimer.current !== null) window.clearTimeout(writeTimer.current);
+    };
+  }, [layout, savedLayouts]);
+
+  const setLayout = useCallback((next: DashboardLayout) => setLayoutState(next), []);
+
+  const saveAs = useCallback((name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setSavedLayouts((prev) => {
+      const without = prev.filter((s) => s.name !== trimmed);
+      return [...without, { name: trimmed, layout, updatedAt: Date.now() }];
+    });
+  }, [layout]);
+
+  const load = useCallback((name: string) => {
+    setSavedLayouts((prev) => {
+      const found = prev.find((s) => s.name === name);
+      if (found) setLayoutState(found.layout);
+      return prev;
+    });
+  }, []);
+
+  const remove = useCallback((name: string) => {
+    setSavedLayouts((prev) => prev.filter((s) => s.name !== name));
+  }, []);
+
+  const resetToDefault = useCallback(() => setLayoutState(defaultLayout), [defaultLayout]);
+
+  return { layout, setLayout, editing, setEditing, savedLayouts, saveAs, load, remove, resetToDefault };
+}
