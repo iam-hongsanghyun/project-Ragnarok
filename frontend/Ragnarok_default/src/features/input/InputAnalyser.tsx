@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { GridRow } from '../../shared/types';
 import { stringValue } from '../../shared/utils/helpers';
+import { SearchableSelect } from '../../shared/components/SearchableSelect';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -502,18 +503,25 @@ export function InputAnalyser({ rows, cols, isTs, frozenCol, currencySymbol = '$
       <div className="ia-panel">
         <div className="ia-controls">
           <Ctl label="Series">
-            <select className="ia-select" value={tsSeries} onChange={(e) => setTsSeries(e.target.value)}>
-              <option value="__all__">All</option>
-              {tsCols.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
+            <SearchableSelect
+              className="ia-select"
+              value={tsSeries}
+              options={[{ value: '__all__', label: 'All' }, ...tsCols]}
+              onChange={(v) => setTsSeries(v)}
+            />
           </Ctl>
           <Ctl label="Chart">
-            <select className="ia-select" value={tsChart} onChange={(e) => setTsChart(e.target.value as TsChart)}>
-              <option value="line">Line</option>
-              <option value="stacked-area">Stacked area</option>
-              <option value="duration">Duration curve</option>
-              <option value="daily-profile">Daily profile</option>
-            </select>
+            <SearchableSelect
+              className="ia-select"
+              value={tsChart}
+              options={[
+                { value: 'line', label: 'Line' },
+                { value: 'stacked-area', label: 'Stacked area' },
+                { value: 'duration', label: 'Duration curve' },
+                { value: 'daily-profile', label: 'Daily profile' },
+              ]}
+              onChange={(v) => setTsChart(v as TsChart)}
+            />
           </Ctl>
           <span className="ia-meta">{rows.length} snapshots · {tsCols.length} series</span>
         </div>
@@ -566,43 +574,51 @@ export function InputAnalyser({ rows, cols, isTs, frozenCol, currencySymbol = '$
     <div className="ia-panel">
       <div className="ia-controls">
         <Ctl label="Value">
-          <select className="ia-select" value={activeValue} onChange={(e) => setValueCol(e.target.value)}>
-            {numericCols.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
+          <SearchableSelect className="ia-select" value={activeValue} options={numericCols} onChange={(v) => setValueCol(v)} />
         </Ctl>
         {showScatterY && (
           <Ctl label="Y axis">
-            <select className="ia-select" value={activeScatY} onChange={(e) => setScatterY(e.target.value)}>
-              {numericCols.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
+            <SearchableSelect className="ia-select" value={activeScatY} options={numericCols} onChange={(v) => setScatterY(v)} />
           </Ctl>
         )}
         {showGroupCtl && (
           <Ctl label="Group by">
-            <select className="ia-select" value={activeGroup} onChange={(e) => setGroupCol(e.target.value)}>
-              <option value="none">None (per row)</option>
-              {stringCols.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
+            <SearchableSelect
+              className="ia-select"
+              value={activeGroup}
+              options={[{ value: 'none', label: 'None (per row)' }, ...stringCols]}
+              onChange={(v) => setGroupCol(v)}
+            />
           </Ctl>
         )}
         {showAggCtl && (
           <Ctl label="Aggregate">
-            <select className="ia-select" value={agg} onChange={(e) => setAgg(e.target.value as AggMethod)}>
-              <option value="sum">Sum</option>
-              <option value="mean">Mean</option>
-              <option value="max">Max</option>
-              <option value="min">Min</option>
-              <option value="count">Count</option>
-            </select>
+            <SearchableSelect
+              className="ia-select"
+              value={agg}
+              options={[
+                { value: 'sum', label: 'Sum' },
+                { value: 'mean', label: 'Mean' },
+                { value: 'max', label: 'Max' },
+                { value: 'min', label: 'Min' },
+                { value: 'count', label: 'Count' },
+              ]}
+              onChange={(v) => setAgg(v as AggMethod)}
+            />
           </Ctl>
         )}
         <Ctl label="Chart">
-          <select className="ia-select" value={staticChart} onChange={(e) => setStaticChart(e.target.value as StaticChart)}>
-            <option value="bar">Bar</option>
-            <option value="grouped-bar">Grouped bar</option>
-            <option value="donut">Donut</option>
-            <option value="scatter">Scatter</option>
-          </select>
+          <SearchableSelect
+            className="ia-select"
+            value={staticChart}
+            options={[
+              { value: 'bar', label: 'Bar' },
+              { value: 'grouped-bar', label: 'Grouped bar' },
+              { value: 'donut', label: 'Donut' },
+              { value: 'scatter', label: 'Scatter' },
+            ]}
+            onChange={(v) => setStaticChart(v as StaticChart)}
+          />
         </Ctl>
         <span className="ia-meta">{rows.length} rows</span>
       </div>

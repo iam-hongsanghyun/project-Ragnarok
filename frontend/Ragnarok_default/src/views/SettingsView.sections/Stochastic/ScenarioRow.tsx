@@ -9,6 +9,7 @@ import {
   WorkbookModel,
 } from '../../../shared/types';
 import { PYPSA_COMPONENTS } from '../../../constants/pypsa_schema';
+import { SearchableSelect } from '../../../shared/components/SearchableSelect';
 
 const OVERRIDABLE_SHEETS = PYPSA_COMPONENTS
   .filter((c) => !['snapshots', 'network', 'carriers'].includes(c.sheet_name) && c.input_static_attributes.length > 0)
@@ -99,38 +100,36 @@ export function StochasticScenarioRow({ scenario, model, onUpdate, onRemove }: P
               return (
                 <tr key={o.id}>
                   <td>
-                    <select
+                    <SearchableSelect
                       className="constraints-cell-input"
                       value={o.sheet}
-                      onChange={(e) => {
-                        const nextSheet = e.target.value;
+                      options={OVERRIDABLE_SHEETS}
+                      onChange={(nextSheet) => {
                         const next = PYPSA_COMPONENTS.find((c) => c.sheet_name === nextSheet);
                         const nextAttr = next?.input_static_attributes[0] ?? o.attribute;
                         updateOverride(o.id, { sheet: nextSheet, attribute: nextAttr, scopeValue: '' });
                       }}
-                    >
-                      {OVERRIDABLE_SHEETS.map((s) => (<option key={s} value={s}>{s}</option>))}
-                    </select>
+                    />
                   </td>
                   <td>
-                    <select
+                    <SearchableSelect
                       className="constraints-cell-input"
                       value={o.attribute}
-                      onChange={(e) => updateOverride(o.id, { attribute: e.target.value })}
-                    >
-                      {attrOptions.map((a) => (<option key={a} value={a}>{a}</option>))}
-                    </select>
+                      options={attrOptions}
+                      onChange={(v) => updateOverride(o.id, { attribute: v })}
+                    />
                   </td>
                   <td>
-                    <select
+                    <SearchableSelect
                       className="constraints-cell-input"
                       value={o.scopeType}
-                      onChange={(e) => updateOverride(o.id, { scopeType: e.target.value as 'all' | 'name' | 'carrier', scopeValue: '' })}
-                    >
-                      <option value="all">all rows</option>
-                      <option value="name">by name</option>
-                      <option value="carrier">by carrier</option>
-                    </select>
+                      options={[
+                        { value: 'all', label: 'all rows' },
+                        { value: 'name', label: 'by name' },
+                        { value: 'carrier', label: 'by carrier' },
+                      ]}
+                      onChange={(v) => updateOverride(o.id, { scopeType: v as 'all' | 'name' | 'carrier', scopeValue: '' })}
+                    />
                   </td>
                   <td>
                     {o.scopeType === 'all' ? (
@@ -140,25 +139,25 @@ export function StochasticScenarioRow({ scenario, model, onUpdate, onRemove }: P
                         no {o.scopeType}s
                       </span>
                     ) : (
-                      <select
+                      <SearchableSelect
                         className="constraints-cell-input"
                         value={o.scopeValue}
-                        onChange={(e) => updateOverride(o.id, { scopeValue: e.target.value })}
-                      >
-                        <option value="">— pick {o.scopeType} —</option>
-                        {matchOptions.map((v) => (<option key={v} value={v}>{v}</option>))}
-                      </select>
+                        options={matchOptions}
+                        placeholder={`— pick ${o.scopeType} —`}
+                        onChange={(v) => updateOverride(o.id, { scopeValue: v })}
+                      />
                     )}
                   </td>
                   <td>
-                    <select
+                    <SearchableSelect
                       className="constraints-cell-input"
                       value={o.operation}
-                      onChange={(e) => updateOverride(o.id, { operation: e.target.value as 'multiply' | 'set' })}
-                    >
-                      <option value="multiply">×</option>
-                      <option value="set">=</option>
-                    </select>
+                      options={[
+                        { value: 'multiply', label: '×' },
+                        { value: 'set', label: '=' },
+                      ]}
+                      onChange={(v) => updateOverride(o.id, { operation: v as 'multiply' | 'set' })}
+                    />
                   </td>
                   <td>
                     <input

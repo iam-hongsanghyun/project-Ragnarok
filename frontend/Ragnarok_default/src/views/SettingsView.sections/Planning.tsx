@@ -3,6 +3,7 @@
  */
 import React from 'react';
 import { PathwayConfig } from '../../shared/types';
+import { SearchableSelect } from '../../shared/components/SearchableSelect';
 
 export interface PlanningSectionProps {
   pathwayConfig: PathwayConfig;
@@ -119,18 +120,18 @@ export function PlanningSection({ pathwayConfig, onPathwayConfigChange }: Planni
           </div>
           <div className="sg-setting-row">
             <label className="sg-setting-label" htmlFor="rs-pathway-mapping">Snapshot mapping</label>
-            <select
-              id="rs-pathway-mapping"
+            <SearchableSelect
               className="sg-setting-select"
               value={pathwayConfig.snapshotMappingMode}
-              onChange={(e) => onPathwayConfigChange({
+              options={[
+                { value: 'explicit_period_column', label: 'Use snapshots.period column' },
+                { value: 'repeat_all_snapshots', label: 'Repeat all snapshots for each period' },
+              ]}
+              onChange={(v) => onPathwayConfigChange({
                 ...pathwayConfig,
-                snapshotMappingMode: e.target.value as PathwayConfig['snapshotMappingMode'],
+                snapshotMappingMode: v as PathwayConfig['snapshotMappingMode'],
               })}
-            >
-              <option value="explicit_period_column">Use snapshots.period column</option>
-              <option value="repeat_all_snapshots">Repeat all snapshots for each period</option>
-            </select>
+            />
             <p className="sg-setting-hint">
               Pathway runs need either a <code>period</code> column on the snapshots sheet, or repeat-all mapping.
             </p>

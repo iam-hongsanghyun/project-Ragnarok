@@ -118,13 +118,12 @@ function renderField(
 ): React.ReactNode {
   if (key === 'sense') {
     return (
-      <select
+      <SearchableSelect
         className="constraints-cell-input"
         value={stringValue(row.sense) || '<='}
-        onChange={(e) => onSet(i, 'sense', e.target.value)}
-      >
-        {NATIVE_SENSES.map((s) => (<option key={s}>{s}</option>))}
-      </select>
+        options={[...NATIVE_SENSES]}
+        onChange={(v) => onSet(i, 'sense', v)}
+      />
     );
   }
 

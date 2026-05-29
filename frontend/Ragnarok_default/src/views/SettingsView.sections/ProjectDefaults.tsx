@@ -4,6 +4,7 @@
 import React from 'react';
 import { DateFormat } from '../../features/settings/useSettings';
 import { CURRENCIES, SETTINGS_CONFIG } from '../../constants';
+import { SearchableSelect } from '../../shared/components/SearchableSelect';
 
 interface Currency { code: string; symbol: string; name: string; }
 
@@ -35,17 +36,17 @@ export function ProjectDefaultsSection(props: ProjectDefaultsSectionProps) {
 
       <div className="sg-setting-row">
         <label className="sg-setting-label" htmlFor="set-date-format">Date format</label>
-        <select
-          id="set-date-format"
+        <SearchableSelect
           className="sg-setting-select"
           value={props.dateFormat}
-          onChange={(e) => props.onDateFormatChange(e.target.value as DateFormat)}
-        >
-          <option value="auto">Auto-detect</option>
-          <option value="ymd">YYYY-MM-DD (ISO)</option>
-          <option value="dmy">DD-MM-YYYY</option>
-          <option value="mdy">MM-DD-YYYY</option>
-        </select>
+          options={[
+            { value: 'auto', label: 'Auto-detect' },
+            { value: 'ymd', label: 'YYYY-MM-DD (ISO)' },
+            { value: 'dmy', label: 'DD-MM-YYYY' },
+            { value: 'mdy', label: 'MM-DD-YYYY' },
+          ]}
+          onChange={(v) => props.onDateFormatChange(v as DateFormat)}
+        />
         <p className="sg-setting-hint">
           Declares the format of input data so the parser can interpret ambiguous strings. Display is always canonical ISO.
         </p>
@@ -53,19 +54,15 @@ export function ProjectDefaultsSection(props: ProjectDefaultsSectionProps) {
 
       <div className="sg-setting-row">
         <label className="sg-setting-label" htmlFor="set-currency">Currency</label>
-        <select
-          id="set-currency"
+        <SearchableSelect
           className="sg-setting-select"
           value={props.currencyCode}
-          onChange={(e) => {
-            const c = currencies.find((x) => x.code === e.target.value);
+          options={currencies.map((c) => ({ value: c.code, label: `${c.symbol} — ${c.name} (${c.code})` }))}
+          onChange={(v) => {
+            const c = currencies.find((x) => x.code === v);
             if (c) props.onCurrencyChange(c.code, c.symbol);
           }}
-        >
-          {currencies.map((c) => (
-            <option key={c.code} value={c.code}>{c.symbol} — {c.name} ({c.code})</option>
-          ))}
-        </select>
+        />
       </div>
 
       <div className="sg-setting-divider" />

@@ -5083,6 +5083,20 @@ th:hover .col-delete-btn {
 .ss-wrap input {
   width: 100%;
   box-sizing: border-box;
+  padding-right: 20px;
+}
+/* Chevron affordance so the field reads as a dropdown. */
+.ss-wrap::after {
+  content: '';
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: translateY(-65%) rotate(45deg);
+  pointer-events: none;
 }
 .ss-menu {
   margin: 0;
@@ -5104,7 +5118,8 @@ th:hover .col-delete-btn {
   text-overflow: ellipsis;
   color: var(--text);
 }
-.ss-option:hover {
+.ss-option:hover,
+.ss-option--active {
   background: #f1f5f9;
 }
 .ss-option--sel {

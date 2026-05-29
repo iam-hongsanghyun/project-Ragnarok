@@ -1,6 +1,7 @@
 import React from 'react';
 import { ConstraintMetric, CustomConstraint } from '../../shared/types';
 import { METRIC_DEFS } from '../../constants';
+import { SearchableSelect } from '../../shared/components/SearchableSelect';
 
 export function GlobalConstraintsSection({
   constraints,
@@ -93,28 +94,23 @@ export function GlobalConstraintsSection({
                     placeholder="label"
                   />
                 </td>
-                <td>
-                  <select
+                <td title={def?.description}>
+                  <SearchableSelect
                     className="constraints-cell-input"
                     value={c.metric}
-                    onChange={(e) => handleMetricChange(c.id, e.target.value as ConstraintMetric)}
-                    title={def?.description}
-                  >
-                    {(Object.keys(METRIC_DEFS) as ConstraintMetric[]).map((m) => (
-                      <option key={m} value={m}>{METRIC_DEFS[m].label}</option>
-                    ))}
-                  </select>
+                    options={(Object.keys(METRIC_DEFS) as ConstraintMetric[]).map((m) => ({ value: m, label: METRIC_DEFS[m].label }))}
+                    onChange={(v) => handleMetricChange(c.id, v as ConstraintMetric)}
+                  />
                 </td>
                 <td className="constraints-cell-sense">{def?.sense}</td>
                 <td>
                   {def?.needsCarrier ? (
-                    <select
+                    <SearchableSelect
                       className="constraints-cell-input"
                       value={c.carrier}
-                      onChange={(e) => update(c.id, { carrier: e.target.value })}
-                    >
-                      {carriers.map((ca) => <option key={ca}>{ca}</option>)}
-                    </select>
+                      options={carriers}
+                      onChange={(v) => update(c.id, { carrier: v })}
+                    />
                   ) : (
                     <span className="constraints-cell-placeholder">—</span>
                   )}

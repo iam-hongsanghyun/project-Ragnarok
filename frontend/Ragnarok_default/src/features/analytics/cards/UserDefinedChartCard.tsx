@@ -20,6 +20,7 @@ import { InteractiveTimeSeriesCard } from './InteractiveTimeSeriesCard';
 import { TimelineSlider } from '../../../shared/components/DualRangeSlider';
 import { useMetricOptions } from '../useMetricOptions';
 import { AssetPills } from './AssetPills';
+import { SearchableSelect } from '../../../shared/components/SearchableSelect';
 
 const BUS_AGG_METRIC_KEYS = new Set([
   'gen_output_by_bus',
@@ -230,92 +231,87 @@ export function UserDefinedChartCard({
         {/* Component */}
         <label className="chart-control">
           <span>Component</span>
-          <select
+          <SearchableSelect
             value={active.focusType}
-            onChange={(e) => handleFocusTypeChange(e.target.value as FocusType)}
-          >
-            {(Object.keys(FOCUS_LABELS) as FocusType[]).map((ft) => (
-              <option key={ft} value={ft} disabled={ft !== 'system' && assetNamesFor(ft, model).length === 0}>
-                {FOCUS_LABELS[ft]}
-              </option>
-            ))}
-          </select>
+            options={(Object.keys(FOCUS_LABELS) as FocusType[])
+              .filter((ft) => ft === 'system' || assetNamesFor(ft, model).length > 0)
+              .map((ft) => ({ value: ft, label: FOCUS_LABELS[ft] }))}
+            onChange={(v) => handleFocusTypeChange(v as FocusType)}
+          />
         </label>
 
         {/* Value */}
         <label className="chart-control">
           <span>Value</span>
-          <select
+          <SearchableSelect
             value={active.metricKey}
-            onChange={(e) => handleMetricChange(e.target.value)}
             disabled={!results}
-          >
-            <option value={EMPTY_METRIC_KEY}>Select value</option>
-            {metricOptions.map((m) => (
-              <option key={m.key} value={m.key}>{m.label}</option>
-            ))}
-          </select>
+            options={[{ value: EMPTY_METRIC_KEY, label: 'Select value' }, ...metricOptions.map((m) => ({ value: m.key, label: m.label }))]}
+            onChange={(v) => handleMetricChange(v)}
+          />
         </label>
 
         {/* Group by — only for generator multi/all */}
         {showGroupBy && (
           <label className="chart-control">
             <span>Group by</span>
-            <select
+            <SearchableSelect
               value={active.groupBy}
-              onChange={(e) =>
-                patch({ ...active, groupBy: e.target.value as GroupByOption })
-              }
-            >
-              <option value="carrier">Carrier</option>
-              <option value="asset">Asset</option>
-            </select>
+              options={[
+                { value: 'carrier', label: 'Carrier' },
+                { value: 'asset', label: 'Asset' },
+              ]}
+              onChange={(v) => patch({ ...active, groupBy: v as GroupByOption })}
+            />
           </label>
         )}
 
         {/* Temporal resolution */}
         <label className="chart-control">
           <span>Temporal resolution</span>
-          <select
+          <SearchableSelect
             value={active.timeframe}
-            onChange={(e) => patch({ ...active, timeframe: e.target.value as TimeframeOption })}
-          >
-            <option value="aggregated">Aggregated</option>
-            <option value="yearly">By year</option>
-            <option value="monthly">By month</option>
-            <option value="weekly">By week</option>
-            <option value="daily">By day</option>
-            <option value="hourly">By hour</option>
-          </select>
+            options={[
+              { value: 'aggregated', label: 'Aggregated' },
+              { value: 'yearly', label: 'By year' },
+              { value: 'monthly', label: 'By month' },
+              { value: 'weekly', label: 'By week' },
+              { value: 'daily', label: 'By day' },
+              { value: 'hourly', label: 'By hour' },
+            ]}
+            onChange={(v) => patch({ ...active, timeframe: v as TimeframeOption })}
+          />
         </label>
 
         {/* Chart type */}
         <label className="chart-control">
           <span>Chart</span>
-          <select
+          <SearchableSelect
             value={active.chartType}
-            onChange={(e) => patch({ ...active, chartType: e.target.value as ChartSectionType })}
             disabled={!hasMetric}
-          >
-            <option value="line">Line</option>
-            <option value="area">Area</option>
-            <option value="bar">Bar</option>
-            <option value="donut">Donut</option>
-          </select>
+            options={[
+              { value: 'line', label: 'Line' },
+              { value: 'area', label: 'Area' },
+              { value: 'bar', label: 'Bar' },
+              { value: 'donut', label: 'Donut' },
+            ]}
+            onChange={(v) => patch({ ...active, chartType: v as ChartSectionType })}
+          />
         </label>
 
         {/* Stack */}
         {active.chartType !== 'donut' && (
           <label className="chart-control">
             <span>Stack</span>
-            <select
+            <SearchableSelect
               value={active.stacked ? 'stacked' : 'normal'}
-              onChange={(e) => patch({ ...active, stacked: e.target.value === 'stacked' })}
               disabled={!hasMetric}
-            >
-              <option value="stacked">Stacked</option>
-              <option value="normal">Normal</option>
-            </select>
+              options={[
+                { value: 'stacked', label: 'Stacked' },
+                { value: 'normal', label: 'Normal' },
+              ]}
+              onChange={(v) => patch({ ...active, stacked: v === 'stacked' })}
+            />
           </label>
         )}
       </div>
@@ -343,35 +339,32 @@ export function UserDefinedChartCard({
           </label>
           <label className="chart-control">
             <span>Legend</span>
-            <select
+            <SearchableSelect
               value={(active.showLegend ?? true) ? 'show' : 'hide'}
-              onChange={(e) => patch({ ...active, showLegend: e.target.value === 'show' })}
-            >
-              <option value="show">Show</option>
-              <option value="hide">Hide</option>
-            </select>
+              options={[{ value: 'show', label: 'Show' }, { value: 'hide', label: 'Hide' }]}
+              onChange={(v) => patch({ ...active, showLegend: v === 'show' })}
+            />
           </label>
           <label className="chart-control">
             <span>Axis labels</span>
-            <select
+            <SearchableSelect
               value={(active.showAxisLabels ?? true) ? 'show' : 'hide'}
-              onChange={(e) => patch({ ...active, showAxisLabels: e.target.value === 'show' })}
-            >
-              <option value="show">Show</option>
-              <option value="hide">Hide</option>
-            </select>
+              options={[{ value: 'show', label: 'Show' }, { value: 'hide', label: 'Hide' }]}
+              onChange={(v) => patch({ ...active, showAxisLabels: v === 'show' })}
+            />
           </label>
           <label className="chart-control">
             <span>X-label angle</span>
-            <select
+            <SearchableSelect
               value={String(active.xLabelAngle ?? 0)}
-              onChange={(e) => patch({ ...active, xLabelAngle: Number(e.target.value) })}
-            >
-              <option value="0">Horizontal</option>
-              <option value="-30">-30°</option>
-              <option value="-45">-45°</option>
-              <option value="-90">Vertical</option>
-            </select>
+              options={[
+                { value: '0', label: 'Horizontal' },
+                { value: '-30', label: '-30°' },
+                { value: '-45', label: '-45°' },
+                { value: '-90', label: 'Vertical' },
+              ]}
+              onChange={(v) => patch({ ...active, xLabelAngle: Number(v) })}
+            />
           </label>
         </div>
       )}

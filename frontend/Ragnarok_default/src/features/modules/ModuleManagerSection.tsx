@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { ModuleConfigField, ModuleConfigTableColumn, ModuleConfigVisibleWhen, ModuleDescriptor, ModuleHostInventory, PluginFileValue } from '../../shared/types';
+import { SearchableSelect } from '../../shared/components/SearchableSelect';
 
 interface ModuleManagerSectionProps {
   inventory: ModuleHostInventory | null;
@@ -138,15 +139,12 @@ export function ConfigFieldRow({ fieldKey, field, value, onChange, carriers, for
     return (
       <label className="sg-module-config-row">
         <span className="sg-module-config-label">{label}</span>
-        <select
+        <SearchableSelect
           className="sg-module-config-select"
           value={String(resolved ?? '')}
-          onChange={(e) => onChange(e.target.value)}
-        >
-          {field.options.map((opt) => (
-            <option key={String(opt.value)} value={String(opt.value)}>{opt.label}</option>
-          ))}
-        </select>
+          options={field.options.map((opt) => ({ value: String(opt.value), label: String(opt.label) }))}
+          onChange={(v) => onChange(v)}
+        />
       </label>
     );
   }
@@ -320,16 +318,12 @@ function cellInput(
 ): React.ReactNode {
   if (column.type === 'select' && column.options) {
     return (
-      <select
+      <SearchableSelect
         className="sg-module-table-cell-input"
         value={String(cell ?? '')}
-        onChange={(e) => onCellChange(e.target.value)}
-      >
-        <option value="" />
-        {column.options.map((opt) => (
-          <option key={opt.value} value={opt.value}>{opt.label ?? opt.value}</option>
-        ))}
-      </select>
+        options={[{ value: '', label: '—' }, ...column.options.map((opt) => ({ value: String(opt.value), label: String(opt.label ?? opt.value) }))]}
+        onChange={(v) => onCellChange(v)}
+      />
     );
   }
   if (column.type === 'number') {

@@ -13,6 +13,7 @@ import React from 'react';
 import { GridRow, Primitive } from '../../shared/types';
 import { getComponentSchema, PypsaAttribute } from '../../constants/pypsa_schema';
 import { stringValue } from '../../shared/utils/helpers';
+import { SearchableSelect } from '../../shared/components/SearchableSelect';
 
 const isStaticInputAttr = (attr: PypsaAttribute): boolean =>
   attr.status === 'input' && attr.storage !== 'series';
@@ -88,10 +89,11 @@ export function BuildAttributeForm({
     if (isBus) {
       field = (
         <div className="build-field-bus">
-          <select value={strValue} onChange={(e) => onUpdate(rowIndex, attr.attribute, e.target.value)}>
-            <option value="">—</option>
-            {busNames.map((b) => <option key={b} value={b}>{b}</option>)}
-          </select>
+          <SearchableSelect
+            value={strValue}
+            options={[{ value: '', label: '—' }, ...busNames.map((b) => ({ value: b, label: b }))]}
+            onChange={(v) => onUpdate(rowIndex, attr.attribute, v)}
+          />
           {onPickOnMap && (
             <button
               type="button"
@@ -115,10 +117,11 @@ export function BuildAttributeForm({
       );
     } else if (t.includes('bool')) {
       field = (
-        <select value={strValue} onChange={(e) => onUpdate(rowIndex, attr.attribute, e.target.value === 'true')}>
-          <option value="true">true</option>
-          <option value="false">false</option>
-        </select>
+        <SearchableSelect
+          value={strValue}
+          options={[{ value: 'true', label: 'true' }, { value: 'false', label: 'false' }]}
+          onChange={(v) => onUpdate(rowIndex, attr.attribute, v === 'true')}
+        />
       );
     } else if (t.includes('float') || t.includes('int') || t.includes('number')) {
       field = (
