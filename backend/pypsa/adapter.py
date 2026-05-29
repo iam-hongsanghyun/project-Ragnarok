@@ -1,8 +1,8 @@
 """PyPSA reference backend adapter.
 
-Wraps the existing :func:`backend.lib.results.run_pypsa` end-to-end pipeline
+Wraps the existing :func:`backend.pypsa.results.run_pypsa` end-to-end pipeline
 (pre-build plugins → build → solve → extract → post-solve) behind the
-:class:`~backend.lib.backends.base.Backend` interface. No solve logic lives
+:class:`~backend.app.backends.base.Backend` interface. No solve logic lives
 here — this is purely the adapter that names PyPSA as a backend and reports
 what it can do.
 """
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..results import run_pypsa
+from .results import run_pypsa
 
 
 class PypsaBackend:

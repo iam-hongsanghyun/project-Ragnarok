@@ -6,6 +6,9 @@ cd "$ROOT_DIR"
 
 VENV_DIR=".venv-pypsa"
 REQ_HASH_FILE="$VENV_DIR/.req_hash"
+# Frontend lives in its own package (pluggable frontend seam). The npm project
+# root — package.json, public/, src/, node_modules/ — is here, not the repo root.
+FRONTEND_DIR="frontend/Ragnarok_default"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -67,9 +70,9 @@ fi
 
 # ── Install frontend dependencies ─────────────────────────────────────────────
 
-if [ ! -d "node_modules" ]; then
+if [ ! -d "$FRONTEND_DIR/node_modules" ]; then
   echo "Installing Node.js packages..."
-  npm install
+  (cd "$FRONTEND_DIR" && npm install)
 fi
 
 # ── Clear stale build caches ──────────────────────────────────────────────────
@@ -77,9 +80,9 @@ fi
 # users to keep seeing pre-fix bundles after a code change. Always wipe it on
 # launch so the dev server compiles a fresh bundle.
 
-if [ -d "node_modules/.cache" ] || [ -d "build" ]; then
+if [ -d "$FRONTEND_DIR/node_modules/.cache" ] || [ -d "$FRONTEND_DIR/build" ]; then
   echo "Clearing build caches (node_modules/.cache, build/)..."
-  rm -rf node_modules/.cache build
+  rm -rf "$FRONTEND_DIR/node_modules/.cache" "$FRONTEND_DIR/build"
 fi
 
 # ── Free ports 3000 + 8000 (kill stale frontend / backend) ────────────────────
@@ -108,7 +111,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 echo "Starting backend..."
-"$VENV_DIR/bin/python" -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 &
+"$VENV_DIR/bin/python" -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 &
 BACKEND_PID=$!
 
 echo "Waiting for backend to be ready..."
@@ -117,4 +120,4 @@ until curl -sf http://127.0.0.1:8000/api/health >/dev/null 2>&1; do
 done
 
 echo "Backend ready. Opening app in browser..."
-npm run start:frontend
+(cd "$FRONTEND_DIR" && npm run start:frontend)

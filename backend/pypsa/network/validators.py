@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..models import RunPayload
+from ...app.models import RunPayload
 from ..pathway import parse_pathway_config
 from ..pypsa_schema import (
     bus_reference_attributes,

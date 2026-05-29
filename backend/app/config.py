@@ -5,7 +5,7 @@ import json
 from functools import lru_cache
 from pathlib import Path
 
-# backend/config sits one level above backend/lib/
+# backend/config sits one level above backend/app/
 _CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
 
 

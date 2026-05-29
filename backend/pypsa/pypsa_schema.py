@@ -6,12 +6,28 @@ from pathlib import Path
 from typing import Any
 
 
+def _frontend_config_dir() -> Path:
+    """Directory holding the generated schema JSON the backend reads.
+
+    The default frontend is a sibling npm package; its build-time codegen writes
+    the schema artefacts the backend shares. ``parents[2]`` is the repo root
+    (``backend/pypsa/pypsa_schema.py`` → ``pypsa`` → ``backend`` → repo root).
+    """
+    return (
+        Path(__file__).resolve().parents[2]
+        / "frontend"
+        / "Ragnarok_default"
+        / "src"
+        / "config"
+    )
+
+
 def _schema_path() -> Path:
-    return Path(__file__).resolve().parents[2] / "src" / "config" / "pypsa_schema.json"
+    return _frontend_config_dir() / "pypsa_schema.json"
 
 
 def _network_import_policy_path() -> Path:
-    return Path(__file__).resolve().parents[2] / "src" / "config" / "network_import_policy.json"
+    return _frontend_config_dir() / "network_import_policy.json"
 
 
 @lru_cache(maxsize=1)

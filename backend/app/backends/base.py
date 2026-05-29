@@ -3,7 +3,7 @@
 Ragnarok talks to exactly one optimisation backend per run. A *backend* is
 anything that can take the in-memory workbook model plus run metadata and
 return Ragnarok's result dict. PyPSA is the reference adapter
-(:mod:`backend.lib.backends.pypsa_backend`); the interface here is the only
+(:mod:`backend.pypsa.adapter`); the interface here is the only
 contract a future backend has to satisfy.
 
 The seam is intentionally a single method — ``run(model, scenario, options)``.

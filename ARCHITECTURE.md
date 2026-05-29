@@ -31,7 +31,7 @@ Ragnarok ships a fully operational plugin system. The full spec and authoring gu
 | `POST` | `/api/modules/install` | Upload `.zip`, extract to managed dir, validate, return module descriptor |
 | `DELETE` | `/api/modules/{id}` | Remove module directory from managed root |
 
-**Module discovery** (`backend/lib/module_host.py`)
+**Module discovery** (`backend/app/module_host.py`)
 
 On every `/api/modules` call the backend scans the managed module root
 (`${PROJECT_ROOT}/.ragnarok/modules/` by default, overridable in `system-defaults.yaml`),
@@ -41,7 +41,7 @@ and permissions, and returns a full descriptor per module including `status`, `v
 
 **Execution pipeline**
 
-When `POST /api/run` fires, `run_pypsa()` in `backend/lib/results/__init__.py` calls
+When `POST /api/run` fires, `run_pypsa()` in `backend/pypsa/results/__init__.py` calls
 `execute_plugins_at_stage()` from `module_host.py` at each stage with the IDs and configs
 that were sent in `options.enabledModules` / `options.moduleConfigs`:
 
@@ -147,96 +147,73 @@ into a `.zip` and use the Install button in the sidebar):
 
 ## Repository layout
 
+The repository is a pluggable **frontend** + pluggable **backend**. The backend
+is further split into an engine-agnostic **host** (`backend/app/`) and the
+reference **engine** (`backend/pypsa/`); a second engine would be a sibling
+package under `backend/`. The frontend lives in its own npm package
+(`frontend/Ragnarok_default/`); a second frontend would be a sibling under
+`frontend/`. The tree below is representative, not exhaustive.
+
 ```
 pypsa_gui/
 ├── backend/
-│   ├── main.py                    ← FastAPI app, 4 endpoints
-│   └── lib/
-│       ├── config.py              ← loads system-defaults.yaml (max_snapshots etc.)
-│       ├── constants.py           ← carrier → colour map used by both network and results
-│       ├── models.py              ← RunPayload Pydantic model
-│       ├── network/               ← build_network() — assembles pypsa.Network from payload
-│       │   ├── __init__.py        ← public entry: build_network(), validate_model()
-│       │   ├── buses.py           ← add_buses(), add_loads()
-│       │   ├── generators.py      ← add_generators(), add_grid_imports_and_shedding()
-│       │   ├── lines.py           ← add_lines(), add_links(), add_transformers()
-│       │   ├── storage.py         ← add_storage_units(), add_stores()
-│       │   ├── constraints.py     ← add_global_constraints()
-│       │   ├── custom_constraints.py  ← carrier share / CO2 cap constraints
-│       │   └── validators.py      ← structural pre-solve validation checks
-│       ├── profiles/              ← time-series helpers
-│       │   ├── __init__.py        ← snapshot_settings(), modeled_period_factor()
-│       │   ├── snapshots.py       ← slice & weight snapshot index
-│       │   ├── availability.py    ← attach p_max_pu / p_min_pu profiles
-│       │   └── demand.py          ← attach loads-p_set profiles
-│       ├── results/               ← extract results from solved network
-│       │   ├── __init__.py        ← public entry: run_pypsa() → RunResults dict
-│       │   ├── dispatch.py        ← carrier-level and generator-level dispatch series
-│       │   ├── emissions.py       ← system + per-generator CO2 series
-│       │   ├── expansion.py       ← capacity expansion delta (p_nom_opt − p_nom)
-│       │   ├── market.py          ← merit order, CO2 shadow price
-│       │   └── assets/            ← per-asset detail series (one file per component)
-│       │       ├── generators.py
-│       │       ├── buses.py
-│       │       ├── storage_units.py
-│       │       ├── stores.py
-│       │       └── branches.py
-│       └── utils/
-│           ├── coerce.py          ← number(), text(), bool_value() — safe type coercion
-│           ├── workbook.py        ← workbook_rows(), apply_scaled_static_attributes()
-│           ├── series.py          ← weighted_sum() and pandas series helpers
-│           └── annuity.py         ← capital-recovery factor for expansion cost annualisation
+│   ├── app/                        ← engine-agnostic FastAPI host (no PyPSA imports)
+│   │   ├── main.py                 ← FastAPI app, run lifecycle, file-converter endpoints
+│   │   ├── models.py               ← RunPayload request/response models
+│   │   ├── config.py               ← loads backend/config/*.json (system defaults, module host)
+│   │   ├── module_host.py          ← plugin discovery / execution system
+│   │   └── backends/               ← pluggable-backend seam
+│   │       ├── base.py             ← Backend protocol + BackendError
+│   │       └── registry.py         ← get_backend / available_backends / register_backend
+│   ├── pypsa/                      ← PyPSA reference engine (the only backend today)
+│   │   ├── adapter.py              ← PypsaBackend — implements the Backend protocol
+│   │   ├── network/                ← build_network() — assembles pypsa.Network from the model
+│   │   │   ├── __init__.py         ← public entry: build_network(), validate_model()
+│   │   │   ├── components.py       ← generic schema-driven component import loop
+│   │   │   ├── network_sheet.py    ← `network` sheet runtime-import allow-list
+│   │   │   ├── snapshots.py        ← snapshot index (flat / pathway MultiIndex)
+│   │   │   ├── custom_constraints.py ← carrier-share / CO2-cap constraints
+│   │   │   ├── load_shedding.py    ← optional load-shedding backstop generator
+│   │   │   └── validators.py       ← structural pre-solve validation checks
+│   │   ├── results/                ← extract results from the solved network
+│   │   │   ├── __init__.py         ← public entry: run_pypsa() → RunResults dict
+│   │   │   ├── full_outputs.py     ← schema-driven solved-output cache
+│   │   │   ├── dispatch.py         ← carrier- and generator-level dispatch series
+│   │   │   ├── emissions.py        ← system + per-generator CO2 series
+│   │   │   ├── expansion.py        ← capacity expansion delta (p_nom_opt − p_nom)
+│   │   │   ├── market.py           ← merit order, CO2 shadow price
+│   │   │   └── summaries.py        ← per-scenario / KPI summaries
+│   │   ├── pathway.py              ← multi-period pathway planning helpers
+│   │   ├── rolling.py              ← rolling-horizon helpers
+│   │   ├── stochastic.py          ← two-stage stochastic scenario helpers
+│   │   ├── carbon_price.py        ← carbon-price schedule parsing/application
+│   │   ├── pypsa_schema.py        ← PyPSA-facing schema helpers (input/output attributes)
+│   │   ├── constants.py           ← carrier → colour map shared by builder + extractors
+│   │   └── utils/
+│   │       ├── coerce.py          ← number(), text(), bool_value() — safe type coercion
+│   │       ├── workbook.py        ← workbook_rows(), apply_scaled_static_attributes()
+│   │       ├── series.py          ← weighted_sum() and pandas series helpers
+│   │       └── annuity.py         ← capital-recovery factor for expansion cost annualisation
+│   ├── config/                     ← JSON config consumed by backend/app/config.py
+│   └── tests/                      ← pytest suite (run with .venv-pypsa)
 │
-├── src/
-│   ├── App.tsx                    ← Root component: all useState + event handlers + layout
-│   ├── index.tsx                  ← ReactDOM.render entry point
-│   ├── index.css                  ← All CSS (scoped by component prefix, see Conventions)
-│   ├── constants/
-│   │   ├── index.ts               ← API_BASE, DEFAULT_CONSTRAINTS, EMPTY_METRIC_KEY etc.
-│   │   ├── sheets.ts              ← SHEETS and TS_SHEETS const arrays (source of truth)
-│   │   ├── pypsa_attributes.ts    ← per-sheet column definitions for the Tables editor
-│   │   └── pypsa_attributes.json  ← raw JSON backing pypsa_attributes.ts
-│   ├── types/
-│   │   ├── index.ts               ← All shared TypeScript types (RunResults, WorkbookModel…)
-│   │   └── pypsa.ts               ← Lower-level PyPSA attribute type helpers
-│   ├── utils/
-│   │   ├── helpers.ts             ← getBounds, getBusIndex, carrierColor, hashColor,
-│   │   │                            numberValue, snapshotMaxFromWorkbook
-│   │   ├── workbook.ts            ← parseWorkbook, exportWorkbook, loadSampleWorkbook,
-│   │   │                            createEmptyWorkbook, workbookToArrayBuffer
-│   │   ├── analytics.ts           ← buildRowsFromGeneratorDetails, buildSystemLoadRows,
-│   │   │                            normalizeSeriesPoint
-│   │   ├── exportResults.ts       ← exportFullResults → multi-sheet Excel download
-│   │   └── exportChart.ts         ← SVG/PNG chart export helpers
-│   └── components/
-│       ├── common/
-│       │   ├── DualRangeSlider.tsx  ← dual-handle range slider (CSS prefix: dual-range-)
-│       │   ├── RunDialog.tsx        ← floating run-config modal (CSS: modal-backdrop, modal-card)
-│       │   ├── SummaryCards.tsx     ← KPI card row (CSS prefix: kpi-)
-│       │   └── Toast.tsx            ← toast notification system (context + hook)
-│       ├── layout/
-│       │   ├── SidebarGroup.tsx     ← collapsible accordion section (CSS prefix: sg-)
-│       │   └── Sidebar.tsx          ← sidebar content: File + Constraints + Results groups
-│       ├── constraints/
-│       │   └── GlobalConstraintsSection.tsx  ← constraint list editor
-│       ├── map/
-│       │   ├── FitToBounds.tsx      ← Leaflet FitBounds effect component
-│       │   └── MapLegend.tsx        ← floating carrier colour legend
-│       ├── panes/
-│       │   ├── MapPane.tsx          ← Map workspace tab
-│       │   ├── TablesPane.tsx       ← Tables workspace tab (editable grid)
-│       │   ├── ValidationPane.tsx   ← Validation workspace tab
-│       │   └── AnalyticsPane.tsx    ← Analytics workspace tab (map + charts)
-│       └── charts/
-│           ├── ResultsDashboard.tsx       ← "Results" sub-tab: fixed predefined charts
-│           ├── UserDefinedChartCard.tsx   ← "Analytics" sub-tab: user-configurable chart
-│           ├── InteractiveTimeSeriesCard.tsx  ← Recharts line/area/bar with timeframe zoom
-│           ├── DonutChart.tsx             ← Recharts pie/donut chart
-│           ├── CapacityExpansionCard.tsx  ← bar chart: p_nom vs p_nom_opt
-│           ├── Co2ShadowCard.tsx          ← CO2 constraint shadow price card
-│           ├── DurationCurveCard.tsx      ← sorted load/price duration curve
-│           ├── EmissionsBreakdownCard.tsx ← stacked bar: emissions by carrier/generator
-│           └── MeritOrderCard.tsx         ← merit order / supply curve
+└── frontend/
+    └── Ragnarok_default/           ← default React/TypeScript UI (its own npm package)
+        ├── package.json            ← npm project root (proxy → 127.0.0.1:8000)
+        ├── public/                 ← CRA static root (index.html)
+        ├── scripts/                ← build-time codegen (*.mjs) for src/config JSON + docs
+        └── src/
+            ├── App.tsx             ← Root component: state, event handlers, run flow
+            ├── index.tsx           ← ReactDOM entry point
+            ├── index.css           ← All CSS (scoped by component prefix, see Conventions)
+            ├── config/             ← generated JSON (pypsa_schema.json, capabilities.json…)
+            ├── constants/          ← schema adapters + shared constants
+            ├── layout/             ← ActivityBar, Sidebar, and chrome
+            ├── views/              ← top-level tab views (Model, Analytics, Settings, Plugins)
+            ├── features/           ← feature folders: build, input, map, analytics,
+            │                          constraints, validation, run, run-history,
+            │                          modules, plugins, settings
+            └── shared/             ← cross-feature types, utils, and components
 ```
 
 ---
@@ -424,18 +401,18 @@ for row in rows:
 1. Create `src/components/charts/MyNewCard.tsx`.
 2. Add it to `ResultsDashboard.tsx` in the appropriate section.
 3. If it needs a new data series, add it to `RunResults` in `src/types/index.ts` and extract
-   it in the relevant `backend/lib/results/*.py` module.
+   it in the relevant `backend/pypsa/results/*.py` module.
 
 ### A new constraint metric
 
 1. Add the new `ConstraintMetric` string literal to `src/types/index.ts`.
 2. Add the UI row to `GlobalConstraintsSection.tsx`.
-3. Handle the new metric in `backend/lib/network/custom_constraints.py`.
+3. Handle the new metric in `backend/pypsa/network/custom_constraints.py`.
 
 ### A new backend result field
 
 1. Add the field to the `RunResults` interface in `src/types/index.ts`.
-2. Compute and return the field from `run_pypsa()` in `backend/lib/results/__init__.py`
+2. Compute and return the field from `run_pypsa()` in `backend/pypsa/results/__init__.py`
    (or delegate to a new file in `results/`).
 3. Consume the field in a chart card or the `ResultsDashboard`.
 
@@ -446,7 +423,7 @@ for row in rows:
 2. Add the corresponding key to the `WorkbookModel` interface in `src/types/index.ts`.
 3. Add default rows to `DEFAULT_SHEET_ROWS` in `src/constants/index.ts`.
 4. Add column definitions to `src/constants/pypsa_attributes.ts`.
-5. Add a backend parser in the appropriate `backend/lib/network/*.py` file and call it from
+5. Add a backend parser in the appropriate `backend/pypsa/network/*.py` file and call it from
    `build_network()`.
 
 ### A new analytics focus type
@@ -454,7 +431,7 @@ for row in rows:
 1. Add the new union member to `AnalyticsFocus` in `src/types/index.ts`.
 2. Add asset detail types (if needed) to `RunResults.assetDetails`.
 3. Add the metric options branch to the `metricOptions` useMemo in `App.tsx`.
-4. Add the asset detail extractor in `backend/lib/results/assets/`.
+4. Add the asset detail extractor in `backend/pypsa/results/assets/`.
 
 ---
 

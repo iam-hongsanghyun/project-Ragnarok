@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from backend.lib.results import run_pypsa
+from backend.pypsa.results import run_pypsa
 
 
 def _model() -> dict[str, list[dict[str, Any]]]:

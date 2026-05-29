@@ -3,7 +3,7 @@
 These two PyPSA components are type catalogues that ``lines`` /
 ``transformers`` reference by name to pull in pre-set electrical
 parameters. They flow through the generic schema-driven import path
-(``backend/lib/network/__init__.py``); these tests pin that the
+(``backend/pypsa/network/__init__.py``); these tests pin that the
 round-trip actually works on real PyPSA versions — i.e. the type rows
 are added to the catalogue *and* the referencing line carries the
 type-derived attributes when the network is built.
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from backend.lib.network import build_network
+from backend.pypsa.network import build_network
 
 
 @pytest.fixture

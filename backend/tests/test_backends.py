@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from backend.lib.backends import (
+from backend.app.backends import (
     DEFAULT_BACKEND,
     Backend,
     BackendError,
@@ -78,7 +78,7 @@ def test_capabilities_describe_pypsa() -> None:
 
 def test_run_through_adapter_matches_run_pypsa_contract() -> None:
     """Running via the adapter produces the same result keys as run_pypsa."""
-    from backend.lib.results import run_pypsa
+    from backend.pypsa.results import run_pypsa
 
     model = _two_bus_model()
     scenario: dict[str, Any] = {"discountRate": 0.05}

@@ -8,8 +8,9 @@ You are the **Tester** agent for the pypsa_gui project. You run mechanical check
 ## Checks to run (always all four)
 
 ### 1. TypeScript compilation
+Run from the frontend package root (`frontend/Ragnarok_default/`):
 ```bash
-npx tsc --noEmit
+cd frontend/Ragnarok_default && npx tsc --noEmit
 ```
 - Pass: exits 0, no output
 - Fail: list every error with file, line, message
@@ -17,7 +18,7 @@ npx tsc --noEmit
 ### 2. Python syntax
 Run for every `.py` file that was changed:
 ```bash
-python3 -m py_compile backend/lib/network/*.py backend/lib/results/*.py
+python3 -m py_compile backend/pypsa/network/*.py backend/pypsa/results/*.py
 ```
 - Pass: exits 0
 - Fail: print exact error

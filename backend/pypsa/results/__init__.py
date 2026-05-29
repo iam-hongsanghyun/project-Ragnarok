@@ -18,7 +18,7 @@ from ..stochastic import (
 )
 from ..utils.series import weighted_sum
 from ..network.custom_constraints import apply_custom_constraints
-from ..module_host import execute_plugins_at_stage, get_module_metadata
+from ...app.module_host import execute_plugins_at_stage, get_module_metadata
 from .dispatch import (
     build_dispatch_series,
     build_price_emissions_series,

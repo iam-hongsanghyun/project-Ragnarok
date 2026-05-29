@@ -7,6 +7,9 @@ Set-Location $PSScriptRoot
 
 $VenvDir     = Join-Path $PSScriptRoot '.venv-pypsa'
 $ReqHashFile = Join-Path $VenvDir '.req_hash'
+# Frontend lives in its own package (pluggable frontend seam). The npm project
+# root — package.json, public\, src\, node_modules\ — is here, not the repo root.
+$FrontendDir = Join-Path $PSScriptRoot 'frontend\Ragnarok_default'
 $PythonExe   = Join-Path $VenvDir 'Scripts\python.exe'
 $PipExe      = Join-Path $VenvDir 'Scripts\pip.exe'
 
@@ -79,9 +82,10 @@ if ($ReqHash.Trim() -ne $StoredHash.Trim()) {
 
 # ── Frontend dependencies ─────────────────────────────────────────────────────
 
-if (-not (Test-Path (Join-Path $PSScriptRoot 'node_modules'))) {
+if (-not (Test-Path (Join-Path $FrontendDir 'node_modules'))) {
     Write-Host 'Installing Node.js packages...'
-    npm install
+    Push-Location $FrontendDir
+    try { npm install } finally { Pop-Location }
 }
 
 # ── Clear stale build caches ──────────────────────────────────────────────────
@@ -89,8 +93,8 @@ if (-not (Test-Path (Join-Path $PSScriptRoot 'node_modules'))) {
 # users to keep seeing pre-fix bundles after a code change. Always wipe it on
 # launch so the dev server compiles a fresh bundle.
 
-$CacheDir = Join-Path $PSScriptRoot 'node_modules\.cache'
-$BuildDir = Join-Path $PSScriptRoot 'build'
+$CacheDir = Join-Path $FrontendDir 'node_modules\.cache'
+$BuildDir = Join-Path $FrontendDir 'build'
 if ((Test-Path $CacheDir) -or (Test-Path $BuildDir)) {
     Write-Host 'Clearing build caches (node_modules\.cache, build\)...'
     if (Test-Path $CacheDir) { Remove-Item -Recurse -Force $CacheDir -ErrorAction SilentlyContinue }
@@ -121,7 +125,7 @@ Free-Port 8000
 Write-Host 'Starting backend...'
 $Backend = Start-Process `
     -FilePath $PythonExe `
-    -ArgumentList '-m', 'uvicorn', 'backend.main:app', '--host', '127.0.0.1', '--port', '8000' `
+    -ArgumentList '-m', 'uvicorn', 'backend.app.main:app', '--host', '127.0.0.1', '--port', '8000' `
     -WorkingDirectory $PSScriptRoot `
     -PassThru `
     -NoNewWindow
@@ -146,9 +150,11 @@ if (-not $ready) {
 
 Write-Host 'Backend ready. Opening app in browser...'
 
+Push-Location $FrontendDir
 try {
     npm run start:frontend
 } finally {
+    Pop-Location
     Write-Host 'Shutting down backend...'
     $Backend | Stop-Process -Force -ErrorAction SilentlyContinue
 }

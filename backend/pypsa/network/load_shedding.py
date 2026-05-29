@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pypsa
 
-from ..config import load_system_defaults
+from ...app.config import load_system_defaults
 
 
 def add_load_shedding(

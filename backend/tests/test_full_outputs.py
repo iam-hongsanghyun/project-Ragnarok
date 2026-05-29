@@ -1,4 +1,4 @@
-"""Regression tests for ``backend.lib.results.full_outputs.build_full_outputs``.
+"""Regression tests for ``backend.pypsa.results.full_outputs.build_full_outputs``.
 
 The frontend's ``deriveAssetDetails`` reads time-series outputs from
 ``outputs.series['<list_name>-<attr>']``. For components whose dynamic frame
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pypsa
 
-from backend.lib.results.full_outputs import build_full_outputs
+from backend.pypsa.results.full_outputs import build_full_outputs
 
 
 def test_processes_time_series_extracted_via_dynamic_fallback() -> None:

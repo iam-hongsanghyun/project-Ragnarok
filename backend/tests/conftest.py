@@ -1,6 +1,7 @@
 """Pytest configuration for backend tests.
 
-Adds the repository root to ``sys.path`` so tests can ``from backend.lib...``
+Adds the repository root to ``sys.path`` so tests can ``from backend.app...``
+and ``from backend.pypsa...``
 when invoked from any working directory.
 """
 from __future__ import annotations

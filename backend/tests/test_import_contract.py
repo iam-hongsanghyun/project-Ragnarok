@@ -3,14 +3,14 @@
 The contract has exactly three rules:
 
 1. ``network`` sheet — only fields whitelisted by
-   :func:`backend.lib.pypsa_schema.network_runtime_import_fields` are applied
+   :func:`backend.pypsa.pypsa_schema.network_runtime_import_fields` are applied
    (name, srid, crs, now). Unknown columns must be ignored.
 2. ``snapshots`` sheet — bypasses the generic component loop and builds the
    snapshot index. In single-period runs the index is a flat ``DatetimeIndex``;
    under pathway planning it is a ``MultiIndex`` of (period, timestep).
 3. Every other schema-defined sheet — buses, generators, processes, line_types,
    global_constraints, shunt_impedances, … — flows through the generic loop in
-   :func:`backend.lib.network.build_network` via
+   :func:`backend.pypsa.network.build_network` via
    ``_ordered_component_sheets`` → ``input_static_attributes`` → ``network.add()``.
    Time-series sheets follow the ``<list_name>-<attr>`` naming convention and
    are wired up through ``_apply_ts_sheet``.
@@ -25,7 +25,7 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from backend.lib.network import build_network
+from backend.pypsa.network import build_network
 
 
 # ── Fixtures ────────────────────────────────────────────────────────────────

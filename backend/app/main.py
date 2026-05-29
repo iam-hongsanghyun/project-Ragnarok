@@ -16,11 +16,11 @@ from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
-from .lib.backends import BackendError, available_backends, get_backend
-from .lib.config import load_system_defaults
-from .lib.models import RunPayload
-from .lib.module_host import discover_modules, execute_module_action, execute_plugins_at_stage, install_module_from_upload, uninstall_module
-from .lib.network import build_network, validate_model
+from .backends import BackendError, available_backends, get_backend
+from .config import load_system_defaults
+from .models import RunPayload
+from .module_host import discover_modules, execute_module_action, execute_plugins_at_stage, install_module_from_upload, uninstall_module
+from ..pypsa.network import build_network, validate_model
 
 
 # ── Suppress per-poll access log noise ───────────────────────────────────────
@@ -357,7 +357,7 @@ def _network_to_model_json(network) -> dict[str, Any]:
     static columns and turning any non-empty `*_t` dynamic frame into a
     `<list_name>-<attr>` sheet with one row per snapshot.
     """
-    from .lib.pypsa_schema import (
+    from ..pypsa.pypsa_schema import (
         input_static_attributes,
         input_temporal_attributes,
         component_sheets,

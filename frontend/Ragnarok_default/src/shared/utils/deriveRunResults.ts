@@ -3,7 +3,7 @@
  *
  * Currently used by the project-import path so an imported workbook restores
  * the Result / Analytics tabs immediately without a fresh solve. The math
- * mirrors `backend/lib/results/__init__.py:run_pypsa` post-solve aggregation.
+ * mirrors `backend/pypsa/results/__init__.py:run_pypsa` post-solve aggregation.
  *
  * No backend round-trip is needed — the imported workbook already contains
  * every output attribute the backend produced.

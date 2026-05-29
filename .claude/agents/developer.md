@@ -12,10 +12,12 @@ You receive a concrete implementation brief from the leader. Your job is to writ
 **Frontend:** React 18 + TypeScript, Vite, Leaflet (map), Recharts-free (custom SVG charts)
 **Backend:** FastAPI + PyPSA (GitHub dev branch) + HiGHS solver via linopy
 
+**Repository split:** the backend host (`backend/app/`) is engine-agnostic; the PyPSA engine lives in `backend/pypsa/`. The frontend is its own npm package at `frontend/Ragnarok_default/` — **all `src/...` paths below are relative to that package**, and `npx tsc --noEmit` / `npm` commands run from inside it.
+
 **Key file locations:**
-- Backend network build: `backend/lib/network/*.py`
-- Backend results: `backend/lib/results/*.py`
-- Backend constraints: `backend/lib/network/custom_constraints.py`
+- Backend network build: `backend/pypsa/network/*.py`
+- Backend results: `backend/pypsa/results/*.py`
+- Backend constraints: `backend/pypsa/network/custom_constraints.py`
 - Frontend types: `src/types/index.ts`
 - Frontend run dialog: `src/features/run/RunDialog.tsx`
 - Frontend results dashboard: `src/features/analytics/ResultsDashboard.tsx` (primary) and `src/components/charts/ResultsDashboard.tsx` (legacy, keep in sync)
@@ -29,8 +31,8 @@ You receive a concrete implementation brief from the leader. Your job is to writ
 2. **Do not modify input-data sheets, DEFAULT_SHEET_ROWS, or pypsa_attributes.json** unless the brief explicitly says to. The project rule is modelling-only changes.
 3. **Read every file before editing it.** Never write based on assumed contents.
 4. **After all edits, run and report:**
-   - `npx tsc --noEmit` (must be 0 errors)
-   - `python3 -m py_compile <each changed .py file>` (must pass)
+   - `npx tsc --noEmit` from `frontend/Ragnarok_default/` (must be 0 errors)
+   - `python3 -m py_compile <each changed .py file>` from the repo root (must pass)
 5. **Do not commit.** The leader commits after reviewer approval.
 6. Stay strictly within the scope of the brief. If you notice something else that needs fixing, note it but do not fix it — the leader will create a separate todo item.
 
@@ -46,7 +48,7 @@ You receive a concrete implementation brief from the leader. Your job is to writ
 
 When adding optional attributes to an existing component:
 1. `src/constants/pypsa_attributes.json` — add `{col, label, type, default, unit?, desc}` to the correct sheet array
-2. `backend/lib/network/<component>.py` — read the attribute from the workbook row and pass to `network.add()`
+2. `backend/pypsa/network/<component>.py` — read the attribute from the workbook row and pass to `network.add()`
 3. Frontend grid editor picks it up automatically from the JSON — no frontend code change needed
 
 ## Data flow: run options
@@ -63,7 +65,7 @@ RunDialog (frontend)
 To add a new run option:
 1. Add state + prop in `RunDialog.tsx` and `App.tsx`
 2. Include in `runOptions.options` in `App.tsx handleRunModel`
-3. Read from `options.get("myOption", default)` in `backend/lib/network/__init__.py`
+3. Read from `options.get("myOption", default)` in `backend/pypsa/network/__init__.py`
 
 ## Output
 

@@ -10,7 +10,7 @@ Ragnarok is a local React + FastAPI application built on [PyPSA](https://pypsa.o
   - a full project workbook with solved PyPSA outputs
   - a result/report package for sharing
 
-The current schema is generated from PyPSA GitHub metadata and checked into the repo at [src/config/pypsa_schema.json](/Users/sanghyun/github/pypsa_gui/src/config/pypsa_schema.json). The authoritative PyPSA references for this README are:
+The current schema is generated from PyPSA GitHub metadata and checked into the repo at [src/config/pypsa_schema.json](/Users/sanghyun/github/pypsa_gui/frontend/Ragnarok_default/src/config/pypsa_schema.json). The authoritative PyPSA references for this README are:
 
 - [PyPSA Components](https://docs.pypsa.org/latest/user-guide/components/)
 - [PyPSA Import and Export](https://docs.pypsa.org/latest/user-guide/import-export/)
@@ -38,13 +38,19 @@ Support levels used below:
 
 ## Architecture
 
-Frontend:
+The repository is split into a pluggable **frontend** and a pluggable **backend** so either side can be swapped independently:
 
-- [src/App.tsx](/Users/sanghyun/github/pypsa_gui/src/App.tsx): app shell, run flow, workbook open/save/import/export, run history
-- [src/constants/pypsa_schema.ts](/Users/sanghyun/github/pypsa_gui/src/constants/pypsa_schema.ts): generated PyPSA schema adapter for the frontend
-- [src/shared/utils/workbook.ts](/Users/sanghyun/github/pypsa_gui/src/shared/utils/workbook.ts): workbook parse/save/project round-trip
-- [src/shared/utils/deriveRunResults.ts](/Users/sanghyun/github/pypsa_gui/src/shared/utils/deriveRunResults.ts): rebuilds `RunResults` from imported workbook outputs
-- [src/shared/utils/helpers.ts](/Users/sanghyun/github/pypsa_gui/src/shared/utils/helpers.ts): `normalizeDateToIso` (input date parser), `isoDate`/`isoTime` (canonical display helpers), `formatTimestamp`
+- `frontend/Ragnarok_default/` — the default React/TypeScript UI (its own npm package: `package.json`, `public/`, `src/`, `scripts/`). A second frontend would live as a sibling, e.g. `frontend/<name>/`.
+- `backend/app/` — the engine-agnostic FastAPI host (run lifecycle, request/response models, config, module host, and the `Backend` protocol + registry).
+- `backend/pypsa/` — the reference optimisation engine (PyPSA network builder, solve, result extraction). A second backend would live as a sibling, e.g. `backend/<engine>/`.
+
+Frontend (paths below are relative to `frontend/Ragnarok_default/`):
+
+- [src/App.tsx](/Users/sanghyun/github/pypsa_gui/frontend/Ragnarok_default/src/App.tsx): app shell, run flow, workbook open/save/import/export, run history
+- [src/constants/pypsa_schema.ts](/Users/sanghyun/github/pypsa_gui/frontend/Ragnarok_default/src/constants/pypsa_schema.ts): generated PyPSA schema adapter for the frontend
+- [src/shared/utils/workbook.ts](/Users/sanghyun/github/pypsa_gui/frontend/Ragnarok_default/src/shared/utils/workbook.ts): workbook parse/save/project round-trip
+- [src/shared/utils/deriveRunResults.ts](/Users/sanghyun/github/pypsa_gui/frontend/Ragnarok_default/src/shared/utils/deriveRunResults.ts): rebuilds `RunResults` from imported workbook outputs
+- [src/shared/utils/helpers.ts](/Users/sanghyun/github/pypsa_gui/frontend/Ragnarok_default/src/shared/utils/helpers.ts): `normalizeDateToIso` (input date parser), `isoDate`/`isoTime` (canonical display helpers), `formatTimestamp`
 
 ### Date handling
 
@@ -56,12 +62,12 @@ Time-series chart x-axis labels adapt to the visible span: `HH:MM` (≤ 24 h), `
 
 Backend:
 
-- [backend/main.py](/Users/sanghyun/github/pypsa_gui/backend/main.py): FastAPI app and run lifecycle
-- [backend/lib/backends/](/Users/sanghyun/github/pypsa_gui/backend/lib/backends): pluggable backend seam — `Backend` protocol, registry, and the PyPSA reference adapter (run selected by `options.backend`)
-- [backend/lib/network/__init__.py](/Users/sanghyun/github/pypsa_gui/backend/lib/network/__init__.py): schema-driven network builder
-- [backend/lib/results/__init__.py](/Users/sanghyun/github/pypsa_gui/backend/lib/results/__init__.py): solve + analytics result assembly
-- [backend/lib/results/full_outputs.py](/Users/sanghyun/github/pypsa_gui/backend/lib/results/full_outputs.py): schema-driven solved output extraction
-- [backend/lib/pypsa_schema.py](/Users/sanghyun/github/pypsa_gui/backend/lib/pypsa_schema.py): backend schema helpers
+- [backend/app/main.py](/Users/sanghyun/github/pypsa_gui/backend/app/main.py): FastAPI app and run lifecycle
+- [backend/app/backends/](/Users/sanghyun/github/pypsa_gui/backend/app/backends): pluggable backend seam — `Backend` protocol, registry, and the PyPSA reference adapter (run selected by `options.backend`)
+- [backend/pypsa/network/__init__.py](/Users/sanghyun/github/pypsa_gui/backend/pypsa/network/__init__.py): schema-driven network builder
+- [backend/pypsa/results/__init__.py](/Users/sanghyun/github/pypsa_gui/backend/pypsa/results/__init__.py): solve + analytics result assembly
+- [backend/pypsa/results/full_outputs.py](/Users/sanghyun/github/pypsa_gui/backend/pypsa/results/full_outputs.py): schema-driven solved output extraction
+- [backend/pypsa/pypsa_schema.py](/Users/sanghyun/github/pypsa_gui/backend/pypsa/pypsa_schema.py): backend schema helpers
 
 ## Current User Flows
 
@@ -155,15 +161,15 @@ optimization envelope is broader than the workflow Ragnarok currently exposes.
 |---|---|---|
 | Excel workbook import (`Network.import_from_excel` equivalent user workflow) | `Partial` | Ragnarok opens Excel workbooks, but it parses into its own in-memory model instead of delegating import to PyPSA directly. |
 | Excel workbook export (`Network.export_to_excel` equivalent) | `Partial` | `Save` exports inputs only. `Export Project` exports input + solved outputs plus Ragnarok metadata sheets, but not the backend-solved network artifact itself. |
-| Generic component schema sync from PyPSA GitHub | `Full` | Build-time generator populates [src/config/pypsa_schema.json](/Users/sanghyun/github/pypsa_gui/src/config/pypsa_schema.json). |
+| Generic component schema sync from PyPSA GitHub | `Full` | Build-time generator populates [src/config/pypsa_schema.json](/Users/sanghyun/github/pypsa_gui/frontend/Ragnarok_default/src/config/pypsa_schema.json). |
 | Generic input table editing for documented components/attributes | `Full` | Input tables are schema-driven rather than hardcoded. |
-| Generic backend ingestion of documented input attributes | `Full` | Backend uses schema-derived input static/time-series attributes in [backend/lib/network/__init__.py](/Users/sanghyun/github/pypsa_gui/backend/lib/network/__init__.py). |
-| Generic solved-output extraction for documented PyPSA outputs | `Full` | Backend extracts schema-marked outputs in [backend/lib/results/full_outputs.py](/Users/sanghyun/github/pypsa_gui/backend/lib/results/full_outputs.py). |
-| Input-only save/load round-trip | `Full` | Known PyPSA input sheets round-trip through [src/shared/utils/workbook.ts](/Users/sanghyun/github/pypsa_gui/src/shared/utils/workbook.ts). |
+| Generic backend ingestion of documented input attributes | `Full` | Backend uses schema-derived input static/time-series attributes in [backend/pypsa/network/__init__.py](/Users/sanghyun/github/pypsa_gui/backend/pypsa/network/__init__.py). |
+| Generic solved-output extraction for documented PyPSA outputs | `Full` | Backend extracts schema-marked outputs in [backend/pypsa/results/full_outputs.py](/Users/sanghyun/github/pypsa_gui/backend/pypsa/results/full_outputs.py). |
+| Input-only save/load round-trip | `Full` | Known PyPSA input sheets round-trip through [src/shared/utils/workbook.ts](/Users/sanghyun/github/pypsa_gui/frontend/Ragnarok_default/src/shared/utils/workbook.ts). |
 | Full project workbook round-trip | `Partial` | Solved outputs and Ragnarok metadata now round-trip settings (including date format), constraints, run window, provenance, scenarios, pathway, rolling, and plugin analytics. Prior run-history entries are not preserved (only the current run is reconstructed on import). Remaining gap is the backend-solved network artifact. |
 | Restore analytics from imported solved workbook | `Full` | Frontend reconstructs analytics locally from `(model, outputs)` and restores plugin analytics / solve metadata from workbook metadata sheets. |
 | Result workbook export for reporting | `Full` | `Export Result` keeps a dedicated reporting workbook. |
-| HTML report export | `Full` | Implemented in [src/shared/utils/exportReport.ts](/Users/sanghyun/github/pypsa_gui/src/shared/utils/exportReport.ts). |
+| HTML report export | `Full` | Implemented in [src/shared/utils/exportReport.ts](/Users/sanghyun/github/pypsa_gui/frontend/Ragnarok_default/src/shared/utils/exportReport.ts). |
 | Structural validation before solve | `Partial` | Validation is now schema-aware across documented component sheets and time-series sheets, but it still stops short of full PyPSA semantic validation. |
 | HiGHS optimization | `Full` | Uses `network.optimize()` with HiGHS. |
 | Carbon price adder | `Full` | Applied to generator marginal costs from carrier emission factors. |
@@ -183,7 +189,7 @@ optimization envelope is broader than the workflow Ragnarok currently exposes.
 | Backend retention of solved network/workbook | `Not Needed` | Deliberate: the server is stateless. The backend returns result JSON and derived output caches; the frontend round-trips losslessly, so no solved `pypsa.Network` artifact is retained server-side. |
 | CSV-folder / netCDF / HDF5 workflows | `Not supported` | Ragnarok is currently Excel-first in the UI. |
 | Power flow-only studies / separate PF UX | `Not supported` | Current workflow is optimization-centric. Roadmapped — see Roadmap below. |
-| Pluggable / non-PyPSA optimization backend | `Partial` | A backend abstraction layer is in place (`backend/lib/backends/`): one `run(model, scenario, options)` adapter per backend, selected by `options.backend` (default `pypsa`), with `GET /api/backends` reporting capabilities. PyPSA is the only adapter today; the seam is ready for additional backends. |
+| Pluggable / non-PyPSA optimization backend | `Partial` | A backend abstraction layer is in place (`backend/app/backends/`): one `run(model, scenario, options)` adapter per backend, selected by `options.backend` (default `pypsa`), with `GET /api/backends` reporting capabilities. PyPSA is the only adapter today; the seam is ready for additional backends. |
 
 ## Support Matrix: PyPSA Components
 
@@ -243,7 +249,7 @@ The project is steering toward three large bodies of work, tackled one at a time
 
 1. **Topology build mode** *(next).* The Build tab currently authors a model with a step-by-step (Serialised) wizard. A `Serialised vs Topology` toggle will add a free-form mode where the whole model is placed, connected, and edited directly on the map / network topology. It reuses the Build map (own-x/y component placement, click-to-link buses, "pick on map", drag-to-move) already shipped, plus multi-bus click-linking for branches.
 
-2. **Pluggable backend** *(seam landed; additional backends future).* The backend abstraction layer is in place: a single `run(model, scenario, options)` adapter per backend, selected by `options.backend` (default `pypsa`), registered in `backend/lib/backends/` and reported by `GET /api/backends`. PyPSA is the only adapter today. The server stays stateless — each adapter returns the schema-driven output cache and the frontend remains the single source of round-trip truth (no per-run backend artifact retention). Remaining work is adding a second adapter when a concrete alternative backend is chosen.
+2. **Pluggable backend** *(seam landed; additional backends future).* The backend abstraction layer is in place: a single `run(model, scenario, options)` adapter per backend, selected by `options.backend` (default `pypsa`), registered in `backend/app/backends/` and reported by `GET /api/backends`. PyPSA is the only adapter today. The server stays stateless — each adapter returns the schema-driven output cache and the frontend remains the single source of round-trip truth (no per-run backend artifact retention). Remaining work is adding a second adapter when a concrete alternative backend is chosen.
 
 3. **Data platform.** Location-based renewable (wind/solar) profile generation and import, a persistent profile database/cache layer, national-level starter model imports, a source registry with versioning and provenance, data-source health checks, and country/region import presets.
 
@@ -257,9 +263,10 @@ Run locally:
 ./run.command
 ```
 
-Key frontend commands:
+Key frontend commands (run from the frontend package root):
 
 ```bash
+cd frontend/Ragnarok_default
 npm run start:frontend
 npm run build
 npx tsc --noEmit
@@ -268,7 +275,7 @@ npx tsc --noEmit
 Key backend checks:
 
 ```bash
-python3 -m py_compile backend/main.py backend/lib/network/__init__.py backend/lib/results/__init__.py
+python3 -m py_compile backend/app/main.py backend/pypsa/network/__init__.py backend/pypsa/results/__init__.py
 ```
 
 Regenerate the PyPSA schema:

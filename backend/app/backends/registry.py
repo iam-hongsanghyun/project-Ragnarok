@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from .base import Backend, BackendError
-from .pypsa_backend import PypsaBackend
+from ...pypsa.adapter import PypsaBackend
 
 DEFAULT_BACKEND = "pypsa"
 

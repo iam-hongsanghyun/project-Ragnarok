@@ -25,7 +25,7 @@ import pandas as pd
 import pypsa
 
 from ..carbon_price import apply_carbon_price, parse_carbon_price_config
-from ..config import load_system_defaults
+from ...app.config import load_system_defaults
 from ..pathway import PathwayConfig, parse_pathway_config
 from ..stochastic import apply_scenarios, parse_stochastic_config
 from ..pypsa_schema import (
@@ -35,7 +35,7 @@ from ..pypsa_schema import (
 from ..utils.annuity import annuity_factor
 from ..utils.coerce import number
 from .load_shedding import add_load_shedding
-from .validators import validate_model  # re-export for backend.main
+from .validators import validate_model  # re-export for backend.app.main
 from .snapshots import (
     _snapshots_index,
     _apply_pathway_config,
@@ -214,7 +214,7 @@ def build_network(
     # ── Carbon-price adder on generator marginal cost ─────────────────────────
     # A single scalar still works (the legacy path); when the user provides a
     # year→price schedule, the adder becomes per-snapshot. See
-    # `backend/lib/carbon_price.py` for the year-resolution rule.
+    # `backend/pypsa/carbon_price.py` for the year-resolution rule.
     carbon_config = parse_carbon_price_config(
         carbon_price,
         options.get("carbonPriceSchedule"),
