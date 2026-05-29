@@ -333,8 +333,7 @@ export function workbookToArrayBuffer(model: WorkbookModel, dateFormat: DateForm
  * transparently.  All numeric cells are cast to `number`; the label column is
  * kept as `string`.  Unparseable numeric cells become `null`.
  */
-export async function parseCsvToGridRows(file: File): Promise<GridRow[]> {
-  const text = await file.text();
+export function parseDelimitedTextToGridRows(text: string): GridRow[] {
   const wb = XLSX.read(text, { type: 'string', raw: false });
   const ws = wb.Sheets[wb.SheetNames[0]];
   const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: null });
@@ -351,6 +350,10 @@ export async function parseCsvToGridRows(file: File): Promise<GridRow[]> {
     });
     return Object.fromEntries(entries) as GridRow;
   });
+}
+
+export async function parseCsvToGridRows(file: File): Promise<GridRow[]> {
+  return parseDelimitedTextToGridRows(await file.text());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

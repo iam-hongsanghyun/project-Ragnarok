@@ -1,17 +1,20 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import DataEditor, {
+  CellClickedEventArgs,
   CompactSelection,
   EditableGridCell,
   GridCell,
   GridCellKind,
   GridColumn,
   GridSelection,
+  HeaderClickedEventArgs,
   Item,
   ProvideEditorCallback,
   TextCell,
   Theme,
 } from '@glideapps/glide-data-grid';
 import '@glideapps/glide-data-grid/dist/index.css';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { GridRow, Primitive } from '../../../shared/types';
 import { stringValue } from '../../../shared/utils/helpers';
 import { resolvePaste } from './range';
@@ -64,6 +67,10 @@ export interface DataGridProps {
   onDeleteColumn?: (col: string) => void;
   onRenameColumn?: (oldCol: string, newCol: string) => void;
   protectedCols?: string[];
+  /** Columns that stay read-only even when the grid is editable (e.g. the
+   *  snapshot/time index of a temporal sheet). Their cells can't be edited or
+   *  overwritten by paste. */
+  readOnlyCols?: string[];
   formatDisplayValue?: (col: string, val: Primitive) => string;
   coerceEditedValue?: (col: string, raw: string, current: Primitive) => Primitive;
   getCellSuggestions?: (col: string) => string[] | null;
@@ -72,6 +79,22 @@ export interface DataGridProps {
   onFocusColumn?: (col: string | null) => void;
   /** Atomic paste: apply edits and grow the table by `extraRows` in one shot. */
   onPasteEdits?: (edits: { rowIndex: number; col: string; val: Primitive }[], extraRows: number) => void;
+  /** Append a blank row. Wired to the "Add row" item in the cell right-click
+   *  context menu. When set, the grid stays mounted even with zero rows so the
+   *  menu is reachable. */
+  onAppendRow?: () => void;
+  /** Delete the row at the given original (unfiltered) index. Wired to the
+   *  "Delete row" item in the cell right-click context menu. */
+  onDeleteRow?: (rowIndex: number) => void;
+  /** Open the add-column UI; receives a screen rect to anchor it. Wired to the
+   *  "Add column" item in the header right-click context menu. */
+  onRequestAddColumn?: (rect: DOMRect) => void;
+  /** Remove every row from the sheet. Wired to "Clear table" in both menus. */
+  onClearTable?: () => void;
+  /** Open the analyser, optionally focused on a single column. `col` is the
+   *  column to focus, or `null` to analyse the whole table. Wired to "Analyse
+   *  column" / "Analyse table" in both menus. */
+  onAnalyse?: (col: string | null) => void;
 }
 
 /** Glide overlay editors mount into a fixed `#portal` element. Create it once. */
@@ -98,15 +121,29 @@ export function DataGrid({
   onDeleteColumn,
   onRenameColumn,
   protectedCols,
+  readOnlyCols,
   formatDisplayValue,
   coerceEditedValue,
   getCellSuggestions,
   onFocusRow,
   onFocusColumn,
   onPasteEdits,
+  onAppendRow,
+  onDeleteRow,
+  onRequestAddColumn,
+  onClearTable,
+  onAnalyse,
 }: DataGridProps) {
   const gridRef = useRef<any>(null);
+  const hostRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => { ensurePortal(); }, []);
+
+  // Right-click a body cell → context menu (screen-positioned). Column actions
+  // (filter / rename / delete) live in the header ▾ menu, not here.
+  const [ctxMenu, setCtxMenu] = useState<
+    | { origIndex: number | null; col: string; x: number; y: number }
+    | null
+  >(null);
 
   const display = useCallback(
     (col: string, v: Primitive): string => (formatDisplayValue ? formatDisplayValue(col, v) : stringValue(v)),
@@ -177,40 +214,59 @@ export function DataGrid({
         if (w > max) max = w;
       }
       const width = Math.round(Math.max(COL_MIN_WIDTH, Math.min(COL_MAX_WIDTH, max + COL_PADDING)));
+      // The header ▾ menu opens the Excel-style filter (+ rename / delete).
       return { title, id: col, hasMenu: true, width };
     }),
     [cols, isActive, rows, display],
   );
   const freezeColumns = frozenCol && cols[0] === frozenCol ? 1 : 0;
 
+  // Trailing "+" column at the right edge: clicking its header opens the
+  // add-column UI. Indexed at `cols.length`, it carries no data.
+  const addColEnabled = !!onRequestAddColumn && !readOnly;
+  const addColIndex = addColEnabled ? cols.length : -1;
+  const displayColumns: GridColumn[] = useMemo(
+    () => (addColEnabled
+      ? [...columns, { title: '+', id: '__add_col__', hasMenu: false, width: 44 } as GridColumn]
+      : columns),
+    [columns, addColEnabled],
+  );
+
   // ── Cell content ──────────────────────────────────────────────────────────
   const getCellContent = useCallback(([c, r]: Item): GridCell => {
+    if (c >= cols.length) {
+      // Trailing "+" column — blank, non-editable filler.
+      return { kind: GridCellKind.Text, data: '', displayData: '', allowOverlay: false, readonly: true };
+    }
     const col = cols[c];
     const row = gridRows[r];
     const text = row ? display(col, row[col]) : '';
     const themeOverride: Partial<Theme> | undefined =
       isColorColumn(col) && text ? { bgCell: text } : undefined;
+    const cellReadOnly = readOnly || (readOnlyCols?.includes(col) ?? false);
     return {
       kind: GridCellKind.Text,
       data: text,
       displayData: text,
-      allowOverlay: !readOnly,
-      readonly: readOnly,
+      allowOverlay: !cellReadOnly,
+      readonly: cellReadOnly,
       themeOverride,
     };
-  }, [cols, gridRows, display, readOnly]);
+  }, [cols, gridRows, display, readOnly, readOnlyCols]);
 
   const onCellEdited = useCallback(([c, r]: Item, newVal: EditableGridCell) => {
     if (readOnly || !onUpdate) return;
+    if (c >= cols.length) return; // trailing "+" column
     if (newVal.kind !== GridCellKind.Text) return;
     const col = cols[c];
+    if (readOnlyCols?.includes(col)) return;
     const orig = displayToOrig[r];
     if (orig == null) return;
     const raw = newVal.data ?? '';
     const current = rows[orig]?.[col];
     const val = coerceEditedValue ? coerceEditedValue(col, raw, current) : inferInputValue(raw, current);
     onUpdate(orig, col, val);
-  }, [readOnly, onUpdate, cols, displayToOrig, rows, coerceEditedValue]);
+  }, [readOnly, onUpdate, cols, displayToOrig, rows, coerceEditedValue, readOnlyCols]);
 
   // ── Paste (auto-grows the table) ──────────────────────────────────────────
   const onPaste = useCallback((target: Item, values: readonly (readonly string[])[]): boolean => {
@@ -222,14 +278,16 @@ export function DataGrid({
       const current = rowIndex < rows.length ? rows[rowIndex][col] : '';
       return coerceEditedValue ? coerceEditedValue(col, raw, current) : inferInputValue(raw, current);
     };
-    const resolved = edits.map((e) => ({ rowIndex: e.rowIndex, col: e.col, val: coerce(e.rowIndex, e.col, e.raw) }));
+    const resolved = edits
+      .filter((e) => !readOnlyCols?.includes(e.col))
+      .map((e) => ({ rowIndex: e.rowIndex, col: e.col, val: coerce(e.rowIndex, e.col, e.raw) }));
     if (onPasteEdits) {
       onPasteEdits(resolved, extraRows);
     } else if (onUpdate) {
       resolved.filter((e) => e.rowIndex < rows.length).forEach((e) => onUpdate(e.rowIndex, e.col, e.val));
     }
     return false; // we applied it ourselves
-  }, [readOnly, cols, displayToOrig, rows, coerceEditedValue, onPasteEdits, onUpdate]);
+  }, [readOnly, cols, displayToOrig, rows, coerceEditedValue, onPasteEdits, onUpdate, readOnlyCols]);
 
   // ── Combobox editor for suggestion columns ────────────────────────────────
   const provideEditor: ProvideEditorCallback<GridCell> = useCallback((cell) => {
@@ -281,13 +339,26 @@ export function DataGrid({
     return undefined;
   }, [displayToOrig, rowIssues]);
 
-  // ── Header menu (filter + rename + delete) ────────────────────────────────
-  const onHeaderMenuClick = useCallback((c: number, bounds: { x: number; y: number; width: number; height: number }) => {
-    const col = cols[c];
-    if (menuCol === col) { setMenuCol(null); return; }
-    setAnchorRect(new DOMRect(bounds.x, bounds.y, bounds.width, bounds.height));
-    setMenuCol(col);
-  }, [cols, menuCol]);
+  // ── Right-click a body cell → cell context menu ───────────────────────────
+  const onCellContextMenu = useCallback(([c, r]: Item, e: CellClickedEventArgs) => {
+    if (c >= cols.length) return; // trailing "+" column
+    e.preventDefault();
+    const orig = displayToOrig[r] ?? null;
+    setCtxMenu({ origIndex: orig, col: cols[c] ?? '', x: e.bounds.x + e.localEventX, y: e.bounds.y + e.localEventY });
+  }, [displayToOrig, cols]);
+
+  // ── Header ▾ menu → Excel-style filter (+ rename / delete) ─────────────────
+  const onHeaderMenuClick = useCallback((c: number, screenPosition: { x: number; y: number; width: number; height: number }) => {
+    setAnchorRect(new DOMRect(screenPosition.x, screenPosition.y, screenPosition.width, screenPosition.height));
+    setMenuCol(cols[c] ?? null);
+  }, [cols]);
+
+  // ── Click the trailing "+" header → open the add-column UI ─────────────────
+  const onHeaderClicked = useCallback((c: number, e: HeaderClickedEventArgs) => {
+    if (c !== addColIndex || !onRequestAddColumn) return;
+    const b = e.bounds;
+    onRequestAddColumn(new DOMRect(b.x, b.y, b.width, b.height));
+  }, [addColIndex, onRequestAddColumn]);
 
   // ── Scroll the highlighted (jump-to) row into view ────────────────────────
   useEffect(() => {
@@ -296,10 +367,16 @@ export function DataGrid({
     if (disp != null) gridRef.current?.scrollTo?.(0, disp);
   }, [highlightRow, origToDisplay]);
 
-  if (rows.length === 0) return <div className="grid-empty">No data</div>;
+  // With an append handler the grid stays mounted at zero rows so the trailing
+  // "new row" affordance is reachable; otherwise show a plain empty state.
+  if (rows.length === 0 && !onAppendRow) return <div className="grid-empty">No data</div>;
 
   const hasAnyFilter = cols.some(isActive);
-  const menuProtected = menuCol ? protectedCols?.includes(menuCol) : false;
+
+  // Which cell right-click actions are reachable (column actions + filter live
+  // in the header ▾ menu, not the cell menu).
+  const hasCellMenu = !!onAnalyse || (!readOnly && (!!onAppendRow || !!onRequestAddColumn || !!onDeleteRow || !!onClearTable));
+  const menuProtected = menuCol ? protectedCols?.includes(menuCol) ?? false : false;
 
   return (
     <div className="rdg-wrap">
@@ -309,10 +386,10 @@ export function DataGrid({
           <button className="ghost-button sm" onClick={() => setColFilters({})}>Clear all filters</button>
         </div>
       )}
-      <div className="rdg-grid-host">
+      <div className="rdg-grid-host" ref={hostRef}>
         <DataEditor
           ref={gridRef}
-          columns={columns}
+          columns={displayColumns}
           rows={gridRows.length}
           getCellContent={getCellContent}
           onCellEdited={readOnly ? undefined : onCellEdited}
@@ -326,12 +403,79 @@ export function DataGrid({
           getRowThemeOverride={getRowThemeOverride}
           provideEditor={provideEditor}
           onHeaderMenuClick={onHeaderMenuClick}
+          onHeaderClicked={addColEnabled ? onHeaderClicked : undefined}
+          onCellContextMenu={hasCellMenu ? onCellContextMenu : undefined}
+          onRowAppended={onAppendRow ? () => { onAppendRow(); } : undefined}
+          trailingRowOptions={onAppendRow ? { sticky: false, tint: true, hint: 'New row…' } : undefined}
           width="100%"
           height="100%"
           smoothScrollX
           smoothScrollY
         />
       </div>
+      {/* Right-click cell menu — Radix DropdownMenu anchored at the cursor.
+          Keyed by position so each right-click re-anchors the content; Radix
+          handles outside-click / Escape / keyboard navigation / ARIA. */}
+      <DropdownMenu.Root
+        key={ctxMenu ? `${ctxMenu.x}:${ctxMenu.y}` : 'closed'}
+        open={!!ctxMenu}
+        onOpenChange={(o) => { if (!o) setCtxMenu(null); }}
+      >
+        <DropdownMenu.Trigger asChild>
+          <span aria-hidden style={{ position: 'fixed', left: ctxMenu?.x ?? 0, top: ctxMenu?.y ?? 0, width: 0, height: 0 }} />
+        </DropdownMenu.Trigger>
+        {ctxMenu && (
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content
+              className="grid-ctxmenu"
+              align="start"
+              sideOffset={2}
+              collisionPadding={8}
+              onCloseAutoFocus={(e) => e.preventDefault()}
+            >
+              {!readOnly && onAppendRow && (
+                <DropdownMenu.Item className="grid-ctxmenu-item" onSelect={() => onAppendRow()}>
+                  Add row
+                </DropdownMenu.Item>
+              )}
+              {!readOnly && onRequestAddColumn && (
+                <DropdownMenu.Item className="grid-ctxmenu-item"
+                  onSelect={() => onRequestAddColumn(new DOMRect(ctxMenu.x, ctxMenu.y, 0, 0))}>
+                  Add column
+                </DropdownMenu.Item>
+              )}
+              {!readOnly && onDeleteRow && ctxMenu.origIndex != null && (
+                <DropdownMenu.Item className="grid-ctxmenu-item danger"
+                  onSelect={() => onDeleteRow(ctxMenu.origIndex as number)}>
+                  Delete row
+                </DropdownMenu.Item>
+              )}
+              {onAnalyse && (
+                <>
+                  <DropdownMenu.Separator className="grid-ctxmenu-sep" />
+                  {ctxMenu.col && (
+                    <DropdownMenu.Item className="grid-ctxmenu-item" onSelect={() => onAnalyse(ctxMenu.col)}>
+                      Analyse column
+                    </DropdownMenu.Item>
+                  )}
+                  <DropdownMenu.Item className="grid-ctxmenu-item" onSelect={() => onAnalyse(null)}>
+                    Analyse table
+                  </DropdownMenu.Item>
+                </>
+              )}
+              {!readOnly && onClearTable && (
+                <>
+                  <DropdownMenu.Separator className="grid-ctxmenu-sep" />
+                  <DropdownMenu.Item className="grid-ctxmenu-item danger"
+                    onSelect={() => { if (window.confirm('Remove every row from this table?')) onClearTable(); }}>
+                    Clear table
+                  </DropdownMenu.Item>
+                </>
+              )}
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        )}
+      </DropdownMenu.Root>
       {menuCol && anchorRect && (
         <FilterDropdown
           col={menuCol}
@@ -352,9 +496,9 @@ export function DataGrid({
           }}
           onSelectAll={() => setColFilters((p) => { const n = { ...p }; delete n[menuCol]; return n; })}
           onUncheckAll={() => setColFilters((p) => ({ ...p, [menuCol]: new Set<string>() }))}
-          onClose={() => setMenuCol(null)}
           onRename={onRenameColumn && !menuProtected ? (newName) => onRenameColumn(menuCol, newName) : undefined}
           onDelete={onDeleteColumn && !menuProtected ? () => onDeleteColumn(menuCol) : undefined}
+          onClose={() => setMenuCol(null)}
         />
       )}
     </div>

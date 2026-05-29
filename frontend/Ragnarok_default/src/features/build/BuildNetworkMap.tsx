@@ -20,6 +20,7 @@ import { CircleMarker, MapContainer, Polyline, TileLayer, Tooltip, useMap, useMa
 import type { Map as LeafletMap } from 'leaflet';
 import { GridRow, WorkbookModel } from '../../shared/types';
 import { numberValue, stringValue, resolvedColor } from '../../shared/utils/helpers';
+import { NoZoomAnimation } from '../map/NoZoomAnimation';
 
 const POINT_SHEETS = new Set(['generators', 'loads', 'storage_units', 'stores']);
 export const BRANCH_SHEETS = new Set(['lines', 'links', 'transformers']);
@@ -133,14 +134,24 @@ function MapContextMenu({
 }
 
 /** Leaflet measures its container once on mount; the Build panel resolves its
- *  flex height after that, so remeasure on every container resize. */
+ *  flex height after that, so remeasure on every container resize.
+ *
+ *  Guarded: when a collapsible panel shrinks the map to zero size, calling
+ *  `invalidateSize()` would leave Leaflet's panes in a bad state and crash a
+ *  later zoom transition (`Cannot read properties of undefined (reading
+ *  '_leaflet_pos')`). Skip while the container has no area, and swallow the
+ *  case where the map is torn down mid-resize. */
 function InvalidateOnResize() {
   const map = useMap();
   useEffect(() => {
     const el = map.getContainer();
-    const ro = new ResizeObserver(() => map.invalidateSize());
+    const safeInvalidate = () => {
+      if (el.offsetWidth === 0 || el.offsetHeight === 0) return;
+      try { map.invalidateSize(); } catch { /* map removed during resize */ }
+    };
+    const ro = new ResizeObserver(safeInvalidate);
     ro.observe(el);
-    const t = window.setTimeout(() => map.invalidateSize(), 0);
+    const t = window.setTimeout(safeInvalidate, 0);
     return () => { ro.disconnect(); window.clearTimeout(t); };
   }, [map]);
   return null;
@@ -313,7 +324,8 @@ export function BuildNetworkMap({
 
   return (
     <div className={`build-map-frame${linking ? ' build-map-frame--linking' : ''}`}>
-      <MapContainer center={[36.35, 127.9]} zoom={7} className="leaflet-map" scrollWheelZoom>
+      <MapContainer center={[36.35, 127.9]} zoom={7} className="leaflet-map" scrollWheelZoom zoomAnimation={false}>
+        <NoZoomAnimation />
         <InvalidateOnResize />
         <MapRef mapRef={mapRef} />
         {draggable && <DragController drag={drag} onMove={(lat, lng) => setDrag((d) => (d ? { ...d, lat, lng } : d))} onEnd={endDrag} />}

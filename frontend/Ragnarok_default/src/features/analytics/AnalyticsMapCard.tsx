@@ -25,6 +25,7 @@ import {
   stringValue,
 } from '../../shared/utils/helpers';
 import { FitToBounds } from '../map/FitToBounds';
+import { NoZoomAnimation } from '../map/NoZoomAnimation';
 import { MapLegend, SmpLegend } from '../map/MapLegend';
 import { MapDetailCard } from './MapDetailCard';
 
@@ -38,9 +39,16 @@ function InvalidateOnResize() {
   const map = useMap();
   useEffect(() => {
     const el = map.getContainer();
-    const ro = new ResizeObserver(() => map.invalidateSize());
+    // Skip while the container has no area (collapsed/hidden panel): invalidating
+    // then corrupts Leaflet's pane positions and crashes a later zoom transition
+    // (`Cannot read properties of undefined (reading '_leaflet_pos')`).
+    const safeInvalidate = () => {
+      if (el.offsetWidth === 0 || el.offsetHeight === 0) return;
+      try { map.invalidateSize(); } catch { /* map removed during resize */ }
+    };
+    const ro = new ResizeObserver(safeInvalidate);
     ro.observe(el);
-    const t = window.setTimeout(() => map.invalidateSize(), 0);
+    const t = window.setTimeout(safeInvalidate, 0);
     return () => { ro.disconnect(); window.clearTimeout(t); };
   }, [map]);
   return null;
@@ -138,7 +146,8 @@ export function AnalyticsMapCard({
 
   return (
     <div className="analytics-map-card-inner" style={{ position: 'relative', width: '100%', height: '100%' }}>
-      <MapContainer center={[36.35, 127.9]} zoom={7} className="leaflet-map" scrollWheelZoom>
+      <MapContainer center={[36.35, 127.9]} zoom={7} className="leaflet-map" scrollWheelZoom zoomAnimation={false}>
+        <NoZoomAnimation />
         <InvalidateOnResize />
         <TileLayer
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"

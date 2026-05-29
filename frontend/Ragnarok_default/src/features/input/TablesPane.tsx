@@ -133,6 +133,7 @@ interface TablesPaneProps {
   onAddColumn: (sheet: SheetName, col: string, defaultValue: string | number | boolean) => void;
   onDeleteColumn: (sheet: SheetName, col: string) => void;
   onRenameColumn: (sheet: SheetName, oldCol: string, newCol: string) => void;
+  onClearTable: (sheet: SheetName) => void;
   onImportTsSheet: (sheet: TsSheetName, rows: GridRow[]) => void;
   issues?: ModelIssue[];
   jumpTo?: { sheet: string; rowIndex: number } | null;
@@ -145,6 +146,10 @@ interface TablesPaneProps {
   /** Hide the sheet title header (eyebrow + name + stats). Build supplies its
    *  own step context, so the redundant title block is dropped there. */
   compact?: boolean;
+  /** Allow inline editing of temporal (_t) sheets. The Model tab keeps these
+   *  read-only; Build opts in so users can populate profiles while building.
+   *  The snapshot/time index column stays locked regardless. */
+  editableTs?: boolean;
   /** Atomic paste: apply many cell edits and grow the sheet by `extraRows`. */
   onBulkPaste?: (
     sheet: SheetName,
@@ -163,6 +168,7 @@ export function TablesPane({
   onAddColumn,
   onDeleteColumn,
   onRenameColumn,
+  onClearTable,
   onImportTsSheet,
   issues = [],
   jumpTo,
@@ -172,6 +178,7 @@ export function TablesPane({
   onBulkPaste,
   showAttrDoc = false,
   compact = false,
+  editableTs = false,
 }: TablesPaneProps) {
   const [jumpHighlight, setJumpHighlight] = useState<number | null>(null);
   const [focusedCol, setFocusedCol] = useState<string | null>(null);
@@ -190,7 +197,9 @@ export function TablesPane({
   const [addColOpen, setAddColOpen] = useState(false);
   const [addColAnchor, setAddColAnchor] = useState<DOMRect | null>(null);
   const [showAnalyser, setShowAnalyser] = useState(false);
-  const addColBtnRef = useRef<HTMLButtonElement | null>(null);
+  // Column the analyser opens focused on (from "Analyse column"); null = whole
+  // table (from "Analyse table"). Both are triggered from the grid right-click.
+  const [analyseFocusCol, setAnalyseFocusCol] = useState<string | null>(null);
   const csvInputRef = useRef<HTMLInputElement | null>(null);
 
   // Row issue map for the currently visible sheet
@@ -271,7 +280,15 @@ export function TablesPane({
   const temporalMeta = isTs
     ? parentGroup?.temporalSheets.find((ts) => ts.sheet === sel.sheet)
     : null;
-  const protectedCols = isTs ? [] : getProtectedColumns(sel.sheet);
+
+  // Temporal data is loaded by CSV import (right-hand Temporal panel in Build);
+  // value cells are editable inline, but the snapshot/time index column stays
+  // locked so the imported time axis can't be corrupted.
+  const lockSnapshotCol = isTs && editableTs;
+
+  const protectedCols = isTs
+    ? (lockSnapshotCol && frozenCol ? [frozenCol] : [])
+    : getProtectedColumns(sel.sheet);
   const temporalLabelCols = new Set(['snapshot', 'datetime', 'name', 'index', 'timestep']);
   const normalizeTemporalDisplay = (raw: string): string => {
     const iso = normalizeDateToIso(raw, dateFormat);
@@ -293,8 +310,7 @@ export function TablesPane({
           <div>
             <p className="eyebrow">{isTs ? 'Temporal (_t)' : 'Static'}</p>
             <h2>
-              {parentGroup?.label ?? sel.sheet}{isTs && temporalMeta ? ` · ${temporalMeta.attribute}` : ''}{' '}
-              <span className="sheet-name-chip">{sel.sheet}</span>
+              {parentGroup?.label ?? sel.sheet}{isTs && temporalMeta ? ` · ${temporalMeta.attribute}` : ''}
             </h2>
           </div>
           <div className="inline-stats">
@@ -305,7 +321,11 @@ export function TablesPane({
         </div>
         )}
 
-        {isTs ? (
+        {/* All table actions (add/delete row & column, rename, analyse, clear,
+            filter) live in the grid right-click menu. The Model tab keeps an
+            inline CSV import for temporal sheets since it has no side panel;
+            Build (editableTs) imports from the right-hand Temporal panel. */}
+        {isTs && !editableTs && (
           <div className="section-toolbar">
             <input
               ref={csvInputRef}
@@ -317,62 +337,9 @@ export function TablesPane({
             <button className="ghost-button sm" onClick={() => csvInputRef.current?.click()}>
               Import CSV
             </button>
-            {rows.length > 0 && (
-              <button
-                className="ghost-button sm danger"
-                title="Remove all rows from this time-series sheet"
-                onClick={() => onImportTsSheet(sel.sheet as TsSheetName, [])}
-              >
-                Clear
-              </button>
-            )}
-            {rows.length > 0 && (
-              <button
-                className={`ghost-button sm${showAnalyser ? ' ghost-button--active' : ''}`}
-                onClick={() => setShowAnalyser((v) => !v)}
-                title="Toggle input data analyser"
-              >
-                Analyse
-              </button>
-            )}
-          </div>
-        ) : (
-          <div className="section-toolbar">
-            <button className="ghost-button sm" onClick={() => onAddRow(sel.sheet as SheetName)}>
-              + Row
-            </button>
-            {rows.length > 0 && (
-              <button
-                className="ghost-button sm danger"
-                onClick={() => onDeleteRow(sel.sheet as SheetName, rows.length - 1)}
-              >
-                − Last row
-              </button>
-            )}
-            <button
-              ref={addColBtnRef}
-              className="ghost-button sm"
-              onClick={() => {
-                if (addColOpen) { setAddColOpen(false); return; }
-                const rect = addColBtnRef.current?.getBoundingClientRect();
-                if (rect) setAddColAnchor(rect);
-                setAddColOpen(true);
-              }}
-            >
-              + Column
-            </button>
-            {rows.length > 0 && (
-              <button
-                className={`ghost-button sm${showAnalyser ? ' ghost-button--active' : ''}`}
-                onClick={() => setShowAnalyser((v) => !v)}
-                title="Toggle input data analyser"
-              >
-                Analyse
-              </button>
-            )}
           </div>
         )}
-        {addColOpen && addColAnchor && (
+        {addColOpen && addColAnchor && !isTs && (
           <AddColumnDropdown
             sheet={sel.sheet as SheetName}
             existingCols={cols}
@@ -383,39 +350,61 @@ export function TablesPane({
         )}
 
         {showAnalyser && rows.length > 0 && (
-          <InputAnalyser
-            rows={rows}
-            cols={cols}
-            isTs={isTs}
-            frozenCol={frozenCol}
-            currencySymbol={currencySymbol}
-          />
+          <div className="ia-wrap">
+            <div className="ia-wrap-head">
+              <span className="eyebrow">Analyser{analyseFocusCol ? ` · ${analyseFocusCol}` : ''}</span>
+              <button className="ghost-button sm" onClick={() => setShowAnalyser(false)}>Close</button>
+            </div>
+            <InputAnalyser
+              rows={rows}
+              cols={cols}
+              isTs={isTs}
+              frozenCol={frozenCol}
+              currencySymbol={currencySymbol}
+              focusCol={analyseFocusCol}
+            />
+          </div>
         )}
     </>
   );
 
   const grid = (
         <div className="tables-grid-wrap">
-          {rows.length === 0 ? (
+          {isTs && rows.length === 0 ? (
+            // Temporal sheets are seeded by CSV import, so an empty one shows a
+            // hint instead of a grid. Static sheets always render the grid (even
+            // with zero rows) so the trailing "new row" is reachable.
             <div className="grid-empty">
-              {isTs ? 'No temporal data — use "Import CSV" above to load a profile.' : 'No rows yet — use "+ Row" to add one.'}
+              {editableTs
+                ? 'No temporal data — use "Import CSV" in the Temporal panel on the right, then edit values here.'
+                : 'No temporal data — use "Import CSV" above to load a profile.'}
             </div>
           ) : (
             <DataGrid
               rows={rows}
               cols={cols}
               frozenCol={frozenCol}
-              readOnly={isTs}
+              readOnly={isTs && !editableTs}
               onUpdate={
-                isTs ? undefined : (ri, col, val) => onUpdate(sel.sheet as SheetName, ri, col, val)
+                isTs && !editableTs ? undefined : (ri, col, val) => onUpdate(sel.sheet as SheetName, ri, col, val)
               }
               onPasteEdits={
-                isTs || !onBulkPaste ? undefined : (edits, extraRows) => onBulkPaste(sel.sheet as SheetName, edits, extraRows)
+                (isTs && !editableTs) || !onBulkPaste ? undefined : (edits, extraRows) => onBulkPaste(sel.sheet as SheetName, edits, extraRows)
               }
+              onAppendRow={isTs ? undefined : () => onAddRow(sel.sheet as SheetName)}
+              onDeleteRow={isTs ? undefined : (ri) => onDeleteRow(sel.sheet as SheetName, ri)}
+              onRequestAddColumn={isTs ? undefined : (rect) => { setAddColAnchor(rect); setAddColOpen(true); }}
+              readOnlyCols={lockSnapshotCol && frozenCol ? [frozenCol] : undefined}
               rowIssues={isTs ? undefined : rowIssueMap}
               highlightRow={isTs ? null : jumpHighlight}
               onDeleteColumn={isTs ? undefined : (col) => onDeleteColumn(sel.sheet as SheetName, col)}
               onRenameColumn={isTs ? undefined : (old, next) => onRenameColumn(sel.sheet as SheetName, old, next)}
+              onAnalyse={(col) => { setAnalyseFocusCol(col); setShowAnalyser(true); }}
+              onClearTable={
+                isTs
+                  ? (editableTs ? () => onImportTsSheet(sel.sheet as TsSheetName, []) : undefined)
+                  : () => onClearTable(sel.sheet as SheetName)
+              }
               protectedCols={protectedCols}
               formatDisplayValue={formatDisplayValue}
               coerceEditedValue={coerceEditedValue}

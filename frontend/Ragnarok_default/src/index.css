@@ -395,8 +395,9 @@ button {
 .topbar-status {
   font-size: 0.72rem;
   color: var(--muted);
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
+  max-width: 38vw;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2866,6 +2867,20 @@ path.leaflet-interactive:focus {
   font-style: italic;
 }
 
+.grid-empty-seed {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-style: normal;
+}
+
+.grid-empty-hint {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
 /* ── Tab badges ──────────────────────────────────────────────────────────── */
 .tab-badge {
   display: inline-flex;
@@ -3775,6 +3790,58 @@ th:hover .col-delete-btn {
   box-shadow: 0 8px 24px rgba(15,23,42,0.14);
   overflow: hidden;
 }
+
+/* Right-click cell context menu — Radix DropdownMenu.Content + .Item.
+   Radix (Floating UI) owns positioning via a popper wrapper, so the content
+   itself carries no `position`/coords; we only style it. */
+[data-radix-popper-content-wrapper] {
+  z-index: 9999;
+}
+.grid-ctxmenu {
+  min-width: 150px;
+  background: #fff;
+  border: 1px solid var(--border, #e2e8f0);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.1);
+  padding: 4px 0;
+}
+.grid-ctxmenu-item {
+  appearance: none;
+  -webkit-appearance: none;
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 5px 14px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  outline: none;
+  text-align: left;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--text, #142033);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+/* :hover for mouse, [data-highlighted] for Radix keyboard navigation. */
+.grid-ctxmenu-item:hover,
+.grid-ctxmenu-item[data-highlighted] {
+  background: #f1f5f9;
+}
+.grid-ctxmenu-item.danger {
+  color: var(--danger, #dc2626);
+}
+.grid-ctxmenu-item.danger:hover,
+.grid-ctxmenu-item.danger[data-highlighted] {
+  background: #fef2f2;
+}
+.grid-ctxmenu-sep {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border, #eef2f6);
+}
 .add-col-header {
   padding: 8px 12px 6px;
   font-size: 0.78rem;
@@ -4582,6 +4649,19 @@ th:hover .col-delete-btn {
 }
 
 /* ── Input analyser panel ────────────────────────────────────────────────── */
+.ia-wrap {
+  margin: 0 0 12px;
+}
+.ia-wrap-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 2px 6px;
+}
+.ia-wrap .ia-panel {
+  margin: 0;
+}
 .ia-panel {
   border: 1px solid var(--border);
   border-radius: 0;
@@ -4985,7 +5065,9 @@ th:hover .col-delete-btn {
   display: flex;
   align-items: center;
   gap: 10px;
-  flex-shrink: 0;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .tab-nav--left {
@@ -6871,8 +6953,151 @@ code, kbd, samp, tt,
 }
 .build-table-region {
   display: flex;
+  flex-direction: column;
   min-height: 0;
   overflow: hidden;
+}
+
+/* Right column of the Build top split: attribute form stacked above the
+   temporal-profiles panel. The form scrolls; the panel sits at the bottom. */
+.build-top-right {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.build-top-right .build-form {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Temporal-profiles panel — pick / CSV-import time-series for the component. */
+.build-ts-panel {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  max-height: 40%;
+  border-top: 1px solid var(--border, #e2e2e2);
+  background: var(--surface, #fff);
+  overflow: hidden;
+}
+
+.build-ts-panel.is-collapsed {
+  max-height: none;
+}
+
+.build-ts-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid #f1f5f9;
+  text-align: left;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.build-ts-panel.is-collapsed .build-ts-panel-head {
+  border-bottom: none;
+}
+
+.build-ts-panel-caret {
+  font-size: 0.7rem;
+  color: var(--muted);
+  line-height: 1;
+}
+
+.build-ts-panel-list {
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.build-ts-panel-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  text-align: left;
+}
+
+.build-ts-panel-row:hover {
+  background: #f1f5f9;
+}
+
+.build-ts-panel-row.is-active {
+  background: #e6f5f2;
+}
+
+.build-ts-panel-import {
+  appearance: none;
+  -webkit-appearance: none;
+  flex-shrink: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  outline: none;
+  font-size: 0.74rem;
+  color: var(--accent, #0f766e);
+  cursor: pointer;
+}
+
+.build-ts-panel-import:hover {
+  text-decoration: underline;
+}
+
+.build-ts-panel-select {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  outline: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.build-ts-panel-name {
+  text-decoration: none;
+}
+
+.build-ts-panel-select:hover .build-ts-panel-name {
+  text-decoration: underline;
+}
+
+.build-ts-panel-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+  font-family: 'IBM Plex Mono', monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.build-ts-panel-meta {
+  font-size: 0.72rem;
+  color: var(--muted);
+  flex-shrink: 0;
 }
 
 .build-form {

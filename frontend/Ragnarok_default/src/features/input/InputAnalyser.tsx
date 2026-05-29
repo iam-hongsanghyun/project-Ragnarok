@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { GridRow } from '../../shared/types';
 import { stringValue } from '../../shared/utils/helpers';
 
@@ -397,13 +397,16 @@ interface InputAnalyserProps {
   isTs: boolean;
   frozenCol: string | null;
   currencySymbol?: string;
+  /** When the analyser is opened via "Analyse column", preselect this column as
+   *  the value (static) / series (temporal). `null` analyses the whole table. */
+  focusCol?: string | null;
 }
 
 type StaticChart = 'bar' | 'grouped-bar' | 'donut' | 'scatter';
 type TsChart     = 'line' | 'stacked-area' | 'duration' | 'daily-profile';
 type AggMethod   = 'sum' | 'mean' | 'max' | 'min' | 'count';
 
-export function InputAnalyser({ rows, cols, isTs, frozenCol, currencySymbol = '$' }: InputAnalyserProps) {
+export function InputAnalyser({ rows, cols, isTs, frozenCol, currencySymbol = '$', focusCol = null }: InputAnalyserProps) {
   const numericCols = useMemo(
     () => cols.filter((c) => c !== frozenCol && isNumericCol(rows, c)),
     [rows, cols, frozenCol],
@@ -427,6 +430,16 @@ export function InputAnalyser({ rows, cols, isTs, frozenCol, currencySymbol = '$
   // ── TS controls ────────────────────────────────────────────────────────────
   const [tsSeries,  setTsSeries]  = useState('__all__');
   const [tsChart,   setTsChart]   = useState<TsChart>('line');
+
+  // "Analyse column" preselects the right control for the requested column.
+  useEffect(() => {
+    if (!focusCol) return;
+    if (isTs) {
+      if (tsCols.includes(focusCol)) setTsSeries(focusCol);
+    } else if (numericCols.includes(focusCol)) {
+      setValueCol(focusCol);
+    }
+  }, [focusCol, isTs, tsCols, numericCols]);
 
   // ── Static derived values (hooks must be unconditional) ───────────────────
   const nameCol     = frozenCol ?? cols[0] ?? '';

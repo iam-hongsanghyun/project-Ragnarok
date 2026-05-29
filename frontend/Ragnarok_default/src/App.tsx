@@ -859,7 +859,7 @@ function AppInner() {
   const updateRowValue = (sheet: SheetName, rowIndex: number, key: string, value: Primitive) => {
     pushHistory();
     setModel((current) => {
-      const nextRows = current[sheet].map((row, index) => (index === rowIndex ? { ...row, [key]: value } : row));
+      const nextRows = (current[sheet] ?? []).map((row, index) => (index === rowIndex ? { ...row, [key]: value } : row));
       return { ...current, [sheet]: nextRows };
     });
   };
@@ -954,6 +954,12 @@ function AppInner() {
       return { ...current, [sheet]: nextRows };
     });
     setStatus(`Renamed column "${oldCol}" to "${newCol}" in ${sheet}.`);
+  };
+
+  const clearSheet = (sheet: SheetName) => {
+    pushHistory();
+    setModel((current) => ({ ...current, [sheet]: [] }));
+    setStatus(`Cleared all rows from ${sheet}.`);
   };
 
   const handleRestoreRun = (entry: RunHistoryEntry) => {
@@ -1572,6 +1578,7 @@ function AppInner() {
               onAddColumn={addColumn}
               onDeleteColumn={deleteColumn}
               onRenameColumn={renameColumn}
+              onClearTable={clearSheet}
               onImportTsSheet={handleImportTsSheet}
               onBulkPaste={bulkPaste}
               modelIssues={modelIssues}
@@ -1592,6 +1599,7 @@ function AppInner() {
               onAddColumn={addColumn}
               onDeleteColumn={deleteColumn}
               onRenameColumn={renameColumn}
+              onClearTable={clearSheet}
               onImportTsSheet={handleImportTsSheet}
               onBulkPaste={bulkPaste}
               modelIssues={modelIssues}

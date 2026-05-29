@@ -39,6 +39,7 @@ export interface ModelViewProps extends FileToolbarProps {
   onAddColumn: (sheet: SheetName, col: string, defaultValue: string | number | boolean) => void;
   onDeleteColumn: (sheet: SheetName, col: string) => void;
   onRenameColumn: (sheet: SheetName, oldCol: string, newCol: string) => void;
+  onClearTable: (sheet: SheetName) => void;
   onImportTsSheet: (sheet: TsSheetName, rows: GridRow[]) => void;
   onBulkPaste: (
     sheet: SheetName,
@@ -77,6 +78,7 @@ export function ModelView(props: ModelViewProps) {
             onAddColumn={props.onAddColumn}
             onDeleteColumn={props.onDeleteColumn}
             onRenameColumn={props.onRenameColumn}
+            onClearTable={props.onClearTable}
             onImportTsSheet={props.onImportTsSheet}
             onBulkPaste={props.onBulkPaste}
             issues={props.modelIssues}

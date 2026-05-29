@@ -4,6 +4,7 @@ import { LatLngBoundsExpression } from 'leaflet';
 import { GridRow, WorkbookModel } from '../../shared/types';
 import { numberValue, stringValue, resolvedColor } from '../../shared/utils/helpers';
 import { FitToBounds } from './FitToBounds';
+import { NoZoomAnimation } from './NoZoomAnimation';
 import { MapLegend } from './MapLegend';
 
 type LayerKey = 'buses' | 'generators' | 'lines' | 'links' | 'transformers';
@@ -102,7 +103,8 @@ export function MapPane({ model, bounds, busIndex }: Props) {
         </div>
       </div>
       <div className="map-frame" style={{ position: 'relative' }}>
-        <MapContainer center={[36.35, 127.9]} zoom={7} className="leaflet-map" scrollWheelZoom>
+        <MapContainer center={[36.35, 127.9]} zoom={7} className="leaflet-map" scrollWheelZoom zoomAnimation={false}>
+          <NoZoomAnimation />
           <TileLayer
             url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'

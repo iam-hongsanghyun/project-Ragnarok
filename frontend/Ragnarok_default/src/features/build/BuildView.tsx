@@ -10,7 +10,7 @@
  * step's primary sheet on the left, and a schema/issue detail pane on the
  * right.
  */
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   GridRow,
   Primitive,
@@ -23,6 +23,8 @@ import { TablesPane } from '../input/TablesPane';
 import { ModelIssue } from '../validation/useModelIssues';
 import { DateFormat } from '../settings/useSettings';
 import { stringValue } from '../../shared/utils/helpers';
+import { parseCsvToGridRows } from '../../shared/utils/workbook';
+import { TABLE_GROUPS } from '../../constants';
 import { BUILD_STEPS, BuildStep, getStepIssues } from './steps';
 import { BuildDetailPane } from './BuildDetailPane';
 import { BuildNetworkMap, BRANCH_SHEETS, isGeoSheet, LinkMode } from './BuildNetworkMap';
@@ -38,6 +40,7 @@ export interface BuildViewProps {
   onAddColumn: (sheet: SheetName, col: string, defaultValue: string | number | boolean) => void;
   onDeleteColumn: (sheet: SheetName, col: string) => void;
   onRenameColumn: (sheet: SheetName, oldCol: string, newCol: string) => void;
+  onClearTable: (sheet: SheetName) => void;
   onImportTsSheet: (sheet: TsSheetName, rows: GridRow[]) => void;
   onBulkPaste: (
     sheet: SheetName,
@@ -73,6 +76,95 @@ function uniqueName(sheet: string, rows: GridRow[]): string {
 }
 
 const round5 = (v: number): number => Math.round(v * 1e5) / 1e5;
+
+// ── TemporalProfilesPanel ─────────────────────────────────────────────────────
+// Right-hand, collapsible panel listing the active step's temporal profiles.
+// Each profile can be selected (to show it in the bottom table) and CSV-imported
+// in place. There is no manual row/column editing — load a profile from CSV, then
+// edit values inline in the table. Clicking the already-active profile (or
+// selecting a row on the map) returns the table to the static sheet.
+interface TemporalProfilesPanelProps {
+  profiles: { sheet: string; label: string }[];
+  activeSheet: string | null;
+  componentLabel: string;
+  rowCountFor: (sheet: string) => number;
+  onSelectStatic: () => void;
+  onSelectTs: (sheet: string) => void;
+  onImport: (sheet: string, rows: GridRow[]) => void;
+}
+
+function TemporalProfilesPanel({
+  profiles, activeSheet, componentLabel, rowCountFor, onSelectStatic, onSelectTs, onImport,
+}: TemporalProfilesPanelProps) {
+  const [collapsed, setCollapsed] = useState(true);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const pendingSheet = useRef<string | null>(null);
+
+  const triggerImport = (sheet: string) => {
+    pendingSheet.current = sheet;
+    inputRef.current?.click();
+  };
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    const sheet = pendingSheet.current;
+    if (!file || !sheet) { e.target.value = ''; return; }
+    try {
+      const rows = await parseCsvToGridRows(file);
+      if (rows.length === 0) throw new Error('No rows found in the file.');
+      onImport(sheet, rows);
+      onSelectTs(sheet);
+    } catch (err) {
+      window.alert(`CSV import failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      pendingSheet.current = null;
+      e.target.value = '';
+    }
+  };
+
+  return (
+    <div className={`build-ts-panel${collapsed ? ' is-collapsed' : ''}`}>
+      <input ref={inputRef} type="file" accept=".csv,.tsv,.txt" hidden onChange={handleFile} />
+      <button
+        type="button"
+        className="build-ts-panel-head"
+        aria-expanded={!collapsed}
+        onClick={() => setCollapsed((v) => !v)}
+      >
+        <span className="build-ts-panel-caret">{collapsed ? '▸' : '▾'}</span>
+        <span className="eyebrow">{componentLabel} · time-series</span>
+      </button>
+      {!collapsed && (
+        <div className="build-ts-panel-list">
+          {profiles.map((p) => {
+            const rowCount = rowCountFor(p.sheet);
+            const active = activeSheet === p.sheet;
+            return (
+              <div key={p.sheet} className={`build-ts-panel-row${active ? ' is-active' : ''}`}>
+                <button
+                  type="button"
+                  className="build-ts-panel-select"
+                  onClick={() => (active ? onSelectStatic() : onSelectTs(p.sheet))}
+                >
+                  <span className="build-ts-panel-name">{p.label}</span>
+                  <span className="build-ts-panel-meta">{rowCount > 0 ? `${rowCount} rows` : 'empty'}</span>
+                </button>
+                <button
+                  type="button"
+                  className="build-ts-panel-import"
+                  title={`Import a CSV for ${p.label}`}
+                  onClick={() => triggerImport(p.sheet)}
+                >
+                  Import
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function BuildView(props: BuildViewProps) {
   const [stepIndex, setStepIndex] = useState(0);
@@ -146,8 +238,16 @@ export function BuildView(props: BuildViewProps) {
     ], 0);
   };
 
-  const tableSel: TableSel = useMemo(
-    () => ({ kind: 'static', sheet: step.primarySheet as SheetName }),
+  // The table can show the step's static sheet or one of its temporal profiles.
+  // Defaults to static; resets to static whenever the step changes.
+  const [tableSel, setTableSel] = useState<TableSel>({ kind: 'static', sheet: step.primarySheet as SheetName });
+  useEffect(() => {
+    setTableSel({ kind: 'static', sheet: step.primarySheet as SheetName });
+  }, [stepIndex, step.primarySheet]);
+
+  // Temporal profiles the active step's component supports (from the schema).
+  const temporalSheets = useMemo(
+    () => TABLE_GROUPS.find((g) => g.sheet === step.primarySheet)?.temporalSheets ?? [],
     [step.primarySheet],
   );
 
@@ -183,13 +283,14 @@ export function BuildView(props: BuildViewProps) {
     <TablesPane
       model={props.model}
       sel={tableSel}
-      onSelChange={() => {/* fixed per step */}}
+      onSelChange={setTableSel}
       onUpdate={props.onUpdateRow}
       onAddRow={props.onAddRow}
       onDeleteRow={props.onDeleteRow}
       onAddColumn={props.onAddColumn}
       onDeleteColumn={props.onDeleteColumn}
       onRenameColumn={props.onRenameColumn}
+      onClearTable={props.onClearTable}
       onImportTsSheet={props.onImportTsSheet}
       onBulkPaste={props.onBulkPaste}
       issues={props.modelIssues}
@@ -198,6 +299,7 @@ export function BuildView(props: BuildViewProps) {
       dateFormat={props.dateFormat}
       onFocusRow={setFocusedRowIndex}
       compact
+      editableTs
     />
   );
 
@@ -214,6 +316,25 @@ export function BuildView(props: BuildViewProps) {
       onDeleteRow={(rowIndex) => { props.onDeleteRow(step.primarySheet as SheetName, rowIndex); setFocusedRowIndex(null); }}
       onPickOnMap={geo ? startLink : undefined}
     />
+  );
+
+  // Right column of the top split: the attribute form, plus (for components
+  // that support time-series) a panel to pick / CSV-import temporal profiles.
+  const rightColumn = (
+    <div className="build-top-right">
+      {attributeForm}
+      {temporalSheets.length > 0 && (
+        <TemporalProfilesPanel
+          profiles={temporalSheets}
+          activeSheet={tableSel.kind === 'ts' ? tableSel.sheet : null}
+          componentLabel={step.label}
+          rowCountFor={(sheet) => ((props.model as Record<string, GridRow[]>)[sheet] ?? []).length}
+          onSelectStatic={() => setTableSel({ kind: 'static', sheet: step.primarySheet as SheetName })}
+          onSelectTs={(sheet) => setTableSel({ kind: 'ts', sheet: sheet as TsSheetName })}
+          onImport={(sheet, rows) => props.onImportTsSheet(sheet as TsSheetName, rows)}
+        />
+      )}
+    </div>
   );
 
   // The map always renders the full network as context. Placement / link /
@@ -299,9 +420,11 @@ export function BuildView(props: BuildViewProps) {
         <ResizablePanels id="build-v" direction="vertical" className="build-body" initialSizes={[52, 48]} minSize={120}>
           <ResizablePanels id="build-top" direction="horizontal" className="build-top-split" initialSizes={[60, 40]} minSize={160}>
             {geoMap}
-            {attributeForm}
+            {rightColumn}
           </ResizablePanels>
-          <section className="build-table-region">{buildTable}</section>
+          <section className="build-table-region">
+            {buildTable}
+          </section>
         </ResizablePanels>
       )}
     </div>
