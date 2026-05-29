@@ -5079,13 +5079,10 @@ th:hover .col-delete-btn {
   position: relative;
   width: 100%;
 }
-.ss-wrap input {
-  width: 100%;
-  box-sizing: border-box;
-}
 /* Canonical dropdown box — one look for every SearchableSelect, matching the
- * global-constraints field. Defined after the legacy select classes so it wins
- * for instances that still pass them (same specificity, later source order). */
+ * global-constraints field. The component always applies `.ss-input`; it's
+ * defined after the legacy select classes so it wins for instances that still
+ * pass them (same specificity, later source order). */
 .ss-input {
   width: 100%;
   box-sizing: border-box;
@@ -5094,7 +5091,7 @@ th:hover .col-delete-btn {
   border-radius: 0;
   background: #fff;
   color: var(--text);
-  font-family: inherit;
+  font-family: var(--font-mono);
   font-size: 0.88rem;
 }
 .ss-input:focus {
@@ -5125,6 +5122,7 @@ th:hover .col-delete-btn {
   border: 1px solid var(--border);
   box-shadow: 0 4px 14px rgba(15, 23, 42, 0.14);
   z-index: 9999;
+  font-family: var(--font-mono);
   font-size: 0.82rem;
 }
 .ss-option {
