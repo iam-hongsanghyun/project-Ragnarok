@@ -1029,6 +1029,24 @@ function AppInner() {
       snapshotWeight: entry.snapshotWeight,
       discountRate: entry.discountRate ?? settings.discountRate,
     });
+    // Load the run's inputs back into the LIVE editable state so the Model tab,
+    // Build tab and any export reflect the selected run — not whatever the user
+    // last edited. The stored model is the exact (date-normalised) workbook that
+    // was submitted, so it drops straight into `model`. Legacy entries with no
+    // stored model leave the live model untouched (prior behaviour). The prior
+    // working model is pushed onto the undo stack so the swap is reversible.
+    if (entry.model) {
+      pushHistory();
+      const restoredModel = structuredClone(entry.model);
+      setModel(restoredModel);
+      const snapshotMax = snapshotMaxFromWorkbook(restoredModel.snapshots);
+      setMaxSnapshots(snapshotMax);
+      setSnapshotStart(entry.snapshotStart);
+      setSnapshotEnd(entry.snapshotEnd);
+    }
+    setSnapshotWeight(entry.snapshotWeight);
+    setCarbonPrice(entry.carbonPrice);
+    if (entry.discountRate !== undefined) updateSettings({ discountRate: entry.discountRate });
     setPathwayConfig((current) => entry.results.pathway?.enabled ? ({
       ...current,
       enabled: true,
@@ -1055,9 +1073,9 @@ function AppInner() {
       ...current,
       enabled: false,
     });
-    setTab('Analytics');
-    setAnalyticsSubTab('Result');
-    setAnalyticsFocus({ type: 'system' });
+    // Stay on whatever view/sub-tab the user is currently on — do not yank them
+    // to a default Result pane. Any stale asset focus that the restored results
+    // don't contain is dropped by the focus-reset effect above.
     showToast(`Viewing ${entry.label}`, 'success');
   };
 
