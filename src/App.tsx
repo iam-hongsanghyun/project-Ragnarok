@@ -1561,7 +1561,6 @@ function AppInner() {
           {tab === 'Build' && (
             <BuildView
               model={model}
-              bounds={bounds}
               busIndex={busIndex}
               onUpdateRow={updateRowValue}
               onAddRow={addRow}

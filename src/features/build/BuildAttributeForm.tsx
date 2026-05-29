@@ -39,10 +39,13 @@ interface Props {
   onUpdate: (rowIndex: number, col: string, val: Primitive) => void;
   onAddRow: () => void;
   onDeleteRow: (rowIndex: number) => void;
+  /** When provided (geo steps), bus fields gain a "pick on map" button that
+   *  starts click-to-link for that field. */
+  onPickOnMap?: (rowIndex: number, field: string) => void;
 }
 
 export function BuildAttributeForm({
-  sheet, row, rowIndex, rowCount, busNames, carrierNames, onUpdate, onAddRow, onDeleteRow,
+  sheet, row, rowIndex, rowCount, busNames, carrierNames, onUpdate, onAddRow, onDeleteRow, onPickOnMap,
 }: Props) {
   const component = getComponentSchema(sheet);
 
@@ -84,10 +87,22 @@ export function BuildAttributeForm({
     let field: React.ReactNode;
     if (isBus) {
       field = (
-        <select value={strValue} onChange={(e) => onUpdate(rowIndex, attr.attribute, e.target.value)}>
-          <option value="">—</option>
-          {busNames.map((b) => <option key={b} value={b}>{b}</option>)}
-        </select>
+        <div className="build-field-bus">
+          <select value={strValue} onChange={(e) => onUpdate(rowIndex, attr.attribute, e.target.value)}>
+            <option value="">—</option>
+            {busNames.map((b) => <option key={b} value={b}>{b}</option>)}
+          </select>
+          {onPickOnMap && (
+            <button
+              type="button"
+              className="ghost-button sm build-field-pick"
+              title="Click a bus on the map"
+              onClick={() => onPickOnMap(rowIndex, attr.attribute)}
+            >
+              Pick on map
+            </button>
+          )}
+        </div>
       );
     } else if (isCarrier) {
       field = (

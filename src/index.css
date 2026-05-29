@@ -6814,6 +6814,87 @@ code, kbd, samp, tt,
   border-right: 1px solid var(--border);
 }
 .build-map-frame .leaflet-map { width: 100%; height: 100%; }
+.build-map-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  z-index: 800;
+  pointer-events: none;
+  padding: 3px 10px;
+  font-size: 0.72rem;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.build-map-menu {
+  z-index: 1200;
+  display: flex;
+  flex-direction: column;
+  min-width: 140px;
+  padding: 4px;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+}
+.build-map-menu-item {
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  color: var(--text, #1e293b);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.build-map-menu-item:hover {
+  background: var(--hover, rgba(15, 118, 110, 0.1));
+}
+.build-map-menu-item--danger {
+  color: #dc2626;
+}
+.build-map-menu-item--danger:hover {
+  background: rgba(220, 38, 38, 0.1);
+}
+.build-map-menu-item--muted {
+  color: var(--muted);
+}
+.build-map-frame--linking .leaflet-container {
+  cursor: crosshair;
+}
+.build-map-linkbar {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  z-index: 800;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 10px;
+  font-size: 0.74rem;
+  color: var(--text, #1e293b);
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid var(--accent, #0f766e);
+  white-space: nowrap;
+}
+.build-field-bus {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.build-field-bus select {
+  flex: 1;
+  min-width: 0;
+}
+.build-field-pick {
+  flex: none;
+  white-space: nowrap;
+}
 .build-table-region {
   display: flex;
   min-height: 0;

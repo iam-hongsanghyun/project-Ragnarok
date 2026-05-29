@@ -11,7 +11,6 @@
  * right.
  */
 import React, { useMemo, useState } from 'react';
-import { LatLngBoundsExpression } from 'leaflet';
 import {
   GridRow,
   Primitive,
@@ -26,13 +25,12 @@ import { DateFormat } from '../settings/useSettings';
 import { stringValue } from '../../shared/utils/helpers';
 import { BUILD_STEPS, BuildStep, getStepIssues } from './steps';
 import { BuildDetailPane } from './BuildDetailPane';
-import { BuildNetworkMap, isGeoSheet } from './BuildNetworkMap';
+import { BuildNetworkMap, BRANCH_SHEETS, isGeoSheet, LinkMode } from './BuildNetworkMap';
 import { BuildAttributeForm } from './BuildAttributeForm';
 import { ResizablePanels } from '../../layout/ResizablePanels';
 
 export interface BuildViewProps {
   model: WorkbookModel;
-  bounds: LatLngBoundsExpression | null;
   busIndex: Record<string, GridRow>;
   onUpdateRow: (sheet: SheetName, rowIndex: number, col: string, val: Primitive) => void;
   onAddRow: (sheet: SheetName) => void;
@@ -53,11 +51,35 @@ export interface BuildViewProps {
   onOpenRunSetup?: () => void;
 }
 
+/** Short, sheet-appropriate base for auto-generated component names. */
+const NAME_BASE: Record<string, string> = {
+  buses: 'bus',
+  generators: 'gen',
+  loads: 'load',
+  storage_units: 'storage',
+  stores: 'store',
+  lines: 'line',
+  links: 'link',
+  transformers: 'transformer',
+};
+
+/** First `${base}_${n}` not already used as a name in `rows`. */
+function uniqueName(sheet: string, rows: GridRow[]): string {
+  const base = NAME_BASE[sheet] ?? 'item';
+  const taken = new Set(rows.map((r) => stringValue(r.name)));
+  let n = rows.length + 1;
+  while (taken.has(`${base}_${n}`)) n += 1;
+  return `${base}_${n}`;
+}
+
+const round5 = (v: number): number => Math.round(v * 1e5) / 1e5;
+
 export function BuildView(props: BuildViewProps) {
   const [stepIndex, setStepIndex] = useState(0);
   const [focusedRowIndex, setFocusedRowIndex] = useState<number | null>(null);
   // A new object on each map-select flashes + scrolls the matching table row.
   const [jumpTo, setJumpTo] = useState<{ sheet: string; rowIndex: number } | null>(null);
+  const [linkMode, setLinkMode] = useState<LinkMode | null>(null);
   const step: BuildStep = BUILD_STEPS[stepIndex];
   const geo = isGeoSheet(step.primarySheet);
 
@@ -76,6 +98,44 @@ export function BuildView(props: BuildViewProps) {
   const selectFromMap = (rowIndex: number) => {
     setFocusedRowIndex(rowIndex);
     setJumpTo({ sheet: step.primarySheet, rowIndex });
+  };
+
+  // Right-click the map → add a row of the active sheet at that location.
+  // Buses and point components (generators/loads/storage/stores) take the exact
+  // clicked coordinates (x = lng, y = lat) and are NOT linked to any bus — the
+  // user links a bus explicitly afterwards. Branches are defined by their two
+  // buses, so a new branch row gets a name only (its buses are picked later).
+  // The whole thing is one atomic, undoable mutation via onBulkPaste (grow by
+  // 1 row, then set the location columns on it).
+  const addAtLocation = (lat: number, lng: number) => {
+    const sheet = step.primarySheet as SheetName;
+    const newIndex = stepRows.length;
+    const name = uniqueName(sheet, stepRows);
+    const edits: { rowIndex: number; col: string; val: Primitive }[] = [
+      { rowIndex: newIndex, col: 'name', val: name },
+    ];
+
+    if (!BRANCH_SHEETS.has(sheet)) {
+      edits.push({ rowIndex: newIndex, col: 'x', val: round5(lng) });
+      edits.push({ rowIndex: newIndex, col: 'y', val: round5(lat) });
+    }
+
+    props.onBulkPaste(sheet, edits, 1);
+    setFocusedRowIndex(newIndex);
+    setJumpTo({ sheet, rowIndex: newIndex });
+  };
+
+  // Click-to-link: a pending "click a bus to set this field" request, started
+  // from the map context menu or the attribute form's "pick on map" button.
+  const startLink = (rowIndex: number, field: string) => {
+    setFocusedRowIndex(rowIndex);
+    setJumpTo({ sheet: step.primarySheet, rowIndex });
+    setLinkMode({ rowIndex, field });
+  };
+  const pickBus = (busName: string) => {
+    if (!linkMode) return;
+    props.onUpdateRow(step.primarySheet as SheetName, linkMode.rowIndex, linkMode.field, busName);
+    setLinkMode(null);
   };
 
   const tableSel: TableSel = useMemo(
@@ -108,6 +168,7 @@ export function BuildView(props: BuildViewProps) {
     setStepIndex(i);
     setFocusedRowIndex(null);
     setJumpTo(null);
+    setLinkMode(null);
   };
 
   const buildTable = (
@@ -142,6 +203,7 @@ export function BuildView(props: BuildViewProps) {
       onUpdate={(rowIndex, col, val) => props.onUpdateRow(step.primarySheet as SheetName, rowIndex, col, val)}
       onAddRow={() => { props.onAddRow(step.primarySheet as SheetName); setFocusedRowIndex(stepRows.length); }}
       onDeleteRow={(rowIndex) => { props.onDeleteRow(step.primarySheet as SheetName, rowIndex); setFocusedRowIndex(null); }}
+      onPickOnMap={geo ? startLink : undefined}
     />
   );
 
@@ -229,11 +291,21 @@ export function BuildView(props: BuildViewProps) {
           <ResizablePanels id="build-top" direction="horizontal" className="build-top-split" initialSizes={[60, 40]} minSize={220}>
             <BuildNetworkMap
               model={props.model}
-              bounds={props.bounds}
               busIndex={props.busIndex}
               activeSheet={step.primarySheet}
               selectedRowIndex={focusedRowIndex}
               onSelectRow={selectFromMap}
+              onAddAtLocation={addAtLocation}
+              onDeleteRow={(rowIndex) => {
+                props.onDeleteRow(step.primarySheet as SheetName, rowIndex);
+                setFocusedRowIndex(null);
+                setJumpTo(null);
+                setLinkMode(null);
+              }}
+              linkMode={linkMode}
+              onStartLink={startLink}
+              onPickBus={pickBus}
+              onCancelLink={() => setLinkMode(null)}
             />
             {attributeForm}
           </ResizablePanels>
