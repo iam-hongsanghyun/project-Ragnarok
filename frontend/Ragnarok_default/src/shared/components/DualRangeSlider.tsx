@@ -41,6 +41,36 @@ export function DualRangeSlider({
   );
 }
 
+export function SingleRangeSlider({
+  min, max, value, step = 1, disabled = false,
+  minLabel, maxLabel,
+  onChange,
+}: {
+  min: number; max: number; value: number; step?: number; disabled?: boolean;
+  minLabel?: React.ReactNode; maxLabel?: React.ReactNode;
+  onChange: (value: number) => void;
+}) {
+  const span = Math.max(max - min, 1);
+  const pct = ((value - min) / span) * 100;
+  return (
+    <div className="dual-range">
+      <div className="dual-range-labels">
+        <span>{minLabel ?? min}</span>
+        <span>{maxLabel ?? max}</span>
+      </div>
+      <div className="dual-range-track">
+        <div className="dual-range-fill" style={{ left: 0, width: `${pct}%` }} />
+        <input
+          type="range" min={min} max={max} step={step} value={value}
+          disabled={disabled}
+          className="dual-range-input"
+          onChange={(e) => onChange(Number(e.target.value))}
+        />
+      </div>
+    </div>
+  );
+}
+
 export function TimelineSlider({
   data,
   startIndex,
