@@ -319,7 +319,7 @@ function cellInput(
   if (column.type === 'select' && column.options) {
     return (
       <SearchableSelect
-        className="sg-module-table-cell-input"
+        className="constraints-cell-input"
         value={String(cell ?? '')}
         options={[{ value: '', label: '—' }, ...column.options.map((opt) => ({ value: String(opt.value), label: String(opt.label ?? opt.value) }))]}
         onChange={(v) => onCellChange(v)}
@@ -330,7 +330,7 @@ function cellInput(
     return (
       <input
         type="number"
-        className="sg-module-table-cell-input"
+        className="constraints-cell-input constraints-cell-input--num"
         value={cell === null || cell === undefined ? '' : String(cell)}
         onChange={(e) => onCellChange(e.target.value === '' ? '' : Number(e.target.value))}
       />
@@ -339,7 +339,7 @@ function cellInput(
   return (
     <input
       type="text"
-      className="sg-module-table-cell-input"
+      className="constraints-cell-input"
       value={cell === null || cell === undefined ? '' : String(cell)}
       onChange={(e) => onCellChange(e.target.value)}
     />
@@ -359,8 +359,11 @@ function TableEditor({ columns, rows, onChange, maxHeight }: TableEditorProps) {
 
   return (
     <div className="sg-module-table-editor">
-      <div className="sg-module-table-scroll" style={maxHeight !== undefined ? { maxHeight } : undefined}>
-      <table className="sg-module-table">
+      <div
+        className="constraints-table-wrap"
+        style={maxHeight !== undefined ? { maxHeight, overflowY: 'auto' } : undefined}
+      >
+      <table className="constraints-table">
         <thead>
           <tr>
             {columns.map((c) => (
@@ -371,13 +374,13 @@ function TableEditor({ columns, rows, onChange, maxHeight }: TableEditorProps) {
                 {c.label ?? c.key}
               </th>
             ))}
-            <th className="sg-module-table-actions-col" aria-label="actions" />
+            <th aria-label="actions" />
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={columns.length + 1} className="sg-module-table-empty">
+              <td colSpan={columns.length + 1} className="constraints-cell-placeholder" style={{ textAlign: 'center', padding: '8px 0' }}>
                 No rows — click “+ Add row” to start.
               </td>
             </tr>
@@ -387,10 +390,10 @@ function TableEditor({ columns, rows, onChange, maxHeight }: TableEditorProps) {
                 {columns.map((c) => (
                   <td key={c.key}>{cellInput(c, row[c.key], (v) => updateCell(rowIdx, c.key, v))}</td>
                 ))}
-                <td className="sg-module-table-actions-col">
+                <td>
                   <button
                     type="button"
-                    className="sg-module-table-row-delete"
+                    className="gcc-del"
                     onClick={() => deleteRow(rowIdx)}
                     aria-label={`Delete row ${rowIdx + 1}`}
                   >
@@ -403,7 +406,7 @@ function TableEditor({ columns, rows, onChange, maxHeight }: TableEditorProps) {
         </tbody>
       </table>
       </div>
-      <button type="button" className="tb-btn sg-module-table-add" onClick={addRow}>
+      <button type="button" className="tb-btn" style={{ marginTop: 8 }} onClick={addRow}>
         + Add row
       </button>
     </div>

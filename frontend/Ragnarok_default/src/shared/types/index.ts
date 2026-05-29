@@ -423,6 +423,12 @@ export interface PluginAnalyticsEntry {
   data: Record<string, unknown>;
 }
 
+export interface AppliedConstraint {
+  name: string;
+  source: 'custom' | 'dsl' | 'plugin';
+  shadowPrice?: number;
+}
+
 export interface RunResults {
   pluginAnalytics?: Record<string, PluginAnalyticsEntry>;
   summary: SummaryItem[];
@@ -439,6 +445,7 @@ export interface RunResults {
   expansionResults?: ExpansionAsset[];
   meritOrder?: MeritOrderEntry[];
   co2Shadow?: Co2Shadow;
+  appliedConstraints?: AppliedConstraint[];
   emissionsBreakdown?: EmissionsBreakdown;
   narrative: string[];
   runMeta: {

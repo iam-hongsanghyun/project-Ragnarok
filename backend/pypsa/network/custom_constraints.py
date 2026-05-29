@@ -1,8 +1,62 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 import pypsa
+
+
+@dataclass
+class ModelContext:
+    """Shared linopy building blocks for custom + DSL constraints.
+
+    Built once per solve from the assembled network so both the structured
+    custom-constraint path and the free-text DSL compile against the same
+    variables and weights.
+    """
+
+    network: pypsa.Network
+    gen_p: Any
+    dim: str
+    weights: Any
+    supply_gens: list[str]
+    shed_gens: list[str]
+    modeled_hours: float
+    cap_var: Any | None
+    cap_dim: str | None
+    emissions_factors: dict[str, float]
+
+
+def build_model_context(
+    n: pypsa.Network,
+    emissions_factors: dict[str, float],
+) -> ModelContext:
+    """Capture the reusable locals needed to express constraints on ``n.model``."""
+    gen_p = n.model["Generator-p"]
+    # PyPSA/linopy uses 'name' as the generator dimension, not 'Generator'
+    dim = [d for d in gen_p.dims if d != "snapshot"][0]
+    weights = n.snapshot_weightings["generators"]
+    supply_gens = [g for g in n.generators.index if not g.startswith("load_shedding_")]
+    shed_gens = [g for g in n.generators.index if g.startswith("load_shedding_")]
+    modeled_hours = float(weights.sum())
+    try:
+        cap_var = n.model["Generator-p_nom"]
+        cap_dim = cap_var.dims[0]
+    except Exception:
+        cap_var = None
+        cap_dim = None
+    return ModelContext(
+        network=n,
+        gen_p=gen_p,
+        dim=dim,
+        weights=weights,
+        supply_gens=supply_gens,
+        shed_gens=shed_gens,
+        modeled_hours=modeled_hours,
+        cap_var=cap_var,
+        cap_dim=cap_dim,
+        emissions_factors=emissions_factors,
+    )
 
 
 def apply_custom_constraints(
@@ -19,27 +73,15 @@ def apply_custom_constraints(
     if not constraints:
         return
 
-    gen_p = n.model["Generator-p"]
-    # PyPSA/linopy uses 'name' as the generator dimension, not 'Generator'
-    dim = [d for d in gen_p.dims if d != "snapshot"][0]
-    weights = n.snapshot_weightings["generators"]
-
-    # Pre-build generator index sets used repeatedly
-    supply_gens = [
-        g for g in n.generators.index
-        if not g.startswith("load_shedding_")
-    ]
-    shed_gens = [g for g in n.generators.index if g.startswith("load_shedding_")]
-    modeled_hours = float(weights.sum())
-
-    cap_var = None
-    cap_dim = None
-    try:
-        cap_var = n.model["Generator-p_nom"]
-        cap_dim = cap_var.dims[0]
-    except Exception:
-        cap_var = None
-        cap_dim = None
+    ctx = build_model_context(n, emissions_factors)
+    gen_p = ctx.gen_p
+    dim = ctx.dim
+    weights = ctx.weights
+    supply_gens = ctx.supply_gens
+    shed_gens = ctx.shed_gens
+    modeled_hours = ctx.modeled_hours
+    cap_var = ctx.cap_var
+    cap_dim = ctx.cap_dim
 
     for i, c in enumerate(constraints):
         if not c.get("enabled", False):

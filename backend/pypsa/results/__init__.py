@@ -18,6 +18,7 @@ from ..stochastic import (
 )
 from ..utils.series import weighted_sum
 from ..network.custom_constraints import apply_custom_constraints
+from ..network.constraint_dsl import apply_dsl_constraints
 from ...app.module_host import execute_plugins_at_stage, get_module_metadata
 from .dispatch import (
     build_dispatch_series,
@@ -28,7 +29,7 @@ from .dispatch import (
 from .emissions import build_emissions_breakdown
 from .expansion import build_expansion_results
 from .full_outputs import build_full_outputs
-from .market import build_co2_shadow, build_merit_order
+from .market import build_applied_constraints, build_co2_shadow, build_merit_order
 from .summaries import _snapshot_label, _rolling_window_summaries, _pathway_period_summaries
 
 
@@ -106,9 +107,11 @@ def run_pypsa(
         emissions_factors = {}
 
     custom_constraints: list[dict] = scenario.get("constraints") or []
+    custom_dsl_text: str = str(scenario.get("customDsl") or "")
 
     def extra_functionality(n, snapshots):
         apply_custom_constraints(n, custom_constraints, emissions_factors, notes)
+        apply_dsl_constraints(n, custom_dsl_text, emissions_factors, notes)
         # ── in-solve ──────────────────────────────────────────────────────────
         execute_plugins_at_stage(
             "in-solve", enabled_modules,
@@ -311,6 +314,7 @@ def run_pypsa(
     # Market analysis — merit order + CO₂ shadow price (pure post-processing)
     merit_order = build_merit_order(network)
     co2_shadow = build_co2_shadow(network, float(scenario.get("carbonPrice", 0.0)), currency)
+    applied_constraints = build_applied_constraints(network)
     emissions_breakdown = build_emissions_breakdown(network, emissions_factors)
 
     cost_breakdown = [
@@ -427,6 +431,7 @@ def run_pypsa(
         "expansionResults": expansion_results,
         "meritOrder": merit_order,
         "co2Shadow": co2_shadow,
+        "appliedConstraints": applied_constraints,
         "emissionsBreakdown": emissions_breakdown,
         "narrative": notes,
         "runMeta": {

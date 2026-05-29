@@ -39,6 +39,7 @@ import { withDerivedAssetDetails } from './shared/utils/deriveAssetDetails';
 import { deriveRunResults } from './shared/utils/deriveRunResults';
 import { defaultPathwayConfig, getDefaultSelectedPeriod, readPathwayConfigFromModel, samePathwayConfig, writePathwayConfigToModel } from './shared/utils/pathway';
 import { defaultRollingConfig, normalizeRollingConfig, readRollingConfigFromModel, sameRollingConfig, writeRollingConfigToModel } from './shared/utils/rolling';
+import { readCustomDslFromModel, writeCustomDslToModel } from './shared/utils/customDsl';
 import { buildScenarioPreset, defaultScenarioCatalog, readScenarioCatalogFromModel, sameScenarioCatalog, writeScenarioCatalogToModel } from './shared/utils/scenarios';
 import { RunDialog } from './features/run/RunDialog';
 import { SettingsView } from './views/SettingsView';
@@ -121,6 +122,7 @@ function AppInner() {
   const [runHistory, setRunHistory] = useState<RunHistoryEntry[]>([]);
   const [pathwayConfig, setPathwayConfig] = useState<PathwayConfig>(() => defaultPathwayConfig());
   const [rollingConfig, setRollingConfig] = useState<RollingHorizonConfig>(() => defaultRollingConfig());
+  const [customDsl, setCustomDsl] = useState<string>('');
   const [stochasticConfig, setStochasticConfig] = useState<StochasticConfig>({ enabled: false, scenarios: [] });
   const [sclopfConfig, setSclopfConfig] = useState<SecurityConstrainedConfig>({ enabled: false });
   const [carbonPriceSchedule, setCarbonPriceSchedule] = useState<CarbonPriceScheduleEntry[]>([]);
@@ -210,6 +212,7 @@ function AppInner() {
       pluginAnalytics: results.pluginAnalytics,
       meritOrder: results.meritOrder,
       co2Shadow: results.co2Shadow,
+      appliedConstraints: results.appliedConstraints,
       emissionsBreakdown: results.emissionsBreakdown,
       outputs: results.outputs,
       pathway: derived.pathway,
@@ -276,6 +279,7 @@ function AppInner() {
     const snapshotMax = snapshotMaxFromWorkbook(nextModel.snapshots);
     const nextPathway = readPathwayConfigFromModel(nextModel);
     const nextRolling = readRollingConfigFromModel(nextModel);
+    setCustomDsl(readCustomDslFromModel(nextModel));
     const nextScenarioCatalog = readScenarioCatalogFromModel(nextModel);
     const activeImportedScenario = nextScenarioCatalog.scenarios.find(
       (scenario) => scenario.id === nextScenarioCatalog.activeScenarioId,
@@ -486,6 +490,12 @@ function AppInner() {
       return sameRollingConfig(readRollingConfigFromModel(current), rollingConfig) ? current : next;
     });
   }, [rollingConfig]);
+
+  useEffect(() => {
+    setModel((current) => (
+      readCustomDslFromModel(current) === customDsl ? current : writeCustomDslToModel(current, customDsl)
+    ));
+  }, [customDsl]);
 
   useEffect(() => {
     setModel((current) => {
@@ -820,6 +830,7 @@ function AppInner() {
   async function exportViaBackend(endpoint: string, filenameOut: string): Promise<void> {
     const scenarioForExport = {
       constraints: constraints.filter((c) => c.enabled),
+      customDsl,
       carbonPrice,
       discountRate: settings.discountRate,
     };
@@ -1017,6 +1028,19 @@ function AppInner() {
       const nextRows = [...current[sheet]];
       const [row] = nextRows.splice(rowIndex, 1);
       nextRows.splice(nextIndex, 0, row);
+      return { ...current, [sheet]: nextRows };
+    });
+  };
+
+  const reorderRow = (sheet: SheetName, fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return;
+    pushHistory();
+    setModel((current) => {
+      const rows = current[sheet] ?? [];
+      if (fromIndex < 0 || fromIndex >= rows.length || toIndex < 0 || toIndex >= rows.length) return current;
+      const nextRows = [...rows];
+      const [row] = nextRows.splice(fromIndex, 1);
+      nextRows.splice(toIndex, 0, row);
       return { ...current, [sheet]: nextRows };
     });
   };
@@ -1314,6 +1338,7 @@ function AppInner() {
     const snapshotCount = snapshotEnd - snapshotStart;
     const scenario = {
       constraints: constraints.filter((c) => c.enabled),
+      customDsl,
       carbonPrice,
       discountRate: settings.discountRate,
     };
@@ -1692,6 +1717,9 @@ function AppInner() {
               onCarbonPriceScheduleChange={setCarbonPriceSchedule}
               constraints={constraints}
               onConstraintsChange={setConstraints}
+              customDsl={customDsl}
+              onCustomDslChange={setCustomDsl}
+              appliedConstraints={displayResults?.appliedConstraints}
               onUpdateRow={updateRowValue}
               onAddRow={addRow}
               onDeleteRow={deleteRow}
@@ -1711,7 +1739,7 @@ function AppInner() {
               onSolverThreadsChange={(v) => updateSettings({ solverThreads: v })}
               onSolverTypeChange={(v) => updateSettings({ solverType: v })}
               onCarrierColorChange={(rowIndex, color) => updateRowValue('carriers', rowIndex, 'color', color)}
-              onCarrierMove={(rowIndex, direction) => moveRow('carriers', rowIndex, direction)}
+              onCarrierReorder={(fromIndex, toIndex) => reorderRow('carriers', fromIndex, toIndex)}
               lineCount={model.lines.length}
               transformerCount={model.transformers.length}
             />

@@ -8,6 +8,7 @@
 import React from 'react';
 import { usePersistedState } from '../shared/utils/usePersistedState';
 import {
+  AppliedConstraint,
   CarbonPriceScheduleEntry,
   CustomConstraint,
   PathwayConfig,
@@ -115,6 +116,9 @@ export interface SettingsViewProps {
   // Constraints
   constraints: CustomConstraint[];
   onConstraintsChange: (next: CustomConstraint[]) => void;
+  customDsl: string;
+  onCustomDslChange: (text: string) => void;
+  appliedConstraints?: AppliedConstraint[];
   onUpdateRow: (sheet: 'global_constraints', rowIndex: number, key: string, value: Primitive) => void;
   onAddRow: (sheet: 'global_constraints') => void;
   onDeleteRow: (sheet: 'global_constraints', rowIndex: number) => void;
@@ -135,7 +139,7 @@ export interface SettingsViewProps {
   onSolverThreadsChange: (v: number) => void;
   onSolverTypeChange: (v: SolverType) => void;
   onCarrierColorChange: (rowIndex: number, color: string) => void;
-  onCarrierMove: (rowIndex: number, direction: -1 | 1) => void;
+  onCarrierReorder: (fromIndex: number, toIndex: number) => void;
 }
 
 export function SettingsView(props: SettingsViewProps) {

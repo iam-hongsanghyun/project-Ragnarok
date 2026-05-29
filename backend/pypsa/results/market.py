@@ -64,6 +64,43 @@ def build_merit_order(network: pypsa.Network) -> list[dict[str, Any]]:
     return rows
 
 
+# ── Applied (non-native) constraints ─────────────────────────────────────────
+
+# PyPSA/linopy assembles many internal constraints; anything starting with one
+# of these is part of the standard model, not a user/plugin addition.
+_NATIVE_CONSTRAINT_PREFIXES = (
+    "Generator-", "Link-", "Line-", "Bus-", "StorageUnit-", "Store-",
+    "Transformer-", "Kirchhoff", "GlobalConstraint-", "Carrier-",
+)
+
+
+def build_applied_constraints(network: pypsa.Network) -> list[dict[str, Any]]:
+    """List user/plugin linopy constraints actually applied to the model.
+
+    Filters out PyPSA-native constraints by name prefix, leaving the ones added
+    by the structured table (``cc_*``), the DSL box (``dsl_*``) and plugins
+    (any other name, e.g. ``cf_max_coal``). Read-only — surfaced so the GUI can
+    show what was applied, including plugin contributions that are otherwise
+    invisible. Each entry: ``{name, source, shadowPrice}``.
+    """
+    try:
+        names = list(network.model.constraints)
+    except Exception:
+        return []
+    out: list[dict[str, Any]] = []
+    for name in names:
+        if name.startswith(_NATIVE_CONSTRAINT_PREFIXES):
+            continue
+        if name.startswith("cc_"):
+            source = "custom"
+        elif name.startswith("dsl_"):
+            source = "dsl"
+        else:
+            source = "plugin"
+        out.append({"name": name, "source": source, "shadowPrice": _linopy_dual(network, name)})
+    return out
+
+
 # ── CO₂ shadow price ─────────────────────────────────────────────────────────
 
 def _linopy_dual(network: pypsa.Network, cname: str) -> float:

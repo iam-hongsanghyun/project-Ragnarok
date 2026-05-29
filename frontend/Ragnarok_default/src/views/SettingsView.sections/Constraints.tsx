@@ -3,15 +3,19 @@
  * PyPSA `global_constraints` rows (bottom). Stacked, not tabbed.
  */
 import React from 'react';
-import { CustomConstraint, GridRow, PathwayConfig, Primitive, WorkbookModel } from '../../shared/types';
+import { AppliedConstraint, CustomConstraint, GridRow, PathwayConfig, Primitive, WorkbookModel } from '../../shared/types';
 import { GlobalConstraintsSection as CustomConstraintsEditor } from '../../features/constraints/GlobalConstraintsSection';
 import { GlobalConstraintsTableEditor } from './Constraints/GlobalConstraintsTableEditor';
+import { CustomDslSection } from '../../features/constraints/CustomDslSection';
 
 export interface ConstraintsSectionProps {
   model: WorkbookModel;
   pathwayConfig: PathwayConfig;
   constraints: CustomConstraint[];
   onConstraintsChange: (next: CustomConstraint[]) => void;
+  customDsl: string;
+  onCustomDslChange: (text: string) => void;
+  appliedConstraints?: AppliedConstraint[];
   onUpdateRow: (sheet: 'global_constraints', rowIndex: number, key: string, value: Primitive) => void;
   onAddRow: (sheet: 'global_constraints') => void;
   onDeleteRow: (sheet: 'global_constraints', rowIndex: number) => void;
@@ -72,6 +76,12 @@ export function ConstraintsSection(props: ConstraintsSectionProps) {
           onSet={(rowIndex, key, value) => props.onUpdateRow('global_constraints', rowIndex, key, value)}
         />
       </section>
+      <div className="sg-setting-divider" style={{ margin: '24px 0' }} />
+      <CustomDslSection
+        customDsl={props.customDsl}
+        onCustomDslChange={props.onCustomDslChange}
+        appliedConstraints={props.appliedConstraints}
+      />
     </>
   );
 }
