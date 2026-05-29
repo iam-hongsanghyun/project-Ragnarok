@@ -1171,6 +1171,10 @@ function AppInner() {
       discountRate: settings.discountRate,
     };
     const options = {
+      // Optimisation backend selector (backend registry resolves this; PyPSA
+      // is the only adapter today). Threaded now so a future backend toggle
+      // has a channel without a payload-shape change.
+      backend: 'pypsa',
       snapshotCount, snapshotStart, snapshotWeight, forceLp,
       dateFormat: settings.dateFormat,
       solverThreads: settings.solverThreads, solverType: settings.solverType,

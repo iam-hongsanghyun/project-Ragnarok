@@ -16,11 +16,11 @@ from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
+from .lib.backends import BackendError, available_backends, get_backend
 from .lib.config import load_system_defaults
 from .lib.models import RunPayload
 from .lib.module_host import discover_modules, execute_module_action, execute_plugins_at_stage, install_module_from_upload, uninstall_module
 from .lib.network import build_network, validate_model
-from .lib.results import run_pypsa
 
 
 # ── Suppress per-poll access log noise ───────────────────────────────────────
@@ -64,9 +64,15 @@ def _solve_worker(
     payload: RunPayload,
     result_queue: "mp.Queue[tuple[str, Any]]",
 ) -> None:
-    """Run in a child process. Puts ("ok", result) or ("err", msg) into the queue."""
+    """Run in a child process. Puts ("ok", result) or ("err", msg) into the queue.
+
+    The backend is selected from ``options["backend"]`` (default PyPSA) via the
+    backend registry, so the worker stays engine-agnostic.
+    """
     try:
-        result = run_pypsa(payload.model, payload.scenario, payload.options or {})
+        options = payload.options or {}
+        backend = get_backend(options.get("backend"))
+        result = backend.run(payload.model, payload.scenario, options)
         result_queue.put(("ok", result))
     except Exception as exc:  # noqa: BLE001
         result_queue.put(("err", str(exc)))
@@ -120,6 +126,12 @@ def get_config() -> dict[str, Any]:
         "defaultSnapshotCount": int(sim.get("default_snapshot_count", 24)),
         "defaultSnapshotWeight": float(sim.get("default_snapshot_weight", 1.0)),
     }
+
+
+@app.get("/api/backends")
+def get_backends() -> dict[str, Any]:
+    """List the available optimisation backends and their capabilities."""
+    return {"backends": available_backends(), "default": "pypsa"}
 
 
 @app.get("/api/modules")
@@ -207,6 +219,13 @@ async def start_run(payload: RunPayload) -> dict[str, Any]:
     bulk `network.add()` and optimises in a child process. The frontend
     polls GET /api/run/{job_id} for status and results.
     """
+    # Fail fast on an unknown backend so the caller gets a 400 immediately
+    # rather than a 500 after the first poll.
+    try:
+        get_backend((payload.options or {}).get("backend"))
+    except BackendError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     # Prune completed/cancelled jobs to avoid unbounded memory growth
     stale = [jid for jid, j in list(_jobs.items()) if j.status in ("done", "error", "cancelled")]
     for jid in stale:

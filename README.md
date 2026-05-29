@@ -57,6 +57,7 @@ Time-series chart x-axis labels adapt to the visible span: `HH:MM` (≤ 24 h), `
 Backend:
 
 - [backend/main.py](/Users/sanghyun/github/pypsa_gui/backend/main.py): FastAPI app and run lifecycle
+- [backend/lib/backends/](/Users/sanghyun/github/pypsa_gui/backend/lib/backends): pluggable backend seam — `Backend` protocol, registry, and the PyPSA reference adapter (run selected by `options.backend`)
 - [backend/lib/network/__init__.py](/Users/sanghyun/github/pypsa_gui/backend/lib/network/__init__.py): schema-driven network builder
 - [backend/lib/results/__init__.py](/Users/sanghyun/github/pypsa_gui/backend/lib/results/__init__.py): solve + analytics result assembly
 - [backend/lib/results/full_outputs.py](/Users/sanghyun/github/pypsa_gui/backend/lib/results/full_outputs.py): schema-driven solved output extraction
@@ -179,9 +180,10 @@ optimization envelope is broader than the workflow Ragnarok currently exposes.
 | Plugin analytics round-trip through project import/export | `Full` | Stored in `RAGNAROK_PluginAnalytics` and restored on import without plugin re-execution. |
 | Project settings / constraints / run-state metadata round-trip | `Full` | Stored in dedicated Ragnarok metadata sheets and restored on project import. |
 | CO2 shadow price restoration from imported project | `Full` | Stored in `RAGNAROK_ResultMeta` and restored on import. |
-| Backend retention of solved network/workbook | `Not supported` | Backend returns result JSON and derived output caches, but does not keep a solved `pypsa.Network` artifact for later export. |
+| Backend retention of solved network/workbook | `Not Needed` | Deliberate: the server is stateless. The backend returns result JSON and derived output caches; the frontend round-trips losslessly, so no solved `pypsa.Network` artifact is retained server-side. |
 | CSV-folder / netCDF / HDF5 workflows | `Not supported` | Ragnarok is currently Excel-first in the UI. |
-| Power flow-only studies / separate PF UX | `Not supported` | Current workflow is optimization-centric. |
+| Power flow-only studies / separate PF UX | `Not supported` | Current workflow is optimization-centric. Roadmapped — see Roadmap below. |
+| Pluggable / non-PyPSA optimization backend | `Partial` | A backend abstraction layer is in place (`backend/lib/backends/`): one `run(model, scenario, options)` adapter per backend, selected by `options.backend` (default `pypsa`), with `GET /api/backends` reporting capabilities. PyPSA is the only adapter today; the seam is ready for additional backends. |
 
 ## Support Matrix: PyPSA Components
 
@@ -217,10 +219,10 @@ Ragnarok does not maintain a separate backend skip policy for schema-defined she
 ## Important Current Limitations
 
 1. `Export Project` is workbook-driven, not backend-solved-network-driven.
-   The app exports `results.outputs`, not a retained solved `pypsa.Network`.
+   The app exports `results.outputs`, not a retained solved `pypsa.Network`. This is by design — the server is stateless and does not retain solved artifacts (see Roadmap / TODO "Not Needed"). The frontend round-trips losslessly, and a native `pypsa.Network` can be reconstructed from the exported workbook or CSV folder.
 
-2. `Import Project` still does not restore a backend-solved network artifact.
-   It restores frontend project state and result metadata, but the imported project is still rebuilt from workbook inputs/outputs rather than reopening a retained `pypsa.Network`.
+2. `Import Project` rebuilds project state from workbook inputs/outputs rather than reopening a retained `pypsa.Network`.
+   It restores frontend project state and result metadata and reconstructs `RunResults` locally. No backend-solved network artifact is involved, by design (stateless server).
 
 3. Pathway planning is still v1-level.
    It supports flat-workbook authoring, backend multi-investment expansion, and selected-period analytics, but it does not yet provide a native frontend MultiIndex editing workflow.
@@ -234,6 +236,18 @@ Ragnarok does not maintain a separate backend skip policy for schema-defined she
    - security-constrained optimization
    - stochastic / uncertainty workflow beyond frontend scenario presets
    - richer scenario-aware analytics
+
+## Roadmap
+
+The project is steering toward three large bodies of work, tackled one at a time. Detailed entries live in [TODO.md](/Users/sanghyun/github/pypsa_gui/TODO.md).
+
+1. **Topology build mode** *(next).* The Build tab currently authors a model with a step-by-step (Serialised) wizard. A `Serialised vs Topology` toggle will add a free-form mode where the whole model is placed, connected, and edited directly on the map / network topology. It reuses the Build map (own-x/y component placement, click-to-link buses, "pick on map", drag-to-move) already shipped, plus multi-bus click-linking for branches.
+
+2. **Pluggable backend** *(seam landed; additional backends future).* The backend abstraction layer is in place: a single `run(model, scenario, options)` adapter per backend, selected by `options.backend` (default `pypsa`), registered in `backend/lib/backends/` and reported by `GET /api/backends`. PyPSA is the only adapter today. The server stays stateless — each adapter returns the schema-driven output cache and the frontend remains the single source of round-trip truth (no per-run backend artifact retention). Remaining work is adding a second adapter when a concrete alternative backend is chosen.
+
+3. **Data platform.** Location-based renewable (wind/solar) profile generation and import, a persistent profile database/cache layer, national-level starter model imports, a source registry with versioning and provenance, data-source health checks, and country/region import presets.
+
+A **power-flow-only (PF / linear PF) study mode** is also planned as a non-optimization companion to the topology builder.
 
 ## Development
 
