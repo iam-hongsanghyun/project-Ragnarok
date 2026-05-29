@@ -32,6 +32,21 @@ from .market import build_co2_shadow, build_merit_order
 from .summaries import _snapshot_label, _rolling_window_summaries, _pathway_period_summaries
 
 
+def _coerce_solve_status(result: Any) -> tuple[str, str]:
+    """Normalize PyPSA optimise() return into (status, condition).
+
+    PyPSA's modern optimise path returns a 2-tuple ``(status, condition)`` where
+    condition is 'optimal' on success. Older / SCLOPF paths sometimes return
+    the network or None; treat those as 'ok'/'optimal' since they would have
+    raised on failure.
+    """
+    if isinstance(result, tuple) and len(result) >= 2:
+        status = str(result[0]) if result[0] is not None else "unknown"
+        condition = str(result[1]) if result[1] is not None else "unknown"
+        return status, condition
+    return "ok", "optimal"
+
+
 def run_pypsa(
     model: dict[str, list[dict[str, Any]]],
     scenario: dict[str, Any],
@@ -114,6 +129,8 @@ def run_pypsa(
         solver_options["solver"] = solver_type
 
     rolling_windows: list[dict[str, Any]] = []
+    solve_status: str = "unknown"
+    solve_condition: str = "unknown"
     try:
         if rolling.enabled:
             rolling_windows = _rolling_window_summaries(
@@ -129,23 +146,45 @@ def run_pypsa(
                 solver_options=solver_options if solver_options else {},
                 extra_functionality=extra_functionality,
             )
+            # PyPSA's rolling-horizon helper does not return a status; it
+            # only logs a warning on bad windows. Treat the run as optimal
+            # only if no window violated its bounds in an obvious way.
+            solve_status, solve_condition = "ok", "optimal"
         elif sclopf_enabled:
             # SCLOPF: every dispatch decision must remain feasible under the
             # outage of any single passive branch. PyPSA enforces this by
             # adding N-1 line-loading constraints for each branch in
             # `branch_outages` (default: all passive branches in the
             # network).
-            network.optimize.optimize_security_constrained(
+            result = network.optimize.optimize_security_constrained(
                 solver_name="highs",
                 solver_options=solver_options if solver_options else {},
                 extra_functionality=extra_functionality,
             )
+            solve_status, solve_condition = _coerce_solve_status(result)
         else:
-            network.optimize(
+            result = network.optimize(
                 multi_investment_periods=pathway.enabled,
                 solver_name="highs",
                 solver_options=solver_options if solver_options else {},
                 extra_functionality=extra_functionality,
+            )
+            solve_status, solve_condition = _coerce_solve_status(result)
+        # Solver may return without raising but still report a non-optimal
+        # condition (e.g. HiGHS "Dual simplex ratio test failed" leaves
+        # condition='unknown' while linopy parses a garbage primal). Treat
+        # anything other than ('ok', 'optimal') as a failed run.
+        if solve_condition != "optimal":
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"Solver did not return an optimal solution "
+                    f"(status='{solve_status}', condition='{solve_condition}'). "
+                    "The model is likely ill-conditioned: check for placeholder "
+                    "1e12 / inf values in p_nom_max, e_sum_min, e_sum_max, "
+                    "lifetime, or for conflicting constraints (CO₂ cap, "
+                    "capacity factor caps) against the available capacity."
+                ),
             )
         solver_note = "HiGHS"
         if solver_options.get("threads"):
