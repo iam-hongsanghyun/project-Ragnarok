@@ -1,87 +1,58 @@
 /**
  * Tabular editor for PyPSA native `global_constraints` rows.
  *
- * The semantics of the `carrier_attribute` column depend on `type`:
- *   - primary_energy: a NUMERIC COLUMN on the carriers sheet (the weight),
- *     e.g. `co2_emissions`, `max_growth`.
- *   - operational_limit, tech_capacity_expansion_limit,
- *     transmission_volume_expansion_limit, transmission_expansion_cost_limit:
- *     a CARRIER NAME, e.g. `coal`, `AC`, `DC`.
- * We swap the dropdown contents accordingly so the user only sees valid
- * options for the type they picked.
+ * Schema-driven and fully user-definable: the column set comes straight from
+ * the PyPSA `global_constraints` schema (no hardcoded type/attribute lists),
+ * and every field is free-form with inline `<datalist>` suggestions sourced
+ * from the model. PyPSA accepts arbitrary `type` / `carrier_attribute` values
+ * and silently ignores ones it doesn't recognise, so we suggest rather than
+ * restrict. Only `sense` is a strict dropdown (PyPSA allows exactly <=, ==, >=).
  */
 import React from 'react';
 import { GridRow, Primitive } from '../../../shared/types';
 import { stringValue } from '../../../shared/utils/helpers';
+import { getOrderedInputAttributes } from '../../../constants/pypsa_schema';
 
-const NATIVE_TYPES = [
+// PyPSA's five recognised constraint types — offered as suggestions only.
+const TYPE_SUGGESTIONS = [
   'primary_energy',
-  'transmission_volume_expansion_limit',
-  'transmission_expansion_cost_limit',
   'operational_limit',
   'tech_capacity_expansion_limit',
-] as const;
-
-type NativeType = typeof NATIVE_TYPES[number];
+  'transmission_volume_expansion_limit',
+  'transmission_expansion_cost_limit',
+];
 
 const NATIVE_SENSES = ['<=', '==', '>='] as const;
 
-const ATTRIBUTE_TYPES: ReadonlySet<NativeType> = new Set<NativeType>(['primary_energy']);
-
-// Short label for the Unit column, plus a one-line description for the help
-// disclosure. `unit` is rendered in the table cell so it must stay tight
-// (no full sentences). `description` is shown in the collapsed help panel.
-const TYPE_INFO: Record<NativeType, { unit: string; description: string }> = {
-  primary_energy: {
-    unit: 'tCO₂',
-    description: 'Σ (carrier_attribute × primary energy) across carriers. Pick carrier_attribute = co2_emissions for a total emissions cap in tonnes.',
-  },
-  operational_limit: {
-    unit: 'MWh',
-    description: 'Total energy dispatched by the chosen carrier across the horizon.',
-  },
-  transmission_volume_expansion_limit: {
-    unit: 'MW',
-    description: 'Cap on new transmission capacity built. Needs extendable lines/links of the chosen carrier (e.g. AC, DC).',
-  },
-  transmission_expansion_cost_limit: {
-    unit: 'currency',
-    description: 'Cap on the total capital spent expanding transmission. Same unit as capital_cost.',
-  },
-  tech_capacity_expansion_limit: {
-    unit: 'MW',
-    description: 'Cap on new capacity built for the chosen carrier (MWh for storage). Needs extendable assets of that carrier.',
-  },
-};
-
 interface Props {
   rows: GridRow[];
+  /** Carrier names from the carriers sheet (model.carriers[].name). */
   carriers: string[];
+  /** Numeric column names on the carriers sheet (e.g. co2_emissions). */
   carrierAttributes: string[];
+  /** Bus names from the buses sheet (model.buses[].name). */
+  busNames: string[];
+  /** Configured investment periods (pathway periods); empty in single-period mode. */
+  investmentPeriods: number[];
   onAdd: () => void;
   onDelete: (rowIndex: number) => void;
   onSet: (rowIndex: number, key: string, value: Primitive) => void;
-}
-
-function carrierAttributeOptions(
-  type: string,
-  carriers: string[],
-  carrierAttributes: string[],
-): string[] {
-  if (ATTRIBUTE_TYPES.has(type as NativeType)) {
-    return carrierAttributes.length > 0 ? carrierAttributes : ['co2_emissions'];
-  }
-  return carriers;
 }
 
 export function GlobalConstraintsTableEditor({
   rows,
   carriers,
   carrierAttributes,
+  busNames,
+  investmentPeriods,
   onAdd,
   onDelete,
   onSet,
 }: Props) {
+  // Columns come from the schema, so any attribute PyPSA adds shows up here
+  // automatically. `name` is rendered first as the required key column.
+  const attrs = getOrderedInputAttributes('global_constraints');
+
   if (rows.length === 0) {
     return (
       <div className="constraints-empty">
@@ -90,130 +61,122 @@ export function GlobalConstraintsTableEditor({
       </div>
     );
   }
+
+  // carrier_attribute can be either a carriers-sheet column (primary_energy) or
+  // a carrier name (the limit types) or comma-separated carriers (transmission),
+  // so suggest the union and let the user type whatever they need.
+  const carrierAttrSuggestions = Array.from(new Set([...carrierAttributes, ...carriers]));
+
   return (
     <div className="constraints-table-wrap">
-      <details className="constraints-help">
-        <summary>What do these constraint types mean?</summary>
-        <ul className="constraints-help-list">
-          {NATIVE_TYPES.map((t) => (
-            <li key={t}>
-              <code>{t}</code>
-              <span className="constraints-help-unit"> ({TYPE_INFO[t].unit})</span>
-              {' — '}
-              {TYPE_INFO[t].description}
-            </li>
-          ))}
-        </ul>
-      </details>
+      <datalist id="gc-type-options">
+        {TYPE_SUGGESTIONS.map((t) => (<option key={t} value={t} />))}
+      </datalist>
+      <datalist id="gc-carrier-attr-options">
+        {carrierAttrSuggestions.map((c) => (<option key={c} value={c} />))}
+      </datalist>
+      <datalist id="gc-bus-options">
+        {busNames.map((b) => (<option key={b} value={b} />))}
+      </datalist>
+      <datalist id="gc-period-options">
+        {investmentPeriods.map((p) => (<option key={p} value={p} />))}
+      </datalist>
+
       <table className="constraints-table">
         <thead>
           <tr>
-            <th>Name</th>
-            <th>Type</th>
-            <th>Sense</th>
-            <th>Constant</th>
-            <th>Unit</th>
-            <th>Carrier attribute</th>
-            <th>Investment period</th>
-            <th>Bus</th>
+            {attrs.map((attr) => (
+              <th key={attr.attribute} title={attr.description}>
+                {attr.attribute}
+              </th>
+            ))}
             <th aria-label="actions" />
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, i) => {
-            const type = stringValue(row.type) || 'primary_energy';
-            const attrOptions = carrierAttributeOptions(type, carriers, carrierAttributes);
-            const isAttrType = ATTRIBUTE_TYPES.has(type as NativeType);
-            const currentAttr = stringValue(row.carrier_attribute);
-            const attrValue = currentAttr || (isAttrType ? (attrOptions[0] ?? '') : '');
-            return (
-              <tr key={i}>
-                <td>
-                  <input
-                    className="constraints-cell-input"
-                    value={stringValue(row.name)}
-                    onChange={(e) => onSet(i, 'name', e.target.value)}
-                    placeholder="name"
-                  />
+          {rows.map((row, i) => (
+            <tr key={i}>
+              {attrs.map((attr) => (
+                <td key={attr.attribute}>
+                  {renderField(attr.attribute, row, i, onSet, busNames, investmentPeriods)}
                 </td>
-                <td>
-                  <select
-                    className="constraints-cell-input"
-                    value={type}
-                    onChange={(e) => {
-                      const nextType = e.target.value;
-                      onSet(i, 'type', nextType);
-                      // Reset the carrier_attribute to a sensible default for
-                      // the new type so the visible dropdown value stays in
-                      // sync with what we will save.
-                      const nextOptions = carrierAttributeOptions(nextType, carriers, carrierAttributes);
-                      if (!nextOptions.includes(stringValue(row.carrier_attribute))) {
-                        onSet(i, 'carrier_attribute', nextOptions[0] ?? '');
-                      }
-                    }}
-                  >
-                    {NATIVE_TYPES.map((t) => (<option key={t}>{t}</option>))}
-                  </select>
-                </td>
-                <td>
-                  <select
-                    className="constraints-cell-input"
-                    value={stringValue(row.sense) || '<='}
-                    onChange={(e) => onSet(i, 'sense', e.target.value)}
-                  >
-                    {NATIVE_SENSES.map((s) => (<option key={s}>{s}</option>))}
-                  </select>
-                </td>
-                <td>
-                  <input
-                    type="number"
-                    className="constraints-cell-input constraints-cell-input--num"
-                    value={Number(row.constant ?? 0)}
-                    onChange={(e) => onSet(i, 'constant', parseFloat(e.target.value) || 0)}
-                  />
-                </td>
-                <td
-                  className="constraints-cell-unit"
-                  title={TYPE_INFO[type as NativeType]?.description}
-                >
-                  {TYPE_INFO[type as NativeType]?.unit ?? '—'}
-                </td>
-                <td>
-                  <select
-                    className="constraints-cell-input"
-                    value={attrOptions.includes(attrValue) ? attrValue : ''}
-                    onChange={(e) => onSet(i, 'carrier_attribute', e.target.value)}
-                  >
-                    {!isAttrType && <option value="">— any —</option>}
-                    {attrOptions.map((opt) => (<option key={opt} value={opt}>{opt}</option>))}
-                  </select>
-                </td>
-                <td>
-                  <input
-                    type="number"
-                    className="constraints-cell-input constraints-cell-input--num"
-                    value={row.investment_period === undefined || row.investment_period === null || row.investment_period === '' ? '' : Number(row.investment_period)}
-                    onChange={(e) => onSet(i, 'investment_period', e.target.value === '' ? '' : (parseFloat(e.target.value) || 0))}
-                    placeholder="—"
-                  />
-                </td>
-                <td>
-                  <input
-                    className="constraints-cell-input"
-                    value={stringValue(row.bus)}
-                    onChange={(e) => onSet(i, 'bus', e.target.value)}
-                    placeholder="—"
-                  />
-                </td>
-                <td>
-                  <button className="gcc-del" onClick={() => onDelete(i)} title="Delete row">x</button>
-                </td>
-              </tr>
-            );
-          })}
+              ))}
+              <td>
+                <button className="gcc-del" onClick={() => onDelete(i)} title="Delete row">x</button>
+              </td>
+            </tr>
+          ))}
         </tbody>
       </table>
       <button className="tb-btn" style={{ marginTop: 12 }} onClick={onAdd}>+ Add global constraint</button>
     </div>
+  );
+}
+
+function renderField(
+  key: string,
+  row: GridRow,
+  i: number,
+  onSet: (rowIndex: number, key: string, value: Primitive) => void,
+  _busNames: string[],
+  _investmentPeriods: number[],
+): React.ReactNode {
+  if (key === 'sense') {
+    return (
+      <select
+        className="constraints-cell-input"
+        value={stringValue(row.sense) || '<='}
+        onChange={(e) => onSet(i, 'sense', e.target.value)}
+      >
+        {NATIVE_SENSES.map((s) => (<option key={s}>{s}</option>))}
+      </select>
+    );
+  }
+
+  if (key === 'constant') {
+    return (
+      <input
+        type="number"
+        className="constraints-cell-input constraints-cell-input--num"
+        value={Number(row.constant ?? 0)}
+        onChange={(e) => onSet(i, 'constant', parseFloat(e.target.value) || 0)}
+      />
+    );
+  }
+
+  if (key === 'investment_period') {
+    const raw = row.investment_period;
+    const value = raw === undefined || raw === null || raw === '' ? '' : String(raw);
+    return (
+      <input
+        type="text"
+        inputMode="numeric"
+        list="gc-period-options"
+        className="constraints-cell-input"
+        value={value}
+        placeholder="all"
+        onChange={(e) => {
+          const v = e.target.value.trim();
+          onSet(i, 'investment_period', v === '' ? '' : (parseFloat(v) || 0));
+        }}
+      />
+    );
+  }
+
+  // Free-text fields with datalist suggestions.
+  const listId =
+    key === 'type' ? 'gc-type-options' :
+    key === 'carrier_attribute' ? 'gc-carrier-attr-options' :
+    key === 'bus' ? 'gc-bus-options' :
+    undefined;
+
+  return (
+    <input
+      className="constraints-cell-input"
+      value={stringValue(row[key])}
+      list={listId}
+      placeholder={key === 'name' ? 'name' : '—'}
+      onChange={(e) => onSet(i, key, e.target.value)}
+    />
   );
 }

@@ -3,12 +3,13 @@
  * PyPSA `global_constraints` rows (bottom). Stacked, not tabbed.
  */
 import React from 'react';
-import { CustomConstraint, GridRow, Primitive, WorkbookModel } from '../../shared/types';
+import { CustomConstraint, GridRow, PathwayConfig, Primitive, WorkbookModel } from '../../shared/types';
 import { GlobalConstraintsSection as CustomConstraintsEditor } from '../../features/constraints/GlobalConstraintsSection';
 import { GlobalConstraintsTableEditor } from './Constraints/GlobalConstraintsTableEditor';
 
 export interface ConstraintsSectionProps {
   model: WorkbookModel;
+  pathwayConfig: PathwayConfig;
   constraints: CustomConstraint[];
   onConstraintsChange: (next: CustomConstraint[]) => void;
   onUpdateRow: (sheet: 'global_constraints', rowIndex: number, key: string, value: Primitive) => void;
@@ -34,6 +35,12 @@ export function ConstraintsSection(props: ConstraintsSectionProps) {
         .filter((key) => !CARRIER_META_COLS.has(key)),
     ),
   );
+  const busNames = Array.from(
+    new Set((props.model.buses ?? []).map((b) => String(b.name ?? '')).filter(Boolean)),
+  );
+  const investmentPeriods = props.pathwayConfig.enabled
+    ? props.pathwayConfig.periods.map((p) => p.period)
+    : [];
   const globalRows = (props.model.global_constraints ?? []) as GridRow[];
   return (
     <>
@@ -58,6 +65,8 @@ export function ConstraintsSection(props: ConstraintsSectionProps) {
           rows={globalRows}
           carriers={carriers}
           carrierAttributes={carrierAttributes}
+          busNames={busNames}
+          investmentPeriods={investmentPeriods}
           onAdd={() => props.onAddRow('global_constraints')}
           onDelete={(rowIndex) => props.onDeleteRow('global_constraints', rowIndex)}
           onSet={(rowIndex, key, value) => props.onUpdateRow('global_constraints', rowIndex, key, value)}
