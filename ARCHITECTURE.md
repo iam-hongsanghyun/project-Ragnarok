@@ -4,6 +4,19 @@
 > sessions. Read it first. You should not need to grep across 60+ files to understand the
 > codebase — everything essential is here. (~5-minute read)
 
+### Documentation map
+
+| Document | Read it for |
+|---|---|
+| **ARCHITECTURE.md** (this file) | System overview, tech stack, repo layout, data flow |
+| [docs/CAPABILITIES.md](./docs/CAPABILITIES.md) | What Ragnarok can and cannot do (code-checked) |
+| [docs/PROCESSES.md](./docs/PROCESSES.md) | Step-by-step logic of each process (open, run, build, solve, extract, export) |
+| [docs/USER_MANUAL.md](./docs/USER_MANUAL.md) | End-user manual for analysts (open/edit/run/analyse/export) |
+| [docs/reference/](./docs/reference/) | Per-module function reference (backend + frontend) |
+| [docs/SUPPORT_MATRIX.md](./docs/SUPPORT_MATRIX.md) | Generated feature support matrix |
+| [docs/module-system-v1.md](./docs/module-system-v1.md) · [authoring guide](./docs/module-authoring-guide.md) | Plugin system spec + how to write plugins |
+| [DESIGN.md](./DESIGN.md) | UI design philosophy |
+
 ---
 
 ## What this app does
@@ -134,14 +147,14 @@ into a `.zip` and use the Install button in the sidebar):
 
 | Layer | Technology |
 |---|---|
-| Frontend | React 18, TypeScript, Vite |
+| Frontend | React 19, TypeScript, Create React App (react-scripts 5) |
 | Mapping | react-leaflet / Leaflet |
 | Charting | Recharts |
 | Workbook I/O | SheetJS (xlsx) |
-| Backend | Python 3.12+, FastAPI, Uvicorn |
+| Backend | Python 3.11+, FastAPI, Uvicorn |
 | Power model | PyPSA |
 | Solver | HiGHS (via PyPSA default) |
-| Transport | REST JSON over `http://localhost:8000` |
+| Transport | REST JSON over `http://127.0.0.1:8000` |
 
 ---
 
@@ -437,8 +450,15 @@ for row in rows:
 
 ## Current scope / limitations
 
-- **Single-period only** — one solve covering a contiguous window of the annual snapshot
-  sequence. Investment planning over multiple years is not yet implemented.
+For the authoritative, code-checked list of what the product can and cannot do, see
+[docs/CAPABILITIES.md](./docs/CAPABILITIES.md). The headline limitations:
+
+- **Optimization only — no standalone power-flow study.** Every run goes through
+  `network.optimize()`. PyPSA's `pf()` / `lpf()` power-flow modes are roadmapped, not
+  implemented (`studyModes: ["optimize"]` in `backend/pypsa/adapter.py`).
+- **Multiple study modes ARE supported.** Beyond single-period, the backend runs multi-period
+  **pathway** (investment planning), **rolling-horizon**, two-stage **stochastic**, and
+  **security-constrained** (SCLOPF / N-1) solves. See `backend/pypsa/results/__init__.py`.
 - **Copper-plate** by default — if no lines/links are defined, all buses are effectively
   connected without congestion. Line flows are extracted if branches exist, but no DC-OPF
   spatial routing is done unless the workbook provides impedances and `s_nom` limits.
@@ -446,7 +466,8 @@ for row in rows:
   costs; there is no ETS permit price curve or intertemporal banking.
 - **HiGHS only** — solver is fixed to HiGHS via PyPSA's default linopt interface. GLPK/Gurobi
   are not exposed in the UI.
-- **Local backend** — the app assumes the FastAPI server is running at `http://localhost:8000`.
+- **Local backend** — the app assumes the FastAPI server is running at `http://127.0.0.1:8000`.
   There is no cloud deployment path or authentication layer.
-- **No scenario manager** — run configurations are not saved; each `▶ Run` replaces the
-  previous result in state.
+- **Session-scoped run history, not a persisted scenario manager** — past runs can be viewed,
+  compared, pinned, renamed, restored, and exported, but the list lives only for the browser
+  session (cleared by "Clear all" or reload). Run configurations are not saved to disk.

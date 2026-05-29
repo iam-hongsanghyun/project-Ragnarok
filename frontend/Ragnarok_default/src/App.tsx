@@ -32,7 +32,6 @@ import {
 import { API_BASE, DEFAULT_CONSTRAINTS, getDefaultRowForSheet, MAX_UNPINNED_HISTORY, PYPSA_SCHEMA_META, RUN_POLLING, RUN_WINDOW, SHEETS } from './constants';
 import { canonicalizeOutputSeries, canonicalizeTemporalRows, createEmptyWorkbook, exportWorkbook, normalizeInputDatesToIso, parseProjectFile, parseWorkbook, projectWorkbookToArrayBuffer, workbookToArrayBuffer } from './shared/utils/workbook';
 import { fullResultsArrayBuffer } from './shared/utils/exportResults';
-import { buildReportHtml } from './shared/utils/exportReport';
 import { getBounds, getBusIndex, carrierColor, numberValue, orderByCarrierRows, setCarrierColorOverrides, snapshotMaxFromWorkbook } from './shared/utils/helpers';
 import { buildRowsFromGeneratorDetails, buildSystemLoadRows, normalizeSeriesPoint } from './shared/utils/analytics';
 import { withDerivedAssetDetails } from './shared/utils/deriveAssetDetails';
@@ -697,39 +696,57 @@ function AppInner() {
     description: string;
     mime: string;
     extensions: string[];
-    data: BlobPart;
+    // Built lazily so the picker can open first (preserving the transient
+    // user-activation window) before any heavy serialisation runs, and so any
+    // build error is surfaced as a toast rather than a swallowed rejection.
+    buildData: () => BlobPart;
     successMsg: string;
   }): Promise<void> => {
-    const { suggestedName, description, mime, extensions, data, successMsg } = opts;
+    const { suggestedName, description, mime, extensions, buildData, successMsg } = opts;
     const saver = (window as any).showSaveFilePicker;
     if (saver) {
+      let handle: any;
       try {
-        const handle = await saver({
+        handle = await saver({
           suggestedName,
           types: [{ description, accept: { [mime]: extensions } }],
         });
+      } catch (error) {
+        if ((error as Error)?.name === 'AbortError') return;   // user cancelled
+        const msg = error instanceof Error ? error.message : 'Export failed.';
+        setStatus(msg);
+        showToast(msg, 'error');
+        return;
+      }
+      try {
+        const data = buildData();
         const writable = await handle.createWritable();
         await writable.write(new Blob([data], { type: mime }));
         await writable.close();
         showToast(`${successMsg} → ${handle.name || suggestedName}`, 'success');
       } catch (error) {
-        if ((error as Error)?.name === 'AbortError') return;   // user cancelled
         const msg = error instanceof Error ? error.message : 'Export failed.';
         setStatus(msg);
         showToast(msg, 'error');
       }
       return;
     }
-    const blob = new Blob([data], { type: mime });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = suggestedName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 0);
-    showToast(successMsg, 'success');
+    try {
+      const blob = new Blob([buildData()], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = suggestedName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+      showToast(successMsg, 'success');
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Export failed.';
+      setStatus(msg);
+      showToast(msg, 'error');
+    }
   };
 
   const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -776,7 +793,7 @@ function AppInner() {
       description: 'Excel Workbook',
       mime: XLSX_MIME,
       extensions: ['.xlsx'],
-      data: projectWorkbookToArrayBuffer(analyticsModel, results?.outputs, metadata),
+      buildData: () => projectWorkbookToArrayBuffer(analyticsModel, results?.outputs, metadata),
       successMsg,
     });
   };
@@ -789,23 +806,11 @@ function AppInner() {
       description: 'Excel Workbook',
       mime: XLSX_MIME,
       extensions: ['.xlsx'],
-      data: fullResultsArrayBuffer(analyticsModel, displayResults),
+      buildData: () => fullResultsArrayBuffer(analyticsModel, displayResults),
       successMsg: 'Result workbook exported',
     });
   };
 
-  const handleExportReport = async () => {
-    if (!displayResults) return;
-    const base = filename.replace(/\.xlsx$/i, '') || 'ragnarok_report';
-    await saveFileWithPicker({
-      suggestedName: `${base}_report.html`,
-      description: 'HTML document',
-      mime: 'text/html;charset=utf-8',
-      extensions: ['.html'],
-      data: buildReportHtml(displayResults, { projectName: base, currencySymbol: settings.currencySymbol }),
-      successMsg: 'HTML report exported',
-    });
-  };
 
   const csvFolderImportInputRef = useRef<HTMLInputElement | null>(null);
   const netcdfImportInputRef = useRef<HTMLInputElement | null>(null);
@@ -1756,7 +1761,6 @@ function AppInner() {
               onImportProject={() => projectImportInputRef.current?.click()}
               onExportProject={handleExportProject}
               onExportResult={handleExportResultWorkbook}
-              onExportReport={handleExportReport}
               onImportCsvFolder={() => csvFolderImportInputRef.current?.click()}
               onExportCsvFolder={handleExportCsvFolder}
               onImportNetcdf={() => netcdfImportInputRef.current?.click()}

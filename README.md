@@ -6,9 +6,10 @@ Ragnarok is a local React + FastAPI application built on [PyPSA](https://pypsa.o
 - running a PyPSA optimization with HiGHS
 - reviewing results in a map, table, and analytics UI
 - exporting either:
-  - an input workbook
-  - a full project workbook with solved PyPSA outputs
-  - a result/report package for sharing
+  - an input workbook (Save / Save As)
+  - a full project workbook with solved PyPSA outputs (Export Project)
+  - a full results workbook (Export Result)
+  - PyPSA-native formats: CSV folder, netCDF, HDF5
 
 The current schema is generated from PyPSA GitHub metadata and checked into the repo at [src/config/pypsa_schema.json](/Users/sanghyun/github/pypsa_gui/frontend/Ragnarok_default/src/config/pypsa_schema.json). The authoritative PyPSA references for this README are:
 
@@ -17,6 +18,18 @@ The current schema is generated from PyPSA GitHub metadata and checked into the 
 - [PyPSA Optimization Overview](https://docs.pypsa.org/v1.0.2/user-guide/optimization/overview/)
 - [PyPSA Pathway Planning / Multi-Investment Optimization](https://docs.pypsa.org/latest/examples/multi-investment-optimisation/)
 - [PyPSA Stochastic Optimization](https://docs.pypsa.org/latest/user-guide/optimization/stochastic/)
+
+## Documentation
+
+| Document | Read it for |
+|---|---|
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | System overview, tech stack, repo layout, data flow |
+| [docs/CAPABILITIES.md](./docs/CAPABILITIES.md) | What Ragnarok can and cannot do (code-checked) |
+| [docs/PROCESSES.md](./docs/PROCESSES.md) | Step-by-step logic of each process |
+| [docs/USER_MANUAL.md](./docs/USER_MANUAL.md) | End-user manual for analysts |
+| [docs/reference/](./docs/reference/) | Per-module function reference (backend + frontend) |
+| [docs/SUPPORT_MATRIX.md](./docs/SUPPORT_MATRIX.md) | Generated feature support matrix |
+| [docs/module-system-v1.md](./docs/module-system-v1.md) | Plugin system spec and authoring guide |
 
 ## Scope
 

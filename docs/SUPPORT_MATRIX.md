@@ -57,5 +57,4 @@ Every component listed above is imported through the generic schema-driven path 
 | PyPSA-native CSV folder (zipped) | ✓ supported |
 | PyPSA-native netCDF (.nc) via backend | ✓ supported |
 | PyPSA-native HDF5 (.h5) via backend | ✓ supported |
-| Standalone HTML result report | ✓ supported |
 

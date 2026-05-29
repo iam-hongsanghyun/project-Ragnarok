@@ -12,7 +12,6 @@ export interface FileToolbarProps {
   onImportProject: () => void;
   onExportProject: () => void;
   onExportResult: () => void;
-  onExportReport: () => void;
   onImportCsvFolder: () => void;
   onExportCsvFolder: () => void;
   onImportNetcdf: () => void;
@@ -42,9 +41,6 @@ export function FileToolbar(props: FileToolbarProps) {
       </button>
       <button className="tb-btn" disabled={!props.hasResults} onClick={props.onExportResult}>
         Export Result
-      </button>
-      <button className="tb-btn" disabled={!props.hasResults} onClick={props.onExportReport}>
-        Export Report
       </button>
       <div className="view-toolbar-sep" />
       <details className="view-toolbar-more">

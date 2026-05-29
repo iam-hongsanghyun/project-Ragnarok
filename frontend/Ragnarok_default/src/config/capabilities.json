@@ -39,7 +39,6 @@
     { "id": "project_xlsx",         "name": "Project workbook (inputs + outputs round-trip)",           "status": "supported" },
     { "id": "csv_folder",           "name": "PyPSA-native CSV folder (zipped)",                         "status": "supported" },
     { "id": "netcdf",               "name": "PyPSA-native netCDF (.nc) via backend",                    "status": "supported" },
-    { "id": "hdf5",                 "name": "PyPSA-native HDF5 (.h5) via backend",                      "status": "supported" },
-    { "id": "html_report",          "name": "Standalone HTML result report",                            "status": "supported" }
+    { "id": "hdf5",                 "name": "PyPSA-native HDF5 (.h5) via backend",                      "status": "supported" }
   ]
 }
