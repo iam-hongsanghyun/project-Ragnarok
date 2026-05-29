@@ -51,28 +51,32 @@ export function GlobalConstraintsSection({
         </div>
       )}
 
-      <div className="gcc-section-label">Presets</div>
-      {presets.map((c) => {
-        const d = METRIC_DEFS[c.metric];
-        return (
-          <div key={c.id} className={`gcc-row${c.enabled ? ' gcc-row--on' : ''}`}>
-            <input className="gcc-check" type="checkbox" checked={c.enabled} onChange={(e) => update(c.id, { enabled: e.target.checked })} />
-            <span className="gcc-sense" title={d?.description}>{d?.sense}</span>
-            <span className="gcc-label" title={d?.description}>{c.label}</span>
-            {d?.needsCarrier && (
-              <select className="gcc-carrier" value={c.carrier} onChange={(e) => update(c.id, { carrier: e.target.value })}>
-                {carriers.map((ca) => <option key={ca}>{ca}</option>)}
-              </select>
-            )}
-            <input className="gcc-val" type="number" value={c.value} onChange={(e) => update(c.id, { value: parseFloat(e.target.value) || 0 })} />
-            <span className="gcc-unit">{c.unit}</span>
-          </div>
-        );
-      })}
+      {presets.length > 0 && (
+        <>
+          <div className="gcc-section-label">Presets</div>
+          {presets.map((c) => {
+            const d = METRIC_DEFS[c.metric];
+            return (
+              <div key={c.id} className={`gcc-row${c.enabled ? ' gcc-row--on' : ''}`}>
+                <input className="gcc-check" type="checkbox" checked={c.enabled} onChange={(e) => update(c.id, { enabled: e.target.checked })} />
+                <span className="gcc-sense" title={d?.description}>{d?.sense}</span>
+                <span className="gcc-label" title={d?.description}>{c.label}</span>
+                {d?.needsCarrier && (
+                  <select className="gcc-carrier" value={c.carrier} onChange={(e) => update(c.id, { carrier: e.target.value })}>
+                    {carriers.map((ca) => <option key={ca}>{ca}</option>)}
+                  </select>
+                )}
+                <input className="gcc-val" type="number" value={c.value} onChange={(e) => update(c.id, { value: parseFloat(e.target.value) || 0 })} />
+                <span className="gcc-unit">{c.unit}</span>
+              </div>
+            );
+          })}
+        </>
+      )}
 
       {customs.length > 0 && (
         <>
-          <div className="gcc-section-label" style={{ marginTop: 6 }}>Custom</div>
+          {presets.length > 0 && <div className="gcc-section-label" style={{ marginTop: 6 }}>Custom</div>}
           {customs.map((c) => {
             const d = METRIC_DEFS[c.metric];
             return (

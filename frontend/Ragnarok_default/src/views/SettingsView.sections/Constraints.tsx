@@ -26,7 +26,7 @@ export function ConstraintsSection(props: ConstraintsSectionProps) {
       <section className="constraints-workspace-section">
         <header className="constraints-workspace-section-header">
           <h3>Custom solver constraints</h3>
-          <p>Applied as <code>linopy</code> constraints during the solve. Preset rows are always present; custom rows append to the list.</p>
+          <p>Applied as <code>linopy</code> constraints during the solve. Add custom rows for caps and floors that aren't expressible in the native <code>global_constraints</code> sheet.</p>
         </header>
         <CustomConstraintsEditor
           constraints={props.constraints}
