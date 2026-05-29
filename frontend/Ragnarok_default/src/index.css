@@ -5076,6 +5076,41 @@ th:hover .col-delete-btn {
 .constraints-cell-placeholder {
   color: var(--muted);
 }
+.ss-wrap {
+  position: relative;
+  width: 100%;
+}
+.ss-wrap input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.ss-menu {
+  margin: 0;
+  padding: 2px 0;
+  list-style: none;
+  max-height: 220px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.14);
+  z-index: 9999;
+  font-size: 0.82rem;
+}
+.ss-option {
+  padding: 5px 9px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+.ss-option:hover {
+  background: #f1f5f9;
+}
+.ss-option--sel {
+  background: #e8f0ef;
+  font-weight: 600;
+}
 .constraints-help {
   margin-bottom: 12px;
   padding: 8px 10px;

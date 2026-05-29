@@ -12,6 +12,7 @@ import React from 'react';
 import { GridRow, Primitive } from '../../../shared/types';
 import { stringValue } from '../../../shared/utils/helpers';
 import { getOrderedInputAttributes } from '../../../constants/pypsa_schema';
+import { SearchableSelect } from '../../../shared/components/SearchableSelect';
 
 // PyPSA's five recognised constraint types — offered as suggestions only.
 const TYPE_SUGGESTIONS = [
@@ -72,12 +73,6 @@ export function GlobalConstraintsTableEditor({
       <datalist id="gc-type-options">
         {TYPE_SUGGESTIONS.map((t) => (<option key={t} value={t} />))}
       </datalist>
-      <datalist id="gc-carrier-attr-options">
-        {carrierAttrSuggestions.map((c) => (<option key={c} value={c} />))}
-      </datalist>
-      <datalist id="gc-bus-options">
-        {busNames.map((b) => (<option key={b} value={b} />))}
-      </datalist>
       <datalist id="gc-period-options">
         {investmentPeriods.map((p) => (<option key={p} value={p} />))}
       </datalist>
@@ -98,7 +93,7 @@ export function GlobalConstraintsTableEditor({
             <tr key={i}>
               {attrs.map((attr) => (
                 <td key={attr.attribute}>
-                  {renderField(attr.attribute, row, i, onSet, busNames, investmentPeriods)}
+                  {renderField(attr.attribute, row, i, onSet, carrierAttrSuggestions, busNames)}
                 </td>
               ))}
               <td>
@@ -118,8 +113,8 @@ function renderField(
   row: GridRow,
   i: number,
   onSet: (rowIndex: number, key: string, value: Primitive) => void,
-  _busNames: string[],
-  _investmentPeriods: number[],
+  carrierAttrSuggestions: string[],
+  busNames: string[],
 ): React.ReactNode {
   if (key === 'sense') {
     return (
@@ -163,18 +158,25 @@ function renderField(
     );
   }
 
-  // Free-text fields with datalist suggestions.
-  const listId =
-    key === 'type' ? 'gc-type-options' :
-    key === 'carrier_attribute' ? 'gc-carrier-attr-options' :
-    key === 'bus' ? 'gc-bus-options' :
-    undefined;
+  // carrier_attribute and bus: searchable dropdowns sourced from the model.
+  if (key === 'carrier_attribute' || key === 'bus') {
+    return (
+      <SearchableSelect
+        className="constraints-cell-input"
+        value={stringValue(row[key])}
+        options={key === 'carrier_attribute' ? carrierAttrSuggestions : busNames}
+        placeholder="—"
+        onChange={(v) => onSet(i, key, v)}
+      />
+    );
+  }
 
+  // name (free text) and type (free text + datalist suggestions).
   return (
     <input
       className="constraints-cell-input"
       value={stringValue(row[key])}
-      list={listId}
+      list={key === 'type' ? 'gc-type-options' : undefined}
       placeholder={key === 'name' ? 'name' : '—'}
       onChange={(e) => onSet(i, key, e.target.value)}
     />
