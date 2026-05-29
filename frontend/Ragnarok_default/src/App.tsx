@@ -1021,18 +1021,6 @@ function AppInner() {
     setStatus(`Removed row ${rowIndex + 1} from ${sheet}.`);
   };
 
-  const moveRow = (sheet: SheetName, rowIndex: number, direction: -1 | 1) => {
-    pushHistory();
-    setModel((current) => {
-      const nextIndex = rowIndex + direction;
-      if (nextIndex < 0 || nextIndex >= current[sheet].length) return current;
-      const nextRows = [...current[sheet]];
-      const [row] = nextRows.splice(rowIndex, 1);
-      nextRows.splice(nextIndex, 0, row);
-      return { ...current, [sheet]: nextRows };
-    });
-  };
-
   const reorderRow = (sheet: SheetName, fromIndex: number, toIndex: number) => {
     if (fromIndex === toIndex) return;
     pushHistory();

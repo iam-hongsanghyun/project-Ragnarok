@@ -1,3 +1,4 @@
+import { describe, it, expect } from '@jest/globals';
 import { dslToSpecs, parseConstraintDsl } from './constraintDsl';
 
 describe('constraintDsl parser (mirrors backend)', () => {
