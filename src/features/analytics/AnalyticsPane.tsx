@@ -102,6 +102,7 @@ export function AnalyticsPane({
           onFocusChange={setAnalyticsFocus}
           storageKey={subTab === 'Result' ? RESULT_STORAGE_KEY : ANALYTICS_STORAGE_KEY}
           initialLayout={subTab === 'Result' ? buildResultPreset(results) : undefined}
+          showPresets={subTab === 'Analytics'}
         />
       )}
     </div>

@@ -1972,7 +1972,7 @@ button {
 .chart-tip-value { font-family: var(--font-sans); }
 
 .chart-tick       { fill: var(--muted); font-size: 10px; }
-.chart-axis-title { fill: var(--muted); font-size: 11px; }
+.chart-axis-title { fill: var(--muted); font-size: 11px; font-weight: 600; text-anchor: middle; }
 .chart-bar-value  { fill: var(--text); font-size: 10px; font-weight: 700; }
 .chart-peak-label { fill: var(--danger); font-size: 10px; font-weight: 600; }
 /* Tooltip text sits on a dark (rgba(15,23,42,0.88)) surface. */
@@ -6036,6 +6036,9 @@ code, kbd, samp, tt,
   flex-direction: column;
   gap: 4px;
   min-width: 180px;
+  max-height: 50vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   box-shadow: 0 6px 18px rgba(15, 23, 42, 0.12);
 }
 .dashboard-toolbar-pop .tb-btn {
@@ -6187,7 +6190,8 @@ code, kbd, samp, tt,
 .dashboard-cell-body {
   flex: 1 1 auto;
   min-height: 0;
-  overflow: hidden;
+  overflow: auto;
+  overscroll-behavior: contain;
   padding: 0;
   position: relative;
 }
@@ -6333,15 +6337,18 @@ code, kbd, samp, tt,
   top: 4px;
   right: 4px;
   z-index: 8;
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
   padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid var(--border);
   border-radius: var(--radius-button);
   background: var(--surface);
   color: var(--muted);
   cursor: pointer;
-  font-size: 0.78rem;
+  font-size: 16px;
   line-height: 1;
   opacity: 0;
   transition: opacity 120ms ease, color 120ms ease;

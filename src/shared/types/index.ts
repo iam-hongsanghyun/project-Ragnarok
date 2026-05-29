@@ -575,6 +575,11 @@ export interface ChartSectionConfig {
   startIndex: number;
   endIndex: number;
   stacked: boolean;
+  // ── Appearance (all optional; undefined = sensible default) ──
+  xAxisTitle?: string;       // custom x-axis caption ('' / undefined = none)
+  yAxisTitle?: string;       // custom y-axis caption ('' / undefined = none)
+  showLegend?: boolean;      // default true
+  showAxisLabels?: boolean;  // default true — tick labels on both axes
 }
 
 // ── Tables pane ───────────────────────────────────────────────────────────────

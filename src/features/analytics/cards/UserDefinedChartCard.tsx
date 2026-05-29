@@ -298,6 +298,50 @@ export function UserDefinedChartCard({
         )}
       </div>
 
+      {/* Appearance — axis titles, legend, tick labels (time-series only) */}
+      {section.chartType !== 'donut' && (
+        <div className="chart-builder-controls">
+          <label className="chart-control">
+            <span>X-axis title</span>
+            <input
+              type="text"
+              value={section.xAxisTitle ?? ''}
+              placeholder="none"
+              onChange={(e) => onChange({ ...section, xAxisTitle: e.target.value })}
+            />
+          </label>
+          <label className="chart-control">
+            <span>Y-axis title</span>
+            <input
+              type="text"
+              value={section.yAxisTitle ?? ''}
+              placeholder="none"
+              onChange={(e) => onChange({ ...section, yAxisTitle: e.target.value })}
+            />
+          </label>
+          <label className="chart-control">
+            <span>Legend</span>
+            <select
+              value={(section.showLegend ?? true) ? 'show' : 'hide'}
+              onChange={(e) => onChange({ ...section, showLegend: e.target.value === 'show' })}
+            >
+              <option value="show">Show</option>
+              <option value="hide">Hide</option>
+            </select>
+          </label>
+          <label className="chart-control">
+            <span>Axis labels</span>
+            <select
+              value={(section.showAxisLabels ?? true) ? 'show' : 'hide'}
+              onChange={(e) => onChange({ ...section, showAxisLabels: e.target.value === 'show' })}
+            >
+              <option value="show">Show</option>
+              <option value="hide">Hide</option>
+            </select>
+          </label>
+        </div>
+      )}
+
       {/* Asset pill multi-select (hidden for system) */}
       {section.focusType !== 'system' && assetNames.length > 0 && (
         <div className="chart-control-row">
@@ -373,6 +417,10 @@ export function UserDefinedChartCard({
           series={metric!.series}
           mode={section.chartType}
           stacked={section.stacked}
+          xAxisTitle={section.xAxisTitle}
+          yAxisTitle={section.yAxisTitle}
+          showLegend={section.showLegend ?? true}
+          showAxisLabels={section.showAxisLabels ?? true}
         />
       )}
     </div>

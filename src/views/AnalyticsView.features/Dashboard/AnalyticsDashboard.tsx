@@ -117,6 +117,8 @@ interface Props {
   storageKey?: string;
   /** Initial layout if nothing is stored yet. */
   initialLayout?: DashboardLayout;
+  /** Show the Presets ▾ picker. Off for the curated Result tab. */
+  showPresets?: boolean;
 }
 
 export function AnalyticsDashboard({
@@ -127,6 +129,7 @@ export function AnalyticsDashboard({
   analyticsFocus, onFocusChange,
   storageKey,
   initialLayout = DEFAULT_LAYOUT,
+  showPresets = true,
 }: Props) {
   const { layout, setLayout, editing, setEditing, savedLayouts, saveAs, load, remove, resetToDefault } =
     useDashboardLayout(initialLayout, storageKey);
@@ -340,28 +343,31 @@ export function AnalyticsDashboard({
           {editing ? 'Done editing' : 'Edit layout'}
         </button>
 
-        <div className="dashboard-toolbar-sep" />
-
-        <div className="dashboard-toolbar-menu">
-          <button className="tb-btn" onClick={() => setOpenMenu(openMenu === 'presets' ? null : 'presets')}>
-            Presets ▾
-          </button>
-          {openMenu === 'presets' && (
-            <div className="dashboard-toolbar-pop dashboard-toolbar-pop--wide">
-              {PRESETS.map((p) => (
-                <button
-                  key={p.key}
-                  className="dashboard-preset-row"
-                  onClick={() => handleLoadPreset(p.key)}
-                  title={p.description}
-                >
-                  <span className="dashboard-preset-label">{p.label}</span>
-                  <span className="dashboard-preset-desc">{p.description}</span>
-                </button>
-              ))}
+        {showPresets && (
+          <>
+            <div className="dashboard-toolbar-sep" />
+            <div className="dashboard-toolbar-menu">
+              <button className="tb-btn" onClick={() => setOpenMenu(openMenu === 'presets' ? null : 'presets')}>
+                Presets ▾
+              </button>
+              {openMenu === 'presets' && (
+                <div className="dashboard-toolbar-pop dashboard-toolbar-pop--wide">
+                  {PRESETS.map((p) => (
+                    <button
+                      key={p.key}
+                      className="dashboard-preset-row"
+                      onClick={() => handleLoadPreset(p.key)}
+                      title={p.description}
+                    >
+                      <span className="dashboard-preset-label">{p.label}</span>
+                      <span className="dashboard-preset-desc">{p.description}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </>
+        )}
 
         {editing && (
           <>

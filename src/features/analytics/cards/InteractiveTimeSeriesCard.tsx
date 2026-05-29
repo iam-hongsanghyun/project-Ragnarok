@@ -24,6 +24,10 @@ export function InteractiveTimeSeriesCard({
   series,
   mode,
   stacked,
+  xAxisTitle,
+  yAxisTitle,
+  showLegend = true,
+  showAxisLabels = true,
 }: {
   title: string;
   description: string;
@@ -31,6 +35,10 @@ export function InteractiveTimeSeriesCard({
   series: TimeSeriesSeries[];
   mode: ChartMode;
   stacked: boolean;
+  xAxisTitle?: string;
+  yAxisTitle?: string;
+  showLegend?: boolean;
+  showAxisLabels?: boolean;
 }) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
@@ -57,9 +65,12 @@ export function InteractiveTimeSeriesCard({
   }
 
   const visible = data;
-  const width = 820, height = 360, padding = 38;
-  const innerWidth = width - padding * 2;
-  const innerHeight = height - padding * 2;
+  const width = 820, height = 360;
+  const padTop = 38, padRight = 38;
+  const padLeft = (showAxisLabels ? 38 : 16) + (yAxisTitle ? 18 : 0);
+  const padBottom = (showAxisLabels ? 38 : 16) + (xAxisTitle ? 18 : 0);
+  const innerWidth = width - padLeft - padRight;
+  const innerHeight = height - padTop - padBottom;
   const visibleSeries = series.filter((item) =>
     visible.some((row) => Math.abs(numberValue(row[item.key] as string | number | undefined)) > 1e-6),
   );
@@ -84,8 +95,8 @@ export function InteractiveTimeSeriesCard({
   }
 
   const range = Math.max(maxValue - minValue, 1);
-  const xForIndex = (i: number) => padding + (i / Math.max(visible.length - 1, 1)) * innerWidth;
-  const yForValue = (v: number) => padding + innerHeight - ((v - minValue) / range) * innerHeight;
+  const xForIndex = (i: number) => padLeft + (i / Math.max(visible.length - 1, 1)) * innerWidth;
+  const yForValue = (v: number) => padTop + innerHeight - ((v - minValue) / range) * innerHeight;
   const zeroY = yForValue(0);
 
   // Compute time span from first/last timestamp to drive label format + tick density
@@ -115,20 +126,22 @@ export function InteractiveTimeSeriesCard({
               const pt = svgEl.createSVGPoint();
               pt.x = e.clientX; pt.y = e.clientY;
               const svgPt = pt.matrixTransform(svgEl.getScreenCTM()!.inverse());
-              const rawIndex = Math.round(((svgPt.x - padding) / innerWidth) * (visible.length - 1));
+              const rawIndex = Math.round(((svgPt.x - padLeft) / innerWidth) * (visible.length - 1));
               setHoverIndex(Math.max(0, Math.min(visible.length - 1, rawIndex)));
             }}
           >
             {[0, 0.25, 0.5, 0.75, 1].map((tick) => (
               <g key={tick}>
-                <line x1={padding} x2={width - padding} y1={padding + innerHeight - innerHeight * tick} y2={padding + innerHeight - innerHeight * tick} className="chart-grid" />
-                <text x={8} y={padding + innerHeight - innerHeight * tick + 4} className="chart-axis">{Math.round(minValue + range * tick)}</text>
+                <line x1={padLeft} x2={width - padRight} y1={padTop + innerHeight - innerHeight * tick} y2={padTop + innerHeight - innerHeight * tick} className="chart-grid" />
+                {showAxisLabels && (
+                  <text x={padLeft - 6} y={padTop + innerHeight - innerHeight * tick + 4} className="chart-axis" textAnchor="end">{Math.round(minValue + range * tick)}</text>
+                )}
               </g>
             ))}
 
             {mode === 'bar' && visible.map((row, rowIndex) => {
               const groupWidth = innerWidth / Math.max(visible.length, 1);
-              const baseX = padding + rowIndex * groupWidth;
+              const baseX = padLeft + rowIndex * groupWidth;
               let runningStack = 0;
               return (
                 <g key={`${row.label}-${rowIndex}`}>
@@ -137,7 +150,7 @@ export function InteractiveTimeSeriesCard({
                     const value = stacked ? Math.max(0, rawValue) : rawValue;
                     if (stacked) {
                       const barHeight = (value / maxValue) * innerHeight;
-                      const y = height - padding - (runningStack / maxValue) * innerHeight - barHeight;
+                      const y = height - padBottom - (runningStack / maxValue) * innerHeight - barHeight;
                       runningStack += value;
                       return <rect key={item.key} x={baseX + 4} y={y} width={Math.max(groupWidth - 8, 3)} height={barHeight} fill={item.color} fillOpacity={0.82} />;
                     }
@@ -189,16 +202,23 @@ export function InteractiveTimeSeriesCard({
               });
             })()}
 
-            {visible.map((row, index) => (
-              <text key={`${row.label}-${index}`} x={xForIndex(index)} y={height - 8} className="chart-axis chart-axis-x">
+            {showAxisLabels && visible.map((row, index) => (
+              <text key={`${row.label}-${index}`} x={xForIndex(index)} y={height - padBottom + 16} className="chart-axis chart-axis-x">
                 {index % stride === 0
                   ? (row.timestamp ? formatXLabel(row.timestamp, spanMs) : row.label)
                   : ''}
               </text>
             ))}
 
+            {yAxisTitle && (
+              <text className="chart-axis-title" transform="rotate(-90)" x={-(padTop + innerHeight / 2)} y={14} textAnchor="middle">{yAxisTitle}</text>
+            )}
+            {xAxisTitle && (
+              <text className="chart-axis-title" x={padLeft + innerWidth / 2} y={height - 6} textAnchor="middle">{xAxisTitle}</text>
+            )}
+
             {minValue < 0 && maxValue > 0 && (
-              <line x1={padding} x2={width - padding} y1={zeroY} y2={zeroY} stroke="rgba(15, 23, 42, 0.28)" strokeWidth={1.2} />
+              <line x1={padLeft} x2={width - padRight} y1={zeroY} y2={zeroY} stroke="rgba(15, 23, 42, 0.28)" strokeWidth={1.2} />
             )}
 
             {hoverIndex !== null && (() => {
@@ -206,11 +226,11 @@ export function InteractiveTimeSeriesCard({
               const row = visible[hoverIndex];
               const tooltipItems = visibleSeries.map((s) => ({ label: s.label, color: s.color, value: numberValue(row[s.key] as string | number | undefined) }));
               const tipWidth = 180, tipHeight = 16 + tooltipItems.length * 18;
-              const tx = hx + 12 + tipWidth > width - padding ? hx - tipWidth - 12 : hx + 12;
-              const ty = Math.max(padding, padding + 4);
+              const tx = hx + 12 + tipWidth > width - padRight ? hx - tipWidth - 12 : hx + 12;
+              const ty = padTop + 4;
               return (
                 <g style={{ pointerEvents: 'none' }}>
-                  <line x1={hx} x2={hx} y1={padding} y2={height - padding} stroke="rgba(15,23,42,0.22)" strokeWidth={1.5} strokeDasharray="4 3" />
+                  <line x1={hx} x2={hx} y1={padTop} y2={height - padBottom} stroke="rgba(15,23,42,0.22)" strokeWidth={1.5} strokeDasharray="4 3" />
                   <g transform={`translate(${tx},${ty})`}>
                     <rect rx="7" ry="7" width={tipWidth} height={tipHeight} fill="rgba(15,23,42,0.88)" />
                     {tooltipItems.map((item, i) => (
@@ -225,9 +245,10 @@ export function InteractiveTimeSeriesCard({
                 </g>
               );
             })()}
-            <rect x={padding} y={padding} width={innerWidth} height={innerHeight} fill="transparent" />
+            <rect x={padLeft} y={padTop} width={innerWidth} height={innerHeight} fill="transparent" />
           </svg>
         </div>
+        {showLegend && (
         <div className="chart-legend chart-legend-side">
           <div className="map-legend-title" style={{ marginBottom: 4 }}>Series</div>
           {visibleSeries.map((item) => (
@@ -237,6 +258,7 @@ export function InteractiveTimeSeriesCard({
             </div>
           ))}
         </div>
+        )}
       </div>
     </section>
   );
