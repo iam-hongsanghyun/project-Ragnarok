@@ -14,8 +14,9 @@
  * Unlike the analytics map this is results-agnostic — it only knows the
  * `WorkbookModel` and the sheet the current Build step is editing.
  */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { CircleMarker, MapContainer, Polyline, TileLayer, Tooltip, useMap, useMapEvents } from 'react-leaflet';
+import type { Map as LeafletMap } from 'leaflet';
 import { GridRow, WorkbookModel } from '../../shared/types';
 import { numberValue, stringValue, resolvedColor } from '../../shared/utils/helpers';
 
@@ -144,6 +145,41 @@ function InvalidateOnResize() {
   return null;
 }
 
+/** Captures the Leaflet map instance into a ref so marker handlers can toggle
+ *  panning when a drag starts. */
+function MapRef({ mapRef }: { mapRef: React.MutableRefObject<LeafletMap | null> }) {
+  const map = useMap();
+  useEffect(() => { mapRef.current = map; return () => { mapRef.current = null; }; }, [map, mapRef]);
+  return null;
+}
+
+/** A node being dragged on the map (own-coordinate component). */
+interface DragState {
+  rowIndex: number;
+  lat: number;
+  lng: number;
+}
+
+/** While a node is being dragged, tracks the cursor (mousemove) and commits the
+ *  final position on release (mouseup). Map panning is disabled by the marker's
+ *  mousedown handler and re-enabled here on release. */
+function DragController({
+  drag,
+  onMove,
+  onEnd,
+}: {
+  drag: DragState | null;
+  onMove: (lat: number, lng: number) => void;
+  onEnd: () => void;
+}) {
+  const map = useMap();
+  useMapEvents({
+    mousemove(e) { if (drag) onMove(e.latlng.lat, e.latlng.lng); },
+    mouseup() { if (drag) { map.dragging.enable(); onEnd(); } },
+  });
+  return null;
+}
+
 /** A pending "click a bus to set this field" request. */
 export interface LinkMode {
   rowIndex: number;
@@ -161,6 +197,8 @@ interface Props {
   onAddAtLocation?: (lat: number, lng: number) => void;
   /** Delete a row of the active sheet (from the context menu). */
   onDeleteRow?: (rowIndex: number) => void;
+  /** Commit a dragged node's new coordinates (x = lng, y = lat). */
+  onMoveRow?: (rowIndex: number, lat: number, lng: number) => void;
   /** Active "click a bus" request, if any. */
   linkMode?: LinkMode | null;
   /** Begin linking a bus to the given row's field (from the context menu). */
@@ -180,7 +218,7 @@ interface ContextMenuState {
 }
 
 export function BuildNetworkMap({
-  model, busIndex, activeSheet, selectedRowIndex, onSelectRow, onAddAtLocation, onDeleteRow,
+  model, busIndex, activeSheet, selectedRowIndex, onSelectRow, onAddAtLocation, onDeleteRow, onMoveRow,
   linkMode, onStartLink, onPickBus, onCancelLink,
 }: Props) {
   const rows: GridRow[] = (model as Record<string, GridRow[]>)[activeSheet] ?? [];
@@ -190,6 +228,27 @@ export function BuildNetworkMap({
   const linking = !!linkMode;
 
   const [menu, setMenu] = useState<ContextMenuState | null>(null);
+  const [drag, setDrag] = useState<DragState | null>(null);
+  const mapRef = useRef<LeafletMap | null>(null);
+
+  // The active own-coordinate layer (buses on the Buses step, point components
+  // otherwise) can be dragged to reposition. Branches follow their buses.
+  const draggable = !!onMoveRow && !linking && (busActive || pointActive);
+
+  /** Start dragging row `index`; disable map panning so the node, not the map,
+   *  follows the cursor. */
+  const beginDrag = (index: number, coords: [number, number]) => (e: { originalEvent: MouseEvent }) => {
+    if (!draggable) return;
+    e.originalEvent.preventDefault();
+    mapRef.current?.dragging.disable();
+    onSelectRow(index);
+    setDrag({ rowIndex: index, lat: coords[0], lng: coords[1] });
+  };
+
+  const endDrag = () => {
+    if (drag) onMoveRow?.(drag.rowIndex, drag.lat, drag.lng);
+    setDrag(null);
+  };
 
   // Close the menu on any outside click, scroll, or Escape.
   useEffect(() => {
@@ -253,6 +312,8 @@ export function BuildNetworkMap({
     <div className={`build-map-frame${linking ? ' build-map-frame--linking' : ''}`}>
       <MapContainer center={[36.35, 127.9]} zoom={7} className="leaflet-map" scrollWheelZoom>
         <InvalidateOnResize />
+        <MapRef mapRef={mapRef} />
+        {draggable && <DragController drag={drag} onMove={(lat, lng) => setDrag((d) => (d ? { ...d, lat, lng } : d))} onEnd={endDrag} />}
         {onAddAtLocation && <MapContextMenu targets={clickTargets} onContext={openMenu} />}
         <TileLayer
           url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
@@ -267,7 +328,8 @@ export function BuildNetworkMap({
 
         {/* Dashed connectors: active point component → its linked bus. */}
         {pointActive && rows.map((row, index) => {
-          const own = ownCoords(row);
+          const stored = ownCoords(row);
+          const own: [number, number] | null = drag?.rowIndex === index ? [drag.lat, drag.lng] : stored;
           const bus = busIndex[stringValue(row.bus)];
           const busC = bus ? ownCoords(bus) : null;
           if (!own || !busC) return null;
@@ -303,13 +365,15 @@ export function BuildNetworkMap({
 
         {/* Buses — context, the active+clickable layer, or pickable in link mode */}
         {model.buses.map((bus, index) => {
-          const coords = ownCoords(bus);
-          if (!coords) return null;
+          const stored = ownCoords(bus);
+          if (!stored) return null;
+          const dragging = busActive && drag?.rowIndex === index;
+          const coords: [number, number] = dragging ? [drag!.lat, drag!.lng] : stored;
           const sel = busActive && index === selectedRowIndex;
           const name = stringValue(bus.name);
-          let handlers: { click: () => void } | undefined;
+          let handlers: Record<string, (e: { originalEvent: MouseEvent }) => void> | undefined;
           if (linking) handlers = { click: () => onPickBus?.(name) };
-          else if (busActive) handlers = { click: () => onSelectRow(index) };
+          else if (busActive) handlers = { click: () => onSelectRow(index), ...(draggable ? { mousedown: beginDrag(index, stored) } : {}) };
           return (
             <CircleMarker
               key={`bus-${index}`}
@@ -333,8 +397,10 @@ export function BuildNetworkMap({
 
         {/* Active point layer (generators / loads / storage / stores) — clickable */}
         {pointActive && rows.map((row, index) => {
-          const coords = pointCoords(row, busIndex);
-          if (!coords) return null;
+          const stored = pointCoords(row, busIndex);
+          if (!stored) return null;
+          const dragging = drag?.rowIndex === index;
+          const coords: [number, number] = dragging ? [drag!.lat, drag!.lng] : stored;
           const sel = index === selectedRowIndex;
           const fill = pointFill(activeSheet, row);
           const bus = stringValue(row.bus);
@@ -344,7 +410,7 @@ export function BuildNetworkMap({
               center={coords}
               radius={sel ? 10 : 6}
               pathOptions={{ color: sel ? SELECT_COLOR : '#ffffff', weight: sel ? 3 : 1.5, fillColor: fill, fillOpacity: 0.95 }}
-              eventHandlers={{ click: () => onSelectRow(index) }}
+              eventHandlers={{ click: () => onSelectRow(index), ...(draggable ? { mousedown: beginDrag(index, stored) } : {}) }}
             >
               <Tooltip>{stringValue(row.name) || `row ${index + 1}`}{bus ? ` · ${bus}` : ' · (no bus)'}</Tooltip>
             </CircleMarker>

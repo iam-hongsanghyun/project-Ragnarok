@@ -138,6 +138,14 @@ export function BuildView(props: BuildViewProps) {
     setLinkMode(null);
   };
 
+  // Drag a node on the map → write its new coordinates (one atomic edit).
+  const moveRow = (rowIndex: number, lat: number, lng: number) => {
+    props.onBulkPaste(step.primarySheet as SheetName, [
+      { rowIndex, col: 'x', val: round5(lng) },
+      { rowIndex, col: 'y', val: round5(lat) },
+    ], 0);
+  };
+
   const tableSel: TableSel = useMemo(
     () => ({ kind: 'static', sheet: step.primarySheet as SheetName }),
     [step.primarySheet],
@@ -302,6 +310,7 @@ export function BuildView(props: BuildViewProps) {
                 setJumpTo(null);
                 setLinkMode(null);
               }}
+              onMoveRow={moveRow}
               linkMode={linkMode}
               onStartLink={startLink}
               onPickBus={pickBus}
