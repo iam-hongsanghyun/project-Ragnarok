@@ -5,7 +5,8 @@
  * section enum, nothing else. Each section is one file under
  * `SettingsView.sections/`.
  */
-import React, { useState } from 'react';
+import React from 'react';
+import { usePersistedState } from '../shared/utils/usePersistedState';
 import {
   CarbonPriceScheduleEntry,
   CustomConstraint,
@@ -138,7 +139,7 @@ export interface SettingsViewProps {
 }
 
 export function SettingsView(props: SettingsViewProps) {
-  const [section, setSection] = useState<SectionId>('scenarios');
+  const [section, setSection] = usePersistedState<SectionId>('ui:settings-section', 'scenarios');
   const groups = GROUPS;
 
   return (

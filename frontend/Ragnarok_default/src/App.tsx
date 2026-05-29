@@ -33,6 +33,7 @@ import { API_BASE, DEFAULT_CONSTRAINTS, getDefaultRowForSheet, MAX_UNPINNED_HIST
 import { canonicalizeOutputSeries, canonicalizeTemporalRows, createEmptyWorkbook, exportWorkbook, normalizeInputDatesToIso, parseProjectFile, parseWorkbook, projectWorkbookToArrayBuffer, workbookToArrayBuffer } from './shared/utils/workbook';
 import { fullResultsArrayBuffer } from './shared/utils/exportResults';
 import { getBounds, getBusIndex, carrierColor, numberValue, orderByCarrierRows, setCarrierColorOverrides, snapshotMaxFromWorkbook } from './shared/utils/helpers';
+import { usePersistedState } from './shared/utils/usePersistedState';
 import { buildRowsFromGeneratorDetails, buildSystemLoadRows, normalizeSeriesPoint } from './shared/utils/analytics';
 import { withDerivedAssetDetails } from './shared/utils/deriveAssetDetails';
 import { deriveRunResults } from './shared/utils/deriveRunResults';
@@ -75,7 +76,7 @@ function AppInner() {
     undoStack.current.push(model);
     setModel(next);
   }, [model]);
-  const [tab, setTab] = useState<WorkspaceTab>('Model');
+  const [tab, setTab] = usePersistedState<WorkspaceTab>('ui:workspace-tab', 'Model');
   // Ctrl/Cmd+Z / Ctrl+Y (or Shift+Z) undo-redo for model edits, only on the
   // Model/Build tabs and never while a text field is focused (so it doesn't
   // hijack native input undo).

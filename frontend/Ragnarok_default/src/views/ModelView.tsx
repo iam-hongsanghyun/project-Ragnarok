@@ -8,7 +8,8 @@
  * The view file is a thin shell: layout + selection state. The tree,
  * table and map are each their own component.
  */
-import React, { useState } from 'react';
+import React from 'react';
+import { usePersistedState } from '../shared/utils/usePersistedState';
 import {
   GridRow,
   Primitive,
@@ -53,7 +54,7 @@ export interface ModelViewProps extends FileToolbarProps {
 }
 
 export function ModelView(props: ModelViewProps) {
-  const [sel, setSel] = useState<TableSel>({ kind: 'static', sheet: 'buses' });
+  const [sel, setSel] = usePersistedState<TableSel>('ui:model-sel', { kind: 'static', sheet: 'buses' });
 
   return (
     <div className="model-view">
