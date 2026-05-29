@@ -28,7 +28,7 @@ import { PlanningSection } from './SettingsView.sections/Planning';
 import { RollingSection } from './SettingsView.sections/Rolling';
 import { StochasticSection } from './SettingsView.sections/Stochastic/Stochastic';
 import { SclopfSection } from './SettingsView.sections/Sclopf';
-import { ConstraintsSection } from './SettingsView.sections/Constraints';
+import { StandardConstraintsSection, AdvancedConstraintsSection } from './SettingsView.sections/Constraints';
 import { AppearanceSection } from './SettingsView.sections/Appearance';
 import { ProjectDefaultsSection } from './SettingsView.sections/ProjectDefaults';
 import { SolverSection } from './SettingsView.sections/Solver';
@@ -42,6 +42,7 @@ type SectionId =
   | 'stochastic'
   | 'sclopf'
   | 'constraints'
+  | 'constraintsAdvanced'
   | 'appearance'
   | 'projectDefaults'
   | 'solver';
@@ -63,8 +64,9 @@ const SECTIONS: Section[] = [
   { id: 'planning',   label: 'Multi-year planning', group: 'Setup' },
   { id: 'rolling',    label: 'Rolling horizon',     group: 'Setup' },
   // Policy — economic / regulatory assumptions imposed on the model
-  { id: 'carbon',      label: 'Carbon price', group: 'Policy' },
-  { id: 'constraints', label: 'Constraints',  group: 'Policy' },
+  { id: 'carbon',             label: 'Carbon price',          group: 'Policy' },
+  { id: 'constraints',        label: 'Standard Constraints',  group: 'Policy' },
+  { id: 'constraintsAdvanced', label: 'Advanced Constraints', group: 'Policy' },
   // Solve — how the optimiser is run
   { id: 'stochastic', label: 'Stochastic',                    group: 'Solve' },
   { id: 'sclopf',     label: 'Security-constrained (SCLOPF)',  group: 'Solve' },
@@ -173,7 +175,8 @@ export function SettingsView(props: SettingsViewProps) {
         {section === 'rolling'        && <RollingSection {...props} />}
         {section === 'stochastic'     && <StochasticSection {...props} />}
         {section === 'sclopf'         && <SclopfSection {...props} />}
-        {section === 'constraints'    && <ConstraintsSection {...props} />}
+        {section === 'constraints'    && <StandardConstraintsSection {...props} />}
+        {section === 'constraintsAdvanced' && <AdvancedConstraintsSection {...props} />}
         {section === 'appearance'     && <AppearanceSection {...props} />}
         {section === 'projectDefaults' && <ProjectDefaultsSection {...props} />}
         {section === 'solver'         && <SolverSection {...props} />}

@@ -1,6 +1,9 @@
 /**
- * Constraints section — custom linopy constraints (top) + native
- * PyPSA `global_constraints` rows (bottom). Stacked, not tabbed.
+ * Constraints sections, split into two Settings nav entries:
+ *  - Standard Constraints: the custom-solver table + native PyPSA
+ *    `global_constraints` table.
+ *  - Advanced Constraints: the free-text constraint code box + the read-only
+ *    applied-constraints list.
  */
 import React from 'react';
 import { AppliedConstraint, CustomConstraint, GridRow, PathwayConfig, Primitive, WorkbookModel } from '../../shared/types';
@@ -26,7 +29,7 @@ export interface ConstraintsSectionProps {
 // fair game for `primary_energy` constraints.
 const CARRIER_META_COLS = new Set(['name', 'color', 'nice_name']);
 
-export function ConstraintsSection(props: ConstraintsSectionProps) {
+export function StandardConstraintsSection(props: ConstraintsSectionProps) {
   const carriers = Array.from(
     new Set(props.model.carriers.map((c) => String(c.name ?? '')).filter(Boolean)),
   );
@@ -76,12 +79,16 @@ export function ConstraintsSection(props: ConstraintsSectionProps) {
           onSet={(rowIndex, key, value) => props.onUpdateRow('global_constraints', rowIndex, key, value)}
         />
       </section>
-      <div className="sg-setting-divider" style={{ margin: '24px 0' }} />
-      <CustomDslSection
-        customDsl={props.customDsl}
-        onCustomDslChange={props.onCustomDslChange}
-        appliedConstraints={props.appliedConstraints}
-      />
     </>
+  );
+}
+
+export function AdvancedConstraintsSection(props: ConstraintsSectionProps) {
+  return (
+    <CustomDslSection
+      customDsl={props.customDsl}
+      onCustomDslChange={props.onCustomDslChange}
+      appliedConstraints={props.appliedConstraints}
+    />
   );
 }
