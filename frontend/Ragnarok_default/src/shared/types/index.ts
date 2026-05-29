@@ -510,6 +510,12 @@ export interface RunHistoryEntry {
   savedAt: string;
   filename: string;
   carbonPrice: number;
+  /**
+   * Discount rate this run was derived with. Optional for backward
+   * compatibility: entries persisted before it was captured fall back to the
+   * current setting when re-deriving pathway KPIs.
+   */
+  discountRate?: number;
   snapshotStart: number;
   snapshotEnd: number;
   snapshotWeight: number;
@@ -524,6 +530,14 @@ export interface RunHistoryEntry {
   pinned: boolean;
   inComparison: boolean;   // false = excluded from Comparison tab, still in history
   results: RunResults;
+  /**
+   * Full workbook topology submitted for this run. Analytics (map geometry,
+   * per-asset derivation) bind to this snapshot so a restored run shows its
+   * own buses/lines/generators rather than the live model the user may have
+   * edited since. Optional for backward compatibility: entries persisted
+   * before per-run snapshots were captured fall back to the live model.
+   */
+  model?: WorkbookModel;
 }
 
 export type AnalyticsFocus =

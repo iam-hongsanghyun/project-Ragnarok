@@ -5853,7 +5853,9 @@ th:hover .col-delete-btn {
   height: 40px;
   display: flex;
   align-items: center;
-  padding: 0 14px;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 8px 0 14px;
   font-family: var(--font-mono);
   font-size: 0.72rem;
   font-weight: 600;
@@ -5862,6 +5864,13 @@ th:hover .col-delete-btn {
   color: var(--muted);
   border-bottom: 1px solid var(--border);
   background: #f1f5f9;
+}
+
+.analytics-view-rail-clear {
+  font-size: 0.66rem;
+  padding: 2px 8px;
+  height: auto;
+  letter-spacing: 0.03em;
 }
 
 .analytics-view-rail-body {

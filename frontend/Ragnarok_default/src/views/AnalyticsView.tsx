@@ -78,6 +78,7 @@ export interface AnalyticsViewProps {
   onRenameHistoryEntry: (id: string, label: string) => void;
   onPinHistoryEntry: (id: string, pinned: boolean) => void;
   onDeleteHistoryEntry: (id: string) => void;
+  onClearHistory: () => void;
 }
 
 export function AnalyticsView(props: AnalyticsViewProps) {
@@ -154,7 +155,17 @@ export function AnalyticsView(props: AnalyticsViewProps) {
 
       {runHistory.length > 0 && (
         <aside className="analytics-view-rail" aria-label="Run history">
-          <div className="analytics-view-rail-header">Run history</div>
+          <div className="analytics-view-rail-header">
+            <span>Run history</span>
+            <button
+              type="button"
+              className="tb-btn tb-btn--muted analytics-view-rail-clear"
+              onClick={props.onClearHistory}
+              title="Remove every run from the comparison history (including pinned). Does not affect the model or the displayed result."
+            >
+              Clear all
+            </button>
+          </div>
           <div className="analytics-view-rail-body">
             <RunHistoryList
               runHistory={runHistory}

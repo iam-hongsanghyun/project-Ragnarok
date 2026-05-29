@@ -95,6 +95,17 @@ function AppInner() {
   }, [tab, undo, redo]);
   const [analyticsSubTab, setAnalyticsSubTab] = useState<AnalyticsSubTab>('Result');
   const [results, setResults] = useState<RunResults | null>(null);
+  // Topology snapshot taken at the moment `results` were produced/restored.
+  // Analytics (map, asset derivation) must reflect the run that owns the
+  // displayed results, not the live model the user may have since edited.
+  const [resultsModel, setResultsModel] = useState<WorkbookModel | null>(null);
+  // Derivation inputs frozen at the moment `results` were produced/restored.
+  // Pathway analytics re-derive per-period KPIs from these; without freezing,
+  // restoring an old run while the live sliders differ would recompute its
+  // charts with the current carbon price / resolution / discount rate.
+  const [resultsContext, setResultsContext] = useState<
+    { carbonPrice: number; snapshotWeight: number; discountRate: number } | null
+  >(null);
   const [runStatus, setRunStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
   const [maxSnapshots, setMaxSnapshots] = useState<number>(RUN_WINDOW.initialMaxSnapshots);
   const [snapshotStart, setSnapshotStart] = useState(RUN_WINDOW.initialSnapshotStart);
@@ -154,10 +165,19 @@ function AppInner() {
   const moduleHost = useModuleHost();
   const modelIssues = useModelIssues(model);
 
+  // Topology that owns the currently displayed results: the snapshot taken at
+  // run/restore time when available, else the live model (e.g. before any run).
+  const analyticsModel = resultsModel ?? model;
+  // Derivation inputs that own the displayed results: frozen run-time values
+  // when available, else the live sliders (e.g. before any run).
+  const analyticsCarbonPrice = resultsContext?.carbonPrice ?? carbonPrice;
+  const analyticsSnapshotWeight = resultsContext?.snapshotWeight ?? snapshotWeight;
+  const analyticsDiscountRate = resultsContext?.discountRate ?? settings.discountRate;
+
   const displayResults = useMemo(() => {
     if (!results) return null;
     if (!results.pathway?.enabled || !results.outputs) {
-      return withDerivedAssetDetails(model, results, settings.currencySymbol);
+      return withDerivedAssetDetails(analyticsModel, results, settings.currencySymbol);
     }
     const selectedPeriod =
       getDefaultSelectedPeriod({
@@ -171,11 +191,11 @@ function AppInner() {
             yearsWeight: results.pathway?.summaries[index]?.yearsWeight ?? 1,
           })),
       });
-    const derived = deriveRunResults(model, results.outputs, {
-      carbonPrice,
+    const derived = deriveRunResults(analyticsModel, results.outputs, {
+      carbonPrice: analyticsCarbonPrice,
       currencySymbol: settings.currencySymbol,
-      discountRate: settings.discountRate,
-      snapshotWeight,
+      discountRate: analyticsDiscountRate,
+      snapshotWeight: analyticsSnapshotWeight,
       narrative: results.narrative,
       selectedPeriod,
       pathway: {
@@ -195,7 +215,7 @@ function AppInner() {
       pathway: derived.pathway,
       runMeta: derived.runMeta,
     };
-  }, [results, model, settings.currencySymbol, settings.discountRate, carbonPrice, snapshotWeight, pathwayConfig]);
+  }, [results, analyticsModel, settings.currencySymbol, analyticsDiscountRate, analyticsCarbonPrice, analyticsSnapshotWeight, pathwayConfig]);
 
   const captureCurrentScenario = useCallback((overrides: Partial<ScenarioPreset> = {}): ScenarioPreset => (
     buildScenarioPreset({
@@ -265,6 +285,14 @@ function AppInner() {
     setSnapshotStart(RUN_WINDOW.initialSnapshotStart);
     setModel(nextModel);
     setResults(null);
+    setResultsModel(null);
+    setResultsContext(null);
+    // Run history is session-scoped: it survives model swaps (new/demo/workbook/
+    // project open) so prior runs stay available for comparison, and is only
+    // emptied when the user clicks "Clear all" or reloads/closes Ragnarok (the
+    // list lives in in-memory React state and is never persisted). Each entry
+    // carries its own topology + results snapshot, so it stays self-contained
+    // even after the live model is replaced. Do NOT clear it here.
     setRunStatus('idle');
     setChartSections([]);
     setValidateResult(null);
@@ -468,6 +496,9 @@ function AppInner() {
 
   const bounds = useMemo(() => getBounds(model), [model.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
   const busIndex = useMemo(() => getBusIndex(model), [model.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
+  // Map geometry for the analytics view follows the results-owning topology.
+  const analyticsBounds = useMemo(() => getBounds(analyticsModel), [analyticsModel.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
+  const analyticsBusIndex = useMemo(() => getBusIndex(analyticsModel), [analyticsModel.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     // Reset focus to 'system' when results disappear or the previously-focused
@@ -608,16 +639,23 @@ function AppInner() {
           }));
         }
         setResults(imported);
+        setResultsModel(structuredClone(nextModel));
+        setResultsContext({
+          carbonPrice: importedCarbonPrice,
+          snapshotWeight: importedSnapshotWeight,
+          discountRate: importedDiscountRate,
+        });
         setAnalyticsFocus({ type: 'system' });
         if (!metadata.runHistory || metadata.runHistory.length === 0) {
           const scenarioLabel = importedScenarios.scenarios.find((scenario) => scenario.id === importedRunState?.activeScenarioId)?.label ?? null;
-          setRunHistory([{
+          const importedEntry: RunHistoryEntry = {
             id: Date.now().toString(),
             label: 'Imported project',
             scenarioLabel,
             savedAt: new Date().toISOString(),
             filename: file.name,
             carbonPrice: importedCarbonPrice,
+            discountRate: importedDiscountRate,
             snapshotStart: importedRunState?.snapshotStart ?? 0,
             snapshotEnd: importedRunState?.snapshotEnd ?? snapshotMaxFromWorkbook(nextModel.snapshots),
             snapshotWeight: importedSnapshotWeight,
@@ -628,7 +666,16 @@ function AppInner() {
             pinned: false,
             inComparison: true,
             results: imported,
-          }]);
+            model: structuredClone(nextModel),
+          };
+          // Prepend to the session history rather than replacing it: prior runs
+          // stay available for comparison across a project import.
+          setRunHistory((hist) => {
+            const withNew = [importedEntry, ...hist];
+            const pinned = withNew.filter((e) => e.pinned);
+            const unpinned = withNew.filter((e) => !e.pinned).slice(0, MAX_UNPINNED_HISTORY);
+            return [...pinned, ...unpinned];
+          });
         }
         setStatus(`Imported project: ${file.name}. Full project state restored.`);
       } else {
@@ -645,6 +692,10 @@ function AppInner() {
   };
 
   const handleExportProject = async () => {
+    // Export the currently viewed run as one coherent snapshot: its own
+    // topology (`analyticsModel`) paired with its outputs. Run history is a
+    // comparison-only, session-scoped list and is never written to the file —
+    // to export a different run, view it first (it becomes the current run).
     const base = filename.replace(/\.xlsx$/i, '') || 'ragnarok_project';
     const out = `${base}_project.xlsx`;
     const metadata = {
@@ -664,7 +715,6 @@ function AppInner() {
         forceLp,
         activeScenarioId: scenarioCatalog.activeScenarioId,
       },
-      runHistory,
       provenance: {
         exportedAt: new Date().toISOString(),
         exportedFilename: filename,
@@ -688,7 +738,7 @@ function AppInner() {
           types: [{ description: 'Excel Workbook', accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] } }],
         });
         const writable = await handle.createWritable();
-        await writable.write(projectWorkbookToArrayBuffer(model, results?.outputs, metadata));
+        await writable.write(projectWorkbookToArrayBuffer(analyticsModel, results?.outputs, metadata));
         await writable.close();
         showToast(`${successMsg} → ${handle.name || out}`, 'success');
       } catch (error) {
@@ -701,7 +751,7 @@ function AppInner() {
     }
 
     try {
-      exportProjectWorkbook(model, results?.outputs, metadata, out);
+      exportProjectWorkbook(analyticsModel, results?.outputs, metadata, out);
       showToast(successMsg, 'success');
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Project export failed.';
@@ -970,6 +1020,18 @@ function AppInner() {
       canonicalizeOutputSeries(entry.results.outputs.series, settings.dateFormat);
     }
     setResults(entry.results);
+    // Pin analytics to the topology that produced this run. Legacy entries
+    // (saved before per-run topology snapshots) carry no model → fall back to
+    // the live model, preserving prior behaviour.
+    setResultsModel(entry.model ?? null);
+    // Pin pathway derivation inputs to this run's stored values so re-derived
+    // KPIs match the run, not the live sliders. discountRate is optional on
+    // older entries → fall back to the current setting.
+    setResultsContext({
+      carbonPrice: entry.carbonPrice,
+      snapshotWeight: entry.snapshotWeight,
+      discountRate: entry.discountRate ?? settings.discountRate,
+    });
     setPathwayConfig((current) => entry.results.pathway?.enabled ? ({
       ...current,
       enabled: true,
@@ -1017,6 +1079,14 @@ function AppInner() {
 
   const handleDeleteHistoryEntry = (id: string) => {
     setRunHistory((h) => h.filter((e) => e.id !== id));
+  };
+
+  const handleClearHistory = () => {
+    if (runHistory.length === 0) return;
+    if (!window.confirm('Clear all run history? This removes every run (including pinned) from the comparison list. The model and the currently displayed result are not affected.')) {
+      return;
+    }
+    setRunHistory([]);
   };
 
   const handleToggleComparison = (id: string, inComparison: boolean) => {
@@ -1299,10 +1369,16 @@ function AppInner() {
         enabled: false,
       });
       setResults(rawResults);
+      // Freeze the exact topology submitted to the backend so analytics (map,
+      // asset derivation) stay tied to this run even after later edits.
+      setResultsModel(structuredClone(modelForRun));
+      // Freeze the derivation inputs this run was solved with, so later slider
+      // edits don't silently recompute the displayed pathway KPIs.
+      setResultsContext({ carbonPrice, snapshotWeight, discountRate: settings.discountRate });
       setRunStatus('done');
       setAnalyticsFocus({ type: 'system' });
       const visible = rawResults.pathway?.enabled && rawResults.outputs
-        ? deriveRunResults(model, rawResults.outputs, {
+        ? deriveRunResults(modelForRun, rawResults.outputs, {
           carbonPrice,
           currencySymbol: settings.currencySymbol,
           discountRate: settings.discountRate,
@@ -1312,7 +1388,7 @@ function AppInner() {
           pathway: rawResults.pathway,
           rolling: rawResults.rolling,
         })
-        : withDerivedAssetDetails(model, rawResults, settings.currencySymbol);
+        : withDerivedAssetDetails(modelForRun, rawResults, settings.currencySymbol);
       const doneMsg = `Completed — ${visible.runMeta.snapshotCount} snapshots, ${visible.runMeta.modeledHours} h.`;
       setStatus(doneMsg);
       showToast(doneMsg, 'success');
@@ -1325,16 +1401,18 @@ function AppInner() {
           savedAt: new Date().toISOString(),
           filename,
           carbonPrice,
+          discountRate: settings.discountRate,
           snapshotStart,
           snapshotEnd,
           snapshotWeight,
           activeConstraints: constraints.filter((c) => c.enabled),
           componentCounts: Object.fromEntries(
-            SHEETS.map((sheet) => [sheet, model[sheet]?.length ?? 0]).filter(([, n]) => n > 0),
+            SHEETS.map((sheet) => [sheet, modelForRun[sheet]?.length ?? 0]).filter(([, n]) => n > 0),
           ),
           pinned: false,
           inComparison: true,
           results: rawResults,
+          model: structuredClone(modelForRun),
         };
         const withNew = [entry, ...hist];
         const pinned = withNew.filter((e) => e.pinned);
@@ -1614,7 +1692,7 @@ function AppInner() {
               onExportProject={handleExportProject}
               onExportResult={() => {
                 if (!displayResults) return;
-                exportFullResults(model, displayResults, filename.replace(/\.xlsx$/i, ''));
+                exportFullResults(analyticsModel, displayResults, filename.replace(/\.xlsx$/i, ''));
                 showToast('Result workbook exported', 'success');
               }}
               onExportReport={() => {
@@ -1650,9 +1728,9 @@ function AppInner() {
               }}
               displayResults={displayResults}
               filename={filename}
-              model={model}
-              bounds={bounds}
-              busIndex={busIndex}
+              model={analyticsModel}
+              bounds={analyticsBounds}
+              busIndex={analyticsBusIndex}
               analyticsFocus={analyticsFocus}
               setAnalyticsFocus={setAnalyticsFocus}
               chartSections={chartSections}
@@ -1668,7 +1746,7 @@ function AppInner() {
               onSelectedPeriodChange={(period) => setPathwayConfig((current) => ({ ...current, selectedPeriod: period }))}
               onExportAll={() => {
                 if (!displayResults) return;
-                exportFullResults(model, displayResults, filename.replace(/\.xlsx$/i, ''));
+                exportFullResults(analyticsModel, displayResults, filename.replace(/\.xlsx$/i, ''));
                 showToast('Full results exported to Excel', 'success');
               }}
               onToggleComparison={handleToggleComparison}
@@ -1676,6 +1754,7 @@ function AppInner() {
               onRenameHistoryEntry={handleRenameHistoryEntry}
               onPinHistoryEntry={handlePinHistoryEntry}
               onDeleteHistoryEntry={handleDeleteHistoryEntry}
+              onClearHistory={handleClearHistory}
             />
           )}
 
