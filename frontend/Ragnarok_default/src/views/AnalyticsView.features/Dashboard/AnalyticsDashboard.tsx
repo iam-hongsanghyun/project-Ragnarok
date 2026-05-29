@@ -11,7 +11,7 @@
  * The same component renders both the Analytics and Result sub-tabs;
  * the parent picks the storage key and the default preset.
  */
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { LatLngBoundsExpression } from 'leaflet';
 import {
   AnalyticsFocus,
@@ -152,6 +152,19 @@ export function AnalyticsDashboard({
     useDashboardLayout(initialLayout, storageKey);
   const [openMenu, setOpenMenu] = useState<'presets' | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const presetsMenuRef = useRef<HTMLDivElement | null>(null);
+
+  // Close the Presets menu when clicking anywhere outside it.
+  useEffect(() => {
+    if (openMenu !== 'presets') return;
+    const onDown = (e: MouseEvent) => {
+      if (presetsMenuRef.current && !presetsMenuRef.current.contains(e.target as Node)) {
+        setOpenMenu(null);
+      }
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [openMenu]);
 
   // Track which preset is currently in play so Reset re-imports *that*
   // preset rather than the hardcoded default. null = the initial layout.
@@ -388,7 +401,7 @@ export function AnalyticsDashboard({
         {showPresets && (
           <>
             <div className="dashboard-toolbar-sep" />
-            <div className="dashboard-toolbar-menu">
+            <div className="dashboard-toolbar-menu" ref={presetsMenuRef}>
               <button className="tb-btn" onClick={() => setOpenMenu(openMenu === 'presets' ? null : 'presets')}>
                 Presets ▾
               </button>

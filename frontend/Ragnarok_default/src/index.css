@@ -793,15 +793,14 @@ button {
   padding: 4px 10px;
 }
 .sg-color-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  max-height: 180px;
-  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 6px 12px;
   padding-right: 2px;
 }
 .sg-color-list--tall {
   max-height: 260px;
+  overflow-y: auto;
 }
 .sg-color-item {
   display: flex;
@@ -1637,7 +1636,9 @@ button {
 }
 
 .field select,
-.chart-control select {
+.chart-control select,
+.field .ss-wrap input,
+.chart-control .ss-wrap input {
   width: 100%;
   padding: 5px 8px;
   border: 1px solid var(--border);
@@ -1646,8 +1647,13 @@ button {
   color: var(--text);
   font-size: 0.82rem;
 }
+.field .ss-wrap input,
+.chart-control .ss-wrap input {
+  padding-right: 20px;
+}
 
-.chart-control select {
+.chart-control select,
+.chart-control .ss-wrap input {
   appearance: none;
   min-width: 150px;
 }
@@ -5084,6 +5090,7 @@ th:hover .col-delete-btn {
   width: 100%;
   box-sizing: border-box;
   padding-right: 20px;
+  font-family: inherit;
 }
 /* Chevron affordance so the field reads as a dropdown. */
 .ss-wrap::after {

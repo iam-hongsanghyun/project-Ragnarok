@@ -108,11 +108,10 @@ export function BuildAttributeForm({
       );
     } else if (isCarrier) {
       field = (
-        <input
-          type="text"
-          list="build-carrier-options"
+        <SearchableSelect
           value={strValue}
-          onChange={(e) => onUpdate(rowIndex, attr.attribute, e.target.value)}
+          options={carrierNames}
+          onChange={(v) => onUpdate(rowIndex, attr.attribute, v)}
         />
       );
     } else if (t.includes('bool')) {
@@ -156,10 +155,6 @@ export function BuildAttributeForm({
 
   return (
     <aside className="build-form">
-      <datalist id="build-carrier-options">
-        {carrierNames.map((c) => <option key={c} value={c} />)}
-      </datalist>
-
       <div className="build-form-head">
         <p className="eyebrow">{component.label} · row {rowIndex + 1}</p>
         <h3>{stringValue(row.name) || `row ${rowIndex + 1}`}</h3>

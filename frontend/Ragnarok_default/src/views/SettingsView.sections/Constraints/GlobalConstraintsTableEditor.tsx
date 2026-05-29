@@ -70,9 +70,6 @@ export function GlobalConstraintsTableEditor({
 
   return (
     <div className="constraints-table-wrap">
-      <datalist id="gc-type-options">
-        {TYPE_SUGGESTIONS.map((t) => (<option key={t} value={t} />))}
-      </datalist>
       <datalist id="gc-period-options">
         {investmentPeriods.map((p) => (<option key={p} value={p} />))}
       </datalist>
@@ -157,25 +154,28 @@ function renderField(
     );
   }
 
-  // carrier_attribute and bus: searchable dropdowns sourced from the model.
-  if (key === 'carrier_attribute' || key === 'bus') {
+  // type, carrier_attribute and bus: searchable dropdowns (free text allowed).
+  if (key === 'type' || key === 'carrier_attribute' || key === 'bus') {
+    const options =
+      key === 'type' ? TYPE_SUGGESTIONS :
+      key === 'carrier_attribute' ? carrierAttrSuggestions :
+      busNames;
     return (
       <SearchableSelect
         className="constraints-cell-input"
         value={stringValue(row[key])}
-        options={key === 'carrier_attribute' ? carrierAttrSuggestions : busNames}
+        options={options}
         placeholder="—"
         onChange={(v) => onSet(i, key, v)}
       />
     );
   }
 
-  // name (free text) and type (free text + datalist suggestions).
+  // name (free text).
   return (
     <input
       className="constraints-cell-input"
       value={stringValue(row[key])}
-      list={key === 'type' ? 'gc-type-options' : undefined}
       placeholder={key === 'name' ? 'name' : '—'}
       onChange={(e) => onSet(i, key, e.target.value)}
     />
