@@ -5175,6 +5175,37 @@ th:hover .col-delete-btn {
   overflow: auto;
   white-space: pre-wrap;
 }
+/* "Server setup" advisory: how to register the plugin's own local build server
+ * in the user's env file + run.command. */
+.plugin-server-setup {
+  margin: 16px;
+  padding: 12px 14px;
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-button);
+}
+.plugin-server-setup-title {
+  margin: 0 0 4px;
+  font-size: 0.85rem;
+}
+.plugin-server-steps {
+  margin: 6px 0;
+  padding-left: 18px;
+  font-size: 0.8rem;
+  color: var(--text);
+}
+.plugin-server-steps li { margin: 2px 0; }
+.plugin-server-entry {
+  margin: 6px 0;
+  padding: 8px 10px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-button);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
 .ss-wrap {
   position: relative;
   width: 100%;

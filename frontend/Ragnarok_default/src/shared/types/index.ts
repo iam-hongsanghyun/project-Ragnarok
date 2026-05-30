@@ -423,6 +423,23 @@ export interface PluginAnalyticsEntry {
   data: Record<string, unknown>;
 }
 
+/**
+ * Manifest-level declaration of a plugin's own (local) build server. Used only
+ * to advise the user how to register the server in their local env file +
+ * `run.command` — Ragnarok never launches it. A browser cannot discover the
+ * absolute install path, so the advisory pairs these with a path placeholder.
+ */
+export interface PluginServerConfig {
+  /** Shell command that starts the server (may activate the plugin's own venv). */
+  run: string;
+  /** Working directory for the command, relative to the plugin's server directory. */
+  cwd?: string;
+  /** Port the server listens on. */
+  port?: number;
+  /** Health-check path (default `/health`). */
+  health?: string;
+}
+
 export interface AppliedConstraint {
   name: string;
   source: 'custom' | 'dsl' | 'plugin';
@@ -687,11 +704,12 @@ export interface ModuleConfigField {
   visibleWhen?: ModuleConfigVisibleWhen;
   /**
    * For 'action' fields: the name of the plugin hook to invoke when the
-   * button is clicked. Currently only "transform" is supported — it runs
-   * the plugin's pre-build transform in isolation and the returned model
-   * replaces the current Ragnarok workbook (no solve).
+   * button is clicked. `"transform"` runs the plugin's transform/contribute
+   * and merges the result into the workbook (no solve). Any other name (e.g.
+   * `"connect"`) invokes the same-named exported function on the plugin
+   * module; its returned `{ ok, message }` drives a success/error toast.
    */
-  hook?: 'transform';
+  hook?: string;
   /** For 'action' fields: button style. Defaults to 'primary'. */
   variant?: 'primary' | 'secondary';
   /** For 'action' fields: toast text on success. */

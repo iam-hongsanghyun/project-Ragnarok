@@ -1591,7 +1591,7 @@ function AppInner() {
           tab={tab}
           onTabChange={setTab}
           validateResult={validateResult}
-          enabledModuleCount={frontendPlugins.enabledIds.length}
+          pluginCount={frontendPlugins.installed.length}
         />
         <div className="workspace-main">
 

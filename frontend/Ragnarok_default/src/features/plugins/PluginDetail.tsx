@@ -16,6 +16,7 @@ import {
   ModuleDescriptor,
   ModulePanelConfig,
   PluginAnalyticsEntry,
+  PluginServerConfig,
   WorkbookModel,
 } from '../../shared/types';
 import { FrontendPluginHost, InstalledPlugin } from './frontendPlugins';
@@ -77,6 +78,73 @@ function manifestToDescriptor(plugin: InstalledPlugin, schema: ModuleConfigSchem
   };
 }
 
+/** The Ragnarok-project env file `run.command` reads to launch plugin servers. */
+const PLUGINS_ENV_FILE = 'plugins.env';
+
+/** Read the manifest's optional `server` block (the local build-server declaration). */
+function getServerConfig(plugin: InstalledPlugin): PluginServerConfig | null {
+  const s = (plugin.manifest as Record<string, unknown>).server;
+  if (!s || typeof s !== 'object') return null;
+  const run = (s as { run?: unknown }).run;
+  if (typeof run !== 'string' || !run.trim()) return null;
+  return s as PluginServerConfig;
+}
+
+/**
+ * Advisory for registering a plugin's own local build server. Ragnarok never
+ * launches it (the backend will be remote and a browser can't spawn processes),
+ * so we tell the user the exact env entry to add — with a path placeholder,
+ * since the browser can't discover the absolute install path — and how
+ * `run.command` uses it.
+ */
+function ServerSetupNotice({ plugin }: { plugin: InstalledPlugin }) {
+  const { showToast } = useToast();
+  const server = getServerConfig(plugin);
+  if (!server) return null;
+
+  const cwd = server.cwd ? `/${server.cwd.replace(/^\/+|\/+$/g, '')}` : '';
+  const entry = `# ${plugin.name}\n/absolute/path/to/${plugin.id}${cwd}|${server.run}`;
+  const health = server.health ?? '/health';
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(entry);
+      showToast('Env entry copied.', 'success');
+    } catch {
+      showToast('Copy failed — select the text and copy manually.', 'error');
+    }
+  };
+
+  return (
+    <section className="plugin-server-setup">
+      <h4 className="plugin-server-setup-title">Server setup</h4>
+      <p className="sg-setting-hint">
+        This plugin runs its own local build server. Register it in Ragnarok's{' '}
+        <code>{PLUGINS_ENV_FILE}</code>, start Ragnarok with <code>run.command</code> (it launches
+        registered servers), then use <strong>Connect</strong> above.
+      </p>
+      <ol className="plugin-server-steps">
+        <li>
+          Add this line to Ragnarok's <code>{PLUGINS_ENV_FILE}</code> (project root, next to{' '}
+          <code>run.command</code>) — replace the path with where this plugin lives on your machine:
+        </li>
+      </ol>
+      <pre className="plugin-server-entry">{entry}</pre>
+      <button className="tb-btn tb-btn--muted" onClick={copy}>Copy entry</button>
+      <ol className="plugin-server-steps" start={2}>
+        <li>
+          Start (or restart) Ragnarok with <code>run.command</code> — it launches each registered server
+          whose path exists{server.port ? <> on port <code>{server.port}</code></> : null}.
+        </li>
+        <li>
+          Click <strong>Connect</strong> above (health check at <code>{health}</code>), then{' '}
+          <strong>Send model to Ragnarok</strong>.
+        </li>
+      </ol>
+    </section>
+  );
+}
+
 export function PluginDetail({ host, plugin, model, onReplaceModel, onMergeSheets, customDsl, onCustomDslChange, results }: PluginDetailProps) {
   const { showToast } = useToast();
   const [analytics, setAnalytics] = useState<PluginAnalyticsEntry | null>(null);
@@ -117,11 +185,24 @@ export function PluginDetail({ host, plugin, model, onReplaceModel, onMergeSheet
     throw new Error(`${plugin.name} has no transform/contribute hook.`);
   };
 
-  // In-form action button (e.g. "Send model to Ragnarok"). ActionFieldRow owns
-  // its own spinner, so we resolve cleanly and surface errors as a toast.
+  // In-form action button. ActionFieldRow owns its own spinner, so we resolve
+  // cleanly and surface errors as a toast. `hook: "transform"` (or unset) runs
+  // the apply path; any other hook name invokes the same-named exported plugin
+  // function and toasts its returned { ok, message } (e.g. a connect/health
+  // check that hides the raw server URL behind a button).
   const handleAction = async (_moduleId: string, _fieldKey: string, field: ModuleConfigField) => {
+    const hook = field.hook ?? 'transform';
     try {
-      await apply(field.successMessage);
+      if (hook === 'transform') {
+        await apply(field.successMessage);
+        return;
+      }
+      const mod = loadPluginModule(plugin) as unknown as Record<string, ((cfg: Record<string, unknown>) => unknown) | undefined>;
+      const fn = mod[hook];
+      if (typeof fn !== 'function') throw new Error(`Plugin has no "${hook}" hook.`);
+      const res = (await fn(withDefaults(schema, host.getConfig(plugin.id)))) as { ok?: boolean; message?: string } | void;
+      const ok = !res || res.ok !== false;
+      showToast(res?.message ?? field.successMessage ?? `${plugin.name}: ${hook} done.`, ok ? 'success' : 'error');
     } catch (err) {
       showToast(`${plugin.name}: ${err instanceof Error ? err.message : 'failed'}`, 'error');
     }
@@ -178,6 +259,7 @@ export function PluginDetail({ host, plugin, model, onReplaceModel, onMergeSheet
             </button>
           </div>
         )}
+        <ServerSetupNotice plugin={plugin} />
       </div>
     );
   }
@@ -207,6 +289,7 @@ export function PluginDetail({ host, plugin, model, onReplaceModel, onMergeSheet
           <p className="sg-setting-hint">This plugin exposes no transform / contribute / analyze hook.</p>
         )}
       </div>
+      <ServerSetupNotice plugin={plugin} />
     </section>
   );
 }

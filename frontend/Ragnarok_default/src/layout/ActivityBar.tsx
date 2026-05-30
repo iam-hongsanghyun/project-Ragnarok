@@ -18,7 +18,7 @@ interface Props {
   tab: WorkspaceTab;
   onTabChange: (t: WorkspaceTab) => void;
   validateResult: ValidationResult | null;
-  enabledModuleCount: number;
+  pluginCount: number;
 }
 
 interface Entry {
@@ -35,12 +35,12 @@ const ENTRIES: Entry[] = [
   { id: 'Plugins',   glyph: 'P', label: 'Plugins' },
 ];
 
-export function ActivityBar({ tab, onTabChange, validateResult, enabledModuleCount }: Props) {
+export function ActivityBar({ tab, onTabChange, validateResult, pluginCount }: Props) {
   return (
     <nav className="activity-bar" aria-label="Views">
       {ENTRIES.map((e) => {
         const showAnalyticsBadge = e.id === 'Analytics' && validateResult;
-        const showPluginsBadge = e.id === 'Plugins' && enabledModuleCount > 0;
+        const showPluginsBadge = e.id === 'Plugins' && pluginCount > 0;
         return (
           <button
             key={e.id}
@@ -57,7 +57,7 @@ export function ActivityBar({ tab, onTabChange, validateResult, enabledModuleCou
               </span>
             )}
             {showPluginsBadge && (
-              <span className="activity-bar-badge is-ok">{enabledModuleCount}</span>
+              <span className="activity-bar-badge is-ok">{pluginCount}</span>
             )}
           </button>
         );

@@ -56,13 +56,6 @@ export function PluginsView(props: Props) {
                     className={`plugin-rail-item${selected?.id === p.id ? ' plugin-rail-item--active' : ''}`}
                     onClick={() => setSelectedId(p.id)}
                   >
-                    <input
-                      type="checkbox"
-                      className="gcc-check"
-                      checked={host.isEnabled(p.id)}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => host.toggle(p.id, e.target.checked)}
-                    />
                     <span className="plugin-rail-name">{p.name}</span>
                     <span
                       className="gcc-del plugin-rail-remove"

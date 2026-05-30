@@ -25,7 +25,6 @@ export interface InstalledPlugin {
 }
 
 const STORE_KEY = 'ragnarok:fe-plugins:installed';
-const ENABLED_KEY = 'ragnarok:fe-plugins:enabled';
 const CONFIG_KEY = 'ragnarok:fe-plugins:configs';
 
 function loadJson<T>(key: string, fallback: T): T {
@@ -79,13 +78,11 @@ export type FrontendPluginHost = ReturnType<typeof useFrontendPlugins>;
 
 export function useFrontendPlugins() {
   const [installed, setInstalled] = useState<InstalledPlugin[]>(() => loadJson<InstalledPlugin[]>(STORE_KEY, []));
-  const [enabledIds, setEnabledIds] = useState<string[]>(() => loadJson<string[]>(ENABLED_KEY, []));
   const [configs, setConfigs] = useState<Record<string, Record<string, unknown>>>(
     () => loadJson<Record<string, Record<string, unknown>>>(CONFIG_KEY, {}),
   );
 
   const persistInstalled = (next: InstalledPlugin[]) => { setInstalled(next); saveJson(STORE_KEY, next); };
-  const persistEnabled = (next: string[]) => { setEnabledIds(next); saveJson(ENABLED_KEY, next); };
 
   const install = useCallback(async (file: File): Promise<{ ok: boolean; error?: string; id?: string }> => {
     try {
@@ -103,12 +100,7 @@ export function useFrontendPlugins() {
 
   const uninstall = useCallback((id: string) => {
     persistInstalled(installed.filter((p) => p.id !== id));
-    persistEnabled(enabledIds.filter((x) => x !== id));
-  }, [installed, enabledIds]);
-
-  const toggle = useCallback((id: string, on: boolean) => {
-    persistEnabled(on ? Array.from(new Set([...enabledIds, id])) : enabledIds.filter((x) => x !== id));
-  }, [enabledIds]);
+  }, [installed]);
 
   const setConfigField = useCallback((id: string, key: string, value: unknown) => {
     const next = { ...configs, [id]: { ...(configs[id] ?? {}), [key]: value } };
@@ -124,11 +116,8 @@ export function useFrontendPlugins() {
 
   return {
     installed,
-    enabledIds,
-    isEnabled: (id: string) => enabledIds.includes(id),
     install,
     uninstall,
-    toggle,
     getConfig: (id: string): Record<string, unknown> => configs[id] ?? {},
     setConfigField,
     setConfig,
