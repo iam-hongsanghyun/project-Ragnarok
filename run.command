@@ -105,8 +105,12 @@ free_port 8000
 
 # ── Launch ────────────────────────────────────────────────────────────────────
 
+PLUGIN_PIDS=()
 cleanup() {
   [ -n "${BACKEND_PID:-}" ] && kill "$BACKEND_PID" >/dev/null 2>&1 || true
+  for pid in "${PLUGIN_PIDS[@]:-}"; do
+    [ -n "$pid" ] && kill "$pid" >/dev/null 2>&1 || true
+  done
 }
 trap cleanup EXIT INT TERM
 
@@ -118,6 +122,39 @@ echo "Waiting for backend to be ready..."
 until curl -sf http://127.0.0.1:8000/api/health >/dev/null 2>&1; do
   sleep 1
 done
+
+# ── Launch registered plugin servers (from plugins.env) ───────────────────────
+# Each non-comment line is "<absolute server dir>|<run command>". The server can
+# live anywhere on disk (e.g. another repo). Plugins never talk to the Ragnarok
+# backend — this just starts the local servers the frontend plugins connect to.
+PLUGIN_ENV_FILE="${RAGNAROK_PLUGINS_ENV:-$ROOT_DIR/plugins.env}"
+if [ -f "$PLUGIN_ENV_FILE" ]; then
+  while IFS='|' read -r pdir pcmd; do
+    pdir="$(echo "$pdir" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    pcmd="$(echo "$pcmd" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    case "$pdir" in ''|\#*) continue ;; esac
+    [ -n "$pcmd" ] || continue
+    if [ -d "$pdir" ]; then
+      echo "Starting plugin server: $pdir -> $pcmd"
+      # Run each plugin server in ITS OWN environment: if the server dir ships a
+      # .venv, use it (so the plugin's deps win); otherwise fall back to the
+      # Ragnarok venv that's active here. An explicit interpreter in the command
+      # (e.g. ".venv/bin/python …") always takes precedence via PATH/exec.
+      (
+        cd "$pdir" || exit 1
+        if [ -f ".venv/bin/activate" ]; then
+          type deactivate >/dev/null 2>&1 && deactivate || true
+          # shellcheck disable=SC1091
+          source ".venv/bin/activate"
+        fi
+        eval "exec $pcmd"
+      ) &
+      PLUGIN_PIDS+=("$!")
+    else
+      echo "Skip plugin server (directory not found): $pdir"
+    fi
+  done < "$PLUGIN_ENV_FILE"
+fi
 
 echo "Backend ready. Opening app in browser..."
 (cd "$FRONTEND_DIR" && npm run start:frontend)
