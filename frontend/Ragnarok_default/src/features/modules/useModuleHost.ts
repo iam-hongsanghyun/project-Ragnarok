@@ -59,18 +59,13 @@ export function useModuleHost() {
   const [error, setError] = useState<string | null>(null);
 
   const fetchInventory = useCallback(async () => {
-    setLoading(true);
+    // Plugins are a frontend-only concern now (the Ragnarok backend no longer
+    // hosts or executes them, so /api/modules is gone). The frontend plugin
+    // host (features/plugins) owns plugins instead; this reports an empty
+    // backend inventory without a network call.
+    setInventory(null);
     setError(null);
-    try {
-      const resp = await fetch(`${API_BASE}/api/modules`);
-      if (!resp.ok) throw new Error(`Module fetch failed with status ${resp.status}.`);
-      const data = await resp.json() as ModuleHostInventory;
-      setInventory(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Module fetch failed.');
-    } finally {
-      setLoading(false);
-    }
+    setLoading(false);
   }, []);
 
   const installFromFile = useCallback(async (file: File): Promise<{ ok: boolean; error?: string; moduleId?: string }> => {

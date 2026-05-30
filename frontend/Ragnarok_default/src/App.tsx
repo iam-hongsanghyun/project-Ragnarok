@@ -8,8 +8,6 @@ import {
   ChartSectionConfig,
   CustomConstraint,
   GridRow,
-  ModuleConfigField,
-  ModuleDescriptor,
   PathwayConfig,
   ProjectImportProvenance,
   RollingHorizonConfig,
@@ -50,7 +48,7 @@ import { BuildView } from './features/build/BuildView';
 import { AnalyticsView } from './views/AnalyticsView';
 import { ActivityBar } from './layout/ActivityBar';
 import { useModelIssues } from './features/validation/useModelIssues';
-import { useModuleHost } from './features/modules/useModuleHost';
+import { useFrontendPlugins } from './features/plugins/frontendPlugins';
 import { ToastProvider, useToast } from './shared/components/Toast';
 
 function AppInner() {
@@ -165,7 +163,7 @@ function AppInner() {
     rollingConfig: defaultRollingConfig(),
     constraints: DEFAULT_CONSTRAINTS,
   }));
-  const moduleHost = useModuleHost();
+  const frontendPlugins = useFrontendPlugins();
   const modelIssues = useModelIssues(model);
 
   // Topology that owns the currently displayed results: the snapshot taken at
@@ -363,83 +361,11 @@ function AppInner() {
     updateSettings,
   ]);
 
-  const handleInstallModule = useCallback(async (file: File) => {
-    const result = await moduleHost.installFromFile(file);
-    if (!result.ok) {
-      showToast(result.error || 'Module install failed.', 'error');
-      setStatus(result.error || 'Module install failed.');
-      return;
-    }
-    const moduleId = result.moduleId ? ` (${result.moduleId})` : '';
-    showToast(`Module installed${moduleId}`, 'success');
-    setStatus(`Installed local module${moduleId}.`);
-  }, [moduleHost, showToast]);
-
-  const handleUninstallModule = useCallback(async (module: ModuleDescriptor) => {
-    const confirmed = window.confirm(`Uninstall local module "${module.name || module.id}"? This removes it completely from the managed module directory.`);
-    if (!confirmed) return;
-    const result = await moduleHost.uninstall(module.id);
-    if (!result.ok) {
-      showToast(result.error || 'Module uninstall failed.', 'error');
-      setStatus(result.error || 'Module uninstall failed.');
-      return;
-    }
-    showToast(`Module uninstalled (${module.id})`, 'success');
-    setStatus(`Uninstalled local module ${module.id}.`);
-  }, [moduleHost, showToast]);
-
   const prepareModelForBackend = useCallback((source: WorkbookModel): WorkbookModel => {
     const cloned = JSON.parse(JSON.stringify(source)) as WorkbookModel;
     normalizeInputDatesToIso(cloned, settings.dateFormat);
     return cloned;
   }, [settings.dateFormat]);
-
-  const handleModuleAction = useCallback(async (
-    moduleId: string,
-    fieldKey: string,
-    field: ModuleConfigField,
-  ) => {
-    if (field.type !== 'action') return;
-    if (field.hook && field.hook !== 'transform') {
-      showToast(`Unsupported action hook "${field.hook}".`, 'error');
-      return;
-    }
-    const scenario = {
-      constraints: constraints.filter((c) => c.enabled),
-      carbonPrice,
-      discountRate: settings.discountRate,
-    };
-    const options = {
-      moduleConfigs: moduleHost.moduleConfigs,
-    };
-    const modelForBackend = prepareModelForBackend(model);
-    try {
-      const resp = await fetch(`${API_BASE}/api/modules/${encodeURIComponent(moduleId)}/preview`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: modelForBackend, scenario, options }),
-      });
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok) {
-        const detail = typeof data.detail === 'string' ? data.detail : `Preview failed (${resp.status}).`;
-        showToast(detail, 'error');
-        setStatus(detail);
-        return;
-      }
-      if (!data.model) {
-        showToast('Plugin returned no model.', 'error');
-        return;
-      }
-      resetForNewModel(data.model as WorkbookModel);
-      const msg = field.successMessage || 'Model loaded into Ragnarok workbook.';
-      showToast(msg, 'success');
-      setStatus(msg);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Plugin preview failed.';
-      showToast(msg, 'error');
-      setStatus(msg);
-    }
-  }, [model, constraints, carbonPrice, settings.discountRate, moduleHost.moduleConfigs, prepareModelForBackend, resetForNewModel, showToast]);
 
   // Elapsed-time ticker while running
   useEffect(() => {
@@ -1342,8 +1268,6 @@ function AppInner() {
       currencySymbol: settings.currencySymbol,
       enableLoadShedding: settings.enableLoadShedding,
       loadSheddingCost: settings.loadSheddingCost,
-      enabledModules: moduleHost.enabledIds,
-      moduleConfigs: moduleHost.moduleConfigs,
       pathwayConfig: {
         ...pathwayConfig,
         selectedPeriod: getDefaultSelectedPeriod(pathwayConfig),
@@ -1667,7 +1591,7 @@ function AppInner() {
           tab={tab}
           onTabChange={setTab}
           validateResult={validateResult}
-          enabledModuleCount={moduleHost.enabledIds.length}
+          enabledModuleCount={frontendPlugins.enabledIds.length}
         />
         <div className="workspace-main">
 
@@ -1830,23 +1754,10 @@ function AppInner() {
 
           {tab === 'Plugins' && (
             <PluginsView
+              host={frontendPlugins}
               model={model}
-              displayResults={displayResults}
-              moduleInventory={moduleHost.inventory}
-              moduleHostLoading={moduleHost.loading}
-              moduleHostError={moduleHost.error}
-              enabledModuleIds={moduleHost.enabledIds}
-              isModuleEnabled={moduleHost.isEnabled}
-              isModuleEnableEligible={moduleHost.isEnableEligible}
-              onToggleModuleEnabled={moduleHost.toggleEnabled}
-              onInstallModule={handleInstallModule}
-              onUninstallModule={handleUninstallModule}
-              enabledModules={moduleHost.modules.filter(
-                (m) => moduleHost.enabledIds.includes(m.id) && moduleHost.isEnableEligible(m),
-              )}
-              moduleConfigs={moduleHost.moduleConfigs as Record<string, Record<string, unknown>>}
-              onModuleConfigChange={moduleHost.setModuleConfig}
-              onModuleAction={handleModuleAction}
+              customDsl={customDsl}
+              onCustomDslChange={setCustomDsl}
             />
           )}
         </div>
