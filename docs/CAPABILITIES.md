@@ -122,8 +122,8 @@ results card reports annualised CAPEX per asset.
 - Run history (session-scoped) — compare and restore any run from the current
   session. Survives model swaps within the session; cleared only by "Clear
   all" or page reload.
-- Plugin analytics tab — post-solve output from installed plugins rendered
-  generically.
+- Plugin Output tab — post-solve analysis from installed plugins, rendered
+  from each plugin's `analyze(result, config)` hook in the browser.
 
 ### Data I/O
 
@@ -140,12 +140,28 @@ results card reports annualised CAPEX per asset.
 
 ### Extensibility
 
-**Plugin system v1** — install local `.zip` plugin packages via the Plugins
-sidebar. Four execution stages: `pre-build` (transform or inject workbook
-data), `post-build` (patch the built network), `in-solve` (add extra linopy
-constraints), `post-solve` (compute and return analytics). Plugin output is
-rendered in the Plugins tab without any hardcoded frontend knowledge of
-individual plugins.
+**Frontend plugin system** — install local `.zip` plugin packages via the
+Plugins sidebar. Each package contains a `module.json` manifest and a JS entry
+file. Plugins are installed and uninstalled only (there is no enable/disable
+toggle). The Ragnarok backend is plugin-agnostic and never loads or executes
+plugin code.
+
+Plugin JS hooks run in the browser:
+
+- `transform(model, config)` — replaces the entire workbook model before submission.
+- `contribute(model, config)` — merges additional sheets and appends DSL constraint
+  lines (written to the `RAGNAROK_CustomDSL` sheet, compiled to `constraintSpecs`
+  JSON sent to the solver via `extra_functionality`).
+- `analyze(result, config)` — reads the returned result object and renders plugin
+  output in the plugin's Output tab. Runs automatically after each solve.
+- Named action hooks (e.g. `connect`) — invoked by action-type fields in the
+  manifest schema, typically to health-check a plugin's own local server.
+
+A plugin may run its own local server (e.g. a PyPSA variant or data service) that
+the browser reaches over localhost. That server is never the Ragnarok backend. To
+auto-start it, register the server in the Ragnarok project's `plugins.env` file
+(one line per server: `<absolute path>|<run command>`); `run.command` reads this
+file and starts each registered server before the frontend launches.
 
 **Pluggable backend / frontend** — the `PypsaBackend` class exposes a
 `capabilities()` declaration and a `run()` entry point. Alternative backends
@@ -196,10 +212,11 @@ backend and cannot be run:
 - SCLOPF + stochastic
 - SCLOPF + multi-period pathway
 
-**No dynamic frontend UI from plugins.** Plugin post-solve output is rendered
-through a generic result table in the Plugins tab. Plugins cannot inject custom
-React components, register new sidebar panels, or add workbook sheets
-dynamically. There is no remote plugin registry or sandboxed plugin process.
+**Plugin UI is manifest-driven, not arbitrary React.** Plugin config panels and
+output tabs are rendered by the Ragnarok host from the manifest schema (`panel`,
+`config` field descriptors). Plugins cannot inject custom React components,
+register new sidebar panels, or add workbook sheets dynamically at runtime.
+There is no remote plugin registry.
 
 **No built-in time-series generation.** The `snapshots` sheet defines the
 timestamp index, but load profiles, renewable capacity factors, and price series
@@ -242,7 +259,7 @@ source.
 | CSV folder (import + export) | Yes | PyPSA-native; zipped; frontend-side |
 | netCDF (import + export) | Yes | Backend-side PyPSA conversion |
 | HDF5 (import + export) | Yes | Backend-side PyPSA conversion |
-| Plugin system (4 stages) | Yes | Local trusted packages; no remote registry |
+| Frontend plugin system | Yes | .zip install; JS hooks in browser; optional own local server; no backend stages |
 | Pluggable backend | Yes | Backend registry; REST API seam |
 | Cloud / multi-user deployment | No | Local only; no auth |
 | Time-series data fetching | No | User must supply all time-series sheets |

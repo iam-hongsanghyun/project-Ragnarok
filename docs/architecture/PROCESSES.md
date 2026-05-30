@@ -142,12 +142,14 @@ corresponding reader detects an actual change, preventing re-render loops.
 
 `handleRunModel` in `App.tsx` assembles:
 
-- `scenario`: `{ constraints: enabled[], carbonPrice, discountRate }`
+- `scenario`: `{ constraints: enabled[], constraintSpecs: compiledSpec[], customDsl: string, carbonPrice, discountRate }`.
+  `constraintSpecs` is the compiled JSON representation of Advanced Constraints
+  (generated from the `RAGNAROK_CustomDSL` sheet and any plugin `contribute` output);
+  `customDsl` is the raw DSL text accepted as a fallback when `constraintSpecs` is absent.
 - `options`: snapshot window (`snapshotStart`, `snapshotCount`, `snapshotWeight`),
   solver settings (`solverThreads`, `solverType`), feature flags (`forceLp`,
   `enableLoadShedding`, `loadSheddingCost`), backend selector
-  (`backend: 'pypsa'`), `enabledModules`, `moduleConfigs`,
-  `pathwayConfig`, `rollingConfig`, `stochasticConfig`,
+  (`backend: 'pypsa'`), `pathwayConfig`, `rollingConfig`, `stochasticConfig`,
   `securityConstrainedConfig`, `carbonPriceSchedule`.
 
 The model is deep-cloned and ISO-normalised via `prepareModelForBackend`.
@@ -299,9 +301,12 @@ combined.
 
 **`extra_functionality(n, snapshots)`** is a closure passed into every solve call.
 It calls `apply_custom_constraints` (`backend/pypsa/network/custom_constraints.py`)
-and then `execute_plugins_at_stage("in-solve", ...)`. Custom constraints are added
-to `n.model` (the linopy model) inside this callback so they are registered before
-the solver runs. See section 7 for plugin details.
+to apply UI-authored constraints, then applies `constraintSpecs` via
+`apply_constraint_specs` (`backend/pypsa/network/constraint_dsl.py`) when present,
+or falls back to `apply_dsl_constraints` for raw DSL text. All constraint additions
+are made to `n.model` (the linopy model) inside this callback so they are registered
+before the solver runs. The backend is plugin-agnostic: no plugin code executes at
+any solve stage.
 
 **Solve branches:**
 
@@ -331,55 +336,39 @@ peak load, objective weight) by grouping the snapshot MultiIndex by `period`.
 
 ---
 
-## 7. Plugin Execution Stages
+## 7. Plugin Runtime (Frontend-Only)
 
-`execute_plugins_at_stage(stage, enabled_ids, **kwargs)` in
-`backend/app/module_host.py`.
+Plugins are a pure frontend concern. The Ragnarok backend is plugin-agnostic: it
+never loads, executes, or is aware of any plugin code. A plugin is a `.zip`
+package containing a `module.json` manifest and a JS entry file. The package is
+installed into browser `localStorage` by `useFrontendPlugins` in
+`frontend/Ragnarok_default/src/features/plugins/frontendPlugins.ts`. There is no
+enable/disable toggle — a plugin is either installed or not.
 
-Plugins are Python modules installed into the managed root directory
-(default: `.ragnarok/modules/`). Each has a `module.json` manifest declaring `id`,
-`stage`, and `hook` (function name, default `"run"`).
+**JS hook contracts** (all run in the browser, called from `PluginDetail.tsx`):
 
-**Stage contracts** (the keyword arguments each hook receives):
+| Hook | When called | Effect |
+|---|---|---|
+| `transform(model, config)` | "Apply to model" | Replaces the entire `WorkbookModel` in React state |
+| `contribute(model, config)` | "Apply to model" | Merges sheets and appends DSL constraint lines to the Advanced Constraints editor |
+| `analyze(result, config)` | After each successful solve | Returns display data rendered in the plugin's Output tab |
+| Named hooks (e.g. `connect`) | Action-type field button | Returns `{ ok, message }`; used for server health checks |
 
-| Stage | Arguments |
-|---|---|
-| `pre-build` | `model, scenario, options` |
-| `post-build` | `network, scenario, options` |
-| `in-solve` | `network, model, scenario, options` |
-| `post-solve` | `network, results, scenario, options` |
+Plugin-contributed constraints enter the solve pipeline through the normal
+Advanced Constraints path: `contribute` output is written to the
+`RAGNAROK_CustomDSL` sheet, compiled into `constraintSpecs` JSON by the frontend,
+and included in the `scenario` payload sent to `POST /api/run`. The backend applies
+them via `apply_constraint_specs` in `extra_functionality` with no knowledge that
+the constraint originated from a plugin.
 
-**Execution flow for each enabled module:**
-
-1. `_load_module_entry(module_id)` reads `module.json`, locates the `entry` file,
-   and imports it via `importlib.util.spec_from_file_location`. Returns
-   `(module_object, manifest)` or `(None, None)` on failure.
-2. The manifest `stage` is compared to the requested stage; mismatches are skipped.
-3. `getattr(mod, hook_name)` retrieves the callable.
-4. Only the kwargs defined in `_STAGE_KWARGS[stage]` are passed. The module's own
-   config (from `options["moduleConfigs"][module_id]`) is injected as
-   `options["moduleConfig"]` so the plugin does not need to know its own id.
-5. Errors are caught, logged, and stored as `{"error": "..."}` in the return dict —
-   except at `in-solve`, where exceptions re-raise immediately because swallowing a
-   constraint-registration failure would silently produce wrong solver results.
-
-**How stages connect to `run_pypsa`:**
-
-- `pre-build`: runs before `build_network`. Any plugin returning a non-error dict
-  replaces `model` (last-writer-wins).
-- `post-build`: runs after `build_network`. Return value is ignored; plugins modify
-  `network` in place.
-- `in-solve`: runs inside `extra_functionality`, which PyPSA calls once before
-  handing the model to the solver. Plugins register additional linopy constraints
-  here.
-- `post-solve`: runs after the solve and stochastic collapse. Return values are
-  enriched with display metadata from `get_module_metadata` (reading `name` and `ui`
-  hints from `module.json`) and stored in `plugin_analytics[module_id]`, which is
-  returned inside `RunResults`.
-
-`execute_module_action` is a single-module variant used by the
-`POST /api/modules/{module_id}/preview` endpoint for action-button previews. It
-bypasses the stage filter and calls the named hook directly.
+**Optional local plugin server.** A plugin may declare a `server` block in its
+manifest (with `run`, optional `cwd`, `port`, and `health` fields). The Ragnarok
+backend does not launch or communicate with this server. To auto-start it, the user
+adds a line to the Ragnarok project's `plugins.env` file in the form
+`<absolute path to server dir>|<run command>`. `run.command` reads `plugins.env`
+at startup and starts each listed server in a subshell, using the server directory's
+own `.venv` if present. The plugin's frontend code then contacts the server directly
+over localhost (e.g. via `connect` hook → `fetch('http://localhost:<port>/...')`).
 
 ---
 
@@ -405,7 +394,6 @@ process before the result is placed in the multiprocessing queue.
 | `emissionsBreakdown` | `build_emissions_breakdown` in `backend/pypsa/results/emissions.py` |
 | `expansionResults` | `build_expansion_results` in `backend/pypsa/results/expansion.py` |
 | `pathway.summaries` | `_pathway_period_summaries` in `backend/pypsa/results/summaries.py` |
-| `pluginAnalytics` | `execute_plugins_at_stage("post-solve", ...)` enriched with manifest metadata |
 | `outputs` | `build_full_outputs(network)` in `backend/pypsa/results/full_outputs.py` |
 
 **`build_full_outputs`** (`backend/pypsa/results/full_outputs.py`) is the
@@ -451,7 +439,7 @@ point from raw `results` to display-ready data. It runs on every change to
   other KPIs from `outputs.static` and `outputs.series` for the selected pathway
   period, applying the frozen `carbonPrice`, `snapshotWeight`, and `discountRate`
   values. The result is merged with fields that are period-independent (`meritOrder`,
-  `co2Shadow`, `emissionsBreakdown`, `pluginAnalytics`, `outputs`).
+  `co2Shadow`, `emissionsBreakdown`, `outputs`).
 
 **`analyticsModel`** is `resultsModel ?? model`. When `resultsModel` is set (i.e.
 after a run or after restoring a history entry), analytics use the frozen topology
@@ -534,9 +522,8 @@ transient user-activation window is preserved.
 4. Writes embedded config sheets (`RAGNAROK_PathwayConfig`, `RAGNAROK_RollingConfig`,
    `RAGNAROK_Scenarios`).
 5. Writes private metadata sheets: `RAGNAROK_ResultMeta` (JSON-chunked `runMeta`,
-   `pathway`, `rolling`, `co2Shadow`, `narrative`), `RAGNAROK_PluginAnalytics`
-   (JSON-chunked per-module data), `RAGNAROK_Settings`, `RAGNAROK_Constraints`,
-   `RAGNAROK_RunState`, `RAGNAROK_Provenance`.
+   `pathway`, `rolling`, `co2Shadow`, `narrative`), `RAGNAROK_Settings`,
+   `RAGNAROK_Constraints`, `RAGNAROK_RunState`, `RAGNAROK_Provenance`.
 
 The file is an ordinary `.xlsx` that PyPSA can import natively (it reads the same
 sheet names). Run history is intentionally not exported.

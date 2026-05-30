@@ -400,23 +400,28 @@ Click **S** in the activity bar. The Settings view has a left navigation panel g
 
 ## 10. Plugins
 
-Click **P** in the activity bar. The Plugins view shows a module manager rail on the left and a configuration panel for enabled modules on the right.
+Click **P** in the activity bar. The Plugins view has a rail on the left to install and switch between plugins, and a panel on the right showing the selected plugin's GUI (Description / Input / Output). Plugins run in the browser and never contact the Ragnarok backend.
 
-### Installing a module
+### Installing a plugin
 
-1. Click **Install module** (or the install button shown in the module manager).
-2. Select a module `.js` or `.zip` file from disk.
-3. The module appears in the inventory and can be enabled.
+1. Click **Install plugin** and select a plugin `.zip` (a `module.json` manifest plus a JS entry).
+2. The plugin appears in the rail and its GUI renders from the manifest.
 
-### Enabling a module
+There is no enable/disable switch — a plugin is simply installed or not.
 
-Toggle the enable switch next to a module in the left rail. Enabled modules participate in the next solve run and may contribute additional analytics panels to the right side of the Plugins view.
+### Using a plugin
 
-### Uninstalling a module
+Select the plugin in the rail, fill in its **Input** form, and use its action buttons (for example, an importer's **Send model to Ragnarok**). A plugin can replace the workbook, contribute sheets and constraints, or read run output in its **Output** tab. Constraints a plugin produces appear in **Settings → Advanced Constraints** and are applied on the next **Run**.
 
-Click **Uninstall** next to a module. Ragnarok asks for confirmation and then removes the module from the managed module directory.
+### Plugin servers
 
-For authoring your own modules, see [docs/module-authoring-guide.md](module-authoring-guide.md).
+Some plugins do heavy work in their own local server. Register that server in the project's `plugins.env` (the plugin's **Server setup** panel shows the exact line); Ragnarok's `run.command` launches it on startup. The plugin then connects to it over `localhost`.
+
+### Uninstalling a plugin
+
+Click **Uninstall** next to a plugin in the rail to remove it.
+
+For authoring your own plugins, see [PLUGIN_AUTHORING.md](PLUGIN_AUTHORING.md).
 
 ---
 

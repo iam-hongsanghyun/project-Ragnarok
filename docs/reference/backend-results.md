@@ -10,11 +10,13 @@ The top-level solve-and-extract pipeline.
 
 ### `run_pypsa(model, scenario, options=None) -> dict[str, Any]`
 
-The complete Ragnarok PyPSA pipeline: pre-build plugins, network construction, post-build plugins, solve, post-solve plugins, and result extraction.
+The complete Ragnarok PyPSA pipeline: network construction, solve with constraint application via `extra_functionality`, and result extraction.
+
+The backend is plugin-agnostic. Plugins are a frontend concern — they contribute rows and constraints to `model`/`scenario` before the payload is sent to the backend. There are no plugin hooks inside `run_pypsa`.
 
 Params:
 - `model: dict[str, list[dict[str, Any]]]` — workbook as `{sheet: rows[]}`.
-- `scenario: dict[str, Any]` — `carbonPrice` (currency/tCO2), `discountRate`, `constraints`.
+- `scenario: dict[str, Any]` — `carbonPrice` (currency/tCO2), `discountRate`, `constraints`, `constraintSpecs`, `customDsl`.
 - `options: dict[str, Any] | None` — all run-control keys (see `RunPayload.options` in `backend-host.md`).
 
 Raises HTTP 400 for mutually exclusive mode combinations:
@@ -24,23 +26,32 @@ Raises HTTP 400 for mutually exclusive mode combinations:
 
 Pipeline stages:
 
-1. **pre-build** — `execute_plugins_at_stage("pre-build", ...)`. Any plugin returning a dict replaces `model` (last writer wins).
-2. **build** — `build_network(model, scenario, options)`.
-3. **post-build** — `execute_plugins_at_stage("post-build", ...)`. In-place; return values ignored.
-4. **solve** — one of:
+1. **Build** — `build_network(model, scenario, options)` constructs a `pypsa.Network` from the JSON workbook model.
+2. **Solve** — one of:
    - `network.optimize.optimize_with_rolling_horizon(...)` when `rollingConfig.enabled`.
    - `network.optimize.optimize_security_constrained(...)` when `securityConstrainedConfig.enabled`.
-   - `network.optimize(...)` for all other cases.
-   All invocations use `solver_name="highs"`, pass `extra_functionality` (which applies custom constraints and runs `in-solve` plugins), and forward `solverThreads` / `solverType` as `solver_options`.
-5. **post-solve** — `execute_plugins_at_stage("post-solve", ...)`. Return dicts are collected as `pluginAnalytics`.
+   - `network.optimize(...)` for all other cases (including pathway and stochastic).
+   All invocations use `solver_name="highs"`, pass `extra_functionality` (which applies `scenario["constraints"]` and `scenario["constraintSpecs"]`), and forward `solverThreads` / `solverType` as `solver_options`.
+3. **Status check** — any solve result other than `condition == "optimal"` raises HTTP 500 immediately.
+4. **Stochastic post-processing** (when enabled) — `per_scenario_summaries` collects per-scenario KPIs; `collapse_to_representative_scenario` selects the highest-weight scenario and reshapes the network so the extraction pipeline below works without modification.
+5. **Result extraction** — carrier mix, cost breakdown, dispatch/price/emissions series, nodal balance, line loading, expansion results, merit order, CO2 shadow price, and the full PyPSA-native output dataset.
 
-After the solve, stochastic networks are summarised with `per_scenario_summaries` then collapsed to the representative (highest-weight) scenario via `collapse_to_representative_scenario` so the rest of extraction is identical to the single-scenario case.
+### Internal helper (within `__init__.py`)
+
+#### `extra_functionality(n, snapshots) -> None` (closure)
+
+The callback passed to `network.optimize()`. Applies structured constraints from `scenario["constraints"]` via `apply_custom_constraints`, then applies JSON-spec constraints from `scenario["constraintSpecs"]` via `apply_constraint_specs`. When no `constraintSpecs` are present, falls back to the raw DSL text in `scenario["customDsl"]` via `apply_dsl_constraints`. Defined as a closure inside `run_pypsa` to capture `custom_constraints`, `constraint_specs`, `custom_dsl_text`, and `emissions_factors`.
+
+#### `_coerce_solve_status(result: Any) -> tuple[str, str]`
+
+Normalises the return value of `network.optimize()` into `(status, condition)`. The modern `optimize` path returns a 2-tuple; older SCLOPF paths may return the network or `None`. In those cases `_coerce_solve_status` returns `("ok", "optimal")` since those paths raise on failure rather than returning a non-optimal condition.
+
+### Return value
 
 Returns a dict with the following top-level keys:
 
 | Key | Content |
 |---|---|
-| `pluginAnalytics` | `{module_id: {name, ui, data}}` — post-solve plugin results enriched with manifest display metadata. |
 | `summary` | Six KPI cards (installed capacity, peak demand, reserve position, peak price, system emissions, transmission stress). |
 | `dispatchSeries` | Per-snapshot carrier-aggregated dispatch (MW). |
 | `generatorDispatchSeries` | Per-snapshot per-generator dispatch (MW). |
@@ -55,6 +66,7 @@ Returns a dict with the following top-level keys:
 | `expansionResults` | Extendable asset expansion details (see `build_expansion_results`). |
 | `meritOrder` | Supply stack sorted by marginal cost (see `build_merit_order`). |
 | `co2Shadow` | CO2 shadow price information (see `build_co2_shadow`). |
+| `appliedConstraints` | Custom and global constraints recognised by the solver (see `build_applied_constraints`). |
 | `emissionsBreakdown` | Per-generator and per-carrier emission breakdown (see `build_emissions_breakdown`). |
 | `narrative` | List of human-readable notes accumulated throughout the pipeline. |
 | `runMeta` | `snapshotCount`, `snapshotWeight`, `modeledHours`, `storeWeight`, `planningMode`, `investmentPeriods`, and (if rolling) rolling window metadata. |
@@ -63,12 +75,6 @@ Returns a dict with the following top-level keys:
 | `stochastic` | Present when stochastic is enabled: `representativeScenario`, per-scenario `scenarios` summaries. |
 | `securityConstrained` | Present when SCLOPF is enabled: `enabled`, `branchCount`. |
 | `outputs` | Full PyPSA-native output dataset from `build_full_outputs` — the `assetDetails` cache the frontend uses for per-asset drilldown and project export. |
-
-### Internal helper (within `__init__.py`)
-
-#### `extra_functionality(n, snapshots) -> None` (closure)
-
-The callback passed to `network.optimize()`. Applies custom constraints from `scenario["constraints"]` via `apply_custom_constraints`, then runs `in-solve` plugins via `execute_plugins_at_stage("in-solve", ...)`. Defined as a closure inside `run_pypsa` to capture `custom_constraints`, `emissions_factors`, `enabled_modules`, `model`, `scenario`, and `options`.
 
 ---
 
@@ -267,6 +273,10 @@ Returns:
     "note": str                   # human-readable explanation
 }
 ```
+
+### `build_applied_constraints(network: pypsa.Network) -> list[dict[str, Any]]`
+
+Returns a list of custom and global constraints that were registered on the solved network. Used by the frontend's Applied Constraints card to display which constraints were active during the solve.
 
 ### `_linopy_dual(network: pypsa.Network, cname: str) -> float`
 

@@ -25,13 +25,14 @@ All documentation lives in [docs/](./docs/) (start at the [docs index](./docs/RE
 
 | Document | Read it for |
 |---|---|
+| [docs/getting-started.md](./docs/getting-started.md) | Install, launch, and a quick tour |
+| [docs/guides/USER_MANUAL.md](./docs/guides/USER_MANUAL.md) | End-user manual for analysts |
+| [docs/guides/PLUGIN_AUTHORING.md](./docs/guides/PLUGIN_AUTHORING.md) | How to build a plugin |
 | [docs/architecture/ARCHITECTURE.md](./docs/architecture/ARCHITECTURE.md) | System overview, tech stack, repo layout, data flow |
 | [docs/architecture/PROCESSES.md](./docs/architecture/PROCESSES.md) | Step-by-step logic of each process |
 | [docs/architecture/DESIGN.md](./docs/architecture/DESIGN.md) | UI design philosophy |
 | [docs/CAPABILITIES.md](./docs/CAPABILITIES.md) | What Ragnarok can and cannot do (code-checked) |
 | [docs/SUPPORT_MATRIX.md](./docs/SUPPORT_MATRIX.md) | Generated feature support matrix |
-| [docs/guides/USER_MANUAL.md](./docs/guides/USER_MANUAL.md) | End-user manual for analysts |
-| [docs/guides/module-system-v1.md](./docs/guides/module-system-v1.md) | Plugin system spec and authoring guide |
 | [docs/reference/](./docs/reference/) | Per-module function reference (backend + frontend) |
 | [docs/TODO.md](./docs/TODO.md) | Living project task log and roadmap |
 

@@ -312,29 +312,32 @@ of props from `SettingsView`. Sections do not communicate with each other.
 
 ### `PluginsView`
 
-Two-column view: `ModuleManagerSection` in the left rail and `PluginPanel` in
-the main area. When no modules are enabled, shows a placeholder message.
+Two-column view: an install/select rail on the left and `PluginDetail` in the
+main area. When no plugins are installed, shows a placeholder message with
+instructions. Plugins run entirely in the browser and never contact the
+Ragnarok backend.
 
 **Key props:**
 
 | Prop | Type | Meaning |
 |---|---|---|
-| `model` | `WorkbookModel` | Carrier names passed to the plugin panel |
-| `displayResults` | `RunResults \| null` | For plugin output rendering |
-| `moduleInventory` | `ModuleHostInventory \| null` | Full inventory from `useModuleHost` |
-| `moduleHostLoading` | `boolean` | Loading state |
-| `moduleHostError` | `string \| null` | Error message |
-| `enabledModuleIds` | `string[]` | Currently enabled module ids |
-| `isModuleEnabled` | `(id) => boolean` | Enable check |
-| `isModuleEnableEligible` | `(module) => boolean` | Eligibility check |
-| `onToggleModuleEnabled` | `(id, enabled) => void` | Enable/disable a module |
-| `onInstallModule` | `(file) => void` | Install from zip |
-| `onUninstallModule` | `(module) => void` | Uninstall |
-| `enabledModules` | `ModuleDescriptor[]` | Filtered to enabled + eligible |
-| `moduleConfigs` | `Record<string, Record<string, unknown>>` | Config values |
-| `onModuleConfigChange` | `(moduleId, key, value) => void` | Field change |
-| `onModuleAction` | `(moduleId, fieldKey, field) => Promise<void>` | Action button |
+| `host` | `FrontendPluginHost` | Plugin host from `useFrontendPlugins()` |
+| `model` | `WorkbookModel` | Live workbook — passed through to `PluginDetail` |
+| `onReplaceModel` | `(next: WorkbookModel) => void` | Called when a plugin replaces the workbook |
+| `onMergeSheets` | `(sheets) => void` | Called when a plugin contributes sheets |
+| `customDsl` | `string` | Current constraint DSL text |
+| `onCustomDslChange` | `(text: string) => void` | Called when a plugin appends constraint lines |
+| `results` | `unknown` | Last run results — passed to the plugin `analyze` hook |
 
-**Notes:** The carrier names extracted from `model.carriers` are passed to
-the plugin panel so action fields that take carrier input can offer a
-`<datalist>` autocomplete.
+**Left rail behaviour:**
+- An "Install plugin…" button opens a hidden `<input type="file" accept=".zip">`.
+  On selection, calls `host.install(file)`. Success toasts with the installed id;
+  the new plugin is selected automatically.
+- Each installed plugin appears as a button. Clicking selects it; the `x`
+  button calls `host.uninstall(id)` and clears the selection if it was active.
+- There is no enable/disable toggle — every installed plugin is immediately
+  available.
+
+**Notes:** `host.installed` is the sole source of truth for the list. The view
+owns only one piece of local state: `selectedId`, the id of the plugin whose
+`PluginDetail` is shown in the main area.

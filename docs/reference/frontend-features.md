@@ -374,50 +374,91 @@ instance. Prevents jarring tile flicker during programmatic bounds fitting.
 
 ---
 
-## `features/modules/useModuleHost.ts`
+## `features/plugins/frontendPlugins.ts`
 
-### `useModuleHost() -> ModuleHost`
+### `useFrontendPlugins() -> FrontendPluginHost`
 
-Hook that manages the pluggable module system. On mount, fetches the module
-inventory from `/api/modules` and pruning enabled IDs that are no longer
-eligible.
+Hook that manages the frontend-only plugin system. Plugins are a pure browser
+concern: they are installed from a `.zip` file into `localStorage`, configured
+in the Plugins tab, and executed in the browser. They never contact the
+Ragnarok backend directly; instead they produce inputs for the model (via
+`transform` / `contribute`) or read run output (via `analyze`) before or after
+the frontend sends a normal solve request.
 
-**Returned object:**
+**Returned object (`FrontendPluginHost`):**
 
 | Field | Type | Meaning |
 |---|---|---|
-| `inventory` | `ModuleHostInventory \| null` | Raw inventory from the backend |
-| `modules` | `ModuleDescriptor[]` | All discovered modules |
-| `loading` | `boolean` | Inventory fetch in progress |
-| `error` | `string \| null` | Last fetch error message |
-| `enabledIds` | `string[]` | IDs of enabled + eligible modules |
-| `moduleConfigs` | `Record<string, Record<string, unknown>>` | Per-module config values |
-| `isEnabled(moduleId)` | `(string) => boolean` | Whether a module is in the enabled set |
-| `isEnableEligible(module)` | `(ModuleDescriptor) => boolean` | `status === 'ready' && valid && compatible && entryExists` |
-| `toggleEnabled(moduleId, enabled)` | `(string, boolean) => void` | Enable/disable a module; persists to `localStorage` |
-| `setModuleConfig(moduleId, key, value)` | `(string, string, unknown) => void` | Update one config field; persists non-File values to `localStorage` |
-| `installFromFile(file)` | `(File) => Promise<{ok, error?, moduleId?}>` | POST a zip to `/api/modules/install`; refreshes inventory on success |
-| `uninstall(moduleId)` | `(string) => Promise<{ok, error?}>` | DELETE `/api/modules/:id`; removes from enabled set and refreshes inventory |
+| `installed` | `InstalledPlugin[]` | All currently installed plugins |
+| `install(file)` | `(File) => Promise<{ok, error?, id?}>` | Parse a `.zip` package and add it to `localStorage`; replaces any existing plugin with the same `id` |
+| `uninstall(id)` | `(string) => void` | Remove a plugin from `installed` and persist the change |
+| `getConfig(id)` | `(string) => Record<string, unknown>` | Return the stored config for the given plugin id (empty object if none) |
+| `setConfig(id, value)` | `(string, Record<string, unknown>) => void` | Replace the entire config for a plugin |
+| `setConfigField(id, key, value)` | `(string, string, unknown) => void` | Update a single config field for a plugin |
 
-**Notes:** Module configs with `File` values are stripped before persisting to
-`localStorage` so large binary blobs are never stored. Enabled IDs that fail
-the `isEnableEligible` check are automatically removed when the inventory is
-refreshed.
+**There is no enable/disable toggle.** Every installed plugin is available for
+use immediately. Plugins do not communicate with `/api/modules` or any other
+Ragnarok backend route.
+
+**Storage keys:**
+- `ragnarok:fe-plugins:installed` — JSON array of `InstalledPlugin` objects.
+- `ragnarok:fe-plugins:configs` — JSON object keyed by plugin id.
+
+### `InstalledPlugin` (interface)
+
+| Field | Type | Meaning |
+|---|---|---|
+| `id` | `string` | Unique identifier from `module.json` |
+| `name` | `string` | Display name from `module.json` |
+| `version` | `string \| undefined` | Optional semver string |
+| `description` | `string \| undefined` | Optional description text |
+| `manifest` | `Record<string, unknown>` | Full parsed `module.json` |
+| `files` | `Record<string, string>` | Text files from the package keyed by relative path |
+
+### `FrontendPluginHost` (type alias)
+
+`ReturnType<typeof useFrontendPlugins>`. Pass the value returned by
+`useFrontendPlugins()` wherever a `FrontendPluginHost` is expected.
 
 ---
 
-## `features/modules/ModuleManagerSection.tsx`
+## `features/plugins/PluginDetail.tsx`
 
-### `ModuleManagerSection`
+### `PluginDetail`
 
-Sidebar section listing all discovered modules with enable/disable toggles,
-install button, and per-module uninstall. Delegates all mutations to callbacks
-from `useModuleHost`.
+Detail pane for one installed plugin. Renders config fields, run actions, and
+analyze output for the selected plugin.
 
-### `ConfigFieldRow`
+When the plugin manifest declares a config schema (field descriptors with a
+`type` property), `PluginDetail` renders the full `PluginPanel` GUI:
+Description / Input / Output inner tabs, the `panel.inputLayout` grid, grouped
+sections, and every field/table editor. A schema-less manifest falls back to a
+raw JSON config textarea. Everything runs in the browser; the plugin never
+contacts the Ragnarok backend.
 
-Renders a single module config field row (text, number, boolean toggle, file
-picker, or action button). Exported so `PluginPanel` can reuse it.
+**Key props:**
+
+| Prop | Type | Meaning |
+|---|---|---|
+| `host` | `FrontendPluginHost` | Plugin host from `useFrontendPlugins()` |
+| `plugin` | `InstalledPlugin` | The plugin to display |
+| `model` | `WorkbookModel` | Current workbook (passed to plugin hooks) |
+| `onReplaceModel` | `(next: WorkbookModel) => void` | Called when a `transform` hook replaces the workbook |
+| `onMergeSheets` | `(sheets) => void` | Called when a `contribute` hook adds/updates sheets |
+| `customDsl` | `string` | Current constraint DSL text |
+| `onCustomDslChange` | `(text: string) => void` | Called when a `contribute` hook appends constraint lines |
+| `results` | `unknown` | Last run results, passed to the `analyze` hook |
+
+**Plugin hook dispatch:**
+- `transform(model, config)` — replaces the entire workbook; triggered by "Apply to model" or an `action` field with `hook: "transform"`.
+- `contribute(model, config)` — merges sheets and/or appends constraint DSL lines.
+- `analyze(results, config)` — called automatically when `results` changes; output is shown in the Output tab.
+- Named hooks (e.g. `connect`) — invoked by `action` fields whose `hook` matches the export name; return value is shown as a toast.
+
+If the manifest declares a `server` block (a local build-server), `PluginDetail`
+renders a `ServerSetupNotice` that shows the `plugins.env` entry the user must
+add so `run.command` will launch the server. The Ragnarok backend does not
+launch plugin servers; this is advisory only.
 
 ---
 
@@ -425,19 +466,41 @@ picker, or action button). Exported so `PluginPanel` can reuse it.
 
 ### `PluginPanel`
 
-Main panel area for enabled plugin modules. Renders one tabbed card per enabled
-module. Each card has Description / Input / Output inner tabs. The Output tab
-renders plugin analytics using `PluginFieldHint` metadata for chart types.
+Panel area for one or more plugins that have a manifest config schema. Renders
+Description / Input / Output inner tabs for the active plugin. When more than
+one `ModuleDescriptor` is passed, a tab strip selects between them.
 
 **Key props:**
 
 | Prop | Type | Meaning |
 |---|---|---|
-| `modules` | `ModuleDescriptor[]` | Enabled modules to render |
-| `moduleConfigs` | `Record<string, Record<string, unknown>>` | Config values per module |
+| `modules` | `ModuleDescriptor[]` | Plugins to render (derived from `InstalledPlugin` manifests) |
+| `moduleConfigs` | `Record<string, Record<string, unknown>>` | Config values per plugin id |
 | `onModuleConfigChange` | `(moduleId, key, value) => void` | Config field change |
+| `carriers` | `string[] \| undefined` | Carrier names for action fields that offer carrier autocomplete |
+| `pluginAnalytics` | `Record<string, PluginAnalyticsEntry>` | Analyze-hook output keyed by plugin id |
 | `onModuleAction` | `(moduleId, fieldKey, field) => Promise<void>` | Action button handler |
-| `displayResults` | `RunResults \| null` | Passed through for plugin output rendering |
+
+**Inner tabs:**
+- `Description` — renders `panel.descriptionSections` or `module.description`.
+- `Input` — renders config fields grouped by `type: "group"` entries in the schema.
+- `Output` — renders `PluginResults` from the plugin's `analyze` hook output, grouped by `hint.section`.
+
+### `ConfigFieldRow`
+
+Renders a single plugin config field row. Supports field types: `text`, `number`,
+`boolean` toggle, `select`, `file` picker, `action` button. Exported so both
+`PluginPanel` and `PluginDetail` can reuse it.
+
+---
+
+## `features/modules/ModuleManagerSection.tsx`
+
+### `ModuleManagerSection`
+
+Internal module config form component, currently used only by `PluginPanel` to
+render individual config field rows. The `ConfigFieldRow` export from this file
+is the primary reusable unit.
 
 ---
 

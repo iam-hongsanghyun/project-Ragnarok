@@ -249,8 +249,8 @@ The main run handler. Three-phase async workflow:
 
 **Phase 2 — start job:** Posts `{model, scenario, options}` to `/api/run`.
 Receives a `jobId`. The `options` object carries solver settings, snapshot
-window, pathway and rolling config, stochastic and SCLOPF config, enabled
-module IDs, and module configs. Sets `runStatus = 'running'`.
+window, pathway and rolling config, stochastic and SCLOPF config, currency
+symbol, and any other run-control keys. Sets `runStatus = 'running'`.
 
 **Phase 3 — poll:** Inner `poll()` function fetches `/api/run/:jobId` every
 `RUN_POLLING.runningDelayMs` ms until status is no longer `'running'`. On
@@ -398,22 +398,17 @@ The `ScenarioPreset` whose `id` matches `scenarioCatalog.activeScenarioId`, or
 
 ---
 
-## Module handlers
+## Plugin host wiring
 
-### `handleInstallModule(file) -> Promise<void>`
+`App.tsx` calls `useFrontendPlugins()` once at the root level and stores the
+result in `frontendPlugins`. This value is passed as `host` to `PluginsView`,
+which passes it to `PluginDetail`. All plugin installs, uninstalls, config
+reads, and config writes go through `host`; none of them touch the Ragnarok
+backend.
 
-Calls `moduleHost.installFromFile(file)`. Shows a success or error toast.
-
-### `handleUninstallModule(module) -> Promise<void>`
-
-`window.confirm` guard, then calls `moduleHost.uninstall(module.id)`.
-
-### `handleModuleAction(moduleId, fieldKey, field) -> Promise<void>`
-
-Handles action-type module config fields with `hook === 'transform'`. Posts
-`{model, scenario, options}` to `/api/modules/:moduleId/preview`. On success,
-calls `resetForNewModel` with the returned model. Unsupported hook types are
-rejected with an error toast.
+There are no App-level plugin handler functions — `PluginsView` calls
+`host.install`, `host.uninstall`, `host.setConfigField`, etc. directly via the
+`FrontendPluginHost` it receives.
 
 ---
 

@@ -14,7 +14,7 @@
 | [CAPABILITIES.md](../CAPABILITIES.md) | What Ragnarok can and cannot do (code-checked) |
 | [SUPPORT_MATRIX.md](../SUPPORT_MATRIX.md) | Generated feature support matrix |
 | [guides/USER_MANUAL.md](../guides/USER_MANUAL.md) | End-user manual for analysts (open/edit/run/analyse/export) |
-| [guides/module-system-v1.md](../guides/module-system-v1.md) · [authoring guide](../guides/module-authoring-guide.md) | Plugin system spec + how to write plugins |
+| [guides/PLUGIN_AUTHORING.md](../guides/PLUGIN_AUTHORING.md) | Plugin system + how to write plugins |
 | [reference/](../reference/) | Per-module function reference (backend + frontend) |
 | [TODO.md](../TODO.md) | Living project task log and roadmap |
 
@@ -28,74 +28,98 @@ parameters in a modal dialog, and the React frontend posts the workbook data to 
 backend that constructs a `pypsa.Network`, solves it with HiGHS, and returns structured results.
 Charts, maps, and tables then display the outputs without any round-trips to a remote server.
 
-## Extension system (Plugin System v1)
+## Communication topology
 
-Ragnarok ships a fully operational plugin system. The full spec and authoring guide are in:
+Understanding which components talk to which is the single most important orientation fact
+for plugin authors and contributors.
 
-- [guides/module-system-v1.md](../guides/module-system-v1.md)
-- [guides/module-authoring-guide.md](../guides/module-authoring-guide.md)
+```
+Browser (Ragnarok frontend)
+  |
+  |  REST JSON  (http://127.0.0.1:8000 — or remote server in future deployments)
+  v
+Ragnarok backend  (FastAPI / HiGHS solver)
 
-### Backend implementation
+Browser (Ragnarok frontend)
+  |
+  |  REST / fetch  (localhost:<plugin port> — registered per-plugin)
+  v
+Plugin's own local backend server  (optional; any language/framework)
+```
 
-**API endpoints**
+**The rule is absolute:**
 
-| Method | Path | Purpose |
+| Link | Allowed |
+|---|---|
+| Plugin JS <-> Ragnarok frontend | Yes — plugins run in the browser and can call frontend APIs |
+| Ragnarok frontend <-> Ragnarok backend | Yes — the only path to the solver |
+| Plugin <-> Ragnarok backend | No — the Ragnarok backend is plugin-agnostic and exposes no plugin endpoints |
+
+The Ragnarok backend receives `{model, scenario, options}` and solves. It never discovers,
+loads, or executes plugin code of any kind. There is no `module_host.py`, no
+`execute_plugins_at_stage()`, and no `/api/modules` route. Plugins that need server-side
+computation run their own separate local server and communicate with it directly from the
+browser.
+
+The backend is currently assumed to run locally at `http://127.0.0.1:8000`. The
+architecture is being moved toward a remote server model; the communication rule above
+is what makes that safe — the frontend is the only client of the Ragnarok backend, so
+moving the backend server-side requires no plugin changes.
+
+---
+
+## Extension system (plugins)
+
+Ragnarok ships a frontend-only plugin system. The full authoring guide is in
+[guides/PLUGIN_AUTHORING.md](../guides/PLUGIN_AUTHORING.md).
+
+### Plugin runtime
+
+Plugins are a **frontend-only** concern.
+
+**`src/features/plugins/frontendPlugins.ts` — `useFrontendPlugins()`**
+
+Custom hook that owns all plugin state in the browser:
+- `installed` — list of `InstalledPlugin` objects, persisted to `localStorage`
+  under `ragnarok:fe-plugins:installed`
+- `configs` — per-plugin config values, persisted to `localStorage` under
+  `ragnarok:fe-plugins:configs`
+- `install(file)` — unpacks the `.zip` in-browser via `fflate`, validates
+  `module.json`, and persists; no backend call is made
+- `uninstall(id)` — removes the plugin from `localStorage`; no backend call is made
+
+There is no "enable/disable" toggle. Installed plugins are always active in the
+Plugins tab.
+
+**Package format**
+
+A plugin is a `.zip` containing at minimum a `module.json` manifest. The manifest
+may sit at the archive root or one directory deep. Text files (JS entry, templates)
+are retained in-memory as plain strings keyed by relative path.
+
+**JS hooks**
+
+A plugin's JS entry file may export any combination of:
+
+| Export | When called | What it does |
 |---|---|---|
-| `GET` | `/api/modules` | Return `ModuleHostInventory` (all discovered modules + host metadata) |
-| `POST` | `/api/modules/install` | Upload `.zip`, extract to managed dir, validate, return module descriptor |
-| `DELETE` | `/api/modules/{id}` | Remove module directory from managed root |
+| `transform(model, config)` | "Apply to model" | Replaces the entire `WorkbookModel` |
+| `contribute(model, config)` | "Apply to model" | Merges sheets and appends constraint DSL lines |
+| `analyze(results, config)` | Auto-run after each solve | Reads `RunResults` and returns display data |
+| Named hook (e.g. `connect`) | Action button in the config UI | Any named export invocable via an `action`-type config field |
 
-**Module discovery** (`backend/app/module_host.py`)
+`transform` and `contribute` are mutually exclusive per plugin. `analyze` runs
+automatically when `results` changes. Named action hooks are invoked by `handleAction`
+in `PluginDetail` and receive the merged config (schema defaults + stored values).
 
-On every `/api/modules` call the backend scans the managed module root
-(`${PROJECT_ROOT}/.ragnarok/modules/` by default, overridable in `system-defaults.yaml`),
-reads each `module.json`, validates it against the host's supported SDK version, capabilities,
-and permissions, and returns a full descriptor per module including `status`, `valid`,
-`compatible`, `entryExists`, and `diagnostics`.
+**`src/features/plugins/PluginDetail.tsx`**
 
-**Execution pipeline**
+Renders one installed plugin's detail pane. When the manifest declares a config
+schema (field descriptors with a `type`), it delegates to `PluginPanel` for the
+V1-style Description / Input / Output subtab layout, section grids, and every
+field type. A schema-less manifest falls back to a raw JSON config textarea.
 
-When `POST /api/run` fires, `run_pypsa()` in `backend/pypsa/results/__init__.py` calls
-`execute_plugins_at_stage()` from `module_host.py` at each stage with the IDs and configs
-that were sent in `options.enabledModules` / `options.moduleConfigs`:
-
-| Stage | When it runs | Hook fn signature | Typical plugin type |
-|---|---|---|---|
-| `pre-build` | Before `build_network()` | `transform(model, scenario, options)` | `data-importer` |
-| `post-build` | After `build_network()`, before `optimize()` | `manipulate(network, scenario, options)` | `data-manipulator` |
-| `in-solve` | Inside PyPSA `extra_functionality` | `add_constraints(network, model, scenario, options)` | `constraint-pack` |
-| `post-solve` | After `network.optimize()` | `analyse(network, results, scenario, options)` | `analytics-pack` |
-
-`execute_plugins_at_stage()` loads each enabled module's Python entry file via
-`importlib`, looks up the hook function named in `manifest.hook`, calls it with only
-the stage-specific kwargs, and collects return values. Per-module configs are injected as
-`options["moduleConfig"]` so plugins stay ID-agnostic. Failures are caught, logged, and
-stored as `{"error": "..."}` — except `in-solve` failures which re-raise to prevent the
-solver from running without a declared constraint.
-
-Post-solve outputs are enriched with display metadata from `module.json`'s `ui` map and
-returned inside the `RunResults` payload under `pluginAnalytics`.
-
-### Frontend implementation
-
-**`src/features/modules/useModuleHost.ts`**
-
-Custom hook that owns all module-system state:
-- `inventory` — fetched from `/api/modules` on mount
-- `enabledIds` — persisted to `localStorage`
-- `moduleConfigs` — per-plugin config values, persisted to `localStorage`
-- `installFromFile()` / `uninstall()` — call the install/delete endpoints and re-fetch inventory
-
-**`src/features/modules/ModuleManagerSection.tsx`**
-
-Sidebar section rendered inside the `Modules` `SidebarGroup`. Each plugin gets a
-collapsible `ModuleCard` showing status, version, capabilities, diagnostics, and manager
-buttons.
-
-The plugin input form no longer lives in the sidebar. It lives in the main **Plugins**
-workspace instead.
-
-Config field types rendered in the main plugin input view:
+Config field types rendered by `PluginPanel`:
 
 | `type` in `module.json` | Rendered as |
 |---|---|
@@ -104,43 +128,72 @@ Config field types rendered in the main plugin input view:
 | `number` (with `min`/`max`) | range slider + live value label |
 | `select` | `<select>` dropdown |
 | `carrier-select` | multi-checkbox list populated from workbook carriers |
+| `group` | visual section separator |
+| `action` | button that fires a named hook |
 
 **`src/features/plugins/PluginPanel.tsx`**
 
-Full-page workspace tab (labelled **Plugins**) shown when at least one plugin is enabled.
+Full-page workspace tab (labelled **Plugins**) shown when at least one plugin is installed.
 Renders:
-- a tab bar with one tab per enabled plugin
+- a tab bar with one tab per installed plugin
 - nested **Description / Input / Output** subtabs
 - layout-aware section grids driven by `module.json` panel metadata
-- `PluginResults` tables formatted via the `ui` hints from `module.json`
-
-Result `format` values supported: `number`, `currency` (locale-formatted), `table`
-(nested sub-table for `Record<string, unknown>` values), plain string fallback.
+- analytics output tables formatted via `ui` hints from `module.json`
 
 **Wiring in `App.tsx`**
 
-`moduleHost.enabledIds` and `moduleHost.moduleConfigs` are passed in the `RunPayload`
-as `options.enabledModules` and `options.moduleConfigs`, connecting frontend selection
-to backend execution. `results?.pluginAnalytics` is forwarded to `PluginPanel` after
-each successful run.
+`useFrontendPlugins()` is called at the `AppInner` root. The resulting `frontendPlugins`
+handle is threaded down to `PluginsView`. Plugin actions (`transform`, `contribute`) mutate
+React model state directly in the browser before any run is submitted. The Ragnarok backend
+never sees plugin identity — the `RunPayload` sent to `POST /api/run` contains only the
+resulting `{model, scenario, options}`.
 
-### Sample plugins
+### Plugin local server (optional)
 
-Four ready-to-install sample plugins live in `sample-plugins/` (pack each sub-directory
-into a `.zip` and use the Install button in the sidebar):
+A plugin that needs server-side computation (for example, a PyPSA-based data builder)
+may declare a `server` block in its `module.json`:
 
-| Directory | Stage | Capability | What it does |
-|---|---|---|---|
-| `ragnarok-cost-reporter` | post-solve | analytics-pack | Total cost, LCOE, nodal price stats, cost-by-carrier table |
-| `ragnarok-renewable-floor` | in-solve | constraint-pack | Minimum renewable share constraint; carriers and floor % are configurable |
-| `ragnarok-network-patcher` | post-build | data-manipulator | Topology log, clamps `p_nom_min < 0`, warns zero-capacity generators |
-| `ragnarok-log-importer` | pre-build | data-importer | Model summary log before build; reference template for importers |
+```json
+{
+  "server": {
+    "run": "python server.py --port 8765",
+    "cwd": "backend",
+    "port": 8765,
+    "health": "/health"
+  }
+}
+```
+
+**Registration via `plugins.env` and `run.command`**
+
+The Ragnarok project's `run.command` reads `plugins.env` (project root, next to
+`run.command`) at startup and launches each registered server whose directory exists.
+The format is one `<absolute server dir>|<run command>` line per plugin. Blank lines
+and lines starting with `#` are ignored.
+
+```
+# Example: Dashboard Importer plugin backend
+/Users/you/my-plugin/backend|python server.py --port 8765
+```
+
+If the server directory contains a `.venv`, `run.command` activates it automatically
+so the plugin's own Python dependencies take precedence. An explicit interpreter in the
+command (e.g. `.venv/bin/python ...`) always takes precedence over the ambient PATH.
+
+The browser plugin connects to this local server directly (via `fetch` to `localhost:<port>`).
+The Ragnarok backend is not involved.
+
+`PluginDetail` renders a **Server setup** advisory when the manifest declares a `server`
+block, showing the exact `plugins.env` entry the user needs to add (with a placeholder
+for the absolute path, since the browser cannot discover the filesystem location) and
+the three-step registration flow.
 
 ### What is NOT in v1
 
 - Remote registry, signed modules, or sandboxed worker-process isolation
-- Dynamic frontend UI injection from module entrypoints (all plugin UI goes through `PluginPanel`'s generic renderer)
-- `activate()` / `deactivate()` lifecycle hooks — plugins are stateless Python callables
+- Backend plugin loading, Python plugin hooks, or plugin-side PyPSA access via the
+  Ragnarok backend (plugins that need PyPSA run their own separate local server)
+- `activate()` / `deactivate()` lifecycle hooks — plugins are stateless JS modules
 
 ---
 
@@ -174,8 +227,7 @@ pypsa_gui/
 │   ├── app/                        ← engine-agnostic FastAPI host (no PyPSA imports)
 │   │   ├── main.py                 ← FastAPI app, run lifecycle, file-converter endpoints
 │   │   ├── models.py               ← RunPayload request/response models
-│   │   ├── config.py               ← loads backend/config/*.json (system defaults, module host)
-│   │   ├── module_host.py          ← plugin discovery / execution system
+│   │   ├── config.py               ← loads backend/config/*.json (system defaults)
 │   │   └── backends/               ← pluggable-backend seam
 │   │       ├── base.py             ← Backend protocol + BackendError
 │   │       └── registry.py         ← get_backend / available_backends / register_backend
@@ -226,7 +278,7 @@ pypsa_gui/
             ├── views/              ← top-level tab views (Model, Analytics, Settings, Plugins)
             ├── features/           ← feature folders: build, input, map, analytics,
             │                          constraints, validation, run, run-history,
-            │                          modules, plugins, settings
+            │                          plugins, settings
             └── shared/             ← cross-feature types, utils, and components
 ```
 
@@ -311,6 +363,9 @@ Sent as JSON to `POST /api/run` and `POST /api/validate`.
       { "id": "c1", "enabled": true, "label": "CO2 cap",
         "metric": "co2_cap", "carrier": "", "value": 1000, "unit": "ktCO2" }
     ],
+    "constraintSpecs": [
+      { "type": "carrier_share_min", "carrier": "solar", "value": 0.3 }
+    ],
     "carbonPrice": 0
   },
   "options": {
@@ -350,6 +405,46 @@ Time-series sheets (`generators-p_max_pu` etc.) use the **first column as the sn
 | `loads-p_set` | time-series | `Load.p_set` | columns = load names |
 | `storage_units-inflow` | time-series | `StorageUnit.inflow` | columns = storage unit names |
 | `links-p_max_pu` | time-series | `Link.p_max_pu` | columns = link names |
+
+---
+
+## Constraints
+
+Ragnarok has three distinct constraint mechanisms. They are independent at authoring time
+but all converge at `extra_functionality` inside `run_pypsa()`.
+
+### Standard constraints (global_constraints sheet)
+
+Native PyPSA `GlobalConstraint` rows live in the `global_constraints` workbook sheet.
+They are imported by `build_network()` directly into `network.global_constraints` and
+are applied by PyPSA's own optimizer without any special backend logic.
+
+### Advanced constraints (custom DSL → constraintSpecs)
+
+The Constraints workspace tab exposes a text-based DSL. Before submission, the frontend
+compiles the DSL text into a `constraintSpecs` JSON array via `dslToSpecs()` in
+`src/shared/utils/constraintDsl.ts`. The `constraintSpecs` array is sent inside
+`scenario.constraintSpecs` in the `RunPayload`. The backend applies them via
+`apply_constraint_specs()` in `backend/pypsa/network/constraint_dsl.py` inside
+`extra_functionality`.
+
+Older payloads that still contain raw DSL text in `scenario.customDsl` are accepted as a
+fallback; the backend prefers `constraintSpecs` when both are present.
+
+### Plugin-contributed constraints
+
+A plugin's `contribute` hook may return a `constraints` array of DSL strings alongside
+optional sheet rows. `PluginDetail` appends those strings to the live `customDsl` state in
+the browser (prefixed with a `# plugin-name` comment). They pass through the same
+`dslToSpecs()` compilation step and arrive at the backend as part of `constraintSpecs`,
+indistinguishable from constraints the user typed directly.
+
+A plugin may alternatively produce a `RAGNAROK_CustomDSL` sheet in the workbook via its
+`contribute` hook; the frontend reads that sheet and merges it into `customDsl` in the
+same way.
+
+In all three cases the solver sees the constraints through a single `extra_functionality`
+call — there is no separate plugin execution stage on the backend.
 
 ---
 
@@ -417,11 +512,15 @@ for row in rows:
 3. If it needs a new data series, add it to `RunResults` in `src/types/index.ts` and extract
    it in the relevant `backend/pypsa/results/*.py` module.
 
-### A new constraint metric
+### A new constraint metric (Standard Constraints)
+
+These are the point-and-click constraints in the Constraints tab that compile to the
+`scenario.constraints` array (not the DSL).
 
 1. Add the new `ConstraintMetric` string literal to `src/types/index.ts`.
 2. Add the UI row to `GlobalConstraintsSection.tsx`.
-3. Handle the new metric in `backend/pypsa/network/custom_constraints.py`.
+3. Handle the new metric in `backend/pypsa/network/custom_constraints.py` inside
+   `apply_custom_constraints()`.
 
 ### A new backend result field
 
@@ -467,8 +566,9 @@ For the authoritative, code-checked list of what the product can and cannot do, 
   costs; there is no ETS permit price curve or intertemporal banking.
 - **HiGHS only** — solver is fixed to HiGHS via PyPSA's default linopt interface. GLPK/Gurobi
   are not exposed in the UI.
-- **Local backend** — the app assumes the FastAPI server is running at `http://127.0.0.1:8000`.
-  There is no cloud deployment path or authentication layer.
+- **Backend assumed local by default** — the app currently defaults to `http://127.0.0.1:8000`.
+  The backend is being moved to a remote server model; the frontend/backend separation is already
+  clean enough to support this, but no authentication layer exists yet.
 - **Session-scoped run history, not a persisted scenario manager** — past runs can be viewed,
   compared, pinned, renamed, restored, and exported, but the list lives only for the browser
   session (cleared by "Clear all" or reload). Run configurations are not saved to disk.
