@@ -1,0 +1,56 @@
+/* ── Log pane (Analytics → Log) ──────────────────────────────────────
+   Polls /api/log every 2s, renders captured backend lines in a mono
+   scroll panel. Levels colour the line text; sticky-to-bottom unless
+   the user scrolls up. */
+.log-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+.log-pane-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-hover);
+}
+.log-pane-status {
+  flex: 1;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+.log-pane-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 16px;
+  background: var(--surface);
+}
+.log-pane-empty {
+  color: var(--muted);
+  text-align: center;
+  padding: 32px;
+  margin: 0;
+}
+.log-line {
+  display: grid;
+  grid-template-columns: 168px 64px 200px 1fr;
+  gap: 8px;
+  padding: 2px 0;
+  border-bottom: 1px solid var(--bg-hover);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.log-line-ts    { color: var(--muted); font-size: 0.72rem; }
+.log-line-level { font-weight: 600; }
+.log-line-logger { color: var(--muted); }
+.log-line-msg    { color: var(--text); }
+.log-line--debug .log-line-level { color: var(--muted); }
+.log-line--info  .log-line-level { color: var(--brand); }
+.log-line--warn  .log-line-level { color: var(--warn-text); }
+.log-line--error .log-line-level { color: var(--danger); }
+.log-line--error .log-line-msg   { color: var(--danger-strong); }

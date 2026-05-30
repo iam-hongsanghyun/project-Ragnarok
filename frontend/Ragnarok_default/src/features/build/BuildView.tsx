@@ -30,6 +30,7 @@ import { BuildDetailPane } from './BuildDetailPane';
 import { BuildNetworkMap, BRANCH_SHEETS, isGeoSheet, LinkMode } from './BuildNetworkMap';
 import { BuildAttributeForm } from './BuildAttributeForm';
 import { ResizablePanels } from '../../layout/ResizablePanels';
+import { ViewPaneHeader } from '../../shared/components/primitives';
 
 export interface BuildViewProps {
   model: WorkbookModel;
@@ -365,7 +366,7 @@ export function BuildView(props: BuildViewProps) {
 
   return (
     <div className="build-view">
-      <div className="view-pane-header">
+      <ViewPaneHeader>
       <nav className="subnav build-step-strip" aria-label="Build steps">
         {BUILD_STEPS.map((s, i) => {
           const complete = completionByIndex[i];
@@ -394,7 +395,7 @@ export function BuildView(props: BuildViewProps) {
           );
         })}
       </nav>
-      </div>
+      </ViewPaneHeader>
 
       {step.id === 'constraints' ? (
         <ResizablePanels id="build" direction="horizontal" className="build-body" initialSizes={[72, 28]} minSize={220}>

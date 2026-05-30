@@ -3,6 +3,7 @@
  * of the Model view. This is the ONLY place these buttons live.
  */
 import React from 'react';
+import { ViewPaneHeader } from '../../shared/components/primitives';
 
 export interface FileToolbarProps {
   hasResults: boolean;
@@ -22,7 +23,7 @@ export interface FileToolbarProps {
 
 export function FileToolbar(props: FileToolbarProps) {
   return (
-    <div className="view-toolbar">
+    <ViewPaneHeader variant="toolbar">
       <button className="tb-btn" onClick={props.onOpen}>Open</button>
       <button className="tb-btn" onClick={props.onSave}>Save</button>
       <button className="tb-btn" onClick={props.onSaveAs}>Save As</button>
@@ -55,6 +56,6 @@ export function FileToolbar(props: FileToolbarProps) {
           <button className="tb-btn" onClick={props.onExportHdf5}>Export HDF5</button>
         </div>
       </details>
-    </div>
+    </ViewPaneHeader>
   );
 }

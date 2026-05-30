@@ -1,6 +1,8 @@
 /**
- * Sub-tab nav for the Analytics view: Validation · Result · Analytics · Comparison.
- * Shows error/warning counts as a badge on the Validation tab.
+ * Sub-tab nav for the Analytics view: Validation · Result · Analytics ·
+ * Comparison · Log. Shows error/warning counts as a badge on Validation.
+ * The Log tab streams backend command-line output (uvicorn / application /
+ * tracebacks) via polling.
  */
 import React from 'react';
 import { AnalyticsSubTab } from '../../shared/types';
@@ -19,7 +21,7 @@ interface Props {
   modelIssues: ModelIssue[];
 }
 
-const SUB_TABS: AnalyticsSubTab[] = ['Validation', 'Result', 'Analytics', 'Comparison'];
+const SUB_TABS: AnalyticsSubTab[] = ['Validation', 'Result', 'Analytics', 'Comparison', 'Log'];
 
 export function AnalyticsSubnav({ subTab, onChange, validateResult, modelIssues }: Props) {
   const errorCount = modelIssues.filter((i) => i.severity === 'error').length;

@@ -27,7 +27,9 @@ import { AnalyticsPane, EmptyAnalytics } from '../features/analytics/AnalyticsPa
 import { ComparisonPane } from '../features/analytics/ComparisonPane';
 import { RunHistoryList } from '../features/run-history/RunHistoryList';
 import { AnalyticsSubnav } from './AnalyticsView.features/AnalyticsSubnav';
+import { LogPane } from '../features/log/LogPane';
 import { ResizablePanels } from '../layout/ResizablePanels';
+import { LeftRail, ViewPaneHeader } from '../shared/components/primitives';
 
 interface ValidationResult {
   valid: boolean;
@@ -88,21 +90,21 @@ export function AnalyticsView(props: AnalyticsViewProps) {
     <div className="analytics-view">
       <ResizablePanels id="analytics" direction="horizontal" initialSizes={[76, 24]} minSize={220}>
       <div className="analytics-view-main">
-      <div className="pane-header analytics-outer-header">
+      <ViewPaneHeader variant="analytics">
         <AnalyticsSubnav
           subTab={analyticsSubTab}
           onChange={props.onAnalyticsSubTabChange}
           validateResult={props.validateResult}
           modelIssues={props.modelIssues}
         />
-        {displayResults && analyticsSubTab !== 'Validation' && (
+        {displayResults && analyticsSubTab !== 'Validation' && analyticsSubTab !== 'Log' && (
           <div className="inline-stats">
             <span>{filename}</span>
             <span>{displayResults.runMeta.snapshotCount} snapshots</span>
             <span>{displayResults.runMeta.snapshotWeight}h weight</span>
           </div>
         )}
-      </div>
+      </ViewPaneHeader>
 
       {analyticsSubTab === 'Validation' && (
         <ValidationPane
@@ -122,6 +124,8 @@ export function AnalyticsView(props: AnalyticsViewProps) {
           currencySymbol={props.currencySymbol}
         />
       )}
+
+      {analyticsSubTab === 'Log' && <LogPane />}
 
       {(analyticsSubTab === 'Result' || analyticsSubTab === 'Analytics') && (
         !displayResults ? (
@@ -154,9 +158,12 @@ export function AnalyticsView(props: AnalyticsViewProps) {
       </div>
 
       {runHistory.length > 0 && (
-        <aside className="analytics-view-rail" aria-label="Run history">
-          <div className="analytics-view-rail-header">
-            <span>Run history</span>
+        <LeftRail
+          title="Run history"
+          ariaLabel="Run history"
+          side="right"
+          className="analytics-view-rail"
+          headerAction={
             <button
               type="button"
               className="tb-btn tb-btn--muted analytics-view-rail-clear"
@@ -165,19 +172,18 @@ export function AnalyticsView(props: AnalyticsViewProps) {
             >
               Clear all
             </button>
-          </div>
-          <div className="analytics-view-rail-body">
-            <RunHistoryList
-              runHistory={runHistory}
-              onRestoreRun={props.onRestoreRun}
-              onRenameHistoryEntry={props.onRenameHistoryEntry}
-              onPinHistoryEntry={props.onPinHistoryEntry}
-              onDeleteHistoryEntry={props.onDeleteHistoryEntry}
-              onToggleComparison={props.onToggleComparison}
-              currencySymbol={props.currencySymbol}
-            />
-          </div>
-        </aside>
+          }
+        >
+          <RunHistoryList
+            runHistory={runHistory}
+            onRestoreRun={props.onRestoreRun}
+            onRenameHistoryEntry={props.onRenameHistoryEntry}
+            onPinHistoryEntry={props.onPinHistoryEntry}
+            onDeleteHistoryEntry={props.onDeleteHistoryEntry}
+            onToggleComparison={props.onToggleComparison}
+            currencySymbol={props.currencySymbol}
+          />
+        </LeftRail>
       )}
       </ResizablePanels>
     </div>

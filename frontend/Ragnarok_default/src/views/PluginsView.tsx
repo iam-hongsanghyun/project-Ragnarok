@@ -11,6 +11,7 @@ import { FrontendPluginHost } from '../features/plugins/frontendPlugins';
 import { PluginDetail } from '../features/plugins/PluginDetail';
 import { useToast } from '../shared/components/Toast';
 import { ResizablePanels } from '../layout/ResizablePanels';
+import { LeftRail } from '../shared/components/primitives';
 
 interface Props {
   host: FrontendPluginHost;
@@ -41,37 +42,34 @@ export function PluginsView(props: Props) {
 
   return (
     <ResizablePanels id="plugins-rail" direction="horizontal" className="view plugins-view" initialSizes={[22, 78]} minSize={180}>
-      <aside className="view-rail view-rail--left" aria-label="Plugins">
-        <div className="view-rail-header">Plugins</div>
-        <div className="plugin-rail-body">
-          <input ref={fileRef} type="file" accept=".zip" style={{ display: 'none' }} onChange={(e) => onPick(e.target.files?.[0])} />
-          <button className="tb-btn plugin-rail-install" onClick={() => fileRef.current?.click()}>Install plugin…</button>
-          {installed.length === 0 ? (
-            <p className="sg-setting-hint" style={{ padding: '8px 12px' }}>No plugins installed.</p>
-          ) : (
-            <ul className="plugin-rail-list">
-              {installed.map((p) => (
-                <li key={p.id}>
-                  <button
-                    className={`plugin-rail-item${selected?.id === p.id ? ' plugin-rail-item--active' : ''}`}
-                    onClick={() => setSelectedId(p.id)}
+      <LeftRail title="Plugins" ariaLabel="Plugins" className="plugin-rail">
+        <input ref={fileRef} type="file" accept=".zip" style={{ display: 'none' }} onChange={(e) => onPick(e.target.files?.[0])} />
+        <button className="tb-btn plugin-rail-install" onClick={() => fileRef.current?.click()}>Install plugin…</button>
+        {installed.length === 0 ? (
+          <p className="sg-setting-hint" style={{ padding: '8px 12px' }}>No plugins installed.</p>
+        ) : (
+          <ul className="plugin-rail-list">
+            {installed.map((p) => (
+              <li key={p.id}>
+                <button
+                  className={`plugin-rail-item${selected?.id === p.id ? ' plugin-rail-item--active' : ''}`}
+                  onClick={() => setSelectedId(p.id)}
+                >
+                  <span className="plugin-rail-name">{p.name}</span>
+                  <span
+                    className="gcc-del plugin-rail-remove"
+                    title="Uninstall"
+                    role="button"
+                    onClick={(e) => { e.stopPropagation(); host.uninstall(p.id); if (selectedId === p.id) setSelectedId(null); }}
                   >
-                    <span className="plugin-rail-name">{p.name}</span>
-                    <span
-                      className="gcc-del plugin-rail-remove"
-                      title="Uninstall"
-                      role="button"
-                      onClick={(e) => { e.stopPropagation(); host.uninstall(p.id); if (selectedId === p.id) setSelectedId(null); }}
-                    >
-                      x
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </aside>
+                    x
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </LeftRail>
 
       <main className="view-main">
         {selected ? (

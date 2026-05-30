@@ -16,6 +16,7 @@
 @import "./styles/_tokens.css";
 @import "./styles/_validation.css";
 @import "./styles/_plugin-tables.css";
+@import "./styles/_log-pane.css";
 
 
 .sidebar {
@@ -4910,13 +4911,12 @@ th:hover .col-delete-btn {
 .constraints-applied-dual { color: var(--muted); font-family: var(--font-mono); }
 /* Match the Settings (Setup) nav look. */
 .plugins-view .view-rail--left { background: var(--bg); }
-.plugin-rail-body {
+.plugin-rail .view-rail-body {
+  /* Layer on top of the shared .view-rail-body baseline (flex + scroll). */
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 12px 0;
-  min-height: 0;
-  overflow-y: auto;
 }
 .plugin-rail-install { align-self: stretch; margin: 0 12px; }
 .plugin-rail-list {
@@ -5293,7 +5293,20 @@ th:hover .col-delete-btn {
   overflow-y: auto;
 }
 .view-rail--left {
-  /* nothing extra */
+  /* baseline border-right from .view-rail */
+}
+.view-rail--right {
+  border-right: none;
+  border-left: 1px solid var(--border);
+}
+/* Rail body — common to every LeftRail primitive instance: scrollable
+   content area below the rail header. View-specific rails (e.g.,
+   .plugin-rail-body, .analytics-view-rail-body) layer their padding /
+   gap rules on top. */
+.view-rail-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .view-rail-header,
@@ -6013,10 +6026,11 @@ th:hover .col-delete-btn {
 
 .analytics-view-rail {
   /* base background / flex direction / display come from the shared rail
-     rule above; this variant lives on the RIGHT, so the adjacent border is
-     on the left instead of the right. */
-  border-left: 1px solid var(--border);
+     rule above; border-left comes from .view-rail--right (LeftRail side). */
   overflow: hidden;
+}
+.analytics-view-rail .view-rail-body {
+  padding: 8px;
 }
 
 .analytics-view-rail-clear {

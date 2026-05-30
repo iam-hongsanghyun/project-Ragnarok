@@ -18,8 +18,14 @@ from fastapi.responses import Response
 
 from .backends import BackendError, available_backends, get_backend
 from .config import load_system_defaults
+from .log_capture import get_snapshot as _log_snapshot, install as _install_log_capture
 from .models import RunPayload
 from ..pypsa.network import build_network, validate_model
+
+# Attach the in-process log handler at import time so the entire uvicorn
+# startup sequence and all subsequent records flow into the ring buffer.
+# Surfaced via GET /api/log (see endpoint below).
+_install_log_capture()
 
 
 # ── Suppress per-poll access log noise ───────────────────────────────────────
@@ -131,6 +137,26 @@ def get_config() -> dict[str, Any]:
 def get_backends() -> dict[str, Any]:
     """List the available optimisation backends and their capabilities."""
     return {"backends": available_backends(), "default": "pypsa"}
+
+
+@app.get("/api/log")
+def get_log() -> dict[str, Any]:
+    """Snapshot of the in-process log ring buffer.
+
+    Polled by the frontend Analytics → Log sub-tab every 2 s. Covers
+    uvicorn HTTP access logs, uvicorn errors, and any application code
+    that emits via ``logging.getLogger(...)``. Solver C-stdout (HiGHS)
+    is not captured — that needs fd-level redirection.
+    """
+    entries, cursor, capacity = _log_snapshot()
+    return {
+        "entries": [
+            {"ts": e.ts, "logger": e.logger, "level": e.level, "message": e.message}
+            for e in entries
+        ],
+        "cursor": cursor,
+        "capacity": capacity,
+    }
 
 
 @app.post("/api/validate")

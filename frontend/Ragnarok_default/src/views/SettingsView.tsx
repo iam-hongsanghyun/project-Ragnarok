@@ -8,6 +8,7 @@
 import React from 'react';
 import { usePersistedState } from '../shared/utils/usePersistedState';
 import { ResizablePanels } from '../layout/ResizablePanels';
+import { LeftRail } from '../shared/components/primitives';
 import {
   AppliedConstraint,
   CarbonPriceScheduleEntry,
@@ -151,8 +152,11 @@ export function SettingsView(props: SettingsViewProps) {
 
   return (
     <ResizablePanels id="settings-rail" direction="horizontal" className="settings-view" initialSizes={[20, 80]} minSize={180}>
-      <aside className="settings-section-nav" aria-label="Settings sections">
-        <div className="view-rail-header">Settings</div>
+      <LeftRail
+        title="Settings"
+        ariaLabel="Settings sections"
+        className="settings-section-nav"
+      >
         {groups.map((g) => (
           <div key={g} className="settings-nav-group">
             <div className="settings-nav-group-title">{g}</div>
@@ -167,7 +171,7 @@ export function SettingsView(props: SettingsViewProps) {
             ))}
           </div>
         ))}
-      </aside>
+      </LeftRail>
 
       <main className="settings-section-main">
         {section === 'scenarios'      && <ScenariosSection {...props} />}
