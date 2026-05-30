@@ -29,18 +29,26 @@ _install_log_capture()
 
 
 # ── Suppress per-poll access log noise ───────────────────────────────────────
-# GET /api/run/{id} fires every 1.5 s while a solve is in progress.
-# These lines add no diagnostic value at INFO level; they are re-emitted at
-# DEBUG so they remain capturable when needed (e.g. uvicorn --log-level debug).
+# Two routes are polled continuously by the frontend and would flood the
+# terminal with one INFO line per poll:
+#   • GET /api/run/{id} — every 1.5 s while a solve is in progress
+#   • GET /api/log      — every 2 s while the Analytics → Log tab is open
+# Drop these from the INFO access log; re-emit at DEBUG so they remain
+# capturable when needed (e.g. uvicorn --log-level debug). Critically, the
+# /api/log polls themselves must NOT be captured into the in-process log
+# ring buffer or the buffer fills with its own poll traffic.
 
 class _SuppressPollLogs(logging.Filter):
     _debug = logging.getLogger("pypsa_gui.poll")
 
+    _POLL_ROUTES = ('"GET /api/run/', '"GET /api/log ')
+
     def filter(self, record: logging.LogRecord) -> bool:  # noqa: A003
         msg = record.getMessage()
-        if '"GET /api/run/' in msg and "HTTP" in msg:
-            self._debug.debug(msg)
-            return False
+        for marker in self._POLL_ROUTES:
+            if marker in msg and "HTTP" in msg:
+                self._debug.debug(msg)
+                return False
         return True
 
 
