@@ -107,6 +107,25 @@ _HANDLER.setLevel(logging.DEBUG)
 _HANDLER.setFormatter(logging.Formatter("%(message)s"))
 
 
+class _DropPollLogger(logging.Filter):
+    """Drop the DEBUG re-emits from the ``pypsa_gui.poll`` logger.
+
+    main.py's access-log filter suppresses `/api/run/{id}` and `/api/log`
+    polls from the INFO access stream and re-emits them on a separate
+    ``pypsa_gui.poll`` logger at DEBUG level — so curious operators can
+    still capture them with ``uvicorn --log-level debug``. Without this
+    secondary filter on the memory handler, those DEBUG re-emits land
+    right back in the in-memory ring buffer and the Log tab fills with
+    the very poll noise we wanted to hide.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:  # noqa: A003
+        return record.name != "pypsa_gui.poll"
+
+
+_HANDLER.addFilter(_DropPollLogger())
+
+
 def install() -> None:
     """Attach the capture handler to the root logger (idempotent)."""
     root = logging.getLogger()
@@ -115,9 +134,43 @@ def install() -> None:
     # Uvicorn loggers default to propagate=True, so their records reach the
     # root logger and our handler. We do not need to attach separately.
     # Ensure root sees DEBUG so we capture everything; individual loggers
-    # still control what they emit.
+    # still control what they emit. The handler-level _DropPollLogger
+    # filter prevents the poll-noise re-emits from flooding the buffer.
     if root.level == logging.NOTSET or root.level > logging.DEBUG:
         root.setLevel(logging.DEBUG)
+
+
+def emit_solver_log(text: str, job_id: str) -> None:
+    """Replay captured solver stdout into the in-process log buffer.
+
+    Used by main.py after a run worker finishes — the worker dup'd its
+    stdout fd to a temp file during the solve to catch C-level output
+    from HiGHS / PyPSA / linopy, then shipped the captured text back to
+    the parent. The parent calls this once to fan the captured lines
+    into the buffer so the Log tab sees them alongside everything else.
+    Each non-empty line becomes one INFO record on the ``pypsa.solver``
+    logger; large captures are truncated to a sane prefix to avoid
+    monopolising the bounded ring buffer.
+    """
+    if not text:
+        return
+    logger = logging.getLogger("pypsa.solver")
+    lines = text.rstrip("\n").split("\n")
+    # Cap how many lines a single solve can push into the buffer. The
+    # buffer holds 1000 entries total; a verbose HiGHS run can emit
+    # thousands. Keep the head + tail so the user can see the start
+    # (parsing / pre-solve) and the end (final objective + status).
+    MAX_LINES = 400
+    if len(lines) > MAX_LINES:
+        head = lines[: MAX_LINES // 2]
+        tail = lines[-MAX_LINES // 2 :]
+        dropped = len(lines) - len(head) - len(tail)
+        lines = [*head, f"... [{dropped} solver lines dropped — full output too long for buffer] ...", *tail]
+    logger.info("── solver output for job %s (%d lines) ──", job_id, len(lines))
+    for line in lines:
+        if line.strip():
+            logger.info("%s", line)
+    logger.info("── end solver output for job %s ──", job_id)
 
 
 def get_snapshot() -> tuple[list[LogEntry], int, int]:
