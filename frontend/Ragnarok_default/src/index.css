@@ -5123,18 +5123,27 @@ th:hover .col-delete-btn {
 .constraints-applied-badge--plugin { color: var(--brand); border-color: var(--brand); }
 .constraints-applied-name { font-family: var(--font-mono); color: var(--text); }
 .constraints-applied-dual { color: var(--muted); font-family: var(--font-mono); }
-.plugin-fe-row {
+.plugin-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.plugin-list-item {
   padding: 8px 0;
   border-top: 1px solid var(--border);
 }
-.plugin-fe-row:first-of-type { border-top: none; }
-.plugin-fe-config {
+.plugin-list-item:first-of-type { border-top: none; }
+.plugin-list-head {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 8px;
-  padding-left: 22px;
+  align-items: center;
+  gap: 8px;
 }
+.plugin-list-version {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.plugin-list-head .gcc-del { margin-left: auto; }
 .ss-wrap {
   position: relative;
   width: 100%;

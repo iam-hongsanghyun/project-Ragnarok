@@ -1753,12 +1753,7 @@ function AppInner() {
           )}
 
           {tab === 'Plugins' && (
-            <PluginsView
-              host={frontendPlugins}
-              model={model}
-              customDsl={customDsl}
-              onCustomDslChange={setCustomDsl}
-            />
+            <PluginsView host={frontendPlugins} />
           )}
         </div>
       </div>

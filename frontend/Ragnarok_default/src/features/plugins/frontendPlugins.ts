@@ -1,57 +1,30 @@
 /**
- * Frontend-only plugin host (Phase 3 foundation).
+ * Frontend-only plugin host (Phase 3).
  *
- * Plugins are a FRONTEND concern: a plugin produces constraints/model inputs in
- * the browser and hands them to the Ragnarok frontend as DSL lines (which the
- * frontend turns into structured `constraintSpecs` JSON before sending to the
- * Ragnarok backend). The Ragnarok backend never sees or runs plugin code.
+ * Plugins are a pure FRONTEND concern: they are installed into a frontend
+ * "plugin location" (browser localStorage), configured in the Plugins tab, and
+ * run in the browser. A plugin produces inputs for the model and/or reads the
+ * run output — it never communicates with the Ragnarok backend. The Ragnarok
+ * frontend is the only thing that talks to the Ragnarok backend.
  *
- * Built-in plugins live here; installed plugins live in a frontend "plugin
- * location" (browser localStorage), loaded the same way. Each plugin exposes a
- * pure `toConstraintLines(config, model)` that returns human-readable DSL lines
- * shown in the Advanced Constraints code box before Run.
+ * A plugin package is a `.zip` containing a `module.json` manifest. No sample
+ * plugins are bundled — the user installs their own.
  */
 import { useCallback, useState } from 'react';
-import { WorkbookModel } from '../../shared/types';
+import { unzipSync, strFromU8 } from 'fflate';
 
-export interface FrontendPluginField {
-  key: string;
-  label: string;
-  type: 'number' | 'carriers';
-  default?: unknown;
-  unit?: string;
-}
-
-export interface FrontendPlugin {
+export interface InstalledPlugin {
   id: string;
   name: string;
-  description: string;
-  fields: FrontendPluginField[];
-  /** Pure: config + current model → DSL constraint lines for the code box. */
-  toConstraintLines: (config: Record<string, unknown>, model: WorkbookModel) => string[];
+  version?: string;
+  description?: string;
+  /** Raw manifest (module.json) as parsed. */
+  manifest: Record<string, unknown>;
+  /** Plain-text files from the package, keyed by path (e.g. the JS entry). */
+  files: Record<string, string>;
 }
 
-// ── Built-in plugins ──────────────────────────────────────────────────────────
-const renewableFloor: FrontendPlugin = {
-  id: 'renewable-cf-floor',
-  name: 'Renewable CF floor',
-  description: 'Force selected carriers to run at or above a minimum capacity factor.',
-  fields: [
-    { key: 'carriers', label: 'Carriers', type: 'carriers', default: [] },
-    { key: 'minCf', label: 'Min capacity factor', type: 'number', default: 0.2, unit: 'fraction 0–1' },
-  ],
-  toConstraintLines: (config) => {
-    const carriers = Array.isArray(config.carriers) ? (config.carriers as string[]) : [];
-    const minCf = Number(config.minCf ?? 0);
-    return carriers
-      .filter(Boolean)
-      .map((c) => `cf(${/\s/.test(c) ? `"${c}"` : c}) >= ${minCf}`);
-  },
-};
-
-export const BUILTIN_FRONTEND_PLUGINS: FrontendPlugin[] = [renewableFloor];
-
-// ── Persistence (the frontend "plugin location") ──────────────────────────────
+const STORE_KEY = 'ragnarok:fe-plugins:installed';
 const ENABLED_KEY = 'ragnarok:fe-plugins:enabled';
 const CONFIG_KEY = 'ragnarok:fe-plugins:configs';
 
@@ -63,59 +36,94 @@ function loadJson<T>(key: string, fallback: T): T {
     return fallback;
   }
 }
+function saveJson(key: string, value: unknown): void {
+  try { window.localStorage.setItem(key, JSON.stringify(value)); } catch { /* quota — ignore */ }
+}
 
-function defaultConfig(plugin: FrontendPlugin): Record<string, unknown> {
-  const cfg: Record<string, unknown> = {};
-  plugin.fields.forEach((f) => { cfg[f.key] = f.default ?? (f.type === 'carriers' ? [] : 0); });
-  return cfg;
+/** Parse a plugin .zip (manifest + text files) without touching the backend. */
+async function parsePackage(file: File): Promise<InstalledPlugin> {
+  const buf = new Uint8Array(await file.arrayBuffer());
+  const entries = unzipSync(buf);
+  // module.json may sit at the root or one directory deep.
+  const manifestPath = Object.keys(entries).find((p) => p.replace(/^[^/]+\//, '') === 'module.json' || p === 'module.json');
+  if (!manifestPath) throw new Error('Package has no module.json manifest.');
+  const prefix = manifestPath.includes('/') ? manifestPath.slice(0, manifestPath.lastIndexOf('/') + 1) : '';
+  let manifest: Record<string, unknown>;
+  try {
+    manifest = JSON.parse(strFromU8(entries[manifestPath])) as Record<string, unknown>;
+  } catch {
+    throw new Error('module.json is not valid JSON.');
+  }
+  const id = String(manifest.id ?? '').trim();
+  const name = String(manifest.name ?? id).trim();
+  if (!id) throw new Error('module.json is missing an "id".');
+  // Keep the (text) files under the manifest's directory for later execution.
+  const files: Record<string, string> = {};
+  for (const [path, bytes] of Object.entries(entries)) {
+    if (prefix && !path.startsWith(prefix)) continue;
+    const rel = prefix ? path.slice(prefix.length) : path;
+    if (!rel || rel.endsWith('/')) continue;
+    try { files[rel] = strFromU8(bytes); } catch { /* skip binary */ }
+  }
+  return {
+    id,
+    name,
+    version: manifest.version ? String(manifest.version) : undefined,
+    description: manifest.description ? String(manifest.description) : undefined,
+    manifest,
+    files,
+  };
 }
 
 export type FrontendPluginHost = ReturnType<typeof useFrontendPlugins>;
 
 export function useFrontendPlugins() {
-  const plugins = BUILTIN_FRONTEND_PLUGINS;
+  const [installed, setInstalled] = useState<InstalledPlugin[]>(() => loadJson<InstalledPlugin[]>(STORE_KEY, []));
   const [enabledIds, setEnabledIds] = useState<string[]>(() => loadJson<string[]>(ENABLED_KEY, []));
   const [configs, setConfigs] = useState<Record<string, Record<string, unknown>>>(
     () => loadJson<Record<string, Record<string, unknown>>>(CONFIG_KEY, {}),
   );
 
-  const persistEnabled = (next: string[]) => {
-    setEnabledIds(next);
-    try { window.localStorage.setItem(ENABLED_KEY, JSON.stringify(next)); } catch { /* ignore */ }
-  };
-  const persistConfigs = (next: Record<string, Record<string, unknown>>) => {
-    setConfigs(next);
-    try { window.localStorage.setItem(CONFIG_KEY, JSON.stringify(next)); } catch { /* ignore */ }
-  };
+  const persistInstalled = (next: InstalledPlugin[]) => { setInstalled(next); saveJson(STORE_KEY, next); };
+  const persistEnabled = (next: string[]) => { setEnabledIds(next); saveJson(ENABLED_KEY, next); };
+
+  const install = useCallback(async (file: File): Promise<{ ok: boolean; error?: string; id?: string }> => {
+    try {
+      const plugin = await parsePackage(file);
+      setInstalled((prev) => {
+        const next = [...prev.filter((p) => p.id !== plugin.id), plugin];
+        saveJson(STORE_KEY, next);
+        return next;
+      });
+      return { ok: true, id: plugin.id };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : 'Install failed.' };
+    }
+  }, []);
+
+  const uninstall = useCallback((id: string) => {
+    persistInstalled(installed.filter((p) => p.id !== id));
+    persistEnabled(enabledIds.filter((x) => x !== id));
+  }, [installed, enabledIds]);
 
   const toggle = useCallback((id: string, on: boolean) => {
     persistEnabled(on ? Array.from(new Set([...enabledIds, id])) : enabledIds.filter((x) => x !== id));
   }, [enabledIds]);
 
-  const getConfig = useCallback((plugin: FrontendPlugin): Record<string, unknown> => (
-    { ...defaultConfig(plugin), ...(configs[plugin.id] ?? {}) }
-  ), [configs]);
-
-  const setConfigField = useCallback((pluginId: string, key: string, value: unknown) => {
-    persistConfigs({ ...configs, [pluginId]: { ...(configs[pluginId] ?? {}), [key]: value } });
+  const setConfigField = useCallback((id: string, key: string, value: unknown) => {
+    const next = { ...configs, [id]: { ...(configs[id] ?? {}), [key]: value } };
+    setConfigs(next);
+    saveJson(CONFIG_KEY, next);
   }, [configs]);
 
-  /** DSL lines contributed by one plugin given the current model. */
-  const linesFor = useCallback((plugin: FrontendPlugin, model: WorkbookModel): string[] => {
-    try {
-      return plugin.toConstraintLines(getConfig(plugin), model);
-    } catch {
-      return [];
-    }
-  }, [getConfig]);
-
   return {
-    plugins,
+    installed,
     enabledIds,
     isEnabled: (id: string) => enabledIds.includes(id),
+    install,
+    uninstall,
     toggle,
-    getConfig,
+    getConfig: (id: string) => configs[id] ?? {},
     setConfigField,
-    linesFor,
   };
 }
