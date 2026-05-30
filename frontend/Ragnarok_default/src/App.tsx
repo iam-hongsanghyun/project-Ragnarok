@@ -45,6 +45,7 @@ import { SettingsView } from './views/SettingsView';
 import { PluginsView } from './views/PluginsView';
 import { ModelView } from './views/ModelView';
 import { BuildView } from './features/build/BuildView';
+import { DataView } from './views/DataView';
 import { AnalyticsView } from './views/AnalyticsView';
 import { ActivityBar } from './layout/ActivityBar';
 import { useModelIssues } from './features/validation/useModelIssues';
@@ -1711,6 +1712,8 @@ function AppInner() {
               onExportHdf5={handleExportHdf5}
             />
           )}
+
+          {tab === 'Data' && <DataView />}
 
           {tab === 'Analytics' && (
             <AnalyticsView

@@ -1,8 +1,8 @@
 /**
- * Activity bar — vertical, far-left strip with the four view switches.
+ * Activity bar — vertical, far-left strip with the view switches.
  *
- * Each button shows a single-letter glyph (M / S / A / P) plus the
- * full view name as a tooltip. This is the only entry point into a
+ * Each button shows a single-letter glyph (B / D / M / S / A / P) plus
+ * the full view name as a tooltip. This is the only entry point into a
  * view; there are no tabs anywhere else.
  */
 import React from 'react';
@@ -29,6 +29,7 @@ interface Entry {
 
 const ENTRIES: Entry[] = [
   { id: 'Build',     glyph: 'B', label: 'Build' },
+  { id: 'Data',      glyph: 'D', label: 'Data' },
   { id: 'Model',     glyph: 'M', label: 'Model' },
   { id: 'Settings',  glyph: 'S', label: 'Settings' },
   { id: 'Analytics', glyph: 'A', label: 'Analytics' },
