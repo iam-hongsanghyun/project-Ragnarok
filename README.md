@@ -25,15 +25,12 @@ All documentation lives in [docs/](./docs/) (start at the [docs index](./docs/RE
 
 | Document | Read it for |
 |---|---|
-| [docs/getting-started.md](./docs/getting-started.md) | Install, launch, and a quick tour |
-| [docs/guides/USER_MANUAL.md](./docs/guides/USER_MANUAL.md) | End-user manual for analysts |
-| [docs/guides/PLUGIN_AUTHORING.md](./docs/guides/PLUGIN_AUTHORING.md) | How to build a plugin |
-| [docs/architecture/ARCHITECTURE.md](./docs/architecture/ARCHITECTURE.md) | System overview, tech stack, repo layout, data flow |
-| [docs/architecture/PROCESSES.md](./docs/architecture/PROCESSES.md) | Step-by-step logic of each process |
-| [docs/architecture/DESIGN.md](./docs/architecture/DESIGN.md) | UI design philosophy |
-| [docs/CAPABILITIES.md](./docs/CAPABILITIES.md) | What Ragnarok can and cannot do (code-checked) |
+| [docs/user-manual.md](./docs/user-manual.md) | Using the app: install, launch, every view and feature, import/export, capabilities |
+| [docs/architecture.md](./docs/architecture.md) | Tech stack, repo layout, topology, data flow, process logic, design |
+| [docs/backend.md](./docs/backend.md) | Backend details: HTTP API, solve pipeline, network build, results, modes, constraints |
+| [docs/frontend.md](./docs/frontend.md) | Frontend details: App state, views, features, plugin host, shared utils/types |
+| [docs/plugin.md](./docs/plugin.md) | Building a plugin: manifest, GUI schema, JS hooks, own server, examples |
 | [docs/SUPPORT_MATRIX.md](./docs/SUPPORT_MATRIX.md) | Generated feature support matrix |
-| [docs/reference/](./docs/reference/) | Per-module function reference (backend + frontend) |
 | [docs/TODO.md](./docs/TODO.md) | Living project task log and roadmap |
 
 ## Scope

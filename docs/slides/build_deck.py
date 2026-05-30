@@ -245,7 +245,7 @@ def build(out: Path):
             "3. Optional: put heavy compute in your own backend server reached over localhost.",
             "4. Zip module.json + index.js and Install it in the Plugins tab.",
             "5. Register the server in plugins.env; run.command launches it. Click Connect, then Run.",
-            "Full guide: docs/guides/PLUGIN_AUTHORING.md",
+            "Full guide: docs/plugin.md",
         ], kicker="Authoring")
 
         slide_bullets(pdf, "Example: Dashboard Importer", [
@@ -258,11 +258,11 @@ def build(out: Path):
         ], kicker="Worked example")
 
         slide_bullets(pdf, "Where to read more", [
-            "docs/getting-started.md -- install, launch, and a quick tour.",
-            "docs/guides/USER_MANUAL.md -- day-to-day use for analysts.",
-            "docs/guides/PLUGIN_AUTHORING.md -- the full plugin authoring guide.",
-            "docs/architecture/ARCHITECTURE.md -- system design and topology.",
-            "docs/CAPABILITIES.md -- what Ragnarok can and cannot do (code-checked).",
+            "docs/user-manual.md -- install, launch, every view and feature, capabilities.",
+            "docs/architecture.md -- tech stack, topology, data flow, process logic, design.",
+            "docs/backend.md -- HTTP API, solve pipeline, network build, modes, constraints.",
+            "docs/frontend.md -- App state, views, features, and the plugin host.",
+            "docs/plugin.md -- the full plugin authoring guide.",
         ], kicker="Next")
 
     return out
