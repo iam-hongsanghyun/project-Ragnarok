@@ -252,15 +252,19 @@ Ragnarok does not maintain a separate backend skip policy for schema-defined she
 
 ## Roadmap
 
-The project is steering toward three large bodies of work, tackled one at a time. Detailed entries live in [docs/TODO.md](./docs/TODO.md).
+The project is steering toward five groups of work. Detailed entries (with IDs `B1`–`B3`, `F1`–`F2`, `R1`–`R2`, `D1`, `I1`–`I3`) and a cross-group execution order live in [docs/TODO.md](./docs/TODO.md).
 
-1. **Topology build mode** *(next).* The Build tab currently authors a model with a step-by-step (Serialised) wizard. A `Serialised vs Topology` toggle will add a free-form mode where the whole model is placed, connected, and edited directly on the map / network topology. It reuses the Build map (own-x/y component placement, click-to-link buses, "pick on map", drag-to-move) already shipped, plus multi-bus click-linking for branches.
+1. **Backend adapters** *(next).* New adapters under the existing `Backend` protocol (`backend/app/backends/`, selected by `options.backend`, reported by `GET /api/backends`; PyPSA cost-min is the only adapter today): a **profit-focused** merchant / asset-owner optimisation adapter (`B1`), a non-optimisation **simulation** adapter that steps the system through the horizon under fixed dispatch rules / bids / prices (`B2`), and a **power-flow-only** study mode (`B3`).
 
-2. **Pluggable backend** *(seam landed; additional backends future).* The backend abstraction layer is in place: a single `run(model, scenario, options)` adapter per backend, selected by `options.backend` (default `pypsa`), registered in `backend/app/backends/` and reported by `GET /api/backends`. PyPSA is the only adapter today. The server stays stateless — each adapter returns the schema-driven output cache and the frontend remains the single source of round-trip truth (no per-run backend artifact retention). Remaining work is adding a second adapter when a concrete alternative backend is chosen.
+2. **Financial model.** A **company / owner dimension** added to components and analytics (`F1`), and a **company-level financial model** (`F2`) — per-owner cashflow, revenue, opex, capex, debt service, IRR / NPV / DSCR / payback over the modelled horizon, driven by the dispatch and capacity-expansion results from the profit-focused adapter.
 
-3. **Data platform.** Location-based renewable (wind/solar) profile generation and import, a persistent profile database/cache layer, national-level starter model imports, a source registry with versioning and provenance, data-source health checks, and country/region import presets.
+3. **Risk modules.** A **physical-climate-risk** module (`R1`) that scores assets against heat / drought / flood / storm / wildfire hazard layers and feeds the result back as availability / derate time series, and a **transition-risk** module (`R2`) that applies carbon-price trajectories, demand shocks, policy pathways, and stranded-asset assumptions to the company-level financial model.
 
-A **power-flow-only (PF / linear PF) study mode** is also planned as a non-optimization companion to the topology builder.
+4. **Data platform.** A backend **profile / weather data layer** (`D1`) — persistent storage, source registry (versioning + provenance), source-health checks — that owns caching, versioning, and provenance for every external dataset Ragnarok consumes (renewable, weather, fleet, grid, policy).
+
+5. **Data importers.** Three user-facing surfaces above the data platform: a **location-based data & model bootstrap** (`I1`, pick a location → fetch weather, grid, fleet, demand, policy/price → snap to a runnable workbook); a **PyPSA-Earth / open-data toolchain importer** (`I2`, ingest country-scale networks built outside Ragnarok); and a **demand forecast generator** (`I3`, driver-based per-bus / per-region projection with hourly reshaping).
+
+The earlier "Topology build mode" direction was retired: the unified map-driven Build already covers the intended free-form editing affordances (own-x/y placement, click-to-link, pick-on-map, drag-to-move), so a separate `Serialised vs Topology` toggle is redundant.
 
 ## Development
 
