@@ -562,6 +562,13 @@ function AppInner() {
           narrative: metadata.narrative ?? [`Imported project from ${file.name}. Outputs restored from workbook.`],
         });
         imported.pluginAnalytics = metadata.pluginAnalytics;
+        // Restore per-plugin form configs from the workbook. setAllConfigs
+        // fully replaces the host's config map, so the imported workbook is
+        // the single source of truth for plugin state (matches how settings,
+        // constraints, and scenarios are restored).
+        if (metadata.pluginConfigs) {
+          frontendPlugins.setAllConfigs(metadata.pluginConfigs);
+        }
         imported.co2Shadow = metadata.co2Shadow ?? imported.co2Shadow;
         imported.runMeta = metadata.runMeta ?? imported.runMeta;
         imported.pathway = metadata.pathway ?? imported.pathway;
@@ -699,6 +706,11 @@ function AppInner() {
     const out = `${base}_project.xlsx`;
     const metadata = {
       pluginAnalytics: results?.pluginAnalytics,
+      // Snapshot every installed plugin's stored form-config so the
+      // exported workbook reproduces plugin state on the receiving end.
+      // Without this, sharing a .xlsx loses everything the user typed
+      // into their plugin panels.
+      pluginConfigs: frontendPlugins.getAllConfigs(),
       co2Shadow: results?.co2Shadow,
       narrative: results?.narrative,
       runMeta: results?.runMeta,

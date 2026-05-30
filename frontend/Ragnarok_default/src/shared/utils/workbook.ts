@@ -15,6 +15,7 @@ import { SCENARIO_SHEET } from './scenarios';
 
 export const RESULT_META_SHEET = 'RAGNAROK_ResultMeta';
 export const PLUGIN_ANALYTICS_SHEET = 'RAGNAROK_PluginAnalytics';
+export const PLUGIN_CONFIGS_SHEET = 'RAGNAROK_PluginConfigs';
 export const SETTINGS_SHEET = 'RAGNAROK_Settings';
 export const CONSTRAINTS_SHEET = 'RAGNAROK_Constraints';
 export const RUN_STATE_SHEET = 'RAGNAROK_RunState';
@@ -378,6 +379,11 @@ export interface ProjectMetadata {
   narrative?: RunResults['narrative'];
   co2Shadow?: RunResults['co2Shadow'];
   pluginAnalytics?: RunResults['pluginAnalytics'];
+  /** Per-plugin user config (the form values entered in each installed
+   *  plugin's panel). Round-trips through Export Project / Import Project
+   *  so a shared workbook reproduces the plugin state, not just the inputs
+   *  / outputs. Keyed by plugin id. */
+  pluginConfigs?: Record<string, Record<string, unknown>>;
   runMeta?: RunResults['runMeta'];
   pathway?: RunResults['pathway'];
   rolling?: RunResults['rolling'];
@@ -394,6 +400,7 @@ function isProjectMetadataSheet(sheetName: string): boolean {
   return [
     RESULT_META_SHEET,
     PLUGIN_ANALYTICS_SHEET,
+    PLUGIN_CONFIGS_SHEET,
     SETTINGS_SHEET,
     CONSTRAINTS_SHEET,
     RUN_STATE_SHEET,
@@ -511,6 +518,20 @@ export function buildProjectWorkbook(
   });
   if (pluginRows.length > 0) {
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(pluginRows), PLUGIN_ANALYTICS_SHEET);
+  }
+
+  // ── Plugin configs ─────────────────────────────────────────────────────
+  // Per-plugin user form values. Chunked the same way as PluginAnalytics so
+  // a long config payload doesn't hit Excel's 32 767-char cell limit.
+  const pluginConfigRows: GridRow[] = [];
+  Object.entries(metadata.pluginConfigs ?? {}).forEach(([moduleId, config]) => {
+    if (!config || typeof config !== 'object') return;
+    chunkText(JSON.stringify(config)).forEach((chunk, part) =>
+      pluginConfigRows.push({ moduleId, part, json: chunk }),
+    );
+  });
+  if (pluginConfigRows.length > 0) {
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(pluginConfigRows), PLUGIN_CONFIGS_SHEET);
   }
 
   if (metadata.settings) {
@@ -693,6 +714,35 @@ export function parseProjectWorkbook(
         }
       });
       if (Object.keys(pluginAnalytics).length > 0) metadata.pluginAnalytics = pluginAnalytics;
+      return;
+    }
+
+    if (sheetName === PLUGIN_CONFIGS_SHEET) {
+      // Reverse of the writer above: rows are {moduleId, part, json} chunks.
+      // Reassemble each moduleId's chunks in part order, JSON.parse the
+      // result, and store under metadata.pluginConfigs.
+      const acc: Record<string, string[]> = {};
+      rawRows.forEach((row) => {
+        const moduleId = String(row.moduleId ?? '').trim();
+        if (!moduleId) return;
+        const part = Number(row.part ?? 0);
+        const json = typeof row.json === 'string' ? row.json : '';
+        if (!acc[moduleId]) acc[moduleId] = [];
+        acc[moduleId][part] = json;
+      });
+      const pluginConfigs: Record<string, Record<string, unknown>> = {};
+      Object.entries(acc).forEach(([moduleId, chunks]) => {
+        try {
+          const merged = chunks.join('');
+          const parsed = merged.trim() ? JSON.parse(merged) : {};
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            pluginConfigs[moduleId] = parsed as Record<string, unknown>;
+          }
+        } catch {
+          /* skip — corrupt chunk, leave that plugin's config to its defaults */
+        }
+      });
+      if (Object.keys(pluginConfigs).length > 0) metadata.pluginConfigs = pluginConfigs;
       return;
     }
 

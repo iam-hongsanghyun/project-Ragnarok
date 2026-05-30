@@ -114,12 +114,25 @@ export function useFrontendPlugins() {
     saveJson(CONFIG_KEY, next);
   }, [configs]);
 
+  /** Replace every installed plugin's config in one shot (used by Import
+   *  Project so the workbook's pluginConfigs sheet drives the state). The
+   *  passed map fully replaces any existing config entries — anything
+   *  absent from the map is wiped, matching the workbook-is-truth model. */
+  const setAllConfigs = useCallback((next: Record<string, Record<string, unknown>>) => {
+    setConfigs(next);
+    saveJson(CONFIG_KEY, next);
+  }, []);
+
   return {
     installed,
     install,
     uninstall,
     getConfig: (id: string): Record<string, unknown> => configs[id] ?? {},
+    /** Snapshot of every plugin's stored config — used by Export Project so
+     *  the workbook can carry the user's plugin form values. */
+    getAllConfigs: (): Record<string, Record<string, unknown>> => configs,
     setConfigField,
     setConfig,
+    setAllConfigs,
   };
 }
