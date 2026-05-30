@@ -1402,6 +1402,11 @@ function AppInner() {
       const doneMsg = `Completed — ${visible.runMeta.snapshotCount} snapshots, ${visible.runMeta.modeledHours} h.`;
       setStatus(doneMsg);
       showToast(doneMsg, 'success');
+      // Run finished — tell the Log tab (if open) to refresh so the user
+      // sees the freshly-captured solve transcript without waiting for the
+      // next poll. The LogPane listens for this on `window`. No-op when
+      // the Log tab is not mounted.
+      window.dispatchEvent(new CustomEvent('ragnarok:log-refresh'));
       setRunHistory((hist) => {
         const next = hist.length + 1;
         const entry: RunHistoryEntry = {
@@ -1448,6 +1453,7 @@ function AppInner() {
           setRunStatus('error');
           setStatus('Run disconnected — server restarted. Please run again.');
           showToast('Run disconnected — server restarted.', 'error');
+          window.dispatchEvent(new CustomEvent('ragnarok:log-refresh'));
           return;
         }
 
@@ -1458,6 +1464,7 @@ function AppInner() {
           setRunStatus('error');
           setStatus(msg || 'Backend run failed.');
           showToast(msg || 'Backend run failed.', 'error');
+          window.dispatchEvent(new CustomEvent('ragnarok:log-refresh'));
           return;
         }
 
