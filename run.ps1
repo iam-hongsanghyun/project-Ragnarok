@@ -139,10 +139,16 @@ Free-Port 8000
 
 # ── Launch ────────────────────────────────────────────────────────────────────
 
-Write-Host 'Starting backend...'
+# Dev-mode launcher: enable uvicorn --reload so backend Python edits are
+# picked up without manually restarting run.ps1. Scoped to --reload-dir
+# backend so watchfiles ignores the venv, node_modules, and the frontend
+# build cache. Caveat: if backend Python is edited while a solve is in
+# flight, uvicorn restart will kill the child mp.Process worker — that is
+# acceptable for dev because the solve was about to be invalidated anyway.
+Write-Host 'Starting backend (dev, auto-reloads on backend/* edits)...'
 $Backend = Start-Process `
     -FilePath $PythonExe `
-    -ArgumentList '-m', 'uvicorn', 'backend.app.main:app', '--host', '127.0.0.1', '--port', '8000' `
+    -ArgumentList '-m', 'uvicorn', 'backend.app.main:app', '--host', '127.0.0.1', '--port', '8000', '--reload', '--reload-dir', 'backend' `
     -WorkingDirectory $PSScriptRoot `
     -PassThru `
     -NoNewWindow
