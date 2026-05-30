@@ -88,17 +88,34 @@ if (-not (Test-Path (Join-Path $FrontendDir 'node_modules'))) {
     try { npm install } finally { Pop-Location }
 }
 
-# ── Clear stale build caches ──────────────────────────────────────────────────
-# The CRA webpack cache survives across `npm start` invocations and has caused
-# users to keep seeing pre-fix bundles after a code change. Always wipe it on
-# launch so the dev server compiles a fresh bundle.
+# ── Clear stale build caches when dependencies change ────────────────────────
+# CRA's webpack cache survives across `npm start` invocations. A dependency
+# upgrade can leave cached transformed sources stale, but the everyday "just
+# launch the app" case doesn't need a wipe — and an unconditional wipe forces
+# a cold compile of the whole bundle on every launch (slow). Hash package.json
+# + package-lock.json (mirrors the ReqHash pattern above) and only wipe when
+# they actually change.
 
-$CacheDir = Join-Path $FrontendDir 'node_modules\.cache'
-$BuildDir = Join-Path $FrontendDir 'build'
-if ((Test-Path $CacheDir) -or (Test-Path $BuildDir)) {
-    Write-Host 'Clearing build caches (node_modules\.cache, build\)...'
-    if (Test-Path $CacheDir) { Remove-Item -Recurse -Force $CacheDir -ErrorAction SilentlyContinue }
-    if (Test-Path $BuildDir) { Remove-Item -Recurse -Force $BuildDir -ErrorAction SilentlyContinue }
+$NpmHashFile = Join-Path $FrontendDir 'node_modules\.npm_hash'
+$PkgFile     = Join-Path $FrontendDir 'package.json'
+$LockFile    = Join-Path $FrontendDir 'package-lock.json'
+$NpmHashParts = @()
+if (Test-Path $PkgFile)  { $NpmHashParts += (Get-FileHash $PkgFile  -Algorithm MD5).Hash }
+if (Test-Path $LockFile) { $NpmHashParts += (Get-FileHash $LockFile -Algorithm MD5).Hash }
+$NpmHash       = ($NpmHashParts -join '')
+$StoredNpmHash = if (Test-Path $NpmHashFile) { (Get-Content $NpmHashFile -Raw).Trim() } else { '' }
+
+if ($NpmHash.Trim() -ne $StoredNpmHash) {
+    $CacheDir = Join-Path $FrontendDir 'node_modules\.cache'
+    $BuildDir = Join-Path $FrontendDir 'build'
+    if ((Test-Path $CacheDir) -or (Test-Path $BuildDir)) {
+        Write-Host 'Clearing build caches (dependencies changed)...'
+        if (Test-Path $CacheDir) { Remove-Item -Recurse -Force $CacheDir -ErrorAction SilentlyContinue }
+        if (Test-Path $BuildDir) { Remove-Item -Recurse -Force $BuildDir -ErrorAction SilentlyContinue }
+    }
+    Set-Content -Path $NpmHashFile -Value $NpmHash
+} else {
+    Write-Host 'Frontend build cache is up to date.'
 }
 
 # ── Free ports 3000 + 8000 (kill stale frontend / backend) ────────────────────

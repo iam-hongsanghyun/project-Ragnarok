@@ -75,14 +75,27 @@ if [ ! -d "$FRONTEND_DIR/node_modules" ]; then
   (cd "$FRONTEND_DIR" && npm install)
 fi
 
-# ── Clear stale build caches ──────────────────────────────────────────────────
-# The CRA webpack cache survives across `npm start` invocations and has caused
-# users to keep seeing pre-fix bundles after a code change. Always wipe it on
-# launch so the dev server compiles a fresh bundle.
+# ── Clear stale build caches when dependencies change ────────────────────────
+# CRA's webpack cache survives across `npm start` invocations. A dependency
+# upgrade can leave cached transformed sources stale, but the everyday "just
+# launch the app" case doesn't need a wipe — and an unconditional wipe forces
+# a cold compile of the whole bundle on every launch (slow). Hash package.json
+# + package-lock.json (mirrors the REQ_HASH pattern above) and only wipe when
+# they actually change.
 
-if [ -d "$FRONTEND_DIR/node_modules/.cache" ] || [ -d "$FRONTEND_DIR/build" ]; then
-  echo "Clearing build caches (node_modules/.cache, build/)..."
-  rm -rf "$FRONTEND_DIR/node_modules/.cache" "$FRONTEND_DIR/build"
+NPM_HASH_FILE="$FRONTEND_DIR/node_modules/.npm_hash"
+NPM_HASH="$(cat "$FRONTEND_DIR/package.json" "$FRONTEND_DIR/package-lock.json" 2>/dev/null \
+            | { md5 -q 2>/dev/null || md5sum 2>/dev/null | cut -d' ' -f1; })"
+STORED_NPM_HASH="$(cat "$NPM_HASH_FILE" 2>/dev/null || echo '')"
+
+if [ "$NPM_HASH" != "$STORED_NPM_HASH" ]; then
+  if [ -d "$FRONTEND_DIR/node_modules/.cache" ] || [ -d "$FRONTEND_DIR/build" ]; then
+    echo "Clearing build caches (dependencies changed)..."
+    rm -rf "$FRONTEND_DIR/node_modules/.cache" "$FRONTEND_DIR/build"
+  fi
+  echo "$NPM_HASH" > "$NPM_HASH_FILE"
+else
+  echo "Frontend build cache is up to date."
 fi
 
 # ── Free ports 3000 + 8000 (kill stale frontend / backend) ────────────────────
