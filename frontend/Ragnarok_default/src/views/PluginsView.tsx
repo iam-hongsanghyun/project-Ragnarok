@@ -1,13 +1,15 @@
 /**
- * Plugins view — install, configure and run frontend-only plugins.
+ * Plugins view — install + manage frontend-only plugins.
  *
- * Parallel to Model / Settings / Analytics. Plugins are a frontend concern: the
- * Ragnarok backend never hosts or runs them.
+ * Mirrors the Analytics layout: a left rail to install and switch between
+ * plugins, and a main pane showing the selected plugin's config + actions.
+ * Plugins run in the browser and never contact the Ragnarok backend.
  */
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import { WorkbookModel } from '../shared/types';
-import { PluginManagerPanel } from '../features/plugins/PluginManagerPanel';
 import { FrontendPluginHost } from '../features/plugins/frontendPlugins';
+import { PluginDetail } from '../features/plugins/PluginDetail';
+import { useToast } from '../shared/components/Toast';
 
 interface Props {
   host: FrontendPluginHost;
@@ -20,18 +22,81 @@ interface Props {
 }
 
 export function PluginsView(props: Props) {
+  const { host } = props;
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const { showToast } = useToast();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const installed = host.installed;
+  const selected = installed.find((p) => p.id === selectedId) ?? installed[0] ?? null;
+
+  const onPick = async (file: File | undefined) => {
+    if (!file) return;
+    const result = await host.install(file);
+    showToast(result.ok ? `Installed "${result.id}"` : `Install failed: ${result.error}`, result.ok ? 'success' : 'error');
+    if (result.ok && result.id) setSelectedId(result.id);
+    if (fileRef.current) fileRef.current.value = '';
+  };
+
   return (
     <div className="view plugins-view">
+      <aside className="view-rail view-rail--left" aria-label="Plugins">
+        <div className="view-rail-header">Plugins</div>
+        <div className="plugin-rail-body">
+          <input ref={fileRef} type="file" accept=".zip" style={{ display: 'none' }} onChange={(e) => onPick(e.target.files?.[0])} />
+          <button className="tb-btn plugin-rail-install" onClick={() => fileRef.current?.click()}>Install plugin…</button>
+          {installed.length === 0 ? (
+            <p className="sg-setting-hint" style={{ padding: '8px 12px' }}>No plugins installed.</p>
+          ) : (
+            <ul className="plugin-rail-list">
+              {installed.map((p) => (
+                <li key={p.id}>
+                  <button
+                    className={`plugin-rail-item${selected?.id === p.id ? ' plugin-rail-item--active' : ''}`}
+                    onClick={() => setSelectedId(p.id)}
+                  >
+                    <input
+                      type="checkbox"
+                      className="gcc-check"
+                      checked={host.isEnabled(p.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => host.toggle(p.id, e.target.checked)}
+                    />
+                    <span className="plugin-rail-name">{p.name}</span>
+                    <span
+                      className="gcc-del plugin-rail-remove"
+                      title="Uninstall"
+                      role="button"
+                      onClick={(e) => { e.stopPropagation(); host.uninstall(p.id); if (selectedId === p.id) setSelectedId(null); }}
+                    >
+                      x
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </aside>
+
       <main className="view-main">
-        <PluginManagerPanel
-          host={props.host}
-          model={props.model}
-          onReplaceModel={props.onReplaceModel}
-          onMergeSheets={props.onMergeSheets}
-          customDsl={props.customDsl}
-          onCustomDslChange={props.onCustomDslChange}
-          results={props.results}
-        />
+        {selected ? (
+          <PluginDetail
+            host={host}
+            plugin={selected}
+            model={props.model}
+            onReplaceModel={props.onReplaceModel}
+            onMergeSheets={props.onMergeSheets}
+            customDsl={props.customDsl}
+            onCustomDslChange={props.onCustomDslChange}
+            results={props.results}
+          />
+        ) : (
+          <div className="view-empty">
+            <h3>No plugins installed</h3>
+            <p>Use “Install plugin…” in the rail to add a <code>.zip</code> package (a <code>module.json</code> manifest + JS entry).</p>
+          </div>
+        )}
       </main>
     </div>
   );

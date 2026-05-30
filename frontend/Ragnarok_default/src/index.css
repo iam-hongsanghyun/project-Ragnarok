@@ -5123,34 +5123,40 @@ th:hover .col-delete-btn {
 .constraints-applied-badge--plugin { color: var(--brand); border-color: var(--brand); }
 .constraints-applied-name { font-family: var(--font-mono); color: var(--text); }
 .constraints-applied-dual { color: var(--muted); font-family: var(--font-mono); }
-.plugin-list {
+.plugin-rail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 10px;
+  min-height: 0;
+  overflow-y: auto;
+}
+.plugin-rail-install { align-self: stretch; }
+.plugin-rail-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
-.plugin-list-item {
-  padding: 8px 0;
-  border-top: 1px solid var(--border);
-}
-.plugin-list-item:first-of-type { border-top: none; }
-.plugin-list-head {
+.plugin-rail-item {
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+  font-size: 0.82rem;
 }
-.plugin-list-version {
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  color: var(--muted);
-}
-.plugin-list-head .gcc-del { margin-left: auto; }
-.plugin-fe-config {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 8px;
-  padding-left: 22px;
-}
+.plugin-rail-item:hover { background: #f1f5f9; }
+.plugin-rail-item--active { background: #e8f0ef; font-weight: 600; }
+.plugin-rail-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plugin-rail-remove { flex-shrink: 0; }
 .plugin-analyze-out {
   margin: 0;
   padding: 8px 10px;
