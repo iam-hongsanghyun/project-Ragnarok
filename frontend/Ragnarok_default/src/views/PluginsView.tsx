@@ -10,6 +10,7 @@ import { WorkbookModel } from '../shared/types';
 import { FrontendPluginHost } from '../features/plugins/frontendPlugins';
 import { PluginDetail } from '../features/plugins/PluginDetail';
 import { useToast } from '../shared/components/Toast';
+import { ResizablePanels } from '../layout/ResizablePanels';
 
 interface Props {
   host: FrontendPluginHost;
@@ -39,7 +40,7 @@ export function PluginsView(props: Props) {
   };
 
   return (
-    <div className="view plugins-view">
+    <ResizablePanels id="plugins-rail" direction="horizontal" className="view plugins-view" initialSizes={[22, 78]} minSize={180}>
       <aside className="view-rail view-rail--left" aria-label="Plugins">
         <div className="view-rail-header">Plugins</div>
         <div className="plugin-rail-body">
@@ -98,6 +99,6 @@ export function PluginsView(props: Props) {
           </div>
         )}
       </main>
-    </div>
+    </ResizablePanels>
   );
 }

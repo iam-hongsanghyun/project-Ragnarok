@@ -7,6 +7,7 @@
  */
 import React from 'react';
 import { usePersistedState } from '../shared/utils/usePersistedState';
+import { ResizablePanels } from '../layout/ResizablePanels';
 import {
   AppliedConstraint,
   CarbonPriceScheduleEntry,
@@ -149,7 +150,7 @@ export function SettingsView(props: SettingsViewProps) {
   const groups = GROUPS;
 
   return (
-    <div className="settings-view">
+    <ResizablePanels id="settings-rail" direction="horizontal" className="settings-view" initialSizes={[20, 80]} minSize={180}>
       <aside className="settings-section-nav" aria-label="Settings sections">
         {groups.map((g) => (
           <div key={g} className="settings-nav-group">
@@ -181,6 +182,6 @@ export function SettingsView(props: SettingsViewProps) {
         {section === 'projectDefaults' && <ProjectDefaultsSection {...props} />}
         {section === 'solver'         && <SolverSection {...props} />}
       </main>
-    </div>
+    </ResizablePanels>
   );
 }

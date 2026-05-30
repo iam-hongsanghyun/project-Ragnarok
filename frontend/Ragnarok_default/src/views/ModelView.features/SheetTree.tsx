@@ -60,7 +60,7 @@ export function SheetTree({ model, issues, sel, onSelChange }: Props) {
   return (
     <nav className="sheet-tree" aria-label="Component sheets">
       <div className="sheet-tree-header">
-        <span className="sheet-tree-title">Components</span>
+        <span className="sheet-tree-title">Model</span>
       </div>
       <div className="sheet-tree-toolbar">
         <input

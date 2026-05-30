@@ -5123,38 +5123,45 @@ th:hover .col-delete-btn {
 .constraints-applied-badge--plugin { color: var(--brand); border-color: var(--brand); }
 .constraints-applied-name { font-family: var(--font-mono); color: var(--text); }
 .constraints-applied-dual { color: var(--muted); font-family: var(--font-mono); }
+/* Match the Settings (Setup) nav look. */
+.plugins-view .view-rail--left { background: #f8fafc; }
 .plugin-rail-body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 10px 10px;
+  padding: 12px 0;
   min-height: 0;
   overflow-y: auto;
 }
-.plugin-rail-install { align-self: stretch; }
+.plugin-rail-install { align-self: stretch; margin: 0 12px; }
 .plugin-rail-list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
 }
 .plugin-rail-item {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 6px 8px;
+  padding: 6px 16px;
   border: none;
+  border-left: 2px solid transparent;
   background: transparent;
   cursor: pointer;
   text-align: left;
   color: var(--text);
   font-size: 0.82rem;
 }
-.plugin-rail-item:hover { background: #f1f5f9; }
-.plugin-rail-item--active { background: #e8f0ef; font-weight: 600; }
+.plugin-rail-item:hover { background: rgba(0, 0, 0, 0.04); }
+.plugin-rail-item--active {
+  background: rgba(29, 78, 216, 0.08);
+  border-left-color: var(--brand);
+  color: var(--brand);
+  font-weight: 600;
+}
 .plugin-rail-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .plugin-rail-remove { flex-shrink: 0; }
 .plugin-analyze-out {
@@ -6203,6 +6210,13 @@ th:hover .col-delete-btn {
   min-width: 0;
   min-height: 0;
 }
+/* Rails inside a resizable split: the gutter (+ minSize) controls width, not the
+   rail's own fixed width. */
+.rzp-panel > .settings-section-nav,
+.rzp-panel > .view-rail {
+  width: 100%;
+  min-width: 0;
+}
 .rzp-gutter {
   flex: 0 0 1px;
   background: var(--border);
@@ -6291,7 +6305,7 @@ code, kbd, samp, tt,
 }
 
 /* Any button inside the workspace */
-.workspace-main button:not(.tb-btn):not(.run-button):not(.primary-button):not(.ghost-button):not(.secondary-button):not(.tab-button):not(.subnav-btn):not(.analytics-subtab):not(.settings-nav-item):not(.activity-bar-btn):not(.sheet-tree-item):not(.sheet-tree-group-header):not(.gcc-del):not(.tab-button):not(.sg-module-card-header):not(.subnav-btn) {
+.workspace-main button:not(.tb-btn):not(.run-button):not(.primary-button):not(.ghost-button):not(.secondary-button):not(.tab-button):not(.subnav-btn):not(.analytics-subtab):not(.settings-nav-item):not(.activity-bar-btn):not(.sheet-tree-item):not(.sheet-tree-group-header):not(.gcc-del):not(.tab-button):not(.sg-module-card-header):not(.subnav-btn):not(.plugin-rail-item) {
   font-family: inherit;
   font-size: 0.82rem;
   font-weight: 500;
