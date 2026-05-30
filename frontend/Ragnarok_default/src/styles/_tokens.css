@@ -32,11 +32,11 @@
    ════════════════════════════════════════════════════════════════════ */
 
 :root {
-  --bg: var(--bg);
-  --bg-hover: var(--bg-hover);        /* slate-100 — table stripes, row hovers, separators */
-  --surface: var(--surface);
-  --panel: var(--surface);
-  --panel-strong: var(--surface);
+  --bg: #f8fafc;
+  --bg-hover: #f1f5f9;         /* slate-100 — table stripes, row hovers, separators */
+  --surface: #ffffff;
+  --panel: #ffffff;
+  --panel-strong: #ffffff;
   --border: #e2e8f0;
   --border-strong: #cbd5e1;
   --text: #0f172a;
