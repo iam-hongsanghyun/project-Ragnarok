@@ -1606,13 +1606,44 @@ function AppInner() {
           <button
             className="tb-btn tb-btn--muted"
             onClick={() => {
-              if (!window.confirm('Clear the loaded model? All unsaved edits and results will be lost.')) return;
+              if (!window.confirm(
+                'Clear the entire cache?\n\n'
+                + 'This removes:\n'
+                + '  • the loaded model + every unsaved edit + every result\n'
+                + '  • every persisted UI preference (column widths, panel sizes,\n'
+                + '    Data-view selection, settings, run history, recent files)\n'
+                + '  • every localStorage entry Ragnarok wrote\n\n'
+                + 'Ragnarok will reload to the Welcome page.',
+              )) return;
+              // Wipe every Ragnarok-owned localStorage key. The prefixes are
+              // stable across the codebase: `pypsa.*` for layout-level state,
+              // `ragnarok:*` for feature-level state, `ui:*` for view-level
+              // state. Untouched: third-party origin storage (none today, but
+              // future-proofs against accidental cross-app erasure).
+              try {
+                const doomed: string[] = [];
+                for (let i = 0; i < window.localStorage.length; i += 1) {
+                  const key = window.localStorage.key(i);
+                  if (!key) continue;
+                  if (
+                    key.startsWith('pypsa.')
+                    || key.startsWith('ragnarok:')
+                    || key.startsWith('ui:')
+                  ) {
+                    doomed.push(key);
+                  }
+                }
+                for (const key of doomed) window.localStorage.removeItem(key);
+              } catch {
+                /* storage unavailable */
+              }
               resetForNewModel(createEmptyWorkbook(), 'untitled.xlsx');
               setFileHandle(null);
-              setStatus('Model cleared.');
-              showToast('Model cleared', 'success');
+              // Reload so every component re-reads its now-empty persisted
+              // state and the Welcome view is restored as the landing page.
+              window.location.reload();
             }}
-            title="Remove the currently loaded model and start from an empty workbook"
+            title="Remove the loaded model AND wipe every persisted UI preference"
           >
             Clear
           </button>
