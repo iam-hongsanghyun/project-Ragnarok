@@ -443,7 +443,7 @@ export const osmModule: DatabaseModule<OSMPayload> = {
   },
 
   preview(result): PreviewSummary {
-    const { parsed, sheets, resolvedOptions } = result.payload;
+    const { parsed, sheets } = result.payload;
     const lineRows = sheets.lines || [];
     const busRows = sheets.buses || [];
     const transformerRows = sheets.transformers || [];
@@ -489,23 +489,31 @@ export const osmModule: DatabaseModule<OSMPayload> = {
       ],
     };
 
+    // Headline counts are deliberately bus/line/transformer (workbook-row
+    // terminology) — not "substations", which previously confused users
+    // because synthesized endpoint buses inflated that number above the
+    // raw OSM substation count.
     const counts: Record<string, number> = {
-      substations: busRows.length,
+      buses: busRows.length,
       lines: lineRows.length,
       transformers: transformerRows.length,
-      total_length_km: Math.round(totalLength),
+      length_km: Math.round(totalLength),
     };
     for (const [k, v] of Object.entries(voltages).sort(([a], [b]) => a.localeCompare(b))) {
       counts[`voltage:${k}`] = v;
     }
 
-    // Show the raw OSM input count so the user can see how many rows were
-    // consolidated by the cleanup vs how many landed in the workbook.
-    const rawSummary = `Raw OSM: ${parsed.substations.length} substations, ${parsed.lines.length} ways.`;
-    const cleanupSummary =
-      resolvedOptions.style === 'pypsa_earth'
-        ? `After cleanup: ${busRows.length} buses, ${lineRows.length} lines, ${transformerRows.length} transformers.`
-        : 'Raw mode: OSM geometry preserved; each OSM way is one line row.';
+    // Single-line provenance note: how many rows we started with from
+    // OSM vs how many landed in the workbook after the chosen cleanup.
+    // Keeps the preview lean — the preset selector itself already tells
+    // the user which mode they picked.
+    const rawSubs = parsed.substations.length;
+    const rawLines = parsed.lines.length;
+    const finalSubs = busRows.length;
+    const finalLines = lineRows.length;
+    const subDelta = finalSubs !== rawSubs ? ` → ${finalSubs}` : '';
+    const lineDelta = finalLines !== rawLines ? ` → ${finalLines}` : '';
+    const rawSummary = `OSM input: ${rawSubs}${subDelta} substations · ${rawLines}${lineDelta} lines`;
 
     return {
       counts,
@@ -524,7 +532,7 @@ export const osmModule: DatabaseModule<OSMPayload> = {
           country: row.country,
         })),
       },
-      notes: [rawSummary, cleanupSummary],
+      notes: [rawSummary],
       overlay,
     };
   },

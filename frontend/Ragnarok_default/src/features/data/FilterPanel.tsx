@@ -273,44 +273,72 @@ function FilterInput({
   }
 }
 
+function formatCount(value: number): string {
+  return value.toLocaleString();
+}
+
+/** Sort voltage keys ("145 kV", "1100 kV", …) ascending numerically. */
+function compareVoltageKey(a: string, b: string): number {
+  const na = parseFloat(a);
+  const nb = parseFloat(b);
+  if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
+  return a.localeCompare(b);
+}
+
 function PreviewBody({ summary }: { summary: PreviewSummary }) {
-  const numeric = Object.entries(summary.counts).filter(([k]) => !k.startsWith('carrier:') && !k.startsWith('voltage:'));
-  const carriers = Object.entries(summary.counts).filter(([k]) => k.startsWith('carrier:'));
-  const voltages = Object.entries(summary.counts).filter(([k]) => k.startsWith('voltage:'));
+  // Split the count map into rows + breakdowns. The renderer below shows
+  // a single right-aligned column for the headline counts, then optional
+  // carrier / voltage breakdowns as compact two-column lists.
+  const numeric = Object.entries(summary.counts).filter(
+    ([k]) => !k.startsWith('carrier:') && !k.startsWith('voltage:'),
+  );
+  const carriers = Object.entries(summary.counts)
+    .filter(([k]) => k.startsWith('carrier:'))
+    .map(([k, v]) => [k.slice('carrier:'.length), v] as const);
+  const voltages = Object.entries(summary.counts)
+    .filter(([k]) => k.startsWith('voltage:'))
+    .map(([k, v]) => [k.slice('voltage:'.length), v] as const)
+    .sort(([a], [b]) => compareVoltageKey(a, b));
+
   return (
     <div className="data-import-preview">
-      <h4>Preview</h4>
-      {summary.notes.map((n, idx) => (
-        <p key={idx} className="data-import-preview__note">{n}</p>
-      ))}
+      {summary.notes.length > 0 && (
+        <p className="data-import-preview__note">{summary.notes[0]}</p>
+      )}
       {numeric.length > 0 && (
         <dl className="data-import-preview__counts">
           {numeric.map(([k, v]) => (
-            <div key={k}>
+            <React.Fragment key={k}>
               <dt>{k.replace(/_/g, ' ')}</dt>
-              <dd>{v}</dd>
-            </div>
+              <dd>{formatCount(Number(v) || 0)}</dd>
+            </React.Fragment>
           ))}
         </dl>
       )}
       {carriers.length > 0 && (
-        <section>
+        <section className="data-import-preview__group">
           <h5>By carrier</h5>
-          <ul className="data-import-preview__chips">
-            {carriers.map(([k, v]) => (
-              <li key={k}><span>{k.slice('carrier:'.length)}</span><b>{v}</b></li>
+          <dl className="data-import-preview__counts">
+            {carriers.map(([name, v]) => (
+              <React.Fragment key={name}>
+                <dt>{name}</dt>
+                <dd>{formatCount(Number(v) || 0)}</dd>
+              </React.Fragment>
             ))}
-          </ul>
+          </dl>
         </section>
       )}
       {voltages.length > 0 && (
-        <section>
+        <section className="data-import-preview__group">
           <h5>By voltage</h5>
-          <ul className="data-import-preview__chips">
-            {voltages.map(([k, v]) => (
-              <li key={k}><span>{k.slice('voltage:'.length)}</span><b>{v}</b></li>
+          <dl className="data-import-preview__counts">
+            {voltages.map(([name, v]) => (
+              <React.Fragment key={name}>
+                <dt>{name}</dt>
+                <dd>{formatCount(Number(v) || 0)}</dd>
+              </React.Fragment>
             ))}
-          </ul>
+          </dl>
         </section>
       )}
     </div>

@@ -8086,68 +8086,55 @@ code, kbd, samp, tt,
   border: 1px solid #fecaca;
   border-radius: 4px;
 }
+/* Preview pane — kept deliberately quiet. Single-column counts list with
+   label-left and tabular number right-aligned. No headline "PREVIEW"
+   wordmark — the right rail is already the preview surface. */
 .data-import-preview {
   border-top: 1px solid var(--border);
-  padding-top: 12px;
+  padding-top: 10px;
   font-size: 0.84rem;
 }
-.data-import-preview h4 {
-  margin: 0 0 8px;
-  font-size: 0.82rem;
-  font-family: var(--font-mono);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-}
 .data-import-preview h5 {
-  margin: 8px 0 4px;
-  font-size: 0.76rem;
+  margin: 10px 0 4px;
+  font-size: 0.72rem;
   font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--muted);
+  font-weight: 500;
 }
 .data-import-preview__note {
-  margin: 0 0 6px;
-  color: var(--text);
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
 }
+/* dt/dd grid: label-column flex 1, number-column auto. Each pair occupies
+   one row. React.Fragment wrappers keep the dt+dd as direct children of
+   the grid so the layout works without per-item wrappers. */
 .data-import-preview__counts {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 2px 8px;
+  column-gap: 12px;
+  row-gap: 2px;
   margin: 0;
+  align-items: baseline;
 }
 .data-import-preview__counts dt {
   margin: 0;
   text-transform: capitalize;
   color: var(--muted);
-  font-size: 0.78rem;
+  font-size: 0.8rem;
 }
 .data-import-preview__counts dd {
   margin: 0;
   font-variant-numeric: tabular-nums;
-  font-weight: 600;
+  font-weight: 500;
   text-align: right;
+  color: var(--text);
 }
-.data-import-preview__chips {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-.data-import-preview__chips li {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  padding: 2px 6px;
-  font-size: 0.78rem;
-  display: inline-flex;
-  gap: 4px;
-}
-.data-import-preview__chips b {
-  font-variant-numeric: tabular-nums;
+.data-import-preview__group {
+  margin-top: 4px;
 }
 .data-import-banner {
   background: var(--bg-hover);
