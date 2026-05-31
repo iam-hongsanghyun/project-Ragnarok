@@ -42,23 +42,47 @@ function parseISO(iso: string | null | undefined): Date | null {
   return new Date(y, mo - 1, d);
 }
 
+const POPOVER_WIDTH = 268;  // matches .data-import-date__popover .react-calendar width + padding
+const POPOVER_MARGIN = 8;
+
 export function DateField({ value, onChange, min, max, placeholder }: Props) {
   const [open, setOpen] = useState(false);
+  const [coords, setCoords] = useState<{ left: number; top: number } | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  const placePopover = () => {
+    const t = triggerRef.current;
+    if (!t) return;
+    const r = t.getBoundingClientRect();
+    // Default: anchor below+left of the trigger. Flip leftward when the
+    // popover would otherwise overflow the viewport's right edge.
+    let left = r.left;
+    const maxLeft = window.innerWidth - POPOVER_WIDTH - POPOVER_MARGIN;
+    if (left > maxLeft) left = Math.max(POPOVER_MARGIN, maxLeft);
+    const top = r.bottom + 2;
+    setCoords({ left, top });
+  };
 
   useEffect(() => {
     if (!open) return;
+    placePopover();
     const onDocClick = (e: MouseEvent) => {
       if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false);
     };
+    const onScrollOrResize = () => placePopover();
     document.addEventListener('mousedown', onDocClick);
     document.addEventListener('keydown', onKey);
+    window.addEventListener('resize', onScrollOrResize);
+    window.addEventListener('scroll', onScrollOrResize, true);
     return () => {
       document.removeEventListener('mousedown', onDocClick);
       document.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', onScrollOrResize);
+      window.removeEventListener('scroll', onScrollOrResize, true);
     };
   }, [open]);
 
@@ -81,6 +105,7 @@ export function DateField({ value, onChange, min, max, placeholder }: Props) {
   return (
     <div ref={wrapRef} className="ss-wrap data-import-date">
       <button
+        ref={triggerRef}
         type="button"
         className="ss-input data-import-date__trigger"
         onClick={() => setOpen((s) => !s)}
@@ -88,8 +113,12 @@ export function DateField({ value, onChange, min, max, placeholder }: Props) {
       >
         {value || placeholder || 'YYYY-MM-DD'}
       </button>
-      {open && (
-        <div className="data-import-date__popover" role="dialog">
+      {open && coords && (
+        <div
+          className="data-import-date__popover"
+          role="dialog"
+          style={{ position: 'fixed', left: coords.left, top: coords.top }}
+        >
           <Calendar
             onChange={handleCalendarChange}
             value={selected ?? undefined}

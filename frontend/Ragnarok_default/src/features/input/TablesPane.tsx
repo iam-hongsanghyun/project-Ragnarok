@@ -384,6 +384,7 @@ export function TablesPane({
               rows={rows}
               cols={cols}
               frozenCol={frozenCol}
+              storageKey={`${sel.kind}:${String(sel.sheet)}`}
               readOnly={isTs && !editableTs}
               onUpdate={
                 isTs && !editableTs ? undefined : (ri, col, val) => onUpdate(sel.sheet as SheetName, ri, col, val)

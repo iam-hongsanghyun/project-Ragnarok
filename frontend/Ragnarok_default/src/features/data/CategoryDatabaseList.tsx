@@ -31,6 +31,14 @@ interface Props {
   onSelectDatabase: (id: string) => void;
 }
 
+/** True iff this database has data for the selected ISO-A3 country. */
+function coversCountry(db: DatabaseMeta, iso: string): boolean {
+  const cov = db.country_coverage;
+  if (cov === undefined || cov === 'global') return true;
+  if (Array.isArray(cov)) return cov.includes(iso);
+  return true;
+}
+
 const CATEGORY_ORDER: ImporterCategory[] = ['transmission', 'generation', 'demand', 'costs'];
 const CATEGORY_LABEL: Record<string, string> = {
   transmission: 'Transmission',
@@ -83,7 +91,14 @@ export function CategoryDatabaseList({
   selectedDatabaseId,
   onSelectDatabase,
 }: Props) {
-  const tree = useMemo(() => buildTree(databases), [databases]);
+  // Filter to only databases that have coverage for the selected country.
+  // Before a country is picked we don't render the tree at all (stage-1
+  // copy block), so the full list is fine there.
+  const visibleDatabases = useMemo(() => {
+    if (!selectedCountry) return databases;
+    return databases.filter((db) => coversCountry(db, selectedCountry.iso));
+  }, [databases, selectedCountry]);
+  const tree = useMemo(() => buildTree(visibleDatabases), [visibleDatabases]);
   const [collapsed, setCollapsed] = usePersistedState<Record<string, boolean>>(COLLAPSE_KEY, {});
   const [query, setQuery] = useState('');
 

@@ -7,6 +7,12 @@
   "homepage": "https://open-power-system-data.org/time_series",
   "version_hint": "2020-10-06 release",
   "description": "Hourly electricity load per ENTSO-E bidding zone, from Open Power System Data (OPSD). Covers ~37 EU countries 2015 onwards. The full CSV is ~150 MB and cached once per process.",
+  "country_coverage": [
+    "AUT", "BEL", "BGR", "CHE", "CYP", "CZE", "DEU", "DNK", "ESP", "EST",
+    "FIN", "FRA", "GBR", "GRC", "HRV", "HUN", "IRL", "ITA", "LTU", "LUX",
+    "LVA", "MKD", "MLT", "NLD", "NOR", "POL", "PRT", "ROU", "SRB", "SVK",
+    "SVN", "SWE"
+  ],
   "targets": ["loads", "loads-p_set", "snapshots"],
   "filters": [
     {

@@ -95,6 +95,12 @@ class DatabaseMeta:
     """Free-text second-level grouping, used by the frontend tree (e.g.
     'Power plants', 'Annual aggregates', 'Hourly profiles'). Empty string
     means the database sits directly under its category."""
+    country_coverage: list[str] | str = "global"
+    """Which countries this database actually has data for. ``"global"``
+    means every ISO-A3 the user can pick is supported. A list of ISO-A3
+    codes restricts the database to that subset — the frontend hides it
+    from the tree when the active country is not in the list, so the user
+    only sees databases that will actually return rows."""
 
     def to_json(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -109,6 +115,11 @@ class DatabaseMeta:
             "filters": [f.to_json() for f in self.filters],
             "available": self.available,
             "description": self.description,
+            "country_coverage": (
+                "global"
+                if self.country_coverage == "global"
+                else list(self.country_coverage)
+            ),
         }
         if self.unavailable_reason is not None:
             out["unavailable_reason"] = self.unavailable_reason

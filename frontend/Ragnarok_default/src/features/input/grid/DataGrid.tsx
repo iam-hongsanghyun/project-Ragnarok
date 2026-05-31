@@ -95,6 +95,38 @@ export interface DataGridProps {
    *  column to focus, or `null` to analyse the whole table. Wired to "Analyse
    *  column" / "Analyse table" in both menus. */
   onAnalyse?: (col: string | null) => void;
+  /** Stable key (typically the sheet name) under which the user's column-
+   *  width overrides are persisted in localStorage. Omit to use a single
+   *  shared bucket — but in practice every call site has a sheet context. */
+  storageKey?: string;
+}
+
+const COL_WIDTH_STORAGE_PREFIX = 'pypsa.gridColumnWidths.';
+
+function loadColumnWidths(key: string | undefined): Record<string, number> {
+  if (!key) return {};
+  try {
+    const raw = window.localStorage.getItem(COL_WIDTH_STORAGE_PREFIX + key);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return {};
+    const out: Record<string, number> = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof v === 'number' && Number.isFinite(v) && v > 0) out[k] = v;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function saveColumnWidths(key: string | undefined, widths: Record<string, number>): void {
+  if (!key) return;
+  try {
+    window.localStorage.setItem(COL_WIDTH_STORAGE_PREFIX + key, JSON.stringify(widths));
+  } catch {
+    /* storage unavailable */
+  }
 }
 
 /** Glide overlay editors mount into a fixed `#portal` element. Create it once. */
@@ -133,10 +165,32 @@ export function DataGrid({
   onRequestAddColumn,
   onClearTable,
   onAnalyse,
+  storageKey,
 }: DataGridProps) {
   const gridRef = useRef<any>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => { ensurePortal(); }, []);
+
+  // User-overridden column widths persist per storageKey (sheet name).
+  // Re-load whenever the key changes so switching sheets shows that
+  // sheet's saved widths, not the previous sheet's.
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>(
+    () => loadColumnWidths(storageKey),
+  );
+  useEffect(() => {
+    setColumnWidths(loadColumnWidths(storageKey));
+  }, [storageKey]);
+  const onColumnResize = useCallback(
+    (col: GridColumn, newSize: number) => {
+      if (!col.id || col.id === '__add_col__') return;
+      setColumnWidths((prev) => {
+        const next = { ...prev, [col.id as string]: Math.round(newSize) };
+        saveColumnWidths(storageKey, next);
+        return next;
+      });
+    },
+    [storageKey],
+  );
 
   // Right-click a body cell → context menu (screen-positioned). Column actions
   // (filter / rename / delete) live in the header ▾ menu, not here.
@@ -204,20 +258,27 @@ export function DataGrid({
   }, [displayToOrig, onFocusRow, onFocusColumn, cols]);
 
   // ── Columns ───────────────────────────────────────────────────────────────
+  // User-overridden widths win over the auto-measured default so a dragged
+  // column stays where the user put it across re-renders / tab switches.
   const columns: GridColumn[] = useMemo(
     () => cols.map((col) => {
       const title = col + (isActive(col) ? ' ▾' : '');
-      let max = measureText(title);
-      const limit = Math.min(rows.length, COL_SAMPLE_LIMIT);
-      for (let i = 0; i < limit; i += 1) {
-        const w = measureText(display(col, rows[i][col]));
-        if (w > max) max = w;
+      let width: number;
+      if (columnWidths[col]) {
+        width = columnWidths[col];
+      } else {
+        let max = measureText(title);
+        const limit = Math.min(rows.length, COL_SAMPLE_LIMIT);
+        for (let i = 0; i < limit; i += 1) {
+          const w = measureText(display(col, rows[i][col]));
+          if (w > max) max = w;
+        }
+        width = Math.round(Math.max(COL_MIN_WIDTH, Math.min(COL_MAX_WIDTH, max + COL_PADDING)));
       }
-      const width = Math.round(Math.max(COL_MIN_WIDTH, Math.min(COL_MAX_WIDTH, max + COL_PADDING)));
       // The header ▾ menu opens the Excel-style filter (+ rename / delete).
       return { title, id: col, hasMenu: true, width };
     }),
-    [cols, isActive, rows, display],
+    [cols, isActive, rows, display, columnWidths],
   );
   const freezeColumns = frozenCol && cols[0] === frozenCol ? 1 : 0;
 
@@ -394,6 +455,7 @@ export function DataGrid({
           getCellContent={getCellContent}
           onCellEdited={readOnly ? undefined : onCellEdited}
           onPaste={readOnly ? undefined : onPaste}
+          onColumnResize={onColumnResize}
           getCellsForSelection={true}
           fillHandle={!readOnly}
           rowMarkers="number"

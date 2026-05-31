@@ -48,6 +48,13 @@ def meta_from_config(
         )
         for f in config.get("filters", [])
     ]
+    coverage_raw = config.get("country_coverage", "global")
+    country_coverage: list[str] | str
+    if isinstance(coverage_raw, list):
+        country_coverage = [str(x).upper() for x in coverage_raw]
+    else:
+        country_coverage = str(coverage_raw)
+
     return DatabaseMeta(
         id=str(config["id"]),
         name=str(config["name"]),
@@ -61,4 +68,5 @@ def meta_from_config(
         available=available,
         unavailable_reason=unavailable_reason,
         description=str(config.get("description", "")),
+        country_coverage=country_coverage,
     )

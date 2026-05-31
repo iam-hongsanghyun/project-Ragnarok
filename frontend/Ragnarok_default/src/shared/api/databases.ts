@@ -44,6 +44,9 @@ export interface DatabaseMeta {
   available: boolean;
   unavailable_reason?: string;
   description?: string;
+  /** `"global"` for sources that work for any country, or a list of
+   *  ISO-A3 codes when the upstream only covers a subset (e.g. OPSD = EU). */
+  country_coverage?: string[] | 'global';
 }
 
 export interface CountryMeta {
