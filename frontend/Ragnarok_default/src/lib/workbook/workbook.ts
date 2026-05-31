@@ -225,10 +225,45 @@ export function normalizeInputDatesToIso(model: WorkbookModel, fmt: DateFormat):
   canonicalizeTemporalSheets(model as unknown as Record<string, GridRow[] | undefined>, fmt);
 }
 
+/**
+ * Standard PyPSA component sheets the UI references directly
+ * (`model.buses`, `model.generators`, …). This is a STRUCTURAL SAFETY
+ * NET, not a schema source — the live PyPSA schema from the backend
+ * remains the only authority for each sheet's attributes, columns,
+ * ordering, defaults, and validation. This list exists purely so that
+ * a freshly-created model always has an array (never `undefined`) for
+ * each universal component, even in the brief window before the boot
+ * schema is applied or if a model is built from an unexpectedly-empty
+ * schema. Without it, every `model.<sheet>.map()` in the views throws.
+ */
+export const CORE_COMPONENT_SHEETS: readonly string[] = [
+  'buses',
+  'carriers',
+  'generators',
+  'loads',
+  'lines',
+  'links',
+  'transformers',
+  'storage_units',
+  'stores',
+  'global_constraints',
+  'shunt_impedances',
+  'shapes',
+  'sub_networks',
+  'snapshots',
+];
+
 export function createEmptyWorkbook(): WorkbookModel {
+  // Core sheets first (always present), then whatever the live schema
+  // declares (which normally is a superset). Spreading SHEETS last means
+  // the schema-driven set wins when both define a sheet, but the core
+  // floor guarantees the universal components exist regardless of schema
+  // load timing.
+  const core = Object.fromEntries(CORE_COMPONENT_SHEETS.map((s) => [s, []]));
   const base = Object.fromEntries(SHEETS.map((s) => [s, []]));
   const ts = Object.fromEntries(TS_SHEETS.map((s) => [s, []]));
   return {
+    ...core,
     ...base,
     ...ts,
     [PATHWAY_CONFIG_SHEET]: [],
