@@ -7,6 +7,7 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { DatabaseMeta, FilterSchema, PreviewSummary } from '../../shared/api/databases';
+import { DateField } from './DateField';
 
 /**
  * Dropdown-style multiselect — keeps the right rail compact when the
@@ -186,18 +187,13 @@ function FilterInput({
       return <MultiselectDropdown filter={filter} selected={selected} onChange={onChange} />;
     }
     case 'date': {
-      // Free-form calendar picker. The value is stored as a YYYY-MM-DD
-      // string — the format every importer's date filter expects.
+      // Popover-style date picker built on react-calendar; renders with
+      // the same ss-* chrome as every other dropdown so the trigger lines
+      // up visually. Stored value is always ISO YYYY-MM-DD.
       const v = typeof value === 'string' ? value : '';
-      return (
-        <input
-          type="date"
-          value={v}
-          min={typeof filter.min === 'string' ? filter.min : undefined}
-          max={typeof filter.max === 'string' ? filter.max : undefined}
-          onChange={(e) => onChange(e.target.value)}
-        />
-      );
+      const minISO = typeof filter.min === 'string' ? filter.min : undefined;
+      const maxISO = typeof filter.max === 'string' ? filter.max : undefined;
+      return <DateField value={v} onChange={onChange} min={minISO} max={maxISO} />;
     }
     default:
       return (

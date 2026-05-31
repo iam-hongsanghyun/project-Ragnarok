@@ -16,9 +16,12 @@ def test_registry_lists_mvp_modules():
         "wri_gppd",
         "worldbank_demand",
         "opsd_load",
-        "renewables_ninja",
-        "pypsa_technology_data",
     } <= ids
+    # Modules deliberately not pursued (need API keys / static CSV
+    # aggregators / etc.) — see docs/TODO.md "Deliberately not pursued".
+    assert "renewables_ninja" not in ids
+    assert "pypsa_technology_data" not in ids
+    assert "owid_energy" not in ids
 
 
 def test_subcategories_round_trip_to_json():
@@ -29,10 +32,6 @@ def test_subcategories_round_trip_to_json():
     assert metas["wri_gppd"]["subcategory"] == "Power plants (per-asset)"
     assert metas["worldbank_demand"]["subcategory"] == "Annual aggregates"
     assert metas["opsd_load"]["subcategory"] == "Hourly profiles"
-    assert metas["renewables_ninja"]["subcategory"] == "Profiles"
-    assert metas["pypsa_technology_data"]["subcategory"] == "Annual snapshots"
-    # New top-level category "costs" introduced by the tech-data module.
-    assert metas["pypsa_technology_data"]["category"] == "costs"
 
 
 def test_available_databases_json_shape():

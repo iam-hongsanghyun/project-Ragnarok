@@ -1,6 +1,7 @@
 import React, { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSettings } from './features/settings/useSettings';
 import 'leaflet/dist/leaflet.css';
+import 'react-calendar/dist/Calendar.css';
 
 import {
   AnalyticsFocus,

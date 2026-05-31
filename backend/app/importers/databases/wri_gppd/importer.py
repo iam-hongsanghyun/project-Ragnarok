@@ -336,7 +336,8 @@ class WRIGPPDImporter:
             if carrier not in used_carriers:
                 used_carriers.add(carrier)
                 # No co2_emissions / marginal_cost / capital_cost set here —
-                # those come from pypsa_technology_data when the user runs it.
+                # PyPSA defaults apply at solve time. The user supplies cost
+                # data in Build view when they need cost-aware studies.
                 carrier_rows.append({"name": carrier})
 
         if gen_rows:

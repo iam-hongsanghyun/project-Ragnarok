@@ -7883,6 +7883,110 @@ code, kbd, samp, tt,
 .data-import-multiselect__option input {
   flex-shrink: 0;
 }
+
+/* ── Date filter — popover built on react-calendar ──────────────────────── */
+/* Trigger inherits the canonical .ss-* dropdown chrome (chevron, mono font,
+   square border). The popover hangs from the trigger and re-skins
+   react-calendar's defaults to match the project's monochrome palette. */
+.data-import-date__trigger {
+  text-align: left;
+  cursor: pointer;
+  height: auto;
+  font-family: var(--font-mono);
+  font-size: 0.88rem;
+  color: var(--text);
+}
+.data-import-date__popover {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  z-index: 20;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.14);
+  padding: 4px;
+}
+/* Restyle react-calendar's defaults to fit. Scope every override to the
+   popover so we don't leak elsewhere. */
+.data-import-date__popover .react-calendar {
+  border: none;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  width: 260px;
+  background: var(--surface);
+  color: var(--text);
+  line-height: 1.2;
+}
+.data-import-date__popover .react-calendar__navigation {
+  height: 32px;
+  margin-bottom: 4px;
+  background: var(--bg-hover);
+  border-bottom: 1px solid var(--border);
+}
+.data-import-date__popover .react-calendar__navigation button {
+  background: none;
+  border: none;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text);
+  min-width: 28px;
+  padding: 0 4px;
+}
+.data-import-date__popover .react-calendar__navigation button:disabled {
+  color: var(--muted);
+}
+.data-import-date__popover .react-calendar__navigation button:enabled:hover,
+.data-import-date__popover .react-calendar__navigation button:enabled:focus {
+  background: var(--surface);
+}
+.data-import-date__popover .react-calendar__month-view__weekdays {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.data-import-date__popover .react-calendar__month-view__weekdays__weekday {
+  padding: 4px 0;
+  text-align: center;
+}
+.data-import-date__popover .react-calendar__month-view__weekdays__weekday abbr {
+  text-decoration: none;
+  cursor: default;
+}
+.data-import-date__popover .react-calendar__tile {
+  padding: 6px 4px;
+  background: none;
+  border: 1px solid transparent;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text);
+  text-align: center;
+  cursor: pointer;
+}
+.data-import-date__popover .react-calendar__tile:enabled:hover,
+.data-import-date__popover .react-calendar__tile:enabled:focus {
+  background: var(--bg-hover);
+}
+.data-import-date__popover .react-calendar__tile--now {
+  background: var(--bg-hover);
+  border-color: var(--border);
+}
+.data-import-date__popover .react-calendar__tile--active {
+  background: var(--brand, #0f766e);
+  color: #ffffff;
+}
+.data-import-date__popover .react-calendar__tile--active:enabled:hover,
+.data-import-date__popover .react-calendar__tile--active:enabled:focus {
+  background: var(--brand, #0f766e);
+}
+.data-import-date__popover .react-calendar__tile:disabled {
+  color: var(--muted);
+  background: none;
+  cursor: not-allowed;
+}
+.data-import-date__popover .react-calendar__month-view__days__day--neighboringMonth {
+  color: var(--muted);
+}
 .data-import-filters__actions {
   display: flex;
   gap: 8px;
