@@ -48,10 +48,6 @@ const SPLIT_TOLERANCE_KM = 0.1; // PyPSA-Earth uses 1 m post-snap; we use
 //                                 centroids, but anything bigger
 //                                 over-splits in dense urban networks
 //                                 (Korea, Japan, Netherlands).
-const MERGE_COORD_PRECISION = 1e6; // ~10 cm — OSM-shared node coords are
-//                                    bit-identical so any precision is
-//                                    safe; this absorbs float noise.
-
 // ── Stitch contiguous OSM ways into logical lines (`linemerge`-equivalent) ──
 //
 // OSM frequently splits a single physical transmission corridor into many
@@ -59,23 +55,25 @@ const MERGE_COORD_PRECISION = 1e6; // ~10 cm — OSM-shared node coords are
 // road, where different editors drew different sections. Each shows up as
 // a separate row in the workbook unless we stitch them back.
 //
-// Two ways are mergeable iff they share an endpoint coordinate AND have
-// matching (voltage, circuits, cable/overhead, AC/DC) — i.e. the OSM tags
-// say it is the same physical line. Shared endpoints come from referencing
-// the same OSM `node`, so their coordinates are bit-identical and rounding
-// at 10 cm precision matches reliably.
-
-function coordKey(lat: number, lon: number): string {
-  return `${Math.round(lat * MERGE_COORD_PRECISION)}_${Math.round(lon * MERGE_COORD_PRECISION)}`;
-}
+// **Merge key = OSM node IDs.** Overpass returns each way's `nodes: number[]`
+// alongside the resolved `geometry`. Two ways meeting at the same OSM node
+// reference the *same* node ID, so endpoint comparison is bit-identical and
+// independent of any rounding / precision tricks on coordinates. This is
+// far more robust than coordinate matching for OSM data, which has plenty
+// of editor-history quirks that leave near-but-not-bit-equal coordinates.
+//
+// Tag-level constraint: only voltage must match. OSM's `circuits` and
+// `cable/overhead` tagging is inconsistent across editors and along the
+// length of a single physical line, so requiring them to match prevents
+// legitimate merges. After concatenation we keep the MAX `circuits`
+// (taking sum would over-count parallel circuits each tagged with the
+// full multiplicity, see the bus-pair collapse below).
 
 function groupKey(line: Line): string {
-  return [
-    Math.round(line.voltageKv),
-    line.circuits,
-    line.isCable ? 'C' : 'O',
-    Math.round(line.frequencyHz),
-  ].join('|');
+  // Same voltage band, same AC/DC frequency split. Within that, anything
+  // sharing a node is fair game.
+  const dcMark = Math.abs(line.frequencyHz) <= 0.1 ? 'DC' : 'AC';
+  return `${Math.round(line.voltageKv)}|${dcMark}`;
 }
 
 function concatLines(
@@ -84,35 +82,38 @@ function concatLines(
   mode: 'append-fwd' | 'append-rev' | 'prepend-fwd' | 'prepend-rev',
 ): Line {
   let coords: Array<[number, number]>;
+  let nodes: number[];
   if (mode === 'append-fwd') {
     coords = [...a.geometry, ...b.geometry.slice(1)];
+    nodes = [...a.nodes, ...b.nodes.slice(1)];
   } else if (mode === 'append-rev') {
-    const rev = b.geometry.slice(0, -1).reverse();
-    coords = [...a.geometry, ...rev];
+    coords = [...a.geometry, ...b.geometry.slice(0, -1).reverse()];
+    nodes = [...a.nodes, ...b.nodes.slice(0, -1).reverse()];
   } else if (mode === 'prepend-fwd') {
     coords = [...b.geometry, ...a.geometry.slice(1)];
+    nodes = [...b.nodes, ...a.nodes.slice(1)];
   } else {
-    const rev = b.geometry.slice().reverse();
-    coords = [...rev, ...a.geometry.slice(1)];
+    coords = [...b.geometry.slice().reverse(), ...a.geometry.slice(1)];
+    nodes = [...b.nodes.slice().reverse(), ...a.nodes.slice(1)];
   }
   // Preserve provenance: the merged line carries every component osm_id.
   const aIds = (a.tags.osm_merged_ids || String(a.osmId)).split(',');
   const bIds = (b.tags.osm_merged_ids || String(b.osmId)).split(',');
-  const merged: Line = {
+  return {
     ...a,
     geometry: coords,
+    nodes,
     lengthKm: polylineLengthKm(coords),
+    circuits: Math.max(a.circuits, b.circuits),
+    isCable: a.isCable && b.isCable, // overhead wins if either is overhead
     tags: {
       ...a.tags,
       osm_merged_ids: Array.from(new Set([...aIds, ...bIds])).join(','),
     },
   };
-  return merged;
 }
 
 function mergeContiguousLines(lines: Line[]): Line[] {
-  // Bucket by compatibility so we never merge across voltage / cable /
-  // circuit mismatches.
   const groups = new Map<string, Line[]>();
   for (const l of lines) {
     const k = groupKey(l);
@@ -123,8 +124,8 @@ function mergeContiguousLines(lines: Line[]): Line[] {
   const out: Line[] = [];
   Array.from(groups.values()).forEach((group) => {
     // Greedy: take a line, repeatedly absorb any remaining line that
-    // shares an endpoint with the current one. Loop until no absorption
-    // happens in a full pass.
+    // shares an endpoint NODE ID with the current one. Loop until no
+    // absorption happens in a full pass.
     const remaining = group.slice();
     while (remaining.length > 0) {
       let current = remaining.shift()!;
@@ -133,16 +134,15 @@ function mergeContiguousLines(lines: Line[]): Line[] {
         absorbed = false;
         for (let i = 0; i < remaining.length; i++) {
           const other = remaining[i];
-          const ms = coordKey(current.geometry[0][0], current.geometry[0][1]);
-          const me = coordKey(
-            current.geometry[current.geometry.length - 1][0],
-            current.geometry[current.geometry.length - 1][1],
-          );
-          const os = coordKey(other.geometry[0][0], other.geometry[0][1]);
-          const oe = coordKey(
-            other.geometry[other.geometry.length - 1][0],
-            other.geometry[other.geometry.length - 1][1],
-          );
+          // Skip degenerate lines that somehow lost their node array
+          // (e.g. very old OSM imports). Coord-based fallback isn't worth
+          // the risk; degenerate cases stay as-is and the bus-pair
+          // collapse downstream catches them.
+          if (current.nodes.length < 2 || other.nodes.length < 2) continue;
+          const ms = current.nodes[0];
+          const me = current.nodes[current.nodes.length - 1];
+          const os = other.nodes[0];
+          const oe = other.nodes[other.nodes.length - 1];
           if (me === os) current = concatLines(current, other, 'append-fwd');
           else if (me === oe) current = concatLines(current, other, 'append-rev');
           else if (ms === oe) current = concatLines(current, other, 'prepend-fwd');

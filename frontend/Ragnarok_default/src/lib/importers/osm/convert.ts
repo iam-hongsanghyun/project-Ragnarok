@@ -126,6 +126,11 @@ function parseResponse(payload: OverpassResponse, minVoltageKv: number): Parsed 
       if (points.length < 2) continue;
       const lengthKm = polylineLengthKm(points);
       if (lengthKm <= 0) continue;
+      // OSM node IDs along the way. Endpoint node IDs are the gold-
+      // standard merge key — two ways meeting at the same OSM node are
+      // bit-identical at that endpoint and definitively belong to the
+      // same physical line.
+      const nodes = ((el as { nodes?: number[] }).nodes || []).map((n) => Number(n));
       const tagsAsStr: Record<string, string> = {};
       for (const [k, v] of Object.entries(tags)) {
         if (v === null || v === undefined) continue;
@@ -134,6 +139,7 @@ function parseResponse(payload: OverpassResponse, minVoltageKv: number): Parsed 
       lines.push({
         osmId: Number((el as { id?: number }).id || 0),
         geometry: points,
+        nodes,
         lengthKm,
         voltageKv: vMax,
         frequencyHz: floatTag(tags, 'frequency', 50.0),
