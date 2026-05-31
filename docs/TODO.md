@@ -13,7 +13,7 @@ Single living todo for Ragnarok. Open work is grouped below by theme. Completed 
 
 ## Open work
 
-Seventeen items across eight groups. Each group is internally coherent (shared infrastructure, schema, or interfaces); cross-group dependencies are called out in the *Why* column.
+Eighteen items across eight groups. Each group is internally coherent (shared infrastructure, schema, or interfaces); cross-group dependencies are called out in the *Why* column.
 
 ### Backend adapters
 
@@ -93,6 +93,7 @@ Top-down user surfaces that build a runnable Ragnarok workbook from high-level i
 | ID | Pri | Surface | Task | Why | Cost |
 |---|---|---|---|---|---:|
 | `W1` | `High` | `Both` | **Guided model-builder wizard** — a stepped flow that asks the user a small ladder of questions and assembles a workbook for them: (1) **Region** — pick a country / region on the map (re-uses the Data view shell); (2) **Question** — "What do you want to study?" (least-cost dispatch / capacity expansion / carbon-cap pathway / merchant IPP / N-1 security / climate-risk); (3) **Time horizon** — historic year, single future year, or multi-period pathway; (4) **Scope** — sectors (electricity only / multi-vector), carriers in-play, candidate technologies; (5) **Constraints** — carbon price / cap, renewable share targets, build-rate limits; (6) **Confidence** — let the wizard fall back to defaults the user did not answer. Output is a fully-populated workbook that is immediately runnable, with provenance flagging every cell the wizard filled vs the user edited. Power users can drop out into the regular Build / Model views at any step. | The Data view we shipped is bottom-up (pick a database, pull rows, repeat). A non-modeller cannot navigate that — they don't know which databases they need, which sheets to populate, or what defaults are reasonable. **W1** is the answer: state your goal in plain language, get a model. Internally it composes the existing importers (`I1`, `I4`, …) plus the transformation tools (`T1`, `T2`, `T3`) into one orchestrated flow, so it has zero new data-source code — it just sequences what is already there with sensible defaults per question. | 32,000 |
+| `W2` | `High` | `Both` | **Country starter models (per-country baseline packs)** — three-question landing flow: (1) **Country** — pick on the map (any country in the Data view's coverage map); (2) **Year** — snapshot or planning horizon year (e.g. 2023 historic, 2030 single-year, 2030–2050 pathway); (3) **What to do** — short list (least-cost dispatch / capacity expansion / merchant IPP / carbon-cap pathway / N-1 security / climate-risk). The output is a curated, immediately-runnable workbook composed from the best baseline available for that (country, year) pair: grid topology (KPG193 for Korea, PyPSA-Eur cluster for EU members, country-specific public networks elsewhere, OSM-derived elsewhere), generation fleet (WRI GPPD + per-country overrides), demand profile (annual aggregate from World Bank or hourly slice if the year is in coverage), carrier costs scaled to the chosen year, policy constraints for that country/year (NDC, RPS, emission caps). Each pack carries a `kind` (`research-grade`, `policy-grade`, `quick-start`) so the user knows the fidelity bar. **KPG193 (this PR) is the prototype starter pack for KOR.** | The Data view is bottom-up (pick a database, pull rows, …). **W2** is the top-down complement: state country + year + question, get a working model. Distinct from **W1**, which is a multi-step wizard that composes data sources on the fly; **W2** ships pre-curated baselines so the answer to "give me Korea 2030 for capacity expansion" is one click instead of six. Internally it sequences the importers we already have (KPG193 / OSM / WRI GPPD / World Bank, plus **I5**–**I8** when those land) with a per-country recipe file describing which database to prefer at each slot for each (country, year) bin. Packs live under `src/lib/importers/starter_packs/<ISO3>/<year>/recipe.json` so adding a new country is just one recipe and one PR. | 24,000 |
 
 ### Modelling extensions
 
@@ -121,9 +122,10 @@ Across groups, respecting cross-group dependencies marked above.
 12. **I4** — Renewable resource profile importer (polygon / buffer region selection).
 13. **I3** — Driver-based demand forecast.
 14. **M1** — Sector coupling (largest single item; lifts Ragnarok out of electricity-only).
-15. **W1** — Guided model-builder wizard (composes every importer + tool + **M1**/**M2** above).
-16. **B2** — Simulation backend adapter.
-17. **B3** — Power-flow-only study mode.
+15. **W2** — Country starter models (KPG193-style baseline packs per country / year, composed from the importers above).
+16. **W1** — Guided model-builder wizard (composes every importer + tool + **M1**/**M2** above).
+17. **B2** — Simulation backend adapter.
+18. **B3** — Power-flow-only study mode.
 
 ## Already shipped
 
