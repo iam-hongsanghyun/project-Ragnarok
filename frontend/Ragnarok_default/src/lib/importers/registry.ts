@@ -28,6 +28,7 @@ import type { DatabaseModule, GeoJSONPolygonLike, Region } from './types';
 import { osmModule } from './osm';
 import { wriGppdModule } from './wri_gppd';
 import { worldbankDemandModule } from './worldbank_demand';
+import { kpg193Module } from './kpg193';
 
 // ── Module list (order = display order in the tree) ─────────────────────────
 
@@ -38,6 +39,7 @@ const MODULES: DatabaseModule<unknown>[] = [
   osmModule as DatabaseModule<unknown>,
   wriGppdModule as DatabaseModule<unknown>,
   worldbankDemandModule as DatabaseModule<unknown>,
+  kpg193Module as DatabaseModule<unknown>,
 ];
 
 // ── Module access ───────────────────────────────────────────────────────────
