@@ -74,11 +74,38 @@ export function DateField({ value, onChange, min, max, placeholder }: Props) {
       if (e.key === 'Escape') setOpen(false);
     };
     const onScrollOrResize = () => placePopover();
+    // Resizable rails / split panes don't fire window resize, so we also
+    // observe the trigger's own size and poll its rect every frame while
+    // open. Cheap and catches any layout shift (rail drag, sidebar
+    // collapse, content reflow) without a per-component event API.
+    const observer =
+      typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(onScrollOrResize)
+        : null;
+    if (observer && triggerRef.current) observer.observe(triggerRef.current);
+    let lastLeft = -1;
+    let lastTop = -1;
+    let rafId = 0;
+    const tick = () => {
+      const t = triggerRef.current;
+      if (t) {
+        const r = t.getBoundingClientRect();
+        if (r.left !== lastLeft || r.bottom !== lastTop) {
+          lastLeft = r.left;
+          lastTop = r.bottom;
+          placePopover();
+        }
+      }
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
     document.addEventListener('mousedown', onDocClick);
     document.addEventListener('keydown', onKey);
     window.addEventListener('resize', onScrollOrResize);
     window.addEventListener('scroll', onScrollOrResize, true);
     return () => {
+      cancelAnimationFrame(rafId);
+      observer?.disconnect();
       document.removeEventListener('mousedown', onDocClick);
       document.removeEventListener('keydown', onKey);
       window.removeEventListener('resize', onScrollOrResize);

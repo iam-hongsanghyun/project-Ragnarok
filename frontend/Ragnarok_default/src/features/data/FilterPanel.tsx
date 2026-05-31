@@ -277,19 +277,21 @@ export function FilterPanel({
       <div className="view-rail-header"><span>{database.name}</span></div>
       <div className="view-rail-body data-import-filters__body">
         <section className="data-import-filters__meta">
-          {database.description && <p>{database.description}</p>}
-          <dl>
-            <div><dt>License</dt><dd>{database.license}</dd></div>
-            <div>
-              <dt>Source</dt>
-              <dd>
-                <a href={database.homepage} target="_blank" rel="noreferrer">
-                  {database.homepage}
-                </a>
-              </dd>
-            </div>
-            <div><dt>Targets</dt><dd>{database.targets.join(', ')}</dd></div>
-          </dl>
+          {database.description && (
+            <p className="data-import-filters__desc">{database.description}</p>
+          )}
+          <p className="data-import-filters__line">
+            <b>License:</b> {database.license}
+          </p>
+          <p className="data-import-filters__line">
+            <b>Source:</b>{' '}
+            <a href={database.homepage} target="_blank" rel="noreferrer">
+              {database.homepage}
+            </a>
+          </p>
+          <p className="data-import-filters__line">
+            <b>Targets:</b> {database.targets.join(', ')}
+          </p>
         </section>
         <section className="data-import-filters__form">
           {database.filters.map((filter) => (

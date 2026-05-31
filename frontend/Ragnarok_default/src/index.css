@@ -7758,23 +7758,22 @@ code, kbd, samp, tt,
 .data-import-filters__meta {
   font-size: 0.82rem;
   color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
-.data-import-filters__meta p {
-  margin: 0 0 8px;
+.data-import-filters__desc {
+  margin: 0 0 4px;
 }
-.data-import-filters__meta dl {
-  margin: 0;
-  display: grid;
-  grid-template-columns: 70px 1fr;
-  gap: 4px 8px;
-}
-.data-import-filters__meta dt {
-  font-weight: 500;
-  color: var(--text);
-}
-.data-import-filters__meta dd {
+.data-import-filters__line {
   margin: 0;
   word-break: break-word;
+  line-height: 1.4;
+}
+.data-import-filters__line b {
+  color: var(--text);
+  font-weight: 600;
+  margin-right: 4px;
 }
 .data-import-filters__form {
   display: flex;

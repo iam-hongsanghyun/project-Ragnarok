@@ -71,6 +71,15 @@ export function WorldMap({
   overlay,
 }: Props) {
   const layerRef = useRef<Map<string, Layer>>(new Map());
+  // Leaflet event handlers attached in onEachFeature capture their closure
+  // at the moment the GeoJSON layer first mounts. To keep `mouseout` aware
+  // of the *current* selection (so it doesn't clear the active country's
+  // highlight when the user hovers off it), mouse handlers read from this
+  // ref instead of the stale `selectedIso` closure.
+  const selectedIsoRef = useRef<string | null>(selectedIso);
+  useEffect(() => {
+    selectedIsoRef.current = selectedIso;
+  }, [selectedIso]);
 
   // Recompute styles whenever the active country changes, without re-rendering
   // the heavy GeoJSON layer.
@@ -87,12 +96,16 @@ export function WorldMap({
     if (!iso) return;
     layerRef.current.set(iso, layer);
     const path = layer as L.Path;
-    path.setStyle(iso === selectedIso ? COUNTRY_STYLE.active : COUNTRY_STYLE.default);
+    path.setStyle(
+      iso === selectedIsoRef.current ? COUNTRY_STYLE.active : COUNTRY_STYLE.default,
+    );
     layer.on('mouseover', () => {
-      if (iso !== selectedIso) path.setStyle(COUNTRY_STYLE.hover);
+      if (iso !== selectedIsoRef.current) path.setStyle(COUNTRY_STYLE.hover);
     });
     layer.on('mouseout', () => {
-      if (iso !== selectedIso) path.setStyle(COUNTRY_STYLE.default);
+      // Read live selection from the ref so the active country's highlight
+      // sticks when the cursor leaves it.
+      if (iso !== selectedIsoRef.current) path.setStyle(COUNTRY_STYLE.default);
     });
     layer.on('click', () => onSelect(iso));
     const props = (feature.properties || {}) as Record<string, unknown>;
