@@ -315,16 +315,92 @@ function buildRawSheets(
 
 // ── Public module ────────────────────────────────────────────────────────────
 
+/**
+ * The fetch step now PRE-BUILDS the workbook sheets (raw or cleaned-up
+ * depending on the user's filters), and stores them in the payload alongside
+ * the raw parsed OSM. preview() reports counts from the BUILT sheets so the
+ * user sees the actual numbers the workbook will receive — not the raw
+ * pre-cleanup counts that confused users when they didn't match the rows
+ * landing in the workbook after PyPSA-Earth cleanup.
+ */
 interface OSMPayload {
   parsed: Parsed;
   rawCount: number;
+  sheets: WorkbookFragment['sheets'];
+  /** Resolved options that produced these sheets — surfaced in provenance. */
+  resolvedOptions: ResolvedTopologyOptions;
 }
 
 type TopologyStyle = 'raw' | 'pypsa_earth';
 
+export interface ResolvedTopologyOptions {
+  style: TopologyStyle;
+  mergeFragments: boolean;
+  clusterSubstations: boolean;
+  clusterEpsKm: number;
+  addLineEndings: boolean;
+  snapEndpoints: boolean;
+  splitAtSubstations: boolean;
+  splitToleranceKm: number;
+  emitTransformers: boolean;
+  collapseParallels: boolean;
+}
+
+function asBool(v: unknown, def: boolean): boolean {
+  if (v === undefined || v === null) return def;
+  if (typeof v === 'boolean') return v;
+  return def;
+}
+
+function asNumber(v: unknown, def: number): number {
+  if (v === undefined || v === null || v === '') return def;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : def;
+}
+
 function resolveStyle(filters: Record<string, unknown>): TopologyStyle {
   const raw = String(filters.topology_style || 'raw').toLowerCase();
   return raw === 'pypsa_earth' ? 'pypsa_earth' : 'raw';
+}
+
+/**
+ * Resolve the cleanup options from the user's filter blob.
+ *
+ *   • `topology_style = 'raw'` → all cleanup steps off regardless of toggles.
+ *   • `topology_style = 'pypsa_earth'` → each step on by default, but the
+ *     individual checkboxes can opt out (e.g. PyPSA-Earth WITHOUT splitting).
+ */
+export function resolveTopologyOptions(
+  filters: Record<string, unknown>,
+): ResolvedTopologyOptions {
+  const style = resolveStyle(filters);
+  if (style === 'raw') {
+    return {
+      style,
+      mergeFragments: false,
+      clusterSubstations: false,
+      clusterEpsKm: 5,
+      addLineEndings: false,
+      snapEndpoints: false,
+      splitAtSubstations: false,
+      splitToleranceKm: 0.1,
+      emitTransformers: false,
+      collapseParallels: false,
+    };
+  }
+  // PyPSA-Earth preset: defaults are ON, individual toggles can disable.
+  return {
+    style,
+    mergeFragments: asBool(filters.merge_fragments, true),
+    clusterSubstations: asBool(filters.cluster_substations, true),
+    clusterEpsKm: asNumber(filters.cluster_eps_km, 5),
+    addLineEndings: asBool(filters.add_line_endings, true),
+    snapEndpoints: asBool(filters.snap_endpoints, true),
+    splitAtSubstations: asBool(filters.split_at_substations, true),
+    splitToleranceKm: asNumber(filters.split_tolerance_m, 100) / 1000,
+    emitTransformers: asBool(filters.emit_transformers, true),
+    collapseParallels: asBool(filters.collapse_parallels, true),
+  };
 }
 
 export const osmModule: DatabaseModule<OSMPayload> = {
@@ -341,23 +417,51 @@ export const osmModule: DatabaseModule<OSMPayload> = {
     });
     const payload = await postQuery(query);
     const parsed = parseResponse(payload, minKv);
+
+    // Build the sheets ONCE here so preview and toSheets agree on counts.
+    // The cleanup respects the user's per-step toggles (see meta.ts).
+    const opts = resolveTopologyOptions(filters);
+    const typeMap = lineTypeMapping();
+    let sheets: WorkbookFragment['sheets'];
+    if (opts.style === 'pypsa_earth') {
+      sheets = buildPyPSAEarthStyleSheets(parsed, region, typeMap, opts).sheets;
+    } else {
+      sheets = buildRawSheets(parsed, region, typeMap).fragment.sheets;
+    }
+
     return {
       databaseId: osmMeta.id,
       region,
       filters: { ...filters },
-      payload: { parsed, rawCount: (payload.elements || []).length },
+      payload: {
+        parsed,
+        rawCount: (payload.elements || []).length,
+        sheets,
+        resolvedOptions: opts,
+      },
     };
   },
 
   preview(result): PreviewSummary {
-    const parsed = result.payload.parsed;
-    const style = resolveStyle(result.filters);
+    const { parsed, sheets, resolvedOptions } = result.payload;
+    const lineRows = sheets.lines || [];
+    const busRows = sheets.buses || [];
+    const transformerRows = sheets.transformers || [];
+
+    // Voltage histogram on the FINAL line rows (post-cleanup), not on the
+    // raw OSM. That's what the user will actually see in the workbook.
     const voltages: Record<string, number> = {};
-    for (const line of parsed.lines) {
-      const key = `${Math.round(line.voltageKv)} kV`;
+    let totalLength = 0;
+    for (const row of lineRows) {
+      const v = Math.round(Number(row.v_nom) || 0);
+      const key = `${v} kV`;
       voltages[key] = (voltages[key] || 0) + 1;
+      totalLength += Number(row.length) || 0;
     }
-    const totalLength = parsed.lines.reduce((s, l) => s + l.lengthKm, 0);
+
+    // Map overlay still draws raw OSM geometry — that's the only place we
+    // *want* to see the raw shapes (so the user can compare to OSM on the
+    // tile basemap underneath).
     const overlay = {
       type: 'FeatureCollection' as const,
       features: [
@@ -384,35 +488,43 @@ export const osmModule: DatabaseModule<OSMPayload> = {
         })),
       ],
     };
+
     const counts: Record<string, number> = {
-      substations: parsed.substations.length,
-      lines: parsed.lines.length,
+      substations: busRows.length,
+      lines: lineRows.length,
+      transformers: transformerRows.length,
       total_length_km: Math.round(totalLength),
     };
     for (const [k, v] of Object.entries(voltages).sort(([a], [b]) => a.localeCompare(b))) {
       counts[`voltage:${k}`] = v;
     }
+
+    // Show the raw OSM input count so the user can see how many rows were
+    // consolidated by the cleanup vs how many landed in the workbook.
+    const rawSummary = `Raw OSM: ${parsed.substations.length} substations, ${parsed.lines.length} ways.`;
+    const cleanupSummary =
+      resolvedOptions.style === 'pypsa_earth'
+        ? `After cleanup: ${busRows.length} buses, ${lineRows.length} lines, ${transformerRows.length} transformers.`
+        : 'Raw mode: OSM geometry preserved; each OSM way is one line row.';
+
     return {
       counts,
       samples: {
-        lines: parsed.lines.slice(0, 10).map((line) => ({
-          osm_id: line.osmId,
-          voltage_kv: line.voltageKv,
-          length_km: Math.round(line.lengthKm * 100) / 100,
-          circuits: line.circuits,
+        lines: lineRows.slice(0, 10).map((row) => ({
+          name: row.name,
+          bus0: row.bus0,
+          bus1: row.bus1,
+          v_nom: row.v_nom,
+          length_km: Math.round((Number(row.length) || 0) * 100) / 100,
+          num_parallel: row.num_parallel,
         })),
-        substations: parsed.substations.slice(0, 10).map((s) => ({
-          osm_id: s.osmId,
-          voltages_kv: s.voltagesKv,
-          name: (s.tags.name || '').trim(),
+        substations: busRows.slice(0, 10).map((row) => ({
+          name: row.name,
+          v_nom: row.v_nom,
+          country: row.country,
         })),
       },
-      notes: [
-        `${parsed.substations.length} substations, ${parsed.lines.length} lines.`,
-        style === 'pypsa_earth'
-          ? 'Topology cleanup: PyPSA-Earth style (DBSCAN station clustering + endpoint snap + line splitting).'
-          : 'Topology cleanup: Raw (OSM geometry preserved verbatim).',
-      ],
+      notes: [rawSummary, cleanupSummary],
       overlay,
     };
   },
@@ -421,25 +533,15 @@ export const osmModule: DatabaseModule<OSMPayload> = {
     result: FetchResult<OSMPayload>,
     _options: Required<ConvertOptions>,
   ): WorkbookFragment {
-    const parsed = result.payload.parsed;
+    // Sheets were already built in fetch() — just package them with
+    // provenance now. Keeps preview's reported counts identical to what
+    // lands in the workbook.
+    const { sheets, resolvedOptions } = result.payload;
     const region: Region = result.region;
-    const typeMap = lineTypeMapping();
-    const style = resolveStyle(result.filters);
-
-    let sheets: WorkbookFragment['sheets'];
     const rowCounts: Record<string, number> = {};
-
-    if (style === 'pypsa_earth') {
-      const frag = buildPyPSAEarthStyleSheets(parsed, region, typeMap);
-      sheets = frag.sheets;
-      for (const [k, v] of Object.entries(sheets)) rowCounts[k] = v.length;
-      rowCounts.topology_style_pypsa_earth = 1;
-    } else {
-      const { fragment, synthesisedBusCount } = buildRawSheets(parsed, region, typeMap);
-      sheets = fragment.sheets;
-      for (const [k, v] of Object.entries(sheets)) rowCounts[k] = v.length;
-      rowCounts.synthesised_buses = synthesisedBusCount;
-    }
+    for (const [k, v] of Object.entries(sheets)) rowCounts[k] = v.length;
+    rowCounts.raw_osm_lines = result.payload.parsed.lines.length;
+    rowCounts.raw_osm_substations = result.payload.parsed.substations.length;
 
     return {
       sheets,
@@ -448,7 +550,7 @@ export const osmModule: DatabaseModule<OSMPayload> = {
         country_iso: region.countryIso,
         country_name: region.countryName,
         filters_json: JSON.stringify(result.filters, Object.keys(result.filters).sort()),
-        convert_options_json: JSON.stringify({ topology_style: style }),
+        convert_options_json: JSON.stringify(resolvedOptions),
         fetch_timestamp: new Date().toISOString().slice(0, 19),
         row_counts_json: JSON.stringify(rowCounts, Object.keys(rowCounts).sort()),
       },

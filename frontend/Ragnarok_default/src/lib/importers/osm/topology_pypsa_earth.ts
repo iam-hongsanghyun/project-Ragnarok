@@ -40,14 +40,20 @@ import {
   lineTypeFor,
 } from './topology_helpers';
 
-// Tuneable thresholds. Match PyPSA-Earth's defaults where they have one.
-const CLUSTER_EPS_KM = 5.0;
-const SPLIT_TOLERANCE_KM = 0.1; // PyPSA-Earth uses 1 m post-snap; we use
-//                                 100 m because OSM line geometry follows
-//                                 roads/right-of-way, not substation
-//                                 centroids, but anything bigger
-//                                 over-splits in dense urban networks
-//                                 (Korea, Japan, Netherlands).
+// Per-step toggles + numeric knobs, resolved from the user's filters by
+// `resolveTopologyOptions` in convert.ts. PyPSA-Earth-style default is to
+// turn every flag ON; "Raw" turns them all off; users can mix-and-match.
+export interface TopologyOptions {
+  mergeFragments: boolean;
+  clusterSubstations: boolean;
+  clusterEpsKm: number;
+  addLineEndings: boolean;
+  snapEndpoints: boolean;
+  splitAtSubstations: boolean;
+  splitToleranceKm: number;
+  emitTransformers: boolean;
+  collapseParallels: boolean;
+}
 // ── Stitch contiguous OSM ways into logical lines (`linemerge`-equivalent) ──
 //
 // OSM frequently splits a single physical transmission corridor into many
@@ -238,7 +244,11 @@ interface SplitLine {
   splitSubIndices: number[]; // (N-1) substation indices terminating each split
 }
 
-function splitLineAtSubstations(line: Line, subs: Substation[]): SplitLine {
+function splitLineAtSubstations(
+  line: Line,
+  subs: Substation[],
+  toleranceKm: number,
+): SplitLine {
   const splits: Split[] = [];
   const lineKv = Math.round(line.voltageKv);
   for (let s = 0; s < line.geometry.length - 1; s++) {
@@ -257,7 +267,7 @@ function splitLineAtSubstations(line: Line, subs: Substation[]): SplitLine {
       // Skip projections at the very ends (those are endpoints, not splits)
       if (t <= 0.001 || t >= 0.999) continue;
       const d = haversineKm(sub.lat, sub.lon, foot[1], foot[0]);
-      if (d > SPLIT_TOLERANCE_KM) continue;
+      if (d > toleranceKm) continue;
       splits.push({ segIndex: s, t, point: [sub.lat, sub.lon], subIdx: si });
     }
   }
@@ -325,6 +335,7 @@ function nearestBusForVoltage(
   subs: Substation[],
   stationOf: number[],
   stationBuses: Map<string, string>,
+  maxDistanceKm: number = Infinity,
 ): string | null {
   let bestBus: string | null = null;
   let bestD = Infinity;
@@ -334,18 +345,20 @@ function nearestBusForVoltage(
     const bus = stationBuses.get(stationKey(stationOf[i], voltageKv));
     if (!bus) continue;
     const d = haversineKm(lat, lon, s.lat, s.lon);
+    if (d > maxDistanceKm) continue;
     if (d < bestD) {
       bestD = d;
       bestBus = bus;
     }
   }
   if (bestBus) return bestBus;
-  // Fallback: any bus in any cluster (different voltage).
+  // Fallback: any bus in any cluster (different voltage), still within
+  // maxDistanceKm so the "snap with cap" mode doesn't reach across the map.
   for (let i = 0; i < subs.length; i++) {
     const s = subs[i];
     const d = haversineKm(lat, lon, s.lat, s.lon);
+    if (d > maxDistanceKm) continue;
     if (d >= bestD) continue;
-    // Find any bus at this station (lowest voltage).
     for (const [k, v] of Array.from(stationBuses.entries())) {
       if (k.startsWith(`${stationOf[i]}|`)) {
         bestBus = v;
@@ -367,42 +380,51 @@ export function buildPyPSAEarthStyleSheets(
   parsed: Parsed,
   region: Region,
   typeMap: Record<number, string>,
+  opts: TopologyOptions,
 ): WorkbookFragment {
   const subs = parsed.substations.slice();
 
-  // Step 1: stitch contiguous OSM ways into logical lines. OSM frequently
-  // fragments one physical line into many ways; without this step the
-  // workbook ends up with thousands of short lines instead of a few hundred
-  // logical connections, which is what the user sees when they import a
-  // dense country like Korea.
-  const mergedLines = mergeContiguousLines(parsed.lines);
+  // Step 1: stitch contiguous OSM ways into logical lines (optional).
+  // OSM frequently fragments one physical line into many ways; without
+  // this step the workbook ends up with thousands of short lines
+  // instead of a few hundred logical connections (Korea example).
+  const mergedLines = opts.mergeFragments
+    ? mergeContiguousLines(parsed.lines)
+    : parsed.lines.slice();
 
-  // Synthesise a substation at every line endpoint not within
-  // CLUSTER_EPS_KM of a real one. PyPSA-Earth's add_line_endings_tosubstations.
-  for (const line of mergedLines) {
-    for (const endpoint of [line.geometry[0], line.geometry[line.geometry.length - 1]]) {
-      const [lat, lon] = endpoint;
-      let near = false;
-      for (const s of subs) {
-        if (haversineKm(lat, lon, s.lat, s.lon) <= CLUSTER_EPS_KM) {
-          near = true;
-          break;
+  // Step 2: synthesise a substation at every line endpoint not within
+  // the cluster radius of a real one (optional — PyPSA-Earth's
+  // `add_line_endings_tosubstations`).
+  if (opts.addLineEndings) {
+    for (const line of mergedLines) {
+      for (const endpoint of [line.geometry[0], line.geometry[line.geometry.length - 1]]) {
+        const [lat, lon] = endpoint;
+        let near = false;
+        for (const s of subs) {
+          if (haversineKm(lat, lon, s.lat, s.lon) <= opts.clusterEpsKm) {
+            near = true;
+            break;
+          }
         }
-      }
-      if (!near) {
-        subs.push({
-          osmId: 0,
-          osmType: 'synthetic_endpoint',
-          lat,
-          lon,
-          voltagesKv: [line.voltageKv],
-          tags: { name: '', power: 'substation_synthetic' },
-        });
+        if (!near) {
+          subs.push({
+            osmId: 0,
+            osmType: 'synthetic_endpoint',
+            lat,
+            lon,
+            voltagesKv: [line.voltageKv],
+            tags: { name: '', power: 'substation_synthetic' },
+          });
+        }
       }
     }
   }
 
-  const stationOf = clusterSubstations(subs, CLUSTER_EPS_KM);
+  // Step 3: DBSCAN cluster (optional). When off, each substation is its
+  // own "cluster" (station_id = its index).
+  const stationOf = opts.clusterSubstations
+    ? clusterSubstations(subs, opts.clusterEpsKm)
+    : subs.map((_, i) => i);
   const nStations = Math.max(...stationOf, -1) + 1;
 
   // For each station_id, the union of voltages present at all member substations.
@@ -466,37 +488,46 @@ export function buildPyPSAEarthStyleSheets(
       row.source = 'OSM (PyPSA-Earth style)';
       busRows.push(row);
     }
-    // Transformers between consecutive voltage levels.
-    for (let i = 0; i < voltages.length - 1; i++) {
-      const vLow = voltages[i];
-      const vHigh = voltages[i + 1];
-      const tName = dedupe(`${base}_tx_${vLow}_${vHigh}`, transformerNames);
-      transformerRows.push({
-        name: tName,
-        bus0: stationBuses.get(stationKey(st, vLow))!,
-        bus1: stationBuses.get(stationKey(st, vHigh))!,
-        station_id: st,
-        source: 'OSM (PyPSA-Earth style)',
-      });
+    // Step 4: transformers between consecutive voltage levels (optional).
+    if (opts.emitTransformers) {
+      for (let i = 0; i < voltages.length - 1; i++) {
+        const vLow = voltages[i];
+        const vHigh = voltages[i + 1];
+        const tName = dedupe(`${base}_tx_${vLow}_${vHigh}`, transformerNames);
+        transformerRows.push({
+          name: tName,
+          bus0: stationBuses.get(stationKey(st, vLow))!,
+          bus1: stationBuses.get(stationKey(st, vHigh))!,
+          station_id: st,
+          source: 'OSM (PyPSA-Earth style)',
+        });
+      }
     }
   }
 
-  // Split each line at intermediate substations, then snap endpoints.
+  // Step 5: split each line at intermediate substations (optional), then
+  // snap endpoints. When `snapEndpoints` is on, the snap has NO distance
+  // cap (forces every endpoint to its nearest cluster bus, PyPSA-Earth's
+  // behaviour). When off, a 5 km cap limits the snap to nearby buses;
+  // endpoints with nothing within 5 km drop their lines.
+  const snapMaxKm = opts.snapEndpoints ? Infinity : 5.0;
   const lineRows: Array<Record<string, unknown>> = [];
   const lineNames = new Set<string>();
   for (const line of mergedLines) {
-    const split = splitLineAtSubstations(line, subs);
+    const split = opts.splitAtSubstations
+      ? splitLineAtSubstations(line, subs, opts.splitToleranceKm)
+      : { parts: [line], splitSubIndices: [] as number[] };
     for (let pi = 0; pi < split.parts.length; pi++) {
       const part = split.parts[pi];
       const [startLat, startLon] = part.geometry[0];
       const [endLat, endLon] = part.geometry[part.geometry.length - 1];
       const bus0 = nearestBusForVoltage(
         startLat, startLon, part.voltageKv,
-        subs, stationOf, stationBuses,
+        subs, stationOf, stationBuses, snapMaxKm,
       );
       const bus1 = nearestBusForVoltage(
         endLat, endLon, part.voltageKv,
-        subs, stationOf, stationBuses,
+        subs, stationOf, stationBuses, snapMaxKm,
       );
       if (!bus0 || !bus1 || bus0 === bus1) continue; // drop self-loops
       const lineName = dedupe(
@@ -551,51 +582,56 @@ export function buildPyPSAEarthStyleSheets(
   //
   // The collapsed row carries every contributing osm_id as
   // `osm_merged_ids`, so the provenance trail is preserved.
-  const pairKey = (a: string, b: string, v: number) => {
-    const lo = a < b ? a : b;
-    const hi = a < b ? b : a;
-    return `${lo}|${hi}|${Math.round(v)}`;
-  };
-  const byPair = new Map<string, Array<Record<string, unknown>>>();
-  for (const row of lineRows) {
-    const key = pairKey(
-      String(row.bus0),
-      String(row.bus1),
-      Number(row.v_nom),
-    );
-    if (!byPair.has(key)) byPair.set(key, []);
-    byPair.get(key)!.push(row);
-  }
-  const collapsedLineRows: Array<Record<string, unknown>> = [];
-  byPair.forEach((group) => {
-    if (group.length === 1) {
-      collapsedLineRows.push(group[0]);
-      return;
+  let collapsedLineRows: Array<Record<string, unknown>>;
+  if (opts.collapseParallels) {
+    const pairKey = (a: string, b: string, v: number) => {
+      const lo = a < b ? a : b;
+      const hi = a < b ? b : a;
+      return `${lo}|${hi}|${Math.round(v)}`;
+    };
+    const byPair = new Map<string, Array<Record<string, unknown>>>();
+    for (const row of lineRows) {
+      const key = pairKey(
+        String(row.bus0),
+        String(row.bus1),
+        Number(row.v_nom),
+      );
+      if (!byPair.has(key)) byPair.set(key, []);
+      byPair.get(key)!.push(row);
     }
-    const head = group[0];
-    // Take max num_parallel + max length (see comment block above).
-    let np = 0;
-    let len = 0;
-    const osmIds = new Set<string>();
-    for (const r of group) {
-      const npv = Number(r.num_parallel) || 1;
-      if (npv > np) np = npv;
-      const lv = Number(r.length) || 0;
-      if (lv > len) len = lv;
-      if (r.osm_id !== undefined && r.osm_id !== null) osmIds.add(String(r.osm_id));
-      const merged = r.osm_merged_ids;
-      if (typeof merged === 'string' && merged) {
-        merged.split(',').forEach((id) => osmIds.add(id));
+    collapsedLineRows = [];
+    byPair.forEach((group) => {
+      if (group.length === 1) {
+        collapsedLineRows.push(group[0]);
+        return;
       }
-    }
-    const collapsed: Record<string, unknown> = { ...head };
-    collapsed.num_parallel = np;
-    collapsed.length = len;
-    collapsed.osm_merged_ids = Array.from(osmIds).join(',');
-    collapsed.osm_collapsed_count = group.length;
-    delete collapsed.osm_split_part;
-    collapsedLineRows.push(collapsed);
-  });
+      const head = group[0];
+      // Take max num_parallel + max length (see comment block above).
+      let np = 0;
+      let len = 0;
+      const osmIds = new Set<string>();
+      for (const r of group) {
+        const npv = Number(r.num_parallel) || 1;
+        if (npv > np) np = npv;
+        const lv = Number(r.length) || 0;
+        if (lv > len) len = lv;
+        if (r.osm_id !== undefined && r.osm_id !== null) osmIds.add(String(r.osm_id));
+        const merged = r.osm_merged_ids;
+        if (typeof merged === 'string' && merged) {
+          merged.split(',').forEach((id) => osmIds.add(id));
+        }
+      }
+      const collapsed: Record<string, unknown> = { ...head };
+      collapsed.num_parallel = np;
+      collapsed.length = len;
+      collapsed.osm_merged_ids = Array.from(osmIds).join(',');
+      collapsed.osm_collapsed_count = group.length;
+      delete collapsed.osm_split_part;
+      collapsedLineRows.push(collapsed);
+    });
+  } else {
+    collapsedLineRows = lineRows;
+  }
 
   const sheets: WorkbookFragment['sheets'] = {};
   if (busRows.length) sheets.buses = busRows;
