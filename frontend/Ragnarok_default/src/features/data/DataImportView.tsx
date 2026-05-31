@@ -162,6 +162,12 @@ export function DataImportView({ applyFragment }: Props) {
     [filterValues],
   );
   useEffect(() => {
+    // Skip while the bootstrap hasn't loaded the database metas yet:
+    // during that brief window `selectedDatabase` is null and
+    // `filterValues` collapses to `{}`, which would spuriously not-match
+    // the active run's real `filtersJson` and clear an in-flight fetch
+    // right when the user comes back from another tab.
+    if (!selectedDatabase) return;
     if (
       activeRun &&
       (activeRun.databaseId !== selectedDatabaseId ||
@@ -173,7 +179,7 @@ export function DataImportView({ applyFragment }: Props) {
       dataImportStore.clear();
       setLastAddedSeq(null);
     }
-  }, [activeRun, selectedDatabaseId, selectedIso, filtersJson]);
+  }, [activeRun, selectedDatabase, selectedDatabaseId, selectedIso, filtersJson]);
 
   const handleSelectCountry = useCallback(
     (iso: string) => {
