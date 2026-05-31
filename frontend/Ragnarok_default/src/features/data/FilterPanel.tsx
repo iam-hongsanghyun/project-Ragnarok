@@ -166,7 +166,7 @@ function FilterInput({
             checked={!!value}
             onChange={(e) => onChange(e.target.checked)}
           />
-          <span>{filter.description || filter.label}</span>
+          <span>{filter.label}</span>
         </label>
       );
     }
@@ -300,17 +300,25 @@ export function FilterPanel({
           {database.filters.map((filter) => (
             <div key={filter.id} className="data-import-filter">
               <label className="data-import-filter__label">
-                {filter.label}
+                <span>{filter.label}</span>
                 {filter.unit ? <span className="data-import-filter__unit"> ({filter.unit})</span> : null}
+                {filter.description && (
+                  <span
+                    className="data-import-filter__info"
+                    role="tooltip"
+                    tabIndex={0}
+                    aria-label={`More info about ${filter.label}`}
+                    data-tooltip={filter.description}
+                  >
+                    i
+                  </span>
+                )}
               </label>
               <FilterInput
                 filter={filter}
                 value={values[filter.id]}
                 onChange={(v) => onChange(filter.id, v)}
               />
-              {filter.description && filter.kind !== 'toggle' && (
-                <p className="data-import-filter__hint">{filter.description}</p>
-              )}
             </div>
           ))}
         </section>

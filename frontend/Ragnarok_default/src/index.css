@@ -7795,6 +7795,9 @@ code, kbd, samp, tt,
   gap: 4px;
 }
 .data-import-filter__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 0.78rem;
   font-weight: 600;
   color: var(--text);
@@ -7803,10 +7806,89 @@ code, kbd, samp, tt,
   color: var(--muted);
   font-weight: 400;
 }
-.data-import-filter__hint {
-  font-size: 0.74rem;
+
+/* (i) info icon — sits at the end of the filter label, shows the
+   description as a hover/focus tooltip. CSS-only, no JS. */
+.data-import-filter__info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 2px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
   color: var(--muted);
-  margin: 0;
+  font-size: 0.65rem;
+  font-style: italic;
+  font-weight: 600;
+  line-height: 1;
+  cursor: help;
+  position: relative;
+  user-select: none;
+}
+.data-import-filter__info:hover,
+.data-import-filter__info:focus-visible {
+  border-color: var(--text);
+  color: var(--text);
+  outline: none;
+}
+.data-import-filter__info::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 240px;
+  padding: 6px 8px;
+  background: var(--text);
+  color: var(--surface);
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 400;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 80ms ease-in;
+  z-index: 1000;
+}
+.data-import-filter__info::before {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 4px solid transparent;
+  border-top-color: var(--text);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 80ms ease-in;
+}
+.data-import-filter__info:hover::after,
+.data-import-filter__info:focus-visible::after,
+.data-import-filter__info:hover::before,
+.data-import-filter__info:focus-visible::before {
+  opacity: 1;
+  visibility: visible;
+}
+/* When the icon is near the right edge of the rail, anchor the tooltip
+   to the right so it doesn't clip out of view. The toggles already align
+   to the start of the row, so this is mostly a safety net. */
+.data-import-filter__info:last-child::after {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+.data-import-filter__info:last-child::before {
+  left: auto;
+  right: 4px;
+  transform: none;
 }
 .data-import-filter input[type=number],
 .data-import-filter input[type=text],
