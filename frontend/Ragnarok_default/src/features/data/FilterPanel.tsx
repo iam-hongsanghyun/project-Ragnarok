@@ -7,6 +7,7 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { DatabaseMeta, FilterSchema, PreviewSummary } from '../../shared/api/databases';
+import { SearchableSelect } from '../../shared/components/SearchableSelect';
 import { DateField } from './DateField';
 
 /**
@@ -171,15 +172,17 @@ function FilterInput({
     }
     case 'select': {
       const v = typeof value === 'string' || typeof value === 'number' ? String(value) : '';
+      const options = (filter.options || []).map((opt) => ({
+        value: String(opt.value),
+        label: opt.label,
+      }));
       return (
-        <select value={v} onChange={(e) => onChange(e.target.value)}>
-          <option value="">—</option>
-          {(filter.options || []).map((opt) => (
-            <option key={String(opt.value)} value={String(opt.value)}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
+        <SearchableSelect
+          value={v}
+          options={options}
+          onChange={(next) => onChange(next)}
+          placeholder="—"
+        />
       );
     }
     case 'multiselect': {
