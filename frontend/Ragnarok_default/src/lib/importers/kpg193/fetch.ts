@@ -10,11 +10,16 @@
  *
  *   • Contents API (JSON listing, CORS-enabled):
  *       https://api.github.com/repos/agm-center/kpg-testgrid/contents/<path>
- *   • Raw file (HTTP 302 → raw.githubusercontent.com, also CORS-enabled):
- *       https://github.com/agm-center/kpg-testgrid/raw/main/<path>
+ *   • Raw file (CORS-enabled):
+ *       https://raw.githubusercontent.com/agm-center/kpg-testgrid/main/<path>
  *
- * Both are GitHub-hosted; the redirect through raw.githubusercontent.com
- * is GitHub's own CDN, not a third party.
+ * We MUST hit raw.githubusercontent.com directly — the prettier
+ * "github.com/<owner>/<repo>/raw/<branch>/<path>" form returns a 302
+ * redirect to the same CDN, but the redirect response carries an empty
+ * `Access-Control-Allow-Origin: ""` header that the browser rejects
+ * during preflight (a long-standing quirk of github.com's redirect
+ * implementation). Both URLs are GitHub-hosted; only the CDN sets CORS
+ * cleanly.
  */
 
 const REPO_OWNER = 'agm-center';
@@ -34,7 +39,8 @@ function contentsUrl(path: string = ''): string {
 }
 
 function rawUrl(path: string): string {
-  return `https://github.com/${REPO_OWNER}/${REPO_NAME}/raw/${REPO_BRANCH}/${path}`;
+  // Direct to GitHub's CDN — see module header for the CORS reason.
+  return `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${REPO_BRANCH}/${path}`;
 }
 
 async function listContents(path: string = ''): Promise<ContentEntry[]> {

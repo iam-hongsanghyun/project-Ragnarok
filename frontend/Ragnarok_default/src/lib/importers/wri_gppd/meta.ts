@@ -4,6 +4,7 @@ import type { DatabaseMeta } from 'lib/api/databases';
 export const wriGppdMeta: DatabaseMeta = {
   id: 'wri_gppd',
   name: 'WRI Global Power Plant Database',
+  short_name: 'WRI GPPD',
   category: 'generation',
   subcategory: 'Power plants (per-asset)',
   license: 'CC-BY 4.0',

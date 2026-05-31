@@ -16,6 +16,7 @@ import type { DatabaseMeta } from 'lib/api/databases';
 export const kpg193Meta: DatabaseMeta = {
   id: 'kpg193',
   name: 'KPG193 — Korean reference grid (193-bus)',
+  short_name: 'KPG193',
   category: 'transmission',
   subcategory: 'Reference network',
   license: 'See agm-center/kpg-testgrid (academic / research use)',

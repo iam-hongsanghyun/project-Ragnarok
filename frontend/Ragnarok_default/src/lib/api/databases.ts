@@ -47,7 +47,12 @@ export type ImporterCategory = 'transmission' | 'generation' | 'demand' | string
 
 export interface DatabaseMeta {
   id: string;
+  /** Full name — shown in the right rail's header and the metadata block. */
   name: string;
+  /** Short label — what the left-rail tree leaf displays. Falls back to
+   *  `name` when absent. Keep this under ~16 chars so it fits in the
+   *  narrow tree column without truncation. */
+  short_name?: string;
   category: ImporterCategory;
   /** Optional second-level grouping inside `category`. Empty means the
    * database sits directly under the category in the tree. */

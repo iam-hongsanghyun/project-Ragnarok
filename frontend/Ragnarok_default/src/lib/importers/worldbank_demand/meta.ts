@@ -4,6 +4,7 @@ import type { DatabaseMeta } from 'lib/api/databases';
 export const worldbankDemandMeta: DatabaseMeta = {
   id: 'worldbank_demand',
   name: 'World Bank — annual electricity consumption',
+  short_name: 'World Bank',
   category: 'demand',
   subcategory: 'Annual aggregates',
   license: 'CC-BY 4.0',

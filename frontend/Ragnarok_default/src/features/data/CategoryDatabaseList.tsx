@@ -293,12 +293,11 @@ function DatabaseLeaf({
       className={`sheet-tree-item${active ? ' is-active' : ''}`}
       onClick={() => db.available && onSelect(db.id)}
       disabled={!db.available}
-      title={db.unavailable_reason || db.description || db.name}
+      title={db.unavailable_reason || db.name}
       style={paddingLeft !== undefined ? { paddingLeft } : undefined}
     >
       <span className="sheet-tree-item-icon">≡</span>
-      <span className="sheet-tree-item-label">{db.name}</span>
-      <span className="sheet-tree-count">{db.license || '—'}</span>
+      <span className="sheet-tree-item-label">{db.short_name || db.name}</span>
     </button>
   );
 }

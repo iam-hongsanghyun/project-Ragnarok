@@ -4,6 +4,7 @@ import type { DatabaseMeta } from 'lib/api/databases';
 export const osmMeta: DatabaseMeta = {
   id: 'osm',
   name: 'OpenStreetMap (Overpass)',
+  short_name: 'OSM',
   category: 'transmission',
   subcategory: 'Live grid topology',
   license: 'ODbL',
