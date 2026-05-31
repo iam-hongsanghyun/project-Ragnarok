@@ -146,8 +146,8 @@ function FilterInput({
         <input
           type="number"
           value={v}
-          min={filter.min}
-          max={filter.max}
+          min={typeof filter.min === 'number' ? filter.min : undefined}
+          max={typeof filter.max === 'number' ? filter.max : undefined}
           step={filter.step}
           onChange={(e) => {
             const raw = e.target.value;
@@ -184,6 +184,20 @@ function FilterInput({
     case 'multiselect': {
       const selected: unknown[] = Array.isArray(value) ? value : [];
       return <MultiselectDropdown filter={filter} selected={selected} onChange={onChange} />;
+    }
+    case 'date': {
+      // Free-form calendar picker. The value is stored as a YYYY-MM-DD
+      // string — the format every importer's date filter expects.
+      const v = typeof value === 'string' ? value : '';
+      return (
+        <input
+          type="date"
+          value={v}
+          min={typeof filter.min === 'string' ? filter.min : undefined}
+          max={typeof filter.max === 'string' ? filter.max : undefined}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      );
     }
     default:
       return (

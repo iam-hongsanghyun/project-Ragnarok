@@ -5,7 +5,7 @@
  * the public-facing JSON shapes. See `docs/TODO.md` items `I1` / `I2`.
  */
 
-export type FilterKind = 'number' | 'select' | 'multiselect' | 'range' | 'toggle';
+export type FilterKind = 'number' | 'select' | 'multiselect' | 'range' | 'toggle' | 'date';
 
 export interface FilterOption {
   value: string | number | boolean;
@@ -18,8 +18,10 @@ export interface FilterSchema {
   kind: FilterKind;
   default?: unknown;
   options?: FilterOption[];
-  min?: number;
-  max?: number;
+  /** Numeric min for `number` / `range`; ISO YYYY-MM-DD for `date`. */
+  min?: number | string;
+  /** Numeric max for `number` / `range`; ISO YYYY-MM-DD for `date`. */
+  max?: number | string;
   step?: number;
   unit?: string;
   description?: string;

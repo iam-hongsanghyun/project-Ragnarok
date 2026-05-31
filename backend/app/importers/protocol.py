@@ -32,15 +32,21 @@ FilterKind = str  # "number" | "select" | "multiselect" | "range" | "toggle"
 
 @dataclass(frozen=True)
 class Filter:
-    """One field in a database's right-rail form."""
+    """One field in a database's right-rail form.
+
+    ``min`` / ``max`` are numeric for ``kind="number"`` / ``"range"`` and
+    ISO ``YYYY-MM-DD`` strings for ``kind="date"`` (rendered as the HTML
+    date input's ``min`` / ``max`` attributes). Either-type passes through
+    to JSON unchanged.
+    """
 
     id: str
     label: str
     kind: FilterKind
     default: Any = None
     options: list[dict[str, Any]] | None = None  # for select / multiselect
-    min: float | None = None
-    max: float | None = None
+    min: float | str | None = None
+    max: float | str | None = None
     step: float | None = None
     unit: str | None = None
     description: str | None = None
