@@ -1,8 +1,13 @@
 /**
  * Left rail of the Data view — file-tree-style database selector.
  *
+ * Uses the project's canonical `.sheet-tree-*` classes (same primitive as
+ * ModelView's component tree) so every tree in the app shares look and
+ * behaviour: chevron + label + count for branch rows, icon + label + count
+ * for leaves, filter search + collapse-all / expand-all in the toolbar.
+ *
  * Stage 1 (no country selected): a short prompt + the recently-used
- * countries list (so the rail isn't empty before the user clicks the map).
+ * countries list, so the rail isn't empty before the user clicks the map.
  *
  * Stage 2 (country picked): country header, then a recursive tree
  *
@@ -11,12 +16,11 @@
  *       • Database 1
  *       • Database 2
  *
- * Every node is collapsable; the open/closed state persists to localStorage
- * so the user's preferred view sticks across reloads. Designed to scale to
- * ~100 databases — each node renders independently so collapsed subtrees
- * cost nothing to keep on screen.
+ * Every branch is collapsable; the open/closed state and the filter query
+ * persist to localStorage so the user's view sticks across reloads.
+ * Designed to scale to ~100 databases — collapsed subtrees render nothing.
  */
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { CountryMeta, DatabaseMeta, ImporterCategory } from '../../shared/api/databases';
 import { usePersistedState } from '../../shared/utils/usePersistedState';
 
@@ -62,7 +66,6 @@ function buildTree(databases: DatabaseMeta[]): CategoryNode[] {
       seen.add(cat);
     }
   }
-  // Append any extra categories not in the canonical order (alphabetical).
   const extras = Array.from(byCategory.keys()).filter((c) => !seen.has(c)).sort();
   for (const cat of extras) ordered.push({ category: cat, subcategories: byCategory.get(cat)! });
   return ordered;
@@ -72,61 +75,8 @@ function nodeKey(parts: string[]): string {
   return parts.join('/');
 }
 
-/**
- * Tree-node row primitive — chevron + label + optional right-aligned count.
- * Indented by `depth` (one level = 12px). The chevron rotates when open.
- */
-function TreeRow({
-  depth,
-  open,
-  hasChildren,
-  selected,
-  label,
-  count,
-  onClick,
-  title,
-  trailing,
-  disabled,
-}: {
-  depth: number;
-  open?: boolean;
-  hasChildren: boolean;
-  selected?: boolean;
-  label: string;
-  count?: number;
-  onClick: () => void;
-  title?: string;
-  trailing?: React.ReactNode;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      className={
-        'data-tree__row' +
-        (selected ? ' data-tree__row--active' : '') +
-        (disabled ? ' data-tree__row--disabled' : '')
-      }
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      style={{ paddingLeft: 8 + depth * 12 }}
-    >
-      <span
-        className={
-          'data-tree__chevron' +
-          (hasChildren ? '' : ' data-tree__chevron--leaf') +
-          (open ? ' data-tree__chevron--open' : '')
-        }
-        aria-hidden="true"
-      >
-        {hasChildren ? '›' : '•'}
-      </span>
-      <span className="data-tree__label">{label}</span>
-      {count !== undefined && <span className="data-tree__count">{count}</span>}
-      {trailing}
-    </button>
-  );
+function matchesQuery(text: string, query: string): boolean {
+  return !query || text.toLowerCase().includes(query.toLowerCase());
 }
 
 export function CategoryDatabaseList({
@@ -140,6 +90,7 @@ export function CategoryDatabaseList({
 }: Props) {
   const tree = useMemo(() => buildTree(databases), [databases]);
   const [collapsed, setCollapsed] = usePersistedState<Record<string, boolean>>(COLLAPSE_KEY, {});
+  const [query, setQuery] = useState('');
 
   const isCollapsed = (key: string): boolean => collapsed[key] === true;
   const toggle = (key: string) =>
@@ -192,6 +143,10 @@ export function CategoryDatabaseList({
     );
   }
 
+  // When the user has typed a query, force-open every branch that contains
+  // a matching leaf so they can see results without having to expand by hand.
+  const queryActive = query.trim().length > 0;
+
   return (
     <aside className="view-rail view-rail--left data-import-rail">
       <div className="view-rail-header">
@@ -209,90 +164,156 @@ export function CategoryDatabaseList({
         <div className="data-import-rail__country-name">{selectedCountry.name}</div>
         <div className="data-import-rail__country-iso">{selectedCountry.iso}</div>
       </div>
-      <div className="data-import-rail__tree-toolbar">
-        <span className="data-import-rail__section-label">Databases</span>
-        <span className="data-import-rail__tree-actions">
-          <button type="button" onClick={collapseAll} title="Collapse all">–</button>
-          <button type="button" onClick={expandAll} title="Expand all">+</button>
-        </span>
-      </div>
-      <div className="view-rail-body data-tree">
-        {tree.map((node) => {
-          const catKey = nodeKey([node.category]);
-          const catOpen = !isCollapsed(catKey);
-          const dbCount = Array.from(node.subcategories.values()).reduce((n, list) => n + list.length, 0);
-          return (
-            <div key={node.category} className="data-tree__group">
-              <TreeRow
-                depth={0}
-                open={catOpen}
-                hasChildren
-                label={CATEGORY_LABEL[node.category] || node.category}
-                count={dbCount}
-                onClick={() => toggle(catKey)}
-              />
-              {catOpen && (
-                <div className="data-tree__children">
-                  {Array.from(node.subcategories.entries()).map(([sub, dbs]) => {
-                    const subKey = nodeKey([node.category, sub]);
-                    const subOpen = !isCollapsed(subKey);
-                    // When the subcategory is empty (UNCATEGORISED), flatten:
-                    // render databases directly under the category at depth 1.
-                    if (sub === UNCATEGORISED) {
-                      return dbs.map((db) => (
-                        <TreeRow
-                          key={db.id}
-                          depth={1}
-                          hasChildren={false}
-                          selected={db.id === selectedDatabaseId}
-                          disabled={!db.available}
-                          label={db.name}
-                          onClick={() => db.available && onSelectDatabase(db.id)}
-                          title={db.unavailable_reason || db.description || db.name}
-                          trailing={
-                            <span className="data-tree__hint" title={db.license}>{db.license}</span>
-                          }
-                        />
-                      ));
-                    }
-                    return (
-                      <div key={sub} className="data-tree__group">
-                        <TreeRow
-                          depth={1}
-                          open={subOpen}
-                          hasChildren
-                          label={sub}
-                          count={dbs.length}
-                          onClick={() => toggle(subKey)}
-                        />
-                        {subOpen && (
-                          <div className="data-tree__children">
-                            {dbs.map((db) => (
-                              <TreeRow
-                                key={db.id}
-                                depth={2}
-                                hasChildren={false}
-                                selected={db.id === selectedDatabaseId}
-                                disabled={!db.available}
-                                label={db.name}
-                                onClick={() => db.available && onSelectDatabase(db.id)}
-                                title={db.unavailable_reason || db.description || db.name}
-                                trailing={
-                                  <span className="data-tree__hint" title={db.license}>{db.license}</span>
-                                }
-                              />
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
+      <nav className="sheet-tree" aria-label="Database tree">
+        <div className="sheet-tree-toolbar">
+          <input
+            className="sheet-tree-search"
+            type="text"
+            placeholder="Filter…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            aria-label="Filter databases"
+          />
+          <button
+            type="button"
+            className="tb-btn tb-btn--muted"
+            onClick={collapseAll}
+            title="Collapse all"
+          >
+            –
+          </button>
+          <button
+            type="button"
+            className="tb-btn tb-btn--muted"
+            onClick={expandAll}
+            title="Expand all"
+          >
+            +
+          </button>
+        </div>
+        <div className="sheet-tree-body">
+          {tree.map((node) => {
+            const catKey = nodeKey([node.category]);
+            const catLabel = CATEGORY_LABEL[node.category] || node.category;
+            const subEntries = Array.from(node.subcategories.entries());
+            // Apply the filter to leaves; a branch is visible if its label
+            // matches or any descendant leaf does.
+            const filteredSubEntries = subEntries
+              .map(([sub, dbs]) => {
+                const subMatches = matchesQuery(sub, query);
+                const dbMatches = dbs.filter((d) => matchesQuery(d.name, query));
+                if (!queryActive) return [sub, dbs] as const;
+                if (subMatches) return [sub, dbs] as const;
+                if (dbMatches.length > 0) return [sub, dbMatches] as const;
+                return null;
+              })
+              .filter((entry): entry is readonly [string, DatabaseMeta[]] => entry !== null);
+            const catMatches = matchesQuery(catLabel, query);
+            if (queryActive && !catMatches && filteredSubEntries.length === 0) return null;
+            const catOpen = queryActive ? true : !isCollapsed(catKey);
+            const dbCount = filteredSubEntries.reduce((n, [, list]) => n + list.length, 0);
+            return (
+              <div key={node.category} className="sheet-tree-group">
+                <button
+                  type="button"
+                  className="sheet-tree-group-header"
+                  onClick={() => toggle(catKey)}
+                  aria-expanded={catOpen}
+                >
+                  <span className={`sheet-tree-chevron${catOpen ? ' is-open' : ''}`}>›</span>
+                  <span className="sheet-tree-group-label">{catLabel}</span>
+                  <span className="sheet-tree-count">{dbCount}</span>
+                </button>
+                {catOpen && (
+                  <div className="sheet-tree-items">
+                    {filteredSubEntries.map(([sub, dbs]) => {
+                      // Uncategorised buckets render their databases inline at
+                      // the same depth as the category's leaves; we skip the
+                      // intermediate subcategory branch row.
+                      if (sub === UNCATEGORISED) {
+                        return dbs.map((db) => (
+                          <DatabaseLeaf
+                            key={db.id}
+                            db={db}
+                            depth={1}
+                            active={db.id === selectedDatabaseId}
+                            onSelect={onSelectDatabase}
+                          />
+                        ));
+                      }
+                      const subKey = nodeKey([node.category, sub]);
+                      const subOpen = queryActive ? true : !isCollapsed(subKey);
+                      return (
+                        <div key={sub} className="sheet-tree-group">
+                          <button
+                            type="button"
+                            className="sheet-tree-group-header"
+                            onClick={() => toggle(subKey)}
+                            aria-expanded={subOpen}
+                            style={{ paddingLeft: 28 }}
+                          >
+                            <span className={`sheet-tree-chevron${subOpen ? ' is-open' : ''}`}>›</span>
+                            <span className="sheet-tree-group-label">{sub}</span>
+                            <span className="sheet-tree-count">{dbs.length}</span>
+                          </button>
+                          {subOpen && (
+                            <div className="sheet-tree-items">
+                              {dbs.map((db) => (
+                                <DatabaseLeaf
+                                  key={db.id}
+                                  db={db}
+                                  depth={2}
+                                  active={db.id === selectedDatabaseId}
+                                  onSelect={onSelectDatabase}
+                                />
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </nav>
     </aside>
+  );
+}
+
+/**
+ * Leaf row — one database. Uses the same `.sheet-tree-item` class as the
+ * Model's per-sheet rows so the Data and Model trees read identically.
+ * The icon column is a small carrier-style glyph (≡) for the database.
+ */
+function DatabaseLeaf({
+  db,
+  depth,
+  active,
+  onSelect,
+}: {
+  db: DatabaseMeta;
+  depth: number;
+  active: boolean;
+  onSelect: (id: string) => void;
+}) {
+  // depth 1 = direct under category (uncategorised) → default 28px left;
+  // depth 2 = under subcategory → 44px left.
+  const paddingLeft = depth >= 2 ? 44 : undefined;
+  return (
+    <button
+      type="button"
+      className={`sheet-tree-item${active ? ' is-active' : ''}`}
+      onClick={() => db.available && onSelect(db.id)}
+      disabled={!db.available}
+      title={db.unavailable_reason || db.description || db.name}
+      style={paddingLeft !== undefined ? { paddingLeft } : undefined}
+    >
+      <span className="sheet-tree-item-icon">≡</span>
+      <span className="sheet-tree-item-label">{db.name}</span>
+      <span className="sheet-tree-count">{db.license || '—'}</span>
+    </button>
   );
 }

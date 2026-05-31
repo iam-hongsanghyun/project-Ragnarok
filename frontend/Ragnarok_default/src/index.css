@@ -7705,35 +7705,6 @@ code, kbd, samp, tt,
   color: var(--muted);
   margin: 0;
 }
-.data-import-rail__tree-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 10px 4px;
-  border-bottom: 1px solid var(--border);
-}
-.data-import-rail__tree-actions {
-  display: inline-flex;
-  gap: 2px;
-}
-.data-import-rail__tree-actions button {
-  width: 22px;
-  height: 22px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--font-mono);
-  font-size: 0.9rem;
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  color: var(--muted);
-  cursor: pointer;
-}
-.data-import-rail__tree-actions button:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-}
 .data-import-rail__list {
   list-style: none;
   margin: 0;
@@ -7765,83 +7736,11 @@ code, kbd, samp, tt,
   font-size: 0.72rem;
   color: var(--muted);
 }
-
-/* ── Tree (file-tree-style database picker) ─────────────────────────────── */
-.data-tree {
-  padding: 4px 0;
-}
-.data-tree__group {
-  display: block;
-}
-.data-tree__children {
-  display: block;
-}
-.data-tree__row {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 0.84rem;
-  color: var(--text);
-  text-align: left;
-  line-height: 1.3;
-}
-.data-tree__row:hover:not(:disabled) {
-  background: var(--bg-hover);
-}
-.data-tree__row--active {
-  background: var(--bg-hover);
-  font-weight: 600;
-  color: var(--brand, var(--text));
-  box-shadow: inset 2px 0 0 var(--brand, var(--text));
-}
-.data-tree__row--disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-.data-tree__chevron {
-  display: inline-flex;
-  width: 14px;
-  height: 14px;
-  align-items: center;
-  justify-content: center;
-  color: var(--muted);
-  font-size: 0.9rem;
-  flex-shrink: 0;
-  transform: rotate(0deg);
-  transition: transform 0.12s ease;
-}
-.data-tree__chevron--open {
-  transform: rotate(90deg);
-}
-.data-tree__chevron--leaf {
-  color: var(--muted);
-  font-size: 0.6rem;
-}
-.data-tree__label {
-  flex: 1 1 auto;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.data-tree__count {
+/* The database tree uses the canonical .sheet-tree-* rules (same primitive
+   as the Model view's component tree). The only Data-view-specific tweak is
+   that license codes shown in the count slot read better in mono. */
+.data-import-rail .sheet-tree-count {
   font-family: var(--font-mono);
-  font-size: 0.7rem;
-  color: var(--muted);
-  margin-left: auto;
-  padding-left: 6px;
-}
-.data-tree__hint {
-  font-family: var(--font-mono);
-  font-size: 0.68rem;
-  color: var(--muted);
-  margin-left: auto;
-  padding-left: 6px;
 }
 
 /* Right rail */
