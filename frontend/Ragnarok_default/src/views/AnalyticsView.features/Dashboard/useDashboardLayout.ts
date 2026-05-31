@@ -6,7 +6,7 @@
  * layouts give them recall slots when they want to switch.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { DashboardLayout, NamedLayout, STORAGE_KEY } from './types';
+import { DashboardLayout, NamedLayout, STORAGE_KEY } from 'lib/dashboard/types';
 
 interface Stored {
   active: DashboardLayout;

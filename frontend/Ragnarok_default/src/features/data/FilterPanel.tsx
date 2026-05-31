@@ -6,7 +6,7 @@
  * here and one match on the backend `Filter` dataclass.
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { DatabaseMeta, FilterSchema, PreviewSummary } from '../../shared/api/databases';
+import { DatabaseMeta, FilterSchema, PreviewSummary } from 'lib/api/databases';
 import { SearchableSelect } from '../../shared/components/SearchableSelect';
 import { DateField } from './DateField';
 

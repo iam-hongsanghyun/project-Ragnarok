@@ -10,7 +10,7 @@
  * its job is purely layout.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Card, DashboardLayout, DragPayload, Row } from './types';
+import { Card, DashboardLayout, DragPayload, Row } from 'lib/dashboard/types';
 
 const MIN_ROW_HEIGHT = 120;
 const MAX_ROW_HEIGHT = 1000;

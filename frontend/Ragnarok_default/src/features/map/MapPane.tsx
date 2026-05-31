@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { CircleMarker, MapContainer, Polyline, TileLayer, Tooltip } from 'react-leaflet';
 import { LatLngBoundsExpression } from 'leaflet';
-import { GridRow, WorkbookModel } from '../../shared/types';
-import { numberValue, stringValue, resolvedColor } from '../../shared/utils/helpers';
+import { GridRow, WorkbookModel } from 'lib/types';
+import { numberValue, stringValue, resolvedColor } from 'lib/utils/helpers';
 import { FitToBounds } from './FitToBounds';
 import { NoZoomAnimation } from './NoZoomAnimation';
 import { MapLegend } from './MapLegend';

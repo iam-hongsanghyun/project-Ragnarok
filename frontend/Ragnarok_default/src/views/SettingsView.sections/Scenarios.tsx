@@ -2,7 +2,7 @@
  * Scenarios section — preset library + active scenario metadata.
  */
 import React from 'react';
-import { ScenarioCatalog, ScenarioPreset } from '../../shared/types';
+import { ScenarioCatalog, ScenarioPreset } from 'lib/types';
 
 export interface ScenariosSectionProps {
   scenarioCatalog: ScenarioCatalog;

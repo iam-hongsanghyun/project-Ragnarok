@@ -2,8 +2,8 @@
  * Carbon price section — scalar price + year-indexed schedule.
  */
 import React from 'react';
-import { CarbonPriceScheduleEntry } from '../../shared/types';
-import { SETTINGS_CONFIG } from '../../constants';
+import { CarbonPriceScheduleEntry } from 'lib/types';
+import { SETTINGS_CONFIG } from 'lib/constants';
 
 export interface CarbonSectionProps {
   carbonPrice: number;

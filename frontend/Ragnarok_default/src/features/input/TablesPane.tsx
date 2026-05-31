@@ -1,15 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
-import { GridRow, Primitive, SheetName, TableSel, TsSheetName, WorkbookModel } from '../../shared/types';
+import { GridRow, Primitive, SheetName, TableSel, TsSheetName, WorkbookModel } from 'lib/types';
 import { ModelIssue } from '../validation/useModelIssues';
-import { getAddableAttributes, getProtectedColumns, TABLE_GROUPS } from '../../constants';
-import { getAttributeSchema, PypsaAttribute, TableGroup } from '../../constants/pypsa_schema';
+import { getAddableAttributes, getProtectedColumns, TABLE_GROUPS } from 'lib/constants';
+import { getAttributeSchema, PypsaAttribute, TableGroup } from 'lib/constants/pypsa_schema';
 import { ResizablePanels } from '../../layout/ResizablePanels';
-import { getColumns, getTsFirstCol, stringValue } from '../../shared/utils/helpers';
-import { parseCsvToGridRows } from '../../shared/utils/workbook';
-import { normalizeDateToIso } from '../../shared/utils/helpers';
+import { getColumns, getTsFirstCol, stringValue } from 'lib/utils/helpers';
+import { parseCsvToGridRows } from 'lib/workbook/workbook';
+import { normalizeDateToIso } from 'lib/utils/helpers';
 import type { DateFormat } from '../settings/useSettings';
-import { PYPSA_STANDARD_LINE_TYPES, PYPSA_STANDARD_TRANSFORMER_TYPES } from '../../constants/pypsa_standard_types';
+import { PYPSA_STANDARD_LINE_TYPES, PYPSA_STANDARD_TRANSFORMER_TYPES } from 'lib/constants/pypsa_standard_types';
 import { InputAnalyser } from './InputAnalyser';
 import { DataGrid } from './grid/DataGrid';
 

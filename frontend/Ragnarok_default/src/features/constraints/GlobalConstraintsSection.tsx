@@ -1,6 +1,6 @@
 import React from 'react';
-import { ConstraintMetric, CustomConstraint } from '../../shared/types';
-import { METRIC_DEFS } from '../../constants';
+import { ConstraintMetric, CustomConstraint } from 'lib/types';
+import { METRIC_DEFS } from 'lib/constants';
 import { SearchableSelect } from '../../shared/components/SearchableSelect';
 
 export function GlobalConstraintsSection({

@@ -1,19 +1,8 @@
 import { useState, useCallback } from 'react';
-import { SETTINGS_CONFIG, SETTINGS_DEFAULTS } from '../../constants';
+import type { AppSettings } from 'lib/settings/types';
+import { SETTINGS_CONFIG, SETTINGS_DEFAULTS } from 'lib/constants';
 
-export type DateFormat = 'auto' | 'dmy' | 'mdy' | 'ymd';
-export type SolverType = 'simplex' | 'ipm';
-
-export interface AppSettings {
-  dateFormat: DateFormat;
-  solverThreads: number;   // 0 = let HiGHS decide (all cores)
-  solverType: SolverType;
-  currencyCode: string;      // ISO 4217 code, e.g. "USD"
-  currencySymbol: string;    // display symbol, e.g. "$"
-  enableLoadShedding: boolean;
-  loadSheddingCost: number;   // VOLL in the currently-selected currency, per MWh
-  discountRate: number;       // Used to annualise CAPEX for extendable assets
-}
+export type { DateFormat, SolverType, AppSettings } from 'lib/settings/types';
 
 const STORAGE_KEY = SETTINGS_CONFIG.storageKey;
 

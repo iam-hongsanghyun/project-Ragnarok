@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { ModuleConfigField, ModuleConfigTableColumn, ModuleConfigVisibleWhen, ModuleDescriptor, ModuleHostInventory, PluginFileValue } from '../../shared/types';
+import { ModuleConfigField, ModuleConfigTableColumn, ModuleConfigVisibleWhen, ModuleDescriptor, ModuleHostInventory, PluginFileValue } from 'lib/types';
 import { SearchableSelect } from '../../shared/components/SearchableSelect';
 
 interface ModuleManagerSectionProps {

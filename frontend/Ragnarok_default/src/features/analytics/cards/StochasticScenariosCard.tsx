@@ -7,7 +7,7 @@
  * is shown in every other chart) is highlighted.
  */
 import React from 'react';
-import { StochasticResult } from '../../../shared/types';
+import { StochasticResult } from 'lib/types';
 
 interface Props {
   stochastic: StochasticResult;

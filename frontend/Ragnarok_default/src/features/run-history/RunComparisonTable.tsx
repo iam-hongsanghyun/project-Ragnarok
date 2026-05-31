@@ -1,6 +1,6 @@
 import React from 'react';
-import { RunHistoryEntry, RunResults } from '../../shared/types';
-import { formatRelTime } from '../../shared/utils/formatRelTime';
+import { RunHistoryEntry, RunResults } from 'lib/types';
+import { formatRelTime } from 'lib/utils/formatRelTime';
 
 interface RunComparisonTableProps {
   runHistory: RunHistoryEntry[];

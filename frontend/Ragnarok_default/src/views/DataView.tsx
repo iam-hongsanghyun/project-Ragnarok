@@ -13,7 +13,7 @@
  */
 import React from 'react';
 import { DataImportView } from '../features/data/DataImportView';
-import { WorkbookFragment } from '../shared/api/databases';
+import { WorkbookFragment } from 'lib/api/databases';
 
 interface Props {
   onApplyFragment: (fragment: WorkbookFragment, databaseName: string, countryName: string) => void;

@@ -18,14 +18,14 @@ import {
   TableSel,
   TsSheetName,
   WorkbookModel,
-} from '../../shared/types';
+} from 'lib/types';
 import { TablesPane } from '../input/TablesPane';
 import { ModelIssue } from '../validation/useModelIssues';
 import { DateFormat } from '../settings/useSettings';
-import { stringValue } from '../../shared/utils/helpers';
-import { parseCsvToGridRows } from '../../shared/utils/workbook';
-import { TABLE_GROUPS } from '../../constants';
-import { BUILD_STEPS, BuildStep, getStepIssues } from './steps';
+import { stringValue } from 'lib/utils/helpers';
+import { parseCsvToGridRows } from 'lib/workbook/workbook';
+import { TABLE_GROUPS } from 'lib/constants';
+import { BUILD_STEPS, BuildStep, getStepIssues } from 'lib/build/steps';
 import { BuildDetailPane } from './BuildDetailPane';
 import { BuildNetworkMap, BRANCH_SHEETS, isGeoSheet, LinkMode } from './BuildNetworkMap';
 import { BuildAttributeForm } from './BuildAttributeForm';

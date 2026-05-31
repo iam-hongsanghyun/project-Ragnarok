@@ -6,7 +6,7 @@
  * Plugins run in the browser and never contact the Ragnarok backend.
  */
 import React, { useRef, useState } from 'react';
-import { WorkbookModel } from '../shared/types';
+import { WorkbookModel } from 'lib/types';
 import { FrontendPluginHost } from '../features/plugins/frontendPlugins';
 import { PluginDetail } from '../features/plugins/PluginDetail';
 import { useToast } from '../shared/components/Toast';

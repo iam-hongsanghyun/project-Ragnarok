@@ -7,10 +7,10 @@
  * the current values for that row beside each attribute.
  */
 import React from 'react';
-import { GridRow, WorkbookModel } from '../../shared/types';
-import { getComponentSchema, PypsaAttribute, TABLE_GROUPS } from '../../constants/pypsa_schema';
-import { stringValue } from '../../shared/utils/helpers';
-import { BuildStep, getStepIssues } from './steps';
+import { GridRow, WorkbookModel } from 'lib/types';
+import { getComponentSchema, PypsaAttribute, TABLE_GROUPS } from 'lib/constants/pypsa_schema';
+import { stringValue } from 'lib/utils/helpers';
+import { BuildStep, getStepIssues } from 'lib/build/steps';
 import { ModelIssue } from '../validation/useModelIssues';
 
 /** Down-sample to at most `maxPts` points so wide profiles stay legible. */

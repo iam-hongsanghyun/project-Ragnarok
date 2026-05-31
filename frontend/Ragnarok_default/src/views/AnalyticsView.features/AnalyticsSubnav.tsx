@@ -5,7 +5,7 @@
  * tracebacks) via polling.
  */
 import React from 'react';
-import { AnalyticsSubTab } from '../../shared/types';
+import { AnalyticsSubTab } from 'lib/types';
 import { ModelIssue } from '../../features/validation/useModelIssues';
 
 interface ValidationResult {

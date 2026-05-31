@@ -22,7 +22,7 @@ import {
   CountryMeta,
   GeoJSONFeature,
   GeoJSONFeatureCollection,
-} from '../../shared/api/databases';
+} from 'lib/api/databases';
 import { CountrySearch } from './CountrySearch';
 
 interface Props {

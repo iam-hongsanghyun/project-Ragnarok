@@ -2,9 +2,9 @@
  * Window section — simulation window (snapshot range) + resolution weight.
  */
 import React from 'react';
-import { PathwayConfig } from '../../shared/types';
+import { PathwayConfig } from 'lib/types';
 import { DualRangeSlider } from '../../shared/components/DualRangeSlider';
-import { RUN_WINDOW } from '../../constants';
+import { RUN_WINDOW } from 'lib/constants';
 
 export interface WindowSectionProps {
   pathwayConfig: PathwayConfig;

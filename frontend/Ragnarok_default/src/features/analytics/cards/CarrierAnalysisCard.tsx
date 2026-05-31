@@ -11,8 +11,8 @@
  * Carriers used only by the load-shedding backstop are excluded.
  */
 import React from 'react';
-import { RunResults } from '../../../shared/types';
-import { numberValue, carrierColor } from '../../../shared/utils/helpers';
+import { RunResults } from 'lib/types';
+import { numberValue, carrierColor } from 'lib/utils/helpers';
 
 interface Props {
   results: RunResults;

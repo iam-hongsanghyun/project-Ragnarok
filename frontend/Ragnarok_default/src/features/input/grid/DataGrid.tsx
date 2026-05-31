@@ -15,9 +15,9 @@ import DataEditor, {
 } from '@glideapps/glide-data-grid';
 import '@glideapps/glide-data-grid/dist/index.css';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { GridRow, Primitive } from '../../../shared/types';
-import { stringValue } from '../../../shared/utils/helpers';
-import { resolvePaste } from './range';
+import { GridRow, Primitive } from 'lib/types';
+import { stringValue } from 'lib/utils/helpers';
+import { resolvePaste } from 'lib/input/range';
 import { FilterDropdown } from './FilterDropdown';
 
 type Row = GridRow & { __i: number };

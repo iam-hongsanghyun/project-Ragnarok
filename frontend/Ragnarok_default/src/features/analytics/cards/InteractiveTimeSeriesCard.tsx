@@ -1,6 +1,6 @@
 import React, { useState, useRef, useLayoutEffect } from 'react';
-import { ChartMode, TimeSeriesRow, TimeSeriesSeries } from '../../../shared/types';
-import { numberValue, isoDate, isoTime } from '../../../shared/utils/helpers';
+import { ChartMode, TimeSeriesRow, TimeSeriesSeries } from 'lib/types';
+import { numberValue, isoDate, isoTime } from 'lib/utils/helpers';
 
 /**
  * Track an element's rendered pixel size so the chart can size its SVG

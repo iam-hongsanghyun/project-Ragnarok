@@ -13,7 +13,7 @@
  * are usually the ones worth scrutinising.
  */
 import React from 'react';
-import { RunResults } from '../../../shared/types';
+import { RunResults } from 'lib/types';
 
 interface Props {
   results: RunResults;

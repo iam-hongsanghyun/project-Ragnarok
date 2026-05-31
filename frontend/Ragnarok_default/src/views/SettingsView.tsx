@@ -6,7 +6,7 @@
  * `SettingsView.sections/`.
  */
 import React from 'react';
-import { usePersistedState } from '../shared/utils/usePersistedState';
+import { usePersistedState } from 'shared/hooks/usePersistedState';
 import { ResizablePanels } from '../layout/ResizablePanels';
 import { LeftRail } from '../shared/components/primitives';
 import {
@@ -20,7 +20,7 @@ import {
   SecurityConstrainedConfig,
   StochasticConfig,
   WorkbookModel,
-} from '../shared/types';
+} from 'lib/types';
 import { DateFormat, SolverType } from '../features/settings/useSettings';
 
 import { ScenariosSection } from './SettingsView.sections/Scenarios';

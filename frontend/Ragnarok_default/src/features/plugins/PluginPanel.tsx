@@ -6,7 +6,7 @@ import {
   PluginAnalyticsEntry,
   PluginFieldHint,
   PluginPanelLayout,
-} from '../../shared/types';
+} from 'lib/types';
 import { ConfigFieldRow } from '../modules/ModuleManagerSection';
 
 type PluginInnerTab = 'description' | 'input' | 'output';

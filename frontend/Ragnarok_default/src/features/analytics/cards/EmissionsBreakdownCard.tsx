@@ -9,8 +9,8 @@
  */
 
 import React, { useState } from 'react';
-import { CarrierEmission, EmissionsBreakdown, GeneratorEmission } from '../../../shared/types';
-import { carrierColor } from '../../../shared/utils/helpers';
+import { CarrierEmission, EmissionsBreakdown, GeneratorEmission } from 'lib/types';
+import { carrierColor } from 'lib/utils/helpers';
 
 interface Props {
   data: EmissionsBreakdown;

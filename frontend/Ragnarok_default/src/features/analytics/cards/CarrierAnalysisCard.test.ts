@@ -7,7 +7,7 @@
  * come out right.
  */
 import { describe, test, expect } from '@jest/globals';
-import type { RunResults } from '../../../shared/types';
+import type { RunResults } from 'lib/types';
 
 // We import the math by reaching into the helper indirectly — re-derive
 // here for testability. Keep this aligned with the card's reducers.

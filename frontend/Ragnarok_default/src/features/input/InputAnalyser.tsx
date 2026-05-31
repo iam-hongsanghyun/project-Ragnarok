@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { GridRow } from '../../shared/types';
-import { stringValue } from '../../shared/utils/helpers';
+import { GridRow } from 'lib/types';
+import { stringValue } from 'lib/utils/helpers';
 import { SearchableSelect } from '../../shared/components/SearchableSelect';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

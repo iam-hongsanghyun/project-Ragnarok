@@ -6,7 +6,7 @@
  * view; there are no tabs anywhere else.
  */
 import React from 'react';
-import { WorkspaceTab } from '../shared/types';
+import { WorkspaceTab } from 'lib/types';
 
 interface ValidationResult {
   valid: boolean;

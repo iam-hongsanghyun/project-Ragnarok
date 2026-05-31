@@ -21,8 +21,8 @@ import {
   TimeSeriesRow,
   TimeSeriesSeries,
   WorkbookModel,
-} from '../../../shared/types';
-import { EMPTY_METRIC_KEY } from '../../../constants';
+} from 'lib/types';
+import { EMPTY_METRIC_KEY } from 'lib/constants';
 import { UserDefinedChartCard } from '../../../features/analytics/cards/UserDefinedChartCard';
 import { AnalyticsMapCard } from '../../../features/analytics/AnalyticsMapCard';
 import { KpiStripCard } from '../../../features/analytics/cards/KpiStripCard';
@@ -35,11 +35,11 @@ import { CapacityByPeriodCard } from '../../../features/analytics/cards/Capacity
 import { CarrierAnalysisCard } from '../../../features/analytics/cards/CarrierAnalysisCard';
 import { LoadAnalysisCard } from '../../../features/analytics/cards/LoadAnalysisCard';
 import { StochasticScenariosCard } from '../../../features/analytics/cards/StochasticScenariosCard';
-import { numberValue } from '../../../shared/utils/helpers';
+import { numberValue } from 'lib/utils/helpers';
 import { Dashboard, newId } from './Dashboard';
-import { Card, DashboardLayout } from './types';
+import { Card, DashboardLayout } from 'lib/dashboard/types';
 import { useDashboardLayout } from './useDashboardLayout';
-import { PRESETS } from './presets';
+import { PRESETS } from 'lib/dashboard/presets';
 
 const DEFAULT_LAYOUT: DashboardLayout = { rows: [], cards: [] };
 

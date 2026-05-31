@@ -27,22 +27,22 @@ import {
   WorkbookModel,
   WorkspaceTab,
   AnalyticsSubTab,
-} from './shared/types';
-import { API_BASE, DEFAULT_CONSTRAINTS, getDefaultRowForSheet, MAX_UNPINNED_HISTORY, PYPSA_SCHEMA_META, RUN_POLLING, RUN_WINDOW, SHEETS } from './constants';
-import { canonicalizeOutputSeries, canonicalizeTemporalRows, createEmptyWorkbook, exportWorkbook, normalizeInputDatesToIso, parseProjectFile, parseWorkbook, projectWorkbookToArrayBuffer, workbookToArrayBuffer } from './shared/utils/workbook';
-import { mergeWorkbookFragment } from './shared/utils/mergeWorkbookFragment';
-import type { WorkbookFragment } from './shared/api/databases';
-import { fullResultsArrayBuffer } from './shared/utils/exportResults';
-import { getBounds, getBusIndex, carrierColor, numberValue, orderByCarrierRows, setCarrierColorOverrides, snapshotMaxFromWorkbook } from './shared/utils/helpers';
-import { usePersistedState } from './shared/utils/usePersistedState';
-import { buildRowsFromGeneratorDetails, buildSystemLoadRows, normalizeSeriesPoint } from './shared/utils/analytics';
-import { withDerivedAssetDetails } from './shared/utils/deriveAssetDetails';
-import { deriveRunResults } from './shared/utils/deriveRunResults';
-import { defaultPathwayConfig, getDefaultSelectedPeriod, readPathwayConfigFromModel, samePathwayConfig, writePathwayConfigToModel } from './shared/utils/pathway';
-import { defaultRollingConfig, normalizeRollingConfig, readRollingConfigFromModel, sameRollingConfig, writeRollingConfigToModel } from './shared/utils/rolling';
-import { readCustomDslFromModel, writeCustomDslToModel } from './shared/utils/customDsl';
-import { dslToSpecs } from './shared/utils/constraintDsl';
-import { buildScenarioPreset, defaultScenarioCatalog, readScenarioCatalogFromModel, sameScenarioCatalog, writeScenarioCatalogToModel } from './shared/utils/scenarios';
+} from 'lib/types';
+import { API_BASE, DEFAULT_CONSTRAINTS, getDefaultRowForSheet, MAX_UNPINNED_HISTORY, PYPSA_SCHEMA_META, RUN_POLLING, RUN_WINDOW, SHEETS } from 'lib/constants';
+import { canonicalizeOutputSeries, canonicalizeTemporalRows, createEmptyWorkbook, exportWorkbook, normalizeInputDatesToIso, parseProjectFile, parseWorkbook, projectWorkbookToArrayBuffer, workbookToArrayBuffer } from 'lib/workbook/workbook';
+import { mergeWorkbookFragment } from 'lib/workbook/mergeFragment';
+import type { WorkbookFragment } from 'lib/api/databases';
+import { fullResultsArrayBuffer } from 'lib/export/results';
+import { getBounds, getBusIndex, carrierColor, numberValue, orderByCarrierRows, setCarrierColorOverrides, snapshotMaxFromWorkbook } from 'lib/utils/helpers';
+import { usePersistedState } from 'shared/hooks/usePersistedState';
+import { buildRowsFromGeneratorDetails, buildSystemLoadRows, normalizeSeriesPoint } from 'lib/results/analytics';
+import { withDerivedAssetDetails } from 'lib/results/assetDetails';
+import { deriveRunResults } from 'lib/results/runResults';
+import { defaultPathwayConfig, getDefaultSelectedPeriod, readPathwayConfigFromModel, samePathwayConfig, writePathwayConfigToModel } from 'lib/results/pathway';
+import { defaultRollingConfig, normalizeRollingConfig, readRollingConfigFromModel, sameRollingConfig, writeRollingConfigToModel } from 'lib/results/rolling';
+import { readCustomDslFromModel, writeCustomDslToModel } from 'lib/constraints/custom';
+import { dslToSpecs } from 'lib/constraints/dsl';
+import { buildScenarioPreset, defaultScenarioCatalog, readScenarioCatalogFromModel, sameScenarioCatalog, writeScenarioCatalogToModel } from 'lib/results/scenarios';
 import { RunDialog } from './features/run/RunDialog';
 import { SettingsView } from './views/SettingsView';
 import { PluginsView } from './views/PluginsView';
@@ -848,7 +848,7 @@ function AppInner() {
     const base = filename.replace(/\.xlsx$/i, '') || 'ragnarok_project';
     const archive = `${base}_csv_folder`;
     try {
-      const { exportModelAsCsvFolderZip } = await import('./shared/utils/csvFolder');
+      const { exportModelAsCsvFolderZip } = await import('lib/workbook/csvFolder');
       const blob = exportModelAsCsvFolderZip(model, archive);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -871,7 +871,7 @@ function AppInner() {
     event.target.value = '';
     if (!file) return;
     try {
-      const { importCsvFolderZip } = await import('./shared/utils/csvFolder');
+      const { importCsvFolderZip } = await import('lib/workbook/csvFolder');
       const { model: nextModel, unknownFiles, importedSheets } = await importCsvFolderZip(file);
       normalizeInputDatesToIso(nextModel, settings.dateFormat);
       resetForNewModel(nextModel, file.name.replace(/\.zip$/i, '.xlsx'));

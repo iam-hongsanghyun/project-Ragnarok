@@ -6,9 +6,9 @@
  * the central table view to that sheet.
  */
 import React, { useMemo, useState } from 'react';
-import { GridRow, SheetName, TableSel, WorkbookModel } from '../../shared/types';
+import { GridRow, SheetName, TableSel, WorkbookModel } from 'lib/types';
 import { ModelIssue } from '../../features/validation/useModelIssues';
-import { TABLE_GROUPS } from '../../constants';
+import { TABLE_GROUPS } from 'lib/constants';
 
 interface Props {
   model: WorkbookModel;

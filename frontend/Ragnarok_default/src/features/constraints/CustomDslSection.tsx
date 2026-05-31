@@ -4,7 +4,7 @@
  * contributions), so plugin-added constraints are no longer invisible.
  */
 import React from 'react';
-import { AppliedConstraint } from '../../shared/types';
+import { AppliedConstraint } from 'lib/types';
 
 export interface CustomDslSectionProps {
   customDsl: string;

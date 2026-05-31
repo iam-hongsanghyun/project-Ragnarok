@@ -1,5 +1,5 @@
 import React from 'react';
-import { carrierColor } from '../../shared/utils/helpers';
+import { carrierColor } from 'lib/utils/helpers';
 
 // ── Generator carrier legend ──────────────────────────────────────────────────
 

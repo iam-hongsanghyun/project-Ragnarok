@@ -1,5 +1,5 @@
 import React from 'react';
-import { RunHistoryEntry, RunResults } from '../../shared/types';
+import { RunHistoryEntry, RunResults } from 'lib/types';
 import { RunComparisonTable } from '../run-history/RunComparisonTable';
 import { ScenarioPivotCard } from './cards/ScenarioPivotCard';
 

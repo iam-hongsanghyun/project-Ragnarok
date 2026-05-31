@@ -21,8 +21,8 @@
  * Designed to scale to ~100 databases — collapsed subtrees render nothing.
  */
 import React, { useMemo, useState } from 'react';
-import { CountryMeta, DatabaseMeta, ImporterCategory } from '../../shared/api/databases';
-import { usePersistedState } from '../../shared/utils/usePersistedState';
+import { CountryMeta, DatabaseMeta, ImporterCategory } from 'lib/api/databases';
+import { usePersistedState } from 'shared/hooks/usePersistedState';
 
 interface Props {
   databases: DatabaseMeta[];

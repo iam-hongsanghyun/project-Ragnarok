@@ -6,8 +6,8 @@
  * the full panel height rather than a fixed scroll box.
  */
 import React, { useState } from 'react';
-import { WorkbookModel } from '../../shared/types';
-import { resolvedColor, stringValue } from '../../shared/utils/helpers';
+import { WorkbookModel } from 'lib/types';
+import { resolvedColor, stringValue } from 'lib/utils/helpers';
 
 export interface AppearanceSectionProps {
   model: WorkbookModel;

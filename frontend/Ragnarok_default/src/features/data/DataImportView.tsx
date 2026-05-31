@@ -24,13 +24,13 @@ import {
   fetchCountryBoundaries,
   listCountries,
   listDatabases,
-} from '../../shared/api/databases';
+} from 'lib/api/databases';
 import { ResizablePanels } from '../../layout/ResizablePanels';
-import { usePersistedState } from '../../shared/utils/usePersistedState';
+import { usePersistedState } from 'shared/hooks/usePersistedState';
 import { CategoryDatabaseList } from './CategoryDatabaseList';
 import { FilterPanel } from './FilterPanel';
 import { WorldMap } from './WorldMap';
-import { dataImportStore } from './dataImportStore';
+import { dataImportStore } from 'lib/data/store';
 
 // Persistent state keys — every selection the user can make sticks across
 // tab switches and reloads. Transient state (preview / fetch error / spinner)

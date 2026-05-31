@@ -10,7 +10,7 @@
  * included runs — otherwise it's redundant with the per-run comparison.
  */
 import React from 'react';
-import { RunHistoryEntry, RunResults } from '../../../shared/types';
+import { RunHistoryEntry, RunResults } from 'lib/types';
 
 interface Props {
   runs: RunHistoryEntry[];

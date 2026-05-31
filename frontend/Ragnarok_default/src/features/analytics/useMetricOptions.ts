@@ -7,9 +7,9 @@ import {
   TimeSeriesRow,
   TimeSeriesSeries,
   WorkbookModel,
-} from '../../shared/types';
-import { carrierColor, hashColor, numberValue, orderByCarrierRows } from '../../shared/utils/helpers';
-import { buildRowsFromGeneratorDetails, buildSystemLoadRows, normalizeSeriesPoint } from '../../shared/utils/analytics';
+} from 'lib/types';
+import { carrierColor, hashColor, numberValue, orderByCarrierRows } from 'lib/utils/helpers';
+import { buildRowsFromGeneratorDetails, buildSystemLoadRows, normalizeSeriesPoint } from 'lib/results/analytics';
 
 // ── Multi-generator aggregation ───────────────────────────────────────────────
 

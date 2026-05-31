@@ -3,7 +3,7 @@
  */
 import React from 'react';
 import { SolverType } from '../../features/settings/useSettings';
-import { SETTINGS_CONFIG } from '../../constants';
+import { SETTINGS_CONFIG } from 'lib/constants';
 
 export interface SolverSectionProps {
   solverThreads: number;

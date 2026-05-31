@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { RunHistoryEntry } from '../../shared/types';
-import { formatRelTime } from '../../shared/utils/formatRelTime';
+import { RunHistoryEntry } from 'lib/types';
+import { formatRelTime } from 'lib/utils/formatRelTime';
 
 export interface RunHistoryCardProps {
   entry: RunHistoryEntry;

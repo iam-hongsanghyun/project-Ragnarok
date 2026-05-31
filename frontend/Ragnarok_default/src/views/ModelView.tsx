@@ -9,7 +9,7 @@
  * table and map are each their own component.
  */
 import React from 'react';
-import { usePersistedState } from '../shared/utils/usePersistedState';
+import { usePersistedState } from 'shared/hooks/usePersistedState';
 import {
   GridRow,
   Primitive,
@@ -17,7 +17,7 @@ import {
   TableSel,
   TsSheetName,
   WorkbookModel,
-} from '../shared/types';
+} from 'lib/types';
 import { ModelIssue } from '../features/validation/useModelIssues';
 import { DateFormat } from '../features/settings/useSettings';
 import { FileToolbar, FileToolbarProps } from './ModelView.features/FileToolbar';
@@ -30,8 +30,8 @@ export interface ModelViewProps extends FileToolbarProps {
   model: WorkbookModel;
 
   // Map
-  bounds: ReturnType<typeof import('../shared/utils/helpers').getBounds>;
-  busIndex: ReturnType<typeof import('../shared/utils/helpers').getBusIndex>;
+  bounds: ReturnType<typeof import('lib/utils/helpers').getBounds>;
+  busIndex: ReturnType<typeof import('lib/utils/helpers').getBusIndex>;
 
   // Table
   onUpdateRow: (sheet: SheetName, rowIndex: number, col: string, val: Primitive) => void;

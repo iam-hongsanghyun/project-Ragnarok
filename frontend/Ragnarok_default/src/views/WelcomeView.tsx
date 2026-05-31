@@ -10,7 +10,7 @@
  * Click the "Ragnarok" word in the top-bar to return here from anywhere.
  */
 import React from 'react';
-import { WorkspaceTab } from '../shared/types';
+import { WorkspaceTab } from 'lib/types';
 
 interface Props {
   onNavigate: (tab: WorkspaceTab) => void;

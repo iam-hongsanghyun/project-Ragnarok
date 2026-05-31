@@ -1,5 +1,5 @@
 import React from 'react';
-import { formatTimestamp } from '../../shared/utils/helpers';
+import { formatTimestamp } from 'lib/utils/helpers';
 
 export function DualRangeSlider({
   min, max, low, high, step = 1,

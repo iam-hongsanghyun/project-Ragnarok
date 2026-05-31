@@ -43,6 +43,38 @@
     "extends": [
       "react-app",
       "react-app/jest"
+    ],
+    "overrides": [
+      {
+        "files": [
+          "src/lib/**/*.ts",
+          "src/lib/**/*.tsx"
+        ],
+        "rules": {
+          "no-restricted-imports": [
+            "error",
+            {
+              "patterns": [
+                {
+                  "group": [
+                    "react",
+                    "react-dom",
+                    "react-leaflet",
+                    "react-calendar",
+                    "react-responsive-carousel",
+                    "features/*",
+                    "views/*",
+                    "layout/*",
+                    "shared/components/*",
+                    "shared/hooks/*"
+                  ],
+                  "message": "src/lib/ is the pure-logic layer and must not import UI / React code. Move the type to lib/ instead. (Type-only Leaflet imports are allowed for geometry type names.)"
+                }
+              ]
+            }
+          ]
+        }
+      }
     ]
   },
   "browserslist": {

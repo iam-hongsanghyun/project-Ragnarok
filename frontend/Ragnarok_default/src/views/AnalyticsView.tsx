@@ -20,7 +20,7 @@ import {
   TimeSeriesRow,
   TimeSeriesSeries,
   WorkbookModel,
-} from '../shared/types';
+} from 'lib/types';
 import { ModelIssue } from '../features/validation/useModelIssues';
 import { ValidationPane } from '../features/validation/ValidationPane';
 import { AnalyticsPane, EmptyAnalytics } from '../features/analytics/AnalyticsPane';

@@ -12,17 +12,9 @@
  */
 import { useCallback, useState } from 'react';
 import { unzipSync, strFromU8 } from 'fflate';
+import type { InstalledPlugin } from 'lib/plugins/types';
 
-export interface InstalledPlugin {
-  id: string;
-  name: string;
-  version?: string;
-  description?: string;
-  /** Raw manifest (module.json) as parsed. */
-  manifest: Record<string, unknown>;
-  /** Plain-text files from the package, keyed by path (e.g. the JS entry). */
-  files: Record<string, string>;
-}
+export type { InstalledPlugin } from 'lib/plugins/types';
 
 const STORE_KEY = 'ragnarok:fe-plugins:installed';
 const CONFIG_KEY = 'ragnarok:fe-plugins:configs';

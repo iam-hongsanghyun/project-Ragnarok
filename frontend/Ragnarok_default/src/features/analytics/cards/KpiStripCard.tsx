@@ -4,8 +4,8 @@
  * dashboard engine can render it as a card alongside charts.
  */
 import React from 'react';
-import { RunResults, WorkbookModel } from '../../../shared/types';
-import { numberValue } from '../../../shared/utils/helpers';
+import { RunResults, WorkbookModel } from 'lib/types';
+import { numberValue } from 'lib/utils/helpers';
 
 interface KpiCardProps {
   label: string;

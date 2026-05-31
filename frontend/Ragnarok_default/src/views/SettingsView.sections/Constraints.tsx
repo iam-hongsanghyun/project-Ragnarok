@@ -6,7 +6,7 @@
  *    applied-constraints list.
  */
 import React from 'react';
-import { AppliedConstraint, CustomConstraint, GridRow, PathwayConfig, Primitive, WorkbookModel } from '../../shared/types';
+import { AppliedConstraint, CustomConstraint, GridRow, PathwayConfig, Primitive, WorkbookModel } from 'lib/types';
 import { GlobalConstraintsSection as CustomConstraintsEditor } from '../../features/constraints/GlobalConstraintsSection';
 import { GlobalConstraintsTableEditor } from './Constraints/GlobalConstraintsTableEditor';
 import { CustomDslSection } from '../../features/constraints/CustomDslSection';

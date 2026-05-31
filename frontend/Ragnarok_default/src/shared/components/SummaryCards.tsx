@@ -1,5 +1,5 @@
 import React from 'react';
-import { SummaryItem } from '../types';
+import { SummaryItem } from 'lib/types';
 
 export function SummaryCards({ items }: { items: SummaryItem[] }) {
   return (

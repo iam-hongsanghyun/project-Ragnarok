@@ -10,9 +10,9 @@
  * instead of the whole sheet (the sheet stays editable in the table below).
  */
 import React from 'react';
-import { GridRow, Primitive } from '../../shared/types';
-import { getComponentSchema, PypsaAttribute } from '../../constants/pypsa_schema';
-import { stringValue } from '../../shared/utils/helpers';
+import { GridRow, Primitive } from 'lib/types';
+import { getComponentSchema, PypsaAttribute } from 'lib/constants/pypsa_schema';
+import { stringValue } from 'lib/utils/helpers';
 import { SearchableSelect } from '../../shared/components/SearchableSelect';
 
 const isStaticInputAttr = (attr: PypsaAttribute): boolean =>

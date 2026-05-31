@@ -9,9 +9,9 @@
  * restrict. Only `sense` is a strict dropdown (PyPSA allows exactly <=, ==, >=).
  */
 import React from 'react';
-import { GridRow, Primitive } from '../../../shared/types';
-import { stringValue } from '../../../shared/utils/helpers';
-import { getOrderedInputAttributes } from '../../../constants/pypsa_schema';
+import { GridRow, Primitive } from 'lib/types';
+import { stringValue } from 'lib/utils/helpers';
+import { getOrderedInputAttributes } from 'lib/constants/pypsa_schema';
 import { SearchableSelect } from '../../../shared/components/SearchableSelect';
 
 // PyPSA's five recognised constraint types — offered as suggestions only.

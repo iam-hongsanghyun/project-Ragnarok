@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { API_BASE, MODULES_CONFIG } from '../../constants';
-import { ModuleDescriptor, ModuleHostInventory } from '../../shared/types';
+import { API_BASE, MODULES_CONFIG } from 'lib/constants';
+import { ModuleDescriptor, ModuleHostInventory } from 'lib/types';
 
 const STORAGE_KEY = MODULES_CONFIG.storageKey;
 const CONFIGS_KEY = `${MODULES_CONFIG.storageKey}_configs`;

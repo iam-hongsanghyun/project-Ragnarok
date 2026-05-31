@@ -3,7 +3,7 @@
  */
 import React from 'react';
 import { DateFormat } from '../../features/settings/useSettings';
-import { CURRENCIES, SETTINGS_CONFIG } from '../../constants';
+import { CURRENCIES, SETTINGS_CONFIG } from 'lib/constants';
 import { SearchableSelect } from '../../shared/components/SearchableSelect';
 
 interface Currency { code: string; symbol: string; name: string; }

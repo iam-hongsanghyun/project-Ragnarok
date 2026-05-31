@@ -16,14 +16,14 @@ import {
   GridRow,
   RunResults,
   WorkbookModel,
-} from '../../shared/types';
+} from 'lib/types';
 import {
   loadingColor,
   numberValue,
   priceColor,
   resolvedColor,
   stringValue,
-} from '../../shared/utils/helpers';
+} from 'lib/utils/helpers';
 import { FitToBounds } from '../map/FitToBounds';
 import { NoZoomAnimation } from '../map/NoZoomAnimation';
 import { MapLegend, SmpLegend } from '../map/MapLegend';

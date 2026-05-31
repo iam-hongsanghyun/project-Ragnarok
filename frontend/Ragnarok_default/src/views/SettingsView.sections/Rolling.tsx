@@ -2,9 +2,9 @@
  * Rolling horizon section — stitch many short solves into one result.
  */
 import React, { useState, useEffect } from 'react';
-import { PathwayConfig, RollingHorizonConfig, WorkbookModel } from '../../shared/types';
-import { normalizeRollingConfig } from '../../shared/utils/rolling';
-import { formatTimestamp } from '../../shared/utils/helpers';
+import { PathwayConfig, RollingHorizonConfig, WorkbookModel } from 'lib/types';
+import { normalizeRollingConfig } from 'lib/results/rolling';
+import { formatTimestamp } from 'lib/utils/helpers';
 
 const MIN_CHUNKS = 2;
 

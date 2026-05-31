@@ -7,8 +7,8 @@ import {
   StochasticScenarioConfig,
   StochasticScenarioOverride,
   WorkbookModel,
-} from '../../../shared/types';
-import { PYPSA_COMPONENTS } from '../../../constants/pypsa_schema';
+} from 'lib/types';
+import { PYPSA_COMPONENTS } from 'lib/constants/pypsa_schema';
 import { SearchableSelect } from '../../../shared/components/SearchableSelect';
 
 const OVERRIDABLE_SHEETS = PYPSA_COMPONENTS

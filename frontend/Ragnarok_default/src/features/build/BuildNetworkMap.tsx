@@ -18,8 +18,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { CircleMarker, MapContainer, Polyline, TileLayer, Tooltip, useMap, useMapEvents } from 'react-leaflet';
 import type { Map as LeafletMap } from 'leaflet';
-import { GridRow, WorkbookModel } from '../../shared/types';
-import { numberValue, stringValue, resolvedColor } from '../../shared/utils/helpers';
+import { GridRow, WorkbookModel } from 'lib/types';
+import { numberValue, stringValue, resolvedColor } from 'lib/utils/helpers';
 import { NoZoomAnimation } from '../map/NoZoomAnimation';
 
 const POINT_SHEETS = new Set(['generators', 'loads', 'storage_units', 'stores']);

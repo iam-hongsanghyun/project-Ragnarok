@@ -9,8 +9,8 @@
  *   capacity = p_nom_opt if p_nom_extendable, else p_nom
  */
 import React, { useMemo, useState } from 'react';
-import { GridRow, RunResults, TimeSeriesRow, WorkbookModel } from '../../../shared/types';
-import { carrierColor, hashColor, numberValue, resolvedColor, stringValue } from '../../../shared/utils/helpers';
+import { GridRow, RunResults, TimeSeriesRow, WorkbookModel } from 'lib/types';
+import { carrierColor, hashColor, numberValue, resolvedColor, stringValue } from 'lib/utils/helpers';
 import { InteractiveTimeSeriesCard } from './InteractiveTimeSeriesCard';
 
 interface Props {

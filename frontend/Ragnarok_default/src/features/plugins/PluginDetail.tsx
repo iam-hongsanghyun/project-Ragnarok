@@ -18,9 +18,9 @@ import {
   PluginAnalyticsEntry,
   PluginServerConfig,
   WorkbookModel,
-} from '../../shared/types';
+} from 'lib/types';
 import { FrontendPluginHost, InstalledPlugin } from './frontendPlugins';
-import { loadPluginModule, pluginCapabilities } from './pluginRuntime';
+import { loadPluginModule, pluginCapabilities } from 'lib/plugins/runtime';
 import { PluginPanel } from './PluginPanel';
 import { useToast } from '../../shared/components/Toast';
 

@@ -2,7 +2,7 @@
  * Planning section — single-period vs. multi-year pathway investment.
  */
 import React from 'react';
-import { PathwayConfig } from '../../shared/types';
+import { PathwayConfig } from 'lib/types';
 import { SearchableSelect } from '../../shared/components/SearchableSelect';
 
 export interface PlanningSectionProps {

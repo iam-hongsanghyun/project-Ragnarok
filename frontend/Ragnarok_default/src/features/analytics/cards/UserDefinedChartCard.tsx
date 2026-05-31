@@ -9,11 +9,11 @@ import {
   RunResults,
   TimeframeOption,
   WorkbookModel,
-} from '../../../shared/types';
-import { clamp, numberValue, stringValue } from '../../../shared/utils/helpers';
-import { aggregateMetricRows, buildDonutFromMetric } from '../../../shared/utils/analytics';
-import { EMPTY_METRIC_KEY } from '../../../constants';
-import { exportChartToExcel } from '../../../shared/utils/exportChart';
+} from 'lib/types';
+import { clamp, numberValue, stringValue } from 'lib/utils/helpers';
+import { aggregateMetricRows, buildDonutFromMetric } from 'lib/results/analytics';
+import { EMPTY_METRIC_KEY } from 'lib/constants';
+import { exportChartToExcel } from 'lib/export/chart';
 import { useToast } from '../../../shared/components/Toast';
 import { DonutChart } from './DonutChart';
 import { InteractiveTimeSeriesCard } from './InteractiveTimeSeriesCard';

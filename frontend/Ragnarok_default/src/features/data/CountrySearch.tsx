@@ -5,7 +5,7 @@
  * selecting one fires the same `onSelect` the GeoJSON click path uses.
  */
 import React, { useMemo, useState } from 'react';
-import { CountryMeta } from '../../shared/api/databases';
+import { CountryMeta } from 'lib/api/databases';
 
 interface Props {
   countries: CountryMeta[];

@@ -7,7 +7,7 @@
  * Editable scenario, pathway, and rolling-horizon controls live in the sidebar.
  */
 import React from 'react';
-import { PathwayConfig, RollingHorizonConfig } from '../../shared/types';
+import { PathwayConfig, RollingHorizonConfig } from 'lib/types';
 
 export interface RunDialogProps {
   open: boolean;

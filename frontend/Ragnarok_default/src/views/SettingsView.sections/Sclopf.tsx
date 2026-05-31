@@ -7,7 +7,7 @@ import {
   RollingHorizonConfig,
   SecurityConstrainedConfig,
   StochasticConfig,
-} from '../../shared/types';
+} from 'lib/types';
 
 export interface SclopfSectionProps {
   sclopfConfig: SecurityConstrainedConfig;

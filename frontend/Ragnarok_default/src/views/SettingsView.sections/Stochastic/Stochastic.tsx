@@ -9,7 +9,7 @@ import {
   StochasticConfig,
   StochasticScenarioConfig,
   WorkbookModel,
-} from '../../../shared/types';
+} from 'lib/types';
 import { StochasticScenarioRow } from './ScenarioRow';
 
 export interface StochasticSectionProps {

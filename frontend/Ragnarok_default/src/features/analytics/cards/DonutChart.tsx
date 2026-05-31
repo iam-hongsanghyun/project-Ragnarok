@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { MixItem } from '../../../shared/types';
+import { MixItem } from 'lib/types';
 
 export function DonutChart({ data }: { data: MixItem[] }) {
   const cx = 190, cy = 190, outerR = 168, innerR = 100;

@@ -1,25 +1,21 @@
 import { useMemo } from 'react';
-import { Primitive, WorkbookModel } from '../../shared/types';
+import type { ModelIssue } from 'lib/validation/issue';
+import { Primitive, WorkbookModel } from 'lib/types';
 import {
   ALL_KNOWN_TS_SHEETS,
   PYPSA_COMPONENTS,
   getComponentSchema,
   isInputTemporalSheet,
   parseTemporalSheetName,
-} from '../../constants/pypsa_schema';
-import { numberValue, stringValue } from '../../shared/utils/helpers';
+} from 'lib/constants/pypsa_schema';
+import { numberValue, stringValue } from 'lib/utils/helpers';
 import {
   PYPSA_STANDARD_LINE_TYPES,
   PYPSA_STANDARD_TRANSFORMER_TYPES,
-} from '../../constants/pypsa_standard_types';
+} from 'lib/constants/pypsa_standard_types';
 
-export interface ModelIssue {
-  sheet: string;
-  rowIndex: number;
-  col?: string;
-  severity: 'error' | 'warning';
-  message: string;
-}
+export type { ModelIssue } from 'lib/validation/issue';
+
 
 type Row = Record<string, Primitive>;
 

@@ -6,7 +6,7 @@
  * explicit carbon price set in the scenario.
  */
 import React from 'react';
-import { Co2Shadow } from '../../../shared/types';
+import { Co2Shadow } from 'lib/types';
 
 interface Props {
   shadow: Co2Shadow;

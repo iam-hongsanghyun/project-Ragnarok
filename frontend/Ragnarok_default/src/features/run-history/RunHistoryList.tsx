@@ -1,5 +1,5 @@
 import React from 'react';
-import { RunHistoryEntry } from '../../shared/types';
+import { RunHistoryEntry } from 'lib/types';
 import { RunHistoryCard } from './RunHistoryCard';
 
 interface RunHistoryListProps {

@@ -2,10 +2,10 @@ import React from 'react';
 import { LatLngBoundsExpression } from 'leaflet';
 import {
   AnalyticsFocus, AnalyticsSubTab, ChartSectionConfig, GridRow, PathwayConfig, RunHistoryEntry, RunResults, TimeSeriesRow, TimeSeriesSeries, WorkbookModel,
-} from '../../shared/types';
+} from 'lib/types';
 import { AnalyticsDashboard } from '../../views/AnalyticsView.features/Dashboard/AnalyticsDashboard';
-import { buildResultPreset } from '../../views/AnalyticsView.features/Dashboard/result-preset';
-import { PRESETS } from '../../views/AnalyticsView.features/Dashboard/presets';
+import { buildResultPreset } from 'lib/dashboard/resultPreset';
+import { PRESETS } from 'lib/dashboard/presets';
 
 interface Props {
   results: RunResults;

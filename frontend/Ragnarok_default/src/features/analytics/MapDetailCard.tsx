@@ -1,6 +1,6 @@
 import React from 'react';
-import { AnalyticsFocus, RunResults } from '../../shared/types';
-import { carrierColor } from '../../shared/utils/helpers';
+import { AnalyticsFocus, RunResults } from 'lib/types';
+import { carrierColor } from 'lib/utils/helpers';
 
 // ── Sparkline ─────────────────────────────────────────────────────────────────
 
