@@ -27,9 +27,6 @@ import { usePersistedState } from '../../shared/utils/usePersistedState';
 interface Props {
   databases: DatabaseMeta[];
   selectedCountry: CountryMeta | null;
-  recentCountries: CountryMeta[];
-  onClearCountry: () => void;
-  onChooseRecent: (iso: string) => void;
   selectedDatabaseId: string | null;
   onSelectDatabase: (id: string) => void;
 }
@@ -82,9 +79,6 @@ function matchesQuery(text: string, query: string): boolean {
 export function CategoryDatabaseList({
   databases,
   selectedCountry,
-  recentCountries,
-  onClearCountry,
-  onChooseRecent,
   selectedDatabaseId,
   onSelectDatabase,
 }: Props) {
@@ -108,36 +102,21 @@ export function CategoryDatabaseList({
   };
   const expandAll = () => setCollapsed({});
 
+  const header = (
+    <div className="view-rail-header">
+      <span>Data import</span>
+    </div>
+  );
+
   if (!selectedCountry) {
     return (
       <aside className="view-rail view-rail--left data-import-rail">
-        <div className="view-rail-header">
-          <span>Data import</span>
-        </div>
+        {header}
         <div className="view-rail-body data-import-rail__body">
           <p className="data-import-rail__hint">
             Pick a country on the map to begin. Click a country shape, or type its
             name in the search box at the top of the map.
           </p>
-          {recentCountries.length > 0 && (
-            <section>
-              <h4 className="data-import-rail__section-label">Recently used</h4>
-              <ul className="data-import-rail__list">
-                {recentCountries.map((c) => (
-                  <li key={c.iso}>
-                    <button
-                      type="button"
-                      className="data-import-rail__country-item"
-                      onClick={() => onChooseRecent(c.iso)}
-                    >
-                      <span>{c.name}</span>
-                      <span className="data-import-rail__country-iso">{c.iso}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
         </div>
       </aside>
     );
@@ -149,17 +128,7 @@ export function CategoryDatabaseList({
 
   return (
     <aside className="view-rail view-rail--left data-import-rail">
-      <div className="view-rail-header">
-        <span>Data import</span>
-        <button
-          type="button"
-          className="data-import-rail__country-clear"
-          onClick={onClearCountry}
-          title="Clear country selection"
-        >
-          Clear
-        </button>
-      </div>
+      {header}
       <div className="data-import-rail__country">
         <div className="data-import-rail__country-name">{selectedCountry.name}</div>
         <div className="data-import-rail__country-iso">{selectedCountry.iso}</div>

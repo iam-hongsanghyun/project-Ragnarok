@@ -39,8 +39,6 @@ import { WorldMap } from './WorldMap';
 // tab switches and reloads. Transient state (preview / fetch error / spinner)
 // is intentionally NOT persisted: those are re-derivable cheap, and stale
 // values would mislead after a long absence.
-const RECENT_MAX = 5;
-const KEY_RECENT = 'ragnarok:data-import:recent-countries';
 const KEY_COUNTRY = 'ragnarok:data-import:country-iso';
 const KEY_DATABASE = 'ragnarok:data-import:database-id';
 const KEY_FILTERS = 'ragnarok:data-import:filters-by-db';
@@ -64,7 +62,6 @@ export function DataImportView({ applyFragment }: Props) {
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
 
   const [selectedIso, setSelectedIso] = usePersistedState<string | null>(KEY_COUNTRY, null);
-  const [recentIsos, setRecentIsos] = usePersistedState<string[]>(KEY_RECENT, []);
 
   const [selectedDatabaseId, setSelectedDatabaseId] = usePersistedState<string | null>(
     KEY_DATABASE,
@@ -116,13 +113,6 @@ export function DataImportView({ applyFragment }: Props) {
     () => (selectedDatabaseId ? databases.find((d) => d.id === selectedDatabaseId) || null : null),
     [databases, selectedDatabaseId],
   );
-  const recentCountries = useMemo(
-    () =>
-      recentIsos
-        .map((iso) => countries.find((c) => c.iso === iso))
-        .filter((c): c is CountryMeta => Boolean(c)),
-    [countries, recentIsos],
-  );
 
   // Filter blob for the currently selected database. Falls back to declared
   // defaults the first time the user picks a database; persisted writes go
@@ -158,11 +148,17 @@ export function DataImportView({ applyFragment }: Props) {
   const handleSelectCountry = useCallback(
     (iso: string) => {
       setSelectedIso(iso);
-      const next = [iso, ...recentIsos.filter((x) => x !== iso)].slice(0, RECENT_MAX);
-      setRecentIsos(next);
     },
-    [recentIsos, setRecentIsos, setSelectedIso],
+    [setSelectedIso],
   );
+
+  // Triggered by the map's Globe button — return to the world view and
+  // drop every downstream selection (database + filters cleared via the
+  // existing per-country effect chain).
+  const handleResetToGlobal = useCallback(() => {
+    setSelectedIso(null);
+    setSelectedDatabaseId(null);
+  }, [setSelectedIso, setSelectedDatabaseId]);
 
   const handleFetchPreview = useCallback(async () => {
     if (!selectedDatabase || !selectedCountry) return;
@@ -229,12 +225,6 @@ export function DataImportView({ applyFragment }: Props) {
         <CategoryDatabaseList
           databases={databases}
           selectedCountry={selectedCountry}
-          recentCountries={recentCountries}
-          onClearCountry={() => {
-            setSelectedIso(null);
-            setSelectedDatabaseId(null);
-          }}
-          onChooseRecent={handleSelectCountry}
           selectedDatabaseId={selectedDatabaseId}
           onSelectDatabase={setSelectedDatabaseId}
         />
@@ -244,6 +234,7 @@ export function DataImportView({ applyFragment }: Props) {
             countries={countries}
             selectedIso={selectedIso}
             onSelect={handleSelectCountry}
+            onResetToGlobal={handleResetToGlobal}
             overlay={preview?.overlay || null}
           />
           {lastFetch && (
