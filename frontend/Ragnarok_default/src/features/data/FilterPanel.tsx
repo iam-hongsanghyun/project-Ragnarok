@@ -6,9 +6,69 @@
  * here and one match on the backend `Filter` dataclass.
  */
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { DatabaseMeta, FilterSchema, PreviewSummary } from 'lib/api/databases';
 import { SearchableSelect } from '../../shared/components/SearchableSelect';
 import { DateField } from './DateField';
+
+/**
+ * Hover/focus tooltip for filter descriptions. Rendered into document.body
+ * via a portal with `position: fixed` so the right rail's `overflow: hidden`
+ * (needed for scrolling) doesn't clip the popup. Position is computed from
+ * the icon's bounding rect each time it shows and clamped to the viewport
+ * with an 8px gutter, so descriptions near the rail edge stay readable.
+ */
+function InfoTooltip({ text, label }: { text: string; label: string }) {
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const iconRef = useRef<HTMLSpanElement>(null);
+
+  const show = () => {
+    const el = iconRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const MAX_WIDTH = 240;
+    const PAD = 8;
+    // Anchor the popup so its bottom sits 8 px above the icon, centred
+    // horizontally on the icon, then clamp into the viewport.
+    let left = rect.left + rect.width / 2 - MAX_WIDTH / 2;
+    if (left < PAD) left = PAD;
+    if (left + MAX_WIDTH > window.innerWidth - PAD) {
+      left = window.innerWidth - MAX_WIDTH - PAD;
+    }
+    const top = rect.top - 8;
+    setPos({ top, left });
+  };
+  const hide = () => setPos(null);
+
+  return (
+    <>
+      <span
+        ref={iconRef}
+        className="data-import-filter__info"
+        role="button"
+        tabIndex={0}
+        aria-label={`More info about ${label}`}
+        onMouseEnter={show}
+        onMouseLeave={hide}
+        onFocus={show}
+        onBlur={hide}
+      >
+        i
+      </span>
+      {pos &&
+        createPortal(
+          <div
+            className="data-import-filter__tooltip"
+            role="tooltip"
+            style={{ top: pos.top, left: pos.left }}
+          >
+            {text}
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
 
 /**
  * Dropdown-style multiselect — keeps the right rail compact when the
@@ -159,6 +219,10 @@ function FilterInput({
       );
     }
     case 'toggle': {
+      // Unreachable: toggles are rendered inline by the outer map so they
+      // can share their row with the (i) tooltip icon. Kept here as a
+      // defensive fallback if a toggle ever ends up routed through
+      // FilterInput.
       return (
         <label className="data-import-filter__toggle">
           <input
@@ -297,30 +361,45 @@ export function FilterPanel({
           </p>
         </section>
         <section className="data-import-filters__form">
-          {database.filters.map((filter) => (
-            <div key={filter.id} className="data-import-filter">
-              <label className="data-import-filter__label">
-                <span>{filter.label}</span>
-                {filter.unit ? <span className="data-import-filter__unit"> ({filter.unit})</span> : null}
-                {filter.description && (
-                  <span
-                    className="data-import-filter__info"
-                    role="tooltip"
-                    tabIndex={0}
-                    aria-label={`More info about ${filter.label}`}
-                    data-tooltip={filter.description}
-                  >
-                    i
-                  </span>
-                )}
-              </label>
-              <FilterInput
-                filter={filter}
-                value={values[filter.id]}
-                onChange={(v) => onChange(filter.id, v)}
-              />
-            </div>
-          ))}
+          {database.filters.map((filter) => {
+            // Toggle filters render as a single row: checkbox + label + (i).
+            // The outer label is the checkbox label — having an additional
+            // "<label>filter.label</label>" above would double-print the
+            // same text under the checkbox.
+            if (filter.kind === 'toggle') {
+              return (
+                <div key={filter.id} className="data-import-filter data-import-filter--toggle">
+                  <label className="data-import-filter__toggle">
+                    <input
+                      type="checkbox"
+                      checked={!!values[filter.id]}
+                      onChange={(e) => onChange(filter.id, e.target.checked)}
+                    />
+                    <span>{filter.label}</span>
+                  </label>
+                  {filter.description && (
+                    <InfoTooltip text={filter.description} label={filter.label} />
+                  )}
+                </div>
+              );
+            }
+            return (
+              <div key={filter.id} className="data-import-filter">
+                <label className="data-import-filter__label">
+                  <span>{filter.label}</span>
+                  {filter.unit ? <span className="data-import-filter__unit"> ({filter.unit})</span> : null}
+                  {filter.description && (
+                    <InfoTooltip text={filter.description} label={filter.label} />
+                  )}
+                </label>
+                <FilterInput
+                  filter={filter}
+                  value={values[filter.id]}
+                  onChange={(v) => onChange(filter.id, v)}
+                />
+              </div>
+            );
+          })}
         </section>
         <section className="data-import-filters__actions">
           <button

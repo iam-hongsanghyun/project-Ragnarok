@@ -485,7 +485,7 @@ export function buildPyPSAEarthStyleSheets(
         if (key in row) continue;
         row[key] = tv;
       }
-      row.source = 'OSM (PyPSA-Earth style)';
+      row.source = 'OSM (cleaned)';
       busRows.push(row);
     }
     // Step 4: transformers between consecutive voltage levels (optional).
@@ -499,7 +499,7 @@ export function buildPyPSAEarthStyleSheets(
           bus0: stationBuses.get(stationKey(st, vLow))!,
           bus1: stationBuses.get(stationKey(st, vHigh))!,
           station_id: st,
-          source: 'OSM (PyPSA-Earth style)',
+          source: 'OSM (cleaned)',
         });
       }
     }
@@ -558,7 +558,7 @@ export function buildPyPSAEarthStyleSheets(
         if (key in row) continue;
         row[key] = tv;
       }
-      row.source = 'OSM (PyPSA-Earth style)';
+      row.source = 'OSM (cleaned)';
       lineRows.push(row);
     }
   }
