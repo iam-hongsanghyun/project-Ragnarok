@@ -121,8 +121,12 @@ interface Props {
   onFetch: () => void;
   onApply: () => void;
   fetching: boolean;
+  /** Reserved — true while the merge is in progress. With the one-trip
+   *  endpoint the merge is synchronous, so this is currently always false. */
   applying: boolean;
   preview: PreviewSummary | null;
+  /** True iff a fetch has succeeded and the held fragment is ready to merge. */
+  canApply: boolean;
   error: string | null;
 }
 
@@ -245,6 +249,7 @@ export function FilterPanel({
   fetching,
   applying,
   preview,
+  canApply,
   error,
 }: Props) {
   if (!database) {
@@ -306,8 +311,8 @@ export function FilterPanel({
           <button
             type="button"
             onClick={onApply}
-            disabled={!preview || fetching || applying}
-            title={!preview ? 'Run a preview first' : 'Merge the fetched rows into the current workbook'}
+            disabled={!canApply || fetching || applying}
+            title={!canApply ? 'Run a preview first' : 'Merge the fetched rows into the current workbook'}
           >
             {applying ? 'Adding…' : 'Add to workbook'}
           </button>

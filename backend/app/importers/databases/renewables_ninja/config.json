@@ -1,0 +1,51 @@
+{
+  "id": "renewables_ninja",
+  "name": "Renewables.ninja hourly profiles",
+  "category": "generation",
+  "subcategory": "Profiles",
+  "license": "CC-BY 4.0",
+  "homepage": "https://www.renewables.ninja",
+  "version_hint": "v1.1 API",
+  "description": "Hourly wind/solar capacity-factor time series at the selected country's centroid. Global coverage. Rate-limited; honour Retry-After.",
+  "targets": ["generators", "generators-p_max_pu", "snapshots"],
+  "filters": [
+    {
+      "id": "date_from",
+      "label": "From",
+      "kind": "select",
+      "default": "2019-01-01",
+      "options": [
+        { "value": "2014-01-01", "label": "2014-01-01" },
+        { "value": "2015-01-01", "label": "2015-01-01" },
+        { "value": "2016-01-01", "label": "2016-01-01" },
+        { "value": "2017-01-01", "label": "2017-01-01" },
+        { "value": "2018-01-01", "label": "2018-01-01" },
+        { "value": "2019-01-01", "label": "2019-01-01" }
+      ]
+    },
+    {
+      "id": "date_to",
+      "label": "To",
+      "kind": "select",
+      "default": "2019-12-31",
+      "options": [
+        { "value": "2014-12-31", "label": "2014-12-31" },
+        { "value": "2015-12-31", "label": "2015-12-31" },
+        { "value": "2016-12-31", "label": "2016-12-31" },
+        { "value": "2017-12-31", "label": "2017-12-31" },
+        { "value": "2018-12-31", "label": "2018-12-31" },
+        { "value": "2019-12-31", "label": "2019-12-31" }
+      ]
+    },
+    {
+      "id": "tech",
+      "label": "Technologies",
+      "kind": "multiselect",
+      "default": ["wind", "solar"],
+      "options": [
+        { "value": "wind", "label": "Wind (onshore)" },
+        { "value": "solar", "label": "Solar PV" }
+      ]
+    }
+  ]
+}

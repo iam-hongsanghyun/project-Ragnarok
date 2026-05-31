@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -40,7 +39,7 @@ def test_list_databases(client: TestClient):
     body = resp.json()
     ids = {d["id"] for d in body["databases"]}
     assert {"osm", "wri_gppd"} <= ids
-    assert "pypsa_earth" not in ids  # removed — see "Deliberately not pursued" in TODO.md
+    assert "pypsa_earth" not in ids
 
 
 def test_list_countries(client: TestClient):
@@ -56,24 +55,10 @@ def test_boundaries_geojson(client: TestClient):
     assert "FeatureCollection" in resp.text
 
 
-def test_preview_wri_gppd(client: TestClient):
+def test_run_returns_preview_and_fragment_together(client: TestClient):
+    """One-trip endpoint must carry both halves."""
     resp = client.post(
-        "/api/import/preview",
-        json={
-            "database_id": "wri_gppd",
-            "country_iso": "KOR",
-            "filters": {},
-        },
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["country_iso"] == "KOR"
-    assert body["preview"]["counts"]["generators"] == 3
-
-
-def test_fetch_wri_gppd_returns_fragment(client: TestClient):
-    resp = client.post(
-        "/api/import/fetch",
+        "/api/import/run",
         json={
             "database_id": "wri_gppd",
             "country_iso": "KOR",
@@ -82,14 +67,17 @@ def test_fetch_wri_gppd_returns_fragment(client: TestClient):
         },
     )
     assert resp.status_code == 200
-    fragment = resp.json()["fragment"]
-    assert "generators" in fragment["sheets"]
-    assert fragment["provenance"]["database_id"] == "wri_gppd"
+    body = resp.json()
+    assert body["database_id"] == "wri_gppd"
+    assert body["country_iso"] == "KOR"
+    assert body["preview"]["counts"]["generators"] == 3
+    assert "generators" in body["fragment"]["sheets"]
+    assert body["fragment"]["provenance"]["database_id"] == "wri_gppd"
 
 
-def test_preview_osm(client: TestClient):
+def test_run_osm(client: TestClient):
     resp = client.post(
-        "/api/import/preview",
+        "/api/import/run",
         json={
             "database_id": "osm",
             "country_iso": "KOR",
@@ -99,11 +87,22 @@ def test_preview_osm(client: TestClient):
     assert resp.status_code == 200
     body = resp.json()
     assert body["preview"]["counts"]["substations"] == 2
+    assert "buses" in body["fragment"]["sheets"]
+
+
+def test_legacy_preview_endpoint_is_gone(client: TestClient):
+    """The two-trip preview/fetch endpoints have been collapsed into /run."""
+    assert client.post(
+        "/api/import/preview", json={"database_id": "wri_gppd", "country_iso": "KOR"}
+    ).status_code == 404
+    assert client.post(
+        "/api/import/fetch", json={"database_id": "wri_gppd", "country_iso": "KOR"}
+    ).status_code == 404
 
 
 def test_unknown_database_404(client: TestClient):
     resp = client.post(
-        "/api/import/preview",
+        "/api/import/run",
         json={"database_id": "nope", "country_iso": "KOR", "filters": {}},
     )
     assert resp.status_code == 404
@@ -111,7 +110,7 @@ def test_unknown_database_404(client: TestClient):
 
 def test_unknown_country_404(client: TestClient):
     resp = client.post(
-        "/api/import/preview",
+        "/api/import/run",
         json={"database_id": "wri_gppd", "country_iso": "ZZZ", "filters": {}},
     )
     assert resp.status_code == 404

@@ -69,7 +69,47 @@ def test_osm_to_sheets_emits_buses_lines_transformers():
     assert line["bus0"].startswith("Seoul_HV") or line["bus0"].startswith("Andong")
     assert line["bus1"].startswith("Seoul_HV") or line["bus1"].startswith("Andong")
     assert line["bus0"] != line["bus1"]
-    assert line["s_nom"] > 0
+    # Line params come from PyPSA's line_types catalogue via the `type`
+    # reference. r/x/b/s_nom are NOT fabricated by the importer.
+    assert line["type"] == "490-AL1/64-ST1A 220.0"
+    for forbidden in ("r", "x", "b", "s_nom"):
+        assert forbidden not in line, (
+            f"OSM line should not fabricate {forbidden!r}; PyPSA fills from `type`"
+        )
+
+
+def test_osm_preserves_all_upstream_tags():
+    """Every OSM tag is preserved on the corresponding row, prefixed `osm_*`."""
+    db = get_database("osm")
+    r = region.get_region("KOR")
+    result = db.fetch(r, {"min_voltage_kv": 110, "include_cables": True, "include_dc": True})
+    fragment = db.to_sheets(result, ConvertOptions())
+    line = fragment.sheets["lines"][0]
+    # The fixture tags name = "Seoul–Andong 220 kV" + circuits=2.
+    assert line["osm_name"] == "Seoul–Andong 220 kV"
+    assert line["osm_voltage"] == "220000"
+    assert line["osm_circuits"] == "2"
+    # Substation rows preserve operator + voltage tags too.
+    seoul_bus = next(b for b in fragment.sheets["buses"] if b["name"].startswith("Seoul_HV"))
+    assert seoul_bus["osm_operator"] == "KEPCO"
+    assert seoul_bus["osm_voltage"] == "220000;110000"
+
+
+def test_osm_does_not_fabricate_electrical_defaults():
+    db = get_database("osm")
+    r = region.get_region("KOR")
+    result = db.fetch(r, {"min_voltage_kv": 110, "include_cables": True, "include_dc": True})
+    fragment = db.to_sheets(result, ConvertOptions())
+    for line in fragment.sheets["lines"]:
+        for forbidden in ("r", "x", "b", "s_nom", "carrier"):
+            assert forbidden not in line, (
+                f"Line should not carry hardcoded {forbidden!r}"
+            )
+    for tx in fragment.sheets["transformers"]:
+        for forbidden in ("s_nom", "r", "x", "type"):
+            assert forbidden not in tx, (
+                f"Transformer should not carry hardcoded {forbidden!r}"
+            )
 
 
 def test_osm_voltage_threshold_drops_lines_below():

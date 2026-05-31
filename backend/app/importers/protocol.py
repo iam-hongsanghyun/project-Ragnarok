@@ -201,10 +201,20 @@ class WorkbookFragment:
     Sheet rows are merged into the current workbook by the frontend (carriers
     union, dedupe-on-name, append). The provenance row is appended to the
     existing ``RAGNAROK_Provenance`` sheet.
+
+    Hourly importers also populate ``snapshots`` — the ordered list of
+    ISO-`T` snapshot strings their time-series cover. The frontend merge
+    helper unions this with the workbook's existing snapshot range so a
+    later fetch with a different date window widens the modelled horizon
+    rather than overwriting it.
     """
 
     sheets: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     provenance: Provenance | None = None
+    snapshots: list[str] | None = None
+    """ISO-`T` snapshot strings (e.g. ``"2019-01-01T00:00:00"``). ``None``
+    means the importer does not carry temporal data (static-only sources
+    like WRI GPPD / OSM); the frontend leaves workbook snapshots alone."""
 
     def to_json(self) -> dict[str, Any]:
         out: dict[str, Any] = {"sheets": self.sheets}
@@ -218,6 +228,8 @@ class WorkbookFragment:
                 "fetch_timestamp": self.provenance.fetch_timestamp,
                 "row_counts_json": self.provenance.row_counts_json,
             }
+        if self.snapshots is not None:
+            out["snapshots"] = list(self.snapshots)
         return out
 
 

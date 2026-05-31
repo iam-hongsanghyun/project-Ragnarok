@@ -1,13 +1,15 @@
 """World Bank annual electricity consumption → workbook Load row.
 
-Two API calls per fetch:
+Self-contained module. No imports from a shared convert/ package. Slug /
+dedupe / provenance helpers inlined. The Load row carries the requested
+year's average MW as ``p_set`` plus **every year** of the underlying
+indicators (`kwh_per_capita_*`, `population_*`, `annual_avg_mw_*`) as
+extra columns — so the user has the full history right next to the value
+used in the model, without a follow-up fetch.
 
-  GET .../indicator/EG.USE.ELEC.KH.PC  → kWh per capita per year
-  GET .../indicator/SP.POP.TOTL       → population per year
-
-We multiply the two and divide by 8760 to get an average MW for the selected
-year (treated as a constant ``p_set`` on a single Load row). Multi-year
-values flow through the preview so the user can sanity-check before commit.
+Optional PyPSA attributes (`sign`, `carrier`, `p_set` time-series cols, …)
+are **not** populated when the upstream is silent — PyPSA's component
+defaults apply at solve time.
 
 No API key; the World Bank Open Data API is public.
 """
@@ -16,17 +18,18 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from ...convert import build_provenance, dedupe_name, slugify_name
 from ...protocol import (
     ConvertOptions,
     DatabaseMeta,
     FetchResult,
     PreviewSummary,
+    Provenance,
     Region,
     WorkbookFragment,
 )
@@ -53,16 +56,11 @@ def _http_get_json(url: str) -> Any:
         return json.loads(resp.read())
 
 
-def _iso2_for_iso3(iso3: str) -> str:
-    """World Bank accepts either ISO-2 or ISO-3 in the URL; pass ISO-3 directly."""
-    return iso3.upper()
-
-
 def _fetch_indicator(country_iso3: str, indicator: str) -> dict[int, float]:
     """Return ``{year: value}`` for the indicator, dropping null years."""
     base = _api_base()
     url = (
-        f"{base}/country/{_iso2_for_iso3(country_iso3)}/indicator/{indicator}"
+        f"{base}/country/{country_iso3.upper()}/indicator/{indicator}"
         f"?format=json&per_page=200"
     )
     body = _http_get_json(url)
@@ -82,6 +80,21 @@ def _fetch_indicator(country_iso3: str, indicator: str) -> dict[int, float]:
     return out
 
 
+# ── Slug helper (inlined) ────────────────────────────────────────────────────
+
+_NAME_RE = re.compile(r"[^A-Za-z0-9_]+")
+
+
+def _slug(raw: str | None, fallback: str = "load") -> str:
+    if not raw:
+        return fallback
+    s = _NAME_RE.sub("_", str(raw).strip()).strip("_")
+    return s or fallback
+
+
+# ── Series ──────────────────────────────────────────────────────────────────
+
+
 @dataclass
 class _Series:
     kwh_per_capita: dict[int, float]
@@ -94,6 +107,14 @@ class _Series:
             return None
         total_kwh = kwh_pc * pop
         return total_kwh / 8760.0 / 1000.0  # kWh → MWh → MW
+
+
+def _latest_year(series: _Series) -> int:
+    overlap = set(series.kwh_per_capita) & set(series.population)
+    return max(overlap) if overlap else datetime.now(timezone.utc).year - 3
+
+
+# ── Database implementation ──────────────────────────────────────────────────
 
 
 @dataclass
@@ -174,16 +195,12 @@ class WorldBankDemandImporter:
     ) -> WorkbookFragment:
         fragment = WorkbookFragment()
         series: _Series | None = result.payload.get("series")
+        ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
         if series is None or not series.kwh_per_capita:
-            fragment.provenance = build_provenance(
-                database_id=self.meta.id,
-                region=result.region,
-                filters=result.filters,
-                options=options,
-                fetch_timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                row_counts={"loads": 0},
-            )
+            fragment.provenance = self._provenance(result, options, ts, {"loads": 0})
             return fragment
+
         requested_year = int(result.filters.get("year") or _latest_year(series))
         annual_mw = series.annual_avg_mw(requested_year)
         chosen_year = requested_year
@@ -194,42 +211,53 @@ class WorldBankDemandImporter:
                 chosen_year = years[-1]
                 annual_mw = series.annual_avg_mw(chosen_year)
         if annual_mw is None:
-            fragment.provenance = build_provenance(
-                database_id=self.meta.id,
-                region=result.region,
-                filters=result.filters,
-                options=options,
-                fetch_timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                row_counts={"loads": 0},
-            )
+            fragment.provenance = self._provenance(result, options, ts, {"loads": 0})
             return fragment
 
         base_name = str(result.filters.get("load_name") or "national_load")
-        full_name = dedupe_name(
-            slugify_name(f"{base_name}_{result.region.country_iso}", fallback="load"),
-            set(),
+        full_name = _slug(
+            f"{base_name}_{result.region.country_iso}", fallback="load"
         )
         load_row: dict[str, Any] = {
             "name": full_name,
-            "bus": "",
-            "carrier": "AC",
+            # bus, carrier, sign INTENTIONALLY UNSET — PyPSA defaults apply
+            # at solve time. The user reconciles `bus` via T3 later.
             "p_set": round(annual_mw, 4),
             "country": result.region.country_iso,
             "source": "World Bank",
             "year": chosen_year,
         }
+        # Preserve the full multi-year history as extra columns. No upstream
+        # value is silently dropped.
+        for y in sorted(set(series.kwh_per_capita) | set(series.population)):
+            kwh = series.kwh_per_capita.get(y)
+            pop = series.population.get(y)
+            mw = series.annual_avg_mw(y)
+            if kwh is not None:
+                load_row[f"kwh_per_capita_{y}"] = round(kwh, 4)
+            if pop is not None:
+                load_row[f"population_{y}"] = int(pop)
+            if mw is not None:
+                load_row[f"annual_avg_mw_{y}"] = round(mw, 4)
         fragment.sheets["loads"] = [load_row]
-        fragment.provenance = build_provenance(
-            database_id=self.meta.id,
-            region=result.region,
-            filters=result.filters,
-            options=options,
-            fetch_timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            row_counts={"loads": 1, "year": chosen_year},
+        fragment.provenance = self._provenance(
+            result, options, ts, {"loads": 1, "year": chosen_year}
         )
         return fragment
 
-
-def _latest_year(series: _Series) -> int:
-    overlap = set(series.kwh_per_capita) & set(series.population)
-    return max(overlap) if overlap else datetime.now(timezone.utc).year - 3
+    def _provenance(
+        self,
+        result: FetchResult,
+        options: ConvertOptions,
+        timestamp: str,
+        row_counts: dict[str, int],
+    ) -> Provenance:
+        return Provenance(
+            database_id=self.meta.id,
+            country_iso=result.region.country_iso,
+            country_name=result.region.country_name,
+            filters_json=json.dumps(result.filters, sort_keys=True, default=str),
+            convert_options_json=json.dumps(options.__dict__, sort_keys=True, default=str),
+            fetch_timestamp=timestamp,
+            row_counts_json=json.dumps(row_counts, sort_keys=True),
+        )

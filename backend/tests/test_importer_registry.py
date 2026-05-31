@@ -11,7 +11,14 @@ from backend.app.importers.registry import (
 def test_registry_lists_mvp_modules():
     registered_databases.cache_clear()
     ids = set(registered_databases().keys())
-    assert {"osm", "wri_gppd", "worldbank_demand"} <= ids
+    assert {
+        "osm",
+        "wri_gppd",
+        "worldbank_demand",
+        "opsd_load",
+        "renewables_ninja",
+        "pypsa_technology_data",
+    } <= ids
 
 
 def test_subcategories_round_trip_to_json():
@@ -21,6 +28,11 @@ def test_subcategories_round_trip_to_json():
     assert metas["osm"]["subcategory"] == "Live grid topology"
     assert metas["wri_gppd"]["subcategory"] == "Power plants (per-asset)"
     assert metas["worldbank_demand"]["subcategory"] == "Annual aggregates"
+    assert metas["opsd_load"]["subcategory"] == "Hourly profiles"
+    assert metas["renewables_ninja"]["subcategory"] == "Profiles"
+    assert metas["pypsa_technology_data"]["subcategory"] == "Annual snapshots"
+    # New top-level category "costs" introduced by the tech-data module.
+    assert metas["pypsa_technology_data"]["category"] == "costs"
 
 
 def test_available_databases_json_shape():

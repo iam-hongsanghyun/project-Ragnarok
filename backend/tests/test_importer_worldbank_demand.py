@@ -62,10 +62,28 @@ def test_worldbank_to_sheets_emits_one_load_row():
     loads = fragment.sheets["loads"]
     assert len(loads) == 1
     assert loads[0]["name"] == "national_load_KOR"
-    assert loads[0]["carrier"] == "AC"
     assert loads[0]["p_set"] > 0
     assert loads[0]["year"] == 2014
     assert fragment.provenance is not None
+    # carrier / bus / sign are NOT fabricated — PyPSA defaults apply.
+    for forbidden in ("carrier", "bus", "sign", "p_min_pu", "p_max_pu"):
+        assert forbidden not in loads[0], (
+            f"Load row should not carry hardcoded {forbidden!r}"
+        )
+
+
+def test_worldbank_preserves_full_indicator_history():
+    """Every year of every indicator is preserved as an extra column."""
+    db = get_database("worldbank_demand")
+    r = region.get_region("KOR")
+    result = db.fetch(r, {"year": 2014})
+    fragment = db.to_sheets(result, ConvertOptions())
+    load = fragment.sheets["loads"][0]
+    # Fixture provides 2010, 2014, 2020 across both indicators.
+    for y in (2010, 2014, 2020):
+        assert f"kwh_per_capita_{y}" in load
+        assert f"population_{y}" in load
+        assert f"annual_avg_mw_{y}" in load
 
 
 def test_worldbank_falls_back_when_year_missing():

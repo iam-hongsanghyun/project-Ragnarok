@@ -1,0 +1,41 @@
+{
+  "id": "opsd_load",
+  "name": "OPSD hourly load",
+  "category": "demand",
+  "subcategory": "Hourly profiles",
+  "license": "ODbL / CC-BY 4.0",
+  "homepage": "https://open-power-system-data.org/time_series",
+  "version_hint": "2020-10-06 release",
+  "description": "Hourly electricity load per ENTSO-E bidding zone, from Open Power System Data (OPSD). Covers ~37 EU countries 2015 onwards. The full CSV is ~150 MB and cached once per process.",
+  "targets": ["loads", "loads-p_set", "snapshots"],
+  "filters": [
+    {
+      "id": "date_from",
+      "label": "From",
+      "kind": "select",
+      "default": "2019-01-01",
+      "options": [
+        { "value": "2015-01-01", "label": "2015-01-01" },
+        { "value": "2016-01-01", "label": "2016-01-01" },
+        { "value": "2017-01-01", "label": "2017-01-01" },
+        { "value": "2018-01-01", "label": "2018-01-01" },
+        { "value": "2019-01-01", "label": "2019-01-01" },
+        { "value": "2020-01-01", "label": "2020-01-01" }
+      ]
+    },
+    {
+      "id": "date_to",
+      "label": "To",
+      "kind": "select",
+      "default": "2019-12-31",
+      "options": [
+        { "value": "2015-12-31", "label": "2015-12-31" },
+        { "value": "2016-12-31", "label": "2016-12-31" },
+        { "value": "2017-12-31", "label": "2017-12-31" },
+        { "value": "2018-12-31", "label": "2018-12-31" },
+        { "value": "2019-12-31", "label": "2019-12-31" },
+        { "value": "2020-12-31", "label": "2020-12-31" }
+      ]
+    }
+  ]
+}

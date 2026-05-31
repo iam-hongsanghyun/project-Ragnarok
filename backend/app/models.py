@@ -14,16 +14,13 @@ class RunPayload(BaseModel):
 # ── Importer subsystem ──────────────────────────────────────────────────────
 
 
-class ImportPreviewRequest(BaseModel):
-    """``POST /api/import/preview``: ``{database_id, country_iso, filters}``."""
+class ImportRunRequest(BaseModel):
+    """``POST /api/import/run``: one-trip fetch.
 
-    database_id: str
-    country_iso: str
-    filters: dict[str, Any] = {}
-
-
-class ImportFetchRequest(BaseModel):
-    """``POST /api/import/fetch``: same shape + ``convert_options``."""
+    Returns ``{preview, fragment}`` together — the frontend uses ``preview``
+    for the right-rail counts / sample / overlay and holds ``fragment`` in
+    React state until the user clicks Add to workbook.
+    """
 
     database_id: str
     country_iso: str

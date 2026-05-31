@@ -1,0 +1,8 @@
+{
+  "_note": "Mapping from OSM-tagged voltage (kV) to a PyPSA standard line-type name. NOT a defaults table — the numeric r/x/b/s_nom values live in PyPSA's own line_types catalogue (pypsa.Network().line_types). Setting Line.type here means PyPSA fills the electrical params at solve time. Voltages not listed → no type set → user fixes manually.",
+  "voltage_kv_to_type": {
+    "110": "305-AL1/39-ST1A 110.0",
+    "220": "490-AL1/64-ST1A 220.0",
+    "380": "490-AL1/64-ST1A 380.0"
+  }
+}

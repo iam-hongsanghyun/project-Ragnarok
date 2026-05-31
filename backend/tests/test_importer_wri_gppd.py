@@ -80,5 +80,56 @@ def test_wri_to_sheets_emits_generators_buses_carriers():
     assert fragment.provenance.database_id == "wri_gppd"
     counts = {sheet: len(rows) for sheet, rows in fragment.sheets.items()}
     assert counts["generators"] == 3
-    assert counts["buses"] == 3  # one synthetic bus per plant
+    assert counts["buses"] == 3
     assert counts["carriers"] == 3
+
+
+def test_wri_preserves_all_upstream_csv_columns():
+    """Each generator row must carry every CSV column the upstream ships,
+    plus the schema-required ones — nothing dropped on the floor."""
+    db = get_database("wri_gppd")
+    r = region.get_region("KOR")
+    result = db.fetch(r, {})
+    fragment = db.to_sheets(result, ConvertOptions())
+    # Pick the Coal Plant row deterministically.
+    coal = next(g for g in fragment.sheets["generators"] if g["carrier"] == "Coal")
+    # Schema-required columns are present.
+    assert coal["name"] == "Test_Coal_Plant"
+    assert coal["p_nom"] == 500.0
+    # Every column from the WRI CSV is preserved verbatim.
+    assert coal["gppd_idnr"] == "KOR0000001"
+    assert coal["country_long"] == "South Korea"
+    assert coal["primary_fuel"] == "Coal"
+    assert coal["owner"] == "KEPCO"
+    assert coal["commissioning_year"] == "1995"
+    # source breadcrumb wins last
+    assert coal["source"] == "WRI GPPD"
+
+
+def test_wri_does_not_fabricate_pypsa_defaults():
+    """Empty stays empty — the importer must not invent marginal_cost /
+    efficiency / co2_emissions when the upstream is silent."""
+    db = get_database("wri_gppd")
+    r = region.get_region("KOR")
+    result = db.fetch(r, {})
+    fragment = db.to_sheets(result, ConvertOptions())
+    for gen in fragment.sheets["generators"]:
+        for forbidden in (
+            "marginal_cost",
+            "efficiency",
+            "co2_emissions",
+            "capital_cost",
+            "lifetime",
+            "p_nom_extendable",
+            "p_min_pu",
+            "p_max_pu",
+        ):
+            assert forbidden not in gen, (
+                f"Generator row should not carry hardcoded {forbidden!r}; "
+                f"got value {gen[forbidden]!r}"
+            )
+    for carrier in fragment.sheets["carriers"]:
+        for forbidden in ("co2_emissions", "marginal_cost", "color"):
+            assert forbidden not in carrier, (
+                f"Carrier row should not carry hardcoded {forbidden!r}"
+            )

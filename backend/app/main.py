@@ -27,7 +27,7 @@ from .log_capture import (
     get_snapshot as _log_snapshot,
     install as _install_log_capture,
 )
-from .models import ImportFetchRequest, ImportPreviewRequest, RunPayload
+from .models import ImportRunRequest, RunPayload
 from ..pypsa.network import build_network, validate_model
 from .importers import ConvertOptions, available_databases, get_database
 from .importers.region import (
@@ -585,25 +585,15 @@ def _resolve_db_and_region(database_id: str, country_iso: str):
     return db, region
 
 
-@app.post("/api/import/preview")
-def importer_preview(payload: ImportPreviewRequest) -> dict[str, Any]:
-    """Cheap counts + sample rows + map overlay for one fetch."""
-    db, region = _resolve_db_and_region(payload.database_id, payload.country_iso)
-    try:
-        result = db.fetch(region, dict(payload.filters))
-        summary = db.preview(result)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"preview failed: {exc}") from exc
-    return {
-        "database_id": db.meta.id,
-        "country_iso": region.country_iso,
-        "preview": summary.to_json(),
-    }
+@app.post("/api/import/run")
+def importer_run(payload: ImportRunRequest) -> dict[str, Any]:
+    """One-trip fetch: returns both the preview summary AND the workbook fragment.
 
-
-@app.post("/api/import/fetch")
-def importer_fetch(payload: ImportFetchRequest) -> dict[str, Any]:
-    """Full fetch + convert. Returns a workbook fragment ready to merge."""
+    Matches the main modelling pattern (1 payload in → 1 result out). The
+    frontend renders the preview in the right rail and holds the fragment
+    in React state until the user clicks "Add to workbook" — no second
+    network call required.
+    """
     db, region = _resolve_db_and_region(payload.database_id, payload.country_iso)
     opts_dict = payload.convert_options or {}
     options = ConvertOptions(
@@ -613,11 +603,13 @@ def importer_fetch(payload: ImportFetchRequest) -> dict[str, Any]:
     )
     try:
         result = db.fetch(region, dict(payload.filters))
+        summary = db.preview(result)
         fragment = db.to_sheets(result, options)
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"fetch failed: {exc}") from exc
+        raise HTTPException(status_code=502, detail=f"import failed: {exc}") from exc
     return {
         "database_id": db.meta.id,
         "country_iso": region.country_iso,
+        "preview": summary.to_json(),
         "fragment": fragment.to_json(),
     }

@@ -19,15 +19,14 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   CountryMeta,
   DatabaseMeta,
-  FetchResponse,
   PreviewSummary,
+  RunImportResponse,
   WorkbookFragment,
   GeoJSONFeatureCollection,
   fetchCountryBoundaries,
-  fetchImport,
   listCountries,
   listDatabases,
-  previewImport,
+  runImport,
 } from '../../shared/api/databases';
 import { ResizablePanels } from '../../layout/ResizablePanels';
 import { usePersistedState } from '../../shared/utils/usePersistedState';
@@ -75,10 +74,13 @@ export function DataImportView({ applyFragment }: Props) {
     {},
   );
 
+  // One-trip response holds both preview (for the right rail) and the
+  // workbook fragment (held in React state until the user clicks Add to
+  // workbook — no second network call).
   const [preview, setPreview] = useState<PreviewSummary | null>(null);
-  const [lastFetch, setLastFetch] = useState<FetchResponse | null>(null);
+  const [pendingResponse, setPendingResponse] = useState<RunImportResponse | null>(null);
+  const [lastAdded, setLastAdded] = useState<RunImportResponse | null>(null);
   const [fetching, setFetching] = useState(false);
-  const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Bootstrap: load databases + countries + GeoJSON in parallel on mount.
@@ -141,9 +143,16 @@ export function DataImportView({ applyFragment }: Props) {
   // showing stale numbers next to fresh filter values.
   useEffect(() => {
     setPreview(null);
-    setLastFetch(null);
+    setPendingResponse(null);
+    setLastAdded(null);
     setError(null);
   }, [selectedIso, selectedDatabaseId]);
+
+  // Changing any filter also invalidates the held fragment — the user must
+  // re-fetch so preview + fragment stay in lockstep.
+  useEffect(() => {
+    setPendingResponse(null);
+  }, [filterValues]);
 
   const handleSelectCountry = useCallback(
     (iso: string) => {
@@ -152,47 +161,41 @@ export function DataImportView({ applyFragment }: Props) {
     [setSelectedIso],
   );
 
-  const handleFetchPreview = useCallback(async () => {
+  // One-trip Fetch: backend returns preview + fragment together. We render
+  // preview in the right rail and hold fragment for the Add to workbook
+  // click — no second network call.
+  const handleFetch = useCallback(async () => {
     if (!selectedDatabase || !selectedCountry) return;
     setFetching(true);
     setError(null);
     try {
-      const resp = await previewImport({
+      const resp = await runImport({
         databaseId: selectedDatabase.id,
         countryIso: selectedCountry.iso,
         filters: filterValues,
       });
       setPreview(resp.preview);
-      // Drop any stale fetch — the user must re-run the full fetch.
-      setLastFetch(null);
+      setPendingResponse(resp);
+      setLastAdded(null);
     } catch (exc) {
       setError(String(exc));
       setPreview(null);
+      setPendingResponse(null);
     } finally {
       setFetching(false);
     }
   }, [selectedDatabase, selectedCountry, filterValues]);
 
-  const handleApply = useCallback(async () => {
-    if (!selectedDatabase || !selectedCountry) return;
-    setApplying(true);
-    setError(null);
-    try {
-      // Always re-fetch the full fragment at apply time so the preview's
-      // filters/conversion options match the merged result exactly.
-      const resp = await fetchImport({
-        databaseId: selectedDatabase.id,
-        countryIso: selectedCountry.iso,
-        filters: filterValues,
-      });
-      setLastFetch(resp);
-      applyFragment(resp.fragment, selectedDatabase.name, selectedCountry.name);
-    } catch (exc) {
-      setError(String(exc));
-    } finally {
-      setApplying(false);
-    }
-  }, [selectedDatabase, selectedCountry, filterValues, applyFragment]);
+  // Apply is now a pure-frontend merge — no network call.
+  const handleApply = useCallback(() => {
+    if (!pendingResponse || !selectedDatabase || !selectedCountry) return;
+    applyFragment(
+      pendingResponse.fragment,
+      selectedDatabase.name,
+      selectedCountry.name,
+    );
+    setLastAdded(pendingResponse);
+  }, [pendingResponse, selectedDatabase, selectedCountry, applyFragment]);
 
   if (bootstrapError) {
     return (
@@ -228,9 +231,9 @@ export function DataImportView({ applyFragment }: Props) {
             onSelect={handleSelectCountry}
             overlay={preview?.overlay || null}
           />
-          {lastFetch && (
+          {lastAdded && (
             <div className="data-import-banner" role="status">
-              Added <b>{lastFetch.database_id}</b> rows to the workbook for{' '}
+              Added <b>{lastAdded.database_id}</b> rows to the workbook for{' '}
               <b>{selectedCountry?.name}</b>. Switch to <b>Model</b> or <b>Build</b> to review.
             </div>
           )}
@@ -239,11 +242,12 @@ export function DataImportView({ applyFragment }: Props) {
           database={selectedDatabase}
           values={filterValues}
           onChange={updateFilterValue}
-          onFetch={handleFetchPreview}
+          onFetch={handleFetch}
           onApply={handleApply}
           fetching={fetching}
-          applying={applying}
+          applying={false}
           preview={preview}
+          canApply={pendingResponse !== null}
           error={error}
         />
       </ResizablePanels>

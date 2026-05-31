@@ -31,11 +31,12 @@ interface Props {
   onSelectDatabase: (id: string) => void;
 }
 
-const CATEGORY_ORDER: ImporterCategory[] = ['transmission', 'generation', 'demand'];
+const CATEGORY_ORDER: ImporterCategory[] = ['transmission', 'generation', 'demand', 'costs'];
 const CATEGORY_LABEL: Record<string, string> = {
   transmission: 'Transmission',
   generation: 'Generation',
   demand: 'Demand',
+  costs: 'Costs & parameters',
 };
 const UNCATEGORISED = '(uncategorised)';
 const COLLAPSE_KEY = 'ragnarok:data-import:tree-collapsed';

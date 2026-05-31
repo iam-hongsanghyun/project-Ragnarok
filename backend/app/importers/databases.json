@@ -1,7 +1,10 @@
 {
   "databases": [
-    { "module": "osm",              "enabled": true, "order": 10 },
-    { "module": "wri_gppd",         "enabled": true, "order": 30 },
-    { "module": "worldbank_demand", "enabled": true, "order": 50 }
+    { "module": "osm",                    "enabled": true, "order": 10 },
+    { "module": "wri_gppd",               "enabled": true, "order": 30 },
+    { "module": "worldbank_demand",       "enabled": true, "order": 50 },
+    { "module": "opsd_load",              "enabled": true, "order": 52 },
+    { "module": "renewables_ninja",       "enabled": true, "order": 35 },
+    { "module": "pypsa_technology_data",  "enabled": true, "order": 70 }
   ]
 }

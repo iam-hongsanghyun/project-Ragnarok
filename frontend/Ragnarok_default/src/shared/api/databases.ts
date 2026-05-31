@@ -58,10 +58,18 @@ export interface PreviewSummary {
   overlay?: GeoJSONFeatureCollection | null;
 }
 
-export interface PreviewResponse {
+/**
+ * Combined response from /api/import/run. Carries both the preview
+ * (counts / samples / overlay) and the full WorkbookFragment so the
+ * frontend can render the preview in the right rail immediately and hold
+ * the fragment in React state until the user clicks "Add to workbook" —
+ * no second network call.
+ */
+export interface RunImportResponse {
   database_id: string;
   country_iso: string;
   preview: PreviewSummary;
+  fragment: WorkbookFragment;
 }
 
 export interface ProvenanceRow {
@@ -77,12 +85,10 @@ export interface ProvenanceRow {
 export interface WorkbookFragment {
   sheets: Record<string, Array<Record<string, unknown>>>;
   provenance?: ProvenanceRow;
-}
-
-export interface FetchResponse {
-  database_id: string;
-  country_iso: string;
-  fragment: WorkbookFragment;
+  /** Ordered ISO-`T` snapshot strings the importer's time-series cover.
+   *  When present the frontend merger unions this with the workbook's
+   *  existing snapshot range. Static-only sources omit the field. */
+  snapshots?: string[];
 }
 
 export interface GeoJSONFeature {
@@ -125,31 +131,20 @@ export async function fetchCountryBoundaries(): Promise<GeoJSONFeatureCollection
   return jsonOrThrow<GeoJSONFeatureCollection>(resp, 'fetch country boundaries');
 }
 
-export interface PreviewRequest {
+export interface RunImportRequest {
   databaseId: string;
   countryIso: string;
   filters: Record<string, unknown>;
-}
-
-export async function previewImport(req: PreviewRequest): Promise<PreviewResponse> {
-  const resp = await fetch('/api/import/preview', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      database_id: req.databaseId,
-      country_iso: req.countryIso,
-      filters: req.filters,
-    }),
-  });
-  return jsonOrThrow<PreviewResponse>(resp, 'preview import');
-}
-
-export interface FetchRequest extends PreviewRequest {
   convertOptions?: Record<string, unknown>;
 }
 
-export async function fetchImport(req: FetchRequest): Promise<FetchResponse> {
-  const resp = await fetch('/api/import/fetch', {
+/**
+ * One-trip import: returns both the preview summary AND the workbook
+ * fragment. Caller renders the preview in the right rail and holds the
+ * fragment until the user clicks Add to workbook — no second network call.
+ */
+export async function runImport(req: RunImportRequest): Promise<RunImportResponse> {
+  const resp = await fetch('/api/import/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -159,5 +154,5 @@ export async function fetchImport(req: FetchRequest): Promise<FetchResponse> {
       convert_options: req.convertOptions || {},
     }),
   });
-  return jsonOrThrow<FetchResponse>(resp, 'fetch import');
+  return jsonOrThrow<RunImportResponse>(resp, 'run import');
 }
