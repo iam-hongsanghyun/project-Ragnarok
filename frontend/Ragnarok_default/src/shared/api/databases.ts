@@ -1,9 +1,25 @@
 /**
- * Typed client for the Data view's external-data importer endpoints.
+ * Browser-direct importer client.
  *
- * The backend lives under `backend/app/importers/`; this client only walks
- * the public-facing JSON shapes. See `docs/TODO.md` items `I1` / `I2`.
+ * The Data view fetches and converts external data **in the browser** —
+ * the backend has no `importers/` package and no `/api/import/*` routes.
+ * The functions below delegate to `src/features/data/databases/registry.ts`
+ * and the per-database TypeScript modules under that directory.
+ *
+ * The JSON shapes (DatabaseMeta, PreviewSummary, WorkbookFragment, …) are
+ * preserved from when the importers lived on the backend so the rest of
+ * the Data view code (FilterPanel, CategoryDatabaseList, mergeWorkbookFragment)
+ * needs no rework.
  */
+
+import {
+  fetchCountryBoundaries as fetchCountryBoundariesLocal,
+  getModule,
+  listCountries as listCountriesLocal,
+  listDatabases as listDatabasesLocal,
+  resolveRegion,
+} from '../../features/data/databases/registry';
+import { defaultConvertOptions } from '../../features/data/databases/types';
 
 export type FilterKind = 'number' | 'select' | 'multiselect' | 'range' | 'toggle' | 'date';
 
@@ -107,33 +123,22 @@ export interface GeoJSONFeatureCollection {
   features: GeoJSONFeature[];
 }
 
-// ── HTTP helpers ─────────────────────────────────────────────────────────────
-
-async function jsonOrThrow<T>(resp: Response, action: string): Promise<T> {
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => '');
-    throw new Error(`${action} failed (${resp.status}): ${text || resp.statusText}`);
-  }
-  return (await resp.json()) as T;
-}
-
-// ── Public endpoints ─────────────────────────────────────────────────────────
+// ── Browser-direct entry points ─────────────────────────────────────────────
+//
+// The four functions below are pure wrappers around the in-process registry
+// in `src/features/data/databases/registry.ts`. They keep the function names
+// the Data view already calls, so the rewire was a one-import swap.
 
 export async function listDatabases(): Promise<DatabaseMeta[]> {
-  const resp = await fetch('/api/import/databases');
-  const body = await jsonOrThrow<{ databases: DatabaseMeta[] }>(resp, 'list databases');
-  return body.databases;
+  return listDatabasesLocal();
 }
 
 export async function listCountries(): Promise<CountryMeta[]> {
-  const resp = await fetch('/api/import/countries');
-  const body = await jsonOrThrow<{ countries: CountryMeta[] }>(resp, 'list countries');
-  return body.countries;
+  return listCountriesLocal();
 }
 
 export async function fetchCountryBoundaries(): Promise<GeoJSONFeatureCollection> {
-  const resp = await fetch('/api/import/boundaries/countries.geojson');
-  return jsonOrThrow<GeoJSONFeatureCollection>(resp, 'fetch country boundaries');
+  return fetchCountryBoundariesLocal();
 }
 
 export interface RunImportRequest {
@@ -145,19 +150,23 @@ export interface RunImportRequest {
 
 /**
  * One-trip import: returns both the preview summary AND the workbook
- * fragment. Caller renders the preview in the right rail and holds the
- * fragment until the user clicks Add to workbook — no second network call.
+ * fragment. The flow lives entirely in the browser — fetch from upstream,
+ * preview, convert, hand back. The caller renders the preview in the right
+ * rail and holds the fragment until the user clicks Add to workbook.
+ *
+ * Errors propagate as thrown `Error`s, identical to the old HTTP path.
  */
 export async function runImport(req: RunImportRequest): Promise<RunImportResponse> {
-  const resp = await fetch('/api/import/run', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      database_id: req.databaseId,
-      country_iso: req.countryIso,
-      filters: req.filters,
-      convert_options: req.convertOptions || {},
-    }),
-  });
-  return jsonOrThrow<RunImportResponse>(resp, 'run import');
+  const mod = getModule(req.databaseId);
+  const region = await resolveRegion(req.countryIso);
+  const options = { ...defaultConvertOptions, ...(req.convertOptions || {}) };
+  const result = await mod.fetch(region, req.filters);
+  const preview = mod.preview(result);
+  const fragment = mod.toSheets(result, options);
+  return {
+    database_id: req.databaseId,
+    country_iso: region.countryIso,
+    preview,
+    fragment,
+  };
 }

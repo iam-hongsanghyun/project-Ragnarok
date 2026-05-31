@@ -1,0 +1,42 @@
+/** OSM importer metadata — same JSON the right-rail FilterPanel consumes. */
+import type { DatabaseMeta } from '../../../../shared/api/databases';
+
+export const osmMeta: DatabaseMeta = {
+  id: 'osm',
+  name: 'OpenStreetMap (Overpass)',
+  category: 'transmission',
+  subcategory: 'Live grid topology',
+  license: 'ODbL',
+  homepage: 'https://www.openstreetmap.org',
+  version_hint: 'live',
+  description:
+    'Power infrastructure tagged in OpenStreetMap (power=line / cable / substation). Voltage thresholds are user-tunable; output lands as buses + lines + transformers.',
+  targets: ['buses', 'lines', 'transformers'],
+  available: true,
+  country_coverage: 'global',
+  filters: [
+    {
+      id: 'min_voltage_kv',
+      label: 'Min voltage',
+      kind: 'number',
+      default: 110,
+      min: 1,
+      max: 1500,
+      step: 10,
+      unit: 'kV',
+    },
+    {
+      id: 'include_cables',
+      label: 'Include cables',
+      kind: 'toggle',
+      default: true,
+      description: 'Underground cables in addition to overhead lines.',
+    },
+    {
+      id: 'include_dc',
+      label: 'Include HVDC',
+      kind: 'toggle',
+      default: true,
+    },
+  ],
+};
