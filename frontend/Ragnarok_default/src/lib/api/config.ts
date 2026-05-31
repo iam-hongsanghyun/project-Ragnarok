@@ -113,7 +113,33 @@ async function fetchFullBundle(): Promise<ConfigBundle> {
   if (!resp.ok) {
     throw new Error(`GET /api/config failed (${resp.status})`);
   }
-  return resp.json() as Promise<ConfigBundle>;
+  const bundle = (await resp.json()) as ConfigBundle;
+  if (!isUsableBundle(bundle)) {
+    throw new Error(
+      'GET /api/config returned a bundle with an empty PyPSA schema — ' +
+        'the backend may still be warming up or running an old build.',
+    );
+  }
+  return bundle;
+}
+
+/**
+ * A bundle is only usable if its schema actually carries components.
+ * An empty `schema.components` would make every schema-derived global
+ * (SHEETS, TS_SHEETS, …) empty, and a workbook built from it would be
+ * missing every sheet key — which crashes the readers downstream. We
+ * treat that as a failure so a stale / malformed cached bundle can never
+ * poison the running app; the caller falls back to a refetch or the
+ * connection-required screen.
+ */
+function isUsableBundle(bundle: ConfigBundle | null | undefined): boolean {
+  return Boolean(
+    bundle &&
+      bundle.schema &&
+      bundle.schema.components &&
+      Object.keys(bundle.schema.components).length > 0 &&
+      bundle.build_id,
+  );
 }
 
 /**
@@ -122,16 +148,18 @@ async function fetchFullBundle(): Promise<ConfigBundle> {
  *
  * Sequence:
  *   1. Hit /api/config/build-id (small, fast).
- *   2. If we have a cached bundle with that exact build_id → return it.
- *   3. Otherwise fetch the full bundle, cache, return.
+ *   2. If we have a *usable* cached bundle with that exact build_id →
+ *      return it. A cached bundle that fails validation (empty schema
+ *      from an earlier broken boot) is ignored, not trusted.
+ *   3. Otherwise fetch the full bundle, validate, cache, return.
  *
- * Throws on any network / parse failure. Caller is expected to render
- * a connection-required error in that case.
+ * Throws on any network / parse / validation failure. Caller renders a
+ * connection-required error in that case.
  */
 export async function loadConfigBundle(): Promise<ConfigBundle> {
   const probe = await fetchBuildId();
   const cached = readCache();
-  if (cached && cached.build_id === probe.build_id) {
+  if (cached && cached.build_id === probe.build_id && isUsableBundle(cached)) {
     return cached;
   }
   const bundle = await fetchFullBundle();

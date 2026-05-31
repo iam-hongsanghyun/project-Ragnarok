@@ -54,9 +54,9 @@ function paletteColor(value: string): string {
   return DEFAULT_CARRIER_PALETTE[hashIndex(normalizeCarrierKey(value), DEFAULT_CARRIER_PALETTE.length)];
 }
 
-export function setCarrierColorOverrides(rows: GridRow[]): void {
+export function setCarrierColorOverrides(rows: GridRow[] | undefined | null): void {
   const next: Record<string, string> = {};
-  rows.forEach((row) => {
+  (rows ?? []).forEach((row) => {
     const name = String(row.name ?? '').trim();
     const color = String(row.color ?? '').trim();
     if (!name || !color) return;

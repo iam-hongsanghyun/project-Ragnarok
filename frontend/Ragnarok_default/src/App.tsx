@@ -406,7 +406,7 @@ function AppInner() {
   // and keeps assumptions out of the empty starting state.
 
   useEffect(() => {
-    setCarrierColorOverrides(model.carriers);
+    setCarrierColorOverrides(model.carriers ?? []);
   }, [model.carriers]);
 
   useEffect(() => {
