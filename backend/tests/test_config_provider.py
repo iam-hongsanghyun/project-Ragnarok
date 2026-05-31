@@ -89,6 +89,7 @@ def test_bundle_to_json_roundtrips():
         "standard_types",
         "network_import_policy",
         "capabilities",
+        "simulation_defaults",
         "build_id",
         "backend_version",
     }

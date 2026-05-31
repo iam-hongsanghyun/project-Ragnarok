@@ -219,20 +219,24 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/api/config")
-def get_config() -> dict[str, Any]:
-    cfg = load_system_defaults()
-    sim = cfg.get("simulation", {})
-    return {
-        "maxSnapshots": int(sim.get("max_snapshots", 8760)),
-        "defaultSnapshotCount": int(sim.get("default_snapshot_count", 24)),
-        "defaultSnapshotWeight": float(sim.get("default_snapshot_weight", 1.0)),
-    }
+# Shared-config bundle (PyPSA schema, standard types, capabilities,
+# simulation defaults, …) is served by the dedicated config router so
+# the frontend can fetch everything it needs to agree with the backend
+# in one boot call.
+from .routers import config as _config_router  # noqa: E402
+app.include_router(_config_router.router)
 
 
 @app.get("/api/backends")
 def get_backends() -> dict[str, Any]:
-    """List the available optimisation backends and their capabilities."""
+    """List the available optimisation backends and their capabilities.
+
+    Kept as its own focused endpoint in addition to the
+    ``GET /api/config`` bundle (which carries the same data under
+    ``capabilities``) — the run dialog calls this directly when the
+    user opens it, since capability flags can change without a schema
+    rebuild and the cheap probe avoids a full bundle round-trip.
+    """
     return {"backends": available_backends(), "default": "pypsa"}
 
 

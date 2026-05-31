@@ -53,12 +53,30 @@ def _network_import_policy_path() -> Path:
 
 @dataclass(frozen=True)
 class ConfigBundle:
-    """The exact JSON shape returned by ``GET /api/config``."""
+    """The exact JSON shape returned by ``GET /api/config``.
+
+    Six payloads, each owned by the backend and computed (or read) on
+    demand:
+
+    * ``schema`` — PyPSA component schema (built live, see
+      ``pypsa_schema_builder.build_pypsa_schema``).
+    * ``standard_types`` — PyPSA line + transformer catalogues (built
+      live).
+    * ``network_import_policy`` — curated rule table, read from disk.
+    * ``capabilities`` — solver-backend capability list (from the
+      backend registry — also dynamic).
+    * ``simulation_defaults`` — server-side simulation knobs (max
+      snapshots, default snapshot count, default snapshot weight).
+      Backend authoritative so the frontend doesn't need to ship its
+      own defaults.
+    * ``build_id`` + ``backend_version`` — for the frontend cache key.
+    """
 
     schema: dict[str, Any]
     standard_types: dict[str, Any]
     network_import_policy: dict[str, Any]
     capabilities: list[dict[str, Any]]
+    simulation_defaults: dict[str, Any]
     build_id: str
     backend_version: str
 
@@ -68,6 +86,7 @@ class ConfigBundle:
             "standard_types": self.standard_types,
             "network_import_policy": self.network_import_policy,
             "capabilities": self.capabilities,
+            "simulation_defaults": self.simulation_defaults,
             "build_id": self.build_id,
             "backend_version": self.backend_version,
         }
@@ -135,18 +154,26 @@ def load_bundle() -> ConfigBundle:
     """
     # Local imports to avoid circular deps at module-import time.
     from .backends.registry import available_backends
+    from .config import load_system_defaults
     from .pypsa_schema_builder import build_pypsa_schema, build_standard_types
 
     schema = build_pypsa_schema()
     standard_types = build_standard_types()
     network_import_policy = json.loads(_network_import_policy_path().read_text())
     capabilities = available_backends()
+    sim_cfg = load_system_defaults().get("simulation", {})
+    simulation_defaults = {
+        "maxSnapshots": int(sim_cfg.get("max_snapshots", 8760)),
+        "defaultSnapshotCount": int(sim_cfg.get("default_snapshot_count", 24)),
+        "defaultSnapshotWeight": float(sim_cfg.get("default_snapshot_weight", 1.0)),
+    }
     backend_version = _backend_version()
     return ConfigBundle(
         schema=schema,
         standard_types=standard_types,
         network_import_policy=network_import_policy,
         capabilities=capabilities,
+        simulation_defaults=simulation_defaults,
         build_id=_build_id(
             schema, standard_types, network_import_policy, backend_version,
         ),
