@@ -7,38 +7,44 @@ from typing import Any
 
 
 def _backend_config_dir() -> Path:
-    """Directory holding the shared schema JSON the backend owns.
+    """Directory holding curated rule tables the backend owns.
 
-    The four shared configs (pypsa_schema, pypsa_standard_types,
-    network_import_policy, plus the live capabilities table) live here.
-    The frontend fetches them at boot via ``GET /api/config`` (see
-    ``backend/app/config_provider.py``). Path: ``backend/data/config/``,
-    resolved from this file's location (``backend/pypsa/pypsa_schema.py``
-    → ``pypsa`` → ``backend`` → ``data/config``).
+    Today this is only ``network_import_policy.json`` (hand-curated and
+    not derivable from PyPSA). The PyPSA schema and standard-type
+    catalogues are built directly from the installed ``pypsa`` package
+    at runtime — see ``backend/app/pypsa_schema_builder.py`` — so there
+    is no JSON file involved for those.
     """
     return Path(__file__).resolve().parents[1] / "data" / "config"
-
-
-def _schema_path() -> Path:
-    return _backend_config_dir() / "pypsa_schema.json"
 
 
 def _network_import_policy_path() -> Path:
     return _backend_config_dir() / "network_import_policy.json"
 
 
-def _standard_types_path() -> Path:
-    return _backend_config_dir() / "pypsa_standard_types.json"
-
-
 @lru_cache(maxsize=1)
 def load_pypsa_schema() -> dict[str, Any]:
-    return json.loads(_schema_path().read_text())
+    """Return the PyPSA component schema computed from the installed package.
+
+    Sole source of truth: ``backend/app/pypsa_schema_builder.build_pypsa_schema``.
+    Bumping PyPSA automatically bumps the schema the next time the
+    backend boots. Cached for the life of the process; call
+    ``reset_cache()`` (or restart) to refresh.
+    """
+    from backend.app.pypsa_schema_builder import build_pypsa_schema
+
+    return build_pypsa_schema()
 
 
 @lru_cache(maxsize=1)
 def load_network_import_policy() -> dict[str, Any]:
     return json.loads(_network_import_policy_path().read_text())
+
+
+def reset_cache() -> None:
+    """Drop both caches so the next call re-reads disk + re-imports PyPSA."""
+    load_pypsa_schema.cache_clear()
+    load_network_import_policy.cache_clear()
 
 
 def component_schema(sheet_name: str) -> dict[str, Any] | None:

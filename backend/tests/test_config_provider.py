@@ -42,10 +42,12 @@ def test_config_files_resolve_under_backend_data():
     assert config_dir.name == "config"
     assert config_dir.parent.name == "data"
     assert config_dir.parent.parent.name == "backend"
-    # All three files exist on disk.
-    assert (config_dir / "pypsa_schema.json").exists()
-    assert (config_dir / "pypsa_standard_types.json").exists()
+    # Only the curated rule table lives here as a file — the PyPSA schema
+    # and standard-types are built live from the installed pypsa package
+    # by `pypsa_schema_builder.py`, not read from JSON.
     assert (config_dir / "network_import_policy.json").exists()
+    assert not (config_dir / "pypsa_schema.json").exists()
+    assert not (config_dir / "pypsa_standard_types.json").exists()
 
 
 def test_build_id_is_deterministic():
@@ -92,22 +94,18 @@ def test_bundle_to_json_roundtrips():
     }
 
 
-def test_legacy_loader_reads_same_backend_copy():
-    """``backend.pypsa.pypsa_schema.load_pypsa_schema`` was reading from
-    the frontend dir; A1 redirects it to ``backend/data/config/``. Verify
-    both paths now agree on the same content.
+def test_legacy_loader_reads_same_live_schema():
+    """``backend.pypsa.pypsa_schema.load_pypsa_schema`` and the bundle's
+    ``schema`` field must agree — they share the same builder.
     """
-    from backend.pypsa.pypsa_schema import load_pypsa_schema, _schema_path
+    from backend.pypsa.pypsa_schema import load_pypsa_schema, reset_cache as _legacy_reset
 
+    _legacy_reset()
+    reset_cache()
     schema_via_legacy = load_pypsa_schema()
-    schema_via_bundle = json.loads(
-        (_backend_config_dir() / "pypsa_schema.json").read_text(),
-    )
-    # Identity by content — the legacy loader uses lru_cache so won't
-    # see a mid-test file rewrite, but the two paths resolve to the
-    # same on-disk file now.
+    schema_via_bundle = load_bundle().schema
     assert schema_via_legacy == schema_via_bundle
-    # And the legacy loader's resolved path is in backend/, not frontend/.
-    legacy_path = _schema_path()
-    assert "backend" in legacy_path.parts
-    assert "frontend" not in legacy_path.parts
+    # The schema carries provenance pointing at the installed package,
+    # not a stale JSON file.
+    assert schema_via_legacy["meta"]["source"] == "installed pypsa package"
+    assert "pypsa_version" in schema_via_legacy["meta"]

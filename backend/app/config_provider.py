@@ -37,18 +37,11 @@ def _backend_config_dir() -> Path:
     """``backend/data/config/`` resolved from this file's location.
 
     ``backend/app/config_provider.py`` → ``app`` → ``backend`` → ``data/config``,
-    so ``parents[1]`` is the backend root. Same depth as
-    ``backend/pypsa/pypsa_schema.py``.
+    so ``parents[1]`` is the backend root. Hosts only the configs that
+    aren't derivable from the installed ``pypsa`` package — currently
+    just ``network_import_policy.json`` (curated rule table).
     """
     return Path(__file__).resolve().parents[1] / "data" / "config"
-
-
-def _schema_path() -> Path:
-    return _backend_config_dir() / "pypsa_schema.json"
-
-
-def _standard_types_path() -> Path:
-    return _backend_config_dir() / "pypsa_standard_types.json"
 
 
 def _network_import_policy_path() -> Path:
@@ -125,17 +118,27 @@ def _build_id(
 
 @lru_cache(maxsize=1)
 def load_bundle() -> ConfigBundle:
-    """Read the three JSON files + capability list and freeze them.
+    """Build the bundle the frontend fetches at boot.
 
-    Cached for the life of the process. Hot-reload (e.g. dev-watch) is a
-    follow-up; a server restart is the supported way to refresh.
+    Two halves:
+
+    * ``schema`` + ``standard_types`` are computed **from the installed
+      pypsa package** (see ``pypsa_schema_builder.py``) at startup. No
+      JSON file involved — bumping PyPSA automatically bumps the schema
+      the next time the backend boots.
+    * ``network_import_policy`` is a hand-curated rule table — not
+      derivable from PyPSA — so it stays as a checked-in JSON file under
+      ``backend/data/config/``.
+
+    Cached for the life of the process. ``reset_cache()`` drops it so the
+    next ``load_bundle()`` re-reads disk + re-imports PyPSA.
     """
-    # Local import to avoid a circular dependency with backends.registry
-    # at module import time.
+    # Local imports to avoid circular deps at module-import time.
     from .backends.registry import available_backends
+    from .pypsa_schema_builder import build_pypsa_schema, build_standard_types
 
-    schema = json.loads(_schema_path().read_text())
-    standard_types = json.loads(_standard_types_path().read_text())
+    schema = build_pypsa_schema()
+    standard_types = build_standard_types()
     network_import_policy = json.loads(_network_import_policy_path().read_text())
     capabilities = available_backends()
     backend_version = _backend_version()

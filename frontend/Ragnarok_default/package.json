@@ -30,8 +30,6 @@
     "xlsx": "^0.18.5"
   },
   "scripts": {
-    "generate:pypsa-schema": "node scripts/generate-pypsa-schema.mjs",
-    "generate:standard-types": "node scripts/generate-pypsa-standard-types.mjs",
     "generate:support-matrix": "node scripts/generate-support-matrix.mjs",
     "start": "REACT_APP_BUILD_ID=dev-$(date +%s) react-scripts start",
     "start:frontend": "REACT_APP_BUILD_ID=dev-$(date +%s) react-scripts start",
