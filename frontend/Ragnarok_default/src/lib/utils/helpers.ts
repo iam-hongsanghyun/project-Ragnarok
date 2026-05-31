@@ -182,16 +182,22 @@ export function rowCoords(row: GridRow): [number, number] | null {
 }
 
 export function getBounds(model: WorkbookModel): LatLngBoundsExpression | null {
-  // Include buses with explicit coords AND generators with their own coords
-  const busPoints = model.buses.flatMap((bus) => { const c = rowCoords(bus); return c ? [c] : []; });
-  const genPoints = model.generators.flatMap((g) => { const c = rowCoords(g); return c ? [c] : []; });
+  // WorkbookModel is a Record<string, GridRow[]>, but a workbook freshly
+  // loaded from localStorage (or built before the schema bootstrap
+  // populated SHEETS) can be missing required keys. Coalesce with [] so
+  // the readers never throw — getBounds returning null on an empty
+  // model is the right shape for the map layer anyway.
+  const buses = model.buses ?? [];
+  const generators = model.generators ?? [];
+  const busPoints = buses.flatMap((bus) => { const c = rowCoords(bus); return c ? [c] : []; });
+  const genPoints = generators.flatMap((g) => { const c = rowCoords(g); return c ? [c] : []; });
   const points = [...busPoints, ...genPoints];
   return points.length ? points : null;
 }
 
 export function getBusIndex(model: WorkbookModel): Record<string, GridRow> {
   const index: Record<string, GridRow> = {};
-  model.buses.forEach((bus) => {
+  (model.buses ?? []).forEach((bus) => {
     index[stringValue(bus.name)] = bus;
   });
   return index;
