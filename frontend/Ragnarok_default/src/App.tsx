@@ -29,6 +29,8 @@ import {
 } from './shared/types';
 import { API_BASE, DEFAULT_CONSTRAINTS, getDefaultRowForSheet, MAX_UNPINNED_HISTORY, PYPSA_SCHEMA_META, RUN_POLLING, RUN_WINDOW, SHEETS } from './constants';
 import { canonicalizeOutputSeries, canonicalizeTemporalRows, createEmptyWorkbook, exportWorkbook, normalizeInputDatesToIso, parseProjectFile, parseWorkbook, projectWorkbookToArrayBuffer, workbookToArrayBuffer } from './shared/utils/workbook';
+import { mergeWorkbookFragment } from './shared/utils/mergeWorkbookFragment';
+import type { WorkbookFragment } from './shared/api/databases';
 import { fullResultsArrayBuffer } from './shared/utils/exportResults';
 import { getBounds, getBusIndex, carrierColor, numberValue, orderByCarrierRows, setCarrierColorOverrides, snapshotMaxFromWorkbook } from './shared/utils/helpers';
 import { usePersistedState } from './shared/utils/usePersistedState';
@@ -883,6 +885,25 @@ function AppInner() {
     }
   };
 
+  // ── Data view importer subsystem ───────────────────────────────────────
+  // Called by DataView when the user clicks "Add to workbook" after picking
+  // a database, country, and filters. Merges the fragment into the current
+  // model (carriers union, name dedupe, provenance row appended).
+  const handleApplyImportedFragment = useCallback(
+    (fragment: WorkbookFragment, databaseName: string, countryName: string) => {
+      pushHistory();
+      setModel((current) => mergeWorkbookFragment(current, fragment));
+      const counts = Object.entries(fragment.sheets)
+        .map(([sheet, rows]) => `${rows.length} ${sheet}`)
+        .join(', ');
+      const note = counts ? ` (${counts})` : '';
+      const msg = `Imported ${databaseName} for ${countryName}${note}`;
+      setStatus(msg);
+      showToast(msg, 'success');
+    },
+    [pushHistory, showToast],
+  );
+
   const handleOpenWorkbook = async () => {
     const picker = (window as any).showOpenFilePicker;
     if (!picker) {
@@ -1732,7 +1753,7 @@ function AppInner() {
             />
           )}
 
-          {tab === 'Data' && <DataView />}
+          {tab === 'Data' && <DataView onApplyFragment={handleApplyImportedFragment} />}
 
           {tab === 'Analytics' && (
             <AnalyticsView

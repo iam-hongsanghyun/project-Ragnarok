@@ -1,0 +1,28 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "backend",
+      "runtimeExecutable": "./.venv-pypsa/bin/python",
+      "runtimeArgs": [
+        "-m",
+        "uvicorn",
+        "backend.app.main:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8000",
+        "--reload",
+        "--reload-dir",
+        "backend"
+      ],
+      "port": 8000
+    },
+    {
+      "name": "pypsa",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["start", "--prefix", "frontend/Ragnarok_default"],
+      "port": 3001
+    }
+  ]
+}

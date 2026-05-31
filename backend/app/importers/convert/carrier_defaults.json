@@ -1,0 +1,19 @@
+{
+  "_note": "Per-carrier defaults used by all plant importers. marginal_cost is EUR/MWh, efficiency is dimensionless, co2_emissions is t CO2 / MWh_thermal. Values are coarse first-cut estimates suitable for starter-model use; the user is expected to tune them in Build for any serious study.",
+  "carriers": {
+    "Coal":       { "marginal_cost": 30.0, "efficiency": 0.39, "co2_emissions": 0.34, "color": "#2f2f2f" },
+    "Lignite":    { "marginal_cost": 20.0, "efficiency": 0.36, "co2_emissions": 0.41, "color": "#5b3a1d" },
+    "Gas":        { "marginal_cost": 55.0, "efficiency": 0.55, "co2_emissions": 0.20, "color": "#c47c14" },
+    "Oil":        { "marginal_cost": 80.0, "efficiency": 0.38, "co2_emissions": 0.27, "color": "#7d4d2f" },
+    "Nuclear":    { "marginal_cost":  8.0, "efficiency": 0.33, "co2_emissions": 0.00, "color": "#9b59b6" },
+    "Hydro":      { "marginal_cost":  0.5, "efficiency": 0.90, "co2_emissions": 0.00, "color": "#2e86c1" },
+    "Wind":       { "marginal_cost":  0.0, "efficiency": 1.00, "co2_emissions": 0.00, "color": "#52be80" },
+    "Solar":      { "marginal_cost":  0.0, "efficiency": 1.00, "co2_emissions": 0.00, "color": "#f4d03f" },
+    "Biomass":    { "marginal_cost": 35.0, "efficiency": 0.30, "co2_emissions": 0.00, "color": "#6c8e57" },
+    "Geothermal": { "marginal_cost":  5.0, "efficiency": 0.15, "co2_emissions": 0.00, "color": "#a04000" },
+    "Waste":      { "marginal_cost": 25.0, "efficiency": 0.25, "co2_emissions": 0.30, "color": "#566573" },
+    "Storage":    { "marginal_cost":  1.0, "efficiency": 0.85, "co2_emissions": 0.00, "color": "#85929e" },
+    "Cogeneration": { "marginal_cost": 40.0, "efficiency": 0.45, "co2_emissions": 0.22, "color": "#bb8fce" },
+    "Other":      { "marginal_cost": 50.0, "efficiency": 0.40, "co2_emissions": 0.10, "color": "#7f8c8d" }
+  }
+}

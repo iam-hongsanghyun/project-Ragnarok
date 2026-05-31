@@ -1,0 +1,21 @@
+{
+  "_note": "WRI GPPD primary_fuel → Ragnarok carrier. Case-insensitive lookup; unknown fuels fall back to 'Other'.",
+  "fuel_to_carrier": {
+    "Coal": "Coal",
+    "Cogeneration": "Cogeneration",
+    "Gas": "Gas",
+    "Geothermal": "Geothermal",
+    "Hydro": "Hydro",
+    "Nuclear": "Nuclear",
+    "Oil": "Oil",
+    "Other": "Other",
+    "Petcoke": "Coal",
+    "Solar": "Solar",
+    "Storage": "Storage",
+    "Waste": "Waste",
+    "Wave and Tidal": "Hydro",
+    "Wind": "Wind",
+    "Biomass": "Biomass",
+    "Bagasse": "Biomass"
+  }
+}

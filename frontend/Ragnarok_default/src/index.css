@@ -6163,7 +6163,7 @@ code, kbd, samp, tt,
 }
 
 /* Any button inside the workspace */
-.workspace-main button:not(.tb-btn):not(.run-button):not(.primary-button):not(.ghost-button):not(.secondary-button):not(.tab-button):not(.subnav-btn):not(.analytics-subtab):not(.settings-nav-item):not(.activity-bar-btn):not(.sheet-tree-item):not(.sheet-tree-group-header):not(.gcc-del):not(.tab-button):not(.sg-module-card-header):not(.subnav-btn):not(.plugin-rail-item) {
+.workspace-main button:not(.tb-btn):not(.run-button):not(.primary-button):not(.ghost-button):not(.secondary-button):not(.tab-button):not(.subnav-btn):not(.analytics-subtab):not(.settings-nav-item):not(.activity-bar-btn):not(.sheet-tree-item):not(.sheet-tree-group-header):not(.gcc-del):not(.tab-button):not(.sg-module-card-header):not(.subnav-btn):not(.plugin-rail-item):not(.ss-input) {
   font-family: inherit;
   font-size: 0.82rem;
   font-weight: 500;
@@ -7566,3 +7566,523 @@ code, kbd, samp, tt,
 }
 .build-spark-attr { font-size: 0.78rem; font-weight: 600; }
 .build-spark-meta { font-size: 0.72rem; color: #94a3b8; }
+
+/* ── Data view: importer subsystem ──────────────────────────────────────── */
+
+.data-import-view {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+/* Inside the resizable container, rails take their width from the panel's
+   flex-basis (driven by ResizablePanels). The `.rzp-panel > .view-rail`
+   override in the .rzp ruleset already strips the rail's hard-coded width,
+   so we only need to size the panel container itself here. */
+.data-import-panels { flex: 1 1 auto; min-width: 0; min-height: 0; }
+.data-import-panels > .rzp-panel { flex-direction: column; }
+.data-import-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+}
+.data-import-map {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
+.data-import-map .leaflet-map {
+  height: 100%;
+  width: 100%;
+}
+.data-import-map__search {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 600;
+  width: 260px;
+}
+.data-import-search {
+  position: relative;
+}
+.data-import-search__input {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  font-size: 0.85rem;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+}
+.data-import-search__input:focus {
+  outline: 2px solid var(--accent, #0f766e);
+  outline-offset: -1px;
+}
+.data-import-search__results {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12);
+  max-height: 260px;
+  overflow-y: auto;
+}
+.data-import-search__option {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text);
+}
+.data-import-search__option:hover {
+  background: var(--bg-hover);
+}
+.data-import-search__iso {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+/* Left rail */
+.data-import-rail__body {
+  padding: 12px 12px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.data-import-rail__hint {
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin: 0;
+}
+.data-import-rail__country {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-hover);
+}
+.data-import-rail__country-name {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--text);
+}
+.data-import-rail__country-iso {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.data-import-rail__country-clear {
+  font-size: 0.72rem;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 2px 6px;
+  cursor: pointer;
+  color: var(--muted);
+}
+.data-import-rail__country-clear:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+.data-import-rail__section-label {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0;
+}
+.data-import-rail__tree-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.data-import-rail__tree-actions {
+  display: inline-flex;
+  gap: 2px;
+}
+.data-import-rail__tree-actions button {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.data-import-rail__tree-actions button:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.data-import-rail__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.data-import-rail__country-item {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  padding: 6px 10px;
+  text-align: left;
+  cursor: pointer;
+  font-size: 0.86rem;
+  color: var(--text);
+  border-radius: 3px;
+}
+.data-import-rail__country-item:hover {
+  background: var(--bg-hover);
+}
+.data-import-rail__country-iso {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+/* ── Tree (file-tree-style database picker) ─────────────────────────────── */
+.data-tree {
+  padding: 4px 0;
+}
+.data-tree__group {
+  display: block;
+}
+.data-tree__children {
+  display: block;
+}
+.data-tree__row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.84rem;
+  color: var(--text);
+  text-align: left;
+  line-height: 1.3;
+}
+.data-tree__row:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.data-tree__row--active {
+  background: var(--bg-hover);
+  font-weight: 600;
+  color: var(--brand, var(--text));
+  box-shadow: inset 2px 0 0 var(--brand, var(--text));
+}
+.data-tree__row--disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.data-tree__chevron {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 0.9rem;
+  flex-shrink: 0;
+  transform: rotate(0deg);
+  transition: transform 0.12s ease;
+}
+.data-tree__chevron--open {
+  transform: rotate(90deg);
+}
+.data-tree__chevron--leaf {
+  color: var(--muted);
+  font-size: 0.6rem;
+}
+.data-tree__label {
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.data-tree__count {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--muted);
+  margin-left: auto;
+  padding-left: 6px;
+}
+.data-tree__hint {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--muted);
+  margin-left: auto;
+  padding-left: 6px;
+}
+
+/* Right rail */
+.data-import-filters__body {
+  padding: 12px 14px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.data-import-filters__empty {
+  padding: 24px;
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+.data-import-filters__meta {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.data-import-filters__meta p {
+  margin: 0 0 8px;
+}
+.data-import-filters__meta dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 70px 1fr;
+  gap: 4px 8px;
+}
+.data-import-filters__meta dt {
+  font-weight: 500;
+  color: var(--text);
+}
+.data-import-filters__meta dd {
+  margin: 0;
+  word-break: break-word;
+}
+.data-import-filters__form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.data-import-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.data-import-filter__label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.data-import-filter__unit {
+  color: var(--muted);
+  font-weight: 400;
+}
+.data-import-filter__hint {
+  font-size: 0.74rem;
+  color: var(--muted);
+  margin: 0;
+}
+.data-import-filter input[type=number],
+.data-import-filter input[type=text],
+.data-import-filter select {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+.data-import-filter__toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.84rem;
+}
+/* Multiselect dropdown — inherits the canonical .ss-* look (trigger, chevron,
+   menu) used by every SearchableSelect in the app. Layered tweaks below:
+   - the button trigger needs text-align:left + cursor:pointer (ss-input
+     defaults to <input> behaviour);
+   - the panel sticks open without the menu's fixed positioning;
+   - a sticky Select all / Clear strip sits above the option list;
+   - each option label spans the row and pulls the checkbox inline. */
+.data-import-multiselect__trigger {
+  text-align: left;
+  cursor: pointer;
+  height: auto;
+  /* <button> elements have user-agent font defaults that ss-input doesn't
+     reset (designed for <input>); pin them explicitly. */
+  font-family: var(--font-mono);
+  font-size: 0.88rem;
+  color: var(--text);
+}
+.data-import-multiselect__panel {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.data-import-multiselect__head {
+  display: flex;
+  gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-hover);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.data-import-multiselect__head-btn {
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  font-size: 0.74rem;
+  cursor: pointer;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+}
+.data-import-multiselect__head-btn:hover:not(:disabled) {
+  color: var(--text);
+}
+.data-import-multiselect__head-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.data-import-multiselect__option {
+  padding: 0;
+}
+.data-import-multiselect__option label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 9px;
+  cursor: pointer;
+  width: 100%;
+}
+.data-import-multiselect__option input {
+  flex-shrink: 0;
+}
+.data-import-filters__actions {
+  display: flex;
+  gap: 8px;
+}
+.data-import-filters__actions button {
+  flex: 1 1 auto;
+  padding: 8px 10px;
+  font-size: 0.86rem;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  cursor: pointer;
+  color: var(--text);
+}
+.data-import-filters__actions button.primary {
+  background: var(--accent, #0f766e);
+  color: #ffffff;
+  border-color: transparent;
+}
+.data-import-filters__actions button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.data-import-filters__error {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 0.82rem;
+  color: #9b1c1c;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 4px;
+}
+.data-import-preview {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  font-size: 0.84rem;
+}
+.data-import-preview h4 {
+  margin: 0 0 8px;
+  font-size: 0.82rem;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.data-import-preview h5 {
+  margin: 8px 0 4px;
+  font-size: 0.76rem;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.data-import-preview__note {
+  margin: 0 0 6px;
+  color: var(--text);
+}
+.data-import-preview__counts {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 8px;
+  margin: 0;
+}
+.data-import-preview__counts dt {
+  margin: 0;
+  text-transform: capitalize;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.data-import-preview__counts dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  text-align: right;
+}
+.data-import-preview__chips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.data-import-preview__chips li {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 0.78rem;
+  display: inline-flex;
+  gap: 4px;
+}
+.data-import-preview__chips b {
+  font-variant-numeric: tabular-nums;
+}
+.data-import-banner {
+  background: var(--bg-hover);
+  border-top: 1px solid var(--border);
+  padding: 8px 12px;
+  font-size: 0.84rem;
+  color: var(--text);
+}

@@ -11,3 +11,22 @@ class RunPayload(BaseModel):
     options: dict[str, Any] | None = None
 
 
+# ── Importer subsystem ──────────────────────────────────────────────────────
+
+
+class ImportPreviewRequest(BaseModel):
+    """``POST /api/import/preview``: ``{database_id, country_iso, filters}``."""
+
+    database_id: str
+    country_iso: str
+    filters: dict[str, Any] = {}
+
+
+class ImportFetchRequest(BaseModel):
+    """``POST /api/import/fetch``: same shape + ``convert_options``."""
+
+    database_id: str
+    country_iso: str
+    filters: dict[str, Any] = {}
+    convert_options: dict[str, Any] | None = None
+

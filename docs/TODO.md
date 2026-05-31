@@ -1,6 +1,6 @@
 # Ragnarok TODO
 
-Last updated: 2026-05-30
+Last updated: 2026-05-31
 
 Single living todo for Ragnarok. Open work is grouped below by theme. Completed and deliberately-dropped items are kept at the bottom in compact form so they are not re-proposed.
 
@@ -13,7 +13,7 @@ Single living todo for Ragnarok. Open work is grouped below by theme. Completed 
 
 ## Open work
 
-Eleven items across five groups. Each group is internally coherent (shared infrastructure, schema, or interfaces); cross-group dependencies are called out in the *Why* column.
+Fourteen items across six groups. Each group is internally coherent (shared infrastructure, schema, or interfaces); cross-group dependencies are called out in the *Why* column.
 
 ### Backend adapters
 
@@ -58,24 +58,37 @@ User-facing surfaces that bring data into a Ragnarok workbook — either from th
 | ID | Pri | Surface | Task | Why | Cost |
 |---|---|---|---|---|---:|
 | `I1` | `High` | `Both` | **Location-based data & model bootstrap** — pick a point / region / country in the UI and assemble a runnable Ragnarok workbook from **D1**: weather profiles, grid topology, generation fleet, demand, policy / price data. | The integrated user surface above **D1**: one location selected → one runnable model. Replaces per-piece "location profile import / national starter / country preset" workflows. | 28,000 |
-| `I2` | `High` | `Both` | **PyPSA-Earth (and similar open-data toolchain) importer** — read networks built by PyPSA-Earth / atlite / similar workflows directly into Ragnarok, mapping their outputs to the Ragnarok workbook schema. | Open-data toolchains already build country-scale PyPSA networks. Ingesting their output avoids re-implementing data harvesting and snaps the user straight into a country-scale model. Complements **I1** (which builds models inside Ragnarok) by importing models built outside. | 20,000 |
-| `I3` | `High` | `Both` | **Demand forecast generator** — per-bus / per-region future demand profiles from drivers (population, GDP, electrification rate, weather sensitivity) with hourly reshaping for pathway runs. | Pathway runs need decade-spanning demand with an evolving shape (electrification of heat / transport shifts the hourly profile, not just the level). Subsumes the simpler "annual demand-growth multiplier" idea. Depends on **D1** for driver datasets. | 24,000 |
+| `I3` | `High` | `Both` | **Driver-based demand forecast generator** — per-bus / per-region future demand profiles from drivers (population, GDP, electrification rate, weather sensitivity) with hourly reshaping for pathway runs. | Pathway runs need decade-spanning demand with an evolving shape (electrification of heat / transport shifts the hourly profile, not just the level). Distinct from **T1** (which just scales an existing series with simple methods); this one drives a *new* shape from exogenous drivers. Depends on **D1** for driver datasets. | 24,000 |
+| `I4` | `High` | `Both` | **Renewable resource profile importer** — pick a region on the map (polygon / buffer around a point / pre-built admin shape), pull wind / solar / hydro inflow time series for that region, then auto-match the imported profile to generators in the workbook by location. | Wind / solar capacity factors vary inside a country; a single national profile is too coarse for siting work. Polygon / buffer selection on the Leaflet map plus a nearest-or-within join to generator coordinates lets the user attach the right shape to the right asset. Depends on **D1** for cached weather / atlite outputs and on the Data view shell shipped this PR. | 20,000 |
+
+### Transformation tools
+
+Tools that transform an already-imported workbook between Data and Run — sit alongside the Build view's edit affordances but operate at sheet-scale rather than row-scale.
+
+| ID | Pri | Surface | Task | Why | Cost |
+|---|---|---|---|---|---:|
+| `T1` | `High` | `Both` | **Forecast tool** — extend any temporal sheet (loads, generator availability, prices, inflow, …) over a future horizon. Methods: (a) time-series extrapolation (ARIMA / Prophet / linear), (b) annual CAGR with a chosen base year, (c) flat multiplication of a base series. Updates the workbook's snapshots so the run window includes the forecast horizon. | Pathway / multi-year runs need future temporal data; today users have to hand-build it outside Ragnarok. **T1** is the lightweight scaling path. Differs from **I3** (which derives a new shape from exogenous drivers); **T1** just stretches an existing series. | 18,000 |
+| `T2` | `High` | `Both` | **Reduced-order / clustering tool** — collapse the workbook to a smaller topology before running. User picks the method (k-means on bus coordinates, voltage-class merge, carrier-bundle aggregation for generators, removal-of-low-flow lines, …) and the target size. Output is a new workbook fragment that runs the same physics on fewer components. | OSM-imported grids and PyPSA-Eur-style bundles often arrive with thousands of buses / lines; many studies need a 50-bus / 20-cluster reduction before they can iterate fast. Today users export to CSV and reduce externally. | 26,000 |
+| `T3` | `High` | `Both` | **Component-to-bus reconciliation** — primarily a per-row affordance in the **Build** view's right rail, next to each component's bus dropdown (Add / Edit Generator, Load, Storage, Process, …): a small **Find nearest bus** action that snaps the current component to the closest bus by haversine, plus a popover with alternative strategies (within an admin polygon, by name match, by free-form rule). Same action also lives in a **Reconcile all** button on the sheet header for bulk fix-up after multi-source imports, with a preview of which rows will move where before applying. | After importing plants (e.g. **WRI GPPD**) and grid (e.g. **OSM**) independently, generators land on synthetic per-plant buses. The inline button makes a one-row fix obvious when the user is already editing that component; the bulk action handles the post-import sweep. Same operation also fixes plant-by-name imports that arrive without coordinates. | 14,000 |
 
 ## Suggested execution order
 
 Across groups, respecting cross-group dependencies marked above.
 
-1. **B1** — Profit-focused optimisation (foundation for the financial model layer).
-2. **F1** — Company / owner dimension (frontend-heavy; can run in parallel with **B1**).
-3. **F2** — Company-level financial model (consumes **B1** + **F1**).
-4. **R1** — Physical-climate-risk module.
-5. **R2** — Transition-risk module (depends on **F2**).
-6. **D1** — Profile / weather data layer.
-7. **I1** — Location-based data & model bootstrap (user surface above **D1**).
-8. **I2** — PyPSA-Earth importer.
-9. **I3** — Demand forecast.
-10. **B2** — Simulation backend adapter.
-11. **B3** — Power-flow-only study mode.
+1. **T3** — Component-to-bus reconciliation (unblocks merged WRI + OSM imports shipped 2026-05-31).
+2. **T1** — Forecast tool (lightweight; immediately useful for pathway runs).
+3. **B1** — Profit-focused optimisation (foundation for the financial model layer).
+4. **F1** — Company / owner dimension (frontend-heavy; can run in parallel with **B1**).
+5. **F2** — Company-level financial model (consumes **B1** + **F1**).
+6. **R1** — Physical-climate-risk module.
+7. **R2** — Transition-risk module (depends on **F2**).
+8. **T2** — Reduced-order / clustering tool.
+9. **D1** — Profile / weather data layer.
+10. **I1** — Location-based data & model bootstrap (user surface above **D1**).
+11. **I4** — Renewable resource profile importer (polygon / buffer region selection).
+12. **I3** — Driver-based demand forecast.
+13. **B2** — Simulation backend adapter.
+14. **B3** — Power-flow-only study mode.
 
 ## Already shipped
 
@@ -129,3 +142,4 @@ Compact history of work completed in earlier passes, grouped by area. Kept so co
 
 - **Backend retention of solved `pypsa.Network`** — the server is intentionally stateless. The JSON output cache round-trips losslessly on the frontend (PR #9) and `deriveRunResults` rebuilds the full `RunResults` on import (PR #11), so backend retention buys nothing for Ragnarok-internal trust. Users who need a native `pypsa.Network` can reconstruct one from the exported workbook or CSV folder.
 - **Separate "Topology" build mode (`Serialised vs Topology` toggle)** — the unified map-driven Build already folds in the intended free-form affordances (own-x/y placement, click-to-link buses, "pick on map" linking, drag-to-move), so a distinct toggle is redundant rather than a separate mode.
+- **PyPSA-Earth as a registered data source** (former `I2`) — PyPSA-Earth is a Snakemake workflow that *produces* country networks from upstream OSM / ERA5 / GADM / atlite outputs, it does not publish data itself. Importing a PyPSA-Earth-built network is equivalent to importing any PyPSA-native `.nc`, which is already covered by the existing `POST /api/import/netcdf` endpoint and the corresponding **Import netCDF** button. A standalone registry entry would duplicate that path without adding value; remove from the Data view registry.

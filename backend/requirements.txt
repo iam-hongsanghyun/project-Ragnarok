@@ -12,3 +12,8 @@ python-calamine>=0.2  # PyPSA's preferred excel engine for import_from_excel
 xarray<2026
 netCDF4>=1.6  # PyPSA-native binary export (.nc)
 tables>=3.10  # PyPSA-native binary export (.h5)
+# Data importer subsystem (Data view): geometry + on-demand upstream fetch.
+shapely>=2.0
+# (geopandas / pyproj are not required for the MVP modules — shapely + plain
+# urllib cover WRI GPPD CSV filtering and OSM Overpass parsing. Add them
+# when an importer needs reprojection or shapefile parsing.)

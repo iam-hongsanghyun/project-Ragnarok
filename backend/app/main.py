@@ -27,8 +27,14 @@ from .log_capture import (
     get_snapshot as _log_snapshot,
     install as _install_log_capture,
 )
-from .models import RunPayload
+from .models import ImportFetchRequest, ImportPreviewRequest, RunPayload
 from ..pypsa.network import build_network, validate_model
+from .importers import ConvertOptions, available_databases, get_database
+from .importers.region import (
+    boundaries_geojson_bytes,
+    country_list,
+    get_region,
+)
 
 # Attach the in-process log handler at import time so the entire uvicorn
 # startup sequence and all subsequent records flow into the ring buffer.
@@ -523,3 +529,95 @@ async def import_hdf5(file: UploadFile) -> dict[str, Any]:
     finally:
         path.unlink(missing_ok=True)
     return {"model": _network_to_model_json(network)}
+
+
+# ── External-data importer subsystem (Data view → registry) ──────────────────
+#
+# The Data tab's three-pane shell (left = database list, main = country map,
+# right = filters) routes through these four endpoints. The registry lives in
+# ``backend/app/importers/`` and discovers per-source modules from
+# ``databases.json``. See ``docs/TODO.md`` items I1 / I2 for the roadmap.
+
+
+@app.get("/api/import/databases")
+def list_importers() -> dict[str, Any]:
+    """Registry contents — what the left rail shows."""
+    return {"databases": available_databases()}
+
+
+@app.get("/api/import/countries")
+def list_countries() -> dict[str, Any]:
+    """Country index for the map search box (no polygons — small payload)."""
+    try:
+        return {"countries": country_list()}
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get("/api/import/boundaries/countries.geojson")
+def importer_boundaries() -> Response:
+    """Country polygons GeoJSON for the Data view map."""
+    try:
+        data = boundaries_geojson_bytes()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return Response(
+        content=data,
+        media_type="application/geo+json",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+def _resolve_db_and_region(database_id: str, country_iso: str):
+    try:
+        db = get_database(database_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if not db.meta.available:
+        raise HTTPException(
+            status_code=503,
+            detail=f"database {database_id!r} unavailable: {db.meta.unavailable_reason}",
+        )
+    try:
+        region = get_region(country_iso)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return db, region
+
+
+@app.post("/api/import/preview")
+def importer_preview(payload: ImportPreviewRequest) -> dict[str, Any]:
+    """Cheap counts + sample rows + map overlay for one fetch."""
+    db, region = _resolve_db_and_region(payload.database_id, payload.country_iso)
+    try:
+        result = db.fetch(region, dict(payload.filters))
+        summary = db.preview(result)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"preview failed: {exc}") from exc
+    return {
+        "database_id": db.meta.id,
+        "country_iso": region.country_iso,
+        "preview": summary.to_json(),
+    }
+
+
+@app.post("/api/import/fetch")
+def importer_fetch(payload: ImportFetchRequest) -> dict[str, Any]:
+    """Full fetch + convert. Returns a workbook fragment ready to merge."""
+    db, region = _resolve_db_and_region(payload.database_id, payload.country_iso)
+    opts_dict = payload.convert_options or {}
+    options = ConvertOptions(
+        create_buses_for_plants=bool(opts_dict.get("create_buses_for_plants", True)),
+        plant_bus_suffix=str(opts_dict.get("plant_bus_suffix", "_bus")),
+        plant_bus_snap_km=float(opts_dict.get("plant_bus_snap_km", 25.0)),
+    )
+    try:
+        result = db.fetch(region, dict(payload.filters))
+        fragment = db.to_sheets(result, options)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"fetch failed: {exc}") from exc
+    return {
+        "database_id": db.meta.id,
+        "country_iso": region.country_iso,
+        "fragment": fragment.to_json(),
+    }
