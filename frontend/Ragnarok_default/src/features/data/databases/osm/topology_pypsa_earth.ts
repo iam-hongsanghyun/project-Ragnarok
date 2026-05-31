@@ -42,11 +42,122 @@ import {
 
 // Tuneable thresholds. Match PyPSA-Earth's defaults where they have one.
 const CLUSTER_EPS_KM = 5.0;
-const SPLIT_TOLERANCE_KM = 0.5; // PyPSA-Earth uses 1 m post-projection; we
-//                                 use 500 m because OSM line geometry
-//                                 follows the road, not the substation
-//                                 footprint, and the tighter tolerance
-//                                 misses real intermediate stops.
+const SPLIT_TOLERANCE_KM = 0.1; // PyPSA-Earth uses 1 m post-snap; we use
+//                                 100 m because OSM line geometry follows
+//                                 roads/right-of-way, not substation
+//                                 centroids, but anything bigger
+//                                 over-splits in dense urban networks
+//                                 (Korea, Japan, Netherlands).
+const MERGE_COORD_PRECISION = 1e6; // ~10 cm — OSM-shared node coords are
+//                                    bit-identical so any precision is
+//                                    safe; this absorbs float noise.
+
+// ── Stitch contiguous OSM ways into logical lines (`linemerge`-equivalent) ──
+//
+// OSM frequently splits a single physical transmission corridor into many
+// short `way`s — at administrative boundaries, where the line crosses a
+// road, where different editors drew different sections. Each shows up as
+// a separate row in the workbook unless we stitch them back.
+//
+// Two ways are mergeable iff they share an endpoint coordinate AND have
+// matching (voltage, circuits, cable/overhead, AC/DC) — i.e. the OSM tags
+// say it is the same physical line. Shared endpoints come from referencing
+// the same OSM `node`, so their coordinates are bit-identical and rounding
+// at 10 cm precision matches reliably.
+
+function coordKey(lat: number, lon: number): string {
+  return `${Math.round(lat * MERGE_COORD_PRECISION)}_${Math.round(lon * MERGE_COORD_PRECISION)}`;
+}
+
+function groupKey(line: Line): string {
+  return [
+    Math.round(line.voltageKv),
+    line.circuits,
+    line.isCable ? 'C' : 'O',
+    Math.round(line.frequencyHz),
+  ].join('|');
+}
+
+function concatLines(
+  a: Line,
+  b: Line,
+  mode: 'append-fwd' | 'append-rev' | 'prepend-fwd' | 'prepend-rev',
+): Line {
+  let coords: Array<[number, number]>;
+  if (mode === 'append-fwd') {
+    coords = [...a.geometry, ...b.geometry.slice(1)];
+  } else if (mode === 'append-rev') {
+    const rev = b.geometry.slice(0, -1).reverse();
+    coords = [...a.geometry, ...rev];
+  } else if (mode === 'prepend-fwd') {
+    coords = [...b.geometry, ...a.geometry.slice(1)];
+  } else {
+    const rev = b.geometry.slice().reverse();
+    coords = [...rev, ...a.geometry.slice(1)];
+  }
+  // Preserve provenance: the merged line carries every component osm_id.
+  const aIds = (a.tags.osm_merged_ids || String(a.osmId)).split(',');
+  const bIds = (b.tags.osm_merged_ids || String(b.osmId)).split(',');
+  const merged: Line = {
+    ...a,
+    geometry: coords,
+    lengthKm: polylineLengthKm(coords),
+    tags: {
+      ...a.tags,
+      osm_merged_ids: Array.from(new Set([...aIds, ...bIds])).join(','),
+    },
+  };
+  return merged;
+}
+
+function mergeContiguousLines(lines: Line[]): Line[] {
+  // Bucket by compatibility so we never merge across voltage / cable /
+  // circuit mismatches.
+  const groups = new Map<string, Line[]>();
+  for (const l of lines) {
+    const k = groupKey(l);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k)!.push(l);
+  }
+
+  const out: Line[] = [];
+  Array.from(groups.values()).forEach((group) => {
+    // Greedy: take a line, repeatedly absorb any remaining line that
+    // shares an endpoint with the current one. Loop until no absorption
+    // happens in a full pass.
+    const remaining = group.slice();
+    while (remaining.length > 0) {
+      let current = remaining.shift()!;
+      let absorbed = true;
+      while (absorbed) {
+        absorbed = false;
+        for (let i = 0; i < remaining.length; i++) {
+          const other = remaining[i];
+          const ms = coordKey(current.geometry[0][0], current.geometry[0][1]);
+          const me = coordKey(
+            current.geometry[current.geometry.length - 1][0],
+            current.geometry[current.geometry.length - 1][1],
+          );
+          const os = coordKey(other.geometry[0][0], other.geometry[0][1]);
+          const oe = coordKey(
+            other.geometry[other.geometry.length - 1][0],
+            other.geometry[other.geometry.length - 1][1],
+          );
+          if (me === os) current = concatLines(current, other, 'append-fwd');
+          else if (me === oe) current = concatLines(current, other, 'append-rev');
+          else if (ms === oe) current = concatLines(current, other, 'prepend-fwd');
+          else if (ms === os) current = concatLines(current, other, 'prepend-rev');
+          else continue;
+          remaining.splice(i, 1);
+          absorbed = true;
+          break;
+        }
+      }
+      out.push(current);
+    }
+  });
+  return out;
+}
 
 // ── DBSCAN-equivalent clustering (eps, min_samples=1) ────────────────────────
 //
@@ -129,11 +240,17 @@ interface SplitLine {
 
 function splitLineAtSubstations(line: Line, subs: Substation[]): SplitLine {
   const splits: Split[] = [];
+  const lineKv = Math.round(line.voltageKv);
   for (let s = 0; s < line.geometry.length - 1; s++) {
     const [aLat, aLon] = line.geometry[s];
     const [bLat, bLon] = line.geometry[s + 1];
     for (let si = 0; si < subs.length; si++) {
       const sub = subs[si];
+      // Only split at substations that actually operate at the line's
+      // voltage. A 22 kV city substation that happens to sit under a
+      // 154 kV transmission corridor is not an electrical connection
+      // for the 154 kV line and must not split it.
+      if (!sub.voltagesKv.some((v) => Math.round(v) === lineKv)) continue;
       const { t, foot } = projectOntoSegment(
         sub.lon, sub.lat, aLon, aLat, bLon, bLat,
       );
@@ -252,9 +369,17 @@ export function buildPyPSAEarthStyleSheets(
   typeMap: Record<number, string>,
 ): WorkbookFragment {
   const subs = parsed.substations.slice();
+
+  // Step 1: stitch contiguous OSM ways into logical lines. OSM frequently
+  // fragments one physical line into many ways; without this step the
+  // workbook ends up with thousands of short lines instead of a few hundred
+  // logical connections, which is what the user sees when they import a
+  // dense country like Korea.
+  const mergedLines = mergeContiguousLines(parsed.lines);
+
   // Synthesise a substation at every line endpoint not within
   // CLUSTER_EPS_KM of a real one. PyPSA-Earth's add_line_endings_tosubstations.
-  for (const line of parsed.lines) {
+  for (const line of mergedLines) {
     for (const endpoint of [line.geometry[0], line.geometry[line.geometry.length - 1]]) {
       const [lat, lon] = endpoint;
       let near = false;
@@ -359,7 +484,7 @@ export function buildPyPSAEarthStyleSheets(
   // Split each line at intermediate substations, then snap endpoints.
   const lineRows: Array<Record<string, unknown>> = [];
   const lineNames = new Set<string>();
-  for (const line of parsed.lines) {
+  for (const line of mergedLines) {
     const split = splitLineAtSubstations(line, subs);
     for (let pi = 0; pi < split.parts.length; pi++) {
       const part = split.parts[pi];
