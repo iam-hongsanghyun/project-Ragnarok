@@ -6,28 +6,29 @@ from pathlib import Path
 from typing import Any
 
 
-def _frontend_config_dir() -> Path:
-    """Directory holding the generated schema JSON the backend reads.
+def _backend_config_dir() -> Path:
+    """Directory holding the shared schema JSON the backend owns.
 
-    The default frontend is a sibling npm package; its build-time codegen writes
-    the schema artefacts the backend shares. ``parents[2]`` is the repo root
-    (``backend/pypsa/pypsa_schema.py`` → ``pypsa`` → ``backend`` → repo root).
+    The four shared configs (pypsa_schema, pypsa_standard_types,
+    network_import_policy, plus the live capabilities table) live here.
+    The frontend fetches them at boot via ``GET /api/config`` (see
+    ``backend/app/config_provider.py``). Path: ``backend/data/config/``,
+    resolved from this file's location (``backend/pypsa/pypsa_schema.py``
+    → ``pypsa`` → ``backend`` → ``data/config``).
     """
-    return (
-        Path(__file__).resolve().parents[2]
-        / "frontend"
-        / "Ragnarok_default"
-        / "src"
-        / "config"
-    )
+    return Path(__file__).resolve().parents[1] / "data" / "config"
 
 
 def _schema_path() -> Path:
-    return _frontend_config_dir() / "pypsa_schema.json"
+    return _backend_config_dir() / "pypsa_schema.json"
 
 
 def _network_import_policy_path() -> Path:
-    return _frontend_config_dir() / "network_import_policy.json"
+    return _backend_config_dir() / "network_import_policy.json"
+
+
+def _standard_types_path() -> Path:
+    return _backend_config_dir() / "pypsa_standard_types.json"
 
 
 @lru_cache(maxsize=1)

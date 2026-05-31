@@ -1,0 +1,60 @@
+{
+  "fields": [
+    {
+      "field": "name",
+      "enabled_for_runtime_import": true,
+      "target": "network.name",
+      "coercion": "string",
+      "notes": "Runtime-applied top-level network name."
+    },
+    {
+      "field": "srid",
+      "enabled_for_runtime_import": true,
+      "target": "network.crs",
+      "coercion": "epsg",
+      "notes": "Applied by overriding the network CRS from an EPSG code."
+    },
+    {
+      "field": "crs",
+      "enabled_for_runtime_import": true,
+      "target": "network.crs",
+      "coercion": "crs-like",
+      "notes": "Applied by overriding the network CRS from a CRS-like input."
+    },
+    {
+      "field": "now",
+      "enabled_for_runtime_import": true,
+      "target": "network.now",
+      "coercion": "any",
+      "notes": "Preserved as a runtime network attribute for workbook compatibility."
+    },
+    {
+      "field": "snapshots",
+      "enabled_for_runtime_import": false,
+      "target": "snapshots-sheet-only",
+      "coercion": "ignored",
+      "notes": "Runtime snapshots are sourced from the dedicated snapshots sheet."
+    },
+    {
+      "field": "snapshot_weightings",
+      "enabled_for_runtime_import": false,
+      "target": "run-options-only",
+      "coercion": "ignored",
+      "notes": "Runtime snapshot weighting is controlled by Ragnarok run options."
+    },
+    {
+      "field": "investment_periods",
+      "enabled_for_runtime_import": false,
+      "target": "future-multi-period",
+      "coercion": "ignored",
+      "notes": "Reserved for future multi-period support."
+    },
+    {
+      "field": "investment_period_weightings",
+      "enabled_for_runtime_import": false,
+      "target": "future-multi-period",
+      "coercion": "ignored",
+      "notes": "Reserved for future multi-period support."
+    }
+  ]
+}
