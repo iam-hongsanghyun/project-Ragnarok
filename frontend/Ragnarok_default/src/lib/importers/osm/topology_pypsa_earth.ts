@@ -532,9 +532,74 @@ export function buildPyPSAEarthStyleSheets(
     }
   }
 
+  // ── Step 4: collapse parallel & redundant connections ─────────────────────
+  //
+  // After merging, splitting, and endpoint snap, multiple line rows may end
+  // up connecting the same (bus0, bus1) at the same voltage:
+  //   • genuine parallel circuits (two physical towers between A and B),
+  //   • OSM way fragments that didn't merge because of inconsistent
+  //     `circuits` tagging or non-shared endpoints,
+  //   • split-and-rejoin artefacts.
+  //
+  // For PyPSA the network only needs ONE row per pair-of-buses; the
+  // `num_parallel` column carries the multiplicity. We collapse by
+  // (min(bus0,bus1), max(bus0,bus1), v_nom) and take MAX (not SUM) of
+  // num_parallel — taking the sum would over-count fragments-of-the-same-
+  // line that all carry circuits=2, claiming 10× the real capacity.
+  // Length is the max (all parallel candidates connect the same two buses,
+  // so their lengths are within rounding of each other).
+  //
+  // The collapsed row carries every contributing osm_id as
+  // `osm_merged_ids`, so the provenance trail is preserved.
+  const pairKey = (a: string, b: string, v: number) => {
+    const lo = a < b ? a : b;
+    const hi = a < b ? b : a;
+    return `${lo}|${hi}|${Math.round(v)}`;
+  };
+  const byPair = new Map<string, Array<Record<string, unknown>>>();
+  for (const row of lineRows) {
+    const key = pairKey(
+      String(row.bus0),
+      String(row.bus1),
+      Number(row.v_nom),
+    );
+    if (!byPair.has(key)) byPair.set(key, []);
+    byPair.get(key)!.push(row);
+  }
+  const collapsedLineRows: Array<Record<string, unknown>> = [];
+  byPair.forEach((group) => {
+    if (group.length === 1) {
+      collapsedLineRows.push(group[0]);
+      return;
+    }
+    const head = group[0];
+    // Take max num_parallel + max length (see comment block above).
+    let np = 0;
+    let len = 0;
+    const osmIds = new Set<string>();
+    for (const r of group) {
+      const npv = Number(r.num_parallel) || 1;
+      if (npv > np) np = npv;
+      const lv = Number(r.length) || 0;
+      if (lv > len) len = lv;
+      if (r.osm_id !== undefined && r.osm_id !== null) osmIds.add(String(r.osm_id));
+      const merged = r.osm_merged_ids;
+      if (typeof merged === 'string' && merged) {
+        merged.split(',').forEach((id) => osmIds.add(id));
+      }
+    }
+    const collapsed: Record<string, unknown> = { ...head };
+    collapsed.num_parallel = np;
+    collapsed.length = len;
+    collapsed.osm_merged_ids = Array.from(osmIds).join(',');
+    collapsed.osm_collapsed_count = group.length;
+    delete collapsed.osm_split_part;
+    collapsedLineRows.push(collapsed);
+  });
+
   const sheets: WorkbookFragment['sheets'] = {};
   if (busRows.length) sheets.buses = busRows;
-  if (lineRows.length) sheets.lines = lineRows;
+  if (collapsedLineRows.length) sheets.lines = collapsedLineRows;
   if (transformerRows.length) sheets.transformers = transformerRows;
   return { sheets };
 }
