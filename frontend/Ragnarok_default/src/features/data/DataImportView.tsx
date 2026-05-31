@@ -152,14 +152,6 @@ export function DataImportView({ applyFragment }: Props) {
     [setSelectedIso],
   );
 
-  // Triggered by the map's Globe button — return to the world view and
-  // drop every downstream selection (database + filters cleared via the
-  // existing per-country effect chain).
-  const handleResetToGlobal = useCallback(() => {
-    setSelectedIso(null);
-    setSelectedDatabaseId(null);
-  }, [setSelectedIso, setSelectedDatabaseId]);
-
   const handleFetchPreview = useCallback(async () => {
     if (!selectedDatabase || !selectedCountry) return;
     setFetching(true);
@@ -234,7 +226,6 @@ export function DataImportView({ applyFragment }: Props) {
             countries={countries}
             selectedIso={selectedIso}
             onSelect={handleSelectCountry}
-            onResetToGlobal={handleResetToGlobal}
             overlay={preview?.overlay || null}
           />
           {lastFetch && (

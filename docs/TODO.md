@@ -13,7 +13,7 @@ Single living todo for Ragnarok. Open work is grouped below by theme. Completed 
 
 ## Open work
 
-Fifteen items across seven groups. Each group is internally coherent (shared infrastructure, schema, or interfaces); cross-group dependencies are called out in the *Why* column.
+Seventeen items across eight groups. Each group is internally coherent (shared infrastructure, schema, or interfaces); cross-group dependencies are called out in the *Why* column.
 
 ### Backend adapters
 
@@ -79,25 +79,36 @@ Top-down user surfaces that build a runnable Ragnarok workbook from high-level i
 |---|---|---|---|---|---:|
 | `W1` | `High` | `Both` | **Guided model-builder wizard** — a stepped flow that asks the user a small ladder of questions and assembles a workbook for them: (1) **Region** — pick a country / region on the map (re-uses the Data view shell); (2) **Question** — "What do you want to study?" (least-cost dispatch / capacity expansion / carbon-cap pathway / merchant IPP / N-1 security / climate-risk); (3) **Time horizon** — historic year, single future year, or multi-period pathway; (4) **Scope** — sectors (electricity only / multi-vector), carriers in-play, candidate technologies; (5) **Constraints** — carbon price / cap, renewable share targets, build-rate limits; (6) **Confidence** — let the wizard fall back to defaults the user did not answer. Output is a fully-populated workbook that is immediately runnable, with provenance flagging every cell the wizard filled vs the user edited. Power users can drop out into the regular Build / Model views at any step. | The Data view we shipped is bottom-up (pick a database, pull rows, repeat). A non-modeller cannot navigate that — they don't know which databases they need, which sheets to populate, or what defaults are reasonable. **W1** is the answer: state your goal in plain language, get a model. Internally it composes the existing importers (`I1`, `I4`, …) plus the transformation tools (`T1`, `T2`, `T3`) into one orchestrated flow, so it has zero new data-source code — it just sequences what is already there with sensible defaults per question. | 32,000 |
 
+### Modelling extensions
+
+Modelling-capability extensions that broaden Ragnarok beyond the single-vector electricity case it ships with today. Each item is a vertical slice — schema-aware Build/Model affordances, importers for sector-specific datasets, optimiser handling, and analytics. PyPSA already supports the underlying mechanics (multi-carrier buses, Links, Stores); the work here is exposing them cleanly through the GUI.
+
+| ID | Pri | Surface | Task | Why | Cost |
+|---|---|---|---|---|---:|
+| `M1` | `High` | `Both` | **Sector coupling** — multi-carrier buses (electricity, gas, hydrogen, heat, district cooling, transport, biomass, CO₂) plus the conversion components that link them (electrolyser, gas turbine / CCGT, heat pump, electric boiler, fuel cell, methaniser, CCS / DAC). Includes per-carrier transport (gas pipelines, hydrogen pipelines, district heating loops) modelled as `Link` networks, carrier-aware filters in the Build view (show only components on the active carrier), and per-vector energy-balance + emissions analytics. Carrier defaults (efficiency, capex, opex, lifetime) seeded from PyPSA-Eur's `costs.csv`. | The decarbonisation studies users want — green-hydrogen merchant, electrify-everything pathways, gas-network repurposing, district-heat decarbonisation — all need more than one energy vector. Today Ragnarok models electricity only; **M1** unlocks the multi-vector cases without changing the optimisation engine (PyPSA already handles it). | 40,000 |
+| `M2` | `High` | `Both` | **Demand response** — flexible load modelling beyond static `p_set`. Three flexibility modes: (a) **Shed** — load can be curtailed at a per-MWh outage cost (extends today's coarse `load_shedding` option to per-load granularity + per-snapshot caps); (b) **Shift** — load can move within a user-defined window (e.g. ±4 h) preserving total daily energy, implemented as a Storage-like component; (c) **Price-elastic** — demand drops as the bus price exceeds a tier threshold (piecewise demand curve). UI: new "Flexibility" section on the Load editor in Build, time-of-use programs as a DSL/template library, analytics showing DR utilisation (energy shifted, energy shed, peak reduction). | Modern systems lean heavily on DR for peak shaving and renewable integration; capacity-expansion models that ignore it over-build firm capacity. **M2** is the missing demand-side complement to **T1** (forecast growth) and **R2** (transition risk). | 28,000 |
+
 ## Suggested execution order
 
 Across groups, respecting cross-group dependencies marked above.
 
 1. **T3** — Component-to-bus reconciliation (unblocks merged WRI + OSM imports shipped 2026-05-31).
 2. **T1** — Forecast tool (lightweight; immediately useful for pathway runs).
-3. **B1** — Profit-focused optimisation (foundation for the financial model layer).
-4. **F1** — Company / owner dimension (frontend-heavy; can run in parallel with **B1**).
-5. **F2** — Company-level financial model (consumes **B1** + **F1**).
-6. **R1** — Physical-climate-risk module.
-7. **R2** — Transition-risk module (depends on **F2**).
-8. **T2** — Reduced-order / clustering tool.
-9. **D1** — Profile / weather data layer.
-10. **I1** — Location-based data & model bootstrap (user surface above **D1**).
-11. **I4** — Renewable resource profile importer (polygon / buffer region selection).
-12. **I3** — Driver-based demand forecast.
-13. **W1** — Guided model-builder wizard (composes the importers + transformation tools above).
-14. **B2** — Simulation backend adapter.
-15. **B3** — Power-flow-only study mode.
+3. **M2** — Demand response (small, modular — slots into the existing Load editor; useful for every other run from here on).
+4. **B1** — Profit-focused optimisation (foundation for the financial model layer).
+5. **F1** — Company / owner dimension (frontend-heavy; can run in parallel with **B1**).
+6. **F2** — Company-level financial model (consumes **B1** + **F1**).
+7. **R1** — Physical-climate-risk module.
+8. **R2** — Transition-risk module (depends on **F2**).
+9. **T2** — Reduced-order / clustering tool.
+10. **D1** — Profile / weather data layer.
+11. **I1** — Location-based data & model bootstrap (user surface above **D1**).
+12. **I4** — Renewable resource profile importer (polygon / buffer region selection).
+13. **I3** — Driver-based demand forecast.
+14. **M1** — Sector coupling (largest single item; lifts Ragnarok out of electricity-only).
+15. **W1** — Guided model-builder wizard (composes every importer + tool + **M1**/**M2** above).
+16. **B2** — Simulation backend adapter.
+17. **B3** — Power-flow-only study mode.
 
 ## Already shipped
 

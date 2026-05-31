@@ -7,7 +7,7 @@
  * GeoJSON `overlay` returned by the active database's preview, so the user
  * sees substations / lines / plant markers without leaving the Data view.
  */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import {
   CircleMarker,
   GeoJSON,
@@ -31,9 +31,6 @@ interface Props {
   countries: CountryMeta[];
   selectedIso: string | null;
   onSelect: (iso: string) => void;
-  /** Fired by the in-map Globe button; should pan back to the world view
-   *  and clear the country / database selection upstream. */
-  onResetToGlobal: () => void;
   overlay: GeoJSONFeatureCollection | null;
 }
 
@@ -66,43 +63,14 @@ function FitToCountry({ bbox }: { bbox: [number, number, number, number] | null 
 const WORLD_CENTER: [number, number] = [20, 10];
 const WORLD_ZOOM = 2;
 
-/**
- * Listens to a monotonically-increasing `trigger` value; whenever it
- * changes, snaps the Leaflet map back to the world view. Used by the
- * in-map Globe button so the action is purely UI-driven (no upstream
- * map ref needed). Skips the very first render so the user's
- * persisted view (or the country fit) is not overridden on mount.
- */
-function ResetView({ trigger }: { trigger: number }) {
-  const map = useMap();
-  const seen = useRef<number | null>(null);
-  useEffect(() => {
-    if (seen.current === null) {
-      seen.current = trigger;
-      return;
-    }
-    if (trigger !== seen.current) {
-      seen.current = trigger;
-      map.setView(WORLD_CENTER, WORLD_ZOOM);
-    }
-  }, [trigger, map]);
-  return null;
-}
-
 export function WorldMap({
   countriesGeoJSON,
   countries,
   selectedIso,
   onSelect,
-  onResetToGlobal,
   overlay,
 }: Props) {
   const layerRef = useRef<Map<string, Layer>>(new Map());
-  const [resetTrigger, setResetTrigger] = useState(0);
-  const handleGlobeClick = useCallback(() => {
-    setResetTrigger((n) => n + 1);
-    onResetToGlobal();
-  }, [onResetToGlobal]);
 
   // Recompute styles whenever the active country changes, without re-rendering
   // the heavy GeoJSON layer.
@@ -171,7 +139,6 @@ export function WorldMap({
           />
         )}
         {selectedCountry && <FitToCountry bbox={selectedCountry.bbox} />}
-        <ResetView trigger={resetTrigger} />
         {lineFeatures.map((f, idx) => {
           const coords = (f.geometry.coordinates as Array<[number, number]>).map(
             ([lon, lat]) => [lat, lon] as [number, number],
@@ -224,15 +191,6 @@ export function WorldMap({
           );
         })}
       </MapContainer>
-      <button
-        type="button"
-        className="data-import-map__globe"
-        onClick={handleGlobeClick}
-        title="Reset to world view"
-        aria-label="Reset to world view"
-      >
-        100%
-      </button>
       <div className="data-import-map__search">
         <CountrySearch
           countries={countries}
