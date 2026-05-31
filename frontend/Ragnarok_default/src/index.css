@@ -291,6 +291,15 @@
   white-space: nowrap;
   padding: 0 6px 0 0;
 }
+/* Clickable variant — same visual weight, just gains a cursor + hover. */
+.topbar-brand--button {
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+.topbar-brand--button:hover {
+  color: var(--brand, #0f766e);
+}
 
 .topbar-divider {
   width: 1px;
@@ -8089,4 +8098,101 @@ code, kbd, samp, tt,
   padding: 8px 12px;
   font-size: 0.84rem;
   color: var(--text);
+}
+
+/* ── Welcome view ───────────────────────────────────────────────────────── */
+.welcome-view {
+  display: block;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  background: var(--bg);
+}
+.welcome-content {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 48px 32px 64px;
+}
+.welcome-header h1 {
+  margin: 0 0 8px;
+  font-family: var(--font-mono);
+  font-size: 1.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text);
+}
+.welcome-tagline {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--muted);
+  line-height: 1.5;
+  max-width: 60ch;
+}
+.welcome-section {
+  margin-top: 36px;
+}
+.welcome-section h2 {
+  margin: 0 0 12px;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.welcome-steps {
+  margin: 0;
+  padding-left: 24px;
+  font-size: 0.92rem;
+  line-height: 1.6;
+  color: var(--text);
+}
+.welcome-steps li + li {
+  margin-top: 6px;
+}
+.welcome-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+.welcome-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+}
+.welcome-tile:hover {
+  border-color: var(--brand, #0f766e);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+}
+.welcome-tile__title {
+  font-family: var(--font-mono);
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text);
+}
+.welcome-tile__blurb {
+  font-size: 0.84rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.welcome-footer {
+  margin-top: 36px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.welcome-footer p {
+  margin: 0;
+}
+.welcome-footer a {
+  color: var(--brand, #0f766e);
 }

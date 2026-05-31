@@ -49,6 +49,7 @@ import { PluginsView } from './views/PluginsView';
 import { ModelView } from './views/ModelView';
 import { BuildView } from './features/build/BuildView';
 import { DataView } from './views/DataView';
+import { WelcomeView } from './views/WelcomeView';
 import { AnalyticsView } from './views/AnalyticsView';
 import { ActivityBar } from './layout/ActivityBar';
 import { useModelIssues } from './features/validation/useModelIssues';
@@ -80,7 +81,7 @@ function AppInner() {
     undoStack.current.push(model);
     setModel(next);
   }, [model]);
-  const [tab, setTab] = usePersistedState<WorkspaceTab>('ui:workspace-tab', 'Model');
+  const [tab, setTab] = usePersistedState<WorkspaceTab>('ui:workspace-tab', 'Welcome');
   // Ctrl/Cmd+Z / Ctrl+Y (or Shift+Z) undo-redo for model edits, only on the
   // Model/Build tabs and never while a text field is focused (so it doesn't
   // hijack native input undo).
@@ -1585,7 +1586,15 @@ function AppInner() {
         File ops other than Clear live in Model view's toolbar only. */}
       <header className="topbar">
         <div className="topbar-left">
-          <span className="topbar-brand">Ragnarok</span>
+          <button
+            type="button"
+            className="topbar-brand topbar-brand--button"
+            onClick={() => setTab('Welcome')}
+            title="Go to Welcome page"
+            aria-label="Go to Welcome page"
+          >
+            Ragnarok
+          </button>
           <button
             className="run-button"
             onClick={() => setRunDialogOpen(true)}
@@ -1753,6 +1762,8 @@ function AppInner() {
               onExportHdf5={handleExportHdf5}
             />
           )}
+
+          {tab === 'Welcome' && <WelcomeView onNavigate={setTab} />}
 
           {tab === 'Data' && <DataView onApplyFragment={handleApplyImportedFragment} />}
 
