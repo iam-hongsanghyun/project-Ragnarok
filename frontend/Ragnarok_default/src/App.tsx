@@ -733,8 +733,8 @@ function AppInner() {
       provenance: {
         exportedAt: new Date().toISOString(),
         exportedFilename: filename,
-        schemaCommitSha: PYPSA_SCHEMA_META.commit_sha,
-        schemaGeneratedAt: PYPSA_SCHEMA_META.generated_at,
+        schemaCommitSha: PYPSA_SCHEMA_META.commit_sha ?? PYPSA_SCHEMA_META.pypsa_version ?? '',
+        schemaGeneratedAt: PYPSA_SCHEMA_META.generated_at ?? '',
         importedFromFilename: projectProvenance?.importedFromFilename ?? null,
         importedAt: projectProvenance?.importedAt ?? null,
       },

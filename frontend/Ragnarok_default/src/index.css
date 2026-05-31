@@ -8240,3 +8240,52 @@ code, kbd, samp, tt,
 .welcome-footer a {
   color: var(--brand, #0f766e);
 }
+
+/* Boot screen — renders before the React app proper, while the
+   /api/config bundle is being fetched (or after it fails). Intentionally
+   minimal — no dependency on schema-derived globals. */
+.boot-screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg, #f8fafc);
+  color: var(--text, #0f172a);
+  font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+}
+.boot-screen__inner {
+  text-align: center;
+  max-width: 480px;
+  padding: 32px;
+}
+.boot-screen__title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  margin-bottom: 12px;
+}
+.boot-screen__msg {
+  font-size: 0.95rem;
+  color: var(--muted, #64748b);
+}
+.boot-screen__detail {
+  margin-top: 12px;
+  font-family: var(--font-mono, ui-monospace, "SF Mono", Consolas, monospace);
+  font-size: 0.78rem;
+  color: var(--muted, #64748b);
+  word-break: break-word;
+}
+.boot-screen__retry {
+  margin-top: 18px;
+  padding: 6px 14px;
+  background: var(--brand, #0f766e);
+  color: #fff;
+  border: 1px solid var(--brand, #0f766e);
+  border-radius: 4px;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+.boot-screen__retry:hover {
+  filter: brightness(1.08);
+}

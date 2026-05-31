@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
 import App from './App';
+import { ConfigBootstrap } from './ConfigBootstrap';
 
 /**
  * Wipe persisted Ragnarok state when the bundle ID changes.
@@ -49,6 +50,8 @@ const root = ReactDOM.createRoot(
 );
 root.render(
   <React.StrictMode>
-    <App />
+    <ConfigBootstrap>
+      <App />
+    </ConfigBootstrap>
   </React.StrictMode>
 );

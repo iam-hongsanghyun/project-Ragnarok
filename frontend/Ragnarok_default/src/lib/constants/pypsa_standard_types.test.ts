@@ -26,9 +26,11 @@ describe('pypsa standard types catalogue', () => {
   });
 
   test('source metadata is present', () => {
-    expect(PYPSA_STANDARD_TYPES_SOURCE.repo).toBe('PyPSA/PyPSA');
-    expect(PYPSA_STANDARD_TYPES_SOURCE.ref).toBe('master');
-    expect(typeof PYPSA_STANDARD_TYPES_SOURCE.commit).toBe('string');
+    // The live builder identifies its source as the installed pypsa
+    // package; the legacy fields (repo/ref/commit) are no longer
+    // populated. Verify the new provenance shape instead.
+    expect(typeof PYPSA_STANDARD_TYPES_SOURCE.source).toBe('string');
+    expect(PYPSA_STANDARD_TYPES_SOURCE.source).toContain('pypsa');
   });
 
   test('findStandardType resolves a known row', () => {

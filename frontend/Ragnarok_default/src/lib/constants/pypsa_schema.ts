@@ -1,5 +1,25 @@
-import rawSchema from 'config/pypsa_schema.json';
-import rawNetworkImportPolicy from 'config/network_import_policy.json';
+/**
+ * PyPSA component schema + the workbook-side network-import policy.
+ *
+ * Both come from the backend's ``GET /api/config`` bundle at app boot
+ * (see ``lib/api/config.ts``). The schema is computed live on the
+ * backend from the installed ``pypsa`` package, so frontend and backend
+ * always agree on the same definitions for the same deploy.
+ *
+ * This module exports two flavours of values:
+ *
+ *   • **Constants** (``let`` exports) — populated by ``applyConfigBundle``
+ *     once the boot fetch resolves. Initial values are empty so any
+ *     consumer that reads at module-init time gets a safe-but-empty
+ *     view; consumers that read at runtime (every React render path)
+ *     see the boot-populated data via JS module live-bindings.
+ *   • **Helpers** — functions that compute on demand from the current
+ *     `PYPSA_*` state. Safe regardless of when they're called.
+ *
+ * Consumers do not need to change their import statements when this
+ * module migrates from the bundled JSON to the boot fetch; the live
+ * binding is what makes that possible.
+ */
 import { GridRow, Primitive } from 'lib/types';
 
 export type PypsaAttrStatus = 'input' | 'output';
@@ -35,20 +55,25 @@ export interface PypsaComponentSchema {
   order: number;
 }
 
-interface PypsaSchemaFile {
+export interface PypsaSchemaFile {
   meta: {
-    repo: string;
-    ref: string;
-    commit_sha: string;
-    generated_at: string;
-    generator: string;
-    note: string;
-    /**
-     * Sheet names that are not imported through the backend's generic
-     * component-add path. `network` and `snapshots` remain explicit runtime
-     * special cases; other schema-defined sheets still flow through the generic
-     * schema-driven import path.
-     */
+    /** Live-build provenance, populated by the backend's
+     *  ``pypsa_schema_builder``. */
+    source?: string;
+    pypsa_version?: string;
+    generator?: string;
+    note?: string;
+    /** Legacy provenance fields (set by the old JS generator that
+     *  fetched from GitHub at build time). The live backend builder
+     *  doesn't populate them but the workbook still round-trips them
+     *  through `RAGNAROK_Provenance` so the columns stay declared as
+     *  optional strings. */
+    repo?: string;
+    ref?: string;
+    commit_sha?: string;
+    generated_at?: string;
+    /** Sheet names that aren't bulk-added via the generic schema-driven
+     *  import path (network + snapshots are special-cased at runtime). */
     non_component_sheets?: string[];
   };
   components: Record<string, PypsaComponentSchema>;
@@ -62,7 +87,7 @@ export interface NetworkImportPolicyField {
   notes?: string;
 }
 
-interface NetworkImportPolicyFile {
+export interface NetworkImportPolicyFile {
   fields: NetworkImportPolicyField[];
 }
 
@@ -74,45 +99,87 @@ export interface TableGroup {
   component: PypsaComponentSchema;
 }
 
-export const PYPSA_SCHEMA = rawSchema as PypsaSchemaFile;
-export const NETWORK_IMPORT_POLICY = rawNetworkImportPolicy as NetworkImportPolicyFile;
-export const PYPSA_SCHEMA_META = PYPSA_SCHEMA.meta;
+// ── State (populated by applyConfigBundle at boot) ──────────────────────────
+
+const EMPTY_SCHEMA: PypsaSchemaFile = { meta: {}, components: {} };
+const EMPTY_POLICY: NetworkImportPolicyFile = { fields: [] };
+
+// Each export below starts empty and is reassigned once by
+// ``applyConfigBundle``. JS module live-bindings mean consumers
+// importing these names see the new value automatically — no need to
+// re-export through a function on every read site.
+/* eslint-disable import/no-mutable-exports */
+export let PYPSA_SCHEMA: PypsaSchemaFile = EMPTY_SCHEMA;
+export let NETWORK_IMPORT_POLICY: NetworkImportPolicyFile = EMPTY_POLICY;
+export let PYPSA_SCHEMA_META: PypsaSchemaFile['meta'] = EMPTY_SCHEMA.meta;
 /** Sheets that the backend does not bulk-add as standard PyPSA components. */
-export const NON_COMPONENT_SHEETS: ReadonlySet<string> = new Set(PYPSA_SCHEMA_META.non_component_sheets ?? []);
+export let NON_COMPONENT_SHEETS: ReadonlySet<string> = new Set();
+export let PYPSA_COMPONENTS: PypsaComponentSchema[] = [];
+export let PYPSA_COMPONENT_BY_SHEET: Record<string, PypsaComponentSchema> = {};
+export let NETWORK_RUNTIME_IMPORT_FIELDS: NetworkImportPolicyField[] = [];
+export let STATIC_INPUT_COMPONENTS: PypsaComponentSchema[] = [];
+export let SHEETS: string[] = [];
+export let TS_SHEETS: string[] = [];
+export let ALL_KNOWN_TS_SHEETS: string[] = [];
+export let ALL_KNOWN_SHEETS: string[] = [];
+export let TABLE_GROUPS: TableGroup[] = [];
+/* eslint-enable import/no-mutable-exports */
 
-export const PYPSA_COMPONENTS = Object.values(PYPSA_SCHEMA.components)
-  .sort((a, b) => a.order - b.order || a.label.localeCompare(b.label));
+/**
+ * Reassign every cached derivation from a freshly-loaded schema + policy
+ * pair. Called once by ``<ConfigBootstrap>`` after ``GET /api/config``
+ * resolves, before React renders.
+ *
+ * Calling it a second time (e.g. after a future "Reload schema"
+ * affordance) reassigns everything again — live bindings propagate to
+ * any consumer that re-reads on its next render.
+ */
+export function applyConfigBundle(
+  schema: PypsaSchemaFile,
+  policy: NetworkImportPolicyFile,
+): void {
+  PYPSA_SCHEMA = schema;
+  NETWORK_IMPORT_POLICY = policy;
+  PYPSA_SCHEMA_META = schema.meta;
+  NON_COMPONENT_SHEETS = new Set(schema.meta.non_component_sheets ?? []);
+  PYPSA_COMPONENTS = Object.values(schema.components).sort(
+    (a, b) => a.order - b.order || a.label.localeCompare(b.label),
+  );
+  PYPSA_COMPONENT_BY_SHEET = Object.fromEntries(
+    PYPSA_COMPONENTS.map((component) => [component.sheet_name, component]),
+  ) as Record<string, PypsaComponentSchema>;
+  NETWORK_RUNTIME_IMPORT_FIELDS = policy.fields.filter(
+    (field) => field.enabled_for_runtime_import,
+  );
+  STATIC_INPUT_COMPONENTS = PYPSA_COMPONENTS.filter(
+    (component) => component.sheet_name !== 'snapshots',
+  );
+  SHEETS = PYPSA_COMPONENTS.map((component) => component.sheet_name);
+  TS_SHEETS = PYPSA_COMPONENTS.flatMap((component) =>
+    component.input_temporal_attributes.map(
+      (attribute) => `${component.sheet_name}-${attribute}`,
+    ),
+  );
+  ALL_KNOWN_TS_SHEETS = PYPSA_COMPONENTS.flatMap((component) =>
+    component.temporal_attributes.map(
+      (attribute) => `${component.sheet_name}-${attribute}`,
+    ),
+  );
+  ALL_KNOWN_SHEETS = [...SHEETS, ...ALL_KNOWN_TS_SHEETS];
+  TABLE_GROUPS = PYPSA_COMPONENTS.map((component) => ({
+    uniqueId: component.unique_id,
+    label: component.label,
+    sheet: component.sheet_name,
+    temporalSheets: component.input_temporal_attributes.map((attribute) => ({
+      sheet: `${component.sheet_name}-${attribute}`,
+      attribute,
+      label: attribute,
+    })),
+    component,
+  }));
+}
 
-export const PYPSA_COMPONENT_BY_SHEET = Object.fromEntries(
-  PYPSA_COMPONENTS.map((component) => [component.sheet_name, component]),
-) as Record<string, PypsaComponentSchema>;
-
-export const NETWORK_RUNTIME_IMPORT_FIELDS = NETWORK_IMPORT_POLICY.fields.filter(
-  (field) => field.enabled_for_runtime_import,
-);
-
-export const STATIC_INPUT_COMPONENTS = PYPSA_COMPONENTS.filter((component) => component.sheet_name !== 'snapshots');
-
-export const SHEETS = PYPSA_COMPONENTS.map((component) => component.sheet_name);
-export const TS_SHEETS = PYPSA_COMPONENTS.flatMap((component) =>
-  component.input_temporal_attributes.map((attribute) => `${component.sheet_name}-${attribute}`),
-);
-export const ALL_KNOWN_TS_SHEETS = PYPSA_COMPONENTS.flatMap((component) =>
-  component.temporal_attributes.map((attribute) => `${component.sheet_name}-${attribute}`),
-);
-export const ALL_KNOWN_SHEETS = [...SHEETS, ...ALL_KNOWN_TS_SHEETS];
-
-export const TABLE_GROUPS: TableGroup[] = PYPSA_COMPONENTS.map((component) => ({
-  uniqueId: component.unique_id,
-  label: component.label,
-  sheet: component.sheet_name,
-  temporalSheets: component.input_temporal_attributes.map((attribute) => ({
-    sheet: `${component.sheet_name}-${attribute}`,
-    attribute,
-    label: attribute,
-  })),
-  component,
-}));
+// ── Helpers (read from the live state above on every call) ──────────────────
 
 function defaultCellValue(attr: PypsaAttribute): Primitive {
   const raw = String(attr.default ?? '').trim();
