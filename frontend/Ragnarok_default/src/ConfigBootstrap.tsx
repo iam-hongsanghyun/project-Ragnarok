@@ -1,26 +1,30 @@
 /**
- * Block-render wrapper that fetches the boot bundle from
- * ``GET /api/config`` before the rest of the app mounts.
+ * Boot gate + progress screen.
  *
- * The bundle carries the PyPSA component schema and the standard-types
- * catalogues — both computed live on the backend from the installed
- * ``pypsa`` package — plus the network-import policy and the solver
- * capabilities. Frontend modules under ``lib/constants/`` start with
- * empty defaults; this wrapper calls their setters once the fetch
- * resolves, so by the time any consumer renders the live-binding
- * exports already point at the populated values.
+ * Runs before the rest of the app mounts. The flow mirrors what the
+ * backend does on startup:
  *
- * Three rendered states:
+ *   1. Poll ``GET /api/status`` every 500 ms.
+ *      • fetch fails → backend not up yet → "Starting backend…"
+ *        (indeterminate; the heavy `import pypsa` happens before the
+ *        server binds its port, so this phase covers it).
+ *      • status.ready === false → render the progress bar + per-step
+ *        checklist of what the backend is building right now.
+ *      • status.phase === 'error' → show the backend's error + Retry.
+ *   2. Once ready, fetch ``GET /api/config`` once, apply the shared
+ *      schema / standard-types into the live-binding constants, and
+ *      render <App>.
  *
- *   • loading — small "Connecting to backend…" spinner
- *   • error   — connection-required screen with a Retry button (no
- *               cached bundle and the backend is unreachable, or the
- *               backend returned an error we cannot recover from)
- *   • ready   — children render
+ * The whole sync is one-shot at startup — after <App> mounts, no further
+ * status/config polling happens for the session.
  */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
-import { loadConfigBundle } from 'lib/api/config';
+import {
+  fetchStartupStatus,
+  loadConfigBundle,
+  type StartupStatus,
+} from 'lib/api/config';
 import {
   applyConfigBundle,
   type PypsaSchemaFile,
@@ -31,80 +35,174 @@ import {
   type StandardTypesCatalogue,
 } from 'lib/constants/pypsa_standard_types';
 
-type Status = 'loading' | 'ready' | 'error';
+type Phase = 'connecting' | 'warming' | 'fetching_config' | 'ready' | 'error';
 
 interface Props {
   children: React.ReactNode;
 }
 
+const POLL_INTERVAL_MS = 500;
+
 export function ConfigBootstrap({ children }: Props) {
-  const [status, setStatus] = useState<Status>('loading');
+  const [phase, setPhase] = useState<Phase>('connecting');
+  const [status, setStatus] = useState<StartupStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const cancelledRef = useRef(false);
 
   useEffect(() => {
-    let cancelled = false;
-    setStatus('loading');
+    cancelledRef.current = false;
+    setPhase('connecting');
+    setStatus(null);
     setError(null);
-    (async () => {
+
+    const finish = async () => {
+      setPhase('fetching_config');
+      const bundle = await loadConfigBundle();
+      if (cancelledRef.current) return;
+      applyConfigBundle(
+        bundle.schema as unknown as PypsaSchemaFile,
+        bundle.network_import_policy as unknown as NetworkImportPolicyFile,
+      );
+      applyStandardTypesBundle(
+        bundle.standard_types as unknown as StandardTypesCatalogue,
+      );
+      if (cancelledRef.current) return;
+      setPhase('ready');
+    };
+
+    const poll = async () => {
+      if (cancelledRef.current) return;
       try {
-        const bundle = await loadConfigBundle();
-        if (cancelled) return;
-        // The boot client's payload types are loose (Record<string, unknown>
-        // for the schema components dict) because lib/api/ doesn't import
-        // from lib/constants/ — that would couple the API layer to the
-        // UI-facing constants. Cast at the boundary here: the backend
-        // sends the shape lib/constants/ expects.
-        applyConfigBundle(
-          bundle.schema as unknown as PypsaSchemaFile,
-          bundle.network_import_policy as unknown as NetworkImportPolicyFile,
-        );
-        applyStandardTypesBundle(
-          bundle.standard_types as unknown as StandardTypesCatalogue,
-        );
-        setStatus('ready');
-      } catch (exc) {
-        if (cancelled) return;
-        setError(String(exc));
-        setStatus('error');
+        const s = await fetchStartupStatus();
+        if (cancelledRef.current) return;
+        setStatus(s);
+        if (s.phase === 'error') {
+          setError(s.error || 'Backend reported a startup error.');
+          setPhase('error');
+          return;
+        }
+        if (s.ready) {
+          try {
+            await finish();
+          } catch (exc) {
+            if (cancelledRef.current) return;
+            setError(String(exc));
+            setPhase('error');
+          }
+          return;
+        }
+        // Not ready yet — keep showing the warm progress.
+        setPhase('warming');
+        setTimeout(poll, POLL_INTERVAL_MS);
+      } catch {
+        // Backend not reachable yet — keep trying.
+        if (cancelledRef.current) return;
+        setPhase('connecting');
+        setTimeout(poll, POLL_INTERVAL_MS);
       }
-    })();
+    };
+
+    poll();
     return () => {
-      cancelled = true;
+      cancelledRef.current = true;
     };
   }, [attempt]);
 
-  if (status === 'loading') {
+  if (phase === 'ready') {
+    return <>{children}</>;
+  }
+
+  if (phase === 'error') {
     return (
-      <div className="boot-screen boot-screen--loading">
-        <div className="boot-screen__inner">
-          <div className="boot-screen__title">Ragnarok</div>
-          <div className="boot-screen__msg">Connecting to backend…</div>
-        </div>
-      </div>
+      <BootScreen
+        title="Ragnarok"
+        message="The backend failed to start."
+        detail={error}
+        onRetry={() => setAttempt((a) => a + 1)}
+      />
     );
   }
 
-  if (status === 'error') {
-    return (
-      <div className="boot-screen boot-screen--error">
-        <div className="boot-screen__inner">
-          <div className="boot-screen__title">Ragnarok</div>
-          <div className="boot-screen__msg">
-            Cannot reach the backend.
+  // connecting / warming / fetching_config → progress screen
+  const steps = status?.steps ?? [];
+  const progress =
+    phase === 'fetching_config'
+      ? 0.95
+      : status?.progress ?? 0;
+  const detail =
+    phase === 'connecting'
+      ? 'Starting backend… (first start imports PyPSA, this can take a few seconds)'
+      : phase === 'fetching_config'
+        ? 'Loading configuration…'
+        : status?.detail ?? 'Working…';
+
+  return (
+    <BootScreen
+      title="Ragnarok"
+      message="Starting up"
+      progress={progress}
+      detail={detail}
+      steps={steps}
+    />
+  );
+}
+
+// ── Presentational boot screen ──────────────────────────────────────────────
+
+function BootScreen({
+  title,
+  message,
+  detail,
+  progress,
+  steps,
+  onRetry,
+}: {
+  title: string;
+  message: string;
+  detail?: string | null;
+  progress?: number;
+  steps?: { key: string; label: string; done: boolean }[];
+  onRetry?: () => void;
+}) {
+  const isError = !!onRetry;
+  return (
+    <div className={`boot-screen ${isError ? 'boot-screen--error' : 'boot-screen--loading'}`}>
+      <div className="boot-screen__inner">
+        <div className="boot-screen__title">{title}</div>
+        <div className="boot-screen__msg">{message}</div>
+
+        {typeof progress === 'number' && (
+          <div className="boot-screen__bar" role="progressbar" aria-valuenow={Math.round(progress * 100)} aria-valuemin={0} aria-valuemax={100}>
+            <div
+              className="boot-screen__bar-fill"
+              style={{ width: `${Math.max(4, Math.round(progress * 100))}%` }}
+            />
           </div>
-          <div className="boot-screen__detail">{error}</div>
-          <button
-            type="button"
-            className="boot-screen__retry"
-            onClick={() => setAttempt((a) => a + 1)}
-          >
+        )}
+
+        {detail && <div className="boot-screen__detail">{detail}</div>}
+
+        {steps && steps.length > 0 && (
+          <ul className="boot-screen__steps">
+            {steps.map((s) => (
+              <li
+                key={s.key}
+                className={`boot-screen__step${s.done ? ' is-done' : ''}`}
+              >
+                <span className="boot-screen__step-mark">{s.done ? '✓' : '○'}</span>
+                <span className="boot-screen__step-label">{s.label}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {onRetry && (
+          <button type="button" className="boot-screen__retry" onClick={onRetry}>
             Retry
           </button>
-        </div>
+        )}
       </div>
-    );
-  }
-
-  return <>{children}</>;
+    </div>
+  );
 }

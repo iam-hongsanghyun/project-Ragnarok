@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from .. import startup_status
 from ..config_provider import load_bundle, reset_cache
 
 
@@ -60,4 +61,7 @@ def reload_config() -> dict:
     """
     reset_cache()
     bundle = load_bundle()
+    # Re-point the startup status at the freshly-built bundle so a client
+    # polling /api/status sees the new build_id too.
+    startup_status.mark_ready(bundle.build_id)
     return {"reloaded": True, "build_id": bundle.build_id}

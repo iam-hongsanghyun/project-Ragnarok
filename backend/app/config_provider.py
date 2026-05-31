@@ -25,9 +25,10 @@ import hashlib
 import importlib.metadata
 import json
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+
+ProgressCallback = Callable[[str, str], None]
 
 
 # ── File locations (all under backend/data/config/) ─────────────────────────
@@ -135,32 +136,59 @@ def _build_id(
     return f"{backend_version}-{digest[:12]}"
 
 
-@lru_cache(maxsize=1)
-def load_bundle() -> ConfigBundle:
-    """Build the bundle the frontend fetches at boot.
+# ── Build steps (one per progress tick the frontend can render) ─────────────
+
+# Each step is (key, human label). The startup warm runs them in order and
+# the frontend draws a checklist + progress bar from the live status.
+BUILD_STEPS: list[tuple[str, str]] = [
+    ("schema", "Building PyPSA component schema"),
+    ("standard_types", "Reading standard line / transformer types"),
+    ("policy", "Loading network-import policy"),
+    ("capabilities", "Querying solver capabilities"),
+    ("finalize", "Finalising configuration bundle"),
+]
+
+# Manual single-slot cache (replaces lru_cache so the builder can emit
+# progress as it goes).
+_BUNDLE: ConfigBundle | None = None
+
+
+def build_bundle(progress: ProgressCallback | None = None) -> ConfigBundle:
+    """Build the config bundle, invoking ``progress(step_key, label)``
+    before each step.
 
     Two halves:
 
     * ``schema`` + ``standard_types`` are computed **from the installed
-      pypsa package** (see ``pypsa_schema_builder.py``) at startup. No
-      JSON file involved — bumping PyPSA automatically bumps the schema
-      the next time the backend boots.
+      pypsa package** (see ``pypsa_schema_builder.py``). No JSON file
+      involved — bumping PyPSA automatically bumps the schema the next
+      time the backend boots.
     * ``network_import_policy`` is a hand-curated rule table — not
       derivable from PyPSA — so it stays as a checked-in JSON file under
       ``backend/data/config/``.
 
-    Cached for the life of the process. ``reset_cache()`` drops it so the
-    next ``load_bundle()`` re-reads disk + re-imports PyPSA.
+    Pure: does not touch the module cache. ``load_bundle`` wraps this and
+    memoises the result.
     """
     # Local imports to avoid circular deps at module-import time.
     from .backends.registry import available_backends
     from .config import load_system_defaults
     from .pypsa_schema_builder import build_pypsa_schema, build_standard_types
 
+    def tick(key: str) -> None:
+        if progress is not None:
+            label = dict(BUILD_STEPS).get(key, key)
+            progress(key, label)
+
+    tick("schema")
     schema = build_pypsa_schema()
+    tick("standard_types")
     standard_types = build_standard_types()
+    tick("policy")
     network_import_policy = json.loads(_network_import_policy_path().read_text())
+    tick("capabilities")
     capabilities = available_backends()
+    tick("finalize")
     sim_cfg = load_system_defaults().get("simulation", {})
     simulation_defaults = {
         "maxSnapshots": int(sim_cfg.get("max_snapshots", 8760)),
@@ -181,9 +209,24 @@ def load_bundle() -> ConfigBundle:
     )
 
 
-def reset_cache() -> None:
-    """Drop the cached bundle so the next ``load_bundle()`` re-reads disk.
+def load_bundle(progress: ProgressCallback | None = None) -> ConfigBundle:
+    """Return the memoised config bundle, building it on first call.
 
-    Used by tests and by the future hot-reload hook.
+    Pass ``progress`` (a ``(step_key, label) -> None`` callable) to watch
+    the build — used by the startup warm task to drive the frontend
+    progress bar. Subsequent calls return the cached bundle and ignore
+    the callback.
     """
-    load_bundle.cache_clear()
+    global _BUNDLE
+    if _BUNDLE is None:
+        _BUNDLE = build_bundle(progress)
+    return _BUNDLE
+
+
+def reset_cache() -> None:
+    """Drop the cached bundle so the next ``load_bundle()`` rebuilds.
+
+    Used by tests and by ``POST /api/config/reload``.
+    """
+    global _BUNDLE
+    _BUNDLE = None

@@ -140,7 +140,12 @@ echo "Starting backend (dev, auto-reloads on backend/* edits)..."
   --reload --reload-dir backend &
 BACKEND_PID=$!
 
-echo "Waiting for backend to be ready..."
+# Wait only for the port to bind (/api/health), NOT for the full warm.
+# The backend keeps building the PyPSA schema / config bundle in the
+# background after the port is up; the frontend's boot screen polls
+# GET /api/status and shows that progress, so we want the browser open
+# and watching it rather than blocking here.
+echo "Waiting for backend port to bind..."
 until curl -sf http://127.0.0.1:8000/api/health >/dev/null 2>&1; do
   sleep 1
 done
@@ -178,5 +183,6 @@ if [ -f "$PLUGIN_ENV_FILE" ]; then
   done < "$PLUGIN_ENV_FILE"
 fi
 
-echo "Backend ready. Opening app in browser..."
+echo "Backend port up. Launching frontend — the app opens on a startup"
+echo "screen that shows the backend's progress until the schema is built."
 (cd "$FRONTEND_DIR" && npm run start:frontend)

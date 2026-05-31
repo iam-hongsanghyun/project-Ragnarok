@@ -66,6 +66,34 @@ export interface SimulationDefaults {
   defaultSnapshotWeight: number;
 }
 
+export interface StartupStep {
+  key: string;
+  label: string;
+  done: boolean;
+}
+
+export interface StartupStatus {
+  phase: 'starting' | 'loading' | 'ready' | 'error';
+  detail: string;
+  ready: boolean;
+  error: string | null;
+  build_id: string | null;
+  progress: number; // 0..1
+  steps: StartupStep[];
+}
+
+/**
+ * Poll target for the boot progress screen. Throws if the backend can't
+ * be reached (which the caller treats as "still starting").
+ */
+export async function fetchStartupStatus(): Promise<StartupStatus> {
+  const resp = await fetch('/api/status');
+  if (!resp.ok) {
+    throw new Error(`GET /api/status failed (${resp.status})`);
+  }
+  return resp.json() as Promise<StartupStatus>;
+}
+
 export interface ConfigBundle {
   schema: PypsaSchemaBundle;
   standard_types: PypsaStandardTypesBundle;

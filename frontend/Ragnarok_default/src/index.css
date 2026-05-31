@@ -8271,10 +8271,58 @@ code, kbd, samp, tt,
 }
 .boot-screen__detail {
   margin-top: 12px;
-  font-family: var(--font-mono, ui-monospace, "SF Mono", Consolas, monospace);
-  font-size: 0.78rem;
+  font-size: 0.82rem;
   color: var(--muted, #64748b);
   word-break: break-word;
+  line-height: 1.4;
+}
+.boot-screen--error .boot-screen__detail {
+  font-family: var(--font-mono, ui-monospace, "SF Mono", Consolas, monospace);
+  font-size: 0.78rem;
+}
+/* Progress bar */
+.boot-screen__bar {
+  margin: 18px auto 0;
+  width: 100%;
+  max-width: 320px;
+  height: 6px;
+  background: var(--border, #e2e8f0);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.boot-screen__bar-fill {
+  height: 100%;
+  background: var(--brand, #0f766e);
+  border-radius: 999px;
+  transition: width 240ms ease-out;
+}
+/* Per-step checklist */
+.boot-screen__steps {
+  list-style: none;
+  margin: 18px auto 0;
+  padding: 0;
+  max-width: 320px;
+  text-align: left;
+}
+.boot-screen__step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 0.82rem;
+  color: var(--muted, #64748b);
+}
+.boot-screen__step.is-done {
+  color: var(--text, #0f172a);
+}
+.boot-screen__step-mark {
+  display: inline-flex;
+  width: 16px;
+  justify-content: center;
+  color: var(--muted, #94a3b8);
+}
+.boot-screen__step.is-done .boot-screen__step-mark {
+  color: var(--brand, #0f766e);
 }
 .boot-screen__retry {
   margin-top: 18px;

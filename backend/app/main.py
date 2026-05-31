@@ -205,7 +205,28 @@ async def _collect_job(job_id: str) -> None:
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 
-app = FastAPI(title="Ragnarok Backend", version="0.1.0")
+from contextlib import asynccontextmanager  # noqa: E402
+from . import startup_status  # noqa: E402
+
+
+@asynccontextmanager
+async def _lifespan(_app: "FastAPI"):
+    """Warm the config bundle in the background as soon as the server is up.
+
+    Kicking the build off as a task (rather than awaiting it here) means
+    the server starts accepting requests immediately, so the frontend's
+    ``GET /api/status`` poll sees live progress instead of a hung
+    connection. See ``startup_status.warm``.
+    """
+    task = asyncio.ensure_future(startup_status.warm())
+    try:
+        yield
+    finally:
+        if not task.done():
+            task.cancel()
+
+
+app = FastAPI(title="Ragnarok Backend", version="0.1.0", lifespan=_lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -217,6 +238,17 @@ app.add_middleware(
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/status")
+def status() -> dict[str, Any]:
+    """Startup progress — polled by the frontend's boot progress screen.
+
+    Returns ``{phase, detail, ready, error, progress, steps, build_id}``.
+    ``ready`` flips true once the config bundle is built; until then the
+    frontend shows the progress bar + per-step checklist.
+    """
+    return startup_status.snapshot()
 
 
 # Shared-config bundle (PyPSA schema, standard types, capabilities,
