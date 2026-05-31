@@ -38,20 +38,11 @@ export const osmMeta: DatabaseMeta = {
       kind: 'toggle',
       default: true,
     },
-    {
-      id: 'topology_style',
-      label: 'Topology preset',
-      kind: 'select',
-      default: 'raw',
-      options: [
-        { value: 'raw', label: 'Raw (preserve OSM as-is)' },
-        { value: 'pypsa_earth', label: 'Full clean up' },
-      ],
-      description:
-        '"Raw" keeps OSM verbatim — no merging, no clustering, no splitting; line endpoints snap to a substation within 5 km otherwise a synthetic endpoint bus is created. "Full clean up" turns ON every cleanup step below (the pipeline modelled on PyPSA-Earth\'s build_osm_network). Uncheck individual steps to opt out within the preset.',
-    },
-    // Fine-grained cleanup toggles. Apply ON TOP OF `topology_style = pypsa_earth`.
-    // When `topology_style = raw`, all of these are ignored.
+    // Fine-grained cleanup toggles. Defaults match the PyPSA-Earth-style
+    // full cleanup pipeline (all on). Uncheck individually to opt out of
+    // any step; uncheck everything to get raw OSM verbatim (each line
+    // endpoint without a nearby substation will be dropped unless
+    // "Synthesize endpoint substations" is left on).
     {
       id: 'merge_fragments',
       label: 'Merge OSM fragments by shared node',

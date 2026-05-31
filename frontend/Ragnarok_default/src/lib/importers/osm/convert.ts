@@ -1,25 +1,16 @@
 /**
  * OSM transmission importer — Overpass → workbook (browser-side).
  *
- * Two topology pipelines, switched by the right-rail filter
- * `topology_style` (`raw` | `pypsa_earth`):
+ * The topology cleanup pipeline (see `topology_pypsa_earth.ts`) runs every
+ * step gated by a per-step checkbox in the right rail. Defaults are all on
+ * (= full PyPSA-Earth-style cleanup); the user can opt out of any step or
+ * all of them to approximate raw OSM.
  *
- *   raw         — current behaviour. One bus per (OSM substation, voltage).
- *                 Line endpoints snap to a substation within 5 km, otherwise
- *                 a synthetic endpoint bus is created. Through-lines are
- *                 NOT split at intermediate substations. Maximum geometry
- *                 fidelity, but the resulting network is often disconnected.
- *
- *   pypsa_earth — DBSCAN-clusters nearby substations (~5 km) into stations,
- *                 one bus per (station, voltage), endpoint snap with no
- *                 distance cap, and lines split at any intermediate
- *                 substation. See `topology_pypsa_earth.ts`.
- *
- * Output rows in both modes preserve **every OSM tag** verbatim as
- * `osm_*` columns. Optional PyPSA attributes (`r` / `x` / `b` / `s_nom` /
- * `carrier` / …) are **never fabricated** — empty cells fall through to
- * PyPSA defaults. Lines set `type` to a PyPSA standard-type name (from
- * `line_types.json`) for common voltages.
+ * Output rows preserve **every OSM tag** verbatim as `osm_*` columns.
+ * Optional PyPSA attributes (`r` / `x` / `b` / `s_nom` / `carrier` / …)
+ * are **never fabricated** — empty cells fall through to PyPSA defaults.
+ * Lines set `type` to a PyPSA standard-type name (from `line_types.json`)
+ * for common voltages.
  */
 import type { PreviewSummary, WorkbookFragment } from 'lib/api/databases';
 import type {
@@ -32,18 +23,8 @@ import { osmMeta } from './meta';
 import { buildQuery, postQuery, type OverpassResponse } from './fetch';
 import { parseVoltageKv } from './voltage';
 import type { Parsed, Substation, Line } from './topology_types';
-import {
-  slug,
-  dedupe,
-  haversineKm,
-  polylineLengthKm,
-  lineTypeMapping,
-  lineTypeFor,
-  endpointKey,
-} from './topology_helpers';
+import { polylineLengthKm, lineTypeMapping } from './topology_helpers';
 import { buildPyPSAEarthStyleSheets } from './topology_pypsa_earth';
-
-const SNAP_KM = 5.0;
 
 // ── Tag helpers ──────────────────────────────────────────────────────────────
 
@@ -152,176 +133,14 @@ function parseResponse(payload: OverpassResponse, minVoltageKv: number): Parsed 
   return { substations, lines };
 }
 
-function nearestSubstation(
-  lat: number,
-  lon: number,
-  subs: Substation[],
-): { sub: Substation; distanceKm: number } | null {
-  if (!subs.length) return null;
-  let best: { sub: Substation; distanceKm: number } | null = null;
-  for (const s of subs) {
-    const d = haversineKm(lat, lon, s.lat, s.lon);
-    if (!best || d < best.distanceKm) best = { sub: s, distanceKm: d };
-  }
-  return best;
-}
-
-// ── Raw-topology endpoint resolver ───────────────────────────────────────────
-
-interface EndpointCtx {
-  substations: Substation[];
-  substationBuses: Map<string, string>;
-  busRows: Array<Record<string, unknown>>;
-  busNames: Set<string>;
-  countryIso: string;
-}
-
-function resolveEndpoint(
-  lat: number,
-  lon: number,
-  vNomKv: number,
-  ctx: EndpointCtx,
-): { busName: string; synthesised: boolean } {
-  const nearest = nearestSubstation(lat, lon, ctx.substations);
-  if (nearest && nearest.distanceKm <= SNAP_KM) {
-    const direct = ctx.substationBuses.get(endpointKey(nearest.sub.osmId, vNomKv));
-    if (direct) return { busName: direct, synthesised: false };
-    for (const v of [...nearest.sub.voltagesKv].sort((a, b) => a - b)) {
-      const alt = ctx.substationBuses.get(endpointKey(nearest.sub.osmId, v));
-      if (alt) return { busName: alt, synthesised: false };
-    }
-  }
-  const synth = dedupe(
-    `endpoint_${Math.abs(Math.trunc(lat * 1000))}_${Math.abs(Math.trunc(lon * 1000))}`,
-    ctx.busNames,
-  );
-  ctx.busRows.push({
-    name: synth,
-    v_nom: vNomKv,
-    x: lon,
-    y: lat,
-    country: ctx.countryIso,
-    synthesised: true,
-    source: 'OSM',
-  });
-  return { busName: synth, synthesised: true };
-}
-
-// ── Raw-topology builder ─────────────────────────────────────────────────────
-
-function buildRawSheets(
-  parsed: Parsed,
-  region: Region,
-  typeMap: Record<number, string>,
-): { fragment: WorkbookFragment; synthesisedBusCount: number } {
-  const busRows: Array<Record<string, unknown>> = [];
-  const lineRows: Array<Record<string, unknown>> = [];
-  const transformerRows: Array<Record<string, unknown>> = [];
-  const busNames = new Set<string>();
-  const lineNames = new Set<string>();
-  const transformerNames = new Set<string>();
-
-  const substationBuses = new Map<string, string>();
-  for (const s of parsed.substations) {
-    const sorted = Array.from(new Set(s.voltagesKv)).sort((a, b) => a - b);
-    const voltages = sorted.length ? sorted : [380.0];
-    const base = slug(s.tags.name || `sub_${s.osmId}`, 'sub');
-    for (const v of voltages) {
-      const keyName = `${base}_${Math.round(v)}kv`;
-      const busName = dedupe(keyName, busNames);
-      substationBuses.set(endpointKey(s.osmId, v), busName);
-      const row: Record<string, unknown> = {
-        name: busName,
-        v_nom: v,
-        x: s.lon,
-        y: s.lat,
-        country: region.countryIso,
-        osm_id: s.osmId,
-        osm_type: s.osmType,
-      };
-      for (const [tk, tv] of Object.entries(s.tags)) {
-        if (tv === '' || tv === undefined || tv === null) continue;
-        const key = `osm_${tk}`;
-        if (key in row) continue;
-        row[key] = tv;
-      }
-      row.source = 'OSM';
-      busRows.push(row);
-    }
-    for (let i = 0; i < voltages.length - 1; i++) {
-      const vLower = voltages[i];
-      const vUpper = voltages[i + 1];
-      const tName = dedupe(
-        `${base}_tx_${Math.round(vLower)}_${Math.round(vUpper)}`,
-        transformerNames,
-      );
-      transformerRows.push({
-        name: tName,
-        bus0: substationBuses.get(endpointKey(s.osmId, vLower))!,
-        bus1: substationBuses.get(endpointKey(s.osmId, vUpper))!,
-        osm_substation_id: s.osmId,
-        source: 'OSM',
-      });
-    }
-  }
-
-  const ctx: EndpointCtx = {
-    substations: parsed.substations,
-    substationBuses,
-    busRows,
-    busNames,
-    countryIso: region.countryIso,
-  };
-  let synthesisedBusCount = 0;
-  for (const line of parsed.lines) {
-    const [startLat, startLon] = line.geometry[0];
-    const [endLat, endLon] = line.geometry[line.geometry.length - 1];
-    const a = resolveEndpoint(startLat, startLon, line.voltageKv, ctx);
-    const b = resolveEndpoint(endLat, endLon, line.voltageKv, ctx);
-    if (a.synthesised) synthesisedBusCount++;
-    if (b.synthesised) synthesisedBusCount++;
-    const lineName = dedupe(
-      slug(line.tags.name || `osm_line_${line.osmId}`, 'line'),
-      lineNames,
-    );
-    const typeRef = lineTypeFor(line.voltageKv, typeMap);
-    const row: Record<string, unknown> = {
-      name: lineName,
-      bus0: a.busName,
-      bus1: b.busName,
-      length: line.lengthKm,
-      v_nom: line.voltageKv,
-      num_parallel: line.circuits,
-      osm_id: line.osmId,
-      is_cable: line.isCable,
-    };
-    if (typeRef) row.type = typeRef;
-    for (const [tk, tv] of Object.entries(line.tags)) {
-      if (tv === '' || tv === undefined || tv === null) continue;
-      const key = `osm_${tk}`;
-      if (key in row) continue;
-      row[key] = tv;
-    }
-    row.source = 'OSM';
-    lineRows.push(row);
-  }
-
-  const sheets: WorkbookFragment['sheets'] = {};
-  if (busRows.length) sheets.buses = busRows;
-  if (lineRows.length) sheets.lines = lineRows;
-  if (transformerRows.length) sheets.transformers = transformerRows;
-  return { fragment: { sheets }, synthesisedBusCount };
-}
 
 // ── Public module ────────────────────────────────────────────────────────────
 
 /**
- * The fetch step now PRE-BUILDS the workbook sheets (raw or cleaned-up
- * depending on the user's filters), and stores them in the payload alongside
- * the raw parsed OSM. preview() reports counts from the BUILT sheets so the
- * user sees the actual numbers the workbook will receive — not the raw
- * pre-cleanup counts that confused users when they didn't match the rows
- * landing in the workbook after PyPSA-Earth cleanup.
+ * The fetch step PRE-BUILDS the workbook sheets according to the user's
+ * cleanup-step checkboxes and stores them in the payload alongside the
+ * raw parsed OSM. preview() reads from the BUILT sheets so the counts
+ * shown to the user match exactly what lands in the workbook.
  */
 interface OSMPayload {
   parsed: Parsed;
@@ -331,10 +150,7 @@ interface OSMPayload {
   resolvedOptions: ResolvedTopologyOptions;
 }
 
-type TopologyStyle = 'raw' | 'pypsa_earth';
-
 export interface ResolvedTopologyOptions {
-  style: TopologyStyle;
   mergeFragments: boolean;
   clusterSubstations: boolean;
   clusterEpsKm: number;
@@ -358,39 +174,17 @@ function asNumber(v: unknown, def: number): number {
   return Number.isFinite(n) ? n : def;
 }
 
-function resolveStyle(filters: Record<string, unknown>): TopologyStyle {
-  const raw = String(filters.topology_style || 'raw').toLowerCase();
-  return raw === 'pypsa_earth' ? 'pypsa_earth' : 'raw';
-}
-
 /**
- * Resolve the cleanup options from the user's filter blob.
- *
- *   • `topology_style = 'raw'` → all cleanup steps off regardless of toggles.
- *   • `topology_style = 'pypsa_earth'` → each step on by default, but the
- *     individual checkboxes can opt out (e.g. PyPSA-Earth WITHOUT splitting).
+ * Resolve cleanup options from the user's filter blob. Each step has its
+ * own checkbox; defaults are all ON (= the full-cleanup pipeline modelled
+ * on PyPSA-Earth's `build_osm_network`). Unchecking everything yields raw
+ * OSM verbatim — lines whose endpoints are far from any substation will
+ * be dropped unless `addLineEndings` is left on as a fallback.
  */
 export function resolveTopologyOptions(
   filters: Record<string, unknown>,
 ): ResolvedTopologyOptions {
-  const style = resolveStyle(filters);
-  if (style === 'raw') {
-    return {
-      style,
-      mergeFragments: false,
-      clusterSubstations: false,
-      clusterEpsKm: 5,
-      addLineEndings: false,
-      snapEndpoints: false,
-      splitAtSubstations: false,
-      splitToleranceKm: 0.1,
-      emitTransformers: false,
-      collapseParallels: false,
-    };
-  }
-  // PyPSA-Earth preset: defaults are ON, individual toggles can disable.
   return {
-    style,
     mergeFragments: asBool(filters.merge_fragments, true),
     clusterSubstations: asBool(filters.cluster_substations, true),
     clusterEpsKm: asNumber(filters.cluster_eps_km, 5),
@@ -419,15 +213,11 @@ export const osmModule: DatabaseModule<OSMPayload> = {
     const parsed = parseResponse(payload, minKv);
 
     // Build the sheets ONCE here so preview and toSheets agree on counts.
-    // The cleanup respects the user's per-step toggles (see meta.ts).
+    // The unified pipeline respects each per-step checkbox; defaults are
+    // all on (full cleanup) and any combination of flags is valid.
     const opts = resolveTopologyOptions(filters);
     const typeMap = lineTypeMapping();
-    let sheets: WorkbookFragment['sheets'];
-    if (opts.style === 'pypsa_earth') {
-      sheets = buildPyPSAEarthStyleSheets(parsed, region, typeMap, opts).sheets;
-    } else {
-      sheets = buildRawSheets(parsed, region, typeMap).fragment.sheets;
-    }
+    const sheets = buildPyPSAEarthStyleSheets(parsed, region, typeMap, opts).sheets;
 
     return {
       databaseId: osmMeta.id,
