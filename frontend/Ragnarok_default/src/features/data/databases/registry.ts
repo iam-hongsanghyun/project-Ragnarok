@@ -54,9 +54,13 @@ export function getModule(id: string): DatabaseModule<unknown> {
 
 // ── Country boundaries (Natural Earth) ──────────────────────────────────────
 
+// Natural Earth 50m Admin-0: ~3 MB, includes the micro-states the 110m
+// dataset drops (Singapore, Vatican, Monaco, San Marino, Andorra, Liechtenstein,
+// Bahrain, Maldives, etc.). The 10m dataset is ~25 MB — overkill for a
+// country-picker map.
 const BOUNDARIES_URL =
   process.env.REACT_APP_RAGNAROK_BOUNDARIES_URL ||
-  'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson';
+  'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_admin_0_countries.geojson';
 
 // Same key precedence as the previous backend region.py.
 const ISO_KEYS = ['ADM0_A3', 'ISO_A3_EH', 'ISO_A3', 'SOV_A3'] as const;

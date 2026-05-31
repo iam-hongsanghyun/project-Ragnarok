@@ -162,7 +162,13 @@ function parseResponse(payload: OverpassResponse, minVoltageKv: number): Parsed 
     const power = tags.power as string | undefined;
     const voltages = parseVoltageKv(tags.voltage as string | undefined);
     if (power === 'substation') {
-      if (voltages.length && Math.max(...voltages) < minVoltageKv) continue;
+      // Require a parseable voltage on every substation and require its
+      // max voltage to clear the user's threshold. Substations without a
+      // voltage tag are almost always LV distribution noise; the previous
+      // "keep if untagged" behaviour leaked thousands of these into the
+      // workbook.
+      if (!voltages.length) continue;
+      if (Math.max(...voltages) < minVoltageKv) continue;
       const center = elementCenter(el);
       if (!center) continue;
       const tagsAsStr: Record<string, string> = {};

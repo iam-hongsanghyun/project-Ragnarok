@@ -69,8 +69,14 @@ export function buildQuery(
   if (opts.includeCables) {
     lines.push(`way["power"="cable"]${voltageFilter}${dcClause}(poly:"${poly}");`);
   }
-  lines.push(`node["power"="substation"](poly:"${poly}");`);
-  lines.push(`way["power"="substation"](poly:"${poly}");`);
+  // Require ["voltage"] on substations too. The OSM data is full of LV
+  // distribution substations without a voltage tag (or tagged at 380 V /
+  // 11 kV); pulling them unfiltered floods the response with rows the
+  // user's threshold will throw away anyway. Substation-without-voltage
+  // cannot survive the client-side `min_voltage_kv` filter, so it's free
+  // to push the filter to the server.
+  lines.push(`node["power"="substation"]${voltageFilter}(poly:"${poly}");`);
+  lines.push(`way["power"="substation"]${voltageFilter}(poly:"${poly}");`);
   return `[out:json][timeout:${timeout}];(${lines.join('')});out body geom;`;
 }
 

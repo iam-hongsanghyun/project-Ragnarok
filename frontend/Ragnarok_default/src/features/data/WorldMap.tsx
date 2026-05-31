@@ -14,7 +14,6 @@ import {
   MapContainer,
   Polyline,
   TileLayer,
-  Tooltip,
   useMap,
 } from 'react-leaflet';
 import L, { LatLngBoundsExpression, Layer } from 'leaflet';
@@ -152,6 +151,14 @@ export function WorldMap({
           />
         )}
         {selectedCountry && <FitToCountry bbox={selectedCountry.bbox} />}
+        {/*
+         * Preview overlay layers are rendered NON-INTERACTIVE so they don't
+         * eat clicks on the country layer beneath. Otherwise after a fetch
+         * the user can't click another country to switch — every click
+         * lands on a polyline / marker instead. The right-rail preview
+         * panel carries the per-feature data, so tooltips on the map are
+         * not load-bearing.
+         */}
         {lineFeatures.map((f, idx) => {
           const coords = (f.geometry.coordinates as Array<[number, number]>).map(
             ([lon, lat]) => [lat, lon] as [number, number],
@@ -162,15 +169,9 @@ export function WorldMap({
             <Polyline
               key={`line-${idx}`}
               positions={coords}
+              interactive={false}
               pathOptions={{ color, weight: 1.4, opacity: 0.85 }}
-            >
-              <Tooltip sticky>
-                Line — {Math.round(v)} kV
-                {(f.properties || {}).length_km != null
-                  ? ` · ${Math.round(Number((f.properties || {}).length_km))} km`
-                  : ''}
-              </Tooltip>
-            </Polyline>
+            />
           );
         })}
         {pointFeatures.map((f, idx) => {
@@ -184,23 +185,14 @@ export function WorldMap({
               key={`pt-${idx}`}
               center={[lat, lon]}
               radius={radius}
+              interactive={false}
               pathOptions={{
                 color: '#ffffff',
                 weight: 1.2,
                 fillColor: color,
                 fillOpacity: 0.95,
               }}
-            >
-              <Tooltip sticky>
-                {(f.properties || {}).name as string || kind || 'feature'}
-                {(f.properties || {}).carrier
-                  ? ` · ${(f.properties || {}).carrier}`
-                  : ''}
-                {(f.properties || {}).capacity_mw != null
-                  ? ` · ${Math.round(Number((f.properties || {}).capacity_mw))} MW`
-                  : ''}
-              </Tooltip>
-            </CircleMarker>
+            />
           );
         })}
       </MapContainer>
