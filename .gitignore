@@ -193,3 +193,13 @@ node_modules
 
 # Local plugin-server registry (user-specific absolute paths)
 plugins.env
+
+# Frontend secrets — API keys, upstream endpoint overrides, anything that
+# must NOT be committed. CRA's `REACT_APP_*` env vars are baked into the
+# bundle at build time, so anything here ships to every browser — never
+# put production keys in these files; they're for dev-host config only.
+# Per-user keys belong in the in-app Settings (browser localStorage).
+frontend/*/.env.local
+frontend/*/.env.*.local
+frontend/*/src/lib/api/secrets.local.ts
+frontend/*/src/lib/api/secrets.local.json
