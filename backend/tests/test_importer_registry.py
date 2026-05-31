@@ -15,10 +15,11 @@ def test_registry_lists_mvp_modules():
         "osm",
         "wri_gppd",
         "worldbank_demand",
-        "opsd_load",
     } <= ids
-    # Modules deliberately not pursued (need API keys / static CSV
-    # aggregators / etc.) — see docs/TODO.md "Deliberately not pursued".
+    # Modules deliberately not pursued — see docs/TODO.md "Deliberately not pursued".
+    # OPSD: 150 MB CSV doesn't fit the browser-direct deployment model;
+    # plan is a self-hosted hourly-demand database (D2 in TODO).
+    assert "opsd_load" not in ids
     assert "renewables_ninja" not in ids
     assert "pypsa_technology_data" not in ids
     assert "owid_energy" not in ids
@@ -31,7 +32,6 @@ def test_subcategories_round_trip_to_json():
     assert metas["osm"]["subcategory"] == "Live grid topology"
     assert metas["wri_gppd"]["subcategory"] == "Power plants (per-asset)"
     assert metas["worldbank_demand"]["subcategory"] == "Annual aggregates"
-    assert metas["opsd_load"]["subcategory"] == "Hourly profiles"
 
 
 def test_available_databases_json_shape():
