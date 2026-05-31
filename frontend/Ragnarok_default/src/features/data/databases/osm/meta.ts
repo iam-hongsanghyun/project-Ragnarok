@@ -38,5 +38,17 @@ export const osmMeta: DatabaseMeta = {
       kind: 'toggle',
       default: true,
     },
+    {
+      id: 'topology_style',
+      label: 'Topology cleanup',
+      kind: 'select',
+      default: 'raw',
+      options: [
+        { value: 'raw', label: 'Raw (preserve OSM as-is)' },
+        { value: 'pypsa_earth', label: 'PyPSA-Earth style (snap + split)' },
+      ],
+      description:
+        '"Raw" keeps OSM tags verbatim, snaps line endpoints to a substation within 5 km, and leaves through-lines unsplit. "PyPSA-Earth style" clusters substations within 5 km (DBSCAN), forces every line endpoint to snap to its nearest cluster bus, and splits lines that cross intermediate substations — giving a connected, solvable network at the cost of editing OSM-reported geometry.',
+    },
   ],
 };
