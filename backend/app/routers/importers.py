@@ -29,9 +29,11 @@ from ..importers import (
     ConvertOptions,
     ImportContext,
     available_databases,
-    get_database,
+    available_sources,
+    registered_databases,
 )
 from ..importers import region as region_mod
+from ..importers.combine import combine_fragments, combine_previews
 from ..importers.http import AsyncClientWrapper
 
 
@@ -39,7 +41,10 @@ router = APIRouter(prefix="/api/import", tags=["import"])
 
 
 class ImportRunRequest(BaseModel):
-    database_id: str
+    # Datasets of one source to fetch together (Country → Database → Datasets).
+    dataset_ids: list[str] = []
+    # Back-compat single-dataset form (older clients): treated as [database_id].
+    database_id: str | None = None
     country_iso: str
     filters: dict[str, Any] = {}
     convert_options: dict[str, Any] | None = None
@@ -49,8 +54,40 @@ class ImportRunRequest(BaseModel):
 
 @router.get("/databases")
 def list_databases() -> dict[str, Any]:
-    """Registry contents — what the left-rail tree renders."""
+    """Flat registry contents (one entry per dataset)."""
     return {"databases": available_databases()}
+
+
+@router.get("/sources")
+def list_sources() -> dict[str, Any]:
+    """Datasets grouped by source for the Country → Database → Datasets tree,
+    each with its ``common_filters`` (settings shared by ≥2 of its datasets)."""
+    return {"sources": available_sources()}
+
+
+def _resolve_dataset_order(requested: list[str]) -> list[str]:
+    """Expand the requested datasets with their declared ``depends_on`` and
+    return them dependency-first (so a profile's static anchor is fetched and
+    combined before the profile). Guards against unknown ids and cycles."""
+    dbs = registered_databases()
+    ordered: list[str] = []
+    visiting: set[str] = set()
+
+    def visit(did: str) -> None:
+        if did in ordered or did in visiting:
+            return
+        db = dbs.get(did)
+        if db is None:
+            raise KeyError(f"unknown dataset id: {did!r}")
+        visiting.add(did)
+        for dep in db.meta.depends_on:
+            visit(dep)
+        visiting.discard(did)
+        ordered.append(did)
+
+    for did in requested:
+        visit(did)
+    return ordered
 
 
 @router.get("/countries")
@@ -81,17 +118,33 @@ async def boundaries() -> Response:
 
 @router.post("/run")
 async def run_import(payload: ImportRunRequest) -> dict[str, Any]:
-    """One-trip fetch: preview + workbook fragment together."""
+    """One-trip fetch of one or more datasets of a source → one combined,
+    PyPSA-aligned fragment + one preview.
+
+    The selected datasets are expanded with their dependencies and fetched
+    with the *same* shared filters, so e.g. every KPG193 dataset resolves the
+    same version/year and their bus-derived names line up. Their fragments are
+    folded together (``combine_fragments``) into one result.
+    """
+    requested = list(payload.dataset_ids) or (
+        [payload.database_id] if payload.database_id else []
+    )
+    if not requested:
+        raise HTTPException(status_code=400, detail="no dataset_ids provided")
+
     try:
-        db = get_database(payload.database_id)
+        order = _resolve_dataset_order(requested)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    if not db.meta.available:
-        raise HTTPException(
-            status_code=503,
-            detail=f"database {payload.database_id!r} unavailable: "
-                   f"{db.meta.unavailable_reason}",
-        )
+
+    dbs = registered_databases()
+    for did in order:
+        meta = dbs[did].meta
+        if not meta.available:
+            raise HTTPException(
+                status_code=503,
+                detail=f"dataset {did!r} unavailable: {meta.unavailable_reason}",
+            )
 
     await _ensure_boundaries_warm()
     try:
@@ -110,10 +163,14 @@ async def run_import(payload: ImportRunRequest) -> dict[str, Any]:
     ctx = ImportContext(
         secrets=dict(payload.secrets), http=http, request_id=str(uuid.uuid4())[:8],
     )
+    fragments = []
+    previews = []
     try:
-        result = await db.fetch(region, dict(payload.filters), ctx)
-        summary = db.preview(result)
-        fragment = db.to_sheets(result, options)
+        for did in order:
+            db = dbs[did]
+            result = await db.fetch(region, dict(payload.filters), ctx)
+            previews.append(db.preview(result))
+            fragments.append(db.to_sheets(result, options))
     except PermissionError as exc:
         # Missing required API key — actionable 400, not a 502.
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -122,8 +179,20 @@ async def run_import(payload: ImportRunRequest) -> dict[str, Any]:
     finally:
         await http.aclose()
 
+    source_id = dbs[order[0]].meta.source_id or dbs[order[0]].meta.id
+    fragment = combine_fragments(
+        fragments,
+        source_id=source_id,
+        country_iso=region.country_iso,
+        country_name=region.country_name,
+        filters=dict(payload.filters),
+        dataset_ids=order,
+    )
+    summary = combine_previews(fragment, previews)
+
     return {
-        "database_id": db.meta.id,
+        "source_id": source_id,
+        "dataset_ids": order,
         "country_iso": region.country_iso,
         "preview": summary.to_json(),
         "fragment": fragment.to_json(),

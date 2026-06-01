@@ -1,6 +1,12 @@
 """EIA hourly electricity demand (US) — the BYOK exemplar.
 
-US balancing-authority hourly demand from the EIA v2 API (Form-930).
+US hourly demand from the EIA v2 API (Form-930 / Hourly Electric Grid
+Monitor). The data is collected per balancing authority (sub-national
+operational regions, not states); EIA also publishes 13 regional
+aggregates and a US48 national total. The ``respondent`` filter lets the
+user pick the granularity — national, region, or balancing authority —
+and ``date_from`` / ``date_to`` set the window.
+
 Requires a free per-user API key (``eia_key``): the user enters it in
 Settings → API keys, the frontend ships it in the request body, and we
 use it here for this one request via ``ctx.require_secret('eia_key')`` —
@@ -32,8 +38,31 @@ from ...protocol import (
 _API_URL = "https://api.eia.gov/v2/electricity/rto/region-data/data/"
 _NAME_RE = re.compile(r"[^A-Za-z0-9_]+")
 
-# A pragmatic subset of the larger US balancing authorities. The full list
-# is ~60; these cover most of the load. (Respondent codes per EIA-930.)
+# EIA-930 collects hourly demand per *balancing authority* (sub-national
+# operational regions — not states). The same region-data `respondent` facet
+# also serves EIA's aggregates: a single US48 national total and 13 regional
+# rollups. We expose all three granularities so the user picks how coarse the
+# series should be. (Codes per the EIA Hourly Electric Grid Monitor.)
+_NATIONAL: list[tuple[str, str]] = [
+    ("US48", "Lower 48 states"),
+]
+_REGIONS: list[tuple[str, str]] = [
+    ("CAL", "California"),
+    ("CAR", "Carolinas"),
+    ("CENT", "Central"),
+    ("FLA", "Florida"),
+    ("MIDA", "Mid-Atlantic"),
+    ("MIDW", "Midwest"),
+    ("NE", "New England"),
+    ("NW", "Northwest"),
+    ("NY", "New York"),
+    ("SE", "Southeast"),
+    ("SW", "Southwest"),
+    ("TEN", "Tennessee"),
+    ("TEX", "Texas"),
+]
+# A pragmatic subset of the ~65 balancing authorities — these carry most of
+# the load. The respondent codes are the full list's identifiers.
 _BALANCING_AUTHORITIES: list[tuple[str, str]] = [
     ("PJM", "PJM Interconnection"),
     ("MISO", "Midcontinent ISO"),
@@ -48,6 +77,26 @@ _BALANCING_AUTHORITIES: list[tuple[str, str]] = [
     ("DUK", "Duke Energy Carolinas"),
     ("BPAT", "Bonneville Power Administration"),
 ]
+
+# code → (granularity level, full name) for labels, preview, and provenance.
+_RESPONDENT_INFO: dict[str, tuple[str, str]] = {
+    **{c: ("national", n) for c, n in _NATIONAL},
+    **{c: ("region", n) for c, n in _REGIONS},
+    **{c: ("balancing authority", n) for c, n in _BALANCING_AUTHORITIES},
+}
+
+
+def _respondent_options() -> list[dict[str, str]]:
+    """Build the single granularity-aware select: national, then regions,
+    then balancing authorities — each labelled with its level."""
+    out: list[dict[str, str]] = []
+    for code, name in _NATIONAL:
+        out.append({"value": code, "label": f"{code} — {name} (national)"})
+    for code, name in _REGIONS:
+        out.append({"value": code, "label": f"{code} — {name} (region)"})
+    for code, name in _BALANCING_AUTHORITIES:
+        out.append({"value": code, "label": f"{code} — {name} (balancing authority)"})
+    return out
 
 
 def _slug(raw: str | None, fallback: str = "load") -> str:
@@ -67,20 +116,27 @@ META = DatabaseMeta(
     homepage="https://www.eia.gov/opendata/",
     version_hint="v2 API",
     description=(
-        "Hourly electricity demand by US balancing authority from the EIA "
-        "v2 API. Lands as one Load row plus an hourly loads-p_set series. "
-        "Needs a free EIA API key (Settings → API keys)."
+        "Hourly US electricity demand from the EIA Hourly Electric Grid "
+        "Monitor (Form-930) v2 API. Choose the granularity — national (US48), "
+        "one of the 13 regional aggregates, or an individual balancing "
+        "authority — and the date window. Lands as one Load row plus an hourly "
+        "loads-p_set series. Needs a free EIA API key (Settings → API keys)."
     ),
-    targets=["loads"],
+    targets=["loads", "loads-p_set"],
     country_coverage=["USA"],
     requires_secrets=["eia_key"],
     filters=[
         Filter(
-            id="balancing_authority", label="Balancing authority", kind="select",
-            default="PJM",
-            options=[{"value": code, "label": f"{code} — {name}"}
-                     for code, name in _BALANCING_AUTHORITIES],
-            description="Which US balancing authority's hourly demand to pull.",
+            id="respondent", label="Granularity / coverage area", kind="select",
+            default="US48",
+            options=_respondent_options(),
+            description=(
+                "Which EIA-930 demand series to pull. The data is collected per "
+                "balancing authority (sub-national operational regions, not "
+                "states); EIA also publishes 13 regional aggregates and a US48 "
+                "national total. Pick the granularity: national, region, or "
+                "balancing authority."
+            ),
         ),
         Filter(id="date_from", label="From", kind="date", default="2023-01-01",
                min="2015-07-01", max="2025-12-31",
@@ -99,7 +155,13 @@ class EiaDemand:
         # BYOK: this raises PermissionError (→ HTTP 400 with an actionable
         # message) when the user hasn't entered their key.
         api_key = ctx.require_secret("eia_key")
-        ba = str(filters.get("balancing_authority") or "PJM")
+        # Accept the new `respondent` id; fall back to the old
+        # `balancing_authority` for any stale client form state.
+        respondent = str(
+            filters.get("respondent")
+            or filters.get("balancing_authority")
+            or "US48"
+        )
         date_from = str(filters.get("date_from") or "2023-01-01")
         date_to = str(filters.get("date_to") or "2023-01-07")
         params = {
@@ -107,7 +169,7 @@ class EiaDemand:
             "frequency": "hourly",
             "data[0]": "value",
             "facets[type][]": "D",            # D = demand
-            "facets[respondent][]": ba,
+            "facets[respondent][]": respondent,
             "start": f"{date_from}T00",
             "end": f"{date_to}T23",
             "sort[0][column]": "period",
@@ -117,11 +179,13 @@ class EiaDemand:
         body = await ctx.http.get_json(_API_URL, params=params)
         rows = (((body or {}).get("response") or {}).get("data")) or []
         return FetchResult(META.id, region, dict(filters),
-                           {"ba": ba, "rows": rows, "date_from": date_from, "date_to": date_to})
+                           {"respondent": respondent, "rows": rows,
+                            "date_from": date_from, "date_to": date_to})
 
     def preview(self, result: FetchResult) -> PreviewSummary:
         rows = result.payload["rows"]
-        ba = result.payload["ba"]
+        respondent = result.payload["respondent"]
+        level, name = _RESPONDENT_INFO.get(respondent, ("balancing authority", respondent))
         vals = [float(r["value"]) for r in rows if r.get("value") not in (None, "")]
         counts: dict[str, int] = {"loads": 1 if rows else 0, "hours": len(rows)}
         if vals:
@@ -133,16 +197,17 @@ class EiaDemand:
                 {"period": r.get("period"), "value": r.get("value")}
                 for r in rows[:24]
             ]},
-            notes=[f"{ba}: {len(rows)} hourly points "
+            notes=[f"{name} ({respondent}, {level}): {len(rows)} hourly points "
                    f"{result.payload['date_from']} → {result.payload['date_to']}."],
         )
 
     def to_sheets(self, result: FetchResult, options: ConvertOptions) -> WorkbookFragment:
         rows = result.payload["rows"]
-        ba = result.payload["ba"]
+        respondent = result.payload["respondent"]
+        level, name = _RESPONDENT_INFO.get(respondent, ("balancing authority", respondent))
         frag = WorkbookFragment()
         ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        load_name = _slug(f"{ba}_demand", "load")
+        load_name = _slug(f"{respondent}_demand", "load")
 
         snapshots: list[str] = []
         p_set_rows: list[dict[str, Any]] = []
@@ -158,7 +223,8 @@ class EiaDemand:
         if p_set_rows:
             frag.sheets["loads"] = [{
                 "name": load_name, "carrier": "AC", "country": "USA",
-                "source": "EIA Form-930", "balancing_authority": ba,
+                "source": "EIA Form-930", "respondent": respondent,
+                "respondent_level": level, "respondent_name": name,
             }]
             frag.sheets["loads-p_set"] = p_set_rows
             frag.snapshots = snapshots

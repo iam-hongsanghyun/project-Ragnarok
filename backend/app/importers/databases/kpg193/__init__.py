@@ -22,12 +22,13 @@ Two GitHub URL forms are in use:
 """
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import json
 import math
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from ...context import ImportContext
@@ -48,6 +49,28 @@ from ...protocol import (
 REPO_OWNER = "agm-center"
 REPO_NAME = "kpg-testgrid"
 REPO_BRANCH = "main"
+
+# The four KPG193 datasets (network / renewable capacity / demand profile /
+# renewable profile) are grouped under one source so the UI presents them as
+# Country → KPG193 → Datasets (multi-select) and fetches them together aligned.
+KPG193_SOURCE_ID = "kpg193"
+KPG193_SOURCE_LABEL = "KPG193 — Korean reference grid"
+
+# ── Hourly-profile dataset conventions ────────────────────────────────────────
+# The repo ships per-version `profile/{demand,renewables}/` folders holding one
+# CSV per day. Each daily file is long-format: rows = (hour 1..24) × (bus 1..193).
+#   demand/daily_demand_<d>.csv     → columns: hour, bus_id, demandP, demandQ
+#   renewables/renewables_<d>.csv   → columns: hour, bus_id, pv_profile_ratio,
+#                                              wind_profile_ratio, hydro_profile_ratio
+# The dataset is a set of 365 representative daily scenarios. The reference
+# build (simplePyPSA_KR/util/build_kpg193_temporal.py) labels them as sequential
+# days from 01/01/2024; we follow that convention so snapshots are a real,
+# monotonic hourly index rather than an opaque scenario number. This is a fixed
+# fact about the dataset, not a tunable — hence a module constant.
+PROFILE_BASE_DATE = "2024-01-01"
+PROFILE_DAYS_AVAILABLE = 365
+PROFILE_MAX_DAYS = 31  # cap the per-request window: 1 CSV per day per category
+PROFILE_FETCH_CONCURRENCY = 6  # polite parallelism against raw.githubusercontent
 
 
 def _contents_url(path: str = "") -> str:
@@ -292,12 +315,15 @@ async def _discover_renewable_years(ctx: ImportContext, version_dir: str) -> lis
     return sorted(years)
 
 
-async def _resolve_paths(
+async def _resolve_version_dir(
     ctx: ImportContext, filters: dict[str, Any]
 ) -> dict[str, Any]:
-    """Resolve user filter values to actual repo paths, using discovery for
-    any value the user left at ``latest``. Raises if the repo is empty / the
-    pinned version doesn't exist / the pinned year doesn't exist.
+    """Resolve the ``version`` filter to a repo directory + the network paths.
+
+    Each KPG193 dataset (network / renewable capacity / profiles) shares a
+    version but needs only a subset of paths, so version resolution is split
+    from renewable-year resolution. Raises if the repo is empty or the pinned
+    version doesn't exist.
     """
     versions = await _discover_versions(ctx)
     if not versions:
@@ -325,22 +351,6 @@ async def _resolve_paths(
             )
         version_dir = match
 
-    years = await _discover_renewable_years(ctx, version_dir)
-    requested_year = str(filters.get("renewable_year") or "latest").strip()
-    if requested_year in ("latest", ""):
-        renewable_year = years[-1] if years else 0
-    else:
-        try:
-            wanted_year = int(requested_year)
-        except ValueError:
-            wanted_year = 0
-        if wanted_year not in years:
-            raise RuntimeError(
-                f'KPG193: renewable year "{requested_year}" not found in '
-                f"{version_dir}. Available: {', '.join(str(y) for y in years)}"
-            )
-        renewable_year = wanted_year
-
     version_tag = re.sub(r"^kpg193_", "", version_dir)
     # The MATPOWER .m file is named KPG193_ver<tag>.m using the tag form
     # without the leading "v" (e.g. "KPG193_ver1_5.m").
@@ -348,18 +358,39 @@ async def _resolve_paths(
     return {
         "version_dir": version_dir,
         "version_tag": version_tag,
-        "renewable_year": renewable_year,
         "matpower_path": f"{version_dir}/network/m/KPG193_ver{mat_file_tag}.m",
         "bus_location_path": f"{version_dir}/network/location/bus_location.csv",
-        "solar_path": (
-            f"{version_dir}/renewables_capacity/solar_generators_{renewable_year}.csv"
-        ),
-        "wind_path": (
-            f"{version_dir}/renewables_capacity/wind_generators_{renewable_year}.csv"
-        ),
-        "hydro_path": (
-            f"{version_dir}/renewables_capacity/hydro_generators_{renewable_year}.csv"
-        ),
+    }
+
+
+async def _resolve_renewable_year(
+    ctx: ImportContext, version_dir: str, filters: dict[str, Any]
+) -> int:
+    """Resolve the ``renewable_year`` filter against the years present in the
+    chosen version. ``latest`` picks the newest; a pinned year must exist."""
+    years = await _discover_renewable_years(ctx, version_dir)
+    requested_year = str(filters.get("renewable_year") or "latest").strip()
+    if requested_year in ("latest", ""):
+        return years[-1] if years else 0
+    try:
+        wanted_year = int(requested_year)
+    except ValueError:
+        wanted_year = 0
+    if wanted_year not in years:
+        raise RuntimeError(
+            f'KPG193: renewable year "{requested_year}" not found in '
+            f"{version_dir}. Available: {', '.join(str(y) for y in years)}"
+        )
+    return wanted_year
+
+
+def _capacity_paths(version_dir: str, renewable_year: int) -> dict[str, str]:
+    """The three renewables_capacity CSV paths for a (version, year)."""
+    base = f"{version_dir}/renewables_capacity"
+    return {
+        "solar_path": f"{base}/solar_generators_{renewable_year}.csv",
+        "wind_path": f"{base}/wind_generators_{renewable_year}.csv",
+        "hydro_path": f"{base}/hydro_generators_{renewable_year}.csv",
     }
 
 
@@ -446,6 +477,168 @@ def _parse_renewable_csv(csv_text: str, carrier: str) -> list[dict[str, Any]]:
             "p_nom_min": p_nom_min,
         })
     return out
+
+
+# ── Hourly-profile window + parsing ──────────────────────────────────────────
+
+
+def _resolve_profile_window(filters: dict[str, Any]) -> list[int]:
+    """Map the user's (start date, day count) to 1-based daily-file indices.
+
+    The window is clamped to ``[1, PROFILE_DAYS_AVAILABLE]`` and the length to
+    ``[1, PROFILE_MAX_DAYS]`` so a request can never blow past the dataset or
+    fetch an unbounded number of CSVs.
+    """
+    base = date.fromisoformat(PROFILE_BASE_DATE)
+    start_raw = str(filters.get("profile_start") or PROFILE_BASE_DATE).strip()
+    try:
+        start = date.fromisoformat(start_raw)
+    except ValueError:
+        start = base
+    start_index = (start - base).days + 1  # 1-based file index
+    start_index = max(1, min(PROFILE_DAYS_AVAILABLE, start_index))
+
+    try:
+        n_days = int(float(filters.get("profile_days")))
+    except (TypeError, ValueError):
+        n_days = 7
+    n_days = max(1, min(PROFILE_MAX_DAYS, n_days))
+
+    last_index = min(PROFILE_DAYS_AVAILABLE, start_index + n_days - 1)
+    return list(range(start_index, last_index + 1))
+
+
+def _snapshot_label(file_index: int, hour: int) -> str:
+    """Snapshot string for daily file ``file_index`` (1-based), ``hour`` 1..24.
+
+    Format ``YYYY-MM-DD HH:00`` (matches the EIA importer) — fixed-width, so a
+    lexical sort equals chronological order, which is what the frontend's
+    fragment-merge relies on.
+    """
+    base = datetime.fromisoformat(PROFILE_BASE_DATE)
+    dt = base + timedelta(days=file_index - 1, hours=hour - 1)
+    return dt.strftime("%Y-%m-%d %H:00")
+
+
+def _profile_demand_path(version_dir: str, file_index: int) -> str:
+    return f"{version_dir}/profile/demand/daily_demand_{file_index}.csv"
+
+
+def _profile_renewables_path(version_dir: str, file_index: int) -> str:
+    return f"{version_dir}/profile/renewables/renewables_{file_index}.csv"
+
+
+def _parse_profile_csv(csv_text: str) -> list[dict[str, str]]:
+    """Parse one daily profile CSV into BOM-stripped, stripped-value dicts."""
+    reader = csv.DictReader(io.StringIO(csv_text))
+    rows: list[dict[str, str]] = []
+    for raw in reader:
+        rec: dict[str, str] = {}
+        for k, v in raw.items():
+            if k is None:
+                continue
+            rec[_strip_bom(k)] = ("" if v is None else str(v)).strip()
+        rows.append(rec)
+    return rows
+
+
+async def _fetch_profile_texts(
+    ctx: ImportContext, paths: list[str]
+) -> list[str | None]:
+    """Fetch many raw CSVs concurrently (bounded). Missing files → ``None``."""
+    sem = asyncio.Semaphore(PROFILE_FETCH_CONCURRENCY)
+
+    async def _one(path: str) -> str | None:
+        async with sem:
+            try:
+                return await ctx.http.get_text(_raw_url(path))
+            except Exception:
+                return None
+
+    return await asyncio.gather(*[_one(p) for p in paths])
+
+
+def _build_load_profile(
+    window: list[int], demand_texts: list[str | None]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
+    """Build ``loads-p_set`` and ``loads-q_set`` rows from the daily demand CSVs.
+
+    Columns are ``load_<bus_id>`` (mirrors :func:`_build_loads`). Returns
+    ``(p_set_rows, q_set_rows, snapshots)`` with one row per covered snapshot.
+    """
+    p_by_snap: dict[str, dict[str, float]] = {}
+    q_by_snap: dict[str, dict[str, float]] = {}
+    snapshots: list[str] = []
+    for file_index, text in zip(window, demand_texts):
+        if not text:
+            continue
+        for row in _parse_profile_csv(text):
+            try:
+                hour = int(float(row.get("hour") or ""))
+                bus_id = int(float(row.get("bus_id") or ""))
+            except (TypeError, ValueError):
+                continue
+            snap = _snapshot_label(file_index, hour)
+            if snap not in p_by_snap:
+                p_by_snap[snap] = {}
+                q_by_snap[snap] = {}
+                snapshots.append(snap)
+            col = f"load_{bus_id}"
+            p_by_snap[snap][col] = _parse_float(row.get("demandP"))
+            q_by_snap[snap][col] = _parse_float(row.get("demandQ"))
+
+    snapshots.sort()
+    p_rows = [{"snapshot": s, **{c: v for c, v in p_by_snap[s].items()
+                                 if math.isfinite(v)}} for s in snapshots]
+    q_rows = [{"snapshot": s, **{c: v for c, v in q_by_snap[s].items()
+                                 if math.isfinite(v)}} for s in snapshots]
+    return p_rows, q_rows, snapshots
+
+
+def _build_renewable_profile(
+    window: list[int],
+    renewable_texts: list[str | None],
+    existing_gen_names: set[str],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Build ``generators-p_max_pu`` rows from the daily renewables CSVs.
+
+    Each bus contributes up to three availability series (PV / wind / hydro),
+    mapped to the renewable generator names :func:`_build_renewable_generators`
+    emits (``gen_solar_<bus>`` / ``gen_wind_<bus>`` / ``gen_hydro_<bus>``). A
+    series is only attached when that generator actually exists — buses with no
+    nameplate capacity for a carrier have no generator to drive.
+    """
+    carrier_cols = [
+        ("pv_profile_ratio", "solar"),
+        ("wind_profile_ratio", "wind"),
+        ("hydro_profile_ratio", "hydro"),
+    ]
+    by_snap: dict[str, dict[str, float]] = {}
+    snapshots: list[str] = []
+    for file_index, text in zip(window, renewable_texts):
+        if not text:
+            continue
+        for row in _parse_profile_csv(text):
+            try:
+                hour = int(float(row.get("hour") or ""))
+                bus_id = int(float(row.get("bus_id") or ""))
+            except (TypeError, ValueError):
+                continue
+            snap = _snapshot_label(file_index, hour)
+            if snap not in by_snap:
+                by_snap[snap] = {}
+                snapshots.append(snap)
+            for col_key, carrier in carrier_cols:
+                gen_name = f"gen_{carrier}_{bus_id}"
+                if gen_name not in existing_gen_names:
+                    continue
+                ratio = _parse_float(row.get(col_key))
+                if math.isfinite(ratio):
+                    by_snap[snap][gen_name] = max(0.0, min(1.0, ratio))
+
+    snapshots.sort()
+    rows = [{"snapshot": s, **by_snap[s]} for s in snapshots]
+    return rows, snapshots
 
 
 # ── PyPSA materialisers (port of convert.ts) ─────────────────────────────────
@@ -678,23 +871,88 @@ def _build_links(dcline_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 # ── Metadata ─────────────────────────────────────────────────────────────────
 
+# Shared filters, reused across the four KPG193 datasets (each lives in its
+# own importer / tree entry — see the sibling packages kpg193_renewable_capacity,
+# kpg193_demand_profile, kpg193_renewable_profile).
+VERSION_FILTER = Filter(
+    id="version",
+    label="Dataset version",
+    kind="select",
+    default="latest",
+    options=[{"value": "latest", "label": "latest (discover at fetch time)"}],
+    description=(
+        'Which kpg193_v* directory in the repo to use. "latest" picks the '
+        "highest-numbered version found in the repo via the GitHub Contents "
+        'API; you can pin a specific value (e.g. "v1_5", "v2_0") to freeze. '
+        "The preview note shows which version was actually used."
+    ),
+)
+
+RENEWABLE_YEAR_FILTER = Filter(
+    id="renewable_year",
+    label="Renewable capacity year",
+    kind="select",
+    default="latest",
+    options=[{"value": "latest", "label": "latest (discover at fetch time)"}],
+    description=(
+        "Which year of the renewables_capacity/"
+        "{solar,wind,hydro}_generators_<year>.csv files to use. "
+        '"latest" picks the most recent year present in the chosen version '
+        'directory; you can pin a year (e.g. "2022") to freeze.'
+    ),
+)
+
+PROFILE_START_FILTER = Filter(
+    id="profile_start",
+    label="Profile start date",
+    kind="date",
+    default=PROFILE_BASE_DATE,
+    min=PROFILE_BASE_DATE,
+    max="2024-12-30",
+    description=(
+        "First day of the hourly window. The dataset ships 365 representative "
+        "daily scenarios; the reference build labels them as sequential days "
+        "from 2024-01-01, and we follow that so snapshots are a real monotonic "
+        "hourly index."
+    ),
+)
+
+PROFILE_DAYS_FILTER = Filter(
+    id="profile_days",
+    label="Profile length",
+    kind="number",
+    default=7,
+    min=1,
+    max=PROFILE_MAX_DAYS,
+    step=1,
+    unit="days",
+    description=(
+        f"How many days to fetch from the start date (each = 24 hourly "
+        f"snapshots, one CSV per day). Capped at {PROFILE_MAX_DAYS} to keep "
+        f"the fetch bounded; the window clamps to the {PROFILE_DAYS_AVAILABLE} "
+        f"days available."
+    ),
+)
+
 META = DatabaseMeta(
-    id="kpg193",
-    name="KPG193 — Korean reference grid (193-bus)",
-    short_name="KPG193",
+    id="kpg193_network",
+    name="KPG193 — Korean reference grid: network",
+    short_name="Network",
+    source_id=KPG193_SOURCE_ID,
+    source_label=KPG193_SOURCE_LABEL,
     category="transmission",
     subcategory="Reference network",
     license="See agm-center/kpg-testgrid (academic / research use)",
     homepage="https://github.com/agm-center/kpg-testgrid",
     version_hint="latest (discovered)",
     description=(
-        "Complete reference network for the Republic of Korea power system: "
-        "193 buses, ~360 transmission lines, ~300 thermal generators with "
-        "cost + commitment parameters, per-bus renewable nameplate capacity "
-        "(PV / wind / hydro), and DC links. Static single-trip import — drop "
-        "into the workbook and run a least-cost dispatch right away. Versions "
-        "and renewable-year snapshots are discovered from the repo at fetch "
-        "time, so newer datasets appear without a code change."
+        "Static transmission network for the Republic of Korea power system "
+        "from the MATPOWER case: 193 buses, ~360 lines, transformers, ~300 "
+        "thermal generators with cost + commitment parameters, per-bus loads, "
+        "and (optionally) HVDC links. The renewable capacities and the hourly "
+        "demand / renewable profiles are separate KPG193 datasets — import "
+        "each from its own entry. Versions are discovered from the repo at "
+        "fetch time."
     ),
     targets=[
         "buses", "generators", "lines", "transformers", "links",
@@ -704,48 +962,7 @@ META = DatabaseMeta(
     country_coverage=["KOR"],
     requires_secrets=[],
     filters=[
-        Filter(
-            id="version",
-            label="Dataset version",
-            kind="select",
-            default="latest",
-            options=[
-                {"value": "latest", "label": "latest (discover at fetch time)"}
-            ],
-            description=(
-                'Which kpg193_v* directory in the repo to use. "latest" picks '
-                "the highest-numbered version found in the repo via the GitHub "
-                'Contents API; you can pin a specific value (e.g. "v1_5", '
-                '"v2_0") to freeze. The preview note shows which version was '
-                "actually used."
-            ),
-        ),
-        Filter(
-            id="renewable_year",
-            label="Renewable capacity year",
-            kind="select",
-            default="latest",
-            options=[
-                {"value": "latest", "label": "latest (discover at fetch time)"}
-            ],
-            description=(
-                "Which year of the renewables_capacity/"
-                "{solar,wind,hydro}_generators_<year>.csv files to attach. "
-                '"latest" picks the most recent year present in the chosen '
-                'version directory; you can pin a year (e.g. "2022") to freeze.'
-            ),
-        ),
-        Filter(
-            id="include_renewables",
-            label="Include renewable capacities (PV / wind / hydro)",
-            kind="toggle",
-            default=True,
-            description=(
-                "Pull per-bus solar / wind / hydro nameplate capacity from the "
-                "auxiliary CSVs and emit them as PyPSA Generator rows alongside "
-                "the thermal fleet (which lives in the MATPOWER mpc.gen block)."
-            ),
-        ),
+        VERSION_FILTER,
         Filter(
             id="include_dc_links",
             label="Include HVDC links",
@@ -770,35 +987,11 @@ class Kpg193:
     async def fetch(
         self, region: Region, filters: dict[str, Any], ctx: ImportContext
     ) -> FetchResult:
-        paths = await _resolve_paths(ctx, filters)
-        include_renewables = filters.get("include_renewables") is not False
+        paths = await _resolve_version_dir(ctx, filters)
         include_dc_links = filters.get("include_dc_links") is not False
 
         mat_text = await ctx.http.get_text(_raw_url(paths["matpower_path"]))
         loc_text = await ctx.http.get_text(_raw_url(paths["bus_location_path"]))
-
-        async def _fetch_renewable(path: str) -> str | None:
-            # Renewable CSV may not exist for every (version, carrier) tuple.
-            try:
-                return await ctx.http.get_text(_raw_url(path))
-            except Exception:
-                return None
-
-        solar_text = (
-            await _fetch_renewable(paths["solar_path"])
-            if include_renewables
-            else None
-        )
-        wind_text = (
-            await _fetch_renewable(paths["wind_path"])
-            if include_renewables
-            else None
-        )
-        hydro_text = (
-            await _fetch_renewable(paths["hydro_path"])
-            if include_renewables
-            else None
-        )
 
         base_mva = float(extract_scalar(mat_text, "baseMVA"))
         bus_rows = parse_matrix(
@@ -829,28 +1022,20 @@ class Kpg193:
         )
 
         locations = _parse_bus_location(loc_text)
-        renewables: list[dict[str, Any]] = []
-        if solar_text:
-            renewables.extend(_parse_renewable_csv(solar_text, "solar"))
-        if wind_text:
-            renewables.extend(_parse_renewable_csv(wind_text, "wind"))
-        if hydro_text:
-            renewables.extend(_parse_renewable_csv(hydro_text, "hydro"))
 
         buses = _build_buses(bus_rows, locations)
         loads = _build_loads(bus_rows)
-        thermal_gens = _build_thermal_generators(
+        generators = _build_thermal_generators(
             gen_rows, gencost_rows, genthermal_rows
         )
-        renewable_gens = _build_renewable_generators(renewables)
-        generators = [*thermal_gens, *renewable_gens]
 
         branches = _enrich_branches(branch_rows, buses, base_mva)
         lines = _build_lines(branches)
         transformers = _build_transformers(branches)
         links = _build_links(dcline_rows)
 
-        # Union of carriers actually present.
+        # Union of carriers actually present (renewable carriers come from the
+        # separate renewable-capacity dataset).
         carriers_set: set[str] = {"AC", "load"}
         for g in generators:
             c = g.get("carrier")
@@ -878,8 +1063,7 @@ class Kpg193:
             "counts": {
                 "buses": len(buses),
                 "loads": len(loads),
-                "thermal_generators": len(thermal_gens),
-                "renewable_generators": len(renewable_gens),
+                "thermal_generators": len(generators),
                 "lines": len(lines),
                 "transformers": len(transformers),
                 "links": len(links),
@@ -896,11 +1080,9 @@ class Kpg193:
             f", {counts['links']} HVDC links" if counts["links"] else ""
         )
         summary = (
-            f"KPG193 {paths['version_tag']}, renewables "
-            f"{paths['renewable_year']}: {counts['buses']} buses, "
+            f"KPG193 {paths['version_tag']} network: {counts['buses']} buses, "
             f"{counts['lines']} lines, {counts['transformers']} transformers, "
-            f"{counts['thermal_generators']} thermal + "
-            f"{counts['renewable_generators']} renewable generators"
+            f"{counts['thermal_generators']} thermal generators"
             f"{links_note}."
         )
         # Per-bus point overlay so the user sees the network footprint
@@ -929,18 +1111,17 @@ class Kpg193:
             })
         overlay = {"type": "FeatureCollection", "features": features}
 
+        preview_counts: dict[str, int] = {
+            "buses": counts["buses"],
+            "loads": counts["loads"],
+            "generators": counts["thermal_generators"],
+            "lines": counts["lines"],
+            "transformers": counts["transformers"],
+            "links": counts["links"],
+        }
+
         return PreviewSummary(
-            counts={
-                "buses": counts["buses"],
-                "loads": counts["loads"],
-                "generators": (
-                    counts["thermal_generators"]
-                    + counts["renewable_generators"]
-                ),
-                "lines": counts["lines"],
-                "transformers": counts["transformers"],
-                "links": counts["links"],
-            },
+            counts=preview_counts,
             samples={
                 "buses": [
                     {
@@ -984,10 +1165,7 @@ class Kpg193:
                 result.filters, sort_keys=True, default=str
             ),
             convert_options_json=json.dumps(
-                {
-                    "version": paths["version_tag"],
-                    "renewable_year": paths["renewable_year"],
-                },
+                {"version": paths["version_tag"]},
                 sort_keys=True,
                 default=str,
             ),

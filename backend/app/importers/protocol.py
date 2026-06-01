@@ -90,6 +90,16 @@ class DatabaseMeta:
     short_name: str = ""
     subcategory: str = ""
     country_coverage: list[str] | str = "global"
+    # Source grouping: many datasets can belong to one source/database. The
+    # frontend groups by ``source_id`` (Country → Database → Datasets) and lets
+    # the user multi-select datasets of a source to fetch together. Singletons
+    # leave these empty and fall back to ``id`` / ``name`` in ``to_json``.
+    source_id: str = ""
+    source_label: str = ""
+    # Other dataset ids this dataset's output references (same source). The
+    # batch fetch auto-includes them so a profile is never imported without the
+    # static components it attaches to — keeping every fetch PyPSA-ready.
+    depends_on: list[str] = field(default_factory=list)
     # Names of user-supplied API keys this database needs (BYOK). The
     # frontend collects them from the Settings store and ships them in the
     # request body; the backend uses them per-request and never persists.
@@ -100,6 +110,8 @@ class DatabaseMeta:
             "id": self.id,
             "name": self.name,
             "short_name": self.short_name or self.name,
+            "source_id": self.source_id or self.id,
+            "source_label": self.source_label or self.name,
             "category": self.category,
             "subcategory": self.subcategory,
             "license": self.license,
@@ -110,6 +122,7 @@ class DatabaseMeta:
             "available": self.available,
             "description": self.description,
             "requires_secrets": list(self.requires_secrets),
+            "depends_on": list(self.depends_on),
             "country_coverage": (
                 "global"
                 if self.country_coverage == "global"

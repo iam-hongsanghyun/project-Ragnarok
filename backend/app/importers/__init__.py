@@ -17,7 +17,12 @@ from .protocol import (
     Region,
     WorkbookFragment,
 )
-from .registry import available_databases, get_database, registered_databases
+from .registry import (
+    available_databases,
+    available_sources,
+    get_database,
+    registered_databases,
+)
 
 __all__ = [
     "ImportContext",
@@ -31,6 +36,7 @@ __all__ = [
     "Region",
     "WorkbookFragment",
     "available_databases",
+    "available_sources",
     "get_database",
     "registered_databases",
 ]
