@@ -110,6 +110,7 @@ describe('workbook project round-trip', () => {
       dateFormat: 'dmy',
       solverThreads: 4,
       solverType: 'ipm',
+      objectiveAutoScale: true,
       currencyCode: 'EUR',
       currencySymbol: '€',
       enableLoadShedding: true,

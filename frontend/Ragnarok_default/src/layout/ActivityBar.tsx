@@ -1,7 +1,7 @@
 /**
  * Activity bar — vertical, far-left strip with the view switches.
  *
- * Each button shows a single-letter glyph (D / B / M / S / A / P) plus
+ * Each button shows a single-letter glyph (D / B / M / F / S / A / P) plus
  * the full view name as a tooltip. This is the only entry point into a
  * view; there are no tabs anywhere else.
  */
@@ -31,6 +31,7 @@ const ENTRIES: Entry[] = [
   { id: 'Data',      glyph: 'D', label: 'Data' },
   { id: 'Build',     glyph: 'B', label: 'Build' },
   { id: 'Model',     glyph: 'M', label: 'Model' },
+  { id: 'Forge',     glyph: 'F', label: 'Forge' },
   { id: 'Settings',  glyph: 'S', label: 'Settings' },
   { id: 'Analytics', glyph: 'A', label: 'Analytics' },
   { id: 'Plugins',   glyph: 'P', label: 'Plugins' },

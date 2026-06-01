@@ -111,6 +111,17 @@ def _build_solver_options(options: dict[str, Any]) -> dict[str, Any]:
         out["solver"] = "hipo" if _highs_has_hipo() else "ipm"
     elif solver_type in _HIGHS_METHODS:
         out["solver"] = solver_type
+    # Objective auto-scaling. Energy-system LPs often carry a wide cost range
+    # (e.g. marginal costs spanning 1e2–1e6), which HiGHS itself flags
+    # ("excessively large costs … consider setting user_objective_scale to -1")
+    # and which slows BOTH dual simplex and PDLP. ``user_objective_scale = -1``
+    # lets HiGHS pick a power-of-10 objective scale: it is results-neutral (the
+    # reported objective is unscaled) and a no-op when the objective is already
+    # well-scaled. Driven by the "Auto-scale objective" solver toggle. Absent
+    # key ⇒ off, so a bare ``options={}`` solve stays identical to a plain
+    # ``n.optimize(solver_name="highs")``; the UI sends it on by default.
+    if bool(options.get("objectiveAutoScale", False)):
+        out["user_objective_scale"] = -1
     return out
 
 

@@ -8,8 +8,10 @@ import { SETTINGS_CONFIG } from 'lib/constants';
 export interface SolverSectionProps {
   solverThreads: number;
   solverType: SolverType;
+  objectiveAutoScale: boolean;
   onSolverThreadsChange: (v: number) => void;
   onSolverTypeChange: (v: SolverType) => void;
+  onObjectiveAutoScaleChange: (v: boolean) => void;
 }
 
 export function SolverSection(props: SolverSectionProps) {
@@ -57,6 +59,30 @@ export function SolverSection(props: SolverSectionProps) {
           excellent on large energy LPs, but only in HiGHS builds compiled with
           it; where it's absent it falls back to IPM automatically, so it's safe
           to pick anywhere. (MIP / unit-commitment runs ignore this choice.)
+        </p>
+      </div>
+      <div className="sg-setting-row">
+        <label className="sg-setting-label">Auto-scale objective</label>
+        <div className="sg-btn-row">
+          {[
+            { value: false, label: 'Off' },
+            { value: true, label: 'On' },
+          ].map(({ value, label }) => (
+            <button
+              key={label}
+              className={`tb-btn sg-solver-btn${props.objectiveAutoScale === value ? '' : ' tb-btn--muted'}`}
+              onClick={() => props.onObjectiveAutoScaleChange(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="sg-setting-hint">
+          Passes HiGHS <code>user_objective_scale=-1</code> so a wide-ranging
+          objective (costs spanning many orders of magnitude) is auto-scaled.
+          <b>Results-neutral</b> — the reported objective is unscaled — and a
+          no-op when already well-scaled, but it can markedly speed up simplex
+          and PDLP on badly-scaled LPs. Recommended on.
         </p>
       </div>
     </section>

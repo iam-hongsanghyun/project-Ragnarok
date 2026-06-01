@@ -11,6 +11,7 @@
  */
 import React from 'react';
 import { WorkspaceTab } from 'lib/types';
+import { RagnarokLogo } from 'shared/components/RagnarokLogo';
 
 interface Props {
   onNavigate: (tab: WorkspaceTab) => void;
@@ -42,6 +43,12 @@ const TILES: Tile[] = [
       'The full workbook view: every sheet, every column, every snapshot. Edit cells directly, paste from spreadsheets, manage time-series.',
   },
   {
+    id: 'Forge',
+    title: 'Forge',
+    blurb:
+      'Shape the imported data: round / ceil / floor numeric attributes in bulk, and snap components to their nearest bus by distance (within a km buffer).',
+  },
+  {
     id: 'Settings',
     title: 'Settings',
     blurb:
@@ -66,6 +73,7 @@ export function WelcomeView({ onNavigate }: Props) {
     <div className="view welcome-view">
       <div className="welcome-content">
         <header className="welcome-header">
+          <RagnarokLogo size={68} title="" className="welcome-logo" />
           <h1>Ragnarok</h1>
           <p className="welcome-tagline">
             Open-source energy-system modelling for the rest of us.

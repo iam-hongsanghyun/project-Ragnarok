@@ -32,6 +32,7 @@ function loadSettings(): AppSettings {
         dateFormat: parsed.dateFormat ?? SETTINGS_DEFAULTS.dateFormat,
         solverThreads: parsed.solverThreads ?? SETTINGS_DEFAULTS.solverThreads,
         solverType,
+        objectiveAutoScale: parsed.objectiveAutoScale ?? SETTINGS_DEFAULTS.objectiveAutoScale,
         currencyCode: parsed.currencyCode ?? SETTINGS_DEFAULTS.currencyCode,
         currencySymbol: parsed.currencySymbol ?? SETTINGS_DEFAULTS.currencySymbol,
         enableLoadShedding: parsed.enableLoadShedding ?? SETTINGS_DEFAULTS.enableLoadShedding,

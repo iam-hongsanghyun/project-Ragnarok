@@ -13,6 +13,7 @@ import {
   PYPSA_STANDARD_LINE_TYPES,
   PYPSA_STANDARD_TRANSFORMER_TYPES,
 } from 'lib/constants/pypsa_standard_types';
+import { VALIDATION_CONFIG } from 'lib/constants';
 
 export type { ModelIssue } from 'lib/validation/issue';
 
@@ -231,6 +232,72 @@ function addTemporalSheetIssues(
   });
 }
 
+/** Numeric cell value, or null when empty / non-numeric. */
+function cellNumber(raw: Primitive): number | null {
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+  if (typeof raw === 'string' && raw.trim() !== '') {
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+/**
+ * Flag attribute values whose magnitude is excessively large or small — the
+ * same conditioning problem HiGHS warns about ("excessively large costs",
+ * "excessively small row bounds"), which slows and can destabilise the solver.
+ * Reported per (sheet, attribute) with the first offending row + a count, so a
+ * badly-scaled column produces one warning, not thousands. Bus references and
+ * the name column are skipped; only finite, non-zero numbers are considered.
+ */
+function addMagnitudeIssues(
+  sheet: string,
+  rows: Row[],
+  issues: ModelIssue[],
+  max: number,
+  min: number,
+) {
+  const attrs = staticInputAttributes(sheet).filter(
+    (attr) => attr !== 'name' && !(attr === 'bus' || (attr.startsWith('bus') && /^\d+$/.test(attr.slice(3)))),
+  );
+  for (const col of attrs) {
+    let firstBig = -1;
+    let bigCount = 0;
+    let firstSmall = -1;
+    let smallCount = 0;
+    rows.forEach((row, rowIndex) => {
+      const n = cellNumber(row[col]);
+      if (n === null || n === 0) return;
+      const mag = Math.abs(n);
+      if (mag > max) {
+        if (firstBig === -1) firstBig = rowIndex;
+        bigCount += 1;
+      } else if (mag < min) {
+        if (firstSmall === -1) firstSmall = rowIndex;
+        smallCount += 1;
+      }
+    });
+    if (firstBig !== -1) {
+      issues.push({
+        sheet,
+        rowIndex: firstBig,
+        col,
+        severity: 'warning',
+        message: `"${col}": ${bigCount} value${bigCount > 1 ? 's' : ''} exceed ${max.toExponential(0)} — very large magnitudes can slow or destabilise the solver (consider scaling units)`,
+      });
+    }
+    if (firstSmall !== -1) {
+      issues.push({
+        sheet,
+        rowIndex: firstSmall,
+        col,
+        severity: 'warning',
+        message: `"${col}": ${smallCount} non-zero value${smallCount > 1 ? 's' : ''} below ${min.toExponential(0)} — very small magnitudes can cause numerical issues`,
+      });
+    }
+  }
+}
+
 export function useModelIssues(model: WorkbookModel): ModelIssue[] {
   return useMemo(() => {
     const issues: ModelIssue[] = [];
@@ -261,6 +328,7 @@ export function useModelIssues(model: WorkbookModel): ModelIssue[] {
       addRequiredFieldIssues(sheet, rows, issues);
       addBusReferenceIssues(sheet, rows, busNames, issues);
       addStaticValueIssues(sheet, rows, carrierNames, issues);
+      addMagnitudeIssues(sheet, rows, issues, VALIDATION_CONFIG.magnitudeMax, VALIDATION_CONFIG.magnitudeMin);
       if (sheet === 'lines') {
         addTypeReferenceIssues(sheet, rows, lineTypeNames, 'line_types', issues);
       } else if (sheet === 'transformers') {

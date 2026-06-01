@@ -144,8 +144,10 @@ export interface SettingsViewProps {
   onLoadSheddingCostChange: (v: number) => void;
   solverThreads: number;
   solverType: SolverType;
+  objectiveAutoScale: boolean;
   onSolverThreadsChange: (v: number) => void;
   onSolverTypeChange: (v: SolverType) => void;
+  onObjectiveAutoScaleChange: (v: boolean) => void;
   onCarrierColorChange: (rowIndex: number, color: string) => void;
   onCarrierReorder: (fromIndex: number, toIndex: number) => void;
 }

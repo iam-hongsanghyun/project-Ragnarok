@@ -35,6 +35,7 @@ import type { WorkbookFragment } from 'lib/api/databases';
 import { fullResultsArrayBuffer } from 'lib/export/results';
 import { getBounds, getBusIndex, carrierColor, numberValue, orderByCarrierRows, setCarrierColorOverrides, snapshotMaxFromWorkbook } from 'lib/utils/helpers';
 import { usePersistedState } from 'shared/hooks/usePersistedState';
+import { RagnarokLogo } from 'shared/components/RagnarokLogo';
 import { buildRowsFromGeneratorDetails, buildSystemLoadRows, normalizeSeriesPoint } from 'lib/results/analytics';
 import { withDerivedAssetDetails } from 'lib/results/assetDetails';
 import { deriveRunResults } from 'lib/results/runResults';
@@ -50,6 +51,7 @@ import { ModelView } from './views/ModelView';
 import { BuildView } from './features/build/BuildView';
 import { DataView } from './views/DataView';
 import { WelcomeView } from './views/WelcomeView';
+import { ForgeView } from './views/ForgeView';
 import { AnalyticsView } from './views/AnalyticsView';
 import { ActivityBar } from './layout/ActivityBar';
 import { useModelIssues } from './features/validation/useModelIssues';
@@ -382,6 +384,27 @@ function AppInner() {
     );
     return () => clearInterval(id);
   }, [runStatus]);
+
+  // Guard against accidental session loss on browser back / forward / refresh /
+  // close. The workbook lives only in memory and there is no client-side
+  // router, so a stray back-swipe (the macOS trackpad gesture) unloads the app
+  // and resets it to the empty Welcome state, orphaning any running solve.
+  // While a run is in progress OR a model is loaded, ask the browser to confirm
+  // before unloading: clicking "Stay" cancels the navigation and keeps the
+  // model and the solve intact. The dialog is browser-native (its wording is
+  // fixed by the browser) and only armed when there is work to protect, so the
+  // empty Welcome screen never prompts.
+  useEffect(() => {
+    const hasWork =
+      runStatus === 'running' || SHEETS.some((sheet) => (model[sheet]?.length ?? 0) > 0);
+    if (!hasWork) return undefined;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = ''; // Chrome/Edge require returnValue to be set to prompt.
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [runStatus, model]);
 
   const handleCancelRun = useCallback(async () => {
     stopPolling();
@@ -1301,6 +1324,7 @@ function AppInner() {
       snapshotCount, snapshotStart, snapshotWeight, forceLp,
       dateFormat: settings.dateFormat,
       solverThreads: settings.solverThreads, solverType: settings.solverType,
+      objectiveAutoScale: settings.objectiveAutoScale,
       currencySymbol: settings.currencySymbol,
       enableLoadShedding: settings.enableLoadShedding,
       loadSheddingCost: settings.loadSheddingCost,
@@ -1593,6 +1617,7 @@ function AppInner() {
             title="Go to Welcome page"
             aria-label="Go to Welcome page"
           >
+            <RagnarokLogo size={18} title="" className="topbar-brand-mark" />
             Ragnarok
           </button>
           <button
@@ -1733,8 +1758,10 @@ function AppInner() {
               onLoadSheddingCostChange={(v) => updateSettings({ loadSheddingCost: v })}
               solverThreads={settings.solverThreads}
               solverType={settings.solverType}
+              objectiveAutoScale={settings.objectiveAutoScale}
               onSolverThreadsChange={(v) => updateSettings({ solverThreads: v })}
               onSolverTypeChange={(v) => updateSettings({ solverType: v })}
+              onObjectiveAutoScaleChange={(v) => updateSettings({ objectiveAutoScale: v })}
               onCarrierColorChange={(rowIndex, color) => updateRowValue('carriers', rowIndex, 'color', color)}
               onCarrierReorder={(fromIndex, toIndex) => reorderRow('carriers', fromIndex, toIndex)}
               lineCount={model.lines.length}
@@ -1799,6 +1826,13 @@ function AppInner() {
           {tab === 'Welcome' && <WelcomeView onNavigate={setTab} />}
 
           {tab === 'Data' && <DataView onApplyFragment={handleApplyImportedFragment} />}
+
+          {tab === 'Forge' && (
+            <ForgeView
+              model={model}
+              onApplySheets={(partial) => setModel((prev) => ({ ...prev, ...partial }))}
+            />
+          )}
 
           {tab === 'Analytics' && (
             <AnalyticsView

@@ -18,6 +18,9 @@ export interface AppSettings {
   dateFormat: DateFormat;
   solverThreads: number; // 0 = let HiGHS decide (all cores)
   solverType: SolverType;
+  // Pass HiGHS user_objective_scale=-1 — auto-scales a wide-ranging objective
+  // (results-neutral) so simplex/PDLP converge faster on badly-scaled LPs.
+  objectiveAutoScale: boolean;
   currencyCode: string; // ISO 4217 code, e.g. "USD"
   currencySymbol: string; // display symbol, e.g. "$"
   enableLoadShedding: boolean;

@@ -73,6 +73,13 @@ html,
 body,
 #root {
   height: 100%;
+  /* Stop a horizontal two-finger swipe from chaining into browser
+     back/forward navigation (the macOS trackpad gesture), which would unload
+     the app mid-run and orphan the solve. `-x: none` blocks only the
+     navigation chaining + horizontal rubber-band — it does NOT block
+     scrolling: wide tables still scroll horizontally with the same gesture,
+     and vertical scrolling is untouched. */
+  overscroll-behavior-x: none;
 }
 
 body {

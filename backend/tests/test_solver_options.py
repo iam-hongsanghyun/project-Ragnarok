@@ -45,3 +45,18 @@ def test_threads_pinned_only_when_positive():
     assert _build_solver_options({"solverType": "ipm", "solverThreads": 8}) == {
         "solver": "ipm", "threads": 8,
     }
+
+
+def test_objective_auto_scale_is_opt_in_and_results_neutral():
+    """The 'Auto-scale objective' toggle adds HiGHS' recommended
+    ``user_objective_scale=-1`` (results-neutral). Absent ⇒ off, so a bare
+    options dict stays identical to a plain HiGHS optimize."""
+    assert _build_solver_options({}) == {}                              # absent → off
+    assert _build_solver_options({"objectiveAutoScale": False}) == {}
+    assert _build_solver_options({"objectiveAutoScale": True}) == {
+        "user_objective_scale": -1,
+    }
+    # composes with a pinned method and threads
+    assert _build_solver_options(
+        {"solverType": "pdlp", "solverThreads": 4, "objectiveAutoScale": True}
+    ) == {"solver": "pdlp", "threads": 4, "user_objective_scale": -1}

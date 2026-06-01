@@ -14,7 +14,7 @@ export type BrowserFileHandle = any;
 
 // ── UI state ──────────────────────────────────────────────────────────────────
 
-export type WorkspaceTab = 'Welcome' | 'Build' | 'Data' | 'Model' | 'Settings' | 'Analytics' | 'Plugins';
+export type WorkspaceTab = 'Welcome' | 'Build' | 'Data' | 'Forge' | 'Model' | 'Settings' | 'Analytics' | 'Plugins';
 export type ModelSubTab = 'Map' | 'Table';
 export type AnalyticsSubTab = 'Validation' | 'Result' | 'Analytics' | 'Comparison' | 'Log';
 export type ChartMode = 'line' | 'area' | 'bar';

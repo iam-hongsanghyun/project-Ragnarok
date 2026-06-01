@@ -34,6 +34,7 @@ import {
   applyStandardTypesBundle,
   type StandardTypesCatalogue,
 } from 'lib/constants/pypsa_standard_types';
+import { RagnarokLogo } from 'shared/components/RagnarokLogo';
 
 type Phase = 'connecting' | 'warming' | 'fetching_config' | 'ready' | 'error';
 
@@ -169,6 +170,7 @@ function BootScreen({
   return (
     <div className={`boot-screen ${isError ? 'boot-screen--error' : 'boot-screen--loading'}`}>
       <div className="boot-screen__inner">
+        <RagnarokLogo size={56} title="" className="boot-screen__logo" />
         <div className="boot-screen__title">{title}</div>
         <div className="boot-screen__msg">{message}</div>
 
