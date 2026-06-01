@@ -1607,24 +1607,26 @@ function AppInner() {
             className="tb-btn tb-btn--muted"
             onClick={() => {
               if (!window.confirm(
-                'Clear the entire cache?\n\n'
+                'Clear the cache?\n\n'
                 + 'This removes:\n'
                 + '  • the loaded model + every unsaved edit + every result\n'
                 + '  • every persisted UI preference (column widths, panel sizes,\n'
-                + '    Data-view selection, settings, run history, recent files)\n'
-                + '  • every localStorage entry Ragnarok wrote\n\n'
+                + '    Data-view selection, settings, run history, recent files)\n\n'
+                + 'Installed plugins are KEPT (uninstall them from the Plugins tab).\n\n'
                 + 'Ragnarok will reload to the Welcome page.',
               )) return;
-              // Wipe every Ragnarok-owned localStorage key. The prefixes are
-              // stable across the codebase: `pypsa.*` for layout-level state,
-              // `ragnarok:*` for feature-level state, `ui:*` for view-level
-              // state. Untouched: third-party origin storage (none today, but
-              // future-proofs against accidental cross-app erasure).
+              // Wipe Ragnarok-owned cache / preference keys (`pypsa.*`,
+              // `ragnarok:*`, `ui:*`). Installed plugins are USER-OWNED
+              // CONTENT, not cache — Clear must NOT uninstall them (same
+              // PRESERVE rule as the build-id wipe in index.tsx). Plugin
+              // keys live under `ragnarok:fe-plugins:`.
               try {
+                const PRESERVE = ['ragnarok:fe-plugins:'];
                 const doomed: string[] = [];
                 for (let i = 0; i < window.localStorage.length; i += 1) {
                   const key = window.localStorage.key(i);
                   if (!key) continue;
+                  if (PRESERVE.some((p) => key.startsWith(p))) continue;
                   if (
                     key.startsWith('pypsa.')
                     || key.startsWith('ragnarok:')
