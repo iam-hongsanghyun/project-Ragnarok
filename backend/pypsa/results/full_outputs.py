@@ -26,6 +26,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import pypsa
 
@@ -84,6 +85,61 @@ def _iso_timestamp(value: Any) -> str:
         return pd.Timestamp(value).strftime("%Y-%m-%dT%H:%M:%S")
     except Exception:
         return str(value)
+
+
+def _series_rows(df: pd.DataFrame) -> list[dict[str, Any]]:
+    """Convert a (snapshot × component) output frame to the list-of-row dicts
+    the frontend expects, vectorised.
+
+    The naive version did a per-cell ``df.at[snapshot, col]`` label lookup —
+    O(snapshots × components) of hashed lookups, which for a multi-bus
+    full-year run is tens of millions of calls and dominates the post-solve
+    time. Here we drop to numpy positional access (and a whole-array
+    ``tolist()`` on the common all-finite path), preserving the original
+    semantics: NaN cells are omitted, finite values become Python floats.
+    """
+    cols = [str(c) for c in df.columns]
+    index_rows = [_series_snapshot_row(s) for s in df.index]
+    rows: list[dict[str, Any]] = []
+
+    # Numeric fast path — every output series (p, q, marginal_price, soc, mu_*)
+    # is float. Object/mixed frames fall through to the slow, exact path.
+    try:
+        arr = df.to_numpy(dtype=float)
+    except (ValueError, TypeError):
+        arr = None
+
+    if arr is not None:
+        finite = np.isfinite(arr)
+        if bool(finite.all()):
+            # No NaN to drop → emit every column; tolist() does the float
+            # conversion in C, so there's no Python per-cell work.
+            for base, vals in zip(index_rows, arr.tolist()):
+                row = dict(base)
+                row.update(zip(cols, vals))
+                rows.append(row)
+        else:
+            for i, base in enumerate(index_rows):
+                row = dict(base)
+                ri = arr[i]
+                fi = finite[i]
+                for j, col in enumerate(cols):
+                    if fi[j]:
+                        row[col] = float(ri[j])
+                rows.append(row)
+        return rows
+
+    # Object/mixed fallback (rare): preserve exact _safe_scalar semantics.
+    values = df.to_numpy()
+    for i, base in enumerate(index_rows):
+        row = dict(base)
+        ri = values[i]
+        for j, col in enumerate(cols):
+            safe = _safe_scalar(ri[j])
+            if safe is not None:
+                row[col] = safe
+        rows.append(row)
+    return rows
 
 
 def _series_snapshot_row(snapshot: Any) -> dict[str, Any]:
@@ -157,14 +213,7 @@ def build_full_outputs(network: pypsa.Network) -> dict[str, Any]:
             df = getattr(t_frame, attr, None)
             if df is None or not isinstance(df, pd.DataFrame) or df.empty:
                 continue
-            rows: list[dict[str, Any]] = []
-            for snapshot in df.index:
-                row = _series_snapshot_row(snapshot)
-                for component_name in df.columns:
-                    safe = _safe_scalar(df.at[snapshot, component_name])
-                    if safe is not None:
-                        row[str(component_name)] = safe
-                rows.append(row)
+            rows = _series_rows(df)
             if rows:
                 series_out[f"{list_name}-{attr}"] = rows
 

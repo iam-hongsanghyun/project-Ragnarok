@@ -381,15 +381,19 @@ def run_pypsa(
     if total_capex_annual > 0:
         cost_breakdown.append({"label": "Capital cost", "value": round(total_capex_annual)})
 
-    # Per-bus LMP (nodal marginal prices) — one value series per bus
+    # Per-bus LMP (nodal marginal prices) — one value series per snapshot.
+    # Vectorised: the naive per-(snapshot, bus) `mp.at[...]` scalar lookup is
+    # O(snapshots × buses) — ~1.7M label lookups for a 1-year, multi-bus run.
+    # Round once and `tolist()` the whole array (C-level) instead.
     nodal_price_series: list[dict] = []
     if not network.buses_t.marginal_price.empty:
-        mp = network.buses_t.marginal_price
-        for ts in network.snapshots:
+        mp = network.buses_t.marginal_price.round(2)
+        bus_cols = [str(b) for b in mp.columns]
+        for ts, vals in zip(mp.index, mp.to_numpy().tolist()):
             nodal_price_series.append({
                 "label": str(ts),
                 "timestamp": str(ts),
-                "values": {bus: round(float(mp.at[ts, bus]), 2) for bus in mp.columns},
+                "values": dict(zip(bus_cols, vals)),
             })
 
     # Series

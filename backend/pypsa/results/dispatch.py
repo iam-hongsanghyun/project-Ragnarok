@@ -41,25 +41,32 @@ def build_dispatch_series(
     load_dispatch: pd.Series,
     generator_dispatch_frame: pd.DataFrame,
 ) -> tuple[list[dict], list[dict]]:
+    # Vectorised: pull whole columns to Python lists once (C-level `tolist()`),
+    # then build the sparse per-snapshot dicts from those — instead of a
+    # per-(snapshot, carrier/generator) `.loc[...]` label lookup, which is
+    # O(snapshots × components) and dominates a multi-bus full-year run.
+    snapshots = network.snapshots
+    labels = [_snapshot_label(s) for s in snapshots]
+    carrier_df = pd.DataFrame(by_carrier, index=snapshots)
+    carrier_cols = [str(c) for c in carrier_df.columns]
+    carrier_rows = carrier_df.to_numpy().tolist()
+    load_vals = load_dispatch.reindex(snapshots).to_numpy().tolist()
+    gen_cols = [str(g) for g in generator_dispatch_frame.columns]
+    gen_rows = generator_dispatch_frame.reindex(index=snapshots).clip(lower=0.0).to_numpy().tolist()
+
     dispatch_series: list[dict] = []
     generator_dispatch_series: list[dict] = []
-    for snapshot in network.snapshots:
-        label, stamp, period = _snapshot_label(snapshot)
-        values = {
-            carrier: float(series.loc[snapshot])
-            for carrier, series in by_carrier.items()
-            if abs(float(series.loc[snapshot])) > 1e-6
-        }
+    for i, (label, stamp, period) in enumerate(labels):
+        total = float(load_vals[i])
+        crow = carrier_rows[i]
+        values = {carrier_cols[j]: v for j, v in enumerate(crow) if abs(v) > 1e-6}
         dispatch_series.append(
-            {"label": label, "timestamp": stamp, "period": period, "values": values, "total": float(load_dispatch.loc[snapshot])}
+            {"label": label, "timestamp": stamp, "period": period, "values": values, "total": total}
         )
-        gen_values = {
-            gen: max(float(generator_dispatch_frame.loc[snapshot, gen]), 0.0)
-            for gen in generator_dispatch_frame.columns
-            if max(float(generator_dispatch_frame.loc[snapshot, gen]), 0.0) > 1e-6
-        }
+        grow = gen_rows[i]
+        gen_values = {gen_cols[j]: v for j, v in enumerate(grow) if v > 1e-6}
         generator_dispatch_series.append(
-            {"label": label, "timestamp": stamp, "period": period, "values": gen_values, "total": float(load_dispatch.loc[snapshot])}
+            {"label": label, "timestamp": stamp, "period": period, "values": gen_values, "total": total}
         )
     return dispatch_series, generator_dispatch_series
 
@@ -76,16 +83,30 @@ def build_price_emissions_series(
             if "co2_emissions" in network.carriers.columns
             else {}
         )
-    system_price: list[dict] = []
-    system_emissions: list[dict] = []
-    for snapshot in network.snapshots:
-        label, stamp, period = _snapshot_label(snapshot)
-        hourly_emissions = sum(
-            max(float(s.loc[snapshot]), 0.0) * emissions_factors.get(c, 0.0)
-            for c, s in by_carrier.items()
-        )
-        system_price.append({"label": label, "timestamp": stamp, "period": period, "value": float(price_series.loc[snapshot])})
-        system_emissions.append({"label": label, "timestamp": stamp, "period": period, "value": hourly_emissions})
+    # Vectorised: emissions = Σ_carrier clip(dispatch, 0) × factor as a single
+    # column op, then `tolist()` both series once — no per-snapshot `.loc[]`.
+    snapshots = network.snapshots
+    labels = [_snapshot_label(s) for s in snapshots]
+    emissions_total = None
+    for c, s in by_carrier.items():
+        ef = emissions_factors.get(c, 0.0)
+        if ef:
+            contrib = s.clip(lower=0.0) * ef
+            emissions_total = contrib if emissions_total is None else emissions_total.add(contrib, fill_value=0.0)
+    emission_vals = (
+        emissions_total.reindex(snapshots).fillna(0.0).to_numpy().tolist()
+        if emissions_total is not None else [0.0] * len(labels)
+    )
+    price_vals = price_series.reindex(snapshots).to_numpy().tolist()
+
+    system_price = [
+        {"label": l, "timestamp": st, "period": p, "value": float(price_vals[i])}
+        for i, (l, st, p) in enumerate(labels)
+    ]
+    system_emissions = [
+        {"label": l, "timestamp": st, "period": p, "value": float(emission_vals[i])}
+        for i, (l, st, p) in enumerate(labels)
+    ]
     return system_price, system_emissions
 
 
@@ -97,26 +118,23 @@ def build_storage_series(network: pypsa.Network) -> list[dict]:
     aggregate into charge (abs of the negative part) and discharge (positive
     part). State of charge is summed directly across units.
     """
-    state: list[dict] = []
+    snapshots = network.snapshots
+    labels = [_snapshot_label(s) for s in snapshots]
     if len(network.storage_units.index) > 0:
         units = list(network.storage_units.index)
         total_p = sum(safe_series(network.storage_units_t.p, unit) for unit in units)
         total_soc = sum(safe_series(network.storage_units_t.state_of_charge, unit) for unit in units)
-        charge = total_p.clip(upper=0.0).abs()
-        discharge = total_p.clip(lower=0.0)
-        for snapshot in network.snapshots:
-            label, stamp, period = _snapshot_label(snapshot)
-            state.append({
-                "label": label, "timestamp": stamp, "period": period,
-                "charge": float(charge.loc[snapshot]),
-                "discharge": float(discharge.loc[snapshot]),
-                "state": float(total_soc.loc[snapshot]),
-            })
-    else:
-        for snapshot in network.snapshots:
-            label, stamp, period = _snapshot_label(snapshot)
-            state.append({
-                "label": label, "timestamp": stamp, "period": period,
-                "charge": 0.0, "discharge": 0.0, "state": 0.0,
-            })
-    return state
+        # `tolist()` each aggregate series once instead of a per-snapshot `.loc`.
+        charge_vals = total_p.clip(upper=0.0).abs().reindex(snapshots).to_numpy().tolist()
+        discharge_vals = total_p.clip(lower=0.0).reindex(snapshots).to_numpy().tolist()
+        soc_vals = total_soc.reindex(snapshots).to_numpy().tolist()
+        return [
+            {"label": l, "timestamp": st, "period": p,
+             "charge": float(charge_vals[i]), "discharge": float(discharge_vals[i]),
+             "state": float(soc_vals[i])}
+            for i, (l, st, p) in enumerate(labels)
+        ]
+    return [
+        {"label": l, "timestamp": st, "period": p, "charge": 0.0, "discharge": 0.0, "state": 0.0}
+        for (l, st, p) in labels
+    ]
