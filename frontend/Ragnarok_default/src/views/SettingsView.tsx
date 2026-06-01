@@ -34,6 +34,7 @@ import { StandardConstraintsSection, AdvancedConstraintsSection } from './Settin
 import { AppearanceSection } from './SettingsView.sections/Appearance';
 import { ProjectDefaultsSection } from './SettingsView.sections/ProjectDefaults';
 import { SolverSection } from './SettingsView.sections/Solver';
+import { ApiKeysSection } from './SettingsView.sections/ApiKeys';
 
 type SectionId =
   | 'scenarios'
@@ -47,9 +48,10 @@ type SectionId =
   | 'constraintsAdvanced'
   | 'appearance'
   | 'projectDefaults'
+  | 'apiKeys'
   | 'solver';
 
-type SectionGroup = 'Setup' | 'Policy' | 'Solve' | 'App';
+type SectionGroup = 'Setup' | 'Policy' | 'Solve' | 'Data' | 'App';
 
 interface Section {
   id: SectionId;
@@ -57,7 +59,7 @@ interface Section {
   group: SectionGroup;
 }
 
-const GROUPS: SectionGroup[] = ['Setup', 'Policy', 'Solve', 'App'];
+const GROUPS: SectionGroup[] = ['Setup', 'Policy', 'Solve', 'Data', 'App'];
 
 const SECTIONS: Section[] = [
   // Setup — what scenario and time span we're solving over
@@ -73,6 +75,8 @@ const SECTIONS: Section[] = [
   { id: 'stochastic', label: 'Stochastic',                    group: 'Solve' },
   { id: 'sclopf',     label: 'Security-constrained (SCLOPF)',  group: 'Solve' },
   { id: 'solver',     label: 'Solver',                        group: 'Solve' },
+  // Data — external-source credentials
+  { id: 'apiKeys',    label: 'API keys',                      group: 'Data' },
   // App — workspace preferences
   { id: 'appearance',      label: 'Appearance',       group: 'App' },
   { id: 'projectDefaults', label: 'Project defaults', group: 'App' },
@@ -185,6 +189,7 @@ export function SettingsView(props: SettingsViewProps) {
         {section === 'constraintsAdvanced' && <AdvancedConstraintsSection {...props} />}
         {section === 'appearance'     && <AppearanceSection {...props} />}
         {section === 'projectDefaults' && <ProjectDefaultsSection {...props} />}
+        {section === 'apiKeys'        && <ApiKeysSection />}
         {section === 'solver'         && <SolverSection {...props} />}
       </main>
     </ResizablePanels>

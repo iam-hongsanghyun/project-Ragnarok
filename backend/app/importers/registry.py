@@ -22,8 +22,9 @@ def _factories() -> list[Callable[[], Database]]:
     from .databases.wri_gppd import build as build_wri
     from .databases.worldbank_demand import build as build_wb
     from .databases.kpg193 import build as build_kpg
+    from .databases.eia_demand import build as build_eia
 
-    return [build_osm, build_wri, build_wb, build_kpg]
+    return [build_osm, build_wri, build_wb, build_kpg, build_eia]
 
 
 @lru_cache(maxsize=1)

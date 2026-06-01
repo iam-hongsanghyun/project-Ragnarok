@@ -16,9 +16,18 @@ from backend.app.importers.registry import (
 from backend.app.importers.protocol import Database
 
 
-def test_registry_lists_all_four_modules():
+def test_registry_lists_expected_modules():
     ids = set(registered_databases().keys())
-    assert ids == {"osm", "wri_gppd", "worldbank_demand", "kpg193"}
+    assert ids == {"osm", "wri_gppd", "worldbank_demand", "kpg193", "eia_demand"}
+
+
+def test_eia_declares_byok_key():
+    """The BYOK exemplar must advertise the key it needs so the frontend
+    can prompt for it and gate the Fetch button."""
+    by_id = {m["id"]: m for m in available_databases()}
+    eia = by_id["eia_demand"]
+    assert eia["requires_secrets"] == ["eia_key"]
+    assert eia["country_coverage"] == ["USA"]
 
 
 def test_every_module_conforms_to_protocol():

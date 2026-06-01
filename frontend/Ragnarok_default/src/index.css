@@ -8337,3 +8337,77 @@ code, kbd, samp, tt,
 .boot-screen__retry:hover {
   filter: brightness(1.08);
 }
+
+/* Settings → API keys */
+.api-key-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.api-key-row {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 14px;
+  background: var(--surface);
+}
+.api-key-row__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.api-key-row__label {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.api-key-row__badge {
+  font-size: 0.72rem;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.api-key-row__badge.is-set {
+  color: var(--brand, #0f766e);
+  border-color: var(--brand, #0f766e);
+}
+.api-key-row__help {
+  margin: 6px 0 10px;
+  font-size: 0.8rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.api-key-row__help a {
+  color: var(--brand, #0f766e);
+}
+.api-key-row__controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.api-key-row__input {
+  flex: 1 1 220px;
+  min-width: 160px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg, #fff);
+  color: var(--text);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.82rem;
+}
+
+/* Data view: "needs an API key" notice on the filter rail */
+.data-import-filters__keynotice {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--brand, #0f766e);
+  border-radius: 4px;
+  background: var(--bg-hover, #f1f5f9);
+  font-size: 0.8rem;
+  color: var(--text);
+  line-height: 1.4;
+}

@@ -8,6 +8,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { DatabaseMeta, FilterSchema, PreviewSummary } from 'lib/api/databases';
+import { getSecret } from 'lib/api/secrets';
 import { SearchableSelect } from '../../shared/components/SearchableSelect';
 import { DateField } from './DateField';
 
@@ -367,10 +368,24 @@ export function FilterPanel({
       </aside>
     );
   }
+  // BYOK: which of this database's required API keys aren't set in this
+  // browser yet. Fetch is blocked until they are — the backend would
+  // 400 anyway, but catching it here is a clearer prompt.
+  const missingSecrets = (database.requires_secrets ?? []).filter(
+    (name) => !getSecret(name),
+  );
+  const blockedOnSecrets = missingSecrets.length > 0;
+
   return (
     <aside className="view-rail view-rail--right data-import-filters">
       <div className="view-rail-header"><span>{database.name}</span></div>
       <div className="view-rail-body data-import-filters__body">
+        {blockedOnSecrets && (
+          <p className="data-import-filters__keynotice">
+            This source needs an API key: <b>{missingSecrets.join(', ')}</b>.
+            Add it in <b>Settings → API keys</b>, then come back and fetch.
+          </p>
+        )}
         <section className="data-import-filters__meta">
           {database.description && (
             <p className="data-import-filters__desc">{database.description}</p>
@@ -434,7 +449,8 @@ export function FilterPanel({
             type="button"
             className="primary"
             onClick={onFetch}
-            disabled={fetching || applying}
+            disabled={fetching || applying || blockedOnSecrets}
+            title={blockedOnSecrets ? 'Add the required API key in Settings first' : undefined}
           >
             {fetching ? 'Fetching…' : 'Fetch preview'}
           </button>
