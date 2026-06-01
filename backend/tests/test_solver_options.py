@@ -27,6 +27,18 @@ def test_explicit_method_is_pinned():
     assert _build_solver_options({"solverType": "IPM"}) == {"solver": "ipm"}
 
 
+def test_hipo_is_capability_gated_and_falls_back():
+    """Selecting HiPO must be safe on any machine: use it where the HiGHS build
+    has it, fall back to IPM where it doesn't — never error."""
+    from backend.pypsa.results import _highs_has_hipo
+
+    opts = _build_solver_options({"solverType": "hipo"})
+    if _highs_has_hipo():
+        assert opts == {"solver": "hipo"}
+    else:
+        assert opts == {"solver": "ipm"}
+
+
 def test_threads_pinned_only_when_positive():
     assert _build_solver_options({"solverThreads": 0}) == {}      # 0 = all cores
     assert _build_solver_options({"solverThreads": 4}) == {"threads": 4}

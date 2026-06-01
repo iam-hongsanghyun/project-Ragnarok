@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import logging
 import time
 from collections import defaultdict
@@ -59,6 +60,27 @@ def _coerce_solve_status(result: Any) -> tuple[str, str]:
 # ``n.optimize(solver_name="highs")`` and the fast default.
 _HIGHS_METHODS = ("simplex", "ipm", "pdlp")
 
+
+@functools.lru_cache(maxsize=1)
+def _highs_has_hipo() -> bool:
+    """Whether the installed HiGHS was compiled with the HiPO solver.
+
+    HiPO (a factorisation-based interior-point solver, HiGHS ≥ 1.12, built with
+    ``-DHIPO=ON``) is excellent on large energy-system LPs but ships only in
+    special builds — the stock pip/conda ``highspy`` rejects ``solver="hipo"``
+    with ``kError``. We probe once so HiPO stays an *opt-in capability*: a
+    machine that has it can pick it; every machine that doesn't falls back and
+    is unaffected.
+    """
+    try:
+        import highspy
+
+        h = highspy.Highs()
+        h.setOptionValue("output_flag", False)
+        return h.setOptionValue("solver", "hipo") == highspy.HighsStatus.kOk
+    except Exception:
+        return False
+
 # How linopy hands the built problem to HiGHS. linopy's default ("lp") writes
 # the whole problem to an LP *text file* and HiGHS parses it back — the
 # "Writing time" stage plus a load step whose cost explodes super-linearly with
@@ -83,7 +105,11 @@ def _build_solver_options(options: dict[str, Any]) -> dict[str, Any]:
     if isinstance(threads, (int, float)) and int(threads) > 0:
         out["threads"] = int(threads)
     solver_type = str(options.get("solverType", "auto")).lower()
-    if solver_type in _HIGHS_METHODS:
+    if solver_type == "hipo":
+        # Use HiPO where the build has it; otherwise fall back to IPM (the next
+        # interior-point method) so a machine without HiPO never errors.
+        out["solver"] = "hipo" if _highs_has_hipo() else "ipm"
+    elif solver_type in _HIGHS_METHODS:
         out["solver"] = solver_type
     return out
 
@@ -242,6 +268,13 @@ def run_pypsa(
                     "lifetime, or for conflicting constraints (CO₂ cap, "
                     "capacity factor caps) against the available capacity."
                 ),
+            )
+        # HiPO requested on a build that lacks it → we ran IPM; say so.
+        if str(options.get("solverType", "auto")).lower() == "hipo" and not _highs_has_hipo():
+            notes.append(
+                "HiPO was selected but this HiGHS build doesn't include it — "
+                "solved with IPM instead. To enable HiPO, install a HiGHS built "
+                "with -DHIPO=ON (and METIS + BLAS)."
             )
         solver_note = "HiGHS"
         if solver_options.get("solver"):

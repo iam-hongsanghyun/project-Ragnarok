@@ -53,8 +53,10 @@ export function SolverSection(props: SolverSectionProps) {
         <p className="sg-setting-hint">
           HiGHS is always the solver; this picks its LP method. <b>Auto</b> lets
           HiGHS choose the fastest one (recommended). Simplex / IPM / PDLP pin a
-          specific method. (MIP / unit-commitment runs ignore this — HiGHS solves
-          them either way.)
+          specific method. <b>HiPO</b> is HiGHS's newer interior-point solver —
+          excellent on large energy LPs, but only in HiGHS builds compiled with
+          it; where it's absent it falls back to IPM automatically, so it's safe
+          to pick anywhere. (MIP / unit-commitment runs ignore this choice.)
         </p>
       </div>
     </section>

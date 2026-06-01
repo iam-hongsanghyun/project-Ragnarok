@@ -9,7 +9,10 @@
 
 export type DateFormat = 'auto' | 'dmy' | 'mdy' | 'ymd';
 // HiGHS is always the solver; this picks its method. 'auto' lets HiGHS choose.
-export type SolverType = 'auto' | 'simplex' | 'ipm' | 'pdlp';
+// 'hipo' uses HiGHS's HiPO interior-point solver where the build includes it,
+// and falls back to IPM elsewhere (handled server-side) — so it's safe to pick
+// on any machine.
+export type SolverType = 'auto' | 'simplex' | 'ipm' | 'pdlp' | 'hipo';
 
 export interface AppSettings {
   dateFormat: DateFormat;

@@ -41,7 +41,8 @@
       { "value": "auto", "label": "Auto (HiGHS chooses)" },
       { "value": "simplex", "label": "Simplex" },
       { "value": "ipm", "label": "IPM" },
-      { "value": "pdlp", "label": "PDLP" }
+      { "value": "pdlp", "label": "PDLP" },
+      { "value": "hipo", "label": "HiPO" }
     ],
     "loadSheddingOptions": [
       { "value": false, "label": "Off" },
