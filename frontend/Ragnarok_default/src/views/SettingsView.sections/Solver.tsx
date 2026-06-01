@@ -38,7 +38,7 @@ export function SolverSection(props: SolverSectionProps) {
         <p className="sg-setting-hint">auto = HiGHS uses all available cores.</p>
       </div>
       <div className="sg-setting-row">
-        <label className="sg-setting-label">Algorithm</label>
+        <label className="sg-setting-label">Method</label>
         <div className="sg-btn-row">
           {solverTypes.map(({ value, label }) => (
             <button
@@ -51,7 +51,10 @@ export function SolverSection(props: SolverSectionProps) {
           ))}
         </div>
         <p className="sg-setting-hint">
-          IPM (interior point) is often faster for large LP models. Use Simplex for MIP / unit-commitment runs.
+          HiGHS is always the solver; this picks its LP method. <b>Auto</b> lets
+          HiGHS choose the fastest one (recommended). Simplex / IPM / PDLP pin a
+          specific method. (MIP / unit-commitment runs ignore this — HiGHS solves
+          them either way.)
         </p>
       </div>
     </section>

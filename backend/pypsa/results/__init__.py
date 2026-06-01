@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import logging
+import time
 from collections import defaultdict
 from typing import Any
 
 import numpy as np
 import pandas as pd
 from fastapi import HTTPException
+
+# Solve-phase timing and notes are logged here. With the run worker no longer
+# redirecting file descriptors, these INFO lines stream to the launching
+# terminal alongside HiGHS' own verbose output.
+_log = logging.getLogger("pypsa.solver")
 
 from ..constants import carrier_color
 from ..network import build_network
@@ -47,6 +54,29 @@ def _coerce_solve_status(result: Any) -> tuple[str, str]:
     return "ok", "optimal"
 
 
+# HiGHS LP methods the user may pin. Anything else (incl. "auto"/"choose"/
+# "highs"/"") leaves the method unset so HiGHS chooses — identical to a bare
+# ``n.optimize(solver_name="highs")`` and the fast default.
+_HIGHS_METHODS = ("simplex", "ipm", "pdlp")
+
+
+def _build_solver_options(options: dict[str, Any]) -> dict[str, Any]:
+    """Translate run options into HiGHS ``solver_options``.
+
+    ``solverThreads`` > 0 pins the thread count (0 = all cores → unset).
+    ``solverType`` pins a HiGHS LP method only when it's an explicit method;
+    the default ``"auto"`` omits ``solver`` so HiGHS picks the fastest path.
+    """
+    out: dict[str, Any] = {}
+    threads = options.get("solverThreads", 0)
+    if isinstance(threads, (int, float)) and int(threads) > 0:
+        out["threads"] = int(threads)
+    solver_type = str(options.get("solverType", "auto")).lower()
+    if solver_type in _HIGHS_METHODS:
+        out["solver"] = solver_type
+    return out
+
+
 def run_pypsa(
     model: dict[str, list[dict[str, Any]]],
     scenario: dict[str, Any],
@@ -79,7 +109,15 @@ def run_pypsa(
     # scenario and options and solves them. Plugins live entirely on the
     # frontend side (they contribute rows/constraints to the model before it is
     # sent here), so there is no plugin hook in this pipeline.
+    _t_build = time.perf_counter()
     network, notes = build_network(model, scenario, options)
+    _log.info(
+        "network built in %.2fs — %d snapshots, %d buses, %d generators",
+        time.perf_counter() - _t_build,
+        len(network.snapshots),
+        len(network.buses),
+        len(network.generators),
+    )
 
     snapshot_count = len(network.snapshots)
     snapshot_weight = float(network.snapshot_weightings["objective"].iloc[0]) if snapshot_count else 1.0
@@ -112,18 +150,15 @@ def run_pypsa(
     # Currency symbol for formatted output strings
     currency = str(options.get("currencySymbol", "$"))
 
-    # Read solver performance options from run payload
-    solver_options: dict = {}
-    threads = options.get("solverThreads", 0)
-    if isinstance(threads, (int, float)) and int(threads) > 0:
-        solver_options["threads"] = int(threads)
-    solver_type = str(options.get("solverType", "simplex")).lower()
-    if solver_type in ("ipm", "simplex"):
-        solver_options["solver"] = solver_type
+    # Read solver performance options from run payload. HiGHS is always the
+    # solver (solver_name="highs"); solverType picks the method within HiGHS and
+    # the default "auto" leaves it to HiGHS (the fast path, == a bare optimize).
+    solver_options = _build_solver_options(options)
 
     rolling_windows: list[dict[str, Any]] = []
     solve_status: str = "unknown"
     solve_condition: str = "unknown"
+    _t_solve = time.perf_counter()
     try:
         if rolling.enabled:
             rolling_windows = _rolling_window_summaries(
@@ -163,6 +198,12 @@ def run_pypsa(
                 extra_functionality=extra_functionality,
             )
             solve_status, solve_condition = _coerce_solve_status(result)
+        _log.info(
+            "solve finished in %.2fs — status=%s condition=%s",
+            time.perf_counter() - _t_solve,
+            solve_status,
+            solve_condition,
+        )
         # Solver may return without raising but still report a non-optimal
         # condition (e.g. HiGHS "Dual simplex ratio test failed" leaves
         # condition='unknown' while linopy parses a garbage primal). Treat
@@ -180,10 +221,12 @@ def run_pypsa(
                 ),
             )
         solver_note = "HiGHS"
-        if solver_options.get("threads"):
-            solver_note += f" ({solver_options['threads']} threads)"
         if solver_options.get("solver"):
             solver_note += f", {solver_options['solver'].upper()}"
+        else:
+            solver_note += " (auto method)"
+        if solver_options.get("threads"):
+            solver_note += f" ({solver_options['threads']} threads)"
         if rolling.enabled:
             notes.append(
                 "PyPSA rolling horizon solved with "

@@ -8,7 +8,6 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-import io
 import tempfile
 from pathlib import Path
 
@@ -16,14 +15,10 @@ from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
-import os
-import sys
-
 from .backends import BackendError, available_backends, get_backend
 from .config import load_system_defaults
 from .log_capture import (
     clear_buffer as _log_clear,
-    emit_solver_log as _emit_solver_log,
     get_snapshot as _log_snapshot,
     install as _install_log_capture,
 )
@@ -83,117 +78,63 @@ _jobs: dict[str, _Job] = {}
 
 def _solve_worker(
     payload: RunPayload,
-    result_queue: "mp.Queue[tuple[str, Any, str]]",
+    result_queue: "mp.Queue[tuple[str, Any]]",
 ) -> None:
-    """Run in a child process. Puts ("ok"|"err", result-or-msg, captured-stdout)
-    into the queue. The third element is the C-level stdout/stderr written by
-    HiGHS / PyPSA / linopy during the solve — Python ``logging`` cannot see
-    those because they go through C ``printf``, so we dup the fd to a temp
-    file for the duration of the run, then read it back and ship the contents
-    home for the parent to fan into its in-process log buffer.
+    """Run in a child process. Puts ("ok", result) or ("err", message) on the queue.
+
+    Solver output (HiGHS C-stdout, plus linopy / PyPSA Python logs) streams
+    straight to the launching terminal: the child inherits the parent's
+    stdout/stderr, so there is no fd redirection and no temp-file capture.
+    Dropping the capture removes per-solve overhead and the temp-file leak
+    that occurred when a solve was cancelled mid-run; the terminal is the
+    natural place for a developer to watch verbose solver progress.
+
+    A ``StreamHandler`` is attached to the root logger so Python-level solver
+    logs (linopy / PyPSA INFO) reach the terminal alongside the C-level HiGHS
+    output — the import-time capture handler only mirrors into the in-process
+    ring buffer, which this short-lived child discards.
 
     The backend is selected from ``options["backend"]`` (default PyPSA) via the
     backend registry, so the worker stays engine-agnostic.
     """
-    capture_path: str | None = None
-    saved_stdout_fd: int | None = None
-    saved_stderr_fd: int | None = None
-    capture_fd: int | None = None
-    status: str = "err"
-    payload_out: Any = "worker setup failed"
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    if not any(isinstance(h, logging.StreamHandler) for h in root.handlers):
+        stream = logging.StreamHandler()
+        stream.setLevel(logging.INFO)
+        stream.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
+        root.addHandler(stream)
+
     try:
-        # ── Redirect stdout (fd 1) and stderr (fd 2) to a temp file ────────
-        capture_path = tempfile.NamedTemporaryFile(
-            mode="w", suffix=".solverlog", delete=False
-        ).name
-        capture_fd = os.open(capture_path, os.O_WRONLY | os.O_TRUNC)
-        sys.stdout.flush()
-        sys.stderr.flush()
-        saved_stdout_fd = os.dup(1)
-        saved_stderr_fd = os.dup(2)
-        os.dup2(capture_fd, 1)
-        os.dup2(capture_fd, 2)
-
-        try:
-            options = payload.options or {}
-            backend = get_backend(options.get("backend"))
-            result = backend.run(payload.model, payload.scenario, options)
-            status = "ok"
-            payload_out = result
-        except Exception as exc:  # noqa: BLE001
-            status = "err"
-            payload_out = str(exc)
-        finally:
-            # ── Restore fd 1 and 2 BEFORE reading the capture file ───────
-            sys.stdout.flush()
-            sys.stderr.flush()
-            if saved_stdout_fd is not None:
-                os.dup2(saved_stdout_fd, 1)
-                os.close(saved_stdout_fd)
-                saved_stdout_fd = None
-            if saved_stderr_fd is not None:
-                os.dup2(saved_stderr_fd, 2)
-                os.close(saved_stderr_fd)
-                saved_stderr_fd = None
-            if capture_fd is not None:
-                try:
-                    os.close(capture_fd)
-                except OSError:
-                    pass
-                capture_fd = None
+        options = payload.options or {}
+        backend = get_backend(options.get("backend"))
+        result = backend.run(payload.model, payload.scenario, options)
+        result_queue.put(("ok", result))
     except Exception as exc:  # noqa: BLE001
-        status = "err"
-        payload_out = str(exc)
-
-    # ── Read captured solver output (best-effort) ──────────────────────────
-    captured_text = ""
-    if capture_path is not None:
-        try:
-            with open(capture_path, "r", encoding="utf-8", errors="replace") as f:
-                captured_text = f.read()
-        except OSError:
-            captured_text = ""
-        try:
-            os.unlink(capture_path)
-        except OSError:
-            pass
-
-    result_queue.put((status, payload_out, captured_text))
+        result_queue.put(("err", str(exc)))
 
 
 async def _collect_job(job_id: str) -> None:
     """Background asyncio task — waits for the worker process and updates job state.
 
-    The worker puts a ``(status, payload, solver_stdout)`` tuple onto its
-    queue once the solve finishes. We update the job state and then fan the
-    captured solver stdout (HiGHS / linopy / PyPSA C-level output) into the
-    in-process log buffer so the Analytics → Log tab sees the solver
-    transcript alongside everything else.
+    The worker puts a ``(status, payload)`` tuple onto its queue once the
+    solve finishes (``payload`` is the result dict on success or an error
+    message string on failure). Solver output (HiGHS / linopy / PyPSA)
+    streams live to the launching terminal during the solve, so there is
+    nothing to fan into the log buffer here.
     """
     job = _jobs.get(job_id)
     if job is None:
         return
     while True:
         try:
-            msg = job.result_queue.get_nowait()
-            # Tolerate the legacy 2-tuple shape in case a worker was started
-            # before this change (e.g. mid-deploy upgrade in dev).
-            if isinstance(msg, tuple) and len(msg) == 3:
-                status, data, solver_stdout = msg
-            else:
-                status, data = msg  # type: ignore[misc]
-                solver_stdout = ""
+            status, data = job.result_queue.get_nowait()
             if status == "ok":
                 job.status = "done"
                 job.result = data
             else:
                 job.status = "error"
                 job.error = data
-            # Fan captured solver output into the log buffer — surfaces in
-            # the Analytics → Log tab on its next refresh (which fires from
-            # the frontend's run-completion path, so it's near-instant).
-            if solver_stdout:
-                _emit_solver_log(solver_stdout, job_id)
             return
         except queue.Empty:
             if not job.proc.is_alive():
@@ -286,11 +227,12 @@ def get_log() -> dict[str, Any]:
       • uvicorn HTTP access logs (with /api/run/{id} and /api/log polls
         already filtered out at INFO and dropped from the buffer);
       • uvicorn errors / startup;
-      • anything emitted via ``logging.getLogger(...)`` in backend code;
-      • the captured solver C-stdout (HiGHS / linopy / PyPSA) — the
-        run worker dup's fd 1+2 to a temp file for the solve, then ships
-        the captured text back so it lands here under the ``pypsa.solver``
-        logger when the worker reports completion.
+      • anything emitted via ``logging.getLogger(...)`` in backend code.
+
+    Solver C-stdout (HiGHS) and the linopy / PyPSA solve logs are NOT
+    mirrored here — they stream live to the terminal that launched the
+    backend (the run worker no longer redirects file descriptors). Watch
+    that terminal for verbose solver progress.
     """
     entries, cursor, capacity = _log_snapshot()
     return {

@@ -11,12 +11,13 @@ What this **does** capture
 * Any application code that uses ``logging.getLogger(...)``.
 * Unhandled exceptions routed through ``logging.exception()``.
 
-What this **does not** capture (yet)
-------------------------------------
-* Solver C-stdout (HiGHS verbose dump). Capturing that needs file-descriptor-
-  level ``os.dup2`` redirection on the run worker process. Listed as a
-  follow-up — would require careful handling around the multiprocessing
-  fork/spawn boundary so dev terminal output is not also swallowed.
+What this **does not** capture
+------------------------------
+* Solver C-stdout (HiGHS verbose dump) and the linopy / PyPSA solve logs.
+  The run worker runs in a child process that inherits the launching
+  terminal's stdout/stderr, so this output streams there live — it is
+  intentionally not redirected or mirrored into this buffer (capturing it
+  added per-solve overhead and a temp-file leak on cancel).
 * Direct ``print()`` calls in the backend. They go to stdout, not through
   ``logging``. The backend convention is to use ``logging.getLogger(...)``;
   any stray ``print()`` will be invisible to the Log tab.
@@ -145,39 +146,6 @@ def install() -> None:
     # filter prevents the poll-noise re-emits from flooding the buffer.
     if root.level == logging.NOTSET or root.level > logging.DEBUG:
         root.setLevel(logging.DEBUG)
-
-
-def emit_solver_log(text: str, job_id: str) -> None:
-    """Replay captured solver stdout into the in-process log buffer.
-
-    Used by main.py after a run worker finishes — the worker dup'd its
-    stdout fd to a temp file during the solve to catch C-level output
-    from HiGHS / PyPSA / linopy, then shipped the captured text back to
-    the parent. The parent calls this once to fan the captured lines
-    into the buffer so the Log tab sees them alongside everything else.
-    Each non-empty line becomes one INFO record on the ``pypsa.solver``
-    logger; large captures are truncated to a sane prefix to avoid
-    monopolising the bounded ring buffer.
-    """
-    if not text:
-        return
-    logger = logging.getLogger("pypsa.solver")
-    lines = text.rstrip("\n").split("\n")
-    # Cap how many lines a single solve can push into the buffer. The
-    # buffer holds 1000 entries total; a verbose HiGHS run can emit
-    # thousands. Keep the head + tail so the user can see the start
-    # (parsing / pre-solve) and the end (final objective + status).
-    MAX_LINES = 400
-    if len(lines) > MAX_LINES:
-        head = lines[: MAX_LINES // 2]
-        tail = lines[-MAX_LINES // 2 :]
-        dropped = len(lines) - len(head) - len(tail)
-        lines = [*head, f"... [{dropped} solver lines dropped — full output too long for buffer] ...", *tail]
-    logger.info("── solver output for job %s (%d lines) ──", job_id, len(lines))
-    for line in lines:
-        if line.strip():
-            logger.info("%s", line)
-    logger.info("── end solver output for job %s ──", job_id)
 
 
 def get_snapshot() -> tuple[list[LogEntry], int, int]:

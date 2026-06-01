@@ -8,7 +8,8 @@
  */
 
 export type DateFormat = 'auto' | 'dmy' | 'mdy' | 'ymd';
-export type SolverType = 'simplex' | 'ipm';
+// HiGHS is always the solver; this picks its method. 'auto' lets HiGHS choose.
+export type SolverType = 'auto' | 'simplex' | 'ipm' | 'pdlp';
 
 export interface AppSettings {
   dateFormat: DateFormat;

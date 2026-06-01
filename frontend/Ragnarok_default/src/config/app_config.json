@@ -22,7 +22,7 @@
     "defaults": {
       "dateFormat": "auto",
       "solverThreads": 0,
-      "solverType": "simplex",
+      "solverType": "auto",
       "currencyCode": "USD",
       "currencySymbol": "$",
       "enableLoadShedding": false,
@@ -38,8 +38,10 @@
       "options": [0, 1, 2, 4, 8]
     },
     "solverTypes": [
+      { "value": "auto", "label": "Auto (HiGHS chooses)" },
       { "value": "simplex", "label": "Simplex" },
-      { "value": "ipm", "label": "IPM" }
+      { "value": "ipm", "label": "IPM" },
+      { "value": "pdlp", "label": "PDLP" }
     ],
     "loadSheddingOptions": [
       { "value": false, "label": "Off" },
