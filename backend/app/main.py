@@ -323,13 +323,25 @@ async def poll_run(job_id: str) -> dict[str, Any]:
 
 @app.delete("/api/run/{job_id}")
 async def cancel_run(job_id: str) -> dict[str, Any]:
-    """Terminate a running job's child process."""
+    """Terminate a running job's child process.
+
+    Escalate SIGTERM → SIGKILL. ``terminate()`` only sends SIGTERM, which the
+    worker honours when it returns to Python — but a long native solve does
+    not. The rolling-horizon path is the worst case: it chains many HiGHS
+    solves in one process, so SIGTERM is frequently not acted on within the
+    grace window and the worker keeps grinding through the remaining windows
+    as an orphan after the job is forgotten. So if it is still alive after a
+    short grace period, send SIGKILL (uncatchable) and only then drop the job.
+    """
     job = _jobs.get(job_id)
     if job is None:
         return {"jobId": job_id, "status": "not_found"}
     if job.proc.is_alive():
-        job.proc.terminate()
+        job.proc.terminate()                       # SIGTERM — graceful
         await asyncio.to_thread(job.proc.join, 3)
+        if job.proc.is_alive():
+            job.proc.kill()                        # SIGKILL — forceful
+            await asyncio.to_thread(job.proc.join, 3)
     job.status = "cancelled"
     _jobs.pop(job_id, None)
     return {"jobId": job_id, "status": "cancelled"}
