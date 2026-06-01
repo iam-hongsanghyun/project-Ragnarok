@@ -1085,9 +1085,42 @@ class Kpg193:
             f"{counts['thermal_generators']} thermal generators"
             f"{links_note}."
         )
-        # Per-bus point overlay so the user sees the network footprint
-        # immediately. KPG193's bus_location.csv covers every bus.
+        # Overlay: bus points AND the lines / transformers / links drawn as
+        # segments between their endpoint buses, so the user sees the actual
+        # grid. KPG193 branches carry no geometry — only bus0/bus1 — so we
+        # connect the bus coordinates with straight segments.
+        coord: dict[str, tuple[float, float]] = {}
+        for b in sheets.get("buses", []):
+            x = b.get("x")
+            y = b.get("y")
+            if isinstance(x, (int, float)) and isinstance(y, (int, float)):
+                coord[str(b.get("name"))] = (float(x), float(y))
+
         features: list[dict[str, Any]] = []
+
+        def _segments(rows: list[dict[str, Any]], kind: str) -> None:
+            for r in rows:
+                a = coord.get(str(r.get("bus0")))
+                b = coord.get(str(r.get("bus1")))
+                if a is None or b is None:
+                    continue
+                features.append({
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "LineString",
+                        "coordinates": [[a[0], a[1]], [b[0], b[1]]],
+                    },
+                    "properties": {
+                        "kind": kind,
+                        "name": str(r.get("name")),
+                        "voltage_kv": _num(r.get("v_nom")),
+                    },
+                })
+
+        _segments(sheets.get("lines", []), "line")
+        _segments(sheets.get("transformers", []), "transformer")
+        _segments(sheets.get("links", []), "link")
+
         for b in sheets.get("buses", []):
             x = b.get("x")
             y = b.get("y")
