@@ -185,6 +185,7 @@ def run_pypsa(
                 solver_options=solver_options if solver_options else {},
                 extra_functionality=extra_functionality,
                 io_api=_SOLVER_IO_API,
+                include_objective_constant=False,  # see note on the single-period call
             )
             # PyPSA's rolling-horizon helper does not return a status; it
             # only logs a warning on bad windows. Treat the run as optimal
@@ -210,6 +211,14 @@ def run_pypsa(
                 solver_options=solver_options if solver_options else {},
                 extra_functionality=extra_functionality,
                 io_api=_SOLVER_IO_API,
+                # Keep the objective constant out of the LP. It is a fixed
+                # offset that does not affect the optimal dispatch/capacities,
+                # and this app never reads n.objective (costs are recomputed
+                # from solved values), so it changes no reported number — it
+                # only improves LP conditioning. Pinned to False to match the
+                # PyPSA v2.0 default ahead of time. Not user-configurable: it
+                # is a numerical detail, not a modelling choice.
+                include_objective_constant=False,
             )
             solve_status, solve_condition = _coerce_solve_status(result)
         _log.info(
