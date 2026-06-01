@@ -19,9 +19,13 @@ import { ConfigBootstrap } from './ConfigBootstrap';
  *
  * CRITICAL: we must NOT wipe USER-OWNED CONTENT — things the user
  * explicitly created or installed and expects to persist until they
- * remove them. Installed plugins are the prime example: before this
- * guard, every dev-server restart minted a new build_id and silently
- * uninstalled every plugin. The PRESERVE list below protects them.
+ * remove them. Installed plugins and BYOK API keys are the prime
+ * examples: before this guard, every dev-server restart minted a new
+ * build_id and silently uninstalled every plugin and erased every saved
+ * API key (`ragnarok:secret:*`), so users had to re-enter keys on each
+ * restart. The PRESERVE list below protects both. (API keys live only in
+ * this browser's localStorage — a local, never-committed store — and are
+ * still wiped by the explicit "Clear cache" button.)
  *
  * `pypsa_gui_settings` is reset on a build change too (see WIPE_KEYS): app
  * settings are derived from the app's *current* defaults, so a new build /
@@ -39,8 +43,9 @@ const WIPE_PREFIXES = ['pypsa.', 'ragnarok:', 'ui:'];
 // Exact keys also wiped on a build change — app settings re-sync to the
 // current defaults instead of persisting a stale cached value.
 const WIPE_KEYS = ['pypsa_gui_settings'];
-// Never wiped — user-owned content that persists until explicitly removed.
-const PRESERVE_PREFIXES = ['ragnarok:fe-plugins:'];
+// Never wiped — user-owned content that persists until explicitly removed
+// (installed plugins, and BYOK API keys the user typed into Settings).
+const PRESERVE_PREFIXES = ['ragnarok:fe-plugins:', 'ragnarok:secret:'];
 
 try {
   const stored = window.localStorage.getItem(BUILD_ID_KEY);
