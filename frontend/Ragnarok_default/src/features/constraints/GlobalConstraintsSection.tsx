@@ -3,6 +3,18 @@ import { ConstraintMetric, CustomConstraint } from 'lib/types';
 import { METRIC_DEFS } from 'lib/constants';
 import { SearchableSelect } from '../../shared/components/SearchableSelect';
 
+/**
+ * Human-readable constraint title composed from its parts, e.g.
+ *   "CO₂ Intensity Cap ≤ 0 tCO₂/MWh"
+ *   "Max Carrier Generation (coal) ≤ 5000 MWh"
+ * Used as the auto-filled label; the user can override it.
+ */
+function autoLabel(metric: ConstraintMetric, carrier: string, value: number): string {
+  const def = METRIC_DEFS[metric];
+  const carrierPart = def.needsCarrier && carrier ? ` (${carrier})` : '';
+  return `${def.label}${carrierPart} ${def.sense} ${value} ${def.unit}`.trim();
+}
+
 export function GlobalConstraintsSection({
   constraints,
   carriers,
@@ -13,18 +25,34 @@ export function GlobalConstraintsSection({
   onChange: (next: CustomConstraint[]) => void;
 }) {
   const update = (id: string, patch: Partial<CustomConstraint>) =>
-    onChange(constraints.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+    onChange(
+      constraints.map((c) => {
+        if (c.id !== id) return c;
+        // A direct label edit wins and stops the title from auto-following.
+        if ('label' in patch) return { ...c, ...patch };
+        const merged = { ...c, ...patch };
+        // Keep the title in sync with metric / carrier / sense / value while it
+        // is still the auto-generated value (or empty). A title the user has
+        // typed themselves is preserved.
+        const wasAuto =
+          c.label.trim() === '' || c.label === autoLabel(c.metric, c.carrier, c.value);
+        if (wasAuto) merged.label = autoLabel(merged.metric, merged.carrier, merged.value);
+        return merged;
+      }),
+    );
 
   const handleAdd = () => {
     const metric: ConstraintMetric = 'co2_cap';
     const def = METRIC_DEFS[metric];
+    const carrier = def.needsCarrier ? (carriers[0] ?? '') : '';
+    const value = 0;
     const nc: CustomConstraint = {
       id: `cc_${Date.now()}`,
       enabled: true,
-      label: def.label,
+      label: autoLabel(metric, carrier, value),
       metric,
-      carrier: def.needsCarrier ? (carriers[0] ?? '') : '',
-      value: 0,
+      carrier,
+      value,
       unit: def.unit,
     };
     onChange([...constraints, nc]);
@@ -33,6 +61,8 @@ export function GlobalConstraintsSection({
   const handleMetricChange = (id: string, nextMetric: ConstraintMetric) => {
     const def = METRIC_DEFS[nextMetric];
     const current = constraints.find((c) => c.id === id);
+    // metric/unit/carrier change here; `update` re-derives the title if it was
+    // still auto-generated.
     update(id, {
       metric: nextMetric,
       unit: def.unit,
