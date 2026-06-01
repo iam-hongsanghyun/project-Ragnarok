@@ -12,8 +12,16 @@
 # where you want HiPO; every other machine keeps working unchanged.
 #
 # Safety: the new wheel is built, then HiPO is verified in a *throwaway* venv,
-# and only if that succeeds is the project venv's highspy replaced. A failed or
-# HiPO-less build therefore never touches the working solver.
+# and only if that succeeds is the project venv's highspy replaced. A failed,
+# HiPO-less, or non-importable build therefore never touches the working solver.
+#
+# KNOWN STATUS (as of highspy 1.14.0, the latest on PyPI): the sdist builds with
+# -DHIPO=ON but the Python extension does not fully link HiPO — `import highspy`
+# then fails with an unresolved `hipo::LogHighs` symbol. So this script will
+# build the wheel, fail the verify step, and correctly leave the venv untouched.
+# Re-run it once a highspy with working HiPO Python bindings ships — the backend
+# probe (_highs_has_hipo) and the "HiPO" UI option will then light up
+# automatically, no code change needed.
 #
 # Usage:  scripts/build-hipo-highspy.sh
 set -euo pipefail
@@ -41,19 +49,23 @@ echo "==> metis at $METIS_PREFIX"
 WHEELDIR="$(mktemp -d)"
 echo "==> Building highspy wheel from source with HiPO (this can take 10-20 min)…"
 # scikit-build-core forwards cmake.define.* to the HiGHS CMake. HIPO=ON +
-# FAST_BUILD=ON are the documented switches; CMAKE_PREFIX_PATH lets find_package
-# locate the brew METIS. BLAS is Accelerate on macOS (found automatically).
+# FAST_BUILD=ON are the documented switches. METIS is supplied via the *env*
+# CMAKE_PREFIX_PATH (cmake merges env + cache) — NOT via cmake.define, which
+# would clobber the cache prefix scikit-build-core sets for pybind11 and break
+# the binding build. BLAS is Accelerate on macOS (found automatically).
+export CMAKE_PREFIX_PATH="$METIS_PREFIX${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}"
 "$PIPBIN" wheel --no-binary highspy "highspy==$HIGHS_VERSION" -w "$WHEELDIR" \
   --config-settings=cmake.define.HIPO=ON \
-  --config-settings=cmake.define.FAST_BUILD=ON \
-  --config-settings=cmake.define.CMAKE_PREFIX_PATH="$METIS_PREFIX"
+  --config-settings=cmake.define.FAST_BUILD=ON
 
 WHEEL="$(ls -1 "$WHEELDIR"/highspy-*.whl | head -1)"
 echo "==> Built $WHEEL"
 
 # 3. Verify HiPO in a throwaway venv BEFORE touching the project venv.
+#    Use the PROJECT interpreter ($PYBIN) so the cp-tag matches the wheel —
+#    a system python of a different minor version would reject it.
 CHECK="$(mktemp -d)/check-venv"
-python3 -m venv "$CHECK"
+"$PYBIN" -m venv "$CHECK"
 "$CHECK/bin/pip" install -q "$WHEEL"
 if ! "$CHECK/bin/python" - <<'PY'
 import sys, highspy
