@@ -5,7 +5,7 @@ import App from './App';
 import { ConfigBootstrap } from './ConfigBootstrap';
 
 /**
- * Wipe persisted Ragnarok state when the bundle ID changes.
+ * Wipe stale, build-coupled state when the bundle ID changes.
  *
  * `REACT_APP_BUILD_ID` is baked at compile time (see `package.json`):
  *   • `npm start`  → `dev-<unix-seconds>`   (changes every dev-server boot)
@@ -13,16 +13,28 @@ import { ConfigBootstrap } from './ConfigBootstrap';
  *
  * On every page load the client compares the running bundle's ID to the
  * ID it last persisted. A mismatch means the user is on a fresh build —
- * we wipe every Ragnarok-owned localStorage key so the new code starts
- * from a clean state and React's `usePersistedState` falls back to its
- * declared defaults (which routes the user to the Welcome tab).
+ * we clear DERIVED / VOLATILE state (grid layout, view selection, the
+ * cached config bundle) so the new code starts from clean defaults and
+ * lands on the Welcome tab.
  *
- * Prefixes wiped: `pypsa.*` (layout/grid), `ragnarok:*` (feature state),
- * `ui:*` (view state). Anything else stays — we never touch third-party
- * origin storage.
+ * CRITICAL: we must NOT wipe USER-OWNED CONTENT — things the user
+ * explicitly created or installed and expects to persist until they
+ * remove them. Installed plugins are the prime example: before this
+ * guard, every dev-server restart minted a new build_id and silently
+ * uninstalled every plugin. The PRESERVE list below protects them.
+ *
+ * Note: `pypsa_gui_settings` and `ragnarok_enabled_modules` use `_`
+ * separators (not `.`/`:`) so they already fall outside the wiped
+ * prefixes and survive untouched.
  */
 const BUILD_ID = process.env.REACT_APP_BUILD_ID || 'untagged';
 const BUILD_ID_KEY = 'ragnarok:build-id';
+
+// Wiped on a build change (derived / volatile state).
+const WIPE_PREFIXES = ['pypsa.', 'ragnarok:', 'ui:'];
+// Never wiped — user-owned content that persists until explicitly removed.
+const PRESERVE_PREFIXES = ['ragnarok:fe-plugins:'];
+
 try {
   const stored = window.localStorage.getItem(BUILD_ID_KEY);
   if (stored !== BUILD_ID) {
@@ -30,11 +42,9 @@ try {
     for (let i = 0; i < window.localStorage.length; i += 1) {
       const key = window.localStorage.key(i);
       if (!key) continue;
-      if (
-        key.startsWith('pypsa.') ||
-        key.startsWith('ragnarok:') ||
-        key.startsWith('ui:')
-      ) {
+      if (key === BUILD_ID_KEY) continue;
+      if (PRESERVE_PREFIXES.some((p) => key.startsWith(p))) continue;
+      if (WIPE_PREFIXES.some((p) => key.startsWith(p))) {
         doomed.push(key);
       }
     }
