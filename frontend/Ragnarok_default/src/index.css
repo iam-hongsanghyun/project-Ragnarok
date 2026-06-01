@@ -7789,6 +7789,49 @@ code, kbd, samp, tt,
   flex-direction: column;
   gap: 12px;
 }
+/* Right-rail settings grouped as Common + one section per selected dataset. */
+.data-import-filters__group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.data-import-filters__group-title {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+/* Dataset multi-select rows in the left tree (checkbox + label + category). */
+.data-import-dataset {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.data-import-dataset.is-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.data-import-dataset__check {
+  flex: none;
+  margin: 0;
+}
+.data-import-dataset__tag {
+  margin-left: auto;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  opacity: 0.7;
+}
 .data-import-filter {
   display: flex;
   flex-direction: column;

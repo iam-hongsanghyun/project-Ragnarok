@@ -38,8 +38,12 @@ const PROVIDERS: ApiKeyProvider[] = [
   {
     name: 'entsoe_key',
     label: 'ENTSO-E Transparency Platform',
-    help: 'Free security token for EU hourly load, prices, and generation.',
-    signupUrl: 'https://transparency.entsoe.eu/usrm/user/createPublicApiKey',
+    help:
+      'Free token for EU national hourly load. Register, email ' +
+      'transparency@entsoe.eu for API access, then generate the token under ' +
+      'My Account Settings.',
+    signupUrl:
+      'https://transparencyplatform.zendesk.com/hc/en-us/articles/12845911031188-How-to-get-security-token',
   },
 ];
 

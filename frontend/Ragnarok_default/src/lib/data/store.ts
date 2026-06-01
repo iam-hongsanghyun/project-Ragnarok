@@ -36,8 +36,11 @@ export type RunStatus = 'fetching' | 'ready' | 'error';
 export interface Run {
   /** Monotonic id — used to discard late results from superseded runs. */
   seq: number;
-  databaseId: string;
-  databaseName: string;
+  sourceId: string;
+  sourceLabel: string;
+  /** The datasets the user selected (pre dependency-expansion), sorted. */
+  datasetIds: string[];
+  datasetIdsJson: string;
   countryIso: string;
   countryName: string;
   filtersJson: string;
@@ -77,22 +80,28 @@ export const dataImportStore = {
    * ignored when it eventually resolves.
    */
   start(args: {
-    databaseId: string;
-    databaseName: string;
+    sourceId: string;
+    sourceLabel: string;
+    /** The datasets the user multi-selected (same source). */
+    datasetIds: string[];
     countryIso: string;
     countryName: string;
     filters: Record<string, unknown>;
-    /** API-key names this database declares (BYOK) — forwarded to runImport
-     *  so it can collect them from the secret store. */
+    /** Union of API-key names the selected datasets declare (BYOK) —
+     *  forwarded to runImport so it can collect them from the secret store. */
     requiresSecrets?: string[];
   }): void {
     _seq += 1;
     const seq = _seq;
     const filtersJson = JSON.stringify(args.filters, Object.keys(args.filters).sort());
+    const datasetIds = [...args.datasetIds].sort();
+    const datasetIdsJson = JSON.stringify(datasetIds);
     _run = {
       seq,
-      databaseId: args.databaseId,
-      databaseName: args.databaseName,
+      sourceId: args.sourceId,
+      sourceLabel: args.sourceLabel,
+      datasetIds,
+      datasetIdsJson,
       countryIso: args.countryIso,
       countryName: args.countryName,
       filtersJson,
@@ -105,7 +114,7 @@ export const dataImportStore = {
     emit();
 
     runImport({
-      databaseId: args.databaseId,
+      datasetIds: args.datasetIds,
       countryIso: args.countryIso,
       filters: args.filters,
       requiresSecrets: args.requiresSecrets,

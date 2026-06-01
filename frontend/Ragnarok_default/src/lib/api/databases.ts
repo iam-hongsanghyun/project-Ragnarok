@@ -41,17 +41,28 @@ export interface FilterSchema {
 
 export type ImporterCategory = 'transmission' | 'generation' | 'demand' | string;
 
+/**
+ * A single dataset — one fetchable unit. Many datasets can belong to one
+ * source (`source_id`); the tree groups by source and the user multi-selects
+ * datasets to fetch together (Country → Database → Datasets).
+ */
 export interface DatabaseMeta {
   id: string;
   /** Full name — shown in the right rail's header and the metadata block. */
   name: string;
-  /** Short label — what the left-rail tree leaf displays. Falls back to
-   *  `name` when absent. Keep this under ~16 chars so it fits in the
-   *  narrow tree column without truncation. */
+  /** Short label — the dataset's name in the tree (e.g. "Network",
+   *  "Demand profile"). Falls back to `name` when absent. */
   short_name?: string;
+  /** The source this dataset belongs to (e.g. "kpg193"). Singletons use their
+   *  own `id`. The tree groups by this. */
+  source_id?: string;
+  /** Human label for the source (e.g. "KPG193 — Korean reference grid"). */
+  source_label?: string;
+  /** Other dataset ids this one references; auto-included by the backend when
+   *  fetched so a profile is never imported without its static anchor. */
+  depends_on?: string[];
   category: ImporterCategory;
-  /** Optional second-level grouping inside `category`. Empty means the
-   * database sits directly under the category in the tree. */
+  /** Optional second-level grouping inside `category`. */
   subcategory?: string;
   license: string;
   homepage: string;
@@ -62,12 +73,28 @@ export interface DatabaseMeta {
   unavailable_reason?: string;
   description?: string;
   /** `"global"` for sources that work for any country, or a list of
-   *  ISO-A3 codes when the upstream only covers a subset (e.g. OPSD = EU). */
+   *  ISO-A3 codes when the upstream only covers a subset. */
   country_coverage?: string[] | 'global';
-  /** Names of user-supplied API keys this database needs (BYOK). The
-   *  frontend collects them from the Settings store and ships them in the
-   *  `/api/import/run` body; the backend uses them per-request only. */
+  /** Names of user-supplied API keys this dataset needs (BYOK). */
   requires_secrets?: string[];
+}
+
+/**
+ * A source groups the datasets a user can multi-select and fetch together.
+ * `common_filters` are the settings declared by ≥2 of the source's datasets
+ * (e.g. version / year / profile window); the right rail renders them once as
+ * a shared "Common settings" group and each dataset's remaining filters
+ * (`filters` minus `common_filter_ids`) under that dataset's own group.
+ */
+export interface Source {
+  source_id: string;
+  source_label: string;
+  category: ImporterCategory;
+  categories: string[];
+  country_coverage?: string[] | 'global';
+  common_filter_ids: string[];
+  common_filters: FilterSchema[];
+  datasets: DatabaseMeta[];
 }
 
 export interface CountryMeta {
@@ -92,7 +119,10 @@ export interface PreviewSummary {
  * no second network call.
  */
 export interface RunImportResponse {
-  database_id: string;
+  source_id: string;
+  /** The datasets actually fetched (the user's selection expanded with
+   *  dependencies, in dependency-first order). */
+  dataset_ids: string[];
   country_iso: string;
   preview: PreviewSummary;
   fragment: WorkbookFragment;
@@ -153,6 +183,12 @@ export async function listDatabases(): Promise<DatabaseMeta[]> {
   return body.databases;
 }
 
+export async function listSources(): Promise<Source[]> {
+  const resp = await fetch(`${API_BASE}/api/import/sources`);
+  const body = await jsonOrThrow<{ sources: Source[] }>(resp, 'list sources');
+  return body.sources;
+}
+
 export async function listCountries(): Promise<CountryMeta[]> {
   const resp = await fetch(`${API_BASE}/api/import/countries`);
   const body = await jsonOrThrow<{ countries: CountryMeta[] }>(resp, 'list countries');
@@ -165,21 +201,23 @@ export async function fetchCountryBoundaries(): Promise<GeoJSONFeatureCollection
 }
 
 export interface RunImportRequest {
-  databaseId: string;
+  /** The datasets the user multi-selected (same source). The backend expands
+   *  dependencies and fetches them together into one aligned fragment. */
+  datasetIds: string[];
   countryIso: string;
   filters: Record<string, unknown>;
   convertOptions?: Record<string, unknown>;
-  /** Names of the API keys this database declares it needs; collected
-   *  from the browser secret store and sent in the request body. */
+  /** Union of the API-key names the selected datasets declare; collected from
+   *  the browser secret store and sent in the request body. */
   requiresSecrets?: string[];
 }
 
 /**
- * One-trip import: POST the filter blob (+ any BYOK keys) to the backend,
- * which fetches the upstream, converts it, and returns the preview
- * summary AND the workbook fragment together. The caller renders the
- * preview in the right rail and holds the fragment until the user clicks
- * Add to workbook — no second network call.
+ * One-trip import: POST the selected dataset ids + shared filter blob (+ any
+ * BYOK keys) to the backend, which fetches each dataset, combines them into
+ * one aligned, PyPSA-ready fragment, and returns the preview + fragment
+ * together. The caller renders the preview and holds the fragment until the
+ * user clicks Add to workbook — no second network call.
  */
 export async function runImport(req: RunImportRequest): Promise<RunImportResponse> {
   const secrets = collectSecretsFor(req.requiresSecrets ?? []);
@@ -187,7 +225,7 @@ export async function runImport(req: RunImportRequest): Promise<RunImportRespons
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      database_id: req.databaseId,
+      dataset_ids: req.datasetIds,
       country_iso: req.countryIso,
       filters: req.filters,
       convert_options: req.convertOptions ?? {},

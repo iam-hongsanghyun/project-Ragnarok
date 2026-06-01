@@ -7,7 +7,7 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { DatabaseMeta, FilterSchema, PreviewSummary } from 'lib/api/databases';
+import { FilterSchema, PreviewSummary, Source } from 'lib/api/databases';
 import { getSecret } from 'lib/api/secrets';
 import { SearchableSelect } from '../../shared/components/SearchableSelect';
 import { DateField } from './DateField';
@@ -178,7 +178,10 @@ function MultiselectDropdown({
 }
 
 interface Props {
-  database: DatabaseMeta | null;
+  /** The focused source (database). Its datasets' settings render here. */
+  source: Source | null;
+  /** Which datasets of the source are ticked in the left rail. */
+  selectedDatasetIds: string[];
   values: Record<string, unknown>;
   onChange: (id: string, value: unknown) => void;
   onFetch: () => void;
@@ -346,8 +349,47 @@ function PreviewBody({ summary }: { summary: PreviewSummary }) {
   );
 }
 
+/** One filter row — toggles render inline (checkbox + label + ⓘ); everything
+ *  else as label + input. Shared by the Common group and per-dataset groups. */
+function FilterRow({
+  filter,
+  value,
+  onChange,
+}: {
+  filter: FilterSchema;
+  value: unknown;
+  onChange: (id: string, value: unknown) => void;
+}) {
+  if (filter.kind === 'toggle') {
+    return (
+      <div className="data-import-filter data-import-filter--toggle">
+        <label className="data-import-filter__toggle">
+          <input
+            type="checkbox"
+            checked={!!value}
+            onChange={(e) => onChange(filter.id, e.target.checked)}
+          />
+          <span>{filter.label}</span>
+        </label>
+        {filter.description && <InfoTooltip text={filter.description} label={filter.label} />}
+      </div>
+    );
+  }
+  return (
+    <div className="data-import-filter">
+      <label className="data-import-filter__label">
+        <span>{filter.label}</span>
+        {filter.unit ? <span className="data-import-filter__unit"> ({filter.unit})</span> : null}
+        {filter.description && <InfoTooltip text={filter.description} label={filter.label} />}
+      </label>
+      <FilterInput filter={filter} value={value} onChange={(v) => onChange(filter.id, v)} />
+    </div>
+  );
+}
+
 export function FilterPanel({
-  database,
+  source,
+  selectedDatasetIds,
   values,
   onChange,
   onFetch,
@@ -358,27 +400,36 @@ export function FilterPanel({
   canApply,
   error,
 }: Props) {
-  if (!database) {
+  if (!source) {
     return (
       <aside className="view-rail view-rail--right data-import-filters">
-        <div className="view-rail-header"><span>Filters</span></div>
+        <div className="view-rail-header"><span>Settings</span></div>
         <div className="view-rail-body data-import-filters__empty">
-          <p>Select a database from the left rail to set filters.</p>
+          <p>Pick a database in the left rail, then tick the datasets to fetch.</p>
         </div>
       </aside>
     );
   }
-  // BYOK: which of this database's required API keys aren't set in this
-  // browser yet. Fetch is blocked until they are — the backend would
-  // 400 anyway, but catching it here is a clearer prompt.
-  const missingSecrets = (database.requires_secrets ?? []).filter(
-    (name) => !getSecret(name),
-  );
+
+  const selectedDatasets = source.datasets.filter((d) => selectedDatasetIds.includes(d.id));
+  const noneSelected = selectedDatasets.length === 0;
+
+  // BYOK: union of required keys across the selected datasets; which aren't set.
+  const missingSecrets = Array.from(
+    new Set(selectedDatasets.flatMap((d) => d.requires_secrets ?? [])),
+  ).filter((name) => !getSecret(name));
   const blockedOnSecrets = missingSecrets.length > 0;
+
+  // Common settings render once, but only when ≥1 selected dataset declares
+  // them. Per-dataset groups carry each dataset's remaining (own) filters.
+  const commonIds = new Set(source.common_filter_ids);
+  const selectedFilterIds = new Set(selectedDatasets.flatMap((d) => d.filters.map((f) => f.id)));
+  const commonFilters = source.common_filters.filter((f) => selectedFilterIds.has(f.id));
+  const primary = selectedDatasets[0] ?? source.datasets[0];
 
   return (
     <aside className="view-rail view-rail--right data-import-filters">
-      <div className="view-rail-header"><span>{database.name}</span></div>
+      <div className="view-rail-header"><span>{source.source_label}</span></div>
       <div className="view-rail-body data-import-filters__body">
         {blockedOnSecrets && (
           <p className="data-import-filters__keynotice">
@@ -386,71 +437,74 @@ export function FilterPanel({
             Add it in <b>Settings → API keys</b>, then come back and fetch.
           </p>
         )}
+
         <section className="data-import-filters__meta">
-          {database.description && (
-            <p className="data-import-filters__desc">{database.description}</p>
+          {primary && (
+            <>
+              <p className="data-import-filters__line">
+                <b>License:</b> {primary.license}
+              </p>
+              <p className="data-import-filters__line">
+                <b>Source:</b>{' '}
+                <a href={primary.homepage} target="_blank" rel="noreferrer">
+                  {primary.homepage}
+                </a>
+              </p>
+            </>
           )}
           <p className="data-import-filters__line">
-            <b>License:</b> {database.license}
-          </p>
-          <p className="data-import-filters__line">
-            <b>Source:</b>{' '}
-            <a href={database.homepage} target="_blank" rel="noreferrer">
-              {database.homepage}
-            </a>
-          </p>
-          <p className="data-import-filters__line">
-            <b>Targets:</b> {database.targets.join(', ')}
+            <b>Datasets:</b>{' '}
+            {noneSelected ? '— none ticked —'
+              : selectedDatasets.map((d) => d.short_name || d.name).join(', ')}
           </p>
         </section>
-        <section className="data-import-filters__form">
-          {database.filters.map((filter) => {
-            // Toggle filters render as a single row: checkbox + label + (i).
-            // The outer label is the checkbox label — having an additional
-            // "<label>filter.label</label>" above would double-print the
-            // same text under the checkbox.
-            if (filter.kind === 'toggle') {
+
+        {noneSelected ? (
+          <p className="data-import-filters__keynotice">
+            Tick at least one dataset in the left rail to fetch.
+          </p>
+        ) : (
+          <>
+            {commonFilters.length > 0 && (
+              <section className="data-import-filters__group">
+                <h5 className="data-import-filters__group-title">Common settings</h5>
+                {commonFilters.map((f) => (
+                  <FilterRow key={f.id} filter={f} value={values[f.id]} onChange={onChange} />
+                ))}
+              </section>
+            )}
+
+            {selectedDatasets.map((ds) => {
+              const ownFilters = ds.filters.filter((f) => !commonIds.has(f.id));
+              if (ownFilters.length === 0) return null;
               return (
-                <div key={filter.id} className="data-import-filter data-import-filter--toggle">
-                  <label className="data-import-filter__toggle">
-                    <input
-                      type="checkbox"
-                      checked={!!values[filter.id]}
-                      onChange={(e) => onChange(filter.id, e.target.checked)}
-                    />
-                    <span>{filter.label}</span>
-                  </label>
-                  {filter.description && (
-                    <InfoTooltip text={filter.description} label={filter.label} />
-                  )}
-                </div>
+                <section key={ds.id} className="data-import-filters__group">
+                  <h5 className="data-import-filters__group-title">
+                    {ds.short_name || ds.name}
+                    {ds.description && <InfoTooltip text={ds.description} label={ds.short_name || ds.name} />}
+                  </h5>
+                  {ownFilters.map((f) => (
+                    <FilterRow key={f.id} filter={f} value={values[f.id]} onChange={onChange} />
+                  ))}
+                </section>
               );
-            }
-            return (
-              <div key={filter.id} className="data-import-filter">
-                <label className="data-import-filter__label">
-                  <span>{filter.label}</span>
-                  {filter.unit ? <span className="data-import-filter__unit"> ({filter.unit})</span> : null}
-                  {filter.description && (
-                    <InfoTooltip text={filter.description} label={filter.label} />
-                  )}
-                </label>
-                <FilterInput
-                  filter={filter}
-                  value={values[filter.id]}
-                  onChange={(v) => onChange(filter.id, v)}
-                />
-              </div>
-            );
-          })}
-        </section>
+            })}
+          </>
+        )}
+
         <section className="data-import-filters__actions">
           <button
             type="button"
             className="primary"
             onClick={onFetch}
-            disabled={fetching || applying || blockedOnSecrets}
-            title={blockedOnSecrets ? 'Add the required API key in Settings first' : undefined}
+            disabled={fetching || applying || blockedOnSecrets || noneSelected}
+            title={
+              noneSelected
+                ? 'Tick at least one dataset in the left rail'
+                : blockedOnSecrets
+                  ? 'Add the required API key in Settings first'
+                  : undefined
+            }
           >
             {fetching ? 'Fetching…' : 'Fetch preview'}
           </button>

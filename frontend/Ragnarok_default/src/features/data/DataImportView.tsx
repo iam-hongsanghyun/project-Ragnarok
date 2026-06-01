@@ -3,27 +3,31 @@
  *
  *   left rail   ·   map (main)   ·   right rail
  *
- * Left rail = `CategoryDatabaseList`. Main = `WorldMap` with `CountrySearch`
- * overlaid. Right rail = `FilterPanel`. Flow per the plan:
+ * Flow: Country → Database (source) → Datasets (multi-select).
  *
  *   1. Pick a country (click or search). Map zooms in.
- *   2. Pick a category, then a database from the left rail.
- *   3. Tweak filters in the right rail; Fetch → preview overlay on the map.
- *   4. Add to workbook → fragment merges into the current model.
- *   5. Pick another database and repeat (country stays selected).
+ *   2. In the left rail pick a database (source) and TICK the datasets you
+ *      want — KPG193 offers network / renewable capacity / demand profile /
+ *      renewable profile (all on by default).
+ *   3. The right rail shows the settings: a Common group (shared across the
+ *      selected datasets) + a group per dataset for its own settings.
+ *   4. One Fetch → the backend fetches the selected datasets together and
+ *      returns one aligned, PyPSA-ready fragment → preview overlays the map.
+ *   5. Add to workbook → fragment merges into the current model.
  *
- * Caller (App) supplies the `applyFragment` callback that merges sheets via
- * `mergeWorkbookFragment` and re-derives the run state.
+ * Caller (App) supplies `applyFragment` which merges sheets via
+ * `mergeWorkbookFragment`.
  */
 import React, { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import {
   CountryMeta,
-  DatabaseMeta,
+  FilterSchema,
+  Source,
   WorkbookFragment,
   GeoJSONFeatureCollection,
   fetchCountryBoundaries,
   listCountries,
-  listDatabases,
+  listSources,
 } from 'lib/api/databases';
 import { ResizablePanels } from '../../layout/ResizablePanels';
 import { usePersistedState } from 'shared/hooks/usePersistedState';
@@ -32,85 +36,77 @@ import { FilterPanel } from './FilterPanel';
 import { WorldMap } from './WorldMap';
 import { dataImportStore } from 'lib/data/store';
 
-// Persistent state keys — every selection the user can make sticks across
-// tab switches and reloads. Transient state (preview / fetch error / spinner)
-// is intentionally NOT persisted: those are re-derivable cheap, and stale
-// values would mislead after a long absence.
+// Persistent state keys — selections stick across tab switches and reloads.
 const KEY_COUNTRY = 'ragnarok:data-import:country-iso';
-const KEY_DATABASE = 'ragnarok:data-import:database-id';
-const KEY_FILTERS = 'ragnarok:data-import:filters-by-db';
+const KEY_SOURCE = 'ragnarok:data-import:source-id';
+const KEY_SELECTION = 'ragnarok:data-import:selection-by-source';
+const KEY_FILTERS = 'ragnarok:data-import:filters-by-source';
 
 interface Props {
   applyFragment: (fragment: WorkbookFragment, databaseName: string, countryName: string) => void;
 }
 
-function defaultFilterValues(db: DatabaseMeta): Record<string, unknown> {
+/** The union of all a source's datasets' filters, de-duped by id (common
+ *  settings appear once). This is the full settings surface for the source. */
+function sourceFilterSchemas(source: Source): FilterSchema[] {
+  const seen = new Set<string>();
+  const out: FilterSchema[] = [];
+  for (const ds of source.datasets) {
+    for (const f of ds.filters) {
+      if (!seen.has(f.id)) {
+        seen.add(f.id);
+        out.push(f);
+      }
+    }
+  }
+  return out;
+}
+
+function defaultFilterValues(source: Source): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const f of db.filters) {
+  for (const f of sourceFilterSchemas(source)) {
     out[f.id] = f.default ?? (f.kind === 'multiselect' ? [] : f.kind === 'toggle' ? false : null);
   }
   return out;
 }
 
 export function DataImportView({ applyFragment }: Props) {
-  const [databases, setDatabases] = useState<DatabaseMeta[]>([]);
+  const [sources, setSources] = useState<Source[]>([]);
   const [countries, setCountries] = useState<CountryMeta[]>([]);
   const [countriesGeoJSON, setCountriesGeoJSON] = useState<GeoJSONFeatureCollection | null>(null);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
 
   const [selectedIso, setSelectedIso] = usePersistedState<string | null>(KEY_COUNTRY, null);
-
-  const [selectedDatabaseId, setSelectedDatabaseId] = usePersistedState<string | null>(
-    KEY_DATABASE,
-    null,
-  );
-  // One filter blob per database id so switching back to a previously-used
-  // database restores the user's tuning. Defaults seed in via the effect
-  // below for any database the user has not touched yet.
-  const [filtersByDb, setFiltersByDb] = usePersistedState<Record<string, Record<string, unknown>>>(
-    KEY_FILTERS,
+  const [focusedSourceId, setFocusedSourceId] = usePersistedState<string | null>(KEY_SOURCE, null);
+  // Which datasets are ticked, per source. Absent → default = all datasets.
+  const [selectionBySource, setSelectionBySource] = usePersistedState<Record<string, string[]>>(
+    KEY_SELECTION,
     {},
   );
+  // One shared filter blob per source (settings are shared across its datasets).
+  const [filtersBySource, setFiltersBySource] = usePersistedState<
+    Record<string, Record<string, unknown>>
+  >(KEY_FILTERS, {});
 
-  // Per-fetch state lives in a module-scoped store (see dataImportStore.ts),
-  // not React state, so it survives switching to Model/Build/etc. and back
-  // — the in-flight fetch keeps running and the result lands in the store
-  // whether or not this view is currently mounted.
   const activeRun = useSyncExternalStore(
     dataImportStore.subscribe,
     dataImportStore.get,
     dataImportStore.get,
   );
-  // `lastAdded` is the only purely view-local signal — it just controls the
-  // "Added X rows to the workbook" banner, which intentionally clears when
-  // the user leaves and comes back.
   const [lastAddedSeq, setLastAddedSeq] = useState<number | null>(null);
 
-  // The current store entry only counts if it matches the user's current
-  // selection. Otherwise it's leftover from a different country/database
-  // and the right rail should show fresh defaults.
-  const currentRun =
-    activeRun &&
-    activeRun.databaseId === selectedDatabaseId &&
-    activeRun.countryIso === selectedIso
-      ? activeRun
-      : null;
-  const preview = currentRun?.preview || null;
-  const fetching = currentRun?.status === 'fetching';
-  const error = currentRun?.status === 'error' ? currentRun.error : null;
-
-  // Bootstrap: load databases + countries + GeoJSON in parallel on mount.
+  // Bootstrap: sources + countries + GeoJSON in parallel on mount.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const [dbs, ctrs, gj] = await Promise.all([
-          listDatabases(),
+        const [srcs, ctrs, gj] = await Promise.all([
+          listSources(),
           listCountries(),
           fetchCountryBoundaries(),
         ]);
         if (cancelled) return;
-        setDatabases(dbs);
+        setSources(srcs);
         setCountries(ctrs);
         setCountriesGeoJSON(gj);
       } catch (exc) {
@@ -127,98 +123,131 @@ export function DataImportView({ applyFragment }: Props) {
     () => (selectedIso ? countries.find((c) => c.iso === selectedIso) || null : null),
     [countries, selectedIso],
   );
-  const selectedDatabase = useMemo(
-    () => (selectedDatabaseId ? databases.find((d) => d.id === selectedDatabaseId) || null : null),
-    [databases, selectedDatabaseId],
+  const focusedSource = useMemo(
+    () => (focusedSourceId ? sources.find((s) => s.source_id === focusedSourceId) || null : null),
+    [sources, focusedSourceId],
   );
 
-  // Filter blob for the currently selected database. Falls back to declared
-  // defaults the first time the user picks a database; persisted writes go
-  // through `updateFilterValue` below.
+  // Selected dataset ids for the focused source (default = none — the user
+  // ticks the datasets they want to fetch).
+  const selectedDatasetIds = useMemo(() => {
+    if (!focusedSource) return [] as string[];
+    return selectionBySource[focusedSource.source_id] ?? [];
+  }, [focusedSource, selectionBySource]);
+
+  // Shared filter blob for the focused source.
   const filterValues = useMemo(() => {
-    if (!selectedDatabase) return {} as Record<string, unknown>;
-    const saved = filtersByDb[selectedDatabase.id];
-    return saved && Object.keys(saved).length > 0
-      ? saved
-      : defaultFilterValues(selectedDatabase);
-  }, [filtersByDb, selectedDatabase]);
+    if (!focusedSource) return {} as Record<string, unknown>;
+    const saved = filtersBySource[focusedSource.source_id];
+    return saved && Object.keys(saved).length > 0 ? saved : defaultFilterValues(focusedSource);
+  }, [filtersBySource, focusedSource]);
+
+  // Union of API keys the selected datasets need.
+  const requiresSecrets = useMemo(() => {
+    if (!focusedSource) return [] as string[];
+    const out = new Set<string>();
+    for (const ds of focusedSource.datasets) {
+      if (selectedDatasetIds.includes(ds.id)) {
+        for (const s of ds.requires_secrets ?? []) out.add(s);
+      }
+    }
+    return Array.from(out);
+  }, [focusedSource, selectedDatasetIds]);
 
   const updateFilterValue = useCallback(
     (filterId: string, value: unknown) => {
-      if (!selectedDatabase) return;
-      setFiltersByDb({
-        ...filtersByDb,
-        [selectedDatabase.id]: { ...filterValues, [filterId]: value },
+      if (!focusedSource) return;
+      setFiltersBySource({
+        ...filtersBySource,
+        [focusedSource.source_id]: { ...filterValues, [filterId]: value },
       });
     },
-    [filtersByDb, filterValues, selectedDatabase, setFiltersByDb],
+    [filtersBySource, filterValues, focusedSource, setFiltersBySource],
   );
 
-  // Filter / selection changes invalidate the held run — the user must
-  // re-fetch so preview + fragment stay in lockstep with what's in the
-  // right rail.
+  const handleFocusSource = useCallback(
+    (sourceId: string) => setFocusedSourceId(sourceId),
+    [setFocusedSourceId],
+  );
+
+  const handleToggleDataset = useCallback(
+    (sourceId: string, datasetId: string) => {
+      setFocusedSourceId(sourceId);
+      const src = sources.find((s) => s.source_id === sourceId);
+      if (!src) return;
+      const current = selectionBySource[sourceId] ?? [];
+      const next = current.includes(datasetId)
+        ? current.filter((id) => id !== datasetId)
+        : [...current, datasetId];
+      setSelectionBySource({ ...selectionBySource, [sourceId]: next });
+    },
+    [sources, selectionBySource, setSelectionBySource, setFocusedSourceId],
+  );
+
+  // The held run only counts if it matches the current source / country /
+  // dataset selection / filters; otherwise the right rail shows fresh state.
+  const selectionJson = useMemo(
+    () => JSON.stringify([...selectedDatasetIds].sort()),
+    [selectedDatasetIds],
+  );
   const filtersJson = useMemo(
     () => JSON.stringify(filterValues, Object.keys(filterValues).sort()),
     [filterValues],
   );
+  const currentRun =
+    activeRun &&
+    activeRun.sourceId === focusedSourceId &&
+    activeRun.countryIso === selectedIso &&
+    activeRun.datasetIdsJson === selectionJson
+      ? activeRun
+      : null;
+  const preview = currentRun?.preview || null;
+  const fetching = currentRun?.status === 'fetching';
+  const error = currentRun?.status === 'error' ? currentRun.error : null;
+
+  // Source / dataset / filter changes invalidate the held run.
   useEffect(() => {
-    // Skip while the bootstrap hasn't loaded the database metas yet:
-    // during that brief window `selectedDatabase` is null and
-    // `filterValues` collapses to `{}`, which would spuriously not-match
-    // the active run's real `filtersJson` and clear an in-flight fetch
-    // right when the user comes back from another tab.
-    if (!selectedDatabase) return;
+    if (!focusedSource) return;
     if (
       activeRun &&
-      (activeRun.databaseId !== selectedDatabaseId ||
+      (activeRun.sourceId !== focusedSourceId ||
         activeRun.countryIso !== selectedIso ||
+        activeRun.datasetIdsJson !== selectionJson ||
         activeRun.filtersJson !== filtersJson)
     ) {
-      // The user has moved on — drop the stale run so the UI doesn't show
-      // numbers belonging to a previous filter blob.
       dataImportStore.clear();
       setLastAddedSeq(null);
     }
-  }, [activeRun, selectedDatabase, selectedDatabaseId, selectedIso, filtersJson]);
+  }, [activeRun, focusedSource, focusedSourceId, selectedIso, selectionJson, filtersJson]);
 
   const handleSelectCountry = useCallback(
-    (iso: string) => {
-      setSelectedIso(iso);
-    },
+    (iso: string) => setSelectedIso(iso),
     [setSelectedIso],
   );
 
-  // Kick off a fetch through the store. The store owns the Promise, so the
-  // fetch survives a view unmount (e.g. user switches to Model and back).
   const handleFetch = useCallback(() => {
-    if (!selectedDatabase || !selectedCountry) return;
+    if (!focusedSource || !selectedCountry || selectedDatasetIds.length === 0) return;
     dataImportStore.start({
-      databaseId: selectedDatabase.id,
-      databaseName: selectedDatabase.name,
+      sourceId: focusedSource.source_id,
+      sourceLabel: focusedSource.source_label,
+      datasetIds: selectedDatasetIds,
       countryIso: selectedCountry.iso,
       countryName: selectedCountry.name,
       filters: filterValues,
-      requiresSecrets: selectedDatabase.requires_secrets,
+      requiresSecrets,
     });
     setLastAddedSeq(null);
-  }, [selectedDatabase, selectedCountry, filterValues]);
+  }, [focusedSource, selectedCountry, selectedDatasetIds, filterValues, requiresSecrets]);
 
-  // Apply is a pure-frontend merge — no network call.
   const handleApply = useCallback(() => {
     if (!currentRun || currentRun.status !== 'ready' || !currentRun.response) return;
-    if (!selectedDatabase || !selectedCountry) return;
-    applyFragment(
-      currentRun.response.fragment,
-      selectedDatabase.name,
-      selectedCountry.name,
-    );
+    if (!focusedSource || !selectedCountry) return;
+    applyFragment(currentRun.response.fragment, focusedSource.source_label, selectedCountry.name);
     setLastAddedSeq(currentRun.seq);
-  }, [currentRun, selectedDatabase, selectedCountry, applyFragment]);
+  }, [currentRun, focusedSource, selectedCountry, applyFragment]);
 
   const lastAdded =
-    lastAddedSeq !== null && currentRun && currentRun.seq === lastAddedSeq
-      ? currentRun
-      : null;
+    lastAddedSeq !== null && currentRun && currentRun.seq === lastAddedSeq ? currentRun : null;
 
   if (bootstrapError) {
     return (
@@ -241,10 +270,12 @@ export function DataImportView({ applyFragment }: Props) {
         className="data-import-panels"
       >
         <CategoryDatabaseList
-          databases={databases}
+          sources={sources}
           selectedCountry={selectedCountry}
-          selectedDatabaseId={selectedDatabaseId}
-          onSelectDatabase={setSelectedDatabaseId}
+          focusedSourceId={focusedSourceId}
+          selectionBySource={selectionBySource}
+          onFocusSource={handleFocusSource}
+          onToggleDataset={handleToggleDataset}
         />
         <main className="view-main data-import-main">
           <WorldMap
@@ -256,13 +287,14 @@ export function DataImportView({ applyFragment }: Props) {
           />
           {lastAdded && (
             <div className="data-import-banner" role="status">
-              Added <b>{lastAdded.databaseName}</b> rows to the workbook for{' '}
+              Added <b>{lastAdded.sourceLabel}</b> to the workbook for{' '}
               <b>{lastAdded.countryName}</b>. Switch to <b>Model</b> or <b>Build</b> to review.
             </div>
           )}
         </main>
         <FilterPanel
-          database={selectedDatabase}
+          source={focusedSource}
+          selectedDatasetIds={selectedDatasetIds}
           values={filterValues}
           onChange={updateFilterValue}
           onFetch={handleFetch}
