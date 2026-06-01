@@ -1,25 +1,21 @@
 /**
- * Browser-direct importer client.
+ * Importer HTTP client.
  *
- * The Data view fetches and converts external data **in the browser** —
- * the backend has no `importers/` package and no `/api/import/*` routes.
- * The functions below delegate to `src/features/data/databases/registry.ts`
- * and the per-database TypeScript modules under that directory.
+ * The Data view's entire outside world is the backend's `/api/import/*`
+ * endpoints. The browser sends a filter blob (+ any BYOK API keys) and
+ * the backend fetches the upstream, converts it, and returns the preview
+ * + workbook fragment. No third-party host is ever contacted from the
+ * browser — heavy datasets, CORS-blocked sources, and per-user keys are
+ * all handled server-side.
  *
- * The JSON shapes (DatabaseMeta, PreviewSummary, WorkbookFragment, …) are
- * preserved from when the importers lived on the backend so the rest of
- * the Data view code (FilterPanel, CategoryDatabaseList, mergeWorkbookFragment)
- * needs no rework.
+ * The JSON shapes (DatabaseMeta, PreviewSummary, WorkbookFragment, …)
+ * match what the backend serves, so the rest of the Data view
+ * (FilterPanel, CategoryDatabaseList, mergeWorkbookFragment) needs no
+ * rework.
  */
 
-import {
-  fetchCountryBoundaries as fetchCountryBoundariesLocal,
-  getModule,
-  listCountries as listCountriesLocal,
-  listDatabases as listDatabasesLocal,
-  resolveRegion,
-} from 'lib/importers/registry';
-import { defaultConvertOptions } from 'lib/importers/types';
+import { API_BASE } from 'lib/constants';
+import { collectSecretsFor } from 'lib/api/secrets';
 
 export type FilterKind = 'number' | 'select' | 'multiselect' | 'range' | 'toggle' | 'date';
 
@@ -68,6 +64,10 @@ export interface DatabaseMeta {
   /** `"global"` for sources that work for any country, or a list of
    *  ISO-A3 codes when the upstream only covers a subset (e.g. OPSD = EU). */
   country_coverage?: string[] | 'global';
+  /** Names of user-supplied API keys this database needs (BYOK). The
+   *  frontend collects them from the Settings store and ships them in the
+   *  `/api/import/run` body; the backend uses them per-request only. */
+  requires_secrets?: string[];
 }
 
 export interface CountryMeta {
@@ -128,22 +128,40 @@ export interface GeoJSONFeatureCollection {
   features: GeoJSONFeature[];
 }
 
-// ── Browser-direct entry points ─────────────────────────────────────────────
+// ── Backend HTTP entry points ────────────────────────────────────────────────
 //
-// The four functions below are pure wrappers around the in-process registry
-// in `src/features/data/databases/registry.ts`. They keep the function names
-// the Data view already calls, so the rewire was a one-import swap.
+// All four hit the backend's /api/import/* router. API_BASE is '' in dev
+// (CRA proxies /api to the backend) and the deployed origin in prod.
+
+async function jsonOrThrow<T>(resp: Response, action: string): Promise<T> {
+  if (!resp.ok) {
+    let detail = resp.statusText;
+    try {
+      const body = await resp.json();
+      detail = body?.detail ?? detail;
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new Error(`${action} failed (${resp.status}): ${detail}`);
+  }
+  return (await resp.json()) as T;
+}
 
 export async function listDatabases(): Promise<DatabaseMeta[]> {
-  return listDatabasesLocal();
+  const resp = await fetch(`${API_BASE}/api/import/databases`);
+  const body = await jsonOrThrow<{ databases: DatabaseMeta[] }>(resp, 'list databases');
+  return body.databases;
 }
 
 export async function listCountries(): Promise<CountryMeta[]> {
-  return listCountriesLocal();
+  const resp = await fetch(`${API_BASE}/api/import/countries`);
+  const body = await jsonOrThrow<{ countries: CountryMeta[] }>(resp, 'list countries');
+  return body.countries;
 }
 
 export async function fetchCountryBoundaries(): Promise<GeoJSONFeatureCollection> {
-  return fetchCountryBoundariesLocal();
+  const resp = await fetch(`${API_BASE}/api/import/boundaries/countries.geojson`);
+  return jsonOrThrow<GeoJSONFeatureCollection>(resp, 'fetch country boundaries');
 }
 
 export interface RunImportRequest {
@@ -151,27 +169,30 @@ export interface RunImportRequest {
   countryIso: string;
   filters: Record<string, unknown>;
   convertOptions?: Record<string, unknown>;
+  /** Names of the API keys this database declares it needs; collected
+   *  from the browser secret store and sent in the request body. */
+  requiresSecrets?: string[];
 }
 
 /**
- * One-trip import: returns both the preview summary AND the workbook
- * fragment. The flow lives entirely in the browser — fetch from upstream,
- * preview, convert, hand back. The caller renders the preview in the right
- * rail and holds the fragment until the user clicks Add to workbook.
- *
- * Errors propagate as thrown `Error`s, identical to the old HTTP path.
+ * One-trip import: POST the filter blob (+ any BYOK keys) to the backend,
+ * which fetches the upstream, converts it, and returns the preview
+ * summary AND the workbook fragment together. The caller renders the
+ * preview in the right rail and holds the fragment until the user clicks
+ * Add to workbook — no second network call.
  */
 export async function runImport(req: RunImportRequest): Promise<RunImportResponse> {
-  const mod = getModule(req.databaseId);
-  const region = await resolveRegion(req.countryIso);
-  const options = { ...defaultConvertOptions, ...(req.convertOptions || {}) };
-  const result = await mod.fetch(region, req.filters);
-  const preview = mod.preview(result);
-  const fragment = mod.toSheets(result, options);
-  return {
-    database_id: req.databaseId,
-    country_iso: region.countryIso,
-    preview,
-    fragment,
-  };
+  const secrets = collectSecretsFor(req.requiresSecrets ?? []);
+  const resp = await fetch(`${API_BASE}/api/import/run`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      database_id: req.databaseId,
+      country_iso: req.countryIso,
+      filters: req.filters,
+      convert_options: req.convertOptions ?? {},
+      secrets,
+    }),
+  });
+  return jsonOrThrow<RunImportResponse>(resp, 'run import');
 }

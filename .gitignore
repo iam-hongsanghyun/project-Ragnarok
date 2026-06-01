@@ -203,3 +203,6 @@ frontend/*/.env.local
 frontend/*/.env.*.local
 frontend/*/src/lib/api/secrets.local.ts
 frontend/*/src/lib/api/secrets.local.json
+
+# Importer runtime cache (Natural Earth boundaries, dataset downloads)
+backend/data/cache/

@@ -1,1 +1,0 @@
-export { osmModule } from './convert';

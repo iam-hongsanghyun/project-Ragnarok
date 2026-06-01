@@ -82,6 +82,9 @@ export const dataImportStore = {
     countryIso: string;
     countryName: string;
     filters: Record<string, unknown>;
+    /** API-key names this database declares (BYOK) — forwarded to runImport
+     *  so it can collect them from the secret store. */
+    requiresSecrets?: string[];
   }): void {
     _seq += 1;
     const seq = _seq;
@@ -105,6 +108,7 @@ export const dataImportStore = {
       databaseId: args.databaseId,
       countryIso: args.countryIso,
       filters: args.filters,
+      requiresSecrets: args.requiresSecrets,
     })
       .then((resp) => {
         // Drop the result if a newer run has started in the meantime.

@@ -258,6 +258,11 @@ def status() -> dict[str, Any]:
 from .routers import config as _config_router  # noqa: E402
 app.include_router(_config_router.router)
 
+# External-data importer subsystem (Data view). The browser POSTs a
+# filter blob to /api/import/run; fetch + convert run server-side.
+from .routers import importers as _importers_router  # noqa: E402
+app.include_router(_importers_router.router)
+
 
 @app.get("/api/backends")
 def get_backends() -> dict[str, Any]:

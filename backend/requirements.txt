@@ -12,7 +12,9 @@ python-calamine>=0.2  # PyPSA's preferred excel engine for import_from_excel
 xarray<2026
 netCDF4>=1.6  # PyPSA-native binary export (.nc)
 tables>=3.10  # PyPSA-native binary export (.h5)
-# Note: the external-data importer subsystem (Data view) runs in the browser.
-# The backend has no geometry / external-dataset dependencies — shapely +
-# geopandas were dropped when fetch and convert moved to TypeScript under
-# `frontend/Ragnarok_default/src/features/data/databases/`.
+# External-data importer subsystem (Data view) — runs server-side. The
+# browser only POSTs a filter blob to /api/import/run; fetch + convert
+# happen here so heavy datasets, CORS-blocked sources, and per-user API
+# keys (BYOK) are all handled in Python.
+httpx>=0.27          # upstream fetches (Overpass, GitHub, World Bank, …)
+shapely>=2.0         # point-in-polygon clipping + region geometry

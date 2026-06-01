@@ -1,1 +1,0 @@
-export { wriGppdModule } from './convert';

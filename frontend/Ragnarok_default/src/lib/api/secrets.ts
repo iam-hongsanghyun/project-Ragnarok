@@ -53,6 +53,22 @@ export function getSecret(name: string): string | null {
 }
 
 /**
+ * Collect the named secrets into a `{name: value}` map for a request
+ * body. Missing keys are simply omitted — the backend decides whether a
+ * given importer can proceed without them (and returns an actionable
+ * 400 if a required key is absent). Used by `runImport` to ship BYOK
+ * keys for the database the user is fetching.
+ */
+export function collectSecretsFor(names: string[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const name of names) {
+    const v = getSecret(name);
+    if (v) out[name] = v;
+  }
+  return out;
+}
+
+/**
  * Persist a user-supplied secret into localStorage (the Settings-panel
  * path). Stored under `ragnarok:secret:<name>` so the global Clear button
  * wipes it along with every other Ragnarok-owned key.

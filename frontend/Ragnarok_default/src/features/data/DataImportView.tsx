@@ -198,6 +198,7 @@ export function DataImportView({ applyFragment }: Props) {
       countryIso: selectedCountry.iso,
       countryName: selectedCountry.name,
       filters: filterValues,
+      requiresSecrets: selectedDatabase.requires_secrets,
     });
     setLastAddedSeq(null);
   }, [selectedDatabase, selectedCountry, filterValues]);
