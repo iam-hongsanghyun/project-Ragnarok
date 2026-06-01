@@ -23,15 +23,22 @@ import { ConfigBootstrap } from './ConfigBootstrap';
  * guard, every dev-server restart minted a new build_id and silently
  * uninstalled every plugin. The PRESERVE list below protects them.
  *
- * Note: `pypsa_gui_settings` and `ragnarok_enabled_modules` use `_`
- * separators (not `.`/`:`) so they already fall outside the wiped
- * prefixes and survive untouched.
+ * `pypsa_gui_settings` is reset on a build change too (see WIPE_KEYS): app
+ * settings are derived from the app's *current* defaults, so a new build /
+ * restart / deploy must re-sync them — a value cached in one browser must
+ * never pin a stale default (e.g. an old solver method) over a changed one.
+ * That keeps the tool web-based rather than hostage to one browser's history.
+ * `ragnarok_enabled_modules` and installed plugins are user-owned, not
+ * settings, and survive.
  */
 const BUILD_ID = process.env.REACT_APP_BUILD_ID || 'untagged';
 const BUILD_ID_KEY = 'ragnarok:build-id';
 
 // Wiped on a build change (derived / volatile state).
 const WIPE_PREFIXES = ['pypsa.', 'ragnarok:', 'ui:'];
+// Exact keys also wiped on a build change — app settings re-sync to the
+// current defaults instead of persisting a stale cached value.
+const WIPE_KEYS = ['pypsa_gui_settings'];
 // Never wiped — user-owned content that persists until explicitly removed.
 const PRESERVE_PREFIXES = ['ragnarok:fe-plugins:'];
 
@@ -44,7 +51,7 @@ try {
       if (!key) continue;
       if (key === BUILD_ID_KEY) continue;
       if (PRESERVE_PREFIXES.some((p) => key.startsWith(p))) continue;
-      if (WIPE_PREFIXES.some((p) => key.startsWith(p))) {
+      if (WIPE_PREFIXES.some((p) => key.startsWith(p)) || WIPE_KEYS.includes(key)) {
         doomed.push(key);
       }
     }

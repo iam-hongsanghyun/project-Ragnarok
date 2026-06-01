@@ -656,6 +656,22 @@
   font-size: 0.78rem;
   padding: 3px 7px;
 }
+/* Typed Start/End boxes for the simulation window. */
+.sg-window-inputs {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+}
+.sg-window-inputs label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.sg-window-inputs input {
+  width: 88px;
+}
 .sg-pathway-grid {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr auto;

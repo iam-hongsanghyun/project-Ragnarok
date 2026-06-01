@@ -31,13 +31,47 @@ export function WindowSection(props: WindowSectionProps) {
             : `${props.snapshotEnd - props.snapshotStart} of ${props.maxSnapshots} steps`}
         </label>
         {!props.pathwayConfig.enabled && props.maxSnapshots > 1 && (
-          <DualRangeSlider
-            min={0}
-            max={props.maxSnapshots}
-            low={props.snapshotStart}
-            high={props.snapshotEnd}
-            onChange={(lo, hi) => { props.onSnapshotStartChange(lo); props.onSnapshotEndChange(hi); }}
-          />
+          <>
+            <DualRangeSlider
+              min={0}
+              max={props.maxSnapshots}
+              low={props.snapshotStart}
+              high={props.snapshotEnd}
+              onChange={(lo, hi) => { props.onSnapshotStartChange(lo); props.onSnapshotEndChange(hi); }}
+            />
+            {/* Typed boxes for an exact window — dragging a slider to e.g. 8784
+                is impractical for a full-year run. */}
+            <div className="sg-window-inputs">
+              <label>
+                Start
+                <input
+                  type="number"
+                  min={0}
+                  max={props.snapshotEnd}
+                  value={props.snapshotStart}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    if (!Number.isFinite(v)) return;
+                    props.onSnapshotStartChange(Math.max(0, Math.min(Math.round(v), props.snapshotEnd)));
+                  }}
+                />
+              </label>
+              <label>
+                End
+                <input
+                  type="number"
+                  min={props.snapshotStart}
+                  max={props.maxSnapshots}
+                  value={props.snapshotEnd}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    if (!Number.isFinite(v)) return;
+                    props.onSnapshotEndChange(Math.max(props.snapshotStart, Math.min(Math.round(v), props.maxSnapshots)));
+                  }}
+                />
+              </label>
+            </div>
+          </>
         )}
       </div>
       <div className="sg-setting-row">
