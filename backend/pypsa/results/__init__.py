@@ -59,6 +59,17 @@ def _coerce_solve_status(result: Any) -> tuple[str, str]:
 # ``n.optimize(solver_name="highs")`` and the fast default.
 _HIGHS_METHODS = ("simplex", "ipm", "pdlp")
 
+# How linopy hands the built problem to HiGHS. linopy's default ("lp") writes
+# the whole problem to an LP *text file* and HiGHS parses it back — the
+# "Writing time" stage plus a load step whose cost explodes super-linearly with
+# problem size (a full-year network never reaches presolve: HiGHS prints its
+# banner, then spends minutes parsing the multi-million-row LP file / thrashing
+# memory before "LP ... has N rows" ever appears). "direct" passes the model
+# in-memory via highspy (a hard HiGHS/PyPSA dependency, always present here),
+# skipping both the file write and the parse. Same solution, dramatically less
+# overhead on large models — this is the I/O cost, not the optimisation.
+_SOLVER_IO_API = "direct"
+
 
 def _build_solver_options(options: dict[str, Any]) -> dict[str, Any]:
     """Translate run options into HiGHS ``solver_options``.
@@ -173,6 +184,7 @@ def run_pypsa(
                 solver_name="highs",
                 solver_options=solver_options if solver_options else {},
                 extra_functionality=extra_functionality,
+                io_api=_SOLVER_IO_API,
             )
             # PyPSA's rolling-horizon helper does not return a status; it
             # only logs a warning on bad windows. Treat the run as optimal
@@ -188,6 +200,7 @@ def run_pypsa(
                 solver_name="highs",
                 solver_options=solver_options if solver_options else {},
                 extra_functionality=extra_functionality,
+                io_api=_SOLVER_IO_API,
             )
             solve_status, solve_condition = _coerce_solve_status(result)
         else:
@@ -196,6 +209,7 @@ def run_pypsa(
                 solver_name="highs",
                 solver_options=solver_options if solver_options else {},
                 extra_functionality=extra_functionality,
+                io_api=_SOLVER_IO_API,
             )
             solve_status, solve_condition = _coerce_solve_status(result)
         _log.info(
