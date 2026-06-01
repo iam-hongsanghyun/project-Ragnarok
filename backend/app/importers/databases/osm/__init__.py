@@ -39,6 +39,12 @@ from ...protocol import (
 
 _DEFAULT_OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 _DEFAULT_TIMEOUT_S = 180
+
+# OpenStreetMap is a multi-dataset source: grid topology (this module) and
+# power plants (the osm_powerplants sibling). They share a source so the UI
+# groups them under one database.
+OSM_SOURCE_ID = "osm"
+OSM_SOURCE_LABEL = "OpenStreetMap (Overpass)"
 _EARTH_KM = 6371.0
 _NAME_RE = re.compile(r"[^A-Za-z0-9_]+")
 _NUM_RE = re.compile(r"-?\d+(?:[.,]\d+)?")
@@ -880,8 +886,10 @@ def build_pypsa_earth_style_sheets(
 
 META = DatabaseMeta(
     id="osm",
-    name="OpenStreetMap (Overpass)",
-    short_name="OSM",
+    name="OpenStreetMap (Overpass) — grid topology",
+    short_name="Grid topology",
+    source_id=OSM_SOURCE_ID,
+    source_label=OSM_SOURCE_LABEL,
     category="transmission",
     subcategory="Live grid topology",
     license="ODbL",

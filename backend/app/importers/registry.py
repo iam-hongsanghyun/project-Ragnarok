@@ -19,6 +19,7 @@ def _factories() -> list[Callable[[], Database]]:
     # Local imports so a broken module surfaces lazily (and tests can
     # import the registry without every dataset's deps loaded).
     from .databases.osm import build as build_osm
+    from .databases.osm_powerplants import build as build_osm_pp
     from .databases.wri_gppd import build as build_wri
     from .databases.worldbank_demand import build as build_wb
     from .databases.kpg193 import build as build_kpg_network
@@ -27,11 +28,12 @@ def _factories() -> list[Callable[[], Database]]:
     from .databases.kpg193_renewable_profile import build as build_kpg_renprof
     from .databases.eia_demand import build as build_eia
     from .databases.entsoe_load import build as build_entsoe
+    from .databases.entsoe_capacity import build as build_entsoe_cap
 
     return [
-        build_osm, build_wri, build_wb,
+        build_osm, build_osm_pp, build_wri, build_wb,
         build_kpg_network, build_kpg_rencap, build_kpg_demand, build_kpg_renprof,
-        build_eia, build_entsoe,
+        build_eia, build_entsoe, build_entsoe_cap,
     ]
 
 

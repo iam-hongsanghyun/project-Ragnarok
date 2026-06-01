@@ -21,11 +21,100 @@ from backend.app.importers.combine import combine_fragments, combine_previews
 def test_registry_lists_expected_modules():
     ids = set(registered_databases().keys())
     assert ids == {
-        "osm", "wri_gppd", "worldbank_demand",
+        "osm", "osm_powerplants", "wri_gppd", "worldbank_demand",
         "kpg193_network", "kpg193_renewable_capacity",
         "kpg193_demand_profile", "kpg193_renewable_profile",
-        "eia_demand", "entsoe_load",
+        "eia_demand", "entsoe_load", "entsoe_capacity",
     }
+
+
+def test_osm_and_entsoe_are_multi_dataset_sources():
+    """OSM and ENTSO-E now group two datasets each under one source."""
+    sources = {s["source_id"]: s for s in available_sources()}
+    assert [d["id"] for d in sources["osm"]["datasets"]] == ["osm", "osm_powerplants"]
+    assert [d["id"] for d in sources["entsoe"]["datasets"]] == [
+        "entsoe_load", "entsoe_capacity",
+    ]
+    # Installed-capacity generators sit on the load's national bus, so it
+    # declares the dependency (auto-included on fetch).
+    by_id = {m["id"]: m for m in available_databases()}
+    assert by_id["entsoe_capacity"]["depends_on"] == ["entsoe_load"]
+    assert by_id["osm_powerplants"]["category"] == "generation"
+
+
+def test_osm_power_capacity_parser():
+    from backend.app.importers.databases import osm_powerplants as pp
+
+    assert pp._parse_power_mw("1300 MW") == 1300.0
+    assert pp._parse_power_mw("2 GW") == 2000.0
+    assert pp._parse_power_mw("100 kW") == 0.1
+    assert pp._parse_power_mw("300000000 W") == 300.0
+    assert pp._parse_power_mw("0.5 MWp") == 0.5
+    # Absent / unitless / unparseable → None, so p_nom is left empty (not guessed).
+    assert pp._parse_power_mw("") is None
+    assert pp._parse_power_mw("500") is None
+    assert pp._parse_power_mw("solar") is None
+
+
+def test_entsoe_capacity_a68_parse():
+    from backend.app.importers.databases import entsoe_capacity as cap
+
+    xml = (
+        '<GL_MarketDocument xmlns="urn:x">'
+        "<TimeSeries><MktPSRType><psrType>B16</psrType></MktPSRType>"
+        "<Period><Point><position>1</position><quantity>15000</quantity></Point>"
+        "</Period></TimeSeries>"
+        "<TimeSeries><MktPSRType><psrType>B19</psrType></MktPSRType>"
+        "<Period><Point><position>1</position><quantity>8000</quantity></Point>"
+        "</Period></TimeSeries>"
+        "</GL_MarketDocument>"
+    )
+    by_psr = cap._parse_capacity_xml(xml)
+    assert by_psr == {"B16": 15000.0, "B19": 8000.0}
+    assert cap.PSRTYPE_CARRIER["B16"] == "solar"
+    assert cap.PSRTYPE_CARRIER["B19"] == "onwind"
+
+    import pytest
+
+    ack = (
+        '<Acknowledgement_MarketDocument xmlns="urn:x">'
+        "<Reason><text>No matching data found</text></Reason>"
+        "</Acknowledgement_MarketDocument>"
+    )
+    with pytest.raises(RuntimeError, match="No matching data found"):
+        cap._parse_capacity_xml(ack)
+
+
+def test_demand_sources_are_self_contained():
+    """EIA and ENTSO-E demand emit a national bus and put the load on it, so a
+    standalone demand fetch is PyPSA-ready (a Load requires a bus)."""
+    from shapely.geometry import box
+
+    from backend.app.importers.protocol import ConvertOptions, FetchResult, Region
+    from backend.app.importers.databases import eia_demand, entsoe_load
+
+    reg_us = Region("USA", "United States", box(-125, 25, -66, 49))
+    eia_res = FetchResult(
+        "eia_demand", reg_us, {"respondent": "US48"},
+        {"respondent": "US48",
+         "rows": [{"period": "2023-01-01T00", "value": "450000"}],
+         "date_from": "2023-01-01", "date_to": "2023-01-01"},
+    )
+    eia_frag = eia_demand.build().to_sheets(eia_res, ConvertOptions())
+    eia_bus = {b["name"] for b in eia_frag.sheets["buses"]}
+    eia_load = eia_frag.sheets["loads"][0]
+    assert eia_load["bus"] in eia_bus
+
+    reg_fr = Region("FRA", "France", box(-5, 42, 8, 51))
+    ent_res = FetchResult(
+        "entsoe_load", reg_fr, {},
+        {"iso": "FRA", "eic": "10YFR-RTE------C", "zone_name": "France",
+         "hourly": [("2023-01-01 00:00", 55000.0)],
+         "date_from": "2023-01-01", "date_to": "2023-01-01"},
+    )
+    ent_frag = entsoe_load.build().to_sheets(ent_res, ConvertOptions())
+    ent_bus = {b["name"] for b in ent_frag.sheets["buses"]}
+    assert ent_frag.sheets["loads"][0]["bus"] in ent_bus
 
 
 def test_kpg193_split_into_separate_datasets():

@@ -84,6 +84,58 @@ _EIC_BY_ISO: dict[str, tuple[str, str]] = {
 }
 
 
+# The ENTSO-E datasets (national load, installed capacity) share a source so
+# the UI groups them under one database and fetches them together aligned.
+ENTSOE_SOURCE_ID = "entsoe"
+ENTSOE_SOURCE_LABEL = "ENTSO-E Transparency"
+
+# ENTSO-E PsrType production-type codes → readable carrier names (per the
+# ENTSO-E code list). Used by the installed-capacity dataset.
+PSRTYPE_CARRIER: dict[str, str] = {
+    "B01": "biomass",
+    "B02": "lignite",
+    "B03": "coal_gas",
+    "B04": "gas",
+    "B05": "hard_coal",
+    "B06": "oil",
+    "B07": "oil_shale",
+    "B08": "peat",
+    "B09": "geothermal",
+    "B10": "hydro_pumped_storage",
+    "B11": "hydro_run_of_river",
+    "B12": "hydro_reservoir",
+    "B13": "marine",
+    "B14": "nuclear",
+    "B15": "other_renewable",
+    "B16": "solar",
+    "B17": "waste",
+    "B18": "offwind",
+    "B19": "onwind",
+    "B20": "other",
+}
+
+
+def national_bus_name(iso: str) -> str:
+    """Deterministic national bus name shared by the ENTSO-E datasets so the
+    load and any generators attach to the same bus."""
+    return iso
+
+
+def national_bus_row(region: Region) -> dict[str, Any]:
+    """A single national bus at the country centroid (so it lands on the map).
+    Only the load dataset emits this; capacity references it by name."""
+    try:
+        c = region.polygon.centroid
+        x, y = float(c.x), float(c.y)
+    except Exception:
+        x, y = "", ""
+    return {
+        "name": national_bus_name(region.country_iso),
+        "x": x, "y": y, "carrier": "AC", "country": region.country_iso,
+        "source": "ENTSO-E Transparency",
+    }
+
+
 def _slug(raw: str | None, fallback: str = "load") -> str:
     if not raw:
         return fallback
@@ -203,7 +255,9 @@ def _aggregate_hourly(points: list[tuple[datetime, float]]) -> list[tuple[str, f
 META = DatabaseMeta(
     id="entsoe_load",
     name="ENTSO-E — national hourly electricity demand (Actual Total Load)",
-    short_name="ENTSO-E load",
+    short_name="National load",
+    source_id=ENTSOE_SOURCE_ID,
+    source_label=ENTSOE_SOURCE_LABEL,
     category="demand",
     subcategory="Hourly profiles",
     license="ENTSO-E Transparency (free, attribution)",
@@ -213,11 +267,11 @@ META = DatabaseMeta(
         "National hourly electricity demand for a European country from the "
         "ENTSO-E Transparency Platform (Actual Total Load, 6.1.A). The country "
         "you pick on the map selects the bidding zone; choose the date window. "
-        "Lands as one Load row plus an hourly loads-p_set series (UTC; "
-        "sub-hourly zones are averaged to hourly). Needs a free ENTSO-E API "
-        "token (Settings → API keys)."
+        "Lands as one national bus + a Load on it + an hourly loads-p_set "
+        "series (UTC; sub-hourly zones are averaged to hourly). Needs a free "
+        "ENTSO-E API token (Settings → API keys)."
     ),
-    targets=["loads", "loads-p_set"],
+    targets=["buses", "loads", "loads-p_set", "carriers"],
     country_coverage=sorted(_EIC_BY_ISO.keys()),
     requires_secrets=["entsoe_key"],
     filters=[
@@ -313,8 +367,12 @@ class EntsoeLoad:
         p_set_rows = [{"snapshot": snap, load_name: mw} for snap, mw in hourly]
 
         if p_set_rows:
+            bus_name = national_bus_name(iso)
+            frag.sheets["carriers"] = [{"name": "AC"}]
+            frag.sheets["buses"] = [national_bus_row(result.region)]
             frag.sheets["loads"] = [{
-                "name": load_name, "carrier": "AC", "country": iso,
+                "name": load_name, "bus": bus_name, "carrier": "AC",
+                "country": iso,
                 "source": "ENTSO-E Transparency (Actual Total Load)",
                 "bidding_zone": eic, "zone_name": zone_name,
             }]

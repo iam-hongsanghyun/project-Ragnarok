@@ -122,7 +122,7 @@ META = DatabaseMeta(
         "authority — and the date window. Lands as one Load row plus an hourly "
         "loads-p_set series. Needs a free EIA API key (Settings → API keys)."
     ),
-    targets=["loads", "loads-p_set"],
+    targets=["buses", "loads", "loads-p_set", "carriers"],
     country_coverage=["USA"],
     requires_secrets=["eia_key"],
     filters=[
@@ -221,10 +221,25 @@ class EiaDemand:
             p_set_rows.append({"snapshot": snap, load_name: float(value)})
 
         if p_set_rows:
+            # Self-contained PyPSA model: a single national bus the load sits
+            # on (PyPSA Load requires a bus). Placed at the region centroid so
+            # it lands on the map.
+            bus_name = _slug(respondent, "bus")
+            try:
+                c = result.region.polygon.centroid
+                bx, by = float(c.x), float(c.y)
+            except Exception:
+                bx, by = "", ""
+            frag.sheets["carriers"] = [{"name": "AC"}]
+            frag.sheets["buses"] = [{
+                "name": bus_name, "x": bx, "y": by, "carrier": "AC",
+                "country": "USA", "source": "EIA Form-930",
+            }]
             frag.sheets["loads"] = [{
-                "name": load_name, "carrier": "AC", "country": "USA",
-                "source": "EIA Form-930", "respondent": respondent,
-                "respondent_level": level, "respondent_name": name,
+                "name": load_name, "bus": bus_name, "carrier": "AC",
+                "country": "USA", "source": "EIA Form-930",
+                "respondent": respondent, "respondent_level": level,
+                "respondent_name": name,
             }]
             frag.sheets["loads-p_set"] = p_set_rows
             frag.snapshots = snapshots
