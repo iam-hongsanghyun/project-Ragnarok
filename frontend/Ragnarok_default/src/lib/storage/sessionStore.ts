@@ -5,21 +5,24 @@
  * localStorage's quota — IndexedDB holds it comfortably and stores structured
  * data without JSON round-tripping. The model carries everything project-side
  * (components, time series, and the `RAGNAROK_*` config sheets: scenarios,
- * carbon library, constraints, DSL, pathway, rolling), so persisting it plus
- * the live run controls restores the whole session on reload.
+ * carbon library, constraints, DSL, pathway, rolling).
  *
- * The session is cleared only by the explicit "Clear cache" button — a plain
- * reload restores it.
+ * The heavy `model` and the lightweight run `controls` are stored under
+ * SEPARATE keys, so changing a control (carbon price, snapshot window) only
+ * rewrites the small controls record — it does NOT re-serialise the whole model
+ * on every slider tick. The session is cleared only by the explicit "Clear
+ * cache" button — a plain reload restores it.
  */
 import type { CarbonPriceScheduleEntry, WorkbookModel } from 'lib/types';
 
 const DB_NAME = 'ragnarok';
 const STORE = 'session';
-const KEY = 'session';
+const MODEL_KEY = 'model';
+const CONTROLS_KEY = 'controls';
 const DB_VERSION = 1;
 
-export interface SessionSnapshot {
-  model: WorkbookModel;
+/** Lightweight run controls — cheap to serialise on every change. */
+export interface SessionControls {
   filename: string;
   carbonPrice: number;
   carbonPriceSchedule: CarbonPriceScheduleEntry[];
@@ -41,36 +44,58 @@ function openDb(): Promise<IDBDatabase> {
   });
 }
 
-/** Persist the session. Best-effort — storage errors (quota, privacy) are swallowed. */
-export async function saveSession(snapshot: SessionSnapshot): Promise<void> {
+function put(key: string, value: unknown): Promise<void> {
+  return openDb().then(
+    (db) =>
+      new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).put(value, key);
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onerror = () => { db.close(); reject(tx.error); };
+        tx.onabort = () => { db.close(); reject(tx.error); };
+      }),
+  );
+}
+
+function get<T>(key: string): Promise<T | null> {
+  return openDb().then(
+    (db) =>
+      new Promise<T | null>((resolve, reject) => {
+        const tx = db.transaction(STORE, 'readonly');
+        const req = tx.objectStore(STORE).get(key);
+        req.onsuccess = () => { db.close(); resolve((req.result as T) ?? null); };
+        req.onerror = () => { db.close(); reject(req.error); };
+      }),
+  );
+}
+
+/** Persist the heavy workbook model (debounce in the caller). Best-effort. */
+export async function saveSessionModel(model: WorkbookModel): Promise<void> {
   try {
-    const db = await openDb();
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE, 'readwrite');
-      tx.objectStore(STORE).put(snapshot, KEY);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error);
-    });
-    db.close();
+    await put(MODEL_KEY, model);
   } catch {
-    /* storage unavailable — best effort */
+    /* storage unavailable / quota — best effort */
   }
 }
 
-export async function loadSession(): Promise<SessionSnapshot | null> {
+/** Persist the lightweight run controls. Best-effort. */
+export async function saveSessionControls(controls: SessionControls): Promise<void> {
   try {
-    const db = await openDb();
-    const result = await new Promise<SessionSnapshot | null>((resolve, reject) => {
-      const tx = db.transaction(STORE, 'readonly');
-      const req = tx.objectStore(STORE).get(KEY);
-      req.onsuccess = () => resolve((req.result as SessionSnapshot) ?? null);
-      req.onerror = () => reject(req.error);
-    });
-    db.close();
-    return result;
+    await put(CONTROLS_KEY, controls);
   } catch {
-    return null;
+    /* best effort */
+  }
+}
+
+export async function loadSession(): Promise<{ model: WorkbookModel | null; controls: SessionControls | null }> {
+  try {
+    const [model, controls] = await Promise.all([
+      get<WorkbookModel>(MODEL_KEY),
+      get<SessionControls>(CONTROLS_KEY),
+    ]);
+    return { model, controls };
+  } catch {
+    return { model: null, controls: null };
   }
 }
 
@@ -80,12 +105,12 @@ export async function clearSession(): Promise<void> {
     const db = await openDb();
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE, 'readwrite');
-      tx.objectStore(STORE).delete(KEY);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error);
+      tx.objectStore(STORE).delete(MODEL_KEY);
+      tx.objectStore(STORE).delete(CONTROLS_KEY);
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => { db.close(); reject(tx.error); };
+      tx.onabort = () => { db.close(); reject(tx.error); };
     });
-    db.close();
   } catch {
     /* ignore */
   }
