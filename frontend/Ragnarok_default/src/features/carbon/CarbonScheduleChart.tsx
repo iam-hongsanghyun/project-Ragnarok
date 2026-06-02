@@ -24,7 +24,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { CarbonPriceScheduleEntry } from 'lib/types';
 import { CARBON_CHART_CONFIG } from 'lib/constants';
 
-export interface CarbonChartOverlay {
+interface CarbonChartOverlay {
   name: string;
   color: string;
   schedule: CarbonPriceScheduleEntry[];

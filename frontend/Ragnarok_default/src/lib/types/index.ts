@@ -1,5 +1,3 @@
-import { SHEETS, TS_SHEETS } from 'lib/constants/sheets';
-
 // ── Sheet name types ──────────────────────────────────────────────────────────
 
 export type SheetName = string;

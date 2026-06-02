@@ -46,7 +46,7 @@ import { readCustomDslFromModel, writeCustomDslToModel } from 'lib/constraints/c
 import { dslToSpecs } from 'lib/constraints/dsl';
 import { buildScenarioPreset, defaultScenarioCatalog, readScenarioCatalogFromModel, sameScenarioCatalog, writeScenarioCatalogToModel } from 'lib/results/scenarios';
 import { readCarbonLibraryFromModel, writeCarbonLibraryToModel, sameCarbonLibrary } from 'lib/results/carbonLibrary';
-import { saveSession, loadSession, clearSession } from 'lib/storage/sessionStore';
+import { saveSessionModel, saveSessionControls, loadSession, clearSession } from 'lib/storage/sessionStore';
 import { RunDialog } from './features/run/RunDialog';
 import { SettingsView } from './views/SettingsView';
 import { PluginsView } from './views/PluginsView';
@@ -368,6 +368,7 @@ function AppInner() {
   }, [
     snapshotWeight,
     carbonPrice,
+    carbonPriceSchedule,
     settings.dateFormat,
     settings.discountRate,
     settings.enableLoadShedding,
@@ -378,7 +379,7 @@ function AppInner() {
   ]);
 
   const prepareModelForBackend = useCallback((source: WorkbookModel): WorkbookModel => {
-    const cloned = JSON.parse(JSON.stringify(source)) as WorkbookModel;
+    const cloned = structuredClone(source);
     normalizeInputDatesToIso(cloned, settings.dateFormat);
     return cloned;
   }, [settings.dateFormat]);
@@ -485,16 +486,18 @@ function AppInner() {
     let cancelled = false;
     void (async () => {
       try {
-        const snap = await loadSession();
-        const hasRows = !!snap && Object.values(snap.model).some((rows) => Array.isArray(rows) && rows.length > 0);
-        if (!cancelled && snap && hasRows) {
-          resetForNewModel(snap.model, snap.filename);
-          setCarbonPrice(snap.carbonPrice);
-          setCarbonPriceSchedule((snap.carbonPriceSchedule ?? []).map((r) => ({ ...r })));
-          setSnapshotWeight(snap.snapshotWeight);
-          setSnapshotStart(snap.snapshotStart);
-          setSnapshotEnd(snap.snapshotEnd);
-          setForceLp(snap.forceLp);
+        const { model: savedModel, controls } = await loadSession();
+        const hasRows = !!savedModel && Object.values(savedModel).some((rows) => Array.isArray(rows) && rows.length > 0);
+        if (!cancelled && savedModel && hasRows) {
+          resetForNewModel(savedModel, controls?.filename);
+          if (controls) {
+            setCarbonPrice(controls.carbonPrice);
+            setCarbonPriceSchedule((controls.carbonPriceSchedule ?? []).map((r) => ({ ...r })));
+            setSnapshotWeight(controls.snapshotWeight);
+            setSnapshotStart(controls.snapshotStart);
+            setSnapshotEnd(controls.snapshotEnd);
+            setForceLp(controls.forceLp);
+          }
           setStatus('Restored your last session.');
         }
       } finally {
@@ -504,17 +507,26 @@ function AppInner() {
     return () => { cancelled = true; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Persist the heavy model on its own (debounced) so editing a control doesn't
+  // re-serialise the whole workbook.
+  useEffect(() => {
+    if (!sessionRestoredRef.current) return undefined;
+    const id = window.setTimeout(() => { void saveSessionModel(model); }, 800);
+    return () => window.clearTimeout(id);
+  }, [model]);
+
+  // Persist the lightweight run controls separately — cheap, so a shorter debounce.
   useEffect(() => {
     if (!sessionRestoredRef.current) return undefined;
     const id = window.setTimeout(() => {
-      void saveSession({
-        model, filename, carbonPrice, carbonPriceSchedule,
+      void saveSessionControls({
+        filename, carbonPrice, carbonPriceSchedule,
         snapshotStart, snapshotEnd, snapshotWeight, forceLp,
         savedAt: Date.now(),
       });
-    }, 800);
+    }, 400);
     return () => window.clearTimeout(id);
-  }, [model, filename, carbonPrice, carbonPriceSchedule, snapshotStart, snapshotEnd, snapshotWeight, forceLp]);
+  }, [filename, carbonPrice, carbonPriceSchedule, snapshotStart, snapshotEnd, snapshotWeight, forceLp]);
 
   const bounds = useMemo(() => getBounds(model), [model.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
   const busIndex = useMemo(() => getBusIndex(model), [model.buses]);  // eslint-disable-line react-hooks/exhaustive-deps

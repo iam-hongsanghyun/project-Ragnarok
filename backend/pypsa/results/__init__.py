@@ -336,10 +336,13 @@ def run_pypsa(
             "expected values across all scenarios are available in the Stochastic scenarios card."
         )
 
+    # One copy (decouples from the network); both frames below are read-only,
+    # so dispatch_frame can alias it when there are no storage units.
     generator_dispatch_frame = network.generators_t.p.copy()
-    dispatch_frame = generator_dispatch_frame.copy()
     if hasattr(network, "storage_units_t") and not network.storage_units_t.p.empty:
-        dispatch_frame = pd.concat([dispatch_frame, network.storage_units_t.p], axis=1)
+        dispatch_frame = pd.concat([generator_dispatch_frame, network.storage_units_t.p], axis=1)
+    else:
+        dispatch_frame = generator_dispatch_frame
 
     by_carrier = dispatch_by_carrier(generator_dispatch_frame, network.generators)
     load_dispatch = network.loads_t.p_set.sum(axis=1)
