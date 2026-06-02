@@ -3,8 +3,12 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
+import pandas as pd
+import pypsa
 import pytest
 
+from backend.pypsa.carbon_price import apply_carbon_price, parse_carbon_price_config
 from backend.pypsa.results import run_pypsa
 
 
@@ -44,6 +48,47 @@ def _pathway_options() -> dict[str, Any]:
             ],
         }
     }
+
+
+def _net(snapshots: list[str]) -> pypsa.Network:
+    """Minimal single-bus network: one emitting (gas) + one clean (wind) gen."""
+    n = pypsa.Network()
+    n.set_snapshots(pd.DatetimeIndex(snapshots))
+    n.add("Carrier", "gas", co2_emissions=0.4)   # tCO₂/MWh (output basis)
+    n.add("Carrier", "wind", co2_emissions=0.0)
+    n.add("Bus", "b0")
+    n.add("Generator", "g", bus="b0", carrier="gas", marginal_cost=20.0)
+    n.add("Generator", "w", bus="b0", carrier="wind", marginal_cost=0.0)
+    return n
+
+
+def test_scalar_price_is_factor_times_price() -> None:
+    """marginal_cost += price × co2_emissions; clean generator untouched."""
+    n = _net(["2025-01-01"])
+    apply_carbon_price(n, parse_carbon_price_config(50.0, None), [], "$")
+    assert n.generators.at["g", "marginal_cost"] == pytest.approx(20.0 + 50.0 * 0.4)  # 40
+    assert n.generators.at["w", "marginal_cost"] == pytest.approx(0.0)
+
+
+def test_schedule_adder_is_per_snapshot() -> None:
+    """A 2025→30 / 2030→120 schedule prices each snapshot by its year."""
+    n = _net(["2025-01-01", "2030-01-01"])
+    cfg = parse_carbon_price_config(0.0, [{"year": 2025, "price": 30.0}, {"year": 2030, "price": 120.0}])
+    apply_carbon_price(n, cfg, [], "$")
+    mc = n.generators_t.marginal_cost["g"]
+    # base 20 + price × 0.4  →  [20+12, 20+48]
+    assert list(mc.values) == pytest.approx([32.0, 68.0])
+
+
+def test_varying_schedule_with_missing_static_cost_is_not_nan() -> None:
+    """Regression: a blank static marginal_cost must coerce to 0, not NaN."""
+    n = _net(["2025-01-01", "2030-01-01"])
+    n.generators.loc["g", "marginal_cost"] = np.nan
+    cfg = parse_carbon_price_config(0.0, [{"year": 2025, "price": 30.0}, {"year": 2030, "price": 120.0}])
+    apply_carbon_price(n, cfg, [], "$")
+    mc = n.generators_t.marginal_cost["g"]
+    assert mc.notna().all()
+    assert list(mc.values) == pytest.approx([12.0, 48.0])  # 0 + price × 0.4
 
 
 def test_scalar_carbon_price_backwards_compatible() -> None:

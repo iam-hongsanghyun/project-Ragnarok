@@ -155,8 +155,10 @@ def apply_carbon_price(
         if gen in mc_t.columns:
             mc_t[gen] = mc_t[gen].fillna(0.0) + adder
         else:
-            base_static = float(network.generators.at[gen, "marginal_cost"]) if "marginal_cost" in network.generators.columns else 0.0
-            mc_t[gen] = base_static + adder
+            # Coerce a missing/NaN static cost to 0 (mirrors the scalar path) —
+            # otherwise NaN + adder would null out the generator's cost.
+            raw_static = network.generators.at[gen, "marginal_cost"] if "marginal_cost" in network.generators.columns else 0.0
+            mc_t[gen] = number(raw_static, 0.0) + adder
 
     schedule_summary = ", ".join(f"{e.year}→{e.price:.0f}" for e in config.schedule)
     notes.append(
