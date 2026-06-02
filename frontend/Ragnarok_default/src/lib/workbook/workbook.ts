@@ -12,6 +12,7 @@ import { normalizeDateToIso } from 'lib/utils/helpers';
 import { PATHWAY_CONFIG_SHEET, PATHWAY_PERIODS_SHEET } from 'lib/results/pathway';
 import { ROLLING_CONFIG_SHEET } from 'lib/results/rolling';
 import { SCENARIO_SHEET } from 'lib/results/scenarios';
+import { CARBON_LIBRARY_SHEET } from 'lib/results/carbonLibrary';
 
 export const RESULT_META_SHEET = 'RAGNAROK_ResultMeta';
 export const PLUGIN_ANALYTICS_SHEET = 'RAGNAROK_PluginAnalytics';
@@ -270,6 +271,7 @@ export function createEmptyWorkbook(): WorkbookModel {
     [PATHWAY_PERIODS_SHEET]: [],
     [ROLLING_CONFIG_SHEET]: [],
     [SCENARIO_SHEET]: [],
+    [CARBON_LIBRARY_SHEET]: [],
   } as WorkbookModel;
 }
 
@@ -337,7 +339,7 @@ export function buildWorkbook(model: WorkbookModel, dateFormat: DateFormat = 'au
     const ws = temporalSheetToWorksheet(prepared);
     XLSX.utils.book_append_sheet(workbook, ws, sheet);
   });
-  [PATHWAY_CONFIG_SHEET, PATHWAY_PERIODS_SHEET, ROLLING_CONFIG_SHEET, SCENARIO_SHEET].forEach((sheet) => {
+  [PATHWAY_CONFIG_SHEET, PATHWAY_PERIODS_SHEET, ROLLING_CONFIG_SHEET, SCENARIO_SHEET, CARBON_LIBRARY_SHEET].forEach((sheet) => {
     const rows = (model as any)[sheet] as GridRow[] | undefined;
     if (!rows || rows.length === 0) return;
     const ws = XLSX.utils.json_to_sheet(rows);
@@ -518,7 +520,7 @@ export function buildProjectWorkbook(
     XLSX.utils.book_append_sheet(workbook, ws, sheet);
   });
 
-  [PATHWAY_CONFIG_SHEET, PATHWAY_PERIODS_SHEET, ROLLING_CONFIG_SHEET, SCENARIO_SHEET].forEach((sheet) => {
+  [PATHWAY_CONFIG_SHEET, PATHWAY_PERIODS_SHEET, ROLLING_CONFIG_SHEET, SCENARIO_SHEET, CARBON_LIBRARY_SHEET].forEach((sheet) => {
     const rows = (model as any)[sheet] as GridRow[] | undefined;
     if (!rows || rows.length === 0) return;
     const ws = XLSX.utils.json_to_sheet(rows);

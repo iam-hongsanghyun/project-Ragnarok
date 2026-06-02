@@ -15,10 +15,12 @@ export interface ForgeFinding {
   message: string;
 }
 
-/** Every model sheet that currently holds at least one row (any naming). */
+/** Every data sheet that currently holds at least one row (any naming).
+ *  Internal `RAGNAROK_*` metadata sheets (scenarios, carbon library, settings…)
+ *  are excluded — they aren't model data the Forge tools should touch. */
 export function nonEmptySheets(model: WorkbookModel): string[] {
   return Object.keys(model).filter(
-    (key) => Array.isArray(model[key]) && (model[key] as GridRow[]).length > 0,
+    (key) => !key.startsWith('RAGNAROK_') && Array.isArray(model[key]) && (model[key] as GridRow[]).length > 0,
   );
 }
 

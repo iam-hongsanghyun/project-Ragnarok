@@ -15,6 +15,7 @@ import {
   StochasticConfig,
   SecurityConstrainedConfig,
   CarbonPriceScheduleEntry,
+  CarbonScheduleProfile,
   Primitive,
   RunHistoryEntry,
   RunResults,
@@ -33,7 +34,7 @@ import { canonicalizeOutputSeries, canonicalizeTemporalRows, createEmptyWorkbook
 import { mergeWorkbookFragment } from 'lib/workbook/mergeFragment';
 import type { WorkbookFragment } from 'lib/api/databases';
 import { fullResultsArrayBuffer } from 'lib/export/results';
-import { getBounds, getBusIndex, carrierColor, numberValue, orderByCarrierRows, setCarrierColorOverrides, snapshotMaxFromWorkbook } from 'lib/utils/helpers';
+import { getBounds, getBusIndex, carrierColor, numberValue, orderByCarrierRows, setCarrierColorOverrides, snapshotMaxFromWorkbook, stringValue } from 'lib/utils/helpers';
 import { usePersistedState } from 'shared/hooks/usePersistedState';
 import { RagnarokLogo } from 'shared/components/RagnarokLogo';
 import { buildRowsFromGeneratorDetails, buildSystemLoadRows, normalizeSeriesPoint } from 'lib/results/analytics';
@@ -44,6 +45,8 @@ import { defaultRollingConfig, normalizeRollingConfig, readRollingConfigFromMode
 import { readCustomDslFromModel, writeCustomDslToModel } from 'lib/constraints/custom';
 import { dslToSpecs } from 'lib/constraints/dsl';
 import { buildScenarioPreset, defaultScenarioCatalog, readScenarioCatalogFromModel, sameScenarioCatalog, writeScenarioCatalogToModel } from 'lib/results/scenarios';
+import { readCarbonLibraryFromModel, writeCarbonLibraryToModel, sameCarbonLibrary } from 'lib/results/carbonLibrary';
+import { saveSession, loadSession, clearSession } from 'lib/storage/sessionStore';
 import { RunDialog } from './features/run/RunDialog';
 import { SettingsView } from './views/SettingsView';
 import { PluginsView } from './views/PluginsView';
@@ -132,6 +135,7 @@ function AppInner() {
   const [stochasticConfig, setStochasticConfig] = useState<StochasticConfig>({ enabled: false, scenarios: [] });
   const [sclopfConfig, setSclopfConfig] = useState<SecurityConstrainedConfig>({ enabled: false });
   const [carbonPriceSchedule, setCarbonPriceSchedule] = useState<CarbonPriceScheduleEntry[]>([]);
+  const [carbonLibrary, setCarbonLibrary] = useState<CarbonScheduleProfile[]>([]);
   const [validateResult, setValidateResult] = useState<{
     valid: boolean;
     errors: string[];
@@ -162,6 +166,7 @@ function AppInner() {
     snapshotEnd: RUN_WINDOW.defaultSnapshotEnd,
     snapshotWeight: RUN_WINDOW.defaultSnapshotWeight,
     carbonPrice: 0,
+    carbonPriceSchedule: [],
     discountRate: settings.discountRate,
     forceLp: false,
     enableLoadShedding: settings.enableLoadShedding,
@@ -235,6 +240,7 @@ function AppInner() {
       snapshotEnd,
       snapshotWeight,
       carbonPrice,
+      carbonPriceSchedule,
       discountRate: settings.discountRate,
       forceLp,
       enableLoadShedding: settings.enableLoadShedding,
@@ -251,6 +257,7 @@ function AppInner() {
     snapshotEnd,
     snapshotWeight,
     carbonPrice,
+    carbonPriceSchedule,
     settings.discountRate,
     settings.enableLoadShedding,
     settings.loadSheddingCost,
@@ -286,6 +293,7 @@ function AppInner() {
     const nextPathway = readPathwayConfigFromModel(nextModel);
     const nextRolling = readRollingConfigFromModel(nextModel);
     setCustomDsl(readCustomDslFromModel(nextModel));
+    setCarbonLibrary(readCarbonLibraryFromModel(nextModel));
     const nextScenarioCatalog = readScenarioCatalogFromModel(nextModel);
     const activeImportedScenario = nextScenarioCatalog.scenarios.find(
       (scenario) => scenario.id === nextScenarioCatalog.activeScenarioId,
@@ -318,6 +326,7 @@ function AppInner() {
       snapshotEnd: snapshotMax,
       snapshotWeight,
       carbonPrice,
+      carbonPriceSchedule,
       discountRate: settings.discountRate,
       forceLp,
       enableLoadShedding: settings.enableLoadShedding,
@@ -459,8 +468,76 @@ function AppInner() {
     });
   }, [scenarioCatalog]);
 
+  // Persist the carbon-schedule library into its model sheet (travels with export).
+  useEffect(() => {
+    setModel((current) => {
+      const next = writeCarbonLibraryToModel(current, carbonLibrary);
+      return sameCarbonLibrary(readCarbonLibraryFromModel(current), carbonLibrary) ? current : next;
+    });
+  }, [carbonLibrary]);
+
+  // ── Session persistence (IndexedDB) ─────────────────────────────────────
+  // Restore the last working session on load, then auto-save it as it changes,
+  // so a plain reload remembers everything (model + carbon library + scenarios
+  // + run controls). Only the Clear button wipes it.
+  const sessionRestoredRef = useRef(false);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const snap = await loadSession();
+        const hasRows = !!snap && Object.values(snap.model).some((rows) => Array.isArray(rows) && rows.length > 0);
+        if (!cancelled && snap && hasRows) {
+          resetForNewModel(snap.model, snap.filename);
+          setCarbonPrice(snap.carbonPrice);
+          setCarbonPriceSchedule((snap.carbonPriceSchedule ?? []).map((r) => ({ ...r })));
+          setSnapshotWeight(snap.snapshotWeight);
+          setSnapshotStart(snap.snapshotStart);
+          setSnapshotEnd(snap.snapshotEnd);
+          setForceLp(snap.forceLp);
+          setStatus('Restored your last session.');
+        }
+      } finally {
+        if (!cancelled) sessionRestoredRef.current = true;
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!sessionRestoredRef.current) return undefined;
+    const id = window.setTimeout(() => {
+      void saveSession({
+        model, filename, carbonPrice, carbonPriceSchedule,
+        snapshotStart, snapshotEnd, snapshotWeight, forceLp,
+        savedAt: Date.now(),
+      });
+    }, 800);
+    return () => window.clearTimeout(id);
+  }, [model, filename, carbonPrice, carbonPriceSchedule, snapshotStart, snapshotEnd, snapshotWeight, forceLp]);
+
   const bounds = useMemo(() => getBounds(model), [model.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
   const busIndex = useMemo(() => getBusIndex(model), [model.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
+  // Carbon-readiness of the current model: how many generators use an emitting
+  // carrier (co2_emissions > 0). Drives the "Apply to model" pre-check — a
+  // carbon price has no effect without emitting generators.
+  const carbonCheck = useMemo(() => {
+    const carriers = model.carriers ?? [];
+    const co2 = new Map<string, number>();
+    let hasCo2Column = false;
+    for (const c of carriers) {
+      if ('co2_emissions' in c) hasCo2Column = true;
+      const name = stringValue(c.name).trim();
+      if (name) co2.set(name, numberValue(c.co2_emissions));
+    }
+    const generators = model.generators ?? [];
+    let emittingGenerators = 0;
+    for (const g of generators) {
+      const carrier = stringValue(g.carrier).trim();
+      if (carrier && (co2.get(carrier) ?? 0) > 0) emittingGenerators += 1;
+    }
+    return { emittingGenerators, hasCo2Column, totalGenerators: generators.length };
+  }, [model.carriers, model.generators]);
   // Map geometry for the analytics view follows the results-owning topology.
   const analyticsBounds = useMemo(() => getBounds(analyticsModel), [analyticsModel.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
   const analyticsBusIndex = useMemo(() => getBusIndex(analyticsModel), [analyticsModel.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
@@ -491,6 +568,7 @@ function AppInner() {
     setSnapshotEnd(nextEnd);
     setSnapshotWeight(scenario.snapshotWeight);
     setCarbonPrice(scenario.carbonPrice);
+    setCarbonPriceSchedule((scenario.carbonPriceSchedule ?? []).map((row) => ({ ...row })));
     setForceLp(scenario.forceLp);
     setConstraints(scenario.constraints.map((row) => ({ ...row })));
     updateSettings({
@@ -1630,7 +1708,7 @@ function AppInner() {
           </button>
           <button
             className="tb-btn tb-btn--muted"
-            onClick={() => {
+            onClick={async () => {
               if (!window.confirm(
                 'Clear the cache?\n\n'
                 + 'This removes:\n'
@@ -1666,6 +1744,9 @@ function AppInner() {
               }
               resetForNewModel(createEmptyWorkbook(), 'untitled.xlsx');
               setFileHandle(null);
+              // Wipe the persisted IndexedDB session too, and await it so the
+              // delete commits before the reload (otherwise it would restore).
+              await clearSession();
               // Reload so every component re-reads its now-empty persisted
               // state and the Welcome view is restored as the landing page.
               window.location.reload();
@@ -1737,6 +1818,9 @@ function AppInner() {
               onCarbonPriceChange={setCarbonPrice}
               carbonPriceSchedule={carbonPriceSchedule}
               onCarbonPriceScheduleChange={setCarbonPriceSchedule}
+              carbonLibrary={carbonLibrary}
+              onCarbonLibraryChange={setCarbonLibrary}
+              carbonCheck={carbonCheck}
               constraints={constraints}
               onConstraintsChange={setConstraints}
               customDsl={customDsl}

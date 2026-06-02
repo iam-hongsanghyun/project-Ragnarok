@@ -137,6 +137,13 @@ export interface CarbonPriceScheduleEntry {
   price: number;
 }
 
+/** A named, reusable carbon-price schedule in the project's carbon library. */
+export interface CarbonScheduleProfile {
+  id: string;
+  name: string;
+  schedule: CarbonPriceScheduleEntry[];
+}
+
 export interface SecurityConstrainedConfig {
   enabled: boolean;
 }
@@ -166,6 +173,7 @@ export interface ScenarioPreset {
   snapshotEnd: number;
   snapshotWeight: number;
   carbonPrice: number;
+  carbonPriceSchedule: CarbonPriceScheduleEntry[];
   discountRate: number;
   forceLp: boolean;
   enableLoadShedding: boolean;

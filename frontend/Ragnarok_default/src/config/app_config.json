@@ -25,6 +25,10 @@
     "magnitudeMax": 10000000,
     "magnitudeMin": 0.000001
   },
+  "carbonChart": {
+    "defaultStartYear": 2020,
+    "defaultEndYear": 2050
+  },
   "settings": {
     "storageKey": "pypsa_gui_settings",
     "defaults": {

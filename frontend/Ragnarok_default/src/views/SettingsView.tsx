@@ -12,6 +12,7 @@ import { LeftRail } from '../shared/components/primitives';
 import {
   AppliedConstraint,
   CarbonPriceScheduleEntry,
+  CarbonScheduleProfile,
   CustomConstraint,
   PathwayConfig,
   Primitive,
@@ -117,6 +118,9 @@ export interface SettingsViewProps {
   onCarbonPriceChange: (v: number) => void;
   carbonPriceSchedule: CarbonPriceScheduleEntry[];
   onCarbonPriceScheduleChange: (next: CarbonPriceScheduleEntry[]) => void;
+  carbonLibrary: CarbonScheduleProfile[];
+  onCarbonLibraryChange: (next: CarbonScheduleProfile[]) => void;
+  carbonCheck: { emittingGenerators: number; hasCo2Column: boolean; totalGenerators: number };
   currencySymbol: string;
   lineCount: number;
   transformerCount: number;

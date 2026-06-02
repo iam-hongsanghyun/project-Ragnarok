@@ -5523,6 +5523,283 @@ th:hover .col-delete-btn {
   overflow: auto;
 }
 
+/* Carbon price schedule chart */
+.carbon-chart {
+  position: relative;
+  width: 100%;
+}
+.carbon-chart-svg {
+  display: block;
+  width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  touch-action: none;
+  user-select: none;
+}
+.carbon-chart-grid { stroke: var(--border); stroke-width: 1; opacity: 0.5; }
+.carbon-chart-axis { stroke: var(--border); stroke-width: 1; }
+.carbon-chart-axis-label { fill: var(--muted); font-size: 11px; }
+.carbon-chart-value { fill: var(--text); font-size: 11px; font-weight: 600; }
+.carbon-chart-empty { fill: var(--muted); font-size: 12px; }
+.carbon-chart-surface { fill: transparent; cursor: crosshair; }
+.carbon-chart-line { fill: none; stroke: var(--brand, #0f766e); stroke-width: 2; }
+.carbon-chart-overlay { cursor: crosshair; }
+.carbon-chart-overlay-line { fill: none; stroke: currentColor; stroke-width: 1.5; opacity: 0.6; stroke-dasharray: 4 3; pointer-events: stroke; }
+.carbon-chart-overlay-dot { fill: currentColor; opacity: 0.6; }
+.carbon-chart-tooltip {
+  position: absolute;
+  transform: translate(-50%, calc(-100% - 8px));
+  background: var(--text);
+  color: var(--bg);
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 6;
+}
+.carbon-chart-tooltip-val { font-weight: 400; opacity: 0.85; }
+/* Compare view: hide the editable curve, show only the saved (dotted) overlays. */
+.carbon-chart-svg.is-compare .carbon-chart-line,
+.carbon-chart-svg.is-compare .carbon-chart-point,
+.carbon-chart-svg.is-compare .carbon-chart-value { display: none; }
+.carbon-chart-svg.is-compare .carbon-chart-overlay-line { opacity: 0.95; }
+.carbon-chart-svg.is-compare .carbon-chart-overlay-dot { opacity: 0.95; }
+.carbon-chart-svg.is-compare .carbon-chart-surface { cursor: default; }
+
+/* Carbon — "now editing a saved schedule" banner + row highlight */
+.carbon-editing-note {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border-left: 3px solid var(--brand, #0f766e);
+  background: color-mix(in srgb, var(--brand, #0f766e) 8%, transparent);
+  border-radius: 4px;
+  font-size: 0.82rem;
+  color: var(--text);
+}
+.carbon-editing-done {
+  margin-left: 6px;
+  border: 1px solid var(--brand, #0f766e);
+  background: var(--bg);
+  color: var(--brand, #0f766e);
+  border-radius: 4px;
+  padding: 1px 8px;
+  font: inherit;
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+.carbon-editing-cancel {
+  margin-left: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--muted);
+  border-radius: 4px;
+  padding: 1px 8px;
+  font: inherit;
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+.carbon-editing-cancel:hover { color: #b91c1c; border-color: #f1b0b0; }
+.carbon-apply-result {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border-radius: 5px;
+  font-size: 0.82rem;
+}
+.carbon-apply-result.is-ok { background: color-mix(in srgb, #16a34a 12%, transparent); color: #15803d; }
+.carbon-apply-result.is-warn { background: color-mix(in srgb, #d97706 14%, transparent); color: #b45309; }
+
+/* Carbon — scenario toolbar + searchable picker dropdown */
+.carbon-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0 8px;
+  flex-wrap: wrap;
+}
+.carbon-picker { position: relative; display: inline-flex; align-items: center; gap: 8px; }
+.carbon-picker-prefix { font-size: 0.78rem; font-weight: 600; color: var(--muted); }
+.carbon-picker-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 220px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 9px;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.carbon-picker-trigger:hover { border-color: var(--brand, #0f766e); }
+.carbon-picker-caret { color: var(--muted); font-size: 0.7rem; }
+.carbon-picker-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  min-width: 300px;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
+}
+.carbon-picker-search {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 4px 7px;
+  font: inherit;
+  font-size: 0.82rem;
+}
+.carbon-picker-scalar {
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 5px;
+  padding: 5px 7px;
+  font: inherit;
+  font-size: 0.82rem;
+  color: var(--text);
+  cursor: pointer;
+}
+.carbon-picker-scalar:hover { background: var(--bg-hover, rgba(127, 127, 127, 0.12)); }
+.carbon-picker-scalar.is-active { background: color-mix(in srgb, var(--brand, #0f766e) 14%, transparent); font-weight: 600; }
+.carbon-picker-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; max-height: 260px; overflow: auto; }
+.carbon-picker-row { display: flex; align-items: center; gap: 6px; border-radius: 5px; padding: 2px 4px; }
+.carbon-picker-row.is-active { background: color-mix(in srgb, var(--brand, #0f766e) 14%, transparent); }
+.carbon-picker-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 0.82rem;
+  color: var(--text);
+  cursor: pointer;
+  padding: 3px 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.carbon-picker-row.is-active .carbon-picker-name { font-weight: 600; }
+.carbon-picker-rename {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--brand, #0f766e);
+  border-radius: 4px;
+  padding: 2px 5px;
+  font: inherit;
+  font-size: 0.82rem;
+}
+.carbon-picker-icon {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.carbon-picker-icon:hover { background: var(--bg-hover, rgba(127, 127, 127, 0.12)); color: var(--text); }
+.carbon-picker-del:hover { color: #dc2626; }
+.carbon-picker-nomatch { color: var(--muted); font-size: 0.8rem; padding: 6px 4px; }
+.carbon-picker-new {
+  text-align: left;
+  background: none;
+  border: 1px dashed var(--border);
+  border-radius: 5px;
+  padding: 5px 7px;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--brand, #0f766e);
+  cursor: pointer;
+}
+.carbon-picker-new:hover { border-color: var(--brand, #0f766e); }
+
+/* Carbon saved-schedule library — the overlay "Show" toggle */
+.carbon-show {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.carbon-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 2px solid var(--border);
+  flex: 0 0 auto;
+}
+.carbon-chart-point {
+  fill: var(--brand, #0f766e);
+  stroke: var(--panel);
+  stroke-width: 2;
+  cursor: ns-resize;
+}
+.carbon-chart-point.is-selected { fill: #d97706; }
+.carbon-chart-editor {
+  position: absolute;
+  transform: translate(-50%, -135%);
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  z-index: 5;
+}
+.carbon-chart-editor label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+.carbon-chart-editor input {
+  width: 64px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 5px;
+  font: inherit;
+  font-size: 0.8rem;
+}
+.carbon-chart-done,
+.carbon-chart-del {
+  align-self: flex-end;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 4px;
+  padding: 4px 9px;
+  font: inherit;
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+.carbon-chart-done { border-color: var(--brand, #0f766e); color: var(--brand, #0f766e); }
+.carbon-chart-del { color: #b91c1c; border-color: #f1b0b0; }
+.carbon-chart-del:hover { background: #fee2e2; }
+
 /* Settings view */
 .settings-view {
   display: flex;

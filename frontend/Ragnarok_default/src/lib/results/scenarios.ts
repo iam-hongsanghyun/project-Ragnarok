@@ -1,4 +1,5 @@
 import {
+  CarbonPriceScheduleEntry,
   CustomConstraint,
   GridRow,
   PathwayConfig,
@@ -52,6 +53,10 @@ function cloneConstraints(constraints: CustomConstraint[]): CustomConstraint[] {
   return constraints.map((row) => ({ ...row }));
 }
 
+function cloneSchedule(schedule: CarbonPriceScheduleEntry[]): CarbonPriceScheduleEntry[] {
+  return (schedule ?? []).map((row) => ({ ...row }));
+}
+
 export function createScenarioId(): string {
   return `scenario-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -64,6 +69,7 @@ export function buildScenarioPreset(input: {
   snapshotEnd: number;
   snapshotWeight: number;
   carbonPrice: number;
+  carbonPriceSchedule?: CarbonPriceScheduleEntry[];
   discountRate: number;
   forceLp: boolean;
   enableLoadShedding: boolean;
@@ -80,6 +86,7 @@ export function buildScenarioPreset(input: {
     snapshotEnd: input.snapshotEnd,
     snapshotWeight: input.snapshotWeight,
     carbonPrice: input.carbonPrice,
+    carbonPriceSchedule: cloneSchedule(input.carbonPriceSchedule ?? []),
     discountRate: input.discountRate,
     forceLp: input.forceLp,
     enableLoadShedding: input.enableLoadShedding,
@@ -115,6 +122,7 @@ function normalizeScenarioCatalog(catalog: ScenarioCatalog): ScenarioCatalog {
       ...scenario,
       label: scenario.label.trim() || 'Scenario',
       notes: scenario.notes ?? '',
+      carbonPriceSchedule: cloneSchedule(scenario.carbonPriceSchedule ?? []),
       pathwayConfig: clonePathwayConfig(scenario.pathwayConfig ?? defaultPathwayConfig()),
       rollingConfig: cloneRollingConfig(scenario.rollingConfig ?? defaultRollingConfig()),
       constraints: cloneConstraints(scenario.constraints ?? []),
@@ -139,6 +147,7 @@ export function readScenarioCatalogFromModel(model: WorkbookModel): ScenarioCata
         snapshotEnd: primitiveNumber(payload.snapshotEnd as Primitive, 24),
         snapshotWeight: primitiveNumber(payload.snapshotWeight as Primitive, 1),
         carbonPrice: primitiveNumber(payload.carbonPrice as Primitive, 0),
+        carbonPriceSchedule: Array.isArray(payload.carbonPriceSchedule) ? payload.carbonPriceSchedule : [],
         discountRate: primitiveNumber(payload.discountRate as Primitive, 0),
         forceLp: primitiveBoolean(payload.forceLp as Primitive, false),
         enableLoadShedding: primitiveBoolean(payload.enableLoadShedding as Primitive, false),
@@ -176,6 +185,7 @@ export function writeScenarioCatalogToModel(
       snapshotEnd: scenario.snapshotEnd,
       snapshotWeight: scenario.snapshotWeight,
       carbonPrice: scenario.carbonPrice,
+      carbonPriceSchedule: scenario.carbonPriceSchedule,
       discountRate: scenario.discountRate,
       forceLp: scenario.forceLp,
       enableLoadShedding: scenario.enableLoadShedding,
