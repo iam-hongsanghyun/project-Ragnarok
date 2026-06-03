@@ -249,6 +249,7 @@ export function PluginDetail({ host, plugin, model, onReplaceModel, onMergeSheet
           moduleConfigs={{ [plugin.id]: withDefaults(schema, host.getConfig(plugin.id)) }}
           onModuleConfigChange={(id, key, value) => host.setConfigField(id, key, value)}
           carriers={carriers}
+          model={model}
           pluginAnalytics={analytics ? { [plugin.id]: analytics } : {}}
           onModuleAction={handleAction}
         />

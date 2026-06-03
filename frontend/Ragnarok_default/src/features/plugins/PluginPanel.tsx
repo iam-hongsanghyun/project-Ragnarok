@@ -6,6 +6,7 @@ import {
   PluginAnalyticsEntry,
   PluginFieldHint,
   PluginPanelLayout,
+  WorkbookModel,
 } from 'lib/types';
 import { ConfigFieldRow } from '../modules/ModuleManagerSection';
 import { PluginChart } from './PluginChart';
@@ -241,10 +242,11 @@ interface InputViewProps {
   config: Record<string, unknown>;
   onConfigChange: (key: string, value: unknown) => void;
   carriers?: string[];
+  model?: WorkbookModel;
   onModuleAction?: (moduleId: string, fieldKey: string, field: ModuleConfigField) => Promise<void>;
 }
 
-function InputView({ module, config, onConfigChange, carriers, onModuleAction }: InputViewProps) {
+function InputView({ module, config, onConfigChange, carriers, model, onModuleAction }: InputViewProps) {
   const sections = buildInputSections(module);
   const panel = module.panel as ModulePanelConfig | undefined;
   if (sections.length === 0) {
@@ -265,6 +267,7 @@ function InputView({ module, config, onConfigChange, carriers, onModuleAction }:
                 value={config[key]}
                 onChange={(value) => onConfigChange(key, value)}
                 carriers={carriers}
+                model={model}
                 formValues={config}
                 onAction={onModuleAction ? (fk, f) => onModuleAction(module.id, fk, f) : undefined}
               />
@@ -299,11 +302,12 @@ interface PluginTabContentProps {
   config: Record<string, unknown>;
   onConfigChange: (key: string, value: unknown) => void;
   carriers?: string[];
+  model?: WorkbookModel;
   analytics: PluginAnalyticsEntry | null;
   onModuleAction?: (moduleId: string, fieldKey: string, field: ModuleConfigField) => Promise<void>;
 }
 
-function PluginTabContent({ module, config, onConfigChange, carriers, analytics, onModuleAction }: PluginTabContentProps) {
+function PluginTabContent({ module, config, onConfigChange, carriers, model, analytics, onModuleAction }: PluginTabContentProps) {
   const [activeInnerTab, setActiveInnerTab] = useState<PluginInnerTab>('description');
   const innerTabs: Array<{ key: PluginInnerTab; label: string }> = [
     { key: 'description', label: 'Description' },
@@ -332,6 +336,7 @@ function PluginTabContent({ module, config, onConfigChange, carriers, analytics,
           config={config}
           onConfigChange={onConfigChange}
           carriers={carriers}
+          model={model}
           onModuleAction={onModuleAction}
         />
       )}
@@ -345,12 +350,13 @@ interface PluginPanelProps {
   moduleConfigs: Record<string, Record<string, unknown>>;
   onModuleConfigChange: (moduleId: string, key: string, value: unknown) => void;
   carriers?: string[];
+  model?: WorkbookModel;
   pluginAnalytics: Record<string, PluginAnalyticsEntry>;
   onModuleAction?: (moduleId: string, fieldKey: string, field: ModuleConfigField) => Promise<void>;
 }
 
 export function PluginPanel({
-  modules, moduleConfigs, onModuleConfigChange, carriers, pluginAnalytics, onModuleAction,
+  modules, moduleConfigs, onModuleConfigChange, carriers, model, pluginAnalytics, onModuleAction,
 }: PluginPanelProps) {
   const [activeId, setActiveId] = useState<string>(modules[0]?.id ?? '');
   const activeModules = useMemo(() => modules, [modules]);
@@ -412,6 +418,7 @@ export function PluginPanel({
         config={moduleConfigs[active.id] ?? {}}
         onConfigChange={(key, value) => onModuleConfigChange(active.id, key, value)}
         carriers={carriers}
+        model={model}
         analytics={pluginAnalytics[active.id] ?? null}
         onModuleAction={onModuleAction}
       />

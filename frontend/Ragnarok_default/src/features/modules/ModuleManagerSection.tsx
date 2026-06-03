@@ -1,6 +1,18 @@
-import React, { useRef, useState } from 'react';
-import { ModuleConfigField, ModuleConfigTableColumn, ModuleConfigVisibleWhen, ModuleDescriptor, ModuleHostInventory, PluginFileValue } from 'lib/types';
+import React, { useMemo, useRef, useState } from 'react';
+import { ModuleConfigField, ModuleConfigTableColumn, ModuleConfigVisibleWhen, ModuleDescriptor, ModuleHostInventory, PluginFileValue, WorkbookModel } from 'lib/types';
+import { resolveOptionsFrom, ResolvedOption } from 'lib/plugins/options';
 import { SearchableSelect } from '../../shared/components/SearchableSelect';
+
+/** Resolved option list for a field/column: dynamic source wins, static is the fallback. */
+function resolveStaticOrDynamic(
+  optionsFrom: ModuleConfigField['optionsFrom'],
+  staticOptions: ResolvedOption[],
+  ctx: { model?: WorkbookModel; formValues?: Record<string, unknown> },
+): ResolvedOption[] {
+  if (!optionsFrom) return staticOptions;
+  const dynamic = resolveOptionsFrom(optionsFrom, ctx);
+  return dynamic.length > 0 ? dynamic : staticOptions;
+}
 
 interface ModuleManagerSectionProps {
   inventory: ModuleHostInventory | null;
@@ -28,7 +40,9 @@ interface ConfigFieldProps {
   value: unknown;
   onChange: (value: unknown) => void;
   carriers?: string[];
-  /** Sibling field values, used to evaluate `visibleWhen` gates. */
+  /** Current workbook model, for `optionsFrom: { source: 'model' }`. */
+  model?: WorkbookModel;
+  /** Sibling field values, used to evaluate `visibleWhen` gates and `optionsFrom: { source: 'config' }`. */
   formValues?: Record<string, unknown>;
   /**
    * Called when an `action`-typed field's button is clicked. Async — the
@@ -93,7 +107,7 @@ function ActionFieldRow({ fieldKey, field, label, onAction }: ActionFieldRowProp
   );
 }
 
-export function ConfigFieldRow({ fieldKey, field, value, onChange, carriers, formValues, onAction }: ConfigFieldProps) {
+export function ConfigFieldRow({ fieldKey, field, value, onChange, carriers, model, formValues, onAction }: ConfigFieldProps) {
   if (!evaluateVisibleWhen(field.visibleWhen, formValues)) {
     return null;
   }
@@ -135,25 +149,34 @@ export function ConfigFieldRow({ fieldKey, field, value, onChange, carriers, for
     );
   }
 
-  if (field.type === 'select' && field.options) {
+  if (field.type === 'select' && (field.options || field.optionsFrom)) {
+    const opts = resolveStaticOrDynamic(
+      field.optionsFrom,
+      (field.options ?? []).map((opt) => ({ value: String(opt.value), label: String(opt.label) })),
+      { model, formValues },
+    );
     return (
       <label className="sg-module-config-row">
         <span className="sg-module-config-label">{label}</span>
         <SearchableSelect
           className="sg-module-config-select"
           value={String(resolved ?? '')}
-          options={field.options.map((opt) => ({ value: String(opt.value), label: String(opt.label) }))}
+          options={opts}
           onChange={(v) => onChange(v)}
         />
       </label>
     );
   }
 
-  if (field.type === 'multi-select' && field.options) {
-    // General multi-select: pick several from a fixed option list. Returns a
-    // string[]. Generalises `carrier-select` (which is fixed to workbook
-    // carriers) to arbitrary, plugin-declared options.
-    const options = field.options.map((opt) => ({ value: String(opt.value), label: String(opt.label) }));
+  if (field.type === 'multi-select' && (field.options || field.optionsFrom)) {
+    // General multi-select: pick several from an option list (static or a
+    // dynamic `optionsFrom` source). Returns a string[]. Generalises
+    // `carrier-select` (which is fixed to workbook carriers).
+    const options = resolveStaticOrDynamic(
+      field.optionsFrom,
+      (field.options ?? []).map((opt) => ({ value: String(opt.value), label: String(opt.label) })),
+      { model, formValues },
+    );
     const selected: string[] = Array.isArray(resolved)
       ? (resolved as unknown[]).map(String)
       : Array.isArray(field.default) ? (field.default as unknown[]).map(String) : [];
@@ -317,6 +340,8 @@ export function ConfigFieldRow({ fieldKey, field, value, onChange, carriers, for
           rows={rows}
           onChange={(next) => onChange(next)}
           maxHeight={field.maxHeight}
+          model={model}
+          formValues={formValues}
         />
       </div>
     );
@@ -347,6 +372,8 @@ interface TableEditorProps {
   rows: Array<Record<string, unknown>>;
   onChange: (rows: Array<Record<string, unknown>>) => void;
   maxHeight?: number;
+  model?: WorkbookModel;
+  formValues?: Record<string, unknown>;
 }
 
 function emptyRow(columns: ModuleConfigTableColumn[]): Record<string, unknown> {
@@ -359,13 +386,14 @@ function cellInput(
   column: ModuleConfigTableColumn,
   cell: unknown,
   onCellChange: (v: unknown) => void,
+  selectOptions: ResolvedOption[],
 ): React.ReactNode {
-  if (column.type === 'select' && column.options) {
+  if (column.type === 'select' && (column.options || column.optionsFrom)) {
     return (
       <SearchableSelect
         className="constraints-cell-input"
         value={String(cell ?? '')}
-        options={[{ value: '', label: '—' }, ...column.options.map((opt) => ({ value: String(opt.value), label: String(opt.label ?? opt.value) }))]}
+        options={[{ value: '', label: '—' }, ...selectOptions]}
         onChange={(v) => onCellChange(v)}
       />
     );
@@ -390,7 +418,20 @@ function cellInput(
   );
 }
 
-function TableEditor({ columns, rows, onChange, maxHeight }: TableEditorProps) {
+function TableEditor({ columns, rows, onChange, maxHeight, model, formValues }: TableEditorProps) {
+  // Per-column 'select' options are the same for every row, so resolve once.
+  // Dynamic `optionsFrom` (model sheet / sibling config table) wins; the
+  // static `options` array is the fallback when it resolves to nothing.
+  const columnOptions = useMemo(() => {
+    const map: Record<string, ResolvedOption[]> = {};
+    for (const c of columns) {
+      if (c.type !== 'select') continue;
+      const staticOpts = (c.options ?? []).map((opt) => ({ value: String(opt.value), label: String(opt.label ?? opt.value) }));
+      map[c.key] = resolveStaticOrDynamic(c.optionsFrom, staticOpts, { model, formValues });
+    }
+    return map;
+  }, [columns, model, formValues]);
+
   const updateCell = (rowIdx: number, key: string, val: unknown) => {
     const next = rows.map((r, i) => (i === rowIdx ? { ...r, [key]: val } : r));
     onChange(next);
@@ -432,7 +473,7 @@ function TableEditor({ columns, rows, onChange, maxHeight }: TableEditorProps) {
             rows.map((row, rowIdx) => (
               <tr key={rowIdx}>
                 {columns.map((c) => (
-                  <td key={c.key}>{cellInput(c, row[c.key], (v) => updateCell(rowIdx, c.key, v))}</td>
+                  <td key={c.key}>{cellInput(c, row[c.key], (v) => updateCell(rowIdx, c.key, v), columnOptions[c.key] ?? [])}</td>
                 ))}
                 <td>
                   <button

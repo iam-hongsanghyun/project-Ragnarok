@@ -53,6 +53,7 @@ code) see `docs/frontend.md`. Everything else is here.
 12. [Minimal end-to-end example](#12-minimal-end-to-end-example)
 13. [Dashboard Importer — full walkthrough](#13-dashboard-importer--full-walkthrough)
 14. [Troubleshooting](#14-troubleshooting)
+15. [SDK changelog](#15-sdk-changelog)
 
 ---
 
@@ -360,15 +361,18 @@ A searchable dropdown. Requires an `options` array.
 ```
 
 Each option requires a `value` property. The `label` property is optional and
-defaults to `value` when absent.
+defaults to `value` when absent. Instead of a static `options` array, a `select`
+field may declare [`optionsFrom`](#dynamic-options-optionsfrom) to source its
+options from the model or a sibling config table.
 
 ---
 
 **`multi-select`**
 
-A checkbox list over a fixed `options` array — pick zero or more. The general
+A checkbox list over an `options` array — pick zero or more. The general
 form of `carrier-select` (which is hard-wired to workbook carriers); use this
-when the choices are anything other than carriers.
+when the choices are anything other than carriers. Like `select`, it may use
+[`optionsFrom`](#dynamic-options-optionsfrom) instead of a static `options` array.
 
 ```jsonc
 "sectors": {
@@ -442,6 +446,7 @@ required. Each column descriptor:
 | `label` | string | Column header. Defaults to `key`. |
 | `type` | string | Cell input type: `"string"` (default), `"number"`, or `"select"`. |
 | `options` | array | For `"select"` cells: `[{ "value": "...", "label": "..." }]`. |
+| `optionsFrom` | object | For `"select"` cells: a dynamic option source. Overrides `options`. See [dynamic options](#dynamic-options-optionsfrom). |
 | `width` | string or number | Optional CSS width. Numbers are treated as px. |
 
 The hook receives the value as `Array<Record<string, string | number>>`. Empty
@@ -464,6 +469,73 @@ cells default to `""` for string columns and `0` for number columns.
 
 Additional property: `maxHeight` (number, pixels, default 260). When the table
 body exceeds this height, it scrolls.
+
+---
+
+### Dynamic options (`optionsFrom`)
+
+A `select` / `multi-select` **field**, and a `"select"` **table column**, may
+declare `optionsFrom` instead of (or alongside) a static `options` array. The
+host resolves it to an option list at render time. When `optionsFrom` resolves
+to at least one option it wins; if it resolves to nothing (e.g. no model is
+loaded yet), the static `options` are used as a fallback.
+
+| Property | Type | Notes |
+|---|---|---|
+| `source` | string | `"model"` or `"config"`. Required. |
+| `sheet` | string | For `source: "model"`: the workbook sheet to read (e.g. `"buses"`). |
+| `field` | string | For `source: "config"`: the sibling config field key whose `table` rows to read (e.g. `"province_mapping"`). |
+| `column` | string | Row property used as the option **value**. Defaults to `"name"`. |
+| `labelColumn` | string | Row property used as the option **label**. Defaults to `column`. |
+
+Both sources read distinct values (blank values dropped, duplicates collapse to
+the first occurrence).
+
+- **`source: "model"`** pulls from the currently open workbook — e.g. bus names:
+
+  ```jsonc
+  { "key": "bus", "label": "Bus", "type": "select",
+    "optionsFrom": { "source": "model", "sheet": "buses" } }
+  ```
+
+- **`source: "config"`** pulls from another `table` field the user is editing,
+  live — e.g. the provinces typed into a `province_mapping` table:
+
+  ```jsonc
+  { "key": "province", "label": "Province", "type": "select",
+    "optionsFrom": { "source": "config", "field": "province_mapping", "column": "province" } }
+  ```
+
+**Switching options by another field's value.** `optionsFrom` itself does not
+branch on a sibling value; use the field-level [`visibleWhen`](#53-visiblewhen-gates)
+gate for that. Declare one `table` field per case, each gated on the controlling
+field, each with its own `optionsFrom`. For example, a `resolution` selector
+with a bus-keyed table when `resolution = "bus"` and a province-keyed table when
+`resolution = "province"`:
+
+```jsonc
+"resolution": {
+  "type": "select", "label": "Resolution", "default": "bus",
+  "options": [{ "value": "bus" }, { "value": "province" }]
+},
+"bus_table": {
+  "type": "table", "label": "By bus",
+  "visibleWhen": { "field": "resolution", "equals": "bus" },
+  "columns": [
+    { "key": "bus", "type": "select", "optionsFrom": { "source": "model", "sheet": "buses" } },
+    { "key": "value", "type": "number" }
+  ]
+},
+"province_table": {
+  "type": "table", "label": "By province",
+  "visibleWhen": { "field": "resolution", "equals": "province" },
+  "columns": [
+    { "key": "province", "type": "select",
+      "optionsFrom": { "source": "config", "field": "province_mapping", "column": "province" } },
+    { "key": "value", "type": "number" }
+  ]
+}
+```
 
 ---
 
@@ -1401,3 +1473,30 @@ Spreading the incoming model (`{ ...model, ... }`) is the safest pattern.
 ES-module syntax (`import`/`export`) instead of CommonJS (`module.exports`).
 
 **Fix:** Use only CommonJS syntax. Verify with Node.js: `node -e "require('./index.js')"`.
+
+---
+
+## 15. SDK changelog
+
+All entries below are **SDK 2** and **backward-compatible** — they are additive
+manifest features, so existing `"sdkVersion": "2"` plugins keep working
+unchanged and there is no version bump. Keep declaring `"sdkVersion": "2"`.
+
+### Config inputs
+
+- **`multi-select` field** — a checkbox list over an `options` array returning
+  `string[]`; the general form of `carrier-select`. See
+  [field type catalogue](#52-field-type-catalogue).
+- **`optionsFrom` (dynamic options)** — a `select` / `multi-select` field or a
+  `"select"` table column can source its options at render time from the
+  workbook model (`source: "model"`) or from a sibling `table` field
+  (`source: "config"`) instead of a static `options` array. Combine with
+  field-level [`visibleWhen`](#53-visiblewhen-gates) to switch option sets by
+  another field's value. See [dynamic options](#dynamic-options-optionsfrom).
+
+### Output (`analyze`)
+
+- **`chart` output format** — a `PluginFieldHint` with `format: "chart"` renders
+  its value (a `PluginChartSpec`: `line` / `area` / `bar` / `donut`) as a chart
+  drawn by the host. Plugins emit a data spec, never markup. See
+  [Output tab](#63-output-tab).

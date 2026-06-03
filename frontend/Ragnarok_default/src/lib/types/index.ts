@@ -702,6 +702,30 @@ export interface ModuleHostRoot {
 
 export type ModuleConfigFieldType = 'number' | 'boolean' | 'string' | 'select' | 'multi-select' | 'carrier-select' | 'file' | 'table' | 'action' | 'group';
 
+/**
+ * Dynamic option source for a `select` / `multi-select` field or a `select`
+ * table column. Resolved at render time to a list of `{ value, label }`.
+ * When present it takes precedence over a static `options` array; if it
+ * resolves to nothing (e.g. no model loaded yet) the static `options` are
+ * used as a fallback.
+ */
+export interface ModuleConfigOptionsFrom {
+  /**
+   * - `'model'`  — distinct values from a workbook sheet (e.g. bus names).
+   * - `'config'` — distinct values from a sibling `table` field's current rows
+   *   (e.g. a `province_mapping` table the user is editing).
+   */
+  source: 'model' | 'config';
+  /** For `source: 'model'`: the workbook sheet name (e.g. `'buses'`). */
+  sheet?: string;
+  /** For `source: 'config'`: the sibling config field key whose rows to read. */
+  field?: string;
+  /** Row property used as the option value. Defaults to `'name'`. */
+  column?: string;
+  /** Row property used as the option label. Defaults to `column`. */
+  labelColumn?: string;
+}
+
 /** Column descriptor for an editable 'table' config field. */
 export interface ModuleConfigTableColumn {
   /** Property name on each row object. Required. */
@@ -712,6 +736,8 @@ export interface ModuleConfigTableColumn {
   type?: 'string' | 'number' | 'select';
   /** Options for 'select'-typed cells. */
   options?: Array<{ value: string; label?: string }>;
+  /** Dynamic option source for 'select'-typed cells. Overrides `options`. */
+  optionsFrom?: ModuleConfigOptionsFrom;
   /** Optional CSS width (px or rem string, or number-as-px). */
   width?: string | number;
 }
@@ -734,6 +760,8 @@ export interface ModuleConfigField {
   max?: number;
   step?: number;
   options?: Array<{ value: unknown; label: string }>;
+  /** For 'select' / 'multi-select' fields: dynamic option source. Overrides `options`. */
+  optionsFrom?: ModuleConfigOptionsFrom;
   /** For 'file' fields: MIME types / extension filter passed to <input accept>. */
   accept?: string;
   /**
