@@ -149,6 +149,50 @@ export function ConfigFieldRow({ fieldKey, field, value, onChange, carriers, for
     );
   }
 
+  if (field.type === 'multi-select' && field.options) {
+    // General multi-select: pick several from a fixed option list. Returns a
+    // string[]. Generalises `carrier-select` (which is fixed to workbook
+    // carriers) to arbitrary, plugin-declared options.
+    const options = field.options.map((opt) => ({ value: String(opt.value), label: String(opt.label) }));
+    const selected: string[] = Array.isArray(resolved)
+      ? (resolved as unknown[]).map(String)
+      : Array.isArray(field.default) ? (field.default as unknown[]).map(String) : [];
+
+    const toggle = (val: string, checked: boolean) => {
+      const next = checked
+        ? [...selected, val]
+        : selected.filter((v) => v !== val);
+      onChange(next);
+    };
+
+    return (
+      <div className="sg-module-config-row sg-module-config-row--carrier">
+        <span className="sg-module-config-label">{label}</span>
+        {options.length > 0 ? (
+          <div className="sg-carrier-select-list">
+            {options.map((opt) => (
+              <label key={opt.value} className="sg-carrier-select-item">
+                <input
+                  type="checkbox"
+                  checked={selected.includes(opt.value)}
+                  onChange={(e) => toggle(opt.value, e.target.checked)}
+                />
+                <span className="sg-carrier-select-name">{opt.label}</span>
+              </label>
+            ))}
+          </div>
+        ) : (
+          <p className="sg-setting-hint" style={{ margin: 0 }}>No options available.</p>
+        )}
+        {options.length > 0 && (
+          <p className="sg-setting-hint" style={{ margin: '4px 0 0' }}>
+            {selected.length} of {options.length} selected.
+          </p>
+        )}
+      </div>
+    );
+  }
+
   if (field.type === 'carrier-select') {
     // Current selection: value from store, else field default, else empty array
     const selected: string[] = Array.isArray(resolved)

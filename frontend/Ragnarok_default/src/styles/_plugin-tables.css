@@ -81,3 +81,17 @@
   background: rgba(15, 118, 110, 0.05);
 }
 
+
+/* ── Plugin chart output (format: 'chart') ───────────────────────────────
+   A chart spans the full width of the result table (both columns of the
+   label/value grid). The embedded .chart-card sizes itself to this cell
+   via its ResizeObserver, so give it a definite block to measure. */
+.plugin-result-chart-cell {
+  padding: 8px 0;
+}
+.plugin-result-chart-cell .chart-card {
+  width: 100%;
+}
+.plugin-result-chart-cell .chart-card-wide {
+  min-height: 280px;
+}

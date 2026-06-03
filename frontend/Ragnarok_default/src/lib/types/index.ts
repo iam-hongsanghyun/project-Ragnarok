@@ -400,13 +400,54 @@ export interface ExpansionAsset {
 
 // ── Plugin analytics ─────────────────────────────────────────────────────────
 
-export type PluginFieldFormat = 'number' | 'currency' | 'table' | 'text';
+export type PluginFieldFormat = 'number' | 'currency' | 'table' | 'text' | 'chart';
 
 export interface PluginFieldHint {
   label?: string;
   unit?: string;
   format?: PluginFieldFormat;
   section?: string;
+}
+
+/** One series in a line/area/bar plugin chart. */
+export interface PluginChartSeries {
+  /** Property name read from each row in `PluginChartSpec.rows`. */
+  key: string;
+  /** Legend label. Defaults to `key`. */
+  label?: string;
+  /** Stroke/fill colour. Defaults to a stable palette colour. */
+  color?: string;
+}
+
+/** One slice of a donut plugin chart. */
+export interface PluginChartSlice {
+  label: string;
+  value: number;
+  /** Slice colour. Defaults to a stable palette colour. */
+  color?: string;
+}
+
+/**
+ * Data spec a plugin returns (as a `data` value whose `ui` hint has
+ * `format: 'chart'`) for the host to render with the app's own chart
+ * components. Plugins emit data, never markup — the host owns rendering.
+ */
+export interface PluginChartSpec {
+  /** 'line' | 'area' | 'bar' | 'donut'. */
+  kind: ChartSectionType;
+  /** Caption shown above the chart. */
+  description?: string;
+  /** line/area/bar: rows keyed by series `key`, plus `label`/`x` (category) or `timestamp`. */
+  rows?: Array<Record<string, string | number>>;
+  /** line/area/bar: series definitions. */
+  series?: PluginChartSeries[];
+  /** line/area/bar: stack series instead of overlaying. */
+  stacked?: boolean;
+  xAxisTitle?: string;
+  yAxisTitle?: string;
+  showLegend?: boolean;
+  /** donut: slice definitions. */
+  slices?: PluginChartSlice[];
 }
 
 export type PluginPanelLayout = 'single' | '2x1' | '1x2' | '2x2';
@@ -659,7 +700,7 @@ export interface ModuleHostRoot {
   managed: boolean;
 }
 
-export type ModuleConfigFieldType = 'number' | 'boolean' | 'string' | 'select' | 'carrier-select' | 'file' | 'table' | 'action' | 'group';
+export type ModuleConfigFieldType = 'number' | 'boolean' | 'string' | 'select' | 'multi-select' | 'carrier-select' | 'file' | 'table' | 'action' | 'group';
 
 /** Column descriptor for an editable 'table' config field. */
 export interface ModuleConfigTableColumn {

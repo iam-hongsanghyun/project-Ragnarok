@@ -8,6 +8,8 @@ import {
   PluginPanelLayout,
 } from 'lib/types';
 import { ConfigFieldRow } from '../modules/ModuleManagerSection';
+import { PluginChart } from './PluginChart';
+import { isPluginChartSpec } from 'lib/plugins/chartSpec';
 
 type PluginInnerTab = 'description' | 'input' | 'output';
 
@@ -174,6 +176,16 @@ function PluginResults({ data, ui }: { data: Record<string, unknown>; ui: Record
               <tr key={key}>
                 <td colSpan={2} style={{ color: 'var(--danger, #dc2626)', fontSize: '0.82rem' }}>
                   Plugin error: {String(value)}
+                </td>
+              </tr>
+            );
+          }
+
+          if (hint?.format === 'chart' && isPluginChartSpec(value)) {
+            return (
+              <tr key={key}>
+                <td className="plugin-result-chart-cell" colSpan={2}>
+                  <PluginChart spec={value} title={hint?.label} />
                 </td>
               </tr>
             );

@@ -364,6 +364,31 @@ defaults to `value` when absent.
 
 ---
 
+**`multi-select`**
+
+A checkbox list over a fixed `options` array — pick zero or more. The general
+form of `carrier-select` (which is hard-wired to workbook carriers); use this
+when the choices are anything other than carriers.
+
+```jsonc
+"sectors": {
+  "type": "multi-select",
+  "label": "Sectors to include",
+  "default": ["power", "heat"],
+  "options": [
+    { "value": "power",     "label": "Electricity" },
+    { "value": "heat",      "label": "Heat" },
+    { "value": "hydrogen",  "label": "Hydrogen" },
+    { "value": "transport", "label": "Transport" }
+  ]
+}
+```
+
+The hook receives the value as a `string[]` of the selected `value`s. As with
+`select`, each option's `label` defaults to its `value`.
+
+---
+
 **`carrier-select`**
 
 A multi-checkbox list populated from the carriers defined in the currently open
@@ -541,6 +566,7 @@ Field renderers by type:
 | `number` (without `min`+`max`) | `<input type="number">` |
 | `boolean` | Checkbox |
 | `select` | Searchable dropdown |
+| `multi-select` | Checkbox list over a fixed `options` array (returns `string[]`) |
 | `carrier-select` | Multi-checkbox list populated from workbook carriers |
 | `file` | File picker button + filename display |
 | `table` | Editable grid with add/delete row controls |
@@ -559,6 +585,51 @@ row in the results table. You can optionally attach display hints using the
 provide them today is via the `PluginAnalyticsEntry.ui` field, which the host
 populates from the `analyze` return object. In practice, returning a flat
 key-value map is sufficient for most plugins.
+
+A hint's `format` controls how the value renders: `'number'` / `'currency'`
+(localized numeric), `'table'` (an array of row objects, or a plain object, as
+a table), `'text'` (default), or `'chart'`.
+
+**Chart output (`format: 'chart'`).** The host owns rendering — a plugin emits
+a *data spec*, never markup. When a value's hint has `format: 'chart'`, that
+value must be a `PluginChartSpec`:
+
+```jsonc
+// kind: 'line' | 'area' | 'bar' | 'donut'
+
+// line / area / bar — series over rows:
+{
+  "kind": "bar",
+  "description": "Annual revenue by source",
+  "stacked": true,
+  "series": [
+    { "key": "energy",   "label": "Energy market" },
+    { "key": "capacity", "label": "Capacity payment", "color": "#f28e2b" }
+  ],
+  "rows": [
+    { "label": "2030", "energy": 120, "capacity": 30 },
+    { "label": "2031", "energy": 135, "capacity": 28 }
+  ]
+}
+
+// donut — slices:
+{
+  "kind": "donut",
+  "slices": [
+    { "label": "Solar", "value": 40 },
+    { "label": "Wind",  "value": 35, "color": "#76b7b2" }
+  ]
+}
+```
+
+Notes:
+- For line/area/bar, each row keys its values by the series `key`; the
+  category axis comes from the row's `label` (or `x`, or the row index). A
+  `timestamp` field, if present, is used for time-aware axis formatting.
+- `color` is optional everywhere — a stable palette colour is assigned by
+  default. Missing/non-numeric series values are treated as `0`.
+- `stacked`, `xAxisTitle`, `yAxisTitle`, and `showLegend` apply to
+  line/area/bar only. The hint's `label` is used as the chart title.
 
 ### 6.4 Footer "Apply to model" button
 
