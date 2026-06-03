@@ -1,6 +1,6 @@
 # Ragnarok TODO
 
-Last updated: 2026-05-31
+Last updated: 2026-06-03
 
 Single living todo for Ragnarok. Open work is grouped below by theme. Completed and deliberately-dropped items are kept at the bottom in compact form so they are not re-proposed.
 
@@ -13,7 +13,7 @@ Single living todo for Ragnarok. Open work is grouped below by theme. Completed 
 
 ## Open work
 
-Nineteen items across eight groups. Each group is internally coherent (shared infrastructure, schema, or interfaces); cross-group dependencies are called out in the *Why* column.
+Twenty-seven items across nine groups. Each group is internally coherent (shared infrastructure, schema, or interfaces); cross-group dependencies are called out in the *Why* column.
 
 ### Backend adapters
 
@@ -21,9 +21,10 @@ Adapters that plug into the existing `Backend` protocol (`backend/app/backends/`
 
 | ID | Pri | Surface | Task | Why | Cost |
 |---|---|---|---|---|---:|
-| `B1` | `High` | `Both` | **Profit-focused optimisation** — merchant / asset-owner objective as a second adapter. Maximises owner revenue under exogenous market prices, bidding strategies, or contract terms. | Current solve answers *least-cost for the whole system*; investor / IPP / merchant use-cases need *most-profitable for this owner*. Foundation for **F1**, **F2**. | 24,000 |
+| `B1` | `High` | `Both` | **Merchant / price-taker optimisation** — asset-owner adapter that maximises one owner's profit (NPV of dispatch + investment) against an **exogenous price signal**: either user-supplied or taken from a stage-1 system cost-min run (`buses_t.marginal_price`). Stays a single-level LP/MILP on the existing **PyPSA + linopy + HiGHS** stack via `extra_functionality` (a market node priced at `−p(t)`, or a custom linear objective term — same hook carbon pricing and custom constraints already use). Genuinely non-trivial for storage / hydro / unit-commitment and for build-vs-retire timing; degenerate (a threshold rule) only for an unconstrained single asset. | Current solve answers *least-cost for the whole system*; investor / IPP / merchant use-cases need *most-profitable for this owner*. The two-stage form (system price → owner optimises against it) is the standard merchant-investor model and feeds **F2** directly. Foundation for **F1**, **F2**. Does **not** model market power — that is **B4**. | 24,000 |
 | `B2` | `High` | `Both` | **Simulation adapter** — non-optimisation. Given dispatch rules / bids / prices, step the system through the horizon and report flows, prices, and revenues. | Take a fixed strategy or operating rule and simulate the outcome under a chosen market structure. Different from **B3** (steady-state network analysis, not time-stepped market simulation). | 30,000 |
 | `B3` | `Medium` | `Both` | **Power-flow-only study mode** — non-optimisation `network.pf()` / `network.lpf()` workflow with its own UI surface. | Steady-state network-analysis use case that pairs with the optimiser / simulator pair (**B1**, **B2**). Currently `Not supported` in the README support matrix. | 16,000 |
+| `B4` | `Low` | `Both` | **Strategic / price-maker optimisation (deferred)** — endogenous prices where the owner's bids move the clearing price (market power, capacity withholding). A **bilevel / MPEC** problem (lower-level market clearing reformulated via KKT + complementarity) that PyPSA's single-level LP **cannot express**; needs a hand-built linopy / pyomo / gurobipy model (MILP via SOS1) or an iterative equilibrium solver — a different stack, not an adapter over PyPSA. Research-grade and data-hungry (requires rivals' cost curves). | The only flavour of profit-max that captures market power, i.e. *strategic* decision-making per company. Separated from **B1** because it is a different problem class and a different solver stack. **Deferred** — documented, not built. | 40,000 |
 
 ### Financial model
 
@@ -85,7 +86,6 @@ Tools that transform an already-imported workbook between Data and Run — sit a
 |---|---|---|---|---|---:|
 | `T1` | `High` | `Both` | **Forecast tool / snapshot editor** — a single Model-side surface for editing the workbook's `snapshots` index and the temporal sheets attached to it. Three concerns in one tool: (a) **Define / re-aim the snapshot window** — calendar picker for new start / end (and resolution: hourly / daily / monthly); imported series are clipped if the window shrinks or pad-extrapolated if it widens. (b) **Forecast / extrapolate** — extend any temporal sheet (`loads-p_set`, `generators-p_max_pu`, prices, inflow, …) over a future horizon. Methods: time-series extrapolation (ARIMA / Prophet / linear), annual CAGR with a chosen base year, flat multiplication of a base series. (c) **Resample / shift** — change time-step or shift a series by N hours / days. The shared point: every operation here is "fix the snapshots so the model can run with the data the user already imported, plus a sensible projection". | After importing OPSD hourly load (year 2019) and a Renewables.ninja profile (year 2018), users end up with a snapshots index that's the union of both ranges and pad-filled gaps. **T1** is the editor that lets them retarget the window (e.g. "I actually want 2025-Jan-01 to 2025-Dec-31"), interpolate / extrapolate the imported series onto the new index, and clip ranges down for fast iteration. Distinct from **I3** (which derives a *new* shape from exogenous drivers); **T1** transforms whatever is already in the workbook. Conceptually the tool lives in the **Model** view next to the snapshots sheet — every operation works directly on the in-memory model, no backend round-trip. | 22,000 |
 | `T2` | `High` | `Both` | **Reduced-order / clustering tool** — collapse the workbook to a smaller topology before running. User picks the method (k-means on bus coordinates, voltage-class merge, carrier-bundle aggregation for generators, removal-of-low-flow lines, …) and the target size. Output is a new workbook fragment that runs the same physics on fewer components. | OSM-imported grids and PyPSA-Eur-style bundles often arrive with thousands of buses / lines; many studies need a 50-bus / 20-cluster reduction before they can iterate fast. Today users export to CSV and reduce externally. | 26,000 |
-| `T3` | `High` | `Both` | **Component-to-bus reconciliation** — primarily a per-row affordance in the **Build** view's right rail, next to each component's bus dropdown (Add / Edit Generator, Load, Storage, Process, …): a small **Find nearest bus** action that snaps the current component to the closest bus by haversine, plus a popover with alternative strategies (within an admin polygon, by name match, by free-form rule). Same action also lives in a **Reconcile all** button on the sheet header for bulk fix-up after multi-source imports, with a preview of which rows will move where before applying. | After importing plants (e.g. **WRI GPPD**) and grid (e.g. **OSM**) independently, generators land on synthetic per-plant buses. The inline button makes a one-row fix obvious when the user is already editing that component; the bulk action handles the post-import sweep. Same operation also fixes plant-by-name imports that arrive without coordinates. | 14,000 |
 
 ### Guided workflows
 
@@ -116,28 +116,36 @@ Verified against the code: the **optimiser needs nothing** (PyPSA does multi-car
 4. **Technology defaults** (efficiency/capex/opex/lifetime per conversion tech) — curated in-app or from a queryable source (not a static CSV, per the data-source rule).
 5. **(Deferred) Importers** for sector data (gas networks, heat/H₂ demand) — a later layer.
 
+### Plugin platform
+
+Extensions to the in-browser plugin runtime (`src/lib/plugins/`, `src/features/plugins/`). Plugins are eval'd as CommonJS that **return data**; the host owns rendering, so new capabilities are new *declared* schema/format types plus a host-side renderer — never raw HTML/SVG injection. Today's input controls cover `string` / `number` (with slider) / `boolean` / `select` (searchable) / `carrier-select` / `file` / `table` / `action`; output formats cover `number` / `currency` / `table` / `text` only.
+
+| ID | Pri | Surface | Task | Why | Cost |
+|---|---|---|---|---|---:|
+| `P1` | `Medium` | `Frontend` | **Plugin chart output** — add a `chart` value to `PluginFieldFormat` (`src/lib/types/index.ts`) plus a host renderer in `PluginPanel.tsx` that draws a plugin-returned data spec (series / axes / kind) with the app's existing charting layer. Plugins emit a data spec, not markup. | The plugin Output tab can only render scalars and tables today; analytics plugins have no way to surface a plot. The biggest single gap in plugin output. | 8,000 |
+| `P2` | `Low` | `Frontend` | **General multi-select control** — add a `multi-select` field type (arbitrary `options`, returns `string[]`) to the config schema and the `ConfigFieldRow` switch (`ModuleManagerSection.tsx`). Generalises the existing `carrier-select` multi-checkbox beyond workbook carriers. | Plugins can only multi-select carriers today; any other "pick several of these" input is impossible. `carrier-select` already proves the rendering. | 4,000 |
+
 ## Suggested execution order
 
 Across groups, respecting cross-group dependencies marked above.
 
-1. **T3** — Component-to-bus reconciliation (unblocks merged WRI + OSM imports shipped 2026-05-31).
-2. **T1** — Forecast tool (lightweight; immediately useful for pathway runs).
-3. **M2** — Demand response (small, modular — slots into the existing Load editor; useful for every other run from here on).
-4. **B1** — Profit-focused optimisation (foundation for the financial model layer).
-5. **F1** — Company / owner dimension (frontend-heavy; can run in parallel with **B1**).
-6. **F2** — Company-level financial model (consumes **B1** + **F1**).
-7. **R1** — Physical-climate-risk module.
-8. **R2** — Transition-risk module (depends on **F2**).
-9. **T2** — Reduced-order / clustering tool.
-10. **D1** — Profile / weather data layer.
-11. **I1** — Location-based data & model bootstrap (user surface above **D1**).
-12. **I4** — Renewable resource profile importer (polygon / buffer region selection).
-13. **I3** — Driver-based demand forecast.
-14. **M1** — Sector coupling (largest single item; lifts Ragnarok out of electricity-only).
-15. **W2** — Country starter models (KPG193-style baseline packs per country / year, composed from the importers above).
-16. **W1** — Guided model-builder wizard (composes every importer + tool + **M1**/**M2** above).
-17. **B2** — Simulation backend adapter.
-18. **B3** — Power-flow-only study mode.
+1. **T1** — Forecast tool (lightweight; immediately useful for pathway runs).
+2. **M2** — Demand response (small, modular — slots into the existing Load editor; useful for every other run from here on).
+3. **B1** — Profit-focused optimisation (foundation for the financial model layer).
+4. **F1** — Company / owner dimension (frontend-heavy; can run in parallel with **B1**).
+5. **F2** — Company-level financial model (consumes **B1** + **F1**).
+6. **R1** — Physical-climate-risk module.
+7. **R2** — Transition-risk module (depends on **F2**).
+8. **T2** — Reduced-order / clustering tool.
+9. **D1** — Profile / weather data layer.
+10. **I1** — Location-based data & model bootstrap (user surface above **D1**).
+11. **I4** — Renewable resource profile importer (polygon / buffer region selection).
+12. **I3** — Driver-based demand forecast.
+13. **M1** — Sector coupling (largest single item; lifts Ragnarok out of electricity-only).
+14. **W2** — Country starter models (KPG193-style baseline packs per country / year, composed from the importers above).
+15. **W1** — Guided model-builder wizard (composes every importer + tool + **M1**/**M2** above).
+16. **B2** — Simulation backend adapter.
+17. **B3** — Power-flow-only study mode.
 
 ## Already shipped
 
@@ -170,6 +178,7 @@ Compact history of work completed in earlier passes, grouped by area. Kept so co
 - Run-history schema-driven counts (PR #10) — `RunHistoryEntry.componentCounts` is `Record<string, number>`.
 - Auto-generated support matrix (`scripts/generate-support-matrix.mjs` → `docs/SUPPORT_MATRIX.md`).
 - Constraints workspace overlay (`ConstraintsWorkspaceView`) — Custom + native `global_constraints` editor.
+- **Component-to-bus reconciliation** (former `T3`) — bulk **Snap to nearest bus** in the Forge view (`src/lib/forge/snap.ts`, `ForgeView.tsx`): haversine matching, configurable buffer (km), per-sheet multi-select across generators / loads / storage / lines, and a post-run report of snapped vs out-of-buffer components; paired with a validation scanner (`src/lib/forge/validate.ts`) that flags coordinate-bearing components with missing / unknown bus refs. OSM import additionally auto-snaps line endpoints (`snap_endpoints` toggle, `backend/app/importers/databases/osm/`). Covers T3's reconciliation engine + post-import bulk sweep; the originally-envisioned per-row inline "Find nearest bus" button in Build was not added separately because Forge's bulk action already handles the multi-source-import use case (Build retains "Pick on map" for manual per-row assignment).
 - Standard PyPSA `line_types` / `transformer_types` catalogues (`scripts/generate-pypsa-standard-types.mjs`) surfaced as datalist typeahead in input cells.
 - Adaptive time-series x-axis labels and tick density (span-driven format selection).
 - Run dialog simplified — scenario presets live in the sidebar; the dialog is an execution summary.
