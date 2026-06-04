@@ -678,7 +678,29 @@
   color: var(--muted);
 }
 .sg-window-inputs input {
-  width: 88px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 0;
+  font-size: 0.82rem;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--surface);
+  color-scheme: light dark;
+  transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+.sg-window-inputs input[type="number"] {
+  width: 96px;
+}
+.sg-window-inputs input[type="date"] {
+  min-width: 156px;
+}
+.sg-window-inputs input:hover {
+  border-color: rgba(15, 118, 110, 0.45);
+}
+.sg-window-inputs input:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.18);
 }
 .sg-pathway-grid {
   display: grid;
