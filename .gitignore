@@ -206,3 +206,18 @@ frontend/*/src/lib/api/secrets.local.json
 
 # Importer runtime cache (Natural Earth boundaries, dataset downloads)
 backend/data/cache/
+
+# ── Keep frontend source tracked (MUST come after the patterns above) ────────
+# This file is a stock Python .gitignore, so several packaging patterns above
+# are unanchored (build/, dist/, target/, var/, parts/, env/, …) and also match
+# same-named directories inside the React source tree — e.g. src/features/build/
+# and src/lib/build/ — silently dropping any NEW files added there. Re-include
+# the whole frontend src tree, then re-assert the few things that must stay
+# ignored even inside src/.
+!frontend/*/src/**/
+!frontend/*/src/**
+
+# Re-assert: never track these, even though they live under src/.
+**/.DS_Store
+frontend/*/src/lib/api/secrets.local.ts
+frontend/*/src/lib/api/secrets.local.json
