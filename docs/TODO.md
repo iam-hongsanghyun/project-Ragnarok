@@ -13,7 +13,7 @@ Single living todo for Ragnarok. Open work is grouped below by theme. Completed 
 
 ## Open work
 
-Twenty-five items across eight groups. Each group is internally coherent (shared infrastructure, schema, or interfaces); cross-group dependencies are called out in the *Why* column.
+Twenty-seven items across nine groups. Each group is internally coherent (shared infrastructure, schema, or interfaces); cross-group dependencies are called out in the *Why* column.
 
 ### Backend adapters
 
@@ -116,6 +116,15 @@ Verified against the code: the **optimiser needs nothing** (PyPSA does multi-car
 4. **Technology defaults** (efficiency/capex/opex/lifetime per conversion tech) — curated in-app or from a queryable source (not a static CSV, per the data-source rule).
 5. **(Deferred) Importers** for sector data (gas networks, heat/H₂ demand) — a later layer.
 
+### Resource adequacy & robustness
+
+Tools that test how a solved model holds up under renewable/weather and outage uncertainty, and quantify reliability. Build on the existing **stochastic optimisation** engine (`backend/pypsa/stochastic.py`) and the `load_shedding` unserved-energy signal already in the model.
+
+| ID | Pri | Surface | Task | Why | Cost |
+|---|---|---|---|---|---:|
+| `A1` | `High` | `Both` | **Stochastic renewable profile generator** — generate an ensemble of synthetic wind / solar capacity-factor profiles (`generators-p_max_pu`) from a base series, with a user-set similarity/variability knob: a target **R²** (or RMSE / std-dev / lag-1 autocorrelation) between each synthetic draw and the base, so a run can be stress-tested against renewable variability. Methods preserve diurnal + seasonal shape and hourly autocorrelation (correlated-noise injection, block-bootstrap resampling, or an AR/Markov model fit to the base); the knob sets how far each draw departs. Output: N perturbed profiles wired into the existing **stochastic optimisation** (per-scenario series) or a Monte-Carlo sweep, plus a robustness readout (spread of objective / cost / curtailment / unserved energy across draws). | A model is solved against one weather year / one profile; users need to know how sensitive cost, capacity and reliability are to renewable variability. Reuses the stochastic engine already shipped and produces the input ensemble for **A2**. | 18,000 |
+| `A2` | `High` | `Both` | **LOLE calculator** — resource-adequacy metrics from an ensemble of dispatch runs (or an analytic convolution of forced-outage + renewable + load distributions): **LOLE** (h/yr or d/yr), **LOLP** per snapshot, **EUE / EENS** (expected unserved energy), and the worst contributing periods. Driven by the **A1** ensemble plus per-unit forced-outage rates, counting snapshots where available capacity < load — unserved energy is already observable via the `load_shedding` generators. Surfaced as an Analytics card against the standard "1 day in 10 years" yardstick. | Capacity-expansion / adequacy studies need LOLE / EUE — the reliability metrics regulators use. Today the tool shows load shedding per run but no reliability statistic across draws. Depends on **A1** for the input ensemble; storage and **M2** demand-response contribute to the adequacy result. | 16,000 |
+
 ## Suggested execution order
 
 Across groups, respecting cross-group dependencies marked above.
@@ -137,6 +146,8 @@ Across groups, respecting cross-group dependencies marked above.
 15. **W1** — Guided model-builder wizard (composes every importer + tool + **M1**/**M2** above).
 16. **B2** — Simulation backend adapter.
 17. **B3** — Power-flow-only study mode.
+18. **A1** — Stochastic renewable profile generator (reuses the shipped stochastic engine; produces the ensemble for **A2**).
+19. **A2** — LOLE calculator (depends on **A1**).
 
 ## Already shipped
 
