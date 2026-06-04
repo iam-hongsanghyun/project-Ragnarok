@@ -13,7 +13,7 @@ Single living todo for Ragnarok. Open work is grouped below by theme. Completed 
 
 ## Open work
 
-Twenty-seven items across nine groups. Each group is internally coherent (shared infrastructure, schema, or interfaces); cross-group dependencies are called out in the *Why* column.
+Twenty-five items across eight groups. Each group is internally coherent (shared infrastructure, schema, or interfaces); cross-group dependencies are called out in the *Why* column.
 
 ### Backend adapters
 
@@ -116,15 +116,6 @@ Verified against the code: the **optimiser needs nothing** (PyPSA does multi-car
 4. **Technology defaults** (efficiency/capex/opex/lifetime per conversion tech) — curated in-app or from a queryable source (not a static CSV, per the data-source rule).
 5. **(Deferred) Importers** for sector data (gas networks, heat/H₂ demand) — a later layer.
 
-### Plugin platform
-
-Extensions to the in-browser plugin runtime (`src/lib/plugins/`, `src/features/plugins/`). Plugins are eval'd as CommonJS that **return data**; the host owns rendering, so new capabilities are new *declared* schema/format types plus a host-side renderer — never raw HTML/SVG injection. Today's input controls cover `string` / `number` (with slider) / `boolean` / `select` (searchable) / `carrier-select` / `file` / `table` / `action`; output formats cover `number` / `currency` / `table` / `text` only.
-
-| ID | Pri | Surface | Task | Why | Cost |
-|---|---|---|---|---|---:|
-| `P1` | `Medium` | `Frontend` | **Plugin chart output** — add a `chart` value to `PluginFieldFormat` (`src/lib/types/index.ts`) plus a host renderer in `PluginPanel.tsx` that draws a plugin-returned data spec (series / axes / kind) with the app's existing charting layer. Plugins emit a data spec, not markup. | The plugin Output tab can only render scalars and tables today; analytics plugins have no way to surface a plot. The biggest single gap in plugin output. | 8,000 |
-| `P2` | `Low` | `Frontend` | **General multi-select control** — add a `multi-select` field type (arbitrary `options`, returns `string[]`) to the config schema and the `ConfigFieldRow` switch (`ModuleManagerSection.tsx`). Generalises the existing `carrier-select` multi-checkbox beyond workbook carriers. | Plugins can only multi-select carriers today; any other "pick several of these" input is impossible. `carrier-select` already proves the rendering. | 4,000 |
-
 ## Suggested execution order
 
 Across groups, respecting cross-group dependencies marked above.
@@ -195,6 +186,14 @@ Compact history of work completed in earlier passes, grouped by area. Kept so co
 - **Full** analytics: `buses`, `generators`, `lines`, `links`, `transformers`, `storage_units`, `stores`.
 - Dedicated detail panels: `processes`, `shunt_impedances`.
 - Round-tripped through workbook + backend without dedicated UX: `carriers`, `global_constraints`, `line_types`, `transformer_types`, `shapes`, `sub_networks`.
+
+### Plugin platform
+
+In-browser plugin runtime (`src/lib/plugins/`, `src/features/plugins/`). All additive **SDK 2** features (no `sdkVersion` bump); documented in `docs/plugin.md` (incl. its §15 SDK changelog). Plugins return data; the host owns rendering — every capability is a declared schema/format type plus a host-side renderer, never raw HTML/SVG injection.
+
+- **`P1` Plugin chart output** — `chart` value on `PluginFieldFormat` + a `PluginChartSpec` (line / area / bar / donut) rendered by the host via the app's own chart components (`PluginChart.tsx`, `lib/plugins/chartSpec.ts`). Tests in `chartSpec.test.ts`.
+- **`P2` General multi-select control** — `multi-select` field type (arbitrary `options`, returns `string[]`) generalising `carrier-select` beyond workbook carriers.
+- **`P3` Dynamic select options (`optionsFrom`)** — `select` / `multi-select` fields and `"select"` table columns can source options at render time from the workbook model (`source: "model"`) or a sibling `table` field (`source: "config"`), with static `options` as fallback; switch sets via field-level `visibleWhen`. Resolver in `lib/plugins/options.ts`, tests in `options.test.ts`.
 
 ## Deliberately not pursued
 
