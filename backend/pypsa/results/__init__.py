@@ -188,11 +188,14 @@ def run_pypsa(
     custom_dsl_text: str = str(scenario.get("customDsl") or "")
 
     def extra_functionality(n, snapshots):
-        apply_custom_constraints(n, custom_constraints, emissions_factors, notes)
+        # `snapshots` is the window being optimised — for rolling horizon it is a
+        # single window, not the full run. Pass it through so weights/hours and
+        # apportioned budgets are scoped to that window (a no-op single-shot).
+        apply_custom_constraints(n, custom_constraints, emissions_factors, notes, snapshots)
         if constraint_specs:
-            apply_constraint_specs(n, constraint_specs, emissions_factors, notes)
+            apply_constraint_specs(n, constraint_specs, emissions_factors, notes, snapshots)
         elif custom_dsl_text:
-            apply_dsl_constraints(n, custom_dsl_text, emissions_factors, notes)
+            apply_dsl_constraints(n, custom_dsl_text, emissions_factors, notes, snapshots)
 
 
     # Currency symbol for formatted output strings

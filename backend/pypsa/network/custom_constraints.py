@@ -10,9 +10,15 @@ import pypsa
 class ModelContext:
     """Shared linopy building blocks for custom + DSL constraints.
 
-    Built once per solve from the assembled network so both the structured
-    custom-constraint path and the free-text DSL compile against the same
-    variables and weights.
+    Built once per solve (or once per rolling-horizon *window*) from the
+    assembled network so both the structured custom-constraint path and the
+    free-text DSL compile against the same variables and weights.
+
+    ``weights`` / ``modeled_hours`` are scoped to the snapshots currently being
+    optimised — i.e. the rolling-horizon window, not the full horizon — so the
+    dispatch variable (``gen_p``, which PyPSA builds over the window) and the
+    RHS use the *same* time span. ``full_horizon_hours`` keeps the whole-run
+    span so absolute (MWh) budgets can be apportioned to the window.
     """
 
     network: pypsa.Network
@@ -22,23 +28,45 @@ class ModelContext:
     supply_gens: list[str]
     shed_gens: list[str]
     modeled_hours: float
+    full_horizon_hours: float
     cap_var: Any | None
     cap_dim: str | None
     emissions_factors: dict[str, float]
+
+    @property
+    def window_fraction(self) -> float:
+        """Window hours ÷ full-horizon hours (1.0 outside rolling horizon)."""
+        if self.full_horizon_hours <= 0:
+            return 1.0
+        return self.modeled_hours / self.full_horizon_hours
 
 
 def build_model_context(
     n: pypsa.Network,
     emissions_factors: dict[str, float],
+    snapshots: Any | None = None,
 ) -> ModelContext:
-    """Capture the reusable locals needed to express constraints on ``n.model``."""
+    """Capture the reusable locals needed to express constraints on ``n.model``.
+
+    Args:
+        snapshots: the snapshots currently being optimised (the rolling-horizon
+            window). When given, weights/hours are restricted to it so the RHS
+            matches ``gen_p``'s time span. ``None`` ⇒ the full horizon.
+    """
     gen_p = n.model["Generator-p"]
     # PyPSA/linopy uses 'name' as the generator dimension, not 'Generator'
     dim = [d for d in gen_p.dims if d != "snapshot"][0]
-    weights = n.snapshot_weightings["generators"]
+    full_weights = n.snapshot_weightings["generators"]
+    weights = full_weights
+    if snapshots is not None:
+        try:
+            weights = full_weights.loc[snapshots]
+        except Exception:
+            weights = full_weights
     supply_gens = [g for g in n.generators.index if not g.startswith("load_shedding_")]
     shed_gens = [g for g in n.generators.index if g.startswith("load_shedding_")]
     modeled_hours = float(weights.sum())
+    full_horizon_hours = float(full_weights.sum())
     try:
         cap_var = n.model["Generator-p_nom"]
         cap_dim = cap_var.dims[0]
@@ -53,6 +81,7 @@ def build_model_context(
         supply_gens=supply_gens,
         shed_gens=shed_gens,
         modeled_hours=modeled_hours,
+        full_horizon_hours=full_horizon_hours,
         cap_var=cap_var,
         cap_dim=cap_dim,
         emissions_factors=emissions_factors,
@@ -64,16 +93,21 @@ def apply_custom_constraints(
     constraints: list[dict[str, Any]],
     emissions_factors: dict[str, float],
     notes: list[str],
+    snapshots: Any | None = None,
 ) -> None:
     """Apply all enabled custom constraints to the linopy model.
 
-    Called inside extra_functionality, so n.model is available.
+    Called inside extra_functionality, so n.model is available. ``snapshots`` is
+    the window being optimised (rolling horizon) — weights/hours are scoped to
+    it, and absolute (MWh) budgets are apportioned by the window's hour-share so
+    a whole-run cap isn't applied in full to every window.
+
     Silently skips any constraint that fails (logs a note instead).
     """
     if not constraints:
         return
 
-    ctx = build_model_context(n, emissions_factors)
+    ctx = build_model_context(n, emissions_factors, snapshots)
     gen_p = ctx.gen_p
     dim = ctx.dim
     weights = ctx.weights
@@ -129,8 +163,12 @@ def apply_custom_constraints(
                     notes.append(f"Constraint '{label}': no load-shedding generators — skipped.")
                     continue
                 total_shed = (gen_p.sel({dim: shed_gens}) * weights).sum()
-                n.model.add_constraints(total_shed <= value, name=cname)
-                notes.append(f"Constraint '{label}': load shedding ≤ {value} MWh added.")
+                cap_value = value * ctx.window_fraction
+                n.model.add_constraints(total_shed <= cap_value, name=cname)
+                msg = f"Constraint '{label}': load shedding ≤ {value} MWh added."
+                if ctx.window_fraction < 1.0:
+                    msg += f" (apportioned to {cap_value:.4g} MWh for this rolling-horizon window)"
+                notes.append(msg)
 
             # ── Carrier generation cap / floor (MWh) ─────────────────────────
             elif metric in ("carrier_max_gen", "carrier_min_gen"):
@@ -139,12 +177,17 @@ def apply_custom_constraints(
                     notes.append(f"Constraint '{label}': no generators with carrier '{carrier}' — skipped.")
                     continue
                 total = (gen_p.sel({dim: cgens}) * weights).sum()
+                budget = value * ctx.window_fraction
+                window_note = (
+                    f" (apportioned to {budget:.4g} MWh for this rolling-horizon window)"
+                    if ctx.window_fraction < 1.0 else ""
+                )
                 if metric == "carrier_max_gen":
-                    n.model.add_constraints(total <= value, name=cname)
-                    notes.append(f"Constraint '{label}': {carrier} generation ≤ {value} MWh added.")
+                    n.model.add_constraints(total <= budget, name=cname)
+                    notes.append(f"Constraint '{label}': {carrier} generation ≤ {value} MWh added.{window_note}")
                 else:
-                    n.model.add_constraints(total >= value, name=cname)
-                    notes.append(f"Constraint '{label}': {carrier} generation ≥ {value} MWh added.")
+                    n.model.add_constraints(total >= budget, name=cname)
+                    notes.append(f"Constraint '{label}': {carrier} generation ≥ {value} MWh added.{window_note}")
 
             # ── Carrier dispatch share cap / floor (%) ───────────────────────
             elif metric in ("carrier_max_share", "carrier_min_share"):

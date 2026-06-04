@@ -354,11 +354,16 @@ def apply_dsl_constraints(
     text: str,
     emissions_factors: dict[str, float],
     notes: list[str],
+    snapshots: object | None = None,
 ) -> None:
-    """Parse and apply the DSL text to ``n.model``. Bad lines are skipped with a note."""
+    """Parse and apply the DSL text to ``n.model``. Bad lines are skipped with a note.
+
+    ``snapshots`` is the window being optimised (rolling horizon); weights/hours
+    are scoped to it so ``gen``/``cf`` terms match the dispatch variable's span.
+    """
     if not text or not text.strip():
         return
-    ctx = build_model_context(n, emissions_factors)
+    ctx = build_model_context(n, emissions_factors, snapshots)
     for n0, raw in enumerate(text.splitlines(), start=1):
         line = raw.split("#", 1)[0].strip()
         if not line:
@@ -379,15 +384,17 @@ def apply_constraint_specs(
     specs: list[dict],
     emissions_factors: dict[str, float],
     notes: list[str],
+    snapshots: object | None = None,
 ) -> None:
     """Apply a structured JSON constraint spec list to ``n.model``.
 
     This is the canonical wire format the frontend sends; the text DSL is only a
     convenience that compiles to the same shape. Bad specs are skipped with a note.
+    ``snapshots`` scopes weights/hours to the rolling-horizon window.
     """
     if not specs:
         return
-    ctx = build_model_context(n, emissions_factors)
+    ctx = build_model_context(n, emissions_factors, snapshots)
     for idx, spec in enumerate(specs, start=1):
         name = f"spec_{idx}"
         try:
