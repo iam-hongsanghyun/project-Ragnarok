@@ -24,6 +24,7 @@ import {
 } from 'lib/types';
 import { DateFormat, SolverType } from '../features/settings/useSettings';
 
+import { snapshotTimestamps } from 'lib/results/snapshotWindow';
 import { ScenariosSection } from './SettingsView.sections/Scenarios';
 import { WindowSection } from './SettingsView.sections/Window';
 import { CarbonSection } from './SettingsView.sections/Carbon';
@@ -185,7 +186,7 @@ export function SettingsView(props: SettingsViewProps) {
 
       <main className="settings-section-main">
         {section === 'scenarios'      && <ScenariosSection {...props} />}
-        {section === 'window'         && <WindowSection {...props} />}
+        {section === 'window'         && <WindowSection {...props} snapshotTimestamps={snapshotTimestamps(props.model.snapshots)} />}
         {section === 'carbon'         && <CarbonSection {...props} />}
         {section === 'planning'       && <PlanningSection {...props} />}
         {section === 'rolling'        && <RollingSection {...props} />}
