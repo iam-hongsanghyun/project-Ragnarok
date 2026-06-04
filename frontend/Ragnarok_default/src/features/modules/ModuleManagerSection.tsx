@@ -603,7 +603,7 @@ export function ModuleManagerSection({
         <button className="tb-btn" onClick={() => fileInputRef.current?.click()} disabled={loading}>
           {loading ? 'Installing…' : 'Install'}
         </button>
-        <input ref={fileInputRef} type="file" accept=".zip"
+        <input ref={fileInputRef} type="file" accept=".zip,application/zip"
           style={{ display: 'none' }} onChange={handleFileChange} />
       </div>
 

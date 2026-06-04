@@ -1027,7 +1027,11 @@ function AppInner() {
     }
     try {
       const [handle] = await picker({
-        excludeAcceptAllOption: true,
+        // Keep the "All Files" option so the OS open panel always has a
+        // non-greyed escape hatch — macOS dims type-restricted files until it
+        // finishes resolving each file's UTI / Gatekeeper quarantine, which on
+        // first open can leave even valid .xlsx files unselectable.
+        excludeAcceptAllOption: false,
         multiple: false,
         types: [{ description: 'Excel Workbook', accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] } }],
       });
@@ -1688,9 +1692,9 @@ function AppInner() {
 
   return (
     <div className="studio-shell">
-      <input ref={fileInputRef} type="file" accept=".xlsx,.xls" hidden onChange={handleImport} />
-      <input ref={projectImportInputRef} type="file" accept=".xlsx,.xls" hidden onChange={handleImportProject} />
-      <input ref={csvFolderImportInputRef} type="file" accept=".zip" hidden onChange={handleImportCsvFolder} />
+      <input ref={fileInputRef} type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden onChange={handleImport} />
+      <input ref={projectImportInputRef} type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden onChange={handleImportProject} />
+      <input ref={csvFolderImportInputRef} type="file" accept=".zip,application/zip" hidden onChange={handleImportCsvFolder} />
       <input ref={netcdfImportInputRef} type="file" accept=".nc" hidden onChange={handleImportNetcdf} />
       <input ref={hdf5ImportInputRef} type="file" accept=".h5,.hdf5" hidden onChange={handleImportHdf5} />
 

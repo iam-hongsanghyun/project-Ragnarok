@@ -125,7 +125,7 @@ function TemporalProfilesPanel({
 
   return (
     <div className={`build-ts-panel${collapsed ? ' is-collapsed' : ''}`}>
-      <input ref={inputRef} type="file" accept=".csv,.tsv,.txt" hidden onChange={handleFile} />
+      <input ref={inputRef} type="file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain" hidden onChange={handleFile} />
       <button
         type="button"
         className="build-ts-panel-head"

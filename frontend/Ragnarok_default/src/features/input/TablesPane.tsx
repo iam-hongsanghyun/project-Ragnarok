@@ -330,7 +330,7 @@ export function TablesPane({
             <input
               ref={csvInputRef}
               type="file"
-              accept=".csv,.tsv,.txt"
+              accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain"
               hidden
               onChange={handleCsvFile}
             />

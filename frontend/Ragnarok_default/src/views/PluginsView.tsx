@@ -43,7 +43,7 @@ export function PluginsView(props: Props) {
   return (
     <ResizablePanels id="plugins-rail" direction="horizontal" className="view plugins-view" initialSizes={[22, 78]} minSize={180}>
       <LeftRail title="Plugins" ariaLabel="Plugins" className="plugin-rail">
-        <input ref={fileRef} type="file" accept=".zip" style={{ display: 'none' }} onChange={(e) => onPick(e.target.files?.[0])} />
+        <input ref={fileRef} type="file" accept=".zip,application/zip" style={{ display: 'none' }} onChange={(e) => onPick(e.target.files?.[0])} />
         <button className="tb-btn plugin-rail-install" onClick={() => fileRef.current?.click()}>Install plugin…</button>
         {installed.length === 0 ? (
           <p className="sg-setting-hint" style={{ padding: '8px 12px' }}>No plugins installed.</p>
