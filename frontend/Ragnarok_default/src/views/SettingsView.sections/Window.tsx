@@ -6,10 +6,11 @@ import { PathwayConfig } from 'lib/types';
 import { DualRangeSlider } from '../../shared/components/DualRangeSlider';
 import { RUN_WINDOW } from 'lib/constants';
 import {
-  endIndexForDate,
+  endIndexForTime,
   isDatedAxis,
-  snapshotDateAt,
-  startIndexForDate,
+  snapshotInputValueAt,
+  snapshotLabelAt,
+  startIndexForTime,
 } from 'lib/results/snapshotWindow';
 
 export interface WindowSectionProps {
@@ -30,17 +31,19 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, hi
 export function WindowSection(props: WindowSectionProps) {
   const ts = props.snapshotTimestamps;
   const dated = isDatedAxis(ts);
-  const firstDate = snapshotDateAt(ts, 0);
-  const lastDate = snapshotDateAt(ts, ts.length - 1);
-  const startDate = snapshotDateAt(ts, props.snapshotStart);
+  const firstValue = snapshotInputValueAt(ts, 0);
+  const lastValue = snapshotInputValueAt(ts, ts.length - 1);
+  const startValue = snapshotInputValueAt(ts, props.snapshotStart);
   // snapshotEnd is exclusive, so the last *included* snapshot is end − 1.
-  const endDate = snapshotDateAt(ts, Math.max(props.snapshotStart, props.snapshotEnd - 1));
+  const endValue = snapshotInputValueAt(ts, Math.max(props.snapshotStart, props.snapshotEnd - 1));
+  const startLabel = snapshotLabelAt(ts, props.snapshotStart);
+  const endLabel = snapshotLabelAt(ts, Math.max(props.snapshotStart, props.snapshotEnd - 1));
 
   const steps = props.snapshotEnd - props.snapshotStart;
   const windowLabel = props.pathwayConfig.enabled
     ? `${props.maxSnapshots} steps (pathway uses full horizon)`
-    : dated && startDate && endDate
-      ? `${startDate} → ${endDate} · ${steps} of ${props.maxSnapshots} steps`
+    : dated && startLabel && endLabel
+      ? `${startLabel} → ${endLabel} · ${steps} of ${props.maxSnapshots} steps`
       : `${steps} of ${props.maxSnapshots} steps`;
 
   return (
@@ -60,20 +63,20 @@ export function WindowSection(props: WindowSectionProps) {
               high={props.snapshotEnd}
               onChange={(lo, hi) => { props.onSnapshotStartChange(lo); props.onSnapshotEndChange(hi); }}
             />
-            {/* Date-range picker — maps the chosen days onto snapshot indices.
-                Shown only when the run axis carries real calendar dates. */}
+            {/* Datetime-range picker — maps the chosen snapshots (date + time)
+                onto indices. Shown only when the axis carries real datetimes. */}
             {dated && (
               <div className="sg-window-inputs">
                 <label>
                   From
                   <input
-                    type="date"
-                    min={firstDate}
-                    max={lastDate}
-                    value={startDate}
+                    type="datetime-local"
+                    min={firstValue}
+                    max={lastValue}
+                    value={startValue}
                     onChange={(e) => {
                       if (!e.target.value) return;
-                      const i = startIndexForDate(ts, e.target.value);
+                      const i = startIndexForTime(ts, e.target.value);
                       props.onSnapshotStartChange(clamp(i, 0, props.snapshotEnd - 1));
                     }}
                   />
@@ -81,13 +84,13 @@ export function WindowSection(props: WindowSectionProps) {
                 <label>
                   To
                   <input
-                    type="date"
-                    min={startDate || firstDate}
-                    max={lastDate}
-                    value={endDate}
+                    type="datetime-local"
+                    min={startValue || firstValue}
+                    max={lastValue}
+                    value={endValue}
                     onChange={(e) => {
                       if (!e.target.value) return;
-                      const end = endIndexForDate(ts, e.target.value);
+                      const end = endIndexForTime(ts, e.target.value);
                       props.onSnapshotEndChange(clamp(end, props.snapshotStart + 1, props.maxSnapshots));
                     }}
                   />

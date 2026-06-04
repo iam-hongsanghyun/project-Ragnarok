@@ -677,30 +677,15 @@
   font-size: 0.78rem;
   color: var(--muted);
 }
-.sg-window-inputs input {
-  padding: 3px 8px;
-  border: 1px solid var(--border);
-  border-radius: 0;
-  font-size: 0.82rem;
-  font-family: inherit;
-  color: var(--text);
-  background: var(--surface);
-  color-scheme: light dark;
-  transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
-}
+/* Appearance comes from the shared .settings-section-main input rule; only
+   width is set here so the boxes are sized to their content and don't clip. */
 .sg-window-inputs input[type="number"] {
   width: 96px;
 }
-.sg-window-inputs input[type="date"] {
-  min-width: 156px;
-}
-.sg-window-inputs input:hover {
-  border-color: rgba(15, 118, 110, 0.45);
-}
-.sg-window-inputs input:focus {
-  outline: none;
-  border-color: var(--brand);
-  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.18);
+.sg-window-inputs input[type="datetime-local"] {
+  /* min-width (not width) so the native field can grow to its locale format
+     (e.g. MM/DD/YYYY, --:-- --) without clipping. */
+  min-width: 210px;
 }
 .sg-pathway-grid {
   display: grid;
@@ -5957,6 +5942,8 @@ th:hover .col-delete-btn {
 .settings-section-main input[type="text"],
 .settings-section-main input[type="number"],
 .settings-section-main input[type="search"],
+.settings-section-main input[type="date"],
+.settings-section-main input[type="datetime-local"],
 .settings-section-main select,
 .settings-section-main textarea {
   font-family: inherit;
