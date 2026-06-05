@@ -16,11 +16,13 @@ import {
   ModuleDescriptor,
   ModulePanelConfig,
   PluginAnalyticsEntry,
+  PluginFieldHint,
   PluginServerConfig,
   WorkbookModel,
 } from 'lib/types';
 import { FrontendPluginHost, InstalledPlugin } from './frontendPlugins';
 import { loadPluginModule, pluginCapabilities } from 'lib/plugins/runtime';
+import { isPluginChartSpec } from 'lib/plugins/chartSpec';
 import { PluginPanel } from './PluginPanel';
 import { useToast } from '../../shared/components/Toast';
 
@@ -51,6 +53,32 @@ function withDefaults(schema: ModuleConfigSchema | undefined, stored: Record<str
     if (field.default !== undefined) out[key] = field.default;
   }
   return { ...out, ...stored };
+}
+
+/**
+ * Derive display hints from an `analyze` return so the Output tab can render
+ * charts and tables, not just scalars. A value that is a `PluginChartSpec`
+ * (kind line/area/bar/donut) is marked `format: 'chart'`; an array of row
+ * objects is marked `format: 'table'`. Everything else is left as a scalar.
+ *
+ * Plugins emit data only — the host owns rendering — so inferring the hint
+ * here keeps the plugin API to "return a value" with no separate hint channel.
+ */
+function inferPluginUi(data: Record<string, unknown>): Record<string, PluginFieldHint> {
+  const ui: Record<string, PluginFieldHint> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (isPluginChartSpec(value)) {
+      ui[key] = { format: 'chart', label: key };
+    } else if (
+      Array.isArray(value) &&
+      value.length > 0 &&
+      typeof value[0] === 'object' &&
+      value[0] !== null
+    ) {
+      ui[key] = { format: 'table', label: key };
+    }
+  }
+  return ui;
 }
 
 function manifestToDescriptor(plugin: InstalledPlugin, schema: ModuleConfigSchema | undefined): ModuleDescriptor {
@@ -219,6 +247,11 @@ export function PluginDetail({ host, plugin, model, onReplaceModel, onMergeSheet
     }
   };
 
+  // Snapshot of the plugin config so the analyze hook re-runs when the user
+  // changes an input (e.g. a chart's region selector), not only on a new solve.
+  // Recomputed every render; the component already re-renders on config edits.
+  const configSnapshot = JSON.stringify(host.getConfig(plugin.id) ?? {});
+
   // Auto-run the analyze hook so the Output tab reflects the latest run, the way
   // the V1 backend populated pluginAnalytics after each solve.
   useEffect(() => {
@@ -232,14 +265,14 @@ export function PluginDetail({ host, plugin, model, onReplaceModel, onMergeSheet
         const mod = loadPluginModule(plugin);
         const cfg = withDefaults(schema, host.getConfig(plugin.id));
         const data = (await mod.analyze!(results, cfg)) || {};
-        if (!cancelled) setAnalytics({ name: plugin.name, ui: {}, data });
+        if (!cancelled) setAnalytics({ name: plugin.name, ui: inferPluginUi(data), data });
       } catch {
         if (!cancelled) setAnalytics(null);
       }
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [results, plugin.id]);
+  }, [results, plugin.id, configSnapshot]);
 
   if (schema) {
     return (
