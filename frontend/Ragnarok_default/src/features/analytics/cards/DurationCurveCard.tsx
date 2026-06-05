@@ -22,7 +22,9 @@ export function DurationCurveCard({ title, data, unit, color }: Props) {
   const height = 240;
   const padL = 44;
   const padR = 12;
-  const padT = 12;
+  // Top band reserves room for the axis-title caption so it never collides with
+  // the topmost y-tick label.
+  const padT = 26;
   const padB = 28;
   const innerW = width - padL - padR;
   const innerH = height - padT - padB;
@@ -107,7 +109,10 @@ export function DurationCurveCard({ title, data, unit, color }: Props) {
           );
         })()}
 
-        <text x={padL} y={padT - 2} className="chart-axis-title">
+        {/* Axis-title caption, left-anchored in the top band. Inline text-anchor
+            overrides the shared .chart-axis-title rule (which is centred for the
+            rotated y-titles elsewhere) so long titles don't clip off the left. */}
+        <text x={4} y={15} className="chart-axis-title" style={{ textAnchor: 'start' }}>
           {title}
         </text>
 
