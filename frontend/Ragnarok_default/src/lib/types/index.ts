@@ -793,12 +793,31 @@ export interface ModuleConfigTableColumn {
   key: string;
   /** Header label. Defaults to `key`. */
   label?: string;
-  /** Cell input type. Defaults to 'string'. */
-  type?: 'string' | 'number' | 'select';
+  /** Cell input type. Defaults to 'string'. `'display'` is a read-only text
+   * cell whose value is looked up per row via `lookup` (not editable, not
+   * stored on the row). */
+  type?: 'string' | 'number' | 'select' | 'display';
   /** Options for 'select'-typed cells. */
   options?: Array<{ value: string; label?: string }>;
   /** Dynamic option source for 'select'-typed cells. Overrides `options`. */
   optionsFrom?: ModuleConfigOptionsFrom;
+  /**
+   * For `'display'` cells: look up the text from a server dataset keyed by
+   * another column in the same row. The host POSTs `{config}` to `endpoint`,
+   * expects `{rows:[...]}`, then shows the `valueColumn` of the row whose
+   * `keyColumn` equals this row's `matchColumn` value.
+   */
+  lookup?: {
+    source: 'server';
+    endpoint: string;
+    baseUrlField?: string;
+    /** This row's column to match on (e.g. `'generator'`). */
+    matchColumn: string;
+    /** Fetched-row column matched against `matchColumn` (defaults to it). */
+    keyColumn?: string;
+    /** Fetched-row column whose value is displayed. */
+    valueColumn: string;
+  };
   /** Optional CSS width (px or rem string, or number-as-px). */
   width?: string | number;
 }

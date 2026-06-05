@@ -419,33 +419,43 @@ function cellInput(
 }
 
 function TableEditor({ columns, rows, onChange, maxHeight, model, formValues }: TableEditorProps) {
-  // Columns whose options come from the plugin's own server (fetched async).
-  const serverCols = useMemo(
-    () => columns.filter((c) => c.type === 'select' && c.optionsFrom?.source === 'server' && c.optionsFrom.endpoint),
-    [columns],
-  );
-  const [serverRows, setServerRows] = useState<Record<string, Array<Record<string, unknown>>>>({});
+  // Distinct plugin-server endpoints used by 'select' (options) or 'display'
+  // (lookup) columns — fetched once each, async.
+  const serverEndpoints = useMemo(() => {
+    const map = new Map<string, string | undefined>(); // endpoint -> baseUrlField
+    for (const c of columns) {
+      if (c.type === 'select' && c.optionsFrom?.source === 'server' && c.optionsFrom.endpoint) {
+        map.set(c.optionsFrom.endpoint, c.optionsFrom.baseUrlField);
+      }
+      if (c.type === 'display' && c.lookup?.source === 'server' && c.lookup.endpoint) {
+        map.set(c.lookup.endpoint, c.lookup.baseUrlField);
+      }
+    }
+    return Array.from(map.entries()).map(([endpoint, baseUrlField]) => ({ endpoint, baseUrlField }));
+  }, [columns]);
+  const [serverData, setServerData] = useState<Record<string, Array<Record<string, unknown>>>>({});
 
-  // Refetch only when the SOURCE config changes — not when a client-side filter
-  // field (e.g. the build-year threshold) changes — so the dropdown re-filters
-  // without a round-trip.
+  // Refetch when the SOURCE config changes — but not when a client-side option
+  // filter field (e.g. the build-year threshold) changes, since that only
+  // re-filters the existing rows. Selection / split changes DO refetch.
   const sourceKey = useMemo(() => {
     const filterFields = new Set(
-      serverCols.map((c) => c.optionsFrom?.filter?.valueFrom).filter(Boolean) as string[],
+      columns
+        .map((c) => (c.type === 'select' ? c.optionsFrom?.filter?.valueFrom : undefined))
+        .filter(Boolean) as string[],
     );
     const sub: Record<string, unknown> = {};
     Object.entries(formValues ?? {}).forEach(([k, v]) => { if (!filterFields.has(k)) sub[k] = v; });
     return JSON.stringify(sub);
-  }, [formValues, serverCols]);
+  }, [formValues, columns]);
 
   useEffect(() => {
-    if (serverCols.length === 0) return;
+    if (serverEndpoints.length === 0) return;
     let cancelled = false;
-    serverCols.forEach((c) => {
-      const of = c.optionsFrom!;
-      const baseRaw = of.baseUrlField ? formValues?.[of.baseUrlField] : undefined;
+    serverEndpoints.forEach(({ endpoint, baseUrlField }) => {
+      const baseRaw = baseUrlField ? formValues?.[baseUrlField] : undefined;
       const base = String(baseRaw || 'http://127.0.0.1:8765').replace(/\/+$/, '');
-      fetch(base + of.endpoint, {
+      fetch(base + endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ config: formValues ?? {} }),
@@ -454,31 +464,54 @@ function TableEditor({ columns, rows, onChange, maxHeight, model, formValues }: 
         .then((j) => {
           if (cancelled || !j) return;
           const fetched = Array.isArray(j) ? j : (j.rows || []);
-          setServerRows((prev) => ({ ...prev, [c.key]: fetched }));
+          setServerData((prev) => ({ ...prev, [endpoint]: fetched }));
         })
-        .catch(() => { /* server down → keep prior/empty, dropdown falls back */ });
+        .catch(() => { /* server down → keep prior/empty */ });
     });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sourceKey, serverCols]);
+  }, [sourceKey, serverEndpoints]);
 
-  // Per-column 'select' options are the same for every row, so resolve once.
-  // Dynamic `optionsFrom` (model sheet / sibling config table / server) wins;
-  // the static `options` array is the fallback when it resolves to nothing.
+  // Per-column 'select' options (dynamic source wins, static is the fallback).
   const columnOptions = useMemo(() => {
     const map: Record<string, ResolvedOption[]> = {};
     for (const c of columns) {
       if (c.type !== 'select') continue;
       const staticOpts = (c.options ?? []).map((opt) => ({ value: String(opt.value), label: String(opt.label ?? opt.value) }));
-      if (c.optionsFrom?.source === 'server') {
-        const dyn = optionsFromRows(c.optionsFrom, serverRows[c.key] ?? [], formValues);
+      if (c.optionsFrom?.source === 'server' && c.optionsFrom.endpoint) {
+        const dyn = optionsFromRows(c.optionsFrom, serverData[c.optionsFrom.endpoint] ?? [], formValues);
         map[c.key] = dyn.length ? dyn : staticOpts;
       } else {
         map[c.key] = resolveStaticOrDynamic(c.optionsFrom, staticOpts, { model, formValues });
       }
     }
     return map;
-  }, [columns, model, formValues, serverRows]);
+  }, [columns, model, formValues, serverData]);
+
+  // Per-'display'-column lookup maps: matched key → display value (as string).
+  const displayLookups = useMemo(() => {
+    const out: Record<string, Record<string, string>> = {};
+    for (const c of columns) {
+      if (c.type !== 'display' || c.lookup?.source !== 'server') continue;
+      const fetched = serverData[c.lookup.endpoint] ?? [];
+      const keyCol = c.lookup.keyColumn ?? c.lookup.matchColumn;
+      const m: Record<string, string> = {};
+      for (const r of fetched) {
+        const k = String(r[keyCol] ?? '');
+        if (!k) continue;
+        const v = r[c.lookup.valueColumn];
+        m[k] = v === undefined || v === null ? '' : String(v);
+      }
+      out[c.key] = m;
+    }
+    return out;
+  }, [columns, serverData]);
+
+  const displayText = (c: ModuleConfigTableColumn, row: Record<string, unknown>): string => {
+    if (c.type !== 'display' || !c.lookup) return '';
+    const key = String(row[c.lookup.matchColumn] ?? '');
+    return (key && displayLookups[c.key]?.[key]) || '—';
+  };
 
   const updateCell = (rowIdx: number, key: string, val: unknown) => {
     const next = rows.map((r, i) => (i === rowIdx ? { ...r, [key]: val } : r));
@@ -521,7 +554,11 @@ function TableEditor({ columns, rows, onChange, maxHeight, model, formValues }: 
             rows.map((row, rowIdx) => (
               <tr key={rowIdx}>
                 {columns.map((c) => (
-                  <td key={c.key}>{cellInput(c, row[c.key], (v) => updateCell(rowIdx, c.key, v), columnOptions[c.key] ?? [])}</td>
+                  <td key={c.key}>
+                    {c.type === 'display'
+                      ? <span className="constraints-cell-display">{displayText(c, row)}</span>
+                      : cellInput(c, row[c.key], (v) => updateCell(rowIdx, c.key, v), columnOptions[c.key] ?? [])}
+                  </td>
                 ))}
                 <td>
                   <button
