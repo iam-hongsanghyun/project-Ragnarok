@@ -34,8 +34,8 @@ export function PluginMap({ spec, title }: { spec: PluginChartSpec; title?: stri
         <div className="chart-card-header"><div><h3>{title}</h3></div></div>
       )}
       {spec.description && <p className="sg-setting-hint" style={{ margin: '0 0 6px' }}>{spec.description}</p>}
-      <div style={{ height: 360, width: '100%' }}>
-        <MapContainer center={[36.35, 127.9]} zoom={7} className="leaflet-map" scrollWheelZoom zoomAnimation={false} zoomSnap={0.25} zoomDelta={0.25} wheelPxPerZoomLevel={120}>
+      <div style={{ height: 360, width: '100%', overflow: 'hidden' }}>
+        <MapContainer center={[36.35, 127.9]} zoom={7} className="leaflet-map" style={{ height: '100%', width: '100%' }} scrollWheelZoom zoomAnimation={false} zoomSnap={0.25} zoomDelta={0.25} wheelPxPerZoomLevel={120}>
           <NoZoomAnimation />
           <TileLayer
             url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
