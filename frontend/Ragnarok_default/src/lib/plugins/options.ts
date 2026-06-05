@@ -34,7 +34,22 @@ export function resolveOptionsFrom(spec: ModuleConfigOptionsFrom, ctx: OptionsCo
     const raw = spec.field ? ctx.formValues?.[spec.field] : undefined;
     if (Array.isArray(raw)) rows = raw as Array<Record<string, unknown>>;
   }
+  // 'server' rows are fetched asynchronously by the caller (TableEditor) and
+  // passed to optionsFromRows directly; resolveOptionsFrom yields [] for it.
+  return optionsFromRows(spec, rows, ctx.formValues);
+}
 
+/**
+ * Transform rows into options: dedup by value, apply the optional numeric
+ * `filter` (threshold from a literal or a sibling field), and append a
+ * `labelSuffixColumn` value to each label. Shared by the model/config path and
+ * the async `source: 'server'` path.
+ */
+export function optionsFromRows(
+  spec: ModuleConfigOptionsFrom,
+  rows: Array<Record<string, unknown>>,
+  formValues?: Record<string, unknown>,
+): ResolvedOption[] {
   const valueKey = spec.column ?? 'name';
   const labelKey = spec.labelColumn ?? valueKey;
 
@@ -42,11 +57,13 @@ export function resolveOptionsFrom(spec: ModuleConfigOptionsFrom, ctx: OptionsCo
   const filter = spec.filter;
   let threshold = Number.NaN;
   if (filter) {
-    const raw = filter.valueFrom !== undefined ? ctx.formValues?.[filter.valueFrom] : filter.value;
+    const raw = filter.valueFrom !== undefined ? formValues?.[filter.valueFrom] : filter.value;
     threshold = Number(raw);
   }
   const passesFilter = (row: Record<string, unknown>): boolean => {
-    if (!filter || !Number.isFinite(threshold)) return true; // no-op when no threshold
+    // No-op when blank / 0 / non-numeric (Number('') === 0), so an unset year
+    // shows all rows. A real year threshold is always positive.
+    if (!filter || !Number.isFinite(threshold) || threshold <= 0) return true;
     const cell = Number(row[filter.column]);
     if (!Number.isFinite(cell)) return false; // non-numeric cell can't satisfy a numeric filter
     switch (filter.op ?? '>=') {

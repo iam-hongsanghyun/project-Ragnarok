@@ -58,3 +58,39 @@ describe('resolveOptionsFrom — source: config', () => {
     expect(resolveOptionsFrom({ source: 'config', field: 'x', column: 'province' }, { formValues: { x: 'scalar' } })).toEqual([]);
   });
 });
+
+describe('resolveOptionsFrom — filter + labelSuffix (build_year)', () => {
+  const gens = {
+    generators: [
+      { name: 'old1', build_year: 2018 },
+      { name: 'new1', build_year: 2030 },
+      { name: 'new2', build_year: 2025 },
+      { name: 'nodate' }, // no build_year → excluded by a numeric filter
+    ],
+  } as unknown as WorkbookModel;
+
+  it('keeps only rows whose column >= a sibling field value, and labels with the year', () => {
+    const out = resolveOptionsFrom(
+      {
+        source: 'model',
+        sheet: 'generators',
+        column: 'name',
+        labelSuffixColumn: 'build_year',
+        filter: { column: 'build_year', op: '>=', valueFrom: 'y' },
+      },
+      { model: gens, formValues: { y: 2025 } },
+    );
+    expect(out).toEqual([
+      { value: 'new1', label: 'new1 (2030)' },
+      { value: 'new2', label: 'new2 (2025)' },
+    ]);
+  });
+
+  it('is a no-op filter when the threshold is blank/non-numeric (keeps all)', () => {
+    const out = resolveOptionsFrom(
+      { source: 'model', sheet: 'generators', column: 'name', filter: { column: 'build_year', op: '>=', valueFrom: 'y' } },
+      { model: gens, formValues: { y: '' } },
+    );
+    expect(out.map((o) => o.value)).toEqual(['old1', 'new1', 'new2', 'nodate']);
+  });
+});

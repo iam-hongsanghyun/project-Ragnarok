@@ -1,6 +1,6 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ModuleConfigField, ModuleConfigTableColumn, ModuleConfigVisibleWhen, ModuleDescriptor, ModuleHostInventory, PluginFileValue, WorkbookModel } from 'lib/types';
-import { resolveOptionsFrom, ResolvedOption } from 'lib/plugins/options';
+import { optionsFromRows, resolveOptionsFrom, ResolvedOption } from 'lib/plugins/options';
 import { SearchableSelect } from '../../shared/components/SearchableSelect';
 
 /** Resolved option list for a field/column: dynamic source wins, static is the fallback. */
@@ -419,18 +419,66 @@ function cellInput(
 }
 
 function TableEditor({ columns, rows, onChange, maxHeight, model, formValues }: TableEditorProps) {
+  // Columns whose options come from the plugin's own server (fetched async).
+  const serverCols = useMemo(
+    () => columns.filter((c) => c.type === 'select' && c.optionsFrom?.source === 'server' && c.optionsFrom.endpoint),
+    [columns],
+  );
+  const [serverRows, setServerRows] = useState<Record<string, Array<Record<string, unknown>>>>({});
+
+  // Refetch only when the SOURCE config changes — not when a client-side filter
+  // field (e.g. the build-year threshold) changes — so the dropdown re-filters
+  // without a round-trip.
+  const sourceKey = useMemo(() => {
+    const filterFields = new Set(
+      serverCols.map((c) => c.optionsFrom?.filter?.valueFrom).filter(Boolean) as string[],
+    );
+    const sub: Record<string, unknown> = {};
+    Object.entries(formValues ?? {}).forEach(([k, v]) => { if (!filterFields.has(k)) sub[k] = v; });
+    return JSON.stringify(sub);
+  }, [formValues, serverCols]);
+
+  useEffect(() => {
+    if (serverCols.length === 0) return;
+    let cancelled = false;
+    serverCols.forEach((c) => {
+      const of = c.optionsFrom!;
+      const baseRaw = of.baseUrlField ? formValues?.[of.baseUrlField] : undefined;
+      const base = String(baseRaw || 'http://127.0.0.1:8765').replace(/\/+$/, '');
+      fetch(base + of.endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ config: formValues ?? {} }),
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => {
+          if (cancelled || !j) return;
+          const fetched = Array.isArray(j) ? j : (j.rows || []);
+          setServerRows((prev) => ({ ...prev, [c.key]: fetched }));
+        })
+        .catch(() => { /* server down → keep prior/empty, dropdown falls back */ });
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceKey, serverCols]);
+
   // Per-column 'select' options are the same for every row, so resolve once.
-  // Dynamic `optionsFrom` (model sheet / sibling config table) wins; the
-  // static `options` array is the fallback when it resolves to nothing.
+  // Dynamic `optionsFrom` (model sheet / sibling config table / server) wins;
+  // the static `options` array is the fallback when it resolves to nothing.
   const columnOptions = useMemo(() => {
     const map: Record<string, ResolvedOption[]> = {};
     for (const c of columns) {
       if (c.type !== 'select') continue;
       const staticOpts = (c.options ?? []).map((opt) => ({ value: String(opt.value), label: String(opt.label ?? opt.value) }));
-      map[c.key] = resolveStaticOrDynamic(c.optionsFrom, staticOpts, { model, formValues });
+      if (c.optionsFrom?.source === 'server') {
+        const dyn = optionsFromRows(c.optionsFrom, serverRows[c.key] ?? [], formValues);
+        map[c.key] = dyn.length ? dyn : staticOpts;
+      } else {
+        map[c.key] = resolveStaticOrDynamic(c.optionsFrom, staticOpts, { model, formValues });
+      }
     }
     return map;
-  }, [columns, model, formValues]);
+  }, [columns, model, formValues, serverRows]);
 
   const updateCell = (rowIdx: number, key: string, val: unknown) => {
     const next = rows.map((r, i) => (i === rowIdx ? { ...r, [key]: val } : r));

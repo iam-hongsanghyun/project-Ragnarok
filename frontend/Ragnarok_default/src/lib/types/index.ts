@@ -748,12 +748,22 @@ export interface ModuleConfigOptionsFrom {
    * - `'model'`  — distinct values from a workbook sheet (e.g. bus names).
    * - `'config'` — distinct values from a sibling `table` field's current rows
    *   (e.g. a `province_mapping` table the user is editing).
+   * - `'server'` — rows fetched from the plugin's own HTTP server (POST
+   *   `endpoint` with `{config}`, response `{rows: [...]}`), e.g. the full
+   *   imported generator fleet. Filtered/labelled client-side like the others.
    */
-  source: 'model' | 'config';
+  source: 'model' | 'config' | 'server';
   /** For `source: 'model'`: the workbook sheet name (e.g. `'buses'`). */
   sheet?: string;
   /** For `source: 'config'`: the sibling config field key whose rows to read. */
   field?: string;
+  /** For `source: 'server'`: the POST path (e.g. `'/generators'`). */
+  endpoint?: string;
+  /**
+   * For `source: 'server'`: config field holding the server base URL
+   * (defaults to `http://127.0.0.1:8765`).
+   */
+  baseUrlField?: string;
   /** Row property used as the option value. Defaults to `'name'`. */
   column?: string;
   /** Row property used as the option label. Defaults to `column`. */
