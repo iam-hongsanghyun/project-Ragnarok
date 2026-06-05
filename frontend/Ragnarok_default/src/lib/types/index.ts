@@ -758,6 +758,23 @@ export interface ModuleConfigOptionsFrom {
   column?: string;
   /** Row property used as the option label. Defaults to `column`. */
   labelColumn?: string;
+  /**
+   * Append `" (row[labelSuffixColumn])"` to each option label — e.g. show a
+   * generator's `build_year` next to its name.
+   */
+  labelSuffixColumn?: string;
+  /**
+   * Keep only rows whose numeric `column` satisfies `op` against a threshold.
+   * The threshold is `value` (literal) or `valueFrom` (a sibling config field's
+   * current value). When the threshold is blank / non-numeric the filter is a
+   * no-op (all rows kept).
+   */
+  filter?: {
+    column: string;
+    op?: '>=' | '<=' | '>' | '<' | '==' | '!=';
+    value?: string | number;
+    valueFrom?: string;
+  };
 }
 
 /** Column descriptor for an editable 'table' config field. */

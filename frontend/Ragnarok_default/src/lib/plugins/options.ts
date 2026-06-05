@@ -38,15 +38,43 @@ export function resolveOptionsFrom(spec: ModuleConfigOptionsFrom, ctx: OptionsCo
   const valueKey = spec.column ?? 'name';
   const labelKey = spec.labelColumn ?? valueKey;
 
+  // Optional numeric filter (e.g. build_year >= a sibling field's value).
+  const filter = spec.filter;
+  let threshold = Number.NaN;
+  if (filter) {
+    const raw = filter.valueFrom !== undefined ? ctx.formValues?.[filter.valueFrom] : filter.value;
+    threshold = Number(raw);
+  }
+  const passesFilter = (row: Record<string, unknown>): boolean => {
+    if (!filter || !Number.isFinite(threshold)) return true; // no-op when no threshold
+    const cell = Number(row[filter.column]);
+    if (!Number.isFinite(cell)) return false; // non-numeric cell can't satisfy a numeric filter
+    switch (filter.op ?? '>=') {
+      case '>': return cell > threshold;
+      case '<': return cell < threshold;
+      case '<=': return cell <= threshold;
+      case '==': return cell === threshold;
+      case '!=': return cell !== threshold;
+      case '>=':
+      default: return cell >= threshold;
+    }
+  };
+
   const seen = new Set<string>();
   const out: ResolvedOption[] = [];
   for (const row of rows) {
     if (!row || typeof row !== 'object') continue;
+    if (!passesFilter(row)) continue;
     const value = String(row[valueKey] ?? '');
     if (!value || seen.has(value)) continue;
     seen.add(value);
     const labelRaw = row[labelKey];
-    out.push({ value, label: labelRaw === undefined || labelRaw === null || labelRaw === '' ? value : String(labelRaw) });
+    let label = labelRaw === undefined || labelRaw === null || labelRaw === '' ? value : String(labelRaw);
+    if (spec.labelSuffixColumn) {
+      const suffix = row[spec.labelSuffixColumn];
+      if (suffix !== undefined && suffix !== null && suffix !== '') label = `${label} (${String(suffix)})`;
+    }
+    out.push({ value, label });
   }
   return out;
 }
