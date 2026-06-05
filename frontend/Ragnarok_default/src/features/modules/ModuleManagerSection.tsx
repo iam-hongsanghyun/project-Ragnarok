@@ -387,6 +387,7 @@ function cellInput(
   cell: unknown,
   onCellChange: (v: unknown) => void,
   selectOptions: ResolvedOption[],
+  placeholder?: string,
 ): React.ReactNode {
   if (column.type === 'select' && (column.options || column.optionsFrom)) {
     return (
@@ -404,6 +405,7 @@ function cellInput(
         type="number"
         className="constraints-cell-input constraints-cell-input--num"
         value={cell === null || cell === undefined ? '' : String(cell)}
+        placeholder={placeholder}
         onChange={(e) => onCellChange(e.target.value === '' ? '' : Number(e.target.value))}
       />
     );
@@ -413,6 +415,7 @@ function cellInput(
       type="text"
       className="constraints-cell-input"
       value={cell === null || cell === undefined ? '' : String(cell)}
+      placeholder={placeholder}
       onChange={(e) => onCellChange(e.target.value)}
     />
   );
@@ -488,11 +491,13 @@ function TableEditor({ columns, rows, onChange, maxHeight, model, formValues }: 
     return map;
   }, [columns, model, formValues, serverData]);
 
-  // Per-'display'-column lookup maps: matched key → display value (as string).
-  const displayLookups = useMemo(() => {
+  // Per-column server lookup maps (matched key → value), for any column that
+  // declares `lookup` — used as read-only text ('display') or as a number/text
+  // cell's placeholder (the computed default the user can override).
+  const lookupMaps = useMemo(() => {
     const out: Record<string, Record<string, string>> = {};
     for (const c of columns) {
-      if (c.type !== 'display' || c.lookup?.source !== 'server') continue;
+      if (c.lookup?.source !== 'server') continue;
       const fetched = serverData[c.lookup.endpoint] ?? [];
       const keyCol = c.lookup.keyColumn ?? c.lookup.matchColumn;
       const m: Record<string, string> = {};
@@ -507,10 +512,10 @@ function TableEditor({ columns, rows, onChange, maxHeight, model, formValues }: 
     return out;
   }, [columns, serverData]);
 
-  const displayText = (c: ModuleConfigTableColumn, row: Record<string, unknown>): string => {
-    if (c.type !== 'display' || !c.lookup) return '';
+  const lookupValue = (c: ModuleConfigTableColumn, row: Record<string, unknown>): string => {
+    if (!c.lookup) return '';
     const key = String(row[c.lookup.matchColumn] ?? '');
-    return (key && displayLookups[c.key]?.[key]) || '—';
+    return (key && lookupMaps[c.key]?.[key]) || '';
   };
 
   const updateCell = (rowIdx: number, key: string, val: unknown) => {
@@ -556,8 +561,14 @@ function TableEditor({ columns, rows, onChange, maxHeight, model, formValues }: 
                 {columns.map((c) => (
                   <td key={c.key}>
                     {c.type === 'display'
-                      ? <span className="constraints-cell-display">{displayText(c, row)}</span>
-                      : cellInput(c, row[c.key], (v) => updateCell(rowIdx, c.key, v), columnOptions[c.key] ?? [])}
+                      ? <span className="constraints-cell-display">{lookupValue(c, row) || '—'}</span>
+                      : cellInput(
+                          c,
+                          row[c.key],
+                          (v) => updateCell(rowIdx, c.key, v),
+                          columnOptions[c.key] ?? [],
+                          c.lookup ? lookupValue(c, row) || undefined : undefined,
+                        )}
                   </td>
                 ))}
                 <td>
