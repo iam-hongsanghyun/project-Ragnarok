@@ -152,7 +152,7 @@ export function ConfigFieldRow({ fieldKey, field, value, onChange, carriers, mod
   if (field.type === 'select' && (field.options || field.optionsFrom)) {
     const opts = resolveStaticOrDynamic(
       field.optionsFrom,
-      (field.options ?? []).map((opt) => ({ value: String(opt.value), label: String(opt.label) })),
+      (field.options ?? []).map((opt) => ({ value: String(opt.value), label: String(opt.label ?? opt.value) })),
       { model, formValues },
     );
     return (
@@ -174,7 +174,7 @@ export function ConfigFieldRow({ fieldKey, field, value, onChange, carriers, mod
     // `carrier-select` (which is fixed to workbook carriers).
     const options = resolveStaticOrDynamic(
       field.optionsFrom,
-      (field.options ?? []).map((opt) => ({ value: String(opt.value), label: String(opt.label) })),
+      (field.options ?? []).map((opt) => ({ value: String(opt.value), label: String(opt.label ?? opt.value) })),
       { model, formValues },
     );
     const selected: string[] = Array.isArray(resolved)
