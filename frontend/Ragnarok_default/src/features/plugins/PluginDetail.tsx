@@ -256,7 +256,10 @@ export function PluginDetail({ host, plugin, model, onReplaceModel, onMergeSheet
   // the V1 backend populated pluginAnalytics after each solve.
   useEffect(() => {
     let cancelled = false;
-    if (!caps.analyze || !results) {
+    // Run analyze even before a solve: some plugins derive their Output from the
+    // input/config (e.g. the dashboard importer's capacity-by-year) and pass
+    // `result` through unused. Plugins that need run results check for null.
+    if (!caps.analyze) {
       setAnalytics(null);
       return;
     }
@@ -264,7 +267,7 @@ export function PluginDetail({ host, plugin, model, onReplaceModel, onMergeSheet
       try {
         const mod = loadPluginModule(plugin);
         const cfg = withDefaults(schema, host.getConfig(plugin.id));
-        const data = (await mod.analyze!(results, cfg)) || {};
+        const data = (await mod.analyze!(results ?? null, cfg)) || {};
         if (!cancelled) setAnalytics({ name: plugin.name, ui: inferPluginUi(data), data });
       } catch {
         if (!cancelled) setAnalytics(null);
