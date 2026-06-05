@@ -378,7 +378,12 @@ interface TableEditorProps {
 
 function emptyRow(columns: ModuleConfigTableColumn[]): Record<string, unknown> {
   const row: Record<string, unknown> = {};
-  for (const c of columns) row[c.key] = c.type === 'number' ? 0 : '';
+  for (const c of columns) {
+    // Number cells default to 0, EXCEPT lookup-backed ones (placeholder-driven
+    // overrides), which start blank so the computed placeholder shows and the
+    // backend uses the computed value until the user types an override.
+    row[c.key] = c.type === 'number' && !c.lookup ? 0 : '';
+  }
   return row;
 }
 
