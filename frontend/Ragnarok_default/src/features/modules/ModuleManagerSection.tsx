@@ -442,11 +442,13 @@ function TableEditor({ columns, rows, onChange, maxHeight, model, formValues }: 
   // filter field (e.g. the build-year threshold) changes, since that only
   // re-filters the existing rows. Selection / split changes DO refetch.
   const sourceKey = useMemo(() => {
-    const filterFields = new Set(
-      columns
-        .map((c) => (c.type === 'select' ? c.optionsFrom?.filter?.valueFrom : undefined))
-        .filter(Boolean) as string[],
-    );
+    const filterFields = new Set<string>();
+    for (const c of columns) {
+      if (c.type !== 'select') continue;
+      const f = c.optionsFrom?.filter;
+      const arr = Array.isArray(f) ? f : f ? [f] : [];
+      for (const ff of arr) if (ff.valueFrom) filterFields.add(ff.valueFrom);
+    }
     const sub: Record<string, unknown> = {};
     Object.entries(formValues ?? {}).forEach(([k, v]) => { if (!filterFields.has(k)) sub[k] = v; });
     return JSON.stringify(sub);

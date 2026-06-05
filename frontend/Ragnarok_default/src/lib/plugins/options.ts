@@ -1,4 +1,4 @@
-import { ModuleConfigOptionsFrom, WorkbookModel } from 'lib/types';
+import { ModuleConfigOptionsFilter, ModuleConfigOptionsFrom, WorkbookModel } from 'lib/types';
 
 export interface ResolvedOption {
   value: string;
@@ -53,29 +53,36 @@ export function optionsFromRows(
   const valueKey = spec.column ?? 'name';
   const labelKey = spec.labelColumn ?? valueKey;
 
-  // Optional numeric filter (e.g. build_year >= a sibling field's value).
-  const filter = spec.filter;
-  let threshold = Number.NaN;
-  if (filter) {
-    const raw = filter.valueFrom !== undefined ? formValues?.[filter.valueFrom] : filter.value;
-    threshold = Number(raw);
-  }
-  const passesFilter = (row: Record<string, unknown>): boolean => {
-    // No-op when blank / 0 / non-numeric (Number('') === 0), so an unset year
-    // shows all rows. A real year threshold is always positive.
-    if (!filter || !Number.isFinite(threshold) || threshold <= 0) return true;
-    const cell = Number(row[filter.column]);
-    if (!Number.isFinite(cell)) return false; // non-numeric cell can't satisfy a numeric filter
-    switch (filter.op ?? '>=') {
+  // One or more filter conditions (AND). Numeric for >=/<=/></<; equality
+  // (==/!=) is numeric when the threshold is a number, else string (carrier).
+  const filters = spec.filter ? (Array.isArray(spec.filter) ? spec.filter : [spec.filter]) : [];
+  const passesOne = (row: Record<string, unknown>, f: ModuleConfigOptionsFilter): boolean => {
+    const raw = f.valueFrom !== undefined ? formValues?.[f.valueFrom] : f.value;
+    const rawStr = raw === undefined || raw === null ? '' : String(raw).trim();
+    const op = f.op ?? '>=';
+    if (op === '==' || op === '!=') {
+      if (rawStr === '') return true; // unset → no-op
+      const num = Number(rawStr);
+      if (Number.isFinite(num)) {
+        const cell = Number(row[f.column]);
+        return op === '==' ? cell === num : cell !== num;
+      }
+      const cell = String(row[f.column] ?? '').trim();
+      return op === '==' ? cell === rawStr : cell !== rawStr;
+    }
+    // Numeric comparison: no-op when blank / 0 / non-numeric (Number('')===0).
+    const threshold = Number(rawStr);
+    if (!Number.isFinite(threshold) || threshold <= 0) return true;
+    const cell = Number(row[f.column]);
+    if (!Number.isFinite(cell)) return false;
+    switch (op) {
       case '>': return cell > threshold;
       case '<': return cell < threshold;
       case '<=': return cell <= threshold;
-      case '==': return cell === threshold;
-      case '!=': return cell !== threshold;
-      case '>=':
       default: return cell >= threshold;
     }
   };
+  const passesFilter = (row: Record<string, unknown>): boolean => filters.every((f) => passesOne(row, f));
 
   const seen = new Set<string>();
   const out: ResolvedOption[] = [];

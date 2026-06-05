@@ -94,3 +94,31 @@ describe('resolveOptionsFrom — filter + labelSuffix (build_year)', () => {
     expect(out.map((o) => o.value)).toEqual(['old1', 'new1', 'new2', 'nodate']);
   });
 });
+
+describe('resolveOptionsFrom — multiple filters incl. carrier (string ==)', () => {
+  const gens = {
+    generators: [
+      { name: 'coal_2030', build_year: 2030, carrier: 'coal' },
+      { name: 'gas_2030', build_year: 2030, carrier: 'gas' },
+      { name: 'gas_2020', build_year: 2020, carrier: 'gas' },
+      { name: 'wind_2035', build_year: 2035, carrier: 'wind' },
+    ],
+  } as unknown as WorkbookModel;
+  const spec = {
+    source: 'model' as const, sheet: 'generators', column: 'name',
+    filter: [
+      { column: 'build_year', op: '>=' as const, valueFrom: 'y' },
+      { column: 'carrier', op: '==' as const, valueFrom: 'c' },
+    ],
+  };
+
+  it('ANDs build_year >= and carrier ==', () => {
+    const out = resolveOptionsFrom(spec, { model: gens, formValues: { y: 2024, c: 'gas' } });
+    expect(out.map((o) => o.value)).toEqual(['gas_2030']);
+  });
+
+  it('blank carrier → that condition is a no-op', () => {
+    const out = resolveOptionsFrom(spec, { model: gens, formValues: { y: 2024, c: '' } });
+    expect(out.map((o) => o.value)).toEqual(['coal_2030', 'gas_2030', 'wind_2035']);
+  });
+});

@@ -774,17 +774,22 @@ export interface ModuleConfigOptionsFrom {
    */
   labelSuffixColumn?: string;
   /**
-   * Keep only rows whose numeric `column` satisfies `op` against a threshold.
-   * The threshold is `value` (literal) or `valueFrom` (a sibling config field's
-   * current value). When the threshold is blank / non-numeric the filter is a
-   * no-op (all rows kept).
+   * Keep only rows that satisfy the condition(s). One condition or an array
+   * (all must pass / AND). Each compares `column` to a threshold (`value`
+   * literal, or `valueFrom` a sibling config field). Numeric ops
+   * (`>=` `<=` `>` `<`) coerce both sides to numbers; equality (`==` `!=`)
+   * compares numerically when the threshold is a number, else as strings
+   * (e.g. carrier). A blank threshold makes that condition a no-op.
    */
-  filter?: {
-    column: string;
-    op?: '>=' | '<=' | '>' | '<' | '==' | '!=';
-    value?: string | number;
-    valueFrom?: string;
-  };
+  filter?: ModuleConfigOptionsFilter | ModuleConfigOptionsFilter[];
+}
+
+/** One condition for `ModuleConfigOptionsFrom.filter`. */
+export interface ModuleConfigOptionsFilter {
+  column: string;
+  op?: '>=' | '<=' | '>' | '<' | '==' | '!=';
+  value?: string | number;
+  valueFrom?: string;
 }
 
 /** Column descriptor for an editable 'table' config field. */
