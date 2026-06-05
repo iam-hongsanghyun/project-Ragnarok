@@ -92,6 +92,19 @@
 .plugin-result-chart-cell .chart-card {
   width: 100%;
 }
+/* Pin the chart to a fixed height. The time-series card measures .chart-main
+   and sizes the SVG to it (height:auto); inside the flexible result-table cell
+   that feeds back and grows unbounded ("the chart keeps getting taller"). A
+   fixed .chart-main height makes the measured height constant, and forcing the
+   SVG to fill it (height:100%, viewBox scales the content) stops the loop. */
 .plugin-result-chart-cell .chart-card-wide {
-  min-height: 280px;
+  min-height: 0;
+}
+.plugin-result-chart-cell .chart-main {
+  height: 320px;
+  flex: 0 0 320px;
+  overflow: hidden;
+}
+.plugin-result-chart-cell .chart-svg {
+  height: 100%;
 }
