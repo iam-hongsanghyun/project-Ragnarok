@@ -435,9 +435,15 @@ export interface PluginMapNode {
   /** WGS84 latitude / longitude. */
   lat: number;
   lon: number;
-  /** Optional magnitude (e.g. generation) used to size the marker. */
+  /** Optional magnitude (e.g. total generation) used to size the marker. */
   value?: number;
   color?: string;
+  /**
+   * Optional breakdown rendered as a pie at the node (e.g. generation mix by
+   * carrier). When present the marker is a pie sized by `value`; otherwise a
+   * plain circle.
+   */
+  mix?: PluginChartSlice[];
 }
 
 /** A directed edge on a `kind: 'map'` plugin chart (e.g. inter-region flow). */

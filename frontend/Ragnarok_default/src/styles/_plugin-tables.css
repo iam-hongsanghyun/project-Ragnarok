@@ -108,3 +108,8 @@
 .plugin-result-chart-cell .chart-svg {
   height: 100%;
 }
+/* Node pie markers on a plugin map: no default leaflet div-icon box. */
+.plugin-map-pie {
+  background: transparent;
+  border: none;
+}

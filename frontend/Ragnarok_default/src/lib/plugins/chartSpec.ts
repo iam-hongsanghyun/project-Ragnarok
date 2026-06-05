@@ -23,6 +23,13 @@ export function isPluginChartSpec(value: unknown): value is PluginChartSpec {
   );
 }
 
+/** A slice of a node's pie (carrier, value, colour). */
+export interface MapNodeSlice {
+  label: string;
+  value: number;
+  color?: string;
+}
+
 /** A map node with coordinates coerced to finite numbers. */
 export interface MapNodePoint {
   id: string;
@@ -31,6 +38,8 @@ export interface MapNodePoint {
   lon: number;
   value: number;
   color?: string;
+  /** Carrier breakdown (positive values only); empty when no mix supplied. */
+  mix: MapNodeSlice[];
 }
 
 /** A map edge resolved to its endpoint coordinates. */
@@ -56,6 +65,13 @@ export function chartSpecToMapNodes(spec: PluginChartSpec): MapNodePoint[] {
       lon: numberValue(n.lon),
       value: numberValue(n.value),
       color: n.color ? String(n.color) : undefined,
+      mix: (Array.isArray(n.mix) ? n.mix : [])
+        .map((s) => ({
+          label: stringValue(s.label),
+          value: numberValue(s.value),
+          color: s.color ? String(s.color) : undefined,
+        }))
+        .filter((s) => isFiniteNum(s.value) && s.value > 0),
     }))
     .filter((n) => isFiniteNum(n.lat) && isFiniteNum(n.lon) && !(n.lat === 0 && n.lon === 0));
 }
