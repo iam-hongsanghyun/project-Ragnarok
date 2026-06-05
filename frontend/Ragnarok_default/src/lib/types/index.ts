@@ -427,14 +427,38 @@ export interface PluginChartSlice {
   color?: string;
 }
 
+/** A node on a `kind: 'map'` plugin chart (e.g. a region centroid). */
+export interface PluginMapNode {
+  /** Unique id; `PluginMapEdge.from`/`to` reference it. */
+  id: string;
+  label?: string;
+  /** WGS84 latitude / longitude. */
+  lat: number;
+  lon: number;
+  /** Optional magnitude (e.g. generation) used to size the marker. */
+  value?: number;
+  color?: string;
+}
+
+/** A directed edge on a `kind: 'map'` plugin chart (e.g. inter-region flow). */
+export interface PluginMapEdge {
+  /** Source / target node id (must match a `PluginMapNode.id`). */
+  from: string;
+  to: string;
+  /** Optional magnitude used to weight the line. */
+  value?: number;
+  label?: string;
+  color?: string;
+}
+
 /**
  * Data spec a plugin returns (as a `data` value whose `ui` hint has
  * `format: 'chart'`) for the host to render with the app's own chart
  * components. Plugins emit data, never markup — the host owns rendering.
  */
 export interface PluginChartSpec {
-  /** 'line' | 'area' | 'bar' | 'donut'. */
-  kind: ChartSectionType;
+  /** 'line' | 'area' | 'bar' | 'donut' | 'map'. */
+  kind: ChartSectionType | 'map';
   /** Caption shown above the chart. */
   description?: string;
   /** line/area/bar: rows keyed by series `key`, plus `label`/`x` (category) or `timestamp`. */
@@ -448,6 +472,10 @@ export interface PluginChartSpec {
   showLegend?: boolean;
   /** donut: slice definitions. */
   slices?: PluginChartSlice[];
+  /** map: node (e.g. region centroid) definitions. */
+  nodes?: PluginMapNode[];
+  /** map: directed edge (e.g. inter-region flow) definitions. */
+  edges?: PluginMapEdge[];
 }
 
 export type PluginPanelLayout = 'single' | '2x1' | '1x2' | '2x2';

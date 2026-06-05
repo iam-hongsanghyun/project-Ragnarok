@@ -3,12 +3,17 @@ import { ChartMode, PluginChartSpec } from 'lib/types';
 import { chartSpecToDonut, chartSpecToRows, chartSpecToSeries } from 'lib/plugins/chartSpec';
 import { InteractiveTimeSeriesCard } from '../analytics/cards/InteractiveTimeSeriesCard';
 import { DonutChart } from '../analytics/cards/DonutChart';
+import { PluginMap } from './PluginMap';
 
 /**
  * Renders a plugin-declared `PluginChartSpec` with the app's own chart
  * components. The host owns rendering; the plugin only supplies data.
  */
 export function PluginChart({ spec, title }: { spec: PluginChartSpec; title?: string }) {
+  if (spec.kind === 'map') {
+    return <PluginMap spec={spec} title={title} />;
+  }
+
   if (spec.kind === 'donut') {
     const data = chartSpecToDonut(spec);
     if (data.length === 0) {
