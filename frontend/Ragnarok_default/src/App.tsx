@@ -867,7 +867,13 @@ function AppInner() {
   };
 
   const handleExportResultWorkbook = async () => {
-    if (!displayResults) return;
+    if (!displayResults) {
+      // Don't no-op silently — the usual cause is no successful run yet
+      // (e.g. the last solve errored), which otherwise looks like "export
+      // does nothing".
+      showToast('No results to export yet — run the model first.', 'error');
+      return;
+    }
     const base = filename.replace(/\.xlsx$/i, '') || 'ragnarok';
     await saveFileWithPicker({
       suggestedName: `${base}_results.xlsx`,
