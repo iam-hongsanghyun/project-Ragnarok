@@ -42,7 +42,7 @@ function formatXLabel(ts: string | undefined, spanMs: number): string {
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return ts;
   if (spanMs <= H24)  return isoTime(d);                      // HH:MM
-  if (spanMs <= H7D)  return `${isoDate(d)} ${isoTime(d)}`;   // YYYY-MM-DD HH:MM
+  if (spanMs <= H7D)  return `${isoDate(d)}T${isoTime(d)}`;   // YYYY-MM-DDTHH:MM
   if (spanMs <= H90D) return isoDate(d);                      // YYYY-MM-DD
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; // YYYY-MM
 }

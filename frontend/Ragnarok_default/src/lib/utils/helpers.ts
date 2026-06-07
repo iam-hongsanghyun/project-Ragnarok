@@ -215,11 +215,12 @@ export function isoTime(d: Date): string {
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 
+/** ISO `YYYY-MM-DDTHH:MM` (the `T` separator, never a space or locale form). */
 export function formatTimestamp(raw?: string) {
   if (!raw) return '';
   const date = new Date(raw);
   if (Number.isNaN(date.getTime())) return raw;
-  return `${isoDate(date)} ${isoTime(date)}`;
+  return `${isoDate(date)}T${isoTime(date)}`;
 }
 
 const DATE_RE = /^(\d{1,4})[-/.](\d{1,2})[-/.](\d{1,4})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$/;

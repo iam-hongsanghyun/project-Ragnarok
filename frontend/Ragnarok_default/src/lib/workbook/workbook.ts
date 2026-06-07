@@ -364,7 +364,7 @@ export function workbookToArrayBuffer(model: WorkbookModel, dateFormat: DateForm
  * Parse a CSV (or TSV) file into GridRow[] for use as a time-series sheet.
  *
  * Expected shape:
- *   Column 0  — snapshot label (string, e.g. "2019-01-01 00:00")
+ *   Column 0  — snapshot label (ISO string, e.g. "2019-01-01T00:00:00")
  *   Columns 1+ — component names → numeric values
  *
  * SheetJS auto-detects comma vs tab delimiter.  BOM-prefixed files are handled

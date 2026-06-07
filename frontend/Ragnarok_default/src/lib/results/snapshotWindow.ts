@@ -33,10 +33,10 @@ export function snapshotInputValueAt(timestamps: string[], index: number): strin
   return ts ? minute(ts) : '';
 }
 
-/** Human label `YYYY-MM-DD HH:MM` at `index`; '' if out of range. */
+/** ISO label `YYYY-MM-DDTHH:MM` at `index`; '' if out of range. */
 export function snapshotLabelAt(timestamps: string[], index: number): string {
   const ts = timestamps[index];
-  return ts ? minute(ts).replace('T', ' ') : '';
+  return ts ? minute(ts) : '';
 }
 
 /**

@@ -42,7 +42,7 @@ describe('isDatedAxis', () => {
 describe('snapshotInputValueAt / snapshotLabelAt', () => {
   it('returns minute-precision datetime-local value and a human label', () => {
     expect(snapshotInputValueAt(TS, 1)).toBe('2030-01-01T12:00');
-    expect(snapshotLabelAt(TS, 1)).toBe('2030-01-01 12:00');
+    expect(snapshotLabelAt(TS, 1)).toBe('2030-01-01T12:00');
     expect(snapshotInputValueAt(TS, 99)).toBe('');
   });
 });
