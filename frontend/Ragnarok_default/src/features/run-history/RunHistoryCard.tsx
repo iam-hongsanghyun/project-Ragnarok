@@ -25,6 +25,13 @@ export function RunHistoryCard({ entry, onView, onRename, onPin, onDelete, onTog
   const kpiEmissions = entry.results.summary[4];
   const kpiPrice = entry.results.summary[3];
 
+  const absoluteTime = new Date(entry.savedAt).toLocaleString();
+  const snapshotSpan = Math.max(0, entry.snapshotEnd - entry.snapshotStart);
+  const componentSummary = Object.entries(entry.componentCounts ?? {})
+    .filter(([, count]) => count > 0)
+    .map(([name, count]) => `${name} ${count}`)
+    .join(', ');
+
   return (
     <div className={`hist-card${entry.pinned ? ' hist-card--pinned' : ''}${!entry.inComparison ? ' hist-card--excluded' : ''}`}>
       <div className="hist-card-header">
@@ -69,15 +76,17 @@ export function RunHistoryCard({ entry, onView, onRename, onPin, onDelete, onTog
       </div>
 
       <div className="hist-meta">
-        <span>{formatRelTime(entry.savedAt)}</span>
+        <span title={absoluteTime}>{formatRelTime(entry.savedAt)}</span>
         <span>·</span>
         <span className="hist-meta-filename">{entry.filename}</span>
       </div>
 
+      <div className="hist-meta hist-meta--absolute">{absoluteTime}</div>
+
       <div className="hist-settings">
         {entry.scenarioLabel && <span>{entry.scenarioLabel}</span>}
-        <span>{entry.results.runMeta.snapshotCount} snaps</span>
-        <span>{entry.snapshotWeight}h</span>
+        <span title={`${snapshotSpan} snapshots (${entry.snapshotStart}–${entry.snapshotEnd})`}>{entry.results.runMeta.snapshotCount} snaps</span>
+        <span title="Resolution">{entry.snapshotWeight}h</span>
         {entry.carbonPrice > 0 && <span>{currencySymbol}{entry.carbonPrice}/t CO₂</span>}
         {entry.activeConstraints.length > 0 && (
           <span title={entry.activeConstraints.map((c) => c.label).join(', ')}>
@@ -85,6 +94,10 @@ export function RunHistoryCard({ entry, onView, onRename, onPin, onDelete, onTog
           </span>
         )}
       </div>
+
+      {componentSummary && (
+        <div className="hist-components" title={componentSummary}>{componentSummary}</div>
+      )}
 
       {(kpiEmissions || kpiPrice) && (
         <div className="hist-kpis">

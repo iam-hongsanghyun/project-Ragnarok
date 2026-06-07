@@ -47,10 +47,12 @@ import { dslToSpecs } from 'lib/constraints/dsl';
 import { buildScenarioPreset, defaultScenarioCatalog, readScenarioCatalogFromModel, sameScenarioCatalog, writeScenarioCatalogToModel } from 'lib/results/scenarios';
 import { readCarbonLibraryFromModel, writeCarbonLibraryToModel, sameCarbonLibrary } from 'lib/results/carbonLibrary';
 import { saveSessionModel, saveSessionControls, loadSession, clearSession } from 'lib/storage/sessionStore';
+import { saveHistory, loadHistory } from 'lib/storage/historyStore';
 import { RunDialog } from './features/run/RunDialog';
 import { SettingsView } from './views/SettingsView';
 import { PluginsView } from './views/PluginsView';
 import { ModelView } from './views/ModelView';
+import { HistoryView } from './views/HistoryView';
 import { BuildView } from './features/build/BuildView';
 import { DataView } from './views/DataView';
 import { WelcomeView } from './views/WelcomeView';
@@ -527,6 +529,33 @@ function AppInner() {
     }, 400);
     return () => window.clearTimeout(id);
   }, [filename, carbonPrice, carbonPriceSchedule, snapshotStart, snapshotEnd, snapshotWeight, forceLp]);
+
+  // ── Run history persistence (IndexedDB, separate DB) ────────────────────
+  // Hydrate the saved run history on load so past runs survive a reload, then
+  // auto-save (debounced) whenever it changes. Best-effort: a storage failure
+  // never blocks a run. We skip hydration if a run already appended an entry
+  // before the async load resolved, so we don't clobber it.
+  const historyHydratedRef = useRef(false);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const saved = await loadHistory();
+        if (!cancelled && saved.length > 0) {
+          setRunHistory((current) => (current.length > 0 ? current : saved));
+        }
+      } finally {
+        if (!cancelled) historyHydratedRef.current = true;
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!historyHydratedRef.current) return undefined;
+    const id = window.setTimeout(() => { void saveHistory(runHistory); }, 500);
+    return () => window.clearTimeout(id);
+  }, [runHistory]);
 
   const bounds = useMemo(() => getBounds(model), [model.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
   const busIndex = useMemo(() => getBusIndex(model), [model.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
@@ -1248,6 +1277,10 @@ function AppInner() {
 
   const handleDeleteHistoryEntry = (id: string) => {
     setRunHistory((h) => h.filter((e) => e.id !== id));
+  };
+
+  const handleDeleteHistoryEntries = (ids: string[]) => {
+    setRunHistory((h) => h.filter((e) => !ids.includes(e.id)));
   };
 
   const handleClearHistory = () => {
@@ -1977,6 +2010,20 @@ function AppInner() {
               onPinHistoryEntry={handlePinHistoryEntry}
               onDeleteHistoryEntry={handleDeleteHistoryEntry}
               onClearHistory={handleClearHistory}
+            />
+          )}
+
+          {tab === 'History' && (
+            <HistoryView
+              runHistory={runHistory}
+              currencySymbol={settings.currencySymbol}
+              onRestoreRun={handleRestoreRun}
+              onRenameHistoryEntry={handleRenameHistoryEntry}
+              onPinHistoryEntry={handlePinHistoryEntry}
+              onDeleteHistoryEntry={handleDeleteHistoryEntry}
+              onDeleteHistoryEntries={handleDeleteHistoryEntries}
+              onClearHistory={handleClearHistory}
+              onToggleComparison={handleToggleComparison}
             />
           )}
 
