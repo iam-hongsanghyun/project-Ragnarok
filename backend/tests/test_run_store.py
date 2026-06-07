@@ -188,3 +188,25 @@ def test_solve_worker_always_stores(_runs_dir: Path, monkeypatch: pytest.MonkeyP
     assert len(runs) == 1
     assert runs[0]["scenarioLabel"] == "Worker scenario"
     assert runs[0]["summary"] == result["summary"]
+
+
+def test_filename_label_stem_strips_extension_and_drops_defaults() -> None:
+    # The model filename loses its extension before becoming a run-name label,
+    # so a run is never named "...case.xlsx" (which yields ".xlsx.xlsx" on
+    # download). Generic default filenames contribute no label at all.
+    assert run_store._filename_label_stem("north-sea-2030.xlsx") == "north-sea-2030"
+    assert run_store._filename_label_stem("case.XLSX") == "case"
+    assert run_store._filename_label_stem("model.nc") == "model"
+    assert run_store._filename_label_stem("ragnarok_case.xlsx") == ""
+    assert run_store._filename_label_stem("ragnarok") == ""
+
+
+def test_derive_name_default_filename_is_clean_timestamp() -> None:
+    # No runLabel / scenario label and the default filename → the name is the
+    # bare timestamp (no "_ragnarok_case", no trailing ".xlsx").
+    name = run_store._derive_name({}, {}, {"filename": "ragnarok_case.xlsx"})
+    assert name.count("_") == 0
+    assert ".xlsx" not in name
+    # A real filename DOES become a label (extension stripped).
+    named = run_store._derive_name({}, {}, {"filename": "north-sea.xlsx"})
+    assert named.endswith("_north-sea")

@@ -42,6 +42,28 @@ _LABEL_SANITISE = re.compile(r"[^A-Za-z0-9._-]+")
 _LABEL_MAX_LEN = 40
 _XLSX_SHEET_MAX_LEN = 31
 
+# Stem-only file extensions stripped before a filename becomes a run label, so a
+# run is never named ``...ragnarok_case.xlsx`` (which then yields a double
+# ``.xlsx.xlsx`` on download). Generic default filenames carry no information —
+# they're dropped so the run name stays a clean timestamp.
+_LABEL_EXTENSIONS = (".xlsx", ".xls", ".nc", ".h5", ".hdf5", ".zip")
+_DEFAULT_FILENAME_STEMS = {"ragnarok_case", "ragnarok_project", "ragnarok"}
+
+
+def _filename_label_stem(filename: str) -> str:
+    """Filename → label stem: lowercase-extension stripped; '' for generic defaults.
+
+    ``ragnarok_case.xlsx`` → ``''`` (a meaningless default, so no label),
+    ``north-sea-2030.xlsx`` → ``north-sea-2030``.
+    """
+    stem = filename.strip()
+    lowered = stem.lower()
+    for ext in _LABEL_EXTENSIONS:
+        if lowered.endswith(ext):
+            stem = stem[: -len(ext)]
+            break
+    return "" if stem.lower() in _DEFAULT_FILENAME_STEMS else stem
+
 
 def _is_safe_name(name: str) -> bool:
     """Return True when ``name`` is safe to use as a filesystem stem.
@@ -65,16 +87,19 @@ def _derive_name(model: dict[str, Any], scenario: dict[str, Any], options: dict[
     """Build a datetime-based, filesystem-safe run name.
 
     The stem is a UTC timestamp ``<YYYY-MM-DDTHH-MM-SS>``; a sanitised label
-    (from ``options['runLabel']``, the scenario label, or the model filename)
-    is appended when one is available.
+    (from ``options['runLabel']``, the scenario label, or the model filename
+    with its extension stripped) is appended when one is available. A generic
+    default filename (``ragnarok_case.xlsx`` etc.) contributes no label, so a
+    plain run keeps a clean timestamp name.
     """
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
     raw_label = (
         (options.get("runLabel") if isinstance(options, dict) else None)
         or (scenario.get("label") if isinstance(scenario, dict) else None)
-        or (options.get("filename") if isinstance(options, dict) else None)
         or ""
     )
+    if not raw_label and isinstance(options, dict) and options.get("filename"):
+        raw_label = _filename_label_stem(str(options["filename"]))
     label = _sanitise_label(str(raw_label)) if raw_label else ""
     return f"{stamp}_{label}" if label else stamp
 
@@ -85,7 +110,7 @@ def _label_for_bundle(scenario: dict[str, Any], options: dict[str, Any], filenam
         return str(options["runLabel"])
     if isinstance(scenario, dict) and scenario.get("label"):
         return str(scenario["label"])
-    return filename or "Run"
+    return _filename_label_stem(filename) or "Run"
 
 
 def store_run(

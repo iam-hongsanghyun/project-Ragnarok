@@ -60,6 +60,16 @@ import { useModelIssues } from './features/validation/useModelIssues';
 import { useFrontendPlugins } from './features/plugins/frontendPlugins';
 import { ToastProvider, useToast } from './shared/components/Toast';
 
+/**
+ * Strip every trailing project/data extension from a filename so export names
+ * never double up (e.g. a re-imported `case.xlsx.xlsx` → `case`). Repeats so
+ * stacked extensions collapse; falls back to `ragnarok` when nothing remains.
+ */
+function projectBaseName(filename: string): string {
+  const base = filename.replace(/(\.(xlsx|xls|nc|h5|hdf5|zip))+$/i, '').trim();
+  return base || 'ragnarok';
+}
+
 function AppInner() {
   const { showToast } = useToast();
   const [model, setModel] = useState<WorkbookModel>(() => createEmptyWorkbook());
@@ -706,6 +716,11 @@ function AppInner() {
         // Imported projects are not solved on this backend, so they do not enter
         // backend run history — the result is simply shown in the viewer.
         setActiveRunName(null);
+        // The project carries solved outputs, so jump straight to Analytics —
+        // matches the post-run navigation and what the user expects after
+        // opening a finished project.
+        setTab('Analytics');
+        setAnalyticsSubTab('Result');
         setStatus(`Imported project: ${file.name}. Full project state restored.`);
       } else {
         setStatus(`Imported project (inputs only): ${file.name}. Metadata restored.`);
@@ -726,8 +741,7 @@ function AppInner() {
     // is built SERVER-SIDE (POST /api/export/project) so the heavy SheetJS
     // build no longer runs in — and OOMs — the browser tab. We just stream the
     // returned blob to a download.
-    const base = filename.replace(/\.xlsx$/i, '') || 'ragnarok_project';
-    const out = `${base}_project.xlsx`;
+    const out = `${projectBaseName(filename)}_project.xlsx`;
     try {
       const resp = await fetch(`${API_BASE}/api/export/project`, {
         method: 'POST',
@@ -821,9 +835,9 @@ function AppInner() {
   }
 
   const handleExportNetcdf = () =>
-    exportViaBackend('/api/export/netcdf', `${filename.replace(/\.xlsx$/i, '') || 'ragnarok'}.nc`);
+    exportViaBackend('/api/export/netcdf', `${projectBaseName(filename)}.nc`);
   const handleExportHdf5 = () =>
-    exportViaBackend('/api/export/hdf5', `${filename.replace(/\.xlsx$/i, '') || 'ragnarok'}.h5`);
+    exportViaBackend('/api/export/hdf5', `${projectBaseName(filename)}.h5`);
 
   const handleImportNetcdf = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -837,8 +851,7 @@ function AppInner() {
   };
 
   const handleExportCsvFolder = async () => {
-    const base = filename.replace(/\.xlsx$/i, '') || 'ragnarok_project';
-    const archive = `${base}_csv_folder`;
+    const archive = `${projectBaseName(filename)}_csv_folder`;
     try {
       const { exportModelAsCsvFolderZip } = await import('lib/workbook/csvFolder');
       const blob = exportModelAsCsvFolderZip(model, archive);
