@@ -228,8 +228,18 @@ export function PluginDetail({ host, plugin, model, onReplaceModel, onMergeSheet
       const mod = loadPluginModule(plugin) as unknown as Record<string, ((cfg: Record<string, unknown>) => unknown) | undefined>;
       const fn = mod[hook];
       if (typeof fn !== 'function') throw new Error(`Plugin has no "${hook}" hook.`);
-      const res = (await fn(withDefaults(schema, host.getConfig(plugin.id)))) as { ok?: boolean; message?: string } | void;
+      const res = (await fn(withDefaults(schema, host.getConfig(plugin.id)))) as
+        | { ok?: boolean; message?: string; config?: Record<string, unknown> }
+        | void;
       const ok = !res || res.ok !== false;
+      // An action hook may return a `config` patch — a map of field → value the
+      // host writes back into this plugin's config (e.g. a "Fill table" button
+      // that populates an editable table). Applied only on success.
+      if (ok && res && res.config && typeof res.config === 'object') {
+        for (const [key, value] of Object.entries(res.config)) {
+          host.setConfigField(plugin.id, key, value);
+        }
+      }
       showToast(res?.message ?? field.successMessage ?? `${plugin.name}: ${hook} done.`, ok ? 'success' : 'error');
     } catch (err) {
       showToast(`${plugin.name}: ${err instanceof Error ? err.message : 'failed'}`, 'error');
