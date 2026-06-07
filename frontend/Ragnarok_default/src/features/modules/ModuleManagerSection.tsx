@@ -14,6 +14,50 @@ function resolveStaticOrDynamic(
   return dynamic.length > 0 ? dynamic : staticOptions;
 }
 
+/**
+ * Fetch rows for a top-level `select`/`multi-select` field whose options come
+ * from a plugin server (`optionsFrom.source === 'server'`). Mirrors the table
+ * editor's server fetch: POST `{config}` to `<baseUrlField>` + `endpoint`,
+ * expect `{rows:[...]}`. Refetches only when the SOURCE config changes — not
+ * when a filter `valueFrom` field changes (that just re-filters the rows
+ * client-side). Returns `[]` for non-server fields.
+ */
+function useServerOptions(
+  spec: ModuleConfigField['optionsFrom'] | undefined,
+  formValues: Record<string, unknown> | undefined,
+): Array<Record<string, unknown>> {
+  const isServer = spec?.source === 'server' && !!spec.endpoint;
+  const endpoint = isServer ? (spec!.endpoint as string) : '';
+  const baseUrl = isServer
+    ? String((formValues ?? {})[spec!.baseUrlField ?? 'backendUrl'] ?? '').replace(/\/+$/, '')
+    : '';
+  const filterArr = spec?.filter ? (Array.isArray(spec.filter) ? spec.filter : [spec.filter]) : [];
+  const filterFields = new Set(filterArr.map((f) => f.valueFrom).filter(Boolean) as string[]);
+  const sourceKey = useMemo(() => {
+    if (!isServer) return '';
+    const sub: Record<string, unknown> = {};
+    Object.entries(formValues ?? {}).forEach(([k, v]) => { if (!filterFields.has(k)) sub[k] = v; });
+    return JSON.stringify({ endpoint, sub });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isServer, endpoint, formValues]);
+  const [rows, setRows] = useState<Array<Record<string, unknown>>>([]);
+  useEffect(() => {
+    if (!isServer || !baseUrl) { setRows([]); return; }
+    let cancelled = false;
+    fetch(baseUrl + endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config: formValues ?? {} }),
+    })
+      .then((r) => (r.ok ? r.json() : { rows: [] }))
+      .then((j) => { if (!cancelled) setRows(Array.isArray(j?.rows) ? j.rows : []); })
+      .catch(() => { if (!cancelled) setRows([]); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceKey, baseUrl, endpoint, isServer]);
+  return rows;
+}
+
 interface ModuleManagerSectionProps {
   inventory: ModuleHostInventory | null;
   loading: boolean;
@@ -108,6 +152,20 @@ function ActionFieldRow({ fieldKey, field, label, onAction }: ActionFieldRowProp
 }
 
 export function ConfigFieldRow({ fieldKey, field, value, onChange, carriers, model, formValues, onAction }: ConfigFieldProps) {
+  // Hook must run unconditionally (before any early return). No-op unless this
+  // field's options come from a plugin server.
+  const serverRows = useServerOptions(field.optionsFrom, formValues);
+  // Options for a select/multi-select: server rows (filtered) win, then dynamic
+  // model/config, then the static list.
+  const selectOptions = (): ResolvedOption[] => {
+    const staticOpts = (field.options ?? []).map((opt) => ({ value: String(opt.value), label: String(opt.label ?? opt.value) }));
+    if (field.optionsFrom?.source === 'server') {
+      const dyn = optionsFromRows(field.optionsFrom, serverRows, formValues);
+      return dyn.length ? dyn : staticOpts;
+    }
+    return resolveStaticOrDynamic(field.optionsFrom, staticOpts, { model, formValues });
+  };
+
   if (!evaluateVisibleWhen(field.visibleWhen, formValues)) {
     return null;
   }
@@ -150,11 +208,7 @@ export function ConfigFieldRow({ fieldKey, field, value, onChange, carriers, mod
   }
 
   if (field.type === 'select' && (field.options || field.optionsFrom)) {
-    const opts = resolveStaticOrDynamic(
-      field.optionsFrom,
-      (field.options ?? []).map((opt) => ({ value: String(opt.value), label: String(opt.label ?? opt.value) })),
-      { model, formValues },
-    );
+    const opts = selectOptions();
     return (
       <label className="sg-module-config-row">
         <span className="sg-module-config-label">{label}</span>
@@ -169,14 +223,9 @@ export function ConfigFieldRow({ fieldKey, field, value, onChange, carriers, mod
   }
 
   if (field.type === 'multi-select' && (field.options || field.optionsFrom)) {
-    // General multi-select: pick several from an option list (static or a
-    // dynamic `optionsFrom` source). Returns a string[]. Generalises
-    // `carrier-select` (which is fixed to workbook carriers).
-    const options = resolveStaticOrDynamic(
-      field.optionsFrom,
-      (field.options ?? []).map((opt) => ({ value: String(opt.value), label: String(opt.label ?? opt.value) })),
-      { model, formValues },
-    );
+    // General multi-select: pick several from an option list (static, a dynamic
+    // `optionsFrom` source, or a plugin server). Returns a string[].
+    const options = selectOptions();
     const selected: string[] = Array.isArray(resolved)
       ? (resolved as unknown[]).map(String)
       : Array.isArray(field.default) ? (field.default as unknown[]).map(String) : [];
