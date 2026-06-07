@@ -878,6 +878,13 @@ export interface ModuleConfigField {
   columns?: ModuleConfigTableColumn[];
   /** For 'table' fields: max visible height in px before the body scrolls. Defaults to 260. */
   maxHeight?: number;
+  /**
+   * For 'group' fields in a two-column input layout: which column this group's
+   * box belongs to. When any group declares a column, the host renders the
+   * input as two stacked columns (with a draggable divider) instead of a grid,
+   * so e.g. control boxes stay left and reference tables stay right.
+   */
+  column?: 'left' | 'right';
   /** Field is hidden unless this gate is satisfied. */
   visibleWhen?: ModuleConfigVisibleWhen;
   /**

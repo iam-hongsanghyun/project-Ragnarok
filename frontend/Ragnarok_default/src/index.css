@@ -4765,6 +4765,15 @@ th:hover .col-delete-btn {
   }
 }
 
+/* A single column in the explicit two-column input layout: stack its boxes. */
+.plugin-panel-col {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  align-content: start;
+}
+
 /* Draggable divider between the two plugin-panel columns. */
 .plugin-panel-resizable {
   position: relative;

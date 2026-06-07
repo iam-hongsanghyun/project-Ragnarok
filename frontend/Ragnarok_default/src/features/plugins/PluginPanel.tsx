@@ -24,6 +24,7 @@ interface InputSection {
   id: string;
   title: string;
   description?: string;
+  column?: 'left' | 'right';
   fields: Array<[string, ModuleConfigField]>;
 }
 
@@ -55,13 +56,26 @@ const TWO_COLUMN_LAYOUTS = new Set<PluginPanelLayout>(['2x1', '2x2']);
  * splitter; other layouts render a plain grid. Sections keep `min-width: 0`, so
  * content reflows / scrolls to fit whatever width the user sets.
  */
-function PanelGrid({ layout, children }: { layout: PluginPanelLayout | undefined; children: React.ReactNode }) {
+function PanelGrid({
+  layout,
+  children,
+  left,
+  right,
+}: {
+  layout: PluginPanelLayout | undefined;
+  children?: React.ReactNode;
+  left?: React.ReactNode;
+  right?: React.ReactNode;
+}) {
   const cls = layoutClass(layout);
   const ref = React.useRef<HTMLDivElement>(null);
   const [leftFr, setLeftFr] = useState(1); // left:right column ratio (right pinned at 1)
+  // Explicit two-column mode: `left`/`right` are pre-partitioned section stacks,
+  // each rendered in its own column (no grid auto-flow interleaving).
+  const explicit = left !== undefined || right !== undefined;
 
   if (!layout || !TWO_COLUMN_LAYOUTS.has(layout)) {
-    return <div className={cls}>{children}</div>;
+    return <div className={cls}>{explicit ? <>{left}{right}</> : children}</div>;
   }
 
   const frac = leftFr / (leftFr + 1); // left column's fraction of the width
@@ -90,7 +104,14 @@ function PanelGrid({ layout, children }: { layout: PluginPanelLayout | undefined
   return (
     <div className="plugin-panel-resizable">
       <div ref={ref} className={cls} style={{ gridTemplateColumns: `minmax(0, ${leftFr}fr) minmax(0, 1fr)` }}>
-        {children}
+        {explicit ? (
+          <>
+            <div className="plugin-panel-col">{left}</div>
+            <div className="plugin-panel-col">{right}</div>
+          </>
+        ) : (
+          children
+        )}
       </div>
       <div
         className="plugin-panel-splitter"
@@ -189,6 +210,7 @@ function buildInputSections(module: ModuleDescriptor): InputSection[] {
         id: `input-group-${index}`,
         title: field.label ?? 'Section',
         description: field.description,
+        column: field.column,
         fields: [],
       };
       return;
@@ -311,31 +333,37 @@ function InputView({ module, config, onConfigChange, carriers, model, onModuleAc
   if (sections.length === 0) {
     return <p className="sg-setting-hint">This plugin does not define any input fields.</p>;
   }
-  return (
-    <PanelGrid layout={panel?.inputLayout}>
-      {sections.map((section) => (
-        <section key={section.id} className="plugin-panel-section">
-          <h3 className="plugin-panel-section-title">{section.title}</h3>
-          {section.description && <p className="sg-setting-hint">{section.description}</p>}
-          <div className="sg-module-config-form">
-            {section.fields.map(([key, field]) => (
-              <ConfigFieldRow
-                key={key}
-                fieldKey={key}
-                field={field}
-                value={config[key]}
-                onChange={(value) => onConfigChange(key, value)}
-                carriers={carriers}
-                model={model}
-                formValues={config}
-                onAction={onModuleAction ? (fk, f) => onModuleAction(module.id, fk, f) : undefined}
-              />
-            ))}
-          </div>
-        </section>
-      ))}
-    </PanelGrid>
+  const renderSection = (section: InputSection) => (
+    <section key={section.id} className="plugin-panel-section">
+      <h3 className="plugin-panel-section-title">{section.title}</h3>
+      {section.description && <p className="sg-setting-hint">{section.description}</p>}
+      <div className="sg-module-config-form">
+        {section.fields.map(([key, field]) => (
+          <ConfigFieldRow
+            key={key}
+            fieldKey={key}
+            field={field}
+            value={config[key]}
+            onChange={(value) => onConfigChange(key, value)}
+            carriers={carriers}
+            model={model}
+            formValues={config}
+            onAction={onModuleAction ? (fk, f) => onModuleAction(module.id, fk, f) : undefined}
+          />
+        ))}
+      </div>
+    </section>
   );
+
+  // When groups declare a `column`, render two pre-partitioned stacks (so the
+  // function boxes don't interleave across the grid). Otherwise, plain grid.
+  if (sections.some((s) => s.column)) {
+    const left = sections.filter((s) => s.column !== 'right').map(renderSection);
+    const right = sections.filter((s) => s.column === 'right').map(renderSection);
+    return <PanelGrid layout={panel?.inputLayout ?? '2x1'} left={left} right={right} />;
+  }
+
+  return <PanelGrid layout={panel?.inputLayout}>{sections.map(renderSection)}</PanelGrid>;
 }
 
 function OutputView({ module, analytics }: { module: ModuleDescriptor; analytics: PluginAnalyticsEntry | null }) {
