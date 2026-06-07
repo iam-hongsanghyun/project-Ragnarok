@@ -2868,40 +2868,20 @@ path.leaflet-interactive:focus {
   padding: 24px 4px;
 }
 
-/* Queue — full-width run cards. Padding matches the History view body so the
-   Queue and History sub-tabs sit identically under the shared header strip. */
-.queue-list { display: flex; flex-direction: column; gap: 10px; padding: 16px; overflow-y: auto; }
-.queue-card {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-button);
-  padding: 12px 14px;
-  background: var(--surface);
-}
-.queue-card--running { border-color: var(--brand); }
-.queue-card-head { display: flex; align-items: center; gap: 12px; }
+/* Queue rows reuse the History row design (.history-row); only the leading
+   status chip is queue-specific. */
 .queue-status {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 0.74rem;
+  gap: 5px;
+  font-size: 0.72rem;
+  font-weight: 600;
   font-family: var(--font-mono);
   color: var(--muted);
   white-space: nowrap;
+  min-width: 88px;
 }
 .queue-status--running { color: var(--brand); }
-.queue-card-label { font-size: 0.86rem; font-weight: 600; color: var(--text); }
-.queue-card-spacer { flex: 1 1 auto; }
-.queue-card-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-.queue-chip {
-  font-size: 0.72rem;
-  color: var(--muted);
-  background: var(--bg-hover);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-button);
-  padding: 2px 8px;
-}
-.queue-chip b { color: var(--text); font-weight: 600; }
-.queue-chip--file { font-family: var(--font-mono); }
 .topbar-queue { display: inline-flex; align-items: center; gap: 6px; }
 
 /* Flat, full-width rows (no card chrome) — one run per line, info horizontal. */
