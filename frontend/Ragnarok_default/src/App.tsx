@@ -1116,11 +1116,16 @@ function AppInner() {
     }
   }, [showToast, refreshBackendRuns]);
 
+  // Poll fast (2.5s) while jobs are active so the Queue tab stays live and the
+  // completion toast fires promptly; back off to a slow heartbeat (15s) when the
+  // queue is empty (a new run is enqueued from this same client, which refreshes
+  // immediately, so idle fast-polling would just be wasted chatter).
+  const hasActiveJobs = queueJobs.length > 0;
   useEffect(() => {
     void refreshQueue();
-    const timer = setInterval(() => void refreshQueue(), 2500);
+    const timer = setInterval(() => void refreshQueue(), hasActiveJobs ? 2500 : 15000);
     return () => clearInterval(timer);
-  }, [refreshQueue]);
+  }, [refreshQueue, hasActiveJobs]);
 
   const handleCancelQueueItem = useCallback(async (id: string) => {
     try {
