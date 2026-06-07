@@ -13,7 +13,13 @@
  * on every slider tick. The session is cleared only by the explicit "Clear
  * cache" button — a plain reload restores it.
  */
-import type { CarbonPriceScheduleEntry, CustomConstraint, WorkbookModel } from 'lib/types';
+import type {
+  CarbonPriceScheduleEntry,
+  CustomConstraint,
+  PathwayConfig,
+  RollingHorizonConfig,
+  WorkbookModel,
+} from 'lib/types';
 
 const DB_NAME = 'ragnarok';
 const STORE = 'session';
@@ -33,6 +39,12 @@ export interface SessionControls {
   // Custom/global constraints ("cc rules") — live React state that isn't
   // embedded in the model, so it's carried here to survive a reload.
   constraints?: CustomConstraint[];
+  // Rolling-horizon and pathway toggles + their detailed settings. These DO
+  // round-trip through the model, but a restored active scenario can override
+  // them with its defaults — so the last live values are carried here and
+  // re-applied after restore, guaranteeing "stay as I left it".
+  rollingConfig?: RollingHorizonConfig;
+  pathwayConfig?: PathwayConfig;
   savedAt: number;
 }
 

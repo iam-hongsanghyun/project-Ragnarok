@@ -5,13 +5,14 @@
  * plugins, and a main pane showing the selected plugin's config + actions.
  * Plugins run in the browser and never contact the Ragnarok backend.
  */
-import React, { useRef, useState } from 'react';
+import React, { useRef } from 'react';
 import { WorkbookModel } from 'lib/types';
 import { FrontendPluginHost } from '../features/plugins/frontendPlugins';
 import { PluginDetail } from '../features/plugins/PluginDetail';
 import { useToast } from '../shared/components/Toast';
 import { ResizablePanels } from '../layout/ResizablePanels';
 import { LeftRail } from '../shared/components/primitives';
+import { usePersistedState } from 'shared/hooks/usePersistedState';
 
 interface Props {
   host: FrontendPluginHost;
@@ -27,7 +28,9 @@ export function PluginsView(props: Props) {
   const { host } = props;
   const fileRef = useRef<HTMLInputElement | null>(null);
   const { showToast } = useToast();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Persisted so the selected plugin survives leaving and re-entering the tab
+  // (and a reload) instead of snapping back to the first/initial plugin.
+  const [selectedId, setSelectedId] = usePersistedState<string | null>('ui:plugin-selected', null);
 
   const installed = host.installed;
   const selected = installed.find((p) => p.id === selectedId) ?? installed[0] ?? null;

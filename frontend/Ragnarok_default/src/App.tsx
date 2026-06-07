@@ -494,6 +494,10 @@ function AppInner() {
             setSnapshotEnd(controls.snapshotEnd);
             setForceLp(controls.forceLp);
             if (controls.constraints) setConstraints(controls.constraints);
+            // Re-apply the last live rolling/pathway AFTER resetForNewModel, so a
+            // restored scenario's defaults can't quietly flip them back.
+            if (controls.rollingConfig) setRollingConfig(normalizeRollingConfig(controls.rollingConfig));
+            if (controls.pathwayConfig) setPathwayConfig(controls.pathwayConfig);
           }
           setStatus('Restored your last session.');
         }
@@ -507,7 +511,13 @@ function AppInner() {
   // Persist the heavy model on its own (debounced) so editing a control doesn't
   // re-serialise the whole workbook.
   useEffect(() => {
-    if (!sessionRestoredRef.current) return undefined;
+    // Skip saving ONLY the empty initial model before the restore has run — that
+    // would clobber a saved session with a blank workbook. A non-empty model is
+    // always real user data (e.g. a just-uploaded workbook), so persist it even
+    // if the restore flag hasn't flipped yet (avoids an upload-during-restore
+    // race that lost the workbook on reload).
+    const modelHasRows = SHEETS.some((sheet) => (model[sheet]?.length ?? 0) > 0);
+    if (!sessionRestoredRef.current && !modelHasRows) return undefined;
     const id = window.setTimeout(() => { void saveSessionModel(model); }, 800);
     return () => window.clearTimeout(id);
   }, [model]);
@@ -519,12 +529,12 @@ function AppInner() {
       void saveSessionControls({
         filename, carbonPrice, carbonPriceSchedule,
         snapshotStart, snapshotEnd, snapshotWeight, forceLp,
-        constraints,
+        constraints, rollingConfig, pathwayConfig,
         savedAt: Date.now(),
       });
     }, 400);
     return () => window.clearTimeout(id);
-  }, [filename, carbonPrice, carbonPriceSchedule, snapshotStart, snapshotEnd, snapshotWeight, forceLp, constraints]);
+  }, [filename, carbonPrice, carbonPriceSchedule, snapshotStart, snapshotEnd, snapshotWeight, forceLp, constraints, rollingConfig, pathwayConfig]);
 
   // Run history lives entirely on the backend (the single source of truth) —
   // see `refreshBackendRuns` / `backendRuns` below. There is no browser-side
