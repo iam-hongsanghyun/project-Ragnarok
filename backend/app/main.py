@@ -394,25 +394,30 @@ def delete_backend_run(name: str) -> dict[str, Any]:
     return {"deleted": run_store.delete_run(name)}
 
 
+_ZIP_MEDIA_TYPE = "application/zip"
+
+
 @app.post("/api/export/project")
 def export_project(payload: ExportProjectPayload) -> Response:
-    """Build the full input + output project xlsx server-side and return it.
+    """Build a Ragnarok Project package (.zip of canonical JSON + readable xlsx).
 
-    Replaces the in-browser SheetJS export, which OOMed the tab while building a
-    full-year workbook in RAM. The frontend POSTs ``{model, result}``; the
-    workbook is assembled on the server via the same frame builder used by the
-    stored-run download and streamed back as an xlsx attachment.
+    For an *unsaved* live model with no stored run. The frontend POSTs
+    ``{model, result}``; the server packs it into a lossless project zip
+    (re-importable) and streams it back. (Stored runs use the richer
+    ``GET /api/runs/{name}/package``, which has the full bundle.)
     """
     from . import project_workbook
 
     try:
-        data = project_workbook.bundle_to_workbook({"model": payload.model, "result": payload.result})
+        data = project_workbook.bundle_to_package(
+            {"model": payload.model, "result": payload.result}, "ragnarok_project"
+        )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"Project export failed: {exc}") from exc
     return Response(
         content=data,
-        media_type=_XLSX_MEDIA_TYPE,
-        headers={"Content-Disposition": 'attachment; filename="ragnarok_project.xlsx"'},
+        media_type=_ZIP_MEDIA_TYPE,
+        headers={"Content-Disposition": 'attachment; filename="ragnarok_project.zip"'},
     )
 
 
@@ -420,19 +425,20 @@ def export_project(payload: ExportProjectPayload) -> Response:
 async def import_project(file: UploadFile) -> dict[str, Any]:
     """Parse an uploaded project xlsx into a run bundle and store it in History.
 
-    The browser uploads the workbook; the backend converts it to the canonical
-    JSON bundle (via ``project_workbook.workbook_to_bundle``) and persists it
-    with ``run_store.store_run`` — so an imported project becomes a History
-    entry, openable with full analytics like any solved run. Returns the new
-    run's meta (its ``name`` lets the frontend open it immediately).
+    The browser uploads a Ragnarok Project ``.zip`` (canonical JSON + readable
+    xlsx) — or a bare ``.xlsx`` — and the backend converts it to the canonical
+    bundle (verbatim from the package JSON when present) and persists it with
+    ``run_store.store_run``. So an imported project becomes a History entry,
+    openable with full analytics like any solved run. Returns the new run's meta
+    (its ``name`` lets the frontend open it immediately).
     """
     from . import project_workbook
 
     raw = await file.read()
-    filename = file.filename or "imported_project.xlsx"
+    filename = file.filename or "imported_project.zip"
 
     def _parse_and_store() -> dict[str, Any] | None:
-        bundle = project_workbook.workbook_to_bundle(raw, filename=filename)
+        bundle = project_workbook.import_bundle_from_upload(raw, filename)
         return run_store.store_run(
             bundle.get("model") or {},
             bundle.get("scenario") or {},
@@ -474,6 +480,30 @@ def download_backend_run_xlsx(name: str) -> Response:
         content=data,
         media_type=_XLSX_MEDIA_TYPE,
         headers={"Content-Disposition": f'attachment; filename="{name}.xlsx"'},
+    )
+
+
+@app.get("/api/runs/{name}/package")
+def download_backend_run_package(name: str) -> Response:
+    """Return a Ragnarok Project ``.zip`` for stored run ``name``.
+
+    Packs the canonical JSON bundle (lossless, re-importable) together with the
+    human-readable xlsx. This is the export to share / re-import — the bare
+    ``/xlsx`` endpoint is only for quick viewing in Excel.
+    """
+    from . import project_workbook
+
+    bundle = run_store.get_run(name)
+    if bundle is None:
+        raise HTTPException(status_code=404, detail="Stored run not found.")
+    try:
+        data = project_workbook.bundle_to_package(bundle, name)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Project package failed: {exc}") from exc
+    return Response(
+        content=data,
+        media_type=_ZIP_MEDIA_TYPE,
+        headers={"Content-Disposition": f'attachment; filename="{name}.zip"'},
     )
 
 

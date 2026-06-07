@@ -670,20 +670,20 @@ function AppInner() {
   };
 
   const handleExportProject = async () => {
-    // Export the currently viewed run as one lossless, round-trippable project
-    // workbook, built SERVER-SIDE so the heavy build never OOMs the tab.
+    // Export the currently viewed run as a Ragnarok Project package (.zip): the
+    // canonical JSON bundle (lossless, re-importable) + a readable xlsx. Built
+    // SERVER-SIDE so the heavy build never OOMs the tab.
     //
     // When the view IS a stored run (the common case after a solve or a History
-    // open), stream its pre-built xlsx straight off disk — rendered from the
-    // canonical JSON bundle, so NOTHING is dropped and it re-imports cleanly.
-    // Only an unsaved, never-run model falls back to POSTing the live
-    // {model, result} for an on-the-fly build.
+    // open), stream its package straight from the canonical bundle on disk — so
+    // NOTHING is dropped and it re-imports identically. Only an unsaved,
+    // never-run model falls back to POSTing the live {model, result}.
     if (activeRunName) {
-      window.open(`${API_BASE}/api/runs/${encodeURIComponent(activeRunName)}/xlsx`, '_blank');
-      showToast('Project exported (from stored run)', 'success');
+      window.open(`${API_BASE}/api/runs/${encodeURIComponent(activeRunName)}/package`, '_blank');
+      showToast('Project exported (.zip from stored run)', 'success');
       return;
     }
-    const out = `${projectBaseName(filename)}_project.xlsx`;
+    const out = `${projectBaseName(filename)}_project.zip`;
     try {
       const resp = await fetch(`${API_BASE}/api/export/project`, {
         method: 'POST',
@@ -1596,7 +1596,7 @@ function AppInner() {
   return (
     <div className="studio-shell">
       <input ref={fileInputRef} type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden onChange={handleImport} />
-      <input ref={projectImportInputRef} type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden onChange={handleImportProject} />
+      <input ref={projectImportInputRef} type="file" accept=".zip,application/zip,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden onChange={handleImportProject} />
       <input ref={csvFolderImportInputRef} type="file" accept=".zip,application/zip" hidden onChange={handleImportCsvFolder} />
       <input ref={netcdfImportInputRef} type="file" accept=".nc" hidden onChange={handleImportNetcdf} />
       <input ref={hdf5ImportInputRef} type="file" accept=".h5,.hdf5" hidden onChange={handleImportHdf5} />

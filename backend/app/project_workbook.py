@@ -210,15 +210,19 @@ def _kv_rows(pairs: list[tuple[str, Any]]) -> list[dict[str, Any]]:
     return [{"key": k, "value": v} for k, v in pairs if v is not None]
 
 
-def bundle_to_workbook(bundle: dict[str, Any]) -> bytes:
-    """Render a run bundle to a round-trippable project xlsx (bytes).
+def bundle_to_workbook(bundle: dict[str, Any], *, include_bundle: bool = False) -> bytes:
+    """Render a run bundle to a human-readable project xlsx (bytes).
 
     Args:
         bundle: ``{model, scenario, options, result}`` (as stored by run_store)
             or the lighter ``{model, result}`` posted by Export Project.
+        include_bundle: when True, also embed the complete bundle as chunked
+            JSON (``RAGNAROK_Bundle``) so a *standalone* xlsx round-trips
+            losslessly. The project *package* ships the JSON separately, so it
+            leaves this off and the xlsx stays clean for Excel viewing.
 
     Returns:
-        xlsx file bytes the Ragnarok frontend can re-import losslessly.
+        xlsx file bytes (readable component / series / metadata sheets).
     """
     model = bundle.get("model") or {}
     result = bundle.get("result") or {}
@@ -290,13 +294,15 @@ def bundle_to_workbook(bundle: dict[str, Any]) -> bytes:
         plugin_rows = _plugin_analytics_rows(result.get("pluginAnalytics") if isinstance(result, dict) else None)
         _write_rows(writer, PLUGIN_ANALYTICS_SHEET, plugin_rows, used)
 
-        # The complete, lossless bundle (read back verbatim on import).
-        bundle_rows = [
-            {"part": part, "json": chunk}
-            for part, chunk in enumerate(_chunks(json.dumps(bundle, default=str)))
-        ]
-        _write_rows(writer, BUNDLE_SHEET, bundle_rows, used)
-        wrote_any = True
+        if include_bundle:
+            # Embed the complete bundle as chunked JSON so even a *standalone*
+            # xlsx round-trips losslessly. Off by default: the project package
+            # ships the canonical JSON as its own file, keeping the xlsx clean.
+            bundle_rows = [
+                {"part": part, "json": chunk}
+                for part, chunk in enumerate(_chunks(json.dumps(bundle, default=str)))
+            ]
+            wrote_any |= _write_rows(writer, BUNDLE_SHEET, bundle_rows, used)
 
         if not wrote_any:
             pd.DataFrame([{"info": "No data in this project."}]).to_excel(
@@ -477,3 +483,83 @@ def workbook_to_bundle(data: bytes, filename: str = "") -> dict[str, Any]:
 
     options.setdefault("filename", filename)
     return {"model": model, "scenario": scenario, "options": options, "result": result}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  PACKAGE  —  a Ragnarok Project is a .zip of {<name>.json, <name>.xlsx}
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#  ``<name>.json``  — the canonical, complete bundle (lossless source of truth).
+#  ``<name>.xlsx``  — the clean, human-readable workbook (inputs + outputs), for
+#                     opening in Excel. NOT the re-import source.
+#
+#  Import reads the JSON member back verbatim, so a re-imported project is
+#  byte-for-byte the exported one. (zip also compresses the JSON, so a package
+#  is typically smaller than a single bundle-embedded xlsx.)
+
+_PROJECT_SUFFIX = "_project"
+# Data extensions stripped from a model filename when deriving a package name.
+_LABEL_EXTENSIONS = (".xlsx", ".xls", ".nc", ".h5", ".hdf5", ".zip")
+
+
+def bundle_to_package(bundle: dict[str, Any], base_name: str) -> bytes:
+    """Pack a bundle into a Ragnarok Project ``.zip`` (canonical JSON + readable xlsx)."""
+    import zipfile
+
+    stem = (base_name or "ragnarok").strip() or "ragnarok"
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(f"{stem}.json", json.dumps(bundle, default=str))
+        zf.writestr(f"{stem}.xlsx", bundle_to_workbook(bundle))
+    return buffer.getvalue()
+
+
+def package_to_bundle(data: bytes, filename: str = "") -> dict[str, Any]:
+    """Read a Ragnarok Project ``.zip`` back into a bundle (verbatim from its JSON).
+
+    Falls back to parsing an embedded ``.xlsx`` member if the package has no
+    JSON (e.g. a hand-assembled zip).
+    """
+    import zipfile
+
+    with zipfile.ZipFile(BytesIO(data)) as zf:
+        names = zf.namelist()
+        json_name = next((n for n in names if n.lower().endswith(".json")), None)
+        if json_name is not None:
+            bundle = json.loads(zf.read(json_name).decode("utf-8"))
+            bundle.setdefault("options", {}).setdefault("filename", filename)
+            return bundle
+        xlsx_name = next((n for n in names if n.lower().endswith(".xlsx")), None)
+        if xlsx_name is not None:
+            return workbook_to_bundle(zf.read(xlsx_name), filename=filename)
+    raise ValueError("Package contains no .json or .xlsx member.")
+
+
+def import_bundle_from_upload(data: bytes, filename: str) -> dict[str, Any]:
+    """Parse an uploaded project file into a bundle, accepting a ``.zip`` package
+    or a bare ``.xlsx`` (embedded-bundle fast path, else sheet reconstruction).
+
+    Detection is by extension — an xlsx is *itself* a zip (it starts with the
+    ``PK`` magic), so the magic bytes alone can't tell a package from a workbook.
+    """
+    name = filename.lower()
+    if name.endswith(".zip"):
+        return package_to_bundle(data, filename)
+    if name.endswith((".xlsx", ".xls")):
+        return workbook_to_bundle(data, filename=filename)
+    # Unknown extension — try a package first, fall back to a bare workbook.
+    try:
+        return package_to_bundle(data, filename)
+    except Exception:  # noqa: BLE001
+        return workbook_to_bundle(data, filename=filename)
+
+
+def project_basename(filename: str) -> str:
+    """``<stem>_project`` from a model filename, stripping data extensions."""
+    stem = filename.strip()
+    for ext in _LABEL_EXTENSIONS:
+        if stem.lower().endswith(ext):
+            stem = stem[: -len(ext)]
+            break
+    stem = stem or "ragnarok"
+    return stem if stem.endswith(_PROJECT_SUFFIX) else f"{stem}{_PROJECT_SUFFIX}"

@@ -69,38 +69,23 @@ def _sample_bundle() -> dict[str, Any]:
     }
 
 
-def test_full_bundle_round_trips_verbatim() -> None:
-    # The embedded JSON makes the round-trip exact: the imported bundle is
-    # byte-for-byte the exported one (every derived field intact). This is what
-    # makes an imported run render identically to a solved run.
+def test_embedded_xlsx_round_trips_verbatim() -> None:
+    # With the bundle embedded, a standalone xlsx round-trips exactly: the
+    # imported bundle is byte-for-byte the exported one (every derived field
+    # intact) — an imported run then renders identically to a solved run.
     bundle = _sample_bundle()
-    rt = pw.workbook_to_bundle(pw.bundle_to_workbook(bundle), filename="demo.xlsx")
+    rt = pw.workbook_to_bundle(pw.bundle_to_workbook(bundle, include_bundle=True), filename="demo.xlsx")
     assert rt["result"] == bundle["result"]
     assert rt["model"] == bundle["model"]
     assert rt["scenario"] == bundle["scenario"]
     assert rt["options"] == bundle["options"]
 
 
-def _strip_embedded_bundle(data: bytes) -> bytes:
-    """Return the workbook with the RAGNAROK_Bundle sheet removed.
-
-    Forces ``workbook_to_bundle`` down its readable-sheet *reconstruction* path
-    (the fallback for a hand-built workbook that has no embedded JSON).
-    """
-    import openpyxl
-
-    from io import BytesIO
-
-    wb = openpyxl.load_workbook(BytesIO(data))
-    del wb[pw.BUNDLE_SHEET]
-    out = BytesIO()
-    wb.save(out)
-    return out.getvalue()
-
-
 def test_reconstruction_fallback_splits_inputs_and_outputs() -> None:
     bundle = _sample_bundle()
-    rt = pw.workbook_to_bundle(_strip_embedded_bundle(pw.bundle_to_workbook(bundle)), filename="demo.xlsx")
+    # The clean (default) workbook has no embedded bundle, so parsing it back
+    # exercises the readable-sheet reconstruction path.
+    rt = pw.workbook_to_bundle(pw.bundle_to_workbook(bundle), filename="demo.xlsx")
 
     # Model inputs: non-empty sheets preserved; empty 'lines' dropped.
     assert {row["name"] for row in rt["model"]["generators"]} == {"wind", "gas"}
@@ -120,9 +105,53 @@ def test_workbook_never_uses_out_prefix_or_truncates() -> None:
 
     from io import BytesIO
 
+    # The package's xlsx is the CLEAN, readable workbook — no embedded JSON sheet.
     data = pw.bundle_to_workbook(_sample_bundle())
     sheets = openpyxl.load_workbook(BytesIO(data), read_only=True).sheetnames
     assert not any(s.startswith("OUT_") for s in sheets), sheets
     assert "generators-p" in sheets  # output series, plainly named
-    assert pw.BUNDLE_SHEET in sheets  # lossless payload present
+    assert pw.BUNDLE_SHEET not in sheets  # clean by default
     assert all(len(s) <= 31 for s in sheets), sheets
+
+    # Opt-in embedding still works for a standalone, lossless single file.
+    embedded = pw.bundle_to_workbook(_sample_bundle(), include_bundle=True)
+    embedded_sheets = openpyxl.load_workbook(BytesIO(embedded), read_only=True).sheetnames
+    assert pw.BUNDLE_SHEET in embedded_sheets
+
+
+def test_project_package_round_trips_verbatim() -> None:
+    # A Ragnarok Project .zip carries the canonical JSON; reading it back is
+    # exact (every derived field intact) — the lossless contract.
+    import zipfile
+
+    from io import BytesIO
+
+    bundle = _sample_bundle()
+    pkg = pw.bundle_to_package(bundle, "north-sea-2030")
+
+    names = zipfile.ZipFile(BytesIO(pkg)).namelist()
+    assert sorted(names) == ["north-sea-2030.json", "north-sea-2030.xlsx"]
+
+    rt = pw.package_to_bundle(pkg, filename="north-sea-2030.zip")
+    assert rt["result"] == bundle["result"]
+    assert rt["model"] == bundle["model"]
+    assert rt["scenario"] == bundle["scenario"]
+    assert rt["options"] == bundle["options"]
+
+
+def test_import_from_upload_accepts_zip_and_xlsx() -> None:
+    bundle = _sample_bundle()
+    # zip package → verbatim
+    zip_bundle = pw.import_bundle_from_upload(pw.bundle_to_package(bundle, "p"), "p.zip")
+    assert zip_bundle["result"] == bundle["result"]
+    # bare embedded xlsx → verbatim
+    xlsx_bundle = pw.import_bundle_from_upload(
+        pw.bundle_to_workbook(bundle, include_bundle=True), "p.xlsx"
+    )
+    assert xlsx_bundle["result"] == bundle["result"]
+
+
+def test_project_basename() -> None:
+    assert pw.project_basename("north-sea.xlsx") == "north-sea_project"
+    assert pw.project_basename("north-sea.zip") == "north-sea_project"
+    assert pw.project_basename("already_project.xlsx") == "already_project"
