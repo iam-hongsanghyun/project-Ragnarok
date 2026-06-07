@@ -493,6 +493,7 @@ function AppInner() {
             setSnapshotStart(controls.snapshotStart);
             setSnapshotEnd(controls.snapshotEnd);
             setForceLp(controls.forceLp);
+            if (controls.constraints) setConstraints(controls.constraints);
           }
           setStatus('Restored your last session.');
         }
@@ -518,11 +519,12 @@ function AppInner() {
       void saveSessionControls({
         filename, carbonPrice, carbonPriceSchedule,
         snapshotStart, snapshotEnd, snapshotWeight, forceLp,
+        constraints,
         savedAt: Date.now(),
       });
     }, 400);
     return () => window.clearTimeout(id);
-  }, [filename, carbonPrice, carbonPriceSchedule, snapshotStart, snapshotEnd, snapshotWeight, forceLp]);
+  }, [filename, carbonPrice, carbonPriceSchedule, snapshotStart, snapshotEnd, snapshotWeight, forceLp, constraints]);
 
   // Run history lives entirely on the backend (the single source of truth) —
   // see `refreshBackendRuns` / `backendRuns` below. There is no browser-side
