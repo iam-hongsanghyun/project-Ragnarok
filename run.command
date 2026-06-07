@@ -162,6 +162,14 @@ if [ -f "$PLUGIN_ENV_FILE" ]; then
     case "$pdir" in ''|\#*) continue ;; esac
     [ -n "$pcmd" ] || continue
     if [ -d "$pdir" ]; then
+      # Free this plugin's port first (same as 3000/8000 above). A stale plugin
+      # server left on the port would otherwise make the new one fail to bind
+      # ([Errno 48] address already in use) while the frontend still compiles —
+      # and the frontend would keep talking to the STALE server. Parse the port
+      # from the run command (`--port N`, `-p N`, or a trailing `:N`).
+      pport="$(printf '%s\n' "$pcmd" | sed -nE 's/.*(--port|-p)[[:space:]=]+([0-9]+).*/\2/p' | head -1)"
+      [ -n "$pport" ] || pport="$(printf '%s\n' "$pcmd" | sed -nE 's/.*:([0-9]{2,5}).*/\1/p' | head -1)"
+      if [ -n "$pport" ]; then free_port "$pport"; fi
       echo "Starting plugin server: $pdir -> $pcmd"
       # Run each plugin server in ITS OWN environment: if the server dir ships a
       # .venv, use it (so the plugin's deps win); otherwise fall back to the
