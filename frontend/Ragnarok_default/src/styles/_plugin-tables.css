@@ -101,8 +101,10 @@
   min-height: 0;
 }
 .plugin-result-chart-cell .chart-main {
-  height: 320px;
-  flex: 0 0 320px;
+  height: 320px;        /* pin HEIGHT only (stops the vertical growth loop) */
+  flex: 1 1 auto;       /* full WIDTH — .chart-shell is a row flexbox, so a
+                           fixed flex-basis here would shrink the chart's width */
+  min-width: 0;
   overflow: hidden;
 }
 .plugin-result-chart-cell .chart-svg {
