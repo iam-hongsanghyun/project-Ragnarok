@@ -661,6 +661,26 @@ export interface RunHistoryEntry {
   model?: WorkbookModel;
 }
 
+/**
+ * Lightweight metadata for a run persisted server-side via the "Store in
+ * backend" run option. Mirrors the meta sidecar written by
+ * `backend/app/run_store.py` (`<name>.meta.json`). The heavy bundle (full
+ * model + results) is fetched on demand via `GET /api/runs/{name}`.
+ */
+export interface BackendRunMeta {
+  name: string;
+  savedAt: string;
+  label: string;
+  filename: string;
+  snapshotStart: number | null;
+  snapshotEnd: number | null;
+  snapshotWeight: number | null;
+  componentCounts: Record<string, number>;
+  /** First ~4 entries of the run summary (label/value KPI cards). */
+  kpis: Array<{ label: string; value: string | number }>;
+  sizeBytes: number;
+}
+
 export type AnalyticsFocus =
   | { type: 'system' }
   | { type: 'generator'; key: string }

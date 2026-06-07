@@ -23,7 +23,11 @@ from .log_capture import (
     install as _install_log_capture,
 )
 from .models import RunPayload
+from . import run_store
 from ..pypsa.network import build_network, validate_model
+
+# xlsx MIME used by the run export endpoint below.
+_XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 # Attach the in-process log handler at import time so the entire uvicorn
 # startup sequence and all subsequent records flow into the ring buffer.
@@ -109,6 +113,16 @@ def _solve_worker(
         options = payload.options or {}
         backend = get_backend(options.get("backend"))
         result = backend.run(payload.model, payload.scenario, options)
+        # Optionally persist the finished run server-side. A store failure
+        # must NOT fail the run — run_store logs and swallows internally, and
+        # we guard again here so nothing escapes into the solve result.
+        if options.get("storeInBackend"):
+            try:
+                run_store.store_run(payload.model, payload.scenario or {}, options, result)
+            except Exception:  # noqa: BLE001
+                logging.getLogger("pypsa_gui.run_store").exception(
+                    "store_run raised after a successful solve"
+                )
         result_queue.put(("ok", result))
     except Exception as exc:  # noqa: BLE001
         result_queue.put(("err", str(exc)))
@@ -345,6 +359,50 @@ async def cancel_run(job_id: str) -> dict[str, Any]:
     job.status = "cancelled"
     _jobs.pop(job_id, None)
     return {"jobId": job_id, "status": "cancelled"}
+
+
+# ── Backend-stored runs ─────────────────────────────────────────────────────
+#
+# When a run is launched with options["storeInBackend"], the worker persists
+# the full bundle (model + result) to backend/data/runs via run_store. These
+# endpoints surface those runs in the History tab: list lightweight metas,
+# reopen a full bundle, download a human-readable xlsx on demand, or delete.
+# Storing server-side avoids the browser-tab OOM that a full-year xlsx export
+# triggers client-side.
+
+
+@app.get("/api/runs")
+def list_backend_runs() -> dict[str, Any]:
+    """List every backend-stored run's lightweight meta, newest first."""
+    return {"runs": run_store.list_runs()}
+
+
+@app.get("/api/runs/{name}")
+def get_backend_run(name: str) -> dict[str, Any]:
+    """Return the full stored bundle for ``name`` (404 if missing)."""
+    bundle = run_store.get_run(name)
+    if bundle is None:
+        raise HTTPException(status_code=404, detail="Stored run not found.")
+    return bundle
+
+
+@app.delete("/api/runs/{name}")
+def delete_backend_run(name: str) -> dict[str, Any]:
+    """Delete the bundle + meta sidecar for ``name``."""
+    return {"deleted": run_store.delete_run(name)}
+
+
+@app.get("/api/runs/{name}/xlsx")
+def download_backend_run_xlsx(name: str) -> Response:
+    """Build and return a human-readable xlsx for stored run ``name``."""
+    data = run_store.run_to_xlsx(name)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Stored run not found.")
+    return Response(
+        content=data,
+        media_type=_XLSX_MEDIA_TYPE,
+        headers={"Content-Disposition": f'attachment; filename="{name}.xlsx"'},
+    )
 
 
 # ── PyPSA-native binary formats (netCDF / HDF5) ──────────────────────────────

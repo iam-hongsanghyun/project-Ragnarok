@@ -1,24 +1,36 @@
 /**
  * History view — browse and manage persisted past runs.
  *
- * Runs are kept in IndexedDB (see lib/storage/historyStore.ts) so a full-year
- * result survives a reload and can be reopened without rebuilding or exporting
- * it. Each run is a single flat, full-width row: one select checkbox (drives the
- * bulk delete), the run's name + metadata laid out horizontally, and inline
- * actions. Shares the same `runHistory` state as Analytics → Comparison.
+ * Two run sources are listed together, sorted newest-first, each row carrying
+ * a SOURCE chip so the user always knows where a run lives:
+ *
+ *  - Browser runs (`runHistory`) are kept in IndexedDB (see
+ *    lib/storage/historyStore.ts) so a full-year result survives a reload and
+ *    can be reopened without rebuilding or exporting it. They keep the flat-row
+ *    layout: select checkbox (drives bulk delete), name + metadata, inline
+ *    actions (View results, Pin, Delete). Shares `runHistory` with
+ *    Analytics → Comparison.
+ *  - Backend runs (`backendRuns`) were persisted server-side via the
+ *    "Store in backend" run option. They use the same flat-row shape with
+ *    actions View results, Download Excel, Delete. There is no multi-select on
+ *    backend rows — they use their own inline Delete.
  */
 import React, { useMemo, useState } from 'react';
-import { RunHistoryEntry } from 'lib/types';
+import { RunHistoryEntry, BackendRunMeta } from 'lib/types';
 import { formatRelTime } from 'lib/utils/formatRelTime';
 
 interface HistoryViewProps {
   runHistory: RunHistoryEntry[];
+  backendRuns: BackendRunMeta[];
   onRestoreRun: (entry: RunHistoryEntry) => void;
   onRenameHistoryEntry: (id: string, label: string) => void;
   onPinHistoryEntry: (id: string, pinned: boolean) => void;
   onDeleteHistoryEntry: (id: string) => void;
   onDeleteHistoryEntries: (ids: string[]) => void;
   onClearHistory: () => void;
+  onOpenBackendRun: (name: string) => void;
+  onDownloadBackendXlsx: (name: string) => void;
+  onDeleteBackendRun: (name: string) => void;
 }
 
 /** Case-insensitive match against label, filename, and the saved date string. */
@@ -36,40 +48,83 @@ export function matchesQuery(entry: RunHistoryEntry, query: string): boolean {
   return haystack.includes(needle);
 }
 
+/** Case-insensitive match for a backend run's meta. */
+export function matchesBackendQuery(meta: BackendRunMeta, query: string): boolean {
+  if (!query) return true;
+  const needle = query.toLowerCase();
+  const haystack = [
+    meta.label,
+    meta.name,
+    meta.filename,
+    meta.savedAt,
+    new Date(meta.savedAt).toLocaleString(),
+  ]
+    .join(' ')
+    .toLowerCase();
+  return haystack.includes(needle);
+}
+
+// A unified list item — either a browser entry or a backend meta — sorted
+// together by savedAt.
+type ListItem =
+  | { source: 'browser'; savedAt: string; entry: RunHistoryEntry }
+  | { source: 'backend'; savedAt: string; meta: BackendRunMeta };
+
 export function HistoryView({
   runHistory,
+  backendRuns,
   onRestoreRun,
   onRenameHistoryEntry,
   onPinHistoryEntry,
   onDeleteHistoryEntry,
   onDeleteHistoryEntries,
   onClearHistory,
+  onOpenBackendRun,
+  onDownloadBackendXlsx,
+  onDeleteBackendRun,
 }: HistoryViewProps) {
   const [query, setQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
-  const filtered = useMemo(
+  const filteredBrowser = useMemo(
     () => runHistory.filter((entry) => matchesQuery(entry, query)),
     [runHistory, query],
   );
-
-  const visibleSelectedIds = useMemo(
-    () => selectedIds.filter((id) => filtered.some((entry) => entry.id === id)),
-    [selectedIds, filtered],
+  const filteredBackend = useMemo(
+    () => backendRuns.filter((meta) => matchesBackendQuery(meta, query)),
+    [backendRuns, query],
   );
-  const allVisibleSelected = filtered.length > 0 && visibleSelectedIds.length === filtered.length;
+
+  const items = useMemo<ListItem[]>(() => {
+    const merged: ListItem[] = [
+      ...filteredBrowser.map((entry) => ({ source: 'browser' as const, savedAt: entry.savedAt, entry })),
+      ...filteredBackend.map((meta) => ({ source: 'backend' as const, savedAt: meta.savedAt, meta })),
+    ];
+    merged.sort((a, b) => (a.savedAt < b.savedAt ? 1 : a.savedAt > b.savedAt ? -1 : 0));
+    return merged;
+  }, [filteredBrowser, filteredBackend]);
+
+  // Multi-select applies to browser rows only — backend rows use inline Delete.
+  const visibleSelectedIds = useMemo(
+    () => selectedIds.filter((id) => filteredBrowser.some((entry) => entry.id === id)),
+    [selectedIds, filteredBrowser],
+  );
+  const allVisibleSelected =
+    filteredBrowser.length > 0 && visibleSelectedIds.length === filteredBrowser.length;
 
   const toggleSelect = (id: string, checked: boolean) =>
     setSelectedIds((prev) => (checked ? (prev.includes(id) ? prev : [...prev, id]) : prev.filter((x) => x !== id)));
 
   const toggleSelectAll = (checked: boolean) =>
-    setSelectedIds(checked ? filtered.map((entry) => entry.id) : []);
+    setSelectedIds(checked ? filteredBrowser.map((entry) => entry.id) : []);
 
   const deleteSelected = () => {
     if (visibleSelectedIds.length === 0) return;
     onDeleteHistoryEntries(visibleSelectedIds);
     setSelectedIds([]);
   };
+
+  const totalRuns = runHistory.length + backendRuns.length;
 
   return (
     <div className="history-view">
@@ -86,7 +141,7 @@ export function HistoryView({
             type="checkbox"
             checked={allVisibleSelected}
             onChange={(e) => toggleSelectAll(e.target.checked)}
-            disabled={filtered.length === 0}
+            disabled={filteredBrowser.length === 0}
           />
           Select all
         </label>
@@ -98,35 +153,45 @@ export function HistoryView({
         </button>
       </div>
 
-      {filtered.length === 0 ? (
+      {items.length === 0 ? (
         <div className="history-empty">
-          {runHistory.length === 0
+          {totalRuns === 0
             ? 'No saved runs yet — run the model to populate history.'
             : 'No runs match your search.'}
         </div>
       ) : (
         <div className="history-list">
-          {filtered.map((entry) => (
-            <HistoryRow
-              key={entry.id}
-              entry={entry}
-              selected={visibleSelectedIds.includes(entry.id)}
-              onSelect={(checked) => toggleSelect(entry.id, checked)}
-              onView={() => onRestoreRun(entry)}
-              onRename={(label) => onRenameHistoryEntry(entry.id, label)}
-              onPin={(pinned) => onPinHistoryEntry(entry.id, pinned)}
-              onDelete={() => onDeleteHistoryEntry(entry.id)}
-            />
-          ))}
+          {items.map((item) =>
+            item.source === 'browser' ? (
+              <BrowserHistoryRow
+                key={`browser:${item.entry.id}`}
+                entry={item.entry}
+                selected={visibleSelectedIds.includes(item.entry.id)}
+                onSelect={(checked) => toggleSelect(item.entry.id, checked)}
+                onView={() => onRestoreRun(item.entry)}
+                onRename={(label) => onRenameHistoryEntry(item.entry.id, label)}
+                onPin={(pinned) => onPinHistoryEntry(item.entry.id, pinned)}
+                onDelete={() => onDeleteHistoryEntry(item.entry.id)}
+              />
+            ) : (
+              <BackendHistoryRow
+                key={`backend:${item.meta.name}`}
+                meta={item.meta}
+                onView={() => onOpenBackendRun(item.meta.name)}
+                onDownload={() => onDownloadBackendXlsx(item.meta.name)}
+                onDelete={() => onDeleteBackendRun(item.meta.name)}
+              />
+            ),
+          )}
         </div>
       )}
     </div>
   );
 }
 
-// ── One flat run row ────────────────────────────────────────────────────────
+// ── Browser run row ───────────────────────────────────────────────────────
 
-function HistoryRow({
+function BrowserHistoryRow({
   entry, selected, onSelect, onView, onRename, onPin, onDelete,
 }: {
   entry: RunHistoryEntry;
@@ -157,6 +222,8 @@ function HistoryRow({
         aria-label={`Select ${entry.label}`}
       />
 
+      <span className="history-row-source history-row-source--browser">Browser</span>
+
       {editing ? (
         <input
           className="history-row-name-input"
@@ -186,6 +253,50 @@ function HistoryRow({
 
       <button className="tb-btn" onClick={onView}>View results</button>
       <button className="tb-btn tb-btn--muted" onClick={() => onPin(!entry.pinned)}>{entry.pinned ? 'Unpin' : 'Pin'}</button>
+      <button className="tb-btn tb-btn--muted" onClick={onDelete}>Delete</button>
+    </div>
+  );
+}
+
+// ── Backend (server-stored) run row ─────────────────────────────────────────
+
+function BackendHistoryRow({
+  meta, onView, onDownload, onDelete,
+}: {
+  meta: BackendRunMeta;
+  onView: () => void;
+  onDownload: () => void;
+  onDelete: () => void;
+}) {
+  const snaps =
+    meta.snapshotStart != null && meta.snapshotEnd != null
+      ? Math.max(0, meta.snapshotEnd - meta.snapshotStart)
+      : null;
+  const kpis = meta.kpis ?? [];
+  const price = kpis[3];
+  const emissions = kpis[2];
+
+  return (
+    <div className="history-row">
+      <span className="history-row-select-placeholder" aria-hidden="true" />
+
+      <span className="history-row-source history-row-source--backend">Backend</span>
+
+      <span className="history-row-name history-row-name--static" title={meta.name}>{meta.label || meta.name}</span>
+
+      <span className="history-row-time" title={new Date(meta.savedAt).toLocaleString()}>
+        {formatRelTime(meta.savedAt)}
+      </span>
+      {meta.filename && <span className="history-row-file" title={meta.filename}>{meta.filename}</span>}
+      {snaps != null && <span className="history-row-chip">{snaps} snaps</span>}
+      {meta.snapshotWeight != null && <span className="history-row-chip">{meta.snapshotWeight}h</span>}
+      {emissions && <span className="history-row-kpi"><b>{emissions.value}</b> {emissions.label}</span>}
+      {price && <span className="history-row-kpi"><b>{price.value}</b> {price.label}</span>}
+
+      <span className="history-row-spacer" />
+
+      <button className="tb-btn" onClick={onView}>View results</button>
+      <button className="tb-btn tb-btn--muted" onClick={onDownload}>Download Excel</button>
       <button className="tb-btn tb-btn--muted" onClick={onDelete}>Delete</button>
     </div>
   );

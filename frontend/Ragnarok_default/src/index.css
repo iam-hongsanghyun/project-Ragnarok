@@ -744,6 +744,11 @@
   background: var(--surface);
   box-sizing: border-box;
 }
+.run-config-hint {
+  margin: 6px 0 0;
+  font-size: 0.74rem;
+  color: var(--muted);
+}
 .sg-scenario-summary {
   display: flex;
   flex-wrap: wrap;
@@ -2925,6 +2930,43 @@ path.leaflet-interactive:focus {
 .history-row-kpi b { color: var(--text); font-weight: 600; }
 .history-row-spacer { flex: 1 1 auto; }
 .history-row .tb-btn { flex: 0 0 auto; }
+
+/* Static (non-editable) name for backend rows — same metrics as the
+   browser name button, but rendered as plain text. */
+.history-row-name--static {
+  cursor: default;
+}
+.history-row-name--static:hover { color: var(--text); }
+
+/* Keeps backend rows aligned with browser rows, which lead with a checkbox. */
+.history-row-select-placeholder {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+}
+
+/* Source chip — Browser vs Backend. Distinct fills so a run's storage
+   location is unambiguous at a glance. */
+.history-row-source {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 1px solid var(--border);
+  border-radius: 0;
+  white-space: nowrap;
+}
+.history-row-source--browser {
+  color: var(--muted);
+  background: var(--surface);
+}
+.history-row-source--backend {
+  color: var(--brand);
+  border-color: var(--brand);
+  background: var(--surface);
+}
 
 .hist-view-btn {
   flex-shrink: 0;

@@ -15,6 +15,7 @@ export interface RunDialogProps {
 
   forceLp: boolean;
   dryRun: boolean;
+  storeInBackend: boolean;
   activeScenarioLabel: string | null;
   activeConstraintCount: number;
   snapshotStart: number;
@@ -25,6 +26,7 @@ export interface RunDialogProps {
 
   onForceLpChange: (v: boolean) => void;
   onDryRunChange: (v: boolean) => void;
+  onStoreInBackendChange: (v: boolean) => void;
 
   onRun: () => void;
 }
@@ -34,6 +36,7 @@ export function RunDialog({
   onClose,
   forceLp,
   dryRun,
+  storeInBackend,
   activeScenarioLabel,
   activeConstraintCount,
   snapshotStart,
@@ -43,6 +46,7 @@ export function RunDialog({
   rollingConfig,
   onForceLpChange,
   onDryRunChange,
+  onStoreInBackendChange,
   onRun,
 }: RunDialogProps) {
   if (!open) return null;
@@ -88,7 +92,16 @@ export function RunDialog({
               >
                 Dry run
               </button>
+              <button
+                className={`tb-btn${storeInBackend ? '' : ' tb-btn--muted'}`}
+                onClick={() => onStoreInBackendChange(!storeInBackend)}
+              >
+                Store in backend
+              </button>
             </div>
+            <p className="run-config-hint">
+              Save this run (model + results) on the server — reopen it from History without re-running.
+            </p>
           </div>
         </div>
 

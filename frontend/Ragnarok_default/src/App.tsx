@@ -18,6 +18,7 @@ import {
   CarbonScheduleProfile,
   Primitive,
   RunHistoryEntry,
+  BackendRunMeta,
   RunResults,
   ScenarioCatalog,
   ScenarioPreset,
@@ -130,7 +131,9 @@ function AppInner() {
   const [chartSections, setChartSections] = useState<ChartSectionConfig[]>([]);
   const [runDialogOpen, setRunDialogOpen] = useState(false);
   const [dryRun, setDryRun] = useState(false);
+  const [storeInBackend, setStoreInBackend] = useState(false);
   const [runHistory, setRunHistory] = useState<RunHistoryEntry[]>([]);
+  const [backendRuns, setBackendRuns] = useState<BackendRunMeta[]>([]);
   const [pathwayConfig, setPathwayConfig] = useState<PathwayConfig>(() => defaultPathwayConfig());
   const [rollingConfig, setRollingConfig] = useState<RollingHorizonConfig>(() => defaultRollingConfig());
   const [customDsl, setCustomDsl] = useState<string>('');
@@ -1295,6 +1298,70 @@ function AppInner() {
     setRunHistory((h) => h.map((e) => (e.id === id ? { ...e, inComparison } : e)));
   };
 
+  // ── Backend-stored runs ─────────────────────────────────────────────────
+  // Runs persisted server-side via the "Store in backend" option. Listed in
+  // the History tab alongside browser runs but clearly tagged as Backend.
+  const refreshBackendRuns = useCallback(async () => {
+    try {
+      const resp = await fetch(`${API_BASE}/api/runs`);
+      if (!resp.ok) return;
+      const data = await resp.json();
+      setBackendRuns(Array.isArray(data.runs) ? data.runs : []);
+    } catch {
+      // Backend unreachable — leave the list as-is; History still shows browser runs.
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshBackendRuns();
+  }, [refreshBackendRuns]);
+
+  const handleOpenBackendRun = async (name: string) => {
+    try {
+      const resp = await fetch(`${API_BASE}/api/runs/${encodeURIComponent(name)}`);
+      if (!resp.ok) {
+        showToast('Stored run could not be opened.', 'error');
+        return;
+      }
+      const bundle = await resp.json();
+      const result: RunResults = bundle.result;
+      const entry: RunHistoryEntry = {
+        id: name,
+        label: bundle.label || name,
+        scenarioLabel: bundle.scenario?.label ?? null,
+        savedAt: bundle.savedAt,
+        filename: bundle.filename || '',
+        carbonPrice: bundle.scenario?.carbonPrice ?? 0,
+        discountRate: bundle.scenario?.discountRate,
+        snapshotStart: bundle.snapshotStart ?? 0,
+        snapshotEnd: bundle.snapshotEnd ?? 0,
+        snapshotWeight: bundle.snapshotWeight ?? 1,
+        activeConstraints: bundle.scenario?.constraints ?? [],
+        componentCounts: bundle.result?.runMeta?.componentCounts ?? {},
+        pinned: false,
+        inComparison: false,
+        results: result,
+        model: bundle.model,
+      };
+      handleRestoreRun(entry);
+    } catch {
+      showToast('Stored run could not be opened.', 'error');
+    }
+  };
+
+  const handleDownloadBackendXlsx = (name: string) => {
+    window.open(`${API_BASE}/api/runs/${encodeURIComponent(name)}/xlsx`, '_blank');
+  };
+
+  const handleDeleteBackendRun = async (name: string) => {
+    try {
+      await fetch(`${API_BASE}/api/runs/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    } catch {
+      // Ignore — refresh below reflects the real server state regardless.
+    }
+    void refreshBackendRuns();
+  };
+
   const handleSelectScenario = (scenarioId: string) => {
     const scenario = scenarioCatalog.scenarios.find((row) => row.id === scenarioId);
     if (!scenario) return;
@@ -1454,7 +1521,9 @@ function AppInner() {
       // is the only adapter today). Threaded now so a future backend toggle
       // has a channel without a payload-shape change.
       backend: 'pypsa',
-      snapshotCount, snapshotStart, snapshotWeight, forceLp,
+      snapshotCount, snapshotStart, snapshotEnd, snapshotWeight, forceLp,
+      storeInBackend,
+      filename,
       dateFormat: settings.dateFormat,
       solverThreads: settings.solverThreads, solverType: settings.solverType,
       objectiveAutoScale: settings.objectiveAutoScale,
@@ -1626,6 +1695,9 @@ function AppInner() {
         const unpinned = withNew.filter((e) => !e.pinned).slice(0, MAX_UNPINNED_HISTORY);
         return [...pinned, ...unpinned];
       });
+      // If this run was stored server-side, refresh the backend list so the
+      // new entry appears in History without a manual reload.
+      if (storeInBackend) void refreshBackendRuns();
     };
 
     // ── Step 3: Poll until done ──────────────────────────────────────────────
@@ -2016,12 +2088,16 @@ function AppInner() {
           {tab === 'History' && (
             <HistoryView
               runHistory={runHistory}
+              backendRuns={backendRuns}
               onRestoreRun={handleRestoreRun}
               onRenameHistoryEntry={handleRenameHistoryEntry}
               onPinHistoryEntry={handlePinHistoryEntry}
               onDeleteHistoryEntry={handleDeleteHistoryEntry}
               onDeleteHistoryEntries={handleDeleteHistoryEntries}
               onClearHistory={handleClearHistory}
+              onOpenBackendRun={handleOpenBackendRun}
+              onDownloadBackendXlsx={handleDownloadBackendXlsx}
+              onDeleteBackendRun={handleDeleteBackendRun}
             />
           )}
 
@@ -2045,6 +2121,7 @@ function AppInner() {
         onClose={() => setRunDialogOpen(false)}
         forceLp={forceLp}
         dryRun={dryRun}
+        storeInBackend={storeInBackend}
         activeScenarioLabel={activeScenario?.label ?? null}
         activeConstraintCount={constraints.filter((row) => row.enabled).length}
         snapshotStart={snapshotStart}
@@ -2054,6 +2131,7 @@ function AppInner() {
         rollingConfig={rollingConfig}
         onForceLpChange={setForceLp}
         onDryRunChange={setDryRun}
+        onStoreInBackendChange={setStoreInBackend}
         onRun={handleRunModel}
       />
     </div>

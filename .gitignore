@@ -54,6 +54,8 @@ coverage.xml
 
 # Importer runtime cache (downloaded datasets) + root-level data dumps
 backend/data/cache/
+# Server-side stored runs (Store-in-backend run option)
+backend/data/runs/
 /data
 
 # Logs
