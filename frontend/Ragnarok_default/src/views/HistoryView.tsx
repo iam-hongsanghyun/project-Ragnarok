@@ -18,6 +18,8 @@ interface HistoryViewProps {
   onDownloadBackendXlsx: (name: string) => void;
   onDeleteBackendRun: (name: string) => void;
   onDeleteBackendRuns: (names: string[]) => void;
+  /** Manually re-fetch the run list from the backend. */
+  onReload?: () => void;
 }
 
 /** Case-insensitive match for a backend run's meta. */
@@ -42,6 +44,7 @@ export function HistoryView({
   onDownloadBackendXlsx,
   onDeleteBackendRun,
   onDeleteBackendRuns,
+  onReload,
 }: HistoryViewProps) {
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<string[]>([]);
@@ -96,6 +99,11 @@ export function HistoryView({
         <button className="tb-btn" onClick={deleteSelected} disabled={visibleSelected.length === 0}>
           Delete selected ({visibleSelected.length})
         </button>
+        {onReload && (
+          <button className="tb-btn tb-btn--muted" onClick={onReload} title="Re-fetch run history from the backend">
+            Reload
+          </button>
+        )}
       </div>
 
       {sorted.length === 0 ? (

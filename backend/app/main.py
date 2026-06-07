@@ -403,8 +403,10 @@ def export_project(payload: ExportProjectPayload) -> Response:
     workbook is assembled on the server via the same frame builder used by the
     stored-run download and streamed back as an xlsx attachment.
     """
+    from . import project_workbook
+
     try:
-        data = run_store._frames_to_excel({"model": payload.model, "result": payload.result})
+        data = project_workbook.bundle_to_workbook({"model": payload.model, "result": payload.result})
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"Project export failed: {exc}") from exc
     return Response(
@@ -412,6 +414,36 @@ def export_project(payload: ExportProjectPayload) -> Response:
         media_type=_XLSX_MEDIA_TYPE,
         headers={"Content-Disposition": 'attachment; filename="ragnarok_project.xlsx"'},
     )
+
+
+@app.post("/api/import/project")
+async def import_project(file: UploadFile) -> dict[str, Any]:
+    """Parse an uploaded project xlsx into a run bundle and store it in History.
+
+    The browser uploads the workbook; the backend converts it to the canonical
+    JSON bundle (via ``project_workbook.workbook_to_bundle``) and persists it
+    with ``run_store.store_run`` — so an imported project becomes a History
+    entry, openable with full analytics like any solved run. Returns the new
+    run's meta (its ``name`` lets the frontend open it immediately).
+    """
+    from . import project_workbook
+
+    raw = await file.read()
+    filename = file.filename or "imported_project.xlsx"
+    try:
+        bundle = project_workbook.workbook_to_bundle(raw, filename=filename)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Project import failed: {exc}") from exc
+
+    meta = run_store.store_run(
+        bundle.get("model") or {},
+        bundle.get("scenario") or {},
+        bundle.get("options") or {},
+        bundle.get("result") or {},
+    )
+    if meta is None:
+        raise HTTPException(status_code=500, detail="Imported project could not be stored.")
+    return {"meta": meta, "name": meta.get("name")}
 
 
 @app.get("/api/runs/{name}/xlsx")

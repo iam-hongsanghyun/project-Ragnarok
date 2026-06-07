@@ -103,6 +103,27 @@ def _sanitize_placeholder_bounds(network: pypsa.Network, notes: list[str]) -> No
         )
 
 
+def _coerce_numeric_columns(
+    df: "pd.DataFrame", network: pypsa.Network, list_name: str
+) -> "pd.DataFrame":
+    """Coerce numeric-typed columns to numbers; blanks/junk → the PyPSA default.
+
+    A re-imported workbook can carry empty-string cells in numeric columns
+    (optional fields left blank). Passed straight to ``network.add`` PyPSA tries
+    ``float('')`` and raises *"could not convert string to float: ''"*. Here we
+    coerce each float/int-typed column with ``to_numeric(errors='coerce')`` and
+    fill the resulting NaNs with the attribute's PyPSA default — exactly what an
+    *absent* column would have produced — so a blank cell can never crash a run.
+    """
+    defaults = network.components[list_name].defaults
+    for col in list(df.columns):
+        if col not in defaults.index or defaults.at[col, "dtype"].kind not in ("f", "i"):
+            continue
+        coerced = pd.to_numeric(df[col], errors="coerce")
+        df[col] = coerced.fillna(defaults.at[col, "default"])
+    return df
+
+
 def build_network(
     model: dict[str, list[dict[str, Any]]],
     scenario: dict[str, Any],
@@ -170,6 +191,7 @@ def build_network(
             continue
         if "carrier" in df.columns and cls != "Carrier":
             _ensure_carriers(network, df["carrier"])
+        df = _coerce_numeric_columns(df, network, sheet_name)
         kwargs = {col: df[col].tolist() for col in df.columns}
         network.add(cls, df.index.tolist(), **kwargs)
 

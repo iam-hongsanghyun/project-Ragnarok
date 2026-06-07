@@ -29,7 +29,7 @@ import {
   AnalyticsSubTab,
 } from 'lib/types';
 import { API_BASE, DEFAULT_CONSTRAINTS, getDefaultRowForSheet, RUN_POLLING, RUN_WINDOW, SHEETS } from 'lib/constants';
-import { canonicalizeOutputSeries, canonicalizeTemporalRows, createEmptyWorkbook, exportWorkbook, normalizeInputDatesToIso, parseProjectFile, parseWorkbook, workbookToArrayBuffer } from 'lib/workbook/workbook';
+import { canonicalizeOutputSeries, canonicalizeTemporalRows, createEmptyWorkbook, exportWorkbook, normalizeInputDatesToIso, parseWorkbook, workbookToArrayBuffer } from 'lib/workbook/workbook';
 import { mergeWorkbookFragment } from 'lib/workbook/mergeFragment';
 import type { WorkbookFragment } from 'lib/api/databases';
 import { getBounds, getBusIndex, carrierColor, numberValue, orderByCarrierRows, setCarrierColorOverrides, snapshotMaxFromWorkbook, stringValue } from 'lib/utils/helpers';
@@ -635,96 +635,24 @@ function AppInner() {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
-      const { model: nextModel, outputs, metadata } = await parseProjectFile(file);
-      const importedPathway = readPathwayConfigFromModel(nextModel);
-      const importedRunState = metadata.runState;
-      const importedSettings = metadata.settings;
-      const importDateFormat = importedSettings?.dateFormat ?? settings.dateFormat;
-      normalizeInputDatesToIso(nextModel, importDateFormat);
-      canonicalizeOutputSeries(outputs.series, importDateFormat);
-      const importedSnapshotWeight = importedRunState?.snapshotWeight ?? snapshotWeight;
-      const importedCarbonPrice = importedRunState?.carbonPrice ?? carbonPrice;
-      const importedDiscountRate = importedSettings?.discountRate ?? settings.discountRate;
-      const importedCurrencySymbol = importedSettings?.currencySymbol ?? settings.currencySymbol;
-      resetForNewModel(nextModel, file.name || 'ragnarok_project.xlsx');
-      setFileHandle(null);
-      if (importedSettings) updateSettings(importedSettings);
-      if (metadata.constraints) setConstraints(metadata.constraints);
-      if (importedRunState) {
-        setSnapshotStart(importedRunState.snapshotStart);
-        setSnapshotEnd(importedRunState.snapshotEnd);
-        setSnapshotWeight(importedRunState.snapshotWeight);
-        setCarbonPrice(importedRunState.carbonPrice);
-        setForceLp(importedRunState.forceLp);
-        if (importedRunState.activeScenarioId) {
-          setScenarioCatalog((current) => ({
-            ...current,
-            activeScenarioId: current.scenarios.some((scenario) => scenario.id === importedRunState.activeScenarioId)
-              ? importedRunState.activeScenarioId
-              : current.activeScenarioId,
-          }));
-        }
+      // Upload to the backend, which parses the project workbook into a run
+      // bundle, persists it (run_store), and returns the new run's name. The
+      // backend is the single source of truth for history, so an imported
+      // project becomes a History entry openable with full analytics — exactly
+      // like a freshly solved run. (Replaces the old in-browser parse, which
+      // could not read the server-built workbook and dropped the outputs.)
+      const form = new FormData();
+      form.append('file', file);
+      const resp = await fetch(`${API_BASE}/api/import/project`, { method: 'POST', body: form });
+      if (!resp.ok) {
+        throw new Error((await resp.text()) || `Import failed (HTTP ${resp.status})`);
       }
-      const hasOutputs =
-        Object.keys(outputs.static).length > 0 || Object.keys(outputs.series).length > 0;
-      if (hasOutputs) {
-        const imported = deriveRunResults(nextModel, outputs, {
-          carbonPrice: importedCarbonPrice,
-          currencySymbol: importedCurrencySymbol,
-          discountRate: importedDiscountRate,
-          snapshotWeight: importedSnapshotWeight,
-          selectedPeriod: getDefaultSelectedPeriod(importedPathway),
-          pathway: metadata.pathway ?? (importedPathway.enabled ? {
-            enabled: true,
-            periods: importedPathway.periods.map((row) => row.period),
-            selectedPeriod: getDefaultSelectedPeriod(importedPathway),
-            snapshotMappingMode: importedPathway.snapshotMappingMode,
-            summaries: [],
-          } : null),
-          rolling: metadata.rolling ?? null,
-          narrative: metadata.narrative ?? [`Imported project from ${file.name}. Outputs restored from workbook.`],
-        });
-        imported.pluginAnalytics = metadata.pluginAnalytics;
-        // Restore per-plugin form configs from the workbook. setAllConfigs
-        // fully replaces the host's config map, so the imported workbook is
-        // the single source of truth for plugin state (matches how settings,
-        // constraints, and scenarios are restored).
-        if (metadata.pluginConfigs) {
-          frontendPlugins.setAllConfigs(metadata.pluginConfigs);
-        }
-        imported.co2Shadow = metadata.co2Shadow ?? imported.co2Shadow;
-        imported.runMeta = metadata.runMeta ?? imported.runMeta;
-        imported.pathway = metadata.pathway ?? imported.pathway;
-        imported.rolling = metadata.rolling ?? imported.rolling;
-        if (metadata.rolling) {
-          setRollingConfig((current) => normalizeRollingConfig({
-            ...current,
-            enabled: metadata.rolling?.enabled ?? current.enabled,
-            horizonSnapshots: metadata.rolling?.horizonSnapshots ?? current.horizonSnapshots,
-            overlapSnapshots: metadata.rolling?.overlapSnapshots ?? current.overlapSnapshots,
-            stepSnapshots: metadata.rolling?.stepSnapshots ?? current.stepSnapshots,
-          }));
-        }
-        setResults(imported);
-        setResultsModel(structuredClone(nextModel));
-        setResultsContext({
-          carbonPrice: importedCarbonPrice,
-          snapshotWeight: importedSnapshotWeight,
-          discountRate: importedDiscountRate,
-        });
-        setAnalyticsFocus({ type: 'system' });
-        // Imported projects are not solved on this backend, so they do not enter
-        // backend run history — the result is simply shown in the viewer.
-        setActiveRunName(null);
-        // The project carries solved outputs, so jump straight to Analytics —
-        // matches the post-run navigation and what the user expects after
-        // opening a finished project.
-        setTab('Analytics');
-        setAnalyticsSubTab('Result');
-        setStatus(`Imported project: ${file.name}. Full project state restored.`);
-      } else {
-        setStatus(`Imported project (inputs only): ${file.name}. Metadata restored.`);
+      const { name } = (await resp.json()) as { name?: string };
+      await refreshBackendRuns();
+      if (name) {
+        await handleOpenBackendRun(name, { navigate: true, restoreConstraints: true });
       }
+      setStatus(`Imported project: ${file.name} — stored in History.`);
       showToast(`Project imported (${file.name})`, 'success');
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Project import failed.';
@@ -736,11 +664,19 @@ function AppInner() {
   };
 
   const handleExportProject = async () => {
-    // Export the currently viewed run as one coherent project workbook: its own
-    // topology (`analyticsModel`) paired with its solved outputs. The workbook
-    // is built SERVER-SIDE (POST /api/export/project) so the heavy SheetJS
-    // build no longer runs in — and OOMs — the browser tab. We just stream the
-    // returned blob to a download.
+    // Export the currently viewed run as one lossless, round-trippable project
+    // workbook, built SERVER-SIDE so the heavy build never OOMs the tab.
+    //
+    // When the view IS a stored run (the common case after a solve or a History
+    // open), stream its pre-built xlsx straight off disk — rendered from the
+    // canonical JSON bundle, so NOTHING is dropped and it re-imports cleanly.
+    // Only an unsaved, never-run model falls back to POSTing the live
+    // {model, result} for an on-the-fly build.
+    if (activeRunName) {
+      window.open(`${API_BASE}/api/runs/${encodeURIComponent(activeRunName)}/xlsx`, '_blank');
+      showToast('Project exported (from stored run)', 'success');
+      return;
+    }
     const out = `${projectBaseName(filename)}_project.xlsx`;
     try {
       const resp = await fetch(`${API_BASE}/api/export/project`, {
@@ -1155,7 +1091,19 @@ function AppInner() {
     void refreshBackendRuns();
   }, [refreshBackendRuns]);
 
-  const handleOpenBackendRun = async (name: string) => {
+  // Auto-refresh the History list while the History tab is open, so a run that
+  // finishes elsewhere (or an import) appears without a browser reload. Polling
+  // only runs while the tab is visible to avoid needless backend chatter.
+  useEffect(() => {
+    if (tab !== 'History') return;
+    const timer = setInterval(() => void refreshBackendRuns(), 5000);
+    return () => clearInterval(timer);
+  }, [tab, refreshBackendRuns]);
+
+  const handleOpenBackendRun = async (
+    name: string,
+    opts?: { navigate?: boolean; restoreConstraints?: boolean },
+  ) => {
     try {
       const resp = await fetch(`${API_BASE}/api/runs/${encodeURIComponent(name)}`);
       if (!resp.ok) {
@@ -1170,12 +1118,23 @@ function AppInner() {
         model: bundle.model,
         carbonPrice: bundle.scenario?.carbonPrice ?? 0,
         discountRate: bundle.scenario?.discountRate,
-        snapshotStart: bundle.snapshotStart ?? 0,
-        snapshotEnd: bundle.snapshotEnd ?? 0,
-        snapshotWeight: bundle.snapshotWeight ?? 1,
+        snapshotStart: bundle.snapshotStart ?? bundle.options?.snapshotStart ?? 0,
+        snapshotEnd: bundle.snapshotEnd ?? bundle.options?.snapshotEnd ?? 0,
+        snapshotWeight: bundle.snapshotWeight ?? bundle.options?.snapshotWeight ?? 1,
       });
       // Mark this stored run as the active one so Comparison highlights it.
       setActiveRunName(name);
+      // On import, restore the project's custom constraints so a re-run uses
+      // them (history "View results" leaves the live constraint list alone).
+      if (opts?.restoreConstraints && Array.isArray(bundle.scenario?.constraints)) {
+        setConstraints(bundle.scenario.constraints);
+      }
+      // On import, jump to Analytics so the restored outputs are visible
+      // immediately (the run carries solved outputs).
+      if (opts?.navigate) {
+        setTab('Analytics');
+        setAnalyticsSubTab('Result');
+      }
     } catch {
       showToast('Stored run could not be opened.', 'error');
     }
@@ -1912,6 +1871,7 @@ function AppInner() {
               onDownloadBackendXlsx={handleDownloadBackendXlsx}
               onDeleteBackendRun={handleDeleteBackendRun}
               onDeleteBackendRuns={handleDeleteBackendRuns}
+              onReload={() => void refreshBackendRuns()}
             />
           )}
 

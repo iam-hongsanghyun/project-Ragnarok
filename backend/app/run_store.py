@@ -22,7 +22,6 @@ import json
 import logging
 import re
 from datetime import datetime, timezone
-from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -40,7 +39,6 @@ RUNS_DIR = _REPO_ROOT / "backend" / "data" / "runs"
 _NAME_GUARD = re.compile(r"^[A-Za-z0-9._\-T:]+$")
 _LABEL_SANITISE = re.compile(r"[^A-Za-z0-9._-]+")
 _LABEL_MAX_LEN = 40
-_XLSX_SHEET_MAX_LEN = 31
 
 # Stem-only file extensions stripped before a filename becomes a run label, so a
 # run is never named ``...ragnarok_case.xlsx`` (which then yields a double
@@ -227,7 +225,9 @@ def store_run(
         # file instead of rebuilding a large workbook on every request. The JSON
         # bundle is the canonical form, so an xlsx-build failure is non-fatal.
         try:
-            (RUNS_DIR / f"{name}.xlsx").write_bytes(_frames_to_excel(bundle))
+            from . import project_workbook
+
+            (RUNS_DIR / f"{name}.xlsx").write_bytes(project_workbook.bundle_to_workbook(bundle))
         except Exception:  # noqa: BLE001
             logger.exception("Failed to pre-build xlsx for run %s", name)
 
@@ -297,77 +297,6 @@ def delete_run(name: str) -> bool:
     return removed
 
 
-def _frames_to_excel(bundle: dict[str, Any]) -> bytes:
-    """Build a human-readable xlsx from a stored bundle.
-
-    Input sheets come from ``bundle['model']`` (list-of-dicts → DataFrame).
-    Output frames come from ``bundle['result']['outputs']['static']`` and
-    ``['outputs']['series']`` (key → DataFrame), prefixed ``OUT_``. Every
-    sheet name is truncated to Excel's 31-char limit with collision dedupe.
-
-    This is an export for inspection — it does NOT round-trip back into the
-    model. The JSON bundle remains the canonical reopen form.
-    """
-    import pandas as pd
-
-    used: set[str] = set()
-
-    def _sheet_name(raw: str) -> str:
-        base = (raw or "sheet")[:_XLSX_SHEET_MAX_LEN]
-        candidate = base
-        suffix = 1
-        while candidate in used:
-            tail = f"_{suffix}"
-            candidate = base[: _XLSX_SHEET_MAX_LEN - len(tail)] + tail
-            suffix += 1
-        used.add(candidate)
-        return candidate
-
-    buffer = BytesIO()
-    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        wrote_any = False
-
-        model = bundle.get("model") or {}
-        if isinstance(model, dict):
-            for sheet, rows in model.items():
-                if not isinstance(rows, list) or not rows:
-                    continue
-                pd.DataFrame(rows).to_excel(writer, sheet_name=_sheet_name(str(sheet)), index=False)
-                wrote_any = True
-
-        result = bundle.get("result") or {}
-        outputs = result.get("outputs") if isinstance(result, dict) else None
-        outputs = outputs or {}
-
-        static = outputs.get("static") if isinstance(outputs, dict) else None
-        if isinstance(static, dict):
-            for key, comp_map in static.items():
-                if not isinstance(comp_map, dict) or not comp_map:
-                    continue
-                # comp_map: {component_name: {attr: value}} → rows.
-                df = pd.DataFrame.from_dict(comp_map, orient="index")
-                df.index.name = "name"
-                df.reset_index(inplace=True)
-                df.to_excel(writer, sheet_name=_sheet_name(f"OUT_{key}"), index=False)
-                wrote_any = True
-
-        series = outputs.get("series") if isinstance(outputs, dict) else None
-        if isinstance(series, dict):
-            for key, rows in series.items():
-                if not isinstance(rows, list) or not rows:
-                    continue
-                pd.DataFrame(rows).to_excel(writer, sheet_name=_sheet_name(f"OUT_{key}"), index=False)
-                wrote_any = True
-
-        if not wrote_any:
-            # openpyxl refuses to save a workbook with zero sheets.
-            pd.DataFrame([{"info": "No data in this run."}]).to_excel(
-                writer, sheet_name=_sheet_name("info"), index=False
-            )
-
-    return buffer.getvalue()
-
-
 def xlsx_path(name: str) -> Path | None:
     """Path to the pre-built xlsx for ``name`` if it exists (and ``name`` is safe).
 
@@ -394,7 +323,9 @@ def run_to_xlsx(name: str) -> bytes | None:
     if bundle is None:
         return None
     try:
-        return _frames_to_excel(bundle)
+        from . import project_workbook
+
+        return project_workbook.bundle_to_workbook(bundle)
     except Exception:  # noqa: BLE001
         logger.exception("Failed to build xlsx for backend run %s", name)
         return None
