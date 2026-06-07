@@ -1,12 +1,14 @@
 import React from 'react';
-import { RunHistoryEntry, RunResults } from 'lib/types';
+import { BackendRunMeta } from 'lib/types';
 import { formatRelTime } from 'lib/utils/formatRelTime';
 
 interface RunComparisonTableProps {
-  runHistory: RunHistoryEntry[];
-  activeResults: RunResults;
-  onToggleComparison?: (id: string, inComparison: boolean) => void;
-  currencySymbol?: string;
+  /** Backend-stored run metas selected for comparison. */
+  runs: BackendRunMeta[];
+  /** Name of the run currently shown in the viewer (highlighted column). */
+  activeRunName: string | null;
+  /** Remove a run from the client-side comparison selection (keeps it stored). */
+  onRemoveFromComparison?: (name: string) => void;
 }
 
 /** Strip units/commas and return the first numeric token, or null. */
@@ -25,34 +27,33 @@ function delta(base: number, target: number): { text: string; dir: 'up' | 'down'
   return { text: `${pct > 0 ? '+' : ''}${pct.toFixed(1)}%`, dir: pct > 0 ? 'up' : 'down' };
 }
 
-export function RunComparisonTable({ runHistory, activeResults, onToggleComparison, currencySymbol = '$' }: RunComparisonTableProps) {
-  if (runHistory.length < 2) return null;
+export function RunComparisonTable({ runs, activeRunName, onRemoveFromComparison }: RunComparisonTableProps) {
+  if (runs.length < 2) return null;
 
   // Newest run first
-  const sorted = [...runHistory].sort(
+  const sorted = [...runs].sort(
     (a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime(),
   );
-  const activeIdx = sorted.findIndex((e) => e.results === activeResults);
+  const activeIdx = sorted.findIndex((e) => e.name === activeRunName);
 
-  const summaryLabels = sorted[0].results.summary.map((s) => s.label);
+  const summaryLabels = (sorted[0].summary ?? []).map((s) => s.label);
 
-  const settingRows: Array<{ label: string; fn: (e: RunHistoryEntry) => string }> = [
+  const snapWindow = (e: BackendRunMeta): string =>
+    e.snapshotStart != null && e.snapshotEnd != null ? `${e.snapshotStart} → ${e.snapshotEnd}` : '—';
+
+  const settingRows: Array<{ label: string; fn: (e: BackendRunMeta) => string }> = [
     { label: 'Scenario', fn: (e) => e.scenarioLabel ?? '—' },
-    { label: 'Planning mode', fn: (e) => e.results.pathway?.enabled ? 'Pathway' : 'Single period' },
-    { label: 'Rolling horizon', fn: (e) => e.results.rolling?.enabled ? 'On' : 'Off' },
-    { label: 'Rolling horizon size', fn: (e) => e.results.rolling?.enabled ? String(e.results.rolling.horizonSnapshots) : '—' },
-    { label: 'Rolling overlap', fn: (e) => e.results.rolling?.enabled ? String(e.results.rolling.overlapSnapshots) : '—' },
-    { label: 'Rolling windows', fn: (e) => e.results.rolling?.enabled ? String(e.results.rolling.windowCount) : '—' },
-    { label: 'Periods',       fn: (e) => e.results.pathway?.enabled ? e.results.pathway.periods.join(', ') : '—' },
-    { label: 'Active period', fn: (e) => e.results.pathway?.selectedPeriod != null ? String(e.results.pathway.selectedPeriod) : '—' },
-    { label: 'Carbon price',  fn: (e) => e.carbonPrice > 0 ? `${currencySymbol}${e.carbonPrice}/t` : '—' },
-    { label: 'Window',        fn: (e) => `${e.snapshotStart} → ${e.snapshotEnd}` },
-    { label: 'Resolution',    fn: (e) => `${e.snapshotWeight} h` },
+    { label: 'Planning mode', fn: (e) => e.pathway?.enabled ? 'Pathway' : 'Single period' },
+    { label: 'Rolling horizon', fn: (e) => e.rolling?.enabled ? 'On' : 'Off' },
+    { label: 'Rolling horizon size', fn: (e) => e.rolling?.enabled ? String(e.rolling.horizonSnapshots ?? 0) : '—' },
+    { label: 'Rolling overlap', fn: (e) => e.rolling?.enabled ? String(e.rolling.overlapSnapshots ?? 0) : '—' },
+    { label: 'Rolling windows', fn: (e) => e.rolling?.enabled ? String(e.rolling.windowCount ?? 0) : '—' },
+    { label: 'Periods',       fn: (e) => e.pathway?.enabled ? (e.pathway.periods ?? []).join(', ') : '—' },
+    { label: 'Active period', fn: (e) => e.pathway?.selectedPeriod != null ? String(e.pathway.selectedPeriod) : '—' },
+    { label: 'Window',        fn: (e) => snapWindow(e) },
+    { label: 'Resolution',    fn: (e) => e.snapshotWeight != null ? `${e.snapshotWeight} h` : '—' },
     { label: 'Generators',    fn: (e) => String(e.componentCounts.generators ?? 0) },
     { label: 'Storage units', fn: (e) => String(e.componentCounts.storage_units ?? 0) },
-    { label: 'Constraints',   fn: (e) => e.activeConstraints.length > 0
-        ? e.activeConstraints.map((c) => c.label).join(', ')
-        : '—' },
   ];
 
   return (
@@ -63,16 +64,16 @@ export function RunComparisonTable({ runHistory, activeResults, onToggleComparis
             <th style={{ width: 160 }} />
             {sorted.map((entry, i) => (
               <th
-                key={entry.id}
+                key={entry.name}
                 className={`cmp-th${i === activeIdx ? ' cmp-col--active' : ''}`}
               >
                 <div className="cmp-th-top">
                   <div className="cmp-th-label">{entry.label}</div>
-                  {onToggleComparison && (
+                  {onRemoveFromComparison && (
                     <button
                       className="cmp-col-remove"
-                      title="Remove from comparison (keeps run in history)"
-                      onClick={() => onToggleComparison(entry.id, false)}
+                      title="Remove from comparison (keeps run stored)"
+                      onClick={() => onRemoveFromComparison(entry.name)}
                     >
                       x
                     </button>
@@ -95,7 +96,7 @@ export function RunComparisonTable({ runHistory, activeResults, onToggleComparis
             <tr key={row.label}>
               <td className="cmp-row-label">{row.label}</td>
               {sorted.map((entry, i) => (
-                <td key={entry.id} className={i === activeIdx ? 'cmp-col--active' : ''}>
+                <td key={entry.name} className={i === activeIdx ? 'cmp-col--active' : ''}>
                   {row.fn(entry)}
                 </td>
               ))}
@@ -107,7 +108,7 @@ export function RunComparisonTable({ runHistory, activeResults, onToggleComparis
             <td colSpan={sorted.length + 1}>Results</td>
           </tr>
           {summaryLabels.map((label, si) => {
-            const vals = sorted.map((e) => e.results.summary[si]?.value ?? '—');
+            const vals = sorted.map((e) => e.summary?.[si]?.value ?? '—');
             const nums = vals.map(parseNum);
             const activeNum = activeIdx >= 0 ? nums[activeIdx] : null;
 
@@ -130,7 +131,7 @@ export function RunComparisonTable({ runHistory, activeResults, onToggleComparis
                   }
 
                   return (
-                    <td key={entry.id} className={isActive ? 'cmp-col--active' : ''}>
+                    <td key={entry.name} className={isActive ? 'cmp-col--active' : ''}>
                       <div className="cmp-cell-main">{vals[i]}</div>
                       {deltaTag}
                     </td>

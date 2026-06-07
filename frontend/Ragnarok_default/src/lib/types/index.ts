@@ -662,10 +662,15 @@ export interface RunHistoryEntry {
 }
 
 /**
- * Lightweight metadata for a run persisted server-side via the "Store in
- * backend" run option. Mirrors the meta sidecar written by
- * `backend/app/run_store.py` (`<name>.meta.json`). The heavy bundle (full
- * model + results) is fetched on demand via `GET /api/runs/{name}`.
+ * Lightweight metadata for a run persisted server-side. Every successful solve
+ * is stored automatically (the backend is the single source of truth for run
+ * history). Mirrors the meta sidecar written by `backend/app/run_store.py`
+ * (`<name>.meta.json`). The heavy bundle (full model + results) is fetched on
+ * demand via `GET /api/runs/{name}`.
+ *
+ * The light fields (`summary`, `carrierMix`, `pathway`, `rolling`,
+ * `scenarioLabel`) carry exactly what Analytics → Comparison needs, so the
+ * Comparison tab renders straight from `GET /api/runs` without a heavy fetch.
  */
 export interface BackendRunMeta {
   name: string;
@@ -679,6 +684,26 @@ export interface BackendRunMeta {
   /** First ~4 entries of the run summary (label/value KPI cards). */
   kpis: Array<{ label: string; value: string | number }>;
   sizeBytes: number;
+  /** Full run summary (KPI rows). Powers the Comparison table's Results section. */
+  summary?: SummaryItem[];
+  /** Carrier generation mix (label/value/color). Powers Comparison dispatch totals. */
+  carrierMix?: MixItem[];
+  /** Light pathway projection (no time-series) for Comparison. */
+  pathway?: {
+    enabled?: boolean;
+    periods?: number[];
+    selectedPeriod?: number | null;
+    summaries?: PathwayPeriodSummary[];
+  } | null;
+  /** Light rolling-horizon projection (no time-series) for Comparison. */
+  rolling?: {
+    enabled?: boolean;
+    horizonSnapshots?: number;
+    overlapSnapshots?: number;
+    windowCount?: number;
+  } | null;
+  /** Scenario label this run was solved under, for cross-scenario pivots. */
+  scenarioLabel?: string | null;
 }
 
 export type AnalyticsFocus =

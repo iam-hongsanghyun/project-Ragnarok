@@ -22,7 +22,7 @@ from .log_capture import (
     get_snapshot as _log_snapshot,
     install as _install_log_capture,
 )
-from .models import RunPayload
+from .models import ExportProjectPayload, RunPayload
 from . import run_store
 from ..pypsa.network import build_network, validate_model
 
@@ -117,16 +117,15 @@ def _solve_worker(
         # — store_run also pre-builds the (potentially large) xlsx, which can take
         # several seconds and would otherwise delay the result.
         result_queue.put(("ok", result))
-        # Optionally persist the finished run server-side. A store failure must
-        # NOT affect the run — run_store logs and swallows internally, and we
-        # guard again here.
-        if options.get("storeInBackend"):
-            try:
-                run_store.store_run(payload.model, payload.scenario or {}, options, result)
-            except Exception:  # noqa: BLE001
-                logging.getLogger("pypsa_gui.run_store").exception(
-                    "store_run raised after a successful solve"
-                )
+        # Always persist the finished run server-side (the backend is the single
+        # source of truth for run history). A store failure must NOT affect the
+        # run — run_store logs and swallows internally, and we guard again here.
+        try:
+            run_store.store_run(payload.model, payload.scenario or {}, options, result)
+        except Exception:  # noqa: BLE001
+            logging.getLogger("pypsa_gui.run_store").exception(
+                "store_run raised after a successful solve"
+            )
     except Exception as exc:  # noqa: BLE001
         result_queue.put(("err", str(exc)))
 
@@ -366,12 +365,12 @@ async def cancel_run(job_id: str) -> dict[str, Any]:
 
 # ── Backend-stored runs ─────────────────────────────────────────────────────
 #
-# When a run is launched with options["storeInBackend"], the worker persists
-# the full bundle (model + result) to backend/data/runs via run_store. These
-# endpoints surface those runs in the History tab: list lightweight metas,
-# reopen a full bundle, download a human-readable xlsx on demand, or delete.
-# Storing server-side avoids the browser-tab OOM that a full-year xlsx export
-# triggers client-side.
+# Every successful solve is persisted by the worker: the full bundle (model +
+# result) is written to backend/data/runs via run_store. The backend is the
+# single source of truth for run history. These endpoints surface those runs in
+# the History tab: list lightweight metas, reopen a full bundle, download a
+# human-readable xlsx on demand, or delete. Storing server-side avoids the
+# browser-tab OOM that a full-year xlsx export triggers client-side.
 
 
 @app.get("/api/runs")
@@ -393,6 +392,26 @@ def get_backend_run(name: str) -> dict[str, Any]:
 def delete_backend_run(name: str) -> dict[str, Any]:
     """Delete the bundle + meta sidecar for ``name``."""
     return {"deleted": run_store.delete_run(name)}
+
+
+@app.post("/api/export/project")
+def export_project(payload: ExportProjectPayload) -> Response:
+    """Build the full input + output project xlsx server-side and return it.
+
+    Replaces the in-browser SheetJS export, which OOMed the tab while building a
+    full-year workbook in RAM. The frontend POSTs ``{model, result}``; the
+    workbook is assembled on the server via the same frame builder used by the
+    stored-run download and streamed back as an xlsx attachment.
+    """
+    try:
+        data = run_store._frames_to_excel({"model": payload.model, "result": payload.result})
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Project export failed: {exc}") from exc
+    return Response(
+        content=data,
+        media_type=_XLSX_MEDIA_TYPE,
+        headers={"Content-Disposition": 'attachment; filename="ragnarok_project.xlsx"'},
+    )
 
 
 @app.get("/api/runs/{name}/xlsx")

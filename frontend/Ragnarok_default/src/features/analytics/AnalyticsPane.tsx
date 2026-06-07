@@ -1,7 +1,7 @@
 import React from 'react';
 import { LatLngBoundsExpression } from 'leaflet';
 import {
-  AnalyticsFocus, AnalyticsSubTab, ChartSectionConfig, GridRow, PathwayConfig, RunHistoryEntry, RunResults, TimeSeriesRow, TimeSeriesSeries, WorkbookModel,
+  AnalyticsFocus, AnalyticsSubTab, ChartSectionConfig, GridRow, PathwayConfig, RunResults, TimeSeriesRow, TimeSeriesSeries, WorkbookModel,
 } from 'lib/types';
 import { AnalyticsDashboard } from '../../views/AnalyticsView.features/Dashboard/AnalyticsDashboard';
 import { buildResultPreset } from 'lib/dashboard/resultPreset';
@@ -22,10 +22,8 @@ interface Props {
   systemLoadRows: TimeSeriesRow[];
   systemPriceRows: TimeSeriesRow[];
   storageRows: TimeSeriesRow[];
-  runHistory: RunHistoryEntry[];
   subTab: AnalyticsSubTab;
   currencySymbol: string;
-  onExportAll?: () => void;
   pathwayConfig?: PathwayConfig;
   onSelectedPeriodChange?: (period: number) => void;
 }

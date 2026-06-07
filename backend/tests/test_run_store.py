@@ -30,6 +30,24 @@ def _sample_result() -> dict:
             {"label": "Emissions", "value": "7"},
         ],
         "runMeta": {"componentCounts": {"generators": 3, "buses": 2}},
+        "carrierMix": [
+            {"label": "Wind", "value": 100.0, "color": "#0a0"},
+            {"label": "Gas", "value": 50.0, "color": "#a00"},
+        ],
+        "pathway": {
+            "enabled": True,
+            "periods": [2030, 2040],
+            "selectedPeriod": 2030,
+            "summaries": [{"period": 2030, "totalDispatch": 1.0}],
+            "snapshotMappingMode": "repeat_all_snapshots",
+        },
+        "rolling": {
+            "enabled": False,
+            "horizonSnapshots": 24,
+            "overlapSnapshots": 6,
+            "windowCount": 0,
+            "windows": [],
+        },
         "outputs": {
             "static": {
                 "generators": {
@@ -66,6 +84,29 @@ def test_run_store_lifecycle(_runs_dir: Path) -> None:
     assert meta["componentCounts"] == {"generators": 3, "buses": 2}
     assert len(meta["kpis"]) == 4
     assert meta["sizeBytes"] > 0
+
+    # Enriched light fields that power Analytics → Comparison without a heavy
+    # bundle fetch.
+    assert meta["summary"] == result["summary"]
+    assert meta["carrierMix"] == result["carrierMix"]
+    assert meta["scenarioLabel"] == "Test scenario"
+    assert meta["pathway"] == {
+        "enabled": True,
+        "periods": [2030, 2040],
+        "selectedPeriod": 2030,
+        "summaries": [{"period": 2030, "totalDispatch": 1.0}],
+    }
+    assert meta["rolling"] == {
+        "enabled": False,
+        "horizonSnapshots": 24,
+        "overlapSnapshots": 6,
+        "windowCount": 0,
+    }
+
+    # The same enriched fields survive a round-trip through the listing.
+    listed_meta = run_store.list_runs()[0]
+    assert listed_meta["summary"] == result["summary"]
+    assert listed_meta["carrierMix"] == result["carrierMix"]
 
     name = meta["name"]
 
@@ -114,3 +155,36 @@ def test_list_runs_tolerates_corrupt_meta(_runs_dir: Path) -> None:
 
 def test_get_run_missing_returns_none(_runs_dir: Path) -> None:
     assert run_store.get_run("2025-01-01T00-00-00") is None
+
+
+def test_solve_worker_always_stores(_runs_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The worker persists every successful solve (no opt-in gate)."""
+    import queue as _queue
+
+    from backend.app import main
+    from backend.app.models import RunPayload
+
+    result = _sample_result()
+
+    class _FakeBackend:
+        def run(self, model, scenario, options):  # noqa: ANN001, ANN201
+            return result
+
+    monkeypatch.setattr(main, "get_backend", lambda _name: _FakeBackend())
+
+    payload = RunPayload(
+        model={"buses": [{"name": "n1"}]},
+        scenario={"label": "Worker scenario"},
+        options={},  # note: no storeInBackend flag — auto-store now
+    )
+    q: "_queue.Queue" = _queue.Queue()
+    main._solve_worker(payload, q)
+
+    status, data = q.get_nowait()
+    assert status == "ok"
+    assert data == result
+
+    runs = run_store.list_runs()
+    assert len(runs) == 1
+    assert runs[0]["scenarioLabel"] == "Worker scenario"
+    assert runs[0]["summary"] == result["summary"]

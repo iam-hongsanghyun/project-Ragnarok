@@ -1,5 +1,5 @@
-import React from 'react';
-import { RunHistoryEntry, RunResults } from 'lib/types';
+import React, { useMemo, useState } from 'react';
+import { BackendRunMeta } from 'lib/types';
 import { RunComparisonTable } from '../run-history/RunComparisonTable';
 import { ScenarioPivotCard } from './cards/ScenarioPivotCard';
 
@@ -32,8 +32,8 @@ function MiniBarChart({ title, unit, entries }: { title: string; unit: string; e
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function firstNumericSummary(entry: RunHistoryEntry, predicate: (label: string) => boolean): number {
-  const s = entry.results.summary.find((x) => predicate(x.label));
+function firstNumericSummary(entry: BackendRunMeta, predicate: (label: string) => boolean): number {
+  const s = (entry.summary ?? []).find((x) => predicate(x.label));
   if (!s) return 0;
   const m = s.value.replace(/,/g, '').match(/[-+]?[0-9]*\.?[0-9]+/);
   const n = m ? parseFloat(m[0]) : NaN;
@@ -43,23 +43,40 @@ function firstNumericSummary(entry: RunHistoryEntry, predicate: (label: string) 
 // ── Comparison pane ───────────────────────────────────────────────────────────
 
 interface Props {
-  runHistory: RunHistoryEntry[];
-  activeResults: RunResults | null;
-  onToggleComparison: (id: string, inComparison: boolean) => void;
+  /** Every backend-stored run meta (the single source of truth for history). */
+  backendRuns: BackendRunMeta[];
+  /** Name of the run currently shown in the viewer (highlighted as "active"). */
+  activeRunName: string | null;
   currencySymbol?: string;
 }
 
-export function ComparisonPane({ runHistory, activeResults, onToggleComparison, currencySymbol = '$' }: Props) {
-  // Only show runs the user has opted into comparison
-  const included = runHistory.filter((e) => e.inComparison);
+export function ComparisonPane({ backendRuns, activeRunName, currencySymbol = '$' }: Props) {
+  // Client-side "included in comparison" selection: a set of run names. Default
+  // is include-all; the user can drop a column to exclude it from the view
+  // (the run stays stored). Runs that disappear from `backendRuns` (deleted)
+  // are naturally ignored since we intersect against the live list below.
+  const [excluded, setExcluded] = useState<Set<string>>(() => new Set());
+
+  const included = useMemo(
+    () => backendRuns.filter((m) => !excluded.has(m.name)),
+    [backendRuns, excluded],
+  );
+
+  const removeFromComparison = (name: string) =>
+    setExcluded((prev) => {
+      const next = new Set(prev);
+      next.add(name);
+      return next;
+    });
 
   if (included.length < 2) {
     return (
       <div className="analytics-empty">
         <h3>No runs to compare yet</h3>
         <p>
-          Run the model at least twice. Use the checkboxes in the run history sidebar
-          to control which runs appear here — unchecking a run removes it from history.
+          Run the model at least twice. Every run is stored automatically and
+          appears here — remove a column to drop it from the comparison (the run
+          stays in History).
         </p>
       </div>
     );
@@ -68,28 +85,28 @@ export function ComparisonPane({ runHistory, activeResults, onToggleComparison, 
   // ── KPI bar data ────────────────────────────────────────────────────────────
 
   const dispatchEntries: BarEntry[] = included.map((e) => ({
-    id: e.id,
+    id: e.name,
     label: e.label,
-    value: e.results.carrierMix.reduce((s, m) => s + m.value, 0) / 1000,
-    active: e.results === activeResults,
+    value: (e.carrierMix ?? []).reduce((s, m) => s + m.value, 0) / 1000,
+    active: e.name === activeRunName,
   }));
 
   const emissionsEntries: BarEntry[] = included.map((e) => ({
-    id: e.id,
+    id: e.name,
     label: e.label,
     value: firstNumericSummary(e, (l) => l.toLowerCase().includes('emission')),
-    active: e.results === activeResults,
+    active: e.name === activeRunName,
   }));
 
   const priceEntries: BarEntry[] = included.map((e) => ({
-    id: e.id,
+    id: e.name,
     label: e.label,
     value: firstNumericSummary(e, (l) => l.toLowerCase().includes('price')),
-    active: e.results === activeResults,
+    active: e.name === activeRunName,
   }));
 
-  const showKpiCharts = included.some((e) => e.results.carrierMix.length > 0);
-  const pathwayRuns = included.filter((e) => e.results.pathway?.enabled && (e.results.pathway.summaries?.length ?? 0) > 0);
+  const showKpiCharts = included.some((e) => (e.carrierMix ?? []).length > 0);
+  const pathwayRuns = included.filter((e) => e.pathway?.enabled && (e.pathway.summaries?.length ?? 0) > 0);
   const hasPathwayComparison = pathwayRuns.length > 0;
 
   return (
@@ -98,7 +115,7 @@ export function ComparisonPane({ runHistory, activeResults, onToggleComparison, 
       {/* ── Cross-scenario pivot ──────────────────────────────────────────── */}
       <ScenarioPivotCard
         runs={included}
-        activeResults={activeResults}
+        activeRunName={activeRunName}
         currencySymbol={currencySymbol}
       />
 
@@ -113,10 +130,9 @@ export function ComparisonPane({ runHistory, activeResults, onToggleComparison, 
 
       {/* ── Comparison table ──────────────────────────────────────────────── */}
       <RunComparisonTable
-        runHistory={included}
-        activeResults={activeResults ?? included[0].results}
-        onToggleComparison={onToggleComparison}
-        currencySymbol={currencySymbol}
+        runs={included}
+        activeRunName={activeRunName}
+        onRemoveFromComparison={removeFromComparison}
       />
 
       {hasPathwayComparison && (
@@ -135,9 +151,9 @@ export function ComparisonPane({ runHistory, activeResults, onToggleComparison, 
             </thead>
             <tbody>
               {pathwayRuns.flatMap((entry) =>
-                (entry.results.pathway?.summaries ?? []).map((row) => (
-                  <tr key={`${entry.id}-${row.period}`}>
-                    <td className={entry.results === activeResults ? 'cmp-col--active' : ''}>{entry.label}</td>
+                (entry.pathway?.summaries ?? []).map((row) => (
+                  <tr key={`${entry.name}-${row.period}`}>
+                    <td className={entry.name === activeRunName ? 'cmp-col--active' : ''}>{entry.label}</td>
                     <td>{row.period}</td>
                     <td>{row.modeledHours.toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
                     <td>{(row.totalDispatch / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 })} GWh</td>

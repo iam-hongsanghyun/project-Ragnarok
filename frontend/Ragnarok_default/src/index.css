@@ -2873,7 +2873,6 @@ path.leaflet-interactive:focus {
 }
 .history-row:hover { background: var(--bg-hover, rgba(15, 118, 110, 0.04)); }
 .history-row.is-selected { background: rgba(15, 118, 110, 0.08); }
-.history-row.is-pinned { border-left: 2px solid var(--brand); padding-left: 8px; }
 
 .history-row-select {
   flex: 0 0 auto;
@@ -2896,20 +2895,6 @@ path.leaflet-interactive:focus {
   cursor: pointer;
   text-align: left;
 }
-.history-row-name:hover { color: var(--brand); }
-.history-row-name-input {
-  flex: 0 0 auto;
-  width: 180px;
-  padding: 2px 6px;
-  font-size: 0.82rem;
-  font-weight: 600;
-  border: 1px solid var(--border);
-  border-radius: 0;
-  background: var(--surface);
-  color: var(--text);
-  outline: none;
-}
-.history-row-name-input:focus { border-color: var(--brand); }
 .history-row-time { color: var(--muted); white-space: nowrap; }
 .history-row-file {
   color: var(--muted);
@@ -2937,36 +2922,6 @@ path.leaflet-interactive:focus {
   cursor: default;
 }
 .history-row-name--static:hover { color: var(--text); }
-
-/* Keeps backend rows aligned with browser rows, which lead with a checkbox. */
-.history-row-select-placeholder {
-  flex: 0 0 auto;
-  width: 15px;
-  height: 15px;
-}
-
-/* Source chip — Browser vs Backend. Distinct fills so a run's storage
-   location is unambiguous at a glance. */
-.history-row-source {
-  flex: 0 0 auto;
-  padding: 1px 8px;
-  font-size: 0.68rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  border: 1px solid var(--border);
-  border-radius: 0;
-  white-space: nowrap;
-}
-.history-row-source--browser {
-  color: var(--muted);
-  background: var(--surface);
-}
-.history-row-source--backend {
-  color: var(--brand);
-  border-color: var(--brand);
-  background: var(--surface);
-}
 
 .hist-view-btn {
   flex-shrink: 0;

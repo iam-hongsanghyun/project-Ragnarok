@@ -1,7 +1,7 @@
 """Persistent server-side store for completed optimisation runs.
 
-When the user ticks "Store in backend" in the run dialog, the solve worker
-hands the finished bundle to :func:`store_run`, which writes two files to
+Every successful solve is persisted automatically: the solve worker hands the
+finished bundle to :func:`store_run`, which writes two files to
 ``backend/data/runs``:
 
 * ``<name>.json`` — the full bundle (model + scenario + options + result).
@@ -126,7 +126,39 @@ def store_run(
         ) or {}
 
         summary = result.get("summary") if isinstance(result, dict) else None
-        kpis = summary[:4] if isinstance(summary, list) else []
+        summary = summary if isinstance(summary, list) else []
+        kpis = summary[:4]
+
+        carrier_mix = result.get("carrierMix") if isinstance(result, dict) else None
+        carrier_mix = carrier_mix if isinstance(carrier_mix, list) else []
+
+        # Light pathway/rolling projections for Comparison — no time-series, only
+        # the small fields the Comparison tab reads.
+        pathway_src = result.get("pathway") if isinstance(result, dict) else None
+        pathway_meta: dict[str, Any] | None = None
+        if isinstance(pathway_src, dict):
+            pathway_meta = {
+                "enabled": pathway_src.get("enabled"),
+                "periods": pathway_src.get("periods"),
+                "selectedPeriod": pathway_src.get("selectedPeriod"),
+                "summaries": pathway_src.get("summaries"),
+            }
+
+        rolling_src = result.get("rolling") if isinstance(result, dict) else None
+        rolling_meta: dict[str, Any] | None = None
+        if isinstance(rolling_src, dict):
+            rolling_meta = {
+                "enabled": rolling_src.get("enabled"),
+                "horizonSnapshots": rolling_src.get("horizonSnapshots"),
+                "overlapSnapshots": rolling_src.get("overlapSnapshots"),
+                "windowCount": rolling_src.get("windowCount"),
+            }
+
+        scenario_label = (
+            (scenario.get("label") if isinstance(scenario, dict) else None)
+            or (options.get("scenarioLabel") if isinstance(options, dict) else None)
+            or None
+        )
 
         bundle = {
             "savedAt": saved_at,
@@ -156,6 +188,13 @@ def store_run(
             "componentCounts": component_counts,
             "kpis": kpis,
             "sizeBytes": size_bytes,
+            # Light fields that power Analytics → Comparison without a heavy
+            # bundle fetch. No time-series — only the small projections.
+            "summary": summary,
+            "carrierMix": carrier_mix,
+            "pathway": pathway_meta,
+            "rolling": rolling_meta,
+            "scenarioLabel": scenario_label,
         }
         (RUNS_DIR / f"{name}.meta.json").write_text(json.dumps(meta), encoding="utf-8")
 

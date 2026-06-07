@@ -1,7 +1,7 @@
 /**
  * Cross-scenario pivot card.
  *
- * Groups run-history entries by their `scenarioLabel`, picks the latest
+ * Groups backend-stored run metas by their `scenarioLabel`, picks the latest
  * run per scenario, and pivots a small set of headline KPIs into a
  * scenario-wise comparison table. Complements the existing
  * RunComparisonTable (which compares individual runs, not scenarios).
@@ -10,17 +10,17 @@
  * included runs — otherwise it's redundant with the per-run comparison.
  */
 import React from 'react';
-import { RunHistoryEntry, RunResults } from 'lib/types';
+import { BackendRunMeta } from 'lib/types';
 
 interface Props {
-  runs: RunHistoryEntry[];
-  activeResults: RunResults | null;
+  runs: BackendRunMeta[];
+  activeRunName: string | null;
   currencySymbol: string;
 }
 
 interface ScenarioRow {
   label: string;
-  entry: RunHistoryEntry;
+  entry: BackendRunMeta;
   isActive: boolean;
 }
 
@@ -30,8 +30,8 @@ interface MetricRow {
   values: Array<{ scenarioLabel: string; value: number; raw: string | null }>;
 }
 
-function pickNumericSummary(entry: RunHistoryEntry, predicate: (label: string) => boolean): { value: number; raw: string } | null {
-  const s = entry.results.summary.find((x) => predicate(x.label));
+function pickNumericSummary(entry: BackendRunMeta, predicate: (label: string) => boolean): { value: number; raw: string } | null {
+  const s = (entry.summary ?? []).find((x) => predicate(x.label));
   if (!s) return null;
   const m = s.value.replace(/,/g, '').match(/[-+]?[0-9]*\.?[0-9]+/);
   const n = m ? parseFloat(m[0]) : NaN;
@@ -39,13 +39,13 @@ function pickNumericSummary(entry: RunHistoryEntry, predicate: (label: string) =
   return { value: n, raw: s.value };
 }
 
-function carrierMixGwh(entry: RunHistoryEntry): number {
-  return entry.results.carrierMix.reduce((sum, m) => sum + m.value, 0) / 1000;
+function carrierMixGwh(entry: BackendRunMeta): number {
+  return (entry.carrierMix ?? []).reduce((sum, m) => sum + m.value, 0) / 1000;
 }
 
-export function ScenarioPivotCard({ runs, activeResults, currencySymbol }: Props) {
+export function ScenarioPivotCard({ runs, activeRunName, currencySymbol }: Props) {
   // Group by scenarioLabel, taking the latest savedAt per group.
-  const byScenario = new Map<string, RunHistoryEntry>();
+  const byScenario = new Map<string, BackendRunMeta>();
   for (const entry of runs) {
     const key = (entry.scenarioLabel ?? '').trim();
     if (!key) continue;
@@ -58,7 +58,7 @@ export function ScenarioPivotCard({ runs, activeResults, currencySymbol }: Props
   const scenarios: ScenarioRow[] = Array.from(byScenario.entries()).map(([label, entry]) => ({
     label,
     entry,
-    isActive: entry.results === activeResults,
+    isActive: entry.name === activeRunName,
   }));
 
   const metricRows: MetricRow[] = [

@@ -10,14 +10,12 @@ import {
   CustomConstraint,
   GridRow,
   PathwayConfig,
-  ProjectImportProvenance,
   RollingHorizonConfig,
   StochasticConfig,
   SecurityConstrainedConfig,
   CarbonPriceScheduleEntry,
   CarbonScheduleProfile,
   Primitive,
-  RunHistoryEntry,
   BackendRunMeta,
   RunResults,
   ScenarioCatalog,
@@ -30,11 +28,10 @@ import {
   WorkspaceTab,
   AnalyticsSubTab,
 } from 'lib/types';
-import { API_BASE, DEFAULT_CONSTRAINTS, getDefaultRowForSheet, MAX_UNPINNED_HISTORY, PYPSA_SCHEMA_META, RUN_POLLING, RUN_WINDOW, SHEETS } from 'lib/constants';
-import { canonicalizeOutputSeries, canonicalizeTemporalRows, createEmptyWorkbook, exportWorkbook, normalizeInputDatesToIso, parseProjectFile, parseWorkbook, projectWorkbookToArrayBuffer, workbookToArrayBuffer } from 'lib/workbook/workbook';
+import { API_BASE, DEFAULT_CONSTRAINTS, getDefaultRowForSheet, RUN_POLLING, RUN_WINDOW, SHEETS } from 'lib/constants';
+import { canonicalizeOutputSeries, canonicalizeTemporalRows, createEmptyWorkbook, exportWorkbook, normalizeInputDatesToIso, parseProjectFile, parseWorkbook, workbookToArrayBuffer } from 'lib/workbook/workbook';
 import { mergeWorkbookFragment } from 'lib/workbook/mergeFragment';
 import type { WorkbookFragment } from 'lib/api/databases';
-import { fullResultsArrayBuffer } from 'lib/export/results';
 import { getBounds, getBusIndex, carrierColor, numberValue, orderByCarrierRows, setCarrierColorOverrides, snapshotMaxFromWorkbook, stringValue } from 'lib/utils/helpers';
 import { usePersistedState } from 'shared/hooks/usePersistedState';
 import { RagnarokLogo } from 'shared/components/RagnarokLogo';
@@ -48,7 +45,6 @@ import { dslToSpecs } from 'lib/constraints/dsl';
 import { buildScenarioPreset, defaultScenarioCatalog, readScenarioCatalogFromModel, sameScenarioCatalog, writeScenarioCatalogToModel } from 'lib/results/scenarios';
 import { readCarbonLibraryFromModel, writeCarbonLibraryToModel, sameCarbonLibrary } from 'lib/results/carbonLibrary';
 import { saveSessionModel, saveSessionControls, loadSession, clearSession } from 'lib/storage/sessionStore';
-import { saveHistory, loadHistory } from 'lib/storage/historyStore';
 import { RunDialog } from './features/run/RunDialog';
 import { SettingsView } from './views/SettingsView';
 import { PluginsView } from './views/PluginsView';
@@ -131,9 +127,11 @@ function AppInner() {
   const [chartSections, setChartSections] = useState<ChartSectionConfig[]>([]);
   const [runDialogOpen, setRunDialogOpen] = useState(false);
   const [dryRun, setDryRun] = useState(false);
-  const [storeInBackend, setStoreInBackend] = useState(false);
-  const [runHistory, setRunHistory] = useState<RunHistoryEntry[]>([]);
   const [backendRuns, setBackendRuns] = useState<BackendRunMeta[]>([]);
+  // Name of the backend run currently shown in the viewer — drives the
+  // Comparison "active" column highlight. Set after a run completes (to the
+  // newest stored meta) and when opening a stored run.
+  const [activeRunName, setActiveRunName] = useState<string | null>(null);
   const [pathwayConfig, setPathwayConfig] = useState<PathwayConfig>(() => defaultPathwayConfig());
   const [rollingConfig, setRollingConfig] = useState<RollingHorizonConfig>(() => defaultRollingConfig());
   const [customDsl, setCustomDsl] = useState<string>('');
@@ -151,7 +149,6 @@ function AppInner() {
   } | null>(null);
   const [status, setStatus] = useState('Ready. Open a workbook or import a project.');
   const [fileHandle, setFileHandle] = useState<BrowserFileHandle | null>(null);
-  const [projectProvenance, setProjectProvenance] = useState<ProjectImportProvenance | null>(null);
   const [jumpTo, setJumpTo] = useState<{ sheet: string; rowIndex: number } | null>(null);
   const [runElapsed, setRunElapsed] = useState(0);
   const jobIdRef = useRef<string | null>(null);
@@ -320,7 +317,6 @@ function AppInner() {
     setChartSections([]);
     setValidateResult(null);
     setAnalyticsFocus({ type: 'system' });
-    setProjectProvenance(null);
     const fallbackPathway = {
       ...nextPathway,
       selectedPeriod: getDefaultSelectedPeriod(nextPathway),
@@ -533,32 +529,9 @@ function AppInner() {
     return () => window.clearTimeout(id);
   }, [filename, carbonPrice, carbonPriceSchedule, snapshotStart, snapshotEnd, snapshotWeight, forceLp]);
 
-  // ── Run history persistence (IndexedDB, separate DB) ────────────────────
-  // Hydrate the saved run history on load so past runs survive a reload, then
-  // auto-save (debounced) whenever it changes. Best-effort: a storage failure
-  // never blocks a run. We skip hydration if a run already appended an entry
-  // before the async load resolved, so we don't clobber it.
-  const historyHydratedRef = useRef(false);
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const saved = await loadHistory();
-        if (!cancelled && saved.length > 0) {
-          setRunHistory((current) => (current.length > 0 ? current : saved));
-        }
-      } finally {
-        if (!cancelled) historyHydratedRef.current = true;
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (!historyHydratedRef.current) return undefined;
-    const id = window.setTimeout(() => { void saveHistory(runHistory); }, 500);
-    return () => window.clearTimeout(id);
-  }, [runHistory]);
+  // Run history lives entirely on the backend (the single source of truth) —
+  // see `refreshBackendRuns` / `backendRuns` below. There is no browser-side
+  // history store anymore.
 
   const bounds = useMemo(() => getBounds(model), [model.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
   const busIndex = useMemo(() => getBusIndex(model), [model.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
@@ -654,7 +627,6 @@ function AppInner() {
     try {
       const { model: nextModel, outputs, metadata } = await parseProjectFile(file);
       const importedPathway = readPathwayConfigFromModel(nextModel);
-      const importedScenarios = readScenarioCatalogFromModel(nextModel);
       const importedRunState = metadata.runState;
       const importedSettings = metadata.settings;
       const importDateFormat = importedSettings?.dateFormat ?? settings.dateFormat;
@@ -683,14 +655,6 @@ function AppInner() {
           }));
         }
       }
-      setProjectProvenance({
-        exportedAt: metadata.provenance?.exportedAt ?? '',
-        exportedFilename: metadata.provenance?.exportedFilename ?? file.name,
-        schemaCommitSha: metadata.provenance?.schemaCommitSha ?? '',
-        schemaGeneratedAt: metadata.provenance?.schemaGeneratedAt ?? '',
-        importedFromFilename: file.name,
-        importedAt: new Date().toISOString(),
-      });
       const hasOutputs =
         Object.keys(outputs.static).length > 0 || Object.keys(outputs.series).length > 0;
       if (hasOutputs) {
@@ -739,35 +703,9 @@ function AppInner() {
           discountRate: importedDiscountRate,
         });
         setAnalyticsFocus({ type: 'system' });
-        const scenarioLabel = importedScenarios.scenarios.find((scenario) => scenario.id === importedRunState?.activeScenarioId)?.label ?? null;
-        const importedEntry: RunHistoryEntry = {
-          id: Date.now().toString(),
-          label: 'Imported project',
-          scenarioLabel,
-          savedAt: new Date().toISOString(),
-          filename: file.name,
-          carbonPrice: importedCarbonPrice,
-          discountRate: importedDiscountRate,
-          snapshotStart: importedRunState?.snapshotStart ?? 0,
-          snapshotEnd: importedRunState?.snapshotEnd ?? snapshotMaxFromWorkbook(nextModel.snapshots),
-          snapshotWeight: importedSnapshotWeight,
-          activeConstraints: metadata.constraints ?? [],
-          componentCounts: Object.fromEntries(
-            SHEETS.map((sheet) => [sheet, nextModel[sheet]?.length ?? 0]).filter(([, n]) => n > 0),
-          ),
-          pinned: false,
-          inComparison: true,
-          results: imported,
-          model: structuredClone(nextModel),
-        };
-        // Prepend to the session history rather than replacing it: prior runs
-        // stay available for comparison across a project import.
-        setRunHistory((hist) => {
-          const withNew = [importedEntry, ...hist];
-          const pinned = withNew.filter((e) => e.pinned);
-          const unpinned = withNew.filter((e) => !e.pinned).slice(0, MAX_UNPINNED_HISTORY);
-          return [...pinned, ...unpinned];
-        });
+        // Imported projects are not solved on this backend, so they do not enter
+        // backend run history — the result is simply shown in the viewer.
+        setActiveRunName(null);
         setStatus(`Imported project: ${file.name}. Full project state restored.`);
       } else {
         setStatus(`Imported project (inputs only): ${file.name}. Metadata restored.`);
@@ -782,139 +720,42 @@ function AppInner() {
     }
   };
 
-  // Persist `data` to disk, prompting for path + file name via the File System
-  // Access API when available (Chromium), and falling back to a normal download
-  // elsewhere. Shared by every export (project, result workbook, HTML report) so
-  // they behave identically. Returns silently when the user cancels the picker.
-  const saveFileWithPicker = async (opts: {
-    suggestedName: string;
-    description: string;
-    mime: string;
-    extensions: string[];
-    // Built lazily so the picker can open first (preserving the transient
-    // user-activation window) before any heavy serialisation runs, and so any
-    // build error is surfaced as a toast rather than a swallowed rejection.
-    buildData: () => BlobPart;
-    successMsg: string;
-  }): Promise<void> => {
-    const { suggestedName, description, mime, extensions, buildData, successMsg } = opts;
-    const saver = (window as any).showSaveFilePicker;
-    if (saver) {
-      let handle: any;
-      try {
-        handle = await saver({
-          suggestedName,
-          types: [{ description, accept: { [mime]: extensions } }],
-        });
-      } catch (error) {
-        if ((error as Error)?.name === 'AbortError') return;   // user cancelled
-        const msg = error instanceof Error ? error.message : 'Export failed.';
-        setStatus(msg);
-        showToast(msg, 'error');
-        return;
-      }
-      try {
-        const data = buildData();
-        const writable = await handle.createWritable();
-        await writable.write(new Blob([data], { type: mime }));
-        await writable.close();
-        showToast(`${successMsg} → ${handle.name || suggestedName}`, 'success');
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : 'Export failed.';
-        setStatus(msg);
-        showToast(msg, 'error');
-      }
-      return;
-    }
+  const handleExportProject = async () => {
+    // Export the currently viewed run as one coherent project workbook: its own
+    // topology (`analyticsModel`) paired with its solved outputs. The workbook
+    // is built SERVER-SIDE (POST /api/export/project) so the heavy SheetJS
+    // build no longer runs in — and OOMs — the browser tab. We just stream the
+    // returned blob to a download.
+    const base = filename.replace(/\.xlsx$/i, '') || 'ragnarok_project';
+    const out = `${base}_project.xlsx`;
     try {
-      const blob = new Blob([buildData()], { type: mime });
+      const resp = await fetch(`${API_BASE}/api/export/project`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: analyticsModel, result: displayResults ?? {} }),
+      });
+      if (!resp.ok) {
+        const detail = await resp.text();
+        throw new Error(detail || `Export failed (HTTP ${resp.status})`);
+      }
+      const blob = await resp.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = suggestedName;
+      a.download = out;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 0);
-      showToast(successMsg, 'success');
+      const successMsg = displayResults?.outputs
+        ? 'Project (inputs + solved outputs) exported'
+        : 'Project (inputs only) exported';
+      showToast(`${successMsg} → ${out}`, 'success');
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Export failed.';
       setStatus(msg);
       showToast(msg, 'error');
     }
-  };
-
-  const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-
-  const handleExportProject = async () => {
-    // Export the currently viewed run as one coherent snapshot: its own
-    // topology (`analyticsModel`) paired with its outputs. Run history is a
-    // comparison-only, session-scoped list and is never written to the file —
-    // to export a different run, view it first (it becomes the current run).
-    const base = filename.replace(/\.xlsx$/i, '') || 'ragnarok_project';
-    const out = `${base}_project.xlsx`;
-    const metadata = {
-      pluginAnalytics: results?.pluginAnalytics,
-      // Snapshot every installed plugin's stored form-config so the
-      // exported workbook reproduces plugin state on the receiving end.
-      // Without this, sharing a .xlsx loses everything the user typed
-      // into their plugin panels.
-      pluginConfigs: frontendPlugins.getAllConfigs(),
-      co2Shadow: results?.co2Shadow,
-      narrative: results?.narrative,
-      runMeta: results?.runMeta,
-      pathway: results?.pathway,
-      rolling: results?.rolling,
-      settings,
-      constraints,
-      runState: {
-        snapshotStart,
-        snapshotEnd,
-        snapshotWeight,
-        carbonPrice,
-        forceLp,
-        activeScenarioId: scenarioCatalog.activeScenarioId,
-      },
-      provenance: {
-        exportedAt: new Date().toISOString(),
-        exportedFilename: filename,
-        schemaCommitSha: PYPSA_SCHEMA_META.commit_sha ?? PYPSA_SCHEMA_META.pypsa_version ?? '',
-        schemaGeneratedAt: PYPSA_SCHEMA_META.generated_at ?? '',
-        importedFromFilename: projectProvenance?.importedFromFilename ?? null,
-        importedAt: projectProvenance?.importedAt ?? null,
-      },
-    };
-    const successMsg = results?.outputs
-      ? 'Project (inputs + solved outputs) exported'
-      : 'Project (inputs only) exported';
-
-    await saveFileWithPicker({
-      suggestedName: out,
-      description: 'Excel Workbook',
-      mime: XLSX_MIME,
-      extensions: ['.xlsx'],
-      buildData: () => projectWorkbookToArrayBuffer(analyticsModel, results?.outputs, metadata),
-      successMsg,
-    });
-  };
-
-  const handleExportResultWorkbook = async () => {
-    if (!displayResults) {
-      // Don't no-op silently — the usual cause is no successful run yet
-      // (e.g. the last solve errored), which otherwise looks like "export
-      // does nothing".
-      showToast('No results to export yet — run the model first.', 'error');
-      return;
-    }
-    const base = filename.replace(/\.xlsx$/i, '') || 'ragnarok';
-    await saveFileWithPicker({
-      suggestedName: `${base}_results.xlsx`,
-      description: 'Excel Workbook',
-      mime: XLSX_MIME,
-      extensions: ['.xlsx'],
-      buildData: () => fullResultsArrayBuffer(analyticsModel, displayResults),
-      successMsg: 'Result workbook exported',
-    });
   };
 
 
@@ -1195,7 +1036,20 @@ function AppInner() {
     setStatus(`Cleared all rows from ${sheet}.`);
   };
 
-  const handleRestoreRun = (entry: RunHistoryEntry) => {
+  // The subset of a fetched backend bundle that `handleRestoreRun` needs to
+  // load a stored run back into the viewer. Built in `handleOpenBackendRun`.
+  type RestorableRun = {
+    label: string;
+    results: RunResults;
+    model?: WorkbookModel;
+    carbonPrice: number;
+    discountRate?: number;
+    snapshotStart: number;
+    snapshotEnd: number;
+    snapshotWeight: number;
+  };
+
+  const handleRestoreRun = (entry: RestorableRun) => {
     // Older persisted entries may predate canonicalisation — re-canonicalise
     // the restored outputs in place so display/derivation see ISO-`T` + leading
     // `snapshot` consistently.
@@ -1265,50 +1119,22 @@ function AppInner() {
     showToast(`Viewing ${entry.label}`, 'success');
   };
 
-  const handleRenameHistoryEntry = (id: string, label: string) => {
-    setRunHistory((h) => h.map((e) => (e.id === id ? { ...e, label } : e)));
-  };
-
-  const handlePinHistoryEntry = (id: string, pinned: boolean) => {
-    setRunHistory((h) => {
-      const updated = h.map((e) => (e.id === id ? { ...e, pinned } : e));
-      const pinnedEntries = updated.filter((e) => e.pinned);
-      const unpinnedEntries = updated.filter((e) => !e.pinned).slice(0, MAX_UNPINNED_HISTORY);
-      return [...pinnedEntries, ...unpinnedEntries];
-    });
-  };
-
-  const handleDeleteHistoryEntry = (id: string) => {
-    setRunHistory((h) => h.filter((e) => e.id !== id));
-  };
-
-  const handleDeleteHistoryEntries = (ids: string[]) => {
-    setRunHistory((h) => h.filter((e) => !ids.includes(e.id)));
-  };
-
-  const handleClearHistory = () => {
-    if (runHistory.length === 0) return;
-    if (!window.confirm('Clear all run history? This removes every run (including pinned) from the comparison list. The model and the currently displayed result are not affected.')) {
-      return;
-    }
-    setRunHistory([]);
-  };
-
-  const handleToggleComparison = (id: string, inComparison: boolean) => {
-    setRunHistory((h) => h.map((e) => (e.id === id ? { ...e, inComparison } : e)));
-  };
-
   // ── Backend-stored runs ─────────────────────────────────────────────────
-  // Runs persisted server-side via the "Store in backend" option. Listed in
-  // the History tab alongside browser runs but clearly tagged as Backend.
-  const refreshBackendRuns = useCallback(async () => {
+  // Every successful solve is persisted server-side (the backend is the single
+  // source of truth for run history). These handlers list, open, download, and
+  // delete those runs; `backendRuns` powers both the History tab and Analytics
+  // → Comparison.
+  const refreshBackendRuns = useCallback(async (): Promise<BackendRunMeta[]> => {
     try {
       const resp = await fetch(`${API_BASE}/api/runs`);
-      if (!resp.ok) return;
+      if (!resp.ok) return [];
       const data = await resp.json();
-      setBackendRuns(Array.isArray(data.runs) ? data.runs : []);
+      const runs: BackendRunMeta[] = Array.isArray(data.runs) ? data.runs : [];
+      setBackendRuns(runs);
+      return runs;
     } catch {
-      // Backend unreachable — leave the list as-is; History still shows browser runs.
+      // Backend unreachable — leave the list as-is.
+      return [];
     }
   }, []);
 
@@ -1325,25 +1151,18 @@ function AppInner() {
       }
       const bundle = await resp.json();
       const result: RunResults = bundle.result;
-      const entry: RunHistoryEntry = {
-        id: name,
+      handleRestoreRun({
         label: bundle.label || name,
-        scenarioLabel: bundle.scenario?.label ?? null,
-        savedAt: bundle.savedAt,
-        filename: bundle.filename || '',
+        results: result,
+        model: bundle.model,
         carbonPrice: bundle.scenario?.carbonPrice ?? 0,
         discountRate: bundle.scenario?.discountRate,
         snapshotStart: bundle.snapshotStart ?? 0,
         snapshotEnd: bundle.snapshotEnd ?? 0,
         snapshotWeight: bundle.snapshotWeight ?? 1,
-        activeConstraints: bundle.scenario?.constraints ?? [],
-        componentCounts: bundle.result?.runMeta?.componentCounts ?? {},
-        pinned: false,
-        inComparison: false,
-        results: result,
-        model: bundle.model,
-      };
-      handleRestoreRun(entry);
+      });
+      // Mark this stored run as the active one so Comparison highlights it.
+      setActiveRunName(name);
     } catch {
       showToast('Stored run could not be opened.', 'error');
     }
@@ -1359,6 +1178,7 @@ function AppInner() {
     } catch {
       // Ignore — refresh below reflects the real server state regardless.
     }
+    setActiveRunName((current) => (current === name ? null : current));
     void refreshBackendRuns();
   };
 
@@ -1369,6 +1189,7 @@ function AppInner() {
         fetch(`${API_BASE}/api/runs/${encodeURIComponent(name)}`, { method: 'DELETE' }).catch(() => undefined),
       ),
     );
+    setActiveRunName((current) => (current && names.includes(current) ? null : current));
     void refreshBackendRuns();
   };
 
@@ -1532,7 +1353,9 @@ function AppInner() {
       // has a channel without a payload-shape change.
       backend: 'pypsa',
       snapshotCount, snapshotStart, snapshotEnd, snapshotWeight, forceLp,
-      storeInBackend,
+      // Carried so the backend run store can label the stored run with the
+      // active scenario for Analytics → Comparison's cross-scenario pivot.
+      scenarioLabel: activeScenario?.label ?? null,
       filename,
       dateFormat: settings.dateFormat,
       solverThreads: settings.solverThreads, solverType: settings.solverType,
@@ -1678,36 +1501,17 @@ function AppInner() {
       // next poll. The LogPane listens for this on `window`. No-op when
       // the Log tab is not mounted.
       window.dispatchEvent(new CustomEvent('ragnarok:log-refresh'));
-      setRunHistory((hist) => {
-        const next = hist.length + 1;
-        const entry: RunHistoryEntry = {
-          id: Date.now().toString(),
-          label: `Run ${next}`,
-          scenarioLabel: activeScenario?.label ?? null,
-          savedAt: new Date().toISOString(),
-          filename,
-          carbonPrice,
-          discountRate: settings.discountRate,
-          snapshotStart,
-          snapshotEnd,
-          snapshotWeight,
-          activeConstraints: constraints.filter((c) => c.enabled),
-          componentCounts: Object.fromEntries(
-            SHEETS.map((sheet) => [sheet, modelForRun[sheet]?.length ?? 0]).filter(([, n]) => n > 0),
-          ),
-          pinned: false,
-          inComparison: true,
-          results: rawResults,
-          model: structuredClone(modelForRun),
-        };
-        const withNew = [entry, ...hist];
-        const pinned = withNew.filter((e) => e.pinned);
-        const unpinned = withNew.filter((e) => !e.pinned).slice(0, MAX_UNPINNED_HISTORY);
-        return [...pinned, ...unpinned];
-      });
-      // If this run was stored server-side, refresh the backend list so the
-      // new entry appears in History without a manual reload.
-      if (storeInBackend) void refreshBackendRuns();
+      // Every run is stored server-side automatically. Refresh the backend list
+      // so the new run appears in History and Comparison without a manual
+      // reload, then mark the newest stored meta (max savedAt) as active so
+      // Comparison highlights this run.
+      void (async () => {
+        const runs = await refreshBackendRuns();
+        if (runs.length > 0) {
+          const newest = runs.reduce((a, b) => (a.savedAt >= b.savedAt ? a : b));
+          setActiveRunName(newest.name);
+        }
+      })();
     };
 
     // ── Step 3: Poll until done ──────────────────────────────────────────────
@@ -2034,7 +1838,6 @@ function AppInner() {
               onSaveAs={saveAsWorkbook}
               onImportProject={() => projectImportInputRef.current?.click()}
               onExportProject={handleExportProject}
-              onExportResult={handleExportResultWorkbook}
               onImportCsvFolder={() => csvFolderImportInputRef.current?.click()}
               onExportCsvFolder={handleExportCsvFolder}
               onImportNetcdf={() => netcdfImportInputRef.current?.click()}
@@ -2081,30 +1884,17 @@ function AppInner() {
               systemLoadRows={systemLoadRows}
               systemPriceRows={systemPriceRows}
               storageRows={storageRows}
-              runHistory={runHistory}
               currencySymbol={settings.currencySymbol}
               pathwayConfig={pathwayConfig}
               onSelectedPeriodChange={(period) => setPathwayConfig((current) => ({ ...current, selectedPeriod: period }))}
-              onExportAll={handleExportResultWorkbook}
-              onToggleComparison={handleToggleComparison}
-              onRestoreRun={handleRestoreRun}
-              onRenameHistoryEntry={handleRenameHistoryEntry}
-              onPinHistoryEntry={handlePinHistoryEntry}
-              onDeleteHistoryEntry={handleDeleteHistoryEntry}
-              onClearHistory={handleClearHistory}
+              backendRuns={backendRuns}
+              activeRunName={activeRunName}
             />
           )}
 
           {tab === 'History' && (
             <HistoryView
-              runHistory={runHistory}
               backendRuns={backendRuns}
-              onRestoreRun={handleRestoreRun}
-              onRenameHistoryEntry={handleRenameHistoryEntry}
-              onPinHistoryEntry={handlePinHistoryEntry}
-              onDeleteHistoryEntry={handleDeleteHistoryEntry}
-              onDeleteHistoryEntries={handleDeleteHistoryEntries}
-              onClearHistory={handleClearHistory}
               onOpenBackendRun={handleOpenBackendRun}
               onDownloadBackendXlsx={handleDownloadBackendXlsx}
               onDeleteBackendRun={handleDeleteBackendRun}
@@ -2132,7 +1922,6 @@ function AppInner() {
         onClose={() => setRunDialogOpen(false)}
         forceLp={forceLp}
         dryRun={dryRun}
-        storeInBackend={storeInBackend}
         activeScenarioLabel={activeScenario?.label ?? null}
         activeConstraintCount={constraints.filter((row) => row.enabled).length}
         snapshotStart={snapshotStart}
@@ -2142,7 +1931,6 @@ function AppInner() {
         rollingConfig={rollingConfig}
         onForceLpChange={setForceLp}
         onDryRunChange={setDryRun}
-        onStoreInBackendChange={setStoreInBackend}
         onRun={handleRunModel}
       />
     </div>
