@@ -25,6 +25,7 @@ import {
   type SnapResult,
 } from 'lib/forge/snap';
 import { nonEmptySheets, roundFindings, snapFindings, type ForgeFinding } from 'lib/forge/validate';
+import { AdjustPanel } from './ForgeView.features/AdjustPanel';
 
 interface Props {
   model: WorkbookModel;
@@ -32,13 +33,14 @@ interface Props {
   onApplySheets: (partial: Record<string, GridRow[]>) => void;
 }
 
-type Operation = 'round' | 'snap';
+type Operation = 'round' | 'adjust' | 'snap';
 type OpGroup = 'Numeric' | 'Geospatial';
 
 /** Catalog of Forge tools, grouped. Add a new tool by adding an entry here
  *  (and its panel + findings wiring) — the rail renders groups from this. */
 const OPERATIONS: Array<{ id: Operation; label: string; group: OpGroup }> = [
   { id: 'round', label: 'Round / Ceil / Floor', group: 'Numeric' },
+  { id: 'adjust', label: 'Adjust values', group: 'Numeric' },
   { id: 'snap', label: 'Snap to nearest bus', group: 'Geospatial' },
 ];
 const OP_GROUPS: OpGroup[] = ['Numeric', 'Geospatial'];
@@ -129,7 +131,8 @@ export function ForgeView({ model, onApplySheets }: Props) {
   // Context-aware "what needs handling" for the active tool. Recomputes when
   // the tool or model changes, so switching tools re-reports automatically.
   const findings = useMemo<ForgeFinding[] | null>(() => {
-    if (!validated) return null;
+    // 'adjust' has no pre-scan; its preview is the per-card match count.
+    if (!validated || operation === 'adjust') return null;
     return operation === 'round'
       ? roundFindings(model, decimals, VALIDATION_CONFIG.magnitudeMax, VALIDATION_CONFIG.magnitudeMin)
       : snapFindings(model);
@@ -270,6 +273,13 @@ export function ForgeView({ model, onApplySheets }: Props) {
               </span>
             </div>
           </section>
+        ) : operation === 'adjust' ? (
+          <AdjustPanel
+            model={model}
+            sheetsWithRows={sheetsWithRows}
+            onApplySheets={onApplySheets}
+            onStatus={setStatus}
+          />
         ) : (
           <section className="forge-section">
             <header className="forge-section-header">

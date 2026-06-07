@@ -5493,6 +5493,69 @@ th:hover .col-delete-btn {
   align-items: center;
   gap: 12px;
 }
+
+/* ── Adjust-values tool ─────────────────────────────────────────────────── */
+.forge-adjust-card {
+  border: 1px solid var(--border);
+  border-radius: 0;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.forge-adjust-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.forge-adjust-row .sg-setting-label {
+  min-width: 72px;
+}
+.forge-adjust-select {
+  min-width: 180px;
+}
+.forge-adjust-filter {
+  padding-left: 4px;
+}
+.forge-adjust-and {
+  min-width: 40px;
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-style: italic;
+}
+.forge-adjust-eq {
+  color: var(--muted);
+  font-weight: 600;
+}
+.forge-adjust-remove {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0 6px;
+}
+.forge-adjust-remove:hover {
+  color: var(--danger);
+}
+.forge-adjust-match,
+.forge-adjust-hint {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.forge-adjust-addfilter {
+  font-size: 0.78rem;
+}
+.forge-adjust-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+}
 .forge-report {
   border: 1px solid var(--border);
   border-radius: 6px;
