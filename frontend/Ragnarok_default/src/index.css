@@ -5526,6 +5526,10 @@ th:hover .col-delete-btn {
 .forge-adjust-select {
   min-width: 0;
 }
+.forge-adjust-amount {
+  width: 72px;
+  flex: 0 0 auto;
+}
 .forge-adjust-filter {
   padding-left: 4px;
 }

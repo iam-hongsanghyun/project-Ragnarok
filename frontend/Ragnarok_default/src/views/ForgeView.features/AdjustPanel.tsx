@@ -29,13 +29,10 @@ interface Props {
 }
 
 const ACTIONS: Array<{ value: AdjustAction; label: string }> = [
-  { value: 'multiply', label: 'Multiply (current × %)' },
-  { value: 'add', label: 'Add (current + value)' },
-  { value: 'set', label: 'Set (= value)' },
+  { value: 'multiply', label: 'Multiply (×%)' },
+  { value: 'add', label: 'Add (+)' },
+  { value: 'set', label: 'Set (=)' },
 ];
-
-const amountHint = (action: AdjustAction): string =>
-  action === 'multiply' ? '% (100 = unchanged)' : action === 'add' ? 'amount to add' : 'new value';
 
 let counter = 0;
 const newId = (): string => `adj_${(counter += 1)}_${counter}`;
@@ -150,18 +147,39 @@ function AdjustmentCard({
 
   return (
     <div className="forge-adjust-card">
-      <div className="forge-adjust-row">
-        <label className="sg-setting-label">Component</label>
+      {/* Spec — component · attribute · action · value, all on one line */}
+      <div className="forge-adjust-row forge-adjust-spec">
         <SearchableSelect
           className="forge-adjust-select"
           value={adj.sheet}
+          placeholder="component"
           options={sheetsWithRows.map((s) => ({ value: s, label: `${s} (${rowsOf(model, s).length})` }))}
           onChange={(v) => onChange({ sheet: v, filters: [], attribute: '' })}
         />
+        <SearchableSelect
+          className="forge-adjust-select"
+          value={adj.attribute}
+          placeholder="attribute"
+          options={numCols.map((c) => ({ value: c, label: c }))}
+          onChange={(v) => onChange({ attribute: v })}
+        />
+        <SearchableSelect
+          className="forge-adjust-select forge-adjust-action"
+          value={adj.action}
+          options={ACTIONS}
+          onChange={(v) => onChange({ action: v as AdjustAction, amount: v === 'multiply' ? 100 : 0 })}
+        />
+        <input
+          type="number"
+          className="forge-number forge-adjust-amount"
+          value={Number.isFinite(adj.amount) ? adj.amount : 0}
+          onChange={(e) => onChange({ amount: Number(e.target.value) })}
+        />
+        {adj.action === 'multiply' && <span className="forge-adjust-hint">%</span>}
         <button type="button" className="forge-adjust-remove" onClick={onRemove} aria-label="Remove adjustment">×</button>
       </div>
 
-      {/* Filters (AND) */}
+      {/* Filters — each "where col = val ×" on one line */}
       {adj.filters.map((f, idx) => (
         <div className="forge-adjust-row forge-adjust-filter" key={idx}>
           <span className="forge-adjust-and">{idx === 0 ? 'where' : 'and'}</span>
@@ -190,34 +208,6 @@ function AdjustmentCard({
           + Add filter
         </button>
         <span className="forge-adjust-match">{matches} row{matches === 1 ? '' : 's'} match</span>
-      </div>
-
-      {/* Attribute + action + amount */}
-      <div className="forge-adjust-row">
-        <label className="sg-setting-label">Attribute</label>
-        <SearchableSelect
-          className="forge-adjust-select"
-          value={adj.attribute}
-          placeholder="numeric attribute"
-          options={numCols.map((c) => ({ value: c, label: c }))}
-          onChange={(v) => onChange({ attribute: v })}
-        />
-      </div>
-      <div className="forge-adjust-row">
-        <label className="sg-setting-label">Action</label>
-        <SearchableSelect
-          className="forge-adjust-select"
-          value={adj.action}
-          options={ACTIONS}
-          onChange={(v) => onChange({ action: v as AdjustAction, amount: v === 'multiply' ? 100 : 0 })}
-        />
-        <input
-          type="number"
-          className="forge-number"
-          value={Number.isFinite(adj.amount) ? adj.amount : 0}
-          onChange={(e) => onChange({ amount: Number(e.target.value) })}
-        />
-        <span className="forge-adjust-hint">{amountHint(adj.action)}</span>
       </div>
     </div>
   );
