@@ -934,6 +934,13 @@ export interface ModuleConfigField {
   options?: Array<{ value: unknown; label: string }>;
   /** For 'select' / 'multi-select' fields: dynamic option source. Overrides `options`. */
   optionsFrom?: ModuleConfigOptionsFrom;
+  /**
+   * For 'select' fields: prepend an empty `''` option so the user can clear the
+   * selection back to unset. Label defaults to "— none —" (override with
+   * `emptyLabel`). Use for optional selects whose blank value is meaningful.
+   */
+  clearable?: boolean;
+  emptyLabel?: string;
   /** For 'file' fields: MIME types / extension filter passed to <input accept>. */
   accept?: string;
   /**

@@ -161,11 +161,18 @@ export function ConfigFieldRow({ fieldKey, field, value, onChange, carriers, mod
   // model/config, then the static list.
   const selectOptions = (): ResolvedOption[] => {
     const staticOpts = (field.options ?? []).map((opt) => ({ value: String(opt.value), label: String(opt.label ?? opt.value) }));
+    let opts: ResolvedOption[];
     if (field.optionsFrom?.source === 'server') {
       const dyn = optionsFromRows(field.optionsFrom, serverRows, formValues);
-      return dyn.length ? dyn : staticOpts;
+      opts = dyn.length ? dyn : staticOpts;
+    } else {
+      opts = resolveStaticOrDynamic(field.optionsFrom, staticOpts, { model, formValues });
     }
-    return resolveStaticOrDynamic(field.optionsFrom, staticOpts, { model, formValues });
+    // `clearable`: a blank option lets the user reset an optional select to unset.
+    if (field.clearable && field.type === 'select' && !opts.some((o) => o.value === '')) {
+      opts = [{ value: '', label: field.emptyLabel ?? '— none —' }, ...opts];
+    }
+    return opts;
   };
 
   if (!evaluateVisibleWhen(field.visibleWhen, formValues)) {
