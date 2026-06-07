@@ -112,7 +112,9 @@ function AppInner() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [tab, undo, redo]);
-  const [analyticsSubTab, setAnalyticsSubTab] = useState<AnalyticsSubTab>('Result');
+  // Persisted so the analytics sub-tab the user last viewed sticks across tab
+  // navigation and reloads — never auto-yanked back to a default.
+  const [analyticsSubTab, setAnalyticsSubTab] = usePersistedState<AnalyticsSubTab>('ui:analytics-subtab', 'Result');
   const [results, setResults] = useState<RunResults | null>(null);
   // Topology snapshot taken at the moment `results` were produced/restored.
   // Analytics (map, asset derivation) must reflect the run that owns the
@@ -133,7 +135,11 @@ function AppInner() {
   const [constraints, setConstraints] = useState<CustomConstraint[]>(DEFAULT_CONSTRAINTS);
   const [carbonPrice, setCarbonPrice] = useState<number>(0);
   const [forceLp, setForceLp] = useState<boolean>(false);
-  const [analyticsFocus, setAnalyticsFocus] = useState<AnalyticsFocus>({ type: 'system' });
+  // Persisted so the asset the user was inspecting (system / a bus / a
+  // generator …) survives tab navigation and reloads. Only the safety effect
+  // below clears it — and only when that asset is genuinely absent from the
+  // current results.
+  const [analyticsFocus, setAnalyticsFocus] = usePersistedState<AnalyticsFocus>('ui:analytics-focus', { type: 'system' });
   const [chartSections, setChartSections] = useState<ChartSectionConfig[]>([]);
   const [runDialogOpen, setRunDialogOpen] = useState(false);
   const [dryRun, setDryRun] = useState(false);
@@ -393,6 +399,7 @@ function AppInner() {
     forceLp,
     constraints,
     updateSettings,
+    setAnalyticsFocus,
   ]);
 
   const prepareModelForBackend = useCallback((source: WorkbookModel): WorkbookModel => {
@@ -588,7 +595,7 @@ function AppInner() {
     if (analyticsFocus.type === 'store' && displayResults.assetDetails.stores[analyticsFocus.key]) return;
     if (analyticsFocus.type === 'branch' && displayResults.assetDetails.branches[analyticsFocus.key]) return;
     setAnalyticsFocus({ type: 'system' });
-  }, [displayResults, analyticsFocus]);
+  }, [displayResults, analyticsFocus, setAnalyticsFocus]);
 
   const applyScenarioPreset = useCallback((scenario: ScenarioPreset) => {
     setScenarioCatalog((current) => ({
@@ -656,7 +663,7 @@ function AppInner() {
       const { name } = (await resp.json()) as { name?: string };
       await refreshBackendRuns();
       if (name) {
-        await handleOpenBackendRun(name, { navigate: true, restoreConstraints: true });
+        await handleOpenBackendRun(name, { restoreConstraints: true });
       }
       setStatus(`Imported project: ${file.name} — stored in History.`);
       showToast(`Project imported (${file.name})`, 'success');
@@ -1108,7 +1115,7 @@ function AppInner() {
 
   const handleOpenBackendRun = async (
     name: string,
-    opts?: { navigate?: boolean; restoreConstraints?: boolean },
+    opts?: { restoreConstraints?: boolean },
   ) => {
     try {
       const resp = await fetch(`${API_BASE}/api/runs/${encodeURIComponent(name)}`);
@@ -1135,12 +1142,9 @@ function AppInner() {
       if (opts?.restoreConstraints && Array.isArray(bundle.scenario?.constraints)) {
         setConstraints(bundle.scenario.constraints);
       }
-      // On import, jump to Analytics so the restored outputs are visible
-      // immediately (the run carries solved outputs).
-      if (opts?.navigate) {
-        setTab('Analytics');
-        setAnalyticsSubTab('Result');
-      }
+      // Intentionally do NOT switch tabs here — opening/importing a run leaves
+      // the user exactly where they are (the results are available the moment
+      // they choose to look at Analytics).
     } catch {
       showToast('Stored run could not be opened.', 'error');
     }
@@ -1376,8 +1380,8 @@ function AppInner() {
         });
         const result = await response.json();
         setValidateResult(result);
-        setTab('Analytics');
-        setAnalyticsSubTab('Validation');
+        // Don't auto-switch tabs — the pass/fail is reported via the toast/status
+        // below; the user opens Analytics → Validation themselves for detail.
         const vMsg = result.valid ? 'Validation passed.' : `Validation failed: ${result.errors.length} error(s).`;
         setStatus(vMsg);
         showToast(vMsg, result.valid ? 'success' : 'error');
@@ -1464,7 +1468,9 @@ function AppInner() {
       // edits don't silently recompute the displayed pathway KPIs.
       setResultsContext({ carbonPrice, snapshotWeight, discountRate: settings.discountRate });
       setRunStatus('done');
-      setAnalyticsFocus({ type: 'system' });
+      // Keep the user's current view/focus after a run — don't yank to the
+      // system overview. The safety effect clears focus only if the asset the
+      // user was inspecting is genuinely absent from the new results.
       const visible = rawResults.pathway?.enabled && rawResults.outputs
         ? deriveRunResults(modelForRun, rawResults.outputs, {
           carbonPrice,
