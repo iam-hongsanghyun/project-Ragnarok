@@ -22,6 +22,9 @@ export const CONSTRAINTS_SHEET = 'RAGNAROK_Constraints';
 export const RUN_STATE_SHEET = 'RAGNAROK_RunState';
 export const RUN_HISTORY_SHEET = 'RAGNAROK_RunHistory';
 export const PROVENANCE_SHEET = 'RAGNAROK_Provenance';
+// The backend embeds the complete run bundle as chunked JSON here for a lossless
+// re-import. The frontend parser ignores it (import goes through the backend).
+export const BUNDLE_SHEET = 'RAGNAROK_Bundle';
 
 export function normalizeCell(value: unknown): Primitive {
   if (value === undefined || value === null) return null;
@@ -443,6 +446,7 @@ function isProjectMetadataSheet(sheetName: string): boolean {
     RUN_STATE_SHEET,
     RUN_HISTORY_SHEET,
     PROVENANCE_SHEET,
+    BUNDLE_SHEET,
   ].includes(sheetName);
 }
 

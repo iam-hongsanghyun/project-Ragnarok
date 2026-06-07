@@ -430,17 +430,24 @@ async def import_project(file: UploadFile) -> dict[str, Any]:
 
     raw = await file.read()
     filename = file.filename or "imported_project.xlsx"
-    try:
+
+    def _parse_and_store() -> dict[str, Any] | None:
         bundle = project_workbook.workbook_to_bundle(raw, filename=filename)
+        return run_store.store_run(
+            bundle.get("model") or {},
+            bundle.get("scenario") or {},
+            bundle.get("options") or {},
+            bundle.get("result") or {},
+        )
+
+    # Parsing the workbook and (re)building the stored xlsx are heavy, synchronous
+    # CPU work. Run them in a worker thread so they never block the event loop —
+    # otherwise a large import freezes EVERY request, including the boot screen's
+    # /api/status poll (which is why a mid-import browser reload hung on startup).
+    try:
+        meta = await asyncio.to_thread(_parse_and_store)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"Project import failed: {exc}") from exc
-
-    meta = run_store.store_run(
-        bundle.get("model") or {},
-        bundle.get("scenario") or {},
-        bundle.get("options") or {},
-        bundle.get("result") or {},
-    )
     if meta is None:
         raise HTTPException(status_code=500, detail="Imported project could not be stored.")
     return {"meta": meta, "name": meta.get("name")}

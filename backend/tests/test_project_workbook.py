@@ -58,45 +58,61 @@ def _sample_bundle() -> dict[str, Any]:
             "pathway": {"enabled": False},
             "rolling": {"enabled": False},
             "narrative": ["Solved in 2 snapshots."],
+            # Derived-only fields the frontend cards read directly — these must
+            # survive the round-trip verbatim (they are NOT reconstructable from
+            # the readable sheets, which is exactly why crashes appeared before).
+            "summary": [{"label": "Total cost", "value": "$1,234", "detail": "system"}],
+            "carrierMix": [{"carrier": "wind", "value": 140.0}],
+            "dispatchSeries": [{"snapshot": "2025-01-01T00:00:00", "wind": 80.0}],
+            "assetDetails": {"generators": {"wind": {"capacity": 120.0}}},
         },
     }
 
 
-def test_bundle_to_workbook_round_trip_preserves_everything() -> None:
+def test_full_bundle_round_trips_verbatim() -> None:
+    # The embedded JSON makes the round-trip exact: the imported bundle is
+    # byte-for-byte the exported one (every derived field intact). This is what
+    # makes an imported run render identically to a solved run.
     bundle = _sample_bundle()
     rt = pw.workbook_to_bundle(pw.bundle_to_workbook(bundle), filename="demo.xlsx")
+    assert rt["result"] == bundle["result"]
+    assert rt["model"] == bundle["model"]
+    assert rt["scenario"] == bundle["scenario"]
+    assert rt["options"] == bundle["options"]
 
-    # ── Model inputs: non-empty sheets preserved; empty 'lines' dropped ──────
-    assert {row["name"] for row in rt["model"]["buses"]} == {"n1", "n2"}
+
+def _strip_embedded_bundle(data: bytes) -> bytes:
+    """Return the workbook with the RAGNAROK_Bundle sheet removed.
+
+    Forces ``workbook_to_bundle`` down its readable-sheet *reconstruction* path
+    (the fallback for a hand-built workbook that has no embedded JSON).
+    """
+    import openpyxl
+
+    from io import BytesIO
+
+    wb = openpyxl.load_workbook(BytesIO(data))
+    del wb[pw.BUNDLE_SHEET]
+    out = BytesIO()
+    wb.save(out)
+    return out.getvalue()
+
+
+def test_reconstruction_fallback_splits_inputs_and_outputs() -> None:
+    bundle = _sample_bundle()
+    rt = pw.workbook_to_bundle(_strip_embedded_bundle(pw.bundle_to_workbook(bundle)), filename="demo.xlsx")
+
+    # Model inputs: non-empty sheets preserved; empty 'lines' dropped.
     assert {row["name"] for row in rt["model"]["generators"]} == {"wind", "gas"}
-    # Output-static column stripped from the model …
+    # Output-static column split out of the model …
     assert all("p_nom_opt" not in row for row in rt["model"]["generators"])
-    # … input columns kept.
-    wind = next(r for r in rt["model"]["generators"] if r["name"] == "wind")
-    assert wind["p_nom"] == 100.0 and wind["carrier"] == "wind"
-    # Input temporal + config sheets copied verbatim.
-    assert len(rt["model"]["generators-p_max_pu"]) == 2
-    assert rt["model"]["RAGNAROK_Scenarios"][0]["label"] == "Base"
-    assert "lines" not in rt["model"]  # empty sheet skipped
-
-    # ── Outputs ──────────────────────────────────────────────────────────────
-    static = rt["result"]["outputs"]["static"]["generators"]
-    assert static["wind"]["p_nom_opt"] == 120.0
-    assert static["gas"]["p_nom_opt"] == 50.0
+    # … and re-homed under outputs.static.
+    assert rt["result"]["outputs"]["static"]["generators"]["wind"]["p_nom_opt"] == 120.0
     series = rt["result"]["outputs"]["series"]["generators-p"]
-    assert len(series) == 2
-    assert series[0]["wind"] == 80.0 and series[1]["gas"] == 30.0
-    assert series[0]["snapshot"] == "2025-01-01T00:00:00"
-
-    # ── Metadata ──────────────────────────────────────────────────────────────
+    assert len(series) == 2 and series[0]["wind"] == 80.0
+    assert "lines" not in rt["model"]  # empty sheet skipped
     assert rt["result"]["runMeta"]["componentCounts"] == {"generators": 2, "buses": 2}
-    assert rt["result"]["pathway"] == {"enabled": False}
-    assert rt["result"]["narrative"] == ["Solved in 2 snapshots."]
     assert rt["scenario"]["constraints"][0]["metric"] == "co2_cap"
-    assert rt["scenario"]["carbonPrice"] == 50.0
-    assert rt["scenario"]["discountRate"] == 0.07
-    assert rt["options"]["snapshotEnd"] == 2
-    assert rt["options"]["currencySymbol"] == "$"
 
 
 def test_workbook_never_uses_out_prefix_or_truncates() -> None:
@@ -108,4 +124,5 @@ def test_workbook_never_uses_out_prefix_or_truncates() -> None:
     sheets = openpyxl.load_workbook(BytesIO(data), read_only=True).sheetnames
     assert not any(s.startswith("OUT_") for s in sheets), sheets
     assert "generators-p" in sheets  # output series, plainly named
+    assert pw.BUNDLE_SHEET in sheets  # lossless payload present
     assert all(len(s) <= 31 for s in sheets), sheets

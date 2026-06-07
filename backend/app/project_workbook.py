@@ -54,7 +54,15 @@ RUN_STATE_SHEET = "RAGNAROK_RunState"
 RUN_HISTORY_SHEET = "RAGNAROK_RunHistory"
 PROVENANCE_SHEET = "RAGNAROK_Provenance"
 
-# Config sheets live inside the model dict under these keys (copied verbatim).
+# The COMPLETE run bundle (model + scenario + options + the full derived result)
+# is embedded here as chunked JSON. This is the canonical, lossless payload: on
+# import it is read back verbatim, so an imported run is byte-for-byte the run
+# that was exported — no field is reconstructed or lost. The readable component
+# / series / metadata sheets are kept alongside it purely for human inspection
+# (and frontend-parser compatibility).
+BUNDLE_SHEET = "RAGNAROK_Bundle"
+
+# Sheets the importer must NOT treat as model/output data.
 _META_SHEETS = {
     RESULT_META_SHEET,
     PLUGIN_ANALYTICS_SHEET,
@@ -64,6 +72,7 @@ _META_SHEETS = {
     RUN_STATE_SHEET,
     RUN_HISTORY_SHEET,
     PROVENANCE_SHEET,
+    BUNDLE_SHEET,
 }
 
 # JSON metadata is chunked at this many chars/row (Excel cell limit is 32 767).
@@ -281,6 +290,14 @@ def bundle_to_workbook(bundle: dict[str, Any]) -> bytes:
         plugin_rows = _plugin_analytics_rows(result.get("pluginAnalytics") if isinstance(result, dict) else None)
         _write_rows(writer, PLUGIN_ANALYTICS_SHEET, plugin_rows, used)
 
+        # The complete, lossless bundle (read back verbatim on import).
+        bundle_rows = [
+            {"part": part, "json": chunk}
+            for part, chunk in enumerate(_chunks(json.dumps(bundle, default=str)))
+        ]
+        _write_rows(writer, BUNDLE_SHEET, bundle_rows, used)
+        wrote_any = True
+
         if not wrote_any:
             pd.DataFrame([{"info": "No data in this project."}]).to_excel(
                 writer, sheet_name="info", index=False
@@ -364,6 +381,25 @@ def workbook_to_bundle(data: bytes, filename: str = "") -> dict[str, Any]:
     (summary, dispatch, …) are intentionally *not* reconstructed here — the
     frontend recomputes them from ``outputs`` when the run is opened.
     """
+    excel = pd.ExcelFile(BytesIO(data), engine="openpyxl")
+
+    # Fast path: a Ragnarok-exported workbook embeds the complete bundle as
+    # chunked JSON. Read it back verbatim — the imported run is then identical
+    # to the exported one, with every derived field intact (no reconstruction).
+    if BUNDLE_SHEET in excel.sheet_names:
+        rows = _df_rows(excel.parse(BUNDLE_SHEET))
+        parts = {int(r.get("part") or 0): r.get("json") for r in rows if isinstance(r.get("json"), str)}
+        joined = "".join(parts[i] for i in sorted(parts))
+        if joined.strip():
+            try:
+                bundle = json.loads(joined)
+                bundle.setdefault("options", {}).setdefault("filename", filename)
+                return bundle
+            except json.JSONDecodeError:
+                logger.warning("RAGNAROK_Bundle JSON unreadable — falling back to sheet reconstruction")
+
+    # Fallback: reconstruct from the readable sheets (e.g. a hand-built workbook
+    # with no embedded bundle). Derived analytics are recomputed on the client.
     model: dict[str, Any] = {}
     static: dict[str, dict[str, Any]] = {}
     series: dict[str, Any] = {}
@@ -371,7 +407,6 @@ def workbook_to_bundle(data: bytes, filename: str = "") -> dict[str, Any]:
     scenario: dict[str, Any] = {}
     options: dict[str, Any] = {}
 
-    excel = pd.ExcelFile(BytesIO(data), engine="openpyxl")
     for sheet in excel.sheet_names:
         rows = _df_rows(excel.parse(sheet))
 
