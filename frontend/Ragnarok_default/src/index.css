@@ -2868,13 +2868,9 @@ path.leaflet-interactive:focus {
   padding: 24px 4px;
 }
 
-/* History top-tab sub-navigation: Queue | History — uses the shared `.subnav`
-   segmented control (same as Analytics), kept compact (hugs its content). */
-.history-tabbed { display: flex; flex-direction: column; height: 100%; }
-.history-tabbed > .subnav { align-self: flex-start; margin-bottom: 12px; }
-
-/* Queue — full-width run cards. */
-.queue-list { display: flex; flex-direction: column; gap: 10px; }
+/* Queue — full-width run cards. Padding matches the History view body so the
+   Queue and History sub-tabs sit identically under the shared header strip. */
+.queue-list { display: flex; flex-direction: column; gap: 10px; padding: 16px; overflow-y: auto; }
 .queue-card {
   border: 1px solid var(--border);
   border-radius: var(--radius-button);

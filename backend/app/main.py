@@ -267,21 +267,42 @@ async def _run_queue_item(item: _QueueItem) -> None:
     item.status = "running"
     item.started_at = _now_iso()
     item.proc.start()
-    # Wait for the child to fully EXIT — the worker persists the run (store_run)
-    # AFTER putting its result, so process exit guarantees the run + its xlsx are
-    # on disk before we mark this done and start the next (no CPU contention).
-    await asyncio.to_thread(item.proc.join)
+
+    # Read the result FIRST. The worker puts a (possibly large) result dict on
+    # the queue and only then exits; a multiprocessing.Queue blocks the child's
+    # exit until that payload is drained by the parent, so calling join() before
+    # reading deadlocks (the job appears stuck "running" forever). Poll
+    # get_nowait without blocking the event loop until the message arrives.
+    status: str | None = None
+    data: Any = None
+    while True:
+        if item.status == "cancelled":
+            return
+        try:
+            status, data = item.result_queue.get_nowait()
+            break
+        except queue.Empty:
+            if not item.proc.is_alive():
+                break  # exited without delivering a result
+            await asyncio.sleep(0.3)
+
+    # The result is drained, so the child can now finish persisting (store_run
+    # runs after the put) and exit. Wait for that — process exit guarantees the
+    # run + its xlsx are on disk before we start the next job (serial, no
+    # contention). Bounded so a stuck child can never wedge the whole queue.
+    await asyncio.to_thread(item.proc.join, 600)
+    if item.proc.is_alive():
+        _queue_logger.warning("Queue item %s did not exit within 600s after result", item.id)
     if item.status == "cancelled":
         return
-    try:
-        status, data = item.result_queue.get_nowait()
-    except queue.Empty:
-        status, data = ("err", "Worker exited without delivering a result.")
     if status == "ok":
         item.status = "done"
-    else:
+    elif status == "err":
         item.status = "error"
         item.error = str(data)
+    else:
+        item.status = "error"
+        item.error = "Worker exited without delivering a result."
     item.finished_at = _now_iso()
     _queue_logger.info("Queue item %s finished: %s", item.id, item.status)
 

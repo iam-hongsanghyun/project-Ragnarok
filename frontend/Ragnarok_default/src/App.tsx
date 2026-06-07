@@ -52,6 +52,7 @@ import { PluginsView } from './views/PluginsView';
 import { ModelView } from './views/ModelView';
 import { HistoryView } from './views/HistoryView';
 import { QueueView } from './views/QueueView';
+import { ViewPaneHeader } from './shared/components/primitives';
 import { BuildView } from './features/build/BuildView';
 import { DataView } from './views/DataView';
 import { WelcomeView } from './views/WelcomeView';
@@ -1754,34 +1755,38 @@ function AppInner() {
           )}
 
           {tab === 'History' && (
-            <div className="history-tabbed">
-              <nav className="subnav">
-                <button
-                  className={`subnav-btn${historySubTab === 'Queue' ? ' subnav-btn--active' : ''}`}
-                  onClick={() => setHistorySubTab('Queue')}
-                >
-                  Queue{queueJobs.length > 0 ? ` (${queueJobs.length})` : ''}
-                </button>
-                <button
-                  className={`subnav-btn${historySubTab === 'History' ? ' subnav-btn--active' : ''}`}
-                  onClick={() => setHistorySubTab('History')}
-                >
-                  History
-                </button>
-              </nav>
-              {historySubTab === 'Queue' ? (
-                <QueueView jobs={queueJobs} onCancel={handleCancelQueueItem} />
-              ) : (
-                <HistoryView
-                  backendRuns={backendRuns}
-                  onOpenBackendRun={handleOpenBackendRun}
-                  onDownloadBackendXlsx={handleDownloadBackendXlsx}
-                  onExportBackendProject={handleExportBackendProject}
-                  onDeleteBackendRun={handleDeleteBackendRun}
-                  onDeleteBackendRuns={handleDeleteBackendRuns}
-                  onReload={() => void refreshBackendRuns()}
-                />
-              )}
+            <div className="analytics-view">
+              <div className="analytics-view-main">
+                <ViewPaneHeader variant="analytics">
+                  <nav className="subnav">
+                    <button
+                      className={`subnav-btn${historySubTab === 'Queue' ? ' subnav-btn--active' : ''}`}
+                      onClick={() => setHistorySubTab('Queue')}
+                    >
+                      Queue{queueJobs.length > 0 ? ` (${queueJobs.length})` : ''}
+                    </button>
+                    <button
+                      className={`subnav-btn${historySubTab === 'History' ? ' subnav-btn--active' : ''}`}
+                      onClick={() => setHistorySubTab('History')}
+                    >
+                      History
+                    </button>
+                  </nav>
+                </ViewPaneHeader>
+                {historySubTab === 'Queue' ? (
+                  <QueueView jobs={queueJobs} onCancel={handleCancelQueueItem} />
+                ) : (
+                  <HistoryView
+                    backendRuns={backendRuns}
+                    onOpenBackendRun={handleOpenBackendRun}
+                    onDownloadBackendXlsx={handleDownloadBackendXlsx}
+                    onExportBackendProject={handleExportBackendProject}
+                    onDeleteBackendRun={handleDeleteBackendRun}
+                    onDeleteBackendRuns={handleDeleteBackendRuns}
+                    onReload={() => void refreshBackendRuns()}
+                  />
+                )}
+              </div>
             </div>
           )}
 
