@@ -1755,20 +1755,20 @@ function AppInner() {
 
           {tab === 'History' && (
             <div className="history-tabbed">
-              <div className="history-subnav">
+              <nav className="subnav">
                 <button
-                  className={`history-subnav-btn${historySubTab === 'Queue' ? ' is-active' : ''}`}
+                  className={`subnav-btn${historySubTab === 'Queue' ? ' subnav-btn--active' : ''}`}
                   onClick={() => setHistorySubTab('Queue')}
                 >
                   Queue{queueJobs.length > 0 ? ` (${queueJobs.length})` : ''}
                 </button>
                 <button
-                  className={`history-subnav-btn${historySubTab === 'History' ? ' is-active' : ''}`}
+                  className={`subnav-btn${historySubTab === 'History' ? ' subnav-btn--active' : ''}`}
                   onClick={() => setHistorySubTab('History')}
                 >
                   History
                 </button>
-              </div>
+              </nav>
               {historySubTab === 'Queue' ? (
                 <QueueView jobs={queueJobs} onCancel={handleCancelQueueItem} />
               ) : (

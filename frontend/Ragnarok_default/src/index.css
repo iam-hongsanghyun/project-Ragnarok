@@ -2868,28 +2868,10 @@ path.leaflet-interactive:focus {
   padding: 24px 4px;
 }
 
-/* History top-tab sub-navigation: Queue | History. */
+/* History top-tab sub-navigation: Queue | History — uses the shared `.subnav`
+   segmented control (same as Analytics), kept compact (hugs its content). */
 .history-tabbed { display: flex; flex-direction: column; height: 100%; }
-.history-subnav {
-  display: flex;
-  gap: 4px;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 12px;
-}
-.history-subnav-btn {
-  padding: 6px 14px;
-  font-size: 0.8rem;
-  font-family: var(--font-mono);
-  color: var(--muted);
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
-}
-.history-subnav-btn:hover { color: var(--text); }
-.history-subnav-btn.is-active {
-  color: var(--text);
-  border-bottom-color: var(--brand);
-}
+.history-tabbed > .subnav { align-self: flex-start; margin-bottom: 12px; }
 
 /* Queue — full-width run cards. */
 .queue-list { display: flex; flex-direction: column; gap: 10px; }
