@@ -28,8 +28,10 @@ function useServerOptions(
 ): Array<Record<string, unknown>> {
   const isServer = spec?.source === 'server' && !!spec.endpoint;
   const endpoint = isServer ? (spec!.endpoint as string) : '';
+  // Mirror the table editor's default: when the baseUrl field is unset, fall
+  // back to the conventional local plugin-server address.
   const baseUrl = isServer
-    ? String((formValues ?? {})[spec!.baseUrlField ?? 'backendUrl'] ?? '').replace(/\/+$/, '')
+    ? String((formValues ?? {})[spec!.baseUrlField ?? 'backendUrl'] || 'http://127.0.0.1:8765').replace(/\/+$/, '')
     : '';
   const filterArr = spec?.filter ? (Array.isArray(spec.filter) ? spec.filter : [spec.filter]) : [];
   const filterFields = new Set(filterArr.map((f) => f.valueFrom).filter(Boolean) as string[]);
