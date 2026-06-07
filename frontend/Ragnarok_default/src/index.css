@@ -4765,6 +4765,43 @@ th:hover .col-delete-btn {
   }
 }
 
+/* Draggable divider between the two plugin-panel columns. */
+.plugin-panel-resizable {
+  position: relative;
+}
+.plugin-panel-splitter {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  z-index: 3;
+  touch-action: none;
+  background: transparent;
+}
+.plugin-panel-splitter::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  background: var(--border);
+  transition: background 0.12s, width 0.12s;
+}
+.plugin-panel-splitter:hover::before,
+.plugin-panel-splitter:active::before {
+  background: var(--accent, #2f6f4f);
+  width: 3px;
+}
+@media (max-width: 960px) {
+  /* Columns collapse to one on small screens — hide the divider. */
+  .plugin-panel-splitter {
+    display: none;
+  }
+}
+
 /* ── Constraints workspace overlay ───────────────────────────────────────── */
 
 .constraints-summary {

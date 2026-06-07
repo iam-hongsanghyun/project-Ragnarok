@@ -47,6 +47,65 @@ function layoutClass(layout: PluginPanelLayout | undefined): string {
   }
 }
 
+const TWO_COLUMN_LAYOUTS = new Set<PluginPanelLayout>(['2x1', '2x2']);
+
+/**
+ * Plugin-panel grid whose middle divider is draggable to rebalance the two
+ * columns (so wide tables on one side aren't clipped). Two-column layouts get a
+ * splitter; other layouts render a plain grid. Sections keep `min-width: 0`, so
+ * content reflows / scrolls to fit whatever width the user sets.
+ */
+function PanelGrid({ layout, children }: { layout: PluginPanelLayout | undefined; children: React.ReactNode }) {
+  const cls = layoutClass(layout);
+  const ref = React.useRef<HTMLDivElement>(null);
+  const [leftFr, setLeftFr] = useState(1); // left:right column ratio (right pinned at 1)
+
+  if (!layout || !TWO_COLUMN_LAYOUTS.has(layout)) {
+    return <div className={cls}>{children}</div>;
+  }
+
+  const frac = leftFr / (leftFr + 1); // left column's fraction of the width
+  const onPointerDown = (e: React.PointerEvent) => {
+    const el = ref.current;
+    if (!el) return;
+    const width = el.getBoundingClientRect().width;
+    const startX = e.clientX;
+    const startFrac = frac;
+    const move = (ev: PointerEvent) => {
+      let f = startFrac + (ev.clientX - startX) / Math.max(width, 1);
+      f = Math.min(0.85, Math.max(0.15, f));
+      setLeftFr(f / (1 - f));
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      document.body.style.cursor = '';
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    document.body.style.cursor = 'col-resize';
+    e.preventDefault();
+  };
+
+  return (
+    <div className="plugin-panel-resizable">
+      <div ref={ref} className={cls} style={{ gridTemplateColumns: `minmax(0, ${leftFr}fr) minmax(0, 1fr)` }}>
+        {children}
+      </div>
+      <div
+        className="plugin-panel-splitter"
+        style={{ left: `calc(${frac * 100}% - 4px)` }}
+        onPointerDown={onPointerDown}
+        onDoubleClick={() => setLeftFr(1)}
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Drag to resize columns (double-click to reset)"
+        title="Drag to resize · double-click to reset"
+      />
+    </div>
+  );
+}
+
 function formatPluginValue(value: unknown, hint: PluginFieldHint | undefined): string {
   if (value === null || value === undefined) return '—';
   if (hint?.format === 'currency' || hint?.format === 'number') {
@@ -253,7 +312,7 @@ function InputView({ module, config, onConfigChange, carriers, model, onModuleAc
     return <p className="sg-setting-hint">This plugin does not define any input fields.</p>;
   }
   return (
-    <div className={layoutClass(panel?.inputLayout)}>
+    <PanelGrid layout={panel?.inputLayout}>
       {sections.map((section) => (
         <section key={section.id} className="plugin-panel-section">
           <h3 className="plugin-panel-section-title">{section.title}</h3>
@@ -275,7 +334,7 @@ function InputView({ module, config, onConfigChange, carriers, model, onModuleAc
           </div>
         </section>
       ))}
-    </div>
+    </PanelGrid>
   );
 }
 
@@ -286,14 +345,14 @@ function OutputView({ module, analytics }: { module: ModuleDescriptor; analytics
     return <p className="sg-setting-hint">No results yet — run the model first.</p>;
   }
   return (
-    <div className={layoutClass(panel?.outputLayout)}>
+    <PanelGrid layout={panel?.outputLayout}>
       {sections.map((section) => (
         <section key={section.id} className="plugin-panel-section">
           <h3 className="plugin-panel-section-title">{section.title}</h3>
           <PluginResults data={section.data} ui={section.ui} />
         </section>
       ))}
-    </div>
+    </PanelGrid>
   );
 }
 

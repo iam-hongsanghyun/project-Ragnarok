@@ -435,6 +435,12 @@ function TableEditor({ columns, rows, onChange, maxHeight, model, formValues }: 
       if (c.type === 'select' && c.optionsFrom?.source === 'server' && c.optionsFrom.endpoint) {
         map.set(c.optionsFrom.endpoint, c.optionsFrom.baseUrlField);
       }
+      // Server-sourced cases of a per-row dependent select.
+      if (c.type === 'select' && c.optionsFromByColumn) {
+        for (const spec of Object.values(c.optionsFromByColumn.cases)) {
+          if (spec?.source === 'server' && spec.endpoint) map.set(spec.endpoint, spec.baseUrlField);
+        }
+      }
       if (c.type === 'display' && c.lookup?.source === 'server' && c.lookup.endpoint) {
         map.set(c.lookup.endpoint, c.lookup.baseUrlField);
       }
@@ -519,6 +525,25 @@ function TableEditor({ columns, rows, onChange, maxHeight, model, formValues }: 
     return out;
   }, [columns, serverData]);
 
+  // Per-ROW options for a 'select' cell whose source depends on a sibling
+  // column (`optionsFromByColumn`): read this row's switch column, pick the
+  // matching case, and resolve it. Falls back to the shared column options.
+  const cellOptions = (c: ModuleConfigTableColumn, row: Record<string, unknown>): ResolvedOption[] => {
+    const byCol = c.optionsFromByColumn;
+    if (byCol) {
+      const sw = String(row[byCol.switchColumn] ?? '').trim();
+      const spec = sw ? byCol.cases[sw] : undefined;
+      if (!spec) return [];
+      const staticOpts = (c.options ?? []).map((opt) => ({ value: String(opt.value), label: String(opt.label ?? opt.value) }));
+      if (spec.source === 'server' && spec.endpoint) {
+        const dyn = optionsFromRows(spec, serverData[spec.endpoint] ?? [], formValues);
+        return dyn.length ? dyn : staticOpts;
+      }
+      return resolveStaticOrDynamic(spec, staticOpts, { model, formValues });
+    }
+    return columnOptions[c.key] ?? [];
+  };
+
   const lookupValue = (c: ModuleConfigTableColumn, row: Record<string, unknown>): string => {
     if (!c.lookup) return '';
     const key = String(row[c.lookup.matchColumn] ?? '');
@@ -573,7 +598,7 @@ function TableEditor({ columns, rows, onChange, maxHeight, model, formValues }: 
                           c,
                           row[c.key],
                           (v) => updateCell(rowIdx, c.key, v),
-                          columnOptions[c.key] ?? [],
+                          cellOptions(c, row),
                           c.lookup ? lookupValue(c, row) || undefined : undefined,
                         )}
                   </td>

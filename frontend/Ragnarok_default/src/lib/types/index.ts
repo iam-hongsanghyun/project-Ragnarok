@@ -812,6 +812,19 @@ export interface ModuleConfigTableColumn {
   /** Dynamic option source for 'select'-typed cells. Overrides `options`. */
   optionsFrom?: ModuleConfigOptionsFrom;
   /**
+   * Per-row dependent options for 'select'-typed cells: the option source is
+   * chosen by the value of another column in the SAME row. Read
+   * `row[switchColumn]`, look it up in `cases`, and resolve that
+   * `ModuleConfigOptionsFrom` (config/model/server) for this row. Falls back to
+   * `options` when the switch value is blank or has no matching case. Overrides
+   * `optionsFrom`. Lets e.g. a "value" column show bus names when its row's
+   * "resolution" is `bus` and region labels when it is `group2`.
+   */
+  optionsFromByColumn?: {
+    switchColumn: string;
+    cases: Record<string, ModuleConfigOptionsFrom>;
+  };
+  /**
    * For `'display'` cells: look up the text from a server dataset keyed by
    * another column in the same row. The host POSTs `{config}` to `endpoint`,
    * expects `{rows:[...]}`, then shows the `valueColumn` of the row whose
