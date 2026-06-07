@@ -5530,6 +5530,15 @@ th:hover .col-delete-btn {
   width: 72px;
   flex: 0 0 auto;
 }
+.forge-adjust-check {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+.forge-adjust-card.is-off {
+  opacity: 0.55;
+}
 .forge-adjust-filter {
   padding-left: 4px;
 }

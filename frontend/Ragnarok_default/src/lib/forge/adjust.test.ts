@@ -5,6 +5,7 @@ import {
   applyAdjustments,
   columnsOf,
   matchCount,
+  revertAdjustments,
   rowMatches,
   uniqueValues,
 } from './adjust';
@@ -103,5 +104,47 @@ describe('matchCount', () => {
   it('counts rows matching the filters', () => {
     expect(matchCount(model, 'generators', [{ column: 'carrier', value: 'gas' }])).toBe(3);
     expect(matchCount(model, 'generators', [{ column: 'carrier', value: 'gas' }, { column: 'province', value: '경상남도' }])).toBe(2);
+  });
+});
+
+describe('baseline capture + revertAdjustments', () => {
+  const gasHalf = (id: string): Adjustment => ({
+    id, sheet: 'generators', filters: [{ column: 'carrier', value: 'gas' }],
+    attribute: 'p_nom', action: 'multiply', amount: 50,
+  });
+
+  it('reverts to the ORIGINAL value, not the previous step (stacked)', () => {
+    // Apply ×50% twice: g1 100 → 50 → 25; baseline captures the original 100.
+    const r1 = applyAdjustments(model, [gasHalf('a'), gasHalf('b')]);
+    expect(r1.sheets.generators.find((r) => r.name === 'g1')!.p_nom).toBe(25);
+
+    // Revert one card over the applied model → back to 100 (original), not 50.
+    const applied = { generators: r1.sheets.generators } as unknown as WorkbookModel;
+    const rev = revertAdjustments(applied, [gasHalf('a')], r1.baseline);
+    expect(rev.sheets.generators.find((r) => r.name === 'g1')!.p_nom).toBe(100);
+    expect(rev.sheets.generators.find((r) => r.name === 'g2')!.p_nom).toBe(200);
+    expect(rev.reverted).toBe(2); // g1, g2 (both gas with numeric p_nom)
+  });
+
+  it('captures original across separate apply calls (first touch wins)', () => {
+    const r1 = applyAdjustments(model, [gasHalf('a')]); // 100→50, baseline 100
+    const applied = { generators: r1.sheets.generators } as unknown as WorkbookModel;
+    const r2 = applyAdjustments(applied, [gasHalf('b')], r1.baseline); // 50→25, baseline still 100
+    const rev = revertAdjustments({ generators: r2.sheets.generators } as unknown as WorkbookModel, [gasHalf('a')], r2.baseline);
+    expect(rev.sheets.generators.find((r) => r.name === 'g1')!.p_nom).toBe(100);
+  });
+
+  it('set on a missing attribute reverts by removing it (original was absent)', () => {
+    const setAdj: Adjustment = { id: 'a', sheet: 'generators', filters: [{ column: 'name', value: 'g4' }], attribute: 'p_nom', action: 'set', amount: 5 };
+    const r1 = applyAdjustments(model, [setAdj]);
+    expect(r1.sheets.generators.find((r) => r.name === 'g4')!.p_nom).toBe(5);
+    const rev = revertAdjustments({ generators: r1.sheets.generators } as unknown as WorkbookModel, [setAdj], r1.baseline);
+    expect('p_nom' in rev.sheets.generators.find((r) => r.name === 'g4')!).toBe(false);
+  });
+
+  it('reverting with no baseline entry is a no-op', () => {
+    const rev = revertAdjustments(model, [gasHalf('a')], {});
+    expect(rev.reverted).toBe(0);
+    expect(Object.keys(rev.sheets)).toEqual([]);
   });
 });

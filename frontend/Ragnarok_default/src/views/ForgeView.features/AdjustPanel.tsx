@@ -16,8 +16,10 @@ import {
   AdjustAction,
   AdjustFilter,
   applyAdjustments,
+  Baseline,
   columnsOf,
   matchCount,
+  revertAdjustments,
   uniqueValues,
 } from 'lib/forge/adjust';
 
@@ -40,11 +42,14 @@ const newId = (): string => `adj_${(counter += 1)}_${counter}`;
 const rowsOf = (model: WorkbookModel, sheet: string): GridRow[] => model[sheet] ?? [];
 
 function blankAdjustment(sheet: string): Adjustment {
-  return { id: newId(), sheet, filters: [], attribute: '', action: 'multiply', amount: 100 };
+  return { id: newId(), enabled: true, sheet, filters: [], attribute: '', action: 'multiply', amount: 100 };
 }
 
 export function AdjustPanel({ model, sheetsWithRows, onApplySheets, onStatus }: Props) {
   const [adjustments, setAdjustments] = usePersistedState<Adjustment[]>('ui:forge-adjustments', []);
+  // Original (pre-adjustment) cell values, so Revert restores the original, not
+  // the previous step. Persisted alongside the cards so it survives tab switches.
+  const [baseline, setBaseline] = usePersistedState<Baseline>('ui:forge-adjust-baseline', {});
 
   // usePersistedState's setter takes a value (no functional updater), so each
   // mutator derives the next array from the current `adjustments`.
@@ -69,20 +74,37 @@ export function AdjustPanel({ model, sheetsWithRows, onApplySheets, onStatus }: 
   const removeFilter = (id: string, idx: number) =>
     mapFilters(id, (filters) => filters.filter((_, i) => i !== idx));
 
+  // Cards selected (checkbox on) and fully specified.
+  const selected = adjustments.filter((a) => a.enabled !== false && a.sheet && a.attribute);
+
   const apply = () => {
-    const ready = adjustments.filter((a) => a.sheet && a.attribute);
-    if (ready.length === 0) {
-      onStatus('Add at least one adjustment with a component and an attribute.');
+    if (selected.length === 0) {
+      onStatus('Select at least one adjustment (with a component and an attribute) to apply.');
       return;
     }
-    const result = applyAdjustments(model, ready);
+    const result = applyAdjustments(model, selected, baseline);
     if (result.changed === 0) {
       onStatus('No rows matched — nothing changed. Check the filters.');
       return;
     }
     onApplySheets(result.sheets);
+    setBaseline(result.baseline);
     const sheetCount = Object.keys(result.sheets).length;
     onStatus(`Adjusted ${result.changed} cell${result.changed === 1 ? '' : 's'} across ${sheetCount} sheet${sheetCount === 1 ? '' : 's'}.`);
+  };
+
+  const revert = () => {
+    if (selected.length === 0) {
+      onStatus('Select at least one adjustment to revert.');
+      return;
+    }
+    const result = revertAdjustments(model, selected, baseline);
+    if (result.reverted === 0) {
+      onStatus('Nothing to revert — these cells are already at their original values.');
+      return;
+    }
+    onApplySheets(result.sheets);
+    onStatus(`Reverted ${result.reverted} cell${result.reverted === 1 ? '' : 's'} to their original value${result.reverted === 1 ? '' : 's'}.`);
   };
 
   return (
@@ -118,8 +140,11 @@ export function AdjustPanel({ model, sheetsWithRows, onApplySheets, onStatus }: 
         <button type="button" className="tb-btn" onClick={addAdjustment} disabled={sheetsWithRows.length === 0}>
           + Add adjustment
         </button>
-        <button type="button" className="primary-button" onClick={apply} disabled={adjustments.length === 0}>
-          Apply {adjustments.length || ''} adjustment{adjustments.length === 1 ? '' : 's'}
+        <button type="button" className="primary-button" onClick={apply} disabled={selected.length === 0}>
+          Apply selected{selected.length ? ` (${selected.length})` : ''}
+        </button>
+        <button type="button" className="tb-btn" onClick={revert} disabled={selected.length === 0} title="Restore the selected adjustments' cells to their original values.">
+          Revert selected
         </button>
       </div>
     </section>
@@ -146,9 +171,16 @@ function AdjustmentCard({
   const matches = useMemo(() => matchCount(model, adj.sheet, adj.filters), [model, adj.sheet, adj.filters]);
 
   return (
-    <div className="forge-adjust-card">
+    <div className={`forge-adjust-card${adj.enabled === false ? ' is-off' : ''}`}>
       {/* Spec — component · attribute · action · value, all on one line */}
       <div className="forge-adjust-row forge-adjust-spec">
+        <input
+          type="checkbox"
+          className="forge-adjust-check"
+          checked={adj.enabled !== false}
+          onChange={(e) => onChange({ enabled: e.target.checked })}
+          title="Include this adjustment when applying / reverting"
+        />
         <SearchableSelect
           className="forge-adjust-select"
           value={adj.sheet}
