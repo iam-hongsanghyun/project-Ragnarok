@@ -150,9 +150,11 @@ export interface SettingsViewProps {
   solverThreads: number;
   solverType: SolverType;
   objectiveAutoScale: boolean;
+  queuePollSeconds: number;
   onSolverThreadsChange: (v: number) => void;
   onSolverTypeChange: (v: SolverType) => void;
   onObjectiveAutoScaleChange: (v: boolean) => void;
+  onQueuePollSecondsChange: (v: number) => void;
   onCarrierColorChange: (rowIndex: number, color: string) => void;
   onCarrierReorder: (fromIndex: number, toIndex: number) => void;
 }

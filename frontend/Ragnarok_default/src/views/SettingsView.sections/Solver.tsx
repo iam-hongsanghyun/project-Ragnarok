@@ -9,9 +9,11 @@ export interface SolverSectionProps {
   solverThreads: number;
   solverType: SolverType;
   objectiveAutoScale: boolean;
+  queuePollSeconds: number;
   onSolverThreadsChange: (v: number) => void;
   onSolverTypeChange: (v: SolverType) => void;
   onObjectiveAutoScaleChange: (v: boolean) => void;
+  onQueuePollSecondsChange: (v: number) => void;
 }
 
 export function SolverSection(props: SolverSectionProps) {
@@ -83,6 +85,28 @@ export function SolverSection(props: SolverSectionProps) {
           <b>Results-neutral</b> — the reported objective is unscaled — and a
           no-op when already well-scaled, but it can markedly speed up simplex
           and PDLP on badly-scaled LPs. Recommended on.
+        </p>
+      </div>
+      <div className="sg-setting-row">
+        <label className="sg-setting-label">Queue poll interval</label>
+        <div className="sg-btn-row">
+          <input
+            type="number"
+            min={0.5}
+            step={0.5}
+            value={props.queuePollSeconds}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              if (Number.isFinite(v) && v >= 0.5) props.onQueuePollSecondsChange(v);
+            }}
+            style={{ width: 90 }}
+          />
+          <span className="sg-setting-hint" style={{ alignSelf: 'center' }}>seconds</span>
+        </div>
+        <p className="sg-setting-hint">
+          How often the Queue tab refreshes <b>while a run is active</b> (live
+          status + the "finished" notification). When the queue is idle it backs
+          off automatically. Lower = snappier updates, more backend requests.
         </p>
       </div>
     </section>

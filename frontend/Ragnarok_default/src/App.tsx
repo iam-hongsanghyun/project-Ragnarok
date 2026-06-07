@@ -1121,11 +1121,14 @@ function AppInner() {
   // queue is empty (a new run is enqueued from this same client, which refreshes
   // immediately, so idle fast-polling would just be wasted chatter).
   const hasActiveJobs = queueJobs.length > 0;
+  const activePollMs = Math.max(500, settings.queuePollSeconds * 1000);
   useEffect(() => {
     void refreshQueue();
-    const timer = setInterval(() => void refreshQueue(), hasActiveJobs ? 2500 : 15000);
+    // Active: user-configured interval (Settings → Solver). Idle: a slow
+    // heartbeat (>= 15s) since a new run is enqueued from this client anyway.
+    const timer = setInterval(() => void refreshQueue(), hasActiveJobs ? activePollMs : Math.max(15000, activePollMs));
     return () => clearInterval(timer);
-  }, [refreshQueue, hasActiveJobs]);
+  }, [refreshQueue, hasActiveJobs, activePollMs]);
 
   const handleCancelQueueItem = useCallback(async (id: string) => {
     try {
@@ -1651,9 +1654,11 @@ function AppInner() {
               solverThreads={settings.solverThreads}
               solverType={settings.solverType}
               objectiveAutoScale={settings.objectiveAutoScale}
+              queuePollSeconds={settings.queuePollSeconds}
               onSolverThreadsChange={(v) => updateSettings({ solverThreads: v })}
               onSolverTypeChange={(v) => updateSettings({ solverType: v })}
               onObjectiveAutoScaleChange={(v) => updateSettings({ objectiveAutoScale: v })}
+              onQueuePollSecondsChange={(v) => updateSettings({ queuePollSeconds: v })}
               onCarrierColorChange={(rowIndex, color) => updateRowValue('carriers', rowIndex, 'color', color)}
               onCarrierReorder={(fromIndex, toIndex) => reorderRow('carriers', fromIndex, toIndex)}
               lineCount={model.lines.length}

@@ -20,6 +20,7 @@ export interface SettingsDefaultsConfig {
   enableLoadShedding: boolean;
   loadSheddingCost: number;
   discountRate: number;
+  queuePollSeconds: number;
 }
 
 export const APP_CONFIG: AppConfig = appConfigJson;

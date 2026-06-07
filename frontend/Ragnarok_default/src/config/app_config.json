@@ -15,7 +15,16 @@
     "initialSnapshotStart": 0,
     "defaultSnapshotEnd": 24,
     "defaultSnapshotWeight": 1,
-    "weightOptions": [1, 2, 3, 4, 6, 8, 12, 24]
+    "weightOptions": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      8,
+      12,
+      24
+    ]
   },
   "forge": {
     "defaultBufferKm": 50,
@@ -23,7 +32,7 @@
   },
   "validation": {
     "magnitudeMax": 10000000,
-    "magnitudeMin": 0.000001
+    "magnitudeMin": 1e-06
   },
   "carbonChart": {
     "defaultStartYear": 2020,
@@ -40,26 +49,65 @@
       "currencySymbol": "$",
       "enableLoadShedding": false,
       "loadSheddingCost": 2000,
-      "discountRate": 0.05
+      "discountRate": 0.05,
+      "queuePollSeconds": 2.5
     },
     "ranges": {
-      "carbonPrice": { "min": 0, "max": 10000, "step": 1 },
-      "discountRate": { "min": 0, "max": 1, "step": 0.005 },
-      "loadSheddingCost": { "min": 0, "step": 1 }
+      "carbonPrice": {
+        "min": 0,
+        "max": 10000,
+        "step": 1
+      },
+      "discountRate": {
+        "min": 0,
+        "max": 1,
+        "step": 0.005
+      },
+      "loadSheddingCost": {
+        "min": 0,
+        "step": 1
+      }
     },
     "solverThreads": {
-      "options": [0, 1, 2, 4, 8]
+      "options": [
+        0,
+        1,
+        2,
+        4,
+        8
+      ]
     },
     "solverTypes": [
-      { "value": "auto", "label": "Auto (HiGHS chooses)" },
-      { "value": "simplex", "label": "Simplex" },
-      { "value": "ipm", "label": "IPM" },
-      { "value": "pdlp", "label": "PDLP" },
-      { "value": "hipo", "label": "HiPO" }
+      {
+        "value": "auto",
+        "label": "Auto (HiGHS chooses)"
+      },
+      {
+        "value": "simplex",
+        "label": "Simplex"
+      },
+      {
+        "value": "ipm",
+        "label": "IPM"
+      },
+      {
+        "value": "pdlp",
+        "label": "PDLP"
+      },
+      {
+        "value": "hipo",
+        "label": "HiPO"
+      }
     ],
     "loadSheddingOptions": [
-      { "value": false, "label": "Off" },
-      { "value": true, "label": "On" }
+      {
+        "value": false,
+        "label": "Off"
+      },
+      {
+        "value": true,
+        "label": "On"
+      }
     ]
   },
   "modules": {

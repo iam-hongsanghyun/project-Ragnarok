@@ -26,4 +26,5 @@ export interface AppSettings {
   enableLoadShedding: boolean;
   loadSheddingCost: number; // VOLL in the currently-selected currency, per MWh
   discountRate: number; // Used to annualise CAPEX for extendable assets
+  queuePollSeconds: number; // How often the Queue tab polls while a run is active
 }

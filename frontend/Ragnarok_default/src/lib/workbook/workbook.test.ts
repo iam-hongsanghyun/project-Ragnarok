@@ -116,6 +116,7 @@ describe('workbook project round-trip', () => {
       enableLoadShedding: true,
       loadSheddingCost: 9000,
       discountRate: 0.07,
+      queuePollSeconds: 2.5,
     };
     const metadata: ProjectMetadata = { settings };
 

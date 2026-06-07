@@ -38,6 +38,7 @@ function loadSettings(): AppSettings {
         enableLoadShedding: parsed.enableLoadShedding ?? SETTINGS_DEFAULTS.enableLoadShedding,
         loadSheddingCost: parsed.loadSheddingCost ?? SETTINGS_DEFAULTS.loadSheddingCost,
         discountRate: parsed.discountRate ?? SETTINGS_DEFAULTS.discountRate,
+        queuePollSeconds: parsed.queuePollSeconds ?? SETTINGS_DEFAULTS.queuePollSeconds,
       };
       // Persist only when the migration actually changed the value, so the
       // run payload (which reads from here) sends 'auto' even if the user
