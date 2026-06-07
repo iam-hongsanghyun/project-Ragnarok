@@ -201,21 +201,30 @@ function AppInner() {
 
   const displayResults = useMemo(() => {
     if (!results) return null;
-    if (!results.pathway?.enabled || !results.outputs) {
+    // A normal solved run arrives with the full backend-derived analytics
+    // (summary, carrierMix, …) attached; trust them as-is. A *reconstructed*
+    // bundle — an imported project — carries only `outputs` and re-derives its
+    // analytics on the client, so it must fall through to deriveRunResults even
+    // when it isn't a pathway run. (Without this, KPI/summary cards read
+    // `undefined.reduce` and crash.)
+    const hasDerivedSummary = Array.isArray(results.summary) && results.summary.length > 0;
+    if (!results.outputs || (!results.pathway?.enabled && hasDerivedSummary)) {
       return withDerivedAssetDetails(analyticsModel, results, settings.currencySymbol);
     }
-    const selectedPeriod =
-      getDefaultSelectedPeriod({
+    const activePathway = results.pathway?.enabled ? results.pathway : null;
+    const selectedPeriod: number | null = activePathway
+      ? getDefaultSelectedPeriod({
         ...pathwayConfig,
-        selectedPeriod: pathwayConfig.selectedPeriod ?? results.pathway.selectedPeriod,
+        selectedPeriod: pathwayConfig.selectedPeriod ?? activePathway.selectedPeriod,
         periods: pathwayConfig.periods.length
           ? pathwayConfig.periods
-          : results.pathway.periods.map((period, index) => ({
+          : activePathway.periods.map((period, index) => ({
             period,
-            objectiveWeight: results.pathway?.summaries[index]?.objectiveWeight ?? 1,
-            yearsWeight: results.pathway?.summaries[index]?.yearsWeight ?? 1,
+            objectiveWeight: activePathway.summaries[index]?.objectiveWeight ?? 1,
+            yearsWeight: activePathway.summaries[index]?.yearsWeight ?? 1,
           })),
-      });
+      })
+      : null;
     const derived = deriveRunResults(analyticsModel, results.outputs, {
       carbonPrice: analyticsCarbonPrice,
       currencySymbol: settings.currencySymbol,
@@ -223,10 +232,7 @@ function AppInner() {
       snapshotWeight: analyticsSnapshotWeight,
       narrative: results.narrative,
       selectedPeriod,
-      pathway: {
-        ...results.pathway,
-        selectedPeriod,
-      },
+      pathway: activePathway ? { ...activePathway, selectedPeriod } : null,
       rolling: results.rolling,
     });
     return {
