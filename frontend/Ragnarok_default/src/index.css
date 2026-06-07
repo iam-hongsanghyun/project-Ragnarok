@@ -343,6 +343,19 @@
   border-color: var(--border-strong);
 }
 
+.tb-btn:disabled {
+  color: var(--muted);
+  background: var(--surface);
+  border-color: var(--border);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.tb-btn:disabled:hover {
+  background: var(--surface);
+  border-color: var(--border);
+}
+
 .tb-btn--muted {
   color: var(--muted);
 }

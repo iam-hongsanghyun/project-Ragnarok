@@ -191,7 +191,9 @@ function BackendHistoryRow({
       >
         {meta.xlsxReady ? 'Export Project' : 'Preparing…'}
       </button>
-      <button className="tb-btn" onClick={onDownload} disabled={!meta.xlsxReady}>Download Excel</button>
+      <button className="tb-btn" onClick={onDownload} disabled={!meta.xlsxReady}>
+        {meta.xlsxReady ? 'Download Excel' : 'Preparing…'}
+      </button>
       <button className="tb-btn" onClick={onDelete}>Delete</button>
     </div>
   );
