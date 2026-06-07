@@ -103,7 +103,7 @@ export function HistoryView({
           Delete selected ({visibleSelected.length})
         </button>
         {onReload && (
-          <button className="tb-btn tb-btn--muted" onClick={onReload} title="Re-fetch run history from the backend">
+          <button className="tb-btn" onClick={onReload} title="Re-fetch run history from the backend">
             Reload
           </button>
         )}
@@ -191,8 +191,8 @@ function BackendHistoryRow({
       >
         {meta.xlsxReady ? 'Export Project' : 'Preparing…'}
       </button>
-      <button className="tb-btn tb-btn--muted" onClick={onDownload} disabled={!meta.xlsxReady}>Download Excel</button>
-      <button className="tb-btn tb-btn--muted" onClick={onDelete}>Delete</button>
+      <button className="tb-btn" onClick={onDownload} disabled={!meta.xlsxReady}>Download Excel</button>
+      <button className="tb-btn" onClick={onDelete}>Delete</button>
     </div>
   );
 }
