@@ -81,6 +81,10 @@ def test_run_store_lifecycle(_runs_dir: Path) -> None:
     assert bundle["snapshotStart"] == 0
     assert bundle["snapshotEnd"] == 24
 
+    # The xlsx is pre-built at store time so downloads stream a ready file.
+    pre = run_store.xlsx_path(name)
+    assert pre is not None and pre.exists()
+
     xlsx_bytes = run_store.run_to_xlsx(name)
     assert xlsx_bytes is not None
     assert len(xlsx_bytes) > 0
@@ -90,6 +94,7 @@ def test_run_store_lifecycle(_runs_dir: Path) -> None:
     assert run_store.delete_run(name) is True
     assert run_store.get_run(name) is None
     assert run_store.list_runs() == []
+    assert run_store.xlsx_path(name) is None  # the .xlsx was removed too
 
 
 def test_get_run_rejects_unsafe_names(_runs_dir: Path) -> None:

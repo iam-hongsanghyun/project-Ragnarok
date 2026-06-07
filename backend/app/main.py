@@ -13,7 +13,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 
 from .backends import BackendError, available_backends, get_backend
 from .config import load_system_defaults
@@ -113,9 +113,13 @@ def _solve_worker(
         options = payload.options or {}
         backend = get_backend(options.get("backend"))
         result = backend.run(payload.model, payload.scenario, options)
-        # Optionally persist the finished run server-side. A store failure
-        # must NOT fail the run — run_store logs and swallows internally, and
-        # we guard again here so nothing escapes into the solve result.
+        # Deliver the result FIRST so the frontend isn't blocked while we persist
+        # — store_run also pre-builds the (potentially large) xlsx, which can take
+        # several seconds and would otherwise delay the result.
+        result_queue.put(("ok", result))
+        # Optionally persist the finished run server-side. A store failure must
+        # NOT affect the run — run_store logs and swallows internally, and we
+        # guard again here.
         if options.get("storeInBackend"):
             try:
                 run_store.store_run(payload.model, payload.scenario or {}, options, result)
@@ -123,7 +127,6 @@ def _solve_worker(
                 logging.getLogger("pypsa_gui.run_store").exception(
                     "store_run raised after a successful solve"
                 )
-        result_queue.put(("ok", result))
     except Exception as exc:  # noqa: BLE001
         result_queue.put(("err", str(exc)))
 
@@ -394,7 +397,18 @@ def delete_backend_run(name: str) -> dict[str, Any]:
 
 @app.get("/api/runs/{name}/xlsx")
 def download_backend_run_xlsx(name: str) -> Response:
-    """Build and return a human-readable xlsx for stored run ``name``."""
+    """Return the human-readable xlsx for stored run ``name``.
+
+    Serves the file pre-built at store time (fast — streamed straight off disk);
+    falls back to building on demand for runs saved before pre-build existed.
+    """
+    pre = run_store.xlsx_path(name)
+    if pre is not None:
+        return FileResponse(
+            path=pre,
+            media_type=_XLSX_MEDIA_TYPE,
+            filename=f"{name}.xlsx",
+        )
     data = run_store.run_to_xlsx(name)
     if data is None:
         raise HTTPException(status_code=404, detail="Stored run not found.")

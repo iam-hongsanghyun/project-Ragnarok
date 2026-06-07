@@ -158,6 +158,15 @@ def store_run(
             "sizeBytes": size_bytes,
         }
         (RUNS_DIR / f"{name}.meta.json").write_text(json.dumps(meta), encoding="utf-8")
+
+        # Pre-build the xlsx now (server-side) so a later download serves a ready
+        # file instead of rebuilding a large workbook on every request. The JSON
+        # bundle is the canonical form, so an xlsx-build failure is non-fatal.
+        try:
+            (RUNS_DIR / f"{name}.xlsx").write_bytes(_frames_to_excel(bundle))
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to pre-build xlsx for run %s", name)
+
         logger.info("Stored run %s (%d bytes)", name, size_bytes)
         return meta
     except Exception:  # noqa: BLE001 — storage must never fail the solve
@@ -213,7 +222,7 @@ def delete_run(name: str) -> bool:
         return False
     removed = False
     try:
-        for suffix in (".json", ".meta.json"):
+        for suffix in (".json", ".meta.json", ".xlsx"):
             path = RUNS_DIR / f"{name}{suffix}"
             if path.exists():
                 path.unlink()
@@ -295,8 +304,28 @@ def _frames_to_excel(bundle: dict[str, Any]) -> bytes:
     return buffer.getvalue()
 
 
+def xlsx_path(name: str) -> Path | None:
+    """Path to the pre-built xlsx for ``name`` if it exists (and ``name`` is safe).
+
+    The endpoint streams this file directly, so a download serves a ready file
+    rather than rebuilding the workbook per request.
+    """
+    if not _is_safe_name(name):
+        return None
+    path = RUNS_DIR / f"{name}.xlsx"
+    return path if path.exists() else None
+
+
 def run_to_xlsx(name: str) -> bytes | None:
-    """Return an xlsx export of run ``name`` as bytes, or ``None`` if missing."""
+    """Return the run's xlsx bytes — the pre-built file if present, else built
+    on demand (fallback for runs stored before pre-build, or if it failed).
+    ``None`` if the run is missing."""
+    pre = xlsx_path(name)
+    if pre is not None:
+        try:
+            return pre.read_bytes()
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to read pre-built xlsx for %s", name)
     bundle = get_run(name)
     if bundle is None:
         return None
