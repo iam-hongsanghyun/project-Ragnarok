@@ -1362,6 +1362,16 @@ function AppInner() {
     void refreshBackendRuns();
   };
 
+  const handleDeleteBackendRuns = async (names: string[]) => {
+    // Delete all selected, then refresh once.
+    await Promise.all(
+      names.map((name) =>
+        fetch(`${API_BASE}/api/runs/${encodeURIComponent(name)}`, { method: 'DELETE' }).catch(() => undefined),
+      ),
+    );
+    void refreshBackendRuns();
+  };
+
   const handleSelectScenario = (scenarioId: string) => {
     const scenario = scenarioCatalog.scenarios.find((row) => row.id === scenarioId);
     if (!scenario) return;
@@ -2098,6 +2108,7 @@ function AppInner() {
               onOpenBackendRun={handleOpenBackendRun}
               onDownloadBackendXlsx={handleDownloadBackendXlsx}
               onDeleteBackendRun={handleDeleteBackendRun}
+              onDeleteBackendRuns={handleDeleteBackendRuns}
             />
           )}
 

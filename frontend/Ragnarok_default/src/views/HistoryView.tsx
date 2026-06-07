@@ -31,6 +31,7 @@ interface HistoryViewProps {
   onOpenBackendRun: (name: string) => void;
   onDownloadBackendXlsx: (name: string) => void;
   onDeleteBackendRun: (name: string) => void;
+  onDeleteBackendRuns: (names: string[]) => void;
 }
 
 /** Case-insensitive match against label, filename, and the saved date string. */
@@ -82,9 +83,13 @@ export function HistoryView({
   onOpenBackendRun,
   onDownloadBackendXlsx,
   onDeleteBackendRun,
+  onDeleteBackendRuns,
 }: HistoryViewProps) {
   const [query, setQuery] = useState('');
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  // Selection keys span both sources: `b:<id>` (browser) and `s:<name>` (backend).
+  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  const browserKey = (id: string) => `b:${id}`;
+  const backendKey = (name: string) => `s:${name}`;
 
   const filteredBrowser = useMemo(
     () => runHistory.filter((entry) => matchesQuery(entry, query)),
@@ -104,24 +109,32 @@ export function HistoryView({
     return merged;
   }, [filteredBrowser, filteredBackend]);
 
-  // Multi-select applies to browser rows only — backend rows use inline Delete.
-  const visibleSelectedIds = useMemo(
-    () => selectedIds.filter((id) => filteredBrowser.some((entry) => entry.id === id)),
-    [selectedIds, filteredBrowser],
+  // Selection spans both sources; keep it limited to what's currently visible.
+  const visibleKeys = useMemo(
+    () => [
+      ...filteredBrowser.map((entry) => browserKey(entry.id)),
+      ...filteredBackend.map((meta) => backendKey(meta.name)),
+    ],
+    [filteredBrowser, filteredBackend],
   );
-  const allVisibleSelected =
-    filteredBrowser.length > 0 && visibleSelectedIds.length === filteredBrowser.length;
+  const visibleSelected = useMemo(
+    () => selectedKeys.filter((k) => visibleKeys.includes(k)),
+    [selectedKeys, visibleKeys],
+  );
+  const allVisibleSelected = visibleKeys.length > 0 && visibleSelected.length === visibleKeys.length;
 
-  const toggleSelect = (id: string, checked: boolean) =>
-    setSelectedIds((prev) => (checked ? (prev.includes(id) ? prev : [...prev, id]) : prev.filter((x) => x !== id)));
+  const toggleKey = (key: string, checked: boolean) =>
+    setSelectedKeys((prev) => (checked ? (prev.includes(key) ? prev : [...prev, key]) : prev.filter((k) => k !== key)));
 
-  const toggleSelectAll = (checked: boolean) =>
-    setSelectedIds(checked ? filteredBrowser.map((entry) => entry.id) : []);
+  const toggleSelectAll = (checked: boolean) => setSelectedKeys(checked ? visibleKeys : []);
 
   const deleteSelected = () => {
-    if (visibleSelectedIds.length === 0) return;
-    onDeleteHistoryEntries(visibleSelectedIds);
-    setSelectedIds([]);
+    const browserIds = visibleSelected.filter((k) => k.startsWith('b:')).map((k) => k.slice(2));
+    const backendNames = visibleSelected.filter((k) => k.startsWith('s:')).map((k) => k.slice(2));
+    if (browserIds.length === 0 && backendNames.length === 0) return;
+    if (browserIds.length) onDeleteHistoryEntries(browserIds);
+    if (backendNames.length) onDeleteBackendRuns(backendNames);
+    setSelectedKeys([]);
   };
 
   const totalRuns = runHistory.length + backendRuns.length;
@@ -141,12 +154,12 @@ export function HistoryView({
             type="checkbox"
             checked={allVisibleSelected}
             onChange={(e) => toggleSelectAll(e.target.checked)}
-            disabled={filteredBrowser.length === 0}
+            disabled={visibleKeys.length === 0}
           />
           Select all
         </label>
-        <button className="tb-btn" onClick={deleteSelected} disabled={visibleSelectedIds.length === 0}>
-          Delete selected ({visibleSelectedIds.length})
+        <button className="tb-btn" onClick={deleteSelected} disabled={visibleSelected.length === 0}>
+          Delete selected ({visibleSelected.length})
         </button>
         <button className="tb-btn tb-btn--muted" onClick={onClearHistory} disabled={runHistory.length === 0}>
           Clear all
@@ -166,8 +179,8 @@ export function HistoryView({
               <BrowserHistoryRow
                 key={`browser:${item.entry.id}`}
                 entry={item.entry}
-                selected={visibleSelectedIds.includes(item.entry.id)}
-                onSelect={(checked) => toggleSelect(item.entry.id, checked)}
+                selected={visibleSelected.includes(browserKey(item.entry.id))}
+                onSelect={(checked) => toggleKey(browserKey(item.entry.id), checked)}
                 onView={() => onRestoreRun(item.entry)}
                 onRename={(label) => onRenameHistoryEntry(item.entry.id, label)}
                 onPin={(pinned) => onPinHistoryEntry(item.entry.id, pinned)}
@@ -177,6 +190,8 @@ export function HistoryView({
               <BackendHistoryRow
                 key={`backend:${item.meta.name}`}
                 meta={item.meta}
+                selected={visibleSelected.includes(backendKey(item.meta.name))}
+                onSelect={(checked) => toggleKey(backendKey(item.meta.name), checked)}
                 onView={() => onOpenBackendRun(item.meta.name)}
                 onDownload={() => onDownloadBackendXlsx(item.meta.name)}
                 onDelete={() => onDeleteBackendRun(item.meta.name)}
@@ -261,9 +276,11 @@ function BrowserHistoryRow({
 // ── Backend (server-stored) run row ─────────────────────────────────────────
 
 function BackendHistoryRow({
-  meta, onView, onDownload, onDelete,
+  meta, selected, onSelect, onView, onDownload, onDelete,
 }: {
   meta: BackendRunMeta;
+  selected: boolean;
+  onSelect: (checked: boolean) => void;
   onView: () => void;
   onDownload: () => void;
   onDelete: () => void;
@@ -277,8 +294,14 @@ function BackendHistoryRow({
   const emissions = kpis[2];
 
   return (
-    <div className="history-row">
-      <span className="history-row-select-placeholder" aria-hidden="true" />
+    <div className={`history-row${selected ? ' is-selected' : ''}`}>
+      <input
+        type="checkbox"
+        className="history-row-select"
+        checked={selected}
+        onChange={(e) => onSelect(e.target.checked)}
+        aria-label={`Select ${meta.label || meta.name}`}
+      />
 
       <span className="history-row-source history-row-source--backend">Backend</span>
 
