@@ -60,6 +60,15 @@ export function optionsFromRows(
     const raw = f.valueFrom !== undefined ? formValues?.[f.valueFrom] : f.value;
     const rawStr = raw === undefined || raw === null ? '' : String(raw).trim();
     const op = f.op ?? '>=';
+    if (op === 'in' || op === 'not-in') {
+      // Threshold is a set (e.g. a multi-select array). Empty → no-op.
+      const set = Array.isArray(raw)
+        ? raw.map((x) => String(x).trim()).filter(Boolean)
+        : (rawStr ? [rawStr] : []);
+      if (set.length === 0) return true;
+      const member = set.indexOf(String(row[f.column] ?? '').trim()) !== -1;
+      return op === 'in' ? member : !member;
+    }
     if (op === '==' || op === '!=') {
       if (rawStr === '') return true; // unset → no-op
       const num = Number(rawStr);

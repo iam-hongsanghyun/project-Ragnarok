@@ -787,7 +787,12 @@ export interface ModuleConfigOptionsFrom {
 /** One condition for `ModuleConfigOptionsFrom.filter`. */
 export interface ModuleConfigOptionsFilter {
   column: string;
-  op?: '>=' | '<=' | '>' | '<' | '==' | '!=';
+  /**
+   * Numeric (`>=` `<=` `>` `<`) or equality (`==` `!=`, numeric or string), or
+   * set membership (`in` / `not-in`) when the threshold is an array (e.g. a
+   * multi-select field value). An empty/blank threshold is a no-op.
+   */
+  op?: '>=' | '<=' | '>' | '<' | '==' | '!=' | 'in' | 'not-in';
   value?: string | number;
   valueFrom?: string;
 }

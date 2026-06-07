@@ -122,3 +122,22 @@ describe('resolveOptionsFrom — multiple filters incl. carrier (string ==)', ()
     expect(out.map((o) => o.value)).toEqual(['coal_2030', 'gas_2030', 'wind_2035']);
   });
 });
+
+describe('resolveOptionsFrom — set membership (in) for multi-select carriers', () => {
+  const gens = { generators: [
+    { name: 'coal_30', build_year: 2030, carrier: 'coal' },
+    { name: 'gas_30', build_year: 2030, carrier: 'gas' },
+    { name: 'wind_35', build_year: 2035, carrier: 'wind' },
+  ] } as unknown as WorkbookModel;
+  const spec = { source: 'model' as const, sheet: 'generators', column: 'name',
+    filter: [{ column: 'carrier', op: 'in' as const, valueFrom: 'cs' }] };
+
+  it('keeps rows whose carrier is in the checked set', () => {
+    const out = resolveOptionsFrom(spec, { model: gens, formValues: { cs: ['gas', 'wind'] } });
+    expect(out.map((o) => o.value)).toEqual(['gas_30', 'wind_35']);
+  });
+  it('empty set → no-op (all rows)', () => {
+    const out = resolveOptionsFrom(spec, { model: gens, formValues: { cs: [] } });
+    expect(out.map((o) => o.value)).toEqual(['coal_30', 'gas_30', 'wind_35']);
+  });
+});
