@@ -704,6 +704,9 @@ export interface BackendRunMeta {
   } | null;
   /** Scenario label this run was solved under, for cross-scenario pivots. */
   scenarioLabel?: string | null;
+  /** True once the server has finished pre-building the run's xlsx, so the
+   *  export package can be downloaded. Until then the UI shows "Preparing…". */
+  xlsxReady?: boolean;
 }
 
 export type AnalyticsFocus =

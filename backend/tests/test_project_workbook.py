@@ -119,19 +119,21 @@ def test_workbook_never_uses_out_prefix_or_truncates() -> None:
     assert pw.BUNDLE_SHEET in embedded_sheets
 
 
-def test_project_package_round_trips_verbatim() -> None:
-    # A Ragnarok Project .zip carries the canonical JSON; reading it back is
-    # exact (every derived field intact) — the lossless contract.
+def test_project_package_has_three_files_and_round_trips_verbatim() -> None:
+    # A Ragnarok Project .zip carries ALL THREE files (bundle JSON + meta JSON +
+    # xlsx); reading the bundle back is exact (every derived field intact).
     import zipfile
 
     from io import BytesIO
 
     bundle = _sample_bundle()
-    pkg = pw.bundle_to_package(bundle, "north-sea-2030")
+    meta = {"name": "north-sea-2030", "label": "North Sea", "kpis": []}
+    pkg = pw.bundle_to_package(bundle, "north-sea-2030", meta=meta)
 
-    names = zipfile.ZipFile(BytesIO(pkg)).namelist()
-    assert sorted(names) == ["north-sea-2030.json", "north-sea-2030.xlsx"]
+    names = sorted(zipfile.ZipFile(BytesIO(pkg)).namelist())
+    assert names == ["north-sea-2030.json", "north-sea-2030.meta.json", "north-sea-2030.xlsx"]
 
+    # The canonical bundle is read back verbatim — NOT confused with meta.json.
     rt = pw.package_to_bundle(pkg, filename="north-sea-2030.zip")
     assert rt["result"] == bundle["result"]
     assert rt["model"] == bundle["model"]

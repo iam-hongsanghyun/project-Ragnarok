@@ -1150,6 +1150,12 @@ function AppInner() {
     window.open(`${API_BASE}/api/runs/${encodeURIComponent(name)}/xlsx`, '_blank');
   };
 
+  // Export a stored run as the full Ragnarok Project package (.zip of all three
+  // files: bundle JSON + meta JSON + readable xlsx).
+  const handleExportBackendProject = (name: string) => {
+    window.open(`${API_BASE}/api/runs/${encodeURIComponent(name)}/package`, '_blank');
+  };
+
   const handleDeleteBackendRun = async (name: string) => {
     try {
       await fetch(`${API_BASE}/api/runs/${encodeURIComponent(name)}`, { method: 'DELETE' });
@@ -1875,6 +1881,7 @@ function AppInner() {
               backendRuns={backendRuns}
               onOpenBackendRun={handleOpenBackendRun}
               onDownloadBackendXlsx={handleDownloadBackendXlsx}
+              onExportBackendProject={handleExportBackendProject}
               onDeleteBackendRun={handleDeleteBackendRun}
               onDeleteBackendRuns={handleDeleteBackendRuns}
               onReload={() => void refreshBackendRuns()}

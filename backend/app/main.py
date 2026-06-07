@@ -409,9 +409,9 @@ def export_project(payload: ExportProjectPayload) -> Response:
     from . import project_workbook
 
     try:
-        data = project_workbook.bundle_to_package(
-            {"model": payload.model, "result": payload.result}, "ragnarok_project"
-        )
+        bundle = {"model": payload.model, "result": payload.result}
+        meta = run_store.build_run_meta("ragnarok_project", bundle)
+        data = project_workbook.bundle_to_package(bundle, "ragnarok_project", meta=meta)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"Project export failed: {exc}") from exc
     return Response(
@@ -487,19 +487,14 @@ def download_backend_run_xlsx(name: str) -> Response:
 def download_backend_run_package(name: str) -> Response:
     """Return a Ragnarok Project ``.zip`` for stored run ``name``.
 
-    Packs the canonical JSON bundle (lossless, re-importable) together with the
-    human-readable xlsx. This is the export to share / re-import — the bare
+    Packs ALL THREE artefacts — ``<name>.json`` (canonical bundle),
+    ``<name>.meta.json`` (sidecar), ``<name>.xlsx`` (readable workbook) — from
+    the files on disk. This is the export to share / re-import; the bare
     ``/xlsx`` endpoint is only for quick viewing in Excel.
     """
-    from . import project_workbook
-
-    bundle = run_store.get_run(name)
-    if bundle is None:
+    data = run_store.run_to_package(name)
+    if data is None:
         raise HTTPException(status_code=404, detail="Stored run not found.")
-    try:
-        data = project_workbook.bundle_to_package(bundle, name)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=400, detail=f"Project package failed: {exc}") from exc
     return Response(
         content=data,
         media_type=_ZIP_MEDIA_TYPE,

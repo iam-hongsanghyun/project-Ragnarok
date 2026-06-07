@@ -502,14 +502,22 @@ _PROJECT_SUFFIX = "_project"
 _LABEL_EXTENSIONS = (".xlsx", ".xls", ".nc", ".h5", ".hdf5", ".zip")
 
 
-def bundle_to_package(bundle: dict[str, Any], base_name: str) -> bytes:
-    """Pack a bundle into a Ragnarok Project ``.zip`` (canonical JSON + readable xlsx)."""
+def bundle_to_package(
+    bundle: dict[str, Any], base_name: str, meta: dict[str, Any] | None = None
+) -> bytes:
+    """Pack a bundle into a Ragnarok Project ``.zip`` — all three files.
+
+    ``<stem>.json`` (canonical bundle), ``<stem>.meta.json`` (light sidecar, when
+    provided), and ``<stem>.xlsx`` (readable workbook).
+    """
     import zipfile
 
     stem = (base_name or "ragnarok").strip() or "ragnarok"
     buffer = BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(f"{stem}.json", json.dumps(bundle, default=str))
+        if meta is not None:
+            zf.writestr(f"{stem}.meta.json", json.dumps(meta, default=str))
         zf.writestr(f"{stem}.xlsx", bundle_to_workbook(bundle))
     return buffer.getvalue()
 
@@ -524,7 +532,12 @@ def package_to_bundle(data: bytes, filename: str = "") -> dict[str, Any]:
 
     with zipfile.ZipFile(BytesIO(data)) as zf:
         names = zf.namelist()
-        json_name = next((n for n in names if n.lower().endswith(".json")), None)
+        # The canonical bundle is `<name>.json` — NOT the `<name>.meta.json`
+        # sidecar (which is a different, lightweight file in the same package).
+        json_name = next(
+            (n for n in names if n.lower().endswith(".json") and not n.lower().endswith(".meta.json")),
+            None,
+        )
         if json_name is not None:
             bundle = json.loads(zf.read(json_name).decode("utf-8"))
             bundle.setdefault("options", {}).setdefault("filename", filename)

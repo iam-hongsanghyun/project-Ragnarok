@@ -111,6 +111,73 @@ def _label_for_bundle(scenario: dict[str, Any], options: dict[str, Any], filenam
     return _filename_label_stem(filename) or "Run"
 
 
+def build_run_meta(name: str, bundle: dict[str, Any], size_bytes: int = 0) -> dict[str, Any]:
+    """Compute the lightweight meta sidecar from a run bundle.
+
+    Shared by :func:`store_run` (persisted alongside the bundle) and the project
+    export path (so an exported package's ``.meta.json`` matches a stored run's).
+    Carries only the small fields History + Analytics→Comparison read — never a
+    time series.
+    """
+    scenario = bundle.get("scenario") or {}
+    options = bundle.get("options") or {}
+    result = bundle.get("result") or {}
+
+    run_meta = result.get("runMeta") if isinstance(result, dict) else None
+    component_counts = (run_meta.get("componentCounts", {}) if isinstance(run_meta, dict) else {}) or {}
+
+    summary = result.get("summary") if isinstance(result, dict) else None
+    summary = summary if isinstance(summary, list) else []
+
+    carrier_mix = result.get("carrierMix") if isinstance(result, dict) else None
+    carrier_mix = carrier_mix if isinstance(carrier_mix, list) else []
+
+    pathway_src = result.get("pathway") if isinstance(result, dict) else None
+    pathway_meta: dict[str, Any] | None = None
+    if isinstance(pathway_src, dict):
+        pathway_meta = {
+            "enabled": pathway_src.get("enabled"),
+            "periods": pathway_src.get("periods"),
+            "selectedPeriod": pathway_src.get("selectedPeriod"),
+            "summaries": pathway_src.get("summaries"),
+        }
+
+    rolling_src = result.get("rolling") if isinstance(result, dict) else None
+    rolling_meta: dict[str, Any] | None = None
+    if isinstance(rolling_src, dict):
+        rolling_meta = {
+            "enabled": rolling_src.get("enabled"),
+            "horizonSnapshots": rolling_src.get("horizonSnapshots"),
+            "overlapSnapshots": rolling_src.get("overlapSnapshots"),
+            "windowCount": rolling_src.get("windowCount"),
+        }
+
+    scenario_label = (
+        (scenario.get("label") if isinstance(scenario, dict) else None)
+        or (options.get("scenarioLabel") if isinstance(options, dict) else None)
+        or None
+    )
+    filename = str(options.get("filename") or bundle.get("filename") or "")
+
+    return {
+        "name": name,
+        "savedAt": bundle.get("savedAt"),
+        "label": bundle.get("label") or _label_for_bundle(scenario, options, filename),
+        "filename": filename,
+        "snapshotStart": options.get("snapshotStart"),
+        "snapshotEnd": options.get("snapshotEnd"),
+        "snapshotWeight": options.get("snapshotWeight"),
+        "componentCounts": component_counts,
+        "kpis": summary[:4],
+        "sizeBytes": size_bytes,
+        "summary": summary,
+        "carrierMix": carrier_mix,
+        "pathway": pathway_meta,
+        "rolling": rolling_meta,
+        "scenarioLabel": scenario_label,
+    }
+
+
 def store_run(
     model: dict[str, Any],
     scenario: dict[str, Any],
@@ -139,57 +206,14 @@ def store_run(
         saved_at = datetime.now(timezone.utc).isoformat()
         filename = str(options.get("filename") or "")
         label = _label_for_bundle(scenario, options, filename)
-        snapshot_start = options.get("snapshotStart")
-        snapshot_end = options.get("snapshotEnd")
-        snapshot_weight = options.get("snapshotWeight")
-
-        run_meta = result.get("runMeta") if isinstance(result, dict) else None
-        component_counts = (
-            run_meta.get("componentCounts", {}) if isinstance(run_meta, dict) else {}
-        ) or {}
-
-        summary = result.get("summary") if isinstance(result, dict) else None
-        summary = summary if isinstance(summary, list) else []
-        kpis = summary[:4]
-
-        carrier_mix = result.get("carrierMix") if isinstance(result, dict) else None
-        carrier_mix = carrier_mix if isinstance(carrier_mix, list) else []
-
-        # Light pathway/rolling projections for Comparison — no time-series, only
-        # the small fields the Comparison tab reads.
-        pathway_src = result.get("pathway") if isinstance(result, dict) else None
-        pathway_meta: dict[str, Any] | None = None
-        if isinstance(pathway_src, dict):
-            pathway_meta = {
-                "enabled": pathway_src.get("enabled"),
-                "periods": pathway_src.get("periods"),
-                "selectedPeriod": pathway_src.get("selectedPeriod"),
-                "summaries": pathway_src.get("summaries"),
-            }
-
-        rolling_src = result.get("rolling") if isinstance(result, dict) else None
-        rolling_meta: dict[str, Any] | None = None
-        if isinstance(rolling_src, dict):
-            rolling_meta = {
-                "enabled": rolling_src.get("enabled"),
-                "horizonSnapshots": rolling_src.get("horizonSnapshots"),
-                "overlapSnapshots": rolling_src.get("overlapSnapshots"),
-                "windowCount": rolling_src.get("windowCount"),
-            }
-
-        scenario_label = (
-            (scenario.get("label") if isinstance(scenario, dict) else None)
-            or (options.get("scenarioLabel") if isinstance(options, dict) else None)
-            or None
-        )
 
         bundle = {
             "savedAt": saved_at,
             "label": label,
             "filename": filename,
-            "snapshotStart": snapshot_start,
-            "snapshotEnd": snapshot_end,
-            "snapshotWeight": snapshot_weight,
+            "snapshotStart": options.get("snapshotStart"),
+            "snapshotEnd": options.get("snapshotEnd"),
+            "snapshotWeight": options.get("snapshotWeight"),
             "model": model,
             "scenario": scenario,
             "options": options,
@@ -200,25 +224,7 @@ def store_run(
         bundle_path.write_text(json.dumps(bundle), encoding="utf-8")
         size_bytes = bundle_path.stat().st_size
 
-        meta = {
-            "name": name,
-            "savedAt": saved_at,
-            "label": label,
-            "filename": filename,
-            "snapshotStart": snapshot_start,
-            "snapshotEnd": snapshot_end,
-            "snapshotWeight": snapshot_weight,
-            "componentCounts": component_counts,
-            "kpis": kpis,
-            "sizeBytes": size_bytes,
-            # Light fields that power Analytics → Comparison without a heavy
-            # bundle fetch. No time-series — only the small projections.
-            "summary": summary,
-            "carrierMix": carrier_mix,
-            "pathway": pathway_meta,
-            "rolling": rolling_meta,
-            "scenarioLabel": scenario_label,
-        }
+        meta = build_run_meta(name, bundle, size_bytes)
         (RUNS_DIR / f"{name}.meta.json").write_text(json.dumps(meta), encoding="utf-8")
 
         # Pre-build the xlsx now (server-side) so a later download serves a ready
@@ -250,7 +256,13 @@ def list_runs() -> list[dict[str, Any]]:
             return runs
         for path in RUNS_DIR.glob("*.meta.json"):
             try:
-                runs.append(json.loads(path.read_text(encoding="utf-8")))
+                meta = json.loads(path.read_text(encoding="utf-8"))
+                # The xlsx is pre-built AFTER the meta sidecar, so a run can be
+                # listed before its workbook is ready. Surface readiness so the
+                # UI can show "Preparing…" until the export package can be built.
+                name = str(meta.get("name", ""))
+                meta["xlsxReady"] = bool(name) and (RUNS_DIR / f"{name}.xlsx").exists()
+                runs.append(meta)
             except Exception:  # noqa: BLE001
                 logger.warning("Skipping unreadable run meta: %s", path.name)
     except Exception:  # noqa: BLE001
@@ -329,3 +341,38 @@ def run_to_xlsx(name: str) -> bytes | None:
     except Exception:  # noqa: BLE001
         logger.exception("Failed to build xlsx for backend run %s", name)
         return None
+
+
+def run_to_package(name: str) -> bytes | None:
+    """Return a Ragnarok Project ``.zip`` for ``name`` — ALL THREE files.
+
+    Bundles the three on-disk artefacts so the export is complete:
+
+    * ``<name>.json``       — the canonical bundle (lossless source of truth),
+    * ``<name>.meta.json``  — the lightweight meta sidecar (History/Comparison),
+    * ``<name>.xlsx``       — the human-readable workbook.
+
+    ``None`` if the run does not exist. The xlsx is built on demand if its
+    pre-built file is somehow missing, so the package is always complete.
+    """
+    if not _is_safe_name(name):
+        return None
+    bundle = get_run(name)
+    if bundle is None:
+        return None
+
+    meta_path = RUNS_DIR / f"{name}.meta.json"
+    meta_bytes = meta_path.read_bytes() if meta_path.exists() else None
+    xlsx_bytes = run_to_xlsx(name)
+
+    import zipfile
+    from io import BytesIO
+
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(f"{name}.json", json.dumps(bundle))
+        if meta_bytes is not None:
+            zf.writestr(f"{name}.meta.json", meta_bytes)
+        if xlsx_bytes is not None:
+            zf.writestr(f"{name}.xlsx", xlsx_bytes)
+    return buffer.getvalue()

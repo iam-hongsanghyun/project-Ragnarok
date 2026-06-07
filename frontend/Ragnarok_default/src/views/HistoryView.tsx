@@ -16,6 +16,8 @@ interface HistoryViewProps {
   backendRuns: BackendRunMeta[];
   onOpenBackendRun: (name: string) => void;
   onDownloadBackendXlsx: (name: string) => void;
+  /** Download the full project package (.zip of bundle JSON + meta JSON + xlsx). */
+  onExportBackendProject: (name: string) => void;
   onDeleteBackendRun: (name: string) => void;
   onDeleteBackendRuns: (names: string[]) => void;
   /** Manually re-fetch the run list from the backend. */
@@ -42,6 +44,7 @@ export function HistoryView({
   backendRuns,
   onOpenBackendRun,
   onDownloadBackendXlsx,
+  onExportBackendProject,
   onDeleteBackendRun,
   onDeleteBackendRuns,
   onReload,
@@ -122,6 +125,7 @@ export function HistoryView({
               onSelect={(checked) => toggleName(meta.name, checked)}
               onView={() => onOpenBackendRun(meta.name)}
               onDownload={() => onDownloadBackendXlsx(meta.name)}
+              onExportProject={() => onExportBackendProject(meta.name)}
               onDelete={() => onDeleteBackendRun(meta.name)}
             />
           ))}
@@ -134,13 +138,14 @@ export function HistoryView({
 // ── Backend (server-stored) run row ─────────────────────────────────────────
 
 function BackendHistoryRow({
-  meta, selected, onSelect, onView, onDownload, onDelete,
+  meta, selected, onSelect, onView, onDownload, onExportProject, onDelete,
 }: {
   meta: BackendRunMeta;
   selected: boolean;
   onSelect: (checked: boolean) => void;
   onView: () => void;
   onDownload: () => void;
+  onExportProject: () => void;
   onDelete: () => void;
 }) {
   const snaps =
@@ -175,7 +180,18 @@ function BackendHistoryRow({
       <span className="history-row-spacer" />
 
       <button className="tb-btn" onClick={onView}>View results</button>
-      <button className="tb-btn tb-btn--muted" onClick={onDownload}>Download Excel</button>
+      {/* The full project export (.zip of all 3 files). Until the server has
+          finished pre-building the workbook it reads "Preparing…" and is
+          unclickable; once ready it becomes "Export Project". */}
+      <button
+        className="tb-btn"
+        onClick={onExportProject}
+        disabled={!meta.xlsxReady}
+        title={meta.xlsxReady ? 'Download bundle JSON + meta JSON + Excel (.zip)' : 'Workbook is still being prepared'}
+      >
+        {meta.xlsxReady ? 'Export Project' : 'Preparing…'}
+      </button>
+      <button className="tb-btn tb-btn--muted" onClick={onDownload} disabled={!meta.xlsxReady}>Download Excel</button>
       <button className="tb-btn tb-btn--muted" onClick={onDelete}>Delete</button>
     </div>
   );

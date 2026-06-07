@@ -132,6 +132,18 @@ def test_run_store_lifecycle(_runs_dir: Path) -> None:
     # xlsx files are zip archives — they start with the PK signature.
     assert xlsx_bytes[:2] == b"PK"
 
+    # list_runs reports xlsx readiness (the pre-build finished above).
+    assert run_store.list_runs()[0]["xlsxReady"] is True
+
+    # The export package zips ALL THREE on-disk files.
+    import zipfile
+    from io import BytesIO
+
+    pkg = run_store.run_to_package(name)
+    assert pkg is not None
+    members = sorted(zipfile.ZipFile(BytesIO(pkg)).namelist())
+    assert members == [f"{name}.json", f"{name}.meta.json", f"{name}.xlsx"]
+
     assert run_store.delete_run(name) is True
     assert run_store.get_run(name) is None
     assert run_store.list_runs() == []
