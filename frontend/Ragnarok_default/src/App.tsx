@@ -2016,14 +2016,12 @@ function AppInner() {
           {tab === 'History' && (
             <HistoryView
               runHistory={runHistory}
-              currencySymbol={settings.currencySymbol}
               onRestoreRun={handleRestoreRun}
               onRenameHistoryEntry={handleRenameHistoryEntry}
               onPinHistoryEntry={handlePinHistoryEntry}
               onDeleteHistoryEntry={handleDeleteHistoryEntry}
               onDeleteHistoryEntries={handleDeleteHistoryEntries}
               onClearHistory={handleClearHistory}
-              onToggleComparison={handleToggleComparison}
             />
           )}
 

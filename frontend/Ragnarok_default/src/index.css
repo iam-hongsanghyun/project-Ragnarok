@@ -2850,36 +2850,81 @@ path.leaflet-interactive:focus {
   padding: 24px 4px;
 }
 
-.history-column {
+/* Flat, full-width rows (no card chrome) — one run per line, info horizontal. */
+.history-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  border-top: 1px solid var(--border);
 }
-
 .history-row {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
-}
-
-.history-select-check {
-  display: flex;
   align-items: center;
-  flex-shrink: 0;
-  padding-top: 12px;
-  cursor: pointer;
+  gap: 10px;
+  flex-wrap: wrap;
+  row-gap: 4px;
+  padding: 7px 6px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.82rem;
 }
-.history-select-check input[type='checkbox'] {
+.history-row:hover { background: var(--bg-hover, rgba(15, 118, 110, 0.04)); }
+.history-row.is-selected { background: rgba(15, 118, 110, 0.08); }
+.history-row.is-pinned { border-left: 2px solid var(--brand); padding-left: 8px; }
+
+.history-row-select {
+  flex: 0 0 auto;
   width: 15px;
   height: 15px;
   cursor: pointer;
   accent-color: var(--brand);
 }
-
-.history-row .hist-card {
-  flex: 1;
-  min-width: 0;
+.history-row-name {
+  flex: 0 0 auto;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--text);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
 }
+.history-row-name:hover { color: var(--brand); }
+.history-row-name-input {
+  flex: 0 0 auto;
+  width: 180px;
+  padding: 2px 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--surface);
+  color: var(--text);
+  outline: none;
+}
+.history-row-name-input:focus { border-color: var(--brand); }
+.history-row-time { color: var(--muted); white-space: nowrap; }
+.history-row-file {
+  color: var(--muted);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-row-chip {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  font-size: 0.72rem;
+  color: var(--muted);
+  background: var(--bg-hover, rgba(100, 116, 139, 0.14));
+  white-space: nowrap;
+}
+.history-row-kpi { color: var(--muted); white-space: nowrap; }
+.history-row-kpi b { color: var(--text); font-weight: 600; }
+.history-row-spacer { flex: 1 1 auto; }
+.history-row .tb-btn { flex: 0 0 auto; }
 
 .hist-view-btn {
   flex-shrink: 0;

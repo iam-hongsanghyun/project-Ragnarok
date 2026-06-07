@@ -3,29 +3,22 @@
  *
  * Runs are kept in IndexedDB (see lib/storage/historyStore.ts) so a full-year
  * result survives a reload and can be reopened without rebuilding or exporting
- * it. This view is a single column of run cards with a search filter and a
- * multi-select delete, plus a "Clear all". It shares the same `runHistory`
- * state as the Analytics → Comparison pane and reuses RunHistoryCard, so the
- * two stay in sync.
- *
- * The per-card SELECT checkbox here is local to this view (drives the bulk
- * delete) and is deliberately distinct from each entry's `inComparison` flag,
- * which the card's own comparison checkbox toggles.
+ * it. Each run is a single flat, full-width row: one select checkbox (drives the
+ * bulk delete), the run's name + metadata laid out horizontally, and inline
+ * actions. Shares the same `runHistory` state as Analytics → Comparison.
  */
 import React, { useMemo, useState } from 'react';
 import { RunHistoryEntry } from 'lib/types';
-import { RunHistoryCard } from '../features/run-history/RunHistoryCard';
+import { formatRelTime } from 'lib/utils/formatRelTime';
 
 interface HistoryViewProps {
   runHistory: RunHistoryEntry[];
-  currencySymbol: string;
   onRestoreRun: (entry: RunHistoryEntry) => void;
   onRenameHistoryEntry: (id: string, label: string) => void;
   onPinHistoryEntry: (id: string, pinned: boolean) => void;
   onDeleteHistoryEntry: (id: string) => void;
   onDeleteHistoryEntries: (ids: string[]) => void;
   onClearHistory: () => void;
-  onToggleComparison: (id: string, inComparison: boolean) => void;
 }
 
 /** Case-insensitive match against label, filename, and the saved date string. */
@@ -45,14 +38,12 @@ export function matchesQuery(entry: RunHistoryEntry, query: string): boolean {
 
 export function HistoryView({
   runHistory,
-  currencySymbol,
   onRestoreRun,
   onRenameHistoryEntry,
   onPinHistoryEntry,
   onDeleteHistoryEntry,
   onDeleteHistoryEntries,
   onClearHistory,
-  onToggleComparison,
 }: HistoryViewProps) {
   const [query, setQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -62,23 +53,17 @@ export function HistoryView({
     [runHistory, query],
   );
 
-  // Keep selection in sync with the entries actually on screen.
   const visibleSelectedIds = useMemo(
     () => selectedIds.filter((id) => filtered.some((entry) => entry.id === id)),
     [selectedIds, filtered],
   );
   const allVisibleSelected = filtered.length > 0 && visibleSelectedIds.length === filtered.length;
 
-  const toggleSelect = (id: string, checked: boolean) => {
-    setSelectedIds((prev) => {
-      if (checked) return prev.includes(id) ? prev : [...prev, id];
-      return prev.filter((x) => x !== id);
-    });
-  };
+  const toggleSelect = (id: string, checked: boolean) =>
+    setSelectedIds((prev) => (checked ? (prev.includes(id) ? prev : [...prev, id]) : prev.filter((x) => x !== id)));
 
-  const toggleSelectAll = (checked: boolean) => {
+  const toggleSelectAll = (checked: boolean) =>
     setSelectedIds(checked ? filtered.map((entry) => entry.id) : []);
-  };
 
   const deleteSelected = () => {
     if (visibleSelectedIds.length === 0) return;
@@ -105,18 +90,10 @@ export function HistoryView({
           />
           Select all
         </label>
-        <button
-          className="tb-btn"
-          onClick={deleteSelected}
-          disabled={visibleSelectedIds.length === 0}
-        >
+        <button className="tb-btn" onClick={deleteSelected} disabled={visibleSelectedIds.length === 0}>
           Delete selected ({visibleSelectedIds.length})
         </button>
-        <button
-          className="tb-btn tb-btn--muted"
-          onClick={onClearHistory}
-          disabled={runHistory.length === 0}
-        >
+        <button className="tb-btn tb-btn--muted" onClick={onClearHistory} disabled={runHistory.length === 0}>
           Clear all
         </button>
       </div>
@@ -128,29 +105,88 @@ export function HistoryView({
             : 'No runs match your search.'}
         </div>
       ) : (
-        <div className="history-column">
+        <div className="history-list">
           {filtered.map((entry) => (
-            <div key={entry.id} className="history-row">
-              <label className="history-select-check" title="Select for bulk delete">
-                <input
-                  type="checkbox"
-                  checked={visibleSelectedIds.includes(entry.id)}
-                  onChange={(e) => toggleSelect(entry.id, e.target.checked)}
-                />
-              </label>
-              <RunHistoryCard
-                entry={entry}
-                onView={() => onRestoreRun(entry)}
-                onRename={(label) => onRenameHistoryEntry(entry.id, label)}
-                onPin={(pinned) => onPinHistoryEntry(entry.id, pinned)}
-                onDelete={() => onDeleteHistoryEntry(entry.id)}
-                onToggleComparison={(v) => onToggleComparison(entry.id, v)}
-                currencySymbol={currencySymbol}
-              />
-            </div>
+            <HistoryRow
+              key={entry.id}
+              entry={entry}
+              selected={visibleSelectedIds.includes(entry.id)}
+              onSelect={(checked) => toggleSelect(entry.id, checked)}
+              onView={() => onRestoreRun(entry)}
+              onRename={(label) => onRenameHistoryEntry(entry.id, label)}
+              onPin={(pinned) => onPinHistoryEntry(entry.id, pinned)}
+              onDelete={() => onDeleteHistoryEntry(entry.id)}
+            />
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── One flat run row ────────────────────────────────────────────────────────
+
+function HistoryRow({
+  entry, selected, onSelect, onView, onRename, onPin, onDelete,
+}: {
+  entry: RunHistoryEntry;
+  selected: boolean;
+  onSelect: (checked: boolean) => void;
+  onView: () => void;
+  onRename: (label: string) => void;
+  onPin: (pinned: boolean) => void;
+  onDelete: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(entry.label);
+
+  const snaps = Math.max(0, entry.snapshotEnd - entry.snapshotStart);
+  const summary = entry.results?.summary ?? [];
+  const price = summary[3];
+  const emissions = summary[4];
+
+  const commit = () => { onRename(draft.trim() || entry.label); setEditing(false); };
+
+  return (
+    <div className={`history-row${selected ? ' is-selected' : ''}${entry.pinned ? ' is-pinned' : ''}`}>
+      <input
+        type="checkbox"
+        className="history-row-select"
+        checked={selected}
+        onChange={(e) => onSelect(e.target.checked)}
+        aria-label={`Select ${entry.label}`}
+      />
+
+      {editing ? (
+        <input
+          className="history-row-name-input"
+          value={draft}
+          autoFocus
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === 'Escape') e.currentTarget.blur(); }}
+        />
+      ) : (
+        <button className="history-row-name" onClick={() => { setDraft(entry.label); setEditing(true); }} title="Click to rename">
+          {entry.label}
+        </button>
+      )}
+
+      <span className="history-row-time" title={new Date(entry.savedAt).toLocaleString()}>
+        {formatRelTime(entry.savedAt)}
+      </span>
+      <span className="history-row-file" title={entry.filename}>{entry.filename}</span>
+      {entry.scenarioLabel && <span className="history-row-chip">{entry.scenarioLabel}</span>}
+      <span className="history-row-chip">{snaps} snaps</span>
+      <span className="history-row-chip">{entry.snapshotWeight}h</span>
+      {emissions && <span className="history-row-kpi"><b>{emissions.value}</b> {emissions.label}</span>}
+      {price && <span className="history-row-kpi"><b>{price.value}</b> {price.label}</span>}
+
+      <span className="history-row-spacer" />
+
+      <button className="tb-btn" onClick={onView}>View results</button>
+      <button className="tb-btn tb-btn--muted" onClick={() => onPin(!entry.pinned)}>{entry.pinned ? 'Unpin' : 'Pin'}</button>
+      <button className="tb-btn tb-btn--muted" onClick={onDelete}>Delete</button>
     </div>
   );
 }
