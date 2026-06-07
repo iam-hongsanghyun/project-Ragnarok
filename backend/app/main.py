@@ -5,7 +5,8 @@ import logging
 import multiprocessing as mp
 import queue
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 
 import tempfile
@@ -160,6 +161,149 @@ async def _collect_job(job_id: str) -> None:
             await asyncio.sleep(0.5)
 
 
+# ── Run queue (serial, in-memory) ─────────────────────────────────────────────
+# A single FIFO queue runs one solve at a time. Enqueue returns immediately
+# ("queued, position N"); a background pump runs each job to completion (which
+# also persists it to History via the worker's store_run), then starts the next.
+# State is in-memory only — a backend restart clears pending jobs (a running
+# solve can't survive a restart anyway). Terminal items linger briefly so the
+# UI can show the final status / fire a completion toast before they're pruned.
+
+_queue_logger = logging.getLogger("pypsa_gui.queue")
+_TERMINAL = ("done", "error", "cancelled")
+_QUEUE_PRUNE_SECONDS = 60.0
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+@dataclass
+class _QueueItem:
+    id: str
+    payload: RunPayload
+    label: str
+    summary: dict[str, Any]
+    submitted_at: str
+    status: str = "queued"  # queued | running | done | error | cancelled
+    started_at: str | None = None
+    finished_at: str | None = None
+    error: str | None = None
+    proc: "mp.Process | None" = field(default=None, repr=False)
+    result_queue: Any = field(default=None, repr=False)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "label": self.label,
+            "status": self.status,
+            "submittedAt": self.submitted_at,
+            "startedAt": self.started_at,
+            "finishedAt": self.finished_at,
+            "error": self.error,
+            **self.summary,
+        }
+
+
+_run_queue: list[_QueueItem] = []
+
+
+def _queue_label(payload: RunPayload) -> str:
+    opts = payload.options or {}
+    scen = payload.scenario or {}
+    return str(
+        opts.get("runLabel")
+        or opts.get("scenarioLabel")
+        or scen.get("label")
+        or opts.get("filename")
+        or "Run"
+    )
+
+
+def _queue_summary(payload: RunPayload) -> dict[str, Any]:
+    """Small, display-only run settings for the Queue card."""
+    opts = payload.options or {}
+    scen = payload.scenario or {}
+    start, end = opts.get("snapshotStart"), opts.get("snapshotEnd")
+    snaps = (
+        end - start
+        if isinstance(start, (int, float)) and isinstance(end, (int, float))
+        else opts.get("snapshotCount")
+    )
+    return {
+        "snapshots": snaps,
+        "snapshotWeight": opts.get("snapshotWeight"),
+        "scenarioLabel": opts.get("scenarioLabel") or scen.get("label"),
+        "solver": opts.get("solverType"),
+        "carbonPrice": scen.get("carbonPrice"),
+        "rolling": bool((opts.get("rollingConfig") or {}).get("enabled")),
+        "pathway": bool((opts.get("pathwayConfig") or {}).get("enabled")),
+        "backend": opts.get("backend"),
+        "filename": opts.get("filename"),
+    }
+
+
+def _prune_queue() -> None:
+    """Drop terminal items older than the grace window (keeps the list bounded)."""
+    now = datetime.now(timezone.utc)
+    keep: list[_QueueItem] = []
+    for it in _run_queue:
+        if it.status in _TERMINAL and it.finished_at:
+            try:
+                age = (now - datetime.fromisoformat(it.finished_at)).total_seconds()
+            except ValueError:
+                age = 0.0
+            if age > _QUEUE_PRUNE_SECONDS:
+                continue
+        keep.append(it)
+    _run_queue[:] = keep
+
+
+async def _run_queue_item(item: _QueueItem) -> None:
+    """Run one queued job to completion in a child process (serial)."""
+    ctx = mp.get_context("spawn")
+    item.result_queue = ctx.Queue()
+    item.proc = ctx.Process(target=_solve_worker, args=(item.payload, item.result_queue), daemon=True)
+    item.status = "running"
+    item.started_at = _now_iso()
+    item.proc.start()
+    # Wait for the child to fully EXIT — the worker persists the run (store_run)
+    # AFTER putting its result, so process exit guarantees the run + its xlsx are
+    # on disk before we mark this done and start the next (no CPU contention).
+    await asyncio.to_thread(item.proc.join)
+    if item.status == "cancelled":
+        return
+    try:
+        status, data = item.result_queue.get_nowait()
+    except queue.Empty:
+        status, data = ("err", "Worker exited without delivering a result.")
+    if status == "ok":
+        item.status = "done"
+    else:
+        item.status = "error"
+        item.error = str(data)
+    item.finished_at = _now_iso()
+    _queue_logger.info("Queue item %s finished: %s", item.id, item.status)
+
+
+async def _queue_pump() -> None:
+    """Background loop: run the next queued job whenever none is running."""
+    while True:
+        try:
+            _prune_queue()
+            running = any(it.status == "running" for it in _run_queue)
+            nxt = next((it for it in _run_queue if it.status == "queued"), None)
+            if nxt is not None and not running:
+                await _run_queue_item(nxt)
+            else:
+                await asyncio.sleep(0.4)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 — the pump must never die
+            _queue_logger.exception("Queue pump iteration failed")
+            await asyncio.sleep(1.0)
+
+
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 
 from contextlib import asynccontextmanager  # noqa: E402
@@ -176,11 +320,14 @@ async def _lifespan(_app: "FastAPI"):
     connection. See ``startup_status.warm``.
     """
     task = asyncio.ensure_future(startup_status.warm())
+    pump = asyncio.ensure_future(_queue_pump())
     try:
         yield
     finally:
         if not task.done():
             task.cancel()
+        if not pump.done():
+            pump.cancel()
 
 
 app = FastAPI(title="Ragnarok Backend", version="0.1.0", lifespan=_lifespan)
@@ -361,6 +508,62 @@ async def cancel_run(job_id: str) -> dict[str, Any]:
     job.status = "cancelled"
     _jobs.pop(job_id, None)
     return {"jobId": job_id, "status": "cancelled"}
+
+
+# ── Run queue endpoints ───────────────────────────────────────────────────────
+
+
+@app.post("/api/queue")
+async def enqueue_run(payload: RunPayload) -> dict[str, Any]:
+    """Add a solve to the back of the queue and return immediately.
+
+    The job runs when its turn comes (serial); the frontend polls
+    ``GET /api/queue`` for status and is notified when it finishes (the run then
+    appears in History). Returns the new item id and its 1-based queue position.
+    """
+    try:
+        get_backend((payload.options or {}).get("backend"))
+    except BackendError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    item = _QueueItem(
+        id=str(uuid.uuid4()),
+        payload=payload,
+        label=_queue_label(payload),
+        summary=_queue_summary(payload),
+        submitted_at=_now_iso(),
+    )
+    _run_queue.append(item)
+    position = sum(1 for it in _run_queue if it.status == "queued")
+    return {"id": item.id, "status": item.status, "position": position}
+
+
+@app.get("/api/queue")
+def get_queue() -> dict[str, Any]:
+    """List queue items (queued / running, plus recently-finished for a moment)."""
+    return {"jobs": [it.to_dict() for it in _run_queue]}
+
+
+@app.delete("/api/queue/{item_id}")
+async def cancel_queued(item_id: str) -> dict[str, Any]:
+    """Cancel a queued job, or kill it if it is currently running."""
+    item = next((it for it in _run_queue if it.id == item_id), None)
+    if item is None:
+        return {"id": item_id, "status": "not_found"}
+    if item.status == "queued":
+        item.status = "cancelled"
+        item.finished_at = _now_iso()
+    elif item.status == "running":
+        item.status = "cancelled"
+        item.finished_at = _now_iso()
+        proc = item.proc
+        if proc is not None and proc.is_alive():
+            proc.terminate()
+            await asyncio.to_thread(proc.join, 3)
+            if proc.is_alive():
+                proc.kill()
+                await asyncio.to_thread(proc.join, 3)
+    return {"id": item_id, "status": "cancelled"}
 
 
 # ── Backend-stored runs ─────────────────────────────────────────────────────

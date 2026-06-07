@@ -709,6 +709,27 @@ export interface BackendRunMeta {
   xlsxReady?: boolean;
 }
 
+/** A run on the backend's serial queue (GET /api/queue). */
+export interface QueueJob {
+  id: string;
+  label: string;
+  status: 'queued' | 'running' | 'done' | 'error' | 'cancelled';
+  submittedAt: string;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  error?: string | null;
+  // Display-only run settings.
+  snapshots?: number | null;
+  snapshotWeight?: number | null;
+  scenarioLabel?: string | null;
+  solver?: string | null;
+  carbonPrice?: number | null;
+  rolling?: boolean;
+  pathway?: boolean;
+  backend?: string | null;
+  filename?: string | null;
+}
+
 export type AnalyticsFocus =
   | { type: 'system' }
   | { type: 'generator'; key: string }

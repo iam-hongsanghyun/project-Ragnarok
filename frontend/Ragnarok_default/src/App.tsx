@@ -27,8 +27,9 @@ import {
   WorkbookModel,
   WorkspaceTab,
   AnalyticsSubTab,
+  QueueJob,
 } from 'lib/types';
-import { API_BASE, DEFAULT_CONSTRAINTS, getDefaultRowForSheet, RUN_POLLING, RUN_WINDOW, SHEETS } from 'lib/constants';
+import { API_BASE, DEFAULT_CONSTRAINTS, getDefaultRowForSheet, RUN_WINDOW, SHEETS } from 'lib/constants';
 import { canonicalizeOutputSeries, canonicalizeTemporalRows, createEmptyWorkbook, exportWorkbook, normalizeInputDatesToIso, parseWorkbook, workbookToArrayBuffer } from 'lib/workbook/workbook';
 import { mergeWorkbookFragment } from 'lib/workbook/mergeFragment';
 import type { WorkbookFragment } from 'lib/api/databases';
@@ -50,6 +51,7 @@ import { SettingsView } from './views/SettingsView';
 import { PluginsView } from './views/PluginsView';
 import { ModelView } from './views/ModelView';
 import { HistoryView } from './views/HistoryView';
+import { QueueView } from './views/QueueView';
 import { BuildView } from './features/build/BuildView';
 import { DataView } from './views/DataView';
 import { WelcomeView } from './views/WelcomeView';
@@ -115,6 +117,8 @@ function AppInner() {
   // Persisted so the analytics sub-tab the user last viewed sticks across tab
   // navigation and reloads — never auto-yanked back to a default.
   const [analyticsSubTab, setAnalyticsSubTab] = usePersistedState<AnalyticsSubTab>('ui:analytics-subtab', 'Result');
+  // History top-tab sub-navigation: the live run Queue, or the persisted run History.
+  const [historySubTab, setHistorySubTab] = usePersistedState<'Queue' | 'History'>('ui:history-subtab', 'History');
   const [results, setResults] = useState<RunResults | null>(null);
   // Topology snapshot taken at the moment `results` were produced/restored.
   // Analytics (map, asset derivation) must reflect the run that owns the
@@ -127,7 +131,6 @@ function AppInner() {
   const [resultsContext, setResultsContext] = useState<
     { carbonPrice: number; snapshotWeight: number; discountRate: number } | null
   >(null);
-  const [runStatus, setRunStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
   const [maxSnapshots, setMaxSnapshots] = useState<number>(RUN_WINDOW.initialMaxSnapshots);
   const [snapshotStart, setSnapshotStart] = useState(RUN_WINDOW.initialSnapshotStart);
   const [snapshotEnd, setSnapshotEnd] = useState(RUN_WINDOW.defaultSnapshotEnd);
@@ -166,17 +169,11 @@ function AppInner() {
   const [status, setStatus] = useState('Ready. Open a workbook or import a project.');
   const [fileHandle, setFileHandle] = useState<BrowserFileHandle | null>(null);
   const [jumpTo, setJumpTo] = useState<{ sheet: string; rowIndex: number } | null>(null);
-  const [runElapsed, setRunElapsed] = useState(0);
-  const jobIdRef = useRef<string | null>(null);
-  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const runStartRef = useRef<number>(0);
-
-  const stopPolling = useCallback(() => {
-    if (pollTimerRef.current !== null) {
-      clearTimeout(pollTimerRef.current);
-      pollTimerRef.current = null;
-    }
-  }, []);
+  // Server-side run queue (serial). Runs are enqueued and execute one at a time;
+  // the frontend polls /api/queue, shows pending/running jobs in the Queue tab,
+  // and is notified when each finishes (it then appears in History).
+  const [queueJobs, setQueueJobs] = useState<QueueJob[]>([]);
+  const seenTerminalRef = useRef<Set<string>>(new Set());
 
   const [settings, updateSettings] = useSettings();
   const [scenarioCatalog, setScenarioCatalog] = useState<ScenarioCatalog>(() => defaultScenarioCatalog({
@@ -335,7 +332,6 @@ function AppInner() {
     // list lives in in-memory React state and is never persisted). Each entry
     // carries its own topology + results snapshot, so it stays self-contained
     // even after the live model is replaced. Do NOT clear it here.
-    setRunStatus('idle');
     setChartSections([]);
     setValidateResult(null);
     setAnalyticsFocus({ type: 'system' });
@@ -408,17 +404,6 @@ function AppInner() {
     return cloned;
   }, [settings.dateFormat]);
 
-  // Elapsed-time ticker while running
-  useEffect(() => {
-    if (runStatus !== 'running') { setRunElapsed(0); return; }
-    runStartRef.current = Date.now();
-    const id = setInterval(
-      () => setRunElapsed(Math.floor((Date.now() - runStartRef.current) / 1000)),
-      1000,
-    );
-    return () => clearInterval(id);
-  }, [runStatus]);
-
   // Guard against accidental session loss on browser back / forward / refresh /
   // close. The workbook lives only in memory and there is no client-side
   // router, so a stray back-swipe (the macOS trackpad gesture) unloads the app
@@ -430,7 +415,7 @@ function AppInner() {
   // empty Welcome screen never prompts.
   useEffect(() => {
     const hasWork =
-      runStatus === 'running' || SHEETS.some((sheet) => (model[sheet]?.length ?? 0) > 0);
+      queueJobs.length > 0 || SHEETS.some((sheet) => (model[sheet]?.length ?? 0) > 0);
     if (!hasWork) return undefined;
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();
@@ -438,22 +423,8 @@ function AppInner() {
     };
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [runStatus, model]);
+  }, [queueJobs.length, model]);
 
-  const handleCancelRun = useCallback(async () => {
-    stopPolling();
-    const jobId = jobIdRef.current;
-    jobIdRef.current = null;
-    sessionStorage.removeItem('activeJobId');
-    if (jobId) {
-      try {
-        await fetch(`${API_BASE}/api/run/${jobId}`, { method: 'DELETE' });
-      } catch { /* ignore — process will be cleaned up server-side */ }
-    }
-    setRunStatus('idle');
-    setStatus('Run cancelled.');
-    showToast('Run cancelled', 'info');
-  }, [stopPolling, showToast]);
   const [filename, setFilename] = useState('ragnarok_case.xlsx');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const projectImportInputRef = useRef<HTMLInputElement | null>(null);
@@ -1113,6 +1084,52 @@ function AppInner() {
     return () => clearInterval(timer);
   }, [tab, refreshBackendRuns]);
 
+  // ── Run queue polling ──────────────────────────────────────────────────────
+  // Always poll the queue (regardless of tab) so a completion notification fires
+  // wherever the user is. On each tick: refresh the visible (queued/running)
+  // jobs, and for any job that newly reached a terminal state, toast once and
+  // refresh History (where the finished run now lives).
+  const refreshQueue = useCallback(async (): Promise<void> => {
+    try {
+      const resp = await fetch(`${API_BASE}/api/queue`);
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const jobs: QueueJob[] = Array.isArray(data.jobs) ? data.jobs : [];
+      setQueueJobs(jobs.filter((j) => j.status === 'queued' || j.status === 'running'));
+      let anyFinished = false;
+      for (const job of jobs) {
+        if ((job.status === 'done' || job.status === 'error') && !seenTerminalRef.current.has(job.id)) {
+          seenTerminalRef.current.add(job.id);
+          anyFinished = true;
+          if (job.status === 'done') {
+            showToast(`Run "${job.label}" finished — added to History`, 'success');
+          } else {
+            showToast(`Run "${job.label}" failed: ${job.error ?? 'unknown error'}`, 'error');
+          }
+          window.dispatchEvent(new CustomEvent('ragnarok:log-refresh'));
+        }
+      }
+      if (anyFinished) void refreshBackendRuns();
+    } catch {
+      /* backend unreachable — leave the queue as-is */
+    }
+  }, [showToast, refreshBackendRuns]);
+
+  useEffect(() => {
+    void refreshQueue();
+    const timer = setInterval(() => void refreshQueue(), 2500);
+    return () => clearInterval(timer);
+  }, [refreshQueue]);
+
+  const handleCancelQueueItem = useCallback(async (id: string) => {
+    try {
+      await fetch(`${API_BASE}/api/queue/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    } catch {
+      /* ignore — the next poll reflects the real server state */
+    }
+    void refreshQueue();
+  }, [refreshQueue]);
+
   const handleOpenBackendRun = async (
     name: string,
     opts?: { restoreConstraints?: boolean },
@@ -1326,8 +1343,6 @@ function AppInner() {
   };
 
   const handleRunModel = async () => {
-    // Guard against double-submit while a job is already in flight
-    if (runStatus === 'running') return;
     const snapshotCount = snapshotEnd - snapshotStart;
     const scenario = {
       constraints: constraints.filter((c) => c.enabled),
@@ -1391,171 +1406,29 @@ function AppInner() {
       return;
     }
 
-    setRunStatus('running');
-    setStatus(`Running — ${snapshotCount} snapshots…`);
-
-    // ── Step 1: Start the job ────────────────────────────────────────────────
-    // Send the in-memory workbook as JSON. The backend builds the PyPSA
-    // network directly from the per-sheet rows via bulk `network.add()`.
-    let jobId: string;
+    // Enqueue the run on the backend's serial queue and return immediately. The
+    // queue poller notifies on completion and the finished run appears in
+    // History — the UI never blocks on a live solve here.
+    setStatus(`Queuing run — ${snapshotCount} snapshots…`);
     try {
-      const startResp = await fetch(`${API_BASE}/api/run`, {
+      const resp = await fetch(`${API_BASE}/api/queue`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: modelForRun, scenario, options }),
       });
-      if (!startResp.ok) {
-        const msg = await startResp.text();
-        throw new Error(msg || `Failed to start run (status ${startResp.status}).`);
+      if (!resp.ok) {
+        throw new Error((await resp.text()) || `Failed to queue run (status ${resp.status}).`);
       }
-      const { jobId: jid } = await startResp.json() as { jobId: string };
-      jobId = jid;
+      const { position } = (await resp.json()) as { id: string; position: number };
+      const posMsg = position > 1 ? ` — position ${position} in queue` : '';
+      setStatus(`Run queued${posMsg}. You'll be notified when it finishes; it then appears in History.`);
+      showToast(`Run queued${posMsg}`, 'info');
+      void refreshQueue();
     } catch (error) {
-      const msg = error instanceof Error ? error.message : 'Failed to start run.';
-      setRunStatus('error');
+      const msg = error instanceof Error ? error.message : 'Failed to queue run.';
       setStatus(msg);
       showToast(msg, 'error');
-      return;
     }
-
-    jobIdRef.current = jobId;
-    sessionStorage.setItem('activeJobId', jobId);
-
-    // ── Step 2: Apply completed result ───────────────────────────────────────
-    const applyResult = (rawResults: RunResults) => {
-      sessionStorage.removeItem('activeJobId');
-      jobIdRef.current = null;
-      // Canonicalise backend output time-series in place (ISO-`T` snapshots,
-      // `snapshot` column leading) so all downstream rendering, derivation,
-      // and re-exports see uniformly PyPSA-canonical data.
-      if (rawResults.outputs?.series) {
-        canonicalizeOutputSeries(rawResults.outputs.series, settings.dateFormat);
-      }
-      const selectedPeriod = rawResults.pathway?.enabled
-        ? (rawResults.pathway.selectedPeriod ?? rawResults.pathway.periods[0] ?? null)
-        : null;
-      setPathwayConfig((current) => rawResults.pathway?.enabled ? ({
-        ...current,
-        planningMode: 'pathway',
-        enabled: true,
-        periods: rawResults.pathway?.summaries?.map((row) => ({
-          period: row.period,
-          objectiveWeight: row.objectiveWeight,
-          yearsWeight: row.yearsWeight,
-        })) ?? current.periods,
-        selectedPeriod,
-      }) : {
-        ...current,
-        enabled: false,
-        planningMode: 'single_period',
-        selectedPeriod: null,
-      });
-      setRollingConfig((current) => rawResults.rolling ? normalizeRollingConfig({
-        ...current,
-        enabled: rawResults.rolling?.enabled ?? current.enabled,
-        horizonSnapshots: rawResults.rolling?.horizonSnapshots ?? current.horizonSnapshots,
-        overlapSnapshots: rawResults.rolling?.overlapSnapshots ?? current.overlapSnapshots,
-        stepSnapshots: rawResults.rolling?.stepSnapshots ?? current.stepSnapshots,
-      }) : {
-        ...current,
-        enabled: false,
-      });
-      setResults(rawResults);
-      // Freeze the exact topology submitted to the backend so analytics (map,
-      // asset derivation) stay tied to this run even after later edits.
-      setResultsModel(structuredClone(modelForRun));
-      // Freeze the derivation inputs this run was solved with, so later slider
-      // edits don't silently recompute the displayed pathway KPIs.
-      setResultsContext({ carbonPrice, snapshotWeight, discountRate: settings.discountRate });
-      setRunStatus('done');
-      // Keep the user's current view/focus after a run — don't yank to the
-      // system overview. The safety effect clears focus only if the asset the
-      // user was inspecting is genuinely absent from the new results.
-      const visible = rawResults.pathway?.enabled && rawResults.outputs
-        ? deriveRunResults(modelForRun, rawResults.outputs, {
-          carbonPrice,
-          currencySymbol: settings.currencySymbol,
-          discountRate: settings.discountRate,
-          snapshotWeight,
-          narrative: rawResults.narrative,
-          selectedPeriod,
-          pathway: rawResults.pathway,
-          rolling: rawResults.rolling,
-        })
-        : withDerivedAssetDetails(modelForRun, rawResults, settings.currencySymbol);
-      const doneMsg = `Completed — ${visible.runMeta.snapshotCount} snapshots, ${visible.runMeta.modeledHours} h.`;
-      setStatus(doneMsg);
-      showToast(doneMsg, 'success');
-      // Run finished — tell the Log tab (if open) to refresh so the user
-      // sees the freshly-captured solve transcript without waiting for the
-      // next poll. The LogPane listens for this on `window`. No-op when
-      // the Log tab is not mounted.
-      window.dispatchEvent(new CustomEvent('ragnarok:log-refresh'));
-      // Every run is stored server-side automatically. Refresh the backend list
-      // so the new run appears in History and Comparison without a manual
-      // reload, then mark the newest stored meta (max savedAt) as active so
-      // Comparison highlights this run.
-      void (async () => {
-        const runs = await refreshBackendRuns();
-        if (runs.length > 0) {
-          const newest = runs.reduce((a, b) => (a.savedAt >= b.savedAt ? a : b));
-          setActiveRunName(newest.name);
-        }
-      })();
-    };
-
-    // ── Step 3: Poll until done ──────────────────────────────────────────────
-    // The job runs independently on the backend — a brief network disconnect
-    // just means polling retries, it does NOT kill the solve.
-    const poll = async (): Promise<void> => {
-      if (jobIdRef.current !== jobId) return; // cancelled or superseded
-
-      let data: { jobId: string; status: string; result?: RunResults };
-      try {
-        const resp = await fetch(`${API_BASE}/api/run/${jobId}`);
-
-        if (resp.status === 404) {
-          // Server restarted and lost the job
-          sessionStorage.removeItem('activeJobId');
-          jobIdRef.current = null;
-          setRunStatus('error');
-          setStatus('Run disconnected — server restarted. Please run again.');
-          showToast('Run disconnected — server restarted.', 'error');
-          window.dispatchEvent(new CustomEvent('ragnarok:log-refresh'));
-          return;
-        }
-
-        if (!resp.ok) {
-          const msg = await resp.text();
-          sessionStorage.removeItem('activeJobId');
-          jobIdRef.current = null;
-          setRunStatus('error');
-          setStatus(msg || 'Backend run failed.');
-          showToast(msg || 'Backend run failed.', 'error');
-          window.dispatchEvent(new CustomEvent('ragnarok:log-refresh'));
-          return;
-        }
-
-        data = await resp.json();
-      } catch {
-        // Network error — keep retrying silently
-        if (jobIdRef.current === jobId) {
-          pollTimerRef.current = setTimeout(poll, RUN_POLLING.retryDelayMs);
-        }
-        return;
-      }
-
-      if (data.status === 'running') {
-        pollTimerRef.current = setTimeout(poll, RUN_POLLING.runningDelayMs);
-        return;
-      }
-
-      // Done
-      applyResult(data.result!);
-    };
-
-    // First poll after a short delay to let the process spin up
-    pollTimerRef.current = setTimeout(poll, RUN_POLLING.initialDelayMs);
   };
 
   // ── Metric series derived data ────────────────────────────────────────────
@@ -1632,8 +1505,7 @@ function AppInner() {
           <button
             className="run-button"
             onClick={() => setRunDialogOpen(true)}
-            disabled={runStatus === 'running'}
-            title={runStatus === 'running' ? 'A run is already in progress' : undefined}
+            title="Queue a run (runs execute one at a time)"
           >
             Run
           </button>
@@ -1686,24 +1558,23 @@ function AppInner() {
           >
             Clear
           </button>
-          {runStatus === 'running' ? (
-            <>
-              <span className="topbar-running">
-                <span className="topbar-spinner" />
-                {Math.floor(runElapsed / 60) > 0 ? `${Math.floor(runElapsed / 60)}m ` : ''}{(runElapsed % 60).toString().padStart(2, '0')}s
-              </span>
-              <button className="tb-btn tb-btn--muted topbar-cancel" onClick={handleCancelRun}>Cancel</button>
-            </>
-          ) : null}
+          {queueJobs.length > 0 && (
+            <button
+              className="tb-btn topbar-queue"
+              onClick={() => { setTab('History'); setHistorySubTab('Queue'); }}
+              title="Open the run queue"
+            >
+              <span className="topbar-spinner" />
+              {queueJobs.some((j) => j.status === 'running') ? 'Running' : 'Queued'} ({queueJobs.length})
+            </button>
+          )}
         </div>
         <div className="topbar-right">
           <span className="topbar-file" title={filename}>{filename}</span>
           {displayResults && (
             <span className="topbar-run-meta">{displayResults.runMeta.snapshotCount} snaps · {displayResults.runMeta.snapshotWeight}h</span>
           )}
-          {runStatus !== 'running' && (
-            <span className="topbar-status" title={status}>{status}</span>
-          )}
+          <span className="topbar-status" title={status}>{status}</span>
         </div>
       </header>
 
@@ -1883,15 +1754,35 @@ function AppInner() {
           )}
 
           {tab === 'History' && (
-            <HistoryView
-              backendRuns={backendRuns}
-              onOpenBackendRun={handleOpenBackendRun}
-              onDownloadBackendXlsx={handleDownloadBackendXlsx}
-              onExportBackendProject={handleExportBackendProject}
-              onDeleteBackendRun={handleDeleteBackendRun}
-              onDeleteBackendRuns={handleDeleteBackendRuns}
-              onReload={() => void refreshBackendRuns()}
-            />
+            <div className="history-tabbed">
+              <div className="history-subnav">
+                <button
+                  className={`history-subnav-btn${historySubTab === 'Queue' ? ' is-active' : ''}`}
+                  onClick={() => setHistorySubTab('Queue')}
+                >
+                  Queue{queueJobs.length > 0 ? ` (${queueJobs.length})` : ''}
+                </button>
+                <button
+                  className={`history-subnav-btn${historySubTab === 'History' ? ' is-active' : ''}`}
+                  onClick={() => setHistorySubTab('History')}
+                >
+                  History
+                </button>
+              </div>
+              {historySubTab === 'Queue' ? (
+                <QueueView jobs={queueJobs} onCancel={handleCancelQueueItem} />
+              ) : (
+                <HistoryView
+                  backendRuns={backendRuns}
+                  onOpenBackendRun={handleOpenBackendRun}
+                  onDownloadBackendXlsx={handleDownloadBackendXlsx}
+                  onExportBackendProject={handleExportBackendProject}
+                  onDeleteBackendRun={handleDeleteBackendRun}
+                  onDeleteBackendRuns={handleDeleteBackendRuns}
+                  onReload={() => void refreshBackendRuns()}
+                />
+              )}
+            </div>
           )}
 
           {tab === 'Plugins' && (

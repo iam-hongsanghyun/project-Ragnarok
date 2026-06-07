@@ -2868,6 +2868,64 @@ path.leaflet-interactive:focus {
   padding: 24px 4px;
 }
 
+/* History top-tab sub-navigation: Queue | History. */
+.history-tabbed { display: flex; flex-direction: column; height: 100%; }
+.history-subnav {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 12px;
+}
+.history-subnav-btn {
+  padding: 6px 14px;
+  font-size: 0.8rem;
+  font-family: var(--font-mono);
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+}
+.history-subnav-btn:hover { color: var(--text); }
+.history-subnav-btn.is-active {
+  color: var(--text);
+  border-bottom-color: var(--brand);
+}
+
+/* Queue — full-width run cards. */
+.queue-list { display: flex; flex-direction: column; gap: 10px; }
+.queue-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-button);
+  padding: 12px 14px;
+  background: var(--surface);
+}
+.queue-card--running { border-color: var(--brand); }
+.queue-card-head { display: flex; align-items: center; gap: 12px; }
+.queue-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.74rem;
+  font-family: var(--font-mono);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.queue-status--running { color: var(--brand); }
+.queue-card-label { font-size: 0.86rem; font-weight: 600; color: var(--text); }
+.queue-card-spacer { flex: 1 1 auto; }
+.queue-card-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.queue-chip {
+  font-size: 0.72rem;
+  color: var(--muted);
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-button);
+  padding: 2px 8px;
+}
+.queue-chip b { color: var(--text); font-weight: 600; }
+.queue-chip--file { font-family: var(--font-mono); }
+.topbar-queue { display: inline-flex; align-items: center; gap: 6px; }
+
 /* Flat, full-width rows (no card chrome) — one run per line, info horizontal. */
 .history-list {
   display: flex;
