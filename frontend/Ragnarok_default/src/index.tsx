@@ -38,13 +38,18 @@ import { ConfigBootstrap } from './ConfigBootstrap';
 const BUILD_ID = process.env.REACT_APP_BUILD_ID || 'untagged';
 const BUILD_ID_KEY = 'ragnarok:build-id';
 
-// Wiped on a build change (derived / volatile state).
+// Wiped on a build change (derived / volatile state only — grid layout, view
+// selection, cached results). NOT user preferences.
 const WIPE_PREFIXES = ['pypsa.', 'ragnarok:', 'ui:'];
-// Exact keys also wiped on a build change — app settings re-sync to the
-// current defaults instead of persisting a stale cached value.
-const WIPE_KEYS = ['pypsa_gui_settings'];
+// No exact keys are wiped on a build change. App settings (`pypsa_gui_settings`)
+// used to be reset here to re-sync to defaults, but that meant every dev-server
+// restart / deploy silently discarded the user's settings — so they persist
+// now. New default fields are still picked up because `loadSettings` merges each
+// field with the current default (`parsed.x ?? DEFAULTS.x`), and the one-off
+// solver-method migration handles the only stale-default case.
+const WIPE_KEYS: string[] = [];
 // Never wiped — user-owned content that persists until explicitly removed
-// (installed plugins, and BYOK API keys the user typed into Settings).
+// (installed plugins + their configs, and BYOK API keys typed into Settings).
 const PRESERVE_PREFIXES = ['ragnarok:fe-plugins:', 'ragnarok:secret:'];
 
 try {
