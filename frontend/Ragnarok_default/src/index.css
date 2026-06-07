@@ -5498,12 +5498,12 @@ th:hover .col-delete-btn {
 .forge-adjust-card {
   border: 1px solid var(--border);
   border-radius: 0;
-  padding: 10px 12px;
-  margin-bottom: 12px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
   background: var(--surface);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 5px;
 }
 .forge-adjust-row {
   display: flex;
@@ -5512,10 +5512,19 @@ th:hover .col-delete-btn {
   flex-wrap: wrap;
 }
 .forge-adjust-row .sg-setting-label {
-  min-width: 72px;
+  min-width: 64px;
+  margin: 0;
+}
+/* Let each SearchableSelect flex and share its row instead of stretching to
+   full width — keeps "label [select] [×]" and "where [col] = [val] [×]" on
+   one line each, so the card stays compact. */
+.forge-adjust-row .ss-wrap {
+  flex: 1 1 0;
+  min-width: 110px;
+  width: auto;
 }
 .forge-adjust-select {
-  min-width: 180px;
+  min-width: 0;
 }
 .forge-adjust-filter {
   padding-left: 4px;
