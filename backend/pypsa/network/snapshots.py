@@ -12,12 +12,19 @@ from ..utils.coerce import number
 def _snapshots_index(
     model: dict[str, list[dict[str, Any]]],
     pathway: PathwayConfig,
+    notes: list[str] | None = None,
 ) -> pd.Index:
     """Build the snapshot index from the `snapshots` sheet, if present.
 
     Snapshot date strings are expected to already be ISO (the frontend
     normalizes input dates to ISO using the user's Date format setting before
     the model is sent here), so they parse unambiguously.
+
+    The index is **sorted chronologically**: PyPSA steps through snapshots in
+    index order and inter-temporal physics (storage state-of-charge, ramping,
+    rolling horizon) are path-dependent, so a non-chronological sheet — e.g. a
+    union of imported date ranges — would otherwise corrupt the solve and the
+    time-axis of every chart. Reordering is reported via ``notes``.
     """
     rows = model.get("snapshots") or []
     labels: list[str] = []
@@ -43,7 +50,13 @@ def _snapshots_index(
             timesteps = pd.Index(labels, dtype="object")
         snapshots = pd.MultiIndex.from_arrays([periods, timesteps], names=["period", "timestep"])
         snapshots.name = "snapshot"
-        return snapshots
+        ordered = snapshots.sort_values()
+        if notes is not None and not ordered.equals(snapshots):
+            notes.append(
+                f"Snapshots were not in chronological order — reordered {len(ordered)} "
+                "snapshots by (period, time) so storage/ramping dynamics are correct."
+            )
+        return ordered
     # Single-period run: dedupe labels so a pathway workbook (which lists the
     # same timestamp once per period via the `period` column) still produces
     # a unique snapshot index. Without this PyPSA's internal reindexing
@@ -56,9 +69,17 @@ def _snapshots_index(
         seen.add(label)
         unique_labels.append(label)
     try:
-        return pd.to_datetime(unique_labels)
+        idx = pd.to_datetime(unique_labels)
     except Exception:
+        # Non-datetime labels (e.g. "now" / integer steps) — keep input order.
         return pd.Index(unique_labels, dtype="object")
+    ordered = idx.sort_values()
+    if notes is not None and not ordered.equals(idx):
+        notes.append(
+            f"Snapshots were not in chronological order — reordered {len(ordered)} "
+            "snapshots by time so storage/ramping dynamics and chart time-axes are correct."
+        )
+    return ordered
 
 
 def _apply_pathway_config(

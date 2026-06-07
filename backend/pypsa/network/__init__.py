@@ -140,7 +140,7 @@ def build_network(
     # ── Snapshots ─────────────────────────────────────────────────────────────
     # Snapshot dates arrive already normalized to ISO by the frontend (which
     # interprets the user's input Date format), so parse them as-is here.
-    snaps_idx = _snapshots_index(model, pathway)
+    snaps_idx = _snapshots_index(model, pathway, notes)
     if len(snaps_idx) > 0:
         network.set_snapshots(snaps_idx)
     _apply_pathway_config(network, pathway, notes)

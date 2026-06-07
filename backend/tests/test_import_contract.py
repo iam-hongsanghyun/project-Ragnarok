@@ -284,3 +284,39 @@ def test_broken_bus_reference_is_dropped(scenario: dict[str, Any]) -> None:
     assert any("dangling" in note for note in notes), (
         "Expected the dropped row to be surfaced in notes; got: " + repr(notes)
     )
+
+
+def test_snapshots_reordered_chronologically(scenario: dict[str, Any]) -> None:
+    """A non-chronological `snapshots` sheet must be sorted by time before solving.
+
+    PyPSA steps through snapshots in index order and storage SoC / ramping are
+    path-dependent, so an unsorted index would corrupt the solve and scramble
+    every chart's time-axis. The reorder is surfaced in notes.
+    """
+    model = {
+        "buses": [{"name": "b"}],
+        "snapshots": [
+            {"snapshot": "2024-03-01T00:00:00"},
+            {"snapshot": "2024-01-01T00:00:00"},
+            {"snapshot": "2024-02-01T00:00:00"},
+        ],
+    }
+    network, notes = build_network(model, scenario)
+
+    stamps = [str(s) for s in network.snapshots]
+    assert stamps == sorted(stamps), f"snapshots not chronological: {stamps}"
+    assert stamps[0].startswith("2024-01-01")
+    assert any("chronological" in note.lower() for note in notes), repr(notes)
+
+
+def test_already_sorted_snapshots_emit_no_reorder_note(scenario: dict[str, Any]) -> None:
+    model = {
+        "buses": [{"name": "b"}],
+        "snapshots": [
+            {"snapshot": "2024-01-01T00:00:00"},
+            {"snapshot": "2024-01-01T01:00:00"},
+            {"snapshot": "2024-01-01T02:00:00"},
+        ],
+    }
+    _, notes = build_network(model, scenario)
+    assert not any("chronological" in note.lower() for note in notes), repr(notes)
