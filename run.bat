@@ -1,5 +1,5 @@
 @echo off
-:: Ragnarok — Windows one-click launcher
+:: Ragnarok - Windows one-click launcher
 :: Double-click this file to start the app.
 :: Requires: Python 3.11+  https://www.python.org/downloads/
 ::           Node.js        https://nodejs.org

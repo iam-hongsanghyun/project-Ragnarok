@@ -1,4 +1,4 @@
-# Ragnarok — Windows launcher (PowerShell)
+# Ragnarok - Windows launcher (PowerShell)
 # Called by run.bat with -ExecutionPolicy Bypass.
 # You can also right-click this file and choose "Run with PowerShell".
 
@@ -8,12 +8,12 @@ Set-Location $PSScriptRoot
 $VenvDir     = Join-Path $PSScriptRoot '.venv-pypsa'
 $ReqHashFile = Join-Path $VenvDir '.req_hash'
 # Frontend lives in its own package (pluggable frontend seam). The npm project
-# root — package.json, public\, src\, node_modules\ — is here, not the repo root.
+# root - package.json, public\, src\, node_modules\ - is here, not the repo root.
 $FrontendDir = Join-Path $PSScriptRoot 'frontend\Ragnarok_default'
 $PythonExe   = Join-Path $VenvDir 'Scripts\python.exe'
 $PipExe      = Join-Path $VenvDir 'Scripts\pip.exe'
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# -- Helpers -------------------------------------------------------------------
 
 function Die([string]$msg) {
     Write-Host "ERROR: $msg" -ForegroundColor Red
@@ -26,7 +26,7 @@ function NeedCmd([string]$cmd, [string]$hint) {
     }
 }
 
-# ── Dependency checks ─────────────────────────────────────────────────────────
+# -- Dependency checks ---------------------------------------------------------
 
 NeedCmd 'git' 'Install Git from https://git-scm.com (required for the PyPSA dependency)'
 NeedCmd 'npm' 'Install Node.js (includes npm) from https://nodejs.org'
@@ -44,7 +44,7 @@ if (-not $Python) {
     Die 'Python 3.11 or later is required. Download from https://www.python.org/downloads/'
 }
 
-# ── Virtual environment ───────────────────────────────────────────────────────
+# -- Virtual environment -------------------------------------------------------
 
 $RebuildVenv = $false
 if (Test-Path $PythonExe) {
@@ -62,7 +62,7 @@ if (-not (Test-Path $PythonExe)) {
     & $Python -m venv $VenvDir
 }
 
-# ── Backend dependencies (skipped when requirements.txt is unchanged) ─────────
+# -- Backend dependencies (skipped when requirements.txt is unchanged) ---------
 
 $env:MPLCONFIGDIR = Join-Path $PSScriptRoot '.matplotlib'
 New-Item -ItemType Directory -Force -Path $env:MPLCONFIGDIR | Out-Null
@@ -80,7 +80,7 @@ if ($ReqHash.Trim() -ne $StoredHash.Trim()) {
     Write-Host 'Backend dependencies are up to date.'
 }
 
-# ── Frontend dependencies ─────────────────────────────────────────────────────
+# -- Frontend dependencies -----------------------------------------------------
 
 if (-not (Test-Path (Join-Path $FrontendDir 'node_modules'))) {
     Write-Host 'Installing Node.js packages...'
@@ -88,10 +88,10 @@ if (-not (Test-Path (Join-Path $FrontendDir 'node_modules'))) {
     try { npm install } finally { Pop-Location }
 }
 
-# ── Clear stale build caches when dependencies change ────────────────────────
+# -- Clear stale build caches when dependencies change ------------------------
 # CRA's webpack cache survives across `npm start` invocations. A dependency
 # upgrade can leave cached transformed sources stale, but the everyday "just
-# launch the app" case doesn't need a wipe — and an unconditional wipe forces
+# launch the app" case doesn't need a wipe - and an unconditional wipe forces
 # a cold compile of the whole bundle on every launch (slow). Hash package.json
 # + package-lock.json (mirrors the ReqHash pattern above) and only wipe when
 # they actually change.
@@ -118,7 +118,7 @@ if ($NpmHash.Trim() -ne $StoredNpmHash) {
     Write-Host 'Frontend build cache is up to date.'
 }
 
-# ── Free ports 3000 + 8000 (kill stale frontend / backend) ────────────────────
+# -- Free ports 3000 + 8000 (kill stale frontend / backend) --------------------
 
 function Free-Port([int]$port) {
     $pids = @()
@@ -128,7 +128,7 @@ function Free-Port([int]$port) {
     } catch { }
     foreach ($p in $pids) {
         if ($p -and $p -ne 0) {
-            Write-Host "Port $port busy — killing PID $p"
+            Write-Host "Port $port busy - killing PID $p"
             try { Stop-Process -Id $p -Force -ErrorAction Stop } catch { }
         }
     }
@@ -137,10 +137,10 @@ function Free-Port([int]$port) {
 Free-Port 3000
 Free-Port 8000
 
-# ── Plugin servers (from plugins.env) ─────────────────────────────────────────
+# -- Plugin servers (from plugins.env) -----------------------------------------
 # Each non-comment line is "<server dir>|<run command>". The server can live
 # anywhere on disk (e.g. another repo); plugins never talk to the Ragnarok
-# backend — this just starts the local servers the frontend plugins connect to.
+# backend - this just starts the local servers the frontend plugins connect to.
 # Mirrors run.command's plugin launch for Windows.
 function Start-PluginServers {
     $envFile = if ($env:RAGNAROK_PLUGINS_ENV) { $env:RAGNAROK_PLUGINS_ENV } else { Join-Path $PSScriptRoot 'plugins.env' }
@@ -189,13 +189,13 @@ function Start-PluginServers {
     return $procs
 }
 
-# ── Launch ────────────────────────────────────────────────────────────────────
+# -- Launch --------------------------------------------------------------------
 
 # Dev-mode launcher: enable uvicorn --reload so backend Python edits are
 # picked up without manually restarting run.ps1. Scoped to --reload-dir
 # backend so watchfiles ignores the venv, node_modules, and the frontend
 # build cache. Caveat: if backend Python is edited while a solve is in
-# flight, uvicorn restart will kill the child mp.Process worker — that is
+# flight, uvicorn restart will kill the child mp.Process worker - that is
 # acceptable for dev because the solve was about to be invalidated anyway.
 Write-Host 'Starting backend (dev, auto-reloads on backend/* edits)...'
 $Backend = Start-Process `
@@ -228,7 +228,7 @@ Write-Host 'Backend ready.'
 # Start any registered plugin servers (after the backend is up, like run.command).
 $Plugins = Start-PluginServers
 
-Write-Host 'Launching frontend — the app opens on a startup screen that shows'
+Write-Host 'Launching frontend - the app opens on a startup screen that shows'
 Write-Host 'the backend progress until the schema is built.'
 
 Push-Location $FrontendDir
