@@ -115,22 +115,63 @@ export function orderTemporalRow(row: GridRow): GridRow {
  * SheetJS-with-raw:false, JavaScript Date from raw cells of type 'd', or an
  * Excel serial number) and emits an ISO-`T` string regardless.
  */
+// A snapshot already in the canonical `YYYY-MM-DDTHH:MM:SS` form needs no
+// reparsing — a cheap regex test lets us skip normalizeDateToIso entirely.
+const CANONICAL_SNAPSHOT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/;
+
+/** True when a row's keys are ALREADY in the order orderTemporalRow produces
+ *  (period — if present & non-empty — then snapshot, then the rest), so
+ *  reordering would be a no-op. An empty `period` key would be dropped by
+ *  orderTemporalRow, so that case is reported as not-yet-canonical. */
+function isTemporalRowOrdered(row: GridRow): boolean {
+  const periodKeyPresent = PERIOD_COL in row;
+  const periodActive =
+    periodKeyPresent && row[PERIOD_COL] !== undefined && row[PERIOD_COL] !== null && row[PERIOD_COL] !== '';
+  if (periodKeyPresent && !periodActive) return false; // empty period would be dropped
+  const keys = Object.keys(row);
+  let idx = 0;
+  if (periodActive) {
+    if (keys[idx] !== PERIOD_COL) return false;
+    idx += 1;
+  }
+  if (SNAPSHOT_COL in row && keys[idx] !== SNAPSHOT_COL) return false;
+  return true;
+}
+
+/**
+ * Canonicalise the snapshot column + key order of temporal rows.
+ *
+ * Performance: a full-year sheet is 8760 rows × many columns, and a plugin
+ * hand-off or re-import almost always arrives ALREADY canonical (ISO-`T`,
+ * `snapshot` leading). So this fast-paths the no-op case: a row whose snapshot
+ * is already canonical AND whose keys are already ordered is reused untouched
+ * (no `{...row}` clone, no `orderTemporalRow` allocation), and when NO row
+ * changed the original array reference is returned. Only rows that actually
+ * need fixing are rebuilt — which is what stops the main-thread freeze on
+ * large-model load.
+ */
 export function canonicalizeTemporalRows(rows: GridRow[], fmt: DateFormat): GridRow[] {
   if (!hasSnapshotColumn(rows)) return rows;
-  return rows.map((row) => {
-    const copy = { ...row };
-    const v: unknown = copy[SNAPSHOT_COL];
+  let changed = false;
+  const out = rows.map((row) => {
+    const v: unknown = row[SNAPSHOT_COL];
+    let canonical: Primitive;
     if (typeof v === 'string') {
-      copy[SNAPSHOT_COL] = normalizeSnapshotIso(v, fmt);
+      canonical = CANONICAL_SNAPSHOT_RE.test(v) ? v : normalizeSnapshotIso(v, fmt);
     } else if (v instanceof Date) {
-      copy[SNAPSHOT_COL] = isoFromDate(v);
+      canonical = isoFromDate(v);
     } else if (typeof v === 'number' && Number.isFinite(v)) {
       // Excel date serial → JS Date → ISO-T.
       const d = excelSerialToDate(v);
-      if (d) copy[SNAPSHOT_COL] = isoFromDate(d);
+      canonical = d ? isoFromDate(d) : (v as Primitive);
+    } else {
+      canonical = v as Primitive;
     }
-    return orderTemporalRow(copy);
+    if (canonical === v && isTemporalRowOrdered(row)) return row; // already canonical — reuse
+    changed = true;
+    return orderTemporalRow({ ...row, [SNAPSHOT_COL]: canonical });
   });
+  return changed ? out : rows;
 }
 
 function pad2(n: number): string {

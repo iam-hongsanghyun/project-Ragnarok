@@ -431,6 +431,19 @@ describe('canonicalizeTemporalSheets (in-memory normalization)', () => {
     const twice = canonicalizeTemporalRows(once, 'auto');
     expect(twice).toEqual(once);
   });
+
+  test('already-canonical rows are returned untouched (fast path — no rebuild)', () => {
+    // The performance guard: rows already in canonical ISO-`T` + snapshot-first
+    // order must be reused by reference (no clone, no reorder) so a large-model
+    // hand-off / import does not freeze the main thread.
+    const rows: GridRow[] = [
+      { snapshot: '2024-08-01T00:00:00', load_a: 100 },
+      { snapshot: '2024-08-01T01:00:00', load_a: 110 },
+    ];
+    const out = canonicalizeTemporalRows(rows, 'auto');
+    expect(out).toBe(rows);        // same array — nothing rebuilt
+    expect(out[0]).toBe(rows[0]);  // same row objects — no per-row clone
+  });
 });
 
 describe('input-only workbook round-trip', () => {
