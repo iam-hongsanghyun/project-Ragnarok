@@ -1,6 +1,6 @@
 # Ragnarok TODO
 
-Last updated: 2026-06-03
+Last updated: 2026-06-08
 
 Single living todo for Ragnarok. Open work is grouped below by theme. Completed and deliberately-dropped items are kept at the bottom in compact form so they are not re-proposed.
 
@@ -138,6 +138,14 @@ Tools that test how a solved model holds up under renewable/weather and outage u
 |---|---|---|---|---|---:|
 | `A1` | `High` | `Both` | **Stochastic renewable profile generator** — generate an ensemble of synthetic wind / solar capacity-factor profiles (`generators-p_max_pu`) from a base series, with a user-set similarity/variability knob: a target **R²** (or RMSE / std-dev / lag-1 autocorrelation) between each synthetic draw and the base, so a run can be stress-tested against renewable variability. Methods preserve diurnal + seasonal shape and hourly autocorrelation (correlated-noise injection, block-bootstrap resampling, or an AR/Markov model fit to the base); the knob sets how far each draw departs. Output: N perturbed profiles wired into the existing **stochastic optimisation** (per-scenario series) or a Monte-Carlo sweep, plus a robustness readout (spread of objective / cost / curtailment / unserved energy across draws). | A model is solved against one weather year / one profile; users need to know how sensitive cost, capacity and reliability are to renewable variability. Reuses the stochastic engine already shipped and produces the input ensemble for **A2**. | 18,000 |
 | `A2` | `High` | `Both` | **LOLE calculator** — resource-adequacy metrics from an ensemble of dispatch runs (or an analytic convolution of forced-outage + renewable + load distributions): **LOLE** (h/yr or d/yr), **LOLP** per snapshot, **EUE / EENS** (expected unserved energy), and the worst contributing periods. Driven by the **A1** ensemble plus per-unit forced-outage rates, counting snapshots where available capacity < load — unserved energy is already observable via the `load_shedding` generators. Surfaced as an Analytics card against the standard "1 day in 10 years" yardstick. | Capacity-expansion / adequacy studies need LOLE / EUE — the reliability metrics regulators use. Today the tool shows load shedding per run but no reliability statistic across draws. Depends on **A1** for the input ensemble; storage and **M2** demand-response contribute to the adequacy result. | 16,000 |
+
+### Architecture
+
+Cross-cutting platform direction (not a single feature). Assumes a dedicated backend server service rather than a browser-resident app.
+
+| ID | Pri | Surface | Task | Why | Cost |
+|---|---|---|---|---:|---:|
+| `X1` | `Medium` | `Both` | **Backend-centric data processing (thin browser)** — move all data processing and the end-to-end model lifecycle to the backend so the browser is a light, fast view layer. In scope: a stateful server-side workspace (model + edits) with an API for every mutation; server-computed analytics/derivation (port `deriveRunResults` + chart series); **plugin execution server-side** (today plugins run as in-browser JS — needs a sandbox/runtime); push/poll sync. Assumes a dedicated backend service deployment. | The browser currently owns the model, all editing, normalization, analytics derivation, and the plugin runtime, so large models (full-year, many components) make it heavy/slow and a heavy plugin can freeze the tab. Moving the work to the server keeps the browser light and fast and matches a hosted, multi-user deployment. **Big re-architecture** (touches state management, every editor, charts, plugins) — sequence after the targeted perf wins (grid is already virtualized; snapshot-canonicalization fast-path landed) prove insufficient. Related: the "Backend retention of solved network" item under *Deliberately not pursued* was scoped to trust, not performance — this supersedes that reasoning if pursued. | 60,000 |
 
 ## Suggested execution order
 
