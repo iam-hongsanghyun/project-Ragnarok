@@ -135,6 +135,14 @@ export function HistoryView({
   );
 }
 
+/** Annual energy demand (MWh) → a compact TWh / GWh / MWh label. */
+function formatDemand(mwh: number | null | undefined): string | null {
+  if (mwh == null || !Number.isFinite(mwh) || mwh <= 0) return null;
+  if (mwh >= 1e6) return `${(mwh / 1e6).toLocaleString(undefined, { maximumFractionDigits: 1 })} TWh`;
+  if (mwh >= 1e3) return `${(mwh / 1e3).toLocaleString(undefined, { maximumFractionDigits: 1 })} GWh`;
+  return `${Math.round(mwh).toLocaleString()} MWh`;
+}
+
 // ── Backend (server-stored) run row ─────────────────────────────────────────
 
 function BackendHistoryRow({
@@ -148,13 +156,8 @@ function BackendHistoryRow({
   onExportProject: () => void;
   onDelete: () => void;
 }) {
-  const snaps =
-    meta.snapshotStart != null && meta.snapshotEnd != null
-      ? Math.max(0, meta.snapshotEnd - meta.snapshotStart)
-      : null;
-  const kpis = meta.kpis ?? [];
-  const price = kpis[3];
-  const emissions = kpis[2];
+  // The run's display name IS the scenario name (falls back to the stored label).
+  const name = meta.scenarioLabel || meta.label || meta.name;
 
   return (
     <div className={`history-row${selected ? ' is-selected' : ''}`}>
@@ -163,19 +166,25 @@ function BackendHistoryRow({
         className="history-row-select"
         checked={selected}
         onChange={(e) => onSelect(e.target.checked)}
-        aria-label={`Select ${meta.label || meta.name}`}
+        aria-label={`Select ${name}`}
       />
 
-      <span className="history-row-name history-row-name--static" title={meta.name}>{meta.label || meta.name}</span>
+      <span className="history-row-name history-row-name--static" title={meta.name}>{name}</span>
 
       <span className="history-row-time" title={new Date(meta.savedAt).toLocaleString()}>
         {formatRelTime(meta.savedAt)}
       </span>
-      {meta.filename && <span className="history-row-file" title={meta.filename}>{meta.filename}</span>}
-      {snaps != null && <span className="history-row-chip">{snaps} snaps</span>}
-      {meta.snapshotWeight != null && <span className="history-row-chip">{meta.snapshotWeight}h</span>}
-      {emissions && <span className="history-row-kpi"><b>{emissions.value}</b> {emissions.label}</span>}
-      {price && <span className="history-row-kpi"><b>{price.value}</b> {price.label}</span>}
+      {meta.scenarioYear != null && <span className="history-row-chip">{meta.scenarioYear}</span>}
+      {meta.resolutionHours != null && <span className="history-row-chip">{meta.resolutionHours}h res</span>}
+      {meta.windowCount != null && meta.windowCount > 0 && (
+        <span className="history-row-chip">{meta.windowCount} batches</span>
+      )}
+      {formatDemand(meta.totalDemandMwh) && (
+        <span className="history-row-kpi"><b>{formatDemand(meta.totalDemandMwh)}</b> demand</span>
+      )}
+      {(meta.tags ?? []).map((t) => (
+        <span key={t} className="history-row-chip history-row-chip--tag">{t}</span>
+      ))}
 
       <span className="history-row-spacer" />
 

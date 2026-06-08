@@ -111,6 +111,77 @@ def _label_for_bundle(scenario: dict[str, Any], options: dict[str, Any], filenam
     return _filename_label_stem(filename) or "Run"
 
 
+def _total_demand_mwh(model: dict[str, Any]) -> float | None:
+    """Annual energy demand (MWh) = sum of every cell in the loads-p_set sheet.
+
+    Falls back to static ``loads.p_set`` × modelled hours when there is no load
+    time-series. ``None`` when no load data is present.
+    """
+    lps = model.get("loads-p_set")
+    if isinstance(lps, list) and lps:
+        total = 0.0
+        for row in lps:
+            if not isinstance(row, dict):
+                continue
+            for key, value in row.items():
+                if key in ("snapshot", "period", "name", "datetime"):
+                    continue
+                try:
+                    total += float(value)
+                except (TypeError, ValueError):
+                    continue
+        return total
+    loads = model.get("loads")
+    if isinstance(loads, list) and loads:
+        peak = 0.0
+        for row in loads:
+            try:
+                peak += float(row.get("p_set"))  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                continue
+        return peak if peak else None
+    return None
+
+
+def _scenario_year(model: dict[str, Any], snapshot_start: int) -> int | None:
+    """Calendar year of the run's first snapshot (window-aware)."""
+    snaps = model.get("snapshots")
+    if not isinstance(snaps, list) or not snaps:
+        return None
+    idx = snapshot_start if isinstance(snapshot_start, int) and 0 <= snapshot_start < len(snaps) else 0
+    row = snaps[idx] if isinstance(snaps[idx], dict) else {}
+    raw = str(row.get("snapshot") or row.get("name") or row.get("datetime") or "")
+    return int(raw[:4]) if len(raw) >= 4 and raw[:4].isdigit() else None
+
+
+def _nonstandard_tags(scenario: dict[str, Any], options: dict[str, Any], result: dict[str, Any]) -> list[str]:
+    """Short chips for any non-default / notable run settings."""
+    tags: list[str] = []
+    cp = scenario.get("carbonPrice")
+    if isinstance(cp, (int, float)) and cp:
+        tags.append(f"carbon {cp:g}")
+    if options.get("forceLp"):
+        tags.append("force-LP")
+    if options.get("enableLoadShedding"):
+        tags.append("load-shed")
+    solver = options.get("solverType")
+    if solver and solver != "auto":
+        tags.append(f"solver:{solver}")
+    pathway = result.get("pathway") if isinstance(result, dict) else None
+    if isinstance(pathway, dict) and pathway.get("enabled"):
+        tags.append("pathway")
+    if isinstance(options.get("stochasticConfig"), dict) and options["stochasticConfig"].get("enabled"):
+        tags.append("stochastic")
+    if isinstance(options.get("securityConstrainedConfig"), dict) and options["securityConstrainedConfig"].get("enabled"):
+        tags.append("N-1")
+    constraints = scenario.get("constraints")
+    if isinstance(constraints, list):
+        enabled = sum(1 for c in constraints if isinstance(c, dict) and c.get("enabled"))
+        if enabled:
+            tags.append(f"{enabled} constraint{'s' if enabled != 1 else ''}")
+    return tags
+
+
 def build_run_meta(name: str, bundle: dict[str, Any], size_bytes: int = 0) -> dict[str, Any]:
     """Compute the lightweight meta sidecar from a run bundle.
 
@@ -122,6 +193,7 @@ def build_run_meta(name: str, bundle: dict[str, Any], size_bytes: int = 0) -> di
     scenario = bundle.get("scenario") or {}
     options = bundle.get("options") or {}
     result = bundle.get("result") or {}
+    model = bundle.get("model") or {}
 
     run_meta = result.get("runMeta") if isinstance(result, dict) else None
     component_counts = (run_meta.get("componentCounts", {}) if isinstance(run_meta, dict) else {}) or {}
@@ -175,6 +247,14 @@ def build_run_meta(name: str, bundle: dict[str, Any], size_bytes: int = 0) -> di
         "pathway": pathway_meta,
         "rolling": rolling_meta,
         "scenarioLabel": scenario_label,
+        # History-card display fields (see HistoryView): scenario name, the
+        # snapshot year, the effective resolution (hours/snapshot), rolling
+        # batch count, total annual demand, and any non-standard settings.
+        "scenarioYear": _scenario_year(model, options.get("snapshotStart") or 0),
+        "resolutionHours": options.get("snapshotWeight"),
+        "windowCount": rolling_meta.get("windowCount") if rolling_meta else None,
+        "totalDemandMwh": _total_demand_mwh(model),
+        "tags": _nonstandard_tags(scenario, options, result),
     }
 
 

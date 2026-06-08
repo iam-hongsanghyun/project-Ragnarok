@@ -2942,6 +2942,12 @@ path.leaflet-interactive:focus {
 }
 .history-row-kpi { color: var(--muted); white-space: nowrap; }
 .history-row-kpi b { color: var(--text); font-weight: 600; }
+/* Non-standard-settings chips: brand-tinted so they stand out from the
+   neutral year / resolution / batch chips. */
+.history-row-chip--tag {
+  color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 12%, transparent);
+}
 .history-row-spacer { flex: 1 1 auto; }
 .history-row .tb-btn { flex: 0 0 auto; }
 

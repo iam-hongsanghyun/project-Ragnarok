@@ -707,6 +707,18 @@ export interface BackendRunMeta {
   /** True once the server has finished pre-building the run's xlsx, so the
    *  export package can be downloaded. Until then the UI shows "Preparing…". */
   xlsxReady?: boolean;
+  // ── History-card display fields ──
+  /** Calendar year of the run's first snapshot. */
+  scenarioYear?: number | null;
+  /** Effective resolution = hours per snapshot (snapshotWeight). */
+  resolutionHours?: number | null;
+  /** Rolling-horizon batch (window) count, if rolling was used. */
+  windowCount?: number | null;
+  /** Total annual energy demand (MWh) — sum of the load profile. */
+  totalDemandMwh?: number | null;
+  /** Short chips for non-standard / notable settings (carbon price, force-LP,
+   *  load-shed, custom solver, pathway, stochastic, N-1, constraint count). */
+  tags?: string[];
 }
 
 /** A run on the backend's serial queue (GET /api/queue). */
