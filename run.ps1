@@ -137,6 +137,58 @@ function Free-Port([int]$port) {
 Free-Port 3000
 Free-Port 8000
 
+# ── Plugin servers (from plugins.env) ─────────────────────────────────────────
+# Each non-comment line is "<server dir>|<run command>". The server can live
+# anywhere on disk (e.g. another repo); plugins never talk to the Ragnarok
+# backend — this just starts the local servers the frontend plugins connect to.
+# Mirrors run.command's plugin launch for Windows.
+function Start-PluginServers {
+    $envFile = if ($env:RAGNAROK_PLUGINS_ENV) { $env:RAGNAROK_PLUGINS_ENV } else { Join-Path $PSScriptRoot 'plugins.env' }
+    $procs = @()
+    if (-not (Test-Path $envFile)) { return $procs }
+    foreach ($line in Get-Content $envFile) {
+        $t = $line.Trim()
+        if ($t -eq '' -or $t.StartsWith('#')) { continue }
+        $bar = $t.IndexOf('|')
+        if ($bar -lt 0) { continue }
+        $pdir = $t.Substring(0, $bar).Trim()
+        $pcmd = $t.Substring($bar + 1).Trim()
+        if ($pdir -eq '' -or $pcmd -eq '') { continue }
+        if (-not (Test-Path $pdir)) {
+            Write-Host "Skip plugin server (directory not found): $pdir"
+            continue
+        }
+        # Free this plugin's port first so a stale server can't hold it. Parse
+        # the port from the run command (--port N / -p N / a trailing :N).
+        $pport = $null
+        if ($pcmd -match '(?:--port|-p)[\s=]+(\d+)') { $pport = [int]$Matches[1] }
+        elseif ($pcmd -match ':(\d{2,5})\b') { $pport = [int]$Matches[1] }
+        if ($pport) { Free-Port $pport }
+
+        # Run in the plugin's OWN environment: if the dir ships a .venv use its
+        # python (plugin deps win); otherwise fall back to the Ragnarok venv.
+        $parts = $pcmd -split '\s+'
+        $exe = $parts[0]
+        $rest = if ($parts.Count -gt 1) { $parts[1..($parts.Count - 1)] } else { @() }
+        if ($exe -ieq 'python' -or $exe -ieq 'python3') {
+            $pluginPy = Join-Path $pdir '.venv\Scripts\python.exe'
+            $exe = if (Test-Path $pluginPy) { $pluginPy } else { $PythonExe }
+        }
+        Write-Host "Starting plugin server: $pdir -> $pcmd"
+        try {
+            if ($rest.Count -gt 0) {
+                $p = Start-Process -FilePath $exe -ArgumentList $rest -WorkingDirectory $pdir -PassThru -NoNewWindow -ErrorAction Stop
+            } else {
+                $p = Start-Process -FilePath $exe -WorkingDirectory $pdir -PassThru -NoNewWindow -ErrorAction Stop
+            }
+            $procs += $p
+        } catch {
+            Write-Host "Failed to start plugin server: $pdir ($($_.Exception.Message))"
+        }
+    }
+    return $procs
+}
+
 # ── Launch ────────────────────────────────────────────────────────────────────
 
 # Dev-mode launcher: enable uvicorn --reload so backend Python edits are
@@ -171,13 +223,22 @@ if (-not $ready) {
     Die 'Backend did not start within 60 seconds. Check the error output above.'
 }
 
-Write-Host 'Backend ready. Opening app in browser...'
+Write-Host 'Backend ready.'
+
+# Start any registered plugin servers (after the backend is up, like run.command).
+$Plugins = Start-PluginServers
+
+Write-Host 'Launching frontend — the app opens on a startup screen that shows'
+Write-Host 'the backend progress until the schema is built.'
 
 Push-Location $FrontendDir
 try {
     npm run start:frontend
 } finally {
     Pop-Location
-    Write-Host 'Shutting down backend...'
+    Write-Host 'Shutting down backend and plugin servers...'
     $Backend | Stop-Process -Force -ErrorAction SilentlyContinue
+    foreach ($p in $Plugins) {
+        if ($p) { try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch { } }
+    }
 }
