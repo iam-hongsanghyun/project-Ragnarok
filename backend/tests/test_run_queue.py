@@ -11,7 +11,7 @@ import asyncio
 
 import pytest
 
-from backend.app import main, session_store
+from backend.app import main, model_store, session_store
 from backend.app.models import RunPayload
 
 
@@ -103,14 +103,15 @@ def test_cancel_staged_marks_cancelled() -> None:
 
 
 def test_import_queue_item_loads_model_into_session(_session_dir) -> None:
-    session_store.save_model("default", _session_model(), filename="case.xlsx", scenario_name="ref")
+    # Set up + assert via the model_store facade (the active store production uses).
+    model_store.save_model("default", _session_model(), filename="case.xlsx", scenario_name="ref")
     payload = RunPayload(scenario={"label": "ref"}, options={"snapshotStart": 0, "snapshotEnd": 6}, sessionId="default")
     r = asyncio.run(main.enqueue_run(payload))
     # Clear the session, then import the queued item's snapshot back into it.
-    session_store.clear("default")
+    model_store.clear("default")
     meta = asyncio.run(main.import_queue_item(r["id"]))
     assert meta["componentCounts"].get("buses") == 1
-    assert session_store.get_meta("default") is not None
+    assert model_store.get_meta("default") is not None
 
 
 def test_delete_queue_item_removes_payload_files() -> None:

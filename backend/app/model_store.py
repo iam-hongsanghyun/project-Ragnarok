@@ -3,8 +3,11 @@
 All app code (routers, run/queue) goes through this module instead of importing
 a concrete store, so the storage engine is a one-line config flip:
 
-* ``RAGNAROK_STORE=legacy`` (default) — JSON + Parquet files (:mod:`session_store`).
-* ``RAGNAROK_STORE=sqlite`` — one ``project.db`` per session (:mod:`sqlite_store`).
+* ``RAGNAROK_STORE=sqlite`` (**default**) — one ``project.db`` per session
+  (:mod:`sqlite_store`). Ragnarok keeps zero scattered files; a legacy session is
+  migrated into its ``project.db`` on first read (see ``_ensure_migrated``).
+* ``RAGNAROK_STORE=legacy`` — JSON + Parquet files (:mod:`session_store`). Escape
+  hatch for one release while the SQLite store beds in.
 
 The public API (signatures + JSON shapes) is identical for both, so the
 ``/api/session/*`` endpoint contract and the frontend are unchanged either way.
@@ -15,7 +18,8 @@ import os
 
 from . import session_store, sqlite_store
 
-USE_SQLITE = os.environ.get("RAGNAROK_STORE", "legacy").strip().lower() == "sqlite"
+# SQLite is the default; only an explicit ``RAGNAROK_STORE=legacy`` opts out.
+USE_SQLITE = os.environ.get("RAGNAROK_STORE", "sqlite").strip().lower() != "legacy"
 _impl = sqlite_store if USE_SQLITE else session_store
 
 # ── delegated public API (identical surface in both backends) ───────────────────

@@ -68,9 +68,54 @@ def _kv_set(conn: sqlite3.Connection, key: str, value: Any) -> None:
     )
 
 
+def _legacy_artifacts(session_id: str) -> list[Path]:
+    """The legacy JSON/Parquet artifacts for a session (meta + static/ + series/ + controls)."""
+    base = ss.SESSION_DIR / session_id
+    return [base / "meta.json", base / "controls.json", base / "static", base / "series"]
+
+
+def _ensure_migrated(session_id: str) -> None:
+    """One-time, transparent migration of a legacy JSON/Parquet session → ``project.db``.
+
+    Triggered on first read when ``project.db`` is absent but legacy files exist
+    (i.e. a session created before the SQLite flip). The full legacy model is read
+    into memory, written into a fresh db, then the legacy artifacts are removed so
+    the session dir holds only ``project.db`` — keeping Ragnarok free of the old
+    scattered-file storage. Building the db *before* deleting anything means a
+    crash mid-migration leaves the legacy files intact for a retry.
+    """
+    if _db_path(session_id).exists():
+        return
+    legacy_meta = ss.get_meta(session_id)
+    if legacy_meta is None:
+        return  # no legacy session to migrate
+    model = ss.load_full_model(session_id)
+    if not model:
+        return
+    _build_db(
+        session_id,
+        model,
+        filename=str(legacy_meta.get("filename", "")),
+        scenario_name=str(legacy_meta.get("scenarioName", "")),
+    )
+    controls = ss.get_controls(session_id)
+    if controls is not None:
+        save_controls(session_id, controls)
+    # DB is committed and reads will now hit it — drop the legacy artifacts.
+    for path in _legacy_artifacts(session_id):
+        if path.is_dir():
+            shutil.rmtree(path, ignore_errors=True)
+        elif path.exists():
+            path.unlink(missing_ok=True)
+    logger.info("Migrated legacy session %s → sqlite project.db (%d sheets)", session_id, len(model))
+
+
 def _raw_meta(session_id: str) -> dict[str, Any] | None:
     """Meta dict as stored (sheet entries are the public {name,kind,rowCount,columns})."""
-    if not ss._is_safe_id(session_id) or not _db_path(session_id).exists():
+    if not ss._is_safe_id(session_id):
+        return None
+    _ensure_migrated(session_id)
+    if not _db_path(session_id).exists():
         return None
     try:
         with _connect(session_id) as conn:
@@ -98,6 +143,21 @@ def save_model(
     if not ss._is_safe_id(session_id):
         raise ValueError(f"Unsafe session id: {session_id!r}")
     clear(session_id)
+    return _build_db(session_id, model, filename=filename, scenario_name=scenario_name)
+
+
+def _build_db(
+    session_id: str,
+    model: dict[str, list[dict[str, Any]]],
+    *,
+    filename: str = "",
+    scenario_name: str = "",
+) -> dict[str, Any]:
+    """Create a fresh ``project.db`` and populate it. Assumes no db exists yet.
+
+    Split out of :func:`save_model` so :func:`_ensure_migrated` can build the db
+    from legacy files *without* :func:`clear` wiping those files mid-migration.
+    """
     with _connect(session_id) as conn:
         conn.execute("CREATE TABLE _kv (k TEXT PRIMARY KEY, v TEXT)")
         sheets_meta: list[dict[str, Any]] = []
@@ -298,7 +358,10 @@ def save_controls(session_id: str, controls: dict[str, Any]) -> None:
 
 
 def get_controls(session_id: str) -> dict[str, Any] | None:
-    if not ss._is_safe_id(session_id) or not _db_path(session_id).exists():
+    if not ss._is_safe_id(session_id):
+        return None
+    _ensure_migrated(session_id)
+    if not _db_path(session_id).exists():
         return None
     with _connect(session_id) as conn:
         return _kv_get(conn, "controls")

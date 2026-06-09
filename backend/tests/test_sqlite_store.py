@@ -123,3 +123,41 @@ def test_clear_and_has_model(_dir) -> None:
     sq.clear("sql")
     assert sq.has_model("sql") is False
     assert sq.get_meta("sql") is None
+
+
+# ── migrate-on-read (legacy JSON/Parquet → project.db) ────────────────────────
+
+
+def test_migrate_on_read_builds_db_and_drops_legacy(_dir) -> None:
+    # A legacy session exists (written by the JSON/Parquet store), no project.db.
+    legacy.save_model("mig", _model(), filename="old.xlsx", scenario_name="ref")
+    legacy.save_controls("mig", {"carbonPrice": 42.0})
+    base = legacy.SESSION_DIR / "mig"
+    assert (base / "meta.json").exists()
+    assert not sq._db_path("mig").exists()
+    expected_model = legacy.load_full_model("mig")  # capture the legacy round-trip
+
+    # First SQLite read triggers a transparent migration.
+    meta = sq.get_meta("mig")
+    assert meta is not None
+    assert meta["filename"] == "old.xlsx"
+    assert meta["scenarioName"] == "ref"
+    assert sq._db_path("mig").exists()
+
+    # Data is fully readable from the db, and controls came across.
+    assert sq.load_full_model("mig") == expected_model
+    assert sq.get_controls("mig") == {"carbonPrice": 42.0}
+    assert sq.distinct_values("mig", "generators", "carrier") == ["gas", "wind"]
+
+    # Legacy artifacts are gone — the dir is now pure-db (zero scattered files).
+    assert not (base / "meta.json").exists()
+    assert not (base / "controls.json").exists()
+    assert not (base / "static").exists()
+    assert not (base / "series").exists()
+
+
+def test_migrate_on_read_noop_without_legacy(_dir) -> None:
+    # No legacy session and no db → reads return None, nothing is created.
+    assert sq.get_meta("ghost") is None
+    assert sq.has_model("ghost") is False
+    assert not sq._db_path("ghost").exists()

@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 from fastapi import UploadFile
 
-from backend.app import plugins, session_store
+from backend.app import model_store, plugins, session_store
 from backend.app.routers import plugins as plugins_router
 
 GOOD = "def transform(model, config):\n    return {'buses': [{'name': 'b'}]}\n"
@@ -94,8 +94,10 @@ def test_run_transform_bad_return_is_valueerror(_plugins_dir) -> None:
 
 
 def test_contribute_merges_sheets_and_constraints_into_session(_plugins_dir, tmp_path, monkeypatch) -> None:
+    # Production goes through model_store (the active store); set up + assert via
+    # the same facade so the test follows the configured backend (sqlite default).
     monkeypatch.setattr(session_store, "SESSION_DIR", tmp_path / "session")
-    session_store.save_model("default", {"buses": [{"name": "b0"}]}, filename="x.xlsx", scenario_name="")
+    model_store.save_model("default", {"buses": [{"name": "b0"}]}, filename="x.xlsx", scenario_name="")
     _write_plugin(
         _plugins_dir,
         "contrib",
@@ -106,7 +108,7 @@ def test_contribute_merges_sheets_and_constraints_into_session(_plugins_dir, tmp
 
     plugins_router.contribute_plugin("contrib", plugins_router.TransformRequest(sessionId="default"))
 
-    full = session_store.load_full_model("default") or {}
+    full = model_store.load_full_model("default") or {}
     assert any(r.get("name") == "wind" for r in full.get("carriers", []))
     assert full.get("RAGNAROK_CustomDSL")  # constraints landed in the DSL sheet
 
