@@ -5209,6 +5209,15 @@ th:hover .col-delete-btn {
   text-transform: uppercase;
   color: var(--muted);
 }
+/* Backend-plugin server-side file picker (upload-once + dropdown). */
+.be-file-section { margin-bottom: 8px; }
+.be-file-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.be-file-picker .sg-module-config-select { min-width: 160px; }
 .plugin-rail-list {
   list-style: none;
   margin: 0;

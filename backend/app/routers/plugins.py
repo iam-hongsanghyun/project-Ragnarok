@@ -165,8 +165,38 @@ def uninstall_plugin(plugin_id: str) -> dict[str, Any]:
     if target.parent != root or not target.is_dir():
         raise HTTPException(status_code=404, detail=f"Installed plugin {plugin_id!r} not found.")
     shutil.rmtree(target)
+    plugins.remove_plugin_files(plugin_id)  # also drop the plugin's uploaded data files
     plugins.registry(refresh=True)
     return {"id": plugin_id, "removed": True}
+
+
+# ── Per-plugin data files (server-side scratch store) ─────────────────────────
+# A plugin's heavy input (e.g. a model workbook) is uploaded HERE once and then
+# referenced by name in the config — the bytes never live in the browser/config.
+
+
+@router.post("/{plugin_id}/files")
+async def upload_plugin_file(plugin_id: str, file: UploadFile = File(...)) -> dict[str, Any]:
+    """Upload a data file into the plugin's server-side scratch dir."""
+    if plugins.get(plugin_id) is None:
+        raise HTTPException(status_code=404, detail=f"Backend plugin {plugin_id!r} not found.")
+    data = await file.read()
+    return plugins.save_plugin_file(plugin_id, file.filename or "upload.bin", data)
+
+
+@router.get("/{plugin_id}/files")
+def get_plugin_files(plugin_id: str) -> dict[str, Any]:
+    """List the plugin's uploaded data files (for the picker dropdown)."""
+    return {"files": plugins.list_plugin_files(plugin_id)}
+
+
+@router.delete("/{plugin_id}/files/{filename}")
+def delete_plugin_file(plugin_id: str, filename: str) -> dict[str, Any]:
+    """Delete one uploaded data file."""
+    removed = plugins.delete_plugin_file(plugin_id, filename)
+    if not removed:
+        raise HTTPException(status_code=404, detail=f"File {filename!r} not found.")
+    return {"name": filename, "removed": True}
 
 
 # ── Hooks ─────────────────────────────────────────────────────────────────────

@@ -34,8 +34,8 @@
     },
     "model_file": {
       "type": "file",
-      "label": "Model workbook (upload)",
-      "description": "Upload a PyPSA model xlsx (binary upload). Use this OR model_path, not both.",
+      "label": "Model workbook",
+      "description": "Upload a PyPSA model xlsx once — it is stored on the server (not in the browser) and picked from the dropdown. The build reads it server-side.",
       "accept": ".xlsx,.xlsm,.xlsb",
       "binary": true
     },

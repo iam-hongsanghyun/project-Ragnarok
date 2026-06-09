@@ -53,6 +53,7 @@ def _plugins_dir(tmp_path, monkeypatch):
     d = tmp_path / "plugins"
     d.mkdir()
     monkeypatch.setattr(plugins, "BACKEND_PLUGINS_DIR", d)
+    monkeypatch.setattr(plugins, "PLUGIN_FILES_DIR", tmp_path / "plugin_files")
     plugins._REGISTRY = None
     return d
 
@@ -162,6 +163,45 @@ def test_uninstall_unknown_is_404(_plugins_dir) -> None:
     with pytest.raises(plugins_router.HTTPException) as exc:
         plugins_router.uninstall_plugin("ghost")
     assert exc.value.status_code == 404
+
+
+# ── Per-plugin server-side file store ─────────────────────────────────────────
+
+
+def test_file_store_upload_list_delete_and_inject(_plugins_dir) -> None:
+    # A plugin whose transform surfaces the injected data dir + chosen filename,
+    # proving the file lives server-side and is referenced by NAME only.
+    _write_plugin(
+        _plugins_dir,
+        "fp",
+        "import os\n"
+        "def transform(model, config):\n"
+        "    d = config.get('__plugin_data_dir__', '')\n"
+        "    return {'buses': [{'name': os.path.basename(d)}], 'meta': [{'file': config.get('model_file', '')}]}\n",
+    )
+    plugins._REGISTRY = None
+
+    saved = asyncio.run(plugins_router.upload_plugin_file("fp", _upload(b"xlsx-bytes", "model.xlsx")))
+    assert saved["name"] == "model.xlsx" and saved["size"] == len(b"xlsx-bytes")
+    assert (_plugins_dir.parent / "plugin_files" / "fp" / "model.xlsx").exists()
+    assert [f["name"] for f in plugins_router.get_plugin_files("fp")["files"]] == ["model.xlsx"]
+
+    # transform: framework injects the data dir; the model references the file by name.
+    model = plugins.run_transform("fp", {}, {"model_file": "model.xlsx"})
+    assert model["buses"][0]["name"] == "fp"          # data dir basename == plugin id
+    assert model["meta"][0]["file"] == "model.xlsx"   # only a filename, never bytes
+
+    plugins_router.delete_plugin_file("fp", "model.xlsx")
+    assert plugins_router.get_plugin_files("fp")["files"] == []
+
+
+def test_uninstall_removes_uploaded_files(_plugins_dir) -> None:
+    _write_plugin(_plugins_dir, "fp2", GOOD)
+    plugins._REGISTRY = None
+    plugins.save_plugin_file("fp2", "data.bin", b"123")
+    assert (_plugins_dir.parent / "plugin_files" / "fp2").is_dir()
+    plugins_router.uninstall_plugin("fp2")
+    assert not (_plugins_dir.parent / "plugin_files" / "fp2").exists()
 
 
 # ── The shipped EXAMPLE backend plugin (installed from its zip) ───────────────

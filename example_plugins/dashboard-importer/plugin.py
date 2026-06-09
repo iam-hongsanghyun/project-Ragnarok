@@ -52,13 +52,27 @@ def transform(model: dict[str, list[dict[str, Any]]], config: dict[str, Any]) ->
 
     Args:
         model: the current session model (unused; the build replaces it).
-        config: the plugin's config (model_file upload / model_path / GUI
-            reference tables and toggles).
+        config: the plugin's config. ``model_file`` is now a *filename reference*
+            into the plugin's server-side scratch dir (uploaded once, never held
+            in the browser); the framework injects ``__plugin_data_dir__`` so we
+            resolve it to an absolute ``model_path`` for the engine.
 
     Returns:
         A model dict ``{sheet: [rows]}`` for the session store (may include a
         ``RAGNAROK_CustomDSL`` sheet carrying CF constraints).
     """
     del model  # the importer replaces the workbook; current model is discarded
+    cfg = dict(config or {})
+    data_dir = cfg.pop("__plugin_data_dir__", None)
+    selected = cfg.get("model_file")
+    # Resolve the chosen uploaded file (a bare filename) to a server path, unless
+    # the user gave an explicit model_path. The engine then reads model_path.
+    if (
+        isinstance(selected, str)
+        and selected.strip()
+        and not str(cfg.get("model_path") or "").strip()
+        and data_dir
+    ):
+        cfg["model_path"] = str(Path(data_dir) / selected.strip())
     engine = _load_engine()
-    return engine.transform({}, {}, {"moduleConfig": config or {}})
+    return engine.transform({}, {}, {"moduleConfig": cfg})

@@ -92,6 +92,10 @@ export function PluginsView(props: Props) {
   const onUninstallBackend = async (id: string) => {
     try {
       await uninstallBackendPlugin(id);
+      // Free the browser-side footprint too: drop this plugin's persisted config
+      // so nothing lingers after removal (server-side files are deleted by the
+      // DELETE endpoint).
+      try { window.localStorage.removeItem(`ui:be-plugin-cfg:${id}`); } catch { /* ignore */ }
       if (selectedKey === `be:${id}`) setSelectedKey(null);
       await refreshBackendPlugins();
       showToast(`Uninstalled "${id}"`, 'info');

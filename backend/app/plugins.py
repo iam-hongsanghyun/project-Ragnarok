@@ -33,6 +33,7 @@ import importlib.util
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
@@ -49,6 +50,66 @@ BACKEND_PLUGINS_DIR = Path(
     os.environ.get("RAGNAROK_BACKEND_PLUGINS_DIR")
     or (Path(__file__).resolve().parents[1] / "data" / "plugins")
 )
+
+# Per-plugin SERVER-SIDE scratch dir for uploaded data files (e.g. a dashboard
+# model workbook). The browser uploads a file here ONCE and thereafter only
+# references it by name — the bytes never live in the plugin config / browser
+# memory. Gitignored; removed when the plugin is uninstalled.
+PLUGIN_FILES_DIR = Path(
+    os.environ.get("RAGNAROK_PLUGIN_FILES_DIR")
+    or (Path(__file__).resolve().parents[1] / "data" / "plugin_files")
+)
+
+# The reserved config key the framework injects so a plugin can resolve its
+# uploaded files to absolute server paths (see run_transform/run_contribute).
+PLUGIN_DATA_DIR_KEY = "__plugin_data_dir__"
+
+
+def _safe_name(name: str) -> str:
+    """Filesystem-safe basename — strips any path components and odd chars."""
+    base = os.path.basename(str(name)).strip()
+    cleaned = re.sub(r"[^A-Za-z0-9._-]", "_", base)
+    return cleaned or "file"
+
+
+def plugin_files_dir(plugin_id: str) -> Path:
+    return PLUGIN_FILES_DIR / _safe_name(plugin_id)
+
+
+def save_plugin_file(plugin_id: str, filename: str, data: bytes) -> dict[str, Any]:
+    """Store an uploaded data file under the plugin's scratch dir."""
+    d = plugin_files_dir(plugin_id)
+    d.mkdir(parents=True, exist_ok=True)
+    name = _safe_name(filename)
+    (d / name).write_bytes(data)
+    return {"name": name, "size": len(data)}
+
+
+def list_plugin_files(plugin_id: str) -> list[dict[str, Any]]:
+    """List the plugin's uploaded data files (for the picker dropdown)."""
+    d = plugin_files_dir(plugin_id)
+    if not d.is_dir():
+        return []
+    out: list[dict[str, Any]] = []
+    for f in sorted(d.iterdir()):
+        if f.is_file():
+            out.append({"name": f.name, "size": f.stat().st_size})
+    return out
+
+
+def delete_plugin_file(plugin_id: str, filename: str) -> bool:
+    target = plugin_files_dir(plugin_id) / _safe_name(filename)
+    if target.is_file():
+        target.unlink()
+        return True
+    return False
+
+
+def remove_plugin_files(plugin_id: str) -> None:
+    """Remove the plugin's entire scratch dir (on uninstall)."""
+    import shutil
+
+    shutil.rmtree(plugin_files_dir(plugin_id), ignore_errors=True)
 
 
 @dataclass
@@ -185,6 +246,12 @@ def get(plugin_id: str) -> BackendPlugin | None:
     return registry().get(plugin_id)
 
 
+def _with_data_dir(plugin_id: str, config: dict[str, Any]) -> dict[str, Any]:
+    """Inject the plugin's scratch-dir path so it can resolve uploaded files to
+    server paths (the browser only passes a filename reference)."""
+    return {**(config or {}), PLUGIN_DATA_DIR_KEY: str(plugin_files_dir(plugin_id))}
+
+
 def _call(hook: Callable[..., Any], *args: Any) -> Any:
     """Invoke a plugin hook, normalising any error into a ValueError the router
     surfaces as a clean 400 (rather than a 500 stack trace)."""
@@ -206,7 +273,7 @@ def run_transform(
         raise KeyError(plugin_id)
     if not plugin.has_transform:
         raise ValueError(f"Plugin {plugin_id!r} has no transform hook.")
-    out = _call(plugin.module.transform, model or {}, config or {})
+    out = _call(plugin.module.transform, model or {}, _with_data_dir(plugin_id, config))
     if not isinstance(out, dict):
         raise ValueError(f"Plugin {plugin_id!r} transform() did not return a model dict.")
     return out
@@ -223,7 +290,7 @@ def run_contribute(
         raise KeyError(plugin_id)
     if not plugin.has_contribute:
         raise ValueError(f"Plugin {plugin_id!r} has no contribute hook.")
-    out = _call(plugin.module.contribute, model or {}, config or {})
+    out = _call(plugin.module.contribute, model or {}, _with_data_dir(plugin_id, config))
     if not isinstance(out, dict):
         raise ValueError(f"Plugin {plugin_id!r} contribute() did not return a dict.")
     return out
@@ -236,7 +303,7 @@ def run_analyze(plugin_id: str, result: dict[str, Any], config: dict[str, Any]) 
         raise KeyError(plugin_id)
     if not plugin.has_analyze:
         raise ValueError(f"Plugin {plugin_id!r} has no analyze hook.")
-    out = _call(plugin.module.analyze, result or {}, config or {})
+    out = _call(plugin.module.analyze, result or {}, _with_data_dir(plugin_id, config))
     if not isinstance(out, dict):
         raise ValueError(f"Plugin {plugin_id!r} analyze() did not return a dict.")
     return out

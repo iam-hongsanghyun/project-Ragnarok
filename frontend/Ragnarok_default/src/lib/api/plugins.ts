@@ -54,6 +54,33 @@ export async function uninstallBackendPlugin(id: string): Promise<void> {
   if (!resp.ok) throw new Error((await resp.text()) || `Uninstall failed (${resp.status}).`);
 }
 
+export interface PluginFile {
+  name: string;
+  size: number;
+}
+
+/** List the data files uploaded to a backend plugin's server-side scratch dir. */
+export async function listPluginFiles(id: string): Promise<PluginFile[]> {
+  const resp = await fetch(`${API_BASE}/api/plugins/${encodeURIComponent(id)}/files`);
+  const body = await asJson<{ files: PluginFile[] }>(resp);
+  return Array.isArray(body.files) ? body.files : [];
+}
+
+/** Upload a data file to a backend plugin's scratch dir (streamed, NOT base64
+ *  into config — the bytes never live in the browser config / memory). */
+export async function uploadPluginFile(id: string, file: File): Promise<PluginFile> {
+  const form = new FormData();
+  form.append('file', file, file.name);
+  const resp = await fetch(`${API_BASE}/api/plugins/${encodeURIComponent(id)}/files`, { method: 'POST', body: form });
+  return asJson<PluginFile>(resp);
+}
+
+/** Delete one uploaded data file. */
+export async function deletePluginFile(id: string, name: string): Promise<void> {
+  const resp = await fetch(`${API_BASE}/api/plugins/${encodeURIComponent(id)}/files/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  if (!resp.ok) throw new Error((await resp.text()) || `Delete failed (${resp.status}).`);
+}
+
 /** Run a backend `transform`/`contribute` hook; the model lands in the session. */
 export async function runBackendHook(
   id: string,
