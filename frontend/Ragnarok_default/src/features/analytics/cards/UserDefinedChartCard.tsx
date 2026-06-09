@@ -266,22 +266,26 @@ export function UserDefinedChartCard({
           </label>
         )}
 
-        {/* Temporal resolution */}
-        <label className="chart-control">
-          <span>Temporal resolution</span>
-          <SearchableSelect
-            value={active.timeframe}
-            options={[
-              { value: 'aggregated', label: 'Aggregated' },
-              { value: 'yearly', label: 'By year' },
-              { value: 'monthly', label: 'By month' },
-              { value: 'weekly', label: 'By week' },
-              { value: 'daily', label: 'By day' },
-              { value: 'hourly', label: 'By hour' },
-            ]}
-            onChange={(v) => patch({ ...active, timeframe: v as TimeframeOption })}
-          />
-        </label>
+        {/* Temporal resolution — irrelevant for a donut, which always shows the
+            fully-aggregated total over the entire period. Hide it there so it
+            doesn't look like a control that does nothing. */}
+        {active.chartType !== 'donut' && (
+          <label className="chart-control">
+            <span>Temporal resolution</span>
+            <SearchableSelect
+              value={active.timeframe}
+              options={[
+                { value: 'aggregated', label: 'Aggregated' },
+                { value: 'yearly', label: 'By year' },
+                { value: 'monthly', label: 'By month' },
+                { value: 'weekly', label: 'By week' },
+                { value: 'daily', label: 'By day' },
+                { value: 'hourly', label: 'By hour' },
+              ]}
+              onChange={(v) => patch({ ...active, timeframe: v as TimeframeOption })}
+            />
+          </label>
+        )}
 
         {/* Chart type */}
         <label className="chart-control">
@@ -428,7 +432,7 @@ export function UserDefinedChartCard({
         <section className="chart-card">
           {!compact && (
             <div className="chart-card-header">
-              <div><h3>{metric!.label}</h3><p>average {metric!.unit} over window</p></div>
+              <div><h3>{metric!.label}</h3><p>total {metric!.unit} over the entire period</p></div>
             </div>
           )}
           {buildDonutFromMetric(metric!, safeStart, safeEnd).length > 0
