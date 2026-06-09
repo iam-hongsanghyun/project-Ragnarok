@@ -7447,7 +7447,7 @@ code, kbd, samp, tt,
 .chart-builder-gear {
   position: absolute;
   top: 4px;
-  right: 4px;
+  left: 4px;
   z-index: 8;
   width: 30px;
   height: 30px;
@@ -7727,9 +7727,6 @@ code, kbd, samp, tt,
   max-height: 100%;
   max-width: 40%;
   flex: 0 1 auto;
-  /* Reserve space at the top-right so the (hover) settings gear, which is
-     pinned to the cell's top-right corner, never overlaps the Breakdown legend. */
-  padding-top: 28px;
 }
 
 
