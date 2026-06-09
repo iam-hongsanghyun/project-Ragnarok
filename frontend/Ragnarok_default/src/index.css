@@ -1693,39 +1693,6 @@
   margin-top: 4px;
 }
 
-/* Temporal-chart window nav: minimal monochrome line under the chart
-   (‹ start–end / total ›  + length input). Flat/mono — no coloured slider. */
-.cw-nav {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 10px 6px;
-  font-size: 0.72rem;
-  color: var(--muted, #64748b);
-}
-.cw-nav-label { white-space: nowrap; }
-.cw-nav-btn {
-  border: none;
-  background: none;
-  color: var(--text, #0f172a);
-  cursor: pointer;
-  padding: 0 4px;
-  font-size: 0.95rem;
-  line-height: 1;
-}
-.cw-nav-btn:disabled { opacity: 0.3; cursor: default; }
-.cw-nav-len {
-  width: 64px;
-  margin-left: auto;
-  border: none;
-  border-bottom: 1px solid var(--border, #e5e7eb);
-  background: none;
-  color: var(--text, #0f172a);
-  font-size: 0.72rem;
-  text-align: right;
-  padding: 1px 2px;
-}
-.cw-nav-len:focus { outline: none; border-bottom-color: var(--text, #0f172a); }
 
 .chart-card-controls {
   flex-wrap: wrap;

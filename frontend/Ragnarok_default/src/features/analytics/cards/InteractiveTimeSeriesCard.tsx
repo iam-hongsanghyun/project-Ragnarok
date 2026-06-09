@@ -1,57 +1,10 @@
-import React, { useState, useRef, useLayoutEffect, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useLayoutEffect } from 'react';
 import { ChartMode, TimeSeriesRow, TimeSeriesSeries } from 'lib/types';
 import { numberValue, isoDate, isoTime } from 'lib/utils/helpers';
 
-// Default initial window: render at most one week of hourly points so a
-// full-year (8760-point) series doesn't paint thousands of nodes on open. The
-// user drags the brush below the chart to resize/pan from there.
-const DEFAULT_WINDOW_POINTS = 168;
-
-interface WindowRange { start: number; end: number }
-
-/**
- * Draggable range brush for the visible time window. A thin track spans the full
- * series [0, total); the highlighted band is the visible window. Drag a handle to
- * resize one edge, drag the band to pan. Pointer-based so it works on touch too.
- * Rendered under the chart (always visible, unlike the compact-hidden header).
- */
-/**
- * Minimal, monochrome window nav under the chart: a plain "‹ start–end / total ›"
- * line plus a small length input. No coloured slider — keeps the flat/mono style.
- */
-function WindowNav({ total, start, end, onChange }: {
-  total: number;
-  start: number;
-  end: number;
-  onChange: (next: WindowRange) => void;
-}) {
-  const len = end - start;
-  const setLen = (n: number) => {
-    const L = Math.max(1, Math.min(n, total));
-    const s = Math.min(start, total - L);
-    onChange({ start: s, end: s + L });
-  };
-  const pan = (dir: -1 | 1) => {
-    const s = Math.max(0, Math.min(start + dir * len, total - len));
-    onChange({ start: s, end: s + len });
-  };
-  return (
-    <div className="cw-nav">
-      <button type="button" className="cw-nav-btn" onClick={() => pan(-1)} disabled={start <= 0} aria-label="Earlier window">‹</button>
-      <span className="cw-nav-label">{(start + 1).toLocaleString()}–{end.toLocaleString()} / {total.toLocaleString()}</span>
-      <button type="button" className="cw-nav-btn" onClick={() => pan(1)} disabled={end >= total} aria-label="Later window">›</button>
-      <input
-        className="cw-nav-len"
-        type="number"
-        min={1}
-        max={total}
-        value={len}
-        title="Window length (snapshots)"
-        onChange={(e) => { const n = parseInt(e.target.value, 10); if (Number.isFinite(n) && n > 0) setLen(n); }}
-      />
-    </div>
-  );
-}
+// NOTE: the temporal window controls (resolution / from–to) will live in the
+// chart's settings (gear) — not a bottom bar. For now the chart renders the
+// full series; the default window is a later refinement.
 
 /**
  * Track an element's rendered pixel size so the chart can size its SVG
@@ -125,13 +78,6 @@ export function InteractiveTimeSeriesCard({
 }) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const [mainRef, width, height] = useElementSize<HTMLDivElement>();
-  // Windowing over `data` as a [start, end) row range, set by the brush below.
-  const [win, setWin] = useState<WindowRange>({ start: 0, end: data.length });
-  const setWindow = useCallback((next: WindowRange) => setWin(next), []);
-  // A new dataset (different length) resets to the first default-sized window.
-  useEffect(() => {
-    setWin({ start: 0, end: data.length > DEFAULT_WINDOW_POINTS ? DEFAULT_WINDOW_POINTS : data.length });
-  }, [data.length]);
 
   if (!series.length) {
     return (
@@ -155,12 +101,9 @@ export function InteractiveTimeSeriesCard({
     );
   }
 
-  // Slice the visible window out of the full series. Everything below renders
-  // from `visible`, so the SVG only ever paints the windowed points.
-  const total = data.length;
-  const start = Math.max(0, Math.min(win.start, total - 1));
-  const end = Math.max(start + 1, Math.min(win.end, total));
-  const visible = data.slice(start, end);
+  // Render the full series for now; windowing/resolution will be driven from the
+  // chart settings (gear) later.
+  const visible = data;
 
   const visibleSeries = series.filter((item) =>
     visible.some((row) => Math.abs(numberValue(row[item.key] as string | number | undefined)) > 1e-6),
@@ -408,9 +351,6 @@ export function InteractiveTimeSeriesCard({
         </div>
         )}
       </div>
-      {total > DEFAULT_WINDOW_POINTS && (
-        <WindowNav total={total} start={start} end={end} onChange={setWindow} />
-      )}
     </section>
   );
 }
