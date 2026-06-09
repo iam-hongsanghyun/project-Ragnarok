@@ -1,0 +1,50 @@
+{
+  "id": "demo-network-builder",
+  "name": "Demo Network Builder",
+  "version": "1.0.0",
+  "kind": "backend",
+  "description": "A reference BACKEND plugin: builds a small valid PyPSA model (buses, hourly load, one generator per bus) entirely server-side, importing the bundled PyPSA source (backend/pypsa) to construct the network. The built model is written straight into the session — it never travels through the browser. Use this as a template for backend plugins.",
+  "capabilities": ["data-importer"],
+  "config": {
+    "grp_build": {
+      "type": "group",
+      "label": "Demo network",
+      "description": "Build a tiny synthetic network on the server and load it into the session."
+    },
+    "buses": {
+      "type": "number",
+      "label": "Buses",
+      "description": "Number of buses; each gets one load and one generator.",
+      "default": 1,
+      "min": 1,
+      "max": 50
+    },
+    "snapshots": {
+      "type": "number",
+      "label": "Snapshots (hours)",
+      "description": "Hourly snapshots from 2030-01-01.",
+      "default": 24,
+      "min": 1,
+      "max": 8760
+    },
+    "peak_load_mw": {
+      "type": "number",
+      "label": "Peak load per bus (MW)",
+      "default": 100,
+      "min": 1
+    },
+    "carrier": {
+      "type": "string",
+      "label": "Generator carrier",
+      "default": "gas"
+    },
+    "build": {
+      "type": "action",
+      "label": "Build & load into Ragnarok",
+      "description": "Runs server-side, constructs the network with the bundled PyPSA, and loads the model into the session.",
+      "hook": "build",
+      "variant": "primary",
+      "successMessage": "Demo network built into the session."
+    }
+  }
+}
