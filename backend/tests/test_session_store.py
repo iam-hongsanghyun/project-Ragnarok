@@ -155,6 +155,38 @@ def test_load_full_model_roundtrip(_session_dir: Path) -> None:
     )
 
 
+def test_load_full_model_static_only_excludes_series(_session_dir: Path) -> None:
+    session_store.save_model("default", _model(10))
+    full = session_store.load_full_model("default")
+    static = session_store.load_full_model("default", static_only=True)
+    assert full is not None and "generators-p_max_pu" in full
+    assert static is not None and "generators-p_max_pu" not in static
+    assert "generators" in static and "snapshots" in static
+
+
+def test_merge_static_keeps_series(_session_dir: Path) -> None:
+    session_store.save_model("default", _model(10))
+    # Merge an edited static sheet; the heavy series must survive untouched.
+    edited = {"generators": [{"name": "g1", "p_nom": 999.0}], "snapshots": [{"snapshot": "x"}] * 10}
+    meta = session_store.merge_static_model("default", edited)
+    assert meta is not None
+    page = session_store.get_sheet_page("default", "generators")
+    assert page is not None and page["rows"][0]["p_nom"] == 999.0
+    # Series still intact.
+    win = session_store.get_series_window("default", "generators-p_max_pu", max_points=100)
+    assert win is not None and win["total"] == 10
+
+
+def test_merge_static_ignores_series_sheets_in_payload(_session_dir: Path) -> None:
+    session_store.save_model("default", _model(10))
+    # A series sheet in the merge payload must be ignored (series are PATCH-only).
+    session_store.merge_static_model(
+        "default", {"generators-p_max_pu": [{"snapshot": "z", "g1": -1.0}]}
+    )
+    win = session_store.get_series_window("default", "generators-p_max_pu", max_points=100)
+    assert win is not None and win["total"] == 10 and win["rows"][0]["g1"] == 0.0
+
+
 def test_clear_and_has_model(_session_dir: Path) -> None:
     session_store.save_model("default", _model())
     assert session_store.has_model("default")

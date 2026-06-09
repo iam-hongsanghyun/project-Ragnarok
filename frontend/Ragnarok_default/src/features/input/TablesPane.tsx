@@ -12,6 +12,7 @@ import type { DateFormat } from '../settings/useSettings';
 import { PYPSA_STANDARD_LINE_TYPES, PYPSA_STANDARD_TRANSFORMER_TYPES } from 'lib/constants/pypsa_standard_types';
 import { InputAnalyser } from './InputAnalyser';
 import { DataGrid } from './grid/DataGrid';
+import { getSheetPage, patchSheet } from 'lib/api/session';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -222,7 +223,15 @@ export function TablesPane({
     try {
       const imported = await parseCsvToGridRows(file);
       if (imported.length === 0) throw new Error('No rows found in the file.');
-      onImportTsSheet(sel.sheet as TsSheetName, imported);
+      // ts sheets live in the backend session — replace the sheet there (clear
+      // current rows, then add the imported ones) and mirror locally.
+      const current = tsRows?.length ?? 0;
+      const ops = [
+        ...(current ? [{ op: 'deleteRows' as const, rows: Array.from({ length: current }, (_, i) => i) }] : []),
+        ...imported.map((r) => ({ op: 'addRow' as const, values: r as Record<string, unknown> })),
+      ];
+      setTsRows(imported);
+      await patchSheet(String(sel.sheet), ops);
     } catch (err) {
       window.alert(`CSV import failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -231,9 +240,59 @@ export function TablesPane({
   };
 
   const isTs = sel.kind === 'ts';
+  // Time-series (ts) sheets are NOT kept in the React model (they're the heavy
+  // part). Fetch the selected ts sheet's rows from the backend session on
+  // demand; edits below go straight to the backend via PATCH. Static sheets
+  // still come from the in-memory model.
+  const [tsRows, setTsRows] = useState<GridRow[] | null>(null);
+  const [tsLoading, setTsLoading] = useState(false);
+  useEffect(() => {
+    if (!isTs) { setTsRows(null); return undefined; }
+    let cancelled = false;
+    setTsLoading(true);
+    // Fetch the whole sheet (one ts sheet at a time is bounded; the persistent
+    // win is that ALL ts sheets no longer live in the browser model).
+    void getSheetPage(String(sel.sheet), { offset: 0, limit: 1_000_000 })
+      .then((page) => { if (!cancelled) setTsRows(page.rows); })
+      .catch(() => { if (!cancelled) setTsRows([]); })
+      .finally(() => { if (!cancelled) setTsLoading(false); });
+    return () => { cancelled = true; };
+  }, [isTs, sel.sheet]);
+
   const rows: GridRow[] = isTs
-    ? ((model as any)[sel.sheet] as GridRow[]) ?? []
+    ? (tsRows ?? [])
     : (model as any)[sel.sheet] ?? [];
+
+  // Edit a ts cell: update the fetched rows locally (responsive) and persist to
+  // the backend session via PATCH. Static-sheet edits keep using the prop
+  // handlers (which update the React model).
+  const patchTsCell = (rowIndex: number, col: string, val: Primitive) => {
+    setTsRows((prev) => (prev ? prev.map((r, i) => (i === rowIndex ? { ...r, [col]: val } : r)) : prev));
+    void patchSheet(String(sel.sheet), [{ op: 'set', row: rowIndex, column: col, value: val }]).catch(() => { /* best-effort */ });
+  };
+  const patchTsPaste = (edits: { rowIndex: number; col: string; val: Primitive }[], extraRows: number) => {
+    setTsRows((prev) => {
+      if (!prev) return prev;
+      const next = prev.map((r) => ({ ...r }));
+      for (let k = 0; k < extraRows; k += 1) next.push({});
+      for (const e of edits) { if (next[e.rowIndex]) next[e.rowIndex][e.col] = e.val; }
+      return next;
+    });
+    const ops = [
+      ...Array.from({ length: extraRows }, () => ({ op: 'addRow' as const, values: {} })),
+      ...edits.map((e) => ({ op: 'set' as const, row: e.rowIndex, column: e.col, value: e.val })),
+    ];
+    void patchSheet(String(sel.sheet), ops).catch(() => { /* best-effort */ });
+  };
+  const patchTsClear = () => {
+    const count = tsRows?.length ?? 0;
+    if (count === 0) return;
+    setTsRows([]);
+    void patchSheet(
+      String(sel.sheet),
+      [{ op: 'deleteRows', rows: Array.from({ length: count }, (_, i) => i) }],
+    ).catch(() => { /* best-effort */ });
+  };
 
   // Build ordered column list with pinned first column
   const rawCols: string[] =
@@ -371,13 +430,15 @@ export function TablesPane({
   const grid = (
         <div className="tables-grid-wrap">
           {isTs && rows.length === 0 ? (
-            // Temporal sheets are seeded by CSV import, so an empty one shows a
-            // hint instead of a grid. Static sheets always render the grid (even
-            // with zero rows) so the trailing "new row" is reachable.
+            // Temporal sheets are fetched from the backend session on demand;
+            // show a loading note while that's in flight, otherwise the empty
+            // hint. Static sheets always render the grid (even with zero rows).
             <div className="grid-empty">
-              {editableTs
-                ? 'No temporal data — use "Import CSV" in the Temporal panel on the right, then edit values here.'
-                : 'No temporal data — use "Import CSV" above to load a profile.'}
+              {tsLoading
+                ? 'Loading time-series from the backend…'
+                : editableTs
+                  ? 'No temporal data — use "Import CSV" in the Temporal panel on the right, then edit values here.'
+                  : 'No temporal data — use "Import CSV" above to load a profile.'}
             </div>
           ) : (
             <DataGrid
@@ -387,10 +448,14 @@ export function TablesPane({
               storageKey={`${sel.kind}:${String(sel.sheet)}`}
               readOnly={isTs && !editableTs}
               onUpdate={
-                isTs && !editableTs ? undefined : (ri, col, val) => onUpdate(sel.sheet as SheetName, ri, col, val)
+                isTs
+                  ? (editableTs ? patchTsCell : undefined)
+                  : (ri, col, val) => onUpdate(sel.sheet as SheetName, ri, col, val)
               }
               onPasteEdits={
-                (isTs && !editableTs) || !onBulkPaste ? undefined : (edits, extraRows) => onBulkPaste(sel.sheet as SheetName, edits, extraRows)
+                isTs
+                  ? (editableTs ? patchTsPaste : undefined)
+                  : (!onBulkPaste ? undefined : (edits, extraRows) => onBulkPaste(sel.sheet as SheetName, edits, extraRows))
               }
               onAppendRow={isTs ? undefined : () => onAddRow(sel.sheet as SheetName)}
               onDeleteRow={isTs ? undefined : (ri) => onDeleteRow(sel.sheet as SheetName, ri)}
@@ -403,7 +468,7 @@ export function TablesPane({
               onAnalyse={(col) => { setAnalyseFocusCol(col); setShowAnalyser(true); }}
               onClearTable={
                 isTs
-                  ? (editableTs ? () => onImportTsSheet(sel.sheet as TsSheetName, []) : undefined)
+                  ? (editableTs ? patchTsClear : undefined)
                   : () => onClearTable(sel.sheet as SheetName)
               }
               protectedCols={protectedCols}

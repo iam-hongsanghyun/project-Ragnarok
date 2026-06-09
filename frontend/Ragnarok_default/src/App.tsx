@@ -46,7 +46,7 @@ import { dslToSpecs } from 'lib/constraints/dsl';
 import { buildScenarioPreset, defaultScenarioCatalog, readScenarioCatalogFromModel, sameScenarioCatalog, writeScenarioCatalogToModel } from 'lib/results/scenarios';
 import { readCarbonLibraryFromModel, writeCarbonLibraryToModel, sameCarbonLibrary } from 'lib/results/carbonLibrary';
 import { saveSessionControls, loadSessionControls, clearSession, clearSessionModelOnly } from 'lib/storage/sessionStore';
-import { clearSessionModel, putSessionModel, getSessionFullModel, DEFAULT_SESSION_ID } from 'lib/api/session';
+import { clearSessionModel, putSessionModel, putStaticModel, getSessionFullModel, isSeriesSheet, DEFAULT_SESSION_ID } from 'lib/api/session';
 import { RunDialog } from './features/run/RunDialog';
 import { SettingsView } from './views/SettingsView';
 import { PluginsView } from './views/PluginsView';
@@ -72,6 +72,20 @@ import { ToastProvider, useToast } from './shared/components/Toast';
 function projectBaseName(filename: string): string {
   const base = filename.replace(/(\.(xlsx|xls|nc|h5|hdf5|zip))+$/i, '').trim();
   return base || 'ragnarok';
+}
+
+/**
+ * Drop the heavy time-series sheets from a model so the browser holds only the
+ * small static/topology sheets. The series live in the backend session and are
+ * paged into the grid on demand. Keeps `snapshots` (the time axis) and all
+ * static/config sheets.
+ */
+function stripSeriesSheets(model: WorkbookModel): WorkbookModel {
+  const out: WorkbookModel = {} as WorkbookModel;
+  for (const [sheet, rows] of Object.entries(model)) {
+    (out as Record<string, unknown>)[sheet] = isSeriesSheet(sheet) ? [] : rows;
+  }
+  return out;
 }
 
 function AppInner() {
@@ -314,9 +328,6 @@ function AppInner() {
     // per load (not per edit — that per-keystroke full-model serialisation is
     // what spiked the heap). Skip when we are *restoring from* the session on
     // boot (the model is already there).
-    if (opts?.pushToSession !== false) {
-      void putSessionModel(nextModel, { filename: name ?? '', scenarioName: '' }).catch(() => { /* best-effort */ });
-    }
     // Single choke point: every temporal sheet in the incoming model becomes
     // ISO-`T` with `snapshot` leading, no matter which path the model came in
     // through (workbook import, project import, demo, plugin preview, history
@@ -324,6 +335,12 @@ function AppInner() {
     // no-op, so callers that pre-normalise with a project-specific dateFormat
     // (e.g. handleImportProject) stay correct.
     normalizeInputDatesToIso(nextModel, settings.dateFormat);
+    // Push the FULL (normalised) model to the backend session — the source of
+    // truth. Done once per load (not per edit). Skipped when restoring FROM the
+    // session on boot (it's already there).
+    if (opts?.pushToSession !== false) {
+      void putSessionModel(nextModel, { filename: name ?? '', scenarioName: '' }).catch(() => { /* best-effort */ });
+    }
     const snapshotMax = snapshotMaxFromWorkbook(nextModel.snapshots);
     const nextPathway = readPathwayConfigFromModel(nextModel);
     const nextRolling = readRollingConfigFromModel(nextModel);
@@ -336,7 +353,9 @@ function AppInner() {
     setMaxSnapshots(snapshotMax);
     setSnapshotEnd(snapshotMax);
     setSnapshotStart(RUN_WINDOW.initialSnapshotStart);
-    setModel(nextModel);
+    // React holds only the small static sheets; the heavy time-series stay in
+    // the backend session and are paged into the grid on demand.
+    setModel(stripSeriesSheets(nextModel));
     setResults(null);
     setResultsModel(null);
     setResultsContext(null);
@@ -500,7 +519,9 @@ function AppInner() {
         // Use the controls-only loader so we never deserialise a stale heavy
         // model record from IndexedDB on boot.
         const controls = await loadSessionControls();
-        const savedModel = await getSessionFullModel().catch(() => null);
+        // Rehydrate only the small static sheets; series stay in the backend and
+        // are paged into the grid on demand (keeps boot light).
+        const savedModel = await getSessionFullModel({ staticOnly: true }).catch(() => null);
         const hasRows = !!savedModel && Object.values(savedModel).some((rows) => Array.isArray(rows) && rows.length > 0);
         if (!cancelled && savedModel && hasRows) {
           // Already in the session — don't push it straight back.
@@ -1474,12 +1495,12 @@ function AppInner() {
     const modelForRun = prepareModelForBackend(model);
     setModel(modelForRun);
 
-    // Sync the session with the exact model being run (captures unsaved edits),
-    // then submit by sessionId only — the heavy model never travels in the
-    // validate/queue payload. The backend snapshots the session model into the
-    // queue item, so later edits can't change an already-queued run.
+    // Sync static edits to the session (MERGE — the browser only holds static
+    // sheets; the backend keeps the heavy series it already has), then submit by
+    // sessionId only. The backend snapshots the session model into the queue
+    // item, so later edits can't change an already-queued run.
     try {
-      await putSessionModel(modelForRun, { filename });
+      await putStaticModel(modelForRun);
     } catch {
       setStatus('Could not sync the model to the backend session.');
       showToast('Could not reach the backend to start the run.', 'error');

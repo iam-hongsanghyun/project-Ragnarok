@@ -87,18 +87,36 @@ export async function putSessionModel(
   return asJson<SessionMeta>(resp);
 }
 
+/** Merge the model's STATIC sheets into the session, keeping the backend's
+ *  time-series untouched. The thin client syncs its in-memory static edits this
+ *  way before a run (it never holds the heavy series, so a full put would wipe them). */
+export async function putStaticModel(
+  model: WorkbookModel,
+  opts: { sessionId?: string } = {},
+): Promise<SessionMeta> {
+  const resp = await fetch(`${API_BASE}/api/session/model/static`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, sessionId: opts.sessionId ?? DEFAULT_SESSION_ID }),
+  });
+  return asJson<SessionMeta>(resp);
+}
+
 /** Return the session meta ({} when nothing is loaded). */
 export async function getSessionMeta(sessionId = DEFAULT_SESSION_ID): Promise<SessionMeta> {
   const resp = await fetch(`${API_BASE}/api/session/meta?session_id=${encodeURIComponent(sessionId)}`);
   return asJson<SessionMeta>(resp);
 }
 
-/** Full working model from the session ({sheet: rows}), or null if none. Heavy —
- *  used to rehydrate the editor on boot; prefer getSheetPage for on-screen rows. */
+/** Working model from the session ({sheet: rows}), or null if none.
+ *  With staticOnly, the heavy time-series sheets are omitted — used to rehydrate
+ *  the editor cheaply on boot (series are paged on demand). */
 export async function getSessionFullModel(
-  sessionId = DEFAULT_SESSION_ID,
+  opts: { sessionId?: string; staticOnly?: boolean } = {},
 ): Promise<WorkbookModel | null> {
-  const resp = await fetch(`${API_BASE}/api/session/model/full?session_id=${encodeURIComponent(sessionId)}`);
+  const params = new URLSearchParams({ session_id: opts.sessionId ?? DEFAULT_SESSION_ID });
+  if (opts.staticOnly) params.set('staticOnly', 'true');
+  const resp = await fetch(`${API_BASE}/api/session/model/full?${params}`);
   const body = await asJson<{ model: WorkbookModel | null }>(resp);
   return body.model ?? null;
 }
@@ -135,6 +153,31 @@ export async function getSeriesWindow(
   if (opts.agg) params.set('agg', opts.agg);
   const resp = await fetch(`${API_BASE}/api/session/series/${encodeURIComponent(name)}?${params}`);
   return asJson<SeriesWindow>(resp);
+}
+
+/** A PyPSA time-series sheet is ``<component>-<attribute>`` (e.g. generators-p_max_pu);
+ *  ``snapshots`` is the time axis, treated as static. Mirrors the backend rule. */
+export function isSeriesSheet(name: string): boolean {
+  return name !== 'snapshots' && name.includes('-');
+}
+
+export type SheetEditOp =
+  | { op: 'set'; row: number; column: string; value: unknown }
+  | { op: 'addRow'; values?: Record<string, unknown>; index?: number }
+  | { op: 'deleteRows'; rows: number[] };
+
+/** Apply a batch of edits to a session sheet (backend = source of truth). */
+export async function patchSheet(
+  name: string,
+  ops: SheetEditOp[],
+  sessionId = DEFAULT_SESSION_ID,
+): Promise<{ name: string; kind: string; total: number; columns: string[] }> {
+  const resp = await fetch(`${API_BASE}/api/session/sheet/${encodeURIComponent(name)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ops, sessionId }),
+  });
+  return asJson(resp);
 }
 
 /** Clear the session's working model server-side (keeps frontend settings). */

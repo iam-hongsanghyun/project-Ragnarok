@@ -220,6 +220,41 @@ def save_model(
     return meta
 
 
+def merge_static_model(session_id: str, model: dict[str, list[dict[str, Any]]]) -> dict[str, Any] | None:
+    """Overwrite the session's STATIC sheets from ``model``; leave series untouched.
+
+    The thin client holds only static sheets in memory and edits series directly
+    against the backend (PATCH). Before a run it syncs its static edits here —
+    using a merge (not a full replace) so the heavy time-series the browser never
+    held are preserved. Returns the refreshed meta, or ``None`` if no session.
+    """
+    if not _is_safe_id(session_id):
+        return None
+    meta = get_meta(session_id)
+    if meta is None:
+        return None
+    base = _session_dir(session_id)
+    (base / "static").mkdir(parents=True, exist_ok=True)
+    existing = {s["name"]: s for s in meta.get("sheets", []) if isinstance(s, dict)}
+    for name, rows in model.items():
+        if not isinstance(rows, list) or is_series_sheet(name):
+            continue
+        _static_path(session_id, name).write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+        columns = list(rows[0].keys()) if rows and isinstance(rows[0], dict) else []
+        entry = existing.get(name)
+        if entry is None:
+            meta.setdefault("sheets", []).append(
+                {"name": name, "kind": "static", "rowCount": len(rows), "columns": columns}
+            )
+        else:
+            entry["rowCount"] = len(rows)
+            entry["columns"] = columns
+    if isinstance(model.get("snapshots"), list):
+        meta["snapshotCount"] = len(model["snapshots"])
+    _meta_path(session_id).write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    return meta
+
+
 # ── read: meta ─────────────────────────────────────────────────────────────────
 
 def get_meta(session_id: str) -> dict[str, Any] | None:
@@ -348,11 +383,16 @@ def get_series_window(
 
 # ── read: full model (for the run/solve path) ────────────────────────────────────
 
-def load_full_model(session_id: str) -> dict[str, list[dict[str, Any]]] | None:
-    """Reconstruct the complete ``{sheet: rows}`` model from disk.
+def load_full_model(
+    session_id: str, *, static_only: bool = False
+) -> dict[str, list[dict[str, Any]]] | None:
+    """Reconstruct the ``{sheet: rows}`` model from disk.
 
     Used by the run/queue path so a solve consumes the session model the user
-    built — no giant payload travels from the browser. ``None`` if no session.
+    built — no giant payload travels from the browser. With ``static_only`` the
+    heavy time-series sheets are skipped, so the thin client can rehydrate only
+    the small static/topology sheets on boot and page series on demand. ``None``
+    if no session.
     """
     meta = get_meta(session_id)
     if meta is None:
@@ -363,6 +403,8 @@ def load_full_model(session_id: str) -> dict[str, list[dict[str, Any]]] | None:
             continue
         name = str(entry.get("name"))
         if entry.get("kind") == "series":
+            if static_only:
+                continue
             path = _series_path(session_id, name)
             if path.exists():
                 model[name] = timeseries.df_to_records(pd.read_parquet(path))

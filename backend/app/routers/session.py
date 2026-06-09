@@ -60,6 +60,19 @@ def put_model(payload: SessionModelPayload) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/model/static")
+def merge_static(payload: SessionModelPayload) -> dict:
+    """Merge the static sheets of ``model`` into the session, keeping series.
+
+    The thin client calls this to sync its in-memory static edits before a run
+    without clobbering the heavy time-series it doesn't hold.
+    """
+    meta = session_store.merge_static_model(payload.sessionId, payload.model)
+    if meta is None:
+        raise HTTPException(status_code=400, detail="No session to merge into.")
+    return meta
+
+
 @router.get("/meta")
 def get_meta(session_id: str = Query("default", alias="session_id")) -> dict:
     """Return the session meta, or ``{}`` when no model is loaded."""
@@ -67,15 +80,17 @@ def get_meta(session_id: str = Query("default", alias="session_id")) -> dict:
 
 
 @router.get("/model/full")
-def get_full_model(session_id: str = Query("default", alias="session_id")) -> dict:
-    """Return the full working model ``{sheet: rows}`` from the session.
+def get_full_model(
+    session_id: str = Query("default", alias="session_id"),
+    static_only: bool = Query(False, alias="staticOnly"),
+) -> dict:
+    """Return the working model ``{sheet: rows}`` from the session.
 
-    Used to rehydrate the editor on boot now that the model is no longer mirrored
-    into the browser's IndexedDB (the backend session is the source of truth).
-    Returns ``{model: null}`` when nothing is loaded. This is the heaviest session
-    read; the thin-client grid prefers ``/sheet/{name}`` paging over this.
+    With ``staticOnly=true`` the heavy time-series sheets are omitted — that's
+    what the thin client uses to rehydrate the editor on boot (it pages series
+    on demand). Returns ``{model: null}`` when nothing is loaded.
     """
-    return {"model": session_store.load_full_model(session_id)}
+    return {"model": session_store.load_full_model(session_id, static_only=static_only)}
 
 
 @router.get("/sheet/{name}")
