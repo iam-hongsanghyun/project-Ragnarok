@@ -1982,7 +1982,19 @@ function AppInner() {
               host={frontendPlugins}
               model={model}
               onReplaceModel={(next) => resetForNewModel(next)}
-              onMergeSheets={(sheets) => setModel((prev) => ({ ...prev, ...sheets }))}
+              onMergeSheets={(sheets) => {
+                // A plugin's contributed sheets must reach the BACKEND session
+                // (the source of truth), not just the in-memory workbook —
+                // otherwise the relayed model would be lost on the next run,
+                // which submits by sessionId. Merge locally for the preview,
+                // then relay the merged static sheets; if there's no session
+                // yet, fall back to a full put.
+                const next = { ...model, ...sheets };
+                setModel(next);
+                void putStaticModel(next).catch(() => {
+                  void putSessionModel(next, { filename }).catch(() => { /* best-effort */ });
+                });
+              }}
               customDsl={customDsl}
               onCustomDslChange={setCustomDsl}
               results={displayResults}
