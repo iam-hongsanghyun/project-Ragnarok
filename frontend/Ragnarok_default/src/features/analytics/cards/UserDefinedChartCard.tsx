@@ -161,11 +161,11 @@ export function UserDefinedChartCard({
     ? aggregateMetricRows(metric!, safeStart, safeEnd, active.timeframe)
     : [];
 
-  // A donut is ALWAYS the fully-aggregated total over the ENTIRE period — it
-  // must NOT track the range slider (safeStart/safeEnd). Always sum the whole
-  // metric series.
+  // The donut is the SUM over the SELECTED period — it tracks the range slider
+  // (safeStart/safeEnd), and buildDonutFromMetric sums the raw per-snapshot
+  // values across that range.
   const donutData = hasMetric && active.chartType === 'donut'
-    ? buildDonutFromMetric(metric!, 0, Math.max(metricRows.length - 1, 0))
+    ? buildDonutFromMetric(metric!, safeStart, safeEnd)
     : [];
 
   // Show Group by when:
@@ -416,9 +416,9 @@ export function UserDefinedChartCard({
         </div>
       )}
 
-      {/* Timeline slider — not for donuts (they always show the full-period
-          total, so a range would be misleading). */}
-      {hasMetric && active.chartType !== 'donut' && (
+      {/* Timeline slider — drives the visible window for line/bar charts AND the
+          summed range for donuts. */}
+      {hasMetric && (
         <TimelineSlider
           data={metric!.rows}
           startIndex={safeStart}
@@ -440,7 +440,7 @@ export function UserDefinedChartCard({
         <section className="chart-card">
           {!compact && (
             <div className="chart-card-header">
-              <div><h3>{metric!.label}</h3><p>total {metric!.unit} over the entire period</p></div>
+              <div><h3>{metric!.label}</h3><p>total {metric!.unit} over the selected period</p></div>
             </div>
           )}
           {donutData.length > 0
