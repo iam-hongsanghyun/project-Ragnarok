@@ -1693,53 +1693,39 @@
   margin-top: 4px;
 }
 
-/* Temporal-chart window brush: a thin draggable range under the chart. Drag a
-   handle to resize an edge, drag the band to pan. Always visible (not hidden in
-   compact dashboard cells), replacing the old gear-popover controls. */
-.cw-brushbar {
+/* Temporal-chart window nav: minimal monochrome line under the chart
+   (‹ start–end / total ›  + length input). Flat/mono — no coloured slider. */
+.cw-nav {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 10px 8px;
-}
-.cw-brush-count {
+  gap: 6px;
+  padding: 2px 10px 6px;
   font-size: 0.72rem;
   color: var(--muted, #64748b);
-  white-space: nowrap;
-  min-width: 92px;
 }
-.cw-brush {
-  position: relative;
-  flex: 1 1 auto;
-  height: 16px;
-  background: var(--border, #e5e7eb);
-  border-radius: 8px;
+.cw-nav-label { white-space: nowrap; }
+.cw-nav-btn {
+  border: none;
+  background: none;
+  color: var(--text, #0f172a);
   cursor: pointer;
-  touch-action: none;
+  padding: 0 4px;
+  font-size: 0.95rem;
+  line-height: 1;
 }
-.cw-brush-window {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  background: var(--accent, #2f7d6e);
-  opacity: 0.4;
-  border-radius: 8px;
-  cursor: grab;
-  touch-action: none;
+.cw-nav-btn:disabled { opacity: 0.3; cursor: default; }
+.cw-nav-len {
+  width: 64px;
+  margin-left: auto;
+  border: none;
+  border-bottom: 1px solid var(--border, #e5e7eb);
+  background: none;
+  color: var(--text, #0f172a);
+  font-size: 0.72rem;
+  text-align: right;
+  padding: 1px 2px;
 }
-.cw-brush-window:active { cursor: grabbing; }
-.cw-brush-handle {
-  position: absolute;
-  top: -3px;
-  bottom: -3px;
-  width: 12px;
-  background: var(--accent, #2f7d6e);
-  border-radius: 3px;
-  cursor: ew-resize;
-  touch-action: none;
-}
-.cw-brush-handle--l { left: -6px; }
-.cw-brush-handle--r { right: -6px; }
+.cw-nav-len:focus { outline: none; border-bottom-color: var(--text, #0f172a); }
 
 .chart-card-controls {
   flex-wrap: wrap;

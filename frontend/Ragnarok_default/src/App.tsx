@@ -79,9 +79,14 @@ function projectBaseName(filename: string): string {
  * small static/topology sheets. The series live in the backend session and are
  * paged into the grid on demand. Keeps `snapshots` (the time axis) and all
  * static/config sheets.
+ *
+ * Starts from an empty workbook so EVERY standard component sheet is always
+ * present as an array — a backend-rehydrated model only carries the sheets the
+ * session actually had, and consumers like MapPane do `model.lines.map(...)`
+ * assuming the sheet exists.
  */
 function stripSeriesSheets(model: WorkbookModel): WorkbookModel {
-  const out: WorkbookModel = {} as WorkbookModel;
+  const out: WorkbookModel = createEmptyWorkbook();
   for (const [sheet, rows] of Object.entries(model)) {
     (out as Record<string, unknown>)[sheet] = isSeriesSheet(sheet) ? [] : rows;
   }

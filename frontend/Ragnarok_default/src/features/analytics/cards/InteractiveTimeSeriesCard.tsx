@@ -15,63 +15,40 @@ interface WindowRange { start: number; end: number }
  * resize one edge, drag the band to pan. Pointer-based so it works on touch too.
  * Rendered under the chart (always visible, unlike the compact-hidden header).
  */
-function WindowBrush({ total, start, end, onChange }: {
+/**
+ * Minimal, monochrome window nav under the chart: a plain "‹ start–end / total ›"
+ * line plus a small length input. No coloured slider — keeps the flat/mono style.
+ */
+function WindowNav({ total, start, end, onChange }: {
   total: number;
   start: number;
   end: number;
   onChange: (next: WindowRange) => void;
 }) {
-  const trackRef = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ mode: 'start' | 'end' | 'pan'; x0: number; s0: number; e0: number } | null>(null);
-  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
-
-  useEffect(() => {
-    const onMove = (e: PointerEvent) => {
-      const d = drag.current;
-      const track = trackRef.current;
-      if (!d || !track) return;
-      const w = track.getBoundingClientRect().width || 1;
-      const deltaIdx = Math.round(((e.clientX - d.x0) / w) * total);
-      if (d.mode === 'start') {
-        onChange({ start: clamp(d.s0 + deltaIdx, 0, d.e0 - 1), end: d.e0 });
-      } else if (d.mode === 'end') {
-        onChange({ start: d.s0, end: clamp(d.e0 + deltaIdx, d.s0 + 1, total) });
-      } else {
-        const len = d.e0 - d.s0;
-        const s = clamp(d.s0 + deltaIdx, 0, total - len);
-        onChange({ start: s, end: s + len });
-      }
-    };
-    const onUp = () => { drag.current = null; };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    return () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-    };
-  }, [total, onChange]);
-
-  const begin = (mode: 'start' | 'end' | 'pan') => (e: React.PointerEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    drag.current = { mode, x0: e.clientX, s0: start, e0: end };
+  const len = end - start;
+  const setLen = (n: number) => {
+    const L = Math.max(1, Math.min(n, total));
+    const s = Math.min(start, total - L);
+    onChange({ start: s, end: s + L });
   };
-
-  const leftPct = (start / total) * 100;
-  const widthPct = Math.max(((end - start) / total) * 100, 1.5);
+  const pan = (dir: -1 | 1) => {
+    const s = Math.max(0, Math.min(start + dir * len, total - len));
+    onChange({ start: s, end: s + len });
+  };
   return (
-    <div className="cw-brushbar">
-      <span className="cw-brush-count">{(end - start).toLocaleString()} / {total.toLocaleString()}</span>
-      <div
-        className="cw-brush"
-        ref={trackRef}
-        title={`Showing snapshots ${start + 1}–${end} of ${total} — drag the ends to resize, drag the band to move`}
-      >
-        <div className="cw-brush-window" style={{ left: `${leftPct}%`, width: `${widthPct}%` }} onPointerDown={begin('pan')}>
-          <span className="cw-brush-handle cw-brush-handle--l" onPointerDown={begin('start')} />
-          <span className="cw-brush-handle cw-brush-handle--r" onPointerDown={begin('end')} />
-        </div>
-      </div>
+    <div className="cw-nav">
+      <button type="button" className="cw-nav-btn" onClick={() => pan(-1)} disabled={start <= 0} aria-label="Earlier window">‹</button>
+      <span className="cw-nav-label">{(start + 1).toLocaleString()}–{end.toLocaleString()} / {total.toLocaleString()}</span>
+      <button type="button" className="cw-nav-btn" onClick={() => pan(1)} disabled={end >= total} aria-label="Later window">›</button>
+      <input
+        className="cw-nav-len"
+        type="number"
+        min={1}
+        max={total}
+        value={len}
+        title="Window length (snapshots)"
+        onChange={(e) => { const n = parseInt(e.target.value, 10); if (Number.isFinite(n) && n > 0) setLen(n); }}
+      />
     </div>
   );
 }
@@ -432,7 +409,7 @@ export function InteractiveTimeSeriesCard({
         )}
       </div>
       {total > DEFAULT_WINDOW_POINTS && (
-        <WindowBrush total={total} start={start} end={end} onChange={setWindow} />
+        <WindowNav total={total} start={start} end={end} onChange={setWindow} />
       )}
     </section>
   );
