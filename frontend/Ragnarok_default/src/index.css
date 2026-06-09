@@ -5197,6 +5197,24 @@ th:hover .col-delete-btn {
   padding: 12px 0;
 }
 .plugin-rail-install { align-self: stretch; margin: 0 12px; }
+/* Rail sub-heading separating backend (server-side) plugins from frontend ones. */
+.plugin-rail-group {
+  margin: 12px 12px 4px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+/* "Backend plugin · vX" badge atop the backend detail pane. */
+.plugin-detail-kind {
+  margin: 0 0 10px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
 .plugin-rail-list {
   list-style: none;
   margin: 0;
@@ -7450,8 +7468,10 @@ code, kbd, samp, tt,
 /* Gear button — top right overlay on every compact chart cell */
 .chart-builder-gear {
   position: absolute;
-  top: 4px;
-  left: 4px;
+  /* Bottom-right corner — clear of the title (top-left) and the side legend
+     (top-right), per the requested layout. */
+  bottom: 4px;
+  right: 4px;
   z-index: 8;
   width: 30px;
   height: 30px;

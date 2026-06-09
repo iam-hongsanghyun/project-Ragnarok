@@ -1981,6 +1981,18 @@ function AppInner() {
             <PluginsView
               host={frontendPlugins}
               model={model}
+              onBackendModelBuilt={async (meta) => {
+                // A backend plugin already wrote the model into the session;
+                // rehydrate the editor (static sheets only — series stay server-
+                // side) and jump to the Model tab so the user sees the result.
+                try {
+                  const savedModel = await getSessionFullModel({ staticOnly: true });
+                  if (savedModel) resetForNewModel(savedModel, meta.filename, { pushToSession: false });
+                  setTab('Model');
+                } catch {
+                  showToast('Built, but the editor could not reload from the session.', 'error');
+                }
+              }}
               onReplaceModel={(next) => resetForNewModel(next)}
               onMergeSheets={(sheets) => {
                 // A plugin's contributed sheets must reach the BACKEND session
