@@ -837,14 +837,24 @@ export interface ModuleConfigOptionsFrom {
    * - `'server'` — rows fetched from the plugin's own HTTP server (POST
    *   `endpoint` with `{config}`, response `{rows: [...]}`), e.g. the full
    *   imported generator fleet. Filtered/labelled client-side like the others.
+   *   Used by FRONTEND plugins (which run their own server).
+   * - `'plugin'` — rows fetched from a BACKEND plugin's `options(name, …)` hook
+   *   via Ragnarok (`POST /api/plugins/{id}/options`, response `{rows: [...]}`).
+   *   No external server; the backend plugin owns the logic. Filtered/labelled
+   *   client-side like the others.
    */
-  source: 'model' | 'config' | 'server';
+  source: 'model' | 'config' | 'server' | 'plugin';
   /** For `source: 'model'`: the workbook sheet name (e.g. `'buses'`). */
   sheet?: string;
   /** For `source: 'config'`: the sibling config field key whose rows to read. */
   field?: string;
   /** For `source: 'server'`: the POST path (e.g. `'/generators'`). */
   endpoint?: string;
+  /**
+   * For `source: 'plugin'`: the option-set id passed to the plugin's
+   * `options(name, …)` hook (e.g. `'/demand_values'`).
+   */
+  name?: string;
   /**
    * For `source: 'server'`: config field holding the server base URL
    * (defaults to `http://127.0.0.1:8765`).
@@ -917,8 +927,11 @@ export interface ModuleConfigTableColumn {
    * `keyColumn` equals this row's `matchColumn` value.
    */
   lookup?: {
-    source: 'server';
-    endpoint: string;
+    source: 'server' | 'plugin';
+    /** For `source: 'server'`: the POST path. */
+    endpoint?: string;
+    /** For `source: 'plugin'`: the backend-plugin `options(name, …)` id. */
+    name?: string;
     baseUrlField?: string;
     /** This row's column to match on (e.g. `'generator'`). */
     matchColumn: string;

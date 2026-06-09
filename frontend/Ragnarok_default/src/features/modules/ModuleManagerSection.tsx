@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ModuleConfigField, ModuleConfigTableColumn, ModuleConfigVisibleWhen, ModuleDescriptor, ModuleHostInventory, PluginFileValue, WorkbookModel } from 'lib/types';
 import { optionsFromRows, resolveOptionsFrom, ResolvedOption } from 'lib/plugins/options';
+import { usePluginOptionsResolver } from 'lib/plugins/pluginOptionsContext';
 import { SearchableSelect } from '../../shared/components/SearchableSelect';
 import { useDebouncedValue } from '../../shared/hooks/useDebouncedValue';
 
@@ -15,20 +16,37 @@ function resolveStaticOrDynamic(
   return dynamic.length > 0 ? dynamic : staticOptions;
 }
 
+/** Storage key for a remote (server/plugin) options or lookup spec's fetched rows. */
+function remoteOptionKey(spec: { source?: string; endpoint?: string; name?: string } | undefined): string {
+  if (!spec) return '';
+  if (spec.source === 'plugin') return spec.name ?? spec.endpoint ?? '';
+  if (spec.source === 'server') return spec.endpoint ?? '';
+  return '';
+}
+
 /**
  * Fetch rows for a top-level `select`/`multi-select` field whose options come
- * from a plugin server (`optionsFrom.source === 'server'`). Mirrors the table
- * editor's server fetch: POST `{config}` to `<baseUrlField>` + `endpoint`,
- * expect `{rows:[...]}`. Refetches only when the SOURCE config changes — not
- * when a filter `valueFrom` field changes (that just re-filters the rows
- * client-side). Returns `[]` for non-server fields.
+ * from a server source. Two flavours, both returning `{rows:[...]}`:
+ *
+ * - `source: 'server'` — POST `{config}` to `<baseUrlField>` + `endpoint`, the
+ *   FRONTEND plugin's own HTTP server (e.g. `localhost:8765`).
+ * - `source: 'plugin'` — a BACKEND plugin's `options(name, …)` hook, resolved via
+ *   the `PluginOptionsContext` resolver (no external server).
+ *
+ * Refetches only when the SOURCE config changes — not when a filter `valueFrom`
+ * field changes (that just re-filters the rows client-side). Returns `[]` for
+ * non-server fields. Debounced so typing doesn't refire the call per keystroke.
  */
 function useServerOptions(
   spec: ModuleConfigField['optionsFrom'] | undefined,
   formValues: Record<string, unknown> | undefined,
 ): Array<Record<string, unknown>> {
+  const resolvePlugin = usePluginOptionsResolver();
   const isServer = spec?.source === 'server' && !!spec.endpoint;
+  const isPlugin = spec?.source === 'plugin' && !!resolvePlugin;
+  const isRemote = isServer || isPlugin;
   const endpoint = isServer ? (spec!.endpoint as string) : '';
+  const optionName = isPlugin ? (spec!.name ?? spec!.endpoint ?? '') : '';
   // Mirror the table editor's default: when the baseUrl field is unset, fall
   // back to the conventional local plugin-server address.
   const baseUrl = isServer
@@ -37,33 +55,38 @@ function useServerOptions(
   const filterArr = spec?.filter ? (Array.isArray(spec.filter) ? spec.filter : [spec.filter]) : [];
   const filterFields = new Set(filterArr.map((f) => f.valueFrom).filter(Boolean) as string[]);
   const sourceKey = useMemo(() => {
-    if (!isServer) return '';
+    if (!isRemote) return '';
     const sub: Record<string, unknown> = {};
     Object.entries(formValues ?? {}).forEach(([k, v]) => { if (!filterFields.has(k)) sub[k] = v; });
-    return JSON.stringify({ endpoint, sub });
+    return JSON.stringify({ endpoint, optionName, sub });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isServer, endpoint, formValues]);
+  }, [isRemote, endpoint, optionName, formValues]);
   const [rows, setRows] = useState<Array<Record<string, unknown>>>([]);
-  // Debounce so typing in ANY field doesn't refire this network POST on every
-  // keystroke (the config — incl. an uploaded model — is sent in the body, and a
-  // server-options field re-runs whenever formValues changes). Fetch ~350 ms
-  // after typing stops instead.
+  // Debounce so typing in ANY field doesn't refire this network call on every
+  // keystroke (the config is sent in the body, and a server-options field
+  // re-runs whenever formValues changes). Fetch ~350 ms after typing stops.
   const debouncedKey = useDebouncedValue(sourceKey, 350);
   const debouncedBase = useDebouncedValue(baseUrl, 350);
   useEffect(() => {
-    if (!isServer || !debouncedBase) { setRows([]); return; }
     let cancelled = false;
-    fetch(debouncedBase + endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ config: formValues ?? {} }),
-    })
-      .then((r) => (r.ok ? r.json() : { rows: [] }))
-      .then((j) => { if (!cancelled) setRows(Array.isArray(j?.rows) ? j.rows : []); })
-      .catch(() => { if (!cancelled) setRows([]); });
+    const apply = (r: Array<Record<string, unknown>>) => { if (!cancelled) setRows(r); };
+    if (isPlugin && resolvePlugin) {
+      resolvePlugin(optionName, formValues ?? {}).then(apply).catch(() => apply([]));
+    } else if (isServer && debouncedBase) {
+      fetch(debouncedBase + endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ config: formValues ?? {} }),
+      })
+        .then((r) => (r.ok ? r.json() : { rows: [] }))
+        .then((j) => apply(Array.isArray(j?.rows) ? j.rows : []))
+        .catch(() => apply([]));
+    } else {
+      setRows([]);
+    }
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedKey, debouncedBase, endpoint, isServer]);
+  }, [debouncedKey, debouncedBase, endpoint, optionName, isServer, isPlugin]);
   return rows;
 }
 
@@ -169,7 +192,7 @@ export function ConfigFieldRow({ fieldKey, field, value, onChange, carriers, mod
   const selectOptions = (): ResolvedOption[] => {
     const staticOpts = (field.options ?? []).map((opt) => ({ value: String(opt.value), label: String(opt.label ?? opt.value) }));
     let opts: ResolvedOption[];
-    if (field.optionsFrom?.source === 'server') {
+    if (field.optionsFrom?.source === 'server' || field.optionsFrom?.source === 'plugin') {
       const dyn = optionsFromRows(field.optionsFrom, serverRows, formValues);
       opts = dyn.length ? dyn : staticOpts;
     } else {
@@ -492,25 +515,26 @@ function cellInput(
 }
 
 function TableEditor({ columns, rows, onChange, maxHeight, model, formValues }: TableEditorProps) {
-  // Distinct plugin-server endpoints used by 'select' (options) or 'display'
-  // (lookup) columns — fetched once each, async.
-  const serverEndpoints = useMemo(() => {
-    const map = new Map<string, string | undefined>(); // endpoint -> baseUrlField
+  const resolvePlugin = usePluginOptionsResolver();
+  // Distinct remote sources (server endpoint OR backend-plugin options name) used
+  // by 'select' (options) or 'display' (lookup) columns — fetched once each, async.
+  // Keyed by `remoteOptionKey` (endpoint for 'server', name for 'plugin').
+  const remoteSources = useMemo(() => {
+    const map = new Map<string, { kind: 'server' | 'plugin'; key: string; endpoint?: string; name?: string; baseUrlField?: string }>();
+    const add = (spec: { source?: string; endpoint?: string; name?: string; baseUrlField?: string } | undefined) => {
+      if (!spec || (spec.source !== 'server' && spec.source !== 'plugin')) return;
+      const key = remoteOptionKey(spec);
+      if (!key) return;
+      map.set(key, { kind: spec.source, key, endpoint: spec.endpoint, name: spec.name, baseUrlField: spec.baseUrlField });
+    };
     for (const c of columns) {
-      if (c.type === 'select' && c.optionsFrom?.source === 'server' && c.optionsFrom.endpoint) {
-        map.set(c.optionsFrom.endpoint, c.optionsFrom.baseUrlField);
-      }
-      // Server-sourced cases of a per-row dependent select.
+      if (c.type === 'select') add(c.optionsFrom);
       if (c.type === 'select' && c.optionsFromByColumn) {
-        for (const spec of Object.values(c.optionsFromByColumn.cases)) {
-          if (spec?.source === 'server' && spec.endpoint) map.set(spec.endpoint, spec.baseUrlField);
-        }
+        for (const spec of Object.values(c.optionsFromByColumn.cases)) add(spec);
       }
-      if (c.type === 'display' && c.lookup?.source === 'server' && c.lookup.endpoint) {
-        map.set(c.lookup.endpoint, c.lookup.baseUrlField);
-      }
+      if (c.type === 'display') add(c.lookup);
     }
-    return Array.from(map.entries()).map(([endpoint, baseUrlField]) => ({ endpoint, baseUrlField }));
+    return Array.from(map.values());
   }, [columns]);
   const [serverData, setServerData] = useState<Record<string, Array<Record<string, unknown>>>>({});
 
@@ -531,12 +555,22 @@ function TableEditor({ columns, rows, onChange, maxHeight, model, formValues }: 
   }, [formValues, columns]);
 
   useEffect(() => {
-    if (serverEndpoints.length === 0) return;
+    if (remoteSources.length === 0) return;
     let cancelled = false;
-    serverEndpoints.forEach(({ endpoint, baseUrlField }) => {
-      const baseRaw = baseUrlField ? formValues?.[baseUrlField] : undefined;
+    const store = (key: string, fetched: Array<Record<string, unknown>>) => {
+      if (!cancelled) setServerData((prev) => ({ ...prev, [key]: fetched }));
+    };
+    remoteSources.forEach((src) => {
+      if (src.kind === 'plugin') {
+        if (!resolvePlugin) return;
+        resolvePlugin(src.name ?? src.endpoint ?? '', formValues ?? {})
+          .then((rows) => store(src.key, rows))
+          .catch(() => { /* keep prior/empty */ });
+        return;
+      }
+      const baseRaw = src.baseUrlField ? formValues?.[src.baseUrlField] : undefined;
       const base = String(baseRaw || 'http://127.0.0.1:8765').replace(/\/+$/, '');
-      fetch(base + endpoint, {
+      fetch(base + (src.endpoint ?? ''), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ config: formValues ?? {} }),
@@ -544,14 +578,13 @@ function TableEditor({ columns, rows, onChange, maxHeight, model, formValues }: 
         .then((r) => (r.ok ? r.json() : null))
         .then((j) => {
           if (cancelled || !j) return;
-          const fetched = Array.isArray(j) ? j : (j.rows || []);
-          setServerData((prev) => ({ ...prev, [endpoint]: fetched }));
+          store(src.key, Array.isArray(j) ? j : (j.rows || []));
         })
         .catch(() => { /* server down → keep prior/empty */ });
     });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sourceKey, serverEndpoints]);
+  }, [sourceKey, remoteSources]);
 
   // Per-column 'select' options (dynamic source wins, static is the fallback).
   const columnOptions = useMemo(() => {
@@ -559,8 +592,8 @@ function TableEditor({ columns, rows, onChange, maxHeight, model, formValues }: 
     for (const c of columns) {
       if (c.type !== 'select') continue;
       const staticOpts = (c.options ?? []).map((opt) => ({ value: String(opt.value), label: String(opt.label ?? opt.value) }));
-      if (c.optionsFrom?.source === 'server' && c.optionsFrom.endpoint) {
-        const dyn = optionsFromRows(c.optionsFrom, serverData[c.optionsFrom.endpoint] ?? [], formValues);
+      if (c.optionsFrom?.source === 'server' || c.optionsFrom?.source === 'plugin') {
+        const dyn = optionsFromRows(c.optionsFrom, serverData[remoteOptionKey(c.optionsFrom)] ?? [], formValues);
         map[c.key] = dyn.length ? dyn : staticOpts;
       } else {
         map[c.key] = resolveStaticOrDynamic(c.optionsFrom, staticOpts, { model, formValues });
@@ -575,8 +608,8 @@ function TableEditor({ columns, rows, onChange, maxHeight, model, formValues }: 
   const lookupMaps = useMemo(() => {
     const out: Record<string, Record<string, string>> = {};
     for (const c of columns) {
-      if (c.lookup?.source !== 'server') continue;
-      const fetched = serverData[c.lookup.endpoint] ?? [];
+      if (c.lookup?.source !== 'server' && c.lookup?.source !== 'plugin') continue;
+      const fetched = serverData[remoteOptionKey(c.lookup)] ?? [];
       const keyCol = c.lookup.keyColumn ?? c.lookup.matchColumn;
       const m: Record<string, string> = {};
       for (const r of fetched) {
@@ -600,8 +633,8 @@ function TableEditor({ columns, rows, onChange, maxHeight, model, formValues }: 
       const spec = sw ? byCol.cases[sw] : undefined;
       if (!spec) return [];
       const staticOpts = (c.options ?? []).map((opt) => ({ value: String(opt.value), label: String(opt.label ?? opt.value) }));
-      if (spec.source === 'server' && spec.endpoint) {
-        const dyn = optionsFromRows(spec, serverData[spec.endpoint] ?? [], formValues);
+      if (spec.source === 'server' || spec.source === 'plugin') {
+        const dyn = optionsFromRows(spec, serverData[remoteOptionKey(spec)] ?? [], formValues);
         return dyn.length ? dyn : staticOpts;
       }
       return resolveStaticOrDynamic(spec, staticOpts, { model, formValues });

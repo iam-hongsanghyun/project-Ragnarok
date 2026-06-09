@@ -283,7 +283,11 @@ def test_install_example_dashboard_importer(_plugins_dir) -> None:
 
     manifest = asyncio.run(plugins_router.install_plugin(_upload(zip_path.read_bytes(), "dashboard-importer.zip")))
     assert manifest["id"] == "dashboard-importer" and manifest["hooks"]["transform"] is True
+    assert manifest["hooks"]["options"] is True  # serves its own dropdowns on demand
 
     with pytest.raises(ValueError) as exc:
         plugins.run_transform("dashboard-importer", {}, {})
     assert "model" in str(exc.value).lower()  # "No model workbook specified…"
+
+    # An unknown option-set returns [] cleanly (the dropdown shows static options).
+    assert plugins.run_options("dashboard-importer", "/nope", {}) == []

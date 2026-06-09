@@ -25,11 +25,13 @@ import {
   BackendPluginManifest,
   PluginFile,
   deletePluginFile,
+  getPluginOptions,
   listPluginFiles,
   runBackendHook,
   uploadPluginFile,
 } from 'lib/api/plugins';
 import type { SessionMeta } from 'lib/api/session';
+import { PluginOptionsContext, PluginOptionsResolver } from 'lib/plugins/pluginOptionsContext';
 import { PluginPanel } from './PluginPanel';
 import { SearchableSelect } from '../../shared/components/SearchableSelect';
 import { useToast } from '../../shared/components/Toast';
@@ -82,24 +84,26 @@ function isHeavyValue(v: unknown): boolean {
 }
 
 /**
- * Backend plugins must NOT fetch dropdown options from an external server while
- * the user edits (that "handles data in the middle" — the lag/leak source, and
- * it couples a backend plugin to a separate localhost server). A manifest can
- * declare server-sourced options in several nested shapes (`optionsFrom`,
- * `optionsFromByColumn.cases.*`, table-column `lookup`, …), so we DEEP-walk the
- * schema and neutralise every object with ``source: 'server'`` (drop its
- * endpoint) — wherever it is. The form then uses static options only; the rules
- * are sent as-is and resolved once on the build.
+ * A backend plugin has NO external server — it fills its dropdowns through its
+ * own `options(name, …)` hook, dispatched by Ragnarok (`/api/plugins/{id}/options`).
+ * So we DEEP-walk the schema and rewrite every options/lookup spec declared as
+ * ``source: 'server'`` (the frontend-plugin convention, POSTing to localhost:8765)
+ * into ``source: 'plugin'``, carrying the old `endpoint` across as the option-set
+ * `name`. This keeps backend plugins fully decoupled from any localhost server
+ * even if their manifest still uses the older `server` spelling. The resolver
+ * (provided via `PluginOptionsContext` below) then routes these through Ragnarok.
  */
-function stripServerOptions(schema: ModuleConfigSchema): ModuleConfigSchema {
+function serverOptionsToPlugin(schema: ModuleConfigSchema): ModuleConfigSchema {
   const walk = (v: unknown): unknown => {
     if (Array.isArray(v)) return v.map(walk);
     if (v && typeof v === 'object') {
       const out: Record<string, unknown> = {};
       for (const [k, val] of Object.entries(v as Record<string, unknown>)) out[k] = walk(val);
       if (out.source === 'server') {
-        out.source = 'static'; // no live fetch — fall back to static options
+        out.source = 'plugin';
+        if (out.name === undefined && typeof out.endpoint === 'string') out.name = out.endpoint;
         delete out.endpoint;
+        delete out.baseUrlField;
       }
       return out;
     }
@@ -242,8 +246,16 @@ export function BackendPluginDetail({ manifest, model, onBuilt }: Props) {
   const panelSchema = useMemo(() => {
     const out: ModuleConfigSchema = { ...(manifest.config ?? {}) };
     for (const [k] of fileFields) delete out[k];
-    return stripServerOptions(out);
+    return serverOptionsToPlugin(out);
   }, [manifest.config, fileFields]);
+
+  // Resolver for `optionsFrom: { source: 'plugin', name }` fields: POST the
+  // current form config to this plugin's options() hook and return its rows. The
+  // rows are filtered/labelled client-side by the existing optionsFromRows path.
+  const resolveOptions = useMemo<PluginOptionsResolver>(
+    () => (name, cfg) => getPluginOptions(manifest.id, name, withDefaults(manifest.config, cfg)),
+    [manifest.id, manifest.config],
+  );
 
   const descriptor = useMemo(() => toDescriptor(manifest, panelSchema), [manifest, panelSchema]);
   const carriers = useMemo(
@@ -298,15 +310,17 @@ export function BackendPluginDetail({ manifest, model, onBuilt }: Props) {
           ))}
         </div>
       )}
-      <PluginPanel
-        modules={[descriptor]}
-        moduleConfigs={{ [manifest.id]: withDefaults(panelSchema, config) }}
-        onModuleConfigChange={(_id, key, value) => setConfigValue(key, value)}
-        carriers={carriers}
-        model={model}
-        pluginAnalytics={{}}
-        onModuleAction={handleAction}
-      />
+      <PluginOptionsContext.Provider value={resolveOptions}>
+        <PluginPanel
+          modules={[descriptor]}
+          moduleConfigs={{ [manifest.id]: withDefaults(panelSchema, config) }}
+          onModuleConfigChange={(_id, key, value) => setConfigValue(key, value)}
+          carriers={carriers}
+          model={model}
+          pluginAnalytics={{}}
+          onModuleAction={handleAction}
+        />
+      </PluginOptionsContext.Provider>
       {fallbackHook && !hasActionField && (
         <div className="sg-setting-row plugin-detail-footer">
           <button className="tb-btn" disabled={busy} onClick={() => runHook(fallbackHook)}>

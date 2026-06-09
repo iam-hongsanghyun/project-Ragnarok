@@ -25,7 +25,7 @@ export interface BackendPluginManifest {
   description: string;
   capabilities: string[];
   config: ModuleConfigSchema;
-  hooks: { transform: boolean; contribute: boolean; analyze: boolean };
+  hooks: { transform: boolean; contribute: boolean; analyze: boolean; options?: boolean };
 }
 
 async function asJson<T>(resp: Response): Promise<T> {
@@ -99,6 +99,34 @@ export async function runBackendHook(
     }),
   });
   return asJson<SessionMeta>(resp);
+}
+
+/**
+ * Fetch on-demand dropdown rows from a backend plugin's `options(name, …)` hook.
+ *
+ * Replaces the old per-plugin `localhost:8765` POST for backend plugins — the
+ * rows are resolved into options client-side (filter/label) exactly like the
+ * other option sources. Returns `[]` on any error so a dropdown degrades to its
+ * static options instead of throwing.
+ */
+export async function getPluginOptions(
+  id: string,
+  name: string,
+  config: Record<string, unknown>,
+  sessionId: string = DEFAULT_SESSION_ID,
+): Promise<Array<Record<string, unknown>>> {
+  try {
+    const resp = await fetch(`${API_BASE}/api/plugins/${encodeURIComponent(id)}/options`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, config, sessionId }),
+    });
+    if (!resp.ok) return [];
+    const body = (await resp.json()) as { rows?: Array<Record<string, unknown>> };
+    return Array.isArray(body.rows) ? body.rows : [];
+  } catch {
+    return [];
+  }
 }
 
 /** Run a backend plugin's `analyze(result, config)` and return its output. */

@@ -16,7 +16,7 @@
       "type": "group",
       "column": "left",
       "label": "Model & build",
-      "description": "Point to the model workbook, connect to the build server, and send the built model to Ragnarok."
+      "description": "Point to the model workbook and send the built model to Ragnarok."
     },
     "send_to_ragnarok": {
       "type": "action",
@@ -29,7 +29,7 @@
     "model_path": {
       "type": "string",
       "label": "Model workbook path",
-      "description": "Absolute path to the PyPSA model Excel workbook, resolved on the build server. Supports ${HOME} and ${PROJECT_ROOT}.",
+      "description": "Absolute path to the PyPSA model Excel workbook, resolved in the Ragnarok backend. Supports ${HOME} and ${PROJECT_ROOT}.",
       "default": ""
     },
     "model_file": {
@@ -284,10 +284,9 @@
         "equals": true
       },
       "optionsFrom": {
-        "source": "server",
-        "endpoint": "/generator_filter_values",
-        "baseUrlField": "backendUrl",
-        "column": "column"
+        "source": "plugin",
+        "column": "column",
+        "name": "/generator_filter_values"
       },
       "options": []
     },
@@ -304,9 +303,7 @@
         "equals": true
       },
       "optionsFrom": {
-        "source": "server",
-        "endpoint": "/generator_filter_values",
-        "baseUrlField": "backendUrl",
+        "source": "plugin",
         "column": "value",
         "filter": [
           {
@@ -314,7 +311,8 @@
             "op": "==",
             "valueFrom": "replace_filter_column"
           }
-        ]
+        ],
+        "name": "/generator_filter_values"
       },
       "options": []
     },
@@ -841,7 +839,7 @@
     "demand_redist_moves": {
       "type": "table",
       "label": "Demand moves (from → to)",
-      "description": "Each row is one move: it shifts 'Amount (MWh)' of annual demand from the source (From resolution + value) to the destination (To resolution + value). The two ends are independent and may use different resolutions — e.g. From bus '204' → To '전남' at group2. Each value dropdown follows the resolution chosen in that same row and shows that bus/region's annual demand (recalculated by the target load), so you can decide how much to move. Moves apply in table order. Needs the build server running; region resolutions need a province_mapping.",
+      "description": "Each row is one move: it shifts 'Amount (MWh)' of annual demand from the source (From resolution + value) to the destination (To resolution + value). The two ends are independent and may use different resolutions — e.g. From bus '204' → To '전남' at group2. Each value dropdown follows the resolution chosen in that same row and shows that bus/region's annual demand (recalculated by the target load), so you can decide how much to move. Moves apply in table order. Region resolutions need a province_mapping.",
       "visibleWhen": {
         "field": "demand_redistribution",
         "equals": true
@@ -889,9 +887,7 @@
             "switchColumn": "from_resolution",
             "cases": {
               "bus": {
-                "source": "server",
-                "endpoint": "/demand_values",
-                "baseUrlField": "backendUrl",
+                "source": "plugin",
                 "column": "value",
                 "labelSuffixColumn": "annual_label",
                 "filter": [
@@ -900,12 +896,11 @@
                     "op": "==",
                     "value": "bus"
                   }
-                ]
+                ],
+                "name": "/demand_values"
               },
               "province": {
-                "source": "server",
-                "endpoint": "/demand_values",
-                "baseUrlField": "backendUrl",
+                "source": "plugin",
                 "column": "value",
                 "labelSuffixColumn": "annual_label",
                 "filter": [
@@ -914,12 +909,11 @@
                     "op": "==",
                     "value": "province"
                   }
-                ]
+                ],
+                "name": "/demand_values"
               },
               "group1": {
-                "source": "server",
-                "endpoint": "/demand_values",
-                "baseUrlField": "backendUrl",
+                "source": "plugin",
                 "column": "value",
                 "labelSuffixColumn": "annual_label",
                 "filter": [
@@ -928,12 +922,11 @@
                     "op": "==",
                     "value": "group1"
                   }
-                ]
+                ],
+                "name": "/demand_values"
               },
               "group2": {
-                "source": "server",
-                "endpoint": "/demand_values",
-                "baseUrlField": "backendUrl",
+                "source": "plugin",
                 "column": "value",
                 "labelSuffixColumn": "annual_label",
                 "filter": [
@@ -942,12 +935,11 @@
                     "op": "==",
                     "value": "group2"
                   }
-                ]
+                ],
+                "name": "/demand_values"
               },
               "group3": {
-                "source": "server",
-                "endpoint": "/demand_values",
-                "baseUrlField": "backendUrl",
+                "source": "plugin",
                 "column": "value",
                 "labelSuffixColumn": "annual_label",
                 "filter": [
@@ -956,12 +948,11 @@
                     "op": "==",
                     "value": "group3"
                   }
-                ]
+                ],
+                "name": "/demand_values"
               },
               "singlenode": {
-                "source": "server",
-                "endpoint": "/demand_values",
-                "baseUrlField": "backendUrl",
+                "source": "plugin",
                 "column": "value",
                 "labelSuffixColumn": "annual_label",
                 "filter": [
@@ -970,7 +961,8 @@
                     "op": "==",
                     "value": "singlenode"
                   }
-                ]
+                ],
+                "name": "/demand_values"
               }
             }
           },
@@ -1017,9 +1009,7 @@
             "switchColumn": "to_resolution",
             "cases": {
               "bus": {
-                "source": "server",
-                "endpoint": "/demand_values",
-                "baseUrlField": "backendUrl",
+                "source": "plugin",
                 "column": "value",
                 "labelSuffixColumn": "annual_label",
                 "filter": [
@@ -1028,12 +1018,11 @@
                     "op": "==",
                     "value": "bus"
                   }
-                ]
+                ],
+                "name": "/demand_values"
               },
               "province": {
-                "source": "server",
-                "endpoint": "/demand_values",
-                "baseUrlField": "backendUrl",
+                "source": "plugin",
                 "column": "value",
                 "labelSuffixColumn": "annual_label",
                 "filter": [
@@ -1042,12 +1031,11 @@
                     "op": "==",
                     "value": "province"
                   }
-                ]
+                ],
+                "name": "/demand_values"
               },
               "group1": {
-                "source": "server",
-                "endpoint": "/demand_values",
-                "baseUrlField": "backendUrl",
+                "source": "plugin",
                 "column": "value",
                 "labelSuffixColumn": "annual_label",
                 "filter": [
@@ -1056,12 +1044,11 @@
                     "op": "==",
                     "value": "group1"
                   }
-                ]
+                ],
+                "name": "/demand_values"
               },
               "group2": {
-                "source": "server",
-                "endpoint": "/demand_values",
-                "baseUrlField": "backendUrl",
+                "source": "plugin",
                 "column": "value",
                 "labelSuffixColumn": "annual_label",
                 "filter": [
@@ -1070,12 +1057,11 @@
                     "op": "==",
                     "value": "group2"
                   }
-                ]
+                ],
+                "name": "/demand_values"
               },
               "group3": {
-                "source": "server",
-                "endpoint": "/demand_values",
-                "baseUrlField": "backendUrl",
+                "source": "plugin",
                 "column": "value",
                 "labelSuffixColumn": "annual_label",
                 "filter": [
@@ -1084,12 +1070,11 @@
                     "op": "==",
                     "value": "group3"
                   }
-                ]
+                ],
+                "name": "/demand_values"
               },
               "singlenode": {
-                "source": "server",
-                "endpoint": "/demand_values",
-                "baseUrlField": "backendUrl",
+                "source": "plugin",
                 "column": "value",
                 "labelSuffixColumn": "annual_label",
                 "filter": [
@@ -1098,7 +1083,8 @@
                     "op": "==",
                     "value": "singlenode"
                   }
-                ]
+                ],
+                "name": "/demand_values"
               }
             }
           },
@@ -1129,9 +1115,7 @@
           "type": "select",
           "width": 220,
           "optionsFrom": {
-            "source": "server",
-            "endpoint": "/generators",
-            "baseUrlField": "backendUrl",
+            "source": "plugin",
             "column": "name",
             "labelSuffixColumn": "build_year",
             "filter": [
@@ -1145,7 +1129,8 @@
                 "op": "in",
                 "valueFrom": "replace_carriers"
               }
-            ]
+            ],
+            "name": "/generators"
           },
           "options": []
         },
@@ -1155,12 +1140,11 @@
           "type": "display",
           "width": 90,
           "lookup": {
-            "source": "server",
-            "endpoint": "/replacement_plan",
-            "baseUrlField": "backendUrl",
+            "source": "plugin",
             "matchColumn": "generator",
             "keyColumn": "generator",
-            "valueColumn": "total_mw"
+            "valueColumn": "total_mw",
+            "name": "/replacement_plan"
           }
         },
         {
@@ -1169,12 +1153,11 @@
           "type": "display",
           "width": 100,
           "lookup": {
-            "source": "server",
-            "endpoint": "/replacement_plan",
-            "baseUrlField": "backendUrl",
+            "source": "plugin",
             "matchColumn": "generator",
             "keyColumn": "generator",
-            "valueColumn": "solar_mw"
+            "valueColumn": "solar_mw",
+            "name": "/replacement_plan"
           }
         },
         {
@@ -1183,12 +1166,11 @@
           "type": "display",
           "width": 100,
           "lookup": {
-            "source": "server",
-            "endpoint": "/replacement_plan",
-            "baseUrlField": "backendUrl",
+            "source": "plugin",
             "matchColumn": "generator",
             "keyColumn": "generator",
-            "valueColumn": "wind_mw"
+            "valueColumn": "wind_mw",
+            "name": "/replacement_plan"
           }
         }
       ],
