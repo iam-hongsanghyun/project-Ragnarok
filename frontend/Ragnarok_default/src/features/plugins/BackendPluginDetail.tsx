@@ -254,8 +254,12 @@ export function BackendPluginDetail({ manifest, model, onBuilt }: Props) {
   const runHook = async (hook: 'transform' | 'contribute', successMessage?: string) => {
     setBusy(true);
     try {
+      // Name the session after the chosen uploaded model file (e.g.
+      // "Planned_Model.xlsx") rather than the generic plugin id, so the topbar
+      // shows a meaningful filename. Falls back to "<plugin-id>.xlsx".
+      const pickedFile = fileFields.map(([k]) => String(config[k] ?? '')).find((v) => v.trim());
       const meta = await runBackendHook(manifest.id, hook, withDefaults(manifest.config, config), {
-        filename: `${manifest.id}.xlsx`,
+        filename: pickedFile || `${manifest.id}.xlsx`,
       });
       onBuilt(meta);
       showToast(successMessage ?? `${manifest.name}: applied to the session.`, 'success');

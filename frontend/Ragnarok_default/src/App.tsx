@@ -545,6 +545,9 @@ function AppInner() {
             if (controls.pathwayConfig) setPathwayConfig(controls.pathwayConfig);
           }
           setStatus('Restored your last session.');
+          // Transient: clear the boot notice after a few seconds so it doesn't
+          // sit in the topbar forever (the next real action sets its own status).
+          window.setTimeout(() => { if (!cancelled) setStatus(''); }, 6000);
         }
       } finally {
         if (!cancelled) sessionRestoredRef.current = true;
