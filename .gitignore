@@ -59,6 +59,8 @@ backend/data/runs/
 # Server-side working-model session + serial run queue (runtime data)
 backend/data/session/
 backend/data/queue/
+# Installed backend plugins (3rd-party, uploaded at runtime — Ragnarok ships none)
+backend/data/plugins/
 /data
 
 # Logs

@@ -96,6 +96,27 @@ async function parsePackage(file: File): Promise<InstalledPlugin> {
   };
 }
 
+/** Detect whether an uploaded plugin .zip is a BACKEND plugin (has `plugin.py`
+ *  or a manifest with `kind:"backend"`) or a FRONTEND plugin (`index.js` /
+ *  `module.json`). Used to route the single "Install plugin…" button. Defaults
+ *  to 'frontend' when ambiguous. */
+export async function peekPackageKind(file: File): Promise<'backend' | 'frontend'> {
+  try {
+    const entries = unzipSync(new Uint8Array(await file.arrayBuffer()));
+    const names = Object.keys(entries);
+    const base = (p: string) => p.replace(/^.*\//, '');
+    if (names.some((p) => base(p) === 'plugin.py')) return 'backend';
+    const manifestPath = names.find((p) => base(p) === 'manifest.json');
+    if (manifestPath) {
+      try {
+        const m = JSON.parse(strFromU8(entries[manifestPath])) as { kind?: string };
+        if (m.kind === 'backend') return 'backend';
+      } catch { /* fall through */ }
+    }
+  } catch { /* not a readable zip — let the installer surface the error */ }
+  return 'frontend';
+}
+
 export type FrontendPluginHost = ReturnType<typeof useFrontendPlugins>;
 
 export function useFrontendPlugins() {

@@ -2,12 +2,12 @@
  * Detail pane for one BACKEND (server-side) plugin.
  *
  * Renders the same config panel used for browser plugins (via PluginPanel), but
- * action hooks run on the server: a `build` action POSTs to
- * `/api/plugins/{id}/build`, the backend writes the model into the session, and
+ * action hooks run on the server: a `transform`/`contribute` action POSTs to
+ * `/api/plugins/{id}/{hook}`, the backend writes the model into the session, and
  * the parent rehydrates the editor from there. The model never enters the
  * browser — the frontend only sends config and reads back the session meta.
  */
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ModuleConfigField,
   ModuleConfigSchema,
@@ -15,11 +15,10 @@ import {
   ModulePanelConfig,
   WorkbookModel,
 } from 'lib/types';
-import { BackendPluginManifest, buildBackendPlugin } from 'lib/api/plugins';
+import { BackendPluginManifest, runBackendHook } from 'lib/api/plugins';
 import type { SessionMeta } from 'lib/api/session';
 import { PluginPanel } from './PluginPanel';
 import { useToast } from '../../shared/components/Toast';
-import { usePersistedState } from 'shared/hooks/usePersistedState';
 
 interface Props {
   manifest: BackendPluginManifest;
@@ -73,18 +72,35 @@ function isHeavyValue(v: unknown): boolean {
 
 export function BackendPluginDetail({ manifest, model, onBuilt }: Props) {
   const { showToast } = useToast();
-  // Light config persists; heavy/binary values (uploaded files) live only in
-  // memory for the session (re-select after a reload).
-  const [persistedConfig, setPersistedConfig] = usePersistedState<Record<string, unknown>>(`ui:be-plugin-cfg:${manifest.id}`, {});
-  const [volatileConfig, setVolatileConfig] = useState<Record<string, unknown>>({});
-  const config = useMemo(() => ({ ...persistedConfig, ...volatileConfig }), [persistedConfig, volatileConfig]);
-  const setConfigValue = (key: string, value: unknown) => {
-    if (isHeavyValue(value)) {
-      setVolatileConfig((prev) => ({ ...prev, [key]: value }));
-    } else {
-      setPersistedConfig({ ...persistedConfig, [key]: value });
+  // Config lives in plain React state (fast, in-memory) and is persisted to
+  // localStorage on a DEBOUNCE — never on every keystroke. A synchronous
+  // JSON.stringify + setItem of this (large, table-heavy) config per character
+  // is what made typing lag. Heavy/binary values (uploaded files) are never
+  // persisted (re-select after a reload).
+  const storeKey = `ui:be-plugin-cfg:${manifest.id}`;
+  const [config, setConfig] = useState<Record<string, unknown>>(() => {
+    try {
+      const raw = window.localStorage.getItem(storeKey);
+      return raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+    } catch {
+      return {};
     }
-  };
+  });
+  const setConfigValue = (key: string, value: unknown) => setConfig((prev) => ({ ...prev, [key]: value }));
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      try {
+        const slim: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(config)) {
+          if (!isHeavyValue(v)) slim[k] = v;
+        }
+        window.localStorage.setItem(storeKey, JSON.stringify(slim));
+      } catch {
+        /* quota / privacy mode — ignore */
+      }
+    }, 400);
+    return () => window.clearTimeout(id);
+  }, [config, storeKey]);
   const [busy, setBusy] = useState(false);
 
   const descriptor = useMemo(() => toDescriptor(manifest), [manifest]);
@@ -93,33 +109,39 @@ export function BackendPluginDetail({ manifest, model, onBuilt }: Props) {
     [model.carriers],
   );
 
-  const handleAction = async (_moduleId: string, _fieldKey: string, field: ModuleConfigField) => {
-    const hook = field.hook ?? 'build';
-    if (hook !== 'build') {
-      showToast(`This backend plugin action ("${hook}") isn't wired in the UI yet.`, 'info');
-      return;
-    }
+  const runHook = async (hook: 'transform' | 'contribute', successMessage?: string) => {
     setBusy(true);
     try {
-      const meta = await buildBackendPlugin(manifest.id, withDefaults(manifest.config, config), {
+      const meta = await runBackendHook(manifest.id, hook, withDefaults(manifest.config, config), {
         filename: `${manifest.id}.xlsx`,
       });
       onBuilt(meta);
-      showToast(field.successMessage ?? `${manifest.name}: built into the session.`, 'success');
+      showToast(successMessage ?? `${manifest.name}: applied to the session.`, 'success');
     } catch (err) {
-      showToast(`${manifest.name}: ${err instanceof Error ? err.message : 'build failed'}`, 'error');
+      showToast(`${manifest.name}: ${err instanceof Error ? err.message : 'failed'}`, 'error');
     } finally {
       setBusy(false);
     }
   };
 
+  const handleAction = async (_moduleId: string, _fieldKey: string, field: ModuleConfigField) => {
+    // Default action verb is the model-producing hook the plugin exposes.
+    const hook = field.hook ?? (manifest.hooks.transform ? 'transform' : 'contribute');
+    if (hook !== 'transform' && hook !== 'contribute') {
+      // e.g. a frontend-only named action (fill table) that has no server hook.
+      showToast(`This action ("${hook}") has no server-side hook.`, 'info');
+      return;
+    }
+    await runHook(hook, field.successMessage);
+  };
+
   const hasActionField = Object.values(manifest.config ?? {}).some((f) => f?.type === 'action');
+  // Fallback button verb when the manifest declares no action field.
+  const fallbackHook: 'transform' | 'contribute' | null =
+    manifest.hooks.transform ? 'transform' : manifest.hooks.contribute ? 'contribute' : null;
 
   return (
     <div className="plugin-detail">
-      <div className="plugin-detail-kind" title="Runs on the server, using the bundled PyPSA source">
-        Backend plugin · v{manifest.version}
-      </div>
       <PluginPanel
         modules={[descriptor]}
         moduleConfigs={{ [manifest.id]: withDefaults(manifest.config, config) }}
@@ -129,15 +151,11 @@ export function BackendPluginDetail({ manifest, model, onBuilt }: Props) {
         pluginAnalytics={{}}
         onModuleAction={handleAction}
       />
-      {/* Schema with no action field: offer a default Build button. */}
-      {manifest.hooks.build && !hasActionField && (
+      {/* Schema with no action field: offer a default apply button. */}
+      {fallbackHook && !hasActionField && (
         <div className="sg-setting-row plugin-detail-footer">
-          <button
-            className="tb-btn"
-            disabled={busy}
-            onClick={() => handleAction(manifest.id, 'build', { type: 'action', hook: 'build' } as ModuleConfigField)}
-          >
-            {busy ? 'Building…' : 'Build & load into Ragnarok'}
+          <button className="tb-btn" disabled={busy} onClick={() => runHook(fallbackHook)}>
+            {busy ? 'Working…' : 'Build & load into Ragnarok'}
           </button>
         </div>
       )}

@@ -21,8 +21,8 @@
     "send_to_ragnarok": {
       "type": "action",
       "label": "Build & load into Ragnarok (server-side)",
-      "description": "Builds the model from all settings below (via the connected build server) and loads it into Ragnarok's current workbook. Does not run the solver. Click the topbar Run when you're ready to optimise.",
-      "hook": "build",
+      "description": "Builds the model from all settings below, entirely in the Ragnarok backend, and writes it into the session. The model never enters the browser. Does not run the solver — click the topbar Run when you're ready to optimise.",
+      "hook": "transform",
       "variant": "primary",
       "successMessage": "Model built into the session (server-side)."
     },

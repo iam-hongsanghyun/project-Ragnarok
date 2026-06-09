@@ -2,19 +2,19 @@
  * Plugins view — install + manage plugins of two kinds:
  *   • frontend plugins — browser-evaluated JS (installed from a .zip); run in
  *     the browser and never contact the Ragnarok backend.
- *   • backend plugins — discovered server-side (GET /api/plugins); run in the
- *     Ragnarok backend and import the bundled PyPSA source directly. A backend
- *     `build` plugin writes its model straight into the session.
+ *   • backend plugins — installed server-side (uploaded .zip → GET /api/plugins);
+ *     run in the Ragnarok backend and import the bundled PyPSA source directly. A
+ *     backend `transform` plugin writes its model straight into the session.
  *
  * A left rail lists both (backend ones grouped under their own heading); the
  * main pane shows the selected plugin's config + actions.
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { WorkbookModel } from 'lib/types';
-import { FrontendPluginHost } from '../features/plugins/frontendPlugins';
+import { FrontendPluginHost, peekPackageKind } from '../features/plugins/frontendPlugins';
 import { PluginDetail } from '../features/plugins/PluginDetail';
 import { BackendPluginDetail } from '../features/plugins/BackendPluginDetail';
-import { BackendPluginManifest, listBackendPlugins } from 'lib/api/plugins';
+import { BackendPluginManifest, installBackendPlugin, listBackendPlugins, uninstallBackendPlugin } from 'lib/api/plugins';
 import type { SessionMeta } from 'lib/api/session';
 import { useToast } from '../shared/components/Toast';
 import { ResizablePanels } from '../layout/ResizablePanels';
@@ -43,6 +43,10 @@ export function PluginsView(props: Props) {
   const [selectedKey, setSelectedKey] = usePersistedState<string | null>('ui:plugin-selected', null);
   const [backendPlugins, setBackendPlugins] = useState<BackendPluginManifest[]>([]);
 
+  const refreshBackendPlugins = React.useCallback(async () => {
+    try { setBackendPlugins(await listBackendPlugins()); } catch { /* backend down — leave as-is */ }
+  }, []);
+
   // Discover backend plugins once on mount (and silently no-op if the backend
   // is unreachable — frontend plugins still work).
   useEffect(() => {
@@ -62,12 +66,38 @@ export function PluginsView(props: Props) {
   const activeFe = effectiveKey?.startsWith('fe:') ? installed.find((p) => `fe:${p.id}` === effectiveKey) ?? null : null;
   const activeBe = effectiveKey?.startsWith('be:') ? backendPlugins.find((p) => `be:${p.id}` === effectiveKey) ?? null : null;
 
+  // One "Install plugin…" button for both kinds: peek the .zip and route a
+  // backend package (plugin.py / manifest kind:"backend") to the server install
+  // endpoint, else install as a browser plugin.
   const onPick = async (file: File | undefined) => {
     if (!file) return;
-    const result = await host.install(file);
-    showToast(result.ok ? `Installed "${result.id}"` : `Install failed: ${result.error}`, result.ok ? 'success' : 'error');
-    if (result.ok && result.id) setSelectedKey(`fe:${result.id}`);
+    try {
+      const kind = await peekPackageKind(file);
+      if (kind === 'backend') {
+        const manifest = await installBackendPlugin(file);
+        await refreshBackendPlugins();
+        setSelectedKey(`be:${manifest.id}`);
+        showToast(`Installed "${manifest.id}" (backend)`, 'success');
+      } else {
+        const result = await host.install(file);
+        showToast(result.ok ? `Installed "${result.id}"` : `Install failed: ${result.error}`, result.ok ? 'success' : 'error');
+        if (result.ok && result.id) setSelectedKey(`fe:${result.id}`);
+      }
+    } catch (err) {
+      showToast(`Install failed: ${err instanceof Error ? err.message : 'unknown error'}`, 'error');
+    }
     if (fileRef.current) fileRef.current.value = '';
+  };
+
+  const onUninstallBackend = async (id: string) => {
+    try {
+      await uninstallBackendPlugin(id);
+      if (selectedKey === `be:${id}`) setSelectedKey(null);
+      await refreshBackendPlugins();
+      showToast(`Uninstalled "${id}"`, 'info');
+    } catch (err) {
+      showToast(`Uninstall failed: ${err instanceof Error ? err.message : 'unknown error'}`, 'error');
+    }
   };
 
   const nothingInstalled = installed.length === 0 && backendPlugins.length === 0;
@@ -114,6 +144,14 @@ export function PluginsView(props: Props) {
                         onClick={() => setSelectedKey(`be:${p.id}`)}
                       >
                         <span className="plugin-rail-name">{p.name}</span>
+                        <span
+                          className="gcc-del plugin-rail-remove"
+                          title="Uninstall (removes it from the server)"
+                          role="button"
+                          onClick={(e) => { e.stopPropagation(); void onUninstallBackend(p.id); }}
+                        >
+                          x
+                        </span>
                       </button>
                     </li>
                   ))}
@@ -141,7 +179,7 @@ export function PluginsView(props: Props) {
         ) : (
           <div className="view-empty">
             <h3>No plugins installed</h3>
-            <p>Use “Install plugin…” in the rail to add a frontend <code>.zip</code> package, or drop a backend plugin into <code>backend/plugins/</code>.</p>
+            <p>Use “Install plugin…” in the rail to add a plugin <code>.zip</code> — frontend (browser JS) or backend (server-side). Examples live in <code>example_plugins/</code>.</p>
           </div>
         )}
       </main>

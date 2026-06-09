@@ -864,14 +864,20 @@ deployment needs.
 - **Compute is server-side.** The solve runs in a backend worker process; backend
   plugins (below) also run in-process.
 
-**Two plugin kinds** (see `docs/plugin.md`):
+**Two plugin kinds, one hook contract** (see `docs/plugin.md`). Ragnarok ships
+**no plugins** — they are purely 3rd-party (examples in `example_plugins/`). Both
+kinds expose `transform(model,config)→model`, `contribute(model,config)→{sheets,
+constraints}`, and/or `analyze(result,config)→data`.
 
-- *Frontend plugin* — browser JS; may run its **own** local server registered in
-  `plugins.env`.
-- *Backend plugin* — discovered under `backend/plugins/`, runs in the backend and
-  imports the bundled PyPSA source directly; **nothing in `plugins.env`**. A
-  `build` plugin writes its model straight into the session. Endpoints:
-  `GET /api/plugins`, `POST /api/plugins/{id}/build|analyze`.
+- *Frontend plugin* — browser JS (`.zip` of module.json + index.js, kept in
+  localStorage); may run its **own** local server registered in `plugins.env`.
+- *Backend plugin* — `.zip` of manifest.json + plugin.py, **installed by upload**
+  into the gitignored `backend/data/plugins/`; runs in the backend and imports the
+  bundled PyPSA source directly; **nothing in `plugins.env`**. `transform`/
+  `contribute` write straight into the session. Endpoints: `GET /api/plugins`,
+  `POST /api/plugins/install`, `DELETE /api/plugins/{id}`,
+  `POST /api/plugins/{id}/transform|contribute|analyze`. (Install runs uploaded
+  Python — RCE by design; gate behind auth for multi-user.)
 
 **Already remote-ready**
 

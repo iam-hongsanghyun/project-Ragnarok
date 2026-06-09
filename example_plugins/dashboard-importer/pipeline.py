@@ -1249,6 +1249,59 @@ def _resolve_export_path(cfg: dict[str, Any], base: Path) -> Path | None:
     return _resolve_path(raw, base=base)
 
 
+# Uploaded model_file bytes are materialised to a CONTENT-ADDRESSED path so that
+# repeated calls (the GUI fills filter dropdowns by re-POSTing the whole config,
+# including the base64 model, on every interaction) reuse ONE file instead of
+# leaking a fresh NamedTemporaryFile each time. Without this the temp dir filled
+# with thousands of identical xlsx copies → "No space left on device". Stale
+# entries are reaped on each call so the cache dir is self-bounding.
+_MODEL_CACHE_DIR = Path(tempfile.gettempdir()) / "ragnarok_dashboard_models"
+_MODEL_CACHE_TTL_SECONDS = 3600  # reap files untouched for > 1 h
+
+
+def _reap_model_cache(now: float) -> None:
+    try:
+        for stale in _MODEL_CACHE_DIR.glob("model_*"):
+            try:
+                if now - stale.stat().st_mtime > _MODEL_CACHE_TTL_SECONDS:
+                    stale.unlink()
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+
+def _materialize_uploaded_model(data: bytes, suffix: str) -> Path:
+    """Write the uploaded model bytes to ``<tmp>/ragnarok_dashboard_models/
+    model_<sha256[:16]><suffix>``, reusing the file if it already exists."""
+    import hashlib
+    import os
+    import time
+
+    _MODEL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    now = time.time()
+    _reap_model_cache(now)
+    digest = hashlib.sha256(data).hexdigest()[:16]
+    target = _MODEL_CACHE_DIR / f"model_{digest}{suffix}"
+    if target.exists() and target.stat().st_size == len(data):
+        os.utime(target, None)  # touch so reuse keeps it past the TTL
+        return target
+    # Atomic write: a unique temp in the same dir, then rename onto the target.
+    fd, tmp_name = tempfile.mkstemp(dir=str(_MODEL_CACHE_DIR), prefix="part_", suffix=suffix)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        os.replace(tmp_name, target)
+    finally:
+        if os.path.exists(tmp_name):
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+    logger.info("[dashboard-importer] cached uploaded model_file (%d bytes) -> %s", len(data), target.name)
+    return target
+
+
 def _resolve_model_workbook(
     cfg: dict[str, Any],
     dashboard_path: Path | None,
@@ -1272,15 +1325,7 @@ def _resolve_model_workbook(
     if _is_file_value(file_val) and file_val.get("content"):
         data = _decode_binary_file_value(file_val)
         suffix = Path(str(file_val.get("name", "model.xlsx"))).suffix or ".xlsx"
-        tmp = tempfile.NamedTemporaryFile(
-            prefix="ragnarok_dashboard_model_",
-            suffix=suffix,
-            delete=False,
-        )
-        tmp.write(data)
-        tmp.close()
-        logger.info("[dashboard-importer] wrote uploaded model_file (%d bytes) to %s", len(data), tmp.name)
-        return Path(tmp.name)
+        return _materialize_uploaded_model(data, suffix)
 
     if dashboard_path is not None and xlsx_model:
         candidate = Path(str(xlsx_model).strip()).expanduser()

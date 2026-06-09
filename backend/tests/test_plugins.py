@@ -1,18 +1,37 @@
 """Tests for the backend plugin framework (backend/app/plugins.py + router).
 
-Covers discovery, hard isolation (a broken plugin can't break the registry or
-the app), the build/analyze runners, and the HTTP endpoints (list / build into
-session / errors).
+Covers discovery + hard isolation, the unified hook runners (transform /
+contribute / analyze), and the install (upload .zip) / uninstall lifecycle
+including zip-slip rejection. Ragnarok ships NO plugins — they are installed at
+runtime, so these tests build their own plugin zips / dirs.
 """
 from __future__ import annotations
 
+import asyncio
+import io
 import json
+import zipfile
 from pathlib import Path
 
 import pytest
+from fastapi import UploadFile
 
 from backend.app import plugins, session_store
 from backend.app.routers import plugins as plugins_router
+
+GOOD = "def transform(model, config):\n    return {'buses': [{'name': 'b'}]}\n"
+
+
+def _make_zip(files: dict[str, str]) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for name, content in files.items():
+            z.writestr(name, content)
+    return buf.getvalue()
+
+
+def _upload(data: bytes, name: str) -> UploadFile:
+    return UploadFile(io.BytesIO(data), filename=name)
 
 
 def _write_plugin(root: Path, pid: str, plugin_py: str, manifest: dict | None = None) -> None:
@@ -29,10 +48,20 @@ def _reset_registry():
     plugins._REGISTRY = None
 
 
+@pytest.fixture()
+def _plugins_dir(tmp_path, monkeypatch):
+    d = tmp_path / "plugins"
+    d.mkdir()
+    monkeypatch.setattr(plugins, "BACKEND_PLUGINS_DIR", d)
+    plugins._REGISTRY = None
+    return d
+
+
+# ── Discovery + isolation ─────────────────────────────────────────────────────
+
+
 def test_discover_skips_broken_and_keeps_good(tmp_path) -> None:
-    # A good plugin, one that explodes on import, one with no hook, one missing
-    # plugin.py. Discovery must return only the good one and never raise.
-    _write_plugin(tmp_path, "good", "def build(config):\n    return {'buses': [{'name': 'b'}]}\n")
+    _write_plugin(tmp_path, "good", GOOD)
     _write_plugin(tmp_path, "boom", "import this_module_does_not_exist_xyz\n")
     _write_plugin(tmp_path, "nohook", "X = 1\n")
     (tmp_path / "no-plugin-py").mkdir()
@@ -41,64 +70,113 @@ def test_discover_skips_broken_and_keeps_good(tmp_path) -> None:
     found = plugins.discover(tmp_path)
 
     assert set(found) == {"good"}
-    assert found["good"].has_build and not found["good"].has_analyze
+    assert found["good"].has_transform and not found["good"].has_analyze
 
 
 def test_discover_missing_dir_returns_empty(tmp_path) -> None:
-    # Isolation: no plugins dir at all -> empty, no error (app still starts).
     assert plugins.discover(tmp_path / "does-not-exist") == {}
 
 
-def test_reference_demo_plugin_builds_valid_model() -> None:
-    # The shipped reference plugin builds via the bundled PyPSA source.
-    reg = plugins.discover()
-    assert "demo-network-builder" in reg
-    model = plugins.run_build("demo-network-builder", {"buses": 2, "snapshots": 6, "peak_load_mw": 120})
-    assert len(model["buses"]) == 2
-    assert len(model["snapshots"]) == 6
-    assert len(model["generators"]) == 2
-    assert set(model["loads-p_set"][0]) == {"snapshot", "load0", "load1"}
+# ── Hook runners ──────────────────────────────────────────────────────────────
 
 
-def test_run_build_unknown_plugin_raises_keyerror() -> None:
+def test_run_transform_unknown_raises_keyerror() -> None:
     with pytest.raises(KeyError):
-        plugins.run_build("nope", {})
+        plugins.run_transform("nope", {}, {})
 
 
-def test_run_build_bad_return_is_valueerror(tmp_path, monkeypatch) -> None:
-    _write_plugin(tmp_path, "bad", "def build(config):\n    return 42\n")
-    monkeypatch.setattr(plugins, "BACKEND_PLUGINS_DIR", tmp_path)
+def test_run_transform_bad_return_is_valueerror(_plugins_dir) -> None:
+    _write_plugin(_plugins_dir, "bad", "def transform(model, config):\n    return 42\n")
     plugins._REGISTRY = None
     with pytest.raises(ValueError):
-        plugins.run_build("bad", {})
+        plugins.run_transform("bad", {}, {})
 
 
-def test_router_lists_and_builds_into_session(tmp_path, monkeypatch) -> None:
+def test_contribute_merges_sheets_and_constraints_into_session(_plugins_dir, tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(session_store, "SESSION_DIR", tmp_path / "session")
-    listed = plugins_router.get_plugins()["plugins"]
-    assert any(p["id"] == "demo-network-builder" and p["kind"] == "backend" for p in listed)
+    session_store.save_model("default", {"buses": [{"name": "b0"}]}, filename="x.xlsx", scenario_name="")
+    _write_plugin(
+        _plugins_dir,
+        "contrib",
+        "def contribute(model, config):\n"
+        "    return {'sheets': {'carriers': [{'name': 'wind'}]}, 'constraints': ['cf(\"wind\") <= 0.5']}\n",
+    )
+    plugins._REGISTRY = None
 
-    body = plugins_router.BuildRequest(config={"buses": 1, "snapshots": 4}, sessionId="default")
-    meta = plugins_router.build_plugin("demo-network-builder", body)
+    plugins_router.contribute_plugin("contrib", plugins_router.TransformRequest(sessionId="default"))
+
+    full = session_store.load_full_model("default") or {}
+    assert any(r.get("name") == "wind" for r in full.get("carriers", []))
+    assert full.get("RAGNAROK_CustomDSL")  # constraints landed in the DSL sheet
+
+
+# ── Install / uninstall lifecycle ─────────────────────────────────────────────
+
+
+def test_install_then_transform_into_session_then_uninstall(_plugins_dir, tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(session_store, "SESSION_DIR", tmp_path / "session")
+    data = _make_zip(
+        {
+            "manifest.json": json.dumps(
+                {"id": "mini", "name": "Mini", "kind": "backend", "config": {}}
+            ),
+            "plugin.py": "def transform(model, config):\n    return {'buses': [{'name': 'n1'}]}\n",
+        }
+    )
+
+    manifest = asyncio.run(plugins_router.install_plugin(_upload(data, "mini.zip")))
+    assert manifest["id"] == "mini" and manifest["hooks"]["transform"] is True
+    assert (_plugins_dir / "mini" / "plugin.py").exists()
+    assert any(p["id"] == "mini" for p in plugins_router.get_plugins()["plugins"])
+
+    meta = plugins_router.transform_plugin("mini", plugins_router.TransformRequest(sessionId="default"))
     assert meta["componentCounts"].get("buses") == 1
-    assert session_store.get_meta("default") is not None
+
+    res = plugins_router.uninstall_plugin("mini")
+    assert res["removed"] is True
+    assert not (_plugins_dir / "mini").exists()
+    assert not any(p["id"] == "mini" for p in plugins_router.get_plugins()["plugins"])
 
 
-def test_router_build_unknown_is_404() -> None:
-    body = plugins_router.BuildRequest(config={})
+def test_install_rejects_zip_slip(_plugins_dir) -> None:
+    data = _make_zip(
+        {
+            "manifest.json": json.dumps({"id": "evil", "name": "Evil"}),
+            "plugin.py": "def transform(model, config):\n    return {}\n",
+            "../escape.txt": "pwned",
+        }
+    )
     with pytest.raises(plugins_router.HTTPException) as exc:
-        plugins_router.build_plugin("nope", body)
+        asyncio.run(plugins_router.install_plugin(_upload(data, "evil.zip")))
+    assert exc.value.status_code == 400
+
+
+def test_install_rejects_missing_plugin_py(_plugins_dir) -> None:
+    data = _make_zip({"manifest.json": json.dumps({"id": "x", "name": "X"})})
+    with pytest.raises(plugins_router.HTTPException) as exc:
+        asyncio.run(plugins_router.install_plugin(_upload(data, "x.zip")))
+    assert exc.value.status_code == 400
+
+
+def test_uninstall_unknown_is_404(_plugins_dir) -> None:
+    with pytest.raises(plugins_router.HTTPException) as exc:
+        plugins_router.uninstall_plugin("ghost")
     assert exc.value.status_code == 404
 
 
-def test_dashboard_importer_backend_plugin_loads_and_runs_engine() -> None:
-    # The ported Dashboard Importer runs in-backend (imports dashboard_lib +
-    # the bundled deps). With no model workbook it must raise a CLEAN domain
-    # error (proving the engine is reachable and dashboard_lib imported) — not
-    # an ImportError.
-    reg = plugins.discover()
-    assert "dashboard-importer" in reg
-    assert reg["dashboard-importer"].has_build
+# ── The shipped EXAMPLE backend plugin (installed from its zip) ───────────────
+
+
+def test_install_example_dashboard_importer(_plugins_dir) -> None:
+    # Install the example backend plugin and confirm it loads + its engine is
+    # reachable (no model workbook → CLEAN domain error, not an ImportError).
+    zip_path = Path(__file__).resolve().parents[2] / "example_plugins" / "zips" / "dashboard-importer.zip"
+    if not zip_path.exists():
+        pytest.skip("example dashboard-importer.zip not built")
+
+    manifest = asyncio.run(plugins_router.install_plugin(_upload(zip_path.read_bytes(), "dashboard-importer.zip")))
+    assert manifest["id"] == "dashboard-importer" and manifest["hooks"]["transform"] is True
+
     with pytest.raises(ValueError) as exc:
-        plugins.run_build("dashboard-importer", {})
+        plugins.run_transform("dashboard-importer", {}, {})
     assert "model" in str(exc.value).lower()  # "No model workbook specified…"

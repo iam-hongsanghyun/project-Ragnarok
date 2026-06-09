@@ -43,16 +43,22 @@ def _load_engine() -> ModuleType:
     return _engine
 
 
-def build(config: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
-    """Build the Ragnarok workbook model server-side from GUI config.
+def transform(model: dict[str, list[dict[str, Any]]], config: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    """Build the Ragnarok workbook model server-side from GUI config (replace).
+
+    The unified ``transform(model, config)`` hook. The current session ``model``
+    is intentionally discarded — the importer builds a fresh workbook from the
+    uploaded dashboard model + GUI settings.
 
     Args:
-        config: the plugin's config (model_file upload / dashboard_path / GUI
+        model: the current session model (unused; the build replaces it).
+        config: the plugin's config (model_file upload / model_path / GUI
             reference tables and toggles).
 
     Returns:
         A model dict ``{sheet: [rows]}`` for the session store (may include a
         ``RAGNAROK_CustomDSL`` sheet carrying CF constraints).
     """
+    del model  # the importer replaces the workbook; current model is discarded
     engine = _load_engine()
     return engine.transform({}, {}, {"moduleConfig": config or {}})

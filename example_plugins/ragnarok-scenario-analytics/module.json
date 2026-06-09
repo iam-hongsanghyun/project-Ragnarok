@@ -1,0 +1,106 @@
+{
+  "id": "ragnarok-scenario-analytics",
+  "name": "Scenario Analytics",
+  "version": "2.0.0",
+  "sdkVersion": "2",
+  "entry": "index.js",
+  "description": "System-level analytics for the solved run, for the 11th-Basic-Plan alternative-scenario study: generation & capacity mix, hourly dispatch + SMP (zero-price hours), CO₂ vs NDC and emission factor, inter-region flow map, peak demand / reserve margin, and a load-duration curve — charts + numbers, 100% frontend. Run the model, then open the Output tab.",
+  "capabilities": ["analytics-pack"],
+  "permissions": ["results.read"],
+  "panel": { "inputLayout": "2x1" },
+  "config": {
+    "sec_left": { "type": "group", "label": "Display" },
+    "energy_unit": {
+      "type": "select",
+      "label": "Energy unit",
+      "default": "TWh",
+      "options": [
+        { "value": "TWh", "label": "TWh" },
+        { "value": "GWh", "label": "GWh" },
+        { "value": "MWh", "label": "MWh" }
+      ],
+      "description": "Unit for annual energy totals (hourly charts stay in MW)."
+    },
+    "dispatch_start": {
+      "type": "number",
+      "label": "Dispatch window start (snapshot)",
+      "default": 0,
+      "description": "First snapshot index for the hourly dispatch / SMP charts (e.g. set to a summer or winter week)."
+    },
+    "dispatch_hours": {
+      "type": "number",
+      "label": "Dispatch window length (hours)",
+      "default": 168,
+      "description": "Number of snapshots to plot from the start (168 = one week)."
+    },
+    "ndc_target_mt": {
+      "type": "number",
+      "label": "NDC target (MtCO₂)",
+      "default": 0,
+      "description": "Optional. If > 0, adds a 'CO₂ vs NDC target' bar comparing this run's total emissions to the target."
+    },
+    "aggregate_by_region": {
+      "type": "boolean",
+      "label": "Aggregate by region (flow map)",
+      "default": true,
+      "description": "Group buses into regions for the inter-region flow map. Off = per-bus."
+    },
+    "region_column": {
+      "type": "select",
+      "label": "Region column",
+      "default": "province",
+      "visibleWhen": { "field": "aggregate_by_region", "equals": true },
+      "options": [
+        { "value": "province", "label": "province" },
+        { "value": "group1", "label": "group1" },
+        { "value": "group2", "label": "group2" },
+        { "value": "group3", "label": "group3" },
+        { "value": "singlenode", "label": "singlenode" }
+      ],
+      "description": "Province-mapping column used to group buses into regions."
+    },
+    "download_csv": {
+      "type": "action",
+      "label": "Download analytics (CSV)",
+      "hook": "downloadAnalytics",
+      "variant": "secondary",
+      "description": "Download the aggregated tables (generation, capacity, emissions, flows, adequacy) as one CSV. Run the model and open the Output tab first.",
+      "successMessage": "Analytics CSV downloaded."
+    },
+    "sec_right": { "type": "group", "label": "Region mapping (for the flow map)" },
+    "province_mapping": {
+      "type": "table",
+      "label": "Province → region mapping",
+      "visibleWhen": { "field": "aggregate_by_region", "equals": true },
+      "maxHeight": 400,
+      "columns": [
+        { "key": "short", "label": "short", "width": 60 },
+        { "key": "official", "label": "official", "width": 120 },
+        { "key": "group1", "label": "group1", "width": 60 },
+        { "key": "group2", "label": "group2", "width": 60 },
+        { "key": "group3", "label": "group3", "width": 60 },
+        { "key": "singlenode", "label": "singlenode", "width": 70 }
+      ],
+      "default": [
+        { "short": "강원", "official": "강원특별자치도", "group1": "육지", "group2": "육지", "group3": "강원", "singlenode": "KR" },
+        { "short": "경기", "official": "경기도", "group1": "육지", "group2": "수도권", "group3": "수도권", "singlenode": "KR" },
+        { "short": "경남", "official": "경상남도", "group1": "육지", "group2": "육지", "group3": "경상", "singlenode": "KR" },
+        { "short": "경북", "official": "경상북도", "group1": "육지", "group2": "육지", "group3": "경상", "singlenode": "KR" },
+        { "short": "광주", "official": "광주광역시", "group1": "육지", "group2": "육지", "group3": "전라", "singlenode": "KR" },
+        { "short": "대구", "official": "대구광역시", "group1": "육지", "group2": "육지", "group3": "경상", "singlenode": "KR" },
+        { "short": "대전", "official": "대전광역시", "group1": "육지", "group2": "육지", "group3": "충청", "singlenode": "KR" },
+        { "short": "부산", "official": "부산광역시", "group1": "육지", "group2": "육지", "group3": "경상", "singlenode": "KR" },
+        { "short": "서울", "official": "서울특별시", "group1": "육지", "group2": "수도권", "group3": "수도권", "singlenode": "KR" },
+        { "short": "세종", "official": "세종특별자치시", "group1": "육지", "group2": "육지", "group3": "충청", "singlenode": "KR" },
+        { "short": "울산", "official": "울산광역시", "group1": "육지", "group2": "육지", "group3": "경상", "singlenode": "KR" },
+        { "short": "인천", "official": "인천광역시", "group1": "육지", "group2": "수도권", "group3": "수도권", "singlenode": "KR" },
+        { "short": "전남", "official": "전라남도", "group1": "육지", "group2": "육지", "group3": "전라", "singlenode": "KR" },
+        { "short": "전북", "official": "전북특별자치도", "group1": "육지", "group2": "육지", "group3": "전라", "singlenode": "KR" },
+        { "short": "제주", "official": "제주특별자치도", "group1": "제주", "group2": "제주", "group3": "제주", "singlenode": "KR" },
+        { "short": "충남", "official": "충청남도", "group1": "육지", "group2": "육지", "group3": "충청", "singlenode": "KR" },
+        { "short": "충북", "official": "충청북도", "group1": "육지", "group2": "육지", "group3": "충청", "singlenode": "KR" }
+      ],
+      "description": "Required: short, official. The Region column selector picks which column becomes the region."
+    }
+  }
+}

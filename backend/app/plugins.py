@@ -40,12 +40,14 @@ from typing import Any, Callable
 
 logger = logging.getLogger("pypsa_gui.plugins")
 
-# backend/plugins sits one level above backend/app/. Overridable via env so a
-# remote deployment can mount plugins from anywhere (no hardcoded path leaks
-# into callers — they always go through this constant).
+# The INSTALL directory for backend plugins — under backend/data/ (gitignored,
+# runtime/user content), NOT in the project tree. Ragnarok ships ZERO plugins;
+# plugins are purely 3rd-party and arrive via upload-install (see the plugins
+# router). Overridable via env so a remote deployment can mount plugins anywhere
+# (no hardcoded path leaks into callers — they always go through this constant).
 BACKEND_PLUGINS_DIR = Path(
     os.environ.get("RAGNAROK_BACKEND_PLUGINS_DIR")
-    or (Path(__file__).resolve().parents[1] / "plugins")
+    or (Path(__file__).resolve().parents[1] / "data" / "plugins")
 )
 
 
@@ -63,8 +65,12 @@ class BackendPlugin:
     directory: Path = field(repr=False)
 
     @property
-    def has_build(self) -> bool:
-        return callable(getattr(self.module, "build", None))
+    def has_transform(self) -> bool:
+        return callable(getattr(self.module, "transform", None))
+
+    @property
+    def has_contribute(self) -> bool:
+        return callable(getattr(self.module, "contribute", None))
 
     @property
     def has_analyze(self) -> bool:
@@ -80,7 +86,15 @@ class BackendPlugin:
             "description": self.description,
             "capabilities": self.capabilities,
             "config": self.config_schema,
-            "hooks": {"build": self.has_build, "analyze": self.has_analyze},
+            # Unified contract, shared with frontend plugins:
+            #   transform(model, config) -> model     (replace)
+            #   contribute(model, config) -> {sheets, constraints}  (add)
+            #   analyze(result, config) -> data        (read-only output)
+            "hooks": {
+                "transform": self.has_transform,
+                "contribute": self.has_contribute,
+                "analyze": self.has_analyze,
+            },
         }
 
 
@@ -120,8 +134,8 @@ def _load_one(directory: Path) -> BackendPlugin | None:
             module=module,
             directory=directory,
         )
-        if not (plugin.has_build or plugin.has_analyze):
-            logger.warning("Skip backend plugin %s: no build/analyze hook", plugin.id)
+        if not (plugin.has_transform or plugin.has_contribute or plugin.has_analyze):
+            logger.warning("Skip backend plugin %s: no transform/contribute/analyze hook", plugin.id)
             return None
         logger.info("Loaded backend plugin %s v%s", plugin.id, plugin.version)
         return plugin
@@ -181,17 +195,38 @@ def _call(hook: Callable[..., Any], *args: Any) -> Any:
         raise ValueError(str(exc) or exc.__class__.__name__) from exc
 
 
-def run_build(plugin_id: str, config: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
-    """Run a plugin's ``build(config)`` and return the model dict it produces."""
+def run_transform(
+    plugin_id: str,
+    model: dict[str, list[dict[str, Any]]],
+    config: dict[str, Any],
+) -> dict[str, list[dict[str, Any]]]:
+    """Run a plugin's ``transform(model, config)`` → the replacement model dict."""
     plugin = get(plugin_id)
     if plugin is None:
         raise KeyError(plugin_id)
-    if not plugin.has_build:
-        raise ValueError(f"Plugin {plugin_id!r} has no build hook.")
-    model = _call(plugin.module.build, config or {})
-    if not isinstance(model, dict):
-        raise ValueError(f"Plugin {plugin_id!r} build() did not return a model dict.")
-    return model
+    if not plugin.has_transform:
+        raise ValueError(f"Plugin {plugin_id!r} has no transform hook.")
+    out = _call(plugin.module.transform, model or {}, config or {})
+    if not isinstance(out, dict):
+        raise ValueError(f"Plugin {plugin_id!r} transform() did not return a model dict.")
+    return out
+
+
+def run_contribute(
+    plugin_id: str,
+    model: dict[str, list[dict[str, Any]]],
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    """Run a plugin's ``contribute(model, config)`` → ``{sheets?, constraints?}``."""
+    plugin = get(plugin_id)
+    if plugin is None:
+        raise KeyError(plugin_id)
+    if not plugin.has_contribute:
+        raise ValueError(f"Plugin {plugin_id!r} has no contribute hook.")
+    out = _call(plugin.module.contribute, model or {}, config or {})
+    if not isinstance(out, dict):
+        raise ValueError(f"Plugin {plugin_id!r} contribute() did not return a dict.")
+    return out
 
 
 def run_analyze(plugin_id: str, result: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:

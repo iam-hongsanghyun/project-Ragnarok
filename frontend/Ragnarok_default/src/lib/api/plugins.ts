@@ -2,13 +2,20 @@
  * Client for BACKEND (server-side) plugins — see backend `app/routers/plugins.py`.
  *
  * Backend plugins run inside the Ragnarok backend and import the bundled PyPSA
- * source directly. A `build` plugin writes its model straight into the session
- * (the source of truth), so the produced model never travels through the
- * browser — the frontend just kicks it off and then rehydrates from the session.
+ * source directly. They share the unified hook contract with frontend plugins:
+ * `transform` (replace model), `contribute` (add sheets/constraints), `analyze`
+ * (read-only output). `transform`/`contribute` write straight into the session
+ * (the source of truth), so the produced model never travels through the browser
+ * — the frontend kicks it off and then rehydrates from the session.
+ *
+ * Plugins are installed by uploading a `.zip` (`installBackendPlugin`) and removed
+ * with `uninstallBackendPlugin` — Ragnarok ships none.
  */
 import { API_BASE } from 'lib/constants';
 import type { ModuleConfigSchema } from 'lib/types';
 import { DEFAULT_SESSION_ID, type SessionMeta } from './session';
+
+export type BackendHook = 'transform' | 'contribute' | 'analyze';
 
 export interface BackendPluginManifest {
   id: string;
@@ -18,7 +25,7 @@ export interface BackendPluginManifest {
   description: string;
   capabilities: string[];
   config: ModuleConfigSchema;
-  hooks: { build: boolean; analyze: boolean };
+  hooks: { transform: boolean; contribute: boolean; analyze: boolean };
 }
 
 async function asJson<T>(resp: Response): Promise<T> {
@@ -33,13 +40,28 @@ export async function listBackendPlugins(): Promise<BackendPluginManifest[]> {
   return Array.isArray(body.plugins) ? body.plugins : [];
 }
 
-/** Run a backend plugin's `build(config)`; the model lands in the session. */
-export async function buildBackendPlugin(
+/** Install a backend plugin from a `.zip` (manifest.json + plugin.py). */
+export async function installBackendPlugin(file: File): Promise<BackendPluginManifest> {
+  const form = new FormData();
+  form.append('file', file, file.name);
+  const resp = await fetch(`${API_BASE}/api/plugins/install`, { method: 'POST', body: form });
+  return asJson<BackendPluginManifest>(resp);
+}
+
+/** Remove an installed backend plugin (deletes its server-side folder). */
+export async function uninstallBackendPlugin(id: string): Promise<void> {
+  const resp = await fetch(`${API_BASE}/api/plugins/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (!resp.ok) throw new Error((await resp.text()) || `Uninstall failed (${resp.status}).`);
+}
+
+/** Run a backend `transform`/`contribute` hook; the model lands in the session. */
+export async function runBackendHook(
   id: string,
+  hook: 'transform' | 'contribute',
   config: Record<string, unknown>,
   opts: { sessionId?: string; filename?: string; scenarioName?: string } = {},
 ): Promise<SessionMeta> {
-  const resp = await fetch(`${API_BASE}/api/plugins/${encodeURIComponent(id)}/build`, {
+  const resp = await fetch(`${API_BASE}/api/plugins/${encodeURIComponent(id)}/${hook}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

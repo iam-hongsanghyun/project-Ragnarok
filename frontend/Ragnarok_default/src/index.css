@@ -5197,21 +5197,15 @@ th:hover .col-delete-btn {
   padding: 12px 0;
 }
 .plugin-rail-install { align-self: stretch; margin: 0 12px; }
-/* Rail sub-heading separating backend (server-side) plugins from frontend ones. */
+/* Rail sub-heading for the backend (server-side) group. Matches the Settings
+   nav group title (.settings-nav-group-title) so the grouping aligns with the
+   rest of the app — same 16px inset as the rail items below it. */
 .plugin-rail-group {
-  margin: 12px 12px 4px;
+  margin-top: 12px;
+  padding: 6px 16px;
   font-size: 0.68rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-/* "Backend plugin · vX" badge atop the backend detail pane. */
-.plugin-detail-kind {
-  margin: 0 0 10px;
-  font-size: 0.7rem;
-  font-weight: 600;
-  letter-spacing: 0.03em;
+  font-weight: 700;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--muted);
 }

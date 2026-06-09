@@ -65,7 +65,7 @@ Ragnarok has **two kinds** of plugin:
 | Kind | Runs in | Distributed as | Discovered via | Own server? |
 |---|---|---|---|---|
 | **Frontend plugin** | the browser (evaluated JS) | a `.zip` you install in the Plugins tab | `localStorage` | optionally its own local HTTP server, registered in `plugins.env` |
-| **Backend plugin** | the Ragnarok **backend** process | a directory under `backend/plugins/` | `GET /api/plugins` | no — it imports the bundled PyPSA source directly; nothing in `plugins.env` |
+| **Backend plugin** | the Ragnarok **backend** process | a `.zip` (manifest.json + plugin.py) you install in the Plugins tab | `GET /api/plugins` (installed into the gitignored `backend/data/plugins/`) | no — it imports the bundled PyPSA source directly; nothing in `plugins.env` |
 
 **Sections 1–15 of this guide describe FRONTEND plugins.** Backend plugins —
 the server-side kind that imports PyPSA directly and writes its model straight
@@ -1525,66 +1525,87 @@ unchanged and there is no version bump. Keep declaring `"sdkVersion": "2"`.
 ## 16. Backend (server-side) plugins
 
 A **backend plugin** runs inside the Ragnarok backend process and may import the
-bundled PyPSA source directly (`backend/pypsa`). It is the right kind for the
+bundled PyPSA source directly (`backend.pypsa`). It is the right kind for the
 server-side / thin-client deployment: the build happens on the server, the
-result is written straight into the session (the source of truth), and **nothing
-is launched from `plugins.env`** — there is no separate server, because the
-plugin *is* part of the backend.
+result is written straight into the session (the source of truth), the model
+**never enters the browser**, and **nothing is launched from `plugins.env`** —
+there is no separate server, because the plugin *is* part of the backend.
 
-### 16.1 When to use which kind
+**Ragnarok ships ZERO plugins.** Plugins are purely 3rd-party. Reference examples
+live in `example_plugins/` (not auto-loaded); you install one from the Plugins tab.
 
-- **Backend plugin** — heavy Python that belongs on the server (network build,
-  PyPSA construction, large-file parsing), and you want one deployable unit with
-  the model never entering the browser. Imports `backend.pypsa` / `pypsa`
-  directly. No `plugins.env` entry.
-- **Frontend plugin with its own server** (sections 8–9) — you already have an
-  external build server, or it must run on a different machine/repo. Registered
-  in `plugins.env`.
-- **Frontend plugin, browser-only** — light transforms/analytics that run in the
-  browser.
+### 16.1 The unified hook contract (both kinds)
 
-> **Does `plugins.env` go away?** For a backend plugin, yes — it needs no entry.
-> `plugins.env` only launches the **own-server** of a *frontend* plugin. If you
-> port the Dashboard Importer to a backend plugin, delete its `plugins.env` line.
+Frontend and backend plugins share ONE contract:
 
-### 16.2 Layout and discovery
+| Hook | Signature | Meaning |
+|---|---|---|
+| `transform` | `transform(model, config) -> model` | replace the working model |
+| `contribute` | `contribute(model, config) -> {sheets, constraints}` | add sheets / DSL constraints |
+| `analyze` | `analyze(result, config) -> data` | read-only Output-tab data |
 
-Backend plugins live under the directory named by the `RAGNAROK_BACKEND_PLUGINS_DIR`
-environment variable (default `backend/plugins/`). Each plugin is a directory:
+For a backend plugin these are Python functions in `plugin.py`; for a frontend
+plugin they are JS exports in `index.js` (section 7). `transform`/`contribute`
+write into the session.
+
+Use a **backend plugin** for heavy Python that belongs on the server (network
+build, PyPSA construction, large-file parsing). Use a **frontend plugin** for
+browser-light transforms/analytics, or when you must keep an existing own-server
+build pipeline (sections 8–9, registered in `plugins.env`). `plugins.env` is
+**only** for a frontend plugin's own server — a backend plugin needs no entry.
+
+### 16.2 Layout, install, and discovery
+
+A backend plugin is a directory:
 
 ```
-backend/plugins/<id>/
-  manifest.json    # {id, name, version, description?, capabilities?, config?}
-  plugin.py        # exposes build(config) and/or analyze(result, config)
+<id>/
+  manifest.json    # {id, name, version, kind:"backend", description?, capabilities?, config?}
+  plugin.py        # exposes transform / contribute / analyze (any subset)
+  ...              # any supporting modules (e.g. a vendored build engine)
 ```
 
-Discovery is isolated: a missing directory yields no plugins, and a plugin that
-fails to import (or exposes no hook) is logged and skipped — the backend always
-starts. The reference implementation is `backend/plugins/demo-network-builder/`.
+It is distributed as a **`.zip`** (manifest.json + plugin.py at the root) and
+**installed by upload** from the Plugins tab. The backend extracts it (zip-slip
+safe) into the install dir `RAGNAROK_BACKEND_PLUGINS_DIR` (default
+`backend/data/plugins/`, **gitignored** — runtime/user content, never in the
+project tree) and refreshes the registry. Discovery is isolated: a missing dir
+yields no plugins, and a plugin that fails to import (or exposes no hook) is
+logged and skipped — the backend always starts.
+
+> **Security:** install accepts a `.zip` of runnable Python that the backend
+> imports — i.e. remote code execution by design. Acceptable single-user/local;
+> a multi-user remote deployment must gate this behind auth/sandboxing.
+
+The reference example is `example_plugins/dashboard-importer/`.
 
 ### 16.3 The `plugin.py` contract
 
 ```python
-def build(config: dict) -> dict:
+def transform(model: dict, config: dict) -> dict:
     """Return a model dict {sheet: [rows]} — written into the session."""
     from backend.pypsa.network import build_network   # the bundled source
-    model = {...}
-    build_network(model, {"discountRate": 0.0, "carbonPrice": 0.0}, None)  # validate
-    return model
+    new_model = {...}
+    build_network(new_model, {"discountRate": 0.0, "carbonPrice": 0.0}, None)  # validate
+    return new_model
+
+def contribute(model: dict, config: dict) -> dict:
+    """Optional: {sheets: {...}, constraints: ["cf(\"wind\") <= 0.5", ...]}."""
+    return {"sheets": {"carriers": [{"name": "wind"}]}, "constraints": []}
 
 def analyze(result: dict, config: dict) -> dict:
-    """Optional: return an analytics dict for a solved run."""
+    """Optional: analytics dict for a solved run (Output tab)."""
     return {"total_cost": result.get("summary", [{}])[0].get("value")}
 ```
 
-A plugin may export `build`, `analyze`, or both. Raising inside a hook is safe —
-the router surfaces the message as a clean `400`.
+A plugin may export any subset. Raising inside a hook is safe — the router
+surfaces the message as a clean `400`.
 
 ### 16.4 The `manifest.json`
 
 Same `config` schema as a frontend manifest (section 5), so the Plugins tab
-renders the identical form. An `action` field with `"hook": "build"` triggers the
-server build:
+renders the identical form. An `action` field with `"hook": "transform"` (or
+`"contribute"`) triggers the server hook:
 
 ```json
 {
@@ -1592,12 +1613,12 @@ server build:
   "name": "Demo Network Builder",
   "version": "1.0.0",
   "kind": "backend",
-  "description": "Builds a small PyPSA model server-side.",
+  "description": "Builds a PyPSA model server-side.",
   "config": {
     "grp": { "type": "group", "label": "Demo network" },
     "buses": { "type": "number", "label": "Buses", "default": 1, "min": 1, "max": 50 },
     "build": { "type": "action", "label": "Build & load into Ragnarok",
-               "hook": "build", "variant": "primary" }
+               "hook": "transform", "variant": "primary" }
   }
 }
 ```
@@ -1606,20 +1627,26 @@ server build:
 
 | Method | Route | Purpose |
 |---|---|---|
-| `GET` | `/api/plugins` | list loaded backend plugins (manifests) |
+| `GET` | `/api/plugins` | list installed backend plugins (manifests) |
 | `GET` | `/api/plugins/{id}` | one manifest |
-| `POST` | `/api/plugins/{id}/build` | run `build(config)` → save model into the session → return session meta |
-| `POST` | `/api/plugins/{id}/analyze` | run `analyze(result, config)` → return its dict |
+| `POST` | `/api/plugins/install` | install from an uploaded `.zip` (multipart) → manifest |
+| `DELETE` | `/api/plugins/{id}` | uninstall (remove the dir) → `{removed}` |
+| `POST` | `/api/plugins/{id}/transform` | run `transform(model, config)` → save into session → meta |
+| `POST` | `/api/plugins/{id}/contribute` | run `contribute(model, config)` → merge into session → meta |
+| `POST` | `/api/plugins/{id}/analyze` | run `analyze(result, config)` → its dict |
 
-`POST .../build` body: `{config, sessionId, filename?, scenarioName?}`. The model
-is persisted server-side; the response is the lightweight session meta only.
+`transform`/`contribute` body: `{config, sessionId, filename?, scenarioName?}`.
+The model is persisted server-side; the response is the lightweight session meta.
 
 ### 16.6 The frontend side
 
-The Plugins tab lists backend plugins (from `GET /api/plugins`) under a
-"Backend (server-side)" group. Selecting one renders its config form; the Build
-action POSTs to `/api/plugins/{id}/build`, then the editor rehydrates from the
-session (static sheets) and switches to the Model tab. The built model never
-enters the browser. If the backend is unreachable the list is simply empty —
-frontend plugins still work. See `src/lib/api/plugins.ts` and
-`src/features/plugins/BackendPluginDetail.tsx`.
+The single **"Install plugin…"** button auto-detects the package kind (a `.zip`
+with `plugin.py` / manifest `kind:"backend"` → backend upload; `index.js` /
+`module.json` → frontend localStorage). Backend plugins appear under a
+**"Backend (server-side)"** rail group, each with an **uninstall "x"** (DELETE).
+Selecting one renders its config form; the action runs `transform`/`contribute`,
+then the editor rehydrates from the session and switches to the Model tab. The
+model never enters the browser. If the backend is unreachable the list is simply
+empty — frontend plugins still work. See `src/lib/api/plugins.ts`,
+`src/features/plugins/BackendPluginDetail.tsx`, and `peekPackageKind` in
+`src/features/plugins/frontendPlugins.ts`.

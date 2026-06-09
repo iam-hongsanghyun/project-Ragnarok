@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ModuleConfigField, ModuleConfigTableColumn, ModuleConfigVisibleWhen, ModuleDescriptor, ModuleHostInventory, PluginFileValue, WorkbookModel } from 'lib/types';
 import { optionsFromRows, resolveOptionsFrom, ResolvedOption } from 'lib/plugins/options';
 import { SearchableSelect } from '../../shared/components/SearchableSelect';
+import { useDebouncedValue } from '../../shared/hooks/useDebouncedValue';
 
 /** Resolved option list for a field/column: dynamic source wins, static is the fallback. */
 function resolveStaticOrDynamic(
@@ -43,10 +44,16 @@ function useServerOptions(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isServer, endpoint, formValues]);
   const [rows, setRows] = useState<Array<Record<string, unknown>>>([]);
+  // Debounce so typing in ANY field doesn't refire this network POST on every
+  // keystroke (the config — incl. an uploaded model — is sent in the body, and a
+  // server-options field re-runs whenever formValues changes). Fetch ~350 ms
+  // after typing stops instead.
+  const debouncedKey = useDebouncedValue(sourceKey, 350);
+  const debouncedBase = useDebouncedValue(baseUrl, 350);
   useEffect(() => {
-    if (!isServer || !baseUrl) { setRows([]); return; }
+    if (!isServer || !debouncedBase) { setRows([]); return; }
     let cancelled = false;
-    fetch(baseUrl + endpoint, {
+    fetch(debouncedBase + endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ config: formValues ?? {} }),
@@ -56,7 +63,7 @@ function useServerOptions(
       .catch(() => { if (!cancelled) setRows([]); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sourceKey, baseUrl, endpoint, isServer]);
+  }, [debouncedKey, debouncedBase, endpoint, isServer]);
   return rows;
 }
 
