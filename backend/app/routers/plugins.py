@@ -65,6 +65,14 @@ class AnalyzeRequest(BaseModel):
     result: dict[str, Any] = {}
 
 
+class OptionsRequest(BaseModel):
+    """Body for ``POST /api/plugins/{id}/options`` (on-demand dropdown values)."""
+
+    name: str = ""
+    config: dict[str, Any] = {}
+    sessionId: str = "default"
+
+
 @router.get("")
 def get_plugins(refresh: bool = False) -> dict[str, Any]:
     """List loaded backend plugins. ``refresh=true`` re-scans the plugins dir."""
@@ -269,3 +277,20 @@ def analyze_plugin(plugin_id: str, body: AnalyzeRequest) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=f"Backend plugin {plugin_id!r} not found.") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{plugin_id}/options")
+def options_plugin(plugin_id: str, body: OptionsRequest) -> dict[str, Any]:
+    """Run the plugin's ``options(name, config, ctx)`` → ``{name, rows:[…]}``.
+
+    On-demand dropdown population. The plugin owns the filter logic; Ragnarok only
+    dispatches and injects read-only session access (:class:`plugins.PluginContext`).
+    Returns option *rows* (same shape the frontend resolves for any options source).
+    """
+    try:
+        rows = plugins.run_options(plugin_id, body.name, body.config, body.sessionId)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Backend plugin {plugin_id!r} not found.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"name": body.name, "rows": rows}

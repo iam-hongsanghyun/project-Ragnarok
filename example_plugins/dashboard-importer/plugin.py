@@ -6,11 +6,17 @@ The same build engine that previously ran in the plugin's own HTTP server
 straight into the session — it never enters the browser, which is what made the
 frontend version slow once a model file was uploaded.
 
-`build(config)` is the backend-plugin hook (see `backend/app/plugins.py`); it
-delegates to the engine's `transform(model, scenario, options)`, passing the
-config under ``options["moduleConfig"]`` exactly as the old `/build` server did.
-The engine reads an uploaded `model_file` (base64) or a server-side
-`dashboard_path`, or builds GUI-only from the reference tables.
+Hooks (see `backend/app/plugins.py` for the contract):
+* ``transform(model, config)`` builds the workbook and replaces the session model,
+  delegating to the engine's ``transform(model, scenario, options)`` with the
+  config under ``options["moduleConfig"]`` exactly as the old `/build` server did.
+* ``options(name, config, ctx)`` answers dropdowns on demand (generator filters,
+  demand-move values, replacement plan) by dispatching to the engine's payload
+  builders — replacing the old per-plugin HTTP server at ``localhost:8765``.
+
+The engine reads an uploaded `model_file` (a filename into the plugin's scratch
+dir) resolved to an absolute `model_path`, or builds GUI-only from the reference
+tables.
 """
 from __future__ import annotations
 
@@ -62,11 +68,22 @@ def transform(model: dict[str, list[dict[str, Any]]], config: dict[str, Any]) ->
         ``RAGNAROK_CustomDSL`` sheet carrying CF constraints).
     """
     del model  # the importer replaces the workbook; current model is discarded
+    cfg = _resolve_model_path(config)
+    engine = _load_engine()
+    return engine.transform({}, {}, {"moduleConfig": cfg})
+
+
+def _resolve_model_path(config: dict[str, Any]) -> dict[str, Any]:
+    """Return a config copy with ``model_path`` resolved from the uploaded file.
+
+    The framework injects ``__plugin_data_dir__`` (the plugin's server-side scratch
+    dir) and ``model_file`` is a bare filename into it — turn that into an absolute
+    ``model_path`` the engine can open. Shared by ``transform`` and ``options`` so
+    both read the same uploaded workbook.
+    """
     cfg = dict(config or {})
     data_dir = cfg.pop("__plugin_data_dir__", None)
     selected = cfg.get("model_file")
-    # Resolve the chosen uploaded file (a bare filename) to a server path, unless
-    # the user gave an explicit model_path. The engine then reads model_path.
     if (
         isinstance(selected, str)
         and selected.strip()
@@ -74,5 +91,37 @@ def transform(model: dict[str, list[dict[str, Any]]], config: dict[str, Any]) ->
         and data_dir
     ):
         cfg["model_path"] = str(Path(data_dir) / selected.strip())
+    return cfg
+
+
+# Dropdown name → engine payload builder. The engine's payload functions already
+# return option *rows* (filtered/labelled client-side by the manifest's
+# optionsFrom specs), so options() just dispatches by name — Ragnarok core stays
+# ignorant of what each dropdown means.
+_OPTION_BUILDERS = {
+    "/generator_filter_values": "generator_filter_values_payload",
+    "/demand_values": "demand_values_payload",
+    "/replacement_plan": "replacement_plan_payload",
+    "/generators": "generator_filter_values_payload",
+}
+
+
+def options(name: str, config: dict[str, Any], ctx: Any) -> list[dict[str, Any]]:
+    """On-demand dropdown rows for a backend-plugin select (see backend/app/plugins.py).
+
+    ``name`` is the option-set id from the manifest (e.g. ``/demand_values``);
+    ``config`` is the current form state (incl. the chosen ``model_file``); ``ctx``
+    gives read-only session access (unused here — this plugin reads its own
+    uploaded workbook, which is the plugin's decision, not Ragnarok's).
+    """
+    del ctx  # this plugin derives options from its own uploaded model, not the session
+    builder_name = _OPTION_BUILDERS.get(name)
+    if builder_name is None:
+        return []
+    cfg = _resolve_model_path(config)
     engine = _load_engine()
-    return engine.transform({}, {}, {"moduleConfig": cfg})
+    builder = getattr(engine, builder_name, None)
+    if builder is None:
+        return []
+    rows = builder(cfg)
+    return rows if isinstance(rows, list) else []

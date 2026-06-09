@@ -206,6 +206,71 @@ def test_uninstall_removes_uploaded_files(_plugins_dir) -> None:
     assert not (_plugins_dir.parent / "plugin_files" / "fp2").exists()
 
 
+# ── options() hook (on-demand dropdowns) ──────────────────────────────────────
+
+
+def test_options_returns_rows_and_reports_capability(_plugins_dir) -> None:
+    _write_plugin(
+        _plugins_dir,
+        "opt",
+        "def transform(model, config):\n    return {}\n"
+        "def options(name, config, ctx):\n"
+        "    if name == '/scalars':\n        return ['a', 'b']\n"
+        "    return [{'name': name, 'echo': config.get('x')}]\n",
+    )
+    plugins._REGISTRY = None
+
+    assert plugins.get("opt").to_dict()["hooks"]["options"] is True
+    # dict rows pass through; the form's `config` reaches the hook
+    rows = plugins.run_options("opt", "/things", {"x": 7})
+    assert rows == [{"name": "/things", "echo": 7}]
+    # scalars are wrapped to {name: value} so the default column 'name' resolves
+    assert plugins.run_options("opt", "/scalars", {}) == [{"name": "a"}, {"name": "b"}]
+
+
+def test_options_router_shape_and_errors(_plugins_dir) -> None:
+    _write_plugin(
+        _plugins_dir,
+        "opt2",
+        "def transform(model, config):\n    return {}\n"
+        "def options(name, config, ctx):\n    return [{'name': 'x'}]\n",
+    )
+    _write_plugin(_plugins_dir, "noopt", GOOD)  # transform only, no options
+    plugins._REGISTRY = None
+
+    out = plugins_router.options_plugin("opt2", plugins_router.OptionsRequest(name="/q"))
+    assert out == {"name": "/q", "rows": [{"name": "x"}]}
+
+    with pytest.raises(plugins_router.HTTPException) as missing:
+        plugins_router.options_plugin("ghost", plugins_router.OptionsRequest(name="/q"))
+    assert missing.value.status_code == 404
+
+    with pytest.raises(plugins_router.HTTPException) as nohook:
+        plugins_router.options_plugin("noopt", plugins_router.OptionsRequest(name="/q"))
+    assert nohook.value.status_code == 400
+
+
+def test_options_ctx_distinct_reads_session(_plugins_dir, tmp_path, monkeypatch) -> None:
+    # The plugin answers a dropdown from the SESSION via ctx.distinct (generic,
+    # SQL-backed) — Ragnarok owns no plugin-specific filter logic.
+    monkeypatch.setattr(session_store, "SESSION_DIR", tmp_path / "session")
+    model_store.save_model(
+        "default",
+        {"generators": [{"name": "g0", "carrier": "wind"}, {"name": "g1", "carrier": "gas"}]},
+    )
+    _write_plugin(
+        _plugins_dir,
+        "ctxopt",
+        "def transform(model, config):\n    return {}\n"
+        "def options(name, config, ctx):\n"
+        "    return [{'name': c} for c in ctx.distinct('generators', 'carrier')]\n",
+    )
+    plugins._REGISTRY = None
+
+    rows = plugins.run_options("ctxopt", "/carriers", {}, session_id="default")
+    assert rows == [{"name": "gas"}, {"name": "wind"}]
+
+
 # ── The shipped EXAMPLE backend plugin (installed from its zip) ───────────────
 
 

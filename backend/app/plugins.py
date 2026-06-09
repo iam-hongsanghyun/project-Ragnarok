@@ -137,6 +137,10 @@ class BackendPlugin:
     def has_analyze(self) -> bool:
         return callable(getattr(self.module, "analyze", None))
 
+    @property
+    def has_options(self) -> bool:
+        return callable(getattr(self.module, "options", None))
+
     def to_dict(self) -> dict[str, Any]:
         """The manifest the frontend reads to render the plugin and its form."""
         return {
@@ -151,10 +155,12 @@ class BackendPlugin:
             #   transform(model, config) -> model     (replace)
             #   contribute(model, config) -> {sheets, constraints}  (add)
             #   analyze(result, config) -> data        (read-only output)
+            #   options(name, config, ctx) -> [opt]    (on-demand dropdown values)
             "hooks": {
                 "transform": self.has_transform,
                 "contribute": self.has_contribute,
                 "analyze": self.has_analyze,
+                "options": self.has_options,
             },
         }
 
@@ -307,3 +313,66 @@ def run_analyze(plugin_id: str, result: dict[str, Any], config: dict[str, Any]) 
     if not isinstance(out, dict):
         raise ValueError(f"Plugin {plugin_id!r} analyze() did not return a dict.")
     return out
+
+
+@dataclass
+class PluginContext:
+    """Read-only session access handed to a plugin's ``options`` hook.
+
+    Lets a plugin answer a dropdown WITHOUT Ragnarok knowing anything
+    plugin-specific: the plugin computes its own option list from either the
+    session (``ctx.distinct`` / ``ctx.sheet_page`` — generic SQL-backed reads) or
+    its own uploaded files (``ctx.data_dir``). Ragnarok just dispatches + injects
+    this context; it owns zero plugin filter logic.
+    """
+
+    session_id: str
+    data_dir: str
+
+    def distinct(self, sheet: str, column: str) -> list[str]:
+        """Sorted distinct non-empty values of a column in a session sheet."""
+        from . import model_store
+
+        return model_store.distinct_values(self.session_id, sheet, column) or []
+
+    def sheet_page(self, sheet: str, offset: int = 0, limit: int | None = None) -> dict[str, Any] | None:
+        """One page of a session sheet's rows (or None if absent)."""
+        from . import model_store
+
+        return model_store.get_sheet_page(self.session_id, sheet, offset=offset, limit=limit)
+
+
+def _as_option_rows(out: Any, plugin_id: str) -> list[dict[str, Any]]:
+    """Coerce an ``options()`` return into a list of option *rows*.
+
+    Rows mirror the shape the old per-plugin HTTP server returned (``{rows:[…]}``)
+    so the frontend reuses its existing row→option resolution (``optionsFromRows``:
+    ``column``/``labelColumn``/``filter`` from the manifest). A list of scalars is
+    wrapped as ``{"name": value}`` so the default ``column: 'name'`` still works.
+    """
+    if not isinstance(out, list):
+        raise ValueError(f"Plugin {plugin_id!r} options() must return a list.")
+    return [item if isinstance(item, dict) else {"name": str(item)} for item in out]
+
+
+def run_options(
+    plugin_id: str,
+    name: str,
+    config: dict[str, Any],
+    session_id: str = "default",
+) -> list[dict[str, Any]]:
+    """Run a plugin's ``options(name, config, ctx)`` → option rows.
+
+    On-demand dropdown population (when a select opens / its dependency changes),
+    never per-keystroke. ``name`` selects which option-set the plugin should
+    return; ``config`` is the current form state; ``ctx`` gives read-only session
+    access (see :class:`PluginContext`).
+    """
+    plugin = get(plugin_id)
+    if plugin is None:
+        raise KeyError(plugin_id)
+    if not plugin.has_options:
+        raise ValueError(f"Plugin {plugin_id!r} has no options hook.")
+    ctx = PluginContext(session_id=session_id, data_dir=str(plugin_files_dir(plugin_id)))
+    out = _call(plugin.module.options, name, _with_data_dir(plugin_id, config), ctx)
+    return _as_option_rows(out, plugin_id)
