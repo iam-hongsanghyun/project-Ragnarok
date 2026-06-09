@@ -38,6 +38,7 @@ detail, see the plugin guide.
 9. [Plugin runtime](#9-plugin-runtime)
 10. [UI design philosophy](#10-ui-design-philosophy)
 11. [Current scope and limitations](#11-current-scope-and-limitations)
+12. [Server-side deployment & frontend/backend separation](#12-server-side-deployment--frontendbackend-separation)
 
 ---
 
@@ -835,3 +836,57 @@ headline limitations are:
   separation is already clean) but no authentication layer exists yet.
 - **Session-scoped run history.** Past runs can be viewed, compared, pinned, renamed,
   restored, and exported, but the list lives only for the browser session.
+
+---
+
+## 12. Server-side deployment & frontend/backend separation
+
+Ragnarok is built so the **backend is the single source of truth** and the
+frontend is a thin terminal — the shape a server-side (and eventually iPad)
+deployment needs.
+
+**What lives where**
+
+- **Backend owns the model.** The working model is a server-side *session*
+  (`backend/app/session_store.py`): static sheets as JSON, time-series as
+  Parquet, under `backend/data/session/<session_id>/`. The frontend imports a
+  model once (`POST /api/session/model`) and thereafter fetches only what's on
+  screen — a page of rows (`GET …/sheet/{name}`) or a windowed, downsampled
+  series slice (`GET …/series/{name}`). Edits go back as patches
+  (`PATCH …/sheet/{name}`). The heavy model never lives in browser memory.
+- **Runs submit by `sessionId`.** `POST /api/queue` takes `{sessionId, scenario,
+  options}`; the backend snapshots the session model into the queued item. The
+  giant model payload never travels from the browser.
+- **Results are split.** `GET /api/runs/{name}/analytics` returns a light bundle
+  (KPIs, carrier-level series, topology) for an instant View; per-component
+  series are served windowed on demand from `…/series/{sheet}`. The lossless
+  bundle stays on disk as the export source.
+- **Compute is server-side.** The solve runs in a backend worker process; backend
+  plugins (below) also run in-process.
+
+**Two plugin kinds** (see `docs/plugin.md`):
+
+- *Frontend plugin* — browser JS; may run its **own** local server registered in
+  `plugins.env`.
+- *Backend plugin* — discovered under `backend/plugins/`, runs in the backend and
+  imports the bundled PyPSA source directly; **nothing in `plugins.env`**. A
+  `build` plugin writes its model straight into the session. Endpoints:
+  `GET /api/plugins`, `POST /api/plugins/{id}/build|analyze`.
+
+**Already remote-ready**
+
+- `session_id` is a first-class parameter everywhere (default `"default"`), so
+  multi-session is a config flip, not a rewrite.
+- CORS is open (`allow_origins=["*"]`); `API_BASE` is env-configurable; no
+  hardcoded `127.0.0.1` in the data-path code.
+
+**Remaining for a hardened multi-user server** (not yet built)
+
+- **Auth** — there is no authentication/authorization layer.
+- **Per-user sessions** — a single `"default"` session is assumed; concurrent
+  users would need session isolation and a shared store (Redis/DB/object
+  storage) instead of the warm single-process cache.
+- **`run.command` launches local processes** — fine for a workstation; a server
+  deployment runs the backend (and any backend plugins) as a managed service.
+- **A few result objects** (e.g. `assetDetails`) are still derived in the
+  browser from raw outputs; the per-component series fetch is on-demand.

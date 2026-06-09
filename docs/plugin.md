@@ -54,25 +54,40 @@ code) see `docs/frontend.md`. Everything else is here.
 13. [Dashboard Importer — full walkthrough](#13-dashboard-importer--full-walkthrough)
 14. [Troubleshooting](#14-troubleshooting)
 15. [SDK changelog](#15-sdk-changelog)
+16. [Backend (server-side) plugins](#16-backend-server-side-plugins)
 
 ---
 
 ## 1. What a plugin is
 
-A Ragnarok plugin is a **frontend-only extension** that runs entirely in the
-browser. You distribute it as a `.zip` containing a JSON manifest
-(`module.json`) and a JavaScript entry file (`index.js`). When you install the
-zip, the browser unpacks it, stores the files in `localStorage`, renders a
-configuration GUI from the manifest schema, and invokes the JavaScript hooks
-when you click "Apply to model", "Connect", or any other action button declared
-in the manifest.
+Ragnarok has **two kinds** of plugin:
 
-Plugins never execute inside the Ragnarok backend process. There is no backend
-hook, no pipeline stage, and no server-side Python that a plugin controls
-within Ragnarok. If a plugin needs heavy computation — building a network,
-running PyPSA, parsing a large Excel file — it hosts its own separate local
-HTTP server. The plugin's JavaScript communicates with that server directly
-over `localhost`; the Ragnarok backend is never involved.
+| Kind | Runs in | Distributed as | Discovered via | Own server? |
+|---|---|---|---|---|
+| **Frontend plugin** | the browser (evaluated JS) | a `.zip` you install in the Plugins tab | `localStorage` | optionally its own local HTTP server, registered in `plugins.env` |
+| **Backend plugin** | the Ragnarok **backend** process | a directory under `backend/plugins/` | `GET /api/plugins` | no — it imports the bundled PyPSA source directly; nothing in `plugins.env` |
+
+**Sections 1–15 of this guide describe FRONTEND plugins.** Backend plugins —
+the server-side kind that imports PyPSA directly and writes its model straight
+into the session — are covered in [section 16](#16-backend-server-side-plugins).
+Use a backend plugin when you want the build to run on the server (the
+server-side / iPad-thin-client deployment) with no separate process to launch;
+use a frontend plugin when the logic is light enough for the browser or when
+you want to keep an existing own-server build pipeline.
+
+A **frontend plugin** runs entirely in the browser. You distribute it as a
+`.zip` containing a JSON manifest (`module.json`) and a JavaScript entry file
+(`index.js`). When you install the zip, the browser unpacks it, stores the
+files in `localStorage`, renders a configuration GUI from the manifest schema,
+and invokes the JavaScript hooks when you click "Apply to model", "Connect", or
+any other action button declared in the manifest.
+
+A frontend plugin never executes inside the Ragnarok backend process. If it
+needs heavy computation — building a network, running PyPSA, parsing a large
+Excel file — it either hosts its **own** separate local HTTP server (the
+own-server pattern in section 8, registered in `plugins.env`) **or** is
+re-implemented as a backend plugin (section 16). Either way the plugin never
+calls the Ragnarok backend's own `/api/*` routes.
 
 There is no enable/disable toggle. A plugin is either installed (present and
 active in the Plugins tab) or uninstalled. Installing a plugin with an `id`
@@ -935,6 +950,10 @@ plugin server is self-contained and does not need Ragnarok's involvement.
 
 ### 9.1 `plugins.env` format
 
+> `plugins.env` is **only** for a *frontend* plugin's own local server. A
+> **backend plugin** ([section 16](#16-backend-server-side-plugins)) needs no
+> entry here — it runs inside the Ragnarok backend and imports PyPSA directly.
+
 Create a file named `plugins.env` in the Ragnarok project root (the same
 directory as `run.command`). Each non-comment line has the format:
 
@@ -949,7 +968,7 @@ Example:
 
 ```
 # Dashboard Importer build server
-/Users/you/simplePyPSA_KR/plugins_V2/ragnarok-dashboard-importer/backend|python server.py --port 8765
+/Users/you/simplePyPSA_KR/plugins_V3/ragnarok-dashboard-importer/backend|python server.py --port 8765
 ```
 
 Copy `plugins.env.example` from the project root to get the annotated template.
@@ -1267,7 +1286,7 @@ Run to solve.
 ## 13. Dashboard Importer — full walkthrough
 
 The `ragnarok-dashboard-importer` plugin in
-`simplePyPSA_KR/plugins_V2/ragnarok-dashboard-importer/` is the canonical
+`simplePyPSA_KR/plugins_V3/ragnarok-dashboard-importer/` is the canonical
 real-world reference implementation. It uses every feature of the plugin system:
 own server, `action` buttons, binary file upload, `table` fields with
 `visibleWhen` gates, and the `RAGNAROK_CustomDSL` constraint path.
@@ -1333,7 +1352,7 @@ terminal.
 
 ```
 # Dashboard Importer
-/Users/you/simplePyPSA_KR/plugins_V2/ragnarok-dashboard-importer/backend|python server.py --port 8765
+/Users/you/simplePyPSA_KR/plugins_V3/ragnarok-dashboard-importer/backend|python server.py --port 8765
 ```
 
 `run.command` detects `backend/.venv`, activates it, then runs
@@ -1354,7 +1373,7 @@ Ragnarok backend as part of the standard run request.
 **Install the plugin (zip only `module.json` + `index.js`):**
 
 ```bash
-cd /Users/you/simplePyPSA_KR/plugins_V2/ragnarok-dashboard-importer
+cd /Users/you/simplePyPSA_KR/plugins_V3/ragnarok-dashboard-importer
 zip -j ragnarok-dashboard-importer.zip module.json index.js
 ```
 
@@ -1500,3 +1519,107 @@ unchanged and there is no version bump. Keep declaring `"sdkVersion": "2"`.
   its value (a `PluginChartSpec`: `line` / `area` / `bar` / `donut`) as a chart
   drawn by the host. Plugins emit a data spec, never markup. See
   [Output tab](#63-output-tab).
+
+---
+
+## 16. Backend (server-side) plugins
+
+A **backend plugin** runs inside the Ragnarok backend process and may import the
+bundled PyPSA source directly (`backend/pypsa`). It is the right kind for the
+server-side / thin-client deployment: the build happens on the server, the
+result is written straight into the session (the source of truth), and **nothing
+is launched from `plugins.env`** — there is no separate server, because the
+plugin *is* part of the backend.
+
+### 16.1 When to use which kind
+
+- **Backend plugin** — heavy Python that belongs on the server (network build,
+  PyPSA construction, large-file parsing), and you want one deployable unit with
+  the model never entering the browser. Imports `backend.pypsa` / `pypsa`
+  directly. No `plugins.env` entry.
+- **Frontend plugin with its own server** (sections 8–9) — you already have an
+  external build server, or it must run on a different machine/repo. Registered
+  in `plugins.env`.
+- **Frontend plugin, browser-only** — light transforms/analytics that run in the
+  browser.
+
+> **Does `plugins.env` go away?** For a backend plugin, yes — it needs no entry.
+> `plugins.env` only launches the **own-server** of a *frontend* plugin. If you
+> port the Dashboard Importer to a backend plugin, delete its `plugins.env` line.
+
+### 16.2 Layout and discovery
+
+Backend plugins live under the directory named by the `RAGNAROK_BACKEND_PLUGINS_DIR`
+environment variable (default `backend/plugins/`). Each plugin is a directory:
+
+```
+backend/plugins/<id>/
+  manifest.json    # {id, name, version, description?, capabilities?, config?}
+  plugin.py        # exposes build(config) and/or analyze(result, config)
+```
+
+Discovery is isolated: a missing directory yields no plugins, and a plugin that
+fails to import (or exposes no hook) is logged and skipped — the backend always
+starts. The reference implementation is `backend/plugins/demo-network-builder/`.
+
+### 16.3 The `plugin.py` contract
+
+```python
+def build(config: dict) -> dict:
+    """Return a model dict {sheet: [rows]} — written into the session."""
+    from backend.pypsa.network import build_network   # the bundled source
+    model = {...}
+    build_network(model, {"discountRate": 0.0, "carbonPrice": 0.0}, None)  # validate
+    return model
+
+def analyze(result: dict, config: dict) -> dict:
+    """Optional: return an analytics dict for a solved run."""
+    return {"total_cost": result.get("summary", [{}])[0].get("value")}
+```
+
+A plugin may export `build`, `analyze`, or both. Raising inside a hook is safe —
+the router surfaces the message as a clean `400`.
+
+### 16.4 The `manifest.json`
+
+Same `config` schema as a frontend manifest (section 5), so the Plugins tab
+renders the identical form. An `action` field with `"hook": "build"` triggers the
+server build:
+
+```json
+{
+  "id": "demo-network-builder",
+  "name": "Demo Network Builder",
+  "version": "1.0.0",
+  "kind": "backend",
+  "description": "Builds a small PyPSA model server-side.",
+  "config": {
+    "grp": { "type": "group", "label": "Demo network" },
+    "buses": { "type": "number", "label": "Buses", "default": 1, "min": 1, "max": 50 },
+    "build": { "type": "action", "label": "Build & load into Ragnarok",
+               "hook": "build", "variant": "primary" }
+  }
+}
+```
+
+### 16.5 Endpoints
+
+| Method | Route | Purpose |
+|---|---|---|
+| `GET` | `/api/plugins` | list loaded backend plugins (manifests) |
+| `GET` | `/api/plugins/{id}` | one manifest |
+| `POST` | `/api/plugins/{id}/build` | run `build(config)` → save model into the session → return session meta |
+| `POST` | `/api/plugins/{id}/analyze` | run `analyze(result, config)` → return its dict |
+
+`POST .../build` body: `{config, sessionId, filename?, scenarioName?}`. The model
+is persisted server-side; the response is the lightweight session meta only.
+
+### 16.6 The frontend side
+
+The Plugins tab lists backend plugins (from `GET /api/plugins`) under a
+"Backend (server-side)" group. Selecting one renders its config form; the Build
+action POSTs to `/api/plugins/{id}/build`, then the editor rehydrates from the
+session (static sheets) and switches to the Model tab. The built model never
+enters the browser. If the backend is unreachable the list is simply empty —
+frontend plugins still work. See `src/lib/api/plugins.ts` and
+`src/features/plugins/BackendPluginDetail.tsx`.
