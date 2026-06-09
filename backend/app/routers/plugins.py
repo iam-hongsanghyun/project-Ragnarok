@@ -42,7 +42,7 @@ from typing import Any
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from .. import plugins, session_store
+from .. import model_store, plugins
 
 router = APIRouter(prefix="/api/plugins", tags=["plugins"])
 
@@ -204,7 +204,7 @@ def delete_plugin_file(plugin_id: str, filename: str) -> dict[str, Any]:
 
 def _save_transformed(plugin_id: str, body: TransformRequest, model: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
     try:
-        return session_store.save_model(
+        return model_store.save_model(
             body.sessionId,
             model,
             filename=body.filename or f"{plugin_id}.xlsx",
@@ -220,7 +220,7 @@ def transform_plugin(plugin_id: str, body: TransformRequest) -> dict[str, Any]:
 
     Returns the lightweight session meta — the model stays server-side.
     """
-    current = session_store.load_full_model(body.sessionId) or {}
+    current = model_store.load_full_model(body.sessionId) or {}
     try:
         model = plugins.run_transform(plugin_id, current, body.config)
     except KeyError as exc:
@@ -233,7 +233,7 @@ def transform_plugin(plugin_id: str, body: TransformRequest) -> dict[str, Any]:
 @router.post("/{plugin_id}/contribute")
 def contribute_plugin(plugin_id: str, body: TransformRequest) -> dict[str, Any]:
     """Run ``contribute(model, config)`` and merge its sheets + constraints into the session."""
-    current = session_store.load_full_model(body.sessionId) or {}
+    current = model_store.load_full_model(body.sessionId) or {}
     try:
         out = plugins.run_contribute(plugin_id, current, body.config)
     except KeyError as exc:
@@ -249,11 +249,11 @@ def contribute_plugin(plugin_id: str, body: TransformRequest) -> dict[str, Any]:
     if isinstance(constraints, list) and constraints:
         fragment["RAGNAROK_CustomDSL"] = [{"text": "\n".join(str(c) for c in constraints)}]
     if not fragment:
-        meta = session_store.get_meta(body.sessionId)
+        meta = model_store.get_meta(body.sessionId)
         if meta is None:
             raise HTTPException(status_code=400, detail="No session to contribute into.")
         return meta
-    meta = session_store.merge_static_model(body.sessionId, fragment)
+    meta = model_store.merge_static_model(body.sessionId, fragment)
     if meta is None:
         # No existing session — fall back to a full save of the fragment.
         return _save_transformed(plugin_id, body, fragment)

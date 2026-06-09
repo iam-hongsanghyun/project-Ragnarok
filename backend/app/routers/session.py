@@ -25,7 +25,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from .. import session_store
+from .. import model_store
 from ..models import SessionModelPayload
 
 router = APIRouter(prefix="/api/session", tags=["session"])
@@ -50,7 +50,7 @@ def put_model(payload: SessionModelPayload) -> dict:
     model it just sent.
     """
     try:
-        return session_store.save_model(
+        return model_store.save_model(
             payload.sessionId,
             payload.model,
             filename=payload.filename,
@@ -67,7 +67,7 @@ def merge_static(payload: SessionModelPayload) -> dict:
     The thin client calls this to sync its in-memory static edits before a run
     without clobbering the heavy time-series it doesn't hold.
     """
-    meta = session_store.merge_static_model(payload.sessionId, payload.model)
+    meta = model_store.merge_static_model(payload.sessionId, payload.model)
     if meta is None:
         raise HTTPException(status_code=400, detail="No session to merge into.")
     return meta
@@ -76,7 +76,7 @@ def merge_static(payload: SessionModelPayload) -> dict:
 @router.get("/meta")
 def get_meta(session_id: str = Query("default", alias="session_id")) -> dict:
     """Return the session meta, or ``{}`` when no model is loaded."""
-    return session_store.get_meta(session_id) or {}
+    return model_store.get_meta(session_id) or {}
 
 
 @router.get("/model/full")
@@ -90,7 +90,7 @@ def get_full_model(
     what the thin client uses to rehydrate the editor on boot (it pages series
     on demand). Returns ``{model: null}`` when nothing is loaded.
     """
-    return {"model": session_store.load_full_model(session_id, static_only=static_only)}
+    return {"model": model_store.load_full_model(session_id, static_only=static_only)}
 
 
 @router.get("/sheet/{name}")
@@ -101,7 +101,7 @@ def get_sheet(
     limit: int | None = Query(None, ge=0),
 ) -> dict:
     """Return one page of a sheet's rows (static or series)."""
-    page = session_store.get_sheet_page(session_id, name, offset=offset, limit=limit)
+    page = model_store.get_sheet_page(session_id, name, offset=offset, limit=limit)
     if page is None:
         raise HTTPException(status_code=404, detail=f"Sheet {name!r} not found in session.")
     return page
@@ -119,7 +119,7 @@ def get_series(
 ) -> dict:
     """Return a windowed, downsampled slice of a time-series sheet."""
     cols = [c.strip() for c in columns.split(",") if c.strip()] if columns else None
-    window = session_store.get_series_window(
+    window = model_store.get_series_window(
         session_id,
         name,
         start=start,
@@ -138,7 +138,7 @@ def get_series(
 @router.patch("/sheet/{name}")
 def patch_sheet(name: str, payload: SheetPatch) -> dict:
     """Apply a batch of edits to a sheet (backend is the source of truth)."""
-    result = session_store.patch_sheet(payload.sessionId, name, payload.ops)
+    result = model_store.patch_sheet(payload.sessionId, name, payload.ops)
     if result is None:
         raise HTTPException(status_code=404, detail=f"Sheet {name!r} not found in session.")
     return result
@@ -147,4 +147,4 @@ def patch_sheet(name: str, payload: SheetPatch) -> dict:
 @router.post("/clear")
 def clear_session(session_id: str = Query("default", alias="session_id")) -> dict:
     """Clear the session's working model (settings are a separate frontend concern)."""
-    return {"cleared": session_store.clear(session_id)}
+    return {"cleared": model_store.clear(session_id)}

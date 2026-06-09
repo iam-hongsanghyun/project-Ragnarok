@@ -25,7 +25,7 @@ from .log_capture import (
     install as _install_log_capture,
 )
 from .models import ExportProjectPayload, RunPayload
-from . import run_store, session_store
+from . import model_store, run_store
 from ..pypsa.network import build_network, validate_model
 
 # xlsx MIME used by the run export endpoint below.
@@ -587,7 +587,7 @@ def _resolve_payload_model(payload: RunPayload) -> RunPayload:
     if payload.model:
         return payload
     if payload.sessionId:
-        model = session_store.load_full_model(payload.sessionId)
+        model = model_store.load_full_model(payload.sessionId)
         if not model:
             raise HTTPException(
                 status_code=400, detail=f"No model loaded in session {payload.sessionId!r}."
@@ -796,7 +796,7 @@ async def import_queue_item(item_id: str) -> dict[str, Any]:
     payload = _read_queue_payload(item.payload_path)
     if not payload.model:
         raise HTTPException(status_code=400, detail="Queue item has no model to import.")
-    meta = session_store.save_model(
+    meta = model_store.save_model(
         "default",
         payload.model,
         filename=str((payload.options or {}).get("filename") or item.label),
