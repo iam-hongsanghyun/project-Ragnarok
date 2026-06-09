@@ -212,6 +212,23 @@ def run_pypsa(
     _t_solve = time.perf_counter()
     try:
         if rolling.enabled:
+            # Rolling horizon carries storage state between windows via
+            # `state_of_charge_initial` (set from the previous window's end).
+            # Cyclic SOC (soc_end == soc_start within each window) is INCOMPATIBLE:
+            # it ignores the carried state and forces every window — especially the
+            # shorter trailing one — to net-zero storage, which is frequently
+            # infeasible. PyPSA then silently leaves that window's results at zero,
+            # truncating the run. Force non-cyclic so carried state provides
+            # continuity across the full horizon.
+            if not network.storage_units.empty:
+                network.storage_units["cyclic_state_of_charge"] = False
+                if "cyclic_state_of_charge_per_period" in network.storage_units.columns:
+                    network.storage_units["cyclic_state_of_charge_per_period"] = False
+            if not network.stores.empty:
+                if "e_cyclic" in network.stores.columns:
+                    network.stores["e_cyclic"] = False
+                if "e_cyclic_per_period" in network.stores.columns:
+                    network.stores["e_cyclic_per_period"] = False
             rolling_windows = _rolling_window_summaries(
                 network.snapshots,
                 rolling.horizon_snapshots,
