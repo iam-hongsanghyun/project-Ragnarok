@@ -107,6 +107,25 @@ def get_sheet(
     return page
 
 
+@router.get("/sheet/{name}/distinct")
+def get_sheet_distinct(
+    name: str,
+    column: str = Query(..., description="Column whose distinct non-empty values to return."),
+    session_id: str = Query("default", alias="session_id"),
+) -> dict:
+    """Return the sorted distinct non-empty values of one column in a sheet.
+
+    Backs Ragnarok's own unique-value features (Forge target pickers, grid column
+    filters). Served by the store's native ``SELECT DISTINCT`` on the SQLite
+    backend and a row-scan fallback on the legacy store, so the capability works
+    regardless of ``RAGNAROK_STORE``. The model never travels to the browser.
+    """
+    values = model_store.distinct_values(session_id, name, column)
+    if values is None:
+        raise HTTPException(status_code=404, detail=f"Sheet {name!r} not found in session.")
+    return {"sheet": name, "column": column, "values": values}
+
+
 @router.get("/series/{name}")
 def get_series(
     name: str,

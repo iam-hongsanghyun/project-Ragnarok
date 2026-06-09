@@ -133,6 +133,29 @@ export async function getSheetPage(
   return asJson<SheetPage>(resp);
 }
 
+/**
+ * Sorted distinct non-empty values of one column in a static sheet.
+ *
+ * Server-side (`SELECT DISTINCT` on the SQLite store, row-scan on legacy) so the
+ * model never loads into the browser. Backs unique-value pickers (Forge targets,
+ * grid column filters) on demand — never per-keystroke.
+ */
+export async function getSheetDistinct(
+  name: string,
+  column: string,
+  opts: { sessionId?: string } = {},
+): Promise<string[]> {
+  const params = new URLSearchParams({
+    session_id: opts.sessionId ?? DEFAULT_SESSION_ID,
+    column,
+  });
+  const resp = await fetch(
+    `${API_BASE}/api/session/sheet/${encodeURIComponent(name)}/distinct?${params}`,
+  );
+  const data = await asJson<{ values: string[] }>(resp);
+  return data.values ?? [];
+}
+
 /** A windowed, server-downsampled slice of a time-series sheet. */
 export async function getSeriesWindow(
   name: string,
