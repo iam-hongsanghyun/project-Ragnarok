@@ -1224,6 +1224,26 @@ function AppInner() {
     void refreshQueue();
   }, [refreshQueue]);
 
+  // Import project (Queue tab): load a queued/finished item's retained model
+  // snapshot into the editor as a new working project. The backend writes it to
+  // the session; we then rehydrate the editor from there (static sheets only —
+  // series stay server-side and page into the grid). A subsequent Run/Queue
+  // makes a NEW entry, so the original queue card is left untouched.
+  const handleImportQueueItem = useCallback(async (id: string) => {
+    try {
+      const resp = await fetch(`${API_BASE}/api/queue/${encodeURIComponent(id)}/import`, { method: 'POST' });
+      if (!resp.ok) throw new Error((await resp.text()) || 'Import failed.');
+      const meta = (await resp.json()) as { filename?: string };
+      const savedModel = await getSessionFullModel({ staticOnly: true });
+      if (!savedModel) throw new Error('Imported model could not be read back from the session.');
+      resetForNewModel(savedModel, meta.filename, { pushToSession: false });
+      setTab('Model');
+      showToast('Imported queued model into the editor', 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Failed to import queued model.', 'error');
+    }
+  }, [resetForNewModel, setTab, showToast]);
+
   const handleOpenBackendRun = async (
     name: string,
     opts?: { restoreConstraints?: boolean; asProject?: boolean },
@@ -1459,7 +1479,7 @@ function AppInner() {
     }
   };
 
-  const handleRunModel = async () => {
+  const handleRunModel = async (staged = false) => {
     const snapshotCount = snapshotEnd - snapshotStart;
     const scenario = {
       constraints: constraints.filter((c) => c.enabled),
@@ -1535,10 +1555,12 @@ function AppInner() {
 
     // Enqueue the run on the backend's serial queue and return immediately. The
     // queue poller notifies on completion and the finished run appears in
-    // History — the UI never blocks on a live solve here.
-    setStatus(`Queuing run — ${snapshotCount} snapshots…`);
+    // History — the UI never blocks on a live solve here. ``staged`` parks the
+    // job ("Queue next Run") so it won't auto-run until the user activates it
+    // from the Queue tab; the default ("Run") runs now if idle, else next.
+    setStatus(staged ? `Staging run — ${snapshotCount} snapshots…` : `Queuing run — ${snapshotCount} snapshots…`);
     try {
-      const resp = await fetch(`${API_BASE}/api/queue`, {
+      const resp = await fetch(`${API_BASE}/api/queue${staged ? '?staged=true' : ''}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId: DEFAULT_SESSION_ID, scenario, options }),
@@ -1547,9 +1569,14 @@ function AppInner() {
         throw new Error((await resp.text()) || `Failed to queue run (status ${resp.status}).`);
       }
       const { position } = (await resp.json()) as { id: string; position: number };
-      const posMsg = position > 1 ? ` — position ${position} in queue` : '';
-      setStatus(`Run queued${posMsg}. You'll be notified when it finishes; it then appears in History.`);
-      showToast(`Run queued${posMsg}`, 'info');
+      if (staged) {
+        setStatus('Run staged. Activate it from the Queue tab when you want it to run.');
+        showToast('Run staged for later', 'info');
+      } else {
+        const posMsg = position > 1 ? ` — position ${position} in queue` : '';
+        setStatus(`Run queued${posMsg}. You'll be notified when it finishes; it then appears in History.`);
+        showToast(`Run queued${posMsg}`, 'info');
+      }
       void refreshQueue();
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Failed to queue run.';
@@ -1932,6 +1959,7 @@ function AppInner() {
                     jobs={queueJobs}
                     onCancel={handleCancelQueueItem}
                     onRerun={handleRerunQueueItem}
+                    onImport={handleImportQueueItem}
                     onDelete={handleDeleteQueueItem}
                   />
                 ) : (
@@ -1978,7 +2006,8 @@ function AppInner() {
         rollingConfig={rollingConfig}
         onForceLpChange={setForceLp}
         onDryRunChange={setDryRun}
-        onRun={handleRunModel}
+        onRun={() => void handleRunModel(false)}
+        onQueueNext={() => void handleRunModel(true)}
       />
     </div>
   );

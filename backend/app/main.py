@@ -191,7 +191,7 @@ class _QueueItem:
     label: str
     summary: dict[str, Any]
     submitted_at: str
-    status: str = "queued"  # queued | running | done | error | cancelled
+    status: str = "queued"  # queued | staged | running | done | error | cancelled
     started_at: str | None = None
     finished_at: str | None = None
     error: str | None = None
@@ -689,12 +689,15 @@ async def cancel_run(job_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/queue")
-async def enqueue_run(payload: RunPayload) -> dict[str, Any]:
-    """Add a solve to the back of the queue and return immediately.
+async def enqueue_run(payload: RunPayload, staged: bool = False) -> dict[str, Any]:
+    """Add a solve to the queue and return immediately.
 
-    The job runs when its turn comes (serial); the frontend polls
-    ``GET /api/queue`` for status and is notified when it finishes (the run then
-    appears in History). Returns the new item id and its 1-based queue position.
+    ``staged=false`` (default, the "Run" button): the job runs now if the queue
+    is idle, else it's next — the pump picks it up. ``staged=true`` (the "Queue
+    next Run" button): the job is parked as ``staged`` and the pump skips it
+    until the user activates it (per-card Run). Either way the session model is
+    snapshotted into the item now, so later edits can't change it. Returns the
+    new item id, status and 1-based queue position.
     """
     try:
         get_backend((payload.options or {}).get("backend"))
@@ -705,6 +708,9 @@ async def enqueue_run(payload: RunPayload) -> dict[str, Any]:
     # _resolve_payload_model) so the queued run is immune to later edits.
     payload = _resolve_payload_model(payload)
     item, position = _enqueue_payload(payload)
+    if staged:
+        item.status = "staged"
+        _persist_queue_meta(item)
     return {"id": item.id, "status": item.status, "position": position}
 
 
@@ -725,7 +731,7 @@ async def cancel_queued(item_id: str) -> dict[str, Any]:
     item = _find_queue_item(item_id)
     if item is None:
         return {"id": item_id, "status": "not_found"}
-    if item.status == "queued":
+    if item.status in ("queued", "staged"):
         item.status = "cancelled"
         item.finished_at = _now_iso()
     elif item.status == "running":
@@ -746,10 +752,17 @@ async def cancel_queued(item_id: str) -> dict[str, Any]:
 
 @app.post("/api/queue/{item_id}/rerun")
 async def rerun_queued(item_id: str) -> dict[str, Any]:
-    """Create a fresh queued item from a retained queue payload."""
+    """Activate a queue item IN PLACE — re-runs its retained model snapshot.
+
+    Used by the per-card "Run" button on a staged or finished/cancelled card.
+    The SAME card flips back to ``queued`` (no duplicate card, no duplicated
+    model) and the pump picks it up. A running item is left as-is.
+    """
     item = _find_queue_item(item_id)
     if item is None:
         return {"id": item_id, "status": "not_found"}
+    if item.status == "running":
+        return {"id": item_id, "status": "running"}
     if not item.payload_path.exists():
         raise HTTPException(status_code=404, detail="Queued payload file is missing.")
     payload = _read_queue_payload(item.payload_path)
@@ -757,8 +770,34 @@ async def rerun_queued(item_id: str) -> dict[str, Any]:
         get_backend((payload.options or {}).get("backend"))
     except BackendError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    new_item, position = _enqueue_payload(payload)
-    return {"id": new_item.id, "status": new_item.status, "position": position}
+    item.status = "queued"
+    item.started_at = None
+    item.finished_at = None
+    item.error = None
+    _persist_queue_meta(item)
+    return {"id": item.id, "status": "queued", "position": _queue_position()}
+
+
+@app.post("/api/queue/{item_id}/import")
+async def import_queue_item(item_id: str) -> dict[str, Any]:
+    """Load a queue item's model snapshot into the current working session.
+
+    Lets the user pull a queued/finished run back into the editor to tweak and
+    re-run as a NEW entry (the original card is untouched).
+    """
+    item = _find_queue_item(item_id)
+    if item is None or not item.payload_path.exists():
+        raise HTTPException(status_code=404, detail="Queue item not found.")
+    payload = _read_queue_payload(item.payload_path)
+    if not payload.model:
+        raise HTTPException(status_code=400, detail="Queue item has no model to import.")
+    meta = session_store.save_model(
+        "default",
+        payload.model,
+        filename=str((payload.options or {}).get("filename") or item.label),
+        scenario_name=str((payload.scenario or {}).get("label") or ""),
+    )
+    return meta
 
 
 @app.delete("/api/queue/{item_id}")

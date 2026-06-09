@@ -729,7 +729,7 @@ export interface BackendRunMeta {
 export interface QueueJob {
   id: string;
   label: string;
-  status: 'queued' | 'running' | 'done' | 'error' | 'cancelled';
+  status: 'queued' | 'staged' | 'running' | 'done' | 'error' | 'cancelled';
   submittedAt: string;
   startedAt?: string | null;
   finishedAt?: string | null;

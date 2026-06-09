@@ -65,18 +65,52 @@ def test_cancel_unknown_is_not_found() -> None:
     assert asyncio.run(main.cancel_queued("does-not-exist"))["status"] == "not_found"
 
 
-def test_rerun_queued_creates_new_item_from_retained_payload() -> None:
+def test_rerun_reactivates_in_place_no_duplicate() -> None:
     r = asyncio.run(main.enqueue_run(_payload("Stopped", 12)))
     asyncio.run(main.cancel_queued(r["id"]))
 
     rerun = asyncio.run(main.rerun_queued(r["id"]))
 
+    # Same card, flipped back to queued — no duplicate row, no duplicated model.
     assert rerun["status"] == "queued"
-    assert rerun["position"] == 1
+    assert rerun["id"] == r["id"]
     jobs = main.get_queue()["jobs"]
-    assert [job["status"] for job in jobs] == ["cancelled", "queued"]
-    assert [job["label"] for job in jobs] == ["Stopped", "Stopped"]
-    assert main._queue_payload_path(rerun["id"]).exists()
+    assert len(jobs) == 1
+    assert jobs[0]["status"] == "queued" and jobs[0]["label"] == "Stopped"
+
+
+def test_enqueue_staged_parks_without_running() -> None:
+    r = asyncio.run(main.enqueue_run(_payload("Later", 10), staged=True))
+    assert r["status"] == "staged"
+    jobs = main.get_queue()["jobs"]
+    assert jobs[0]["status"] == "staged"
+    # The pump only picks "queued" items, so a staged item is never auto-run.
+    nxt = next((it for it in main._run_queue if it.status == "queued"), None)
+    assert nxt is None
+
+
+def test_staged_then_run_activates_in_place() -> None:
+    r = asyncio.run(main.enqueue_run(_payload("Later", 10), staged=True))
+    res = asyncio.run(main.rerun_queued(r["id"]))
+    assert res["status"] == "queued" and res["id"] == r["id"]
+    assert len(main.get_queue()["jobs"]) == 1
+
+
+def test_cancel_staged_marks_cancelled() -> None:
+    r = asyncio.run(main.enqueue_run(_payload("Later", 10), staged=True))
+    res = asyncio.run(main.cancel_queued(r["id"]))
+    assert res["status"] == "cancelled"
+
+
+def test_import_queue_item_loads_model_into_session(_session_dir) -> None:
+    session_store.save_model("default", _session_model(), filename="case.xlsx", scenario_name="ref")
+    payload = RunPayload(scenario={"label": "ref"}, options={"snapshotStart": 0, "snapshotEnd": 6}, sessionId="default")
+    r = asyncio.run(main.enqueue_run(payload))
+    # Clear the session, then import the queued item's snapshot back into it.
+    session_store.clear("default")
+    meta = asyncio.run(main.import_queue_item(r["id"]))
+    assert meta["componentCounts"].get("buses") == 1
+    assert session_store.get_meta("default") is not None
 
 
 def test_delete_queue_item_removes_payload_files() -> None:

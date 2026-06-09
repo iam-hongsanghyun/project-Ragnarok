@@ -2893,6 +2893,8 @@ path.leaflet-interactive:focus {
   min-width: 88px;
 }
 .queue-status--running { color: var(--brand); }
+/* Staged ("Queue next Run"): parked, not yet running — dim it like a draft. */
+.queue-status--staged { color: var(--muted); font-style: italic; }
 .topbar-queue { display: inline-flex; align-items: center; gap: 6px; }
 
 /* Flat, full-width rows (no card chrome) — one run per line, info horizontal. */
