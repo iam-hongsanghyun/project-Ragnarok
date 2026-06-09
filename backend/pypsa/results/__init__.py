@@ -389,6 +389,28 @@ def run_pypsa(
         if v > 0.0
     ]
 
+    # Per-generator dispatched energy (MWh, snapshot-weighted). This is the small
+    # aggregate the "Dispatch by unit" donut renders, so the heavy per-snapshot
+    # generator series never has to reach the browser — it stays server-side and
+    # is fetched windowed only when a time-series chart is opened.
+    generator_carriers = network.generators["carrier"].to_dict()
+    generator_energy = []
+    for gen in generator_dispatch_frame.columns:
+        if str(gen).startswith("load_shedding_"):
+            continue
+        energy = weighted_sum(generator_dispatch_frame[gen].clip(lower=0.0), generator_weights)
+        if energy > 0.0:
+            carrier = str(generator_carriers.get(gen, ""))
+            generator_energy.append(
+                {
+                    "name": str(gen),
+                    "value": float(energy),
+                    "carrier": carrier,
+                    "color": carrier_color(network, carrier),
+                }
+            )
+    generator_energy.sort(key=lambda row: row["value"], reverse=True)
+
     # Cost breakdown. Use the effective per-snapshot marginal cost
     # (``get_switchable_as_dense`` resolves static vs time-varying inputs) so
     # the fuel/carbon split is correct even when a generator's marginal_cost is
@@ -518,6 +540,7 @@ def run_pypsa(
         "storageSeries": storage_s,
         "nodalPriceSeries": nodal_price_series,
         "carrierMix": carrier_mix,
+        "generatorEnergy": generator_energy,
         "costBreakdown": cost_breakdown,
         "nodalBalance": nodal_balance,
         "lineLoading": line_loading,

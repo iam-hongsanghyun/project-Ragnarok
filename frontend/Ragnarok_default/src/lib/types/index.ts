@@ -548,6 +548,10 @@ export interface RunResults {
   summary: SummaryItem[];
   dispatchSeries: SeriesPoint[];
   generatorDispatchSeries: SeriesPoint[];
+  /** Compact per-generator dispatched energy (MWh) — backend aggregate that
+   *  powers the "Dispatch by unit" donut without shipping the per-snapshot
+   *  series. Present on light (View) loads; the full series is fetched windowed. */
+  generatorEnergy?: Array<{ name: string; value: number; carrier?: string; color?: string }>;
   systemPriceSeries: ValuePoint[];
   systemEmissionsSeries: ValuePoint[];
   storageSeries: StoragePoint[];
@@ -730,6 +734,7 @@ export interface QueueJob {
   startedAt?: string | null;
   finishedAt?: string | null;
   error?: string | null;
+  payloadAvailable?: boolean;
   // Display-only run settings.
   snapshots?: number | null;
   snapshotWeight?: number | null;

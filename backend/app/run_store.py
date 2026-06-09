@@ -25,6 +25,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
+
+from . import timeseries
+
 logger = logging.getLogger("pypsa_gui.run_store")
 
 # Resolve the runs directory relative to the repository root. ``__file__`` is
@@ -63,6 +67,22 @@ def _filename_label_stem(filename: str) -> str:
     return "" if stem.lower() in _DEFAULT_FILENAME_STEMS else stem
 
 
+_SHEET_SANITISE = re.compile(r"[^A-Za-z0-9._\-]+")
+
+
+def _safe_sheet_filename(sheet: str) -> str:
+    """Filesystem-safe stem for a series sheet (e.g. ``generators-p``)."""
+    return _SHEET_SANITISE.sub("_", sheet).strip("_") or "sheet"
+
+
+def _analytics_path(name: str) -> Path:
+    return RUNS_DIR / f"{name}.analytics.json"
+
+
+def _series_dir(name: str) -> Path:
+    return RUNS_DIR / f"{name}.series"
+
+
 def _is_safe_name(name: str) -> bool:
     """Return True when ``name`` is safe to use as a filesystem stem.
 
@@ -82,13 +102,14 @@ def _sanitise_label(label: str) -> str:
 
 
 def _derive_name(model: dict[str, Any], scenario: dict[str, Any], options: dict[str, Any]) -> str:
-    """Build a datetime-based, filesystem-safe run name.
+    """Build a ``scenarioname_datetime`` filesystem-safe run name.
 
-    The stem is a UTC timestamp ``<YYYY-MM-DDTHH-MM-SS>``; a sanitised label
-    (from ``options['runLabel']``, the scenario label, or the model filename
-    with its extension stripped) is appended when one is available. A generic
-    default filename (``ragnarok_case.xlsx`` etc.) contributes no label, so a
-    plain run keeps a clean timestamp name.
+    The scenario name leads (from ``options['runLabel']``, the scenario label, or
+    the model filename with its extension stripped), followed by a UTC timestamp
+    ``<YYYY-MM-DDTHH-MM-SS>`` so reruns of the same scenario never collide and
+    sort chronologically within a scenario: ``north-sea-2030_2026-06-09T14-30-00``.
+    A generic default filename (``ragnarok_case.xlsx`` etc.) contributes no name,
+    so such a run is just the clean timestamp.
     """
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
     raw_label = (
@@ -99,7 +120,7 @@ def _derive_name(model: dict[str, Any], scenario: dict[str, Any], options: dict[
     if not raw_label and isinstance(options, dict) and options.get("filename"):
         raw_label = _filename_label_stem(str(options["filename"]))
     label = _sanitise_label(str(raw_label)) if raw_label else ""
-    return f"{stamp}_{label}" if label else stamp
+    return f"{label}_{stamp}" if label else stamp
 
 
 def _label_for_bundle(scenario: dict[str, Any], options: dict[str, Any], filename: str) -> str:
@@ -258,6 +279,122 @@ def build_run_meta(name: str, bundle: dict[str, Any], size_bytes: int = 0) -> di
     }
 
 
+def _is_series_sheet(name: str) -> bool:
+    """A PyPSA time-series sheet is ``<component>-<attribute>``; ``snapshots`` is
+    the time axis (static). Mirrors session_store.is_series_sheet."""
+    return name != "snapshots" and "-" in name
+
+
+def _model_static(model: Any) -> dict[str, Any]:
+    """Topology-only view of a model: every static sheet, none of the heavy input
+    time-series. Small enough to ship with the light analytics bundle so the
+    network map renders on View without downloading the full model."""
+    if not isinstance(model, dict):
+        return {}
+    return {name: rows for name, rows in model.items() if not _is_series_sheet(str(name))}
+
+
+def _generator_energy_fallback(result: dict[str, Any], bundle: dict[str, Any]) -> list[dict[str, Any]]:
+    """Per-generator dispatched energy from the per-snapshot series (older runs).
+
+    New runs carry ``result['generatorEnergy']`` (computed server-side at solve
+    time); runs stored before that field existed are summed here from
+    ``generatorDispatchSeries`` so the "Dispatch by unit" donut still has its
+    small aggregate after the heavy series is stripped from the light view.
+    """
+    rows = result.get("generatorDispatchSeries")
+    if not isinstance(rows, list) or not rows:
+        return []
+    totals: dict[str, float] = {}
+    for row in rows:
+        values = row.get("values") if isinstance(row, dict) else None
+        if isinstance(values, dict):
+            for key, value in values.items():
+                try:
+                    totals[str(key)] = totals.get(str(key), 0.0) + float(value)
+                except (TypeError, ValueError):
+                    continue
+    weight = bundle.get("snapshotWeight") or (bundle.get("options") or {}).get("snapshotWeight") or 1.0
+    try:
+        weight = float(weight)
+    except (TypeError, ValueError):
+        weight = 1.0
+    carrier_map: dict[str, str] = {}
+    gens = (bundle.get("model") or {}).get("generators")
+    if isinstance(gens, list):
+        for g in gens:
+            if isinstance(g, dict) and g.get("name") is not None:
+                carrier_map[str(g["name"])] = str(g.get("carrier", ""))
+    out = [
+        {"name": k, "value": v * weight, "carrier": carrier_map.get(k, "")}
+        for k, v in totals.items()
+        if v > 0.0
+    ]
+    out.sort(key=lambda row: row["value"], reverse=True)
+    return out
+
+
+def _light_analytics(bundle: dict[str, Any]) -> dict[str, Any]:
+    """Build the lightweight analytics bundle.
+
+    Drops the heavy input model and per-component output series, plus the heavy
+    per-snapshot ``generatorDispatchSeries`` (tens of MB). Keeps topology (for the
+    map), the small result aggregates, the carrier-level dispatch series, and a
+    compact per-generator energy aggregate (``generatorEnergy``) for the
+    "Dispatch by unit" donut. The stripped series stay in the canonical bundle
+    (used by Import) and are served windowed on demand.
+    """
+    result = bundle.get("result")
+    outputs = result.get("outputs") if isinstance(result, dict) else None
+    series = outputs.get("series") if isinstance(outputs, dict) else None
+    light_outputs = dict(outputs) if isinstance(outputs, dict) else {}
+    light_outputs["series"] = None
+    light_outputs["seriesSheets"] = sorted(series) if isinstance(series, dict) else []
+    analytics = {k: v for k, v in bundle.items() if k != "model"}
+    if isinstance(result, dict):
+        light_result = {**result, "outputs": light_outputs}
+        if not light_result.get("generatorEnergy"):
+            light_result["generatorEnergy"] = _generator_energy_fallback(result, bundle)
+        # The dominant payload (tens of MB) — only needed for the per-unit
+        # time-series view, which fetches it windowed on demand.
+        light_result["generatorDispatchSeries"] = None
+        analytics["result"] = light_result
+    analytics["modelStatic"] = _model_static(bundle.get("model"))
+    analytics["hasModel"] = isinstance(bundle.get("model"), dict)
+    return analytics
+
+
+def _write_results_split(name: str, bundle: dict[str, Any]) -> None:
+    """Write the granular artefacts the thin client reads instead of the bundle.
+
+    The full ``<name>.json`` bundle stays the lossless source of truth, but
+    "View Result" used to download it whole — model + every output time-series —
+    which froze the tab. So we additionally write:
+
+    * ``<name>.analytics.json`` — the bundle minus the heavy input ``model`` and
+      minus the output ``result.outputs.series`` (replaced by a ``seriesSheets``
+      name list). Small; the analytics view loads this first and renders at once.
+    * ``<name>.series/<sheet>.parquet`` — one Parquet per output time-series
+      sheet, read back windowed + downsampled via :func:`run_series_window`.
+    """
+    result = bundle.get("result")
+    if not isinstance(result, dict):
+        return
+    outputs = result.get("outputs")
+    series = outputs.get("series") if isinstance(outputs, dict) else None
+
+    _analytics_path(name).write_text(json.dumps(_light_analytics(bundle)), encoding="utf-8")
+
+    if isinstance(series, dict) and series:
+        sdir = _series_dir(name)
+        sdir.mkdir(parents=True, exist_ok=True)
+        for sheet, rows in series.items():
+            if isinstance(rows, list) and rows:
+                pd.DataFrame(rows).to_parquet(
+                    sdir / f"{_safe_sheet_filename(str(sheet))}.parquet", index=False
+                )
+
+
 def store_run(
     model: dict[str, Any],
     scenario: dict[str, Any],
@@ -306,6 +443,13 @@ def store_run(
 
         meta = build_run_meta(name, bundle, size_bytes)
         (RUNS_DIR / f"{name}.meta.json").write_text(json.dumps(meta), encoding="utf-8")
+
+        # Granular artefacts for the thin client (analytics.json + series parquet).
+        # Non-fatal: the canonical bundle above already holds everything.
+        try:
+            _write_results_split(name, bundle)
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to write results split for run %s", name)
 
         # Pre-build the xlsx now (server-side) so a later download serves a ready
         # file instead of rebuilding a large workbook on every request. The JSON
@@ -367,8 +511,112 @@ def get_run(name: str) -> dict[str, Any] | None:
         return None
 
 
+def get_run_analytics(name: str) -> dict[str, Any] | None:
+    """Return the lightweight analytics bundle (no input model, no output series).
+
+    This is what "View Result" loads first — small enough to render instantly.
+    Falls back to deriving it from the full bundle for runs stored before the
+    results-split existed. ``None`` if the run is missing/unsafe.
+    """
+    if not _is_safe_name(name):
+        return None
+    path = _analytics_path(name)
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to read analytics for run %s", name)
+    # Fallback: derive on the fly from the canonical bundle (older runs).
+    bundle = get_run(name)
+    if bundle is None:
+        return None
+    return _light_analytics(bundle)
+
+
+def run_series_window(
+    name: str,
+    sheet: str,
+    *,
+    start: int = 0,
+    end: int | None = None,
+    columns: list[str] | None = None,
+    max_points: int | None = None,
+    agg: str = "mean",
+) -> dict[str, Any] | None:
+    """Return a windowed, downsampled slice of a stored run's output series.
+
+    Reads the per-sheet Parquet written by :func:`_write_results_split`; for
+    older runs without it, falls back to the series embedded in the bundle.
+    ``None`` if the run/sheet is absent.
+    """
+    if not _is_safe_name(name):
+        return None
+    mp = max_points if max_points is not None else 800
+
+    path = _series_dir(name) / f"{_safe_sheet_filename(sheet)}.parquet"
+    if path.exists():
+        df = _read_series_with_columns(path, columns)
+        index_col = timeseries.series_index_col([str(c) for c in df.columns])
+    else:
+        bundle = get_run(name)
+        series = (((bundle or {}).get("result") or {}).get("outputs") or {}).get("series")
+        rows = series.get(sheet) if isinstance(series, dict) else None
+        if not isinstance(rows, list) or not rows:
+            return None
+        df = pd.DataFrame(rows)
+        index_col = timeseries.series_index_col([str(c) for c in df.columns])
+        if columns:
+            keep = [index_col] + [c for c in columns if c in df.columns and c != index_col]
+            df = df[[c for c in keep if c in df.columns]]
+    window = timeseries.slice_and_reduce(
+        df, start=start, end=end, max_points=mp, agg=agg, index_col=index_col
+    )
+    return {"name": sheet, **window}
+
+
+def run_model_sheet_page(
+    name: str, sheet: str, offset: int = 0, limit: int = 200
+) -> dict[str, Any] | None:
+    """Return one page of a stored run's INPUT model sheet (for re-edit/import).
+
+    Reads from the canonical bundle's ``model``. ``None`` if missing/unsafe.
+    """
+    if not _is_safe_name(name):
+        return None
+    bundle = get_run(name)
+    model = bundle.get("model") if isinstance(bundle, dict) else None
+    rows = model.get(sheet) if isinstance(model, dict) else None
+    if not isinstance(rows, list):
+        return None
+    offset = max(0, int(offset))
+    limit = max(0, int(limit))
+    page = rows[offset : offset + limit]
+    columns = list(page[0].keys()) if page and isinstance(page[0], dict) else []
+    return {
+        "name": sheet,
+        "total": len(rows),
+        "offset": offset,
+        "limit": limit,
+        "columns": columns,
+        "rows": page,
+    }
+
+
+def _read_series_with_columns(path: Path, columns: list[str] | None) -> pd.DataFrame:
+    """Read a series parquet, pushing down a column subset (index col kept)."""
+    if not columns:
+        return pd.read_parquet(path)
+    import pyarrow.parquet as pq
+
+    available = [str(c) for c in pq.read_schema(path).names]
+    index_col = timeseries.series_index_col(available)
+    wanted = [c for c in columns if c in available and c != index_col]
+    read_cols = ([index_col] + wanted) if index_col in available else wanted
+    return pd.read_parquet(path, columns=read_cols or None)
+
+
 def delete_run(name: str) -> bool:
-    """Delete the bundle and meta sidecar for ``name``.
+    """Delete the bundle, meta sidecar, analytics, series dir and xlsx for ``name``.
 
     Returns True if at least one file was removed, False otherwise (including
     an unsafe name or a non-existent run).
@@ -378,11 +626,17 @@ def delete_run(name: str) -> bool:
         return False
     removed = False
     try:
-        for suffix in (".json", ".meta.json", ".xlsx"):
+        for suffix in (".json", ".meta.json", ".xlsx", ".analytics.json"):
             path = RUNS_DIR / f"{name}{suffix}"
             if path.exists():
                 path.unlink()
                 removed = True
+        sdir = _series_dir(name)
+        if sdir.exists():
+            import shutil
+
+            shutil.rmtree(sdir, ignore_errors=True)
+            removed = True
     except Exception:  # noqa: BLE001
         logger.exception("Failed to delete backend run %s", name)
         return removed

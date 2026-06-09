@@ -18,3 +18,13 @@ config loading, the ``RunPayload`` model, and the plugin host. A second backend
 would live as a sibling package (e.g. ``backend.<engine>``) implementing the
 same ``Backend`` protocol.
 """
+from __future__ import annotations
+
+# Force NumPy/object strings before any pypsa.Network is built (pyarrow is
+# installed for the session store's Parquet engine, which would otherwise flip
+# pandas 3.0 to Arrow strings that xarray<2026 rejects). See
+# backend.app._pandas_compat. Solver tests import this engine package directly,
+# so the shim must live here too, not only in the API host.
+from ..app._pandas_compat import ensure_object_strings as _ensure_object_strings
+
+_ensure_object_strings()

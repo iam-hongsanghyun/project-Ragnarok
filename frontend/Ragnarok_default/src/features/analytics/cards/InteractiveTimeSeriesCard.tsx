@@ -1,6 +1,80 @@
-import React, { useState, useRef, useLayoutEffect } from 'react';
+import React, { useState, useRef, useLayoutEffect, useEffect, useCallback } from 'react';
 import { ChartMode, TimeSeriesRow, TimeSeriesSeries } from 'lib/types';
 import { numberValue, isoDate, isoTime } from 'lib/utils/helpers';
+
+// Default initial window: render at most one week of hourly points so a
+// full-year (8760-point) series doesn't paint thousands of nodes on open. The
+// user drags the brush below the chart to resize/pan from there.
+const DEFAULT_WINDOW_POINTS = 168;
+
+interface WindowRange { start: number; end: number }
+
+/**
+ * Draggable range brush for the visible time window. A thin track spans the full
+ * series [0, total); the highlighted band is the visible window. Drag a handle to
+ * resize one edge, drag the band to pan. Pointer-based so it works on touch too.
+ * Rendered under the chart (always visible, unlike the compact-hidden header).
+ */
+function WindowBrush({ total, start, end, onChange }: {
+  total: number;
+  start: number;
+  end: number;
+  onChange: (next: WindowRange) => void;
+}) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ mode: 'start' | 'end' | 'pan'; x0: number; s0: number; e0: number } | null>(null);
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      const d = drag.current;
+      const track = trackRef.current;
+      if (!d || !track) return;
+      const w = track.getBoundingClientRect().width || 1;
+      const deltaIdx = Math.round(((e.clientX - d.x0) / w) * total);
+      if (d.mode === 'start') {
+        onChange({ start: clamp(d.s0 + deltaIdx, 0, d.e0 - 1), end: d.e0 });
+      } else if (d.mode === 'end') {
+        onChange({ start: d.s0, end: clamp(d.e0 + deltaIdx, d.s0 + 1, total) });
+      } else {
+        const len = d.e0 - d.s0;
+        const s = clamp(d.s0 + deltaIdx, 0, total - len);
+        onChange({ start: s, end: s + len });
+      }
+    };
+    const onUp = () => { drag.current = null; };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+  }, [total, onChange]);
+
+  const begin = (mode: 'start' | 'end' | 'pan') => (e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    drag.current = { mode, x0: e.clientX, s0: start, e0: end };
+  };
+
+  const leftPct = (start / total) * 100;
+  const widthPct = Math.max(((end - start) / total) * 100, 1.5);
+  return (
+    <div className="cw-brushbar">
+      <span className="cw-brush-count">{(end - start).toLocaleString()} / {total.toLocaleString()}</span>
+      <div
+        className="cw-brush"
+        ref={trackRef}
+        title={`Showing snapshots ${start + 1}–${end} of ${total} — drag the ends to resize, drag the band to move`}
+      >
+        <div className="cw-brush-window" style={{ left: `${leftPct}%`, width: `${widthPct}%` }} onPointerDown={begin('pan')}>
+          <span className="cw-brush-handle cw-brush-handle--l" onPointerDown={begin('start')} />
+          <span className="cw-brush-handle cw-brush-handle--r" onPointerDown={begin('end')} />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /**
  * Track an element's rendered pixel size so the chart can size its SVG
@@ -74,6 +148,13 @@ export function InteractiveTimeSeriesCard({
 }) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const [mainRef, width, height] = useElementSize<HTMLDivElement>();
+  // Windowing over `data` as a [start, end) row range, set by the brush below.
+  const [win, setWin] = useState<WindowRange>({ start: 0, end: data.length });
+  const setWindow = useCallback((next: WindowRange) => setWin(next), []);
+  // A new dataset (different length) resets to the first default-sized window.
+  useEffect(() => {
+    setWin({ start: 0, end: data.length > DEFAULT_WINDOW_POINTS ? DEFAULT_WINDOW_POINTS : data.length });
+  }, [data.length]);
 
   if (!series.length) {
     return (
@@ -97,7 +178,13 @@ export function InteractiveTimeSeriesCard({
     );
   }
 
-  const visible = data;
+  // Slice the visible window out of the full series. Everything below renders
+  // from `visible`, so the SVG only ever paints the windowed points.
+  const total = data.length;
+  const start = Math.max(0, Math.min(win.start, total - 1));
+  const end = Math.max(start + 1, Math.min(win.end, total));
+  const visible = data.slice(start, end);
+
   const visibleSeries = series.filter((item) =>
     visible.some((row) => Math.abs(numberValue(row[item.key] as string | number | undefined)) > 1e-6),
   );
@@ -344,6 +431,9 @@ export function InteractiveTimeSeriesCard({
         </div>
         )}
       </div>
+      {total > DEFAULT_WINDOW_POINTS && (
+        <WindowBrush total={total} start={start} end={end} onChange={setWindow} />
+      )}
     </section>
   );
 }

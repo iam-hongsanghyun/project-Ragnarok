@@ -6,6 +6,13 @@
     "default_snapshot_weight": 1.0,
     "hours_in_year": 8760.0
   },
+  "session": {
+    "_comment": "Server-side working-model store (backend is the source of truth; the frontend fetches pages/windows on demand). Tunables for temporal-chart windowing and the edit undo stack.",
+    "max_chart_points_default": 800,
+    "chart_window_hours_default": 168,
+    "sheet_page_default": 200,
+    "undo_depth": 25
+  },
   "load_shedding": {
     "_comment": "Per-bus load-shedding (VOLL) generators, added only when enableLoadShedding=true. The marginal_cost here is the backend default; the running app can override it from frontend Settings in the user-selected currency.",
     "carrier": "LoadShedding",

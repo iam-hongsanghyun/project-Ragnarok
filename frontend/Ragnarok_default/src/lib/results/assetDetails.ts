@@ -65,7 +65,8 @@ function isoToLabel(iso: string): string {
 
 /** Read the snapshot timestamps from any output series sheet (PyPSA-standard
  * `snapshot` index column). */
-function pickSnapshots(series: SeriesMap, preferred: string[]): string[] {
+function pickSnapshots(series: SeriesMap | null | undefined, preferred: string[]): string[] {
+  if (!series) return [];
   for (const key of preferred) {
     const rows = series[key];
     if (rows && rows.length) return rows.map((r) => stringValue(r.snapshot));
@@ -579,7 +580,10 @@ export function deriveAssetDetails(
   currencySymbol = '$',
   snapshotWeight = 1,
 ): AssetDetails {
-  if (!outputs) return EMPTY_DETAILS;
+  // No outputs, or a light (View) payload whose per-component series were
+  // stripped server-side (`series: null`): per-asset detail is derived on
+  // demand from the windowed series, not here. Return empty rather than crash.
+  if (!outputs || !outputs.series) return EMPTY_DETAILS;
   const input: DeriveInput = { model, outputs, currencySymbol, snapshotWeight };
   const snapshots = pickSnapshots(outputs.series, [
     'generators-p', 'buses-marginal_price', 'storage_units-p', 'stores-p', 'processes-p0', 'shunt_impedances-p',

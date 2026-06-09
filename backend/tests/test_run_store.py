@@ -213,12 +213,90 @@ def test_filename_label_stem_strips_extension_and_drops_defaults() -> None:
     assert run_store._filename_label_stem("ragnarok") == ""
 
 
+def test_results_split_writes_analytics_and_series(_runs_dir: Path) -> None:
+    meta = run_store.store_run(
+        {"buses": [{"name": "n1"}]},
+        {"label": "split"},
+        {"snapshotStart": 0, "snapshotEnd": 2},
+        _sample_result(),
+    )
+    assert meta is not None
+    name = meta["name"]
+
+    # analytics bundle: no input model, no heavy series, but a seriesSheets list.
+    analytics = run_store.get_run_analytics(name)
+    assert analytics is not None
+    assert "model" not in analytics
+    assert analytics["hasModel"] is True
+    assert analytics["result"]["outputs"]["series"] is None
+    assert analytics["result"]["outputs"]["seriesSheets"] == ["generators-p"]
+    # The lightweight chart fields stay available for instant render.
+    assert analytics["result"]["summary"] == _sample_result()["summary"]
+
+    # series window read back from parquet (windowed + column subset).
+    win = run_store.run_series_window(name, "generators-p", max_points=100)
+    assert win is not None and win["total"] == 2
+    assert [r["wind"] for r in win["rows"]] == [10.0, 12.0]
+    sub = run_store.run_series_window(name, "generators-p", columns=["gas"], max_points=100)
+    assert sub is not None and set(sub["columns"]) == {"snapshot", "gas"}
+
+    # input model paging.
+    page = run_store.run_model_sheet_page(name, "buses")
+    assert page is not None and page["total"] == 1 and page["rows"][0]["name"] == "n1"
+
+
+def test_run_series_window_downsamples(_runs_dir: Path) -> None:
+    import numpy as np
+
+    res = _sample_result()
+    res["outputs"]["series"]["generators-p"] = [
+        {"snapshot": f"2025-01-01T{h:02d}:00:00", "wind": float(h)} for h in range(8)
+    ]
+    meta = run_store.store_run({"buses": [{"name": "n1"}]}, {}, {}, res)
+    assert meta is not None
+    win = run_store.run_series_window(meta["name"], "generators-p", max_points=4, agg="mean")
+    assert win is not None
+    np.testing.assert_allclose([r["wind"] for r in win["rows"]], [0.5, 2.5, 4.5, 6.5])
+
+
+def test_get_run_analytics_fallback_when_split_missing(_runs_dir: Path) -> None:
+    meta = run_store.store_run({"buses": [{"name": "n1"}]}, {}, {}, _sample_result())
+    assert meta is not None
+    name = meta["name"]
+    # Simulate an older run that predates the split: drop the granular artefacts.
+    run_store._analytics_path(name).unlink()
+    import shutil
+
+    shutil.rmtree(run_store._series_dir(name), ignore_errors=True)
+    analytics = run_store.get_run_analytics(name)
+    assert analytics is not None
+    assert analytics["result"]["outputs"]["seriesSheets"] == ["generators-p"]
+    # And series still serve from the bundle fallback.
+    win = run_store.run_series_window(name, "generators-p", max_points=100)
+    assert win is not None and win["total"] == 2
+
+
+def test_delete_run_removes_split_artifacts(_runs_dir: Path) -> None:
+    meta = run_store.store_run({"buses": [{"name": "n1"}]}, {}, {}, _sample_result())
+    assert meta is not None
+    name = meta["name"]
+    assert run_store._analytics_path(name).exists()
+    assert run_store._series_dir(name).exists()
+    assert run_store.delete_run(name) is True
+    assert not run_store._analytics_path(name).exists()
+    assert not run_store._series_dir(name).exists()
+
+
 def test_derive_name_default_filename_is_clean_timestamp() -> None:
     # No runLabel / scenario label and the default filename → the name is the
     # bare timestamp (no "_ragnarok_case", no trailing ".xlsx").
     name = run_store._derive_name({}, {}, {"filename": "ragnarok_case.xlsx"})
     assert name.count("_") == 0
     assert ".xlsx" not in name
-    # A real filename DOES become a label (extension stripped).
+    # A real filename DOES become a label (extension stripped). The name is
+    # scenarioname_datetime, so the label LEADS and the timestamp follows.
     named = run_store._derive_name({}, {}, {"filename": "north-sea.xlsx"})
-    assert named.endswith("_north-sea")
+    assert named.startswith("north-sea_")
+    # scenario label wins and also leads.
+    scen = run_store._derive_name({}, {"label": "ref-case"}, {})
+    assert scen.startswith("ref-case_")

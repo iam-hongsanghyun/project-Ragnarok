@@ -1693,6 +1693,54 @@
   margin-top: 4px;
 }
 
+/* Temporal-chart window brush: a thin draggable range under the chart. Drag a
+   handle to resize an edge, drag the band to pan. Always visible (not hidden in
+   compact dashboard cells), replacing the old gear-popover controls. */
+.cw-brushbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px 8px;
+}
+.cw-brush-count {
+  font-size: 0.72rem;
+  color: var(--muted, #64748b);
+  white-space: nowrap;
+  min-width: 92px;
+}
+.cw-brush {
+  position: relative;
+  flex: 1 1 auto;
+  height: 16px;
+  background: var(--border, #e5e7eb);
+  border-radius: 8px;
+  cursor: pointer;
+  touch-action: none;
+}
+.cw-brush-window {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--accent, #2f7d6e);
+  opacity: 0.4;
+  border-radius: 8px;
+  cursor: grab;
+  touch-action: none;
+}
+.cw-brush-window:active { cursor: grabbing; }
+.cw-brush-handle {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 12px;
+  background: var(--accent, #2f7d6e);
+  border-radius: 3px;
+  cursor: ew-resize;
+  touch-action: none;
+}
+.cw-brush-handle--l { left: -6px; }
+.cw-brush-handle--r { right: -6px; }
+
 .chart-card-controls {
   flex-wrap: wrap;
 }
@@ -2829,6 +2877,16 @@ path.leaflet-interactive:focus {
   gap: 8px;
   flex-wrap: wrap;
 }
+.history-toolbar-spacer { flex: 1 1 auto; }
+.tb-btn--primary {
+  background: var(--accent, #2f7d6e);
+  color: #fff;
+  border-color: var(--accent, #2f7d6e);
+}
+.tb-btn--primary:disabled { opacity: 0.45; }
+/* Selected history rows read as a clickable selection, not a button strip. */
+.history-row { cursor: default; }
+.history-row.is-selected { outline: 2px solid var(--accent, #2f7d6e); outline-offset: -2px; }
 
 .history-search {
   flex: 1;

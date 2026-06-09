@@ -14,11 +14,13 @@ import { formatRelTime } from 'lib/utils/formatRelTime';
 
 interface HistoryViewProps {
   backendRuns: BackendRunMeta[];
-  onOpenBackendRun: (name: string) => void;
+  /** View the current selection: 1 → its Result, 2+ → side-by-side Comparison. */
+  onViewSelected: (names: string[]) => void;
+  /** Import the run's model into the editable session for edit + re-run (heavy). */
+  onImportBackendRun: (name: string) => void;
   onDownloadBackendXlsx: (name: string) => void;
   /** Download the full project package (.zip of bundle JSON + meta JSON + xlsx). */
   onExportBackendProject: (name: string) => void;
-  onDeleteBackendRun: (name: string) => void;
   onDeleteBackendRuns: (names: string[]) => void;
   /** Manually re-fetch the run list from the backend. */
   onReload?: () => void;
@@ -42,10 +44,10 @@ export function matchesBackendQuery(meta: BackendRunMeta, query: string): boolea
 
 export function HistoryView({
   backendRuns,
-  onOpenBackendRun,
+  onViewSelected,
+  onImportBackendRun,
   onDownloadBackendXlsx,
   onExportBackendProject,
-  onDeleteBackendRun,
   onDeleteBackendRuns,
   onReload,
 }: HistoryViewProps) {
@@ -80,6 +82,11 @@ export function HistoryView({
     setSelected([]);
   };
 
+  // Actions live at the top and act on the selection: Import needs exactly one
+  // model; View shows one run's Result, or several side-by-side in Comparison.
+  const single = visibleSelected.length === 1 ? visibleSelected[0] : null;
+  const n = visibleSelected.length;
+
   return (
     <div className="history-view">
       <div className="history-toolbar">
@@ -99,8 +106,41 @@ export function HistoryView({
           />
           Select all
         </label>
-        <button className="tb-btn" onClick={deleteSelected} disabled={visibleSelected.length === 0}>
-          Delete selected ({visibleSelected.length})
+        <button
+          className="tb-btn tb-btn--primary"
+          onClick={() => onViewSelected(visibleSelected)}
+          disabled={n === 0}
+          title={n > 1 ? 'Compare the selected runs side by side' : 'View this run’s results'}
+        >
+          {n > 1 ? `Compare results (${n})` : 'View result'}
+        </button>
+        <button
+          className="tb-btn"
+          onClick={() => single && onImportBackendRun(single)}
+          disabled={!single}
+          title={single ? 'Load this run’s model into the editor to edit and re-run' : 'Select exactly one run to import'}
+        >
+          Import project
+        </button>
+        <button
+          className="tb-btn"
+          onClick={() => single && onExportBackendProject(single)}
+          disabled={!single}
+          title="Download the full project package (.zip)"
+        >
+          Export
+        </button>
+        <button
+          className="tb-btn"
+          onClick={() => single && onDownloadBackendXlsx(single)}
+          disabled={!single}
+          title="Download the run workbook (.xlsx)"
+        >
+          Excel
+        </button>
+        <span className="history-toolbar-spacer" />
+        <button className="tb-btn" onClick={deleteSelected} disabled={n === 0}>
+          Delete ({n})
         </button>
         {onReload && (
           <button className="tb-btn" onClick={onReload} title="Re-fetch run history from the backend">
@@ -123,10 +163,7 @@ export function HistoryView({
               meta={meta}
               selected={visibleSelected.includes(meta.name)}
               onSelect={(checked) => toggleName(meta.name, checked)}
-              onView={() => onOpenBackendRun(meta.name)}
-              onDownload={() => onDownloadBackendXlsx(meta.name)}
-              onExportProject={() => onExportBackendProject(meta.name)}
-              onDelete={() => onDeleteBackendRun(meta.name)}
+              onActivate={() => onViewSelected([meta.name])}
             />
           ))}
         </div>
@@ -146,21 +183,25 @@ function formatDemand(mwh: number | null | undefined): string | null {
 // ── Backend (server-stored) run row ─────────────────────────────────────────
 
 function BackendHistoryRow({
-  meta, selected, onSelect, onView, onDownload, onExportProject, onDelete,
+  meta, selected, onSelect, onActivate,
 }: {
   meta: BackendRunMeta;
   selected: boolean;
   onSelect: (checked: boolean) => void;
-  onView: () => void;
-  onDownload: () => void;
-  onExportProject: () => void;
-  onDelete: () => void;
+  /** Double-click / Enter on the row → view this single run (toolbar handles the rest). */
+  onActivate: () => void;
 }) {
   // The run's display name IS the scenario name (falls back to the stored label).
   const name = meta.scenarioLabel || meta.label || meta.name;
 
+  // Rows are display-only: select with the checkbox (or click the row), then use
+  // the toolbar actions at the top. This keeps every row a clean, aligned line
+  // instead of a ragged strip of buttons.
   return (
-    <div className={`history-row${selected ? ' is-selected' : ''}`}>
+    <div
+      className={`history-row${selected ? ' is-selected' : ''}`}
+      onDoubleClick={onActivate}
+    >
       <input
         type="checkbox"
         className="history-row-select"
@@ -187,23 +228,7 @@ function BackendHistoryRow({
       ))}
 
       <span className="history-row-spacer" />
-
-      <button className="tb-btn" onClick={onView}>View results</button>
-      {/* The full project export (.zip of all 3 files). Until the server has
-          finished pre-building the workbook it reads "Preparing…" and is
-          unclickable; once ready it becomes "Export Project". */}
-      <button
-        className="tb-btn"
-        onClick={onExportProject}
-        disabled={!meta.xlsxReady}
-        title={meta.xlsxReady ? 'Download bundle JSON + meta JSON + Excel (.zip)' : 'Workbook is still being prepared'}
-      >
-        {meta.xlsxReady ? 'Export Project' : 'Preparing…'}
-      </button>
-      <button className="tb-btn" onClick={onDownload} disabled={!meta.xlsxReady}>
-        {meta.xlsxReady ? 'Download Excel' : 'Preparing…'}
-      </button>
-      <button className="tb-btn" onClick={onDelete}>Delete</button>
+      {!meta.xlsxReady && <span className="history-row-chip" title="Workbook still being prepared for download/export">Preparing…</span>}
     </div>
   );
 }

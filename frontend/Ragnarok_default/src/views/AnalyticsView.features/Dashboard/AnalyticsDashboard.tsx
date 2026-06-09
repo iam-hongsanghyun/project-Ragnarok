@@ -292,7 +292,7 @@ export function AnalyticsDashboard({
           return (
             <ul className="dashboard-notes">
               {results.narrative.length === 0 && <li className="dashboard-notes-empty">No notes from this run.</li>}
-              {results.narrative.map((item) => <li key={item}>{item}</li>)}
+              {results.narrative.map((item, i) => <li key={`${i}-${item}`}>{item}</li>)}
             </ul>
           );
         case 'kpi-strip':

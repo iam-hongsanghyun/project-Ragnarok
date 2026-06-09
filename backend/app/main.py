@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import multiprocessing as mp
 import queue
+import shutil
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -12,19 +14,18 @@ from typing import Any
 import tempfile
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi import FastAPI, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 
 from .backends import BackendError, available_backends, get_backend
-from .config import load_system_defaults
 from .log_capture import (
     clear_buffer as _log_clear,
     get_snapshot as _log_snapshot,
     install as _install_log_capture,
 )
 from .models import ExportProjectPayload, RunPayload
-from . import run_store
+from . import run_store, session_store
 from ..pypsa.network import build_network, validate_model
 
 # xlsx MIME used by the run export endpoint below.
@@ -82,7 +83,7 @@ _jobs: dict[str, _Job] = {}
 # Must be a module-level function so multiprocessing "spawn" can import it.
 
 def _solve_worker(
-    payload: RunPayload,
+    payload: RunPayload | str,
     result_queue: "mp.Queue[tuple[str, Any]]",
 ) -> None:
     """Run in a child process. Puts ("ok", result) or ("err", message) on the queue.
@@ -111,6 +112,8 @@ def _solve_worker(
         root.addHandler(stream)
 
     try:
+        if isinstance(payload, str):
+            payload = _read_queue_payload(Path(payload))
         options = payload.options or {}
         backend = get_backend(options.get("backend"))
         result = backend.run(payload.model, payload.scenario, options)
@@ -161,17 +164,20 @@ async def _collect_job(job_id: str) -> None:
             await asyncio.sleep(0.5)
 
 
-# ── Run queue (serial, in-memory) ─────────────────────────────────────────────
+# ── Run queue (serial, disk-backed payloads) ──────────────────────────────────
 # A single FIFO queue runs one solve at a time. Enqueue returns immediately
 # ("queued, position N"); a background pump runs each job to completion (which
 # also persists it to History via the worker's store_run), then starts the next.
-# State is in-memory only — a backend restart clears pending jobs (a running
-# solve can't survive a restart anyway). Terminal items linger briefly so the
-# UI can show the final status / fire a completion toast before they're pruned.
+# Queue metadata is kept in memory for quick polling, but the submitted model
+# payload is written to backend/data/queue/<job_id>/payload.json. That keeps
+# large queued workbooks out of RAM and lets terminal queue rows be rerun until
+# the user explicitly deletes them.
 
 _queue_logger = logging.getLogger("pypsa_gui.queue")
-_TERMINAL = ("done", "error", "cancelled")
-_QUEUE_PRUNE_SECONDS = 60.0
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_QUEUE_DIR = _REPO_ROOT / "backend" / "data" / "queue"
+_QUEUE_PAYLOAD = "payload.json"
+_QUEUE_META = "meta.json"
 
 
 def _now_iso() -> str:
@@ -181,7 +187,7 @@ def _now_iso() -> str:
 @dataclass
 class _QueueItem:
     id: str
-    payload: RunPayload
+    payload_path: Path
     label: str
     summary: dict[str, Any]
     submitted_at: str
@@ -201,11 +207,114 @@ class _QueueItem:
             "startedAt": self.started_at,
             "finishedAt": self.finished_at,
             "error": self.error,
+            "payloadAvailable": self.payload_path.exists(),
             **self.summary,
         }
 
 
 _run_queue: list[_QueueItem] = []
+
+
+def _payload_to_dict(payload: RunPayload) -> dict[str, Any]:
+    """Return a JSON-serialisable dict for Pydantic v1 or v2."""
+    if hasattr(payload, "model_dump"):
+        return payload.model_dump(mode="json")  # type: ignore[attr-defined]
+    return payload.dict()
+
+
+def _queue_item_dir(item_id: str) -> Path:
+    return _QUEUE_DIR / item_id
+
+
+def _queue_payload_path(item_id: str) -> Path:
+    return _queue_item_dir(item_id) / _QUEUE_PAYLOAD
+
+
+def _queue_meta_path(item_id: str) -> Path:
+    return _queue_item_dir(item_id) / _QUEUE_META
+
+
+def _write_json_atomic(path: Path, data: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _write_queue_payload(item_id: str, payload: RunPayload) -> Path:
+    path = _queue_payload_path(item_id)
+    _write_json_atomic(path, _payload_to_dict(payload))
+    return path
+
+
+def _read_queue_payload(path: Path) -> RunPayload:
+    return RunPayload(**json.loads(path.read_text(encoding="utf-8")))
+
+
+def _queue_meta(item: _QueueItem) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "label": item.label,
+        "summary": item.summary,
+        "submittedAt": item.submitted_at,
+        "status": item.status,
+        "startedAt": item.started_at,
+        "finishedAt": item.finished_at,
+        "error": item.error,
+        "payloadFile": _QUEUE_PAYLOAD,
+    }
+
+
+def _persist_queue_meta(item: _QueueItem) -> None:
+    try:
+        _write_json_atomic(_queue_meta_path(item.id), _queue_meta(item))
+    except Exception:  # noqa: BLE001
+        _queue_logger.exception("Failed to persist queue metadata for %s", item.id)
+
+
+def _load_queue_from_disk() -> None:
+    """Restore queued metadata and payload references from backend/data/queue."""
+    if not _QUEUE_DIR.exists():
+        return
+    restored: list[_QueueItem] = []
+    for meta_path in sorted(_QUEUE_DIR.glob(f"*/{_QUEUE_META}")):
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            item_id = str(meta.get("id") or meta_path.parent.name)
+            payload_path = meta_path.parent / str(meta.get("payloadFile") or _QUEUE_PAYLOAD)
+            if not payload_path.exists():
+                _queue_logger.warning("Skipping queue item %s without payload file", item_id)
+                continue
+            status = str(meta.get("status") or "queued")
+            started_at = meta.get("startedAt")
+            finished_at = meta.get("finishedAt")
+            error = meta.get("error")
+            if status == "running":
+                status = "cancelled"
+                finished_at = _now_iso()
+                error = error or "Backend stopped before this queued run finished."
+            item = _QueueItem(
+                id=item_id,
+                payload_path=payload_path,
+                label=str(meta.get("label") or item_id),
+                summary=meta.get("summary") if isinstance(meta.get("summary"), dict) else {},
+                submitted_at=str(meta.get("submittedAt") or _now_iso()),
+                status=status,
+                started_at=str(started_at) if started_at else None,
+                finished_at=str(finished_at) if finished_at else None,
+                error=str(error) if error else None,
+            )
+            restored.append(item)
+            if status != meta.get("status") or finished_at != meta.get("finishedAt"):
+                _persist_queue_meta(item)
+        except Exception:  # noqa: BLE001
+            _queue_logger.exception("Skipping unreadable queue metadata: %s", meta_path)
+    restored.sort(key=lambda item: item.submitted_at)
+    _run_queue[:] = restored
+
+
+def _delete_queue_files(item_id: str) -> None:
+    shutil.rmtree(_queue_item_dir(item_id), ignore_errors=True)
 
 
 def _queue_label(payload: RunPayload) -> str:
@@ -243,29 +352,42 @@ def _queue_summary(payload: RunPayload) -> dict[str, Any]:
     }
 
 
-def _prune_queue() -> None:
-    """Drop terminal items older than the grace window (keeps the list bounded)."""
-    now = datetime.now(timezone.utc)
-    keep: list[_QueueItem] = []
-    for it in _run_queue:
-        if it.status in _TERMINAL and it.finished_at:
-            try:
-                age = (now - datetime.fromisoformat(it.finished_at)).total_seconds()
-            except ValueError:
-                age = 0.0
-            if age > _QUEUE_PRUNE_SECONDS:
-                continue
-        keep.append(it)
-    _run_queue[:] = keep
+def _queue_position() -> int:
+    return sum(1 for it in _run_queue if it.status == "queued")
+
+
+def _enqueue_payload(payload: RunPayload) -> tuple[_QueueItem, int]:
+    item_id = str(uuid.uuid4())
+    item = _QueueItem(
+        id=item_id,
+        payload_path=_write_queue_payload(item_id, payload),
+        label=_queue_label(payload),
+        summary=_queue_summary(payload),
+        submitted_at=_now_iso(),
+    )
+    _persist_queue_meta(item)
+    _run_queue.append(item)
+    return item, _queue_position()
+
+
+def _find_queue_item(item_id: str) -> _QueueItem | None:
+    return next((it for it in _run_queue if it.id == item_id), None)
 
 
 async def _run_queue_item(item: _QueueItem) -> None:
     """Run one queued job to completion in a child process (serial)."""
     ctx = mp.get_context("spawn")
     item.result_queue = ctx.Queue()
-    item.proc = ctx.Process(target=_solve_worker, args=(item.payload, item.result_queue), daemon=True)
+    item.proc = ctx.Process(
+        target=_solve_worker,
+        args=(str(item.payload_path), item.result_queue),
+        daemon=True,
+    )
     item.status = "running"
     item.started_at = _now_iso()
+    item.finished_at = None
+    item.error = None
+    _persist_queue_meta(item)
     item.proc.start()
 
     # Read the result FIRST. The worker puts a (possibly large) result dict on
@@ -294,6 +416,7 @@ async def _run_queue_item(item: _QueueItem) -> None:
     if item.proc.is_alive():
         _queue_logger.warning("Queue item %s did not exit within 600s after result", item.id)
     if item.status == "cancelled":
+        _persist_queue_meta(item)
         return
     if status == "ok":
         item.status = "done"
@@ -304,6 +427,7 @@ async def _run_queue_item(item: _QueueItem) -> None:
         item.status = "error"
         item.error = "Worker exited without delivering a result."
     item.finished_at = _now_iso()
+    _persist_queue_meta(item)
     _queue_logger.info("Queue item %s finished: %s", item.id, item.status)
 
 
@@ -311,7 +435,6 @@ async def _queue_pump() -> None:
     """Background loop: run the next queued job whenever none is running."""
     while True:
         try:
-            _prune_queue()
             running = any(it.status == "running" for it in _run_queue)
             nxt = next((it for it in _run_queue if it.status == "queued"), None)
             if nxt is not None and not running:
@@ -340,6 +463,7 @@ async def _lifespan(_app: "FastAPI"):
     ``GET /api/status`` poll sees live progress instead of a hung
     connection. See ``startup_status.warm``.
     """
+    _load_queue_from_disk()
     task = asyncio.ensure_future(startup_status.warm())
     pump = asyncio.ensure_future(_queue_pump())
     try:
@@ -387,6 +511,11 @@ app.include_router(_config_router.router)
 # filter blob to /api/import/run; fetch + convert run server-side.
 from .routers import importers as _importers_router  # noqa: E402
 app.include_router(_importers_router.router)
+
+# Server-side working model ("session"). The backend is the source of truth for
+# the model; the frontend imports once and then fetches pages/windows on demand.
+from .routers import session as _session_router  # noqa: E402
+app.include_router(_session_router.router)
 
 
 @app.get("/api/backends")
@@ -442,9 +571,31 @@ def clear_log() -> dict[str, Any]:
     return {"entries": [], "cursor": cursor, "capacity": capacity}
 
 
+def _resolve_payload_model(payload: RunPayload) -> RunPayload:
+    """Materialise the model a run will solve.
+
+    A thin client submits only ``{sessionId, scenario, options}`` — the working
+    model lives server-side. Snapshot it into the payload *now* (at submit time)
+    so a later edit to the session never mutates an already-submitted or queued
+    run. A legacy payload carrying an inline ``model`` is returned unchanged.
+    """
+    if payload.model:
+        return payload
+    if payload.sessionId:
+        model = session_store.load_full_model(payload.sessionId)
+        if not model:
+            raise HTTPException(
+                status_code=400, detail=f"No model loaded in session {payload.sessionId!r}."
+            )
+        data = _payload_to_dict(payload)
+        data["model"] = model
+        return RunPayload(**data)
+    raise HTTPException(status_code=400, detail="Run payload must include a model or a sessionId.")
+
+
 @app.post("/api/validate")
 def validate_case(payload: RunPayload) -> dict[str, Any]:
-    return validate_model(payload)
+    return validate_model(_resolve_payload_model(payload))
 
 
 @app.post("/api/run")
@@ -464,6 +615,9 @@ async def start_run(payload: RunPayload) -> dict[str, Any]:
         get_backend((payload.options or {}).get("backend"))
     except BackendError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # Resolve the model from the session when the client sent only a sessionId.
+    payload = _resolve_payload_model(payload)
 
     # Prune completed/cancelled jobs to avoid unbounded memory growth
     stale = [jid for jid, j in list(_jobs.items()) if j.status in ("done", "error", "cancelled")]
@@ -547,28 +701,28 @@ async def enqueue_run(payload: RunPayload) -> dict[str, Any]:
     except BackendError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    item = _QueueItem(
-        id=str(uuid.uuid4()),
-        payload=payload,
-        label=_queue_label(payload),
-        summary=_queue_summary(payload),
-        submitted_at=_now_iso(),
-    )
-    _run_queue.append(item)
-    position = sum(1 for it in _run_queue if it.status == "queued")
+    # Snapshot the session model into the payload at submit time (see
+    # _resolve_payload_model) so the queued run is immune to later edits.
+    payload = _resolve_payload_model(payload)
+    item, position = _enqueue_payload(payload)
     return {"id": item.id, "status": item.status, "position": position}
 
 
 @app.get("/api/queue")
 def get_queue() -> dict[str, Any]:
-    """List queue items (queued / running, plus recently-finished for a moment)."""
+    """List queue items until the user explicitly deletes them."""
     return {"jobs": [it.to_dict() for it in _run_queue]}
 
 
-@app.delete("/api/queue/{item_id}")
+@app.post("/api/queue/{item_id}/cancel")
 async def cancel_queued(item_id: str) -> dict[str, Any]:
-    """Cancel a queued job, or kill it if it is currently running."""
-    item = next((it for it in _run_queue if it.id == item_id), None)
+    """Cancel a queued job, or kill it if it is currently running.
+
+    The queue row and payload file are intentionally retained so the user can
+    rerun the same submitted model later. Use DELETE /api/queue/{item_id} to
+    remove the queue record and its payload file.
+    """
+    item = _find_queue_item(item_id)
     if item is None:
         return {"id": item_id, "status": "not_found"}
     if item.status == "queued":
@@ -584,7 +738,53 @@ async def cancel_queued(item_id: str) -> dict[str, Any]:
             if proc.is_alive():
                 proc.kill()
                 await asyncio.to_thread(proc.join, 3)
+    else:
+        return {"id": item_id, "status": item.status}
+    _persist_queue_meta(item)
     return {"id": item_id, "status": "cancelled"}
+
+
+@app.post("/api/queue/{item_id}/rerun")
+async def rerun_queued(item_id: str) -> dict[str, Any]:
+    """Create a fresh queued item from a retained queue payload."""
+    item = _find_queue_item(item_id)
+    if item is None:
+        return {"id": item_id, "status": "not_found"}
+    if not item.payload_path.exists():
+        raise HTTPException(status_code=404, detail="Queued payload file is missing.")
+    payload = _read_queue_payload(item.payload_path)
+    try:
+        get_backend((payload.options or {}).get("backend"))
+    except BackendError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    new_item, position = _enqueue_payload(payload)
+    return {"id": new_item.id, "status": new_item.status, "position": position}
+
+
+@app.delete("/api/queue/{item_id}")
+async def delete_queue_item(item_id: str) -> dict[str, Any]:
+    """Delete a queue item and its retained model payload.
+
+    This intentionally does not delete History entries produced by completed
+    runs; History lives under backend/data/runs and has its own endpoint.
+    """
+    item = _find_queue_item(item_id)
+    if item is None:
+        _delete_queue_files(item_id)
+        return {"id": item_id, "deleted": False}
+    if item.status == "running":
+        proc = item.proc
+        item.status = "cancelled"
+        item.finished_at = _now_iso()
+        if proc is not None and proc.is_alive():
+            proc.terminate()
+            await asyncio.to_thread(proc.join, 3)
+            if proc.is_alive():
+                proc.kill()
+                await asyncio.to_thread(proc.join, 3)
+    _run_queue[:] = [it for it in _run_queue if it.id != item_id]
+    _delete_queue_files(item_id)
+    return {"id": item_id, "deleted": True}
 
 
 # ── Backend-stored runs ─────────────────────────────────────────────────────
@@ -605,11 +805,61 @@ def list_backend_runs() -> dict[str, Any]:
 
 @app.get("/api/runs/{name}")
 def get_backend_run(name: str) -> dict[str, Any]:
-    """Return the full stored bundle for ``name`` (404 if missing)."""
+    """Return the full stored bundle for ``name`` (404 if missing).
+
+    Heavy (model + every output series). Prefer the granular endpoints below —
+    ``/analytics`` then ``/series/{sheet}`` on demand — to avoid freezing the tab.
+    Kept for back-compat and as the lossless export source.
+    """
     bundle = run_store.get_run(name)
     if bundle is None:
         raise HTTPException(status_code=404, detail="Stored run not found.")
     return bundle
+
+
+@app.get("/api/runs/{name}/analytics")
+def get_backend_run_analytics(name: str) -> dict[str, Any]:
+    """Lightweight analytics bundle (no input model, no output series).
+
+    What "View Result" loads first: summary, KPIs, carrier mix, cost, merit
+    order, narrative, and the ``seriesSheets`` name list. Renders instantly; the
+    series themselves load per-sheet on demand from ``/series/{sheet}``.
+    """
+    analytics = run_store.get_run_analytics(name)
+    if analytics is None:
+        raise HTTPException(status_code=404, detail="Stored run not found.")
+    return analytics
+
+
+@app.get("/api/runs/{name}/series/{sheet}")
+def get_backend_run_series(
+    name: str,
+    sheet: str,
+    start: int = 0,
+    end: int | None = None,
+    columns: str | None = None,
+    max_points: int | None = Query(None, alias="maxPoints", ge=1),
+    agg: str = "mean",
+) -> dict[str, Any]:
+    """Windowed + downsampled slice of a stored run's output time-series sheet."""
+    cols = [c.strip() for c in columns.split(",") if c.strip()] if columns else None
+    window = run_store.run_series_window(
+        name, sheet, start=start, end=end, columns=cols, max_points=max_points, agg=agg
+    )
+    if window is None:
+        raise HTTPException(status_code=404, detail="Run series not found.")
+    return window
+
+
+@app.get("/api/runs/{name}/model/sheet/{sheet}")
+def get_backend_run_model_sheet(
+    name: str, sheet: str, offset: int = 0, limit: int = 200
+) -> dict[str, Any]:
+    """One page of a stored run's INPUT model sheet (re-edit / import-project)."""
+    page = run_store.run_model_sheet_page(name, sheet, offset=offset, limit=limit)
+    if page is None:
+        raise HTTPException(status_code=404, detail="Run model sheet not found.")
+    return page
 
 
 @app.delete("/api/runs/{name}")

@@ -56,6 +56,9 @@ coverage.xml
 backend/data/cache/
 # Server-side stored runs (Store-in-backend run option)
 backend/data/runs/
+# Server-side working-model session + serial run queue (runtime data)
+backend/data/session/
+backend/data/queue/
 /data
 
 # Logs

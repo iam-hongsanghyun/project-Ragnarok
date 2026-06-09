@@ -3,6 +3,7 @@ uvicorn[standard]>=0.30
 python-multipart>=0.0.9
 pypsa @ git+https://github.com/PyPSA/PyPSA.git  # Process component not yet in stable release
 pandas>=2.2
+pyarrow>=17  # columnar Parquet engine for the server-side session store (time-series)
 numpy>=2.1
 scipy>=1.14
 linopy>=0.5

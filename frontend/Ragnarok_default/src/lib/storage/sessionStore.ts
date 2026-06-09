@@ -102,6 +102,18 @@ export async function saveSessionControls(controls: SessionControls): Promise<vo
   }
 }
 
+/** Load ONLY the lightweight run controls (no heavy model deserialisation).
+
+ * The model is no longer stored in IndexedDB — the backend session owns it — so
+ * boot must not pay to read a (possibly stale, multi-MB) model record here. */
+export async function loadSessionControls(): Promise<SessionControls | null> {
+  try {
+    return await get<SessionControls>(CONTROLS_KEY);
+  } catch {
+    return null;
+  }
+}
+
 export async function loadSession(): Promise<{ model: WorkbookModel | null; controls: SessionControls | null }> {
   try {
     const [model, controls] = await Promise.all([
@@ -114,7 +126,23 @@ export async function loadSession(): Promise<{ model: WorkbookModel | null; cont
   }
 }
 
-/** Remove the saved session (the Clear button). Awaited so it commits before reload. */
+/** Remove only the persisted model (the "Clear" button — keeps controls/settings). */
+export async function clearSessionModelOnly(): Promise<void> {
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).delete(MODEL_KEY);
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => { db.close(); reject(tx.error); };
+      tx.onabort = () => { db.close(); reject(tx.error); };
+    });
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Remove the saved session (the "Clear cache" button). Awaited so it commits before reload. */
 export async function clearSession(): Promise<void> {
   try {
     const db = await openDb();

@@ -29,9 +29,9 @@ function autoFitCols(ws: XLSX.WorkSheet) {
 }
 
 function pivotSeries(
-  rows: Array<{ timestamp?: string; label?: string; period?: number | null; values?: Record<string, number>; total?: number }>,
+  rows: Array<{ timestamp?: string; label?: string; period?: number | null; values?: Record<string, number>; total?: number }> | null | undefined,
 ): Record<string, unknown>[] {
-  return rows.map((row) => {
+  return (rows ?? []).map((row) => {
     const { timestamp, label, period, values = {}, total } = row;
     return { ...(period !== undefined && period !== null ? { period } : {}), timestamp: timestamp ?? label, ...values, ...(total !== undefined ? { total } : {}) };
   });
