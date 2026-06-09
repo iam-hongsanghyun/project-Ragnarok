@@ -642,7 +642,9 @@
   line-height: 1;
 }
 .sg-carbon-input {
-  width: 72px;
+  /* Wide enough for a full price with decimals (e.g. "1250.50") without the
+     value being clipped — the 72px box truncated longer carbon prices. */
+  width: 96px;
   padding: 4px 7px;
   border: 1px solid var(--border);
   border-radius: 0;

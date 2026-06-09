@@ -208,11 +208,15 @@ export function UserDefinedChartCard({
     let promise: Promise<void>;
     if (active.chartType === 'donut') {
       const data = donutData;
+      // Donut legend = the slices (label + colour), so the exported image is
+      // self-describing even though the on-screen legend is HTML outside the SVG.
       promise = exportChartToExcel(
         metric.label,
         ['label', 'value'],
         data.map((d) => ({ label: d.label, value: d.value })),
         chartContainerRef.current,
+        undefined,
+        { title: metric.label, unit: metric.unit, legend: data.map((d) => ({ label: d.label, color: d.color })) },
       );
     } else {
       const keys    = metric.series.map((s) => s.key);
@@ -222,7 +226,14 @@ export function UserDefinedChartCard({
         keys.forEach((k) => { row[k] = numberValue(r[k] as any); });
         return row;
       });
-      promise = exportChartToExcel(metric.label, headers, rows, chartContainerRef.current);
+      promise = exportChartToExcel(
+        metric.label,
+        headers,
+        rows,
+        chartContainerRef.current,
+        undefined,
+        { title: metric.label, unit: metric.unit, legend: metric.series.map((s) => ({ label: s.label, color: s.color })) },
+      );
     }
     promise
       .then(() => showToast(`Exported ${metric.label}`, 'success'))
