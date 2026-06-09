@@ -61,6 +61,8 @@ backend/data/session/
 backend/data/queue/
 # Installed backend plugins (3rd-party, uploaded at runtime — Ragnarok ships none)
 backend/data/plugins/
+# Per-plugin server-side file store (heavy model workbooks uploaded at runtime)
+backend/data/plugin_files/
 /data
 
 # Logs

@@ -254,12 +254,11 @@ export function BackendPluginDetail({ manifest, model, onBuilt }: Props) {
   const runHook = async (hook: 'transform' | 'contribute', successMessage?: string) => {
     setBusy(true);
     try {
-      // Name the session after the chosen uploaded model file (e.g.
-      // "Planned_Model.xlsx") rather than the generic plugin id, so the topbar
-      // shows a meaningful filename. Falls back to "<plugin-id>.xlsx".
-      const pickedFile = fileFields.map(([k]) => String(config[k] ?? '')).find((v) => v.trim());
+      // The topbar/session name is derived downstream by `resetForNewModel` from
+      // the built model's scenario (always `{scenario||untitled}_{ISO-T}.xlsx`), so
+      // this is just the backend session-meta record — keep it the plugin id.
       const meta = await runBackendHook(manifest.id, hook, withDefaults(manifest.config, config), {
-        filename: pickedFile || `${manifest.id}.xlsx`,
+        filename: `${manifest.id}.xlsx`,
       });
       onBuilt(meta);
       showToast(successMessage ?? `${manifest.name}: applied to the session.`, 'success');

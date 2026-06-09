@@ -34,6 +34,7 @@ import { canonicalizeOutputSeries, canonicalizeTemporalRows, createEmptyWorkbook
 import { mergeWorkbookFragment } from 'lib/workbook/mergeFragment';
 import type { WorkbookFragment } from 'lib/api/databases';
 import { getBounds, getBusIndex, carrierColor, numberValue, orderByCarrierRows, setCarrierColorOverrides, snapshotMaxFromWorkbook, stringValue } from 'lib/utils/helpers';
+import { scenarioFilename } from 'lib/utils/scenarioFilename';
 import { usePersistedState } from 'shared/hooks/usePersistedState';
 import { RagnarokLogo } from 'shared/components/RagnarokLogo';
 import { buildRowsFromGeneratorDetails, buildSystemLoadRows, normalizeSeriesPoint } from 'lib/results/analytics';
@@ -340,21 +341,36 @@ function AppInner() {
     // no-op, so callers that pre-normalise with a project-specific dateFormat
     // (e.g. handleImportProject) stay correct.
     normalizeInputDatesToIso(nextModel, settings.dateFormat);
+    // Resolve the model's OWN active scenario up front — it both names the working
+    // file and is mirrored into the session meta so the topbar and the backend
+    // record agree. Use the imported scenario (null when the model carried none),
+    // NOT the synthetic "Base case" fallback, so a scenario-less model → "untitled".
+    const nextScenarioCatalog = readScenarioCatalogFromModel(nextModel);
+    const activeImportedScenario = nextScenarioCatalog.scenarios.find(
+      (scenario) => scenario.id === nextScenarioCatalog.activeScenarioId,
+    ) ?? null;
+    // The working-model name is ALWAYS `{scenario||untitled}_{ISO-T}.xlsx`. A fresh
+    // load (import/build/demo/open) mints the name now; a RESTORE (boot, stored
+    // run — `pushToSession:false`) keeps the name it was saved under, so the stamp
+    // reflects when the model was created, not when it reloaded.
+    const isRestore = opts?.pushToSession === false;
+    const builtFilename = isRestore && name && name.trim()
+      ? name
+      : scenarioFilename(activeImportedScenario?.label);
     // Push the FULL (normalised) model to the backend session — the source of
     // truth. Done once per load (not per edit). Skipped when restoring FROM the
     // session on boot (it's already there).
     if (opts?.pushToSession !== false) {
-      void putSessionModel(nextModel, { filename: name ?? '', scenarioName: '' }).catch(() => { /* best-effort */ });
+      void putSessionModel(nextModel, {
+        filename: builtFilename,
+        scenarioName: activeImportedScenario?.label ?? '',
+      }).catch(() => { /* best-effort */ });
     }
     const snapshotMax = snapshotMaxFromWorkbook(nextModel.snapshots);
     const nextPathway = readPathwayConfigFromModel(nextModel);
     const nextRolling = readRollingConfigFromModel(nextModel);
     setCustomDsl(readCustomDslFromModel(nextModel));
     setCarbonLibrary(readCarbonLibraryFromModel(nextModel));
-    const nextScenarioCatalog = readScenarioCatalogFromModel(nextModel);
-    const activeImportedScenario = nextScenarioCatalog.scenarios.find(
-      (scenario) => scenario.id === nextScenarioCatalog.activeScenarioId,
-    ) ?? null;
     setMaxSnapshots(snapshotMax);
     setSnapshotEnd(snapshotMax);
     setSnapshotStart(RUN_WINDOW.initialSnapshotStart);
@@ -421,7 +437,7 @@ function AppInner() {
       setRollingConfig(fallbackRolling);
     }
     setScenarioCatalog(catalogToApply);
-    if (name) setFilename(name);
+    setFilename(builtFilename);
   }, [
     snapshotWeight,
     carbonPrice,
