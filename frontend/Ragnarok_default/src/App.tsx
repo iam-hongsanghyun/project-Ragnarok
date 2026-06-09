@@ -593,6 +593,25 @@ function AppInner() {
     return () => window.clearTimeout(id);
   }, [filename, carbonPrice, carbonPriceSchedule, snapshotStart, snapshotEnd, snapshotWeight, forceLp, constraints, rollingConfig, pathwayConfig]);
 
+  // Keep the backend session authoritative for STATIC edits too. The heavy
+  // time-series are already edited directly against the backend (PATCH); the
+  // static sheets were previously synced only on load and just-before-a-run, so
+  // anything reading the session in between (e.g. a plugin's `options(…)` via
+  // `ctx.distinct`) saw stale rows. Mirror static edits to the backend on a
+  // debounce — `putStaticModel` merges ONLY the static sheets, leaving the
+  // backend's windowed series untouched, so this stays cheap. Skipped until the
+  // session has been restored (so it never races the boot restore) and when the
+  // model is empty (nothing to sync / avoid clobbering a just-cleared session).
+  useEffect(() => {
+    if (!sessionRestoredRef.current) return undefined;
+    const hasStatic = SHEETS.some((sheet) => (model[sheet]?.length ?? 0) > 0);
+    if (!hasStatic) return undefined;
+    const id = window.setTimeout(() => {
+      void putStaticModel(prepareModelForBackend(model)).catch(() => { /* best-effort */ });
+    }, 500);
+    return () => window.clearTimeout(id);
+  }, [model, prepareModelForBackend]);
+
   // Run history lives entirely on the backend (the single source of truth) —
   // see `refreshBackendRuns` / `backendRuns` below. There is no browser-side
   // history store anymore.
