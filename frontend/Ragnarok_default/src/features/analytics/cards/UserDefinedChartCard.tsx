@@ -161,6 +161,13 @@ export function UserDefinedChartCard({
     ? aggregateMetricRows(metric!, safeStart, safeEnd, active.timeframe)
     : [];
 
+  // A donut is ALWAYS the fully-aggregated total over the ENTIRE period — it
+  // must NOT track the range slider (safeStart/safeEnd). Always sum the whole
+  // metric series.
+  const donutData = hasMetric && active.chartType === 'donut'
+    ? buildDonutFromMetric(metric!, 0, Math.max(metricRows.length - 1, 0))
+    : [];
+
   // Show Group by when:
   //   - Generator focus with multi/all selection, OR
   //   - Bus focus with one of the generator-aggregated metrics picked
@@ -200,7 +207,7 @@ export function UserDefinedChartCard({
     if (!metric) return;
     let promise: Promise<void>;
     if (active.chartType === 'donut') {
-      const data = buildDonutFromMetric(metric, safeStart, safeEnd);
+      const data = donutData;
       promise = exportChartToExcel(
         metric.label,
         ['label', 'value'],
@@ -409,8 +416,9 @@ export function UserDefinedChartCard({
         </div>
       )}
 
-      {/* Timeline slider */}
-      {hasMetric && (
+      {/* Timeline slider — not for donuts (they always show the full-period
+          total, so a range would be misleading). */}
+      {hasMetric && active.chartType !== 'donut' && (
         <TimelineSlider
           data={metric!.rows}
           startIndex={safeStart}
@@ -435,8 +443,8 @@ export function UserDefinedChartCard({
               <div><h3>{metric!.label}</h3><p>total {metric!.unit} over the entire period</p></div>
             </div>
           )}
-          {buildDonutFromMetric(metric!, safeStart, safeEnd).length > 0
-            ? <DonutChart data={buildDonutFromMetric(metric!, safeStart, safeEnd)} />
+          {donutData.length > 0
+            ? <DonutChart data={donutData} />
             : <p className="empty-text">No data for current selection.</p>
           }
         </section>
