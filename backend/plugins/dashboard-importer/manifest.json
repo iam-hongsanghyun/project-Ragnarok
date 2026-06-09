@@ -1,0 +1,1537 @@
+{
+  "id": "dashboard-importer",
+  "name": "Dashboard Importer (backend)",
+  "version": "3.0.0",
+  "kind": "backend",
+  "description": "Builds a Ragnarok workbook from a PyPSA dashboard model + GUI settings. Runs ENTIRELY in the Ragnarok backend (imports the bundled PyPSA source); the model is written straight into the session and never enters the browser. Backend port of the frontend dashboard importer — no separate server, nothing in plugins.env.",
+  "capabilities": [
+    "data-importer",
+    "constraint-pack"
+  ],
+  "panel": {
+    "inputLayout": "2x1"
+  },
+  "config": {
+    "grp_build": {
+      "type": "group",
+      "column": "left",
+      "label": "Model & build",
+      "description": "Point to the model workbook, connect to the build server, and send the built model to Ragnarok."
+    },
+    "send_to_ragnarok": {
+      "type": "action",
+      "label": "Build & load into Ragnarok (server-side)",
+      "description": "Builds the model from all settings below (via the connected build server) and loads it into Ragnarok's current workbook. Does not run the solver. Click the topbar Run when you're ready to optimise.",
+      "hook": "build",
+      "variant": "primary",
+      "successMessage": "Model built into the session (server-side)."
+    },
+    "model_path": {
+      "type": "string",
+      "label": "Model workbook path",
+      "description": "Absolute path to the PyPSA model Excel workbook, resolved on the build server. Supports ${HOME} and ${PROJECT_ROOT}.",
+      "default": ""
+    },
+    "model_file": {
+      "type": "file",
+      "label": "Model workbook (upload)",
+      "description": "Upload a PyPSA model xlsx (binary upload). Use this OR model_path, not both.",
+      "accept": ".xlsx,.xlsm,.xlsb",
+      "binary": true
+    },
+    "dashboard_path": {
+      "type": "string",
+      "label": "Dashboard workbook (fallback)",
+      "description": "Optional path to a legacy dashboard.xlsx. GUI tables above always take precedence. Supports ${HOME} and ${PROJECT_ROOT}.",
+      "default": ""
+    },
+    "grp_time": {
+      "type": "group",
+      "column": "left",
+      "label": "Time & load",
+      "description": "Base/target year, the snapshot window, and the target annual demand."
+    },
+    "base_year": {
+      "type": "string",
+      "label": "Base year",
+      "description": "Calendar year of the load/generation profile in the model workbook (e.g. 2024).",
+      "default": "2024"
+    },
+    "target_year": {
+      "type": "string",
+      "label": "Target year",
+      "description": "Simulation year — assets outside their lifetime range are dropped (e.g. 2030).",
+      "default": "2030"
+    },
+    "snapshot_start": {
+      "type": "string",
+      "label": "Snapshot start",
+      "description": "Start of the simulation window in ISO format, YYYY-MM-DDTHH:MM (e.g. 2030-01-01T00:00). The output snapshots are re-dated to this year — set the year to your target year so the timeline reads e.g. 2030, not the model's base year.",
+      "default": "2030-01-01T00:00"
+    },
+    "snapshot_length": {
+      "type": "string",
+      "label": "Snapshot length (hours)",
+      "description": "Number of consecutive hourly snapshots. 8760 = full year.",
+      "default": "8760"
+    },
+    "target_load_twh": {
+      "type": "string",
+      "label": "Target load (TWh)",
+      "description": "Rescale total annual demand to this TWh target. Set to 0 to leave unchanged.",
+      "default": "0"
+    },
+    "grp_grid": {
+      "type": "group",
+      "column": "left",
+      "label": "Grid topology",
+      "description": "How the network topology is treated, plus combined-cycle merging."
+    },
+    "grid_mode": {
+      "type": "select",
+      "label": "Grid mode",
+      "description": "Network topology treatment applied before aggregation.",
+      "default": "as-is",
+      "options": [
+        {
+          "value": "as-is",
+          "label": "as-is — keep original topology"
+        },
+        {
+          "value": "single",
+          "label": "single — collapse to one node"
+        },
+        {
+          "value": "line_to_link",
+          "label": "line_to_link — replace lines with Links"
+        },
+        {
+          "value": "merge_line_transformer",
+          "label": "merge_line_transformer — merge transformer substations"
+        }
+      ]
+    },
+    "single_bus": {
+      "type": "string",
+      "label": "Single bus name",
+      "description": "Bus name used when grid_mode is 'single'.",
+      "default": "KR",
+      "visibleWhen": {
+        "field": "grid_mode",
+        "equals": "single"
+      }
+    },
+    "link_loss": {
+      "type": "string",
+      "label": "Link loss fraction",
+      "description": "Fractional transmission loss applied to line-derived Links (e.g. 0.03 = 3%).",
+      "default": "0.03"
+    },
+    "cc_rule": {
+      "type": "boolean",
+      "label": "CC merge rule",
+      "description": "Combine combined-cycle gas turbine blocks before aggregation. Edit rules in the right panel.",
+      "default": true
+    },
+    "grp_agg": {
+      "type": "group",
+      "column": "left",
+      "label": "Region & carrier aggregation",
+      "description": "Collapse buses into regions and/or merge generators per carrier."
+    },
+    "aggregate_by_region": {
+      "type": "boolean",
+      "label": "Aggregate by region",
+      "description": "Collapse buses into regions. Edit mapping and rules in the right panel.",
+      "default": false
+    },
+    "region_column": {
+      "type": "select",
+      "label": "Region column",
+      "description": "Bus attribute used for region grouping.",
+      "default": "province",
+      "visibleWhen": {
+        "field": "aggregate_by_region",
+        "equals": true
+      },
+      "options": [
+        {
+          "value": "province",
+          "label": "province"
+        },
+        {
+          "value": "group1",
+          "label": "group1"
+        },
+        {
+          "value": "group2",
+          "label": "group2"
+        },
+        {
+          "value": "group3",
+          "label": "group3"
+        },
+        {
+          "value": "singlenode",
+          "label": "singlenode"
+        }
+      ]
+    },
+    "aggregate_by_carrier": {
+      "type": "boolean",
+      "label": "Aggregate by carrier",
+      "description": "Merge generators sharing the same (bus, carrier). Edit rules in the right panel.",
+      "default": false
+    },
+    "grp_demand": {
+      "type": "group",
+      "column": "left",
+      "label": "Demand redistribution",
+      "description": "Move annual demand between buses/regions (edit moves in the right panel)."
+    },
+    "demand_redistribution": {
+      "type": "boolean",
+      "label": "Redistribute demand",
+      "description": "Move a fixed annual demand (MWh) between groups of buses/regions, proportionally over the existing profile. Runs after load scaling, before region aggregation. Edit moves in the right panel.",
+      "default": false
+    },
+    "grp_replace": {
+      "type": "group",
+      "column": "left",
+      "label": "Generator replacement",
+      "description": "Replace target-year plants with solar/wind (edit the table in the right panel)."
+    },
+    "replace_generators": {
+      "type": "boolean",
+      "label": "Replace plants with renewables",
+      "description": "Replace selected new power plants with solar and/or wind at the same bus, using the province's renewable profile. Edit the replacement table in the right panel.",
+      "default": false
+    },
+    "replace_build_year": {
+      "type": "number",
+      "label": "Replacement base year",
+      "description": "Filter 2 (replacement only): only plants whose build_year ≥ this year are replaceable, and the Plant dropdown is filtered to them. Plants built before it (but still active in the target year) stay as-is. This is layered on top of the target-year filter — leave 0/blank for no extra restriction.",
+      "default": 2025,
+      "visibleWhen": {
+        "field": "replace_generators",
+        "equals": true
+      }
+    },
+    "replace_follow": {
+      "type": "boolean",
+      "label": "Follow yearly solar/wind additions",
+      "description": "Split each replaced plant's capacity between solar and wind by the ratio of solar:wind capacity ADDED in that plant's build year (across the model). When on, the fixed Solar %/Wind % boxes are ignored. If a year has no solar/wind additions, the split falls back to the latest earlier year with nonzero solar/wind additions.",
+      "default": false,
+      "visibleWhen": {
+        "field": "replace_generators",
+        "equals": true
+      }
+    },
+    "replace_carriers": {
+      "type": "multi-select",
+      "label": "Carriers",
+      "description": "Check the carrier(s) to work with. Filters the Plant dropdown to these carriers, and drives the 'Fill table from carriers' button below (which adds every matching plant, prefilled). None checked = all carriers.",
+      "default": [],
+      "visibleWhen": {
+        "field": "replace_generators",
+        "equals": true
+      },
+      "options": [
+        {
+          "value": "coal",
+          "label": "coal"
+        },
+        {
+          "value": "gas",
+          "label": "gas"
+        },
+        {
+          "value": "nuclear",
+          "label": "nuclear"
+        },
+        {
+          "value": "bio",
+          "label": "bio"
+        },
+        {
+          "value": "hydro",
+          "label": "hydro"
+        },
+        {
+          "value": "solar",
+          "label": "solar"
+        },
+        {
+          "value": "wind",
+          "label": "wind"
+        },
+        {
+          "value": "others",
+          "label": "others"
+        }
+      ]
+    },
+    "replace_filter_column": {
+      "type": "select",
+      "column": "left",
+      "label": "Filter column (optional)",
+      "description": "Optionally narrow the replaceable fleet further: pick any column from the model's generators sheet, then a value below. Applied together with the carrier filter (AND). Leave blank for carrier-only.",
+      "default": "",
+      "clearable": true,
+      "emptyLabel": "— none —",
+      "visibleWhen": {
+        "field": "replace_generators",
+        "equals": true
+      },
+      "optionsFrom": {
+        "source": "server",
+        "endpoint": "/generator_filter_values",
+        "baseUrlField": "backendUrl",
+        "column": "column"
+      },
+      "options": []
+    },
+    "replace_filter_value": {
+      "type": "select",
+      "column": "left",
+      "label": "Filter value (optional)",
+      "description": "Value the chosen 'Filter column' must equal — lists that column's unique values from the model. Only generators whose column equals this value (and match the carriers) are replaceable.",
+      "default": "",
+      "clearable": true,
+      "emptyLabel": "— none —",
+      "visibleWhen": {
+        "field": "replace_generators",
+        "equals": true
+      },
+      "optionsFrom": {
+        "source": "server",
+        "endpoint": "/generator_filter_values",
+        "baseUrlField": "backendUrl",
+        "column": "value",
+        "filter": [
+          {
+            "column": "column",
+            "op": "==",
+            "valueFrom": "replace_filter_column"
+          }
+        ]
+      },
+      "options": []
+    },
+    "fill_reallocation": {
+      "type": "action",
+      "label": "Fill table from carriers",
+      "hook": "fillReallocation",
+      "variant": "secondary",
+      "description": "Add every plant of the checked carriers that is replaceable (active in the target year and build_year ≥ the replacement base year) to the table below. Solar/Wind MW are computed live from the current replacement settings.",
+      "visibleWhen": {
+        "field": "replace_generators",
+        "equals": true
+      }
+    },
+    "clear_reallocation": {
+      "type": "action",
+      "label": "Clear table",
+      "hook": "clearReallocation",
+      "variant": "secondary",
+      "description": "Empty the Generator-replacements table — removes every row (filled or manually added). Nothing is replaced until you fill it again.",
+      "visibleWhen": {
+        "field": "replace_generators",
+        "equals": true
+      }
+    },
+    "replace_solar_pct": {
+      "type": "number",
+      "label": "Solar share (%)",
+      "description": "Direct percent of each replaced plant's original capacity assigned to solar. Used only when 'Follow yearly additions' is off.",
+      "default": 50,
+      "visibleWhen": {
+        "field": "replace_generators",
+        "equals": true
+      }
+    },
+    "replace_wind_pct": {
+      "type": "number",
+      "label": "Wind share (%)",
+      "description": "Direct percent of each replaced plant's original capacity assigned to wind. Used only when 'Follow yearly additions' is off.",
+      "default": 50,
+      "visibleWhen": {
+        "field": "replace_generators",
+        "equals": true
+      }
+    },
+    "grp_mc": {
+      "type": "group",
+      "column": "left",
+      "label": "Marginal cost",
+      "description": "Scale generator marginal cost per carrier (edit the table in the right panel)."
+    },
+    "marginal_cost_multiplier": {
+      "type": "boolean",
+      "label": "Scale marginal cost by carrier",
+      "description": "Multiply each carrier's generator marginal cost by a percentage of its ORIGINAL value (100 = unchanged, 30 = ×0.30, 130 = +30%). Edit the per-carrier table in the right panel.",
+      "default": false
+    },
+    "grp_carbon": {
+      "type": "group",
+      "column": "left",
+      "label": "Carbon price",
+      "description": "Apply a carbon price to generator marginal costs."
+    },
+    "carbonprice": {
+      "type": "boolean",
+      "label": "Carbon price enabled",
+      "description": "Apply a carbon price to generator marginal costs. Edit curves in the right panel.",
+      "default": false
+    },
+    "carbonprice_scenario": {
+      "type": "string",
+      "label": "Carbon price scenario",
+      "description": "Scenario column name selected from the carbon price curves table.",
+      "default": "",
+      "visibleWhen": {
+        "field": "carbonprice",
+        "equals": true
+      }
+    },
+    "currency_exchange": {
+      "type": "string",
+      "label": "KRW / USD exchange rate",
+      "description": "Exchange rate used to convert USD-denominated costs to KRW.",
+      "default": "1350",
+      "visibleWhen": {
+        "field": "carbonprice",
+        "equals": true
+      }
+    },
+    "grp_constraints": {
+      "type": "group",
+      "column": "left",
+      "label": "Constraints",
+      "description": "Capacity-factor constraints on generators."
+    },
+    "constraints": {
+      "type": "boolean",
+      "label": "CF constraints enabled",
+      "description": "Apply capacity-factor constraints to generators. Edit values in the right panel.",
+      "default": false
+    },
+    "constraints_attribute": {
+      "type": "string",
+      "label": "Constraint attributes",
+      "description": "Comma-separated list of active CF constraint attribute names.",
+      "default": "max_cf, min_cf",
+      "visibleWhen": {
+        "field": "constraints",
+        "equals": true
+      }
+    },
+    "grp_output": {
+      "type": "group",
+      "column": "left",
+      "label": "Output & debug",
+      "description": "Optional map plot and debug workbook export."
+    },
+    "plot_map": {
+      "type": "boolean",
+      "label": "Plot map",
+      "description": "Compatibility flag from dashboard.xlsx (stored for parity, not rendered here).",
+      "default": true
+    },
+    "export_path": {
+      "type": "string",
+      "label": "Debug export path",
+      "description": "Optional path to export the built workbook as XLSX. Leave blank to skip. Supports ${HOME} and ${PROJECT_ROOT}.",
+      "default": ""
+    },
+    "grp_tables": {
+      "type": "group",
+      "column": "right",
+      "label": "Reference tables",
+      "description": "Tables backing the toggles on the left. Only the relevant ones are shown."
+    },
+    "cc_rules": {
+      "type": "table",
+      "label": "CC merge rules",
+      "description": "How combined-cycle generator attributes are merged. 'others' row sets the default. Rule can be a reduction keyword OR a literal numeric value (1e5, 1e6, 1e7) applied verbatim to every merged generator. Active when CC merge rule is on.",
+      "visibleWhen": {
+        "field": "cc_rule",
+        "equals": true
+      },
+      "maxHeight": 240,
+      "columns": [
+        {
+          "key": "attribute",
+          "label": "Attribute",
+          "width": 140
+        },
+        {
+          "key": "rule",
+          "label": "Rule",
+          "type": "select",
+          "width": 160,
+          "options": [
+            {
+              "value": "sum"
+            },
+            {
+              "value": "weighted_avg"
+            },
+            {
+              "value": "GT"
+            },
+            {
+              "value": "min"
+            },
+            {
+              "value": "max"
+            },
+            {
+              "value": "mean"
+            },
+            {
+              "value": "1e5",
+              "label": "100,000 (1e5)"
+            },
+            {
+              "value": "1e6",
+              "label": "1,000,000 (1e6)"
+            },
+            {
+              "value": "1e7",
+              "label": "10,000,000 (1e7)"
+            }
+          ]
+        }
+      ],
+      "default": [
+        {
+          "attribute": "p_nom",
+          "rule": "sum"
+        },
+        {
+          "attribute": "marginal_cost",
+          "rule": "weighted_avg"
+        },
+        {
+          "attribute": "capital_cost",
+          "rule": "weighted_avg"
+        },
+        {
+          "attribute": "efficiency",
+          "rule": "weighted_avg"
+        },
+        {
+          "attribute": "build_year",
+          "rule": "GT"
+        },
+        {
+          "attribute": "close_year",
+          "rule": "GT"
+        },
+        {
+          "attribute": "lifespan",
+          "rule": "GT"
+        },
+        {
+          "attribute": "others",
+          "rule": "GT"
+        }
+      ]
+    },
+    "province_mapping": {
+      "type": "table",
+      "label": "Province → region mapping",
+      "description": "Required columns: short, official. Optional group columns are looked up by the Region column selector. Active when Aggregate by region is on.",
+      "visibleWhen": {
+        "field": "aggregate_by_region",
+        "equals": true
+      },
+      "maxHeight": 400,
+      "columns": [
+        {
+          "key": "short",
+          "label": "short",
+          "width": 60
+        },
+        {
+          "key": "official",
+          "label": "official",
+          "width": 120
+        },
+        {
+          "key": "group1",
+          "label": "group1",
+          "width": 60
+        },
+        {
+          "key": "group2",
+          "label": "group2",
+          "width": 60
+        },
+        {
+          "key": "group3",
+          "label": "group3",
+          "width": 60
+        },
+        {
+          "key": "singlenode",
+          "label": "singlenode",
+          "width": 60
+        }
+      ],
+      "default": [
+        {
+          "short": "강원",
+          "official": "강원특별자치도",
+          "group1": "육지",
+          "group2": "육지",
+          "group3": "강원",
+          "singlenode": "KR"
+        },
+        {
+          "short": "경기",
+          "official": "경기도",
+          "group1": "육지",
+          "group2": "수도권",
+          "group3": "수도권",
+          "singlenode": "KR"
+        },
+        {
+          "short": "경남",
+          "official": "경상남도",
+          "group1": "육지",
+          "group2": "육지",
+          "group3": "경상",
+          "singlenode": "KR"
+        },
+        {
+          "short": "경북",
+          "official": "경상북도",
+          "group1": "육지",
+          "group2": "육지",
+          "group3": "경상",
+          "singlenode": "KR"
+        },
+        {
+          "short": "광주",
+          "official": "광주광역시",
+          "group1": "육지",
+          "group2": "육지",
+          "group3": "전라",
+          "singlenode": "KR"
+        },
+        {
+          "short": "대구",
+          "official": "대구광역시",
+          "group1": "육지",
+          "group2": "육지",
+          "group3": "경상",
+          "singlenode": "KR"
+        },
+        {
+          "short": "대전",
+          "official": "대전광역시",
+          "group1": "육지",
+          "group2": "육지",
+          "group3": "충청",
+          "singlenode": "KR"
+        },
+        {
+          "short": "부산",
+          "official": "부산광역시",
+          "group1": "육지",
+          "group2": "육지",
+          "group3": "경상",
+          "singlenode": "KR"
+        },
+        {
+          "short": "서울",
+          "official": "서울특별시",
+          "group1": "육지",
+          "group2": "수도권",
+          "group3": "수도권",
+          "singlenode": "KR"
+        },
+        {
+          "short": "세종",
+          "official": "세종특별자치시",
+          "group1": "육지",
+          "group2": "육지",
+          "group3": "충청",
+          "singlenode": "KR"
+        },
+        {
+          "short": "울산",
+          "official": "울산광역시",
+          "group1": "육지",
+          "group2": "육지",
+          "group3": "경상",
+          "singlenode": "KR"
+        },
+        {
+          "short": "인천",
+          "official": "인천광역시",
+          "group1": "육지",
+          "group2": "수도권",
+          "group3": "수도권",
+          "singlenode": "KR"
+        },
+        {
+          "short": "전남",
+          "official": "전라남도",
+          "group1": "육지",
+          "group2": "육지",
+          "group3": "전라",
+          "singlenode": "KR"
+        },
+        {
+          "short": "전북",
+          "official": "전북특별자치도",
+          "group1": "육지",
+          "group2": "육지",
+          "group3": "전라",
+          "singlenode": "KR"
+        },
+        {
+          "short": "제주",
+          "official": "제주특별자치도",
+          "group1": "제주",
+          "group2": "제주",
+          "group3": "제주",
+          "singlenode": "KR"
+        },
+        {
+          "short": "충남",
+          "official": "충청남도",
+          "group1": "육지",
+          "group2": "육지",
+          "group3": "충청",
+          "singlenode": "KR"
+        },
+        {
+          "short": "충북",
+          "official": "충청북도",
+          "group1": "육지",
+          "group2": "육지",
+          "group3": "충청",
+          "singlenode": "KR"
+        }
+      ]
+    },
+    "region_rules": {
+      "type": "table",
+      "label": "Region aggregation rules",
+      "description": "Per-component attribute reduction rules. 'others' row sets the per-component default. 'default' / 'ignore' = skip (PyPSA uses 0 for p_nom). 'inf' / '-inf' = unbounded (stored as ±1e12). Or pick a literal value (1e5, 1e6, 1e7) to set every aggregated component to that number. Active when Aggregate by region is on.",
+      "visibleWhen": {
+        "field": "aggregate_by_region",
+        "equals": true
+      },
+      "maxHeight": 200,
+      "columns": [
+        {
+          "key": "component",
+          "label": "Component",
+          "type": "select",
+          "width": 80,
+          "options": [
+            {
+              "value": "buses"
+            },
+            {
+              "value": "links"
+            }
+          ]
+        },
+        {
+          "key": "attribute",
+          "label": "Attribute",
+          "width": 100
+        },
+        {
+          "key": "rule",
+          "label": "Rule",
+          "type": "select",
+          "width": 130,
+          "options": [
+            {
+              "value": "sum"
+            },
+            {
+              "value": "mean"
+            },
+            {
+              "value": "min"
+            },
+            {
+              "value": "max"
+            },
+            {
+              "value": "ignore"
+            },
+            {
+              "value": "default"
+            },
+            {
+              "value": "inf"
+            },
+            {
+              "value": "-inf"
+            },
+            {
+              "value": "oldest"
+            },
+            {
+              "value": "newest"
+            },
+            {
+              "value": "region"
+            },
+            {
+              "value": "carrier"
+            },
+            {
+              "value": "1e5",
+              "label": "100,000 (1e5)"
+            },
+            {
+              "value": "1e6",
+              "label": "1,000,000 (1e6)"
+            },
+            {
+              "value": "1e7",
+              "label": "10,000,000 (1e7)"
+            }
+          ]
+        }
+      ],
+      "default": [
+        {
+          "component": "links",
+          "attribute": "p_nom",
+          "rule": "sum"
+        },
+        {
+          "component": "links",
+          "attribute": "efficiency",
+          "rule": "min"
+        },
+        {
+          "component": "buses",
+          "attribute": "v_nom",
+          "rule": "default"
+        },
+        {
+          "component": "buses",
+          "attribute": "x",
+          "rule": "mean"
+        },
+        {
+          "component": "buses",
+          "attribute": "y",
+          "rule": "mean"
+        },
+        {
+          "component": "buses",
+          "attribute": "others",
+          "rule": "ignore"
+        }
+      ]
+    },
+    "demand_redist_moves": {
+      "type": "table",
+      "label": "Demand moves (from → to)",
+      "description": "Each row is one move: it shifts 'Amount (MWh)' of annual demand from the source (From resolution + value) to the destination (To resolution + value). The two ends are independent and may use different resolutions — e.g. From bus '204' → To '전남' at group2. Each value dropdown follows the resolution chosen in that same row and shows that bus/region's annual demand (recalculated by the target load), so you can decide how much to move. Moves apply in table order. Needs the build server running; region resolutions need a province_mapping.",
+      "visibleWhen": {
+        "field": "demand_redistribution",
+        "equals": true
+      },
+      "maxHeight": 300,
+      "columns": [
+        {
+          "key": "from_resolution",
+          "label": "From resolution",
+          "type": "select",
+          "width": 130,
+          "options": [
+            {
+              "value": "bus",
+              "label": "bus"
+            },
+            {
+              "value": "province",
+              "label": "province"
+            },
+            {
+              "value": "group1",
+              "label": "group1"
+            },
+            {
+              "value": "group2",
+              "label": "group2"
+            },
+            {
+              "value": "group3",
+              "label": "group3"
+            },
+            {
+              "value": "singlenode",
+              "label": "singlenode"
+            }
+          ]
+        },
+        {
+          "key": "from_value",
+          "label": "From value (annual demand)",
+          "type": "select",
+          "width": 200,
+          "optionsFromByColumn": {
+            "switchColumn": "from_resolution",
+            "cases": {
+              "bus": {
+                "source": "server",
+                "endpoint": "/demand_values",
+                "baseUrlField": "backendUrl",
+                "column": "value",
+                "labelSuffixColumn": "annual_label",
+                "filter": [
+                  {
+                    "column": "resolution",
+                    "op": "==",
+                    "value": "bus"
+                  }
+                ]
+              },
+              "province": {
+                "source": "server",
+                "endpoint": "/demand_values",
+                "baseUrlField": "backendUrl",
+                "column": "value",
+                "labelSuffixColumn": "annual_label",
+                "filter": [
+                  {
+                    "column": "resolution",
+                    "op": "==",
+                    "value": "province"
+                  }
+                ]
+              },
+              "group1": {
+                "source": "server",
+                "endpoint": "/demand_values",
+                "baseUrlField": "backendUrl",
+                "column": "value",
+                "labelSuffixColumn": "annual_label",
+                "filter": [
+                  {
+                    "column": "resolution",
+                    "op": "==",
+                    "value": "group1"
+                  }
+                ]
+              },
+              "group2": {
+                "source": "server",
+                "endpoint": "/demand_values",
+                "baseUrlField": "backendUrl",
+                "column": "value",
+                "labelSuffixColumn": "annual_label",
+                "filter": [
+                  {
+                    "column": "resolution",
+                    "op": "==",
+                    "value": "group2"
+                  }
+                ]
+              },
+              "group3": {
+                "source": "server",
+                "endpoint": "/demand_values",
+                "baseUrlField": "backendUrl",
+                "column": "value",
+                "labelSuffixColumn": "annual_label",
+                "filter": [
+                  {
+                    "column": "resolution",
+                    "op": "==",
+                    "value": "group3"
+                  }
+                ]
+              },
+              "singlenode": {
+                "source": "server",
+                "endpoint": "/demand_values",
+                "baseUrlField": "backendUrl",
+                "column": "value",
+                "labelSuffixColumn": "annual_label",
+                "filter": [
+                  {
+                    "column": "resolution",
+                    "op": "==",
+                    "value": "singlenode"
+                  }
+                ]
+              }
+            }
+          },
+          "options": []
+        },
+        {
+          "key": "to_resolution",
+          "label": "To resolution",
+          "type": "select",
+          "width": 130,
+          "options": [
+            {
+              "value": "bus",
+              "label": "bus"
+            },
+            {
+              "value": "province",
+              "label": "province"
+            },
+            {
+              "value": "group1",
+              "label": "group1"
+            },
+            {
+              "value": "group2",
+              "label": "group2"
+            },
+            {
+              "value": "group3",
+              "label": "group3"
+            },
+            {
+              "value": "singlenode",
+              "label": "singlenode"
+            }
+          ]
+        },
+        {
+          "key": "to_value",
+          "label": "To value (annual demand)",
+          "type": "select",
+          "width": 200,
+          "optionsFromByColumn": {
+            "switchColumn": "to_resolution",
+            "cases": {
+              "bus": {
+                "source": "server",
+                "endpoint": "/demand_values",
+                "baseUrlField": "backendUrl",
+                "column": "value",
+                "labelSuffixColumn": "annual_label",
+                "filter": [
+                  {
+                    "column": "resolution",
+                    "op": "==",
+                    "value": "bus"
+                  }
+                ]
+              },
+              "province": {
+                "source": "server",
+                "endpoint": "/demand_values",
+                "baseUrlField": "backendUrl",
+                "column": "value",
+                "labelSuffixColumn": "annual_label",
+                "filter": [
+                  {
+                    "column": "resolution",
+                    "op": "==",
+                    "value": "province"
+                  }
+                ]
+              },
+              "group1": {
+                "source": "server",
+                "endpoint": "/demand_values",
+                "baseUrlField": "backendUrl",
+                "column": "value",
+                "labelSuffixColumn": "annual_label",
+                "filter": [
+                  {
+                    "column": "resolution",
+                    "op": "==",
+                    "value": "group1"
+                  }
+                ]
+              },
+              "group2": {
+                "source": "server",
+                "endpoint": "/demand_values",
+                "baseUrlField": "backendUrl",
+                "column": "value",
+                "labelSuffixColumn": "annual_label",
+                "filter": [
+                  {
+                    "column": "resolution",
+                    "op": "==",
+                    "value": "group2"
+                  }
+                ]
+              },
+              "group3": {
+                "source": "server",
+                "endpoint": "/demand_values",
+                "baseUrlField": "backendUrl",
+                "column": "value",
+                "labelSuffixColumn": "annual_label",
+                "filter": [
+                  {
+                    "column": "resolution",
+                    "op": "==",
+                    "value": "group3"
+                  }
+                ]
+              },
+              "singlenode": {
+                "source": "server",
+                "endpoint": "/demand_values",
+                "baseUrlField": "backendUrl",
+                "column": "value",
+                "labelSuffixColumn": "annual_label",
+                "filter": [
+                  {
+                    "column": "resolution",
+                    "op": "==",
+                    "value": "singlenode"
+                  }
+                ]
+              }
+            }
+          },
+          "options": []
+        },
+        {
+          "key": "amount_mwh",
+          "label": "Amount (MWh)",
+          "type": "number",
+          "width": 130
+        }
+      ],
+      "default": []
+    },
+    "generator_replacements": {
+      "type": "table",
+      "label": "Generator replacements",
+      "description": "Pick plants to replace with renewables. Each plant's own capacity is split into solar + wind from the current settings: yearly solar/wind additions when 'Follow yearly additions' is on, otherwise direct Solar %/Wind % of original capacity. New units are added at the same bus/province with that province's solar/wind profile and a marginal cost = mean of existing same-carrier units. New units are named <plant>_solar_<year> / <plant>_wind_<year>. The dropdown lists the replaceable plants — active in the target year and built on/after the replacement base year (each option shows its build year). Active when Replace plants with renewables is on.",
+      "visibleWhen": {
+        "field": "replace_generators",
+        "equals": true
+      },
+      "maxHeight": 260,
+      "columns": [
+        {
+          "key": "generator",
+          "label": "Plant (build year)",
+          "type": "select",
+          "width": 220,
+          "optionsFrom": {
+            "source": "server",
+            "endpoint": "/generators",
+            "baseUrlField": "backendUrl",
+            "column": "name",
+            "labelSuffixColumn": "build_year",
+            "filter": [
+              {
+                "column": "build_year",
+                "op": ">=",
+                "valueFrom": "replace_build_year"
+              },
+              {
+                "column": "carrier",
+                "op": "in",
+                "valueFrom": "replace_carriers"
+              }
+            ]
+          },
+          "options": []
+        },
+        {
+          "key": "total_mw",
+          "label": "Total (MW)",
+          "type": "display",
+          "width": 90,
+          "lookup": {
+            "source": "server",
+            "endpoint": "/replacement_plan",
+            "baseUrlField": "backendUrl",
+            "matchColumn": "generator",
+            "keyColumn": "generator",
+            "valueColumn": "total_mw"
+          }
+        },
+        {
+          "key": "solar_mw",
+          "label": "Solar (MW)",
+          "type": "display",
+          "width": 100,
+          "lookup": {
+            "source": "server",
+            "endpoint": "/replacement_plan",
+            "baseUrlField": "backendUrl",
+            "matchColumn": "generator",
+            "keyColumn": "generator",
+            "valueColumn": "solar_mw"
+          }
+        },
+        {
+          "key": "wind_mw",
+          "label": "Wind (MW)",
+          "type": "display",
+          "width": 100,
+          "lookup": {
+            "source": "server",
+            "endpoint": "/replacement_plan",
+            "baseUrlField": "backendUrl",
+            "matchColumn": "generator",
+            "keyColumn": "generator",
+            "valueColumn": "wind_mw"
+          }
+        }
+      ],
+      "default": []
+    },
+    "marginal_cost_multipliers": {
+      "type": "table",
+      "label": "Marginal cost multipliers (% of original)",
+      "description": "Per carrier: '% of original' is a percentage of that carrier's original marginal cost (100 = unchanged, 30 = ×0.30, 130 = ×1.30). Carriers with no row (or a blank %) are left unchanged.",
+      "visibleWhen": {
+        "field": "marginal_cost_multiplier",
+        "equals": true
+      },
+      "maxHeight": 260,
+      "columns": [
+        {
+          "key": "carrier",
+          "label": "Carrier",
+          "type": "select",
+          "width": 140,
+          "options": [
+            {
+              "value": "coal",
+              "label": "coal"
+            },
+            {
+              "value": "gas",
+              "label": "gas"
+            },
+            {
+              "value": "nuclear",
+              "label": "nuclear"
+            },
+            {
+              "value": "bio",
+              "label": "bio"
+            },
+            {
+              "value": "hydro",
+              "label": "hydro"
+            },
+            {
+              "value": "solar",
+              "label": "solar"
+            },
+            {
+              "value": "wind",
+              "label": "wind"
+            },
+            {
+              "value": "others",
+              "label": "others"
+            }
+          ]
+        },
+        {
+          "key": "multiplier_pct",
+          "label": "% of original",
+          "type": "number",
+          "width": 130
+        }
+      ],
+      "default": []
+    },
+    "carrier_rules": {
+      "type": "table",
+      "label": "Carrier aggregation rules (static)",
+      "description": "Static attribute merge rules. 'others' row sets the default. Pick a reduction keyword OR a literal numeric value (1e5, 1e6, 1e7). Active when Aggregate by carrier is on.",
+      "visibleWhen": {
+        "field": "aggregate_by_carrier",
+        "equals": true
+      },
+      "maxHeight": 260,
+      "columns": [
+        {
+          "key": "attribute",
+          "label": "Attribute",
+          "width": 140
+        },
+        {
+          "key": "rule",
+          "label": "Rule",
+          "type": "select",
+          "width": 160,
+          "options": [
+            {
+              "value": "sum"
+            },
+            {
+              "value": "mean"
+            },
+            {
+              "value": "min"
+            },
+            {
+              "value": "max"
+            },
+            {
+              "value": "weighted_avg"
+            },
+            {
+              "value": "carrier"
+            },
+            {
+              "value": "bus"
+            },
+            {
+              "value": "p_nom"
+            },
+            {
+              "value": "ignore"
+            },
+            {
+              "value": "1e5",
+              "label": "100,000 (1e5)"
+            },
+            {
+              "value": "1e6",
+              "label": "1,000,000 (1e6)"
+            },
+            {
+              "value": "1e7",
+              "label": "10,000,000 (1e7)"
+            }
+          ]
+        }
+      ],
+      "default": [
+        {
+          "attribute": "p_nom",
+          "rule": "sum"
+        },
+        {
+          "attribute": "marginal_cost",
+          "rule": "weighted_avg"
+        },
+        {
+          "attribute": "capital_cost",
+          "rule": "weighted_avg"
+        },
+        {
+          "attribute": "efficiency",
+          "rule": "weighted_avg"
+        },
+        {
+          "attribute": "build_year",
+          "rule": "min"
+        },
+        {
+          "attribute": "close_year",
+          "rule": "max"
+        },
+        {
+          "attribute": "carrier",
+          "rule": "carrier"
+        },
+        {
+          "attribute": "bus",
+          "rule": "bus"
+        },
+        {
+          "attribute": "others",
+          "rule": "mean"
+        }
+      ]
+    },
+    "carrier_rules_t": {
+      "type": "table",
+      "label": "Carrier aggregation rules (time-series)",
+      "description": "Per-snapshot attribute reduction rules. Pick a reduction keyword OR a literal numeric value (1e5, 1e6, 1e7) to write into every snapshot of the merged time-series. Active when Aggregate by carrier is on.",
+      "visibleWhen": {
+        "field": "aggregate_by_carrier",
+        "equals": true
+      },
+      "maxHeight": 180,
+      "columns": [
+        {
+          "key": "attribute",
+          "label": "Attribute",
+          "width": 140
+        },
+        {
+          "key": "rule",
+          "label": "Rule",
+          "type": "select",
+          "width": 160,
+          "options": [
+            {
+              "value": "sum"
+            },
+            {
+              "value": "max"
+            },
+            {
+              "value": "min"
+            },
+            {
+              "value": "mean"
+            },
+            {
+              "value": "weighted_avg"
+            },
+            {
+              "value": "ignore"
+            },
+            {
+              "value": "1e5",
+              "label": "100,000 (1e5)"
+            },
+            {
+              "value": "1e6",
+              "label": "1,000,000 (1e6)"
+            },
+            {
+              "value": "1e7",
+              "label": "10,000,000 (1e7)"
+            }
+          ]
+        }
+      ],
+      "default": [
+        {
+          "attribute": "p_set",
+          "rule": "sum"
+        },
+        {
+          "attribute": "p_max_pu",
+          "rule": "mean"
+        },
+        {
+          "attribute": "p_min_pu",
+          "rule": "mean"
+        },
+        {
+          "attribute": "marginal_cost",
+          "rule": "mean"
+        },
+        {
+          "attribute": "others",
+          "rule": "mean"
+        }
+      ]
+    },
+    "constraints_rows": {
+      "type": "table",
+      "label": "CF constraint values",
+      "description": "One row per (carrier, attribute, year). Filtered to target_year at build time. Active when CF constraints are on.",
+      "visibleWhen": {
+        "field": "constraints",
+        "equals": true
+      },
+      "columns": [
+        {
+          "key": "carrier",
+          "label": "Carrier",
+          "width": 100
+        },
+        {
+          "key": "attribute",
+          "label": "Attribute",
+          "type": "select",
+          "width": 90,
+          "options": [
+            {
+              "value": "max_cf"
+            },
+            {
+              "value": "min_cf"
+            }
+          ]
+        },
+        {
+          "key": "year",
+          "label": "Year",
+          "type": "number",
+          "width": 70
+        },
+        {
+          "key": "value",
+          "label": "Value",
+          "type": "number",
+          "width": 70
+        }
+      ],
+      "default": []
+    },
+    "carbonprice_curves": {
+      "type": "table",
+      "label": "Carbon price curves (USD/tCO2)",
+      "description": "Long format: (scenario, year, value). The active row matches the scenario name and target year. Active when Carbon price is on.",
+      "visibleWhen": {
+        "field": "carbonprice",
+        "equals": true
+      },
+      "columns": [
+        {
+          "key": "scenario",
+          "label": "Scenario",
+          "width": 100
+        },
+        {
+          "key": "year",
+          "label": "Year",
+          "type": "number",
+          "width": 70
+        },
+        {
+          "key": "value",
+          "label": "USD/tCO2",
+          "type": "number",
+          "width": 80
+        }
+      ],
+      "default": []
+    },
+    "emission_intensity_rows": {
+      "type": "table",
+      "label": "Emission intensities (kg CO2/MWh)",
+      "description": "Per-carrier emission intensity by year. Filtered to target_year at build time. Active when Carbon price is on.",
+      "visibleWhen": {
+        "field": "carbonprice",
+        "equals": true
+      },
+      "columns": [
+        {
+          "key": "year",
+          "label": "Year",
+          "type": "number",
+          "width": 70
+        },
+        {
+          "key": "carrier",
+          "label": "Carrier",
+          "width": 100
+        },
+        {
+          "key": "value",
+          "label": "kg CO2/MWh",
+          "type": "number",
+          "width": 90
+        }
+      ],
+      "default": []
+    }
+  }
+}

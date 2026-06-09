@@ -89,3 +89,16 @@ def test_router_build_unknown_is_404() -> None:
     with pytest.raises(plugins_router.HTTPException) as exc:
         plugins_router.build_plugin("nope", body)
     assert exc.value.status_code == 404
+
+
+def test_dashboard_importer_backend_plugin_loads_and_runs_engine() -> None:
+    # The ported Dashboard Importer runs in-backend (imports dashboard_lib +
+    # the bundled deps). With no model workbook it must raise a CLEAN domain
+    # error (proving the engine is reachable and dashboard_lib imported) — not
+    # an ImportError.
+    reg = plugins.discover()
+    assert "dashboard-importer" in reg
+    assert reg["dashboard-importer"].has_build
+    with pytest.raises(ValueError) as exc:
+        plugins.run_build("dashboard-importer", {})
+    assert "model" in str(exc.value).lower()  # "No model workbook specified…"

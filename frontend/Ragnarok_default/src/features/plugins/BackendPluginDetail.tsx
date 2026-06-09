@@ -63,9 +63,28 @@ function toDescriptor(manifest: BackendPluginManifest): ModuleDescriptor {
   };
 }
 
+/** A binary `file` field holds the whole upload as a multi-MB base64 `data:`
+ *  string. Persisting that to localStorage on every config edit makes the form
+ *  crawl (same bug as frontend plugins), so heavy values are kept in memory
+ *  only and merged over the persisted (light) config. */
+function isHeavyValue(v: unknown): boolean {
+  return typeof v === 'string' && (v.length > 50_000 || v.startsWith('data:'));
+}
+
 export function BackendPluginDetail({ manifest, model, onBuilt }: Props) {
   const { showToast } = useToast();
-  const [config, setConfig] = usePersistedState<Record<string, unknown>>(`ui:be-plugin-cfg:${manifest.id}`, {});
+  // Light config persists; heavy/binary values (uploaded files) live only in
+  // memory for the session (re-select after a reload).
+  const [persistedConfig, setPersistedConfig] = usePersistedState<Record<string, unknown>>(`ui:be-plugin-cfg:${manifest.id}`, {});
+  const [volatileConfig, setVolatileConfig] = useState<Record<string, unknown>>({});
+  const config = useMemo(() => ({ ...persistedConfig, ...volatileConfig }), [persistedConfig, volatileConfig]);
+  const setConfigValue = (key: string, value: unknown) => {
+    if (isHeavyValue(value)) {
+      setVolatileConfig((prev) => ({ ...prev, [key]: value }));
+    } else {
+      setPersistedConfig({ ...persistedConfig, [key]: value });
+    }
+  };
   const [busy, setBusy] = useState(false);
 
   const descriptor = useMemo(() => toDescriptor(manifest), [manifest]);
@@ -104,7 +123,7 @@ export function BackendPluginDetail({ manifest, model, onBuilt }: Props) {
       <PluginPanel
         modules={[descriptor]}
         moduleConfigs={{ [manifest.id]: withDefaults(manifest.config, config) }}
-        onModuleConfigChange={(_id, key, value) => setConfig({ ...config, [key]: value })}
+        onModuleConfigChange={(_id, key, value) => setConfigValue(key, value)}
         carriers={carriers}
         model={model}
         pluginAnalytics={{}}
