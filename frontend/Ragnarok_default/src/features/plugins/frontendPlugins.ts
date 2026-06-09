@@ -31,6 +31,36 @@ function saveJson(key: string, value: unknown): void {
   try { window.localStorage.setItem(key, JSON.stringify(value)); } catch { /* quota — ignore */ }
 }
 
+// Largest config string value we persist. A binary `file` field stores the whole
+// upload as a base64 `data:` string (multi-MB); serialising that to localStorage
+// on EVERY config edit is what makes "change a number after picking a file"
+// crawl. Such values are kept in memory for the session but never persisted —
+// re-select the file after a reload.
+const MAX_PERSISTED_VALUE_LEN = 50_000;
+
+function isHeavyValue(v: unknown): boolean {
+  return typeof v === 'string' && (v.length > MAX_PERSISTED_VALUE_LEN || v.startsWith('data:'));
+}
+
+/** Drop oversized/binary values (e.g. uploaded files) before persisting. */
+function slimConfigs(
+  configs: Record<string, Record<string, unknown>>,
+): Record<string, Record<string, unknown>> {
+  const out: Record<string, Record<string, unknown>> = {};
+  for (const [id, cfg] of Object.entries(configs)) {
+    const slim: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(cfg ?? {})) {
+      if (!isHeavyValue(v)) slim[k] = v;
+    }
+    out[id] = slim;
+  }
+  return out;
+}
+
+function saveConfigs(configs: Record<string, Record<string, unknown>>): void {
+  saveJson(CONFIG_KEY, slimConfigs(configs));
+}
+
 /** Parse a plugin .zip (manifest + text files) without touching the backend. */
 async function parsePackage(file: File): Promise<InstalledPlugin> {
   const buf = new Uint8Array(await file.arrayBuffer());
@@ -97,13 +127,13 @@ export function useFrontendPlugins() {
   const setConfigField = useCallback((id: string, key: string, value: unknown) => {
     const next = { ...configs, [id]: { ...(configs[id] ?? {}), [key]: value } };
     setConfigs(next);
-    saveJson(CONFIG_KEY, next);
+    saveConfigs(next);
   }, [configs]);
 
   const setConfig = useCallback((id: string, value: Record<string, unknown>) => {
     const next = { ...configs, [id]: value };
     setConfigs(next);
-    saveJson(CONFIG_KEY, next);
+    saveConfigs(next);
   }, [configs]);
 
   /** Replace every installed plugin's config in one shot (used by Import
@@ -112,7 +142,7 @@ export function useFrontendPlugins() {
    *  absent from the map is wiped, matching the workbook-is-truth model. */
   const setAllConfigs = useCallback((next: Record<string, Record<string, unknown>>) => {
     setConfigs(next);
-    saveJson(CONFIG_KEY, next);
+    saveConfigs(next);
   }, []);
 
   return {
