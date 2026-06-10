@@ -13,11 +13,17 @@ export type DateFormat = 'auto' | 'dmy' | 'mdy' | 'ymd';
 // and falls back to IPM elsewhere (handled server-side) — so it's safe to pick
 // on any machine.
 export type SolverType = 'auto' | 'simplex' | 'ipm' | 'pdlp' | 'hipo';
+// Run-result gate. 'lenient' (default) accepts any solve the toolchain
+// validated (linopy status ok) even when HiGHS reports condition='unknown'
+// (typical for interior-point runs without crossover). 'strict' requires
+// condition='optimal' — vertex-optimal solutions with exact shadow prices.
+export type SolveAcceptance = 'lenient' | 'strict';
 
 export interface AppSettings {
   dateFormat: DateFormat;
   solverThreads: number; // 0 = let HiGHS decide (all cores)
   solverType: SolverType;
+  solveAcceptance: SolveAcceptance;
   // Pass HiGHS user_objective_scale=-1 — auto-scales a wide-ranging objective
   // (results-neutral) so simplex/PDLP converge faster on badly-scaled LPs.
   objectiveAutoScale: boolean;

@@ -1685,6 +1685,7 @@ function AppInner() {
       filename,
       dateFormat: settings.dateFormat,
       solverThreads: settings.solverThreads, solverType: settings.solverType,
+      solveAcceptance: settings.solveAcceptance,
       objectiveAutoScale: settings.objectiveAutoScale,
       currencySymbol: settings.currencySymbol,
       enableLoadShedding: settings.enableLoadShedding,
@@ -2010,10 +2011,12 @@ function AppInner() {
               onLoadSheddingCostChange={(v) => updateSettings({ loadSheddingCost: v })}
               solverThreads={settings.solverThreads}
               solverType={settings.solverType}
+              solveAcceptance={settings.solveAcceptance}
               objectiveAutoScale={settings.objectiveAutoScale}
               queuePollSeconds={settings.queuePollSeconds}
               onSolverThreadsChange={(v) => updateSettings({ solverThreads: v })}
               onSolverTypeChange={(v) => updateSettings({ solverType: v })}
+              onSolveAcceptanceChange={(v) => updateSettings({ solveAcceptance: v })}
               onObjectiveAutoScaleChange={(v) => updateSettings({ objectiveAutoScale: v })}
               onQueuePollSecondsChange={(v) => updateSettings({ queuePollSeconds: v })}
               onCarrierColorChange={(rowIndex, color) => updateRowValue('carriers', rowIndex, 'color', color)}

@@ -55,6 +55,26 @@ def _coerce_solve_status(result: Any) -> tuple[str, str]:
     return "ok", "optimal"
 
 
+def _solve_rejected(status: str, condition: str, *, strict: bool) -> bool:
+    """Whether a finished solve must be rejected, per the acceptance setting.
+
+    ``condition='optimal'`` always passes. In **strict** mode nothing else
+    does — the user wants vertex-optimal solutions with exact duals only.
+    In **lenient** mode (the default) a solve also passes when linopy accepted
+    and parsed the solution (status ok/warning) and the condition is not a
+    definite failure: interior-point methods (IPM/HiPO/PDLP) often finish
+    without crossover, so HiGHS emits no 'optimal' termination string and the
+    condition reads 'unknown' even though the solution is valid.
+    """
+    if condition == "optimal":
+        return False
+    if strict:
+        return True
+    if condition in ("infeasible", "unbounded", "infeasible_or_unbounded"):
+        return True
+    return status.lower() not in ("ok", "warning")
+
+
 # HiGHS LP methods the user may pin. Anything else (incl. "auto"/"choose"/
 # "highs"/"") leaves the method unset so HiGHS chooses — identical to a bare
 # ``n.optimize(solver_name="highs")`` and the fast default.
@@ -284,17 +304,20 @@ def run_pypsa(
             solve_status,
             solve_condition,
         )
-        # A solve is acceptable when EITHER HiGHS reports condition='optimal',
-        # OR linopy reports status='ok' (it accepted and parsed the primal/dual
-        # — "Optimization successful"). Interior-point methods (IPM/HiPO/PDLP)
-        # often finish without crossover, so HiGHS emits no clean "optimal"
-        # string and linopy records condition='unknown' WITH status='ok'; that
-        # solution is valid. Only a non-ok status (warning/infeasible) or a
-        # genuinely bad condition (infeasible/unbounded) is a real failure —
-        # e.g. HiGHS "Dual simplex ratio test failed" leaves status!='ok'.
-        _ok_status = solve_status.lower() in ("ok", "warning")
-        _bad_condition = solve_condition in ("infeasible", "unbounded", "infeasible_or_unbounded")
-        if _bad_condition or (solve_condition != "optimal" and not _ok_status):
+        # Gate the result per the user's "Solution acceptance" solver setting
+        # (see _solve_rejected): Strict demands condition='optimal'; Lenient
+        # (default) also accepts linopy-validated solves whose condition is
+        # merely 'unknown' (typical for interior-point runs without crossover).
+        strict = str(options.get("solveAcceptance", "lenient")).lower() == "strict"
+        if _solve_rejected(solve_status, solve_condition, strict=strict):
+            strict_hint = (
+                " Solution acceptance is set to Strict; this solve was accepted "
+                "by the solver toolchain and Lenient mode would keep it — "
+                "see Settings → Solver."
+                if strict and solve_status.lower() in ("ok", "warning")
+                and solve_condition not in ("infeasible", "unbounded", "infeasible_or_unbounded")
+                else ""
+            )
             raise HTTPException(
                 status_code=500,
                 detail=(
@@ -304,6 +327,7 @@ def run_pypsa(
                     "placeholder 1e12 / inf values in p_nom_max, e_sum_min, "
                     "e_sum_max, lifetime, or for conflicting constraints (CO₂ cap, "
                     "capacity factor caps) against the available capacity."
+                    + strict_hint
                 ),
             )
         if solve_condition != "optimal":
@@ -311,8 +335,9 @@ def run_pypsa(
                 f"Solver finished with condition='{solve_condition}' but linopy "
                 f"accepted the solution (status='{solve_status}'). This is normal "
                 "for interior-point methods (IPM/HiPO) that skip crossover; the "
-                "result is usable. Switch Solver to 'simplex' if you need a "
-                "vertex-optimal solution with exact shadow prices."
+                "result is usable. Switch Solver to 'simplex' or set Solution "
+                "acceptance to 'Strict' if you need vertex-optimal solutions "
+                "with exact shadow prices."
             )
         # HiPO requested on a build that lacks it → we ran IPM; say so.
         if str(options.get("solverType", "auto")).lower() == "hipo" and not _highs_has_hipo():

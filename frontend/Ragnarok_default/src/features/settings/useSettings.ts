@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import type { AppSettings } from 'lib/settings/types';
 import { SETTINGS_CONFIG, SETTINGS_DEFAULTS } from 'lib/constants';
 
-export type { DateFormat, SolverType, AppSettings } from 'lib/settings/types';
+export type { DateFormat, SolveAcceptance, SolverType, AppSettings } from 'lib/settings/types';
 
 const STORAGE_KEY = SETTINGS_CONFIG.storageKey;
 
@@ -32,6 +32,7 @@ function loadSettings(): AppSettings {
         dateFormat: parsed.dateFormat ?? SETTINGS_DEFAULTS.dateFormat,
         solverThreads: parsed.solverThreads ?? SETTINGS_DEFAULTS.solverThreads,
         solverType,
+        solveAcceptance: parsed.solveAcceptance ?? SETTINGS_DEFAULTS.solveAcceptance,
         objectiveAutoScale: parsed.objectiveAutoScale ?? SETTINGS_DEFAULTS.objectiveAutoScale,
         currencyCode: parsed.currencyCode ?? SETTINGS_DEFAULTS.currencyCode,
         currencySymbol: parsed.currencySymbol ?? SETTINGS_DEFAULTS.currencySymbol,
