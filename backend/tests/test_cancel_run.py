@@ -16,7 +16,10 @@ from __future__ import annotations
 import asyncio
 import multiprocessing as mp
 import signal
+import sys
 import time
+
+import pytest
 
 from backend.app.main import _Job, _jobs, cancel_run
 
@@ -30,6 +33,11 @@ def _sigterm_ignoring_worker(q: "mp.Queue") -> None:
         time.sleep(0.05)
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Needs the POSIX 'fork' start method; on Windows terminate() is "
+    "already TerminateProcess (forceful), so there is no escalation to test.",
+)
 def test_cancel_escalates_to_sigkill() -> None:
     ctx = mp.get_context("fork")
     q: mp.Queue = ctx.Queue()

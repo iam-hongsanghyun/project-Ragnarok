@@ -300,9 +300,31 @@ def _read_queue_outcome(item_id: str) -> dict[str, Any] | None:
 
 
 def _pid_alive(pid: int | None) -> bool:
-    """True when ``pid`` is a live process we may signal (the orphaned worker)."""
+    """True when ``pid`` is a live process we may signal (the orphaned worker).
+
+    Platform split is load-bearing: on POSIX ``os.kill(pid, 0)`` is the
+    standard liveness probe, but on Windows ``os.kill`` with ANY non-console
+    signal — including 0 — calls TerminateProcess, i.e. it would KILL the
+    orphaned solve we are checking on. Windows probes via OpenProcess instead.
+    """
     if not isinstance(pid, int) or pid <= 0:
         return False
+    if os.name == "nt":
+        import ctypes
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return False
+            return code.value == STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
     try:
         os.kill(pid, 0)
         return True
@@ -983,12 +1005,16 @@ async def cancel_queued(item_id: str) -> dict[str, Any]:
                 await asyncio.to_thread(proc.join, 3)
         elif proc is None and _pid_alive(item.pid):
             # Orphaned worker (survived a backend restart) — no mp handle, only
-            # the persisted pid. Same SIGTERM → SIGKILL escalation by signal.
+            # the persisted pid. POSIX: SIGTERM → SIGKILL escalation. Windows:
+            # os.kill with a non-console signal IS TerminateProcess (hard kill),
+            # and SIGKILL does not exist there — one shot is both available and
+            # sufficient.
             try:
                 os.kill(item.pid, signal.SIGTERM)  # type: ignore[arg-type]
-                await asyncio.sleep(3.0)
-                if _pid_alive(item.pid):
-                    os.kill(item.pid, signal.SIGKILL)  # type: ignore[arg-type]
+                if hasattr(signal, "SIGKILL"):
+                    await asyncio.sleep(3.0)
+                    if _pid_alive(item.pid):
+                        os.kill(item.pid, signal.SIGKILL)
             except OSError:
                 pass  # already gone
     else:
@@ -1631,3 +1657,32 @@ async def import_hdf5(file: UploadFile) -> dict[str, Any]:
 # ``POST /api/import/hdf5`` — accept a user-uploaded PyPSA-native file and
 # convert it to the in-memory model JSON; they are not part of the external-
 # data registry.
+
+
+# ── Serve the built client (server mode) ─────────────────────────────────────
+# Server mode: ONE process serves both the API and the SPA, so a browser on
+# another machine just opens http://<this-host>:8000 — same-origin, which makes
+# the client's relative API calls hit this backend with zero configuration.
+# The mount is registered LAST so every /api/* route above wins. Dist lookup:
+# RAGNAROK_FRONTEND_DIST if set; else ./build at the repo root (a deployment
+# wrapper's committed copy); else the frontend package's own CRA output.
+from fastapi.staticfiles import StaticFiles  # noqa: E402
+
+_DIST_CANDIDATES = (
+    _REPO_ROOT / "build",
+    _REPO_ROOT / "frontend" / "Ragnarok_default" / "build",
+)
+_env_dist = os.environ.get("RAGNAROK_FRONTEND_DIST")
+_FRONTEND_DIST = (
+    Path(_env_dist)
+    if _env_dist
+    else next((p for p in _DIST_CANDIDATES if p.is_dir()), _DIST_CANDIDATES[0])
+)
+if _FRONTEND_DIST.is_dir():
+    app.mount("/", StaticFiles(directory=str(_FRONTEND_DIST), html=True), name="spa")
+    logging.getLogger("pypsa_gui").info("Serving client from %s", _FRONTEND_DIST)
+else:
+    logging.getLogger("pypsa_gui").info(
+        "No client build at %s — API-only mode (run `npm run build` or set RAGNAROK_FRONTEND_DIST)",
+        _FRONTEND_DIST,
+    )

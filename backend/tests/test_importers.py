@@ -505,6 +505,8 @@ def test_server_recorded_secrets_roundtrip(tmp_path, monkeypatch) -> None:
     assert "eia_key" not in imp._stored_secrets()
     assert client.delete("/api/import/secrets/eia_key").json()["removed"] is False
 
-    # Invalid names are rejected.
-    assert client.put("/api/import/secrets/../evil", json={"value": "x"}).status_code in (400, 404)
+    # Invalid names are rejected. The traversal normalizes to a non-route; with
+    # a client build present the SPA mount answers it 405 instead of 404.
+    assert client.put("/api/import/secrets/../evil", json={"value": "x"}).status_code in (400, 404, 405)
+    assert "evil" not in imp._stored_secrets()
     assert client.put("/api/import/secrets/UPPER", json={"value": "x"}).status_code == 400

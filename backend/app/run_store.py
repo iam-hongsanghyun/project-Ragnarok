@@ -24,9 +24,10 @@ import json
 import logging
 import re
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import pandas as pd
 
@@ -379,11 +380,21 @@ def _db_path(name: str) -> Path:
     return RUNS_DIR / f"{name}.db"
 
 
-def _connect(name: str) -> sqlite3.Connection:
+@contextmanager
+def _connect(name: str) -> Iterator[sqlite3.Connection]:
+    """Open a run db for one operation and ALWAYS close it (see sqlite_store:
+    open handles break delete/replace on Windows)."""
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(_db_path(name)))
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def _kv_get(conn: Any, key: str) -> Any | None:
