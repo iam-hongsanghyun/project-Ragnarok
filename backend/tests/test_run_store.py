@@ -122,17 +122,19 @@ def test_run_store_lifecycle(_runs_dir: Path) -> None:
     assert bundle["snapshotStart"] == 0
     assert bundle["snapshotEnd"] == 24
 
-    # The xlsx is pre-built at store time so downloads stream a ready file.
-    pre = run_store.xlsx_path(name)
-    assert pre is not None and pre.exists()
+    # NO xlsx is pre-built — Excel is derived only on explicit export, so no
+    # workbook file exists on disk after a store.
+    assert run_store.xlsx_path(name) is None
+    assert not (run_store.RUNS_DIR / f"{name}.xlsx").exists()
 
+    # …but it builds on demand from the canonical bundle when downloaded.
     xlsx_bytes = run_store.run_to_xlsx(name)
     assert xlsx_bytes is not None
     assert len(xlsx_bytes) > 0
     # xlsx files are zip archives — they start with the PK signature.
     assert xlsx_bytes[:2] == b"PK"
 
-    # list_runs reports xlsx readiness (the pre-build finished above).
+    # A stored run can always produce a workbook on demand.
     assert run_store.list_runs()[0]["xlsxReady"] is True
 
     # The export package zips ALL THREE on-disk files.

@@ -451,15 +451,10 @@ def store_run(
         except Exception:  # noqa: BLE001
             logger.exception("Failed to write results split for run %s", name)
 
-        # Pre-build the xlsx now (server-side) so a later download serves a ready
-        # file instead of rebuilding a large workbook on every request. The JSON
-        # bundle is the canonical form, so an xlsx-build failure is non-fatal.
-        try:
-            from . import project_workbook
-
-            (RUNS_DIR / f"{name}.xlsx").write_bytes(project_workbook.bundle_to_workbook(bundle))
-        except Exception:  # noqa: BLE001
-            logger.exception("Failed to pre-build xlsx for run %s", name)
+        # NO xlsx is written here. Excel is a derived export artefact, built ONLY
+        # when the user explicitly downloads/exports it (GET /api/runs/{name}/xlsx
+        # and /package both build on demand from this bundle). Ragnarok keeps SQL/
+        # JSON as the source of truth and never auto-creates workbooks.
 
         logger.info("Stored run %s (%d bytes)", name, size_bytes)
         return meta
@@ -481,11 +476,11 @@ def list_runs() -> list[dict[str, Any]]:
         for path in RUNS_DIR.glob("*.meta.json"):
             try:
                 meta = json.loads(path.read_text(encoding="utf-8"))
-                # The xlsx is pre-built AFTER the meta sidecar, so a run can be
-                # listed before its workbook is ready. Surface readiness so the
-                # UI can show "Preparing…" until the export package can be built.
+                # Excel is never pre-built — it's derived on demand from the
+                # canonical bundle when the user downloads/exports. So any stored
+                # run can always produce a workbook; flag it ready unconditionally.
                 name = str(meta.get("name", ""))
-                meta["xlsxReady"] = bool(name) and (RUNS_DIR / f"{name}.xlsx").exists()
+                meta["xlsxReady"] = bool(name)
                 runs.append(meta)
             except Exception:  # noqa: BLE001
                 logger.warning("Skipping unreadable run meta: %s", path.name)
