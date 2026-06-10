@@ -929,12 +929,21 @@
   gap: 4px;
 }
 .sg-module-config-label {
-  flex: 0 0 auto;
+  /* Fixed label column so every row's input starts at the same x — auto-width
+     labels staggered the inputs into a ragged, broken-looking layout. */
+  flex: 0 0 11.5rem;
   color: var(--text);
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* Column-direction rows (slider / file / table): the fixed basis would become a
+   fixed HEIGHT there — let those labels size naturally. */
+.sg-module-config-row--slider .sg-module-config-label,
+.sg-module-config-row--file .sg-module-config-label,
+.sg-module-config-row--table .sg-module-config-label {
+  flex: 0 0 auto;
 }
 .sg-module-config-slider-row {
   display: flex;
@@ -5201,11 +5210,12 @@ th:hover .col-delete-btn {
    nav group title (.settings-nav-group-title) so the grouping aligns with the
    rest of the app — same 16px inset as the rail items below it. */
 .plugin-rail-group {
+  /* Matches .settings-nav-group-title / .forge-group-title — one rail design. */
   margin-top: 12px;
-  padding: 6px 16px;
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.07em;
+  padding: 6px 8px 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted);
 }
@@ -6170,11 +6180,14 @@ th:hover .col-delete-btn {
 .settings-nav-group {
   margin-bottom: 14px;
 }
+/* Rail group heading — ONE design across all tabs (Forge's): small uppercase
+   muted label inset 8px, so the real items below (16px inset) read as indented
+   children of the group. */
 .settings-nav-group-title {
-  padding: 6px 16px;
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.07em;
+  padding: 6px 8px 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted);
 }
@@ -6648,13 +6661,17 @@ th:hover .col-delete-btn {
   align-items: center;
   gap: 6px;
   width: 100%;
-  padding: 5px 12px;
+  padding: 6px 8px 4px;
   background: transparent;
   border: none;
   cursor: pointer;
-  font-size: 0.82rem;
+  /* Same group-heading typography as the other rails (Forge design); the
+     chevron + counts keep the collapse affordance. */
+  font-size: 0.7rem;
   font-weight: 600;
-  color: var(--text);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
   text-align: left;
 }
 .sheet-tree-group-header:hover { background: rgba(15, 118, 110, 0.05); }
@@ -6786,14 +6803,6 @@ th:hover .col-delete-btn {
   color: var(--muted);
   margin-left: 4px;
 }
-/* Settings section nav — slightly smaller, mono labels feel like code */
-.settings-nav-group-title {
-  font-family: var(--font-mono);
-  font-size: 0.68rem;
-  font-weight: 500;
-  letter-spacing: 0.06em;
-}
-
 /* Drop big border-radius on settings input/select */
 .settings-section-main input,
 .settings-section-main select,

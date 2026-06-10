@@ -12,10 +12,14 @@ export function isoStamp(d: Date = new Date()): string {
   return d.toISOString().slice(0, 19).replace(/:/g, '-');
 }
 
-/** Sanitised scenario segment of the filename ("untitled" when blank). */
+/** Sanitised scenario segment of the filename ("untitled" when blank).
+ *
+ * DENYLIST sanitisation: only filesystem-unsafe characters are replaced, so
+ * non-Latin scenario names (한글, 日本語, …) survive into the filename instead
+ * of being stripped to "untitled". */
 export function scenarioFileStem(scenario?: string | null): string {
   const raw = (scenario ?? '').trim();
-  const safe = raw.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
+  const safe = raw.replace(/[\\/:*?"<>|\s]+/g, '-').replace(/^-+|-+$/g, '');
   return safe || 'untitled';
 }
 

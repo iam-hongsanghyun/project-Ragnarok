@@ -172,6 +172,39 @@ export async function svgToPng(svgEl: SVGElement, chrome: ChartChrome = {}): Pro
  * @param filename     Override filename (default: `<title>_<date>.xlsx`)
  * @param chrome       Title/unit/legend to composite onto the exported image
  */
+/**
+ * Read the chart's ON-SCREEN HTML legend (swatch colour + label) so the export
+ * can ALWAYS composite a legend that matches what the user sees — even when the
+ * caller passed no `chrome.legend` (or an empty one). Looks for the shared
+ * `.legend-swatch` pattern used by every chart card's HTML legend.
+ */
+function legendFromDom(containerEl: HTMLElement | null): { label: string; color: string }[] {
+  if (!containerEl) return [];
+  const out: { label: string; color: string }[] = [];
+  containerEl.querySelectorAll('.legend-swatch').forEach((sw) => {
+    const item = sw.parentElement;
+    if (!item) return;
+    const label = (item.textContent ?? '').trim();
+    if (!label) return;
+    const color = window.getComputedStyle(sw).backgroundColor || '#94a3b8';
+    out.push({ label, color });
+  });
+  return out;
+}
+
+/** Drop empty/duplicate legend entries and coerce values to plain strings. */
+function cleanLegend(items: { label: string; color: string }[] | undefined): { label: string; color: string }[] {
+  const seen = new Set<string>();
+  const out: { label: string; color: string }[] = [];
+  for (const it of items ?? []) {
+    const label = String(it?.label ?? '').trim();
+    if (!label || seen.has(label)) continue;
+    seen.add(label);
+    out.push({ label, color: String(it?.color ?? '') || '#94a3b8' });
+  }
+  return out;
+}
+
 export async function exportChartToExcel(
   title: string,
   headers: string[],
@@ -210,7 +243,14 @@ export async function exportChartToExcel(
   const svgEl = containerEl?.querySelector('svg') ?? null;
   if (svgEl) {
     try {
-      const raster = await svgToPng(svgEl as SVGElement, chrome ?? { title });
+      // The legend must ALWAYS export: prefer the caller's, fall back to the
+      // on-screen HTML legend (what the user actually sees next to the chart).
+      const legend = (() => {
+        const fromChrome = cleanLegend(chrome?.legend);
+        return fromChrome.length ? fromChrome : cleanLegend(legendFromDom(containerEl));
+      })();
+      const effChrome: ChartChrome = { title, ...chrome, legend };
+      const raster = await svgToPng(svgEl as SVGElement, effChrome);
       if (raster) {
         const chartSheet = workbook.addWorksheet('Chart');
         const imageId = workbook.addImage({ base64: raster.base64, extension: 'png' });
