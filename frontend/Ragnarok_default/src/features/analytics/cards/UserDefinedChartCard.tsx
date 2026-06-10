@@ -161,6 +161,13 @@ export function UserDefinedChartCard({
     ? aggregateMetricRows(metric!, safeStart, safeEnd, active.timeframe)
     : [];
 
+  // The donut is the SUM over the SELECTED period — it tracks the range slider
+  // (safeStart/safeEnd), and buildDonutFromMetric sums the raw per-snapshot
+  // values across that range.
+  const donutData = hasMetric && active.chartType === 'donut'
+    ? buildDonutFromMetric(metric!, safeStart, safeEnd)
+    : [];
+
   // Show Group by when:
   //   - Generator focus with multi/all selection, OR
   //   - Bus focus with one of the generator-aggregated metrics picked
@@ -200,12 +207,16 @@ export function UserDefinedChartCard({
     if (!metric) return;
     let promise: Promise<void>;
     if (active.chartType === 'donut') {
-      const data = buildDonutFromMetric(metric, safeStart, safeEnd);
+      const data = donutData;
+      // Donut legend = the slices (label + colour), so the exported image is
+      // self-describing even though the on-screen legend is HTML outside the SVG.
       promise = exportChartToExcel(
         metric.label,
         ['label', 'value'],
         data.map((d) => ({ label: d.label, value: d.value })),
         chartContainerRef.current,
+        undefined,
+        { title: metric.label, unit: metric.unit, legend: data.map((d) => ({ label: d.label, color: d.color })) },
       );
     } else {
       const keys    = metric.series.map((s) => s.key);
@@ -215,7 +226,14 @@ export function UserDefinedChartCard({
         keys.forEach((k) => { row[k] = numberValue(r[k] as any); });
         return row;
       });
-      promise = exportChartToExcel(metric.label, headers, rows, chartContainerRef.current);
+      promise = exportChartToExcel(
+        metric.label,
+        headers,
+        rows,
+        chartContainerRef.current,
+        undefined,
+        { title: metric.label, unit: metric.unit, legend: metric.series.map((s) => ({ label: s.label, color: s.color })) },
+      );
     }
     promise
       .then(() => showToast(`Exported ${metric.label}`, 'success'))
@@ -266,22 +284,26 @@ export function UserDefinedChartCard({
           </label>
         )}
 
-        {/* Temporal resolution */}
-        <label className="chart-control">
-          <span>Temporal resolution</span>
-          <SearchableSelect
-            value={active.timeframe}
-            options={[
-              { value: 'aggregated', label: 'Aggregated' },
-              { value: 'yearly', label: 'By year' },
-              { value: 'monthly', label: 'By month' },
-              { value: 'weekly', label: 'By week' },
-              { value: 'daily', label: 'By day' },
-              { value: 'hourly', label: 'By hour' },
-            ]}
-            onChange={(v) => patch({ ...active, timeframe: v as TimeframeOption })}
-          />
-        </label>
+        {/* Temporal resolution — irrelevant for a donut, which always shows the
+            fully-aggregated total over the entire period. Hide it there so it
+            doesn't look like a control that does nothing. */}
+        {active.chartType !== 'donut' && (
+          <label className="chart-control">
+            <span>Temporal resolution</span>
+            <SearchableSelect
+              value={active.timeframe}
+              options={[
+                { value: 'aggregated', label: 'Aggregated' },
+                { value: 'yearly', label: 'By year' },
+                { value: 'monthly', label: 'By month' },
+                { value: 'weekly', label: 'By week' },
+                { value: 'daily', label: 'By day' },
+                { value: 'hourly', label: 'By hour' },
+              ]}
+              onChange={(v) => patch({ ...active, timeframe: v as TimeframeOption })}
+            />
+          </label>
+        )}
 
         {/* Chart type */}
         <label className="chart-control">
@@ -405,7 +427,8 @@ export function UserDefinedChartCard({
         </div>
       )}
 
-      {/* Timeline slider */}
+      {/* Timeline slider — drives the visible window for line/bar charts AND the
+          summed range for donuts. */}
       {hasMetric && (
         <TimelineSlider
           data={metric!.rows}
@@ -428,11 +451,11 @@ export function UserDefinedChartCard({
         <section className="chart-card">
           {!compact && (
             <div className="chart-card-header">
-              <div><h3>{metric!.label}</h3><p>average {metric!.unit} over window</p></div>
+              <div><h3>{metric!.label}</h3><p>total {metric!.unit} over the selected period</p></div>
             </div>
           )}
-          {buildDonutFromMetric(metric!, safeStart, safeEnd).length > 0
-            ? <DonutChart data={buildDonutFromMetric(metric!, safeStart, safeEnd)} />
+          {donutData.length > 0
+            ? <DonutChart data={donutData} />
             : <p className="empty-text">No data for current selection.</p>
           }
         </section>

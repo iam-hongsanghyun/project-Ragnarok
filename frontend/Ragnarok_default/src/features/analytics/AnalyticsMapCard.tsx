@@ -264,7 +264,7 @@ export function AnalyticsMapCard({
       </MapContainer>
 
       <MapLegend carriers={uniqueCarriers} showLines={!hasLineLoading} />
-      <SmpLegend show={hasSmp} min={smpMin} max={smpMax} />
+      <SmpLegend show={hasSmp} min={smpMin} max={smpMax} currencySymbol={currencySymbol} />
       <MapDetailCard
         focus={analyticsFocus}
         results={results}

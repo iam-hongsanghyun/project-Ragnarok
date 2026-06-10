@@ -548,6 +548,10 @@ export interface RunResults {
   summary: SummaryItem[];
   dispatchSeries: SeriesPoint[];
   generatorDispatchSeries: SeriesPoint[];
+  /** Compact per-generator dispatched energy (MWh) — backend aggregate that
+   *  powers the "Dispatch by unit" donut without shipping the per-snapshot
+   *  series. Present on light (View) loads; the full series is fetched windowed. */
+  generatorEnergy?: Array<{ name: string; value: number; carrier?: string; color?: string }>;
   systemPriceSeries: ValuePoint[];
   systemEmissionsSeries: ValuePoint[];
   storageSeries: StoragePoint[];
@@ -725,11 +729,12 @@ export interface BackendRunMeta {
 export interface QueueJob {
   id: string;
   label: string;
-  status: 'queued' | 'running' | 'done' | 'error' | 'cancelled';
+  status: 'queued' | 'staged' | 'running' | 'done' | 'error' | 'cancelled';
   submittedAt: string;
   startedAt?: string | null;
   finishedAt?: string | null;
   error?: string | null;
+  payloadAvailable?: boolean;
   // Display-only run settings.
   snapshots?: number | null;
   snapshotWeight?: number | null;
@@ -832,14 +837,24 @@ export interface ModuleConfigOptionsFrom {
    * - `'server'` — rows fetched from the plugin's own HTTP server (POST
    *   `endpoint` with `{config}`, response `{rows: [...]}`), e.g. the full
    *   imported generator fleet. Filtered/labelled client-side like the others.
+   *   Used by FRONTEND plugins (which run their own server).
+   * - `'plugin'` — rows fetched from a BACKEND plugin's `options(name, …)` hook
+   *   via Ragnarok (`POST /api/plugins/{id}/options`, response `{rows: [...]}`).
+   *   No external server; the backend plugin owns the logic. Filtered/labelled
+   *   client-side like the others.
    */
-  source: 'model' | 'config' | 'server';
+  source: 'model' | 'config' | 'server' | 'plugin';
   /** For `source: 'model'`: the workbook sheet name (e.g. `'buses'`). */
   sheet?: string;
   /** For `source: 'config'`: the sibling config field key whose rows to read. */
   field?: string;
   /** For `source: 'server'`: the POST path (e.g. `'/generators'`). */
   endpoint?: string;
+  /**
+   * For `source: 'plugin'`: the option-set id passed to the plugin's
+   * `options(name, …)` hook (e.g. `'/demand_values'`).
+   */
+  name?: string;
   /**
    * For `source: 'server'`: config field holding the server base URL
    * (defaults to `http://127.0.0.1:8765`).
@@ -912,8 +927,11 @@ export interface ModuleConfigTableColumn {
    * `keyColumn` equals this row's `matchColumn` value.
    */
   lookup?: {
-    source: 'server';
-    endpoint: string;
+    source: 'server' | 'plugin';
+    /** For `source: 'server'`: the POST path. */
+    endpoint?: string;
+    /** For `source: 'plugin'`: the backend-plugin `options(name, …)` id. */
+    name?: string;
     baseUrlField?: string;
     /** This row's column to match on (e.g. `'generator'`). */
     matchColumn: string;

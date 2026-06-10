@@ -110,7 +110,11 @@ export function aggregateMetricRows(metric: MetricOption, startIndex: number, en
 }
 
 export function buildDonutFromMetric(metric: MetricOption, startIndex: number, endIndex: number) {
-  const rows = aggregateMetricRows(metric, startIndex, endIndex, 'aggregated');
+  // A donut is the SUM over the selected period — sum the raw per-snapshot
+  // values across [startIndex, endIndex], regardless of the metric's reducer
+  // (mean/last) or any timeframe bucketing. So sliding the range re-sums exactly
+  // the selected snapshots.
+  const rows = metric.rows.slice(startIndex, endIndex + 1);
   return metric.series
     .map((item) => ({
       label: item.label,

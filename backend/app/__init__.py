@@ -18,3 +18,11 @@ The engine that actually builds and solves a network lives in a sibling package
 never imports engine internals directly except through the registry and the
 file-converter endpoints.
 """
+from __future__ import annotations
+
+# Keep pandas on NumPy/object strings even though pyarrow (our Parquet engine)
+# is installed; otherwise pandas 3.0 defaults to Arrow strings that the pinned
+# xarray<2026 / PyPSA cannot consume. See _pandas_compat for the full rationale.
+from ._pandas_compat import ensure_object_strings as _ensure_object_strings
+
+_ensure_object_strings()

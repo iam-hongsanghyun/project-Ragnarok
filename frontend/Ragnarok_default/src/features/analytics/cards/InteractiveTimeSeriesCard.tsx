@@ -2,6 +2,10 @@ import React, { useState, useRef, useLayoutEffect } from 'react';
 import { ChartMode, TimeSeriesRow, TimeSeriesSeries } from 'lib/types';
 import { numberValue, isoDate, isoTime } from 'lib/utils/helpers';
 
+// NOTE: the temporal window controls (resolution / from–to) will live in the
+// chart's settings (gear) — not a bottom bar. For now the chart renders the
+// full series; the default window is a later refinement.
+
 /**
  * Track an element's rendered pixel size so the chart can size its SVG
  * viewBox to the actual box instead of a fixed 820×360. Driving the
@@ -97,7 +101,10 @@ export function InteractiveTimeSeriesCard({
     );
   }
 
+  // Render the full series for now; windowing/resolution will be driven from the
+  // chart settings (gear) later.
   const visible = data;
+
   const visibleSeries = series.filter((item) =>
     visible.some((row) => Math.abs(numberValue(row[item.key] as string | number | undefined)) > 1e-6),
   );

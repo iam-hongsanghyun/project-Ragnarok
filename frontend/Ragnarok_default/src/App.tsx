@@ -34,6 +34,7 @@ import { canonicalizeOutputSeries, canonicalizeTemporalRows, createEmptyWorkbook
 import { mergeWorkbookFragment } from 'lib/workbook/mergeFragment';
 import type { WorkbookFragment } from 'lib/api/databases';
 import { getBounds, getBusIndex, carrierColor, numberValue, orderByCarrierRows, setCarrierColorOverrides, snapshotMaxFromWorkbook, stringValue } from 'lib/utils/helpers';
+import { filenameMatchesScenario, scenarioFilename } from 'lib/utils/scenarioFilename';
 import { usePersistedState } from 'shared/hooks/usePersistedState';
 import { RagnarokLogo } from 'shared/components/RagnarokLogo';
 import { buildRowsFromGeneratorDetails, buildSystemLoadRows, normalizeSeriesPoint } from 'lib/results/analytics';
@@ -45,7 +46,9 @@ import { readCustomDslFromModel, writeCustomDslToModel } from 'lib/constraints/c
 import { dslToSpecs } from 'lib/constraints/dsl';
 import { buildScenarioPreset, defaultScenarioCatalog, readScenarioCatalogFromModel, sameScenarioCatalog, writeScenarioCatalogToModel } from 'lib/results/scenarios';
 import { readCarbonLibraryFromModel, writeCarbonLibraryToModel, sameCarbonLibrary } from 'lib/results/carbonLibrary';
-import { saveSessionModel, saveSessionControls, loadSession, clearSession } from 'lib/storage/sessionStore';
+import { saveSessionControls, loadSessionControls, clearSession, clearSessionModelOnly } from 'lib/storage/sessionStore';
+import { clearSessionModel, putSessionModel, putStaticModel, getSessionFullModel, getSheetPage, isSeriesSheet, patchSheet, DEFAULT_SESSION_ID } from 'lib/api/session';
+import type { SheetEditOp } from 'lib/api/session';
 import { RunDialog } from './features/run/RunDialog';
 import { SettingsView } from './views/SettingsView';
 import { PluginsView } from './views/PluginsView';
@@ -73,6 +76,25 @@ function projectBaseName(filename: string): string {
   return base || 'ragnarok';
 }
 
+/**
+ * Drop the heavy time-series sheets from a model so the browser holds only the
+ * small static/topology sheets. The series live in the backend session and are
+ * paged into the grid on demand. Keeps `snapshots` (the time axis) and all
+ * static/config sheets.
+ *
+ * Starts from an empty workbook so EVERY standard component sheet is always
+ * present as an array — a backend-rehydrated model only carries the sheets the
+ * session actually had, and consumers like MapPane do `model.lines.map(...)`
+ * assuming the sheet exists.
+ */
+function stripSeriesSheets(model: WorkbookModel): WorkbookModel {
+  const out: WorkbookModel = createEmptyWorkbook();
+  for (const [sheet, rows] of Object.entries(model)) {
+    (out as Record<string, unknown>)[sheet] = isSeriesSheet(sheet) ? [] : rows;
+  }
+  return out;
+}
+
 function AppInner() {
   const { showToast } = useToast();
   const [model, setModel] = useState<WorkbookModel>(() => createEmptyWorkbook());
@@ -80,7 +102,30 @@ function AppInner() {
   // since every mutation already builds a fresh object this is cheap to retain.
   const undoStack = useRef<WorkbookModel[]>([]);
   const redoStack = useRef<WorkbookModel[]>([]);
-  const HISTORY_LIMIT = 50;
+  // ── Static edits → backend (the session is the source of truth) ───────────
+  // Cell/row edits on static sheets map 1:1 to precise PATCH ops — row-level
+  // SQL writes, exactly like the temporal sheets. Structural changes that have
+  // no op equivalent (column add/delete/rename, clear, reorder, undo/redo)
+  // bump `staticResyncTick` → ONE static-merge resync (effect lives below,
+  // after prepareModelForBackend). The React model stays only as a small read
+  // cache for the map/Forge/validation views — never the truth.
+  const modelRef = useRef<WorkbookModel>(model);
+  modelRef.current = model;
+  const [staticResyncTick, setStaticResyncTick] = useState(0);
+  const requestStaticResync = useCallback(() => setStaticResyncTick((t) => t + 1), []);
+  const pushStaticOps = useCallback(
+    (sheet: SheetName, ops: SheetEditOp[]) => {
+      // On any failure (e.g. the sheet has no session table yet) fall back to a
+      // full static merge so the backend can never silently drift from the UI.
+      void patchSheet(String(sheet), ops).catch(() => requestStaticResync());
+    },
+    [requestStaticResync],
+  );
+
+  // Undo depth. Each entry retains the model object as it was before an edit;
+  // editing big time-series sheets makes these add up, so keep the window small
+  // (the backend is the source of truth — deep client-side history isn't needed).
+  const HISTORY_LIMIT = 5;
   const pushHistory = useCallback(() => {
     undoStack.current.push(model);
     if (undoStack.current.length > HISTORY_LIMIT) undoStack.current.shift();
@@ -91,13 +136,15 @@ function AppInner() {
     if (!prev) return;
     redoStack.current.push(model);
     setModel(prev);
-  }, [model]);
+    requestStaticResync(); // mirror reverted → re-merge it into the session
+  }, [model, requestStaticResync]);
   const redo = useCallback(() => {
     const next = redoStack.current.pop();
     if (!next) return;
     undoStack.current.push(model);
     setModel(next);
-  }, [model]);
+    requestStaticResync();
+  }, [model, requestStaticResync]);
   const [tab, setTab] = usePersistedState<WorkspaceTab>('ui:workspace-tab', 'Welcome');
   // Ctrl/Cmd+Z / Ctrl+Y (or Shift+Z) undo-redo for model edits, only on the
   // Model/Build tabs and never while a text field is focused (so it doesn't
@@ -171,10 +218,11 @@ function AppInner() {
   const [fileHandle, setFileHandle] = useState<BrowserFileHandle | null>(null);
   const [jumpTo, setJumpTo] = useState<{ sheet: string; rowIndex: number } | null>(null);
   // Server-side run queue (serial). Runs are enqueued and execute one at a time;
-  // the frontend polls /api/queue, shows pending/running jobs in the Queue tab,
-  // and is notified when each finishes (it then appears in History).
+  // the frontend polls /api/queue, shows retained queue rows in the Queue tab,
+  // and is notified when active rows finish (successful runs also appear in History).
   const [queueJobs, setQueueJobs] = useState<QueueJob[]>([]);
   const seenTerminalRef = useRef<Set<string>>(new Set());
+  const queueStatusRef = useRef<Map<string, QueueJob['status']>>(new Map());
 
   const [settings, updateSettings] = useSettings();
   const [scenarioCatalog, setScenarioCatalog] = useState<ScenarioCatalog>(() => defaultScenarioCatalog({
@@ -303,7 +351,12 @@ function AppInner() {
     })) !== JSON.stringify(activeScenario);
   }, [activeScenario, captureCurrentScenario]);
 
-  const resetForNewModel = useCallback((nextModel: WorkbookModel, name?: string) => {
+  const resetForNewModel = useCallback((nextModel: WorkbookModel, name?: string, opts?: { pushToSession?: boolean }) => {
+    // The backend session is the source of truth for the working model. Every
+    // load path funnels through here, so mirror the model into the session once
+    // per load (not per edit — that per-keystroke full-model serialisation is
+    // what spiked the heap). Skip when we are *restoring from* the session on
+    // boot (the model is already there).
     // Single choke point: every temporal sheet in the incoming model becomes
     // ISO-`T` with `snapshot` leading, no matter which path the model came in
     // through (workbook import, project import, demo, plugin preview, history
@@ -311,19 +364,42 @@ function AppInner() {
     // no-op, so callers that pre-normalise with a project-specific dateFormat
     // (e.g. handleImportProject) stay correct.
     normalizeInputDatesToIso(nextModel, settings.dateFormat);
+    // Resolve the model's OWN active scenario up front — it both names the working
+    // file and is mirrored into the session meta so the topbar and the backend
+    // record agree. Use the imported scenario (null when the model carried none),
+    // NOT the synthetic "Base case" fallback, so a scenario-less model → "untitled".
+    const nextScenarioCatalog = readScenarioCatalogFromModel(nextModel);
+    const activeImportedScenario = nextScenarioCatalog.scenarios.find(
+      (scenario) => scenario.id === nextScenarioCatalog.activeScenarioId,
+    ) ?? null;
+    // The working-model name is ALWAYS `{scenario||untitled}_{ISO-T}.xlsx`. A fresh
+    // load (import/build/demo/open) mints the name now; a RESTORE (boot, stored
+    // run — `pushToSession:false`) keeps the name it was saved under, so the stamp
+    // reflects when the model was created, not when it reloaded.
+    const isRestore = opts?.pushToSession === false;
+    const builtFilename = isRestore && name && name.trim()
+      ? name
+      : scenarioFilename(activeImportedScenario?.label);
+    // Push the FULL (normalised) model to the backend session — the source of
+    // truth. Done once per load (not per edit). Skipped when restoring FROM the
+    // session on boot (it's already there).
+    if (opts?.pushToSession !== false) {
+      void putSessionModel(nextModel, {
+        filename: builtFilename,
+        scenarioName: activeImportedScenario?.label ?? '',
+      }).catch(() => { /* best-effort */ });
+    }
     const snapshotMax = snapshotMaxFromWorkbook(nextModel.snapshots);
     const nextPathway = readPathwayConfigFromModel(nextModel);
     const nextRolling = readRollingConfigFromModel(nextModel);
     setCustomDsl(readCustomDslFromModel(nextModel));
     setCarbonLibrary(readCarbonLibraryFromModel(nextModel));
-    const nextScenarioCatalog = readScenarioCatalogFromModel(nextModel);
-    const activeImportedScenario = nextScenarioCatalog.scenarios.find(
-      (scenario) => scenario.id === nextScenarioCatalog.activeScenarioId,
-    ) ?? null;
     setMaxSnapshots(snapshotMax);
     setSnapshotEnd(snapshotMax);
     setSnapshotStart(RUN_WINDOW.initialSnapshotStart);
-    setModel(nextModel);
+    // React holds only the small static sheets; the heavy time-series stay in
+    // the backend session and are paged into the grid on demand.
+    setModel(stripSeriesSheets(nextModel));
     setResults(null);
     setResultsModel(null);
     setResultsContext(null);
@@ -384,7 +460,7 @@ function AppInner() {
       setRollingConfig(fallbackRolling);
     }
     setScenarioCatalog(catalogToApply);
-    if (name) setFilename(name);
+    setFilename(builtFilename);
   }, [
     snapshotWeight,
     carbonPrice,
@@ -427,6 +503,16 @@ function AppInner() {
   }, [queueJobs.length, model]);
 
   const [filename, setFilename] = useState('ragnarok_case.xlsx');
+  // The working-file name ALWAYS tracks the ACTIVE scenario
+  // (`{scenario}_{ISO-T}.xlsx`) — not just at model load. Creating, renaming or
+  // switching the active scenario mints a fresh name; when the current name
+  // already carries this scenario's stem it is kept, so the timestamp stays the
+  // creation time (reloads/restores don't re-stamp).
+  useEffect(() => {
+    const label = activeScenario?.label?.trim();
+    if (!label) return;
+    setFilename((current) => (filenameMatchesScenario(current, label) ? current : scenarioFilename(label)));
+  }, [activeScenario?.label]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const projectImportInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -438,40 +524,53 @@ function AppInner() {
     setCarrierColorOverrides(model.carriers ?? []);
   }, [model.carriers]);
 
+  // Config writes land in RAGNAROK_* model sheets; when one actually changes,
+  // request a static-merge resync so the backend session (the source of truth)
+  // carries the new config too — not just the in-memory mirror.
   useEffect(() => {
     setModel((current) => {
       const next = writePathwayConfigToModel(current, pathwayConfig);
-      return samePathwayConfig(readPathwayConfigFromModel(current), pathwayConfig) ? current : next;
+      if (samePathwayConfig(readPathwayConfigFromModel(current), pathwayConfig)) return current;
+      requestStaticResync();
+      return next;
     });
-  }, [pathwayConfig]);
+  }, [pathwayConfig, requestStaticResync]);
 
   useEffect(() => {
     setModel((current) => {
       const next = writeRollingConfigToModel(current, rollingConfig);
-      return sameRollingConfig(readRollingConfigFromModel(current), rollingConfig) ? current : next;
+      if (sameRollingConfig(readRollingConfigFromModel(current), rollingConfig)) return current;
+      requestStaticResync();
+      return next;
     });
-  }, [rollingConfig]);
+  }, [rollingConfig, requestStaticResync]);
 
   useEffect(() => {
-    setModel((current) => (
-      readCustomDslFromModel(current) === customDsl ? current : writeCustomDslToModel(current, customDsl)
-    ));
-  }, [customDsl]);
+    setModel((current) => {
+      if (readCustomDslFromModel(current) === customDsl) return current;
+      requestStaticResync();
+      return writeCustomDslToModel(current, customDsl);
+    });
+  }, [customDsl, requestStaticResync]);
 
   useEffect(() => {
     setModel((current) => {
       const next = writeScenarioCatalogToModel(current, scenarioCatalog);
-      return sameScenarioCatalog(readScenarioCatalogFromModel(current), scenarioCatalog) ? current : next;
+      if (sameScenarioCatalog(readScenarioCatalogFromModel(current), scenarioCatalog)) return current;
+      requestStaticResync();
+      return next;
     });
-  }, [scenarioCatalog]);
+  }, [scenarioCatalog, requestStaticResync]);
 
   // Persist the carbon-schedule library into its model sheet (travels with export).
   useEffect(() => {
     setModel((current) => {
       const next = writeCarbonLibraryToModel(current, carbonLibrary);
-      return sameCarbonLibrary(readCarbonLibraryFromModel(current), carbonLibrary) ? current : next;
+      if (sameCarbonLibrary(readCarbonLibraryFromModel(current), carbonLibrary)) return current;
+      requestStaticResync();
+      return next;
     });
-  }, [carbonLibrary]);
+  }, [carbonLibrary, requestStaticResync]);
 
   // ── Session persistence (IndexedDB) ─────────────────────────────────────
   // Restore the last working session on load, then auto-save it as it changes,
@@ -482,10 +581,18 @@ function AppInner() {
     let cancelled = false;
     void (async () => {
       try {
-        const { model: savedModel, controls } = await loadSession();
+        // Controls (small) still come from IndexedDB; the heavy model is
+        // rehydrated from the backend session (the source of truth) instead.
+        // Use the controls-only loader so we never deserialise a stale heavy
+        // model record from IndexedDB on boot.
+        const controls = await loadSessionControls();
+        // Rehydrate only the small static sheets; series stay in the backend and
+        // are paged into the grid on demand (keeps boot light).
+        const savedModel = await getSessionFullModel({ staticOnly: true }).catch(() => null);
         const hasRows = !!savedModel && Object.values(savedModel).some((rows) => Array.isArray(rows) && rows.length > 0);
         if (!cancelled && savedModel && hasRows) {
-          resetForNewModel(savedModel, controls?.filename);
+          // Already in the session — don't push it straight back.
+          resetForNewModel(savedModel, controls?.filename, { pushToSession: false });
           if (controls) {
             setCarbonPrice(controls.carbonPrice);
             setCarbonPriceSchedule((controls.carbonPriceSchedule ?? []).map((r) => ({ ...r })));
@@ -500,6 +607,9 @@ function AppInner() {
             if (controls.pathwayConfig) setPathwayConfig(controls.pathwayConfig);
           }
           setStatus('Restored your last session.');
+          // Transient: clear the boot notice after a few seconds so it doesn't
+          // sit in the topbar forever (the next real action sets its own status).
+          window.setTimeout(() => { if (!cancelled) setStatus(''); }, 6000);
         }
       } finally {
         if (!cancelled) sessionRestoredRef.current = true;
@@ -508,19 +618,12 @@ function AppInner() {
     return () => { cancelled = true; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Persist the heavy model on its own (debounced) so editing a control doesn't
-  // re-serialise the whole workbook.
-  useEffect(() => {
-    // Skip saving ONLY the empty initial model before the restore has run — that
-    // would clobber a saved session with a blank workbook. A non-empty model is
-    // always real user data (e.g. a just-uploaded workbook), so persist it even
-    // if the restore flag hasn't flipped yet (avoids an upload-during-restore
-    // race that lost the workbook on reload).
-    const modelHasRows = SHEETS.some((sheet) => (model[sheet]?.length ?? 0) > 0);
-    if (!sessionRestoredRef.current && !modelHasRows) return undefined;
-    const id = window.setTimeout(() => { void saveSessionModel(model); }, 800);
-    return () => window.clearTimeout(id);
-  }, [model]);
+  // NOTE: the heavy model is NO LONGER mirrored into the browser's IndexedDB.
+  // Repeatedly structured-cloning a full-year, multi-region workbook on every
+  // edit was a prime driver of the multi-GB heap. The backend session is now the
+  // source of truth (mirrored on load via resetForNewModel and before every run);
+  // the editor rehydrates from it on boot. Only the small run controls persist
+  // client-side below.
 
   // Persist the lightweight run controls separately — cheap, so a shorter debounce.
   useEffect(() => {
@@ -535,6 +638,17 @@ function AppInner() {
     }, 400);
     return () => window.clearTimeout(id);
   }, [filename, carbonPrice, carbonPriceSchedule, snapshotStart, snapshotEnd, snapshotWeight, forceLp, constraints, rollingConfig, pathwayConfig]);
+
+  // Structural static-model changes (column ops, clear, reorder, undo/redo)
+  // have no row-op equivalent — they request ONE static-merge resync here.
+  // Cell/row edits never come through this path (they PATCH precise ops).
+  useEffect(() => {
+    if (staticResyncTick === 0) return undefined;
+    const id = window.setTimeout(() => {
+      void putStaticModel(prepareModelForBackend(modelRef.current)).catch(() => { /* best-effort */ });
+    }, 300);
+    return () => window.clearTimeout(id);
+  }, [staticResyncTick, prepareModelForBackend]);
 
   // Run history lives entirely on the backend (the single source of truth) —
   // see `refreshBackendRuns` / `backendRuns` below. There is no browser-side
@@ -832,7 +946,26 @@ function AppInner() {
   const handleApplyImportedFragment = useCallback(
     (fragment: WorkbookFragment, databaseName: string, countryName: string) => {
       pushHistory();
-      setModel((current) => mergeWorkbookFragment(current, fragment));
+      // Merge once (deterministic), apply to the mirror, then push to the
+      // session: static sheets via the merge resync; any SERIES sheets in the
+      // fragment (e.g. demand profiles) are replaced sheet-by-sheet via PATCH
+      // because static merges deliberately skip time-series.
+      const merged = mergeWorkbookFragment(modelRef.current, fragment);
+      setModel(merged);
+      requestStaticResync();
+      for (const sheet of Object.keys(fragment.sheets)) {
+        if (!isSeriesSheet(sheet)) continue;
+        const rows = (merged[sheet] as GridRow[] | undefined) ?? [];
+        void (async () => {
+          const previous = await getSheetPage(sheet, { offset: 0, limit: 0 })
+            .then((page) => page.total)
+            .catch(() => 0);
+          await patchSheet(sheet, [
+            ...(previous ? [{ op: 'deleteRows' as const, rows: Array.from({ length: previous }, (_, i) => i) }] : []),
+            ...rows.map((r) => ({ op: 'addRow' as const, values: r as Record<string, unknown> })),
+          ]);
+        })().catch(() => { /* best-effort */ });
+      }
       const counts = Object.entries(fragment.sheets)
         .map(([sheet, rows]) => `${rows.length} ${sheet}`)
         .join(', ');
@@ -841,7 +974,7 @@ function AppInner() {
       setStatus(msg);
       showToast(msg, 'success');
     },
-    [pushHistory, showToast],
+    [pushHistory, showToast, requestStaticResync],
   );
 
   const handleOpenWorkbook = async () => {
@@ -881,6 +1014,7 @@ function AppInner() {
       const nextRows = (current[sheet] ?? []).map((row, index) => (index === rowIndex ? { ...row, [key]: value } : row));
       return { ...current, [sheet]: nextRows };
     });
+    pushStaticOps(sheet, [{ op: 'set', row: rowIndex, column: key, value }]);
   };
 
   // Atomic paste: grow the sheet by `extraRows` (seeded from the schema default)
@@ -904,6 +1038,13 @@ function AppInner() {
       }
       return { ...current, [sheet]: grown };
     });
+    pushStaticOps(sheet, [
+      ...Array.from({ length: extraRows }, () => ({
+        op: 'addRow' as const,
+        values: { ...getDefaultRowForSheet(sheet) } as Record<string, unknown>,
+      })),
+      ...edits.map((e) => ({ op: 'set' as const, row: e.rowIndex, column: e.col, value: e.val })),
+    ]);
     setStatus(`Pasted ${edits.length} cell${edits.length === 1 ? '' : 's'} into ${sheet}${extraRows > 0 ? ` (+${extraRows} rows)` : ''}.`);
   };
 
@@ -913,6 +1054,9 @@ function AppInner() {
       const nextRows = [...(current[sheet] ?? []), { ...getDefaultRowForSheet(sheet) }];
       return { ...current, [sheet]: nextRows };
     });
+    pushStaticOps(sheet, [
+      { op: 'addRow', values: { ...getDefaultRowForSheet(sheet) } as Record<string, unknown> },
+    ]);
     setStatus(`Added a new row to ${sheet}.`);
   };
 
@@ -922,6 +1066,7 @@ function AppInner() {
       const nextRows = current[sheet].filter((_, i) => i !== rowIndex);
       return { ...current, [sheet]: nextRows };
     });
+    pushStaticOps(sheet, [{ op: 'deleteRows', rows: [rowIndex] }]);
     setStatus(`Removed row ${rowIndex + 1} from ${sheet}.`);
   };
 
@@ -936,6 +1081,7 @@ function AppInner() {
       nextRows.splice(toIndex, 0, row);
       return { ...current, [sheet]: nextRows };
     });
+    requestStaticResync(); // row order matters; no row-op equivalent
   };
 
   const addColumn = (sheet: SheetName, col: string, defaultValue: string | number | boolean) => {
@@ -946,6 +1092,7 @@ function AppInner() {
       );
       return { ...current, [sheet]: nextRows };
     });
+    requestStaticResync();
     setStatus(`Added column "${col}" to ${sheet}.`);
   };
 
@@ -958,6 +1105,7 @@ function AppInner() {
       });
       return { ...current, [sheet]: nextRows };
     });
+    requestStaticResync();
     setStatus(`Removed column "${col}" from ${sheet}.`);
   };
 
@@ -973,12 +1121,14 @@ function AppInner() {
       });
       return { ...current, [sheet]: nextRows };
     });
+    requestStaticResync();
     setStatus(`Renamed column "${oldCol}" to "${newCol}" in ${sheet}.`);
   };
 
   const clearSheet = (sheet: SheetName) => {
     pushHistory();
     setModel((current) => ({ ...current, [sheet]: [] }));
+    requestStaticResync(); // empties the sheet server-side too (merge writes [])
     setStatus(`Cleared all rows from ${sheet}.`);
   };
 
@@ -995,7 +1145,7 @@ function AppInner() {
     snapshotWeight: number;
   };
 
-  const handleRestoreRun = (entry: RestorableRun) => {
+  const handleRestoreRun = (entry: RestorableRun, opts?: { loadIntoEditor?: boolean }) => {
     // Older persisted entries may predate canonicalisation — re-canonicalise
     // the restored outputs in place so display/derivation see ISO-`T` + leading
     // `snapshot` consistently.
@@ -1015,16 +1165,22 @@ function AppInner() {
       snapshotWeight: entry.snapshotWeight,
       discountRate: entry.discountRate ?? settings.discountRate,
     });
-    // Load the run's inputs back into the LIVE editable state so the Model tab,
-    // Build tab and any export reflect the selected run — not whatever the user
-    // last edited. The stored model is the exact (date-normalised) workbook that
-    // was submitted, so it drops straight into `model`. Legacy entries with no
-    // stored model leave the live model untouched (prior behaviour). The prior
-    // working model is pushed onto the undo stack so the swap is reversible.
-    if (entry.model) {
+    // VIEW vs IMPORT. Plain "View results" must NOT clone the run's model into
+    // the live editable state: that structuredClone (a full workbook) plus the
+    // pushHistory() it triggers is the dominant browser-memory sink — viewing
+    // several runs stacks many independent full-model copies on the undo stack.
+    // Viewing only needs `resultsModel` (set above, by reference) to pin the
+    // analytics topology. The heavy load-into-editor happens solely on explicit
+    // "Import project" (loadIntoEditor), which is the path for edit + re-run.
+    if (entry.model && opts?.loadIntoEditor) {
       pushHistory();
       const restoredModel = structuredClone(entry.model);
       setModel(restoredModel);
+      // The session is the source of truth and runs submit by sessionId — push
+      // the FULL restored model (incl. its time-series; a static merge would
+      // leave the previous model's series in place and the next run would solve
+      // a chimera).
+      void putSessionModel(restoredModel, { filename: entry.label ?? '' }).catch(() => { /* best-effort */ });
       const snapshotMax = snapshotMaxFromWorkbook(restoredModel.snapshots);
       setMaxSnapshots(snapshotMax);
       setSnapshotStart(entry.snapshotStart);
@@ -1062,7 +1218,10 @@ function AppInner() {
     // Stay on whatever view/sub-tab the user is currently on — do not yank them
     // to a default Result pane. Any stale asset focus that the restored results
     // don't contain is dropped by the focus-reset effect above.
-    showToast(`Viewing ${entry.label}`, 'success');
+    showToast(
+      opts?.loadIntoEditor ? `Imported ${entry.label} into the editor` : `Viewing ${entry.label}`,
+      'success',
+    );
   };
 
   // ── Backend-stored runs ─────────────────────────────────────────────────
@@ -1108,20 +1267,28 @@ function AppInner() {
       if (!resp.ok) return;
       const data = await resp.json();
       const jobs: QueueJob[] = Array.isArray(data.jobs) ? data.jobs : [];
-      setQueueJobs(jobs.filter((j) => j.status === 'queued' || j.status === 'running'));
+      const previousStatuses = queueStatusRef.current;
+      setQueueJobs(jobs);
       let anyFinished = false;
       for (const job of jobs) {
-        if ((job.status === 'done' || job.status === 'error') && !seenTerminalRef.current.has(job.id)) {
+        const previous = previousStatuses.get(job.id);
+        const becameTerminal =
+          (previous === 'queued' || previous === 'running')
+          && (job.status === 'done' || job.status === 'error' || job.status === 'cancelled');
+        if (becameTerminal && !seenTerminalRef.current.has(job.id)) {
           seenTerminalRef.current.add(job.id);
           anyFinished = true;
           if (job.status === 'done') {
             showToast(`Run "${job.label}" finished — added to History`, 'success');
-          } else {
+          } else if (job.status === 'error') {
             showToast(`Run "${job.label}" failed: ${job.error ?? 'unknown error'}`, 'error');
+          } else {
+            showToast(`Run "${job.label}" cancelled`, 'info');
           }
           window.dispatchEvent(new CustomEvent('ragnarok:log-refresh'));
         }
       }
+      queueStatusRef.current = new Map(jobs.map((job) => [job.id, job.status]));
       if (anyFinished) void refreshBackendRuns();
     } catch {
       /* backend unreachable — leave the queue as-is */
@@ -1132,7 +1299,8 @@ function AppInner() {
   // completion toast fires promptly; back off to a slow heartbeat (15s) when the
   // queue is empty (a new run is enqueued from this same client, which refreshes
   // immediately, so idle fast-polling would just be wasted chatter).
-  const hasActiveJobs = queueJobs.length > 0;
+  const activeQueueJobs = queueJobs.filter((job) => job.status === 'queued' || job.status === 'running');
+  const hasActiveJobs = activeQueueJobs.length > 0;
   const activePollMs = Math.max(500, settings.queuePollSeconds * 1000);
   useEffect(() => {
     void refreshQueue();
@@ -1144,6 +1312,28 @@ function AppInner() {
 
   const handleCancelQueueItem = useCallback(async (id: string) => {
     try {
+      await fetch(`${API_BASE}/api/queue/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
+    } catch {
+      /* ignore — the next poll reflects the real server state */
+    }
+    void refreshQueue();
+  }, [refreshQueue]);
+
+  const handleRerunQueueItem = useCallback(async (id: string) => {
+    try {
+      const resp = await fetch(`${API_BASE}/api/queue/${encodeURIComponent(id)}/rerun`, { method: 'POST' });
+      if (!resp.ok) throw new Error(await resp.text());
+      const { position } = (await resp.json()) as { position?: number };
+      const posMsg = position && position > 1 ? ` — position ${position} in queue` : '';
+      showToast(`Run queued${posMsg}`, 'info');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Failed to rerun queued model.', 'error');
+    }
+    void refreshQueue();
+  }, [refreshQueue, showToast]);
+
+  const handleDeleteQueueItem = useCallback(async (id: string) => {
+    try {
       await fetch(`${API_BASE}/api/queue/${encodeURIComponent(id)}`, { method: 'DELETE' });
     } catch {
       /* ignore — the next poll reflects the real server state */
@@ -1151,12 +1341,39 @@ function AppInner() {
     void refreshQueue();
   }, [refreshQueue]);
 
+  // Import project (Queue tab): load a queued/finished item's retained model
+  // snapshot into the editor as a new working project. The backend writes it to
+  // the session; we then rehydrate the editor from there (static sheets only —
+  // series stay server-side and page into the grid). A subsequent Run/Queue
+  // makes a NEW entry, so the original queue card is left untouched.
+  const handleImportQueueItem = useCallback(async (id: string) => {
+    try {
+      const resp = await fetch(`${API_BASE}/api/queue/${encodeURIComponent(id)}/import`, { method: 'POST' });
+      if (!resp.ok) throw new Error((await resp.text()) || 'Import failed.');
+      const meta = (await resp.json()) as { filename?: string };
+      const savedModel = await getSessionFullModel({ staticOnly: true });
+      if (!savedModel) throw new Error('Imported model could not be read back from the session.');
+      resetForNewModel(savedModel, meta.filename, { pushToSession: false });
+      setTab('Model');
+      showToast('Imported queued model into the editor', 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Failed to import queued model.', 'error');
+    }
+  }, [resetForNewModel, setTab, showToast]);
+
   const handleOpenBackendRun = async (
     name: string,
-    opts?: { restoreConstraints?: boolean },
+    opts?: { restoreConstraints?: boolean; asProject?: boolean },
   ) => {
     try {
-      const resp = await fetch(`${API_BASE}/api/runs/${encodeURIComponent(name)}`);
+      // VIEW is light: the analytics endpoint omits the input model and the
+      // heavy per-component output series (charts get the small carrier-level
+      // series + KPIs inline). IMPORT needs the full bundle to load the model
+      // into the editor, so it pays for the full payload deliberately.
+      const url = opts?.asProject
+        ? `${API_BASE}/api/runs/${encodeURIComponent(name)}`
+        : `${API_BASE}/api/runs/${encodeURIComponent(name)}/analytics`;
+      const resp = await fetch(url);
       if (!resp.ok) {
         showToast('Stored run could not be opened.', 'error');
         return;
@@ -1166,18 +1383,28 @@ function AppInner() {
       handleRestoreRun({
         label: bundle.label || name,
         results: result,
-        model: bundle.model,
+        // VIEW carries only the topology (modelStatic) for the map; IMPORT
+        // carries the full model to load into the editor.
+        model: bundle.model ?? bundle.modelStatic,
         carbonPrice: bundle.scenario?.carbonPrice ?? 0,
         discountRate: bundle.scenario?.discountRate,
         snapshotStart: bundle.snapshotStart ?? bundle.options?.snapshotStart ?? 0,
         snapshotEnd: bundle.snapshotEnd ?? bundle.options?.snapshotEnd ?? 0,
         snapshotWeight: bundle.snapshotWeight ?? bundle.options?.snapshotWeight ?? 1,
-      });
+      }, { loadIntoEditor: !!opts?.asProject });
       // Mark this stored run as the active one so Comparison highlights it.
       setActiveRunName(name);
+      // Importing as a project also pushes the run's model into the backend
+      // session so the editable working model and the backend agree.
+      if (opts?.asProject && bundle.model) {
+        void putSessionModel(bundle.model, {
+          filename: bundle.filename || `${name}.xlsx`,
+          scenarioName: bundle.scenario?.label || name,
+        }).catch(() => { /* best-effort; live edit still works */ });
+      }
       // On import, restore the project's custom constraints so a re-run uses
       // them (history "View results" leaves the live constraint list alone).
-      if (opts?.restoreConstraints && Array.isArray(bundle.scenario?.constraints)) {
+      if ((opts?.restoreConstraints || opts?.asProject) && Array.isArray(bundle.scenario?.constraints)) {
         setConstraints(bundle.scenario.constraints);
       }
       // Intentionally do NOT switch tabs here — opening/importing a run leaves
@@ -1188,24 +1415,33 @@ function AppInner() {
     }
   };
 
-  const handleDownloadBackendXlsx = (name: string) => {
-    window.open(`${API_BASE}/api/runs/${encodeURIComponent(name)}/xlsx`, '_blank');
+  // History toolbar "View result": one selected run → its Result pane; several →
+  // the Comparison pane (which reads the lightweight run metas, so it stays
+  // cheap). Navigation lives here so History rows can stay action-free.
+  const handleViewSelectedRuns = (names: string[]) => {
+    if (names.length === 0) return;
+    if (names.length === 1) {
+      void handleOpenBackendRun(names[0]);
+      setTab('Analytics');
+      setAnalyticsSubTab('Result');
+    } else {
+      void handleOpenBackendRun(names[0]);
+      setTab('Analytics');
+      setAnalyticsSubTab('Comparison');
+    }
+  };
+
+  // Explicit Excel export — the ONLY path that creates a workbook (the backend
+  // never auto-writes xlsx). `parts` mirrors the Export dialog's checkboxes.
+  const handleDownloadBackendXlsx = (name: string, parts?: string[]) => {
+    const q = parts && parts.length ? `?parts=${encodeURIComponent(parts.join(','))}` : '';
+    window.open(`${API_BASE}/api/runs/${encodeURIComponent(name)}/xlsx${q}`, '_blank');
   };
 
   // Export a stored run as the full Ragnarok Project package (.zip of all three
   // files: bundle JSON + meta JSON + readable xlsx).
   const handleExportBackendProject = (name: string) => {
     window.open(`${API_BASE}/api/runs/${encodeURIComponent(name)}/package`, '_blank');
-  };
-
-  const handleDeleteBackendRun = async (name: string) => {
-    try {
-      await fetch(`${API_BASE}/api/runs/${encodeURIComponent(name)}`, { method: 'DELETE' });
-    } catch {
-      // Ignore — refresh below reflects the real server state regardless.
-    }
-    setActiveRunName((current) => (current === name ? null : current));
-    void refreshBackendRuns();
   };
 
   const handleDeleteBackendRuns = async (names: string[]) => {
@@ -1308,6 +1544,18 @@ function AppInner() {
     // CSV/manual import boundary so the in-memory model stays PyPSA-canonical.
     const canonical = canonicalizeTemporalRows(rows, settings.dateFormat);
     setModel((current) => ({ ...current, [sheet]: canonical }));
+    // Time-series live in the backend session (static merges skip them) —
+    // replace the sheet there too, like the Model tab's CSV import does. The
+    // current row count comes from the BACKEND (the mirror strips series).
+    void (async () => {
+      const previous = await getSheetPage(String(sheet), { offset: 0, limit: 0 })
+        .then((page) => page.total)
+        .catch(() => 0);
+      await patchSheet(String(sheet), [
+        ...(previous ? [{ op: 'deleteRows' as const, rows: Array.from({ length: previous }, (_, i) => i) }] : []),
+        ...canonical.map((r) => ({ op: 'addRow' as const, values: r as Record<string, unknown> })),
+      ]);
+    })().catch(() => { /* best-effort */ });
     if (canonical.length > 0) {
       showToast(`Imported ${canonical.length} rows into ${sheet}`, 'success');
       setStatus(`Imported ${canonical.length} rows into ${sheet}.`);
@@ -1363,7 +1611,7 @@ function AppInner() {
     }
   };
 
-  const handleRunModel = async () => {
+  const handleRunModel = async (staged = false) => {
     const snapshotCount = snapshotEnd - snapshotStart;
     const scenario = {
       constraints: constraints.filter((c) => c.enabled),
@@ -1404,15 +1652,25 @@ function AppInner() {
     const modelForRun = prepareModelForBackend(model);
     setModel(modelForRun);
 
+    // Sync static edits to the session (MERGE — the browser only holds static
+    // sheets; the backend keeps the heavy series it already has), then submit by
+    // sessionId only. The backend snapshots the session model into the queue
+    // item, so later edits can't change an already-queued run.
+    try {
+      await putStaticModel(modelForRun);
+    } catch {
+      setStatus('Could not sync the model to the backend session.');
+      showToast('Could not reach the backend to start the run.', 'error');
+      return;
+    }
+
     if (dryRun) {
-      // Validate still receives JSON model — it's a cheap structural check
-      // and does not need to round-trip through Excel.
       setStatus('Validating model structure...');
       try {
         const response = await fetch(`${API_BASE}/api/validate`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: modelForRun, scenario, options }),
+          body: JSON.stringify({ sessionId: DEFAULT_SESSION_ID, scenario, options }),
         });
         const result = await response.json();
         setValidateResult(result);
@@ -1429,21 +1687,28 @@ function AppInner() {
 
     // Enqueue the run on the backend's serial queue and return immediately. The
     // queue poller notifies on completion and the finished run appears in
-    // History — the UI never blocks on a live solve here.
-    setStatus(`Queuing run — ${snapshotCount} snapshots…`);
+    // History — the UI never blocks on a live solve here. ``staged`` parks the
+    // job ("Queue next Run") so it won't auto-run until the user activates it
+    // from the Queue tab; the default ("Run") runs now if idle, else next.
+    setStatus(staged ? `Staging run — ${snapshotCount} snapshots…` : `Queuing run — ${snapshotCount} snapshots…`);
     try {
-      const resp = await fetch(`${API_BASE}/api/queue`, {
+      const resp = await fetch(`${API_BASE}/api/queue${staged ? '?staged=true' : ''}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: modelForRun, scenario, options }),
+        body: JSON.stringify({ sessionId: DEFAULT_SESSION_ID, scenario, options }),
       });
       if (!resp.ok) {
         throw new Error((await resp.text()) || `Failed to queue run (status ${resp.status}).`);
       }
       const { position } = (await resp.json()) as { id: string; position: number };
-      const posMsg = position > 1 ? ` — position ${position} in queue` : '';
-      setStatus(`Run queued${posMsg}. You'll be notified when it finishes; it then appears in History.`);
-      showToast(`Run queued${posMsg}`, 'info');
+      if (staged) {
+        setStatus('Run staged. Activate it from the Queue tab when you want it to run.');
+        showToast('Run staged for later', 'info');
+      } else {
+        const posMsg = position > 1 ? ` — position ${position} in queue` : '';
+        setStatus(`Run queued${posMsg}. You'll be notified when it finishes; it then appears in History.`);
+        showToast(`Run queued${posMsg}`, 'info');
+      }
       void refreshQueue();
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Failed to queue run.';
@@ -1534,6 +1799,29 @@ function AppInner() {
             className="tb-btn tb-btn--muted"
             onClick={async () => {
               if (!window.confirm(
+                'Clear the model?\n\n'
+                + 'This removes the loaded model, every unsaved edit, and the current\n'
+                + 'results — on both the frontend and the backend session.\n\n'
+                + 'Your settings, run controls, history, and installed plugins are KEPT.\n'
+                + '(Use "Clear cache" to also wipe settings and reload.)',
+              )) return;
+              // Clear the MODEL only: reset the frontend workbook + results, drop
+              // the backend session model, and remove just the persisted model
+              // record (controls/settings/prefs survive). No reload.
+              resetForNewModel(createEmptyWorkbook(), 'untitled.xlsx');
+              setFileHandle(null);
+              void clearSessionModel();
+              await clearSessionModelOnly();
+              setStatus('Model cleared. Settings kept.');
+            }}
+            title="Remove the loaded model (frontend + backend), keep settings"
+          >
+            Clear
+          </button>
+          <button
+            className="tb-btn tb-btn--muted"
+            onClick={async () => {
+              if (!window.confirm(
                 'Clear the cache?\n\n'
                 + 'This removes:\n'
                 + '  • the loaded model + every unsaved edit + every result\n'
@@ -1568,6 +1856,9 @@ function AppInner() {
               }
               resetForNewModel(createEmptyWorkbook(), 'untitled.xlsx');
               setFileHandle(null);
+              // Drop the backend session model too (fire-and-forget; the reload
+              // below doesn't depend on it).
+              void clearSessionModel();
               // Wipe the persisted IndexedDB session too, and await it so the
               // delete commits before the reload (otherwise it would restore).
               await clearSession();
@@ -1577,16 +1868,16 @@ function AppInner() {
             }}
             title="Remove the loaded model AND wipe every persisted UI preference"
           >
-            Clear
+            Clear cache
           </button>
-          {queueJobs.length > 0 && (
+          {activeQueueJobs.length > 0 && (
             <button
               className="tb-btn topbar-queue"
               onClick={() => { setTab('History'); setHistorySubTab('Queue'); }}
               title="Open the run queue"
             >
               <span className="topbar-spinner" />
-              {queueJobs.some((j) => j.status === 'running') ? 'Running' : 'Queued'} ({queueJobs.length})
+              {activeQueueJobs.some((j) => j.status === 'running') ? 'Running' : 'Queued'} ({activeQueueJobs.length})
             </button>
           )}
         </div>
@@ -1738,7 +2029,10 @@ function AppInner() {
           {tab === 'Forge' && (
             <ForgeView
               model={model}
-              onApplySheets={(partial) => setModel((prev) => ({ ...prev, ...partial }))}
+              onApplySheets={(partial) => {
+                setModel((prev) => ({ ...prev, ...partial }));
+                requestStaticResync(); // Forge edits static sheets → sync the session
+              }}
             />
           )}
 
@@ -1796,14 +2090,20 @@ function AppInner() {
                   </nav>
                 </ViewPaneHeader>
                 {historySubTab === 'Queue' ? (
-                  <QueueView jobs={queueJobs} onCancel={handleCancelQueueItem} />
+                  <QueueView
+                    jobs={queueJobs}
+                    onCancel={handleCancelQueueItem}
+                    onRerun={handleRerunQueueItem}
+                    onImport={handleImportQueueItem}
+                    onDelete={handleDeleteQueueItem}
+                  />
                 ) : (
                   <HistoryView
                     backendRuns={backendRuns}
-                    onOpenBackendRun={handleOpenBackendRun}
+                    onViewSelected={handleViewSelectedRuns}
+                    onImportBackendRun={(name) => void handleOpenBackendRun(name, { asProject: true, restoreConstraints: true })}
                     onDownloadBackendXlsx={handleDownloadBackendXlsx}
                     onExportBackendProject={handleExportBackendProject}
-                    onDeleteBackendRun={handleDeleteBackendRun}
                     onDeleteBackendRuns={handleDeleteBackendRuns}
                     onReload={() => void refreshBackendRuns()}
                   />
@@ -1816,8 +2116,32 @@ function AppInner() {
             <PluginsView
               host={frontendPlugins}
               model={model}
+              onBackendModelBuilt={async (meta) => {
+                // A backend plugin already wrote the model into the session;
+                // rehydrate the editor (static sheets only — series stay server-
+                // side) and jump to the Model tab so the user sees the result.
+                try {
+                  const savedModel = await getSessionFullModel({ staticOnly: true });
+                  if (savedModel) resetForNewModel(savedModel, meta.filename, { pushToSession: false });
+                  setTab('Model');
+                } catch {
+                  showToast('Built, but the editor could not reload from the session.', 'error');
+                }
+              }}
               onReplaceModel={(next) => resetForNewModel(next)}
-              onMergeSheets={(sheets) => setModel((prev) => ({ ...prev, ...sheets }))}
+              onMergeSheets={(sheets) => {
+                // A plugin's contributed sheets must reach the BACKEND session
+                // (the source of truth), not just the in-memory workbook —
+                // otherwise the relayed model would be lost on the next run,
+                // which submits by sessionId. Merge locally for the preview,
+                // then relay the merged static sheets; if there's no session
+                // yet, fall back to a full put.
+                const next = { ...model, ...sheets };
+                setModel(next);
+                void putStaticModel(next).catch(() => {
+                  void putSessionModel(next, { filename }).catch(() => { /* best-effort */ });
+                });
+              }}
               customDsl={customDsl}
               onCustomDslChange={setCustomDsl}
               results={displayResults}
@@ -1841,7 +2165,8 @@ function AppInner() {
         rollingConfig={rollingConfig}
         onForceLpChange={setForceLp}
         onDryRunChange={setDryRun}
-        onRun={handleRunModel}
+        onRun={() => void handleRunModel(false)}
+        onQueueNext={() => void handleRunModel(true)}
       />
     </div>
   );

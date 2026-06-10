@@ -2,6 +2,7 @@ import React from 'react';
 import { ConstraintMetric, CustomConstraint } from 'lib/types';
 import { METRIC_DEFS } from 'lib/constants';
 import { SearchableSelect } from '../../shared/components/SearchableSelect';
+import { NumberDraftInput } from '../../shared/components/NumberDraftInput';
 
 /**
  * Human-readable constraint title composed from its parts, e.g.
@@ -146,11 +147,10 @@ export function GlobalConstraintsSection({
                   )}
                 </td>
                 <td>
-                  <input
-                    type="number"
+                  <NumberDraftInput
                     className="constraints-cell-input constraints-cell-input--num"
                     value={c.value}
-                    onChange={(e) => update(c.id, { value: parseFloat(e.target.value) || 0 })}
+                    onCommit={(v) => update(c.id, { value: v })}
                   />
                 </td>
                 <td className="constraints-cell-unit">{c.unit}</td>

@@ -18,7 +18,11 @@ second network call.
 """
 from __future__ import annotations
 
+import json
+import os
+import re
 import uuid
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -38,6 +42,50 @@ from ..importers.http import AsyncClientWrapper
 
 
 router = APIRouter(prefix="/api/import", tags=["import"])
+
+# Server-side API keys, two layers (values never leave the server):
+# 1. env: any ``RAGNAROK_SECRET_<NAME>`` provides the importer secret ``<name>``
+#    (lowercased) — set in the gitignored ``backend/.env``.
+# 2. stored: keys the user typed into Settings → API keys are RECORDED on the
+#    backend in ``backend/data/secrets.json`` (gitignored, 0600) via the
+#    endpoints below, and win over env. A key sent in a request body (BYOK)
+#    overrides both for that one request.
+_SERVER_SECRET_PREFIX = "RAGNAROK_SECRET_"
+_SECRET_NAME_RE = re.compile(r"^[a-z0-9_]{1,64}$")
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+SECRETS_PATH = _REPO_ROOT / "backend" / "data" / "secrets.json"
+
+
+def _env_secrets() -> dict[str, str]:
+    out: dict[str, str] = {}
+    for key, value in os.environ.items():
+        if key.startswith(_SERVER_SECRET_PREFIX) and value.strip():
+            out[key[len(_SERVER_SECRET_PREFIX):].lower()] = value.strip()
+    return out
+
+
+def _stored_secrets() -> dict[str, str]:
+    try:
+        if not SECRETS_PATH.exists():
+            return {}
+        data = json.loads(SECRETS_PATH.read_text(encoding="utf-8"))
+        return {str(k): str(v) for k, v in data.items() if str(v).strip()} if isinstance(data, dict) else {}
+    except Exception:  # noqa: BLE001 — a corrupt file must not break imports
+        return {}
+
+
+def _write_stored_secrets(secrets: dict[str, str]) -> None:
+    SECRETS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SECRETS_PATH.write_text(json.dumps(secrets, indent=2), encoding="utf-8")
+    try:
+        os.chmod(SECRETS_PATH, 0o600)  # owner-only — these are credentials
+    except OSError:
+        pass
+
+
+def _server_secrets() -> dict[str, str]:
+    """All importer secrets the server provides: env, overridden by stored."""
+    return {**_env_secrets(), **_stored_secrets()}
 
 
 class ImportRunRequest(BaseModel):
@@ -61,8 +109,57 @@ def list_databases() -> dict[str, Any]:
 @router.get("/sources")
 def list_sources() -> dict[str, Any]:
     """Datasets grouped by source for the Country → Database → Datasets tree,
-    each with its ``common_filters`` (settings shared by ≥2 of its datasets)."""
-    return {"sources": available_sources()}
+    each with its ``common_filters`` (settings shared by ≥2 of its datasets).
+
+    ``serverSecrets`` lists the secret NAMES the backend already provides from
+    its environment (values never leave the server) so the UI can mark those
+    API-key requirements as satisfied without the user typing anything.
+    """
+    return {"sources": available_sources(), "serverSecrets": sorted(_server_secrets())}
+
+
+# ── Server-recorded API keys (Settings → API keys writes through) ─────────────
+
+
+class SecretPayload(BaseModel):
+    value: str = ""
+
+
+@router.get("/secrets")
+def list_secrets() -> dict[str, Any]:
+    """The secret NAMES the server provides — values never leave the server."""
+    return {"stored": sorted(_stored_secrets()), "env": sorted(_env_secrets())}
+
+
+@router.put("/secrets/{name}")
+def put_secret(name: str, payload: SecretPayload) -> dict[str, Any]:
+    """Record an API key on the backend (gitignored secrets.json, 0600).
+
+    An empty value deletes the stored key. Values are write-only: no endpoint
+    ever returns them.
+    """
+    if not _SECRET_NAME_RE.match(name):
+        raise HTTPException(status_code=400, detail="Invalid secret name (use a-z, 0-9, _).")
+    stored = _stored_secrets()
+    value = payload.value.strip()
+    if value:
+        stored[name] = value
+    else:
+        stored.pop(name, None)
+    _write_stored_secrets(stored)
+    return {"name": name, "stored": bool(value)}
+
+
+@router.delete("/secrets/{name}")
+def delete_secret(name: str) -> dict[str, Any]:
+    """Remove a server-recorded API key."""
+    if not _SECRET_NAME_RE.match(name):
+        raise HTTPException(status_code=400, detail="Invalid secret name.")
+    stored = _stored_secrets()
+    existed = name in stored
+    stored.pop(name, None)
+    _write_stored_secrets(stored)
+    return {"name": name, "removed": existed}
 
 
 def _resolve_dataset_order(requested: list[str]) -> list[str]:
@@ -159,9 +256,13 @@ async def run_import(payload: ImportRunRequest) -> dict[str, Any]:
         plant_bus_snap_km=float(opts_dict.get("plant_bus_snap_km", 25.0)),
     )
 
-    http = AsyncClientWrapper(secrets=list(payload.secrets.values()))
+    # Server-held keys (gitignored .env) under the browser's BYOK keys — a key
+    # the user typed wins for their request; otherwise the server's is used, so
+    # datasets work with no key in the browser at all.
+    secrets = {**_server_secrets(), **{k: v for k, v in payload.secrets.items() if str(v).strip()}}
+    http = AsyncClientWrapper(secrets=list(secrets.values()))
     ctx = ImportContext(
-        secrets=dict(payload.secrets), http=http, request_id=str(uuid.uuid4())[:8],
+        secrets=secrets, http=http, request_id=str(uuid.uuid4())[:8],
     )
     fragments = []
     previews = []

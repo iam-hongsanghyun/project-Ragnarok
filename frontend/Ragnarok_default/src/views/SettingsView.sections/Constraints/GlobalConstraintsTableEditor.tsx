@@ -13,6 +13,7 @@ import { GridRow, Primitive } from 'lib/types';
 import { stringValue } from 'lib/utils/helpers';
 import { getOrderedInputAttributes } from 'lib/constants/pypsa_schema';
 import { SearchableSelect } from '../../../shared/components/SearchableSelect';
+import { NumberDraftInput } from '../../../shared/components/NumberDraftInput';
 
 // PyPSA's five recognised constraint types — offered as suggestions only.
 const TYPE_SUGGESTIONS = [
@@ -126,11 +127,10 @@ function renderField(
 
   if (key === 'constant') {
     return (
-      <input
-        type="number"
+      <NumberDraftInput
         className="constraints-cell-input constraints-cell-input--num"
         value={Number(row.constant ?? 0)}
-        onChange={(e) => onSet(i, 'constant', parseFloat(e.target.value) || 0)}
+        onCommit={(v) => onSet(i, 'constant', v)}
       />
     );
   }

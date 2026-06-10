@@ -10,6 +10,7 @@ import {
 } from 'lib/types';
 import { PYPSA_COMPONENTS } from 'lib/constants/pypsa_schema';
 import { SearchableSelect } from '../../../shared/components/SearchableSelect';
+import { NumberDraftInput } from '../../../shared/components/NumberDraftInput';
 
 const OVERRIDABLE_SHEETS = PYPSA_COMPONENTS
   .filter((c) => !['snapshots', 'network', 'carriers'].includes(c.sheet_name) && c.input_static_attributes.length > 0)
@@ -51,12 +52,11 @@ export function StochasticScenarioRow({ scenario, model, onUpdate, onRemove }: P
         />
         <label className="sg-stochastic-field" title="Probability weight">
           <span>w</span>
-          <input
-            type="number"
+          <NumberDraftInput
             step="0.05"
-            min="0"
+            min={0}
             value={scenario.weight}
-            onChange={(e) => onUpdate({ weight: Number(e.target.value) || 0 })}
+            onCommit={(v) => onUpdate({ weight: v })}
           />
         </label>
         <span style={{ flex: 1, color: 'var(--muted)', fontSize: '0.78rem' }}>
@@ -160,12 +160,11 @@ export function StochasticScenarioRow({ scenario, model, onUpdate, onRemove }: P
                     />
                   </td>
                   <td>
-                    <input
-                      type="number"
+                    <NumberDraftInput
                       className="constraints-cell-input constraints-cell-input--num"
                       value={o.value}
                       step="0.1"
-                      onChange={(e) => updateOverride(o.id, { value: Number(e.target.value) || 0 })}
+                      onCommit={(v) => updateOverride(o.id, { value: v })}
                     />
                   </td>
                   <td>

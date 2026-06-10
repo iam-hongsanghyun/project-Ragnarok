@@ -64,7 +64,7 @@ function withDefaults(schema: ModuleConfigSchema | undefined, stored: Record<str
  * Plugins emit data only — the host owns rendering — so inferring the hint
  * here keeps the plugin API to "return a value" with no separate hint channel.
  */
-function inferPluginUi(data: Record<string, unknown>): Record<string, PluginFieldHint> {
+export function inferPluginUi(data: Record<string, unknown>): Record<string, PluginFieldHint> {
   const ui: Record<string, PluginFieldHint> = {};
   for (const [key, value] of Object.entries(data)) {
     if (isPluginChartSpec(value)) {
@@ -79,6 +79,17 @@ function inferPluginUi(data: Record<string, unknown>): Record<string, PluginFiel
     }
   }
   return ui;
+}
+
+/** A change-detection key for the config that does NOT serialise multi-MB
+ *  `file` blobs: oversized/`data:` string values are replaced by a short
+ *  `‹blob:len›` fingerprint (still changes when a different file is picked). */
+function cheapConfigSnapshot(cfg: Record<string, unknown>): string {
+  const slim: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(cfg)) {
+    slim[k] = typeof v === 'string' && (v.length > 50_000 || v.startsWith('data:')) ? `‹blob:${v.length}›` : v;
+  }
+  return JSON.stringify(slim);
 }
 
 function manifestToDescriptor(plugin: InstalledPlugin, schema: ModuleConfigSchema | undefined): ModuleDescriptor {
@@ -259,8 +270,11 @@ export function PluginDetail({ host, plugin, model, onReplaceModel, onMergeSheet
 
   // Snapshot of the plugin config so the analyze hook re-runs when the user
   // changes an input (e.g. a chart's region selector), not only on a new solve.
-  // Recomputed every render; the component already re-renders on config edits.
-  const configSnapshot = JSON.stringify(host.getConfig(plugin.id) ?? {});
+  // Recomputed every render — so it must NOT serialise a multi-MB `file` blob
+  // (that made every keystroke after a file upload crawl). Heavy/binary values
+  // are replaced by a cheap length fingerprint, which still changes when a
+  // different file is picked.
+  const configSnapshot = cheapConfigSnapshot(host.getConfig(plugin.id) ?? {});
 
   // Auto-run the analyze hook so the Output tab reflects the latest run, the way
   // the V1 backend populated pluginAnalytics after each solve.

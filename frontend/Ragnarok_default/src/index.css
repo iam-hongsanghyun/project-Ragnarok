@@ -642,7 +642,9 @@
   line-height: 1;
 }
 .sg-carbon-input {
-  width: 72px;
+  /* Wide enough for a full price with decimals (e.g. "1250.50") without the
+     value being clipped — the 72px box truncated longer carbon prices. */
+  width: 96px;
   padding: 4px 7px;
   border: 1px solid var(--border);
   border-radius: 0;
@@ -927,12 +929,21 @@
   gap: 4px;
 }
 .sg-module-config-label {
-  flex: 0 0 auto;
+  /* Fixed label column so every row's input starts at the same x — auto-width
+     labels staggered the inputs into a ragged, broken-looking layout. */
+  flex: 0 0 11.5rem;
   color: var(--text);
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* Column-direction rows (slider / file / table): the fixed basis would become a
+   fixed HEIGHT there — let those labels size naturally. */
+.sg-module-config-row--slider .sg-module-config-label,
+.sg-module-config-row--file .sg-module-config-label,
+.sg-module-config-row--table .sg-module-config-label {
+  flex: 0 0 auto;
 }
 .sg-module-config-slider-row {
   display: flex;
@@ -1692,6 +1703,7 @@
 .chart-card p {
   margin-top: 4px;
 }
+
 
 .chart-card-controls {
   flex-wrap: wrap;
@@ -2829,6 +2841,16 @@ path.leaflet-interactive:focus {
   gap: 8px;
   flex-wrap: wrap;
 }
+.history-toolbar-spacer { flex: 1 1 auto; }
+.tb-btn--primary {
+  background: var(--accent, #2f7d6e);
+  color: #fff;
+  border-color: var(--accent, #2f7d6e);
+}
+.tb-btn--primary:disabled { opacity: 0.45; }
+/* Selected history rows read as a clickable selection, not a button strip. */
+.history-row { cursor: default; }
+.history-row.is-selected { outline: 2px solid var(--accent, #2f7d6e); outline-offset: -2px; }
 
 .history-search {
   flex: 1;
@@ -2882,6 +2904,8 @@ path.leaflet-interactive:focus {
   min-width: 88px;
 }
 .queue-status--running { color: var(--brand); }
+/* Staged ("Queue next Run"): parked, not yet running — dim it like a draft. */
+.queue-status--staged { color: var(--muted); font-style: italic; }
 .topbar-queue { display: inline-flex; align-items: center; gap: 6px; }
 
 /* Flat, full-width rows (no card chrome) — one run per line, info horizontal. */
@@ -5182,6 +5206,28 @@ th:hover .col-delete-btn {
   padding: 12px 0;
 }
 .plugin-rail-install { align-self: stretch; margin: 0 12px; }
+/* Rail sub-heading for the backend (server-side) group. Matches the Settings
+   nav group title (.settings-nav-group-title) so the grouping aligns with the
+   rest of the app — same 16px inset as the rail items below it. */
+.plugin-rail-group {
+  /* Matches .settings-nav-group-title / .forge-group-title — one rail design. */
+  margin-top: 12px;
+  padding: 6px 8px 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+/* Backend-plugin server-side file picker (upload-once + dropdown). */
+.be-file-section { margin-bottom: 8px; }
+.be-file-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.be-file-picker .sg-module-config-select { min-width: 160px; }
 .plugin-rail-list {
   list-style: none;
   margin: 0;
@@ -6134,11 +6180,14 @@ th:hover .col-delete-btn {
 .settings-nav-group {
   margin-bottom: 14px;
 }
+/* Rail group heading — ONE design across all tabs (Forge's): small uppercase
+   muted label inset 8px, so the real items below (16px inset) read as indented
+   children of the group. */
 .settings-nav-group-title {
-  padding: 6px 16px;
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.07em;
+  padding: 6px 8px 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted);
 }
@@ -6612,13 +6661,17 @@ th:hover .col-delete-btn {
   align-items: center;
   gap: 6px;
   width: 100%;
-  padding: 5px 12px;
+  padding: 6px 8px 4px;
   background: transparent;
   border: none;
   cursor: pointer;
-  font-size: 0.82rem;
+  /* Same group-heading typography as the other rails (Forge design); the
+     chevron + counts keep the collapse affordance. */
+  font-size: 0.7rem;
   font-weight: 600;
-  color: var(--text);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
   text-align: left;
 }
 .sheet-tree-group-header:hover { background: rgba(15, 118, 110, 0.05); }
@@ -6750,14 +6803,6 @@ th:hover .col-delete-btn {
   color: var(--muted);
   margin-left: 4px;
 }
-/* Settings section nav — slightly smaller, mono labels feel like code */
-.settings-nav-group-title {
-  font-family: var(--font-mono);
-  font-size: 0.68rem;
-  font-weight: 500;
-  letter-spacing: 0.06em;
-}
-
 /* Drop big border-radius on settings input/select */
 .settings-section-main input,
 .settings-section-main select,
@@ -7435,7 +7480,9 @@ code, kbd, samp, tt,
 /* Gear button — top right overlay on every compact chart cell */
 .chart-builder-gear {
   position: absolute;
-  top: 4px;
+  /* Bottom-right corner — clear of the title (top-left) and the side legend
+     (top-right), per the requested layout. */
+  bottom: 4px;
   right: 4px;
   z-index: 8;
   width: 30px;

@@ -3,6 +3,7 @@
  */
 import React from 'react';
 import { ScenarioCatalog, ScenarioPreset } from 'lib/types';
+import { TextDraftInput } from '../../shared/components/TextDraftInput';
 
 export interface ScenariosSectionProps {
   scenarioCatalog: ScenarioCatalog;
@@ -81,12 +82,11 @@ export function ScenariosSection(props: ScenariosSectionProps) {
           <div className="sg-setting-divider" />
           <div className="sg-setting-row">
             <label className="sg-setting-label" htmlFor="set-scenario-label">Active scenario label</label>
-            <input
+            <TextDraftInput
               id="set-scenario-label"
-              type="text"
               className="sg-num-input"
               value={activeScenario.label}
-              onChange={(e) => onRenameScenario(activeScenario.id, e.target.value)}
+              onCommit={(v) => onRenameScenario(activeScenario.id, v)}
             />
           </div>
           <div className="sg-setting-row">

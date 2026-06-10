@@ -84,13 +84,15 @@ interface SmpLegendProps {
   show: boolean;
   min: number;
   max: number;
+  /** Currency unit symbol from Settings (defaults to $ for back-compat). */
+  currencySymbol?: string;
 }
 
-export function SmpLegend({ show, min, max }: SmpLegendProps) {
+export function SmpLegend({ show, min, max, currencySymbol = '$' }: SmpLegendProps) {
   if (!show) return null;
   return (
     <div className="map-legend loading-legend">
-      <div className="map-legend-title">Avg SMP ($/MWh)</div>
+      <div className="map-legend-title">Avg SMP ({currencySymbol}/MWh)</div>
       <div className="smp-gradient-bar" />
       <div className="loading-gradient-labels">
         <span>{min.toFixed(0)}</span>

@@ -14,11 +14,14 @@ import { formatRelTime } from 'lib/utils/formatRelTime';
 
 interface HistoryViewProps {
   backendRuns: BackendRunMeta[];
-  onOpenBackendRun: (name: string) => void;
-  onDownloadBackendXlsx: (name: string) => void;
+  /** View the current selection: 1 → its Result, 2+ → side-by-side Comparison. */
+  onViewSelected: (names: string[]) => void;
+  /** Import the run's model into the editable session for edit + re-run (heavy). */
+  onImportBackendRun: (name: string) => void;
+  /** Explicit Excel export; `parts` ⊆ ['metadata','model','result'] selects sheet groups. */
+  onDownloadBackendXlsx: (name: string, parts: string[]) => void;
   /** Download the full project package (.zip of bundle JSON + meta JSON + xlsx). */
   onExportBackendProject: (name: string) => void;
-  onDeleteBackendRun: (name: string) => void;
   onDeleteBackendRuns: (names: string[]) => void;
   /** Manually re-fetch the run list from the backend. */
   onReload?: () => void;
@@ -42,15 +45,20 @@ export function matchesBackendQuery(meta: BackendRunMeta, query: string): boolea
 
 export function HistoryView({
   backendRuns,
-  onOpenBackendRun,
+  onViewSelected,
+  onImportBackendRun,
   onDownloadBackendXlsx,
   onExportBackendProject,
-  onDeleteBackendRun,
   onDeleteBackendRuns,
   onReload,
 }: HistoryViewProps) {
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<string[]>([]);
+  // Export dialog: which run is being exported (null = closed) + the three
+  // sheet-group checkboxes. All on by default so the file is a complete,
+  // PyPSA-import-ready workbook with the Result included.
+  const [exportFor, setExportFor] = useState<string | null>(null);
+  const [exportParts, setExportParts] = useState({ metadata: true, model: true, result: true });
 
   const filtered = useMemo(
     () => backendRuns.filter((meta) => matchesBackendQuery(meta, query)),
@@ -80,6 +88,11 @@ export function HistoryView({
     setSelected([]);
   };
 
+  // Actions live at the top and act on the selection: Import needs exactly one
+  // model; View shows one run's Result, or several side-by-side in Comparison.
+  const single = visibleSelected.length === 1 ? visibleSelected[0] : null;
+  const n = visibleSelected.length;
+
   return (
     <div className="history-view">
       <div className="history-toolbar">
@@ -99,8 +112,41 @@ export function HistoryView({
           />
           Select all
         </label>
-        <button className="tb-btn" onClick={deleteSelected} disabled={visibleSelected.length === 0}>
-          Delete selected ({visibleSelected.length})
+        <button
+          className="tb-btn tb-btn--primary"
+          onClick={() => onViewSelected(visibleSelected)}
+          disabled={n === 0}
+          title={n > 1 ? 'Compare the selected runs side by side' : 'View this run’s results'}
+        >
+          {n > 1 ? `Compare results (${n})` : 'View result'}
+        </button>
+        <button
+          className="tb-btn"
+          onClick={() => single && onImportBackendRun(single)}
+          disabled={!single}
+          title={single ? 'Load this run’s model into the editor to edit and re-run' : 'Select exactly one run to import'}
+        >
+          Import project
+        </button>
+        <button
+          className="tb-btn"
+          onClick={() => single && onExportBackendProject(single)}
+          disabled={!single}
+          title="Download the full project package (.zip)"
+        >
+          Export
+        </button>
+        <button
+          className="tb-btn"
+          onClick={() => single && setExportFor(single)}
+          disabled={!single}
+          title="Export an Excel workbook (choose Metadata / Model / Result)"
+        >
+          Excel
+        </button>
+        <span className="history-toolbar-spacer" />
+        <button className="tb-btn" onClick={deleteSelected} disabled={n === 0}>
+          Delete ({n})
         </button>
         {onReload && (
           <button className="tb-btn" onClick={onReload} title="Re-fetch run history from the backend">
@@ -123,12 +169,56 @@ export function HistoryView({
               meta={meta}
               selected={visibleSelected.includes(meta.name)}
               onSelect={(checked) => toggleName(meta.name, checked)}
-              onView={() => onOpenBackendRun(meta.name)}
-              onDownload={() => onDownloadBackendXlsx(meta.name)}
-              onExportProject={() => onExportBackendProject(meta.name)}
-              onDelete={() => onDeleteBackendRun(meta.name)}
+              onActivate={() => onViewSelected([meta.name])}
             />
           ))}
+        </div>
+      )}
+
+      {exportFor && (
+        <div className="modal-backdrop" onClick={() => setExportFor(null)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="validation-report">
+              <span className="validation-eyebrow">Export</span>
+              <h2>Export Excel</h2>
+              <p className="sg-setting-hint">
+                Builds one workbook on demand from <b>{exportFor}</b> — nothing is
+                stored server-side. With all three parts selected the file is
+                PyPSA-import-ready.
+              </p>
+              <div className="validation-section">
+                <h3>Include</h3>
+                {([
+                  ['model', 'Model', 'PyPSA component sheets, input time-series, snapshots'],
+                  ['result', 'Result', 'Solved outputs: optimal capacities, dispatch series, result meta'],
+                  ['metadata', 'Metadata', 'Ragnarok config: scenarios, constraints, run state, settings'],
+                ] as const).map(([key, label, hint]) => (
+                  <label key={key} className="sg-setting-row" style={{ cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={exportParts[key]}
+                      onChange={(e) => setExportParts((p) => ({ ...p, [key]: e.target.checked }))}
+                    />
+                    <span><b>{label}</b> — {hint}</span>
+                  </label>
+                ))}
+              </div>
+              <div className="sg-setting-row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+                <button className="tb-btn" onClick={() => setExportFor(null)}>Cancel</button>
+                <button
+                  className="tb-btn tb-btn--primary"
+                  disabled={!exportParts.metadata && !exportParts.model && !exportParts.result}
+                  onClick={() => {
+                    const parts = (['metadata', 'model', 'result'] as const).filter((k) => exportParts[k]);
+                    onDownloadBackendXlsx(exportFor, parts);
+                    setExportFor(null);
+                  }}
+                >
+                  Download .xlsx
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -146,21 +236,25 @@ function formatDemand(mwh: number | null | undefined): string | null {
 // ── Backend (server-stored) run row ─────────────────────────────────────────
 
 function BackendHistoryRow({
-  meta, selected, onSelect, onView, onDownload, onExportProject, onDelete,
+  meta, selected, onSelect, onActivate,
 }: {
   meta: BackendRunMeta;
   selected: boolean;
   onSelect: (checked: boolean) => void;
-  onView: () => void;
-  onDownload: () => void;
-  onExportProject: () => void;
-  onDelete: () => void;
+  /** Double-click / Enter on the row → view this single run (toolbar handles the rest). */
+  onActivate: () => void;
 }) {
   // The run's display name IS the scenario name (falls back to the stored label).
   const name = meta.scenarioLabel || meta.label || meta.name;
 
+  // Rows are display-only: select with the checkbox (or click the row), then use
+  // the toolbar actions at the top. This keeps every row a clean, aligned line
+  // instead of a ragged strip of buttons.
   return (
-    <div className={`history-row${selected ? ' is-selected' : ''}`}>
+    <div
+      className={`history-row${selected ? ' is-selected' : ''}`}
+      onDoubleClick={onActivate}
+    >
       <input
         type="checkbox"
         className="history-row-select"
@@ -187,23 +281,6 @@ function BackendHistoryRow({
       ))}
 
       <span className="history-row-spacer" />
-
-      <button className="tb-btn" onClick={onView}>View results</button>
-      {/* The full project export (.zip of all 3 files). Until the server has
-          finished pre-building the workbook it reads "Preparing…" and is
-          unclickable; once ready it becomes "Export Project". */}
-      <button
-        className="tb-btn"
-        onClick={onExportProject}
-        disabled={!meta.xlsxReady}
-        title={meta.xlsxReady ? 'Download bundle JSON + meta JSON + Excel (.zip)' : 'Workbook is still being prepared'}
-      >
-        {meta.xlsxReady ? 'Export Project' : 'Preparing…'}
-      </button>
-      <button className="tb-btn" onClick={onDownload} disabled={!meta.xlsxReady}>
-        {meta.xlsxReady ? 'Download Excel' : 'Preparing…'}
-      </button>
-      <button className="tb-btn" onClick={onDelete}>Delete</button>
     </div>
   );
 }

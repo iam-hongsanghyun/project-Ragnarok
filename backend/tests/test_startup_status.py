@@ -68,3 +68,21 @@ def test_mark_step_advances_detail_and_progress():
     assert done[0] is True and done[1] is True
     assert done[2] is False
     startup_status.reset()
+
+
+def test_health_reports_all_subsystems() -> None:
+    from fastapi.testclient import TestClient
+
+    from backend.app.main import app
+
+    body = TestClient(app).get("/api/health").json()
+    assert body["status"] in ("ok", "degraded")
+    checks = body["checks"]
+    assert checks["store"]["engine"] in ("sqlite", "legacy")
+    assert "sessionLoaded" in checks["store"]
+    assert "count" in checks["runs"] and "dirWritable" in checks["runs"]
+    assert {"jobs", "running", "queued", "pumpAlive"} <= set(checks["queue"])
+    assert "ids" in checks["plugins"]
+    assert "highs" in checks["solver"]
+    assert "freeGb" in checks["disk"]
+    assert checks["version"]["python"]

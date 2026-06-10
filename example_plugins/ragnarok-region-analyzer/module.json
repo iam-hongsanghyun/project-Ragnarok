@@ -1,0 +1,310 @@
+{
+  "id": "ragnarok-region-analyzer",
+  "name": "Region & Carrier Analyzer",
+  "version": "6.0.0",
+  "sdkVersion": "2",
+  "entry": "index.js",
+  "description": "Aggregates the solved nodal output to REGIONAL output and charts it: a system carrier-mix donut, generation-by-region stacked bar, a per-region carrier-mix donut + hourly stacked-area (pick the region), and an inter-region net-flow bar — plus the underlying tables. 100% frontend, no backend.",
+  "capabilities": [
+    "analytics-pack"
+  ],
+  "permissions": [
+    "results.read"
+  ],
+  "panel": {
+    "inputLayout": "2x1"
+  },
+  "config": {
+    "sec_left": {
+      "type": "group",
+      "label": "Region aggregation"
+    },
+    "aggregate_by_region": {
+      "type": "boolean",
+      "label": "Aggregate by region",
+      "default": true,
+      "description": "Collapse nodal (per-bus) output into regions. Off = per-bus."
+    },
+    "region_column": {
+      "type": "select",
+      "label": "Region column",
+      "default": "province",
+      "visibleWhen": {
+        "field": "aggregate_by_region",
+        "equals": true
+      },
+      "options": [
+        {
+          "value": "province",
+          "label": "province"
+        },
+        {
+          "value": "group1",
+          "label": "group1"
+        },
+        {
+          "value": "group2",
+          "label": "group2"
+        },
+        {
+          "value": "group3",
+          "label": "group3"
+        },
+        {
+          "value": "singlenode",
+          "label": "singlenode"
+        }
+      ],
+      "description": "Bus attribute used for region grouping."
+    },
+    "aggregate_by_carrier": {
+      "type": "boolean",
+      "label": "Split by carrier",
+      "default": true,
+      "description": "Split generation by carrier (solar, wind, coal, …) for the mix charts. Off = total only."
+    },
+    "chart_region_province": {
+      "type": "select",
+      "label": "Chart region",
+      "default": "",
+      "description": "Region for the per-region mix (donut) + hourly (stacked area) charts. Blank = highest-generation region.",
+      "visibleWhen": { "field": "region_column", "equals": "province" },
+      "optionsFrom": { "source": "config", "field": "province_mapping", "column": "short" },
+      "options": [ { "value": "", "label": "— top region —" } ]
+    },
+    "chart_region_group1": {
+      "type": "select",
+      "label": "Chart region",
+      "default": "",
+      "description": "Region for the per-region mix (donut) + hourly (stacked area) charts. Blank = highest-generation region.",
+      "visibleWhen": { "field": "region_column", "equals": "group1" },
+      "optionsFrom": { "source": "config", "field": "province_mapping", "column": "group1" },
+      "options": [ { "value": "", "label": "— top region —" } ]
+    },
+    "chart_region_group2": {
+      "type": "select",
+      "label": "Chart region",
+      "default": "",
+      "description": "Region for the per-region mix (donut) + hourly (stacked area) charts. Blank = highest-generation region.",
+      "visibleWhen": { "field": "region_column", "equals": "group2" },
+      "optionsFrom": { "source": "config", "field": "province_mapping", "column": "group2" },
+      "options": [ { "value": "", "label": "— top region —" } ]
+    },
+    "chart_region_group3": {
+      "type": "select",
+      "label": "Chart region",
+      "default": "",
+      "description": "Region for the per-region mix (donut) + hourly (stacked area) charts. Blank = highest-generation region.",
+      "visibleWhen": { "field": "region_column", "equals": "group3" },
+      "optionsFrom": { "source": "config", "field": "province_mapping", "column": "group3" },
+      "options": [ { "value": "", "label": "— top region —" } ]
+    },
+    "chart_region_singlenode": {
+      "type": "select",
+      "label": "Chart region",
+      "default": "",
+      "description": "Region for the per-region mix (donut) + hourly (stacked area) charts. Blank = highest-generation region.",
+      "visibleWhen": { "field": "region_column", "equals": "singlenode" },
+      "optionsFrom": { "source": "config", "field": "province_mapping", "column": "singlenode" },
+      "options": [ { "value": "", "label": "— top region —" } ]
+    },
+    "max_hours": {
+      "type": "number",
+      "label": "Hourly chart length (hours)",
+      "default": 168,
+      "description": "How many snapshots to plot in the hourly stacked-area chart (from the start). Raise for a longer window; the full year can be heavy."
+    },
+    "download_aggregated": {
+      "type": "action",
+      "label": "Download aggregated (CSV)",
+      "hook": "downloadAggregated",
+      "variant": "secondary",
+      "description": "Download the aggregated tables (generation by region, carrier totals, inter-region flow) as one CSV. Run the model and open the Output tab first.",
+      "successMessage": "Aggregated CSV downloaded."
+    },
+    "sec_right": {
+      "type": "group",
+      "label": "Region aggregation"
+    },
+    "province_mapping": {
+      "type": "table",
+      "label": "Province → region mapping",
+      "visibleWhen": {
+        "field": "aggregate_by_region",
+        "equals": true
+      },
+      "maxHeight": 400,
+      "columns": [
+        {
+          "key": "short",
+          "label": "short",
+          "width": 60
+        },
+        {
+          "key": "official",
+          "label": "official",
+          "width": 120
+        },
+        {
+          "key": "group1",
+          "label": "group1",
+          "width": 60
+        },
+        {
+          "key": "group2",
+          "label": "group2",
+          "width": 60
+        },
+        {
+          "key": "group3",
+          "label": "group3",
+          "width": 60
+        },
+        {
+          "key": "singlenode",
+          "label": "singlenode",
+          "width": 70
+        }
+      ],
+      "default": [
+        {
+          "short": "강원",
+          "official": "강원특별자치도",
+          "group1": "육지",
+          "group2": "육지",
+          "group3": "강원",
+          "singlenode": "KR"
+        },
+        {
+          "short": "경기",
+          "official": "경기도",
+          "group1": "육지",
+          "group2": "수도권",
+          "group3": "수도권",
+          "singlenode": "KR"
+        },
+        {
+          "short": "경남",
+          "official": "경상남도",
+          "group1": "육지",
+          "group2": "육지",
+          "group3": "경상",
+          "singlenode": "KR"
+        },
+        {
+          "short": "경북",
+          "official": "경상북도",
+          "group1": "육지",
+          "group2": "육지",
+          "group3": "경상",
+          "singlenode": "KR"
+        },
+        {
+          "short": "광주",
+          "official": "광주광역시",
+          "group1": "육지",
+          "group2": "육지",
+          "group3": "전라",
+          "singlenode": "KR"
+        },
+        {
+          "short": "대구",
+          "official": "대구광역시",
+          "group1": "육지",
+          "group2": "육지",
+          "group3": "경상",
+          "singlenode": "KR"
+        },
+        {
+          "short": "대전",
+          "official": "대전광역시",
+          "group1": "육지",
+          "group2": "육지",
+          "group3": "충청",
+          "singlenode": "KR"
+        },
+        {
+          "short": "부산",
+          "official": "부산광역시",
+          "group1": "육지",
+          "group2": "육지",
+          "group3": "경상",
+          "singlenode": "KR"
+        },
+        {
+          "short": "서울",
+          "official": "서울특별시",
+          "group1": "육지",
+          "group2": "수도권",
+          "group3": "수도권",
+          "singlenode": "KR"
+        },
+        {
+          "short": "세종",
+          "official": "세종특별자치시",
+          "group1": "육지",
+          "group2": "육지",
+          "group3": "충청",
+          "singlenode": "KR"
+        },
+        {
+          "short": "울산",
+          "official": "울산광역시",
+          "group1": "육지",
+          "group2": "육지",
+          "group3": "경상",
+          "singlenode": "KR"
+        },
+        {
+          "short": "인천",
+          "official": "인천광역시",
+          "group1": "육지",
+          "group2": "수도권",
+          "group3": "수도권",
+          "singlenode": "KR"
+        },
+        {
+          "short": "전남",
+          "official": "전라남도",
+          "group1": "육지",
+          "group2": "육지",
+          "group3": "전라",
+          "singlenode": "KR"
+        },
+        {
+          "short": "전북",
+          "official": "전북특별자치도",
+          "group1": "육지",
+          "group2": "육지",
+          "group3": "전라",
+          "singlenode": "KR"
+        },
+        {
+          "short": "제주",
+          "official": "제주특별자치도",
+          "group1": "제주",
+          "group2": "제주",
+          "group3": "제주",
+          "singlenode": "KR"
+        },
+        {
+          "short": "충남",
+          "official": "충청남도",
+          "group1": "육지",
+          "group2": "육지",
+          "group3": "충청",
+          "singlenode": "KR"
+        },
+        {
+          "short": "충북",
+          "official": "충청북도",
+          "group1": "육지",
+          "group2": "육지",
+          "group3": "충청",
+          "singlenode": "KR"
+        }
+      ],
+      "description": "Required: short, official. The Region column selector picks which column becomes the region."
+    }
+  }
+}

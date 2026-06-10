@@ -109,3 +109,46 @@ export function getEndpointOverride(name: string): string | null {
   const v = (process.env as Record<string, string | undefined>)[envKey];
   return v && v.trim() ? v.trim() : null;
 }
+
+// ── Server-recorded keys (Settings writes through to the backend) ───────────
+// The backend stores typed keys in its gitignored secrets.json and merges them
+// into every /api/import/run, so the key works from ANY browser/device — not
+// just the one it was typed in. Values are write-only; only names come back.
+
+const API_BASE = process.env.REACT_APP_API_BASE ?? '';
+
+/** Record (or with an empty value, remove) a key on the backend. */
+export async function putServerSecret(name: string, value: string): Promise<boolean> {
+  try {
+    const resp = await fetch(`${API_BASE}/api/import/secrets/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value }),
+    });
+    return resp.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Remove a server-recorded key. */
+export async function deleteServerSecret(name: string): Promise<boolean> {
+  try {
+    const resp = await fetch(`${API_BASE}/api/import/secrets/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    return resp.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Names of keys the server already provides (stored + env). Never values. */
+export async function listServerSecrets(): Promise<{ stored: string[]; env: string[] }> {
+  try {
+    const resp = await fetch(`${API_BASE}/api/import/secrets`);
+    if (!resp.ok) return { stored: [], env: [] };
+    const j = await resp.json();
+    return { stored: j.stored ?? [], env: j.env ?? [] };
+  } catch {
+    return { stored: [], env: [] };
+  }
+}

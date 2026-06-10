@@ -38,6 +38,7 @@ detail, see the plugin guide.
 9. [Plugin runtime](#9-plugin-runtime)
 10. [UI design philosophy](#10-ui-design-philosophy)
 11. [Current scope and limitations](#11-current-scope-and-limitations)
+12. [Server-side deployment & frontend/backend separation](#12-server-side-deployment--frontendbackend-separation)
 
 ---
 
@@ -835,3 +836,77 @@ headline limitations are:
   separation is already clean) but no authentication layer exists yet.
 - **Session-scoped run history.** Past runs can be viewed, compared, pinned, renamed,
   restored, and exported, but the list lives only for the browser session.
+
+---
+
+## 12. Server-side deployment & frontend/backend separation
+
+Ragnarok is built so the **backend is the single source of truth** and the
+frontend is a thin terminal — the shape a server-side (and eventually iPad)
+deployment needs.
+
+**What lives where**
+
+- **Backend owns the model — one SQLite file per project.** The working model
+  is a server-side *session* stored as
+  `backend/data/session/<session_id>/project.db` (`backend/app/sqlite_store.py`,
+  selected by `RAGNAROK_STORE`, default `sqlite`; copying the file = sharing the
+  project). The frontend imports a model once (`POST /api/session/model`) and
+  thereafter everything is a SQL query: a page of rows (`GET …/sheet/{name}`,
+  `LIMIT/OFFSET`), a windowed downsampled series slice (`GET …/series/{name}`),
+  distinct column values for pickers (`GET …/sheet/{name}/distinct`). Edits go
+  back as patches (`PATCH …/sheet/{name}`); static edits sync on a debounce.
+  Pre-SQLite sessions (JSON + Parquet) migrate into their `project.db` on first
+  read. The heavy model never lives in browser memory.
+- **Runs submit by `sessionId`.** `POST /api/queue` takes `{sessionId, scenario,
+  options}`; the backend snapshots the session model into the queued item. The
+  giant model payload never travels from the browser. A running solve survives a
+  backend restart: the worker persists its outcome on disk and the restarted
+  backend adopts or watches the orphaned process (`outcome.json` + pid).
+- **Runs are one SQLite file each.** A finished run is `backend/data/runs/
+  <name>.db`: the meta link, the input-model SNAPSHOT (so editing the live
+  session can't corrupt past runs), and the result. `GET /api/runs/{name}/
+  analytics` is one key read (instant View); model pages and chart windows are
+  SQL queries. Legacy JSON/Parquet runs migrate on first access.
+- **Excel is export-only.** No workbook is ever auto-written. The Export dialog
+  (Metadata / Model / Result checkboxes, all on by default) derives one
+  PyPSA-import-ready xlsx on demand (`GET /api/runs/{name}/xlsx?parts=…`);
+  `…/package` derives the bundle JSON + meta + xlsx zip the same way.
+- **Compute is server-side.** The solve runs in a backend worker process; backend
+  plugins (below) also run in-process.
+
+**Two plugin kinds, one hook contract** (see `docs/plugin.md`). Ragnarok ships
+**no plugins** — they are purely 3rd-party (examples in `example_plugins/`). Both
+kinds expose `transform(model,config)→model`, `contribute(model,config)→{sheets,
+constraints}`, and/or `analyze(result,config)→data`.
+
+- *Frontend plugin* — browser JS (`.zip` of module.json + index.js, kept in
+  localStorage); may run its **own** local server registered in `plugins.env`.
+- *Backend plugin* — `.zip` of manifest.json + plugin.py, **installed by upload**
+  into the gitignored `backend/data/plugins/`; runs in the backend and imports the
+  bundled PyPSA source directly; **nothing in `plugins.env`**. `transform`/
+  `contribute` write straight into the session; an optional
+  `options(name, config, ctx)` hook answers its dropdowns on demand (ctx gives
+  read-only session access, e.g. `ctx.distinct`) — no per-plugin localhost
+  server. Endpoints: `GET /api/plugins`, `POST /api/plugins/install`,
+  `DELETE /api/plugins/{id}`,
+  `POST /api/plugins/{id}/transform|contribute|analyze|options`. (Install runs
+  uploaded Python — RCE by design; gate behind auth for multi-user.)
+
+**Already remote-ready**
+
+- `session_id` is a first-class parameter everywhere (default `"default"`), so
+  multi-session is a config flip, not a rewrite.
+- CORS is open (`allow_origins=["*"]`); `API_BASE` is env-configurable; no
+  hardcoded `127.0.0.1` in the data-path code.
+
+**Remaining for a hardened multi-user server** (not yet built)
+
+- **Auth** — there is no authentication/authorization layer.
+- **Per-user sessions** — a single `"default"` session is assumed; concurrent
+  users would need session isolation and a shared store (Redis/DB/object
+  storage) instead of the warm single-process cache.
+- **`run.command` launches local processes** — fine for a workstation; a server
+  deployment runs the backend (and any backend plugins) as a managed service.
+- **A few result objects** (e.g. `assetDetails`) are still derived in the
+  browser from raw outputs; the per-component series fetch is on-demand.

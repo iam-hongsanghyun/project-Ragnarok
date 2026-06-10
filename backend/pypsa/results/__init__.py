@@ -212,6 +212,23 @@ def run_pypsa(
     _t_solve = time.perf_counter()
     try:
         if rolling.enabled:
+            # Rolling horizon carries storage state between windows via
+            # `state_of_charge_initial` (set from the previous window's end).
+            # Cyclic SOC (soc_end == soc_start within each window) is INCOMPATIBLE:
+            # it ignores the carried state and forces every window — especially the
+            # shorter trailing one — to net-zero storage, which is frequently
+            # infeasible. PyPSA then silently leaves that window's results at zero,
+            # truncating the run. Force non-cyclic so carried state provides
+            # continuity across the full horizon.
+            if not network.storage_units.empty:
+                network.storage_units["cyclic_state_of_charge"] = False
+                if "cyclic_state_of_charge_per_period" in network.storage_units.columns:
+                    network.storage_units["cyclic_state_of_charge_per_period"] = False
+            if not network.stores.empty:
+                if "e_cyclic" in network.stores.columns:
+                    network.stores["e_cyclic"] = False
+                if "e_cyclic_per_period" in network.stores.columns:
+                    network.stores["e_cyclic_per_period"] = False
             rolling_windows = _rolling_window_summaries(
                 network.snapshots,
                 rolling.horizon_snapshots,
@@ -389,6 +406,28 @@ def run_pypsa(
         if v > 0.0
     ]
 
+    # Per-generator dispatched energy (MWh, snapshot-weighted). This is the small
+    # aggregate the "Dispatch by unit" donut renders, so the heavy per-snapshot
+    # generator series never has to reach the browser — it stays server-side and
+    # is fetched windowed only when a time-series chart is opened.
+    generator_carriers = network.generators["carrier"].to_dict()
+    generator_energy = []
+    for gen in generator_dispatch_frame.columns:
+        if str(gen).startswith("load_shedding_"):
+            continue
+        energy = weighted_sum(generator_dispatch_frame[gen].clip(lower=0.0), generator_weights)
+        if energy > 0.0:
+            carrier = str(generator_carriers.get(gen, ""))
+            generator_energy.append(
+                {
+                    "name": str(gen),
+                    "value": float(energy),
+                    "carrier": carrier,
+                    "color": carrier_color(network, carrier),
+                }
+            )
+    generator_energy.sort(key=lambda row: row["value"], reverse=True)
+
     # Cost breakdown. Use the effective per-snapshot marginal cost
     # (``get_switchable_as_dense`` resolves static vs time-varying inputs) so
     # the fuel/carbon split is correct even when a generator's marginal_cost is
@@ -518,6 +557,7 @@ def run_pypsa(
         "storageSeries": storage_s,
         "nodalPriceSeries": nodal_price_series,
         "carrierMix": carrier_mix,
+        "generatorEnergy": generator_energy,
         "costBreakdown": cost_breakdown,
         "nodalBalance": nodal_balance,
         "lineLoading": line_loading,

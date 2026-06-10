@@ -1,9 +1,11 @@
-"""Per-request import context — the only place a user's API key lives.
+"""Per-request import context — the only place an API key lives during a fetch.
 
-Built fresh for each ``POST /api/import/run`` from the secrets the
-frontend sent in the request body, handed by argument into
-``database.fetch(region, filters, ctx)``, and dropped when the response
-is written. No module reads ``os.environ`` for a credential and nothing
+Built fresh for each ``POST /api/import/run`` from the request's BYOK secrets
+merged over the server's own keys (``RAGNAROK_SECRET_*`` env vars from the
+gitignored ``backend/.env`` — resolved once in the router, see
+``routers/importers._server_secrets``), handed by argument into
+``database.fetch(region, filters, ctx)``, and dropped when the response is
+written. No DATASET module reads ``os.environ`` for a credential and nothing
 caches a key, so two concurrent users with different keys never cross.
 
 ``ctx.http`` is a shared async HTTP client with retry/backoff and

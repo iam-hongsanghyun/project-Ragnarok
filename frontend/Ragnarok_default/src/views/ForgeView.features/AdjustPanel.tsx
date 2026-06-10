@@ -10,6 +10,7 @@ import React, { useMemo } from 'react';
 import type { GridRow, WorkbookModel } from 'lib/types';
 import { usePersistedState } from 'shared/hooks/usePersistedState';
 import { SearchableSelect } from 'shared/components/SearchableSelect';
+import { NumberDraftInput } from 'shared/components/NumberDraftInput';
 import { numericColumns } from 'lib/forge/transforms';
 import {
   Adjustment,
@@ -201,11 +202,10 @@ function AdjustmentCard({
           options={ACTIONS}
           onChange={(v) => onChange({ action: v as AdjustAction, amount: v === 'multiply' ? 100 : 0 })}
         />
-        <input
-          type="number"
+        <NumberDraftInput
           className="forge-number forge-adjust-amount"
           value={Number.isFinite(adj.amount) ? adj.amount : 0}
-          onChange={(e) => onChange({ amount: Number(e.target.value) })}
+          onCommit={(v) => onChange({ amount: v })}
         />
         {adj.action === 'multiply' && <span className="forge-adjust-hint">%</span>}
         <button type="button" className="forge-adjust-remove" onClick={onRemove} aria-label="Remove adjustment">×</button>

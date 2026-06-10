@@ -292,7 +292,7 @@ export function AnalyticsDashboard({
           return (
             <ul className="dashboard-notes">
               {results.narrative.length === 0 && <li className="dashboard-notes-empty">No notes from this run.</li>}
-              {results.narrative.map((item) => <li key={item}>{item}</li>)}
+              {results.narrative.map((item, i) => <li key={`${i}-${item}`}>{item}</li>)}
             </ul>
           );
         case 'kpi-strip':
@@ -361,7 +361,11 @@ export function AnalyticsDashboard({
     if (card.kind === 'chart') {
       const label = chartCardTitle(card.config);
       const tf = card.config.timeframe;
-      const tfSuffix = tf && tf !== 'hourly' ? ` · ${tf}` : '';
+      // Donuts always show the full-period total, so the timeframe is irrelevant
+      // (and misleading) in the title — omit it there.
+      const tfSuffix = card.config.chartType === 'donut'
+        ? ''
+        : (tf && tf !== 'hourly' ? ` · ${tf}` : '');
       return `${label}${tfSuffix}`;
     }
     switch (card.kind) {

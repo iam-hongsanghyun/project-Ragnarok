@@ -26,7 +26,10 @@ export interface RunDialogProps {
   onForceLpChange: (v: boolean) => void;
   onDryRunChange: (v: boolean) => void;
 
+  /** "Run model" — runs now if the queue is idle, else next in line. */
   onRun: () => void;
+  /** "Queue next Run" — parks the job as staged; the user activates it later. */
+  onQueueNext: () => void;
 }
 
 export function RunDialog({
@@ -44,6 +47,7 @@ export function RunDialog({
   onForceLpChange,
   onDryRunChange,
   onRun,
+  onQueueNext,
 }: RunDialogProps) {
   if (!open) return null;
 
@@ -97,6 +101,11 @@ export function RunDialog({
 
         <div className="modal-actions">
           <button className="secondary-button" onClick={onClose}>Cancel</button>
+          {!dryRun && (
+            <button className="secondary-button" onClick={onQueueNext} title="Stage this run; activate it later from the Queue tab">
+              Queue next Run
+            </button>
+          )}
           <button className="run-button" onClick={onRun}>
             {dryRun ? 'Validate' : 'Run model'}
           </button>
