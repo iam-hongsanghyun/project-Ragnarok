@@ -970,6 +970,9 @@
 }
 .sg-module-config-input {
   flex: 1;
+  /* flex min-width defaults to auto: an <input>'s intrinsic ~20ch floor would
+     overflow the section card in narrow plugin-panel columns. */
+  min-width: 0;
   padding: 3px 8px;
   border: 1px solid var(--border);
   border-radius: 0;
@@ -978,6 +981,7 @@
 }
 .sg-module-config-select {
   flex: 1;
+  min-width: 0;
   padding: 3px 8px;
   border: 1px solid var(--border);
   border-radius: 0;
