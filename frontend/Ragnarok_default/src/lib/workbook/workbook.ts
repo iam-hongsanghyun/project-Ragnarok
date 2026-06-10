@@ -22,6 +22,10 @@ export const CONSTRAINTS_SHEET = 'RAGNAROK_Constraints';
 export const RUN_STATE_SHEET = 'RAGNAROK_RunState';
 export const RUN_HISTORY_SHEET = 'RAGNAROK_RunHistory';
 export const PROVENANCE_SHEET = 'RAGNAROK_Provenance';
+// Backend-only human-readable landing sheet in exported workbooks. Carries no
+// data the parser needs, so it's skipped on import (never absorbed as a model
+// sheet). The frontend never writes it.
+export const SUMMARY_SHEET = 'RAGNAROK_Summary';
 // The backend embeds the complete run bundle as chunked JSON here for a lossless
 // re-import. The frontend parser ignores it (import goes through the backend).
 export const BUNDLE_SHEET = 'RAGNAROK_Bundle';
@@ -488,6 +492,7 @@ function isProjectMetadataSheet(sheetName: string): boolean {
     RUN_HISTORY_SHEET,
     PROVENANCE_SHEET,
     BUNDLE_SHEET,
+    SUMMARY_SHEET,
   ].includes(sheetName);
 }
 
