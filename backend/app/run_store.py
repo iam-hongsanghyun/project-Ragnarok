@@ -40,11 +40,13 @@ logger = logging.getLogger("pypsa_gui.run_store")
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 RUNS_DIR = _REPO_ROOT / "backend" / "data" / "runs"
 
-# A run name is a sanitised UTC timestamp, optionally suffixed with a label:
-# ``2026-06-07T14-30-00`` or ``2026-06-07T14-30-00_my-scenario``. The guard
-# rejects anything with path separators or parent-directory traversal.
-_NAME_GUARD = re.compile(r"^[A-Za-z0-9._\-T:]+$")
-_LABEL_SANITISE = re.compile(r"[^A-Za-z0-9._-]+")
+# A run name is ``{scenario}_{timestamp}`` (e.g. ``이런젠장_2026-06-07T14-30-00``).
+# DENYLIST sanitisation: only filesystem-unsafe characters are replaced, so
+# non-Latin scenario names (한글, 日本語, …) survive into the run name instead of
+# being stripped away. The guard rejects path separators, traversal, control
+# characters and anything unprintable — not non-ASCII letters.
+_NAME_BAD = re.compile(r"[\\/\x00-\x1f]")
+_LABEL_SANITISE = re.compile(r"[\\/:*?\"<>|\x00-\x1f\s]+")
 _LABEL_MAX_LEN = 40
 
 # Stem-only file extensions stripped before a filename becomes a run label, so a
@@ -85,13 +87,15 @@ def _series_dir(name: str) -> Path:
 def _is_safe_name(name: str) -> bool:
     """Return True when ``name`` is safe to use as a filesystem stem.
 
-    Guards every name-taking endpoint (get/delete/xlsx) against path
-    traversal: rejects empty strings, anything containing ``/`` or ``..``,
-    and anything not matching the allowed character class.
+    Guards every name-taking endpoint (get/delete/xlsx) against path traversal:
+    rejects empty/overlong strings, ``/`` ``\\`` ``..``, leading dots/spaces and
+    control characters. Non-ASCII letters (Korean scenario names etc.) are fine.
     """
-    if not name or "/" in name or "\\" in name or ".." in name:
+    if not name or len(name) > 200 or ".." in name:
         return False
-    return bool(_NAME_GUARD.match(name))
+    if name.startswith((".", " ")) or name.endswith(" "):
+        return False
+    return not _NAME_BAD.search(name)
 
 
 def _sanitise_label(label: str) -> str:

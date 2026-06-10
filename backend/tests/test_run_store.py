@@ -382,3 +382,13 @@ def test_export_parts_select_sheet_groups(_runs_dir: Path) -> None:
     meta_only = sheets(include_model=False, include_result=False)
     assert {"RAGNAROK_Scenarios", "RAGNAROK_RunState", "RAGNAROK_Settings"} <= meta_only
     assert "buses" not in meta_only and "generators-p" not in meta_only
+
+
+def test_korean_scenario_label_survives_into_run_name() -> None:
+    # DENYLIST sanitisation: non-Latin labels are kept, not stripped to nothing.
+    name = run_store._derive_name({}, {"label": "이런젠장 시나리오"}, {})
+    assert name.startswith("이런젠장-시나리오_")
+    assert run_store._is_safe_name(name) is True
+    # Traversal/path characters are still rejected.
+    assert run_store._is_safe_name("../이런젠장") is False
+    assert run_store._is_safe_name("이런/젠장") is False
