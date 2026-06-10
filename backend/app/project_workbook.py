@@ -210,8 +210,27 @@ def _kv_rows(pairs: list[tuple[str, Any]]) -> list[dict[str, Any]]:
     return [{"key": k, "value": v} for k, v in pairs if v is not None]
 
 
-def bundle_to_workbook(bundle: dict[str, Any], *, include_bundle: bool = False) -> bytes:
+def bundle_to_workbook(
+    bundle: dict[str, Any],
+    *,
+    include_bundle: bool = False,
+    include_meta: bool = True,
+    include_model: bool = True,
+    include_result: bool = True,
+) -> bytes:
     """Render a run bundle to a human-readable project xlsx (bytes).
+
+    Excel is a DERIVED export — built only on an explicit user download, never
+    auto-written. The three ``include_*`` flags mirror the Export dialog's
+    checkboxes and select which sheet groups land in the workbook:
+
+    * ``include_model``  — PyPSA component sheets + input time-series + snapshots
+      (the PyPSA-import-ready core).
+    * ``include_result`` — solved static outputs (merged into component sheets
+      when the model is included), output series sheets, result meta + plugin
+      analytics.
+    * ``include_meta``   — Ragnarok config sheets (``RAGNAROK_*`` in the model,
+      constraints, run state, settings).
 
     Args:
         bundle: ``{model, scenario, options, result}`` (as stored by run_store)
@@ -220,6 +239,9 @@ def bundle_to_workbook(bundle: dict[str, Any], *, include_bundle: bool = False) 
             JSON (``RAGNAROK_Bundle``) so a *standalone* xlsx round-trips
             losslessly. The project *package* ships the JSON separately, so it
             leaves this off and the xlsx stays clean for Excel viewing.
+        include_meta: write the Ragnarok metadata/config sheets.
+        include_model: write the PyPSA input sheets.
+        include_result: write the solved outputs.
 
     Returns:
         xlsx file bytes (readable component / series / metadata sheets).
@@ -230,8 +252,8 @@ def bundle_to_workbook(bundle: dict[str, Any], *, include_bundle: bool = False) 
     options = bundle.get("options") or {}
     outputs = result.get("outputs") if isinstance(result, dict) else None
     outputs = outputs or {}
-    static = outputs.get("static") or {}
-    series = outputs.get("series") or {}
+    static = (outputs.get("static") or {}) if include_result else {}
+    series = (outputs.get("series") or {}) if include_result else {}
 
     buffer = BytesIO()
     used: set[str] = set()
@@ -240,19 +262,26 @@ def bundle_to_workbook(bundle: dict[str, Any], *, include_bundle: bool = False) 
         series_keys = set(series.keys())
 
         # 1) Model sheets (components + input temporal + config). Component
-        #    sheets get their solved static outputs merged in.
+        #    sheets get their solved static outputs merged in (Result part).
+        #    RAGNAROK_* config sheets inside the model belong to the Metadata
+        #    part; everything else is the Model part.
         if isinstance(model, dict):
             for sheet, rows in model.items():
                 if sheet in series_keys or not isinstance(rows, list):
+                    continue
+                is_config_sheet = str(sheet).startswith("RAGNAROK_")
+                if not (include_meta if is_config_sheet else include_model):
                     continue
                 if ps.component_schema(sheet) is not None:
                     rows = _merge_static_outputs(sheet, rows, static.get(sheet) or {})
                 wrote_any |= _write_rows(writer, str(sheet), rows, used)
 
-        # 2) Static outputs for components with no input rows in the model.
+        # 2) Static outputs for components with no input rows in the workbook
+        #    (also the home for ALL static outputs when the model is excluded).
         if isinstance(static, dict):
             for sheet, comp_map in static.items():
-                if not isinstance(comp_map, dict) or (isinstance(model, dict) and sheet in model):
+                already_written = include_model and isinstance(model, dict) and sheet in model
+                if not isinstance(comp_map, dict) or already_written:
                     continue
                 rows = [{"name": name, **attrs} for name, attrs in comp_map.items()]
                 wrote_any |= _write_rows(writer, str(sheet), rows, used)
@@ -263,36 +292,38 @@ def bundle_to_workbook(bundle: dict[str, Any], *, include_bundle: bool = False) 
                 if isinstance(rows, list):
                     wrote_any |= _write_rows(writer, str(key), rows, used)
 
-        # 4) Metadata sheets.
-        wrote_any |= _write_rows(writer, RESULT_META_SHEET, _result_meta_rows(result), used)
+        # 4) Result meta + plugin analytics (Result part).
+        if include_result:
+            wrote_any |= _write_rows(writer, RESULT_META_SHEET, _result_meta_rows(result), used)
+            plugin_rows = _plugin_analytics_rows(result.get("pluginAnalytics") if isinstance(result, dict) else None)
+            _write_rows(writer, PLUGIN_ANALYTICS_SHEET, plugin_rows, used)
 
-        constraints = scenario.get("constraints") if isinstance(scenario, dict) else None
-        if isinstance(constraints, list):
-            _write_rows(writer, CONSTRAINTS_SHEET, constraints, used)
+        # 5) Ragnarok config sheets (Metadata part).
+        if include_meta:
+            constraints = scenario.get("constraints") if isinstance(scenario, dict) else None
+            if isinstance(constraints, list):
+                _write_rows(writer, CONSTRAINTS_SHEET, constraints, used)
 
-        run_state = _kv_rows(
-            [
-                ("snapshotStart", options.get("snapshotStart")),
-                ("snapshotEnd", options.get("snapshotEnd")),
-                ("snapshotWeight", options.get("snapshotWeight")),
-                ("carbonPrice", scenario.get("carbonPrice") if isinstance(scenario, dict) else None),
-                ("forceLp", options.get("forceLp")),
-                ("activeScenarioId", options.get("scenarioLabel")),
-            ]
-        )
-        _write_rows(writer, RUN_STATE_SHEET, run_state, used)
+            run_state = _kv_rows(
+                [
+                    ("snapshotStart", options.get("snapshotStart")),
+                    ("snapshotEnd", options.get("snapshotEnd")),
+                    ("snapshotWeight", options.get("snapshotWeight")),
+                    ("carbonPrice", scenario.get("carbonPrice") if isinstance(scenario, dict) else None),
+                    ("forceLp", options.get("forceLp")),
+                    ("activeScenarioId", options.get("scenarioLabel")),
+                ]
+            )
+            _write_rows(writer, RUN_STATE_SHEET, run_state, used)
 
-        settings = _kv_rows(
-            [
-                ("currencySymbol", options.get("currencySymbol")),
-                ("discountRate", scenario.get("discountRate") if isinstance(scenario, dict) else None),
-                ("dateFormat", options.get("dateFormat")),
-            ]
-        )
-        _write_rows(writer, SETTINGS_SHEET, settings, used)
-
-        plugin_rows = _plugin_analytics_rows(result.get("pluginAnalytics") if isinstance(result, dict) else None)
-        _write_rows(writer, PLUGIN_ANALYTICS_SHEET, plugin_rows, used)
+            settings = _kv_rows(
+                [
+                    ("currencySymbol", options.get("currencySymbol")),
+                    ("discountRate", scenario.get("discountRate") if isinstance(scenario, dict) else None),
+                    ("dateFormat", options.get("dateFormat")),
+                ]
+            )
+            _write_rows(writer, SETTINGS_SHEET, settings, used)
 
         if include_bundle:
             # Embed the complete bundle as chunked JSON so even a *standalone*

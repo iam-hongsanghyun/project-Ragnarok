@@ -1352,8 +1352,11 @@ function AppInner() {
     }
   };
 
-  const handleDownloadBackendXlsx = (name: string) => {
-    window.open(`${API_BASE}/api/runs/${encodeURIComponent(name)}/xlsx`, '_blank');
+  // Explicit Excel export — the ONLY path that creates a workbook (the backend
+  // never auto-writes xlsx). `parts` mirrors the Export dialog's checkboxes.
+  const handleDownloadBackendXlsx = (name: string, parts?: string[]) => {
+    const q = parts && parts.length ? `?parts=${encodeURIComponent(parts.join(','))}` : '';
+    window.open(`${API_BASE}/api/runs/${encodeURIComponent(name)}/xlsx${q}`, '_blank');
   };
 
   // Export a stored run as the full Ragnarok Project package (.zip of all three

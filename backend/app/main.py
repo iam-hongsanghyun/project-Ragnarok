@@ -16,7 +16,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import Response
 
 from .backends import BackendError, available_backends, get_backend
 from .log_capture import (
@@ -978,20 +978,26 @@ async def import_project(file: UploadFile) -> dict[str, Any]:
 
 
 @app.get("/api/runs/{name}/xlsx")
-def download_backend_run_xlsx(name: str) -> Response:
-    """Return the human-readable xlsx for stored run ``name``.
+def download_backend_run_xlsx(name: str, parts: str = "metadata,model,result") -> Response:
+    """Build and return the export xlsx for stored run ``name`` (explicit export).
 
-    Serves the file pre-built at store time (fast — streamed straight off disk);
-    falls back to building on demand for runs saved before pre-build existed.
+    Excel is never auto-written — this endpoint derives the workbook from the
+    canonical bundle ON each download. ``parts`` selects the sheet groups
+    (comma-separated subset of ``metadata``/``model``/``result``; default all),
+    mirroring the Export dialog's checkboxes. The full default selection stays
+    PyPSA-import-ready; a legacy pre-built file is reused only for full exports
+    (inside run_to_xlsx).
     """
-    pre = run_store.xlsx_path(name)
-    if pre is not None:
-        return FileResponse(
-            path=pre,
-            media_type=_XLSX_MEDIA_TYPE,
-            filename=f"{name}.xlsx",
-        )
-    data = run_store.run_to_xlsx(name)
+    chosen = {p.strip().lower() for p in parts.split(",") if p.strip()}
+    valid = {"metadata", "model", "result"}
+    if not chosen or not chosen <= valid:
+        raise HTTPException(status_code=400, detail=f"parts must be a subset of {sorted(valid)}.")
+    data = run_store.run_to_xlsx(
+        name,
+        include_meta="metadata" in chosen,
+        include_model="model" in chosen,
+        include_result="result" in chosen,
+    )
     if data is None:
         raise HTTPException(status_code=404, detail="Stored run not found.")
     return Response(

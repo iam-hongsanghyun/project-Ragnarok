@@ -302,3 +302,51 @@ def test_derive_name_default_filename_is_clean_timestamp() -> None:
     # scenario label wins and also leads.
     scen = run_store._derive_name({}, {"label": "ref-case"}, {})
     assert scen.startswith("ref-case_")
+
+
+def test_export_parts_select_sheet_groups(_runs_dir: Path) -> None:
+    """The Export dialog's Metadata/Model/Result checkboxes map to sheet groups."""
+    from io import BytesIO
+
+    model = {
+        "buses": [{"name": "n1"}],
+        "generators": [{"name": "wind"}],
+        "RAGNAROK_Scenarios": [{"id": "s1", "label": "ref"}],  # config sheet → Metadata
+    }
+    meta = run_store.store_run(
+        model,
+        {"label": "parts", "carbonPrice": 25.0, "discountRate": 0.05},
+        {"runLabel": "parts", "snapshotStart": 0, "snapshotEnd": 24, "currencySymbol": "$"},
+        _sample_result(),
+    )
+    assert meta is not None
+    name = meta["name"]
+
+    def sheets(**kw) -> set[str]:
+        data = run_store.run_to_xlsx(name, **kw)
+        assert data is not None and data[:2] == b"PK"
+        import openpyxl
+
+        wb = openpyxl.load_workbook(BytesIO(data), read_only=True)
+        try:
+            return set(wb.sheetnames)
+        finally:
+            wb.close()
+
+    full = sheets()
+    assert {"buses", "generators", "RAGNAROK_Scenarios", "generators-p", "RAGNAROK_ResultMeta"} <= full
+
+    model_only = sheets(include_meta=False, include_result=False)
+    assert {"buses", "generators"} <= model_only
+    assert not any(s.startswith("RAGNAROK_") for s in model_only)
+    assert "generators-p" not in model_only
+
+    result_only = sheets(include_meta=False, include_model=False)
+    assert "generators-p" in result_only and "RAGNAROK_ResultMeta" in result_only
+    assert "buses" not in result_only
+    # solved static outputs still exported standalone when the model is excluded
+    assert "generators" in result_only
+
+    meta_only = sheets(include_model=False, include_result=False)
+    assert {"RAGNAROK_Scenarios", "RAGNAROK_RunState", "RAGNAROK_Settings"} <= meta_only
+    assert "buses" not in meta_only and "generators-p" not in meta_only

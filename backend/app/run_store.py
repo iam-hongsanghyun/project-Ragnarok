@@ -639,10 +639,10 @@ def delete_run(name: str) -> bool:
 
 
 def xlsx_path(name: str) -> Path | None:
-    """Path to the pre-built xlsx for ``name`` if it exists (and ``name`` is safe).
+    """Path to a pre-built xlsx for ``name`` if one exists (and ``name`` is safe).
 
-    The endpoint streams this file directly, so a download serves a ready file
-    rather than rebuilding the workbook per request.
+    Runs no longer pre-build workbooks (Excel is export-only), but runs stored
+    by older versions may still have one on disk — a FULL export can stream it.
     """
     if not _is_safe_name(name):
         return None
@@ -650,23 +650,38 @@ def xlsx_path(name: str) -> Path | None:
     return path if path.exists() else None
 
 
-def run_to_xlsx(name: str) -> bytes | None:
-    """Return the run's xlsx bytes — the pre-built file if present, else built
-    on demand (fallback for runs stored before pre-build, or if it failed).
-    ``None`` if the run is missing."""
-    pre = xlsx_path(name)
-    if pre is not None:
-        try:
-            return pre.read_bytes()
-        except Exception:  # noqa: BLE001
-            logger.exception("Failed to read pre-built xlsx for %s", name)
+def run_to_xlsx(
+    name: str,
+    *,
+    include_meta: bool = True,
+    include_model: bool = True,
+    include_result: bool = True,
+) -> bytes | None:
+    """Build the run's export workbook ON DEMAND from the canonical bundle.
+
+    The ``include_*`` flags mirror the Export dialog's Metadata/Model/Result
+    checkboxes (see :func:`project_workbook.bundle_to_workbook`). A legacy
+    pre-built file is reused only for a FULL export. ``None`` if the run is
+    missing."""
+    if include_meta and include_model and include_result:
+        pre = xlsx_path(name)
+        if pre is not None:
+            try:
+                return pre.read_bytes()
+            except Exception:  # noqa: BLE001
+                logger.exception("Failed to read pre-built xlsx for %s", name)
     bundle = get_run(name)
     if bundle is None:
         return None
     try:
         from . import project_workbook
 
-        return project_workbook.bundle_to_workbook(bundle)
+        return project_workbook.bundle_to_workbook(
+            bundle,
+            include_meta=include_meta,
+            include_model=include_model,
+            include_result=include_result,
+        )
     except Exception:  # noqa: BLE001
         logger.exception("Failed to build xlsx for backend run %s", name)
         return None
