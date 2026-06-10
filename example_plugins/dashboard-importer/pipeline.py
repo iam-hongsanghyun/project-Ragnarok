@@ -809,9 +809,14 @@ def _capacity_by_carrier_year(
     ``{"year": Y, <carrier>: MW, ..., "total": MW}`` (carriers as columns), or
     ``None`` when the sheet is unavailable.
 
+    The series starts at the fleet's earliest ``build_year`` (not the GUI base
+    year) so the chart shows the cumulative build-up history; with
+    ``base_year == target_year`` it would otherwise collapse to a single year.
+
     Args:
         model_path: Path to the model workbook.
-        base_year:  First year of the series (years before it are "always built").
+        base_year:  Always included in the series; also anchors the guard
+            against absurd close years.
     """
     df = _read_generators_sheet(model_path)
     if df is None or "carrier" not in df.columns or "p_nom" not in df.columns:
@@ -824,12 +829,15 @@ def _capacity_by_carrier_year(
     carrier = df["carrier"].astype(str).str.strip()
 
     start = int(base_year)
-    end = start
+    if build.notna().any():
+        start = min(start, int(build.dropna().min()))
+    end = int(base_year)
     if close.notna().any():
         end = max(end, int(close.dropna().max()))
     if build.notna().any():
         end = max(end, int(build.dropna().max()))
-    end = min(end, start + 80)  # guard against absurd close years (e.g. 9999)
+    end = min(end, int(base_year) + 80)  # guard against absurd close years (e.g. 9999)
+    start = max(start, end - 120)  # bound the span against absurd build years (e.g. 0)
 
     carriers = sorted(c for c in carrier.dropna().unique() if c and c.lower() != "nan")
     rows: list[dict[str, Any]] = []
