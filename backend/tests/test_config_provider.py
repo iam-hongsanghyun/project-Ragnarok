@@ -7,7 +7,6 @@ bundle's build_id is deterministic + flips when content changes.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from backend.app.config_provider import (
     ConfigBundle,
