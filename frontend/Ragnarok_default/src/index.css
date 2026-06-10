@@ -7587,6 +7587,15 @@ code, kbd, samp, tt,
   height: 100%;
 }
 
+/* In the zero-padding contexts above, side legends would otherwise sit
+   flush against the cell's top/right edges — give them a slight gap. */
+.dashboard-cell .chart-legend-side,
+.dashboard-cell .legend-list,
+.dashboard-section-body .chart-legend-side,
+.dashboard-section-body .legend-list {
+  margin: 6px 6px 0 0;
+}
+
 /* Same for Results dashboard sections: drop the inner card frame so
  * only the outer .dashboard-section border remains. */
 .dashboard-section-body .chart-card,

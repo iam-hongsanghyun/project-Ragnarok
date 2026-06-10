@@ -142,6 +142,7 @@ export function CapacityByPeriodCard({ model, results }: Props) {
         series={series}
         mode="bar"
         stacked
+        yAxisTitle="MW"
       />
     </div>
   );

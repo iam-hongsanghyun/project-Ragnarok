@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { MixItem } from 'lib/types';
 
-export function DonutChart({ data }: { data: MixItem[] }) {
+export function DonutChart({ data, unit }: { data: MixItem[]; unit?: string }) {
   const cx = 190, cy = 190, outerR = 168, innerR = 100;
   const total = data.reduce((sum, item) => sum + item.value, 0) || 1;
   const [tooltip, setTooltip] = useState<{ label: string; value: number; x: number; y: number } | null>(null);
@@ -52,7 +52,9 @@ export function DonutChart({ data }: { data: MixItem[] }) {
           );
         })}
         <circle cx={cx} cy={cy} r={innerR} fill="#ffffff" />
-        <text x={cx} y={cy - 8} textAnchor="middle" className="donut-total-label">Total</text>
+        <text x={cx} y={cy - 8} textAnchor="middle" className="donut-total-label">
+          {unit ? `Total (${unit})` : 'Total'}
+        </text>
         <text x={cx} y={cy + 20} textAnchor="middle" className="donut-total-value">
           {Math.round(total).toLocaleString()}
         </text>
@@ -64,14 +66,16 @@ export function DonutChart({ data }: { data: MixItem[] }) {
               <rect rx="4" ry="4" width="160" height="48" fill="rgba(15,23,42,0.88)" />
               <text y="18" x="10" className="chart-tip-label">{tooltip.label}</text>
               <text y="36" x="10" className="chart-tip-value">
-                {Math.round(tooltip.value).toLocaleString()}
+                {Math.round(tooltip.value).toLocaleString()}{unit ? ` ${unit}` : ''}
               </text>
             </g>
           );
         })()}
       </svg>
       <div className="legend-list">
-        <div className="map-legend-title" style={{ marginBottom: 4 }}>Breakdown</div>
+        <div className="map-legend-title" style={{ marginBottom: 4 }}>
+          {unit ? `Breakdown (${unit})` : 'Breakdown'}
+        </div>
         {data.map((item) => (
           <div key={item.label} className="legend-item">
             <span className="legend-swatch" style={{ backgroundColor: item.color }} />

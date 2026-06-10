@@ -123,8 +123,10 @@ export function ComparisonPane({ backendRuns, activeRunName, currencySymbol = '$
       {showKpiCharts && (
         <div className="cmp-bar-strip">
           <MiniBarChart title="Total dispatch" unit=" GWh" entries={dispatchEntries} />
-          <MiniBarChart title="Emissions" unit="" entries={emissionsEntries} />
-          <MiniBarChart title="Avg system price" unit="" entries={priceEntries} />
+          <MiniBarChart title="Emissions" unit=" ktCO₂e" entries={emissionsEntries} />
+          {/* Parses the "Peak price" summary item — the run summary carries no
+              average price, so the title must say peak, not avg. */}
+          <MiniBarChart title="Peak price" unit={` ${currencySymbol}/MWh`} entries={priceEntries} />
         </div>
       )}
 

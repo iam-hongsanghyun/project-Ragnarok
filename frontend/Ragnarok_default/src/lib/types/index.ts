@@ -475,6 +475,8 @@ export interface PluginChartSpec {
   stacked?: boolean;
   xAxisTitle?: string;
   yAxisTitle?: string;
+  /** Value unit (e.g. 'MW'). Donut centre/tooltip label; y-axis title fallback. */
+  unit?: string;
   showLegend?: boolean;
   /** donut: slice definitions. */
   slices?: PluginChartSlice[];
