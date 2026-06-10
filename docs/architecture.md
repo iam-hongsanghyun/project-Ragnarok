@@ -847,20 +847,31 @@ deployment needs.
 
 **What lives where**
 
-- **Backend owns the model.** The working model is a server-side *session*
-  (`backend/app/session_store.py`): static sheets as JSON, time-series as
-  Parquet, under `backend/data/session/<session_id>/`. The frontend imports a
-  model once (`POST /api/session/model`) and thereafter fetches only what's on
-  screen — a page of rows (`GET …/sheet/{name}`) or a windowed, downsampled
-  series slice (`GET …/series/{name}`). Edits go back as patches
-  (`PATCH …/sheet/{name}`). The heavy model never lives in browser memory.
+- **Backend owns the model — one SQLite file per project.** The working model
+  is a server-side *session* stored as
+  `backend/data/session/<session_id>/project.db` (`backend/app/sqlite_store.py`,
+  selected by `RAGNAROK_STORE`, default `sqlite`; copying the file = sharing the
+  project). The frontend imports a model once (`POST /api/session/model`) and
+  thereafter everything is a SQL query: a page of rows (`GET …/sheet/{name}`,
+  `LIMIT/OFFSET`), a windowed downsampled series slice (`GET …/series/{name}`),
+  distinct column values for pickers (`GET …/sheet/{name}/distinct`). Edits go
+  back as patches (`PATCH …/sheet/{name}`); static edits sync on a debounce.
+  Pre-SQLite sessions (JSON + Parquet) migrate into their `project.db` on first
+  read. The heavy model never lives in browser memory.
 - **Runs submit by `sessionId`.** `POST /api/queue` takes `{sessionId, scenario,
   options}`; the backend snapshots the session model into the queued item. The
-  giant model payload never travels from the browser.
-- **Results are split.** `GET /api/runs/{name}/analytics` returns a light bundle
-  (KPIs, carrier-level series, topology) for an instant View; per-component
-  series are served windowed on demand from `…/series/{sheet}`. The lossless
-  bundle stays on disk as the export source.
+  giant model payload never travels from the browser. A running solve survives a
+  backend restart: the worker persists its outcome on disk and the restarted
+  backend adopts or watches the orphaned process (`outcome.json` + pid).
+- **Runs are one SQLite file each.** A finished run is `backend/data/runs/
+  <name>.db`: the meta link, the input-model SNAPSHOT (so editing the live
+  session can't corrupt past runs), and the result. `GET /api/runs/{name}/
+  analytics` is one key read (instant View); model pages and chart windows are
+  SQL queries. Legacy JSON/Parquet runs migrate on first access.
+- **Excel is export-only.** No workbook is ever auto-written. The Export dialog
+  (Metadata / Model / Result checkboxes, all on by default) derives one
+  PyPSA-import-ready xlsx on demand (`GET /api/runs/{name}/xlsx?parts=…`);
+  `…/package` derives the bundle JSON + meta + xlsx zip the same way.
 - **Compute is server-side.** The solve runs in a backend worker process; backend
   plugins (below) also run in-process.
 
@@ -874,10 +885,13 @@ constraints}`, and/or `analyze(result,config)→data`.
 - *Backend plugin* — `.zip` of manifest.json + plugin.py, **installed by upload**
   into the gitignored `backend/data/plugins/`; runs in the backend and imports the
   bundled PyPSA source directly; **nothing in `plugins.env`**. `transform`/
-  `contribute` write straight into the session. Endpoints: `GET /api/plugins`,
-  `POST /api/plugins/install`, `DELETE /api/plugins/{id}`,
-  `POST /api/plugins/{id}/transform|contribute|analyze`. (Install runs uploaded
-  Python — RCE by design; gate behind auth for multi-user.)
+  `contribute` write straight into the session; an optional
+  `options(name, config, ctx)` hook answers its dropdowns on demand (ctx gives
+  read-only session access, e.g. `ctx.distinct`) — no per-plugin localhost
+  server. Endpoints: `GET /api/plugins`, `POST /api/plugins/install`,
+  `DELETE /api/plugins/{id}`,
+  `POST /api/plugins/{id}/transform|contribute|analyze|options`. (Install runs
+  uploaded Python — RCE by design; gate behind auth for multi-user.)
 
 **Already remote-ready**
 
