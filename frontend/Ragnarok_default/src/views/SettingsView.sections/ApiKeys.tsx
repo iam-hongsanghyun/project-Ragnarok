@@ -16,9 +16,9 @@
  * appears here whenever a registered importer declares it in
  * `requires_secrets`.
  */
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
-import { getSecret, setUserSecret, clearSecret } from 'lib/api/secrets';
+import { getSecret, setUserSecret, clearSecret, putServerSecret, deleteServerSecret, listServerSecrets } from 'lib/api/secrets';
 
 interface ApiKeyProvider {
   /** Matches the importer's `requires_secrets` entry + the storage slug. */
@@ -50,24 +50,39 @@ const PROVIDERS: ApiKeyProvider[] = [
 function ApiKeyRow({ provider }: { provider: ApiKeyProvider }) {
   const [value, setValue] = useState<string>(() => getSecret(provider.name) ?? '');
   const [saved, setSaved] = useState<boolean>(() => !!getSecret(provider.name));
+  const [onServer, setOnServer] = useState(false);
   const [reveal, setReveal] = useState(false);
+
+  // A key may already live on the SERVER (typed earlier, possibly from another
+  // browser, or provided via the backend's env) — show that state.
+  useEffect(() => {
+    let cancelled = false;
+    void listServerSecrets().then(({ stored, env }) => {
+      if (!cancelled) setOnServer(stored.includes(provider.name) || env.includes(provider.name));
+    });
+    return () => { cancelled = true; };
+  }, [provider.name]);
 
   const save = () => {
     setUserSecret(provider.name, value);
     setSaved(!!value.trim());
+    // RECORD on the backend too: the key then works from any device and the
+    // browser no longer needs to send it with each import.
+    void putServerSecret(provider.name, value.trim()).then((ok) => { if (ok) setOnServer(!!value.trim()); });
   };
   const clear = () => {
     clearSecret(provider.name);
     setValue('');
     setSaved(false);
+    void deleteServerSecret(provider.name).then((ok) => { if (ok) setOnServer(false); });
   };
 
   return (
     <div className="api-key-row">
       <div className="api-key-row__head">
         <span className="api-key-row__label">{provider.label}</span>
-        <span className={`api-key-row__badge${saved ? ' is-set' : ''}`}>
-          {saved ? 'Key set' : 'Not set'}
+        <span className={`api-key-row__badge${saved || onServer ? ' is-set' : ''}`}>
+          {onServer ? 'On server' : saved ? 'Key set' : 'Not set'}
         </span>
       </div>
       <p className="api-key-row__help">

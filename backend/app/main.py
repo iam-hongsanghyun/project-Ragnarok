@@ -7,6 +7,8 @@ import multiprocessing as mp
 import os
 import queue
 import shutil
+import sys
+import time
 import signal
 import uuid
 from dataclasses import dataclass, field
@@ -573,10 +575,19 @@ async def _watch_orphan(item: _QueueItem) -> None:
         await asyncio.sleep(1.0)
 
 
+# Monotonic timestamp of the pump's last loop iteration — the health check uses
+# it to verify the background queue worker is actually ticking. While a solve is
+# RUNNING the pump is awaited inside _run_queue_item (no ticks), so health also
+# treats "a job is running" as alive.
+_PUMP_HEARTBEAT: float | None = None
+
+
 async def _queue_pump() -> None:
     """Background loop: run the next queued job whenever none is running."""
+    global _PUMP_HEARTBEAT
     while True:
         try:
+            _PUMP_HEARTBEAT = time.monotonic()
             running = any(it.status == "running" for it in _run_queue)
             nxt = next((it for it in _run_queue if it.status == "queued"), None)
             if nxt is not None and not running:
@@ -635,8 +646,75 @@ app.add_middleware(
 
 
 @app.get("/api/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+def health() -> dict[str, Any]:
+    """Comprehensive health report — every subsystem in one structured probe.
+
+    ``status`` stays "ok"/"degraded" (back-compat for simple monitors); the
+    ``checks`` block carries per-subsystem detail: storage engine + live
+    session, runs store, queue (incl. a pump heartbeat), loaded plugins,
+    solver availability and disk headroom.
+    """
+    import importlib.util as _ilu
+
+    from . import plugins as _plugins
+
+    checks: dict[str, Any] = {}
+    problems: list[str] = []
+
+    # Storage: engine + the working session.
+    try:
+        checks["store"] = {
+            "engine": "sqlite" if model_store.USE_SQLITE else "legacy",
+            "sessionLoaded": model_store.has_model("default"),
+        }
+    except Exception as exc:  # noqa: BLE001
+        checks["store"] = {"error": str(exc)}
+        problems.append("store")
+
+    # Stored runs: count + the dir is writable.
+    try:
+        run_store.RUNS_DIR.mkdir(parents=True, exist_ok=True)
+        writable = os.access(run_store.RUNS_DIR, os.W_OK)
+        checks["runs"] = {"count": len(run_store.list_runs()), "dirWritable": writable}
+        if not writable:
+            problems.append("runs")
+    except Exception as exc:  # noqa: BLE001
+        checks["runs"] = {"error": str(exc)}
+        problems.append("runs")
+
+    # Queue: job counts + pump liveness (while a solve runs the pump is awaited
+    # inside it, so "running > 0" also counts as alive).
+    running = sum(1 for it in _run_queue if it.status == "running")
+    pump_fresh = _PUMP_HEARTBEAT is not None and (time.monotonic() - _PUMP_HEARTBEAT) < 10.0
+    pump_alive = pump_fresh or running > 0
+    checks["queue"] = {
+        "jobs": len(_run_queue),
+        "running": running,
+        "queued": sum(1 for it in _run_queue if it.status == "queued"),
+        "pumpAlive": pump_alive,
+    }
+    if not pump_alive:
+        problems.append("queue")
+
+    # Plugins (3rd-party, installed at runtime — zero is healthy).
+    try:
+        checks["plugins"] = {"ids": sorted(_plugins.registry())}
+    except Exception as exc:  # noqa: BLE001
+        checks["plugins"] = {"error": str(exc)}
+
+    # Solver + disk headroom.
+    checks["solver"] = {"highs": _ilu.find_spec("highspy") is not None}
+    try:
+        du = shutil.disk_usage(_REPO_ROOT)
+        free_gb = round(du.free / 1e9, 1)
+        checks["disk"] = {"freeGb": free_gb, "totalGb": round(du.total / 1e9, 1)}
+        if free_gb < 2.0:  # a solve writing results can fail well before zero
+            problems.append("disk")
+    except Exception as exc:  # noqa: BLE001
+        checks["disk"] = {"error": str(exc)}
+
+    checks["version"] = {"app": app.version, "python": sys.version.split()[0]}
+    return {"status": "degraded" if problems else "ok", "problems": problems, "checks": checks}
 
 
 @app.get("/api/status")
@@ -1145,8 +1223,7 @@ def download_backend_run_xlsx(name: str, parts: str = "metadata,model,result") -
     canonical bundle ON each download. ``parts`` selects the sheet groups
     (comma-separated subset of ``metadata``/``model``/``result``; default all),
     mirroring the Export dialog's checkboxes. The full default selection stays
-    PyPSA-import-ready; a legacy pre-built file is reused only for full exports
-    (inside run_to_xlsx).
+    PyPSA-import-ready.
     """
     chosen = {p.strip().lower() for p in parts.split(",") if p.strip()}
     valid = {"metadata", "model", "result"}

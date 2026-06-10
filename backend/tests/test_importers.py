@@ -477,3 +477,34 @@ def test_sources_lists_server_secret_names_not_values(monkeypatch) -> None:
     body = resp.json()
     assert "eia_key" in body["serverSecrets"]  # names exposed…
     assert "super-secret-value" not in resp.text  # …values never
+
+
+def test_server_recorded_secrets_roundtrip(tmp_path, monkeypatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from backend.app.main import app
+    from backend.app.routers import importers as imp
+
+    monkeypatch.setattr(imp, "SECRETS_PATH", tmp_path / "secrets.json")
+    client = TestClient(app)
+
+    # Record a key → it lands in the merged server secrets and lists by NAME.
+    r = client.put("/api/import/secrets/eia_key", json={"value": "  typed-key  "})
+    assert r.status_code == 200 and r.json()["stored"] is True
+    assert imp._server_secrets()["eia_key"] == "typed-key"
+    listed = client.get("/api/import/secrets").json()
+    assert "eia_key" in listed["stored"]
+    assert "typed-key" not in str(listed)  # values never leave the server
+
+    # Stored key WINS over the env-provided one.
+    monkeypatch.setenv("RAGNAROK_SECRET_EIA_KEY", "env-key")
+    assert imp._server_secrets()["eia_key"] == "typed-key"
+
+    # Empty value (or DELETE) removes it.
+    client.put("/api/import/secrets/eia_key", json={"value": ""})
+    assert "eia_key" not in imp._stored_secrets()
+    assert client.delete("/api/import/secrets/eia_key").json()["removed"] is False
+
+    # Invalid names are rejected.
+    assert client.put("/api/import/secrets/../evil", json={"value": "x"}).status_code in (400, 404)
+    assert client.put("/api/import/secrets/UPPER", json={"value": "x"}).status_code == 400

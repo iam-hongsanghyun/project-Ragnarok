@@ -84,14 +84,6 @@ function get<T>(key: string): Promise<T | null> {
   );
 }
 
-/** Persist the heavy workbook model (debounce in the caller). Best-effort. */
-export async function saveSessionModel(model: WorkbookModel): Promise<void> {
-  try {
-    await put(MODEL_KEY, model);
-  } catch {
-    /* storage unavailable / quota — best effort */
-  }
-}
 
 /** Persist the lightweight run controls. Best-effort. */
 export async function saveSessionControls(controls: SessionControls): Promise<void> {

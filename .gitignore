@@ -63,6 +63,8 @@ backend/data/queue/
 backend/data/plugins/
 # Per-plugin server-side file store (heavy model workbooks uploaded at runtime)
 backend/data/plugin_files/
+# Server-recorded importer API keys (credentials — never commit)
+backend/data/secrets.json
 /data
 
 # Logs
