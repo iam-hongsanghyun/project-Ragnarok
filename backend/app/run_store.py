@@ -457,6 +457,74 @@ def _read_table(conn: Any, table: str) -> list[dict[str, Any]]:
     return [json.loads(r[0]) for r in conn.execute(f"SELECT d FROM {table} ORDER BY __row")]
 
 
+def get_run_for_export(
+    name: str,
+    *,
+    include_meta: bool = True,
+    include_model: bool = True,
+    include_result: bool = True,
+) -> dict[str, Any] | None:
+    """Assemble ONLY the bundle pieces the xlsx builder reads for these parts.
+
+    :func:`get_run` reassembles the whole bundle — model snapshot AND every
+    output series — which on a full-year run means json.loads-ing the entire
+    (hundreds-of-MB) db before the builder even checks which parts were asked
+    for. That made a *metadata-only* export pay the full deserialize tax.
+
+    This loads the minimum instead, matching :func:`project_workbook.bundle_to_workbook`:
+
+    * the ``head`` kv (scenario + options) — always, it's tiny;
+    * model component tables — only when ``include_model``; just the small
+      ``RAGNAROK_*`` config sheets when only ``include_meta`` needs them;
+    * static outputs (``result_light``) — when model or result is included
+      (the merge / the standalone static sheets);
+    * output **series** tables (the heavy ``o_*`` tables) — only when
+      ``include_result``.
+
+    ``None`` if missing/unsafe.
+    """
+    if not _is_safe_name(name):
+        logger.warning("Rejected unsafe run name: %r", name)
+        return None
+    _ensure_run_migrated(name)
+    if not _db_path(name).exists():
+        return None
+    try:
+        with _connect(name) as conn:
+            head = _kv_get(conn, "head") or {}
+            model_tables = _kv_get(conn, "model_tables") or {}
+            series_tables = _kv_get(conn, "series_tables") or {}
+
+            if include_model:
+                wanted_model = list(model_tables.items())
+            elif include_meta:
+                # Only the RAGNAROK_* config sheets (scenarios, carbon, pathway,
+                # rolling, DSL) — the metadata part writes those, not the heavy
+                # component sheets.
+                wanted_model = [
+                    (s, t) for s, t in model_tables.items() if str(s).startswith("RAGNAROK_")
+                ]
+            else:
+                wanted_model = []
+            model = {sheet: _read_table(conn, tbl) for sheet, tbl in wanted_model}
+
+            result: dict[str, Any] = {}
+            if include_model or include_result:
+                result = _kv_get(conn, "result_light") or {}
+            outputs = result.get("outputs") if isinstance(result.get("outputs"), dict) else {}
+            outputs = {k: v for k, v in outputs.items() if k != "seriesSheets"}
+            if include_result:
+                outputs["series"] = {
+                    sheet: _read_table(conn, tbl) for sheet, tbl in series_tables.items()
+                }
+            if result:
+                result["outputs"] = outputs
+        return {**head, "model": model, "result": result}
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to read backend run %s for export", name)
+        return None
+
+
 def _legacy_run_paths(name: str) -> list[Path]:
     return [
         RUNS_DIR / f"{name}.json",
@@ -776,6 +844,14 @@ def delete_run(name: str) -> bool:
     return removed
 
 
+def run_exists(name: str) -> bool:
+    """Cheap existence check for a stored run (no bundle load)."""
+    if not _is_safe_name(name):
+        return False
+    _ensure_run_migrated(name)
+    return _db_path(name).exists() or (RUNS_DIR / f"{name}.json").exists()
+
+
 def xlsx_path(name: str) -> Path | None:
     """Path to a pre-built xlsx for ``name`` if one exists (and ``name`` is safe).
 
@@ -799,8 +875,17 @@ def run_to_xlsx(
 
     The ``include_*`` flags mirror the Export dialog's Metadata/Model/Result
     checkboxes (see :func:`project_workbook.bundle_to_workbook`). ``None`` if
-    the run is missing."""
-    bundle = get_run(name)
+    the run is missing.
+
+    Loads only the bundle pieces the selected parts need (see
+    :func:`get_run_for_export`) so a metadata- or model-only export doesn't pay
+    the full-series deserialize cost."""
+    bundle = get_run_for_export(
+        name,
+        include_meta=include_meta,
+        include_model=include_model,
+        include_result=include_result,
+    )
     if bundle is None:
         return None
     try:
@@ -830,6 +915,9 @@ def run_to_package(name: str) -> bytes | None:
     """
     if not _is_safe_name(name):
         return None
+    # The package needs the FULL bundle (it ships `<name>.json`), so load it once
+    # and build the xlsx from that in-memory bundle — don't call run_to_xlsx,
+    # which would deserialise the whole db a SECOND time.
     bundle = get_run(name)
     if bundle is None:
         return None
@@ -843,7 +931,13 @@ def run_to_package(name: str) -> bytes | None:
     if not isinstance(meta, dict):
         meta = build_run_meta(name, bundle, 0)
     meta_bytes = json.dumps(meta).encode("utf-8")
-    xlsx_bytes = run_to_xlsx(name)
+    try:
+        from . import project_workbook
+
+        xlsx_bytes: bytes | None = project_workbook.bundle_to_workbook(bundle)
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to build xlsx for package of backend run %s", name)
+        xlsx_bytes = None
 
     import zipfile
     from io import BytesIO
