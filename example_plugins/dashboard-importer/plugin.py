@@ -84,12 +84,10 @@ def _resolve_model_path(config: dict[str, Any]) -> dict[str, Any]:
     cfg = dict(config or {})
     data_dir = cfg.pop("__plugin_data_dir__", None)
     selected = cfg.get("model_file")
-    if (
-        isinstance(selected, str)
-        and selected.strip()
-        and not str(cfg.get("model_path") or "").strip()
-        and data_dir
-    ):
+    # The server-side picker is the canonical choice: a picked model_file WINS
+    # over any manual model_path (stale text in that field — e.g. a leftover
+    # "4019" — must never shadow the file the user explicitly selected).
+    if isinstance(selected, str) and selected.strip() and data_dir:
         cfg["model_path"] = str(Path(data_dir) / selected.strip())
     return cfg
 
@@ -104,6 +102,58 @@ _OPTION_BUILDERS = {
     "/replacement_plan": "replacement_plan_payload",
     "/generators": "generator_filter_values_payload",
 }
+
+
+def analyze(result: dict[str, Any] | None, config: dict[str, Any]) -> dict[str, Any]:
+    """Output-tab analytics — capacity by carrier by year + the reallocation plan.
+
+    Port of the frontend importer's ``analyze`` (which POSTed to its own server's
+    ``/capacity`` and ``/replacement_plan``): here the engine's payload builders
+    run in-process. ``result`` is unused — the output derives from the uploaded
+    model + the current GUI config, so it works before any solve.
+    """
+    del result
+    cfg = _resolve_model_path(config)
+    engine = _load_engine()
+    try:
+        rows = engine.capacity_payload(cfg) or []
+    except Exception as exc:  # noqa: BLE001 — surface the reason in the Output tab
+        return {"note": f"Capacity unavailable: {exc}"}
+    if not rows:
+        return {"note": "No generators found in the model — pick a model workbook above."}
+
+    carriers = sorted({k for r in rows for k in r if k not in ("year", "total")})
+    chart = {
+        "kind": "bar",
+        "stacked": True,
+        "description": "Installed capacity by carrier by year (MW): build_year ≤ year < close_year",
+        "xAxisTitle": "year",
+        "yAxisTitle": "MW",
+        "series": [{"key": c} for c in carriers],
+        "rows": [
+            {"label": str(r.get("year")), **{c: r.get(c) or 0 for c in carriers}} for r in rows
+        ],
+    }
+    out: dict[str, Any] = {
+        "Capacity by carrier by year (MW)": chart,
+        "Cumulative capacity by carrier — table (MW)": rows,
+    }
+    try:  # the plan is optional — never break the capacity output over it
+        plan = engine.replacement_plan_payload(cfg) or []
+        if plan:
+            out["Reallocation plan (MW)"] = [
+                {
+                    "generator": r.get("generator"),
+                    "build_year": r.get("build_year"),
+                    "p_nom (MW)": r.get("total_mw"),
+                    "solar (MW)": r.get("solar_mw"),
+                    "wind (MW)": r.get("wind_mw"),
+                }
+                for r in plan
+            ]
+    except Exception:  # noqa: BLE001
+        pass
+    return out
 
 
 def options(name: str, config: dict[str, Any], ctx: Any) -> list[dict[str, Any]]:

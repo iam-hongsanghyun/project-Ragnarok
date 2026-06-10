@@ -284,6 +284,11 @@ def test_install_example_dashboard_importer(_plugins_dir) -> None:
     manifest = asyncio.run(plugins_router.install_plugin(_upload(zip_path.read_bytes(), "dashboard-importer.zip")))
     assert manifest["id"] == "dashboard-importer" and manifest["hooks"]["transform"] is True
     assert manifest["hooks"]["options"] is True  # serves its own dropdowns on demand
+    assert manifest["hooks"]["analyze"] is True  # Output tab: capacity by year
+
+    # analyze degrades to an actionable note (never raises) when no model is picked.
+    note = plugins.run_analyze("dashboard-importer", {}, {})
+    assert "note" in note
 
     with pytest.raises(ValueError) as exc:
         plugins.run_transform("dashboard-importer", {}, {})

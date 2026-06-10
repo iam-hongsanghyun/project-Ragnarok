@@ -64,7 +64,7 @@ function withDefaults(schema: ModuleConfigSchema | undefined, stored: Record<str
  * Plugins emit data only — the host owns rendering — so inferring the hint
  * here keeps the plugin API to "return a value" with no separate hint channel.
  */
-function inferPluginUi(data: Record<string, unknown>): Record<string, PluginFieldHint> {
+export function inferPluginUi(data: Record<string, unknown>): Record<string, PluginFieldHint> {
   const ui: Record<string, PluginFieldHint> = {};
   for (const [key, value] of Object.entries(data)) {
     if (isPluginChartSpec(value)) {

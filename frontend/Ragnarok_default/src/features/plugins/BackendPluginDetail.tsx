@@ -19,11 +19,13 @@ import {
   ModuleConfigSchema,
   ModuleDescriptor,
   ModulePanelConfig,
+  PluginAnalyticsEntry,
   WorkbookModel,
 } from 'lib/types';
 import {
   BackendPluginManifest,
   PluginFile,
+  analyzeBackendPlugin,
   deletePluginFile,
   getPluginOptions,
   listPluginFiles,
@@ -33,6 +35,8 @@ import {
 import type { SessionMeta } from 'lib/api/session';
 import type { PluginOptionsResolver } from 'lib/plugins/options';
 import { PluginOptionsContext } from '../../shared/hooks/pluginOptionsContext';
+import { useDebouncedValue } from '../../shared/hooks/useDebouncedValue';
+import { inferPluginUi } from './PluginDetail';
 import { PluginPanel } from './PluginPanel';
 import { SearchableSelect } from '../../shared/components/SearchableSelect';
 import { useToast } from '../../shared/components/Toast';
@@ -264,6 +268,30 @@ export function BackendPluginDetail({ manifest, model, onBuilt }: Props) {
     [model.carriers],
   );
 
+  // Auto-run the analyze hook server-side so the Output tab shows the plugin's
+  // analytics (e.g. the importer's capacity-by-year), mirroring how frontend
+  // plugins populate it. Re-runs when the config changes — debounced so typing
+  // never fires per keystroke; the result is null when the plugin has no
+  // analyze hook or it fails (Output then shows the empty hint).
+  const [analytics, setAnalytics] = useState<PluginAnalyticsEntry | null>(null);
+  const configKey = useDebouncedValue(JSON.stringify(withDefaults(manifest.config, config)), 500);
+  useEffect(() => {
+    if (!manifest.hooks.analyze) {
+      setAnalytics(null);
+      return undefined;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await analyzeBackendPlugin(manifest.id, {}, JSON.parse(configKey) as Record<string, unknown>);
+        if (!cancelled) setAnalytics({ name: manifest.name, ui: inferPluginUi(data), data });
+      } catch {
+        if (!cancelled) setAnalytics(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [manifest.id, manifest.name, manifest.hooks.analyze, configKey]);
+
   const runHook = async (hook: 'transform' | 'contribute', successMessage?: string) => {
     setBusy(true);
     try {
@@ -318,7 +346,7 @@ export function BackendPluginDetail({ manifest, model, onBuilt }: Props) {
           onModuleConfigChange={(_id, key, value) => setConfigValue(key, value)}
           carriers={carriers}
           model={model}
-          pluginAnalytics={{}}
+          pluginAnalytics={analytics ? { [manifest.id]: analytics } : {}}
           onModuleAction={handleAction}
         />
       </PluginOptionsContext.Provider>
