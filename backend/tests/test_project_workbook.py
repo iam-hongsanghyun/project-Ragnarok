@@ -119,6 +119,33 @@ def test_workbook_never_uses_out_prefix_or_truncates() -> None:
     assert pw.BUNDLE_SHEET in embedded_sheets
 
 
+def test_summary_sheet_is_first_and_skipped_on_import() -> None:
+    import openpyxl
+
+    from io import BytesIO
+
+    data = pw.bundle_to_workbook(_sample_bundle())
+    wb = openpyxl.load_workbook(BytesIO(data))
+    # The human-readable Summary is the landing sheet …
+    assert wb.sheetnames[0] == pw.SUMMARY_SHEET
+    summary = wb[pw.SUMMARY_SHEET]
+    assert summary.cell(1, 1).value == "Section"
+    assert summary.cell(1, 1).font.bold  # header styled
+    flat = "\n".join(
+        " ".join(str(c) for c in row if c is not None)
+        for row in summary.iter_rows(values_only=True)
+    )
+    assert "Total cost" in flat  # a KPI from result.summary made it in
+
+    # … and it is NOT absorbed into the model on re-import (it's meta).
+    rt = pw.workbook_to_bundle(data, filename="demo.xlsx")
+    assert pw.SUMMARY_SHEET not in rt["model"]
+    # Display styling must not have changed any VALUE: inputs round-trip exactly.
+    assert {row["name"] for row in rt["model"]["generators"]} == {"wind", "gas"}
+    by_name = {row["name"]: row for row in rt["model"]["generators"]}
+    assert by_name["wind"]["p_nom"] == 100.0
+
+
 def test_project_package_has_three_files_and_round_trips_verbatim() -> None:
     # A Ragnarok Project .zip carries ALL THREE files (bundle JSON + meta JSON +
     # xlsx); reading the bundle back is exact (every derived field intact).

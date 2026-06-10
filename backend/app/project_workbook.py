@@ -39,6 +39,8 @@ from io import BytesIO
 from typing import Any
 
 import pandas as pd
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 
 from ..pypsa import pypsa_schema as ps
 
@@ -53,6 +55,9 @@ CONSTRAINTS_SHEET = "RAGNAROK_Constraints"
 RUN_STATE_SHEET = "RAGNAROK_RunState"
 RUN_HISTORY_SHEET = "RAGNAROK_RunHistory"
 PROVENANCE_SHEET = "RAGNAROK_Provenance"
+# Human-readable landing sheet (KPIs, constraints, run settings). Display-only —
+# carries no data the importer needs, so it's in _META_SHEETS (skipped on read).
+SUMMARY_SHEET = "RAGNAROK_Summary"
 
 # The COMPLETE run bundle (model + scenario + options + the full derived result)
 # is embedded here as chunked JSON. This is the canonical, lossless payload: on
@@ -73,6 +78,7 @@ _META_SHEETS = {
     RUN_HISTORY_SHEET,
     PROVENANCE_SHEET,
     BUNDLE_SHEET,
+    SUMMARY_SHEET,
 }
 
 # JSON metadata is chunked at this many chars/row (Excel cell limit is 32 767).
@@ -210,6 +216,163 @@ def _kv_rows(pairs: list[tuple[str, Any]]) -> list[dict[str, Any]]:
     return [{"key": k, "value": v} for k, v in pairs if v is not None]
 
 
+# ── Human-readable Summary sheet ──────────────────────────────────────────────
+def _summary_rows(bundle: dict[str, Any]) -> list[dict[str, Any]]:
+    """A skimmable {Section, Item, Value} overview for the Summary landing sheet.
+
+    Pulls from the already-human-formatted ``result.summary`` KPIs (values carry
+    units), the run window/meta, the active constraints (their labels are plain
+    language), and the headline settings — so opening the workbook lands on
+    something a person can read, not the raw ``network`` sheet.
+    """
+    result = bundle.get("result") if isinstance(bundle.get("result"), dict) else {}
+    scenario = bundle.get("scenario") if isinstance(bundle.get("scenario"), dict) else {}
+    options = bundle.get("options") if isinstance(bundle.get("options"), dict) else {}
+    run_meta = result.get("runMeta") if isinstance(result.get("runMeta"), dict) else {}
+    rolling = run_meta.get("rolling") if isinstance(run_meta.get("rolling"), dict) else {}
+
+    rows: list[dict[str, Any]] = []
+    pending_section: str | None = None
+
+    def section(name: str) -> None:
+        nonlocal pending_section
+        pending_section = name
+
+    def add(item: str, value: Any) -> None:
+        nonlocal pending_section
+        if value is None or value == "":
+            return
+        rows.append({"Section": pending_section or "", "Item": item, "Value": value})
+        pending_section = None
+
+    label = bundle.get("label") or options.get("scenarioLabel") or options.get("filename") or "Run"
+    section("Overview")
+    add("Run", label)
+    add("Source file", options.get("filename"))
+    add("Backend", options.get("backend"))
+    add("Solver", options.get("solverType"))
+
+    section("Window")
+    snaps = run_meta.get("snapshotCount")
+    if snaps is None and options.get("snapshotStart") is not None and options.get("snapshotEnd") is not None:
+        snaps = options.get("snapshotEnd") - options.get("snapshotStart")
+    add("Snapshots", snaps)
+    weight = run_meta.get("snapshotWeight") or options.get("snapshotWeight")
+    add("Resolution", f"{weight}h" if weight is not None else None)
+    add("Modelled hours", run_meta.get("modeledHours"))
+    add("Planning mode", run_meta.get("planningMode"))
+    if rolling.get("enabled"):
+        add(
+            "Rolling horizon",
+            f"horizon {rolling.get('horizonSnapshots')} / overlap "
+            f"{rolling.get('overlapSnapshots')} · {rolling.get('windowCount')} windows",
+        )
+
+    summary = result.get("summary")
+    if isinstance(summary, list) and summary:
+        section("Results")
+        for entry in summary:
+            if not isinstance(entry, dict):
+                continue
+            value = entry.get("value")
+            detail = entry.get("detail")
+            shown = f"{value}  ({detail})" if value not in (None, "") and detail else value
+            add(str(entry.get("label", "")), shown)
+
+    constraints = scenario.get("constraints")
+    if isinstance(constraints, list):
+        active = [c for c in constraints if isinstance(c, dict) and c.get("enabled")]
+        if active:
+            section("Active constraints")
+            for c in active:
+                add(str(c.get("label") or c.get("metric") or "constraint"), "applied")
+
+    section("Settings")
+    cp = scenario.get("carbonPrice")
+    cur = options.get("currencySymbol") or "₩"
+    add("Carbon price", f"{cp} {cur}/t" if cp not in (None, "") else None)
+    dr = scenario.get("discountRate")
+    add("Discount rate", f"{dr * 100:.1f}%" if isinstance(dr, (int, float)) else None)
+    add("Currency", cur)
+    if options.get("enableLoadShedding"):
+        add("Load shedding", f"enabled @ {options.get('loadSheddingCost')} {cur}/MWh")
+
+    return rows
+
+
+# ── Workbook styling (display-only — never mutates cell VALUES) ────────────────
+_HEADER_FILL = PatternFill("solid", fgColor="E2E8F0")
+_HEADER_FONT = Font(bold=True)
+# Per-cell number formats are skipped above this many cells (the wide output
+# series sheets) — there they'd cost seconds and a lot of memory for little
+# human benefit; those sheets still get header + freeze + width styling.
+_STYLE_CELL_BUDGET = 80_000
+
+
+def _number_format(value: Any) -> str | None:
+    """Excel display format for a numeric cell (None ⇒ leave as-is).
+
+    Display only — the stored value is untouched, so re-import reads the exact
+    number back. ``≥1e9`` sentinels (the ``±inf`` placeholders) render compact
+    scientific so a human doesn't read a literal trillion.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    av = abs(value)
+    if av >= 1e9:
+        return "0.0E+00"
+    if float(value).is_integer():
+        return "#,##0"
+    if av < 1:
+        return "0.0000"
+    return "#,##0.00"
+
+
+def _style_worksheet(ws: Any) -> None:
+    max_row, max_col = ws.max_row, ws.max_column
+    if max_row < 1 or max_col < 1:
+        return
+
+    # Header row: bold on a soft fill.
+    for col in range(1, max_col + 1):
+        cell = ws.cell(row=1, column=col)
+        cell.font = _HEADER_FONT
+        cell.fill = _HEADER_FILL
+        cell.alignment = Alignment(vertical="center")
+
+    # Freeze the header row, plus the first column when it's the row key
+    # (name / snapshot) so a wide sheet keeps its labels in view.
+    first_header = str(ws.cell(row=1, column=1).value or "").lower()
+    ws.freeze_panes = "B2" if first_header in ("name", "snapshot") else "A2"
+
+    wide = max_col > 40  # the big output-series sheets
+    sample_rows = min(max_row, 10 if wide else 40)
+    for col in range(1, max_col + 1):
+        letter = get_column_letter(col)
+        widest = len(str(ws.cell(row=1, column=col).value or ""))
+        for row in range(2, sample_rows + 1):
+            widest = max(widest, len(str(ws.cell(row=row, column=col).value or "")))
+        ws.column_dimensions[letter].width = max(10, min(widest + 2, 16 if wide else 48))
+
+    # Number formats — only on sheets small enough that touching every cell is
+    # cheap. The wide series sheets keep their raw display (still round-trips).
+    if max_row * max_col <= _STYLE_CELL_BUDGET:
+        for row in range(2, max_row + 1):
+            for col in range(1, max_col + 1):
+                cell = ws.cell(row=row, column=col)
+                fmt = _number_format(cell.value)
+                if fmt is not None:
+                    cell.number_format = fmt
+
+
+def _style_workbook(book: Any) -> None:
+    for ws in book.worksheets:
+        try:
+            _style_worksheet(ws)
+        except Exception:  # noqa: BLE001 — styling must never fail an export
+            logger.exception("Failed to style sheet %r", getattr(ws, "title", "?"))
+
+
 def bundle_to_workbook(
     bundle: dict[str, Any],
     *,
@@ -339,6 +502,24 @@ def bundle_to_workbook(
             pd.DataFrame([{"info": "No data in this project."}]).to_excel(
                 writer, sheet_name="info", index=False
             )
+
+        # Human-readable landing sheet — written last, then moved to the front so
+        # the workbook opens on a skimmable overview instead of the raw `network`
+        # sheet. Skipped on re-import (it's in _META_SHEETS). It surfaces KPIs +
+        # settings, so it belongs to the Result/Metadata parts — a pure model-only
+        # export stays clean PyPSA inputs with no RAGNAROK_ sheets.
+        summary_rows = _summary_rows(bundle) if (include_result or include_meta) else []
+        if summary_rows and _write_rows(writer, SUMMARY_SHEET, summary_rows, used):
+            book = writer.book
+            sheets = book._sheets  # openpyxl keeps sheet order here
+            idx = next((i for i, s in enumerate(sheets) if s.title == SUMMARY_SHEET), None)
+            if idx is not None and idx != 0:
+                sheets.insert(0, sheets.pop(idx))
+
+        # Display styling (bold headers, frozen panes, widths, number formats).
+        # Purely cosmetic — cell VALUES are never changed, so re-import is
+        # byte-identical in meaning.
+        _style_workbook(writer.book)
 
     return buffer.getvalue()
 
