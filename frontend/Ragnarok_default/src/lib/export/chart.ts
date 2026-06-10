@@ -7,6 +7,11 @@ import ExcelJS from 'exceljs';
  * the Y-axis unit live in HTML *outside* the chart's <svg>, so rasterising the
  * SVG alone drops them. We draw them onto the canvas instead so the exported
  * image is self-describing (title + unit at the top, colour legend below).
+ *
+ * NOTE: charts are rendered by ECharts with the SVG renderer *on purpose* —
+ * this pipeline serialises the on-screen <svg>, and ECharts inlines every
+ * style attribute, so the export needs no chart-library-specific code path.
+ * Don't switch the renderer to canvas without reworking this file.
  */
 export interface ChartChrome {
   title?: string;
