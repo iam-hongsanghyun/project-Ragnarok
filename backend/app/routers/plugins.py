@@ -140,7 +140,9 @@ def _safe_extract_zip(data: bytes, dest_root: Path) -> str:
         if not rel:
             continue
         target = (dest / rel).resolve()
-        if not str(target).startswith(str(dest) + "/") and target != dest:
+        # Path.is_relative_to is separator-agnostic — the old startswith(dest+"/")
+        # check used the POSIX separator and rejected EVERY entry on Windows.
+        if not target.is_relative_to(dest):
             raise HTTPException(status_code=400, detail="Unsafe path in .zip (zip-slip).")
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(zf.read(name))

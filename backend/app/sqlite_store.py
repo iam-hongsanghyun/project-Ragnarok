@@ -26,9 +26,10 @@ import logging
 import re
 import shutil
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import pandas as pd
 
@@ -44,12 +45,28 @@ def _db_path(session_id: str) -> Path:
     return ss.SESSION_DIR / session_id / "project.db"
 
 
-def _connect(session_id: str) -> sqlite3.Connection:
+@contextmanager
+def _connect(session_id: str) -> Iterator[sqlite3.Connection]:
+    """Open the session db for one operation and ALWAYS close it.
+
+    ``with sqlite3.connect(...)`` only manages the transaction — it leaves the
+    connection (and its file handle) open, which is invisible on POSIX but
+    breaks Windows: open db files there cannot be deleted or replaced, so
+    ``clear``/``save_model`` raise PermissionError. This wrapper preserves the
+    commit-on-success / rollback-on-error semantics and closes the handle.
+    """
     path = _db_path(session_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path))
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def _kv_get(conn: sqlite3.Connection, key: str) -> Any | None:
