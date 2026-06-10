@@ -24,7 +24,7 @@ export function PluginChart({ spec, title }: { spec: PluginChartSpec; title?: st
         {title && (
           <div className="chart-card-header"><div><h3>{title}</h3></div></div>
         )}
-        <DonutChart data={data} />
+        <DonutChart data={data} unit={spec.unit} />
       </section>
     );
   }
@@ -44,7 +44,7 @@ export function PluginChart({ spec, title }: { spec: PluginChartSpec; title?: st
       mode={spec.kind as ChartMode}
       stacked={Boolean(spec.stacked)}
       xAxisTitle={spec.xAxisTitle}
-      yAxisTitle={spec.yAxisTitle}
+      yAxisTitle={spec.yAxisTitle ?? spec.unit}
       showLegend={spec.showLegend ?? true}
     />
   );

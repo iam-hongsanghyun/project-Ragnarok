@@ -355,7 +355,7 @@ export function UserDefinedChartCard({
             <input
               type="text"
               value={active.yAxisTitle ?? ''}
-              placeholder="none"
+              placeholder={metric?.unit || 'none'}
               onChange={(e) => patch({ ...active, yAxisTitle: e.target.value })}
             />
           </label>
@@ -455,7 +455,7 @@ export function UserDefinedChartCard({
             </div>
           )}
           {donutData.length > 0
-            ? <DonutChart data={donutData} />
+            ? <DonutChart data={donutData} unit={metric!.unit} />
             : <p className="empty-text">No data for current selection.</p>
           }
         </section>
@@ -468,7 +468,7 @@ export function UserDefinedChartCard({
           mode={active.chartType}
           stacked={active.stacked}
           xAxisTitle={active.xAxisTitle}
-          yAxisTitle={active.yAxisTitle}
+          yAxisTitle={active.yAxisTitle || metric!.unit}
           showLegend={active.showLegend ?? true}
           showAxisLabels={active.showAxisLabels ?? true}
           xLabelAngle={active.xLabelAngle ?? 0}

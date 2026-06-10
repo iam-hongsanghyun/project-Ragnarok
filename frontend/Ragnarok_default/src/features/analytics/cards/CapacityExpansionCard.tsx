@@ -3,11 +3,14 @@
  *
  * Rendered inside ResultsDashboard only when expansionResults.length > 0.
  */
-import React from 'react';
+import React, { useMemo } from 'react';
 import { ExpansionAsset } from 'lib/types';
 import { carrierColor } from 'lib/utils/helpers';
+import { buildExpansionOption } from 'lib/charts/options';
+import { readChartTheme } from 'lib/charts/theme';
+import { useEChart } from '../../../shared/echarts/useEChart';
 
-// ── Simple horizontal bar chart ───────────────────────────────────────────────
+// ── Horizontal installed-vs-optimised bars (ECharts) ──────────────────────────
 
 interface BarRow {
   name: string;
@@ -17,58 +20,29 @@ interface BarRow {
 }
 
 function ExpansionBarChart({ rows }: { rows: BarRow[] }) {
+  const option = useMemo(() => {
+    if (!rows.length) return null;
+    return buildExpansionOption(
+      rows.map((r) => ({
+        name: r.name,
+        installed: r.installed,
+        optimised: r.optimised,
+        color: carrierColor(r.carrier),
+      })),
+      readChartTheme(),
+    );
+  }, [rows]);
+  const hostRef = useEChart<HTMLDivElement>(option);
+
   if (!rows.length) return null;
 
-  const maxMW = Math.max(1, ...rows.map((r) => r.optimised));
-  const barWidth = 340;
-
   return (
-    <svg
-      viewBox={`0 0 ${barWidth + 180} ${rows.length * 44 + 28}`}
+    <div
+      ref={hostRef}
       className="expansion-bar-chart"
-      style={{ width: '100%', maxWidth: 560, display: 'block' }}
-    >
-      {/* Y-axis labels */}
-      {rows.map((row, i) => (
-        <g key={row.name} transform={`translate(0,${i * 44 + 10})`}>
-          <text x={0} y={14} className="chart-axis-title">
-            {row.name.length > 20 ? row.name.slice(0, 18) + '…' : row.name}
-          </text>
-          {/* installed capacity bar (grey, dimmed) */}
-          <rect
-            x={0} y={18}
-            width={Math.max(2, (row.installed / maxMW) * barWidth)}
-            height={8}
-            fill="var(--border-strong)"
-            rx={0}
-          />
-          {/* optimised capacity bar (carrier colour) */}
-          <rect
-            x={0} y={28}
-            width={Math.max(2, (row.optimised / maxMW) * barWidth)}
-            height={10}
-            fill={carrierColor(row.carrier)}
-            fillOpacity={0.85}
-            rx={0}
-          />
-          {/* value labels */}
-          <text
-            x={(row.optimised / maxMW) * barWidth + 6}
-            y={36}
-            className="chart-bar-value"
-          >
-            {Math.round(row.optimised).toLocaleString()} MW
-          </text>
-        </g>
-      ))}
-      {/* Legend */}
-      <g transform={`translate(0,${rows.length * 44 + 12})`}>
-        <rect x={0} y={0} width={12} height={8} fill="var(--border-strong)" rx={0} />
-        <text x={16} y={8} className="chart-tick">Installed</text>
-        <rect x={68} y={0} width={12} height={8} fill="#6366f1" fillOpacity={0.85} rx={0} />
-        <text x={84} y={8} className="chart-tick">Optimised</text>
-      </g>
-    </svg>
+      role="img"
+      style={{ width: '100%', maxWidth: 560, height: rows.length * 40 + 44 }}
+    />
   );
 }
 

@@ -2043,6 +2043,19 @@
   height: auto;
 }
 
+/* ECharts host elements. Unlike the old inline SVGs (which had intrinsic
+   aspect-ratio height), a host <div> needs explicit height: stretch to the
+   parent when it has one (dashboard cells), else fall back to min-height. */
+.echart-host {
+  width: 100%;
+  height: 100%;
+  min-height: 320px;
+}
+
+.dashboard-cell .echart-host {
+  min-height: 0;
+}
+
 .chart-grid {
   stroke: rgba(148, 163, 184, 0.28);
   stroke-dasharray: 4 6;
@@ -2093,7 +2106,8 @@
 .donut-chart {
   flex: 0 0 380px;
   width: 380px;
-  height: auto;
+  height: 380px;
+  min-height: 0;
 }
 
 .donut-total-label {
@@ -2169,6 +2183,7 @@
   .donut-chart {
     flex: none;
     width: 280px;
+    height: 280px;
   }
 
   .legend-list {
@@ -3402,7 +3417,7 @@ path.leaflet-interactive:focus {
 
 /* ── Merit Order Card ────────────────────────────────────────────────────── */
 .merit-card { padding: 8px 4px; }
-.merit-svg { font-family: var(--font-sans); }
+.merit-host { width: 100%; height: 300px; }
 .merit-legend {
   display: flex;
   flex-wrap: wrap;
@@ -3491,7 +3506,18 @@ path.leaflet-interactive:focus {
 .co2-interpretation li { margin-bottom: 4px; }
 .co2-interpretation p { margin: 0; }
 
-.duration-curve-card { padding: 8px; }
+.duration-curve-card {
+  padding: 8px;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.duration-curve-host {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 180px;
+}
 
 @media (max-width: 860px) {
   .kpi-strip { grid-template-columns: repeat(2, 1fr); }
@@ -7587,6 +7613,15 @@ code, kbd, samp, tt,
   height: 100%;
 }
 
+/* In the zero-padding contexts above, side legends would otherwise sit
+   flush against the cell's top/right edges — give them a slight gap. */
+.dashboard-cell .chart-legend-side,
+.dashboard-cell .legend-list,
+.dashboard-section-body .chart-legend-side,
+.dashboard-section-body .legend-list {
+  margin: 6px 6px 0 0;
+}
+
 /* Same for Results dashboard sections: drop the inner card frame so
  * only the outer .dashboard-section border remains. */
 .dashboard-section-body .chart-card,
@@ -7744,9 +7779,14 @@ code, kbd, samp, tt,
 }
 
 .dashboard-cell .donut-chart {
-  flex: 0 1 auto;
+  /* The ECharts host is a div with no intrinsic aspect ratio (unlike the old
+     inline SVG) — stretch it to the cell and let ECharts centre the pie. */
+  flex: 1 1 auto;
+  align-self: stretch;
   width: auto;
   height: auto;
+  min-width: 0;
+  min-height: 0;
   max-width: 100%;
   max-height: 100%;
 }

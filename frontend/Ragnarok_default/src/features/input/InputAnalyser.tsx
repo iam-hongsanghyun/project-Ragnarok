@@ -1,6 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import type { EChartsCoreOption } from 'echarts/core';
 import { GridRow } from 'lib/types';
 import { stringValue } from 'lib/utils/helpers';
+import { axisName, buildDurationCurveOption, darkTooltip, fmtNum, tickLabel } from 'lib/charts/options';
+import { readChartTheme } from 'lib/charts/theme';
+import { useEChart } from '../../shared/echarts/useEChart';
 import { SearchableSelect } from '../../shared/components/SearchableSelect';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -34,98 +38,117 @@ const PALETTE = [
   '#84cc16','#ec4899','#6366f1','#14b8a6','#f59e0b',
 ];
 
-// ── Shared SVG primitives ─────────────────────────────────────────────────────
+// ── Shared chart primitives ───────────────────────────────────────────────────
 
 function NoData({ msg = 'No data to display.' }: { msg?: string }) {
   return <p style={{ padding: '16px', fontSize: '0.82rem', color: 'var(--muted)', textAlign: 'center' }}>{msg}</p>;
 }
 
+/** Fixed-size ECharts host for the analyser's mini charts. */
+function MiniChart({ option, height, width, maxWidth }: {
+  option: EChartsCoreOption; height: number; width?: number; maxWidth?: number;
+}) {
+  const ref = useEChart<HTMLDivElement>(option);
+  return <div ref={ref} role="img" style={{ width: width ?? '100%', maxWidth, height, flexShrink: width ? 0 : undefined }} />;
+}
+
+function dashedGrid(theme: ReturnType<typeof readChartTheme>): Record<string, unknown> {
+  return { show: true, lineStyle: { color: theme.gridLine, type: [4, 6] } };
+}
+
+/** Bare value axis: no line/tick, dashed grid, muted labels. */
+function bareValueAxis(theme: ReturnType<typeof readChartTheme>): Record<string, unknown> {
+  return {
+    type: 'value',
+    axisLine: { show: false },
+    axisTick: { show: false },
+    splitLine: dashedGrid(theme),
+    axisLabel: { ...tickLabel(theme), formatter: fmtNum },
+  };
+}
+
 // ── 1. Horizontal Bar (static, one value per row) ─────────────────────────────
+
+function fmtBarVal(v: number): string {
+  return v === 0 ? '—' : v < 1 ? v.toFixed(3) : v.toLocaleString(undefined, { maximumFractionDigits: 1 });
+}
 
 function HBar({ labels, values, colors, unit }: {
   labels: string[]; values: number[]; colors?: string[]; unit: string;
 }) {
+  const theme = readChartTheme();
+  const withUnit = (v: number) => `${fmtBarVal(v)}${unit ? ` ${unit}` : ''}`;
+  const option: EChartsCoreOption = {
+    animation: false,
+    grid: { left: 4, right: 86, top: 4, bottom: 4, containLabel: true },
+    tooltip: {
+      ...darkTooltip(theme),
+      trigger: 'item',
+      formatter: (p: { name: string; value: number }) => `${p.name}: <b>${withUnit(p.value)}</b>`,
+    },
+    xAxis: bareValueAxis(theme),
+    yAxis: {
+      type: 'category',
+      inverse: true,
+      data: labels,
+      axisLine: { show: false },
+      axisTick: { show: false },
+      axisLabel: { ...tickLabel(theme), width: 124, overflow: 'truncate' as const },
+    },
+    series: [{
+      type: 'bar',
+      barWidth: 14,
+      showBackground: true,
+      backgroundStyle: { color: theme.bgHover },
+      label: {
+        show: true,
+        position: 'right',
+        color: theme.text,
+        fontSize: 11,
+        fontFamily: theme.fontSans,
+        formatter: (p: { value: number }) => withUnit(p.value),
+      },
+      data: values.map((v, i) => ({ value: v, itemStyle: { color: colors?.[i] ?? '#0f766e', opacity: 0.85 } })),
+    }],
+  };
   if (!labels.length) return <NoData />;
-  const max = Math.max(...values, 0);
-  const barH = 22; const labelW = 130; const barW = 340; const valW = 72;
-  const padX = 8; const padY = 6;
-  const W = labelW + barW + valW + padX * 2;
-  const H = padY * 2 + labels.length * (barH + 4);
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', maxWidth: W, display: 'block' }}>
-      {labels.map((label, i) => {
-        const y = padY + i * (barH + 4);
-        const fill = colors?.[i] ?? '#0f766e';
-        const w = max > 0 ? (values[i] / max) * barW : 0;
-        const fmt = values[i] === 0 ? '—' : values[i] < 1 ? values[i].toFixed(3) : values[i].toLocaleString(undefined, { maximumFractionDigits: 1 });
-        return (
-          <g key={i}>
-            <text x={padX + labelW - 4} y={y + barH / 2 + 4} textAnchor="end" fontSize={11} fill="var(--muted)">
-              {label.length > 18 ? label.slice(0, 17) + '…' : label}
-            </text>
-            <rect x={padX + labelW} y={y} width={barW} height={barH} rx={0} fill="var(--bg-hover)" />
-            {w > 0 && <rect x={padX + labelW} y={y} width={w} height={barH} rx={0} fill={fill} opacity={0.85} />}
-            <text x={padX + labelW + barW + 5} y={y + barH / 2 + 4} fontSize={11} fill="var(--text)">
-              {fmt}{unit ? ` ${unit}` : ''}
-            </text>
-          </g>
-        );
-      })}
-    </svg>
-  );
+  return <MiniChart option={option} height={Math.max(labels.length * 26 + 16, 90)} maxWidth={560} />;
 }
 
 // ── 2. Donut (grouped by a string col) ───────────────────────────────────────
 
 function Donut({ data }: { data: { label: string; value: number; color: string }[] }) {
-  const [tip, setTip] = useState<{ label: string; value: number } | null>(null);
-  if (!data.length) return <NoData />;
-  const cx = 110; const cy = 110; const outerR = 90; const innerR = 52;
-  const total = data.reduce((s, d) => s + d.value, 0) || 1;
-  let angle = -Math.PI / 2;
-  const arcs = data.map((d) => {
-    const span = (d.value / total) * Math.PI * 2;
-    const start = angle;
-    angle += span;
-    return { ...d, start, end: angle, span };
-  });
-  const arc = (s: number, e: number) => {
-    const gap = 0.01;
-    const a = s + gap; const b = e - gap;
-    const lx1 = cx + outerR * Math.cos(a); const ly1 = cy + outerR * Math.sin(a);
-    const lx2 = cx + outerR * Math.cos(b); const ly2 = cy + outerR * Math.sin(b);
-    const sx1 = cx + innerR * Math.cos(b); const sy1 = cy + innerR * Math.sin(b);
-    const sx2 = cx + innerR * Math.cos(a); const sy2 = cy + innerR * Math.sin(a);
-    const lg = b - a > Math.PI ? 1 : 0;
-    return `M${lx1} ${ly1} A${outerR} ${outerR} 0 ${lg} 1 ${lx2} ${ly2} L${sx1} ${sy1} A${innerR} ${innerR} 0 ${lg} 0 ${sx2} ${sy2} Z`;
+  const theme = readChartTheme();
+  const option: EChartsCoreOption = {
+    animation: true,
+    animationDuration: 250,
+    tooltip: {
+      ...darkTooltip(theme),
+      trigger: 'item',
+      formatter: (p: { name: string; value: number; percent: number }) =>
+        `${p.name}: <b>${p.value.toLocaleString(undefined, { maximumFractionDigits: 1 })}</b> (${p.percent.toFixed(1)}%)`,
+    },
+    series: [{
+      type: 'pie',
+      radius: ['46%', '82%'],
+      center: ['50%', '50%'],
+      label: { show: false },
+      itemStyle: { borderColor: '#ffffff', borderWidth: 2 },
+      emphasis: { scale: true, scaleSize: 4 },
+      data: data.map((d) => ({ name: d.label, value: d.value, itemStyle: { color: d.color } })),
+    }],
   };
+  if (!data.length) return <NoData />;
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
-      <svg viewBox="0 0 220 220" style={{ width: 180, flexShrink: 0 }}>
-        {arcs.map((a) => (
-          <path key={a.label} d={arc(a.start, a.end)} fill={a.color}
-            opacity={tip && tip.label !== a.label ? 0.45 : 1}
-            onMouseEnter={() => setTip({ label: a.label, value: a.value })}
-            onMouseLeave={() => setTip(null)}
-            style={{ cursor: 'pointer', transition: 'opacity 0.15s' }}
-          />
-        ))}
-        {tip && (
-          <>
-            <text x={cx} y={cy - 6} textAnchor="middle" fontSize={11} fill="var(--muted)">{tip.label}</text>
-            <text x={cx} y={cy + 12} textAnchor="middle" fontSize={13} fontWeight="700" fill="var(--text)">
-              {((tip.value / total) * 100).toFixed(1)}%
-            </text>
-          </>
-        )}
-      </svg>
+      <MiniChart option={option} height={190} width={190} />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {arcs.map((a) => (
-          <div key={a.label} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12 }}>
-            <span style={{ width: 10, height: 10, borderRadius: '50%', background: a.color, flexShrink: 0 }} />
-            <span style={{ color: 'var(--muted)' }}>{a.label}</span>
+        {data.map((d) => (
+          <div key={d.label} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12 }}>
+            <span style={{ width: 10, height: 10, borderRadius: '50%', background: d.color, flexShrink: 0 }} />
+            <span style={{ color: 'var(--muted)' }}>{d.label}</span>
             <span style={{ fontWeight: 600, color: 'var(--text)', marginLeft: 4 }}>
-              {a.value.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+              {d.value.toLocaleString(undefined, { maximumFractionDigits: 1 })}
             </span>
           </div>
         ))}
@@ -139,54 +162,42 @@ function Donut({ data }: { data: { label: string; value: number; color: string }
 function Scatter({ xVals, yVals, labels, xCol, yCol }: {
   xVals: number[]; yVals: number[]; labels: string[]; xCol: string; yCol: string;
 }) {
-  const [hov, setHov] = useState<number | null>(null);
+  const theme = readChartTheme();
+  const option: EChartsCoreOption = {
+    animation: false,
+    grid: { left: 16, right: 20, top: 12, bottom: 22, containLabel: true },
+    tooltip: {
+      ...darkTooltip(theme),
+      trigger: 'item',
+      formatter: (p: { dataIndex: number; value: [number, number] }) =>
+        `<b>${labels[p.dataIndex] ?? ''}</b><br/>${xCol}: ${p.value[0].toLocaleString()}<br/>${yCol}: ${p.value[1].toLocaleString()}`,
+    },
+    xAxis: {
+      ...bareValueAxis(theme),
+      name: xCol,
+      nameLocation: 'middle',
+      nameGap: 26,
+      nameTextStyle: axisName(theme),
+      scale: true,
+    },
+    yAxis: {
+      ...bareValueAxis(theme),
+      name: yCol,
+      nameLocation: 'middle',
+      nameGap: 48,
+      nameTextStyle: axisName(theme),
+      scale: true,
+    },
+    series: [{
+      type: 'scatter',
+      symbolSize: 10,
+      itemStyle: { color: '#0f766e', opacity: 0.8 },
+      emphasis: { scale: 1.4 },
+      data: xVals.map((x, i) => [x, yVals[i]]),
+    }],
+  };
   if (!xVals.length) return <NoData />;
-  const W = 440; const H = 260; const pL = 48; const pR = 16; const pT = 12; const pB = 36;
-  const cW = W - pL - pR; const cH = H - pT - pB;
-  const xMin = Math.min(...xVals); const xMax = Math.max(...xVals) || 1;
-  const yMin = Math.min(...yVals); const yMax = Math.max(...yVals) || 1;
-  const xPos = (v: number) => pL + ((v - xMin) / (xMax - xMin || 1)) * cW;
-  const yPos = (v: number) => pT + cH - ((v - yMin) / (yMax - yMin || 1)) * cH;
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', maxWidth: W, display: 'block' }}>
-      {[0, 0.5, 1].map((t) => {
-        const v = yMin + t * (yMax - yMin);
-        const y = yPos(v);
-        return (
-          <g key={t}>
-            <line x1={pL} x2={W - pR} y1={y} y2={y} stroke="#e2e8f0" strokeWidth={1} />
-            <text x={pL - 4} y={y + 4} textAnchor="end" fontSize={9} fill="#94a3b8">
-              {v < 1 ? v.toFixed(1) : Math.round(v).toLocaleString()}
-            </text>
-          </g>
-        );
-      })}
-      {[0, 0.5, 1].map((t) => {
-        const v = xMin + t * (xMax - xMin);
-        const x = xPos(v);
-        return (
-          <text key={t} x={x} y={H - pB + 14} textAnchor="middle" fontSize={9} fill="#94a3b8">
-            {v < 1 ? v.toFixed(1) : Math.round(v).toLocaleString()}
-          </text>
-        );
-      })}
-      <text x={pL + cW / 2} y={H - 2} textAnchor="middle" fontSize={10} fill="var(--muted)">{xCol}</text>
-      <text x={10} y={pT + cH / 2} textAnchor="middle" fontSize={10} fill="var(--muted)"
-        transform={`rotate(-90, 10, ${pT + cH / 2})`}>{yCol}</text>
-      {xVals.map((x, i) => (
-        <g key={i} onMouseEnter={() => setHov(i)} onMouseLeave={() => setHov(null)}>
-          <circle cx={xPos(x)} cy={yPos(yVals[i])} r={hov === i ? 7 : 5}
-            fill="#0f766e" opacity={hov !== null && hov !== i ? 0.3 : 0.8}
-            style={{ cursor: 'pointer', transition: 'r 0.1s, opacity 0.1s' }} />
-          {hov === i && (
-            <text x={xPos(x) + 8} y={yPos(yVals[i]) - 6} fontSize={10} fill="var(--text)">
-              {labels[i]}
-            </text>
-          )}
-        </g>
-      ))}
-    </svg>
-  );
+  return <MiniChart option={option} height={260} maxWidth={480} />;
 }
 
 // ── 4. Multi-line / Stacked-area ──────────────────────────────────────────────
@@ -196,75 +207,39 @@ function LineArea({ xLabels, series, stacked }: {
   series: { key: string; values: number[]; color: string }[];
   stacked: boolean;
 }) {
+  const theme = readChartTheme();
+  const option: EChartsCoreOption = {
+    animation: false,
+    grid: { left: 8, right: 16, top: 12, bottom: 4, containLabel: true },
+    tooltip: {
+      ...darkTooltip(theme),
+      trigger: 'axis',
+      valueFormatter: (v: number | string) =>
+        typeof v === 'number' && Math.abs(v) < 1 ? v.toFixed(2) : fmtNum(v),
+    },
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      data: xLabels,
+      axisLine: { lineStyle: { color: theme.border } },
+      axisTick: { show: false },
+      axisLabel: { ...tickLabel(theme), fontSize: 10, hideOverlap: true },
+    },
+    yAxis: bareValueAxis(theme),
+    series: series.map((s) => ({
+      name: s.key,
+      type: 'line' as const,
+      data: s.values,
+      showSymbol: false,
+      stack: stacked ? 'total' : undefined,
+      lineStyle: { width: stacked ? 1 : 1.8, color: s.color },
+      itemStyle: { color: s.color },
+      areaStyle: stacked ? { opacity: 0.45 } : undefined,
+      emphasis: { focus: series.length > 1 ? ('series' as const) : ('none' as const) },
+    })),
+  };
   if (!xLabels.length || !series.length) return <NoData />;
-  const W = 560; const H = 220; const pL = 50; const pR = 12; const pT = 12; const pB = 32;
-  const cW = W - pL - pR; const cH = H - pT - pB;
-  const n = xLabels.length;
-  const tickStep = Math.max(1, Math.ceil(n / 8));
-
-  // For stacked, compute cumulative baseline
-  const computeY = (seriesIdx: number, rowIdx: number): number => {
-    if (!stacked) return series[seriesIdx].values[rowIdx];
-    return series.slice(0, seriesIdx + 1).reduce((s, sr) => s + sr.values[rowIdx], 0);
-  };
-  const baseY = (seriesIdx: number, rowIdx: number): number => {
-    if (!stacked) return 0;
-    return series.slice(0, seriesIdx).reduce((s, sr) => s + sr.values[rowIdx], 0);
-  };
-
-  const allTopVals = series.flatMap((_, si) => xLabels.map((__, ri) => computeY(si, ri)));
-  const maxV = Math.max(...allTopVals, 0);
-  const minV = stacked ? 0 : Math.min(...series.flatMap((s) => s.values), 0);
-  const range = maxV - minV || 1;
-
-  const xPos = (i: number) => pL + (i / Math.max(n - 1, 1)) * cW;
-  const yPos = (v: number) => pT + cH - ((v - minV) / range) * cH;
-
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', maxWidth: W, display: 'block' }}>
-      {[0, 0.25, 0.5, 0.75, 1].map((t) => {
-        const v = minV + t * range;
-        const y = yPos(v);
-        return (
-          <g key={t}>
-            <line x1={pL} x2={W - pR} y1={y} y2={y} stroke="#e2e8f0" strokeWidth={1} />
-            <text x={pL - 4} y={y + 4} textAnchor="end" fontSize={9} fill="#94a3b8">
-              {Math.abs(v) < 1 ? v.toFixed(2) : Math.round(v).toLocaleString()}
-            </text>
-          </g>
-        );
-      })}
-      {xLabels.map((label, i) => {
-        if (i % tickStep !== 0 && i !== n - 1) return null;
-        return (
-          <text key={i} x={xPos(i)} y={H - pB + 14} textAnchor="middle" fontSize={9} fill="#94a3b8">
-            {label.length > 10 ? label.slice(0, 9) + '…' : label}
-          </text>
-        );
-      })}
-      {/* Render stacked areas bottom-to-top, then lines on top */}
-      {stacked && [...series].reverse().map((s, ri) => {
-        const si = series.length - 1 - ri;
-        const topPts = xLabels.map((_, i) => `${xPos(i)},${yPos(computeY(si, i))}`).join(' ');
-        const basePts = [...xLabels].reverse().map((_, revi) => {
-          const i = n - 1 - revi;
-          return `${xPos(i)},${yPos(baseY(si, i))}`;
-        }).join(' ');
-        return (
-          <polygon key={s.key} points={`${topPts} ${basePts}`}
-            fill={s.color} opacity={0.45} />
-        );
-      })}
-      {series.map((s, si) => {
-        const pts = xLabels.map((_, i) => `${xPos(i)},${yPos(computeY(si, i))}`).join(' ');
-        return (
-          <polyline key={s.key} points={pts} fill="none"
-            stroke={s.color} strokeWidth={stacked ? 1 : 1.8}
-            strokeLinejoin="round" strokeLinecap="round" />
-        );
-      })}
-    </svg>
-  );
+  return <MiniChart option={option} height={230} maxWidth={640} />;
 }
 
 // ── 5. Duration curve ─────────────────────────────────────────────────────────
@@ -272,35 +247,10 @@ function LineArea({ xLabels, series, stacked }: {
 function DurationCurve({ values, label, color }: { values: number[]; label: string; color: string }) {
   const sorted = [...values].sort((a, b) => b - a);
   if (!sorted.length) return <NoData />;
-  const W = 480; const H = 200; const pL = 50; const pR = 12; const pT = 12; const pB = 32;
-  const cW = W - pL - pR; const cH = H - pT - pB;
-  const n = sorted.length;
-  const maxV = sorted[0]; const minV = Math.min(...sorted, 0);
-  const range = maxV - minV || 1;
-  const xPos = (i: number) => pL + (i / (n - 1)) * cW;
-  const yPos = (v: number) => pT + cH - ((v - minV) / range) * cH;
-  const pts = sorted.map((v, i) => `${xPos(i)},${yPos(v)}`).join(' ');
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', maxWidth: W, display: 'block' }}>
-      {[0, 0.25, 0.5, 0.75, 1].map((t) => {
-        const v = minV + t * range;
-        const y = yPos(v);
-        return (
-          <g key={t}>
-            <line x1={pL} x2={W - pR} y1={y} y2={y} stroke="#e2e8f0" strokeWidth={1} />
-            <text x={pL - 4} y={y + 4} textAnchor="end" fontSize={9} fill="#94a3b8">
-              {Math.round(v).toLocaleString()}
-            </text>
-          </g>
-        );
-      })}
-      <text x={pL + cW / 2} y={H - 2} textAnchor="middle" fontSize={10} fill="var(--muted)">Rank (sorted descending)</text>
-      <polygon points={`${xPos(0)},${yPos(minV)} ${pts} ${xPos(n-1)},${yPos(minV)}`}
-        fill={color} opacity={0.18} />
-      <polyline points={pts} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" />
-      <text x={pL + 4} y={pT + 14} fontSize={10} fill="var(--muted)">{label}</text>
-    </svg>
-  );
+  const option = buildDurationCurveOption({
+    data: sorted, title: label, unit: '', color, theme: readChartTheme(),
+  });
+  return <MiniChart option={option} height={200} maxWidth={480} />;
 }
 
 // ── 6. Daily profile (average by hour-of-day) ─────────────────────────────────
@@ -326,41 +276,37 @@ function DailyProfile({ xLabels, series }: {
     const vals = hourlyMeans[String(h)] ?? [];
     return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
   });
-  const maxV = Math.max(...means, 0);
-  const W = 480; const H = 180; const pL = 46; const pR = 8; const pT = 10; const pB = 28;
-  const cW = W - pL - pR; const cH = H - pT - pB;
-  const barW = (cW / 24) - 2;
-  const yPos = (v: number) => pT + cH - (v / (maxV || 1)) * cH;
   const color = series[0]?.color ?? '#0f766e';
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', maxWidth: W, display: 'block' }}>
-      {[0, 0.5, 1].map((t) => {
-        const v = t * maxV;
-        const y = yPos(v);
-        return (
-          <g key={t}>
-            <line x1={pL} x2={W - pR} y1={y} y2={y} stroke="#e2e8f0" strokeWidth={1} />
-            <text x={pL - 4} y={y + 4} textAnchor="end" fontSize={9} fill="#94a3b8">
-              {Math.round(v).toLocaleString()}
-            </text>
-          </g>
-        );
-      })}
-      {hours.map((h) => {
-        const x = pL + (h / 24) * cW;
-        const y = yPos(means[h]);
-        return (
-          <g key={h}>
-            <rect x={x + 1} y={y} width={barW} height={pT + cH - y} rx={0} fill={color} opacity={0.75} />
-            {h % 6 === 0 && (
-              <text x={x + barW / 2} y={H - pB + 14} textAnchor="middle" fontSize={9} fill="#94a3b8">{h}:00</text>
-            )}
-          </g>
-        );
-      })}
-      <text x={pL + cW / 2} y={H - 2} textAnchor="middle" fontSize={10} fill="var(--muted)">Hour of day (average)</text>
-    </svg>
-  );
+  const theme = readChartTheme();
+  const option: EChartsCoreOption = {
+    animation: false,
+    grid: { left: 8, right: 12, top: 10, bottom: 26, containLabel: true },
+    tooltip: {
+      ...darkTooltip(theme),
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      valueFormatter: fmtNum,
+    },
+    xAxis: {
+      type: 'category',
+      data: hours.map((h) => `${h}:00`),
+      name: 'Hour of day (average)',
+      nameLocation: 'middle',
+      nameGap: 26,
+      nameTextStyle: axisName(theme),
+      axisLine: { lineStyle: { color: theme.border } },
+      axisTick: { show: false },
+      axisLabel: { ...tickLabel(theme), fontSize: 10, interval: 5 },
+    },
+    yAxis: bareValueAxis(theme),
+    series: [{
+      type: 'bar',
+      barWidth: '70%',
+      itemStyle: { color, opacity: 0.75 },
+      data: means,
+    }],
+  };
+  return <MiniChart option={option} height={190} maxWidth={480} />;
 }
 
 // ── Legend ────────────────────────────────────────────────────────────────────
