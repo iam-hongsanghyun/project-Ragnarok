@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ModuleConfigField, ModuleConfigTableColumn, ModuleConfigVisibleWhen, ModuleDescriptor, ModuleHostInventory, PluginFileValue, WorkbookModel } from 'lib/types';
 import { optionsFromRows, resolveOptionsFrom, ResolvedOption } from 'lib/plugins/options';
 import { usePluginOptionsResolver } from '../../shared/hooks/pluginOptionsContext';
+import { NumberDraftInput } from '../../shared/components/NumberDraftInput';
 import { SearchableSelect } from '../../shared/components/SearchableSelect';
 import { useDebouncedValue } from '../../shared/hooks/useDebouncedValue';
 
@@ -436,17 +437,30 @@ export function ConfigFieldRow({ fieldKey, field, value, onChange, carriers, mod
   }
 
   // string / bare number
+  if (field.type === 'number') {
+    return (
+      <label className="sg-module-config-row">
+        <span className="sg-module-config-label">{label}</span>
+        <NumberDraftInput
+          className="sg-module-config-input"
+          value={typeof resolved === 'number' ? resolved : Number(resolved ?? Number.NaN)}
+          step={field.step}
+          min={field.min}
+          max={field.max}
+          onCommit={onChange}
+        />
+        {field.unit && <span className="sg-module-config-unit">{field.unit}</span>}
+      </label>
+    );
+  }
   return (
     <label className="sg-module-config-row">
       <span className="sg-module-config-label">{label}</span>
       <input
-        type={field.type === 'number' ? 'number' : 'text'}
+        type="text"
         className="sg-module-config-input"
         value={String(resolved ?? '')}
-        step={field.step}
-        min={field.min}
-        max={field.max}
-        onChange={(e) => onChange(field.type === 'number' ? Number(e.target.value) : e.target.value)}
+        onChange={(e) => onChange(e.target.value)}
       />
       {field.unit && <span className="sg-module-config-unit">{field.unit}</span>}
     </label>

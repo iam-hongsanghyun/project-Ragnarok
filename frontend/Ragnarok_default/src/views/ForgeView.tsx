@@ -16,6 +16,7 @@ import type { GridRow, WorkbookModel } from 'lib/types';
 import { usePersistedState } from 'shared/hooks/usePersistedState';
 import { FORGE_CONFIG, VALIDATION_CONFIG } from 'lib/constants';
 import { LeftRail, ViewPanel } from 'shared/components/primitives';
+import { NumberDraftInput } from 'shared/components/NumberDraftInput';
 import { applyRounding, numericColumns, type RoundOp } from 'lib/forge/transforms';
 import {
   buildTargets,
@@ -247,13 +248,12 @@ export function ForgeView({ model, onApplySheets }: Props) {
 
             <div className="sg-setting-row">
               <label className="sg-setting-label">Decimals</label>
-              <input
-                type="number"
+              <NumberDraftInput
                 className="forge-number"
                 min={0}
                 max={12}
                 value={decimals}
-                onChange={(e) => setDecimals(Math.max(0, Math.trunc(Number(e.target.value) || 0)))}
+                onCommit={(v) => setDecimals(Math.trunc(v))}
               />
               <p className="sg-setting-hint">0 = whole numbers. Applies to all three operations.</p>
             </div>
@@ -317,12 +317,11 @@ export function ForgeView({ model, onApplySheets }: Props) {
 
             <div className="sg-setting-row">
               <label className="sg-setting-label">Buffer (km)</label>
-              <input
-                type="number"
+              <NumberDraftInput
                 className="forge-number"
                 min={0}
                 value={bufferKm}
-                onChange={(e) => setBufferKm(Math.max(0, Number(e.target.value) || 0))}
+                onCommit={setBufferKm}
               />
               <p className="sg-setting-hint">A component whose nearest bus is farther than this is left unchanged and warned.</p>
             </div>

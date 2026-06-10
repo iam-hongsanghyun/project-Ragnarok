@@ -4,6 +4,7 @@
 import React from 'react';
 import { PathwayConfig } from 'lib/types';
 import { SearchableSelect } from '../../shared/components/SearchableSelect';
+import { NumberDraftInput } from '../../shared/components/NumberDraftInput';
 
 export interface PlanningSectionProps {
   pathwayConfig: PathwayConfig;
@@ -57,38 +58,35 @@ export function PlanningSection({ pathwayConfig, onPathwayConfigChange }: Planni
               <span />
               {pathwayConfig.periods.map((row, index) => (
                 <React.Fragment key={`pathway-row-${index}`}>
-                  <input
-                    type="number"
+                  <NumberDraftInput
                     className="sg-pathway-input"
                     value={row.period}
-                    onChange={(e) => onPathwayConfigChange({
+                    onCommit={(v) => onPathwayConfigChange({
                       ...pathwayConfig,
                       periods: pathwayConfig.periods.map((item, i) =>
-                        i === index ? { ...item, period: Number(e.target.value) || item.period } : item,
+                        i === index ? { ...item, period: v || item.period } : item,
                       ),
                     })}
                   />
-                  <input
-                    type="number"
+                  <NumberDraftInput
                     step="0.1"
                     className="sg-pathway-input"
                     value={row.objectiveWeight}
-                    onChange={(e) => onPathwayConfigChange({
+                    onCommit={(v) => onPathwayConfigChange({
                       ...pathwayConfig,
                       periods: pathwayConfig.periods.map((item, i) =>
-                        i === index ? { ...item, objectiveWeight: Number(e.target.value) || 1 } : item,
+                        i === index ? { ...item, objectiveWeight: v || 1 } : item,
                       ),
                     })}
                   />
-                  <input
-                    type="number"
+                  <NumberDraftInput
                     step="0.1"
                     className="sg-pathway-input"
                     value={row.yearsWeight}
-                    onChange={(e) => onPathwayConfigChange({
+                    onCommit={(v) => onPathwayConfigChange({
                       ...pathwayConfig,
                       periods: pathwayConfig.periods.map((item, i) =>
-                        i === index ? { ...item, yearsWeight: Number(e.target.value) || 1 } : item,
+                        i === index ? { ...item, yearsWeight: v || 1 } : item,
                       ),
                     })}
                   />

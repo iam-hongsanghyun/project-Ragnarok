@@ -11,6 +11,7 @@ import { SETTINGS_CONFIG } from 'lib/constants';
 import { CarbonScheduleChart } from 'features/carbon/CarbonScheduleChart';
 import { CarbonScenarioPicker } from 'features/carbon/CarbonScenarioPicker';
 import { cloneSchedule, createCarbonProfileId } from 'lib/results/carbonLibrary';
+import { NumberDraftInput } from '../../shared/components/NumberDraftInput';
 
 export interface CarbonSectionProps {
   carbonPrice: number;
@@ -147,16 +148,15 @@ export function CarbonSection(props: CarbonSectionProps) {
         </label>
         <div className="sg-carbon-row">
           <span className="sg-carbon-sym">{props.currencySymbol}</span>
-          <input
+          <NumberDraftInput
             id="rs-carbon-price"
-            type="number"
             className="sg-carbon-input"
             min={settingsRanges.carbonPrice.min}
             max={settingsRanges.carbonPrice.max}
             step={settingsRanges.carbonPrice.step}
             value={props.carbonPrice}
             disabled={scheduleActive}
-            onChange={(e) => props.onCarbonPriceChange(Math.max(settingsRanges.carbonPrice.min, parseFloat(e.target.value) || 0))}
+            onCommit={props.onCarbonPriceChange}
           />
           <span className="sg-carbon-unit">/tCO₂</span>
         </div>

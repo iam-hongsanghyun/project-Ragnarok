@@ -4,6 +4,7 @@
 import React from 'react';
 import { DateFormat } from '../../features/settings/useSettings';
 import { CURRENCIES, SETTINGS_CONFIG } from 'lib/constants';
+import { NumberDraftInput } from '../../shared/components/NumberDraftInput';
 import { SearchableSelect } from '../../shared/components/SearchableSelect';
 
 interface Currency { code: string; symbol: string; name: string; }
@@ -70,15 +71,14 @@ export function ProjectDefaultsSection(props: ProjectDefaultsSectionProps) {
       <div className="sg-setting-row">
         <label className="sg-setting-label" htmlFor="set-discount-rate">Discount rate</label>
         <div className="sg-carbon-row">
-          <input
+          <NumberDraftInput
             id="set-discount-rate"
-            type="number"
             className="sg-carbon-input"
             min={settingsRanges.discountRate.min}
             max={settingsRanges.discountRate.max}
             step={settingsRanges.discountRate.step}
             value={props.discountRate}
-            onChange={(e) => props.onDiscountRateChange(Math.max(settingsRanges.discountRate.min, parseFloat(e.target.value) || 0))}
+            onCommit={props.onDiscountRateChange}
           />
           <span className="sg-carbon-unit">(fraction)</span>
         </div>
@@ -112,14 +112,13 @@ export function ProjectDefaultsSection(props: ProjectDefaultsSectionProps) {
             </label>
             <div className="sg-carbon-row">
               <span className="sg-carbon-sym">{props.currencySymbol}</span>
-              <input
+              <NumberDraftInput
                 id="set-voll"
-                type="number"
                 className="sg-carbon-input"
                 min={settingsRanges.loadSheddingCost.min}
                 step={settingsRanges.loadSheddingCost.step}
                 value={props.loadSheddingCost}
-                onChange={(e) => props.onLoadSheddingCostChange(Math.max(settingsRanges.loadSheddingCost.min, parseFloat(e.target.value) || 0))}
+                onCommit={props.onLoadSheddingCostChange}
               />
               <span className="sg-carbon-unit">/MWh</span>
             </div>
