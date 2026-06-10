@@ -449,3 +449,31 @@ def test_kpg193_matpower_block_parser():
     # two data rows must be present.
     nonblank = [r for r in rows if r.strip()]
     assert len(nonblank) == 2
+
+
+# ── Server-side API keys (RAGNAROK_SECRET_*) ──────────────────────────────────
+
+
+def test_server_secrets_from_env(monkeypatch) -> None:
+    from backend.app.routers import importers as imp
+
+    monkeypatch.setenv("RAGNAROK_SECRET_EIA_KEY", "server-eia")
+    monkeypatch.setenv("RAGNAROK_SECRET_ENTSOE_KEY", "  server-entsoe  ")
+    monkeypatch.setenv("RAGNAROK_SECRET_BLANK", "   ")  # blank → ignored
+    secrets = imp._server_secrets()
+    assert secrets["eia_key"] == "server-eia"
+    assert secrets["entsoe_key"] == "server-entsoe"  # trimmed
+    assert "blank" not in secrets
+
+
+def test_sources_lists_server_secret_names_not_values(monkeypatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from backend.app.main import app
+
+    monkeypatch.setenv("RAGNAROK_SECRET_EIA_KEY", "super-secret-value")
+    resp = TestClient(app).get("/api/import/sources")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "eia_key" in body["serverSecrets"]  # names exposed…
+    assert "super-secret-value" not in resp.text  # …values never

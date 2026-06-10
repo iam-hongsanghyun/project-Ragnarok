@@ -18,6 +18,7 @@ second network call.
 """
 from __future__ import annotations
 
+import os
 import uuid
 from typing import Any
 
@@ -38,6 +39,21 @@ from ..importers.http import AsyncClientWrapper
 
 
 router = APIRouter(prefix="/api/import", tags=["import"])
+
+# Server-side API keys: any env var named ``RAGNAROK_SECRET_<NAME>`` provides
+# the importer secret ``<name>`` (lowercased) — e.g. ``RAGNAROK_SECRET_EIA_KEY``
+# → ``eia_key``. Set them in ``backend/.env`` (gitignored, never pushed). A key
+# the browser sends (BYOK) overrides the server's for that request only.
+_SERVER_SECRET_PREFIX = "RAGNAROK_SECRET_"
+
+
+def _server_secrets() -> dict[str, str]:
+    """Importer secrets provided by the server environment (gitignored .env)."""
+    out: dict[str, str] = {}
+    for key, value in os.environ.items():
+        if key.startswith(_SERVER_SECRET_PREFIX) and value.strip():
+            out[key[len(_SERVER_SECRET_PREFIX):].lower()] = value.strip()
+    return out
 
 
 class ImportRunRequest(BaseModel):
@@ -61,8 +77,13 @@ def list_databases() -> dict[str, Any]:
 @router.get("/sources")
 def list_sources() -> dict[str, Any]:
     """Datasets grouped by source for the Country → Database → Datasets tree,
-    each with its ``common_filters`` (settings shared by ≥2 of its datasets)."""
-    return {"sources": available_sources()}
+    each with its ``common_filters`` (settings shared by ≥2 of its datasets).
+
+    ``serverSecrets`` lists the secret NAMES the backend already provides from
+    its environment (values never leave the server) so the UI can mark those
+    API-key requirements as satisfied without the user typing anything.
+    """
+    return {"sources": available_sources(), "serverSecrets": sorted(_server_secrets())}
 
 
 def _resolve_dataset_order(requested: list[str]) -> list[str]:
@@ -159,9 +180,13 @@ async def run_import(payload: ImportRunRequest) -> dict[str, Any]:
         plant_bus_snap_km=float(opts_dict.get("plant_bus_snap_km", 25.0)),
     )
 
-    http = AsyncClientWrapper(secrets=list(payload.secrets.values()))
+    # Server-held keys (gitignored .env) under the browser's BYOK keys — a key
+    # the user typed wins for their request; otherwise the server's is used, so
+    # datasets work with no key in the browser at all.
+    secrets = {**_server_secrets(), **{k: v for k, v in payload.secrets.items() if str(v).strip()}}
+    http = AsyncClientWrapper(secrets=list(secrets.values()))
     ctx = ImportContext(
-        secrets=dict(payload.secrets), http=http, request_id=str(uuid.uuid4())[:8],
+        secrets=secrets, http=http, request_id=str(uuid.uuid4())[:8],
     )
     fragments = []
     previews = []
