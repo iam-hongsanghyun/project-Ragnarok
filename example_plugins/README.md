@@ -8,7 +8,7 @@ using the prebuilt archives in [`zips/`](./zips):
 | Example | Kind | What it shows |
 |---|---|---|
 | [`dashboard-importer/`](./dashboard-importer) | **backend** (server-side) | Builds a PyPSA model from a dashboard workbook + GUI settings, **entirely in the Ragnarok backend** (imports the bundled PyPSA source). The model is written straight into the session — it never enters the browser. Demonstrates `transform`. |
-| [`ragnarok-region-analyzer/`](./ragnarok-region-analyzer) | frontend (browser) | Aggregates a solved run by region/carrier and charts it. Read-only analytics. |
+| [`ragnarok-region-analyzer/`](./ragnarok-region-analyzer) | **backend** (server-side) | Aggregates a **stored run** by region/carrier (read straight from the backend run store — works on "View result" runs whose series never reach the browser) and charts it, including an inter-region flow map. Demonstrates `analyze` + `options`. |
 | [`ragnarok-scenario-analytics/`](./ragnarok-scenario-analytics) | frontend (browser) | System-level analytics for a solved run (mix, SMP, CO₂, LDC). |
 
 ## The plugin contract (both kinds)

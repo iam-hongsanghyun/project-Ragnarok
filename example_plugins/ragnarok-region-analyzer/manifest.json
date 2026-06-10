@@ -1,15 +1,11 @@
 {
   "id": "ragnarok-region-analyzer",
   "name": "Region & Carrier Analyzer",
-  "version": "6.0.0",
-  "sdkVersion": "2",
-  "entry": "index.js",
-  "description": "Aggregates the solved nodal output to REGIONAL output and charts it: a system carrier-mix donut, generation-by-region stacked bar, a per-region carrier-mix donut + hourly stacked-area (pick the region), and an inter-region net-flow bar — plus the underlying tables. 100% frontend, no backend.",
+  "version": "7.0.0",
+  "kind": "backend",
+  "description": "Aggregates a solved run to REGIONAL output and charts it: a system carrier-mix donut, generation-by-region stacked bar, a per-region carrier-mix donut + hourly stacked-area (pick the region), an inter-region net-flow bar and a flow MAP — plus the underlying tables. Runs ENTIRELY in the Ragnarok backend and reads the run from the server-side run store, so it works on any STORED run (View result) without shipping time-series to the browser. Blank run = the most recent stored run.",
   "capabilities": [
     "analytics-pack"
-  ],
-  "permissions": [
-    "results.read"
   ],
   "panel": {
     "inputLayout": "2x1"
@@ -17,7 +13,27 @@
   "config": {
     "sec_left": {
       "type": "group",
-      "label": "Region aggregation"
+      "label": "Run & aggregation"
+    },
+    "run_name": {
+      "type": "select",
+      "label": "Stored run",
+      "default": "",
+      "clearable": true,
+      "emptyLabel": "— latest stored run —",
+      "description": "Which backend-stored run to analyze. Blank = the most recent one. Runs are stored when 'Store run in backend' is on.",
+      "optionsFrom": {
+        "source": "plugin",
+        "name": "/runs",
+        "column": "name",
+        "labelColumn": "display"
+      },
+      "options": [
+        {
+          "value": "",
+          "label": "— latest stored run —"
+        }
+      ]
     },
     "aggregate_by_region": {
       "type": "boolean",
@@ -63,68 +79,150 @@
       "default": true,
       "description": "Split generation by carrier (solar, wind, coal, …) for the mix charts. Off = total only."
     },
+    "energy_unit": {
+      "type": "select",
+      "label": "Energy unit",
+      "default": "GWh",
+      "options": [
+        {
+          "value": "MWh",
+          "label": "MWh"
+        },
+        {
+          "value": "GWh",
+          "label": "GWh"
+        },
+        {
+          "value": "TWh",
+          "label": "TWh"
+        }
+      ],
+      "description": "Unit for energy totals (charts + tables)."
+    },
     "chart_region_province": {
       "type": "select",
       "label": "Chart region",
       "default": "",
+      "clearable": true,
+      "emptyLabel": "— top region —",
       "description": "Region for the per-region mix (donut) + hourly (stacked area) charts. Blank = highest-generation region.",
-      "visibleWhen": { "field": "region_column", "equals": "province" },
-      "optionsFrom": { "source": "config", "field": "province_mapping", "column": "short" },
-      "options": [ { "value": "", "label": "— top region —" } ]
+      "visibleWhen": {
+        "field": "region_column",
+        "equals": "province"
+      },
+      "optionsFrom": {
+        "source": "config",
+        "field": "province_mapping",
+        "column": "short"
+      },
+      "options": [
+        {
+          "value": "",
+          "label": "— top region —"
+        }
+      ]
     },
     "chart_region_group1": {
       "type": "select",
       "label": "Chart region",
       "default": "",
+      "clearable": true,
+      "emptyLabel": "— top region —",
       "description": "Region for the per-region mix (donut) + hourly (stacked area) charts. Blank = highest-generation region.",
-      "visibleWhen": { "field": "region_column", "equals": "group1" },
-      "optionsFrom": { "source": "config", "field": "province_mapping", "column": "group1" },
-      "options": [ { "value": "", "label": "— top region —" } ]
+      "visibleWhen": {
+        "field": "region_column",
+        "equals": "group1"
+      },
+      "optionsFrom": {
+        "source": "config",
+        "field": "province_mapping",
+        "column": "group1"
+      },
+      "options": [
+        {
+          "value": "",
+          "label": "— top region —"
+        }
+      ]
     },
     "chart_region_group2": {
       "type": "select",
       "label": "Chart region",
       "default": "",
+      "clearable": true,
+      "emptyLabel": "— top region —",
       "description": "Region for the per-region mix (donut) + hourly (stacked area) charts. Blank = highest-generation region.",
-      "visibleWhen": { "field": "region_column", "equals": "group2" },
-      "optionsFrom": { "source": "config", "field": "province_mapping", "column": "group2" },
-      "options": [ { "value": "", "label": "— top region —" } ]
+      "visibleWhen": {
+        "field": "region_column",
+        "equals": "group2"
+      },
+      "optionsFrom": {
+        "source": "config",
+        "field": "province_mapping",
+        "column": "group2"
+      },
+      "options": [
+        {
+          "value": "",
+          "label": "— top region —"
+        }
+      ]
     },
     "chart_region_group3": {
       "type": "select",
       "label": "Chart region",
       "default": "",
+      "clearable": true,
+      "emptyLabel": "— top region —",
       "description": "Region for the per-region mix (donut) + hourly (stacked area) charts. Blank = highest-generation region.",
-      "visibleWhen": { "field": "region_column", "equals": "group3" },
-      "optionsFrom": { "source": "config", "field": "province_mapping", "column": "group3" },
-      "options": [ { "value": "", "label": "— top region —" } ]
+      "visibleWhen": {
+        "field": "region_column",
+        "equals": "group3"
+      },
+      "optionsFrom": {
+        "source": "config",
+        "field": "province_mapping",
+        "column": "group3"
+      },
+      "options": [
+        {
+          "value": "",
+          "label": "— top region —"
+        }
+      ]
     },
     "chart_region_singlenode": {
       "type": "select",
       "label": "Chart region",
       "default": "",
+      "clearable": true,
+      "emptyLabel": "— top region —",
       "description": "Region for the per-region mix (donut) + hourly (stacked area) charts. Blank = highest-generation region.",
-      "visibleWhen": { "field": "region_column", "equals": "singlenode" },
-      "optionsFrom": { "source": "config", "field": "province_mapping", "column": "singlenode" },
-      "options": [ { "value": "", "label": "— top region —" } ]
+      "visibleWhen": {
+        "field": "region_column",
+        "equals": "singlenode"
+      },
+      "optionsFrom": {
+        "source": "config",
+        "field": "province_mapping",
+        "column": "singlenode"
+      },
+      "options": [
+        {
+          "value": "",
+          "label": "— top region —"
+        }
+      ]
     },
     "max_hours": {
       "type": "number",
-      "label": "Hourly chart length (hours)",
+      "label": "Hourly chart length (snapshots)",
       "default": 168,
       "description": "How many snapshots to plot in the hourly stacked-area chart (from the start). Raise for a longer window; the full year can be heavy."
     },
-    "download_aggregated": {
-      "type": "action",
-      "label": "Download aggregated (CSV)",
-      "hook": "downloadAggregated",
-      "variant": "secondary",
-      "description": "Download the aggregated tables (generation by region, carrier totals, inter-region flow) as one CSV. Run the model and open the Output tab first.",
-      "successMessage": "Aggregated CSV downloaded."
-    },
     "sec_right": {
       "type": "group",
-      "label": "Region aggregation"
+      "label": "Region mapping"
     },
     "province_mapping": {
       "type": "table",

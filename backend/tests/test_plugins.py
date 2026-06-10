@@ -296,3 +296,119 @@ def test_install_example_dashboard_importer(_plugins_dir) -> None:
 
     # An unknown option-set returns [] cleanly (the dropdown shows static options).
     assert plugins.run_options("dashboard-importer", "/nope", {}) == []
+
+
+_EXAMPLES = Path(__file__).resolve().parents[2] / "example_plugins"
+
+
+def _install_example(zip_name: str) -> dict:
+    zip_path = _EXAMPLES / "zips" / zip_name
+    if not zip_path.exists():
+        pytest.skip(f"example {zip_name} not built")
+    return asyncio.run(plugins_router.install_plugin(_upload(zip_path.read_bytes(), zip_name)))
+
+
+def test_region_analyzer_analyzes_stored_run(_plugins_dir, tmp_path, monkeypatch) -> None:
+    """End-to-end: store a tiny solved run, then the backend region analyzer
+    aggregates it into chart specs — including the flow MAP with located nodes
+    and a net-flow edge. Numbers are checked against hand computation:
+    energy = sum(max(p, 0)) * weight, net flow = signed sum of p0 * weight."""
+    from backend.app import run_store
+
+    monkeypatch.setattr(run_store, "RUNS_DIR", tmp_path / "runs")
+
+    manifest = _install_example("ragnarok-region-analyzer.zip")
+    assert manifest["id"] == "ragnarok-region-analyzer"
+    assert manifest["hooks"]["analyze"] is True and manifest["hooks"]["options"] is True
+
+    # No stored runs yet → actionable note, never an exception.
+    note = plugins.run_analyze("ragnarok-region-analyzer", {}, {})
+    assert "note" in note and "stored" in note["note"].lower()
+
+    # Two generators on buses in different provinces (embedded KR lookup:
+    # bus 9 → 서울특별시, bus 194 → 제주특별자치도) + one inter-region line.
+    model = {
+        "generators": [
+            {"name": "g1", "bus": "9", "carrier": "coal", "p_nom": 500},
+            {"name": "g2", "bus": "194", "carrier": "solar", "p_nom": 300},
+        ],
+        "lines": [{"name": "l1", "bus0": "9", "bus1": "194", "s_nom": 100}],
+    }
+    result = {
+        "outputs": {
+            "static": {},
+            "series": {
+                "generators-p": [
+                    {"snapshot": "2024-01-01T00:00:00", "g1": 100.0, "g2": 50.0},
+                    {"snapshot": "2024-01-01T01:00:00", "g1": 120.0, "g2": 60.0},
+                ],
+                "lines-p0": [
+                    {"snapshot": "2024-01-01T00:00:00", "l1": 30.0},
+                    {"snapshot": "2024-01-01T01:00:00", "l1": -10.0},
+                ],
+            },
+        },
+    }
+    meta = run_store.store_run(model, {}, {"snapshotWeight": 2, "filename": "tiny.xlsx"}, result)
+    assert meta is not None
+
+    out = plugins.run_analyze("ragnarok-region-analyzer", {}, {})
+    assert "note" not in out, out.get("note")
+    # Energy: g1 (100+120)*2 = 440 MWh, g2 (50+60)*2 = 220 MWh → 0.66 GWh total.
+    assert out["Total generation (GWh)"] == pytest.approx(0.66)
+
+    fmap = out["Inter-region flow map"]
+    assert fmap["kind"] == "map"
+    assert {n["id"] for n in fmap["nodes"]} == {"서울특별시", "제주특별자치도"}
+    mixes = {n["id"]: {s["label"]: s["value"] for s in n["mix"]} for n in fmap["nodes"]}
+    assert mixes["서울특별시"] == {"coal": pytest.approx(0.44)}
+    assert mixes["제주특별자치도"] == {"solar": pytest.approx(0.22)}
+    # Net flow (30 - 10) * 2 = 40 MWh = 0.04 GWh, direction 서울 → 제주.
+    assert len(fmap["edges"]) == 1
+    edge = fmap["edges"][0]
+    assert (edge["from"], edge["to"]) == ("서울특별시", "제주특별자치도")
+    assert edge["value"] == pytest.approx(0.04)
+
+    donut = out["Carrier mix (system)"]
+    assert donut["kind"] == "donut"
+    assert {s["label"]: s["value"] for s in donut["slices"]} == {
+        "coal": pytest.approx(0.44),
+        "solar": pytest.approx(0.22),
+    }
+
+    # Capacity table uses the input p_nom when no p_nom_opt was solved.
+    cap = {r["region"]: r["Total_MW"] for r in out["Capacity by region — table (MW)"]}
+    assert cap == {"서울특별시": 500, "제주특별자치도": 300}
+
+    # The /runs dropdown lists the stored run, newest first.
+    rows = plugins.run_options("ragnarok-region-analyzer", "/runs", {})
+    assert rows and rows[0]["name"] == meta["name"]
+
+
+def test_dashboard_capacity_spans_from_earliest_build_year(_plugins_dir, tmp_path) -> None:
+    """The capacity-by-year output must cover the whole fleet history
+    (build_year ≤ Y < close_year), not start at the GUI base year — with
+    base_year == target_year it previously collapsed to a single year."""
+    pd = pytest.importorskip("pandas")
+
+    _install_example("dashboard-importer.zip")
+    plugin = plugins.get("dashboard-importer")
+    assert plugin is not None
+    engine = plugin.module._load_engine()
+
+    xlsx = tmp_path / "fleet.xlsx"
+    pd.DataFrame(
+        [
+            {"name": "old", "carrier": "coal", "p_nom": 100, "build_year": 2025, "close_year": 2040},
+            {"name": "always", "carrier": "hydro", "p_nom": 50},
+        ]
+    ).to_excel(xlsx, sheet_name="generators", index=False)
+
+    rows = engine._capacity_by_carrier_year(str(xlsx), 2038)
+    assert rows is not None
+    years = [r["year"] for r in rows]
+    assert years[0] == 2025 and years[-1] == 2040  # earliest build → latest close
+    by_year = {r["year"]: r["total"] for r in rows}
+    assert by_year[2025] == 150  # both active
+    assert by_year[2039] == 150  # close_year 2040 exclusive: still active in 2039
+    assert by_year[2040] == 50  # coal closed (Y < close_year), hydro never closes
