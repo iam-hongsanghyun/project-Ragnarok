@@ -67,6 +67,9 @@ backend/data/plugin_files/
 backend/data/secrets.json
 /data
 
+# Local scratch output (sample/exported workbooks — not source)
+/output/
+
 # Logs
 *.log
 
