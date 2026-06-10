@@ -1,17 +1,19 @@
 """Persistent server-side store for completed optimisation runs.
 
 Every successful solve is persisted automatically: the solve worker hands the
-finished bundle to :func:`store_run`, which writes two files to
+finished bundle to :func:`store_run`, which writes ONE SQLite file to
 ``backend/data/runs``:
 
-* ``<name>.json`` — the full bundle (model + scenario + options + result).
-  This is the canonical form the frontend reopens via ``GET /api/runs/{name}``.
-* ``<name>.meta.json`` — a lightweight sidecar listed in the History tab so
-  the browser never has to download a full-year result just to enumerate runs.
+* ``<name>.db`` — the meta link (History sidecar), the input-model SNAPSHOT
+  (a run must stay reproducible after the live session is edited), and the
+  result. Analytics (:func:`get_run_analytics`), model pages
+  (:func:`run_model_sheet_page`) and chart windows (:func:`run_series_window`)
+  are all served by SQL queries from it, so nothing is loaded whole.
 
-Storing server-side sidesteps the browser-tab out-of-memory failure that a
-full-year (8784 h) xlsx export hits client-side: the heavy bytes stay on disk
-and Excel is produced on demand by :func:`run_to_xlsx`.
+The bundle JSON and the Excel workbook are DERIVED on demand — only when the
+user explicitly exports (:func:`run_to_xlsx` / :func:`run_to_package`) — and
+never stored. Runs saved by older versions (JSON bundle + meta sidecar +
+analytics/Parquet split) migrate into their ``.db`` on first access.
 
 Every public function is defensive — a storage failure is logged and never
 propagates into the solve (a failed store must not fail an otherwise good run).
@@ -21,6 +23,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -67,14 +70,10 @@ def _filename_label_stem(filename: str) -> str:
     return "" if stem.lower() in _DEFAULT_FILENAME_STEMS else stem
 
 
-_SHEET_SANITISE = re.compile(r"[^A-Za-z0-9._\-]+")
 
 
-def _safe_sheet_filename(sheet: str) -> str:
-    """Filesystem-safe stem for a series sheet (e.g. ``generators-p``)."""
-    return _SHEET_SANITISE.sub("_", sheet).strip("_") or "sheet"
-
-
+# Legacy (pre-SQLite) artefact paths — only referenced by the migrate-on-read
+# cleanup in `_legacy_run_paths`; new runs never create these.
 def _analytics_path(name: str) -> Path:
     return RUNS_DIR / f"{name}.analytics.json"
 
@@ -364,35 +363,136 @@ def _light_analytics(bundle: dict[str, Any]) -> dict[str, Any]:
     return analytics
 
 
-def _write_results_split(name: str, bundle: dict[str, Any]) -> None:
-    """Write the granular artefacts the thin client reads instead of the bundle.
+# ── Per-run SQLite storage (one <name>.db per run; zero scattered files) ──────
+# A run is ONE SQLite file: the meta link, the input-model SNAPSHOT (a run must
+# stay reproducible after the live session is edited), and the result. The
+# analytics view and charts are served by SQL queries from it; the bundle JSON
+# and Excel are DERIVED on demand (export), never stored. Legacy JSON/Parquet
+# runs migrate into their .db on first access.
 
-    The full ``<name>.json`` bundle stays the lossless source of truth, but
-    "View Result" used to download it whole — model + every output time-series —
-    which froze the tab. So we additionally write:
 
-    * ``<name>.analytics.json`` — the bundle minus the heavy input ``model`` and
-      minus the output ``result.outputs.series`` (replaced by a ``seriesSheets``
-      name list). Small; the analytics view loads this first and renders at once.
-    * ``<name>.series/<sheet>.parquet`` — one Parquet per output time-series
-      sheet, read back windowed + downsampled via :func:`run_series_window`.
+def _db_path(name: str) -> Path:
+    return RUNS_DIR / f"{name}.db"
+
+
+def _connect(name: str) -> sqlite3.Connection:
+    RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(_db_path(name)))
+    conn.execute("PRAGMA journal_mode=WAL")
+    return conn
+
+
+def _kv_get(conn: Any, key: str) -> Any | None:
+    try:
+        row = conn.execute("SELECT v FROM _kv WHERE k = ?", (key,)).fetchone()
+    except Exception:  # noqa: BLE001 — missing table on a corrupt/partial db
+        return None
+    return json.loads(row[0]) if row else None
+
+
+def _kv_set(conn: Any, key: str, value: Any) -> None:
+    conn.execute(
+        "INSERT INTO _kv(k, v) VALUES(?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v",
+        (key, json.dumps(value, ensure_ascii=False, default=str)),
+    )
+
+
+def _insert_rows(conn: Any, table: str, rows: list[dict[str, Any]]) -> None:
+    conn.execute(f"CREATE TABLE {table} (__row INTEGER PRIMARY KEY AUTOINCREMENT, d TEXT)")
+    conn.executemany(
+        f"INSERT INTO {table}(d) VALUES(?)",
+        [(json.dumps(r, ensure_ascii=False, default=str),) for r in rows if isinstance(r, dict)],
+    )
+
+
+def _build_run_db(name: str, bundle: dict[str, Any], meta: dict[str, Any]) -> None:
+    """Write the run as one ``<name>.db``: head + model tables + result tables.
+
+    Layout: ``_kv`` holds ``meta`` (the History sidecar), ``head`` (bundle minus
+    model/series), ``analytics`` (the light analytics bundle), and two name→table
+    maps; ``m_<i>`` tables hold the input-model snapshot one JSON row per sheet
+    row; ``o_<i>`` tables hold each output time-series one JSON row per snapshot.
     """
-    result = bundle.get("result")
-    if not isinstance(result, dict):
+    result = bundle.get("result") if isinstance(bundle.get("result"), dict) else {}
+    outputs = result.get("outputs") if isinstance(result.get("outputs"), dict) else {}
+    series = outputs.get("series") if isinstance(outputs.get("series"), dict) else {}
+    model = bundle.get("model") if isinstance(bundle.get("model"), dict) else {}
+
+    head = {k: v for k, v in bundle.items() if k not in ("model", "result")}
+    light_result = {k: v for k, v in result.items() if k != "outputs"}
+    light_result["outputs"] = {
+        **{k: v for k, v in outputs.items() if k != "series"},
+        "seriesSheets": sorted(str(s) for s in series),
+    }
+
+    _db_path(name).unlink(missing_ok=True)
+    with _connect(name) as conn:
+        conn.execute("CREATE TABLE _kv (k TEXT PRIMARY KEY, v TEXT)")
+        model_tables: dict[str, str] = {}
+        for i, (sheet, rows) in enumerate(model.items()):
+            if isinstance(rows, list):
+                tbl = f"m_{i}"
+                _insert_rows(conn, tbl, rows)
+                model_tables[str(sheet)] = tbl
+        series_tables: dict[str, str] = {}
+        for i, (sheet, rows) in enumerate(series.items()):
+            if isinstance(rows, list):
+                tbl = f"o_{i}"
+                _insert_rows(conn, tbl, rows)
+                series_tables[str(sheet)] = tbl
+        _kv_set(conn, "head", head)
+        _kv_set(conn, "result_light", light_result)
+        _kv_set(conn, "model_tables", model_tables)
+        _kv_set(conn, "series_tables", series_tables)
+        _kv_set(conn, "analytics", _light_analytics(bundle))
+        _kv_set(conn, "meta", meta)
+        conn.commit()
+
+
+def _read_table(conn: Any, table: str) -> list[dict[str, Any]]:
+    return [json.loads(r[0]) for r in conn.execute(f"SELECT d FROM {table} ORDER BY __row")]
+
+
+def _legacy_run_paths(name: str) -> list[Path]:
+    return [
+        RUNS_DIR / f"{name}.json",
+        RUNS_DIR / f"{name}.meta.json",
+        _analytics_path(name),
+        RUNS_DIR / f"{name}.xlsx",
+        _series_dir(name),
+    ]
+
+
+def _ensure_run_migrated(name: str) -> None:
+    """One-time migration of a legacy JSON/Parquet run → ``<name>.db``.
+
+    Build-before-delete: the db is committed first, so a crash mid-migration
+    leaves the legacy files intact for a retry.
+    """
+    if not _is_safe_name(name) or _db_path(name).exists():
         return
-    outputs = result.get("outputs")
-    series = outputs.get("series") if isinstance(outputs, dict) else None
+    legacy = RUNS_DIR / f"{name}.json"
+    if not legacy.exists():
+        return
+    try:
+        bundle = json.loads(legacy.read_text(encoding="utf-8"))
+        meta_path = RUNS_DIR / f"{name}.meta.json"
+        meta = (
+            json.loads(meta_path.read_text(encoding="utf-8"))
+            if meta_path.exists()
+            else build_run_meta(name, bundle, legacy.stat().st_size)
+        )
+        _build_run_db(name, bundle, meta)
+        import shutil
 
-    _analytics_path(name).write_text(json.dumps(_light_analytics(bundle)), encoding="utf-8")
-
-    if isinstance(series, dict) and series:
-        sdir = _series_dir(name)
-        sdir.mkdir(parents=True, exist_ok=True)
-        for sheet, rows in series.items():
-            if isinstance(rows, list) and rows:
-                pd.DataFrame(rows).to_parquet(
-                    sdir / f"{_safe_sheet_filename(str(sheet))}.parquet", index=False
-                )
+        for path in _legacy_run_paths(name):
+            if path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
+            else:
+                path.unlink(missing_ok=True)
+        logger.info("Migrated legacy run %s → %s.db", name, name)
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to migrate legacy run %s", name)
 
 
 def store_run(
@@ -437,24 +537,17 @@ def store_run(
             "result": result,
         }
 
-        bundle_path = RUNS_DIR / f"{name}.json"
-        bundle_path.write_text(json.dumps(bundle), encoding="utf-8")
-        size_bytes = bundle_path.stat().st_size
-
-        meta = build_run_meta(name, bundle, size_bytes)
-        (RUNS_DIR / f"{name}.meta.json").write_text(json.dumps(meta), encoding="utf-8")
-
-        # Granular artefacts for the thin client (analytics.json + series parquet).
-        # Non-fatal: the canonical bundle above already holds everything.
-        try:
-            _write_results_split(name, bundle)
-        except Exception:  # noqa: BLE001
-            logger.exception("Failed to write results split for run %s", name)
-
-        # NO xlsx is written here. Excel is a derived export artefact, built ONLY
-        # when the user explicitly downloads/exports it (GET /api/runs/{name}/xlsx
-        # and /package both build on demand from this bundle). Ragnarok keeps SQL/
-        # JSON as the source of truth and never auto-creates workbooks.
+        # ONE SQLite file per run — the meta link + the input-model snapshot +
+        # the result, queryable (paged sheets, windowed series, analytics) so
+        # nothing is ever loaded whole. The bundle JSON and Excel are DERIVED on
+        # demand (export only); no other artefact is written.
+        meta = build_run_meta(name, bundle, 0)
+        _build_run_db(name, bundle, meta)
+        size_bytes = _db_path(name).stat().st_size
+        meta["sizeBytes"] = size_bytes
+        with _connect(name) as conn:
+            _kv_set(conn, "meta", meta)
+            conn.commit()
 
         logger.info("Stored run %s (%d bytes)", name, size_bytes)
         return meta
@@ -473,15 +566,25 @@ def list_runs() -> list[dict[str, Any]]:
     try:
         if not RUNS_DIR.exists():
             return runs
+        seen: set[str] = set()
+        for path in RUNS_DIR.glob("*.db"):
+            try:
+                with _connect(path.stem) as conn:
+                    meta = _kv_get(conn, "meta")
+                if isinstance(meta, dict) and meta.get("name"):
+                    meta["xlsxReady"] = True  # the workbook is always derivable
+                    runs.append(meta)
+                    seen.add(str(meta["name"]))
+            except Exception:  # noqa: BLE001
+                logger.warning("Skipping unreadable run db: %s", path.name)
+        # Legacy runs not yet migrated (they upgrade to .db on first access).
         for path in RUNS_DIR.glob("*.meta.json"):
             try:
                 meta = json.loads(path.read_text(encoding="utf-8"))
-                # Excel is never pre-built — it's derived on demand from the
-                # canonical bundle when the user downloads/exports. So any stored
-                # run can always produce a workbook; flag it ready unconditionally.
                 name = str(meta.get("name", ""))
-                meta["xlsxReady"] = bool(name)
-                runs.append(meta)
+                if name and name not in seen:
+                    meta["xlsxReady"] = bool(name)
+                    runs.append(meta)
             except Exception:  # noqa: BLE001
                 logger.warning("Skipping unreadable run meta: %s", path.name)
     except Exception:  # noqa: BLE001
@@ -492,15 +595,32 @@ def list_runs() -> list[dict[str, Any]]:
 
 
 def get_run(name: str) -> dict[str, Any] | None:
-    """Return the full bundle for ``name``, or ``None`` if missing/unsafe."""
+    """Reassemble the FULL bundle for ``name`` from its db (export/rerun path).
+
+    This loads everything (model snapshot + all output series) — use the
+    granular readers (:func:`get_run_analytics`, :func:`run_series_window`,
+    :func:`run_model_sheet_page`) for anything interactive.
+    ``None`` if missing/unsafe.
+    """
     if not _is_safe_name(name):
         logger.warning("Rejected unsafe run name: %r", name)
         return None
+    _ensure_run_migrated(name)
+    if not _db_path(name).exists():
+        return None
     try:
-        path = RUNS_DIR / f"{name}.json"
-        if not path.exists():
-            return None
-        return json.loads(path.read_text(encoding="utf-8"))
+        with _connect(name) as conn:
+            head = _kv_get(conn, "head") or {}
+            result = _kv_get(conn, "result_light") or {}
+            model_tables = _kv_get(conn, "model_tables") or {}
+            series_tables = _kv_get(conn, "series_tables") or {}
+            model = {sheet: _read_table(conn, tbl) for sheet, tbl in model_tables.items()}
+            series = {sheet: _read_table(conn, tbl) for sheet, tbl in series_tables.items()}
+        outputs = result.get("outputs") if isinstance(result.get("outputs"), dict) else {}
+        outputs = {k: v for k, v in outputs.items() if k != "seriesSheets"}
+        outputs["series"] = series
+        result["outputs"] = outputs
+        return {**head, "model": model, "result": result}
     except Exception:  # noqa: BLE001
         logger.exception("Failed to read backend run %s", name)
         return None
@@ -509,19 +629,22 @@ def get_run(name: str) -> dict[str, Any] | None:
 def get_run_analytics(name: str) -> dict[str, Any] | None:
     """Return the lightweight analytics bundle (no input model, no output series).
 
-    This is what "View Result" loads first — small enough to render instantly.
-    Falls back to deriving it from the full bundle for runs stored before the
-    results-split existed. ``None`` if the run is missing/unsafe.
+    This is what "View Result" loads first — one small ``_kv`` read from the
+    run's db, so it renders instantly. ``None`` if the run is missing/unsafe.
     """
     if not _is_safe_name(name):
         return None
-    path = _analytics_path(name)
-    if path.exists():
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except Exception:  # noqa: BLE001
-            logger.exception("Failed to read analytics for run %s", name)
-    # Fallback: derive on the fly from the canonical bundle (older runs).
+    _ensure_run_migrated(name)
+    if not _db_path(name).exists():
+        return None
+    try:
+        with _connect(name) as conn:
+            analytics = _kv_get(conn, "analytics")
+        if isinstance(analytics, dict):
+            return analytics
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to read analytics for run %s", name)
+    # Fallback: derive on the fly from the full bundle (corrupt analytics key).
     bundle = get_run(name)
     if bundle is None:
         return None
@@ -540,33 +663,49 @@ def run_series_window(
 ) -> dict[str, Any] | None:
     """Return a windowed, downsampled slice of a stored run's output series.
 
-    Reads the per-sheet Parquet written by :func:`_write_results_split`; for
-    older runs without it, falls back to the series embedded in the bundle.
+    A SQL window read from the run's db (``LIMIT/OFFSET`` over the per-snapshot
+    rows) — only the requested window is loaded, then reduced server-side.
     ``None`` if the run/sheet is absent.
     """
     if not _is_safe_name(name):
         return None
+    _ensure_run_migrated(name)
+    if not _db_path(name).exists():
+        return None
     mp = max_points if max_points is not None else 800
+    if agg not in timeseries.VALID_AGG:
+        agg = "mean"
 
-    path = _series_dir(name) / f"{_safe_sheet_filename(sheet)}.parquet"
-    if path.exists():
-        df = _read_series_with_columns(path, columns)
-        index_col = timeseries.series_index_col([str(c) for c in df.columns])
-    else:
-        bundle = get_run(name)
-        series = (((bundle or {}).get("result") or {}).get("outputs") or {}).get("series")
-        rows = series.get(sheet) if isinstance(series, dict) else None
-        if not isinstance(rows, list) or not rows:
+    with _connect(name) as conn:
+        tbl = (_kv_get(conn, "series_tables") or {}).get(sheet)
+        if tbl is None:
             return None
-        df = pd.DataFrame(rows)
-        index_col = timeseries.series_index_col([str(c) for c in df.columns])
-        if columns:
-            keep = [index_col] + [c for c in columns if c in df.columns and c != index_col]
-            df = df[[c for c in keep if c in df.columns]]
-    window = timeseries.slice_and_reduce(
-        df, start=start, end=end, max_points=mp, agg=agg, index_col=index_col
-    )
-    return {"name": sheet, **window}
+        total = conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
+        start = max(0, int(start))
+        end = total if end is None else min(total, int(end))
+        if end < start:
+            end = start
+        cur = conn.execute(f"SELECT d FROM {tbl} ORDER BY __row LIMIT ? OFFSET ?", (end - start, start))
+        win_rows = [json.loads(r[0]) for r in cur.fetchall()]
+
+    all_columns = list(win_rows[0].keys()) if win_rows else []
+    index_col = timeseries.series_index_col([str(c) for c in all_columns])
+    if columns:
+        keep = ([index_col] if index_col in all_columns else []) + [
+            c for c in columns if c in all_columns and c != index_col
+        ]
+        win_rows = [{k: row.get(k) for k in keep} for row in win_rows]
+    reduced = timeseries.downsample(pd.DataFrame(win_rows), max(1, int(mp)), agg, index_col)  # type: ignore[arg-type]
+    return {
+        "name": sheet,
+        "indexCol": index_col,
+        "total": total,
+        "window": {"start": start, "end": end},
+        "returned": len(reduced),
+        "agg": agg,
+        "columns": [str(c) for c in reduced.columns],
+        "rows": timeseries.df_to_records(reduced),
+    }
 
 
 def run_model_sheet_page(
@@ -574,22 +713,27 @@ def run_model_sheet_page(
 ) -> dict[str, Any] | None:
     """Return one page of a stored run's INPUT model sheet (for re-edit/import).
 
-    Reads from the canonical bundle's ``model``. ``None`` if missing/unsafe.
+    A ``LIMIT/OFFSET`` page over the model-snapshot table in the run's db —
+    the whole sheet is never loaded. ``None`` if missing/unsafe.
     """
     if not _is_safe_name(name):
         return None
-    bundle = get_run(name)
-    model = bundle.get("model") if isinstance(bundle, dict) else None
-    rows = model.get(sheet) if isinstance(model, dict) else None
-    if not isinstance(rows, list):
+    _ensure_run_migrated(name)
+    if not _db_path(name).exists():
         return None
     offset = max(0, int(offset))
     limit = max(0, int(limit))
-    page = rows[offset : offset + limit]
+    with _connect(name) as conn:
+        tbl = (_kv_get(conn, "model_tables") or {}).get(sheet)
+        if tbl is None:
+            return None
+        total = conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
+        cur = conn.execute(f"SELECT d FROM {tbl} ORDER BY __row LIMIT ? OFFSET ?", (limit, offset))
+        page = [json.loads(r[0]) for r in cur.fetchall()]
     columns = list(page[0].keys()) if page and isinstance(page[0], dict) else []
     return {
         "name": sheet,
-        "total": len(rows),
+        "total": total,
         "offset": offset,
         "limit": limit,
         "columns": columns,
@@ -597,21 +741,8 @@ def run_model_sheet_page(
     }
 
 
-def _read_series_with_columns(path: Path, columns: list[str] | None) -> pd.DataFrame:
-    """Read a series parquet, pushing down a column subset (index col kept)."""
-    if not columns:
-        return pd.read_parquet(path)
-    import pyarrow.parquet as pq
-
-    available = [str(c) for c in pq.read_schema(path).names]
-    index_col = timeseries.series_index_col(available)
-    wanted = [c for c in columns if c in available and c != index_col]
-    read_cols = ([index_col] + wanted) if index_col in available else wanted
-    return pd.read_parquet(path, columns=read_cols or None)
-
-
 def delete_run(name: str) -> bool:
-    """Delete the bundle, meta sidecar, analytics, series dir and xlsx for ``name``.
+    """Delete the run's db (and any legacy artefacts) for ``name``.
 
     Returns True if at least one file was removed, False otherwise (including
     an unsafe name or a non-existent run).
@@ -621,17 +752,20 @@ def delete_run(name: str) -> bool:
         return False
     removed = False
     try:
-        for suffix in (".json", ".meta.json", ".xlsx", ".analytics.json"):
-            path = RUNS_DIR / f"{name}{suffix}"
-            if path.exists():
+        import shutil
+
+        for path in (_db_path(name), *_legacy_run_paths(name)):
+            if path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
+                removed = True
+            elif path.exists():
                 path.unlink()
                 removed = True
-        sdir = _series_dir(name)
-        if sdir.exists():
-            import shutil
-
-            shutil.rmtree(sdir, ignore_errors=True)
-            removed = True
+        # WAL sidecars left behind by an open connection.
+        for suffix in ("-wal", "-shm"):
+            side = RUNS_DIR / f"{name}.db{suffix}"
+            if side.exists():
+                side.unlink()
     except Exception:  # noqa: BLE001
         logger.exception("Failed to delete backend run %s", name)
         return removed
@@ -660,16 +794,8 @@ def run_to_xlsx(
     """Build the run's export workbook ON DEMAND from the canonical bundle.
 
     The ``include_*`` flags mirror the Export dialog's Metadata/Model/Result
-    checkboxes (see :func:`project_workbook.bundle_to_workbook`). A legacy
-    pre-built file is reused only for a FULL export. ``None`` if the run is
-    missing."""
-    if include_meta and include_model and include_result:
-        pre = xlsx_path(name)
-        if pre is not None:
-            try:
-                return pre.read_bytes()
-            except Exception:  # noqa: BLE001
-                logger.exception("Failed to read pre-built xlsx for %s", name)
+    checkboxes (see :func:`project_workbook.bundle_to_workbook`). ``None`` if
+    the run is missing."""
     bundle = get_run(name)
     if bundle is None:
         return None
@@ -688,16 +814,15 @@ def run_to_xlsx(
 
 
 def run_to_package(name: str) -> bytes | None:
-    """Return a Ragnarok Project ``.zip`` for ``name`` — ALL THREE files.
+    """Return a Ragnarok Project ``.zip`` for ``name`` — three DERIVED files.
 
-    Bundles the three on-disk artefacts so the export is complete:
+    Everything is derived on demand from the run's db (nothing is pre-built):
 
-    * ``<name>.json``       — the canonical bundle (lossless source of truth),
-    * ``<name>.meta.json``  — the lightweight meta sidecar (History/Comparison),
+    * ``<name>.json``       — the lossless bundle (model + scenario + result),
+    * ``<name>.meta.json``  — the lightweight meta (History/Comparison),
     * ``<name>.xlsx``       — the human-readable workbook.
 
-    ``None`` if the run does not exist. The xlsx is built on demand if its
-    pre-built file is somehow missing, so the package is always complete.
+    ``None`` if the run does not exist.
     """
     if not _is_safe_name(name):
         return None
@@ -705,8 +830,15 @@ def run_to_package(name: str) -> bytes | None:
     if bundle is None:
         return None
 
-    meta_path = RUNS_DIR / f"{name}.meta.json"
-    meta_bytes = meta_path.read_bytes() if meta_path.exists() else None
+    meta: dict[str, Any] | None = None
+    try:
+        with _connect(name) as conn:
+            meta = _kv_get(conn, "meta")
+    except Exception:  # noqa: BLE001
+        pass
+    if not isinstance(meta, dict):
+        meta = build_run_meta(name, bundle, 0)
+    meta_bytes = json.dumps(meta).encode("utf-8")
     xlsx_bytes = run_to_xlsx(name)
 
     import zipfile

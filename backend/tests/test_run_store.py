@@ -261,32 +261,64 @@ def test_run_series_window_downsamples(_runs_dir: Path) -> None:
     np.testing.assert_allclose([r["wind"] for r in win["rows"]], [0.5, 2.5, 4.5, 6.5])
 
 
-def test_get_run_analytics_fallback_when_split_missing(_runs_dir: Path) -> None:
+def test_run_is_one_sqlite_file_with_sql_served_reads(_runs_dir: Path) -> None:
+    # A stored run is exactly ONE <name>.db (zero scattered files); analytics,
+    # the model page, and the series window are all served by SQL queries.
     meta = run_store.store_run({"buses": [{"name": "n1"}]}, {}, {}, _sample_result())
     assert meta is not None
     name = meta["name"]
-    # Simulate an older run that predates the split: drop the granular artefacts.
-    run_store._analytics_path(name).unlink()
-    import shutil
+    assert run_store._db_path(name).exists()
+    assert not (run_store.RUNS_DIR / f"{name}.json").exists()
+    assert not (run_store.RUNS_DIR / f"{name}.meta.json").exists()
+    assert not run_store._analytics_path(name).exists()
+    assert not run_store._series_dir(name).exists()
 
-    shutil.rmtree(run_store._series_dir(name), ignore_errors=True)
     analytics = run_store.get_run_analytics(name)
     assert analytics is not None
     assert analytics["result"]["outputs"]["seriesSheets"] == ["generators-p"]
-    # And series still serve from the bundle fallback.
+    page = run_store.run_model_sheet_page(name, "buses", offset=0, limit=10)
+    assert page is not None and page["total"] == 1 and page["rows"][0]["name"] == "n1"
     win = run_store.run_series_window(name, "generators-p", max_points=100)
     assert win is not None and win["total"] == 2
 
-
-def test_delete_run_removes_split_artifacts(_runs_dir: Path) -> None:
-    meta = run_store.store_run({"buses": [{"name": "n1"}]}, {}, {}, _sample_result())
-    assert meta is not None
-    name = meta["name"]
-    assert run_store._analytics_path(name).exists()
-    assert run_store._series_dir(name).exists()
     assert run_store.delete_run(name) is True
-    assert not run_store._analytics_path(name).exists()
-    assert not run_store._series_dir(name).exists()
+    assert not run_store._db_path(name).exists()
+
+
+def test_legacy_json_run_migrates_to_db_on_read(_runs_dir: Path) -> None:
+    # A pre-SQLite run (json bundle + meta sidecar) upgrades to <name>.db on
+    # first access and its legacy artefacts are removed.
+    import json as _json
+
+    run_store.RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    name = "legacy_2026-01-01T00-00-00"
+    bundle = {
+        "savedAt": "2026-01-01T00:00:00+00:00",
+        "label": "legacy",
+        "filename": "old.xlsx",
+        "snapshotStart": 0,
+        "snapshotEnd": 2,
+        "snapshotWeight": 1,
+        "model": {"buses": [{"name": "n1"}]},
+        "scenario": {"label": "legacy"},
+        "options": {},
+        "result": _sample_result(),
+    }
+    (run_store.RUNS_DIR / f"{name}.json").write_text(_json.dumps(bundle), encoding="utf-8")
+    (run_store.RUNS_DIR / f"{name}.meta.json").write_text(
+        _json.dumps(run_store.build_run_meta(name, bundle, 123)), encoding="utf-8"
+    )
+
+    got = run_store.get_run(name)
+    assert got is not None
+    assert got["model"] == bundle["model"]
+    assert got["result"]["summary"] == bundle["result"]["summary"]
+    assert got["result"]["outputs"]["series"] == bundle["result"]["outputs"]["series"]
+    assert run_store._db_path(name).exists()
+    assert not (run_store.RUNS_DIR / f"{name}.json").exists()
+    assert not (run_store.RUNS_DIR / f"{name}.meta.json").exists()
+    # The listing serves it from the db now.
+    assert [m["name"] for m in run_store.list_runs()] == [name]
 
 
 def test_derive_name_default_filename_is_clean_timestamp() -> None:
