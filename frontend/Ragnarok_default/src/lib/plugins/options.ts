@@ -5,6 +5,18 @@ export interface ResolvedOption {
   label: string;
 }
 
+/**
+ * Resolves a backend-plugin dropdown's rows on demand
+ * (`optionsFrom: { source: 'plugin', name }` → `POST /api/plugins/{id}/options`).
+ *
+ * Pure type only — the React context that carries a bound resolver lives in
+ * `shared/hooks/pluginOptionsContext` (lib/ is the no-React layer).
+ */
+export type PluginOptionsResolver = (
+  name: string,
+  config: Record<string, unknown>,
+) => Promise<Array<Record<string, unknown>>>;
+
 export interface OptionsContext {
   /** The current workbook model, for `source: 'model'`. */
   model?: WorkbookModel;

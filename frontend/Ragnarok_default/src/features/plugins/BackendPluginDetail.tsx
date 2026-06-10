@@ -31,7 +31,8 @@ import {
   uploadPluginFile,
 } from 'lib/api/plugins';
 import type { SessionMeta } from 'lib/api/session';
-import { PluginOptionsContext, PluginOptionsResolver } from 'lib/plugins/pluginOptionsContext';
+import type { PluginOptionsResolver } from 'lib/plugins/options';
+import { PluginOptionsContext } from '../../shared/hooks/pluginOptionsContext';
 import { PluginPanel } from './PluginPanel';
 import { SearchableSelect } from '../../shared/components/SearchableSelect';
 import { useToast } from '../../shared/components/Toast';

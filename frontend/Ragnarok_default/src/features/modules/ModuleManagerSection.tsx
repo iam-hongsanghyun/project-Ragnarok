@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ModuleConfigField, ModuleConfigTableColumn, ModuleConfigVisibleWhen, ModuleDescriptor, ModuleHostInventory, PluginFileValue, WorkbookModel } from 'lib/types';
 import { optionsFromRows, resolveOptionsFrom, ResolvedOption } from 'lib/plugins/options';
-import { usePluginOptionsResolver } from 'lib/plugins/pluginOptionsContext';
+import { usePluginOptionsResolver } from '../../shared/hooks/pluginOptionsContext';
 import { SearchableSelect } from '../../shared/components/SearchableSelect';
 import { useDebouncedValue } from '../../shared/hooks/useDebouncedValue';
 
