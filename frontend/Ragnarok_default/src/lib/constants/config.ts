@@ -1,6 +1,6 @@
 import appConfigJson from 'config/app_config.json';
 import currenciesJson from 'config/currencies.json';
-import type { DateFormat, SolverType } from 'lib/settings/types';
+import type { DateFormat, SolveAcceptance, SolverType } from 'lib/settings/types';
 
 type AppConfig = typeof appConfigJson;
 
@@ -14,6 +14,7 @@ export interface SettingsDefaultsConfig {
   dateFormat: DateFormat;
   solverThreads: number;
   solverType: SolverType;
+  solveAcceptance: SolveAcceptance;
   objectiveAutoScale: boolean;
   currencyCode: string;
   currencySymbol: string;

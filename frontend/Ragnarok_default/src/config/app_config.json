@@ -50,7 +50,8 @@
       "enableLoadShedding": false,
       "loadSheddingCost": 2000,
       "discountRate": 0.05,
-      "queuePollSeconds": 2.5
+      "queuePollSeconds": 2.5,
+      "solveAcceptance": "lenient"
     },
     "ranges": {
       "carbonPrice": {
@@ -107,6 +108,16 @@
       {
         "value": true,
         "label": "On"
+      }
+    ],
+    "solveAcceptanceOptions": [
+      {
+        "value": "lenient",
+        "label": "Lenient"
+      },
+      {
+        "value": "strict",
+        "label": "Strict"
       }
     ]
   },

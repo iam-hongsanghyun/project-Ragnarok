@@ -22,7 +22,7 @@ import {
   StochasticConfig,
   WorkbookModel,
 } from 'lib/types';
-import { DateFormat, SolverType } from '../features/settings/useSettings';
+import { DateFormat, SolveAcceptance, SolverType } from '../features/settings/useSettings';
 
 import { snapshotTimestamps } from 'lib/results/snapshotWindow';
 import { ScenariosSection } from './SettingsView.sections/Scenarios';
@@ -149,10 +149,12 @@ export interface SettingsViewProps {
   onLoadSheddingCostChange: (v: number) => void;
   solverThreads: number;
   solverType: SolverType;
+  solveAcceptance: SolveAcceptance;
   objectiveAutoScale: boolean;
   queuePollSeconds: number;
   onSolverThreadsChange: (v: number) => void;
   onSolverTypeChange: (v: SolverType) => void;
+  onSolveAcceptanceChange: (v: SolveAcceptance) => void;
   onObjectiveAutoScaleChange: (v: boolean) => void;
   onQueuePollSecondsChange: (v: number) => void;
   onCarrierColorChange: (rowIndex: number, color: string) => void;

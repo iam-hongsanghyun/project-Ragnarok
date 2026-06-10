@@ -2,17 +2,19 @@
  * Solver section — HiGHS thread and algorithm settings.
  */
 import React from 'react';
-import { SolverType } from '../../features/settings/useSettings';
+import { SolveAcceptance, SolverType } from '../../features/settings/useSettings';
 import { SETTINGS_CONFIG } from 'lib/constants';
 import { NumberDraftInput } from '../../shared/components/NumberDraftInput';
 
 export interface SolverSectionProps {
   solverThreads: number;
   solverType: SolverType;
+  solveAcceptance: SolveAcceptance;
   objectiveAutoScale: boolean;
   queuePollSeconds: number;
   onSolverThreadsChange: (v: number) => void;
   onSolverTypeChange: (v: SolverType) => void;
+  onSolveAcceptanceChange: (v: SolveAcceptance) => void;
   onObjectiveAutoScaleChange: (v: boolean) => void;
   onQueuePollSecondsChange: (v: number) => void;
 }
@@ -62,6 +64,31 @@ export function SolverSection(props: SolverSectionProps) {
           excellent on large energy LPs, but only in HiGHS builds compiled with
           it; where it's absent it falls back to IPM automatically, so it's safe
           to pick anywhere. (MIP / unit-commitment runs ignore this choice.)
+        </p>
+      </div>
+      <div className="sg-setting-row">
+        <label className="sg-setting-label">Solution acceptance</label>
+        <div className="sg-btn-row">
+          {(SETTINGS_CONFIG.solveAcceptanceOptions as Array<{ value: SolveAcceptance; label: string }>).map(
+            ({ value, label }) => (
+              <button
+                key={value}
+                className={`tb-btn sg-solver-btn${props.solveAcceptance === value ? '' : ' tb-btn--muted'}`}
+                onClick={() => props.onSolveAcceptanceChange(value)}
+              >
+                {label}
+              </button>
+            ),
+          )}
+        </div>
+        <p className="sg-setting-hint">
+          What counts as a successful solve. <b>Lenient</b> (recommended) accepts
+          any solution the solver toolchain validated, including interior-point
+          (IPM / HiPO) runs that finish without crossover and report
+          condition=&apos;unknown&apos;. <b>Strict</b> requires
+          condition=&apos;optimal&apos; — vertex-optimal solutions with exact
+          shadow prices — and fails the run otherwise. Infeasible or unbounded
+          models fail in both modes.
         </p>
       </div>
       <div className="sg-setting-row">

@@ -60,3 +60,26 @@ def test_objective_auto_scale_is_opt_in_and_results_neutral():
     assert _build_solver_options(
         {"solverType": "pdlp", "solverThreads": 4, "objectiveAutoScale": True}
     ) == {"solver": "pdlp", "threads": 4, "user_objective_scale": -1}
+
+
+def test_solve_rejected_acceptance_modes():
+    from backend.pypsa.results import _solve_rejected
+
+    # optimal always passes, both modes
+    assert _solve_rejected("ok", "optimal", strict=False) is False
+    assert _solve_rejected("ok", "optimal", strict=True) is False
+
+    # linopy-accepted interior-point solve without crossover: condition
+    # 'unknown' with status 'ok' — lenient keeps it, strict rejects it.
+    assert _solve_rejected("ok", "unknown", strict=False) is False
+    assert _solve_rejected("warning", "unknown", strict=False) is False
+    assert _solve_rejected("ok", "unknown", strict=True) is True
+
+    # definite failures are rejected in BOTH modes
+    for cond in ("infeasible", "unbounded", "infeasible_or_unbounded"):
+        assert _solve_rejected("ok", cond, strict=False) is True
+        assert _solve_rejected("ok", cond, strict=True) is True
+
+    # solver crash (status not ok/warning) is rejected even in lenient mode
+    assert _solve_rejected("error", "unknown", strict=False) is True
+    assert _solve_rejected("unknown", "unknown", strict=False) is True
