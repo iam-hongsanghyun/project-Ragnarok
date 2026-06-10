@@ -2880,7 +2880,15 @@ path.leaflet-interactive:focus {
   color: #fff;
   border-color: var(--accent, #2f7d6e);
 }
-.tb-btn--primary:disabled { opacity: 0.45; }
+/* Disabled mirrors .run-button:disabled (solid chip, white text) one shade
+   darker, instead of the near-invisible faded-white default. */
+.tb-btn--primary:disabled,
+.tb-btn--primary:disabled:hover {
+  background: #94a3b8;
+  border-color: #94a3b8;
+  color: var(--surface);
+  opacity: 1;
+}
 /* Selected history rows read as a clickable selection, not a button strip. */
 .history-row { cursor: default; }
 .history-row.is-selected { outline: 2px solid var(--accent, #2f7d6e); outline-offset: -2px; }
