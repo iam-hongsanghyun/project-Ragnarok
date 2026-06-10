@@ -4,8 +4,10 @@ import asyncio
 import json
 import logging
 import multiprocessing as mp
+import os
 import queue
 import shutil
+import signal
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -111,26 +113,62 @@ def _solve_worker(
         stream.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
         root.addHandler(stream)
 
+    # Queue runs (payload is a path) also persist their OUTCOME next to the
+    # payload on disk. That makes a solve survive a backend restart: the parent
+    # that spawned us may be gone, but the new backend process finds outcome.json
+    # and flips the queue card to done/error instead of losing the run.
+    outcome_path = Path(payload).parent / _QUEUE_OUTCOME if isinstance(payload, str) else None
+
+    def _write_outcome(status: str, run_name: str | None = None, error: str | None = None) -> None:
+        if outcome_path is None:
+            return
+        try:
+            _write_json_atomic(
+                outcome_path,
+                {
+                    "status": status,
+                    "runName": run_name,
+                    "error": error,
+                    "finishedAt": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+        except Exception:  # noqa: BLE001
+            logging.getLogger("pypsa_gui.queue").exception("Failed to write queue outcome")
+
     try:
         if isinstance(payload, str):
             payload = _read_queue_payload(Path(payload))
         options = payload.options or {}
         backend = get_backend(options.get("backend"))
         result = backend.run(payload.model, payload.scenario, options)
-        # Deliver the result FIRST so the frontend isn't blocked while we persist
-        # — store_run also pre-builds the (potentially large) xlsx, which can take
-        # several seconds and would otherwise delay the result.
-        result_queue.put(("ok", result))
-        # Always persist the finished run server-side (the backend is the single
-        # source of truth for run history). A store failure must NOT affect the
-        # run — run_store logs and swallows internally, and we guard again here.
-        try:
-            run_store.store_run(payload.model, payload.scenario or {}, options, result)
-        except Exception:  # noqa: BLE001
-            logging.getLogger("pypsa_gui.run_store").exception(
-                "store_run raised after a successful solve"
-            )
+        if outcome_path is not None:
+            # Queue run: the frontend reads the result from run HISTORY, never
+            # from this mp.Queue — so persist first, then signal with a tiny
+            # tuple. Not piping the (huge) result dict also lets an ORPHANED
+            # worker exit cleanly (a big payload with no reader wedges the
+            # queue's feeder thread and the process never exits).
+            meta = None
+            try:
+                meta = run_store.store_run(payload.model, payload.scenario or {}, options, result)
+            except Exception:  # noqa: BLE001
+                logging.getLogger("pypsa_gui.run_store").exception(
+                    "store_run raised after a successful solve"
+                )
+            run_name = str(meta.get("name")) if isinstance(meta, dict) else None
+            _write_outcome("done", run_name=run_name)
+            result_queue.put(("ok", run_name))
+        else:
+            # Direct run: the caller waits on this queue for the result itself.
+            # Deliver it FIRST so the frontend isn't blocked while we persist.
+            result_queue.put(("ok", result))
+            try:
+                run_store.store_run(payload.model, payload.scenario or {}, options, result)
+            except Exception:  # noqa: BLE001
+                logging.getLogger("pypsa_gui.run_store").exception(
+                    "store_run raised after a successful solve"
+                )
     except Exception as exc:  # noqa: BLE001
+        _write_outcome("error", error=str(exc))
         result_queue.put(("err", str(exc)))
 
 
@@ -178,6 +216,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _QUEUE_DIR = _REPO_ROOT / "backend" / "data" / "queue"
 _QUEUE_PAYLOAD = "payload.json"
 _QUEUE_META = "meta.json"
+# Written by the WORKER when a queue solve finishes ({status, runName, error,
+# finishedAt}) — the disk-based completion signal that lets a solve survive a
+# backend restart (the new process adopts it instead of marking the job lost).
+_QUEUE_OUTCOME = "outcome.json"
 
 
 def _now_iso() -> str:
@@ -197,6 +239,10 @@ class _QueueItem:
     error: str | None = None
     proc: "mp.Process | None" = field(default=None, repr=False)
     result_queue: Any = field(default=None, repr=False)
+    # OS pid of the worker, persisted in meta.json. After a backend restart the
+    # mp.Process handle is gone, but the pid lets the new process check whether
+    # the orphaned solver is still alive (recovery + cancel).
+    pid: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -234,6 +280,45 @@ def _queue_meta_path(item_id: str) -> Path:
     return _queue_item_dir(item_id) / _QUEUE_META
 
 
+def _queue_outcome_path(item_id: str) -> Path:
+    return _queue_item_dir(item_id) / _QUEUE_OUTCOME
+
+
+def _read_queue_outcome(item_id: str) -> dict[str, Any] | None:
+    """The worker's on-disk completion record, or None if absent/unreadable."""
+    path = _queue_outcome_path(item_id)
+    try:
+        if not path.exists():
+            return None
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _pid_alive(pid: int | None) -> bool:
+    """True when ``pid`` is a live process we may signal (the orphaned worker)."""
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def _adopt_outcome(item: _QueueItem, outcome: dict[str, Any]) -> None:
+    """Apply a worker-written outcome.json to the queue item (done/error)."""
+    status = str(outcome.get("status") or "")
+    item.status = "done" if status == "done" else "error"
+    item.error = str(outcome["error"]) if outcome.get("error") else None
+    item.finished_at = str(outcome.get("finishedAt") or _now_iso())
+
+
 def _write_json_atomic(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -261,6 +346,7 @@ def _queue_meta(item: _QueueItem) -> dict[str, Any]:
         "startedAt": item.started_at,
         "finishedAt": item.finished_at,
         "error": item.error,
+        "pid": item.pid,
         "payloadFile": _QUEUE_PAYLOAD,
     }
 
@@ -289,10 +375,30 @@ def _load_queue_from_disk() -> None:
             started_at = meta.get("startedAt")
             finished_at = meta.get("finishedAt")
             error = meta.get("error")
+            pid_raw = meta.get("pid")
+            pid = pid_raw if isinstance(pid_raw, int) else None
             if status == "running":
-                status = "cancelled"
-                finished_at = _now_iso()
-                error = error or "Backend stopped before this queued run finished."
+                # The previous backend died mid-solve. Three possibilities:
+                # 1) the worker FINISHED while we were down → adopt its outcome;
+                # 2) the worker is STILL solving (it's a separate OS process and
+                #    survives the parent) → keep "running"; a watcher task
+                #    (started in lifespan) flips it when outcome.json appears;
+                # 3) the worker died with us → error, ask the user to rerun.
+                outcome = _read_queue_outcome(item_id)
+                if outcome is not None:
+                    status = "done" if outcome.get("status") == "done" else "error"
+                    error = outcome.get("error")
+                    finished_at = outcome.get("finishedAt") or _now_iso()
+                    _queue_logger.info("Adopted finished orphan run %s: %s", item_id, status)
+                elif _pid_alive(pid):
+                    _queue_logger.info("Queue item %s still solving in orphan pid %s", item_id, pid)
+                else:
+                    status = "error"
+                    finished_at = _now_iso()
+                    error = error or (
+                        "Backend restarted mid-solve and the solver did not survive. "
+                        "Rerun to try again."
+                    )
             item = _QueueItem(
                 id=item_id,
                 payload_path=payload_path,
@@ -303,6 +409,7 @@ def _load_queue_from_disk() -> None:
                 started_at=str(started_at) if started_at else None,
                 finished_at=str(finished_at) if finished_at else None,
                 error=str(error) if error else None,
+                pid=pid,
             )
             restored.append(item)
             if status != meta.get("status") or finished_at != meta.get("finishedAt"):
@@ -387,8 +494,12 @@ async def _run_queue_item(item: _QueueItem) -> None:
     item.started_at = _now_iso()
     item.finished_at = None
     item.error = None
-    _persist_queue_meta(item)
+    # A rerun reuses this item's dir — drop any outcome from a previous attempt
+    # so restart-recovery can never adopt a stale result.
+    _queue_outcome_path(item.id).unlink(missing_ok=True)
     item.proc.start()
+    item.pid = item.proc.pid  # persisted so a restarted backend can find the orphan
+    _persist_queue_meta(item)
 
     # Read the result FIRST. The worker puts a (possibly large) result dict on
     # the queue and only then exits; a multiprocessing.Queue blocks the child's
@@ -431,6 +542,37 @@ async def _run_queue_item(item: _QueueItem) -> None:
     _queue_logger.info("Queue item %s finished: %s", item.id, item.status)
 
 
+async def _watch_orphan(item: _QueueItem) -> None:
+    """Track a solve that survived a backend restart (alive, but not our child).
+
+    We can't ``join()`` a process we didn't spawn, but the worker writes
+    ``outcome.json`` when it finishes — poll for that (or for the pid dying) and
+    flip the queue card to done/error. While this item stays "running" the pump
+    won't start another job, preserving the serial-queue guarantee.
+    """
+    while item.status == "running":
+        outcome = _read_queue_outcome(item.id)
+        if outcome is not None:
+            _adopt_outcome(item, outcome)
+            _persist_queue_meta(item)
+            _queue_logger.info("Orphan run %s finished: %s", item.id, item.status)
+            return
+        if not _pid_alive(item.pid):
+            # Give a just-exited worker a moment to flush its outcome file.
+            await asyncio.sleep(2.0)
+            outcome = _read_queue_outcome(item.id)
+            if outcome is not None:
+                _adopt_outcome(item, outcome)
+            else:
+                item.status = "error"
+                item.error = "The solver process died without delivering a result. Rerun to try again."
+                item.finished_at = _now_iso()
+            _persist_queue_meta(item)
+            _queue_logger.info("Orphan run %s ended: %s", item.id, item.status)
+            return
+        await asyncio.sleep(1.0)
+
+
 async def _queue_pump() -> None:
     """Background loop: run the next queued job whenever none is running."""
     while True:
@@ -466,6 +608,11 @@ async def _lifespan(_app: "FastAPI"):
     _load_queue_from_disk()
     task = asyncio.ensure_future(startup_status.warm())
     pump = asyncio.ensure_future(_queue_pump())
+    # Solves that survived a backend restart (status still "running"): watch
+    # each orphaned worker until its on-disk outcome appears or its pid dies.
+    watchers = [
+        asyncio.ensure_future(_watch_orphan(it)) for it in _run_queue if it.status == "running"
+    ]
     try:
         yield
     finally:
@@ -473,6 +620,9 @@ async def _lifespan(_app: "FastAPI"):
             task.cancel()
         if not pump.done():
             pump.cancel()
+        for w in watchers:
+            if not w.done():
+                w.cancel()
 
 
 app = FastAPI(title="Ragnarok Backend", version="0.1.0", lifespan=_lifespan)
@@ -749,6 +899,16 @@ async def cancel_queued(item_id: str) -> dict[str, Any]:
             if proc.is_alive():
                 proc.kill()
                 await asyncio.to_thread(proc.join, 3)
+        elif proc is None and _pid_alive(item.pid):
+            # Orphaned worker (survived a backend restart) — no mp handle, only
+            # the persisted pid. Same SIGTERM → SIGKILL escalation by signal.
+            try:
+                os.kill(item.pid, signal.SIGTERM)  # type: ignore[arg-type]
+                await asyncio.sleep(3.0)
+                if _pid_alive(item.pid):
+                    os.kill(item.pid, signal.SIGKILL)  # type: ignore[arg-type]
+            except OSError:
+                pass  # already gone
     else:
         return {"id": item_id, "status": item.status}
     _persist_queue_meta(item)

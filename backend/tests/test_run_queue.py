@@ -8,6 +8,7 @@ without spawning real solves.
 from __future__ import annotations
 
 import asyncio
+import os
 
 import pytest
 
@@ -172,17 +173,81 @@ def test_enqueue_with_unknown_session_is_400(_session_dir) -> None:
     assert exc.value.status_code == 400
 
 
-def test_load_queue_from_disk_marks_interrupted_running_job_cancelled() -> None:
-    r = asyncio.run(main.enqueue_run(_payload("A")))
-    item = main._run_queue[0]
+# ── Restart recovery: a backend restart must not lose a running solve ─────────
+
+
+def _mark_running(item, pid: int | None = None) -> None:
     item.status = "running"
     item.started_at = main._now_iso()
+    item.pid = pid
     main._persist_queue_meta(item)
+
+
+def test_restart_recovery_dead_worker_is_error_not_cancelled() -> None:
+    # No outcome on disk and the pid is gone → the job is reported as an ERROR
+    # ("rerun"), never silently "cancelled" (the user didn't cancel anything).
+    r = asyncio.run(main.enqueue_run(_payload("A")))
+    _mark_running(main._run_queue[0], pid=2**22 + 12345)  # certainly not alive
 
     main._run_queue.clear()
     main._load_queue_from_disk()
 
     jobs = main.get_queue()["jobs"]
     assert jobs[0]["id"] == r["id"]
-    assert jobs[0]["status"] == "cancelled"
-    assert "Backend stopped" in jobs[0]["error"]
+    assert jobs[0]["status"] == "error"
+    assert "Rerun" in jobs[0]["error"]
+
+
+def test_restart_recovery_adopts_finished_orphan_outcome() -> None:
+    # The worker finished while the backend was down (outcome.json on disk) →
+    # the restarted backend adopts it as DONE; the run is already in History.
+    r = asyncio.run(main.enqueue_run(_payload("B")))
+    item = main._run_queue[0]
+    _mark_running(item)
+    main._write_json_atomic(
+        main._queue_outcome_path(item.id),
+        {"status": "done", "runName": "b_2026-01-01T00-00-00", "error": None, "finishedAt": main._now_iso()},
+    )
+
+    main._run_queue.clear()
+    main._load_queue_from_disk()
+
+    jobs = main.get_queue()["jobs"]
+    assert jobs[0]["id"] == r["id"]
+    assert jobs[0]["status"] == "done"
+    assert jobs[0]["error"] is None
+
+
+def test_restart_recovery_keeps_live_orphan_running() -> None:
+    # The worker is STILL solving (its pid is alive) → the card stays "running";
+    # the lifespan watcher will flip it when outcome.json appears.
+    asyncio.run(main.enqueue_run(_payload("C")))
+    item = main._run_queue[0]
+    _mark_running(item, pid=os.getpid())  # this test process: definitely alive
+
+    main._run_queue.clear()
+    main._load_queue_from_disk()
+
+    jobs = main.get_queue()["jobs"]
+    assert jobs[0]["status"] == "running"
+
+
+def test_orphan_watcher_flips_running_to_done() -> None:
+    # While "running" with a live pid, the watcher adopts outcome.json as soon
+    # as the worker writes it.
+    asyncio.run(main.enqueue_run(_payload("D")))
+    item = main._run_queue[0]
+    _mark_running(item, pid=os.getpid())
+
+    async def run_watch() -> None:
+        watch = asyncio.ensure_future(main._watch_orphan(item))
+        await asyncio.sleep(0.05)
+        main._write_json_atomic(
+            main._queue_outcome_path(item.id),
+            {"status": "done", "runName": "d_run", "error": None, "finishedAt": main._now_iso()},
+        )
+        await asyncio.wait_for(watch, timeout=10)
+
+    asyncio.run(run_watch())
+    assert item.status == "done"
+    assert item.finished_at is not None
