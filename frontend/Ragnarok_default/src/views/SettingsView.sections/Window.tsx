@@ -4,6 +4,7 @@
 import React from 'react';
 import { PathwayConfig } from 'lib/types';
 import { DualRangeSlider } from '../../shared/components/DualRangeSlider';
+import { NumberDraftInput } from '../../shared/components/NumberDraftInput';
 import { RUN_WINDOW } from 'lib/constants';
 import {
   endIndexForTime,
@@ -102,30 +103,21 @@ export function WindowSection(props: WindowSectionProps) {
             <div className="sg-window-inputs">
               <label>
                 Start
-                <input
-                  type="number"
+                <NumberDraftInput
                   min={0}
                   max={props.snapshotEnd}
                   value={props.snapshotStart}
-                  onChange={(e) => {
-                    const v = Number(e.target.value);
-                    if (!Number.isFinite(v)) return;
-                    props.onSnapshotStartChange(Math.max(0, Math.min(Math.round(v), props.snapshotEnd)));
-                  }}
+                  onCommit={(v) => props.onSnapshotStartChange(Math.max(0, Math.min(Math.round(v), props.snapshotEnd)))}
                 />
               </label>
               <label>
                 End
-                <input
-                  type="number"
+                <NumberDraftInput
                   min={props.snapshotStart}
                   max={props.maxSnapshots}
                   value={props.snapshotEnd}
-                  onChange={(e) => {
-                    const v = Number(e.target.value);
-                    if (!Number.isFinite(v)) return;
-                    props.onSnapshotEndChange(Math.max(props.snapshotStart, Math.min(Math.round(v), props.maxSnapshots)));
-                  }}
+                  emptyValue={props.maxSnapshots}
+                  onCommit={(v) => props.onSnapshotEndChange(Math.max(props.snapshotStart, Math.min(Math.round(v), props.maxSnapshots)))}
                 />
               </label>
             </div>

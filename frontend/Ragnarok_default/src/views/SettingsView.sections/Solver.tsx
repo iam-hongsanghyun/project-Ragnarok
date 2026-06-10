@@ -4,6 +4,7 @@
 import React from 'react';
 import { SolverType } from '../../features/settings/useSettings';
 import { SETTINGS_CONFIG } from 'lib/constants';
+import { NumberDraftInput } from '../../shared/components/NumberDraftInput';
 
 export interface SolverSectionProps {
   solverThreads: number;
@@ -90,15 +91,12 @@ export function SolverSection(props: SolverSectionProps) {
       <div className="sg-setting-row">
         <label className="sg-setting-label">Queue poll interval</label>
         <div className="sg-btn-row">
-          <input
-            type="number"
+          <NumberDraftInput
             min={0.5}
             step={0.5}
             value={props.queuePollSeconds}
-            onChange={(e) => {
-              const v = Number(e.target.value);
-              if (Number.isFinite(v) && v >= 0.5) props.onQueuePollSecondsChange(v);
-            }}
+            emptyValue={props.queuePollSeconds}
+            onCommit={(v) => props.onQueuePollSecondsChange(v)}
             style={{ width: 90 }}
           />
           <span className="sg-setting-hint" style={{ alignSelf: 'center' }}>seconds</span>
