@@ -1431,17 +1431,71 @@ function AppInner() {
     }
   };
 
+  // Run an export as a BACKGROUND JOB: POST to create it, poll until the build
+  // finishes (a full-year workbook can take minutes), then stream the download
+  // — the backend deletes the artefact once the bytes are sent. The browser
+  // never hangs on a pending download, and progress is surfaced via toasts.
+  const runExportJob = async (
+    name: string,
+    kind: 'xlsx' | 'package',
+    parts?: string[],
+  ): Promise<void> => {
+    const label = kind === 'package' ? 'project (.zip)' : 'workbook (.xlsx)';
+    try {
+      const createResp = await fetch(`${API_BASE}/api/exports`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, kind, parts }),
+      });
+      if (!createResp.ok) {
+        throw new Error((await createResp.text()) || `Export failed (HTTP ${createResp.status}).`);
+      }
+      const { jobId } = (await createResp.json()) as { jobId: string };
+      setStatus(`Building ${label}…`);
+      showToast(`Building ${label} — this can take a moment for a full run.`, 'info');
+
+      // Poll for completion. Generous ceiling for a full-year Result export.
+      const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+      const deadline = Date.now() + 10 * 60 * 1000;
+      for (;;) {
+        await sleep(800);
+        const stResp = await fetch(`${API_BASE}/api/exports/${encodeURIComponent(jobId)}`);
+        if (!stResp.ok) throw new Error('Export job expired before it finished.');
+        const job = (await stResp.json()) as { status: string; error?: string };
+        if (job.status === 'ready') break;
+        if (job.status === 'error') throw new Error(job.error || 'Export build failed.');
+        if (Date.now() > deadline) throw new Error('Export timed out while building.');
+      }
+
+      // Ready: trigger the download via a programmatic <a download> click. The
+      // GET streams the file and the backend deletes it afterwards. (A bare
+      // window.open here would be popup-blocked — it runs after the async poll,
+      // outside the original click's gesture context.)
+      const a = document.createElement('a');
+      a.href = `${API_BASE}/api/exports/${encodeURIComponent(jobId)}/download`;
+      a.rel = 'noopener';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setStatus(`${label} ready — downloading.`);
+      showToast(`${label} ready`, 'success');
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Export failed.';
+      setStatus(msg);
+      showToast(msg, 'error');
+    }
+  };
+
   // Explicit Excel export — the ONLY path that creates a workbook (the backend
   // never auto-writes xlsx). `parts` mirrors the Export dialog's checkboxes.
   const handleDownloadBackendXlsx = (name: string, parts?: string[]) => {
-    const q = parts && parts.length ? `?parts=${encodeURIComponent(parts.join(','))}` : '';
-    window.open(`${API_BASE}/api/runs/${encodeURIComponent(name)}/xlsx${q}`, '_blank');
+    void runExportJob(name, 'xlsx', parts);
   };
 
   // Export a stored run as the full Ragnarok Project package (.zip of all three
   // files: bundle JSON + meta JSON + readable xlsx).
   const handleExportBackendProject = (name: string) => {
-    window.open(`${API_BASE}/api/runs/${encodeURIComponent(name)}/package`, '_blank');
+    void runExportJob(name, 'package');
   };
 
   const handleDeleteBackendRuns = async (names: string[]) => {

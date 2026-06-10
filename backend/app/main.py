@@ -20,7 +20,8 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
+from starlette.background import BackgroundTask
 
 from .backends import BackendError, available_backends, get_backend
 from .log_capture import (
@@ -619,6 +620,7 @@ async def _lifespan(_app: "FastAPI"):
     _load_queue_from_disk()
     task = asyncio.ensure_future(startup_status.warm())
     pump = asyncio.ensure_future(_queue_pump())
+    sweeper = asyncio.ensure_future(_export_sweeper())
     # Solves that survived a backend restart (status still "running"): watch
     # each orphaned worker until its on-disk outcome appears or its pid dies.
     watchers = [
@@ -631,6 +633,8 @@ async def _lifespan(_app: "FastAPI"):
             task.cancel()
         if not pump.done():
             pump.cancel()
+        if not sweeper.done():
+            sweeper.cancel()
         for w in watchers:
             if not w.done():
                 w.cancel()
@@ -1151,6 +1155,187 @@ def delete_backend_run(name: str) -> dict[str, Any]:
 
 
 _ZIP_MEDIA_TYPE = "application/zip"
+
+
+# ── Async export jobs ─────────────────────────────────────────────────────────
+# Building a full-year workbook is CPU-bound and can take minutes. Doing it
+# inside the download request blocks the event loop and leaves the browser
+# hanging on a pending download with no feedback (and risks proxy timeouts).
+#
+# Instead: POST /api/exports kicks off a background build (run off-thread so the
+# loop keeps serving), the client polls GET /api/exports/{id} for status, and
+# GET /api/exports/{id}/download streams the finished file from disk and deletes
+# it afterwards. A TTL sweeper reaps artefacts the client never collected.
+_export_logger = logging.getLogger("pypsa_gui.exports")
+_EXPORTS_DIR = _REPO_ROOT / "backend" / "data" / "exports"
+_EXPORT_TTL_SECONDS = 30 * 60  # reap built-but-uncollected artefacts after 30 min
+_EXPORT_PARTS = ("metadata", "model", "result")
+
+
+@dataclass
+class _ExportJob:
+    id: str
+    run_name: str
+    kind: str  # 'xlsx' | 'package'
+    parts: tuple[str, ...]  # for xlsx; ignored for package
+    filename: str
+    status: str = "pending"  # pending | running | ready | error
+    error: str | None = None
+    size: int = 0
+    created_at: str = ""
+    created_mono: float = 0.0
+    file_path: Path | None = field(default=None, repr=False)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "runName": self.run_name,
+            "kind": self.kind,
+            "parts": list(self.parts),
+            "filename": self.filename,
+            "status": self.status,
+            "error": self.error,
+            "size": self.size,
+            "createdAt": self.created_at,
+        }
+
+
+_export_jobs: dict[str, _ExportJob] = {}
+
+
+def _build_export_artifact(job: _ExportJob) -> None:
+    """Build the export bytes and write them under the job's dir (off-thread)."""
+    if job.kind == "package":
+        data = run_store.run_to_package(job.run_name)
+    else:
+        data = run_store.run_to_xlsx(
+            job.run_name,
+            include_meta="metadata" in job.parts,
+            include_model="model" in job.parts,
+            include_result="result" in job.parts,
+        )
+    if data is None:
+        raise RuntimeError("Stored run not found or produced no data.")
+    out_dir = _EXPORTS_DIR / job.id
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / job.filename
+    path.write_bytes(data)
+    job.file_path = path
+    job.size = len(data)
+
+
+async def _run_export_job(job: _ExportJob) -> None:
+    """Drive one export build to completion without blocking the event loop."""
+    job.status = "running"
+    try:
+        await asyncio.to_thread(_build_export_artifact, job)
+        job.status = "ready"
+        _export_logger.info("Export %s ready: %s (%d bytes)", job.id, job.filename, job.size)
+    except Exception as exc:  # noqa: BLE001 — surfaced to the client as a failed job
+        job.status = "error"
+        job.error = str(exc)
+        _export_logger.exception("Export %s failed", job.id)
+
+
+def _discard_export_job(job_id: str) -> None:
+    """Remove a job from the registry and delete its on-disk artefact."""
+    _export_jobs.pop(job_id, None)
+    shutil.rmtree(_EXPORTS_DIR / job_id, ignore_errors=True)
+
+
+async def _export_sweeper() -> None:
+    """Reap export artefacts the client never downloaded (older than the TTL)."""
+    # Clear anything left on disk from a previous backend process at startup.
+    shutil.rmtree(_EXPORTS_DIR, ignore_errors=True)
+    while True:
+        try:
+            now = time.monotonic()
+            stale = [
+                jid for jid, job in _export_jobs.items()
+                if now - job.created_mono > _EXPORT_TTL_SECONDS
+            ]
+            for jid in stale:
+                _export_logger.info("Reaping stale export %s", jid)
+                _discard_export_job(jid)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            _export_logger.exception("Export sweeper iteration failed")
+        await asyncio.sleep(300)
+
+
+@app.post("/api/exports")
+async def create_export_job(payload: dict[str, Any]) -> dict[str, Any]:
+    """Start a background export build; returns ``{jobId}`` for status polling.
+
+    Body: ``{name, kind: 'xlsx'|'package', parts?: [...]}``. ``parts`` (a subset
+    of metadata/model/result) applies to xlsx; the package always ships all
+    three artefacts.
+    """
+    name = str(payload.get("name") or "")
+    kind = str(payload.get("kind") or "xlsx").lower()
+    if kind not in ("xlsx", "package"):
+        raise HTTPException(status_code=400, detail="kind must be 'xlsx' or 'package'.")
+    if not run_store.run_exists(name):
+        raise HTTPException(status_code=404, detail="Stored run not found.")
+
+    if kind == "package":
+        parts: tuple[str, ...] = _EXPORT_PARTS
+        filename = f"{name}.zip"
+    else:
+        raw = payload.get("parts")
+        chosen = (
+            {str(p).strip().lower() for p in raw if str(p).strip()}
+            if isinstance(raw, list) and raw
+            else set(_EXPORT_PARTS)
+        )
+        if not chosen <= set(_EXPORT_PARTS):
+            raise HTTPException(status_code=400, detail=f"parts must be a subset of {list(_EXPORT_PARTS)}.")
+        parts = tuple(p for p in _EXPORT_PARTS if p in chosen)
+        filename = f"{name}.xlsx"
+
+    job = _ExportJob(
+        id=str(uuid.uuid4()),
+        run_name=name,
+        kind=kind,
+        parts=parts,
+        filename=filename,
+        created_at=_now_iso(),
+        created_mono=time.monotonic(),
+    )
+    _export_jobs[job.id] = job
+    asyncio.ensure_future(_run_export_job(job))
+    return {"jobId": job.id, **job.to_dict()}
+
+
+@app.get("/api/exports/{job_id}")
+def get_export_job(job_id: str) -> dict[str, Any]:
+    """Poll an export job's status (pending / running / ready / error)."""
+    job = _export_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Export job not found (it may have expired).")
+    return job.to_dict()
+
+
+@app.get("/api/exports/{job_id}/download")
+def download_export_job(job_id: str) -> Response:
+    """Stream a ready export, then delete its artefact + registry entry."""
+    job = _export_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Export job not found (it may have expired).")
+    if job.status == "error":
+        raise HTTPException(status_code=500, detail=job.error or "Export failed.")
+    if job.status != "ready" or job.file_path is None or not job.file_path.exists():
+        raise HTTPException(status_code=409, detail="Export is not ready yet.")
+    media_type = _ZIP_MEDIA_TYPE if job.kind == "package" else _XLSX_MEDIA_TYPE
+    return FileResponse(
+        path=job.file_path,
+        media_type=media_type,
+        filename=job.filename,
+        # Delete the artefact (and forget the job) only after the bytes are
+        # flushed to the client.
+        background=BackgroundTask(_discard_export_job, job_id),
+    )
 
 
 @app.post("/api/export/project")
