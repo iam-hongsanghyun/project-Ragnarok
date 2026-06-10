@@ -284,21 +284,35 @@ def run_pypsa(
             solve_status,
             solve_condition,
         )
-        # Solver may return without raising but still report a non-optimal
-        # condition (e.g. HiGHS "Dual simplex ratio test failed" leaves
-        # condition='unknown' while linopy parses a garbage primal). Treat
-        # anything other than ('ok', 'optimal') as a failed run.
-        if solve_condition != "optimal":
+        # A solve is acceptable when EITHER HiGHS reports condition='optimal',
+        # OR linopy reports status='ok' (it accepted and parsed the primal/dual
+        # — "Optimization successful"). Interior-point methods (IPM/HiPO/PDLP)
+        # often finish without crossover, so HiGHS emits no clean "optimal"
+        # string and linopy records condition='unknown' WITH status='ok'; that
+        # solution is valid. Only a non-ok status (warning/infeasible) or a
+        # genuinely bad condition (infeasible/unbounded) is a real failure —
+        # e.g. HiGHS "Dual simplex ratio test failed" leaves status!='ok'.
+        _ok_status = solve_status.lower() in ("ok", "warning")
+        _bad_condition = solve_condition in ("infeasible", "unbounded", "infeasible_or_unbounded")
+        if _bad_condition or (solve_condition != "optimal" and not _ok_status):
             raise HTTPException(
                 status_code=500,
                 detail=(
-                    f"Solver did not return an optimal solution "
+                    f"Solver did not return a usable solution "
                     f"(status='{solve_status}', condition='{solve_condition}'). "
-                    "The model is likely ill-conditioned: check for placeholder "
-                    "1e12 / inf values in p_nom_max, e_sum_min, e_sum_max, "
-                    "lifetime, or for conflicting constraints (CO₂ cap, "
+                    "The model is likely infeasible or ill-conditioned: check for "
+                    "placeholder 1e12 / inf values in p_nom_max, e_sum_min, "
+                    "e_sum_max, lifetime, or for conflicting constraints (CO₂ cap, "
                     "capacity factor caps) against the available capacity."
                 ),
+            )
+        if solve_condition != "optimal":
+            notes.append(
+                f"Solver finished with condition='{solve_condition}' but linopy "
+                f"accepted the solution (status='{solve_status}'). This is normal "
+                "for interior-point methods (IPM/HiPO) that skip crossover; the "
+                "result is usable. Switch Solver to 'simplex' if you need a "
+                "vertex-optimal solution with exact shadow prices."
             )
         # HiPO requested on a build that lacks it → we ran IPM; say so.
         if str(options.get("solverType", "auto")).lower() == "hipo" and not _highs_has_hipo():
