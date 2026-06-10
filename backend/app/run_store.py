@@ -388,6 +388,9 @@ def _connect(name: str) -> Iterator[sqlite3.Connection]:
     conn = sqlite3.connect(str(_db_path(name)))
     try:
         conn.execute("PRAGMA journal_mode=WAL")
+        # Wait for a concurrent writer instead of failing instantly with
+        # "database is locked" (see sqlite_store._connect).
+        conn.execute("PRAGMA busy_timeout=5000")
         yield conn
         conn.commit()
     except Exception:
@@ -442,7 +445,10 @@ def _build_run_db(name: str, bundle: dict[str, Any], meta: dict[str, Any]) -> No
 
     _db_path(name).unlink(missing_ok=True)
     with _connect(name) as conn:
-        conn.execute("CREATE TABLE _kv (k TEXT PRIMARY KEY, v TEXT)")
+        # IF NOT EXISTS: a concurrent reader can recreate the file (sqlite
+        # creates on connect) between the unlink and this rebuild — see the
+        # matching race in sqlite_store._build_db.
+        conn.execute("CREATE TABLE IF NOT EXISTS _kv (k TEXT PRIMARY KEY, v TEXT)")
         model_tables: dict[str, str] = {}
         for i, (sheet, rows) in enumerate(model.items()):
             if isinstance(rows, list):

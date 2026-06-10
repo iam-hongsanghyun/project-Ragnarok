@@ -60,6 +60,11 @@ def _connect(session_id: str) -> Iterator[sqlite3.Connection]:
     conn = sqlite3.connect(str(path))
     try:
         conn.execute("PRAGMA journal_mode=WAL")
+        # Concurrent FastAPI worker threads write this db (e.g. an importer
+        # plugin storing the model while the UI persists controls). Without a
+        # busy timeout a second writer fails instantly with "database is
+        # locked" instead of waiting for the first to finish.
+        conn.execute("PRAGMA busy_timeout=5000")
         yield conn
         conn.commit()
     except Exception:
@@ -176,7 +181,11 @@ def _build_db(
     from legacy files *without* :func:`clear` wiping those files mid-migration.
     """
     with _connect(session_id) as conn:
-        conn.execute("CREATE TABLE _kv (k TEXT PRIMARY KEY, v TEXT)")
+        # IF NOT EXISTS: between save_model's clear() and this rebuild, a
+        # concurrent request (save_controls, fired by the UI while a run is in
+        # flight) can recreate the db file with its own _kv — a bare CREATE
+        # then 500s every save with "table _kv already exists".
+        conn.execute("CREATE TABLE IF NOT EXISTS _kv (k TEXT PRIMARY KEY, v TEXT)")
         sheets_meta: list[dict[str, Any]] = []
         tables: dict[str, str] = {}
         for i, (name, rows) in enumerate(r for r in model.items()):
