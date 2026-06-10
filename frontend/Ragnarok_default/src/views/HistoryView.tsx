@@ -132,9 +132,9 @@ export function HistoryView({
           className="tb-btn"
           onClick={() => single && onExportBackendProject(single)}
           disabled={!single}
-          title="Download the full project package (.zip)"
+          title="Download the full project package (.zip of bundle + meta + workbook)"
         >
-          Export
+          Project .zip
         </button>
         <button
           className="tb-btn"
@@ -142,7 +142,7 @@ export function HistoryView({
           disabled={!single}
           title="Export an Excel workbook (choose Metadata / Model / Result)"
         >
-          Excel
+          Excel .xlsx
         </button>
         <span className="history-toolbar-spacer" />
         <button className="tb-btn" onClick={deleteSelected} disabled={n === 0}>
@@ -193,7 +193,7 @@ export function HistoryView({
                   ['result', 'Result', 'Solved outputs: optimal capacities, dispatch series, result meta'],
                   ['metadata', 'Metadata', 'Ragnarok config: scenarios, constraints, run state, settings'],
                 ] as const).map(([key, label, hint]) => (
-                  <label key={key} className="sg-setting-row" style={{ cursor: 'pointer' }}>
+                  <label key={key} className="modal-check-row">
                     <input
                       type="checkbox"
                       checked={exportParts[key]}
@@ -203,7 +203,7 @@ export function HistoryView({
                   </label>
                 ))}
               </div>
-              <div className="sg-setting-row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+              <div className="modal-actions" style={{ gap: 8 }}>
                 <button className="tb-btn" onClick={() => setExportFor(null)}>Cancel</button>
                 <button
                   className="tb-btn tb-btn--primary"

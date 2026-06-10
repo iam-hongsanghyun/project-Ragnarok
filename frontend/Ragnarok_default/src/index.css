@@ -2320,6 +2320,24 @@ path.leaflet-interactive:focus {
   margin-top: 18px;
 }
 
+/* Checkbox + label on ONE line inside modals. (.sg-setting-row is a column
+   stack for the sidebar — using it for checkboxes detaches the box from its
+   label.) */
+.modal-check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 0;
+  cursor: pointer;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.modal-check-row input[type="checkbox"] {
+  margin: 2px 0 0;
+  flex-shrink: 0;
+}
+
 .narrative-panel ul {
   margin: 12px 0 0;
   padding-left: 18px;
