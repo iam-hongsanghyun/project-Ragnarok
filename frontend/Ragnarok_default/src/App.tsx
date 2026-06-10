@@ -34,7 +34,7 @@ import { canonicalizeOutputSeries, canonicalizeTemporalRows, createEmptyWorkbook
 import { mergeWorkbookFragment } from 'lib/workbook/mergeFragment';
 import type { WorkbookFragment } from 'lib/api/databases';
 import { getBounds, getBusIndex, carrierColor, numberValue, orderByCarrierRows, setCarrierColorOverrides, snapshotMaxFromWorkbook, stringValue } from 'lib/utils/helpers';
-import { scenarioFilename } from 'lib/utils/scenarioFilename';
+import { filenameMatchesScenario, scenarioFilename } from 'lib/utils/scenarioFilename';
 import { usePersistedState } from 'shared/hooks/usePersistedState';
 import { RagnarokLogo } from 'shared/components/RagnarokLogo';
 import { buildRowsFromGeneratorDetails, buildSystemLoadRows, normalizeSeriesPoint } from 'lib/results/analytics';
@@ -503,6 +503,16 @@ function AppInner() {
   }, [queueJobs.length, model]);
 
   const [filename, setFilename] = useState('ragnarok_case.xlsx');
+  // The working-file name ALWAYS tracks the ACTIVE scenario
+  // (`{scenario}_{ISO-T}.xlsx`) — not just at model load. Creating, renaming or
+  // switching the active scenario mints a fresh name; when the current name
+  // already carries this scenario's stem it is kept, so the timestamp stays the
+  // creation time (reloads/restores don't re-stamp).
+  useEffect(() => {
+    const label = activeScenario?.label?.trim();
+    if (!label) return;
+    setFilename((current) => (filenameMatchesScenario(current, label) ? current : scenarioFilename(label)));
+  }, [activeScenario?.label]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const projectImportInputRef = useRef<HTMLInputElement | null>(null);
 

@@ -12,9 +12,20 @@ export function isoStamp(d: Date = new Date()): string {
   return d.toISOString().slice(0, 19).replace(/:/g, '-');
 }
 
-/** `{scenario||untitled}_{ISO-T}.xlsx` with a sanitised scenario segment. */
-export function scenarioFilename(scenario?: string | null, stamp: string = isoStamp()): string {
+/** Sanitised scenario segment of the filename ("untitled" when blank). */
+export function scenarioFileStem(scenario?: string | null): string {
   const raw = (scenario ?? '').trim();
   const safe = raw.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
-  return `${safe || 'untitled'}_${stamp}.xlsx`;
+  return safe || 'untitled';
+}
+
+/** `{scenario||untitled}_{ISO-T}.xlsx` with a sanitised scenario segment. */
+export function scenarioFilename(scenario?: string | null, stamp: string = isoStamp()): string {
+  return `${scenarioFileStem(scenario)}_${stamp}.xlsx`;
+}
+
+/** True when `filename` already carries this scenario's stem (so its creation
+ *  stamp should be kept rather than minting a new name). */
+export function filenameMatchesScenario(filename: string, scenario?: string | null): boolean {
+  return filename.startsWith(`${scenarioFileStem(scenario)}_`);
 }
