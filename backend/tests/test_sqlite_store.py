@@ -161,3 +161,21 @@ def test_migrate_on_read_noop_without_legacy(_dir) -> None:
     assert sq.get_meta("ghost") is None
     assert sq.has_model("ghost") is False
     assert not sq._db_path("ghost").exists()
+
+
+def test_build_db_survives_concurrent_kv_create(_dir) -> None:
+    """Regression: importer save during a run 500'd with "_kv already exists".
+
+    While a run is in flight the UI's save_controls can recreate the
+    just-cleared session db (sqlite creates the file on connect) between
+    save_model's clear() and _build_db's CREATE TABLE _kv. The bare CREATE
+    then raised OperationalError on every importer save. Replay that exact
+    interleaving and assert the rebuild succeeds.
+    """
+    sq.save_model("sql", _model())
+    sq.clear("sql")
+    sq.save_controls("sql", {"theme": "dark"})  # interloper recreates db + _kv
+    meta = sq._build_db("sql", _model(), filename="m.xlsx", scenario_name="ref")
+    assert meta["filename"] == "m.xlsx"
+    assert sq.get_meta("sql") is not None
+    assert len(sq.get_sheet_page("sql", "generators")["rows"]) == 3
