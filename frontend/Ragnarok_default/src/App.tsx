@@ -47,7 +47,8 @@ import { dslToSpecs } from 'lib/constraints/dsl';
 import { buildScenarioPreset, defaultScenarioCatalog, readScenarioCatalogFromModel, sameScenarioCatalog, writeScenarioCatalogToModel } from 'lib/results/scenarios';
 import { readCarbonLibraryFromModel, writeCarbonLibraryToModel, sameCarbonLibrary } from 'lib/results/carbonLibrary';
 import { saveSessionControls, loadSessionControls, clearSession, clearSessionModelOnly } from 'lib/storage/sessionStore';
-import { clearSessionModel, putSessionModel, putStaticModel, getSessionFullModel, isSeriesSheet, DEFAULT_SESSION_ID } from 'lib/api/session';
+import { clearSessionModel, putSessionModel, putStaticModel, getSessionFullModel, getSheetPage, isSeriesSheet, patchSheet, DEFAULT_SESSION_ID } from 'lib/api/session';
+import type { SheetEditOp } from 'lib/api/session';
 import { RunDialog } from './features/run/RunDialog';
 import { SettingsView } from './views/SettingsView';
 import { PluginsView } from './views/PluginsView';
@@ -101,6 +102,26 @@ function AppInner() {
   // since every mutation already builds a fresh object this is cheap to retain.
   const undoStack = useRef<WorkbookModel[]>([]);
   const redoStack = useRef<WorkbookModel[]>([]);
+  // ── Static edits → backend (the session is the source of truth) ───────────
+  // Cell/row edits on static sheets map 1:1 to precise PATCH ops — row-level
+  // SQL writes, exactly like the temporal sheets. Structural changes that have
+  // no op equivalent (column add/delete/rename, clear, reorder, undo/redo)
+  // bump `staticResyncTick` → ONE static-merge resync (effect lives below,
+  // after prepareModelForBackend). The React model stays only as a small read
+  // cache for the map/Forge/validation views — never the truth.
+  const modelRef = useRef<WorkbookModel>(model);
+  modelRef.current = model;
+  const [staticResyncTick, setStaticResyncTick] = useState(0);
+  const requestStaticResync = useCallback(() => setStaticResyncTick((t) => t + 1), []);
+  const pushStaticOps = useCallback(
+    (sheet: SheetName, ops: SheetEditOp[]) => {
+      // On any failure (e.g. the sheet has no session table yet) fall back to a
+      // full static merge so the backend can never silently drift from the UI.
+      void patchSheet(String(sheet), ops).catch(() => requestStaticResync());
+    },
+    [requestStaticResync],
+  );
+
   // Undo depth. Each entry retains the model object as it was before an edit;
   // editing big time-series sheets makes these add up, so keep the window small
   // (the backend is the source of truth — deep client-side history isn't needed).
@@ -115,13 +136,15 @@ function AppInner() {
     if (!prev) return;
     redoStack.current.push(model);
     setModel(prev);
-  }, [model]);
+    requestStaticResync(); // mirror reverted → re-merge it into the session
+  }, [model, requestStaticResync]);
   const redo = useCallback(() => {
     const next = redoStack.current.pop();
     if (!next) return;
     undoStack.current.push(model);
     setModel(next);
-  }, [model]);
+    requestStaticResync();
+  }, [model, requestStaticResync]);
   const [tab, setTab] = usePersistedState<WorkspaceTab>('ui:workspace-tab', 'Welcome');
   // Ctrl/Cmd+Z / Ctrl+Y (or Shift+Z) undo-redo for model edits, only on the
   // Model/Build tabs and never while a text field is focused (so it doesn't
@@ -491,40 +514,53 @@ function AppInner() {
     setCarrierColorOverrides(model.carriers ?? []);
   }, [model.carriers]);
 
+  // Config writes land in RAGNAROK_* model sheets; when one actually changes,
+  // request a static-merge resync so the backend session (the source of truth)
+  // carries the new config too — not just the in-memory mirror.
   useEffect(() => {
     setModel((current) => {
       const next = writePathwayConfigToModel(current, pathwayConfig);
-      return samePathwayConfig(readPathwayConfigFromModel(current), pathwayConfig) ? current : next;
+      if (samePathwayConfig(readPathwayConfigFromModel(current), pathwayConfig)) return current;
+      requestStaticResync();
+      return next;
     });
-  }, [pathwayConfig]);
+  }, [pathwayConfig, requestStaticResync]);
 
   useEffect(() => {
     setModel((current) => {
       const next = writeRollingConfigToModel(current, rollingConfig);
-      return sameRollingConfig(readRollingConfigFromModel(current), rollingConfig) ? current : next;
+      if (sameRollingConfig(readRollingConfigFromModel(current), rollingConfig)) return current;
+      requestStaticResync();
+      return next;
     });
-  }, [rollingConfig]);
+  }, [rollingConfig, requestStaticResync]);
 
   useEffect(() => {
-    setModel((current) => (
-      readCustomDslFromModel(current) === customDsl ? current : writeCustomDslToModel(current, customDsl)
-    ));
-  }, [customDsl]);
+    setModel((current) => {
+      if (readCustomDslFromModel(current) === customDsl) return current;
+      requestStaticResync();
+      return writeCustomDslToModel(current, customDsl);
+    });
+  }, [customDsl, requestStaticResync]);
 
   useEffect(() => {
     setModel((current) => {
       const next = writeScenarioCatalogToModel(current, scenarioCatalog);
-      return sameScenarioCatalog(readScenarioCatalogFromModel(current), scenarioCatalog) ? current : next;
+      if (sameScenarioCatalog(readScenarioCatalogFromModel(current), scenarioCatalog)) return current;
+      requestStaticResync();
+      return next;
     });
-  }, [scenarioCatalog]);
+  }, [scenarioCatalog, requestStaticResync]);
 
   // Persist the carbon-schedule library into its model sheet (travels with export).
   useEffect(() => {
     setModel((current) => {
       const next = writeCarbonLibraryToModel(current, carbonLibrary);
-      return sameCarbonLibrary(readCarbonLibraryFromModel(current), carbonLibrary) ? current : next;
+      if (sameCarbonLibrary(readCarbonLibraryFromModel(current), carbonLibrary)) return current;
+      requestStaticResync();
+      return next;
     });
-  }, [carbonLibrary]);
+  }, [carbonLibrary, requestStaticResync]);
 
   // ── Session persistence (IndexedDB) ─────────────────────────────────────
   // Restore the last working session on load, then auto-save it as it changes,
@@ -593,24 +629,16 @@ function AppInner() {
     return () => window.clearTimeout(id);
   }, [filename, carbonPrice, carbonPriceSchedule, snapshotStart, snapshotEnd, snapshotWeight, forceLp, constraints, rollingConfig, pathwayConfig]);
 
-  // Keep the backend session authoritative for STATIC edits too. The heavy
-  // time-series are already edited directly against the backend (PATCH); the
-  // static sheets were previously synced only on load and just-before-a-run, so
-  // anything reading the session in between (e.g. a plugin's `options(…)` via
-  // `ctx.distinct`) saw stale rows. Mirror static edits to the backend on a
-  // debounce — `putStaticModel` merges ONLY the static sheets, leaving the
-  // backend's windowed series untouched, so this stays cheap. Skipped until the
-  // session has been restored (so it never races the boot restore) and when the
-  // model is empty (nothing to sync / avoid clobbering a just-cleared session).
+  // Structural static-model changes (column ops, clear, reorder, undo/redo)
+  // have no row-op equivalent — they request ONE static-merge resync here.
+  // Cell/row edits never come through this path (they PATCH precise ops).
   useEffect(() => {
-    if (!sessionRestoredRef.current) return undefined;
-    const hasStatic = SHEETS.some((sheet) => (model[sheet]?.length ?? 0) > 0);
-    if (!hasStatic) return undefined;
+    if (staticResyncTick === 0) return undefined;
     const id = window.setTimeout(() => {
-      void putStaticModel(prepareModelForBackend(model)).catch(() => { /* best-effort */ });
-    }, 500);
+      void putStaticModel(prepareModelForBackend(modelRef.current)).catch(() => { /* best-effort */ });
+    }, 300);
     return () => window.clearTimeout(id);
-  }, [model, prepareModelForBackend]);
+  }, [staticResyncTick, prepareModelForBackend]);
 
   // Run history lives entirely on the backend (the single source of truth) —
   // see `refreshBackendRuns` / `backendRuns` below. There is no browser-side
@@ -908,7 +936,26 @@ function AppInner() {
   const handleApplyImportedFragment = useCallback(
     (fragment: WorkbookFragment, databaseName: string, countryName: string) => {
       pushHistory();
-      setModel((current) => mergeWorkbookFragment(current, fragment));
+      // Merge once (deterministic), apply to the mirror, then push to the
+      // session: static sheets via the merge resync; any SERIES sheets in the
+      // fragment (e.g. demand profiles) are replaced sheet-by-sheet via PATCH
+      // because static merges deliberately skip time-series.
+      const merged = mergeWorkbookFragment(modelRef.current, fragment);
+      setModel(merged);
+      requestStaticResync();
+      for (const sheet of Object.keys(fragment.sheets)) {
+        if (!isSeriesSheet(sheet)) continue;
+        const rows = (merged[sheet] as GridRow[] | undefined) ?? [];
+        void (async () => {
+          const previous = await getSheetPage(sheet, { offset: 0, limit: 0 })
+            .then((page) => page.total)
+            .catch(() => 0);
+          await patchSheet(sheet, [
+            ...(previous ? [{ op: 'deleteRows' as const, rows: Array.from({ length: previous }, (_, i) => i) }] : []),
+            ...rows.map((r) => ({ op: 'addRow' as const, values: r as Record<string, unknown> })),
+          ]);
+        })().catch(() => { /* best-effort */ });
+      }
       const counts = Object.entries(fragment.sheets)
         .map(([sheet, rows]) => `${rows.length} ${sheet}`)
         .join(', ');
@@ -917,7 +964,7 @@ function AppInner() {
       setStatus(msg);
       showToast(msg, 'success');
     },
-    [pushHistory, showToast],
+    [pushHistory, showToast, requestStaticResync],
   );
 
   const handleOpenWorkbook = async () => {
@@ -957,6 +1004,7 @@ function AppInner() {
       const nextRows = (current[sheet] ?? []).map((row, index) => (index === rowIndex ? { ...row, [key]: value } : row));
       return { ...current, [sheet]: nextRows };
     });
+    pushStaticOps(sheet, [{ op: 'set', row: rowIndex, column: key, value }]);
   };
 
   // Atomic paste: grow the sheet by `extraRows` (seeded from the schema default)
@@ -980,6 +1028,13 @@ function AppInner() {
       }
       return { ...current, [sheet]: grown };
     });
+    pushStaticOps(sheet, [
+      ...Array.from({ length: extraRows }, () => ({
+        op: 'addRow' as const,
+        values: { ...getDefaultRowForSheet(sheet) } as Record<string, unknown>,
+      })),
+      ...edits.map((e) => ({ op: 'set' as const, row: e.rowIndex, column: e.col, value: e.val })),
+    ]);
     setStatus(`Pasted ${edits.length} cell${edits.length === 1 ? '' : 's'} into ${sheet}${extraRows > 0 ? ` (+${extraRows} rows)` : ''}.`);
   };
 
@@ -989,6 +1044,9 @@ function AppInner() {
       const nextRows = [...(current[sheet] ?? []), { ...getDefaultRowForSheet(sheet) }];
       return { ...current, [sheet]: nextRows };
     });
+    pushStaticOps(sheet, [
+      { op: 'addRow', values: { ...getDefaultRowForSheet(sheet) } as Record<string, unknown> },
+    ]);
     setStatus(`Added a new row to ${sheet}.`);
   };
 
@@ -998,6 +1056,7 @@ function AppInner() {
       const nextRows = current[sheet].filter((_, i) => i !== rowIndex);
       return { ...current, [sheet]: nextRows };
     });
+    pushStaticOps(sheet, [{ op: 'deleteRows', rows: [rowIndex] }]);
     setStatus(`Removed row ${rowIndex + 1} from ${sheet}.`);
   };
 
@@ -1012,6 +1071,7 @@ function AppInner() {
       nextRows.splice(toIndex, 0, row);
       return { ...current, [sheet]: nextRows };
     });
+    requestStaticResync(); // row order matters; no row-op equivalent
   };
 
   const addColumn = (sheet: SheetName, col: string, defaultValue: string | number | boolean) => {
@@ -1022,6 +1082,7 @@ function AppInner() {
       );
       return { ...current, [sheet]: nextRows };
     });
+    requestStaticResync();
     setStatus(`Added column "${col}" to ${sheet}.`);
   };
 
@@ -1034,6 +1095,7 @@ function AppInner() {
       });
       return { ...current, [sheet]: nextRows };
     });
+    requestStaticResync();
     setStatus(`Removed column "${col}" from ${sheet}.`);
   };
 
@@ -1049,12 +1111,14 @@ function AppInner() {
       });
       return { ...current, [sheet]: nextRows };
     });
+    requestStaticResync();
     setStatus(`Renamed column "${oldCol}" to "${newCol}" in ${sheet}.`);
   };
 
   const clearSheet = (sheet: SheetName) => {
     pushHistory();
     setModel((current) => ({ ...current, [sheet]: [] }));
+    requestStaticResync(); // empties the sheet server-side too (merge writes [])
     setStatus(`Cleared all rows from ${sheet}.`);
   };
 
@@ -1102,6 +1166,11 @@ function AppInner() {
       pushHistory();
       const restoredModel = structuredClone(entry.model);
       setModel(restoredModel);
+      // The session is the source of truth and runs submit by sessionId — push
+      // the FULL restored model (incl. its time-series; a static merge would
+      // leave the previous model's series in place and the next run would solve
+      // a chimera).
+      void putSessionModel(restoredModel, { filename: entry.label ?? '' }).catch(() => { /* best-effort */ });
       const snapshotMax = snapshotMaxFromWorkbook(restoredModel.snapshots);
       setMaxSnapshots(snapshotMax);
       setSnapshotStart(entry.snapshotStart);
@@ -1465,6 +1534,18 @@ function AppInner() {
     // CSV/manual import boundary so the in-memory model stays PyPSA-canonical.
     const canonical = canonicalizeTemporalRows(rows, settings.dateFormat);
     setModel((current) => ({ ...current, [sheet]: canonical }));
+    // Time-series live in the backend session (static merges skip them) —
+    // replace the sheet there too, like the Model tab's CSV import does. The
+    // current row count comes from the BACKEND (the mirror strips series).
+    void (async () => {
+      const previous = await getSheetPage(String(sheet), { offset: 0, limit: 0 })
+        .then((page) => page.total)
+        .catch(() => 0);
+      await patchSheet(String(sheet), [
+        ...(previous ? [{ op: 'deleteRows' as const, rows: Array.from({ length: previous }, (_, i) => i) }] : []),
+        ...canonical.map((r) => ({ op: 'addRow' as const, values: r as Record<string, unknown> })),
+      ]);
+    })().catch(() => { /* best-effort */ });
     if (canonical.length > 0) {
       showToast(`Imported ${canonical.length} rows into ${sheet}`, 'success');
       setStatus(`Imported ${canonical.length} rows into ${sheet}.`);
@@ -1938,7 +2019,10 @@ function AppInner() {
           {tab === 'Forge' && (
             <ForgeView
               model={model}
-              onApplySheets={(partial) => setModel((prev) => ({ ...prev, ...partial }))}
+              onApplySheets={(partial) => {
+                setModel((prev) => ({ ...prev, ...partial }));
+                requestStaticResync(); // Forge edits static sheets → sync the session
+              }}
             />
           )}
 
