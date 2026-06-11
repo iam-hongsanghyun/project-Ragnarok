@@ -54,6 +54,12 @@ function InfoTooltip({ text, label }: { text: string; label: string }) {
         onMouseLeave={hide}
         onFocus={show}
         onBlur={hide}
+        onClick={(e) => {
+          // Tooltips are hover/focus-only. Some icons now live inside a
+          // collapsible <summary>; a click must not toggle the section.
+          e.preventDefault();
+          e.stopPropagation();
+        }}
       >
         i
       </span>
@@ -424,60 +430,65 @@ function SourceSection({
   const change = (filterId: string, value: unknown) => onChange(source.source_id, filterId, value);
 
   return (
-    <section className="data-import-filters__source">
-      <h4 className="data-import-filters__source-title">{source.source_label}</h4>
-
-      {missingSecrets.length > 0 && (
-        <p className="data-import-filters__keynotice">
-          This source needs an API key: <b>{missingSecrets.join(', ')}</b>.
-          Add it in <b>Settings → API keys</b>, then come back and fetch.
-        </p>
-      )}
-
-      <section className="data-import-filters__meta">
-        {primary && (
-          <>
-            <p className="data-import-filters__line">
-              <b>License:</b> {primary.license}
-            </p>
-            <p className="data-import-filters__line">
-              <b>Source:</b>{' '}
-              <a href={primary.homepage} target="_blank" rel="noreferrer">
-                {primary.homepage}
-              </a>
-            </p>
-          </>
+    <details className="data-import-filters__source" open>
+      <summary className="data-import-filters__source-title">{source.source_label}</summary>
+      <div className="data-import-filters__source-body">
+        {missingSecrets.length > 0 && (
+          <p className="data-import-filters__keynotice">
+            This source needs an API key: <b>{missingSecrets.join(', ')}</b>.
+            Add it in <b>Settings → API keys</b>, then come back and fetch.
+          </p>
         )}
-        <p className="data-import-filters__line">
-          <b>Datasets:</b> {selectedDatasets.map((d) => d.short_name || d.name).join(', ')}
-        </p>
-      </section>
 
-      {commonFilters.length > 0 && (
-        <section className="data-import-filters__group">
-          <h5 className="data-import-filters__group-title">Common settings</h5>
-          {commonFilters.map((f) => (
-            <FilterRow key={f.id} filter={f} value={values[f.id]} onChange={change} />
-          ))}
+        <section className="data-import-filters__meta">
+          {primary && (
+            <>
+              <p className="data-import-filters__line">
+                <b>License:</b> {primary.license}
+              </p>
+              <p className="data-import-filters__line">
+                <b>Source:</b>{' '}
+                <a href={primary.homepage} target="_blank" rel="noreferrer">
+                  {primary.homepage}
+                </a>
+              </p>
+            </>
+          )}
+          <p className="data-import-filters__line">
+            <b>Datasets:</b> {selectedDatasets.map((d) => d.short_name || d.name).join(', ')}
+          </p>
         </section>
-      )}
 
-      {selectedDatasets.map((ds) => {
-        const ownFilters = ds.filters.filter((f) => !commonIds.has(f.id));
-        if (ownFilters.length === 0) return null;
-        return (
-          <section key={ds.id} className="data-import-filters__group">
-            <h5 className="data-import-filters__group-title">
-              {ds.short_name || ds.name}
-              {ds.description && <InfoTooltip text={ds.description} label={ds.short_name || ds.name} />}
-            </h5>
-            {ownFilters.map((f) => (
-              <FilterRow key={f.id} filter={f} value={values[f.id]} onChange={change} />
-            ))}
-          </section>
-        );
-      })}
-    </section>
+        {commonFilters.length > 0 && (
+          <details className="data-import-filters__group" open>
+            <summary className="data-import-filters__group-title">Common settings</summary>
+            <div className="data-import-filters__group-body">
+              {commonFilters.map((f) => (
+                <FilterRow key={f.id} filter={f} value={values[f.id]} onChange={change} />
+              ))}
+            </div>
+          </details>
+        )}
+
+        {selectedDatasets.map((ds) => {
+          const ownFilters = ds.filters.filter((f) => !commonIds.has(f.id));
+          if (ownFilters.length === 0) return null;
+          return (
+            <details key={ds.id} className="data-import-filters__group" open>
+              <summary className="data-import-filters__group-title">
+                {ds.short_name || ds.name}
+                {ds.description && <InfoTooltip text={ds.description} label={ds.short_name || ds.name} />}
+              </summary>
+              <div className="data-import-filters__group-body">
+                {ownFilters.map((f) => (
+                  <FilterRow key={f.id} filter={f} value={values[f.id]} onChange={change} />
+                ))}
+              </div>
+            </details>
+          );
+        })}
+      </div>
+    </details>
   );
 }
 
@@ -539,14 +550,20 @@ export function FilterPanel({
         {errors.map((err) => (
           <p key={err} className="data-import-filters__error">{err}</p>
         ))}
-        {readyPreviews.map((p) => (
-          <section key={p.sourceId} className="data-import-filters__group">
-            {readyPreviews.length > 1 && (
-              <h5 className="data-import-filters__group-title">{p.sourceLabel}</h5>
-            )}
-            <PreviewBody summary={p.preview as PreviewSummary} />
-          </section>
-        ))}
+        {readyPreviews.map((p) =>
+          readyPreviews.length > 1 ? (
+            <details key={p.sourceId} className="data-import-filters__group" open>
+              <summary className="data-import-filters__group-title">{p.sourceLabel}</summary>
+              <div className="data-import-filters__group-body">
+                <PreviewBody summary={p.preview as PreviewSummary} />
+              </div>
+            </details>
+          ) : (
+            <section key={p.sourceId} className="data-import-filters__group">
+              <PreviewBody summary={p.preview as PreviewSummary} />
+            </section>
+          ),
+        )}
       </div>
     </aside>
   );
