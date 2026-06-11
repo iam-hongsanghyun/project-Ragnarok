@@ -631,7 +631,8 @@ def test_dashboard_follow_mode_uses_yearly_additions_ratio(_plugins_dir, tmp_pat
 def test_dashboard_carbon_price_folds_into_marginal_cost(_plugins_dir) -> None:
     """Carbon price reaches the solve as a marginal-cost adder baked into the
     built model (Ragnarok runs no plugin code in-solve): for carrier c,
-    mc += intensity_c[kg/MWh] x price[USD/t] x fx[/USD] / 1000. Zero-intensity
+    mc += intensity_c[kg/MWh] x price[per tCO2] x fx[model-currency per
+    carbon-price-currency] / 1000 — no currency is hardcoded. Zero-intensity
     carriers and disabled toggle leave costs untouched."""
     pd = pytest.importorskip("pandas")
     pytest.importorskip("pypsa")
@@ -674,7 +675,7 @@ def test_dashboard_carbon_price_folds_into_marginal_cost(_plugins_dir) -> None:
     network = _network()
     engine._apply_carbon_price_marginal_cost(network, _dashboard(enabled=True))
     gens = network.generators
-    # coal: 900 kg/MWh x 30 USD/t x 1000 /USD / 1000 = 27000 per MWh
+    # coal: 900 kg/MWh x 30 per tCO2 x 1000 fx / 1000 = 27000 per MWh
     assert gens.at["coal1", "marginal_cost"] == pytest.approx(50.0 + 27_000.0)
     assert gens.at["gas1", "marginal_cost"] == pytest.approx(80.0 + 12_000.0)
     assert gens.at["wind1", "marginal_cost"] == pytest.approx(0.0)  # zero intensity

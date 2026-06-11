@@ -53,7 +53,7 @@ class Settings:
     cc_rule: bool = True        # False → skip CC merge
     carbonprice: bool = False
     carbonprice_scenario: str = ""
-    currency_exchange: float = 1350.0   # KRW per USD
+    currency_exchange: float = 1350.0   # model-currency units per carbon-price-currency unit
     constraints: bool = False
     constraints_attribute: str = "max_cf, min_cf"  # comma-separated list of active CF attributes
 
@@ -68,7 +68,8 @@ class Dashboard:
                             if the sheet is absent.
         cf_constraints:     Capacity-factor constraints filtered for
                             ``settings.target_year``; empty DataFrame if none.
-        carbon_price_usd:   Carbon price in USD/tonne CO₂ for the target year
+        carbon_price_usd:   Carbon price per tonne CO₂ for the target year, in
+                            the carbon-price currency (field name is historical)
                             and selected scenario; 0.0 if not found.
         emission_intensity: Carrier → kg CO₂/MWh for ``settings.target_year``
                             from the wide-format ``emission_intensity`` sheet;
@@ -352,7 +353,9 @@ def _parse_carbon_price(
     scenario: str,
     target_year: int,
 ) -> float:
-    """Return carbon price in USD/tonne CO₂ for *scenario* and *target_year*.
+    """Return carbon price per tonne CO₂ for *scenario* and *target_year*
+    (in whatever currency the dashboard quotes it; converted to the model
+    currency later via ``settings.currency_exchange``).
 
     The ``carbonprice_scenario`` sheet has its year values in the first column
     (regardless of what that column is named, e.g. ``$/tCO2``).
