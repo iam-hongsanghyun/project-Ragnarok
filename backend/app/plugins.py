@@ -80,6 +80,24 @@ PLUGIN_FILES_DIR = Path(
 PLUGIN_DATA_DIR_KEY = "__plugin_data_dir__"
 
 
+def _mb_env(name: str, default_mb: int) -> int:
+    """Env-configurable size limit in MB → bytes (non-positive disables = 0)."""
+    try:
+        mb = int(os.environ.get(name, "") or default_mb)
+    except ValueError:
+        mb = default_mb
+    return max(0, mb) * 1024 * 1024
+
+# Upload resource guards (0 disables a limit). Files are NOT moved by these —
+# plugin code still lands in BACKEND_PLUGINS_DIR and data files in
+# PLUGIN_FILES_DIR; the guards only bound how much an upload may consume so a
+# fat or hostile request can't exhaust server memory/disk.
+MAX_PLUGIN_ZIP_BYTES = _mb_env("RAGNAROK_MAX_PLUGIN_ZIP_MB", 50)
+MAX_PLUGIN_FILE_BYTES = _mb_env("RAGNAROK_MAX_PLUGIN_FILE_MB", 200)
+# Zip-bomb guard: total UNCOMPRESSED size an install zip may expand to.
+MAX_PLUGIN_UNZIPPED_BYTES = _mb_env("RAGNAROK_MAX_PLUGIN_UNZIPPED_MB", 500)
+
+
 def _safe_name(name: str) -> str:
     """Filesystem-safe basename — strips any path components and odd chars."""
     base = os.path.basename(str(name)).strip()

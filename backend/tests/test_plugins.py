@@ -14,7 +14,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from fastapi import UploadFile
+from fastapi import HTTPException, UploadFile
 
 from backend.app import model_store, plugins, session_store
 from backend.app.routers import plugins as plugins_router
@@ -167,6 +167,36 @@ def test_install_then_transform_into_session_then_uninstall(_plugins_dir, tmp_pa
     assert res["removed"] is True
     assert not (_plugins_dir / "mini").exists()
     assert not any(p["id"] == "mini" for p in plugins_router.get_plugins()["plugins"])
+
+
+def test_install_rejects_oversize_zip_with_413(_plugins_dir, monkeypatch) -> None:
+    """The upload is read chunked and aborted past the limit — nothing installs."""
+    monkeypatch.setattr(plugins, "MAX_PLUGIN_ZIP_BYTES", 1024)
+    big = _make_zip({"manifest.json": json.dumps({"id": "big"}), "plugin.py": GOOD, "pad.bin": "x" * 10_000})
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(plugins_router.install_plugin(_upload(big, "big.zip")))
+    assert exc.value.status_code == 413
+    assert not (plugins.BACKEND_PLUGINS_DIR / "big").exists()
+
+
+def test_install_rejects_zip_bomb_before_extraction(_plugins_dir, monkeypatch) -> None:
+    """A small archive that EXPANDS past the uncompressed cap is refused."""
+    monkeypatch.setattr(plugins, "MAX_PLUGIN_UNZIPPED_BYTES", 1024)
+    bomb = _make_zip({"manifest.json": json.dumps({"id": "bomb"}), "plugin.py": GOOD, "pad.bin": "0" * 10_000})
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(plugins_router.install_plugin(_upload(bomb, "bomb.zip")))
+    assert exc.value.status_code == 413
+    assert not (plugins.BACKEND_PLUGINS_DIR / "bomb").exists()
+
+
+def test_file_upload_rejects_oversize_with_413(_plugins_dir, monkeypatch) -> None:
+    _write_plugin(_plugins_dir, "p1", GOOD)
+    plugins._REGISTRY = None
+    monkeypatch.setattr(plugins, "MAX_PLUGIN_FILE_BYTES", 1024)
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(plugins_router.upload_plugin_file("p1", _upload(b"x" * 5000, "big.bin")))
+    assert exc.value.status_code == 413
+    assert plugins.list_plugin_files("p1") == []
 
 
 def test_install_rejects_zip_slip(_plugins_dir) -> None:

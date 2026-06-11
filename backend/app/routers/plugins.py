@@ -48,6 +48,31 @@ router = APIRouter(prefix="/api/plugins", tags=["plugins"])
 
 _ID_RE = re.compile(r"[^a-zA-Z0-9._-]")
 
+_READ_CHUNK = 1024 * 1024  # 1 MiB
+
+
+async def _read_limited(file: UploadFile, limit: int, what: str) -> bytes:
+    """Read an upload in chunks, aborting with 413 once it exceeds ``limit``.
+
+    A plain ``await file.read()`` would buffer an arbitrarily large body into
+    memory before any size check could run; reading chunked keeps the peak at
+    ``limit`` + one chunk. ``limit`` <= 0 disables the check.
+    """
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(_READ_CHUNK)
+        if not chunk:
+            break
+        total += len(chunk)
+        if limit > 0 and total > limit:
+            raise HTTPException(
+                status_code=413,
+                detail=f"{what} exceeds the {limit // (1024 * 1024)} MB limit.",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
 
 class TransformRequest(BaseModel):
     """Body for ``POST /api/plugins/{id}/transform`` and ``/contribute``."""
@@ -109,6 +134,19 @@ def _safe_extract_zip(data: bytes, dest_root: Path) -> str:
     except zipfile.BadZipFile as exc:
         raise HTTPException(status_code=400, detail="Uploaded file is not a valid .zip.") from exc
 
+    # Zip-bomb guard: bound what the archive EXPANDS to before writing a byte.
+    # (The upload itself is already capped by _read_limited; a tiny zip can
+    # still inflate to gigabytes of zeros without this check.)
+    unzipped = sum(info.file_size for info in zf.infolist())
+    if plugins.MAX_PLUGIN_UNZIPPED_BYTES > 0 and unzipped > plugins.MAX_PLUGIN_UNZIPPED_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Plugin .zip expands to {unzipped // (1024 * 1024)} MB — over the "
+                f"{plugins.MAX_PLUGIN_UNZIPPED_BYTES // (1024 * 1024)} MB limit."
+            ),
+        )
+
     names = [n for n in zf.namelist() if not n.endswith("/")]
     manifest_name = min(
         (n for n in names if n.rsplit("/", 1)[-1] == "manifest.json"),
@@ -159,7 +197,7 @@ def _safe_extract_zip(data: bytes, dest_root: Path) -> str:
 @router.post("/install")
 async def install_plugin(file: UploadFile = File(...)) -> dict[str, Any]:
     """Install a backend plugin from an uploaded ``.zip`` (manifest.json + plugin.py)."""
-    data = await file.read()
+    data = await _read_limited(file, plugins.MAX_PLUGIN_ZIP_BYTES, "Plugin .zip")
     plugins.BACKEND_PLUGINS_DIR.mkdir(parents=True, exist_ok=True)
     plugin_id = _safe_extract_zip(data, plugins.BACKEND_PLUGINS_DIR)
     plugins.registry(refresh=True)
@@ -197,7 +235,7 @@ async def upload_plugin_file(plugin_id: str, file: UploadFile = File(...)) -> di
     """Upload a data file into the plugin's server-side scratch dir."""
     if plugins.get(plugin_id) is None:
         raise HTTPException(status_code=404, detail=f"Backend plugin {plugin_id!r} not found.")
-    data = await file.read()
+    data = await _read_limited(file, plugins.MAX_PLUGIN_FILE_BYTES, "Plugin data file")
     return plugins.save_plugin_file(plugin_id, file.filename or "upload.bin", data)
 
 
