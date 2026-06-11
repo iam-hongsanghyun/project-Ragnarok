@@ -271,6 +271,33 @@ def test_options_ctx_distinct_reads_session(_plugins_dir, tmp_path, monkeypatch)
     assert rows == [{"name": "gas"}, {"name": "wind"}]
 
 
+def test_run_action_named_hook_contract(_plugins_dir) -> None:
+    """run_action calls the named plugin.py function with the config (plus the
+    injected scratch dir) and normalises {ok, message, config}. Reserved,
+    private, and missing hook names are rejected as ValueError (clean 400)."""
+    _write_plugin(
+        _plugins_dir,
+        "actor",
+        "def transform(model, config):\n    return {}\n"
+        "def fillTable(config):\n"
+        "    assert '__plugin_data_dir__' in config\n"
+        "    return {'ok': True, 'message': 'filled', 'config': {'rows': [{'generator': 'g1'}]}}\n"
+        "def badReturn(config):\n    return 'nope'\n",
+    )
+    plugins._REGISTRY = None
+
+    res = plugins.run_action("actor", "fillTable", {"x": 1})
+    assert res == {"ok": True, "message": "filled", "config": {"rows": [{"generator": "g1"}]}}
+
+    for bad in ("transform", "options", "_private", "", "missing"):
+        with pytest.raises(ValueError):
+            plugins.run_action("actor", bad, {})
+    with pytest.raises(ValueError):
+        plugins.run_action("actor", "badReturn", {})
+    with pytest.raises(KeyError):
+        plugins.run_action("ghost", "fillTable", {})
+
+
 # ── The shipped EXAMPLE backend plugin (installed from its zip) ───────────────
 
 
@@ -386,17 +413,67 @@ def test_region_analyzer_analyzes_stored_run(_plugins_dir, tmp_path, monkeypatch
 
 
 def test_dashboard_manifest_actions_all_have_server_hooks(_plugins_dir) -> None:
-    """Every `action` field must use a hook the backend host can run (transform/
-    contribute). v3.1 shipped frontend-only hooks (fillReallocation /
-    clearReallocation) that dead-ended in a "no server-side hook" toast; bulk
-    replacement is now the build-time `replace_all_carriers` toggle instead."""
+    """Every `action` field's hook must be runnable server-side: transform/
+    contribute (build path) or a same-named function exported by plugin.py
+    (run via POST /action). v3.1 shipped fillReallocation/clearReallocation
+    WITHOUT the plugin.py functions, dead-ending in a "no server-side hook"
+    toast — this pins that every declared hook actually exists."""
     manifest = _install_example("dashboard-importer.zip")
+    plugin = plugins.get("dashboard-importer")
+    assert plugin is not None
     actions = {k: f for k, f in manifest["config"].items() if f.get("type") == "action"}
+    assert {"fill_reallocation", "clear_reallocation"} <= set(actions)
     for key, field in actions.items():
-        assert field.get("hook") in ("transform", "contribute"), (
-            f"action {key!r} declares hook {field.get('hook')!r}, which BackendPluginDetail cannot run"
+        hook = field.get("hook")
+        assert hook in ("transform", "contribute") or callable(getattr(plugin.module, hook, None)), (
+            f"action {key!r} declares hook {hook!r} with no server-side implementation"
         )
-    assert manifest["config"]["replace_all_carriers"]["type"] == "boolean"
+
+
+def test_dashboard_fill_and_clear_reallocation_actions(_plugins_dir, tmp_path) -> None:
+    """'Fill table from carriers' (the working frontend plugin's workflow, run
+    server-side): adds every replaceable plant of the checked carriers to the
+    generator_replacements table via a config patch, keeping existing picks.
+    'Clear table' empties it."""
+    pd = pytest.importorskip("pandas")
+
+    _install_example("dashboard-importer.zip")
+
+    xlsx = tmp_path / "fleet.xlsx"
+    pd.DataFrame(
+        [
+            {"name": "coal_new", "carrier": "coal", "p_nom": 100, "build_year": 2030, "close_year": 2060},
+            {"name": "coal_old", "carrier": "coal", "p_nom": 400, "build_year": 2010, "close_year": 2060},
+            {"name": "gas_new", "carrier": "gas", "p_nom": 300, "build_year": 2030, "close_year": 2060},
+        ]
+    ).to_excel(xlsx, sheet_name="generators", index=False)
+
+    cfg = {
+        "model_path": str(xlsx),
+        "target_year": "2035",
+        "replace_generators": True,
+        "replace_carriers": ["coal"],
+        "replace_build_year": 2025,
+        # An existing manual pick must be kept (and not duplicated).
+        "generator_replacements": [{"generator": "gas_new"}],
+    }
+    res = plugins.run_action("dashboard-importer", "fillReallocation", cfg)
+    assert res["ok"], res["message"]
+    rows = res["config"]["generator_replacements"]
+    assert rows == [{"generator": "gas_new"}, {"generator": "coal_new"}]  # coal_old filtered out
+
+    # No carriers checked → actionable error, no patch applied.
+    res = plugins.run_action("dashboard-importer", "fillReallocation", {**cfg, "replace_carriers": []})
+    assert res["ok"] is False and "carrier" in res["message"].lower()
+
+    res = plugins.run_action("dashboard-importer", "clearReallocation", cfg)
+    assert res["ok"] and res["config"]["generator_replacements"] == []
+
+    # Reserved/unknown hooks are rejected cleanly (400 at the router).
+    with pytest.raises(ValueError):
+        plugins.run_action("dashboard-importer", "transform", cfg)
+    with pytest.raises(ValueError):
+        plugins.run_action("dashboard-importer", "nope", cfg)
 
 
 def test_dashboard_bulk_replacement_plan_payload(_plugins_dir, tmp_path) -> None:
@@ -424,6 +501,8 @@ def test_dashboard_bulk_replacement_plan_payload(_plugins_dir, tmp_path) -> None
         "model_path": str(xlsx),
         "target_year": "2035",
         "replace_generators": True,
+        # The transient probe flag the fill button sets — bulk plan of every
+        # checked-carrier plant. The stored config never carries it.
         "replace_all_carriers": True,
         "replace_carriers": ["coal"],
         "replace_build_year": 2025,
@@ -439,8 +518,57 @@ def test_dashboard_bulk_replacement_plan_payload(_plugins_dir, tmp_path) -> None
     assert rows["coal_new2"]["solar_mw"] == pytest.approx(120.0)
     assert rows["coal_new2"]["wind_mw"] == pytest.approx(80.0)
 
-    # Bulk off + empty table → nothing planned (the old dead-button state).
+    # No probe flag + empty table → nothing planned (build replaces table rows only).
     assert engine.replacement_plan_payload({**cfg, "replace_all_carriers": False}) == []
+
+
+def test_dashboard_follow_mode_uses_yearly_additions_ratio(_plugins_dir, tmp_path) -> None:
+    """Follow mode splits by the solar:wind capacity ADDED in each plant's build
+    year — A_solar(y) : A_wind(y) — falling back to the latest earlier year with
+    nonzero additions. Carrier matching is case-insensitive ('Solar' == 'solar')."""
+    pd = pytest.importorskip("pandas")
+
+    _install_example("dashboard-importer.zip")
+    plugin = plugins.get("dashboard-importer")
+    assert plugin is not None
+    engine = plugin.module._load_engine()
+
+    xlsx = tmp_path / "fleet.xlsx"
+    pd.DataFrame(
+        [
+            # 2030 additions: solar 300, wind 100 → 75:25. Mixed-case carriers on
+            # purpose — they must still count as solar/wind additions.
+            {"name": "s30", "carrier": "Solar", "p_nom": 300, "build_year": 2030, "close_year": 2060},
+            {"name": "w30", "carrier": "Wind", "p_nom": 100, "build_year": 2030, "close_year": 2060},
+            {"name": "coalA", "carrier": "coal", "p_nom": 100, "build_year": 2030, "close_year": 2060},
+            # 2031 has NO solar/wind additions → coalB follows 2030's 75:25.
+            {"name": "coalB", "carrier": "coal", "p_nom": 200, "build_year": 2031, "close_year": 2060},
+        ]
+    ).to_excel(xlsx, sheet_name="generators", index=False)
+
+    cfg = {
+        "model_path": str(xlsx),
+        "target_year": "2035",
+        "replace_generators": True,
+        "replace_all_carriers": True,
+        "replace_carriers": ["coal"],
+        "replace_follow": True,
+        # Fixed shares must be IGNORED in follow mode.
+        "replace_solar_pct": 10,
+        "replace_wind_pct": 90,
+        "generator_replacements": [],
+    }
+    rows = {r["generator"]: r for r in engine.replacement_plan_payload(cfg)}
+    assert set(rows) == {"coalA", "coalB"}
+    assert rows["coalA"]["solar_mw"] == pytest.approx(75.0)  # 100 · 300/400
+    assert rows["coalA"]["wind_mw"] == pytest.approx(25.0)
+    assert rows["coalB"]["solar_mw"] == pytest.approx(150.0)  # fallback to 2030 ratio
+    assert rows["coalB"]["wind_mw"] == pytest.approx(50.0)
+
+    # Follow OFF → the user's fixed shares apply (direct % of capacity).
+    fixed = {r["generator"]: r for r in engine.replacement_plan_payload({**cfg, "replace_follow": False})}
+    assert fixed["coalA"]["solar_mw"] == pytest.approx(10.0)
+    assert fixed["coalA"]["wind_mw"] == pytest.approx(90.0)
 
 
 def test_dashboard_bulk_replacement_applies_to_network(_plugins_dir) -> None:
@@ -490,6 +618,41 @@ def test_dashboard_bulk_replacement_applies_to_network(_plugins_dir) -> None:
     assert gens.at["coal1_wind_2030", "p_nom"] == pytest.approx(40.0)
     assert gens.at["coal1_solar_2030", "bus"] == "B1"
     assert gens.at["coal1_wind_2030", "carrier"] == "wind"
+
+    # Follow mode on a fresh network: 2030 additions Solar 300 / Wind 100 (mixed
+    # case on purpose) → each replaced coal plant splits 75:25, fixed shares ignored.
+    network2 = pypsa.Network()
+    network2.add("Bus", "B1")
+    network2.add("Generator", "s30", bus="B1", carrier="Solar", p_nom=300, build_year=2030)
+    network2.add("Generator", "w30", bus="B1", carrier="Wind", p_nom=100, build_year=2030)
+    network2.add("Generator", "coal1", bus="B1", carrier="coal", p_nom=100, build_year=2030)
+    # 2031 has no solar/wind additions → falls back to 2030's ratio.
+    network2.add("Generator", "coal2", bus="B1", carrier="coal", p_nom=200, build_year=2031)
+
+    follow_settings = settings_mod.Settings(
+        model="",
+        base_year=2024,
+        target_year=2035,
+        target_load_twh=0.0,
+        snapshot_start="01/01/2035 00:00",
+        snapshot_length=24,
+        replace_generators=True,
+        replace_all_carriers=True,
+        replace_carriers=("coal",),
+        replace_follow=True,
+        replace_solar_pct=10.0,
+        replace_wind_pct=90.0,
+    )
+    dashboard2 = settings_mod.Dashboard(
+        settings=follow_settings, cc_rules=None, cf_constraints=pd.DataFrame(), carbon_price_usd=0.0
+    )
+    gen_replace_mod.replace_generators(network2, dashboard2)
+
+    gens2 = network2.generators
+    assert gens2.at["coal1_solar_2030", "p_nom"] == pytest.approx(75.0)  # 100 · 300/400
+    assert gens2.at["coal1_wind_2030", "p_nom"] == pytest.approx(25.0)
+    assert gens2.at["coal2_solar_2031", "p_nom"] == pytest.approx(150.0)  # 2030 fallback
+    assert gens2.at["coal2_wind_2031", "p_nom"] == pytest.approx(50.0)
 
 
 def test_dashboard_capacity_spans_from_earliest_build_year(_plugins_dir, tmp_path) -> None:

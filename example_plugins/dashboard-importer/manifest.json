@@ -1,7 +1,7 @@
 {
   "id": "dashboard-importer",
   "name": "Dashboard Importer (backend)",
-  "version": "3.2.0",
+  "version": "3.3.0",
   "kind": "backend",
   "description": "Builds a Ragnarok workbook from a PyPSA dashboard model + GUI settings. Runs ENTIRELY in the Ragnarok backend (imports the bundled PyPSA source); the model is written straight into the session and never enters the browser. Backend port of the frontend dashboard importer — no separate server, nothing in plugins.env.",
   "capabilities": [
@@ -204,7 +204,7 @@
     "replace_generators": {
       "type": "boolean",
       "label": "Replace plants with renewables",
-      "description": "Replace selected new power plants with solar and/or wind at the same bus, using the province's renewable profile. Edit the replacement table in the right panel.",
+      "description": "Replace selected new power plants with solar and/or wind at the same bus, using the province's renewable profile. Pick the plants in the right-panel table — 'Fill table from carriers' adds every matching plant at once.",
       "default": false
     },
     "replace_build_year": {
@@ -230,7 +230,7 @@
     "replace_carriers": {
       "type": "multi-select",
       "label": "Carriers",
-      "description": "Check the carrier(s) to work with. Filters the Plant dropdown to these carriers, and drives 'Replace all of the checked carriers' below. None checked = all carriers in the dropdown (bulk replacement needs at least one checked).",
+      "description": "Check the carrier(s) to work with. Filters the Plant dropdown to these carriers, and drives the 'Fill table from carriers' button below (which adds every matching plant, prefilled). None checked = all carriers.",
       "default": [],
       "visibleWhen": {
         "field": "replace_generators",
@@ -316,11 +316,23 @@
       },
       "options": []
     },
-    "replace_all_carriers": {
-      "type": "boolean",
-      "label": "Replace all of the checked carriers",
-      "description": "Bulk mode, applied at build time ('Build & load into Ragnarok') — every plant of the checked carriers that is replaceable (active in the target year, build_year ≥ the replacement base year, and matching the optional column filter) is replaced, no table rows needed. The table below then only adds explicit extra picks. The Output tab previews the result under 'Reallocation plan (MW)'.",
-      "default": false,
+    "fill_reallocation": {
+      "type": "action",
+      "label": "Fill table from carriers",
+      "hook": "fillReallocation",
+      "variant": "secondary",
+      "description": "Add every plant of the checked carriers that is replaceable (active in the target year and build_year ≥ the replacement base year) to the table below. Solar/Wind MW are computed live from the current replacement settings.",
+      "visibleWhen": {
+        "field": "replace_generators",
+        "equals": true
+      }
+    },
+    "clear_reallocation": {
+      "type": "action",
+      "label": "Clear table",
+      "hook": "clearReallocation",
+      "variant": "secondary",
+      "description": "Empty the Generator-replacements table — removes every row (filled or manually added). Nothing is replaced until you fill it again.",
       "visibleWhen": {
         "field": "replace_generators",
         "equals": true
@@ -1090,7 +1102,7 @@
     "generator_replacements": {
       "type": "table",
       "label": "Generator replacements",
-      "description": "Pick individual plants to replace with renewables (optional when 'Replace all of the checked carriers' is on — bulk replacement happens at build time without table rows). Each plant's own capacity is split into solar + wind from the current settings: yearly solar/wind additions when 'Follow yearly additions' is on, otherwise direct Solar %/Wind % of original capacity. New units are added at the same bus/province with that province's solar/wind profile and a marginal cost = mean of existing same-carrier units. New units are named <plant>_solar_<year> / <plant>_wind_<year>. The dropdown lists the replaceable plants — active in the target year and built on/after the replacement base year (each option shows its build year). Active when Replace plants with renewables is on.",
+      "description": "Pick plants to replace with renewables. Each plant's own capacity is split into solar + wind from the current settings: yearly solar/wind additions when 'Follow yearly additions' is on, otherwise direct Solar %/Wind % of original capacity. New units are added at the same bus/province with that province's solar/wind profile and a marginal cost = mean of existing same-carrier units. New units are named <plant>_solar_<year> / <plant>_wind_<year>. The dropdown lists the replaceable plants — active in the target year and built on/after the replacement base year (each option shows its build year). Active when Replace plants with renewables is on.",
       "visibleWhen": {
         "field": "replace_generators",
         "equals": true

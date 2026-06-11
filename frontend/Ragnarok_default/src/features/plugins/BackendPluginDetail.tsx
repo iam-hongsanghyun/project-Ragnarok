@@ -29,6 +29,7 @@ import {
   deletePluginFile,
   getPluginOptions,
   listPluginFiles,
+  runBackendAction,
   runBackendHook,
   uploadPluginFile,
 } from 'lib/api/plugins';
@@ -310,13 +311,28 @@ export function BackendPluginDetail({ manifest, model, onBuilt }: Props) {
     }
   };
 
+  // In-form action button. `transform`/`contribute` run the build path; any
+  // other hook name invokes the same-named function exported by the plugin's
+  // plugin.py via POST /action (mirroring the frontend-plugin contract). A
+  // returned `config` patch is written back into the form — e.g. the importer's
+  // "Fill table from carriers" button populating the replacements table.
   const handleAction = async (_moduleId: string, _fieldKey: string, field: ModuleConfigField) => {
     const hook = field.hook ?? (manifest.hooks.transform ? 'transform' : 'contribute');
-    if (hook !== 'transform' && hook !== 'contribute') {
-      showToast(`This action ("${hook}") has no server-side hook.`, 'info');
+    if (hook === 'transform' || hook === 'contribute') {
+      await runHook(hook, field.successMessage);
       return;
     }
-    await runHook(hook, field.successMessage);
+    try {
+      const res = await runBackendAction(manifest.id, hook, withDefaults(manifest.config, config));
+      if (res.ok && res.config && typeof res.config === 'object') {
+        for (const [key, value] of Object.entries(res.config)) {
+          setConfigValue(key, value);
+        }
+      }
+      showToast(res.message || field.successMessage || `${manifest.name}: ${hook} done.`, res.ok ? 'success' : 'error');
+    } catch (err) {
+      showToast(`${manifest.name}: ${err instanceof Error ? err.message : 'failed'}`, 'error');
+    }
   };
 
   const hasActionField = Object.values(manifest.config ?? {}).some((f) => f?.type === 'action');

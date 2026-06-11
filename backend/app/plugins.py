@@ -315,6 +315,54 @@ def run_analyze(plugin_id: str, result: dict[str, Any], config: dict[str, Any]) 
     return out
 
 
+# Hook names with their own runners/contracts — not callable through run_action.
+_RESERVED_HOOKS = frozenset({"transform", "contribute", "analyze", "options"})
+
+
+def run_action(plugin_id: str, hook: str, config: dict[str, Any]) -> dict[str, Any]:
+    """Run a named action hook ``hook(config) -> {ok?, message?, config?}``.
+
+    The backend counterpart of the frontend-plugin action contract (see
+    ``PluginDetail.handleAction``): a manifest ``action`` field with a hook name
+    other than transform/contribute invokes the same-named function exported by
+    ``plugin.py``. The function receives the current form config (plus the
+    injected scratch-dir path) and may return a ``config`` patch — a map of
+    field → value the frontend writes back into the form (e.g. a "Fill table"
+    button populating an editable table).
+
+    Args:
+        plugin_id: The plugin to dispatch to.
+        hook: Exported function name from the manifest's action field. Private
+            (``_``-prefixed) and reserved hook names are rejected.
+        config: Current form state.
+
+    Returns:
+        ``{"ok": bool, "message": str}`` plus ``"config"`` when the hook
+        returned a patch.
+    """
+    plugin = get(plugin_id)
+    if plugin is None:
+        raise KeyError(plugin_id)
+    if not hook or hook.startswith("_") or hook in _RESERVED_HOOKS:
+        raise ValueError(f"Invalid action hook name {hook!r}.")
+    fn = getattr(plugin.module, hook, None)
+    if not callable(fn):
+        raise ValueError(f"Plugin {plugin_id!r} has no {hook!r} hook.")
+    out = _call(fn, _with_data_dir(plugin_id, config))
+    if out is None:
+        out = {}
+    if not isinstance(out, dict):
+        raise ValueError(f"Plugin {plugin_id!r} {hook}() did not return a dict.")
+    result: dict[str, Any] = {
+        "ok": out.get("ok") is not False,
+        "message": str(out.get("message") or ""),
+    }
+    patch = out.get("config")
+    if isinstance(patch, dict):
+        result["config"] = patch
+    return result
+
+
 @dataclass
 class PluginContext:
     """Read-only session access handed to a plugin's ``options`` hook.
