@@ -32,5 +32,10 @@ dashboard_lib/    # topology, region, scaling, snapshots, carriers, …
    model and writes it into the session; the editor rehydrates from there.
 4. Press the topbar **Run** to solve. *Uninstall* with the **x** in the rail.
 
+Solve-time effects travel **as data** (Ragnarok runs no plugin code in-solve):
+CF constraints are emitted as `RAGNAROK_CustomDSL` lines, and the carbon price
+is folded into generator marginal costs at build time (so it also shows up in
+marginal-cost-derived outputs like the merit order).
+
 The hook is `transform(model, config)` — see `plugin.py`. No `plugins.env` entry
 and no separate server are needed.
