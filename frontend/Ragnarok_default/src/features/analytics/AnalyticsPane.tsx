@@ -41,8 +41,7 @@ function EmptyAnalytics() {
 
 export { EmptyAnalytics };
 
-const ANALYTICS_STORAGE_KEY = 'ragnarok:dashboard:analytics:v1';
-const RESULT_STORAGE_KEY    = 'ragnarok:dashboard:result:v1';
+const ANALYTICS_STORAGE_KEY = 'ragnarok:dashboard:analytics';
 
 export function AnalyticsPane({
   results, model, bounds, busIndex,
@@ -100,7 +99,10 @@ export function AnalyticsPane({
           currencySymbol={currencySymbol}
           analyticsFocus={analyticsFocus}
           onFocusChange={setAnalyticsFocus}
-          storageKey={subTab === 'Result' ? RESULT_STORAGE_KEY : ANALYTICS_STORAGE_KEY}
+          /* Result NEVER persists its layout — it always rebuilds from the
+           * curated preset so code updates show up immediately. Analytics
+           * keeps localStorage persistence for user-built dashboards. */
+          storageKey={subTab === 'Result' ? null : ANALYTICS_STORAGE_KEY}
           initialLayout={subTab === 'Result' ? buildResultPreset(results) : PRESETS[0].build()}
           showPresets={subTab === 'Analytics'}
         />

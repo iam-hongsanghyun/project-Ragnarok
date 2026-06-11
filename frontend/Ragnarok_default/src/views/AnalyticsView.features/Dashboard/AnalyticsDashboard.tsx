@@ -49,11 +49,13 @@ const DEFAULT_LAYOUT: DashboardLayout = { rows: [], cards: [] };
 const SYSTEM_METRIC_LABEL: Record<string, string> = {
   dispatch:          'Generation · Dispatch by carrier',
   dispatch_by_gen:   'Generation · Dispatch by unit',
+  curtailment:       'Generation · Curtailment by carrier',
   load:              'Demand · System load',
   system_price:      'Price · Marginal (SMP)',
   system_emissions:  'Emissions · System CO₂',
   storage_power:     'Storage · Charge / discharge',
   storage_state:     'Storage · State of charge',
+  storage_soc_by_carrier: 'Storage · SoC by carrier',
 };
 
 const FOCUS_TYPE_LABEL: Record<string, string> = {
@@ -131,7 +133,8 @@ interface Props {
   analyticsFocus: AnalyticsFocus;
   onFocusChange: (focus: AnalyticsFocus) => void;
   /** localStorage key for this dashboard instance. */
-  storageKey?: string;
+  /** `null` disables layout persistence (always rebuild from initialLayout). */
+  storageKey?: string | null;
   /** Initial layout if nothing is stored yet. */
   initialLayout?: DashboardLayout;
   /** Show the Presets ▾ picker. Off for the curated Result tab. */
@@ -342,7 +345,7 @@ export function AnalyticsDashboard({
             ? <CapacityByPeriodCard model={model} results={results} />
             : <p className="dashboard-cell-missing">Pathway not enabled.</p>;
         case 'carrier-analysis':
-          return <CarrierAnalysisCard results={results} currencySymbol={currencySymbol} />;
+          return <CarrierAnalysisCard results={results} currencySymbol={currencySymbol} model={model} />;
         case 'load-analysis':
           return <LoadAnalysisCard results={results} currencySymbol={currencySymbol} />;
         case 'stochastic-scenarios':

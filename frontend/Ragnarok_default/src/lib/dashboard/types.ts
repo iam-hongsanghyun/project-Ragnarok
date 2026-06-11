@@ -142,7 +142,7 @@ export interface NamedLayout {
 
 /** Default storage key for the Analytics sub-tab dashboard. Override
  *  via the `storageKey` prop to give the Result sub-tab its own slot. */
-export const STORAGE_KEY = 'ragnarok:dashboard:analytics:v1';
+export const STORAGE_KEY = 'ragnarok:dashboard:analytics';
 
 /** A drag payload carries the cell being moved. */
 export interface DragPayload {

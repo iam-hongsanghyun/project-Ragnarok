@@ -49,9 +49,12 @@ function writeStored(key: string, value: Stored): void {
 
 export function useDashboardLayout(
   defaultLayout: DashboardLayout,
-  storageKey: string = STORAGE_KEY,
+  /** Pass `null` to disable persistence entirely — the layout is rebuilt from
+   *  `defaultLayout` on every mount (used by the Result tab, whose curated
+   *  preset must always reflect the current code, never a stale cache). */
+  storageKey: string | null = STORAGE_KEY,
 ): UseDashboardLayout {
-  const stored = useMemo(() => readStored(storageKey), [storageKey]);
+  const stored = useMemo(() => (storageKey ? readStored(storageKey) : null), [storageKey]);
   const [layout, setLayoutState] = useState<DashboardLayout>(stored?.active ?? defaultLayout);
   const [savedLayouts, setSavedLayouts] = useState<NamedLayout[]>(stored?.saved ?? []);
   const [editing, setEditing] = useState(false);
@@ -59,6 +62,7 @@ export function useDashboardLayout(
   // Autosave: debounce writes to localStorage so resize-drag doesn't write 60x/s.
   const writeTimer = useRef<number | null>(null);
   useEffect(() => {
+    if (!storageKey) return;
     if (writeTimer.current !== null) window.clearTimeout(writeTimer.current);
     writeTimer.current = window.setTimeout(() => {
       writeStored(storageKey, { active: layout, saved: savedLayouts });
