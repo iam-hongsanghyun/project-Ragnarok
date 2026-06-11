@@ -99,12 +99,12 @@ def build_price_emissions_series(
     price_vals = price_series.reindex(snapshots).to_numpy().tolist()
 
     system_price = [
-        {"label": l, "timestamp": st, "period": p, "value": float(price_vals[i])}
-        for i, (l, st, p) in enumerate(labels)
+        {"label": lbl, "timestamp": st, "period": p, "value": float(price_vals[i])}
+        for i, (lbl, st, p) in enumerate(labels)
     ]
     system_emissions = [
-        {"label": l, "timestamp": st, "period": p, "value": float(emission_vals[i])}
-        for i, (l, st, p) in enumerate(labels)
+        {"label": lbl, "timestamp": st, "period": p, "value": float(emission_vals[i])}
+        for i, (lbl, st, p) in enumerate(labels)
     ]
     return system_price, system_emissions
 
@@ -128,12 +128,12 @@ def build_storage_series(network: pypsa.Network) -> list[dict]:
         discharge_vals = total_p.clip(lower=0.0).reindex(snapshots).to_numpy().tolist()
         soc_vals = total_soc.reindex(snapshots).to_numpy().tolist()
         return [
-            {"label": l, "timestamp": st, "period": p,
+            {"label": lbl, "timestamp": st, "period": p,
              "charge": float(charge_vals[i]), "discharge": float(discharge_vals[i]),
              "state": float(soc_vals[i])}
-            for i, (l, st, p) in enumerate(labels)
+            for i, (lbl, st, p) in enumerate(labels)
         ]
     return [
-        {"label": l, "timestamp": st, "period": p, "charge": 0.0, "discharge": 0.0, "state": 0.0}
-        for (l, st, p) in labels
+        {"label": lbl, "timestamp": st, "period": p, "charge": 0.0, "discharge": 0.0, "state": 0.0}
+        for (lbl, st, p) in labels
     ]
