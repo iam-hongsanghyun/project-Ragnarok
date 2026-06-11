@@ -159,7 +159,7 @@ optimization envelope is broader than the workflow Ragnarok currently exposes.
 | Multi-investment / pathway planning | `Partial` | Opt-in pathway mode is implemented with backend multi-investment expansion, pathway metadata, and period-aware analytics. Authoring remains flat/workbook-first rather than native PyPSA MultiIndex editing. |
 | Stochastic optimization | `Partial` | Two-stage stochastic mode is implemented (probability-weighted scenarios expressing uncertainty via per-scenario overrides, e.g. load × 0.8, fuel × 2). No scenario trees or CVaR. Cannot combine with rolling horizon. |
 | Security-constrained optimization / SCLOPF | `Partial` | SCLOPF mode with branch-outage contingencies is implemented. Cannot combine with rolling, stochastic, or pathway modes. |
-| Scenario-based planning UX | `Partial` | Frontend scenario presets capture window, constraints, carbon price, pathway, and rolling settings in workbook metadata. |
+| Scenario-based planning UX | `Partial` | Frontend scenario presets capture window, constraints, carbon price, pathway, rolling, stochastic, and SCLOPF settings in workbook metadata. Custom constraint DSL is saved with the model workbook, not per preset. |
 | Multi-period result analytics | `Partial` | Period summaries and selected-period detailed charts are supported; not every analytics surface is natively multi-period. |
 
 ## Support Matrix: PyPSA Features vs Ragnarok
