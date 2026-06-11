@@ -394,8 +394,8 @@
     },
     "currency_exchange": {
       "type": "string",
-      "label": "KRW / USD exchange rate",
-      "description": "Exchange rate used to convert USD-denominated costs to KRW.",
+      "label": "Currency exchange rate",
+      "description": "Model-currency units per one unit of the carbon-price currency (e.g. 1350 KRW per USD). Converts carbon-price-curve values into the currency your model's marginal costs use.",
       "default": "1350",
       "visibleWhen": {
         "field": "carbonprice",
@@ -1459,8 +1459,8 @@
     },
     "carbonprice_curves": {
       "type": "table",
-      "label": "Carbon price curves (USD/tCO2)",
-      "description": "Long format: (scenario, year, value). The active row matches the scenario name and target year. Active when Carbon price is on.",
+      "label": "Carbon price curves (per tCO2)",
+      "description": "Long format: (scenario, year, value). Value = price per tCO2 in the carbon-price currency; the Currency exchange rate setting converts it into the model currency. The active row matches the scenario name and target year. Active when Carbon price is on.",
       "visibleWhen": {
         "field": "carbonprice",
         "equals": true
@@ -1479,7 +1479,7 @@
         },
         {
           "key": "value",
-          "label": "USD/tCO2",
+          "label": "price/tCO2",
           "type": "number",
           "width": 80
         }

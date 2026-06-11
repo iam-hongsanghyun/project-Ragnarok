@@ -151,14 +151,16 @@ def _apply_carbon_price_marginal_cost(network: Any, dashboard: Any) -> None:
     Algorithm:
         $$ mc_g \\mathrel{+}= I_c \\cdot P \\cdot X / 1000
            \\quad \\forall g \\in \\text{carrier } c $$
-        ASCII: mc_g += intensity_c[kg CO2/MWh] * price[USD/tCO2]
-                       * fx[currency/USD] / 1000
+        ASCII: mc_g += intensity_c[kg CO2/MWh] * price[cp-currency/tCO2]
+                       * fx[model-currency per cp-currency] / 1000
 
     where ``I_c`` is the carrier's emission intensity for the target year
-    (kg CO₂/MWh), ``P`` the carbon price (USD/tCO₂) for the chosen scenario
-    and target year, and ``X`` the currency exchange rate (model currency per
-    USD); /1000 converts kg→t. The objective contribution Σ p·adder is exactly
-    the retired hook's carbon term, and the cost is now visible in
+    (kg CO₂/MWh), ``P`` the carbon price for the chosen scenario and target
+    year (per tCO₂, in whatever currency the carbon-price curves are quoted
+    in), and ``X`` the ``currency_exchange`` setting (model-currency units per
+    one unit of that carbon-price currency — no currency is hardcoded here);
+    /1000 converts kg→t. The objective contribution Σ p·adder is exactly the
+    retired hook's carbon term, and the cost is now visible in
     marginal-cost-derived outputs (e.g. merit order).
 
     Must run AFTER ``apply_marginal_cost_multipliers`` (the per-carrier
@@ -173,7 +175,8 @@ def _apply_carbon_price_marginal_cost(network: Any, dashboard: Any) -> None:
         network: The built, not-yet-aggregated ``pypsa.Network``.
         dashboard: The ``dashboard_lib`` Dashboard carrying ``settings``
             (``carbonprice``, ``currency_exchange``), ``carbon_price_usd``
-            (USD/tCO₂ for the target year) and ``emission_intensity``
+            (price per tCO₂ for the target year, in the carbon-price currency
+            — the field name is historical) and ``emission_intensity``
             (carrier → kg CO₂/MWh for the target year).
     """
     settings = dashboard.settings
@@ -184,7 +187,7 @@ def _apply_carbon_price_marginal_cost(network: Any, dashboard: Any) -> None:
     emission_intensity = dashboard.emission_intensity
     if price_usd <= 0:
         logger.warning(
-            "[dashboard-importer] Carbon price: scenario %r / year %d → %.1f USD/t — skipping",
+            "[dashboard-importer] Carbon price: scenario %r / year %d → %.1f per tCO₂ — skipping",
             getattr(settings, "carbonprice_scenario", ""), settings.target_year, price_usd,
         )
         return
@@ -205,7 +208,7 @@ def _apply_carbon_price_marginal_cost(network: Any, dashboard: Any) -> None:
         network.generators.loc[gens, "marginal_cost"] = base + adder
         applied = True
         logger.info(
-            "[dashboard-importer] carbon %s: %.0f kg CO₂/MWh × %.1f USD/t × %.0f /USD = +%.0f /MWh marginal cost",
+            "[dashboard-importer] carbon %s: %.0f kg CO₂/MWh × %.1f per tCO₂ × %.2f fx = +%.0f per MWh marginal cost",
             carrier, kg_per_mwh, price_usd, fx, adder,
         )
 
