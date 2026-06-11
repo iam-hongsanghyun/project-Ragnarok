@@ -385,6 +385,113 @@ def test_region_analyzer_analyzes_stored_run(_plugins_dir, tmp_path, monkeypatch
     assert rows and rows[0]["name"] == meta["name"]
 
 
+def test_dashboard_manifest_actions_all_have_server_hooks(_plugins_dir) -> None:
+    """Every `action` field must use a hook the backend host can run (transform/
+    contribute). v3.1 shipped frontend-only hooks (fillReallocation /
+    clearReallocation) that dead-ended in a "no server-side hook" toast; bulk
+    replacement is now the build-time `replace_all_carriers` toggle instead."""
+    manifest = _install_example("dashboard-importer.zip")
+    actions = {k: f for k, f in manifest["config"].items() if f.get("type") == "action"}
+    for key, field in actions.items():
+        assert field.get("hook") in ("transform", "contribute"), (
+            f"action {key!r} declares hook {field.get('hook')!r}, which BackendPluginDetail cannot run"
+        )
+    assert manifest["config"]["replace_all_carriers"]["type"] == "boolean"
+
+
+def test_dashboard_bulk_replacement_plan_payload(_plugins_dir, tmp_path) -> None:
+    """Bulk mode (`replace_all_carriers`) selects every checked-carrier plant
+    passing the base-year filter — no table rows — and splits by the fixed
+    shares: solar = C·60%, wind = C·40%."""
+    pd = pytest.importorskip("pandas")
+
+    _install_example("dashboard-importer.zip")
+    plugin = plugins.get("dashboard-importer")
+    assert plugin is not None
+    engine = plugin.module._load_engine()
+
+    xlsx = tmp_path / "fleet.xlsx"
+    pd.DataFrame(
+        [
+            {"name": "coal_new", "carrier": "coal", "p_nom": 100, "build_year": 2030, "close_year": 2060},
+            {"name": "coal_new2", "carrier": "coal", "p_nom": 200, "build_year": 2031, "close_year": 2060},
+            {"name": "coal_old", "carrier": "coal", "p_nom": 400, "build_year": 2010, "close_year": 2060},
+            {"name": "gas_new", "carrier": "gas", "p_nom": 300, "build_year": 2030, "close_year": 2060},
+        ]
+    ).to_excel(xlsx, sheet_name="generators", index=False)
+
+    cfg = {
+        "model_path": str(xlsx),
+        "target_year": "2035",
+        "replace_generators": True,
+        "replace_all_carriers": True,
+        "replace_carriers": ["coal"],
+        "replace_build_year": 2025,
+        "replace_solar_pct": 60,
+        "replace_wind_pct": 40,
+        "generator_replacements": [],
+    }
+    rows = {r["generator"]: r for r in engine.replacement_plan_payload(cfg)}
+    # gas_new (carrier) and coal_old (build_year < 2025) are excluded.
+    assert set(rows) == {"coal_new", "coal_new2"}
+    assert rows["coal_new"]["solar_mw"] == pytest.approx(60.0)
+    assert rows["coal_new"]["wind_mw"] == pytest.approx(40.0)
+    assert rows["coal_new2"]["solar_mw"] == pytest.approx(120.0)
+    assert rows["coal_new2"]["wind_mw"] == pytest.approx(80.0)
+
+    # Bulk off + empty table → nothing planned (the old dead-button state).
+    assert engine.replacement_plan_payload({**cfg, "replace_all_carriers": False}) == []
+
+
+def test_dashboard_bulk_replacement_applies_to_network(_plugins_dir) -> None:
+    """Build-time bulk replacement on a real network: with carriers={coal} and a
+    60/40 split, each coal plant of capacity C is removed and replaced by
+    C·0.6 solar + C·0.4 wind at the same bus; gas is untouched."""
+    import importlib
+
+    pd = pytest.importorskip("pandas")
+    pytest.importorskip("pypsa")
+    import pypsa
+
+    _install_example("dashboard-importer.zip")
+    plugin = plugins.get("dashboard-importer")
+    assert plugin is not None
+    engine = plugin.module._load_engine()
+    with engine._bundled_lib_path():
+        settings_mod = importlib.import_module("dashboard_lib.settings")
+        gen_replace_mod = importlib.import_module("dashboard_lib.generator_replacement")
+
+    network = pypsa.Network()
+    network.add("Bus", "B1")
+    network.add("Generator", "coal1", bus="B1", carrier="coal", p_nom=100, build_year=2030)
+    network.add("Generator", "gas1", bus="B1", carrier="gas", p_nom=300, build_year=2030)
+
+    settings = settings_mod.Settings(
+        model="",
+        base_year=2024,
+        target_year=2035,
+        target_load_twh=0.0,
+        snapshot_start="01/01/2035 00:00",
+        snapshot_length=24,
+        replace_generators=True,
+        replace_all_carriers=True,
+        replace_carriers=("coal",),
+        replace_solar_pct=60.0,
+        replace_wind_pct=40.0,
+    )
+    dashboard = settings_mod.Dashboard(
+        settings=settings, cc_rules=None, cf_constraints=pd.DataFrame(), carbon_price_usd=0.0
+    )
+    gen_replace_mod.replace_generators(network, dashboard)
+
+    gens = network.generators
+    assert "coal1" not in gens.index and "gas1" in gens.index
+    assert gens.at["coal1_solar_2030", "p_nom"] == pytest.approx(60.0)
+    assert gens.at["coal1_wind_2030", "p_nom"] == pytest.approx(40.0)
+    assert gens.at["coal1_solar_2030", "bus"] == "B1"
+    assert gens.at["coal1_wind_2030", "carrier"] == "wind"
+
+
 def test_dashboard_capacity_spans_from_earliest_build_year(_plugins_dir, tmp_path) -> None:
     """The capacity-by-year output must cover the whole fleet history
     (build_year ≤ Y < close_year), not start at the GUI base year — with
