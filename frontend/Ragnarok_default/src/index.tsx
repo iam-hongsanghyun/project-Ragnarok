@@ -72,6 +72,26 @@ try {
   /* storage unavailable — first-load defaults apply naturally */
 }
 
+// Prevent the benign "ResizeObserver loop completed with undelivered
+// notifications" error at its source. It fires when a ResizeObserver callback
+// (ECharts resizing, grid layout) triggers further layout changes within the
+// same observation cycle — harmless, but webpack-dev-server's overlay treats
+// it as a fatal runtime error. A listener-based suppressor can't intercept it:
+// `error` events dispatch AT window, where listeners run in registration order
+// and the dev-server client registers before app code. Deferring every
+// ResizeObserver callback to the next animation frame breaks the loop instead,
+// so the browser never raises the notification at all.
+const NativeResizeObserver = window.ResizeObserver;
+if (NativeResizeObserver) {
+  window.ResizeObserver = class extends NativeResizeObserver {
+    constructor(callback: ResizeObserverCallback) {
+      super((entries, observer) => {
+        window.requestAnimationFrame(() => callback(entries, observer));
+      });
+    }
+  };
+}
+
 const root = ReactDOM.createRoot(
   document.getElementById('root') as HTMLElement
 );

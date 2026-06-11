@@ -56,9 +56,12 @@ function makeChart(patch: Partial<ChartSectionConfig>): Card {
 }
 
 export function buildResultPreset(results: RunResults): DashboardLayout {
+  // Check storageUnits in assetDetails (live run) OR any non-zero value in the
+  // pre-computed storageSeries (analytics-bundle view where series = null and
+  // assetDetails is empty).
   const hasStorage =
-    results.assetDetails &&
-    Object.values(results.assetDetails.storageUnits || {}).length > 0;
+    (results.assetDetails && Object.values(results.assetDetails.storageUnits || {}).length > 0) ||
+    (results.storageSeries?.some((p) => p.charge > 0 || p.discharge > 0 || p.state > 0) ?? false);
   const hasPathway   = !!results.pathway?.enabled;
   const hasExpansion = !!(results.expansionResults && results.expansionResults.length > 0);
   const hasStoch     = !!results.stochastic?.enabled;
@@ -72,12 +75,20 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   const kpi: Card = { id: id('kpi'), kind: 'kpi-strip' };
   rows.push(row({ height: 90, autoHeight: false, cards: [{ card: kpi }] }));
 
-  // 2. Headline charts: dispatch + load + price
+  // 2. Headline: generation dispatch by carrier — full-width time series
   rows.push(row({
     cards: [
-      { card: makeChart({ metricKey: 'dispatch',     chartType: 'area', stacked: true }) },
+      { card: makeChart({ metricKey: 'dispatch', chartType: 'area', stacked: true }) },
+    ],
+  }));
+
+  // 3. Demand + price + storage SoC by carrier, side by side. The SoC chart
+  //    drops out automatically when the run has no storage.
+  rows.push(row({
+    cards: [
       { card: makeChart({ metricKey: 'load' }) },
       { card: makeChart({ metricKey: 'system_price' }) },
+      ...(hasStorage ? [{ card: makeChart({ metricKey: 'storage_soc_by_carrier' }) }] : []),
     ],
   }));
 
@@ -105,12 +116,7 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
     rows.push(row({ cards: [{ card: eb }] }));
   }
 
-  // 7. Storage SoC (conditional)
-  if (hasStorage) {
-    rows.push(row({
-      cards: [{ card: makeChart({ metricKey: 'storage_state' }) }],
-    }));
-  }
+  // (Storage SoC lives in the demand · price · SoC row above.)
 
   // 8. Capacity by period (conditional on pathway)
   if (hasPathway) {
@@ -124,10 +130,12 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
     rows.push(row({ cards: [{ card: ce }] }));
   }
 
-  // 10. Carrier analysis + Load analysis
+  // 10. Carrier analysis + temporal curtailment line chart by carrier.
+  // System-level 'curtailment' metric: backend per-carrier curtailmentSeries,
+  // available in the light analytics bundle too (unlike per-generator details).
   const ca: Card = { id: id('ca'), kind: 'carrier-analysis' };
-  const la: Card = { id: id('la'), kind: 'load-analysis' };
-  rows.push(row({ cards: [{ card: ca }, { card: la }] }));
+  const curt = makeChart({ metricKey: 'curtailment', chartType: 'line' });
+  rows.push(row({ cards: [{ card: ca }, { card: curt }] }));
 
   // 11. Stochastic scenarios (conditional)
   if (hasStoch) {

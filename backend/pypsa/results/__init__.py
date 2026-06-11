@@ -23,9 +23,11 @@ from ..utils.series import weighted_sum
 from ..network.custom_constraints import apply_custom_constraints
 from ..network.constraint_dsl import apply_constraint_specs, apply_dsl_constraints
 from .dispatch import (
+    build_curtailment_series,
     build_dispatch_series,
     build_price_emissions_series,
     build_storage_series,
+    build_storage_soc_series,
     dispatch_by_carrier,
 )
 from .emissions import build_emissions_breakdown
@@ -450,6 +452,18 @@ def run_pypsa(
     # generator series never has to reach the browser — it stays server-side and
     # is fetched windowed only when a time-series chart is opened.
     generator_carriers = network.generators["carrier"].to_dict()
+    # Generators with time-varying p_max_pu (renewables) are the only ones for
+    # which curtailment is meaningful; thermal units at static p_max_pu=1 are
+    # not "curtailed" when running at partial load.
+    # p_nom_opt where solved (>0), else input p_nom — p_nom_opt exists with a
+    # 0.0 default for non-extendable generators on some pypsa versions.
+    _p_nom_in = network.generators["p_nom"].fillna(0.0)
+    if "p_nom_opt" in network.generators.columns:
+        _p_nom_opt = network.generators["p_nom_opt"].fillna(0.0)
+        p_nom_opt_s = _p_nom_opt.where(_p_nom_opt > 0, _p_nom_in)
+    else:
+        p_nom_opt_s = _p_nom_in
+    tv_p_max_pu_cols = set(network.generators_t.p_max_pu.columns)
     generator_energy = []
     for gen in generator_dispatch_frame.columns:
         if str(gen).startswith("load_shedding_"):
@@ -457,12 +471,23 @@ def run_pypsa(
         energy = weighted_sum(generator_dispatch_frame[gen].clip(lower=0.0), generator_weights)
         if energy > 0.0:
             carrier = str(generator_carriers.get(gen, ""))
+            curtailment_mwh: float | None = None
+            if gen in tv_p_max_pu_cols:
+                p_nom_opt = float(p_nom_opt_s.get(gen, 0.0))
+                avail_s = (network.generators_t.p_max_pu[gen] * p_nom_opt).clip(lower=0.0)
+                curtailment_mwh = float(
+                    weighted_sum(
+                        (avail_s - generator_dispatch_frame[gen].clip(lower=0.0)).clip(lower=0.0),
+                        generator_weights,
+                    )
+                )
             generator_energy.append(
                 {
                     "name": str(gen),
                     "value": float(energy),
                     "carrier": carrier,
                     "color": carrier_color(network, carrier),
+                    "curtailmentMwh": curtailment_mwh,
                 }
             )
     generator_energy.sort(key=lambda row: row["value"], reverse=True)
@@ -526,8 +551,10 @@ def run_pypsa(
 
     # Series
     dispatch_s, gen_dispatch_s = build_dispatch_series(network, by_carrier, load_dispatch, generator_dispatch_frame)
+    curtailment_s = build_curtailment_series(network, generator_dispatch_frame)
     price_s, emissions_s = build_price_emissions_series(network, by_carrier, price_series, emissions_factors)
     storage_s = build_storage_series(network)
+    storage_soc_s = build_storage_soc_series(network)
     pathway_summaries = _pathway_period_summaries(
         network,
         generator_dispatch_frame,
@@ -584,16 +611,18 @@ def run_pypsa(
     notes.extend([
         f"Backend PyPSA run solved {len(network.snapshots)} hourly snapshots with {len(network.generators)} generators and {len(network.loads)} loads.",
         f"Average price settled at {average_price:.1f} {currency}/MWh and peaked at {float(price_series.max()):.1f} {currency}/MWh.",
-        f"Load shedding totalled {float(load_shed.sum()):.2f} MWh across the day.",
+        f"Load shedding totalled {float(weighted_sum(load_shed, generator_weights)):.2f} MWh across the day.",
     ])
 
     return {
         "summary": summary,
         "dispatchSeries": dispatch_s,
+        "curtailmentSeries": curtailment_s,
         "generatorDispatchSeries": gen_dispatch_s,
         "systemPriceSeries": price_s,
         "systemEmissionsSeries": emissions_s,
         "storageSeries": storage_s,
+        "storageSocSeries": storage_soc_s,
         "nodalPriceSeries": nodal_price_series,
         "carrierMix": carrier_mix,
         "generatorEnergy": generator_energy,

@@ -151,6 +151,10 @@ export function UserDefinedChartCard({
   const hasMetric  = Boolean(metric);
   const metricRows = metric?.rows || [];
 
+  // Hours per snapshot — integrates MW-rate rows into MWh when summing
+  // (donut totals, 'sum'-reducer buckets) on runs with snapshot gaps.
+  const snapshotWeight = results?.runMeta?.snapshotWeight ?? 1;
+
   const safeStart = hasMetric
     ? clamp(Math.min(active.startIndex, active.endIndex), 0, Math.max(metricRows.length - 1, 0))
     : 0;
@@ -158,15 +162,17 @@ export function UserDefinedChartCard({
     ? clamp(Math.max(active.endIndex, safeStart), safeStart, Math.max(metricRows.length - 1, 0))
     : 0;
   const aggregatedRows = hasMetric
-    ? aggregateMetricRows(metric!, safeStart, safeEnd, active.timeframe)
+    ? aggregateMetricRows(metric!, safeStart, safeEnd, active.timeframe, snapshotWeight)
     : [];
 
   // The donut is the SUM over the SELECTED period — it tracks the range slider
   // (safeStart/safeEnd), and buildDonutFromMetric sums the raw per-snapshot
-  // values across that range.
+  // values across that range, scaled by the snapshot weight (MW·h → MWh).
   const donutData = hasMetric && active.chartType === 'donut'
-    ? buildDonutFromMetric(metric!, safeStart, safeEnd)
+    ? buildDonutFromMetric(metric!, safeStart, safeEnd, snapshotWeight)
     : [];
+  // The donut integrates a MW rate over time, so its total is energy.
+  const donutUnit = metric?.unit === 'MW' ? 'MWh' : metric?.unit || '';
 
   // Show Group by when:
   //   - Generator focus with multi/all selection, OR
@@ -216,7 +222,7 @@ export function UserDefinedChartCard({
         data.map((d) => ({ label: d.label, value: d.value })),
         chartContainerRef.current,
         undefined,
-        { title: metric.label, unit: metric.unit, legend: data.map((d) => ({ label: d.label, color: d.color })) },
+        { title: metric.label, unit: donutUnit, legend: data.map((d) => ({ label: d.label, color: d.color })) },
       );
     } else {
       const keys    = metric.series.map((s) => s.key);
@@ -451,11 +457,11 @@ export function UserDefinedChartCard({
         <section className="chart-card">
           {!compact && (
             <div className="chart-card-header">
-              <div><h3>{metric!.label}</h3><p>total {metric!.unit} over the selected period</p></div>
+              <div><h3>{metric!.label}</h3><p>total {donutUnit} over the selected period</p></div>
             </div>
           )}
           {donutData.length > 0
-            ? <DonutChart data={donutData} unit={metric!.unit} />
+            ? <DonutChart data={donutData} unit={donutUnit} />
             : <p className="empty-text">No data for current selection.</p>
           }
         </section>

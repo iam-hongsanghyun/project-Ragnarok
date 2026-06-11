@@ -8,8 +8,8 @@ import {
   TimeSeriesSeries,
   WorkbookModel,
 } from 'lib/types';
-import { carrierColor, hashColor, numberValue, orderByCarrierRows } from 'lib/utils/helpers';
-import { buildRowsFromGeneratorDetails, buildSystemLoadRows, normalizeSeriesPoint } from 'lib/results/analytics';
+import { carrierColor, hashColor, numberValue, orderByCarrierRows, stringValue } from 'lib/utils/helpers';
+import { buildCurtailmentRowsFromGeneratorDetails, buildRowsFromGeneratorDetails, buildSystemLoadRows, normalizeSeriesPoint } from 'lib/results/analytics';
 
 // ── Multi-generator aggregation ───────────────────────────────────────────────
 
@@ -241,12 +241,73 @@ export function useMetricOptions(
     rows.some((r) => Object.keys(r).some((k) => !SKIP.has(k) && Math.abs(numberValue(r[k] as any)) > 1e-6));
 
   const sysDispatchRows  = hasValues(rawDispatch)  ? rawDispatch  : buildRowsFromGeneratorDetails(results?.assetDetails.generators || {}, 'carrier');
-  const sysGenDispRows   = hasValues(rawGenDisp)   ? rawGenDisp   : buildRowsFromGeneratorDetails(results?.assetDetails.generators || {}, 'generator');
+
+  // For per-unit dispatch, fall back to a synthetic single-row from the compact
+  // generatorEnergy aggregate when both the per-snapshot series and assetDetails
+  // are absent (analytics-bundle view). buildDonutFromMetric sums across rows and
+  // scales by snapshotWeight, so store the rate-equivalent (MWh / weight) here —
+  // generatorEnergy.value is already snapshot-weighted MWh from the backend.
+  const snapshotWeightForRows = results?.runMeta?.snapshotWeight || 1;
+  const genEnergyFallback = results?.generatorEnergy;
+  const baseGenDispRows = hasValues(rawGenDisp)
+    ? rawGenDisp
+    : buildRowsFromGeneratorDetails(results?.assetDetails.generators || {}, 'generator');
+  const sysGenDispRows: TimeSeriesRow[] =
+    baseGenDispRows.length > 0 || !genEnergyFallback || genEnergyFallback.length === 0
+      ? baseGenDispRows
+      : [genEnergyFallback.filter((ge) => !ge.name.startsWith('load_shedding_')).reduce(
+          (row, ge) => { row[ge.name] = ge.value / snapshotWeightForRows; return row; },
+          { label: 'Total', timestamp: '' } as TimeSeriesRow,
+        )];
+
+  // System curtailment by carrier: backend per-carrier aggregate (present in
+  // both the full and the light analytics bundle), with a client-side fallback
+  // derived from per-generator details for bundles predating the field.
+  const rawCurtail = (results?.curtailmentSeries || []).map(normalizeSeriesPoint);
+  const tvGenNames = new Set(
+    _model['generators-p_max_pu']?.length ? Object.keys(_model['generators-p_max_pu'][0]) : [],
+  );
+  const sysCurtailRows = hasValues(rawCurtail)
+    ? rawCurtail
+    : buildCurtailmentRowsFromGeneratorDetails(results?.assetDetails.generators || {}, tvGenNames);
+  const sysCurtailKeys = Array.from(new Set(sysCurtailRows.flatMap((r) => Object.keys(r).filter((k) => !SKIP.has(k) && k !== 'period'))));
+  const sysCurtailSeries = sysCurtailKeys.map((k) => ({ key: k, label: k, color: carrierColor(k) }));
+
+  // Storage SoC by carrier: backend per-carrier aggregate, with a client-side
+  // fallback summing per-unit stateSeries grouped via the model's carrier column.
+  const rawSocByCarrier = (results?.storageSocSeries || []).map(normalizeSeriesPoint);
+  const sysSocRows = hasValues(rawSocByCarrier)
+    ? rawSocByCarrier
+    : (() => {
+        const unitCarrier: Record<string, string> = {};
+        for (const row of _model.storage_units ?? []) {
+          const name = stringValue(row.name);
+          if (name) unitCarrier[name] = stringValue(row.carrier) || 'Other';
+        }
+        const buckets = new Map<string, TimeSeriesRow>();
+        for (const unit of Object.values(results?.assetDetails.storageUnits || {})) {
+          const carrier = unitCarrier[unit.name] || 'Other';
+          for (const p of unit.stateSeries) {
+            const row = buckets.get(p.timestamp) || { label: p.label, timestamp: p.timestamp };
+            row[carrier] = numberValue(row[carrier] as string | number | undefined) + p.state;
+            buckets.set(p.timestamp, row);
+          }
+        }
+        return Array.from(buckets.values()).sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
+      })();
+  const sysSocKeys = Array.from(new Set(sysSocRows.flatMap((r) => Object.keys(r).filter((k) => !SKIP.has(k) && k !== 'period'))));
+  const sysSocSeries = sysSocKeys.map((k) => ({ key: k, label: k, color: carrierColor(k) }));
+
   const rawSysDispKeys   = Array.from(new Set(sysDispatchRows.flatMap((r) => Object.keys(r).filter((k) => !SKIP.has(k)))));
   const sysDispKeys      = orderByCarrierRows(_model.carriers, rawSysDispKeys);
   const sysGenDispKeys   = Array.from(new Set(sysGenDispRows.flatMap((r) => Object.keys(r).filter((k) => !SKIP.has(k)))));
-  const sysDispSeries    = sysDispKeys.map((k)    => ({ key: k, label: k, color: carrierColor(k) }));
-  const sysGenDispSeries = sysGenDispKeys.map((k) => ({ key: k, label: k, color: results?.assetDetails.generators[k]?.color || hashColor(k) }));
+  const sysDispSeries    = sysDispKeys.map((k) => ({ key: k, label: k, color: carrierColor(k) }));
+  const sysGenDispSeries = sysGenDispKeys.map((k) => ({
+    key: k, label: k,
+    color: results?.assetDetails.generators[k]?.color
+      || genEnergyFallback?.find((ge) => ge.name === k)?.color
+      || hashColor(k),
+  }));
   const sysPriceRows     = (results?.systemPriceSeries     || []).map((p) => ({ label: p.label, timestamp: p.timestamp, price: p.value }));
   const sysEmissionsRows = (results?.systemEmissionsSeries || []).map((p) => ({ label: p.label, timestamp: p.timestamp, emissions: p.value }));
   const storageRows      = (results?.storageSeries         || []).map((p) => ({ label: p.label, timestamp: p.timestamp, charge: p.charge, discharge: p.discharge, state: p.state }));
@@ -265,11 +326,13 @@ export function useMetricOptions(
       return [
         { key: 'dispatch',          label: 'Dispatch by carrier',       unit: 'MW',     rows: sysDispatchRows,  series: sysDispSeries,                                                                                                                                           reducer: 'mean', allowDonut: true  },
         { key: 'dispatch_by_gen',   label: 'Dispatch by generator',     unit: 'MW',     rows: sysGenDispRows,   series: sysGenDispSeries,                                                                                                                                        reducer: 'mean', allowDonut: true  },
+        { key: 'curtailment',       label: 'Curtailment by carrier',     unit: 'MW',     rows: sysCurtailRows,   series: sysCurtailSeries,                                                                                                                                        reducer: 'mean', allowDonut: true  },
         { key: 'load',              label: 'Total load',                 unit: 'MW',     rows: sysLoadRows,      series: [{ key: 'load',      label: 'Load MW',         color: '#f97316' }],                                                                                    reducer: 'mean', allowDonut: false },
         { key: 'system_price',      label: 'System marginal price',      unit: `${currencySymbol}/MWh`,  rows: sysPriceRows,     series: [{ key: 'price',     label: `Price ${currencySymbol}/MWh`,     color: '#111827' }],                                                                                    reducer: 'mean', allowDonut: false },
         { key: 'system_emissions',  label: 'System emissions',           unit: 'tCO2e',  rows: sysEmissionsRows, series: [{ key: 'emissions', label: 'Emissions tCO2e', color: '#16a34a' }],                                                                                    reducer: 'sum',  allowDonut: false },
         { key: 'storage_power',     label: 'Storage power',              unit: 'MW',     rows: storageRows,      series: [{ key: 'charge',    label: 'Charge MW',       color: '#0ea5e9' }, { key: 'discharge', label: 'Discharge MW', color: '#f97316' }],                    reducer: 'mean', allowDonut: true  },
         { key: 'storage_state',     label: 'Storage state of charge',    unit: 'MWh',    rows: storageRows,      series: [{ key: 'state',     label: 'State of charge', color: '#14b8a6' }],                                                                                    reducer: 'mean', allowDonut: false },
+        { key: 'storage_soc_by_carrier', label: 'Storage SoC by carrier', unit: 'MWh',   rows: sysSocRows,       series: sysSocSeries,                                                                                                                                            reducer: 'mean', allowDonut: false },
       ];
     }
 
