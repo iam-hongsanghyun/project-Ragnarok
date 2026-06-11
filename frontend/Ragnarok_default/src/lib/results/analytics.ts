@@ -33,6 +33,26 @@ export function buildRowsFromGeneratorDetails(
   return Array.from(buckets.values()).sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp)));
 }
 
+/** Carrier-grouped curtailment rows from per-generator details — fallback for
+ *  bundles predating the backend `curtailmentSeries` aggregate. Restricted to
+ *  `timeVaryingNames` (generators with an input p_max_pu series): thermal units
+ *  at static availability are part-loaded, not curtailed. */
+export function buildCurtailmentRowsFromGeneratorDetails(
+  generators: Record<string, { carrier: string; name: string; curtailmentSeries: Array<{ label: string; timestamp: string; curtailment: number }> }>,
+  timeVaryingNames: Set<string>,
+): TimeSeriesRow[] {
+  const buckets = new Map<string, TimeSeriesRow>();
+  Object.values(generators).forEach((generator) => {
+    if (!timeVaryingNames.has(generator.name)) return;
+    generator.curtailmentSeries.forEach((point) => {
+      const row = buckets.get(point.timestamp) || { label: point.label, timestamp: point.timestamp };
+      row[generator.carrier] = numberValue(row[generator.carrier] as string | number | undefined) + Math.max(point.curtailment, 0);
+      buckets.set(point.timestamp, row);
+    });
+  });
+  return Array.from(buckets.values()).sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp)));
+}
+
 export function buildSystemLoadRows(results: RunResults | null): TimeSeriesRow[] {
   if (!results) return [];
   const dispatchRows = (results.dispatchSeries || []).map((point) => ({
@@ -54,9 +74,15 @@ export function buildSystemLoadRows(results: RunResults | null): TimeSeriesRow[]
   return Array.from(buckets.values()).sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp)));
 }
 
-export function aggregateValues(values: number[], reducer: MetricOption['reducer']) {
+/** Reduce per-snapshot values over a time bucket.
+ *
+ * `snapshotWeight` (hours per snapshot) integrates rates into amounts for the
+ * 'sum' reducer: a 4-hourly run summing MW snapshots must scale by 4 to get
+ * MWh. 'mean' and 'last' are weight-invariant under the uniform per-run
+ * weight used here, so they stay untouched. */
+export function aggregateValues(values: number[], reducer: MetricOption['reducer'], snapshotWeight = 1) {
   if (!values.length) return 0;
-  if (reducer === 'sum') return values.reduce((sum, value) => sum + value, 0);
+  if (reducer === 'sum') return values.reduce((sum, value) => sum + value, 0) * snapshotWeight;
   if (reducer === 'last') return values[values.length - 1];
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
@@ -76,7 +102,7 @@ export function getTimeBucket(timestamp: string | undefined, timeframe: Timefram
   return `${start.getFullYear()}-W${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
 }
 
-export function aggregateMetricRows(metric: MetricOption, startIndex: number, endIndex: number, timeframe: TimeframeOption) {
+export function aggregateMetricRows(metric: MetricOption, startIndex: number, endIndex: number, timeframe: TimeframeOption, snapshotWeight = 1) {
   const rows = metric.rows.slice(startIndex, endIndex + 1);
   if (!rows.length) return [];
   if (timeframe === 'hourly') return rows;
@@ -86,6 +112,7 @@ export function aggregateMetricRows(metric: MetricOption, startIndex: number, en
       aggregated[item.key] = aggregateValues(
         rows.map((row) => numberValue(row[item.key] as string | number | undefined)),
         metric.reducer,
+        snapshotWeight,
       );
     });
     return [aggregated];
@@ -103,22 +130,24 @@ export function aggregateMetricRows(metric: MetricOption, startIndex: number, en
       aggregated[item.key] = aggregateValues(
         bucketRows.map((row) => numberValue(row[item.key] as string | number | undefined)),
         metric.reducer,
+        snapshotWeight,
       );
     });
     return aggregated;
   });
 }
 
-export function buildDonutFromMetric(metric: MetricOption, startIndex: number, endIndex: number) {
+export function buildDonutFromMetric(metric: MetricOption, startIndex: number, endIndex: number, snapshotWeight = 1) {
   // A donut is the SUM over the selected period — sum the raw per-snapshot
   // values across [startIndex, endIndex], regardless of the metric's reducer
   // (mean/last) or any timeframe bucketing. So sliding the range re-sums exactly
-  // the selected snapshots.
+  // the selected snapshots. `snapshotWeight` (hours per snapshot) integrates
+  // MW-rate rows into MWh totals on runs with gaps between snapshots.
   const rows = metric.rows.slice(startIndex, endIndex + 1);
   return metric.series
     .map((item) => ({
       label: item.label,
-      value: rows.reduce((sum, row) => sum + Math.abs(numberValue(row[item.key] as string | number | undefined)), 0),
+      value: rows.reduce((sum, row) => sum + Math.abs(numberValue(row[item.key] as string | number | undefined)), 0) * snapshotWeight,
       color: item.color,
     }))
     .filter((item) => item.value > 0)
