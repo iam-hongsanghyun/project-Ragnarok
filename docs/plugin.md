@@ -1657,8 +1657,11 @@ reference implementation of this pattern (its `_lib()` loader).
 ### 16.4 The `manifest.json`
 
 Same `config` schema as a frontend manifest (section 5), so the Plugins tab
-renders the identical form. An `action` field with `"hook": "transform"` (or
-`"contribute"`) triggers the server hook:
+renders the identical form. Note that `capabilities` is **freeform display
+taxonomy** (e.g. `"data-importer"`, `"constraint-pack"`) — it never controls
+dispatch; the hooks a plugin actually exposes are introspected from
+`plugin.py` and reported in the manifest's `hooks` field. An `action` field
+with `"hook": "transform"` (or `"contribute"`) triggers the server hook:
 
 ```json
 {

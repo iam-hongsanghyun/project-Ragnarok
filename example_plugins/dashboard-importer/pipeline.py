@@ -1,28 +1,33 @@
 """
-ragnarok-dashboard-importer — full GUI plugin (v0.9.0)
-=======================================================
-This plugin has two entry points:
+ragnarok-dashboard-importer — build engine (vendored by plugin.py)
+==================================================================
+The Ragnarok backend runs NO plugin code during the solve, so everything this
+plugin wants to affect at solve time must travel **as data** in the model it
+returns. Entry points (dispatched by plugin.py; host contract in
+backend/app/plugins.py):
 
-1. **transform** (action button "Send model to Ragnarok")
-   Pre-build transform invoked when the user clicks the action button.
-   Builds a complete PyPSA network from the GUI settings, converts it to
-   a Ragnarok workbook model dict, and replaces the current workbook.
-   No solver is run.
+* **transform(model, scenario, options)** — builds a complete PyPSA network
+  from the GUI settings (+ optional uploaded dashboard / model workbooks),
+  converts it to a Ragnarok workbook model dict, and returns it; the host
+  replaces the session model with the return value. No solver runs here.
 
-2. **apply_constraints** (stage: in-solve)
-   Called automatically during every Run, after PyPSA has assembled the
-   linopy model but before the solver runs.  Reads the CF constraints and
-   carbon-price tables from the plugin GUI and adds the corresponding
-   linopy constraints / objective terms.  This is the only way to apply
-   capacity-factor energy bounds and carbon costs — they cannot be
-   expressed in the workbook dict.
+  - CF capacity-factor limits are emitted as DSL lines in a
+    ``RAGNAROK_CustomDSL`` sheet (see ``_custom_dsl_from_cf``); Ragnarok's
+    core DSL compiler applies them at solve time.
+  - The carbon price is folded into generator marginal costs at build time
+    (see ``_apply_carbon_price_marginal_cost``) — objective-equivalent to the
+    retired in-solve hook, and visible in marginal-cost-derived outputs.
+
+* **payload builders** (``capacity_payload``, ``replacement_plan_payload``,
+  ``generator_filter_values_payload``, …) — answer the plugin's ``options`` /
+  ``analyze`` / action hooks.
 
 Typical workflow
 ----------------
-1. Configure all settings in the plugin Input tab.
-2. Click "Send model to Ragnarok" — the workbook is replaced.
-3. Click topbar Run — Ragnarok builds the network, then apply_constraints
-   fires and adds CF / carbon terms before the solver starts.
+1. Configure settings in the plugin Input tab (upload the model workbook once).
+2. Click "Build & load into Ragnarok" — the session model is replaced.
+3. Topbar Run solves it; the CF DSL and carbon-adjusted costs are already in
+   the model.
 """
 from __future__ import annotations
 
@@ -108,9 +113,11 @@ def transform(
     imported_model = _network_to_model(network)
 
     # Emit CF constraints INTO the workbook so they reach the Ragnarok frontend
-    # (Advanced Constraints DSL) and are applied on Run via constraintSpecs. The
-    # legacy in-solve `apply_constraints` hook is never called in the
-    # frontend-only architecture, so constraints must travel inside the model.
+    # (Advanced Constraints DSL) and are applied on Run via constraintSpecs.
+    # Ragnarok runs no plugin code during the solve, so constraints must travel
+    # inside the model. (The carbon price can't be expressed as DSL — it is an
+    # objective cost, not a bound — so it is folded into marginal costs during
+    # the build; see _apply_carbon_price_marginal_cost.)
     custom_dsl = _custom_dsl_from_cf(network, module_config)
     if custom_dsl:
         imported_model["RAGNAROK_CustomDSL"] = [{"text": custom_dsl}]
@@ -131,164 +138,79 @@ def transform(
 
 
 # ---------------------------------------------------------------------------
-# In-solve hook — CF constraints + carbon price
+# Carbon price → marginal-cost adder (build-time)
 # ---------------------------------------------------------------------------
 
-def apply_constraints(
-    network: Any,
-    model: dict[str, list[dict[str, Any]]],
-    scenario: dict[str, Any],
-    options: dict[str, Any],
-) -> None:
-    """Add CF capacity-factor constraints and carbon-price objective terms.
+def _apply_carbon_price_marginal_cost(network: Any, dashboard: Any) -> None:
+    """Fold the carbon cost into generator marginal costs at build time.
 
-    Called automatically at the ``in-solve`` stage during every Ragnarok Run.
-    Reads the plugin GUI config (``constraints_rows``, ``carbonprice_curves``,
-    ``emission_intensity_rows``) and injects linopy constraints / objective
-    terms into the already-assembled PyPSA model.
+    Replaces the retired in-solve ``apply_constraints`` objective term —
+    Ragnarok runs no plugin code during the solve, so the carbon cost must
+    live in the model itself.
 
-    **Idempotent**: PyPSA can invoke ``extra_functionality`` more than once
-    per ``optimize()`` call (e.g. with rolling horizon or warm-start MIPs).
-    Each CF constraint is name-guarded against re-addition, and the carbon
-    objective term is gated by a sentinel attribute on the linopy model.
+    Algorithm:
+        $$ mc_g \\mathrel{+}= I_c \\cdot P \\cdot X / 1000
+           \\quad \\forall g \\in \\text{carrier } c $$
+        ASCII: mc_g += intensity_c[kg CO2/MWh] * price[USD/tCO2]
+                       * fx[currency/USD] / 1000
+
+    where ``I_c`` is the carrier's emission intensity for the target year
+    (kg CO₂/MWh), ``P`` the carbon price (USD/tCO₂) for the chosen scenario
+    and target year, and ``X`` the currency exchange rate (model currency per
+    USD); /1000 converts kg→t. The objective contribution Σ p·adder is exactly
+    the retired hook's carbon term, and the cost is now visible in
+    marginal-cost-derived outputs (e.g. merit order).
+
+    Must run AFTER ``apply_marginal_cost_multipliers`` (the per-carrier
+    multiplier scales fuel cost only — never the carbon adder, matching the
+    original design where the objective term bypassed multipliers) and BEFORE
+    region aggregation (a uniform per-carrier additive adder commutes with the
+    capacity-weighted carrier merge). Static ``marginal_cost`` only — this
+    pipeline never emits time-varying marginal costs, and the retired hook
+    ignored them too.
 
     Args:
-        network: Fully assembled, not-yet-solved ``pypsa.Network``.
-            ``network.model`` is the linopy model.
-        model:   Ragnarok workbook dict (read-only, not used here).
-        scenario: Ragnarok scenario dict (read-only, not used here).
-        options:  Host options; ``options["moduleConfig"]`` holds this
-            plugin's current GUI config.
+        network: The built, not-yet-aggregated ``pypsa.Network``.
+        dashboard: The ``dashboard_lib`` Dashboard carrying ``settings``
+            (``carbonprice``, ``currency_exchange``), ``carbon_price_usd``
+            (USD/tCO₂ for the target year) and ``emission_intensity``
+            (carrier → kg CO₂/MWh for the target year).
     """
-    del model, scenario
-
-    cfg = options.get("moduleConfig", {})
-    constraints_on = _as_bool(cfg, "constraints", False)
-    carbonprice_on = _as_bool(cfg, "carbonprice", False)
-
-    if not constraints_on and not carbonprice_on:
+    settings = dashboard.settings
+    if not getattr(settings, "carbonprice", False):
         return
 
-    m = network.model
-    p = m["Generator-p"]           # linopy Variable: dims (snapshot, name)
-    n_hours = len(network.snapshots)
+    price_usd = float(dashboard.carbon_price_usd or 0.0)
+    emission_intensity = dashboard.emission_intensity
+    if price_usd <= 0:
+        logger.warning(
+            "[dashboard-importer] Carbon price: scenario %r / year %d → %.1f USD/t — skipping",
+            getattr(settings, "carbonprice_scenario", ""), settings.target_year, price_usd,
+        )
+        return
+    if emission_intensity is None or emission_intensity.empty:
+        logger.warning("[dashboard-importer] Carbon price: emission intensities are empty — skipping")
+        return
 
-    def _has_constraint(name: str) -> bool:
-        """Robust 'is this constraint already in m?' check across linopy versions."""
-        try:
-            return name in m.constraints
-        except Exception:  # noqa: BLE001
-            try:
-                return name in getattr(m.constraints, "labels", {})
-            except Exception:  # noqa: BLE001
-                return False
-
-    # ── CF constraints ────────────────────────────────────────────────────────
-    if constraints_on:
-        cf_df = _table_to_df(cfg.get("constraints_rows"))
-        active_attrs: set[str] = {
-            a.strip()
-            for a in _as_str(cfg, "constraints_attribute", "max_cf,min_cf").split(",")
-            if a.strip()
-        }
-
-        if cf_df is None or cf_df.empty:
-            logger.warning("[dashboard-importer] CF constraints on but constraints_rows is empty")
-        else:
-            for _, row in cf_df.iterrows():
-                carrier   = str(row.get("carrier",   "")).strip()
-                attribute = str(row.get("attribute", "")).strip()
-                if attribute not in active_attrs or not carrier:
-                    continue
-                try:
-                    cf_value = float(row.get("value", 0))
-                except (TypeError, ValueError):
-                    logger.warning("[dashboard-importer] CF skip: invalid value for %s %s", carrier, attribute)
-                    continue
-
-                gens = network.generators.index[network.generators["carrier"] == carrier]
-                if len(gens) == 0:
-                    logger.warning("[dashboard-importer] CF skip: carrier %r has no generators", carrier)
-                    continue
-
-                total_p_nom = float(network.generators.loc[gens, "p_nom"].sum())
-                energy_limit = cf_value * total_p_nom * n_hours
-                lhs = p.sel({"name": list(gens)}).sum()
-
-                if attribute == "max_cf":
-                    cname = f"cf_max_{carrier}"
-                    if _has_constraint(cname):
-                        logger.debug("[dashboard-importer] %s already added — skipping", cname)
-                        continue
-                    m.add_constraints(lhs <= energy_limit, name=cname)
-                    logger.info(
-                        "[dashboard-importer] CF max_%s ≤ %.1f%%  (limit %.0f MWh over %d h)",
-                        carrier, cf_value * 100, energy_limit, n_hours,
-                    )
-                elif attribute == "min_cf":
-                    cname = f"cf_min_{carrier}"
-                    if _has_constraint(cname):
-                        logger.debug("[dashboard-importer] %s already added — skipping", cname)
-                        continue
-                    m.add_constraints(lhs >= energy_limit, name=cname)
-                    logger.info(
-                        "[dashboard-importer] CF min_%s ≥ %.1f%%  (floor %.0f MWh over %d h)",
-                        carrier, cf_value * 100, energy_limit, n_hours,
-                    )
-                else:
-                    logger.warning("[dashboard-importer] CF skip: unknown attribute %r", attribute)
-
-    # ── Carbon-price objective term ───────────────────────────────────────────
-    if carbonprice_on:
-        # Sentinel guard: extra_functionality can fire more than once per solve.
-        # Re-adding the term would double the carbon cost in the objective.
-        if getattr(m, "_dashboard_importer_carbon_added", False):
-            logger.debug("[dashboard-importer] carbon term already added — skipping")
-            return
-
-        target_year     = _as_int(cfg, "target_year", 2030)
-        scenario_name   = _as_str(cfg, "carbonprice_scenario", "")
-        currency_exchange = _as_float(cfg, "currency_exchange", 1350.0)
-
-        cp_df    = _table_to_df(cfg.get("carbonprice_curves"))
-        price_usd = _lookup_carbon_price_long(cp_df, scenario_name, target_year) if cp_df is not None else 0.0
-
-        ei_df = _table_to_df(cfg.get("emission_intensity_rows"))
-        emission_intensity = (
-            _emission_intensity_series(ei_df, target_year)
-            if ei_df is not None and not ei_df.empty
-            else pd.Series(dtype=float)
+    fx = float(getattr(settings, "currency_exchange", 1.0) or 1.0)
+    applied = False
+    for carrier, kg_per_mwh in emission_intensity.items():
+        if float(kg_per_mwh) == 0:
+            continue
+        gens = network.generators.index[network.generators["carrier"] == str(carrier).strip()]
+        if len(gens) == 0:
+            continue
+        adder = float(kg_per_mwh) * price_usd * fx / 1000.0
+        base = pd.to_numeric(network.generators.loc[gens, "marginal_cost"], errors="coerce").fillna(0.0)
+        network.generators.loc[gens, "marginal_cost"] = base + adder
+        applied = True
+        logger.info(
+            "[dashboard-importer] carbon %s: %.0f kg CO₂/MWh × %.1f USD/t × %.0f /USD = +%.0f /MWh marginal cost",
+            carrier, kg_per_mwh, price_usd, fx, adder,
         )
 
-        if price_usd <= 0:
-            logger.warning(
-                "[dashboard-importer] Carbon price: scenario %r / year %d → %.1f USD/t — skipping",
-                scenario_name, target_year, price_usd,
-            )
-        elif emission_intensity.empty:
-            logger.warning("[dashboard-importer] Carbon price: emission_intensity_rows is empty — skipping")
-        else:
-            carbon_term = None
-            for carrier, kg_per_mwh in emission_intensity.items():
-                if float(kg_per_mwh) == 0:
-                    continue
-                gens = network.generators.index[network.generators["carrier"] == carrier]
-                if len(gens) == 0:
-                    continue
-                adder = float(kg_per_mwh) * price_usd * currency_exchange / 1000.0
-                term = p.sel({"name": list(gens)}).sum() * adder
-                carbon_term = term if carbon_term is None else carbon_term + term
-                logger.info(
-                    "[dashboard-importer] carbon %s: %.0f kg CO₂/MWh × %.1f USD/t × %.0f KRW/USD = %.0f KRW/MWh",
-                    carrier, kg_per_mwh, price_usd, currency_exchange, adder,
-                )
-
-            if carbon_term is not None:
-                m.add_objective(m.objective.expression + carbon_term, overwrite=True)
-                m._dashboard_importer_carbon_added = True
-                logger.info("[dashboard-importer] carbon objective term added")
-            else:
-                logger.warning("[dashboard-importer] Carbon price: no matching generators found")
+    if not applied:
+        logger.warning("[dashboard-importer] Carbon price: no matching generators found")
 
 
 # ---------------------------------------------------------------------------
@@ -344,6 +266,10 @@ def _build_dashboard_network(
     # Scale generator marginal cost per carrier (uniform factor commutes with the
     # capacity-weighted carrier merge, so order vs aggregation is immaterial).
     marginal_cost_mod.apply_marginal_cost_multipliers(network, dashboard)
+    # Fold the carbon price into marginal costs AFTER the multipliers (the
+    # multiplier scales fuel cost only, never the carbon adder) and BEFORE
+    # aggregation (a per-carrier additive adder commutes with the merge).
+    _apply_carbon_price_marginal_cost(network, dashboard)
     region_mod.aggregate_by_region(network, dashboard)
     p_max_pu_mod.apply_standard_p_max_pu(network, settings.model)
     carrier_mod.aggregate_by_carrier(network, dashboard)
@@ -1371,6 +1297,16 @@ _IMPORT_LOCK = threading.Lock()
 # imported first wins). The directory name is the install id, unique under the
 # plugins dir, so every installed copy keeps its own modules.
 _LIB_ALIAS = "_ragnarok_plugin_lib_" + re.sub(r"\W", "_", PLUGIN_ROOT.name)
+
+# This module is re-executed whenever the plugin is (re)installed or the
+# registry refreshes (plugin.py reloads, then _load_engine re-execs us). Drop
+# any lib modules a PREVIOUS install registered under our alias so a reinstall
+# with changed dashboard_lib files takes effect without a backend restart.
+# In-flight holders keep their already-bound module objects; the next _lib()
+# call re-imports from this install's files.
+_STALE_LIBS = [n for n in list(sys.modules) if n == _LIB_ALIAS or n.startswith(_LIB_ALIAS + ".")]
+for _name in _STALE_LIBS:
+    del sys.modules[_name]
 
 
 def _lib(submodule: str) -> Any:

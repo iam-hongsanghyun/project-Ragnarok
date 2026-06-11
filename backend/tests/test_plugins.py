@@ -628,6 +628,92 @@ def test_dashboard_follow_mode_uses_yearly_additions_ratio(_plugins_dir, tmp_pat
     assert fixed["coalA"]["wind_mw"] == pytest.approx(90.0)
 
 
+def test_dashboard_carbon_price_folds_into_marginal_cost(_plugins_dir) -> None:
+    """Carbon price reaches the solve as a marginal-cost adder baked into the
+    built model (Ragnarok runs no plugin code in-solve): for carrier c,
+    mc += intensity_c[kg/MWh] x price[USD/t] x fx[/USD] / 1000. Zero-intensity
+    carriers and disabled toggle leave costs untouched."""
+    pd = pytest.importorskip("pandas")
+    pytest.importorskip("pypsa")
+    import pypsa
+
+    _install_example("dashboard-importer.zip")
+    plugin = plugins.get("dashboard-importer")
+    assert plugin is not None
+    engine = plugin.module._load_engine()
+    settings_mod = engine._lib("settings")
+
+    def _network() -> "pypsa.Network":
+        n = pypsa.Network()
+        n.add("Bus", "B1")
+        n.add("Generator", "coal1", bus="B1", carrier="coal", p_nom=100, marginal_cost=50.0)
+        n.add("Generator", "gas1", bus="B1", carrier="gas", p_nom=100, marginal_cost=80.0)
+        n.add("Generator", "wind1", bus="B1", carrier="wind", p_nom=100, marginal_cost=0.0)
+        return n
+
+    def _dashboard(enabled: bool) -> object:
+        settings = settings_mod.Settings(
+            model="",
+            base_year=2024,
+            target_year=2030,
+            target_load_twh=0.0,
+            snapshot_start="01/01/2030 00:00",
+            snapshot_length=24,
+            carbonprice=enabled,
+            carbonprice_scenario="NGFS",
+            currency_exchange=1000.0,
+        )
+        return settings_mod.Dashboard(
+            settings=settings,
+            cc_rules=None,
+            cf_constraints=pd.DataFrame(),
+            carbon_price_usd=30.0,
+            emission_intensity=pd.Series({"coal": 900.0, "gas": 400.0, "wind": 0.0}),
+        )
+
+    network = _network()
+    engine._apply_carbon_price_marginal_cost(network, _dashboard(enabled=True))
+    gens = network.generators
+    # coal: 900 kg/MWh x 30 USD/t x 1000 /USD / 1000 = 27000 per MWh
+    assert gens.at["coal1", "marginal_cost"] == pytest.approx(50.0 + 27_000.0)
+    assert gens.at["gas1", "marginal_cost"] == pytest.approx(80.0 + 12_000.0)
+    assert gens.at["wind1", "marginal_cost"] == pytest.approx(0.0)  # zero intensity
+
+    untouched = _network()
+    engine._apply_carbon_price_marginal_cost(untouched, _dashboard(enabled=False))
+    assert untouched.generators.at["coal1", "marginal_cost"] == pytest.approx(50.0)
+
+
+def test_dashboard_lib_alias_purged_on_engine_reload(_plugins_dir) -> None:
+    """Re-executing pipeline.py (what a reinstall / registry refresh triggers
+    via the plugin.py reload) must drop the previous install's lib modules from
+    sys.modules, so changed vendored files take effect without a backend
+    restart."""
+    import importlib.util
+    import sys
+
+    pytest.importorskip("pandas")
+    pytest.importorskip("pypsa")
+
+    _install_example("dashboard-importer.zip")
+    plugin = plugins.get("dashboard-importer")
+    assert plugin is not None
+    engine = plugin.module._load_engine()
+    first = engine._lib("settings")
+    assert engine._LIB_ALIAS in sys.modules
+
+    # Simulate the reinstall path: a fresh exec of pipeline.py.
+    spec = importlib.util.spec_from_file_location("_test_engine_reload", plugin.directory / "pipeline.py")
+    assert spec is not None and spec.loader is not None
+    engine2 = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(engine2)
+
+    assert engine2._LIB_ALIAS == engine._LIB_ALIAS
+    assert engine._LIB_ALIAS not in sys.modules  # purged at exec time
+    second = engine2._lib("settings")
+    assert second is not first  # re-imported from disk, not served stale
+
+
 def test_dashboard_bulk_replacement_applies_to_network(_plugins_dir) -> None:
     """Build-time bulk replacement on a real network: with carriers={coal} and a
     60/40 split, each coal plant of capacity C is removed and replaced by
