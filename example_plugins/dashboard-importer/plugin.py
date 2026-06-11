@@ -32,9 +32,10 @@ _engine: ModuleType | None = None
 def _load_engine() -> ModuleType:
     """Load the vendored build engine once, under a unique module name.
 
-    The engine (``pipeline.py``) makes ``dashboard_lib`` importable itself by
-    inserting its own directory onto ``sys.path`` (see ``_bundled_lib_path``),
-    so we only need to load the top-level module here.
+    The engine (``pipeline.py``) loads its bundled ``dashboard_lib`` itself,
+    aliased under a plugin-unique module name (see ``_lib``) — no ``sys.path``
+    mutation, no bare ``dashboard_lib`` in ``sys.modules`` — so we only need to
+    load the top-level module here.
     """
     global _engine
     if _engine is None:

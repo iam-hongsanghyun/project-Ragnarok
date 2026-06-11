@@ -93,6 +93,34 @@ def test_run_transform_bad_return_is_valueerror(_plugins_dir) -> None:
         plugins.run_transform("bad", {}, {})
 
 
+def test_hooks_receive_a_copy_in_place_mutation_never_persists(_plugins_dir) -> None:
+    """transform/contribute get a defensive copy of the session model: mutating
+    the ``model`` argument in place (cells, rows, sheets) must not leak back to
+    the caller's dict — the contract is return-value only, so a contribute
+    plugin can't smuggle session changes past the merge."""
+    _write_plugin(
+        _plugins_dir,
+        "mutator",
+        "def transform(model, config):\n"
+        "    model['buses'][0]['name'] = 'HACKED'\n"
+        "    model['buses'].append({'name': 'smuggled'})\n"
+        "    model['injected'] = [{'x': 1}]\n"
+        "    return {'carriers': [{'name': 'ok'}]}\n"
+        "def contribute(model, config):\n"
+        "    model['buses'][0]['name'] = 'HACKED'\n"
+        "    del model['buses'][0]\n"
+        "    return {'sheets': {'extra': [{'name': 'e'}]}}\n",
+    )
+    plugins._REGISTRY = None
+
+    current = {"buses": [{"name": "b1"}]}
+    assert plugins.run_transform("mutator", current, {}) == {"carriers": [{"name": "ok"}]}
+    assert current == {"buses": [{"name": "b1"}]}
+
+    assert plugins.run_contribute("mutator", current, {}) == {"sheets": {"extra": [{"name": "e"}]}}
+    assert current == {"buses": [{"name": "b1"}]}
+
+
 def test_contribute_merges_sheets_and_constraints_into_session(_plugins_dir, tmp_path, monkeypatch) -> None:
     # Production goes through model_store (the active store); set up + assert via
     # the same facade so the test follows the configured backend (sqlite default).
@@ -323,6 +351,35 @@ def test_install_example_dashboard_importer(_plugins_dir) -> None:
 
     # An unknown option-set returns [] cleanly (the dropdown shows static options).
     assert plugins.run_options("dashboard-importer", "/nope", {}) == []
+
+
+def test_dashboard_lib_loads_under_plugin_alias_not_bare_name(_plugins_dir) -> None:
+    """The importer's bundled dashboard_lib registers in sys.modules under a
+    plugin-unique alias — never as bare 'dashboard_lib' (two installed plugins
+    shipping a same-named lib would silently swap each other's code) — and the
+    loader never mutates sys.path."""
+    import sys
+
+    pytest.importorskip("pandas")
+    pytest.importorskip("pypsa")
+
+    zip_path = _EXAMPLES / "zips" / "dashboard-importer.zip"
+    if not zip_path.exists():
+        pytest.skip("example dashboard-importer.zip not built")
+    asyncio.run(plugins_router.install_plugin(_upload(zip_path.read_bytes(), "dashboard-importer.zip")))
+    plugin = plugins.get("dashboard-importer")
+    assert plugin is not None
+    engine = plugin.module._load_engine()
+
+    path_before = list(sys.path)
+    settings_mod = engine._lib("settings")
+    # A submodule with a package-relative import — must resolve inside the alias.
+    redist_mod = engine._lib("demand_redistribution")
+    assert sys.path == path_before
+    assert "dashboard_lib" not in sys.modules
+    assert engine._LIB_ALIAS in sys.modules
+    assert settings_mod.__name__ == f"{engine._LIB_ALIAS}.settings"
+    assert redist_mod.region_mod.__name__ == f"{engine._LIB_ALIAS}.region"
 
 
 _EXAMPLES = Path(__file__).resolve().parents[2] / "example_plugins"
@@ -575,8 +632,6 @@ def test_dashboard_bulk_replacement_applies_to_network(_plugins_dir) -> None:
     """Build-time bulk replacement on a real network: with carriers={coal} and a
     60/40 split, each coal plant of capacity C is removed and replaced by
     C·0.6 solar + C·0.4 wind at the same bus; gas is untouched."""
-    import importlib
-
     pd = pytest.importorskip("pandas")
     pytest.importorskip("pypsa")
     import pypsa
@@ -585,9 +640,8 @@ def test_dashboard_bulk_replacement_applies_to_network(_plugins_dir) -> None:
     plugin = plugins.get("dashboard-importer")
     assert plugin is not None
     engine = plugin.module._load_engine()
-    with engine._bundled_lib_path():
-        settings_mod = importlib.import_module("dashboard_lib.settings")
-        gen_replace_mod = importlib.import_module("dashboard_lib.generator_replacement")
+    settings_mod = engine._lib("settings")
+    gen_replace_mod = engine._lib("generator_replacement")
 
     network = pypsa.Network()
     network.add("Bus", "B1")
