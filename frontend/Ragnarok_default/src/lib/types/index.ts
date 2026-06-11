@@ -555,11 +555,18 @@ export interface RunResults {
   pluginAnalytics?: Record<string, PluginAnalyticsEntry>;
   summary: SummaryItem[];
   dispatchSeries: SeriesPoint[];
+  /** Per-carrier curtailed power (MW) per snapshot — renewables (time-varying
+   *  p_max_pu) only; thermal part-load is not curtailment. Backend aggregate,
+   *  kept in the light analytics bundle (like dispatchSeries). */
+  curtailmentSeries?: SeriesPoint[];
+  /** Per-carrier storage state of charge (MWh) per snapshot. Backend
+   *  aggregate, kept in the light analytics bundle. */
+  storageSocSeries?: SeriesPoint[];
   generatorDispatchSeries: SeriesPoint[];
   /** Compact per-generator dispatched energy (MWh) — backend aggregate that
    *  powers the "Dispatch by unit" donut without shipping the per-snapshot
    *  series. Present on light (View) loads; the full series is fetched windowed. */
-  generatorEnergy?: Array<{ name: string; value: number; carrier?: string; color?: string }>;
+  generatorEnergy?: Array<{ name: string; value: number; carrier?: string; color?: string; curtailmentMwh?: number | null }>;
   systemPriceSeries: ValuePoint[];
   systemEmissionsSeries: ValuePoint[];
   storageSeries: StoragePoint[];

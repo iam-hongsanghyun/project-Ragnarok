@@ -70,6 +70,56 @@ def build_dispatch_series(
     return dispatch_series, generator_dispatch_series
 
 
+def build_curtailment_series(
+    network: pypsa.Network,
+    generator_dispatch_frame: pd.DataFrame,
+) -> list[dict]:
+    """Per-carrier curtailed power (MW) per snapshot.
+
+    Only generators with a time-varying ``p_max_pu`` (renewables) can be
+    curtailed — a thermal unit at static availability running below p_nom is
+    part-loaded, not curtailed. The load-shedding backstop (which also gets a
+    time-varying p_max_pu) is excluded by name prefix.
+
+    Algorithm:
+        curtailment_g(t) = max(p_max_pu_g(t) * p_nom_opt_g - p_g(t), 0)   [MW]
+        ASCII: curt = max(avail - dispatch, 0), summed per carrier.
+    """
+    snapshots = network.snapshots
+    labels = [_snapshot_label(s) for s in snapshots]
+    tv = network.generators_t.p_max_pu
+    gens = [
+        g for g in tv.columns
+        if not str(g).startswith("load_shedding_") and g in network.generators.index
+    ]
+    if not gens:
+        return [
+            {"label": lbl, "timestamp": st, "period": p, "values": {}}
+            for (lbl, st, p) in labels
+        ]
+    # p_nom_opt where solved (>0), else input p_nom — the column exists with a
+    # 0.0 default even on unsolved/non-extendable setups.
+    p_nom_opt = network.generators.loc[gens, "p_nom_opt"].fillna(0.0) if "p_nom_opt" in network.generators.columns else None
+    p_nom_in = network.generators.loc[gens, "p_nom"].fillna(0.0)
+    p_nom = p_nom_in if p_nom_opt is None else p_nom_opt.where(p_nom_opt > 0, p_nom_in)
+    avail = tv[gens].reindex(snapshots).fillna(0.0).mul(p_nom, axis=1)
+    disp = generator_dispatch_frame.reindex(index=snapshots, columns=gens, fill_value=0.0).clip(lower=0.0)
+    curt = (avail - disp).clip(lower=0.0)
+    carriers = network.generators.loc[gens, "carrier"].astype(str)
+    by_carrier = curt.T.groupby(carriers).sum().T  # snapshots x carriers
+    cols = [str(c) for c in by_carrier.columns]
+    rows = by_carrier.to_numpy().tolist()
+    return [
+        {
+            "label": lbl,
+            "timestamp": st,
+            "period": p,
+            "values": {cols[j]: float(v) for j, v in enumerate(rows[i]) if v > 1e-6},
+        }
+        for i, (lbl, st, p) in enumerate(labels)
+    ]
+
+
 def build_price_emissions_series(
     network: pypsa.Network,
     by_carrier: dict[str, pd.Series],
@@ -107,6 +157,37 @@ def build_price_emissions_series(
         for i, (lbl, st, p) in enumerate(labels)
     ]
     return system_price, system_emissions
+
+
+def build_storage_soc_series(network: pypsa.Network) -> list[dict]:
+    """Per-carrier state of charge (MWh) per snapshot.
+
+    Sums ``state_of_charge`` across the storage units of each carrier so the
+    dashboard can plot SoC per storage technology. SoC is a stock (MWh), not a
+    rate — no snapshot weighting applies.
+    """
+    snapshots = network.snapshots
+    labels = [_snapshot_label(s) for s in snapshots]
+    if len(network.storage_units.index) == 0 or network.storage_units_t.state_of_charge.empty:
+        return [
+            {"label": lbl, "timestamp": st, "period": p, "values": {}}
+            for (lbl, st, p) in labels
+        ]
+    soc = network.storage_units_t.state_of_charge.reindex(index=snapshots).fillna(0.0)
+    units = [u for u in soc.columns if u in network.storage_units.index]
+    carriers = network.storage_units.loc[units, "carrier"].astype(str)
+    by_carrier = soc[units].T.groupby(carriers).sum().T  # snapshots x carriers
+    cols = [str(c) for c in by_carrier.columns]
+    rows = by_carrier.to_numpy().tolist()
+    return [
+        {
+            "label": lbl,
+            "timestamp": st,
+            "period": p,
+            "values": {cols[j]: float(v) for j, v in enumerate(rows[i]) if abs(v) > 1e-6},
+        }
+        for i, (lbl, st, p) in enumerate(labels)
+    ]
 
 
 def build_storage_series(network: pypsa.Network) -> list[dict]:

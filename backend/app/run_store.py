@@ -338,6 +338,169 @@ def _generator_energy_fallback(result: dict[str, Any], bundle: dict[str, Any]) -
     return out
 
 
+def _curtailment_fallback(bundle: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, float]]:
+    """Per-carrier curtailment series + per-generator curtailed MWh from a
+    stored bundle (runs saved before the solve-time fields existed).
+
+    Everything needed is already in the run db: per-snapshot dispatch
+    (``generatorDispatchSeries``), the input ``generators-p_max_pu`` sheet in
+    the model snapshot (index-aligned with solved snapshots, same convention as
+    the frontend's assetDetails), and ``p_nom_opt`` in the static outputs.
+
+    Algorithm:
+        curtailment_g(t) = max(p_max_pu_g(t) * p_nom_g - p_g(t), 0)   [MW]
+        ASCII: curt = max(avail - dispatch, 0); MWh = sum_t curt * weight.
+
+    Only generators with a time-varying ``p_max_pu`` (renewables) are
+    curtailable; the load-shedding backstop is excluded by name prefix.
+    Returns ``([], {})`` when the bundle lacks the required series.
+    """
+    result = bundle.get("result") or {}
+    disp_rows = result.get("generatorDispatchSeries")
+    model = bundle.get("model") or {}
+    pmax_rows = model.get("generators-p_max_pu")
+    if not isinstance(disp_rows, list) or not disp_rows:
+        return [], {}
+    if not isinstance(pmax_rows, list) or not pmax_rows or not isinstance(pmax_rows[0], dict):
+        pmax_rows = []
+
+    p_nom_in: dict[str, float] = {}
+    carrier_map: dict[str, str] = {}
+    for g in model.get("generators") or []:
+        if isinstance(g, dict) and g.get("name") is not None:
+            name = str(g["name"])
+            try:
+                p_nom_in[name] = float(g.get("p_nom") or 0.0)
+            except (TypeError, ValueError):
+                p_nom_in[name] = 0.0
+            carrier_map[name] = str(g.get("carrier", "") or "")
+
+    static_gens = ((result.get("outputs") or {}).get("static") or {}).get("generators") or {}
+
+    def _p_nom(name: str) -> float:
+        try:
+            opt = float((static_gens.get(name) or {}).get("p_nom_opt") or 0.0)
+        except (TypeError, ValueError):
+            opt = 0.0
+        return opt if opt > 0 else p_nom_in.get(name, 0.0)
+
+    tv_gens = [
+        c for c in (pmax_rows[0] if pmax_rows else {})
+        if c in p_nom_in and not str(c).startswith("load_shedding_")
+    ]
+    tv_p_nom = {g: _p_nom(g) for g in tv_gens}
+
+    weight = bundle.get("snapshotWeight") or (bundle.get("options") or {}).get("snapshotWeight") or 1.0
+    try:
+        weight = float(weight)
+    except (TypeError, ValueError):
+        weight = 1.0
+
+    series: list[dict[str, Any]] = []
+    mwh: dict[str, float] = {}
+    for i, row in enumerate(disp_rows):
+        if not isinstance(row, dict):
+            continue
+        values = row.get("values") if isinstance(row.get("values"), dict) else {}
+        pmax_row = pmax_rows[i] if i < len(pmax_rows) else {}
+        out_vals: dict[str, float] = {}
+        for g in tv_gens:
+            try:
+                ratio = float(pmax_row.get(g) or 0.0)
+            except (TypeError, ValueError):
+                ratio = 0.0
+            try:
+                disp = max(float(values.get(g) or 0.0), 0.0)
+            except (TypeError, ValueError):
+                disp = 0.0
+            curt = max(max(ratio, 0.0) * tv_p_nom[g] - disp, 0.0)
+            if curt > 1e-6:
+                carrier = carrier_map.get(g, "") or "Other"
+                out_vals[carrier] = out_vals.get(carrier, 0.0) + curt
+                mwh[g] = mwh.get(g, 0.0) + curt * weight
+        series.append({
+            "label": row.get("label"),
+            "timestamp": row.get("timestamp"),
+            "period": row.get("period"),
+            "values": out_vals,
+        })
+    return series, mwh
+
+
+def _storage_soc_fallback(bundle: dict[str, Any]) -> list[dict[str, Any]]:
+    """Per-carrier state-of-charge series from a stored bundle (runs saved
+    before ``storageSocSeries`` existed).
+
+    Reads ``outputs.series['storage_units-state_of_charge']`` (per-snapshot MWh
+    per unit, with a ``snapshot`` time column) and groups by each unit's
+    carrier from the model snapshot's ``storage_units`` sheet. SoC is a stock
+    (MWh) — no snapshot weighting. Returns ``[]`` when the bundle lacks the
+    sheet or there are no storage units.
+    """
+    result = bundle.get("result") or {}
+    series = (result.get("outputs") or {}).get("series") or {}
+    soc_rows = series.get("storage_units-state_of_charge")
+    if not isinstance(soc_rows, list) or not soc_rows or not isinstance(soc_rows[0], dict):
+        return []
+    carrier_map: dict[str, str] = {}
+    for u in (bundle.get("model") or {}).get("storage_units") or []:
+        if isinstance(u, dict) and u.get("name") is not None:
+            carrier_map[str(u["name"])] = str(u.get("carrier", "") or "") or "Other"
+    units = [c for c in soc_rows[0] if c in carrier_map]
+    out: list[dict[str, Any]] = []
+    for row in soc_rows:
+        if not isinstance(row, dict):
+            continue
+        stamp = str(row.get("snapshot", ""))
+        values: dict[str, float] = {}
+        for u in units:
+            try:
+                v = float(row.get(u) or 0.0)
+            except (TypeError, ValueError):
+                v = 0.0
+            if abs(v) > 1e-6:
+                carrier = carrier_map[u]
+                values[carrier] = values.get(carrier, 0.0) + v
+        label = stamp[11:16] if len(stamp) >= 16 else stamp
+        out.append({"label": label, "timestamp": stamp, "period": None, "values": values})
+    return out
+
+
+def _attach_storage_soc(light_result: dict[str, Any], bundle: dict[str, Any]) -> bool:
+    """Backfill ``storageSocSeries`` on a light result that predates the
+    solve-time field. Returns True if changed.
+
+    Key presence (not truthiness) marks "already derived": a no-storage run
+    legitimately gets an empty list, and persisting it stops every later view
+    from re-loading the full bundle just to re-derive nothing.
+    """
+    if "storageSocSeries" in light_result:
+        return False
+    light_result["storageSocSeries"] = _storage_soc_fallback(bundle)
+    return True
+
+
+def _attach_curtailment(light_result: dict[str, Any], bundle: dict[str, Any]) -> bool:
+    """Backfill ``curtailmentSeries`` + per-generator ``curtailmentMwh`` on a
+    light result that predates the solve-time fields. Returns True if changed.
+
+    Key presence (not truthiness) marks "already derived" — see
+    ``_attach_storage_soc`` for why.
+    """
+    if "curtailmentSeries" in light_result:
+        return False
+    series, mwh = _curtailment_fallback(bundle)
+    light_result["curtailmentSeries"] = series
+    gen_energy = light_result.get("generatorEnergy")
+    if isinstance(gen_energy, list):
+        light_result["generatorEnergy"] = [
+            {**entry, "curtailmentMwh": mwh.get(str(entry.get("name")))}
+            if isinstance(entry, dict) and "curtailmentMwh" not in entry else entry
+            for entry in gen_energy
+        ]
+    return True
+
+
 def _light_analytics(bundle: dict[str, Any]) -> dict[str, Any]:
     """Build the lightweight analytics bundle.
 
@@ -359,6 +522,10 @@ def _light_analytics(bundle: dict[str, Any]) -> dict[str, Any]:
         light_result = {**result, "outputs": light_outputs}
         if not light_result.get("generatorEnergy"):
             light_result["generatorEnergy"] = _generator_energy_fallback(result, bundle)
+        # Runs stored before the solve-time curtailment / SoC fields existed:
+        # derive them from the stored series + model snapshot.
+        _attach_curtailment(light_result, bundle)
+        _attach_storage_soc(light_result, bundle)
         # The dominant payload (tens of MB) — only needed for the per-unit
         # time-series view, which fetches it windowed on demand.
         light_result["generatorDispatchSeries"] = None
@@ -730,6 +897,23 @@ def get_run_analytics(name: str) -> dict[str, Any] | None:
         with _connect(name) as conn:
             analytics = _kv_get(conn, "analytics")
         if isinstance(analytics, dict):
+            # One-time backfill for runs stored before the curtailment / SoC
+            # fields existed: derive from the full bundle and persist the
+            # enriched analytics so the next read is a single cheap kv get.
+            stored_result = analytics.get("result")
+            if isinstance(stored_result, dict) and (
+                "curtailmentSeries" not in stored_result or "storageSocSeries" not in stored_result
+            ):
+                bundle = get_run(name)
+                if bundle is not None:
+                    changed = _attach_curtailment(stored_result, bundle)
+                    changed = _attach_storage_soc(stored_result, bundle) or changed
+                    if changed:
+                        try:
+                            with _connect(name) as conn:
+                                _kv_set(conn, "analytics", analytics)
+                        except Exception:  # noqa: BLE001
+                            logger.exception("Failed to persist backfilled analytics for run %s", name)
             return analytics
     except Exception:  # noqa: BLE001
         logger.exception("Failed to read analytics for run %s", name)
