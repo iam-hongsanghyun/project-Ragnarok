@@ -10,11 +10,6 @@ import numpy as np
 import pandas as pd
 from fastapi import HTTPException
 
-# Solve-phase timing and notes are logged here. With the run worker no longer
-# redirecting file descriptors, these INFO lines stream to the launching
-# terminal alongside HiGHS' own verbose output.
-_log = logging.getLogger("pypsa.solver")
-
 from ..constants import carrier_color
 from ..network import build_network
 from ..pathway import parse_pathway_config
@@ -37,7 +32,12 @@ from .emissions import build_emissions_breakdown
 from .expansion import build_expansion_results
 from .full_outputs import build_full_outputs
 from .market import build_applied_constraints, build_co2_shadow, build_merit_order
-from .summaries import _snapshot_label, _rolling_window_summaries, _pathway_period_summaries
+from .summaries import _rolling_window_summaries, _pathway_period_summaries
+
+# Solve-phase timing and notes are logged here. With the run worker no longer
+# redirecting file descriptors, these INFO lines stream to the launching
+# terminal alongside HiGHS' own verbose output.
+_log = logging.getLogger("pypsa.solver")
 
 
 def _coerce_solve_status(result: Any) -> tuple[str, str]:

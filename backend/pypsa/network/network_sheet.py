@@ -34,7 +34,9 @@ def _apply_network_sheet(
         value = network_row.get(field)
         if value in (None, ""):
             continue
-        coercion = str(policy.get("coercion", "any"))
+        # The policy's declared coercion (string / epsg / crs-like / any) is
+        # implemented inline by each field branch below — there is no generic
+        # coercion step.
         if field == "name":
             network.name = str(value)
         elif field == "srid":
