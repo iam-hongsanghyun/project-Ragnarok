@@ -1536,7 +1536,9 @@ live in `example_plugins/` (not auto-loaded); you install one from the Plugins t
 
 ### 16.1 The unified hook contract (both kinds)
 
-Frontend and backend plugins share ONE contract:
+Frontend and backend plugins share ONE contract (for the system-level
+involvement map — every touchpoint, what the plugin sees, and what contains
+it — see [architecture.md §9.0](architecture.md#90-where-a-plugin-can-touch-the-system)):
 
 | Hook | Signature | Meaning |
 |---|---|---|

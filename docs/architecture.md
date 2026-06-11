@@ -721,6 +721,56 @@ Two plugin kinds exist; both are installed from the Plugins tab (the single
 zero of either — plugins are purely 3rd-party. For full authoring detail see
 [`docs/plugin.md`](plugin.md).
 
+### 9.0 Where a plugin can touch the system
+
+The complete involvement map. Every plugin touchpoint, what the plugin sees
+there, what it can change, and what contains it. Anything not in this table is
+out of a plugin's reach by construction — most importantly **the solve**:
+`POST /api/run` executes zero plugin code, for either kind.
+
+Lifecycle of a backend plugin:
+
+```
+install (.zip upload)            discovery (registry scan)
+  └─ extracted, zip-slip checked   └─ plugin.py top-level code EXECUTES in-process
+                                      (every backend start / registry refresh)
+
+form open                        apply                            after solve
+  ├─ options(name,cfg,ctx)         ├─ transform(model,cfg) ──┐      └─ analyze(result,cfg)
+  ├─ <action>(cfg) → cfg patch     └─ contribute(model,cfg) ─┤
+  └─ file upload → scratch dir                               ▼
+                                     ONLY the RETURN VALUE is persisted
+                                     into the session (input is a copy)
+solve (POST /api/run)
+  └─ no plugin involvement — the solve pipeline is plugin-free
+```
+
+| Touchpoint | Kind | Runs when | Plugin sees | Plugin can change | Containment |
+|---|---|---|---|---|---|
+| Install / discovery | backend | upload; every backend start | — (top-level code executes) | anything (it is in-process Python) | zip-slip check; broken plugin logged + skipped; **trust boundary** — install = code execution by design |
+| Install | frontend | upload | — (no code runs at install) | browser `localStorage` entry | package parsed, evaluated only on use |
+| Config form render | both | Plugins tab | — (manifest JSON only, no code) | — | schema-driven renderer; no plugin markup |
+| `options(name, config, ctx)` | backend | select opens / dependency changes | form config; read-only session via `ctx.distinct` / `ctx.sheet_page`; own scratch dir | nothing — returns option rows | errors → HTTP 400 |
+| `<action>(config)` named hook | both | action button click | form config (+ scratch dir, backend) | a `config` patch written back into the **form** (user-visible, nothing persisted) | errors → 400 / toast |
+| `transform(model, config)` | both | "Apply to model" / action with `hook:"transform"` | **defensive copy** of the model | session model — via return value ONLY | copy + return-only; errors → 400 / toast |
+| `contribute(model, config)` | both | apply | defensive copy of the model | merged sheets / appended DSL — via return value ONLY | same as transform |
+| `analyze(result, config)` | both | Output tab / results change | the run result it is handed | nothing — returns display data; host renders all markup | errors → 400 / toast |
+| Data-file upload | backend | file picker | own scratch dir `plugin_files/<id>/` only | files in that dir | path injected by host; dir removed on uninstall |
+| Own local server | frontend | `plugins.env` launch | whatever its process can | its own process | separate OS process; never contacted by the Ragnarok backend |
+| Solve | — | `POST /api/run` | — | — | **no plugin code executes** |
+
+**The trust boundary, stated plainly.** Everything in the Containment column is
+*behavioral* containment (what the framework persists, how errors surface). It
+is not a sandbox. A backend plugin runs as full Python inside the backend
+process: nothing stops it from importing `backend.app.model_store` and writing
+the session directly, blocking a worker thread forever, or exhausting memory —
+the containment above keeps *honest* plugins from corrupting state by accident,
+not hostile ones from doing harm. Likewise a frontend plugin is JavaScript
+evaluated in the page and can reach the whole app. Installing a plugin of
+either kind is executing trusted code; on a LAN deployment, only install
+plugins you trust. Hard isolation (subprocess hook workers with timeouts,
+Web-Worker sandboxing) is deliberate future hardening, not a current property.
+
 ### 9.1 Frontend plugins (browser)
 
 A frontend plugin is a `.zip` package containing at minimum a `module.json`
