@@ -27,7 +27,7 @@ import pypsa
 
 from ..carbon_price import apply_carbon_price, parse_carbon_price_config
 from ...app.config import load_system_defaults
-from ..pathway import PathwayConfig, parse_pathway_config
+from ..pathway import parse_pathway_config
 from ..stochastic import apply_scenarios, parse_stochastic_config
 from ..pypsa_schema import (
     input_static_attributes,
@@ -46,12 +46,11 @@ from .components import (
     _has_name,
     _strip_blank_columns,
     _ordered_component_sheets,
-    _bus_ref_columns_for_list,
     _drop_broken_bus_refs,
     _ensure_carriers,
     _apply_ts_sheet,
 )
-from .network_sheet import _apply_network_sheet, _override_network_crs, _peak_load_per_bus
+from .network_sheet import _apply_network_sheet, _peak_load_per_bus
 
 __all__ = ["build_network", "validate_model"]
 

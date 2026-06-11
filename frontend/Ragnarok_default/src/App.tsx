@@ -1262,6 +1262,32 @@ function AppInner() {
     void refreshBackendRuns();
   }, [refreshBackendRuns]);
 
+  // Rename a stored run in place (History row label → input). The backend
+  // renames the .db, identity, and display labels together; here we patch the
+  // list with the returned meta and follow the active-run pointer so the open
+  // result viewer / package download keep working under the new name.
+  const handleRenameBackendRun = useCallback(async (name: string, newNameRaw: string) => {
+    const newName = newNameRaw.trim();
+    if (!newName || newName === name) return;
+    try {
+      const resp = await fetch(`${API_BASE}/api/runs/${encodeURIComponent(name)}/rename`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newName }),
+      });
+      if (!resp.ok) {
+        const detail = await resp.json().catch(() => null) as { detail?: string } | null;
+        throw new Error(detail?.detail || `Rename failed (status ${resp.status}).`);
+      }
+      const meta = (await resp.json()) as BackendRunMeta;
+      setBackendRuns((prev) => prev.map((m) => (m.name === name ? meta : m)));
+      setActiveRunName((current) => (current === name ? meta.name : current));
+      showToast(`Renamed run to ${meta.name}`, 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Rename failed.', 'error');
+    }
+  }, [showToast]);
+
   // Auto-refresh the History list while the History tab is open, so a run that
   // finishes elsewhere (or an import) appears without a browser reload. Polling
   // only runs while the tab is visible to avoid needless backend chatter.
@@ -2190,6 +2216,7 @@ function AppInner() {
                     onDownloadBackendXlsx={handleDownloadBackendXlsx}
                     onExportBackendProject={handleExportBackendProject}
                     onDeleteBackendRuns={handleDeleteBackendRuns}
+                    onRenameBackendRun={(name, newName) => void handleRenameBackendRun(name, newName)}
                     onReload={() => void refreshBackendRuns()}
                   />
                 )}

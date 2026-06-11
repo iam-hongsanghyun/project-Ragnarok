@@ -392,3 +392,42 @@ def test_korean_scenario_label_survives_into_run_name() -> None:
     # Traversal/path characters are still rejected.
     assert run_store._is_safe_name("../이런젠장") is False
     assert run_store._is_safe_name("이런/젠장") is False
+
+
+# ── Rename ─────────────────────────────────────────────────────────────────────
+
+
+def test_rename_run_moves_db_and_updates_identity_and_labels(_runs_dir: Path) -> None:
+    meta = run_store.store_run({"buses": [{"name": "n1"}]}, {"label": "Old"}, {}, _sample_result())
+    assert meta is not None
+    old = meta["name"]
+
+    renamed, err = run_store.rename_run(old, "high-carbon sensitivity")
+    assert err == "" and renamed is not None
+    assert renamed["name"] == "high-carbon sensitivity"
+    assert renamed["label"] == "high-carbon sensitivity"          # History row
+    assert renamed["scenarioLabel"] == "high-carbon sensitivity"  # Comparison pivot
+    assert not (_runs_dir / f"{old}.db").exists()
+    assert (_runs_dir / "high-carbon sensitivity.db").exists()
+
+    # The renamed run is fully readable under its new identity, gone under the old.
+    assert run_store.run_exists("high-carbon sensitivity") is True
+    assert run_store.run_exists(old) is False
+    listed = run_store.list_runs()
+    assert [m["name"] for m in listed] == ["high-carbon sensitivity"]
+    assert run_store.get_run_analytics("high-carbon sensitivity") is not None
+
+
+def test_rename_run_guards(_runs_dir: Path) -> None:
+    meta_a = run_store.store_run({"buses": [{"name": "a"}]}, {"label": "A"}, {"runLabel": "A"}, _sample_result())
+    meta_b = run_store.store_run({"buses": [{"name": "b"}]}, {"label": "B"}, {"runLabel": "B"}, _sample_result())
+    assert meta_a is not None and meta_b is not None
+
+    assert run_store.rename_run("nope", "x") == (None, "not_found")
+    assert run_store.rename_run(meta_a["name"], "../escape")[1] == "unsafe"
+    assert run_store.rename_run(meta_a["name"], "")[1] == "unsafe"
+    assert run_store.rename_run(meta_a["name"], meta_b["name"])[1] == "exists"
+
+    # No-op rename returns the current meta unchanged.
+    same, err = run_store.rename_run(meta_a["name"], meta_a["name"])
+    assert err == "" and same is not None and same["name"] == meta_a["name"]

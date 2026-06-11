@@ -5,7 +5,7 @@ from typing import Any
 import pandas as pd
 import pypsa
 
-from ..pypsa_schema import bus_reference_attributes, input_temporal_attributes
+from ..pypsa_schema import bus_reference_attributes
 from ..utils.coerce import number
 
 

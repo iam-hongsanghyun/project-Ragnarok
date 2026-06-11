@@ -21,6 +21,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
+from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
 from .backends import BackendError, available_backends, get_backend
@@ -1178,6 +1179,31 @@ def get_backend_run_model_sheet(
 def delete_backend_run(name: str) -> dict[str, Any]:
     """Delete the bundle + meta sidecar for ``name``."""
     return {"deleted": run_store.delete_run(name)}
+
+
+class RenameRunRequest(BaseModel):
+    """Body for ``POST /api/runs/{name}/rename``."""
+
+    newName: str = ""
+
+
+@app.post("/api/runs/{name}/rename")
+def rename_backend_run(name: str, body: RenameRunRequest) -> dict[str, Any]:
+    """Rename a stored run (file, identity, and display labels together).
+
+    Guarded: unsafe names → 400, missing run → 404, name collision → 409.
+    Returns the updated meta so the client can patch its list in place.
+    """
+    meta, err = run_store.rename_run(name, body.newName)
+    if err == "unsafe":
+        raise HTTPException(status_code=400, detail="Invalid run name.")
+    if err == "not_found":
+        raise HTTPException(status_code=404, detail="Stored run not found.")
+    if err == "exists":
+        raise HTTPException(status_code=409, detail="A run with that name already exists.")
+    if err or meta is None:
+        raise HTTPException(status_code=500, detail="Rename failed — see server logs.")
+    return meta
 
 
 _ZIP_MEDIA_TYPE = "application/zip"

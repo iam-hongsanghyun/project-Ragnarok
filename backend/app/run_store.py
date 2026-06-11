@@ -869,6 +869,55 @@ def run_exists(name: str) -> bool:
     return _db_path(name).exists() or (RUNS_DIR / f"{name}.json").exists()
 
 
+def rename_run(old: str, new: str) -> tuple[dict[str, Any] | None, str]:
+    """Rename a stored run: ``<old>.db`` → ``<new>.db``; identity + labels follow.
+
+    Updates ``meta.name`` (the run's identity — every ``/api/runs/{name}/*``
+    route and the History row key) AND the display labels (``label``,
+    ``scenarioLabel``) so History rows and the Comparison pivot show the chosen
+    name (see TODO X4). The new name passes the same :func:`_is_safe_name`
+    guard as every other name-taking endpoint.
+
+    Returns:
+        ``(meta, "")`` on success, or ``(None, reason)`` with reason in
+        ``{"unsafe", "not_found", "exists", "error"}`` for the router to map
+        onto 400 / 404 / 409 / 500.
+    """
+    new = (new or "").strip()
+    if not _is_safe_name(old) or not _is_safe_name(new):
+        return None, "unsafe"
+    _ensure_run_migrated(old)
+    if not _db_path(old).exists():
+        return None, "not_found"
+    if new == old:  # no-op rename: hand back the current meta unchanged
+        with _connect(old) as conn:
+            meta = _kv_get(conn, "meta")
+        return (meta if isinstance(meta, dict) else None), ""
+    if run_exists(new):
+        return None, "exists"
+    try:
+        # Connections are per-call (closed on exit), so no handle pins the old
+        # file; drop any WAL sidecars before the move.
+        for suffix in ("-wal", "-shm"):
+            side = RUNS_DIR / f"{old}.db{suffix}"
+            if side.exists():
+                side.unlink()
+        _db_path(old).rename(_db_path(new))
+        with _connect(new) as conn:
+            meta = _kv_get(conn, "meta")
+            meta = meta if isinstance(meta, dict) else {}
+            meta["name"] = new
+            meta["label"] = new
+            meta["scenarioLabel"] = new
+            _kv_set(conn, "meta", meta)
+            conn.commit()
+        logger.info("Renamed run %s -> %s", old, new)
+        return meta, ""
+    except Exception:  # noqa: BLE001 — defensive like every store function
+        logger.exception("Failed to rename run %s -> %s", old, new)
+        return None, "error"
+
+
 def xlsx_path(name: str) -> Path | None:
     """Path to a pre-built xlsx for ``name`` if one exists (and ``name`` is safe).
 

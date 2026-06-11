@@ -23,6 +23,8 @@ interface HistoryViewProps {
   /** Download the full project package (.zip of bundle JSON + meta JSON + xlsx). */
   onExportBackendProject: (name: string) => void;
   onDeleteBackendRuns: (names: string[]) => void;
+  /** Rename a stored run — click the row label to edit it in place. */
+  onRenameBackendRun: (name: string, newName: string) => void;
   /** Manually re-fetch the run list from the backend. */
   onReload?: () => void;
 }
@@ -50,6 +52,7 @@ export function HistoryView({
   onDownloadBackendXlsx,
   onExportBackendProject,
   onDeleteBackendRuns,
+  onRenameBackendRun,
   onReload,
 }: HistoryViewProps) {
   const [query, setQuery] = useState('');
@@ -170,6 +173,7 @@ export function HistoryView({
               selected={visibleSelected.includes(meta.name)}
               onSelect={(checked) => toggleName(meta.name, checked)}
               onActivate={() => onViewSelected([meta.name])}
+              onRename={(newName) => onRenameBackendRun(meta.name, newName)}
             />
           ))}
         </div>
@@ -236,20 +240,33 @@ function formatDemand(mwh: number | null | undefined): string | null {
 // ── Backend (server-stored) run row ─────────────────────────────────────────
 
 function BackendHistoryRow({
-  meta, selected, onSelect, onActivate,
+  meta, selected, onSelect, onActivate, onRename,
 }: {
   meta: BackendRunMeta;
   selected: boolean;
   onSelect: (checked: boolean) => void;
   /** Double-click / Enter on the row → view this single run (toolbar handles the rest). */
   onActivate: () => void;
+  /** Commit an in-place rename (Enter / blur); the backend renames identity + labels together. */
+  onRename: (newName: string) => void;
 }) {
   // The run's display name IS the scenario name (falls back to the stored label).
   const name = meta.scenarioLabel || meta.label || meta.name;
 
-  // Rows are display-only: select with the checkbox (or click the row), then use
-  // the toolbar actions at the top. This keeps every row a clean, aligned line
-  // instead of a ragged strip of buttons.
+  // Click the label to rename in place (same affordance as scenario labels in
+  // Settings). Editing starts from the CANONICAL run name — the filesystem/API
+  // identity — not the display label; after a rename the backend sets both.
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(meta.name);
+  const commit = () => {
+    setEditing(false);
+    const next = draft.trim();
+    if (next && next !== meta.name) onRename(next);
+  };
+
+  // Rows are otherwise display-only: select with the checkbox (or click the
+  // row), then use the toolbar actions at the top. This keeps every row a
+  // clean, aligned line instead of a ragged strip of buttons.
   return (
     <div
       className={`history-row${selected ? ' is-selected' : ''}`}
@@ -263,7 +280,31 @@ function BackendHistoryRow({
         aria-label={`Select ${name}`}
       />
 
-      <span className="history-row-name history-row-name--static" title={meta.name}>{name}</span>
+      {editing ? (
+        <input
+          className="history-row-name-input"
+          value={draft}
+          autoFocus
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commit();
+            if (e.key === 'Escape') { setEditing(false); setDraft(meta.name); }
+          }}
+          onClick={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          aria-label={`Rename ${meta.name}`}
+        />
+      ) : (
+        <span
+          className="history-row-name history-row-name--editable"
+          title={`${meta.name} — click to rename`}
+          onClick={(e) => { e.stopPropagation(); setDraft(meta.name); setEditing(true); }}
+          onDoubleClick={(e) => e.stopPropagation()}
+        >
+          {name}
+        </span>
+      )}
 
       <span className="history-row-time" title={new Date(meta.savedAt).toLocaleString()}>
         {formatRelTime(meta.savedAt)}
