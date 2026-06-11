@@ -8695,12 +8695,10 @@ code, kbd, samp, tt,
   flex-direction: column;
   gap: 12px;
 }
-/* One block per database with ticked datasets — the rail stacks a section
-   per source so multi-database selections (OSM + WRI) are all configurable. */
-.data-import-filters__source {
-  display: flex;
-  flex-direction: column;
-}
+/* One COLLAPSIBLE block per database with ticked datasets — the rail stacks a
+   section per source so multi-database selections (OSM + WRI) are all
+   configurable. <details>/<summary> with the native disclosure marker as the
+   affordance (same idiom as the constraints DSL cheatsheet). */
 .data-import-filters__source + .data-import-filters__source {
   margin-top: 16px;
   padding-top: 12px;
@@ -8711,12 +8709,22 @@ code, kbd, samp, tt,
   font-size: 0.8rem;
   font-weight: 700;
   color: var(--text);
+  display: list-item;   /* keep the disclosure marker visible */
+  cursor: pointer;
 }
-/* Right-rail settings grouped as Common + one section per selected dataset. */
-.data-import-filters__group {
+.data-import-filters__source-body {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+}
+/* An author `display` on details children outranks the UA rule that hides
+   them when closed — re-hide the bodies explicitly. */
+.data-import-filters__source:not([open]) > .data-import-filters__source-body,
+.data-import-filters__group:not([open]) > .data-import-filters__group-body {
+  display: none;
+}
+/* Right-rail settings grouped as Common + one collapsible section per
+   selected dataset (and, after a multi-database fetch, per-source previews). */
+.data-import-filters__group {
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--border);
@@ -8731,6 +8739,23 @@ code, kbd, samp, tt,
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+summary.data-import-filters__group-title {
+  display: list-item;   /* inline-flex would hide the disclosure marker */
+  cursor: pointer;
+}
+.data-import-filters__group-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+/* Plain (non-collapsible) groups — e.g. the single-source preview — keep the
+   stacked layout the collapsible ones get from their body wrapper. */
+section.data-import-filters__group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 /* Dataset multi-select rows in the left tree (checkbox + label + category). */
 .data-import-dataset {
