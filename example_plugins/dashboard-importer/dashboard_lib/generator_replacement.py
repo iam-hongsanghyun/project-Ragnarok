@@ -71,6 +71,7 @@ Symbols (units):
 """
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 import pandas as pd
@@ -78,6 +79,10 @@ import pypsa
 
 if TYPE_CHECKING:
     from dashboard_lib.settings import Dashboard
+
+# logging (not print) so the lines reach Ragnarok's Log tab via log_capture —
+# plugin print() goes only to the server terminal and is invisible in the UI.
+logger = logging.getLogger(__name__)
 
 _REQUIRED_COLUMNS = ("generator",)
 _RENEWABLES = ("solar", "wind")
@@ -195,7 +200,9 @@ def replace_generators(network: pypsa.Network, dashboard: "Dashboard") -> None:
             targets.append(name)
 
     if not targets:
-        print("  Generator replacement: enabled but nothing selected (no table rows, no bulk carriers) — skipping")
+        logger.info(
+            "Generator replacement: enabled but nothing selected (no table rows, no bulk carriers) — skipping"
+        )
         return
 
     # ── Apply each replacement ────────────────────────────────────────────────
@@ -220,6 +227,12 @@ def replace_generators(network: pypsa.Network, dashboard: "Dashboard") -> None:
             year=by,
             capacity=capacity,
             follow=follow,
+        )
+        # Per-plant trace in the Log tab — makes the applied ratio verifiable
+        # against the reference table (and a 50/50 fallback visible as such).
+        logger.info(
+            "Generator replacement: %s (build %s): %.1f MW -> solar %.1f + wind %.1f",
+            name, by, capacity, solar_cap, wind_cap,
         )
 
         network.remove("Generator", name)
@@ -246,9 +259,10 @@ def replace_generators(network: pypsa.Network, dashboard: "Dashboard") -> None:
         if (getattr(settings, "replace_all_carriers", False) and carriers_sel)
         else ""
     )
-    print(
-        f"  Generator replacement: replaced {len(targets)} plant(s) with {added} "
-        f"renewable unit(s) [{mode}{bulk_note}] (solar mc={carrier_mc['solar']}, wind mc={carrier_mc['wind']})"
+    logger.info(
+        "Generator replacement: replaced %d plant(s) with %d renewable unit(s) [%s%s] "
+        "(solar mc=%s, wind mc=%s)",
+        len(targets), added, mode, bulk_note, carrier_mc["solar"], carrier_mc["wind"],
     )
 
 
@@ -272,10 +286,11 @@ def _split_capacity(
         # Last-resort fallback: the model has NO solar/wind unit with a build_year
         # in or before this plant's year, so there is no ratio to follow. Say so
         # loudly — a silent 50/50 looks like the setting was ignored.
-        print(
-            f"  Generator replacement WARNING: follow mode found no solar/wind "
-            f"additions in any year <= {year} — falling back to 50/50. Check the "
-            f"model's solar/wind build_year values, or use fixed Solar %/Wind %."
+        logger.warning(
+            "Generator replacement: follow mode found no solar/wind additions in "
+            "any year <= %s — falling back to 50/50 for this plant. Check the "
+            "model's solar/wind build_year values, or use fixed Solar %%/Wind %%.",
+            year,
         )
         return capacity * 0.5, capacity * 0.5
 
