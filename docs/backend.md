@@ -2,8 +2,10 @@
 
 This document is the single reference for the Ragnarok backend implementation.
 It covers module structure, the HTTP API, the solve pipeline, network
-construction, result extraction, planning modes, constraints, utilities, and
-configuration.
+construction, result extraction, planning modes, constraints, utilities,
+configuration, the server-side session subsystem, the run store (History),
+project export/import, the external-data importers, and the boot-config
+endpoint.
 
 **Scope boundary.** This document describes what the code does — module by
 module, function by function — for analysts and contributors working on or
@@ -51,6 +53,18 @@ integrating with the backend. It does not cover end-user steps (see
    - 8.4 [DSL grammar reference](#84-dsl-grammar-reference)
 9. [Utilities](#9-utilities)
 10. [Configuration](#10-configuration)
+11. [Session subsystem (server-side working model)](#11-session-subsystem-server-side-working-model)
+    - 11.1 [model_store.py — storage facade](#111-model_storepy--storage-facade)
+    - 11.2 [sqlite_store.py — SQLite session store](#112-sqlite_storepy--sqlite-session-store)
+    - 11.3 [session_store.py — legacy JSON+Parquet store](#113-session_storepy--legacy-jsonparquet-store)
+    - 11.4 [timeseries.py — windowing and downsampling](#114-timeseriespy--windowing-and-downsampling)
+    - 11.5 [routers/session.py — /api/session/*](#115-routerssessionpy--apisession)
+12. [Run store (History)](#12-run-store-history)
+    - 12.1 [run_store.py](#121-run_storepy)
+    - 12.2 [Run and export endpoints](#122-run-and-export-endpoints)
+13. [Project workbook](#13-project-workbook)
+14. [External-data importers — /api/import/*](#14-external-data-importers--apiimport)
+15. [Boot config — /api/config](#15-boot-config--apiconfig)
 
 ---
 
@@ -141,9 +155,17 @@ and export/import endpoint.
 
 | Field | Type | Description |
 |---|---|---|
-| `model` | `dict[str, list[dict[str, Any]]]` | Workbook as `{sheet_name: [row_dict, ...]}` |
+| `model` | `dict[str, list[dict[str, Any]]] \| None` | Workbook as `{sheet_name: [row_dict, ...]}`. Optional when `sessionId` is given. |
 | `scenario` | `dict[str, Any]` | `carbonPrice`, `discountRate`, `constraints`, `constraintSpecs`, `customDsl`, etc. |
 | `options` | `dict[str, Any] \| None` | Run-control metadata (see table below) |
+| `sessionId` | `str \| None` | Server-side session to load the model from when `model` is absent |
+
+A thin client submits only `{sessionId, scenario, options}` — the working model
+lives server-side (see [Section 11](#11-session-subsystem-server-side-working-model)).
+`_resolve_payload_model` (in `main.py`) snapshots the session model into the
+payload at submit time, so a later session edit never mutates an
+already-submitted or queued run. A payload with neither `model` nor `sessionId`,
+or a `sessionId` with no loaded model, gets HTTP 400.
 
 Key `options` fields:
 
@@ -171,15 +193,19 @@ Solve, validate, and export/import endpoints are defined in
 `backend/app/main.py`. Session (`/api/session/*`), backend-plugin
 (`/api/plugins/*`), external-data importer (`/api/import/*`), and boot-config
 (`/api/config`) endpoints live in `backend/app/routers/` — each router module's
-docstring carries its endpoint table. Backend-plugin routes are also documented
-in [docs/plugin.md §16.5](plugin.md#165-endpoints).
+docstring carries its endpoint table, mirrored in this document: session
+endpoints in [Section 11.5](#115-routerssessionpy--apisession), stored-run and
+export endpoints in [Section 12.2](#122-run-and-export-endpoints), importer
+endpoints in [Section 14](#14-external-data-importers--apiimport), and the
+config bundle in [Section 15](#15-boot-config--apiconfig). Backend-plugin
+routes are documented in [docs/plugin.md §16.5](plugin.md#165-endpoints).
 
 #### Liveness and configuration
 
 | Method | Path | Description | Returns |
 |---|---|---|---|
 | `GET` | `/api/health` | Liveness probe | `{"status": "ok"}` |
-| `GET` | `/api/config` | Snapshot limits from `system_defaults.json` | `{"maxSnapshots", "defaultSnapshotCount", "defaultSnapshotWeight"}` |
+| `GET` | `/api/config` | Full shared-config bundle (schema, capabilities, simulation defaults — see [Section 15](#15-boot-config--apiconfig)) | `ConfigBundle` JSON |
 | `GET` | `/api/backends` | All registered backends and their capabilities | `{"backends": [...], "default": "pypsa"}` |
 
 #### Validation
@@ -965,9 +991,14 @@ Read and cached by `load_system_defaults()` in `backend/app/config.py`
 | `load_shedding` | `marginal_cost` | 2000.0 | Fallback VOLL cost (currency/MWh) |
 | `load_shedding` | `p_nom_floor` | 1000 | Minimum VOLL generator size (MW) |
 | `load_shedding` | `carrier` | `"LoadShedding"` | Carrier assigned to VOLL generators |
+| `session` | `max_chart_points_default` | 800 | Default `maxPoints` for series windows ([Section 11](#11-session-subsystem-server-side-working-model)) |
+| `session` | `chart_window_hours_default` | 168 | Default chart window span (hours) |
+| `session` | `sheet_page_default` | 200 | Default page size for sheet reads |
+| `session` | `undo_depth` | 25 | Frontend edit undo-stack depth |
 
-`GET /api/config` exposes `maxSnapshots`, `defaultSnapshotCount`, and
-`defaultSnapshotWeight` from the `simulation` section to the frontend.
+The `simulation` keys reach the frontend as `simulation_defaults`
+(`maxSnapshots`, `defaultSnapshotCount`, `defaultSnapshotWeight`) inside the
+`GET /api/config` bundle (see [Section 15](#15-boot-config--apiconfig)).
 
 ### FastAPI app settings
 
@@ -978,3 +1009,347 @@ origin.
 The app is launched by `uvicorn` (see `docs/architecture/PROCESSES.md`).
 `GET /api/run/{job_id}` polling noise is suppressed at the `uvicorn.access`
 INFO level and re-emitted at DEBUG via `_SuppressPollLogs`.
+
+---
+
+## 11. Session subsystem (server-side working model)
+
+The backend holds the working model; the frontend is a thin terminal. A model
+is imported once (`POST /api/session/model`) and thereafter the browser fetches
+only what it shows — a page of static rows or a windowed, downsampled
+time-series slice. The solve path consumes the session model server-side
+(`_resolve_payload_model`), so no giant payload travels from the browser.
+
+A session is keyed by `session_id` (default `"default"`; the app is single-user
+on one machine today). Every store function takes `session_id` so a remote,
+multi-session deployment is a configuration change, not a rewrite. Every public
+reader is defensive: a missing or cleared session returns `None` rather than
+raising.
+
+### 11.1 `model_store.py` — storage facade
+
+All app code (routers, run/queue, plugins) imports `model_store`, never a
+concrete store. The engine is selected once at import time from the
+`RAGNAROK_STORE` environment variable:
+
+| Value | Engine |
+|---|---|
+| `sqlite` (**default**, and any value other than `legacy`) | `sqlite_store` — one `project.db` per session |
+| `legacy` | `session_store` — JSON + Parquet files (escape hatch while SQLite beds in) |
+
+The public API (signatures and JSON shapes) is identical in both engines, so
+the `/api/session/*` contract is unchanged either way:
+
+| Function | Description |
+|---|---|
+| `save_model(session_id, model, *, filename, scenario_name)` | Persist a full model, replacing any current one. Returns the meta. Raises `ValueError` on an unsafe session id. |
+| `merge_static_model(session_id, model)` | Overwrite STATIC sheets only; series untouched. Returns refreshed meta or `None`. |
+| `get_meta(session_id)` | Session meta or `None`. |
+| `get_sheet_page(session_id, sheet, offset, limit)` | One page of rows (static or series). |
+| `get_series_window(session_id, sheet, *, start, end, columns, max_points, agg)` | Windowed + downsampled series slice. |
+| `load_full_model(session_id, *, static_only)` | Reconstruct `{sheet: rows}`; `static_only=True` skips series sheets. |
+| `save_controls(session_id, controls)` / `get_controls(session_id)` | Model-bound run controls (carbon, window, constraints). Rolling-horizon config is intentionally never persisted — it resets on reload/import per the product rule; callers strip it. |
+| `patch_sheet(session_id, sheet, ops)` | Apply edit ops; returns updated `{name, kind, total, columns}`. |
+| `clear(session_id)` | Delete the session from disk; returns whether anything existed. |
+| `has_model(session_id)` | `get_meta(...) is not None`. |
+| `is_series_sheet(name, rows=None)` | True for `<component>-<attribute>` sheet names. `snapshots` is the time axis, classified static. |
+| `distinct_values(session_id, sheet, column)` | Sorted distinct non-empty string values. Uses the engine's native query when available (SQLite `SELECT DISTINCT`); the facade computes it from sheet rows on the legacy store. |
+
+**Session meta shape** (returned by `save_model` / `get_meta`; the only thing
+the frontend keeps in memory):
+
+```python
+{
+    "sessionId": str,
+    "filename": str,
+    "scenarioName": str,
+    "savedAt": str,                 # UTC ISO timestamp
+    "sheets": [{"name", "kind": "static"|"series", "rowCount", "columns"}, ...],
+    "snapshotCount": int,
+    "snapshotStart": str | None,    # first/last snapshot label
+    "snapshotEnd": str | None,
+    "scenarioYear": int | None,     # parsed from the first snapshot label
+    "componentCounts": {sheet: row_count, ...}   # known PyPSA component sheets
+}
+```
+
+### 11.2 `sqlite_store.py` — SQLite session store
+
+One `backend/data/session/<session_id>/project.db` per session — zero
+scattered files. Rows are stored one-per-row as JSON in
+`sheet_<i>(__row INTEGER PRIMARY KEY, d TEXT)` tables (series sheets too: one
+row per snapshot). This sidesteps SQLite's 2000-column limit and the quoting
+that literal asset-name columns would require. A `_kv` table holds the JSON
+values `meta`, `tables` (sheet name → table name), and `controls`.
+
+Engine-specific behaviour:
+
+- **Connections** — `_connect` opens the db per operation and always closes it
+  (open handles break delete/replace on Windows). `PRAGMA journal_mode=WAL` and
+  `PRAGMA busy_timeout=5000` let concurrent FastAPI worker threads (e.g. an
+  importer plugin storing the model while the UI persists controls) wait
+  instead of failing with "database is locked".
+- **Reads are queries, not loads** — `get_sheet_page` and `get_series_window`
+  use `LIMIT ? OFFSET ?`; `distinct_values` uses
+  `SELECT DISTINCT json_extract(d, '$.<column>')` for `[A-Za-z0-9_]+` column
+  names and falls back to a Python row scan for odd names.
+- **`patch_sheet`** reads the sheet's rows, applies the ops
+  (`session_store._apply_ops`), and rewrites the table — correct for
+  set/addRow/deleteRows alike.
+- **Legacy migration** — `_ensure_migrated` runs on first read: when
+  `project.db` is absent but legacy JSON/Parquet files exist, the full legacy
+  model is loaded, written into a fresh db, and only then are the legacy
+  artifacts deleted (a crash mid-migration leaves them intact for a retry).
+- **`clear`** removes the whole session directory.
+
+Shared helpers (id/sheet guards, sheet classification, snapshot parsing, op
+application, config defaults) are imported from `session_store` so the two
+engines stay in lock-step.
+
+### 11.3 `session_store.py` — legacy JSON+Parquet store
+
+The original file-per-sheet store, kept for one release behind
+`RAGNAROK_STORE=legacy`. Layout per session under
+`backend/data/session/<session_id>/`:
+
+```
+meta.json                 # sheet inventory, snapshot range, component counts
+static/<sheet>.json       # component sheets (buses, generators, …) + snapshots
+series/<sheet>.parquet    # time-series sheets (generators-p_max_pu, loads-p_set, …)
+controls.json             # run controls bound to the model (no rolling-horizon)
+```
+
+Time-series sheets are wide and tall (assets × 8760), so they live in Parquet —
+columnar, readable one column-subset and one row-window at a time
+(`get_series_window` does true column pushdown at the Parquet read). Static
+sheets are small and edited cell-by-cell, so they live in JSON.
+
+Helpers also used by the SQLite engine:
+
+| Function | Description |
+|---|---|
+| `_is_safe_id(session_id)` / `_is_safe_sheet(name)` | Path-traversal guards (`session_id` and sheet names become filesystem names). |
+| `is_series_sheet(name, rows=None)` | `<component>-<attribute>` naming convention; `snapshots` is static. |
+| `_snapshot_labels(model)` / `_scenario_year_from_labels(labels)` | Snapshot labels from the `snapshots` sheet; year parsed from the first label. |
+| `_apply_ops(rows, ops)` | Pure application of `set` / `addRow` / `deleteRows` ops to a row list. |
+| `default_max_points()` / `default_window_hours()` / `default_page_size()` | Defaults from `system_defaults.json` → `session` (800 / 168 / 200). |
+
+### 11.4 `timeseries.py` — windowing and downsampling
+
+Shared maths for the thin-client API: both the session store and the run store
+serve time-series the same way — the client asks for a row window `[start, end)`
+and a maximum number of points, and the server slices and reduces so the
+browser only receives what it draws.
+
+| Function | Description |
+|---|---|
+| `series_index_col(columns)` | The time-axis column, first match in priority order `snapshot`, `name`, `datetime`, `period`; falls back to the first column. |
+| `df_to_records(df)` | DataFrame → JSON-safe row dicts (NaN/NaT → `None`). |
+| `downsample(df, max_points, agg, index_col)` | Splits the N rows into `min(N, max_points)` contiguous buckets (`numpy.array_split`); each bucket yields one row labelled by its first index value. `agg` is `mean`, `max`, `min` (numeric reduction; non-numeric cells coerce to NaN) or `point` (first row verbatim — decimation). |
+| `slice_and_reduce(df, *, start, end, max_points, agg, index_col)` | Window then downsample. Returns `{indexCol, total, window: {start, end}, returned, agg, columns, rows}`. Invalid `agg` falls back to `"mean"`. |
+
+### 11.5 `routers/session.py` — `/api/session/*`
+
+| Method | Path | Body / Params | Returns |
+|---|---|---|---|
+| `POST` | `/api/session/model` | `SessionModelPayload` `{model, filename, scenarioName, sessionId}` | meta (ingest a full model, replacing any current one; 400 on unsafe id) |
+| `POST` | `/api/session/model/static` | `SessionModelPayload` | meta (merge static sheets, keep series; 400 when no session exists) |
+| `GET` | `/api/session/meta` | `?session_id` | meta, or `{}` when nothing is loaded |
+| `GET` | `/api/session/model/full` | `?session_id&staticOnly` | `{"model": {sheet: rows} \| null}` — `staticOnly=true` omits series (editor rehydration on boot) |
+| `GET` | `/api/session/sheet/{name}` | `?offset&limit` | one page `{name, kind, total, offset, limit, columns, rows}` (404 if absent) |
+| `GET` | `/api/session/sheet/{name}/distinct` | `?column` | `{sheet, column, values}` (404 if absent) |
+| `GET` | `/api/session/series/{name}` | `?start&end&columns&maxPoints&agg` | windowed slice (404 if absent / not a series). `columns` is comma-separated. |
+| `PATCH` | `/api/session/sheet/{name}` | `SheetPatch` `{ops, sessionId}` | updated `{name, kind, total, columns}` (404 if absent) |
+| `POST` | `/api/session/clear` | `?session_id` | `{"cleared": bool}` |
+
+`SheetPatch.ops` are applied in order:
+
+```python
+{"op": "set",        "row": <int>, "column": <str>, "value": <any>}
+{"op": "addRow",     "values": {<col>: <val>, ...}, "index"?: <int>}  # append if no index
+{"op": "deleteRows", "rows": [<int>, ...]}
+```
+
+Backend plugins write into the same session via their own router (see
+[docs/plugin.md §16](plugin.md#16-backend-server-side-plugins)).
+
+---
+
+## 12. Run store (History)
+
+### 12.1 `run_store.py`
+
+Every successful solve is persisted automatically: the solve worker hands the
+finished bundle (`{model, scenario, options, result}`) to `store_run`, which
+writes ONE SQLite file `backend/data/runs/<name>.db`. The run name is
+`<label>_<UTC timestamp>` (e.g. `north-sea-2030_2026-06-09T14-30-00`); the
+label comes from `options["runLabel"]`, the scenario label, or the model
+filename stem. Sanitisation is a **denylist** (path separators, traversal,
+control characters), so non-Latin scenario names (한글, 日本語, …) survive into
+the run name. Generic default filenames (`ragnarok_case.xlsx` etc.) contribute
+no label.
+
+**DB layout** (written by `_build_run_db`): the `_kv` table holds `meta` (the
+History sidecar), `head` (bundle minus model/result), `result_light` (result
+with output series replaced by a `seriesSheets` name list), `analytics` (the
+light analytics bundle), and two name→table maps; `m_<i>` tables hold the
+input-model snapshot (a run must stay reproducible after the live session is
+edited) and `o_<i>` tables hold each output time-series, one JSON row per
+sheet row / snapshot. The bundle JSON and the Excel workbook are DERIVED on
+demand at export and never stored. Runs saved by older versions (JSON bundle +
+meta sidecar + Parquet series) migrate into their `.db` on first access
+(build-before-delete, like the session migration).
+
+The **light analytics** bundle drops the input model, the per-component output
+series, and the heavy per-snapshot `generatorDispatchSeries`, and adds
+`modelStatic` (topology for the network map) and `generatorEnergy` (a compact
+per-generator energy aggregate for the "Dispatch by unit" donut, summed from
+the dispatch series for older runs that predate the server-side field).
+
+Every public function is defensive — a storage failure is logged and never
+propagates into the solve.
+
+| Function | Description |
+|---|---|
+| `store_run(model, scenario, options, result)` | Persist a finished run; returns the meta or `None` on failure (never raises into the solve). |
+| `build_run_meta(name, bundle, size_bytes)` | The lightweight meta sidecar: label, snapshot window, component counts, KPIs, carrier mix, pathway/rolling summaries, History-card fields (`scenarioYear`, `resolutionHours`, `windowCount`, `totalDemandMwh`, `tags`). |
+| `list_runs()` | Every run's meta, newest first. Unreadable dbs are skipped with a warning; un-migrated legacy `*.meta.json` runs are included. |
+| `get_run(name)` | Reassemble the FULL bundle (model snapshot + all output series). Heavy — export/rerun path only. |
+| `get_run_for_export(name, *, include_meta, include_model, include_result)` | Load only the bundle pieces the xlsx builder needs for the selected parts (metadata-only export skips the heavy series deserialize). |
+| `get_run_analytics(name)` | The light analytics bundle — one small `_kv` read, what "View Result" loads first. Falls back to deriving from the full bundle if the key is corrupt. |
+| `run_series_window(name, sheet, *, start, end, columns, max_points, agg)` | Windowed + downsampled slice of an output series (`LIMIT/OFFSET` SQL read). |
+| `run_model_sheet_page(name, sheet, offset, limit)` | One page of the stored INPUT model sheet (re-edit / import-project). |
+| `delete_run(name)` | Delete the db, legacy artefacts, and WAL sidecars. |
+| `run_exists(name)` | Cheap existence check (no bundle load). |
+| `run_to_xlsx(name, *, include_meta, include_model, include_result)` | Build the export workbook on demand via `project_workbook.bundle_to_workbook`. |
+| `run_to_package(name)` | A Ragnarok Project `.zip` of three derived files: `<name>.json` (lossless bundle), `<name>.meta.json`, `<name>.xlsx`. |
+
+### 12.2 Run and export endpoints
+
+These live in `backend/app/main.py` (not a router).
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/runs` | All stored runs' lightweight metas, newest first |
+| `GET` | `/api/runs/{name}` | Full stored bundle (heavy; prefer `/analytics` + `/series`). 404 if missing. |
+| `GET` | `/api/runs/{name}/analytics` | Light analytics bundle — what "View Result" loads first |
+| `GET` | `/api/runs/{name}/series/{sheet}` | Windowed + downsampled output series (`start`, `end`, `columns`, `maxPoints`, `agg`) |
+| `GET` | `/api/runs/{name}/model/sheet/{sheet}` | One page of the stored input model sheet (`offset`, `limit`) |
+| `DELETE` | `/api/runs/{name}` | `{"deleted": bool}` |
+| `GET` | `/api/runs/{name}/xlsx` | Synchronous workbook download; `?parts=` comma-separated subset of `metadata,model,result` (default all) |
+| `GET` | `/api/runs/{name}/package` | Synchronous project `.zip` download |
+| `POST` | `/api/exports` | Start a background export build. Body `{name, kind: 'xlsx'\|'package', parts?}`. Returns `{jobId, ...}`. |
+| `GET` | `/api/exports/{job_id}` | Poll export status (`pending` / `running` / `ready` / `error`) |
+| `GET` | `/api/exports/{job_id}/download` | Stream the finished file, then delete artefact + job |
+| `POST` | `/api/export/project` | Package an *unsaved* live model: body `{model, result}` → project `.zip` (stored runs use `/api/runs/{name}/package`) |
+| `POST` | `/api/import/project` | Upload a project `.zip` or bare `.xlsx`; parsed to a bundle and stored via `store_run` — the import becomes a History entry. Returns `{meta, name}`. |
+
+Async exports exist because a full-year workbook build is CPU-bound (minutes):
+`POST /api/exports` runs the build off-thread, the client polls, and a TTL
+sweeper reaps artefacts never collected (30 min). Project import also runs
+off-thread so a large upload doesn't block the event loop (including the boot
+screen's `/api/status` poll).
+
+---
+
+## 13. Project workbook
+
+**Module:** `backend/app/project_workbook.py` — lossless, round-trippable
+project xlsx read/write. It produces the **exact layout** the frontend's
+`buildProjectWorkbook` / `parseProjectWorkbook` use, so server- and
+client-written workbooks are interchangeable. The input/output column
+classification comes from the shared PyPSA schema (`pypsa_schema`), so the two
+implementations cannot drift apart.
+
+**Workbook layout:**
+
+- One sheet per model component (`generators`, `buses`, …); solved *static*
+  outputs (`p_nom_opt`, …) merged in as extra columns. The importer splits
+  them back out by the schema's input/output classification.
+- Input time-series and config sheets copied verbatim; output series sheets
+  named `<list>-<attr>` (no `OUT_` prefix — stays inside Excel's 31-char sheet
+  name limit).
+- `RAGNAROK_*` metadata sheets (`ResultMeta`, `Constraints`, `RunState`,
+  `Settings`, `PluginAnalytics`, …). Long JSON payloads are chunked across rows
+  at 30 000 chars (Excel caps a cell at 32 767).
+- A human-readable `RAGNAROK_Summary` landing sheet (KPIs, window, constraints,
+  settings) is written last and moved to the front. Display-only — skipped on
+  re-import.
+- Styling (bold headers, frozen panes, column widths, number formats) is
+  display-only; cell values are never changed, so re-import is byte-identical
+  in meaning. Per-cell number formats are skipped on sheets above 80 000 cells.
+
+| Function | Description |
+|---|---|
+| `bundle_to_workbook(bundle, *, include_bundle=False, include_meta=True, include_model=True, include_result=True)` | Bundle → xlsx bytes. The three `include_*` flags mirror the Export dialog's Metadata/Model/Result checkboxes. `include_bundle=True` additionally embeds the complete bundle as chunked JSON (`RAGNAROK_Bundle`) so a *standalone* xlsx round-trips losslessly. |
+| `workbook_to_bundle(data, filename)` | xlsx bytes → `{model, scenario, options, result}`. Fast path: read the embedded `RAGNAROK_Bundle` JSON verbatim. Fallback: reconstruct from the readable sheets, splitting output-static columns into `result.outputs.static` and `<list>-<attr>` sheets into `result.outputs.series`. Derived analytics are *not* reconstructed — the frontend recomputes them from `outputs`. |
+| `bundle_to_package(bundle, base_name, meta=None)` | Project `.zip`: `<stem>.json` (canonical bundle), `<stem>.meta.json` (when provided), `<stem>.xlsx`. |
+| `package_to_bundle(data, filename)` | `.zip` → bundle, verbatim from its JSON member (never the `.meta.json` sidecar); falls back to parsing an embedded `.xlsx`. |
+| `import_bundle_from_upload(data, filename)` | Dispatch by extension: `.zip` → package, `.xlsx`/`.xls` → workbook, unknown → try package then workbook. (Detection must be by extension — an xlsx is itself a zip.) |
+| `project_basename(filename)` | `<stem>_project` from a model filename, stripping data extensions. |
+
+---
+
+## 14. External-data importers — `/api/import/*`
+
+**Module:** `backend/app/routers/importers.py`; importer implementations live
+in `backend/app/importers/`. The Data view's three-pane shell routes through
+these endpoints: the browser sends only a filter blob (plus any
+bring-your-own-key secrets); fetch and convert run on the backend.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/import/databases` | Flat registry contents (one entry per dataset) |
+| `GET` | `/api/import/sources` | Datasets grouped by source for the Country → Database → Datasets tree, each with its `common_filters`; plus `serverSecrets` (the secret *names* the server provides) |
+| `GET` | `/api/import/countries` | Country index for the map search box (warms the boundaries cache on first call) |
+| `GET` | `/api/import/boundaries/countries.geojson` | Country polygons for the Data-view map (`Cache-Control: max-age=86400`) |
+| `POST` | `/api/import/run` | One-trip fetch of one or more datasets → one combined PyPSA-aligned fragment + one preview |
+| `GET` | `/api/import/secrets` | `{stored, env}` — secret NAMES only; values never leave the server |
+| `PUT` | `/api/import/secrets/{name}` | Record an API key server-side; an empty value deletes it. Write-only. |
+| `DELETE` | `/api/import/secrets/{name}` | Remove a server-recorded key |
+
+(`POST /api/import/netcdf` / `/api/import/hdf5` share the prefix but are the
+binary format converters in `main.py` — see [Section 2.2](#22-endpoints).)
+
+**`POST /run`** body: `{dataset_ids, country_iso, filters, convert_options?,
+secrets?}` (`database_id` is the back-compat single-dataset form). The
+requested datasets are expanded with their declared `depends_on` and fetched
+dependency-first with the same shared filters; their fragments are folded
+together (`combine_fragments`) into one result
+`{source_id, dataset_ids, country_iso, preview, fragment}`. The frontend holds
+the fragment in React state until the user clicks Add to workbook — no second
+network call. Error mapping: unknown dataset → 404, dataset marked unavailable
+→ 503, missing required API key (`PermissionError`) → 400, any other fetch
+failure → 502.
+
+**Secrets** are layered (values never leave the server): environment variables
+`RAGNAROK_SECRET_<NAME>` provide the importer secret `<name>` (lowercased);
+keys typed into Settings → API keys are stored in
+`backend/data/secrets.json` (gitignored, chmod 0600) and win over env; a key
+sent in a request body (BYOK) overrides both for that one request only.
+
+---
+
+## 15. Boot config — `/api/config`
+
+**Module:** `backend/app/routers/config.py`, an isolated wrapper around
+`backend/app/config_provider.py`. The bundle is dynamic — the PyPSA schema and
+standard types are computed live from the installed package, capabilities come
+from the live backend registry — and memoised for the life of the process.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/config` | Full `ConfigBundle` (~110 kB JSON, gzip ~25 kB). The frontend caches it in `localStorage` keyed by `build_id`. |
+| `GET` | `/api/config/build-id` | `{build_id, backend_version}` — cheap freshness probe |
+| `POST` | `/api/config/reload` | Drop the cache; the next request rebuilds. Dev affordance for upgrading PyPSA without a restart. Re-points `/api/status` at the new `build_id`. |
+
+`ConfigBundle` payloads:
+
+| Key | Description |
+|---|---|
+| `schema` | PyPSA component schema, built live (`pypsa_schema_builder.build_pypsa_schema`) |
+| `standard_types` | PyPSA line + transformer catalogues, built live |
+| `network_import_policy` | Curated rule table, read from disk |
+| `capabilities` | Solver-backend capability list from the backend registry |
+| `simulation_defaults` | `{maxSnapshots, defaultSnapshotCount, defaultSnapshotWeight}` from `system_defaults.json` → `simulation` |
+| `build_id` / `backend_version` | The frontend's cache key |
