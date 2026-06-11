@@ -5,7 +5,6 @@ from typing import Any
 import pandas as pd
 import pypsa
 
-from ..utils.series import weighted_sum
 
 
 def _snapshot_label(snapshot: Any) -> str:

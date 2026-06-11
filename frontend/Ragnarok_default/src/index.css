@@ -3020,12 +3020,29 @@ path.leaflet-interactive:focus {
 .history-row-spacer { flex: 1 1 auto; }
 .history-row .tb-btn { flex: 0 0 auto; }
 
-/* Static (non-editable) name for backend rows — same metrics as the
-   browser name button, but rendered as plain text. */
-.history-row-name--static {
-  cursor: default;
+/* Click-to-rename name on backend rows: text cursor + dotted underline on
+   hover signal editability; the input mirrors the label's metrics so the row
+   doesn't jump when editing starts. */
+.history-row-name--editable {
+  cursor: text;
 }
-.history-row-name--static:hover { color: var(--text); }
+.history-row-name--editable:hover {
+  color: var(--text);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.history-row-name-input {
+  flex: 0 0 auto;
+  width: 220px;
+  font-weight: 600;
+  font-size: inherit;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--brand);
+  border-radius: 0;
+  padding: 0 4px;
+}
 
 .hist-view-btn {
   flex-shrink: 0;

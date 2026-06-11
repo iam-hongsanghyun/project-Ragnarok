@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from typing import Any
 
 import pandas as pd
 import pypsa
 
-from ..utils.series import safe_series, weighted_sum
+from ..utils.series import safe_series
 
 
 def _snapshot_parts(snapshot: object) -> tuple[int | None, object]:
