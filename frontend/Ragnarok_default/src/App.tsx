@@ -7,6 +7,7 @@ import {
   AnalyticsFocus,
   BrowserFileHandle,
   ChartSectionConfig,
+  ConstraintSpec,
   CustomConstraint,
   GridRow,
   PathwayConfig,
@@ -43,7 +44,7 @@ import { deriveRunResults } from 'lib/results/runResults';
 import { defaultPathwayConfig, getDefaultSelectedPeriod, readPathwayConfigFromModel, samePathwayConfig, writePathwayConfigToModel } from 'lib/results/pathway';
 import { defaultRollingConfig, normalizeRollingConfig, readRollingConfigFromModel, sameRollingConfig, writeRollingConfigToModel } from 'lib/results/rolling';
 import { readCustomDslFromModel, writeCustomDslToModel } from 'lib/constraints/custom';
-import { dslToSpecs } from 'lib/constraints/dsl';
+import { dslToSpecs, parseConstraintDsl } from 'lib/constraints/dsl';
 import { buildScenarioPreset, defaultScenarioCatalog, readScenarioCatalogFromModel, sameScenarioCatalog, writeScenarioCatalogToModel } from 'lib/results/scenarios';
 import { readCarbonLibraryFromModel, writeCarbonLibraryToModel, sameCarbonLibrary } from 'lib/results/carbonLibrary';
 import { saveSessionControls, loadSessionControls, clearSession, clearSessionModelOnly } from 'lib/storage/sessionStore';
@@ -237,6 +238,8 @@ function AppInner() {
     loadSheddingCost: settings.loadSheddingCost,
     pathwayConfig: defaultPathwayConfig(),
     rollingConfig: defaultRollingConfig(),
+    stochasticConfig: { enabled: false, scenarios: [] },
+    securityConstrainedConfig: { enabled: false },
     constraints: DEFAULT_CONSTRAINTS,
   }));
   const frontendPlugins = useFrontendPlugins();
@@ -320,6 +323,8 @@ function AppInner() {
         selectedPeriod: getDefaultSelectedPeriod(pathwayConfig),
       },
       rollingConfig: normalizeRollingConfig(rollingConfig),
+      stochasticConfig,
+      securityConstrainedConfig: sclopfConfig,
       constraints,
     })
   ), [
@@ -334,6 +339,8 @@ function AppInner() {
     forceLp,
     pathwayConfig,
     rollingConfig,
+    stochasticConfig,
+    sclopfConfig,
     constraints,
   ]);
 
@@ -429,6 +436,8 @@ function AppInner() {
       loadSheddingCost: settings.loadSheddingCost,
       pathwayConfig: fallbackPathway,
       rollingConfig: fallbackRolling,
+      stochasticConfig,
+      securityConstrainedConfig: sclopfConfig,
       constraints,
     });
     const catalogToApply = nextScenarioCatalog.scenarios.length > 0
@@ -470,6 +479,8 @@ function AppInner() {
     settings.enableLoadShedding,
     settings.loadSheddingCost,
     forceLp,
+    stochasticConfig,
+    sclopfConfig,
     constraints,
     updateSettings,
     setAnalyticsFocus,
@@ -719,6 +730,10 @@ function AppInner() {
       selectedPeriod: getDefaultSelectedPeriod(scenario.pathwayConfig),
     });
     setRollingConfig(normalizeRollingConfig(scenario.rollingConfig));
+    // Presets saved before these modes were captured normalize to disabled —
+    // applying a preset restores the FULL run configuration either way.
+    setStochasticConfig(scenario.stochasticConfig ?? { enabled: false, scenarios: [] });
+    setSclopfConfig(scenario.securityConstrainedConfig ?? { enabled: false });
     setStatus(`Applied scenario: ${scenario.label}`);
     showToast(`Scenario applied: ${scenario.label}`, 'success');
   }, [maxSnapshots, showToast, updateSettings]);
@@ -1667,9 +1682,22 @@ function AppInner() {
 
   const handleRunModel = async (staged = false) => {
     const snapshotCount = snapshotEnd - snapshotStart;
+    // Parse the constraint DSL with per-line errors: invalid lines are NOT
+    // applied, and that must never be silent — warn loudly before the run so
+    // "constraint I typed had a typo" can't masquerade as a clean result.
+    const dslLines = parseConstraintDsl(customDsl);
+    const dslErrors = dslLines.filter((line) => line.error);
+    if (dslErrors.length > 0) {
+      const first = dslErrors[0];
+      showToast(
+        `${dslErrors.length} custom-constraint line(s) have syntax errors and are NOT applied `
+        + `(line ${first.lineNo}: ${first.error}). Fix them in Settings → Constraints → Advanced.`,
+        'error',
+      );
+    }
     const scenario = {
       constraints: constraints.filter((c) => c.enabled),
-      constraintSpecs: dslToSpecs(customDsl),
+      constraintSpecs: dslLines.map((line) => line.spec).filter((s): s is ConstraintSpec => !!s),
       carbonPrice,
       discountRate: settings.discountRate,
     };

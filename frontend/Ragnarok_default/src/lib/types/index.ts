@@ -178,6 +178,12 @@ export interface ScenarioPreset {
   loadSheddingCost: number;
   pathwayConfig: PathwayConfig;
   rollingConfig: RollingHorizonConfig;
+  // Stochastic + SCLOPF are part of the preset so applying a scenario restores
+  // the FULL run configuration (they were silently dropped before). customDsl
+  // is deliberately NOT here — it persists in the model workbook sheet
+  // RAGNAROK_CustomDSL, not per preset.
+  stochasticConfig: StochasticConfig;
+  securityConstrainedConfig: SecurityConstrainedConfig;
   constraints: CustomConstraint[];
 }
 

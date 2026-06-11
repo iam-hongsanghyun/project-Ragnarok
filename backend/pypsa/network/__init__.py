@@ -230,7 +230,14 @@ def build_network(
 
     # ── Snapshot windowing & downsampling ─────────────────────────────────────
     start = max(0, int(number(options.get("snapshotStart"), 0)))
-    count = max(1, int(number(options.get("snapshotCount"), len(network.snapshots) or 1)))
+    # snapshotCount wins when present. Absent, fall back to snapshotEnd —
+    # clients naturally describe the window as [start, end) and the Ragnarok
+    # frontend sends both; a payload carrying only snapshotEnd used to be
+    # silently solved over ALL snapshots. Absent both, model everything.
+    raw_count = options.get("snapshotCount")
+    if raw_count in (None, "") and options.get("snapshotEnd") not in (None, ""):
+        raw_count = number(options.get("snapshotEnd"), 0) - start
+    count = max(1, int(number(raw_count, len(network.snapshots) or 1)))
     step = max(1, int(number(options.get("snapshotWeight"), 1)))
     full = network.snapshots
     if len(full) > 0:

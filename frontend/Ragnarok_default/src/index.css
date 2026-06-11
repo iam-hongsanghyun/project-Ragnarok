@@ -5225,6 +5225,19 @@ th:hover .col-delete-btn {
   border-color: var(--brand);
   box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.15);
 }
+.constraints-dsl-errors {
+  margin: 6px 0 0;
+  padding: 6px 10px;
+  list-style: none;
+  border: 1px solid var(--danger, #b91c1c);
+  background: rgba(185, 28, 28, 0.08);
+}
+.constraints-dsl-error {
+  color: var(--danger, #b91c1c);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1.6;
+}
 .constraints-applied-list {
   margin: 0;
   padding: 0;

@@ -7,6 +7,8 @@ import {
   RollingHorizonConfig,
   ScenarioCatalog,
   ScenarioPreset,
+  SecurityConstrainedConfig,
+  StochasticConfig,
   WorkbookModel,
 } from '../types';
 import { defaultPathwayConfig } from 'lib/results/pathway';
@@ -53,6 +55,28 @@ function cloneConstraints(constraints: CustomConstraint[]): CustomConstraint[] {
   return constraints.map((row) => ({ ...row }));
 }
 
+export function defaultStochasticConfig(): StochasticConfig {
+  return { enabled: false, scenarios: [] };
+}
+
+export function defaultSclopfConfig(): SecurityConstrainedConfig {
+  return { enabled: false };
+}
+
+function cloneStochasticConfig(config: StochasticConfig): StochasticConfig {
+  return {
+    ...config,
+    scenarios: (config.scenarios ?? []).map((s) => ({
+      ...s,
+      overrides: (s.overrides ?? []).map((o) => ({ ...o })),
+    })),
+  };
+}
+
+function cloneSclopfConfig(config: SecurityConstrainedConfig): SecurityConstrainedConfig {
+  return { ...config };
+}
+
 function cloneSchedule(schedule: CarbonPriceScheduleEntry[]): CarbonPriceScheduleEntry[] {
   return (schedule ?? []).map((row) => ({ ...row }));
 }
@@ -76,6 +100,10 @@ export function buildScenarioPreset(input: {
   loadSheddingCost: number;
   pathwayConfig: PathwayConfig;
   rollingConfig: RollingHorizonConfig;
+  // Optional for backward compatibility — presets saved before these modes
+  // were captured default to disabled.
+  stochasticConfig?: StochasticConfig;
+  securityConstrainedConfig?: SecurityConstrainedConfig;
   constraints: CustomConstraint[];
 }): ScenarioPreset {
   return {
@@ -93,6 +121,8 @@ export function buildScenarioPreset(input: {
     loadSheddingCost: input.loadSheddingCost,
     pathwayConfig: clonePathwayConfig(input.pathwayConfig),
     rollingConfig: cloneRollingConfig(input.rollingConfig),
+    stochasticConfig: cloneStochasticConfig(input.stochasticConfig ?? defaultStochasticConfig()),
+    securityConstrainedConfig: cloneSclopfConfig(input.securityConstrainedConfig ?? defaultSclopfConfig()),
     constraints: cloneConstraints(input.constraints),
   };
 }
@@ -125,6 +155,8 @@ function normalizeScenarioCatalog(catalog: ScenarioCatalog): ScenarioCatalog {
       carbonPriceSchedule: cloneSchedule(scenario.carbonPriceSchedule ?? []),
       pathwayConfig: clonePathwayConfig(scenario.pathwayConfig ?? defaultPathwayConfig()),
       rollingConfig: cloneRollingConfig(scenario.rollingConfig ?? defaultRollingConfig()),
+      stochasticConfig: cloneStochasticConfig(scenario.stochasticConfig ?? defaultStochasticConfig()),
+      securityConstrainedConfig: cloneSclopfConfig(scenario.securityConstrainedConfig ?? defaultSclopfConfig()),
       constraints: cloneConstraints(scenario.constraints ?? []),
     })),
   };
@@ -154,6 +186,8 @@ export function readScenarioCatalogFromModel(model: WorkbookModel): ScenarioCata
         loadSheddingCost: primitiveNumber(payload.loadSheddingCost as Primitive, 1000),
         pathwayConfig: payload.pathwayConfig ?? defaultPathwayConfig(),
         rollingConfig: payload.rollingConfig ?? defaultRollingConfig(),
+        stochasticConfig: payload.stochasticConfig ?? defaultStochasticConfig(),
+        securityConstrainedConfig: payload.securityConstrainedConfig ?? defaultSclopfConfig(),
         constraints: Array.isArray(payload.constraints) ? payload.constraints : [],
       });
     } catch {
@@ -192,6 +226,8 @@ export function writeScenarioCatalogToModel(
       loadSheddingCost: scenario.loadSheddingCost,
       pathwayConfig: scenario.pathwayConfig,
       rollingConfig: scenario.rollingConfig,
+      stochasticConfig: scenario.stochasticConfig,
+      securityConstrainedConfig: scenario.securityConstrainedConfig,
       constraints: scenario.constraints,
     }),
   }));

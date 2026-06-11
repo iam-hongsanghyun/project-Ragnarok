@@ -3,8 +3,9 @@
  * constraints actually applied in the last run (custom table, DSL, and plugin
  * contributions), so plugin-added constraints are no longer invisible.
  */
-import React from 'react';
+import React, { useMemo } from 'react';
 import { AppliedConstraint } from 'lib/types';
+import { parseConstraintDsl } from 'lib/constraints/dsl';
 
 export interface CustomDslSectionProps {
   customDsl: string;
@@ -20,11 +21,18 @@ const SOURCE_LABEL: Record<AppliedConstraint['source'], string> = {
 
 export function CustomDslSection({ customDsl, onCustomDslChange, appliedConstraints }: CustomDslSectionProps) {
   const applied = appliedConstraints ?? [];
+  // Live per-line validation: lines with syntax errors are NOT applied at run
+  // time, so they must be visible here at author time (and the run path warns
+  // again). Cheap — the DSL box is a handful of lines.
+  const dslErrors = useMemo(
+    () => parseConstraintDsl(customDsl).filter((line) => line.error),
+    [customDsl],
+  );
   return (
     <section className="constraints-workspace-section">
       <header className="constraints-workspace-section-header">
         <h3>Custom constraints (advanced)</h3>
-        <p>One linear constraint per line, applied to the solver. Use this for limits the tables above can't express. <code>#</code> starts a comment.</p>
+        <p>One linear constraint per line, applied to the solver. Use this for limits the tables above can't express. <code>#</code> starts a comment. Constraint code is saved with the model workbook, not with scenario presets.</p>
       </header>
 
       <details className="constraints-help">
@@ -48,6 +56,16 @@ export function CustomDslSection({ customDsl, onCustomDslChange, appliedConstrai
         placeholder={'# examples\ngen(coal) <= 200000\ncf(nuclear) <= 0.85\nemissions <= 0.4 * gen'}
         onChange={(e) => onCustomDslChange(e.target.value)}
       />
+
+      {dslErrors.length > 0 && (
+        <ul className="constraints-dsl-errors" role="alert">
+          {dslErrors.map((line) => (
+            <li key={line.lineNo} className="constraints-dsl-error">
+              line {line.lineNo}: {line.error} — <code>{line.raw}</code> (not applied)
+            </li>
+          ))}
+        </ul>
+      )}
 
       <div className="sg-setting-row">
         <label className="sg-setting-label">Applied constraints (last run)</label>
