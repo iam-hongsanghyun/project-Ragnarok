@@ -16,7 +16,9 @@ leaking a copy per request.
 ```
 manifest.json     # kind:"backend"; config GUI schema; action hook -> "transform"
 plugin.py         # the backend hook: transform(model, config) -> model
-pipeline.py       # the build engine (formerly main.py); imports dashboard_lib
+pipeline.py       # the build engine (formerly main.py); loads dashboard_lib
+                  #   via _lib() under a plugin-unique sys.modules alias —
+                  #   never bare-named, never via sys.path (collision-proof)
 dashboard_lib/    # topology, region, scaling, snapshots, carriers, …
 ```
 

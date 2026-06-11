@@ -149,35 +149,40 @@ fact for plugin authors and contributors.
 ```
 Browser (Ragnarok frontend)
   |
-  |  REST JSON  (http://127.0.0.1:8000 — or remote server in future deployments)
+  |  REST JSON  (http://127.0.0.1:8000 — or a LAN server)
   v
 Ragnarok backend  (FastAPI / HiGHS solver)
+  |
+  +-- backend plugins (3rd-party Python, installed at runtime,
+  |                    run IN the backend process via /api/plugins/*)
 
 Browser (Ragnarok frontend)
   |
   |  REST / fetch  (localhost:<plugin port> — registered per-plugin)
   v
-Plugin's own local backend server  (optional; any language/framework)
+Frontend plugin's own local server  (optional; any language/framework)
 ```
 
-The rule is absolute:
+The rules:
 
 | Link | Allowed |
 |---|---|
-| Plugin JS <-> Ragnarok frontend | Yes — plugins run in the browser and call frontend APIs |
-| Ragnarok frontend <-> Ragnarok backend | Yes — the only path to the solver |
-| Plugin <-> Ragnarok backend | No — the Ragnarok backend is plugin-agnostic |
+| Frontend-plugin JS <-> Ragnarok frontend | Yes — frontend plugins run in the browser and call frontend APIs |
+| Ragnarok frontend <-> Ragnarok backend | Yes — the only path to the solver and the session |
+| Frontend plugin <-> Ragnarok backend | No — a frontend plugin needing server-side computation runs its own local server |
+| Backend plugin <-> Ragnarok backend | In-process — installed via `/api/plugins/install`, dispatched through `backend/app/plugins.py` |
 
-The Ragnarok backend receives `{model, scenario, options}` and solves. It never
-discovers, loads, or executes plugin code of any kind. There is no `module_host.py`,
-no `execute_plugins_at_stage()`, and no `/api/modules` route. Plugins that need
-server-side computation run their own separate local server and communicate with it
-directly from the browser.
+The **solve pipeline** is plugin-agnostic: `{model, scenario, options}` arrives
+at `POST /api/run` and no plugin code executes at any solve stage. Backend
+plugins act *before* the solve — their `transform`/`contribute` hooks write into
+the server-side session under a strict contract: the hook receives a defensive
+copy of the model, only its return value is persisted, and any hook exception
+becomes a clean HTTP 400. See
+[docs/plugin.md §16](plugin.md#16-backend-server-side-plugins).
 
-The backend currently runs locally at `http://127.0.0.1:8000`. The architecture is
-being moved toward a remote server model; the communication rule above is what makes
-that safe — the frontend is the only client of the Ragnarok backend, so moving the
-backend server-side requires no plugin changes.
+The backend runs locally at `http://127.0.0.1:8000` or as a single-worker LAN
+server. The frontend is the only browser-side client of the Ragnarok backend, so
+deploying the backend on a server requires no plugin changes.
 
 ---
 
@@ -711,14 +716,18 @@ execution stage on the backend.
 
 ## 9. Plugin runtime
 
-Plugins are a frontend-only concern. The Ragnarok backend is plugin-agnostic: it never
-loads, executes, or is aware of any plugin code. For full authoring detail see
-[`docs/guides/PLUGIN_AUTHORING.md`](plugin.md).
+Two plugin kinds exist; both are installed from the Plugins tab (the single
+"Install plugin…" button auto-detects the package kind) and Ragnarok ships
+zero of either — plugins are purely 3rd-party. For full authoring detail see
+[`docs/plugin.md`](plugin.md).
 
-A plugin is a `.zip` package containing at minimum a `module.json` manifest. The
-package is installed into browser `localStorage` by `useFrontendPlugins()` in
-`src/features/plugins/frontendPlugins.ts` — no backend call is made. There is no
-enable/disable toggle; a plugin is either installed or not.
+### 9.1 Frontend plugins (browser)
+
+A frontend plugin is a `.zip` package containing at minimum a `module.json`
+manifest. The package is installed into browser `localStorage` by
+`useFrontendPlugins()` in `src/features/plugins/frontendPlugins.ts` — no backend
+call is made. There is no enable/disable toggle; a plugin is either installed or
+not.
 
 **JS hook contracts** (all run in the browser, called from `PluginDetail.tsx`):
 
@@ -752,11 +761,44 @@ involved.
 `PluginDetail` renders a "Server setup" advisory when the manifest declares a `server`
 block, showing the exact `plugins.env` entry the user needs to add.
 
+### 9.2 Backend plugins (server-side)
+
+A backend plugin is a `.zip` of Python (`manifest.json` + `plugin.py`, plus any
+vendored modules) installed by upload into `backend/data/plugins/` (gitignored)
+and run **inside the backend process** via `/api/plugins/*`
+(`backend/app/plugins.py` is the framework; `backend/app/routers/plugins.py` is
+the router). It may import the bundled PyPSA source directly. Its
+`transform`/`contribute` hooks write into the server-side session, so the model
+never enters the browser — the right kind for heavy builds and the thin-client
+deployment.
+
+Isolation contract (enforced by the framework):
+
+- **Discovery never raises** — a broken plugin is logged and skipped; the app
+  runs cleanly with zero plugins.
+- **Error containment** — any hook exception becomes a clean HTTP 400, never a
+  crashed request.
+- **One-way, return-value-only model handoff** — hooks receive a defensive copy
+  of the session model; only the returned dict (transform) or fragment
+  (contribute) is persisted. In-place mutation of the argument never sticks.
+- **Collision-free module namespaces** — `plugin.py` is imported under a
+  synthetic per-id name, and a vendored library must be loaded under a
+  plugin-unique alias (no `sys.path` mutation, no bare package name in
+  `sys.modules`), so two plugins shipping equally-named packages never swap
+  each other's code. See [docs/plugin.md §16.3](plugin.md#163-the-pluginpy-contract).
+- **Per-plugin scratch dirs** — uploaded data files live under
+  `backend/data/plugin_files/<id>/`, zip-slip-checked on install, removed on
+  uninstall.
+
+**Trust model.** Installing a backend plugin is executing trusted Python inside
+the backend by design (LAN-only deployment, no auth). There is no hard
+sandboxing: a plugin runs with full backend privileges in-process. A multi-user
+or remote deployment must gate install behind auth/sandboxing.
+
 **What is not in v1:**
 
 - Remote registry, signed modules, or sandboxed worker-process isolation
-- Backend plugin loading, Python plugin hooks, or plugin-side PyPSA access via the
-  Ragnarok backend
+  (frontend plugins are eval'd into the page; backend plugins run in-process)
 - `activate()` / `deactivate()` lifecycle hooks
 
 ---

@@ -29,7 +29,7 @@ All documentation lives in [docs/](./docs/) (start at the [docs index](./docs/RE
 | [docs/architecture.md](./docs/architecture.md) | Tech stack, repo layout, topology, data flow, process logic, design |
 | [docs/backend.md](./docs/backend.md) | Backend details: HTTP API, solve pipeline, network build, results, modes, constraints |
 | [docs/frontend.md](./docs/frontend.md) | Frontend details: App state, views, features, plugin host, shared utils/types |
-| [docs/plugin.md](./docs/plugin.md) | Building a plugin: manifest, GUI schema, JS hooks, own server, examples |
+| [docs/plugin.md](./docs/plugin.md) | Building a plugin (frontend JS or backend Python): manifest, GUI schema, hooks, own server, examples |
 | [docs/SUPPORT_MATRIX.md](./docs/SUPPORT_MATRIX.md) | Generated feature support matrix |
 | [docs/TODO.md](./docs/TODO.md) | Living project task log and roadmap |
 
@@ -157,9 +157,9 @@ optimization envelope is broader than the workflow Ragnarok currently exposes.
 | Multi-carrier optimization | `Partial` | The backend can ingest multi-carrier workbook structures, but the UX and analytics remain electricity-centric. |
 | Rolling-horizon optimization | `Partial` | Backend stitching and a dedicated frontend configuration surface are implemented; analytics remain stitched-result-first rather than window-first. |
 | Multi-investment / pathway planning | `Partial` | Opt-in pathway mode is implemented with backend multi-investment expansion, pathway metadata, and period-aware analytics. Authoring remains flat/workbook-first rather than native PyPSA MultiIndex editing. |
-| Stochastic optimization | `Not supported` | No scenario-tree, two-stage, or CVaR workflow. |
-| Security-constrained optimization / SCLOPF | `Not supported` | No branch-outage or contingency solve path. |
-| Scenario-based planning UX | `Partial` | Frontend scenario presets now capture window, constraints, carbon price, pathway, and rolling settings in workbook metadata, but there is still no stochastic backend workflow. |
+| Stochastic optimization | `Partial` | Two-stage stochastic mode is implemented (probability-weighted scenarios expressing uncertainty via per-scenario overrides, e.g. load × 0.8, fuel × 2). No scenario trees or CVaR. Cannot combine with rolling horizon. |
+| Security-constrained optimization / SCLOPF | `Partial` | SCLOPF mode with branch-outage contingencies is implemented. Cannot combine with rolling, stochastic, or pathway modes. |
+| Scenario-based planning UX | `Partial` | Frontend scenario presets capture window, constraints, carbon price, pathway, and rolling settings in workbook metadata. |
 | Multi-period result analytics | `Partial` | Period summaries and selected-period detailed charts are supported; not every analytics surface is natively multi-period. |
 
 ## Support Matrix: PyPSA Features vs Ragnarok
@@ -186,15 +186,15 @@ optimization envelope is broader than the workflow Ragnarok currently exposes.
 | Custom constraints panel | `Partial` | Several custom constraints are implemented, but not the full PyPSA constraint space. |
 | Rolling-horizon optimization | `Partial` | Backend rolling-window orchestration and frontend controls are implemented; analytics remain stitched-result-first. |
 | Multi-investment / pathway planning | `Partial` | Pathway mode is implemented through backend expansion from a flat workbook plus Ragnarok-owned pathway metadata sheets. |
-| Stochastic optimization | `Not supported` | No scenario-tree workflow or stochastic solve mode. |
-| Security-constrained optimization | `Not supported` | No SCLOPF / branch outage workflow. |
+| Stochastic optimization | `Partial` | Two-stage stochastic solve mode with probability-weighted scenario overrides; no scenario trees. |
+| Security-constrained optimization | `Partial` | SCLOPF solve mode with branch-outage contingencies. |
 | Native `global_constraints` workbook usage | `Implicit` | Sheet is available and passed through the generic network builder, but Ragnarok adds only limited dedicated UI/analytics around it. |
-| Plugin execution pipeline | `Full` | `pre-build`, `post-build`, `in-solve`, `post-solve` stages are implemented. |
+| Plugin system (frontend + backend) | `Full` | Two kinds, one hook contract (`transform`/`contribute`/`analyze`/`options`/named actions): frontend plugins run in the browser before a run is submitted; backend plugins run in the backend process via `/api/plugins/*` and write into the server-side session. The solve pipeline itself is plugin-agnostic — no staged in-solve plugin execution. |
 | Plugin analytics round-trip through project import/export | `Full` | Stored in `RAGNAROK_PluginAnalytics` and restored on import without plugin re-execution. |
 | Project settings / constraints / run-state metadata round-trip | `Full` | Stored in dedicated Ragnarok metadata sheets and restored on project import. |
 | CO2 shadow price restoration from imported project | `Full` | Stored in `RAGNAROK_ResultMeta` and restored on import. |
-| Backend retention of solved network/workbook | `Not Needed` | Deliberate: the server is stateless. The backend returns result JSON and derived output caches; the frontend round-trips losslessly, so no solved `pypsa.Network` artifact is retained server-side. |
-| CSV-folder / netCDF / HDF5 workflows | `Not supported` | Ragnarok is currently Excel-first in the UI. |
+| Backend retention of solved runs | `Full` | Every successful solve is persisted server-side automatically (`run_store.py`, one SQLite file per run) and served back through History/"View result" without re-solving. The solved `pypsa.Network` object itself is not retained — results and full outputs are. |
+| CSV-folder / netCDF / HDF5 workflows | `Full` | CSV folder import/export (PyPSA-native layout, zipped, frontend-side); netCDF and HDF5 import/export via backend converters (`/api/export/netcdf`, `/api/import/hdf5`, …). |
 | Power flow-only studies / separate PF UX | `Not supported` | Current workflow is optimization-centric. Roadmapped — see Roadmap below. |
 | Pluggable / non-PyPSA optimization backend | `Partial` | A backend abstraction layer is in place (`backend/app/backends/`): one `run(model, scenario, options)` adapter per backend, selected by `options.backend` (default `pypsa`), with `GET /api/backends` reporting capabilities. PyPSA is the only adapter today; the seam is ready for additional backends. |
 
@@ -232,10 +232,10 @@ Ragnarok does not maintain a separate backend skip policy for schema-defined she
 ## Important Current Limitations
 
 1. `Export Project` is workbook-driven, not backend-solved-network-driven.
-   The app exports `results.outputs`, not a retained solved `pypsa.Network`. This is by design — the server is stateless and does not retain solved artifacts (see Roadmap / TODO "Not Needed"). The frontend round-trips losslessly, and a native `pypsa.Network` can be reconstructed from the exported workbook or CSV folder.
+   The app exports `results.outputs`, not a retained solved `pypsa.Network`. The backend persists every solved run's *results* in the run store (History), but never the solved `pypsa.Network` object itself — by design (see Roadmap / TODO "Not Needed"). The frontend round-trips losslessly, and a native `pypsa.Network` can be reconstructed from the exported workbook or CSV folder.
 
 2. `Import Project` rebuilds project state from workbook inputs/outputs rather than reopening a retained `pypsa.Network`.
-   It restores frontend project state and result metadata and reconstructs `RunResults` locally. No backend-solved network artifact is involved, by design (stateless server).
+   It restores frontend project state and result metadata and reconstructs `RunResults` locally. No backend-solved network artifact is involved, by design.
 
 3. Pathway planning is still v1-level.
    It supports flat-workbook authoring, backend multi-investment expansion, and selected-period analytics, but it does not yet provide a native frontend MultiIndex editing workflow.

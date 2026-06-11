@@ -57,18 +57,42 @@ integrating with the backend. It does not cover end-user steps (see
 ## 1. Overview and directory layout
 
 The backend is a FastAPI application that receives a JSON workbook from the
-frontend, builds a `pypsa.Network`, solves it with HiGHS via linopy, and
-returns a structured result dict. The backend is **plugin-agnostic**: plugins
-are a frontend concern. They contribute rows and constraints to `model` and
-`scenario` before the payload is sent here. There are no plugin hooks inside
-the backend pipeline.
+frontend (or holds it in a server-side session), builds a `pypsa.Network`,
+solves it with HiGHS via linopy, and returns a structured result dict.
+
+Two plugin kinds exist, with different relationships to the backend:
+
+* **Frontend plugins** run in the browser; they contribute rows and constraints
+  to `model` and `scenario` *before* the payload is sent here. The **solve
+  pipeline** has no plugin hooks — no plugin code executes at any solve stage.
+* **Backend plugins** (`app/plugins.py` + `app/routers/plugins.py`) are
+  3rd-party Python packages installed at runtime into `backend/data/plugins/`
+  and run **in the backend process** via `/api/plugins/*`, writing into the
+  server-side session. See [docs/plugin.md §16](plugin.md#16-backend-server-side-plugins)
+  for the contract and isolation rules.
 
 ```
 backend/
   app/
-    main.py              FastAPI app, job store, all HTTP endpoints
+    main.py              FastAPI app, job store, solve/validate/export endpoints
     config.py            Loads backend/config/system_defaults.json
+    config_provider.py   Config lookups for the /api/config surface
     models.py            RunPayload Pydantic model
+    model_store.py       Session-storage facade (sqlite default, legacy json/parquet)
+    sqlite_store.py      SQLite session store (one project.db per session)
+    session_store.py     Legacy JSON+Parquet session store
+    run_store.py         Persisted solved-run results
+    plugins.py           Backend-plugin framework: discovery, registry, hook runners
+    timeseries.py        Shared time-series windowing/downsampling for the thin-client API
+    project_workbook.py  Lossless project-workbook (.xlsx) read/write for sessions
+    log_capture.py       In-process log capture (Analytics → Log tab)
+    startup_status.py    Startup progress reporting (GET /api/status)
+    routers/
+      session.py         /api/session/* — server-side working model (source of truth)
+      plugins.py         /api/plugins/* — backend-plugin lifecycle + hooks
+      importers.py       /api/import/* — external-data importer subsystem (Data view)
+      config.py          /api/config — the boot bundle the frontend fetches at startup
+    importers/           importer implementations used by routers/importers.py
     backends/
       base.py            Backend Protocol + BackendError
       registry.py        register_backend / get_backend / available_backends
@@ -143,7 +167,12 @@ Key `options` fields:
 
 ### 2.2 Endpoints
 
-All endpoints are defined in `backend/app/main.py`.
+Solve, validate, and export/import endpoints are defined in
+`backend/app/main.py`. Session (`/api/session/*`), backend-plugin
+(`/api/plugins/*`), external-data importer (`/api/import/*`), and boot-config
+(`/api/config`) endpoints live in `backend/app/routers/` — each router module's
+docstring carries its endpoint table. Backend-plugin routes are also documented
+in [docs/plugin.md §16.5](plugin.md#165-endpoints).
 
 #### Liveness and configuration
 
@@ -590,7 +619,9 @@ omitted. Multi-investment results include a `period` key alongside `snapshot`
 in each series row.
 
 The frontend uses `outputs` as the `assetDetails` cache for per-asset drilldown
-and export-project. The backend is stateless — it does not cache between runs.
+and export-project. The solve pipeline itself keeps no state between runs; the
+completed bundle is persisted by the run store (`app/run_store.py`) for
+History / "View result".
 
 ---
 

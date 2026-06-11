@@ -113,7 +113,7 @@ Each button shows a single letter and its full name as a tooltip.
 | M | Model | Spreadsheet editor for all component sheets plus a read-only topology map. |
 | S | Settings | Scenario presets, simulation window, carbon price, planning modes, constraints, solver options, and appearance. |
 | A | Analytics | Results dashboard, validation report, KPI strip, and run comparison. |
-| P | Plugins | Install, use, and uninstall frontend plugins. |
+| P | Plugins | Install, use, and uninstall plugins (frontend and backend). |
 
 The Analytics button shows a badge with the count of validation errors and
 warnings when validation has been run and found issues. The Plugins button shows
@@ -841,16 +841,29 @@ Click **More formats...** in the file toolbar to expand additional options:
 Click **P** in the activity bar. The Plugins view has a left rail for managing
 installed plugins and a main panel showing the selected plugin's interface.
 
-Plugins are frontend-only. They run in the browser and do not contact the
-Ragnarok backend. The Ragnarok backend is plugin-agnostic and never loads or
-executes plugin code.
+There are two kinds of plugin. Ragnarok ships neither — plugins are 3rd-party
+and you install them yourself:
+
+- **Frontend plugins** run in the browser. They never contact the Ragnarok
+  backend (a plugin that needs server-side computation runs its *own* local
+  server — see [Plugin servers](#plugin-servers) below).
+- **Backend plugins** run inside the Ragnarok backend process. Their build
+  output is written straight into the server-side session, so large models
+  never pass through the browser. They appear in the rail under a
+  **Backend (server-side)** group.
+
+> **Trust note:** installing a backend plugin means the server runs that
+> plugin's Python code. Only install plugins you trust.
 
 ### Installing a plugin
 
 1. Click **Install plugin...** in the left rail.
-2. Select a plugin `.zip` file. A valid plugin zip contains a `module.json`
-   manifest and a JavaScript entry file.
+2. Select a plugin `.zip` file. The kind is detected automatically: a zip with
+   `module.json` + a JavaScript entry file installs as a frontend plugin (into
+   the browser); a zip with `manifest.json` + `plugin.py` uploads to the server
+   as a backend plugin.
 3. The plugin appears in the rail and its interface renders immediately.
+   Re-installing a zip with the same id replaces the existing plugin.
 
 There is no enable/disable toggle. A plugin is simply installed or not.
 
@@ -866,6 +879,13 @@ typically organized into tabs such as **Description**, **Input**, and **Output**
   in **Settings > Advanced Constraints** and are applied on the next **Run**.
 - After a solve, the plugin's **Output** tab may display post-solve analysis
   rendered by the plugin's `analyze(result, config)` hook.
+
+For a **backend plugin**, heavy input files (e.g. a model workbook) are
+uploaded once into the plugin's server-side file store via its file picker and
+referenced by name afterwards — the file never lives in the browser. Apply
+actions run on the server and the editor refreshes from the session when they
+finish. Whatever a plugin does, only the model it *returns* is applied — a
+plugin cannot change your session as a side effect.
 
 ### Plugin servers
 
@@ -897,7 +917,8 @@ To have `run.command` launch a plugin server automatically:
 ### Uninstalling a plugin
 
 Click the **x** button next to the plugin's name in the rail. The plugin is
-removed immediately.
+removed immediately. Uninstalling a backend plugin also deletes its uploaded
+data files from the server.
 
 For authoring your own plugins, see
 [docs/guides/PLUGIN_AUTHORING.md](plugin.md).
@@ -966,7 +987,7 @@ Combining incompatible modes returns a 400 error from the backend.
 | Dispatch / price / emissions charts | Yes | Recharts |
 | Per-asset detail card | Yes | Generators, buses, lines, links, storage, processes, shunt impedances |
 | LMP (nodal marginal prices) | Yes | Per-bus time series |
-| Session run history | Yes | Session-scoped; not persisted to disk |
+| Session run history | Yes | Every solved run is persisted server-side and listed in History |
 | Persisted scenario manager (cross-session) | No | |
 | Open / Save workbook (.xlsx) | Yes | Inputs only |
 | Import / Export Project (.xlsx) | Yes | Inputs + solved outputs + metadata |
@@ -975,6 +996,7 @@ Combining incompatible modes returns a 400 error from the backend.
 | netCDF (import + export) | Yes | Backend-side conversion |
 | HDF5 (import + export) | Yes | Backend-side conversion |
 | Frontend plugin system | Yes | .zip install; JS hooks in browser; optional local server |
+| Backend plugin system | Yes | .zip install; Python hooks in the backend process; server-side file store |
 | Cloud / multi-user deployment | No | Local only; no authentication |
 | Time-series data fetching | No | User must supply all time-series sheets |
 

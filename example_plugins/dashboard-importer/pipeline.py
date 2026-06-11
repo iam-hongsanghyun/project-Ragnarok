@@ -33,11 +33,11 @@ import re
 import sys
 import tempfile
 import threading
-from contextlib import contextmanager
 from datetime import date, datetime
 import importlib
+import importlib.util
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import pandas as pd
 
@@ -300,19 +300,18 @@ def _build_dashboard_network(
     module_config: dict[str, Any],
 ) -> Any:
     """Build a PyPSA network from GUI config, table edits, and optional xlsx."""
-    with _bundled_lib_path():
-        settings_mod   = importlib.import_module("dashboard_lib.settings")
-        loader_mod     = importlib.import_module("dashboard_lib.loader")
-        topology_mod   = importlib.import_module("dashboard_lib.topology")
-        region_mod     = importlib.import_module("dashboard_lib.region")
-        carrier_mod    = importlib.import_module("dashboard_lib.carrier")
-        scaling_mod    = importlib.import_module("dashboard_lib.scaling")
-        snapshots_mod  = importlib.import_module("dashboard_lib.snapshots")
-        merge_cc_mod   = importlib.import_module("dashboard_lib.merge_cc")
-        p_max_pu_mod   = importlib.import_module("dashboard_lib.p_max_pu")
-        demand_redist_mod = importlib.import_module("dashboard_lib.demand_redistribution")
-        gen_replace_mod = importlib.import_module("dashboard_lib.generator_replacement")
-        marginal_cost_mod = importlib.import_module("dashboard_lib.marginal_cost")
+    settings_mod   = _lib("settings")
+    loader_mod     = _lib("loader")
+    topology_mod   = _lib("topology")
+    region_mod     = _lib("region")
+    carrier_mod    = _lib("carrier")
+    scaling_mod    = _lib("scaling")
+    snapshots_mod  = _lib("snapshots")
+    merge_cc_mod   = _lib("merge_cc")
+    p_max_pu_mod   = _lib("p_max_pu")
+    demand_redist_mod = _lib("demand_redistribution")
+    gen_replace_mod = _lib("generator_replacement")
+    marginal_cost_mod = _lib("marginal_cost")
 
     if dashboard_path is not None:
         xlsx_dashboard = settings_mod.read_dashboard(dashboard_path)
@@ -358,8 +357,7 @@ def _build_dashboard_network(
 
 def _resolve_model_for_analytics(module_config: dict[str, Any]) -> tuple[str, int, int]:
     """Resolve (model_path, base_year, target_year) from the GUI config."""
-    with _bundled_lib_path():
-        settings_mod = importlib.import_module("dashboard_lib.settings")
+    settings_mod = _lib("settings")
 
     dashboard_path = _resolve_dashboard_path(module_config)
     if dashboard_path is not None:
@@ -768,8 +766,7 @@ def demand_values_payload(module_config: dict[str, Any]) -> list[dict[str, Any]]
     # Region labels MUST match what redistribute_demand resolves, so reuse the
     # SAME region helper (_build_province_to_region) per resolution. A province
     # not in the mapping falls back to itself, exactly as _build_bus_to_region.
-    with _bundled_lib_path():
-        region_mod = importlib.import_module("dashboard_lib.region")
+    region_mod = _lib("region")
     pm = _table_to_df(module_config.get("province_mapping"))
 
     rows: list[dict[str, Any]] = []
@@ -1361,28 +1358,46 @@ def _resolve_path(raw: str, base: Path | None = None) -> Path:
 
 # Serialises the bundled-lib import block. This server is long-lived and runs
 # request handlers in a threadpool (FastAPI run_in_threadpool), so two requests
-# can import dashboard_lib concurrently. The import machinery is not safe
-# against another thread mutating sys.path / sys.modules mid-import, so we hold
-# this lock for the (cheap, cached-after-first) import block.
+# can import the bundled lib concurrently. The import machinery is not safe
+# against another thread mutating sys.modules mid-import, so we hold this lock
+# for the (cheap, cached-after-first) import block.
 _IMPORT_LOCK = threading.Lock()
 
+# The bundled dashboard_lib registers in sys.modules under a name derived from
+# THIS plugin's install directory — never as bare "dashboard_lib", and with no
+# sys.path mutation. Plugins get copy-pasted from each other, so two installed
+# plugins can easily both ship a package named dashboard_lib; importing it by
+# its bare name would silently hand one plugin the other's code (whichever
+# imported first wins). The directory name is the install id, unique under the
+# plugins dir, so every installed copy keeps its own modules.
+_LIB_ALIAS = "_ragnarok_plugin_lib_" + re.sub(r"\W", "_", PLUGIN_ROOT.name)
 
-@contextmanager
-def _bundled_lib_path() -> Iterator[None]:
-    """Make ``dashboard_lib`` importable, thread-safely.
 
-    Adds the plugin's backend dir to ``sys.path`` ONCE (idempotent, never
-    popped) so concurrent requests can't race on it, and serialises the import
-    block with a lock. Modules are imported normally and stay cached — there is
-    no per-call ``sys.modules`` purge (the old purge deleted ``dashboard_lib.*``
-    on every call, which raced with concurrent imports and raised
-    ``KeyError: 'dashboard_lib.loader'``).
+def _lib(submodule: str) -> Any:
+    """Import a bundled ``dashboard_lib`` submodule, isolated and thread-safe.
+
+    Loads the package once under :data:`_LIB_ALIAS` and returns the requested
+    submodule (``_lib("loader")`` ≙ ``dashboard_lib.loader``). Modules stay
+    cached after the first call; relative imports inside the package resolve
+    within the alias, so the lib never sees — or collides on — its bare name.
     """
-    root_text = str(PLUGIN_ROOT)
     with _IMPORT_LOCK:
-        if root_text not in sys.path:
-            sys.path.insert(0, root_text)
-        yield
+        if _LIB_ALIAS not in sys.modules:
+            init = PLUGIN_ROOT / "dashboard_lib" / "__init__.py"
+            spec = importlib.util.spec_from_file_location(
+                _LIB_ALIAS, init, submodule_search_locations=[str(init.parent)]
+            )
+            if spec is None or spec.loader is None:
+                raise ImportError(f"Cannot load bundled dashboard_lib from {init}")
+            pkg = importlib.util.module_from_spec(spec)
+            # Register before exec so the package's relative imports resolve.
+            sys.modules[_LIB_ALIAS] = pkg
+            try:
+                spec.loader.exec_module(pkg)
+            except BaseException:
+                sys.modules.pop(_LIB_ALIAS, None)
+                raise
+        return importlib.import_module(f"{_LIB_ALIAS}.{submodule}")
 
 
 # ---------------------------------------------------------------------------

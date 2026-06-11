@@ -17,15 +17,30 @@ A backend plugin is a directory under :data:`BACKEND_PLUGINS_DIR` containing:
 * ``manifest.json`` — ``{id, name, version, description?, capabilities?, config?}``
   (the ``config`` schema is rendered by the same frontend form renderer used for
   frontend plugins, so the two look identical in the Plugins tab).
-* ``plugin.py`` — a module exposing one or both hooks::
+* ``plugin.py`` — a module exposing one or more hooks::
 
-      def build(config: dict) -> dict:        # returns a model {sheet: [rows]}
-          ...
-      def analyze(result: dict, config: dict) -> dict:   # returns analytics
-          ...
+      def transform(model: dict, config: dict) -> dict:   # replace the model
+      def contribute(model: dict, config: dict) -> dict:  # {sheets?, constraints?}
+      def analyze(result: dict, config: dict) -> dict:    # read-only analytics
+      def options(name: str, config: dict, ctx) -> list:  # on-demand dropdowns
+      def <action>(config: dict) -> dict:                 # named form actions
 
-Isolation is a hard requirement: discovery never raises, a broken plugin is
-logged and skipped, and the core app runs cleanly with zero plugins present.
+Isolation is a hard requirement:
+
+* Discovery never raises — a broken plugin is logged and skipped, and the core
+  app runs cleanly with zero plugins present.
+* Hook errors are contained — :func:`_call` turns any plugin exception into a
+  clean ``ValueError`` (HTTP 400), never a crashed request.
+* Model handoff is one-way and *return-value only* — ``transform``/``contribute``
+  receive a defensive copy of the session model (:func:`_copy_model`); in-place
+  mutation of the ``model`` argument is never persisted. Only the returned dict
+  (transform) or fragment (contribute) reaches the session store.
+* Module namespaces must not collide — ``plugin.py`` is imported under a
+  synthetic per-id name (:func:`_load_module`), and a plugin that vendors its
+  own library must load it the same way (aliased under a plugin-unique name,
+  no ``sys.path`` mutation) so two plugins shipping equally-named packages
+  never swap each other's code. See the dashboard-importer's ``_lib`` loader
+  for the reference pattern.
 """
 from __future__ import annotations
 
@@ -268,18 +283,42 @@ def _call(hook: Callable[..., Any], *args: Any) -> Any:
         raise ValueError(str(exc) or exc.__class__.__name__) from exc
 
 
+def _copy_model(model: dict[str, list[dict[str, Any]]] | None) -> dict[str, list[dict[str, Any]]]:
+    """Defensive sheet+row copy of the session model handed to a plugin hook.
+
+    The contract is *return-value only*: whatever a plugin does to its ``model``
+    argument in place is never persisted — only the dict it returns is saved
+    (transform) or merged (contribute). Copying the sheets and rows enforces
+    that, so a contribute plugin can't smuggle session changes past the merge
+    by mutating the input while returning an innocent-looking fragment.
+
+    Rows are copied one level deep (``dict(row)``) — cheap even for an
+    8760-snapshot model (small per-row dicts of scalars) versus a deepcopy.
+    Cell values are shared, which is safe for the scalar cells the model
+    schema uses.
+    """
+    return {
+        sheet: [dict(r) if isinstance(r, dict) else r for r in rows]
+        for sheet, rows in (model or {}).items()
+    }
+
+
 def run_transform(
     plugin_id: str,
     model: dict[str, list[dict[str, Any]]],
     config: dict[str, Any],
 ) -> dict[str, list[dict[str, Any]]]:
-    """Run a plugin's ``transform(model, config)`` → the replacement model dict."""
+    """Run a plugin's ``transform(model, config)`` → the replacement model dict.
+
+    The plugin receives a defensive copy of the session model (see
+    :func:`_copy_model`): only the returned dict is ever persisted.
+    """
     plugin = get(plugin_id)
     if plugin is None:
         raise KeyError(plugin_id)
     if not plugin.has_transform:
         raise ValueError(f"Plugin {plugin_id!r} has no transform hook.")
-    out = _call(plugin.module.transform, model or {}, _with_data_dir(plugin_id, config))
+    out = _call(plugin.module.transform, _copy_model(model), _with_data_dir(plugin_id, config))
     if not isinstance(out, dict):
         raise ValueError(f"Plugin {plugin_id!r} transform() did not return a model dict.")
     return out
@@ -290,13 +329,17 @@ def run_contribute(
     model: dict[str, list[dict[str, Any]]],
     config: dict[str, Any],
 ) -> dict[str, Any]:
-    """Run a plugin's ``contribute(model, config)`` → ``{sheets?, constraints?}``."""
+    """Run a plugin's ``contribute(model, config)`` → ``{sheets?, constraints?}``.
+
+    The plugin receives a defensive copy of the session model (see
+    :func:`_copy_model`): only the returned fragment is ever merged.
+    """
     plugin = get(plugin_id)
     if plugin is None:
         raise KeyError(plugin_id)
     if not plugin.has_contribute:
         raise ValueError(f"Plugin {plugin_id!r} has no contribute hook.")
-    out = _call(plugin.module.contribute, model or {}, _with_data_dir(plugin_id, config))
+    out = _call(plugin.module.contribute, _copy_model(model), _with_data_dir(plugin_id, config))
     if not isinstance(out, dict):
         raise ValueError(f"Plugin {plugin_id!r} contribute() did not return a dict.")
     return out
