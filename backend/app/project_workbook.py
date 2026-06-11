@@ -289,7 +289,9 @@ def _summary_rows(bundle: dict[str, Any]) -> list[dict[str, Any]]:
 
     section("Settings")
     cp = scenario.get("carbonPrice")
-    cur = options.get("currencySymbol") or "₩"
+    # Same fallback as the solve pipeline (network/__init__.py, results) — the
+    # symbol is user-set via Settings -> currencySymbol, never assumed.
+    cur = options.get("currencySymbol") or "$"
     add("Carbon price", f"{cp} {cur}/t" if cp not in (None, "") else None)
     dr = scenario.get("discountRate")
     add("Discount rate", f"{dr * 100:.1f}%" if isinstance(dr, (int, float)) else None)
