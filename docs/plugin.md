@@ -1588,6 +1588,13 @@ logged and skipped — the backend always starts.
 > **Security:** install accepts a `.zip` of runnable Python that the backend
 > imports — i.e. remote code execution by design. Acceptable single-user/local;
 > a multi-user remote deployment must gate this behind auth/sandboxing.
+>
+> **Resource guards** (env-configurable, MB; `0` disables): the install zip is
+> capped at `RAGNAROK_MAX_PLUGIN_ZIP_MB` (50), its uncompressed expansion at
+> `RAGNAROK_MAX_PLUGIN_UNZIPPED_MB` (500, zip-bomb guard), and each data-file
+> upload at `RAGNAROK_MAX_PLUGIN_FILE_MB` (200). Uploads are read chunked and
+> rejected with HTTP 413 past the limit — files are never relocated by these
+> guards; install/data paths are unchanged.
 
 The reference example is `example_plugins/dashboard-importer/`.
 
