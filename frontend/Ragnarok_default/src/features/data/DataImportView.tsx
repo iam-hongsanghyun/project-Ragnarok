@@ -3,17 +3,18 @@
  *
  *   left rail   ·   map (main)   ·   right rail
  *
- * Flow: Country → Database (source) → Datasets (multi-select).
+ * Flow: Country → Databases (sources) → Datasets (multi-select).
  *
  *   1. Pick a country (click or search). Map zooms in.
- *   2. In the left rail pick a database (source) and TICK the datasets you
- *      want — KPG193 offers network / renewable capacity / demand profile /
- *      renewable profile (all on by default).
- *   3. The right rail shows the settings: a Common group (shared across the
- *      selected datasets) + a group per dataset for its own settings.
- *   4. One Fetch → the backend fetches the selected datasets together and
- *      returns one aligned, PyPSA-ready fragment → preview overlays the map.
- *   5. Add to workbook → fragment merges into the current model.
+ *   2. In the left rail TICK the datasets you want — across as many
+ *      databases as you like (e.g. OSM transmission + WRI power plants).
+ *   3. The right rail shows the settings for EVERY database with ticked
+ *      datasets: one section per database (its Common group + a group per
+ *      dataset). Each database keeps its own filter values — filter ids can
+ *      collide across databases, so the blobs are never merged.
+ *   4. One Fetch → one backend request per database, in parallel; the
+ *      previews stack in the right rail and the overlays merge on the map.
+ *   5. Add to workbook → every fetched fragment merges into the model.
  *
  * Caller (App) supplies `applyFragment` which merges sheets via
  * `mergeWorkbookFragment`.
@@ -21,7 +22,6 @@
 import React, { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import {
   CountryMeta,
-  FilterSchema,
   Source,
   WorkbookFragment,
   GeoJSONFeatureCollection,
@@ -32,9 +32,9 @@ import {
 import { ResizablePanels } from '../../layout/ResizablePanels';
 import { usePersistedState } from 'shared/hooks/usePersistedState';
 import { CategoryDatabaseList } from './CategoryDatabaseList';
-import { FilterPanel } from './FilterPanel';
+import { FilterPanel, SourceEntry } from './FilterPanel';
 import { WorldMap } from './WorldMap';
-import { dataImportStore } from 'lib/data/store';
+import { dataImportStore, runStatus } from 'lib/data/store';
 
 // Persistent state keys — selections stick across tab switches and reloads.
 const KEY_COUNTRY = 'ragnarok:data-import:country-iso';
@@ -48,9 +48,9 @@ interface Props {
 
 /** The union of all a source's datasets' filters, de-duped by id (common
  *  settings appear once). This is the full settings surface for the source. */
-function sourceFilterSchemas(source: Source): FilterSchema[] {
+function sourceFilterSchemas(source: Source) {
   const seen = new Set<string>();
-  const out: FilterSchema[] = [];
+  const out = [];
   for (const ds of source.datasets) {
     for (const f of ds.filters) {
       if (!seen.has(f.id)) {
@@ -70,6 +70,13 @@ function defaultFilterValues(source: Source): Record<string, unknown> {
   return out;
 }
 
+/** Merge the ready parts' map overlays into one FeatureCollection. */
+function mergeOverlays(overlays: Array<GeoJSONFeatureCollection | null | undefined>): GeoJSONFeatureCollection | null {
+  const features = overlays.flatMap((o) => o?.features ?? []);
+  if (features.length === 0) return null;
+  return { type: 'FeatureCollection', features };
+}
+
 export function DataImportView({ applyFragment }: Props) {
   const [sources, setSources] = useState<Source[]>([]);
   const [countries, setCountries] = useState<CountryMeta[]>([]);
@@ -78,12 +85,13 @@ export function DataImportView({ applyFragment }: Props) {
 
   const [selectedIso, setSelectedIso] = usePersistedState<string | null>(KEY_COUNTRY, null);
   const [focusedSourceId, setFocusedSourceId] = usePersistedState<string | null>(KEY_SOURCE, null);
-  // Which datasets are ticked, per source. Absent → default = all datasets.
+  // Which datasets are ticked, per source. Absent → default = none.
   const [selectionBySource, setSelectionBySource] = usePersistedState<Record<string, string[]>>(
     KEY_SELECTION,
     {},
   );
-  // One shared filter blob per source (settings are shared across its datasets).
+  // One filter blob PER SOURCE (shared across that source's datasets; never
+  // merged across sources — ids like `min_capacity_mw` collide between them).
   const [filtersBySource, setFiltersBySource] = usePersistedState<
     Record<string, Record<string, unknown>>
   >(KEY_FILTERS, {});
@@ -123,46 +131,41 @@ export function DataImportView({ applyFragment }: Props) {
     () => (selectedIso ? countries.find((c) => c.iso === selectedIso) || null : null),
     [countries, selectedIso],
   );
-  const focusedSource = useMemo(
-    () => (focusedSourceId ? sources.find((s) => s.source_id === focusedSourceId) || null : null),
-    [sources, focusedSourceId],
+
+  const filterValuesFor = useCallback(
+    (source: Source): Record<string, unknown> => {
+      const saved = filtersBySource[source.source_id];
+      return saved && Object.keys(saved).length > 0 ? saved : defaultFilterValues(source);
+    },
+    [filtersBySource],
   );
 
-  // Selected dataset ids for the focused source (default = none — the user
-  // ticks the datasets they want to fetch).
-  const selectedDatasetIds = useMemo(() => {
-    if (!focusedSource) return [] as string[];
-    return selectionBySource[focusedSource.source_id] ?? [];
-  }, [focusedSource, selectionBySource]);
-
-  // Shared filter blob for the focused source.
-  const filterValues = useMemo(() => {
-    if (!focusedSource) return {} as Record<string, unknown>;
-    const saved = filtersBySource[focusedSource.source_id];
-    return saved && Object.keys(saved).length > 0 ? saved : defaultFilterValues(focusedSource);
-  }, [filtersBySource, focusedSource]);
-
-  // Union of API keys the selected datasets need.
-  const requiresSecrets = useMemo(() => {
-    if (!focusedSource) return [] as string[];
-    const out = new Set<string>();
-    for (const ds of focusedSource.datasets) {
-      if (selectedDatasetIds.includes(ds.id)) {
-        for (const s of ds.requires_secrets ?? []) out.add(s);
-      }
-    }
-    return Array.from(out);
-  }, [focusedSource, selectedDatasetIds]);
+  // EVERY source with ticked datasets gets a settings section in the right
+  // rail and a slice of the fetch — not just the last-clicked one. (That
+  // single-focus behavior made e.g. OSM ticks silently inert once WRI was
+  // ticked.)
+  const entries: SourceEntry[] = useMemo(
+    () =>
+      sources
+        .map((source) => ({
+          source,
+          datasetIds: selectionBySource[source.source_id] ?? [],
+          values: filterValuesFor(source),
+        }))
+        .filter((entry) => entry.datasetIds.length > 0),
+    [sources, selectionBySource, filterValuesFor],
+  );
 
   const updateFilterValue = useCallback(
-    (filterId: string, value: unknown) => {
-      if (!focusedSource) return;
+    (sourceId: string, filterId: string, value: unknown) => {
+      const source = sources.find((s) => s.source_id === sourceId);
+      if (!source) return;
       setFiltersBySource({
         ...filtersBySource,
-        [focusedSource.source_id]: { ...filterValues, [filterId]: value },
+        [sourceId]: { ...filterValuesFor(source), [filterId]: value },
       });
     },
-    [filtersBySource, filterValues, focusedSource, setFiltersBySource],
+    [sources, filtersBySource, filterValuesFor, setFiltersBySource],
   );
 
   const handleFocusSource = useCallback(
@@ -184,41 +187,67 @@ export function DataImportView({ applyFragment }: Props) {
     [sources, selectionBySource, setSelectionBySource, setFocusedSourceId],
   );
 
-  // The held run only counts if it matches the current source / country /
-  // dataset selection / filters; otherwise the right rail shows fresh state.
-  const selectionJson = useMemo(
-    () => JSON.stringify([...selectedDatasetIds].sort()),
-    [selectedDatasetIds],
+  // The held run only counts if it matches the current country + every
+  // source's dataset selection and filters; otherwise the right rail shows
+  // fresh state. Keyed by the same per-part JSON the store records.
+  const selectionKey = useMemo(
+    () =>
+      JSON.stringify(
+        entries.map((e) => [
+          e.source.source_id,
+          [...e.datasetIds].sort(),
+          JSON.stringify(e.values, Object.keys(e.values).sort()),
+        ]),
+      ),
+    [entries],
   );
-  const filtersJson = useMemo(
-    () => JSON.stringify(filterValues, Object.keys(filterValues).sort()),
-    [filterValues],
-  );
+  const runKey = (run: NonNullable<typeof activeRun>) =>
+    JSON.stringify(
+      run.parts.map((p) => [p.sourceId, p.datasetIds, p.filtersJson]),
+    );
   const currentRun =
     activeRun &&
-    activeRun.sourceId === focusedSourceId &&
     activeRun.countryIso === selectedIso &&
-    activeRun.datasetIdsJson === selectionJson
+    runKey(activeRun) ===
+      JSON.stringify(
+        entries.map((e) => [
+          e.source.source_id,
+          [...e.datasetIds].sort(),
+          JSON.stringify(e.values, Object.keys(e.values).sort()),
+        ]),
+      )
       ? activeRun
       : null;
-  const preview = currentRun?.preview || null;
-  const fetching = currentRun?.status === 'fetching';
-  const error = currentRun?.status === 'error' ? currentRun.error : null;
 
-  // Source / dataset / filter changes invalidate the held run.
+  const fetching = currentRun ? runStatus(currentRun) === 'fetching' : false;
+  const readyParts = useMemo(
+    () => (currentRun ? currentRun.parts.filter((p) => p.status === 'ready' && p.response) : []),
+    [currentRun],
+  );
+  const errors = useMemo(
+    () =>
+      currentRun
+        ? currentRun.parts
+            .filter((p) => p.status === 'error' && p.error)
+            .map((p) => `${p.sourceLabel}: ${p.error}`)
+        : [],
+    [currentRun],
+  );
+  const overlay = useMemo(
+    () => mergeOverlays(readyParts.map((p) => p.preview?.overlay)),
+    [readyParts],
+  );
+
+  // Country / selection / filter changes invalidate the held run.
   useEffect(() => {
-    if (!focusedSource) return;
     if (
       activeRun &&
-      (activeRun.sourceId !== focusedSourceId ||
-        activeRun.countryIso !== selectedIso ||
-        activeRun.datasetIdsJson !== selectionJson ||
-        activeRun.filtersJson !== filtersJson)
+      (activeRun.countryIso !== selectedIso || runKey(activeRun) !== selectionKey)
     ) {
       dataImportStore.clear();
       setLastAddedSeq(null);
     }
-  }, [activeRun, focusedSource, focusedSourceId, selectedIso, selectionJson, filtersJson]);
+  }, [activeRun, selectedIso, selectionKey]);
 
   const handleSelectCountry = useCallback(
     (iso: string) => setSelectedIso(iso),
@@ -226,25 +255,36 @@ export function DataImportView({ applyFragment }: Props) {
   );
 
   const handleFetch = useCallback(() => {
-    if (!focusedSource || !selectedCountry || selectedDatasetIds.length === 0) return;
+    if (!selectedCountry || entries.length === 0) return;
     dataImportStore.start({
-      sourceId: focusedSource.source_id,
-      sourceLabel: focusedSource.source_label,
-      datasetIds: selectedDatasetIds,
       countryIso: selectedCountry.iso,
       countryName: selectedCountry.name,
-      filters: filterValues,
-      requiresSecrets,
+      parts: entries.map((e) => ({
+        sourceId: e.source.source_id,
+        sourceLabel: e.source.source_label,
+        datasetIds: e.datasetIds,
+        filters: e.values,
+        requiresSecrets: Array.from(
+          new Set(
+            e.source.datasets
+              .filter((ds) => e.datasetIds.includes(ds.id))
+              .flatMap((ds) => ds.requires_secrets ?? []),
+          ),
+        ),
+      })),
     });
     setLastAddedSeq(null);
-  }, [focusedSource, selectedCountry, selectedDatasetIds, filterValues, requiresSecrets]);
+  }, [selectedCountry, entries]);
 
   const handleApply = useCallback(() => {
-    if (!currentRun || currentRun.status !== 'ready' || !currentRun.response) return;
-    if (!focusedSource || !selectedCountry) return;
-    applyFragment(currentRun.response.fragment, focusedSource.source_label, selectedCountry.name);
+    if (!currentRun || readyParts.length === 0 || !selectedCountry) return;
+    for (const part of readyParts) {
+      if (part.response) {
+        applyFragment(part.response.fragment, part.sourceLabel, selectedCountry.name);
+      }
+    }
     setLastAddedSeq(currentRun.seq);
-  }, [currentRun, focusedSource, selectedCountry, applyFragment]);
+  }, [currentRun, readyParts, selectedCountry, applyFragment]);
 
   const lastAdded =
     lastAddedSeq !== null && currentRun && currentRun.seq === lastAddedSeq ? currentRun : null;
@@ -283,27 +323,26 @@ export function DataImportView({ applyFragment }: Props) {
             countries={countries}
             selectedIso={selectedIso}
             onSelect={handleSelectCountry}
-            overlay={preview?.overlay || null}
+            overlay={overlay}
           />
           {lastAdded && (
             <div className="data-import-banner" role="status">
-              Added <b>{lastAdded.sourceLabel}</b> to the workbook for{' '}
+              Added{' '}
+              <b>{readyParts.map((p) => p.sourceLabel).join(', ')}</b> to the workbook for{' '}
               <b>{lastAdded.countryName}</b>. Switch to <b>Model</b> or <b>Build</b> to review.
             </div>
           )}
         </main>
         <FilterPanel
-          source={focusedSource}
-          selectedDatasetIds={selectedDatasetIds}
-          values={filterValues}
+          entries={entries}
           onChange={updateFilterValue}
           onFetch={handleFetch}
           onApply={handleApply}
           fetching={fetching}
           applying={false}
-          preview={preview}
-          canApply={currentRun?.status === 'ready'}
-          error={error}
+          parts={currentRun?.parts ?? null}
+          canApply={!fetching && readyParts.length > 0}
+          errors={errors}
         />
       </ResizablePanels>
     </div>

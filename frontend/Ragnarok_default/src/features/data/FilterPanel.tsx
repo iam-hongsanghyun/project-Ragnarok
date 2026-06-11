@@ -9,6 +9,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { FilterSchema, PreviewSummary, Source } from 'lib/api/databases';
 import { getSecret } from 'lib/api/secrets';
+import type { RunPart } from 'lib/data/store';
 import { SearchableSelect } from '../../shared/components/SearchableSelect';
 import { DateField } from './DateField';
 
@@ -177,23 +178,30 @@ function MultiselectDropdown({
   );
 }
 
-interface Props {
-  /** The focused source (database). Its datasets' settings render here. */
-  source: Source | null;
-  /** Which datasets of the source are ticked in the left rail. */
-  selectedDatasetIds: string[];
+/** One database with ticked datasets: its settings section in the rail. */
+export interface SourceEntry {
+  source: Source;
+  /** Which datasets of this source are ticked in the left rail. */
+  datasetIds: string[];
+  /** This source's own filter values (never shared with other sources). */
   values: Record<string, unknown>;
-  onChange: (id: string, value: unknown) => void;
+}
+
+interface Props {
+  /** Every database with ≥1 ticked dataset — each renders its own section. */
+  entries: SourceEntry[];
+  onChange: (sourceId: string, filterId: string, value: unknown) => void;
   onFetch: () => void;
   onApply: () => void;
   fetching: boolean;
   /** Reserved — true while the merge is in progress. With the one-trip
    *  endpoint the merge is synchronous, so this is currently always false. */
   applying: boolean;
-  preview: PreviewSummary | null;
-  /** True iff a fetch has succeeded and the held fragment is ready to merge. */
+  /** The held run's per-source slices (status / preview / error), if any. */
+  parts: RunPart[] | null;
+  /** True iff ≥1 fetched fragment is ready to merge. */
   canApply: boolean;
-  error: string | null;
+  errors: string[];
 }
 
 function FilterInput({
@@ -387,38 +395,25 @@ function FilterRow({
   );
 }
 
-export function FilterPanel({
-  source,
-  selectedDatasetIds,
-  values,
+/** Missing BYOK key names for one entry's ticked datasets. */
+function missingSecretsFor(entry: SourceEntry): string[] {
+  const selected = entry.source.datasets.filter((d) => entry.datasetIds.includes(d.id));
+  return Array.from(new Set(selected.flatMap((d) => d.requires_secrets ?? []))).filter(
+    (name) => !getSecret(name),
+  );
+}
+
+/** One database's settings block: meta line + Common group + per-dataset groups. */
+function SourceSection({
+  entry,
   onChange,
-  onFetch,
-  onApply,
-  fetching,
-  applying,
-  preview,
-  canApply,
-  error,
-}: Props) {
-  if (!source) {
-    return (
-      <aside className="view-rail view-rail--right data-import-filters">
-        <div className="view-rail-header"><span>Settings</span></div>
-        <div className="view-rail-body data-import-filters__empty">
-          <p>Pick a database in the left rail, then tick the datasets to fetch.</p>
-        </div>
-      </aside>
-    );
-  }
-
-  const selectedDatasets = source.datasets.filter((d) => selectedDatasetIds.includes(d.id));
-  const noneSelected = selectedDatasets.length === 0;
-
-  // BYOK: union of required keys across the selected datasets; which aren't set.
-  const missingSecrets = Array.from(
-    new Set(selectedDatasets.flatMap((d) => d.requires_secrets ?? [])),
-  ).filter((name) => !getSecret(name));
-  const blockedOnSecrets = missingSecrets.length > 0;
+}: {
+  entry: SourceEntry;
+  onChange: (sourceId: string, filterId: string, value: unknown) => void;
+}) {
+  const { source, datasetIds, values } = entry;
+  const selectedDatasets = source.datasets.filter((d) => datasetIds.includes(d.id));
+  const missingSecrets = missingSecretsFor(entry);
 
   // Common settings render once, but only when ≥1 selected dataset declares
   // them. Per-dataset groups carry each dataset's remaining (own) filters.
@@ -426,87 +421,111 @@ export function FilterPanel({
   const selectedFilterIds = new Set(selectedDatasets.flatMap((d) => d.filters.map((f) => f.id)));
   const commonFilters = source.common_filters.filter((f) => selectedFilterIds.has(f.id));
   const primary = selectedDatasets[0] ?? source.datasets[0];
+  const change = (filterId: string, value: unknown) => onChange(source.source_id, filterId, value);
+
+  return (
+    <section className="data-import-filters__source">
+      <h4 className="data-import-filters__source-title">{source.source_label}</h4>
+
+      {missingSecrets.length > 0 && (
+        <p className="data-import-filters__keynotice">
+          This source needs an API key: <b>{missingSecrets.join(', ')}</b>.
+          Add it in <b>Settings → API keys</b>, then come back and fetch.
+        </p>
+      )}
+
+      <section className="data-import-filters__meta">
+        {primary && (
+          <>
+            <p className="data-import-filters__line">
+              <b>License:</b> {primary.license}
+            </p>
+            <p className="data-import-filters__line">
+              <b>Source:</b>{' '}
+              <a href={primary.homepage} target="_blank" rel="noreferrer">
+                {primary.homepage}
+              </a>
+            </p>
+          </>
+        )}
+        <p className="data-import-filters__line">
+          <b>Datasets:</b> {selectedDatasets.map((d) => d.short_name || d.name).join(', ')}
+        </p>
+      </section>
+
+      {commonFilters.length > 0 && (
+        <section className="data-import-filters__group">
+          <h5 className="data-import-filters__group-title">Common settings</h5>
+          {commonFilters.map((f) => (
+            <FilterRow key={f.id} filter={f} value={values[f.id]} onChange={change} />
+          ))}
+        </section>
+      )}
+
+      {selectedDatasets.map((ds) => {
+        const ownFilters = ds.filters.filter((f) => !commonIds.has(f.id));
+        if (ownFilters.length === 0) return null;
+        return (
+          <section key={ds.id} className="data-import-filters__group">
+            <h5 className="data-import-filters__group-title">
+              {ds.short_name || ds.name}
+              {ds.description && <InfoTooltip text={ds.description} label={ds.short_name || ds.name} />}
+            </h5>
+            {ownFilters.map((f) => (
+              <FilterRow key={f.id} filter={f} value={values[f.id]} onChange={change} />
+            ))}
+          </section>
+        );
+      })}
+    </section>
+  );
+}
+
+export function FilterPanel({
+  entries,
+  onChange,
+  onFetch,
+  onApply,
+  fetching,
+  applying,
+  parts,
+  canApply,
+  errors,
+}: Props) {
+  if (entries.length === 0) {
+    return (
+      <aside className="view-rail view-rail--right data-import-filters">
+        <div className="view-rail-header"><span>Settings</span></div>
+        <div className="view-rail-body data-import-filters__empty">
+          <p>Pick a database in the left rail, then tick the datasets to fetch — across as many databases as you need.</p>
+        </div>
+      </aside>
+    );
+  }
+
+  // BYOK: any entry missing a key blocks the (single) fetch.
+  const blockedOnSecrets = entries.some((e) => missingSecretsFor(e).length > 0);
+  const headerLabel =
+    entries.length === 1 ? entries[0].source.source_label : `${entries.length} databases`;
+  const readyPreviews = (parts ?? []).filter((p) => p.status === 'ready' && p.preview);
 
   return (
     <aside className="view-rail view-rail--right data-import-filters">
-      <div className="view-rail-header"><span>{source.source_label}</span></div>
+      <div className="view-rail-header"><span>{headerLabel}</span></div>
       <div className="view-rail-body data-import-filters__body">
-        {blockedOnSecrets && (
-          <p className="data-import-filters__keynotice">
-            This source needs an API key: <b>{missingSecrets.join(', ')}</b>.
-            Add it in <b>Settings → API keys</b>, then come back and fetch.
-          </p>
-        )}
-
-        <section className="data-import-filters__meta">
-          {primary && (
-            <>
-              <p className="data-import-filters__line">
-                <b>License:</b> {primary.license}
-              </p>
-              <p className="data-import-filters__line">
-                <b>Source:</b>{' '}
-                <a href={primary.homepage} target="_blank" rel="noreferrer">
-                  {primary.homepage}
-                </a>
-              </p>
-            </>
-          )}
-          <p className="data-import-filters__line">
-            <b>Datasets:</b>{' '}
-            {noneSelected ? '— none ticked —'
-              : selectedDatasets.map((d) => d.short_name || d.name).join(', ')}
-          </p>
-        </section>
-
-        {noneSelected ? (
-          <p className="data-import-filters__keynotice">
-            Tick at least one dataset in the left rail to fetch.
-          </p>
-        ) : (
-          <>
-            {commonFilters.length > 0 && (
-              <section className="data-import-filters__group">
-                <h5 className="data-import-filters__group-title">Common settings</h5>
-                {commonFilters.map((f) => (
-                  <FilterRow key={f.id} filter={f} value={values[f.id]} onChange={onChange} />
-                ))}
-              </section>
-            )}
-
-            {selectedDatasets.map((ds) => {
-              const ownFilters = ds.filters.filter((f) => !commonIds.has(f.id));
-              if (ownFilters.length === 0) return null;
-              return (
-                <section key={ds.id} className="data-import-filters__group">
-                  <h5 className="data-import-filters__group-title">
-                    {ds.short_name || ds.name}
-                    {ds.description && <InfoTooltip text={ds.description} label={ds.short_name || ds.name} />}
-                  </h5>
-                  {ownFilters.map((f) => (
-                    <FilterRow key={f.id} filter={f} value={values[f.id]} onChange={onChange} />
-                  ))}
-                </section>
-              );
-            })}
-          </>
-        )}
+        {entries.map((entry) => (
+          <SourceSection key={entry.source.source_id} entry={entry} onChange={onChange} />
+        ))}
 
         <section className="data-import-filters__actions">
           <button
             type="button"
             className="primary"
             onClick={onFetch}
-            disabled={fetching || applying || blockedOnSecrets || noneSelected}
-            title={
-              noneSelected
-                ? 'Tick at least one dataset in the left rail'
-                : blockedOnSecrets
-                  ? 'Add the required API key in Settings first'
-                  : undefined
-            }
+            disabled={fetching || applying || blockedOnSecrets}
+            title={blockedOnSecrets ? 'Add the required API key in Settings first' : undefined}
           >
-            {fetching ? 'Fetching…' : 'Fetch preview'}
+            {fetching ? 'Fetching…' : entries.length > 1 ? `Fetch preview (${entries.length} databases)` : 'Fetch preview'}
           </button>
           <button
             type="button"
@@ -517,8 +536,17 @@ export function FilterPanel({
             {applying ? 'Adding…' : 'Add to workbook'}
           </button>
         </section>
-        {error && <p className="data-import-filters__error">{error}</p>}
-        {preview && <PreviewBody summary={preview} />}
+        {errors.map((err) => (
+          <p key={err} className="data-import-filters__error">{err}</p>
+        ))}
+        {readyPreviews.map((p) => (
+          <section key={p.sourceId} className="data-import-filters__group">
+            {readyPreviews.length > 1 && (
+              <h5 className="data-import-filters__group-title">{p.sourceLabel}</h5>
+            )}
+            <PreviewBody summary={p.preview as PreviewSummary} />
+          </section>
+        ))}
       </div>
     </aside>
   );

@@ -8695,6 +8695,23 @@ code, kbd, samp, tt,
   flex-direction: column;
   gap: 12px;
 }
+/* One block per database with ticked datasets — the rail stacks a section
+   per source so multi-database selections (OSM + WRI) are all configurable. */
+.data-import-filters__source {
+  display: flex;
+  flex-direction: column;
+}
+.data-import-filters__source + .data-import-filters__source {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 2px solid var(--border);
+}
+.data-import-filters__source-title {
+  margin: 0 0 8px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text);
+}
 /* Right-rail settings grouped as Common + one section per selected dataset. */
 .data-import-filters__group {
   display: flex;
