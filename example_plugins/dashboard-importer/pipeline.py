@@ -522,7 +522,9 @@ def replacement_plan_payload(module_config: dict[str, Any]) -> list[dict[str, An
         if isinstance(rules, list) else []
     )
     bulk_on = _as_bool(module_config, "replace_all_carriers", False)
-    carriers_sel = set(_as_str_list(module_config, "replace_carriers"))
+    # Carrier matching is case/whitespace-insensitive — a model spelling its
+    # carriers "Solar"/"Wind" must still match the lowercase GUI checkboxes.
+    carriers_sel = {c.strip().lower() for c in _as_str_list(module_config, "replace_carriers")}
     if not sel_rows and not (bulk_on and carriers_sel):
         return []
 
@@ -555,7 +557,7 @@ def replacement_plan_payload(module_config: dict[str, Any]) -> list[dict[str, An
 
     add_build = pd.to_numeric(additions_df["build_year"], errors="coerce") if "build_year" in additions_df.columns else pd.Series(index=additions_df.index, dtype="float64")
     add_pnom = pd.to_numeric(additions_df["p_nom"], errors="coerce").fillna(0.0) if "p_nom" in additions_df.columns else pd.Series(0.0, index=additions_df.index)
-    add_carrier = additions_df["carrier"].astype(str).str.strip().fillna("") if "carrier" in additions_df.columns else pd.Series("", index=additions_df.index)
+    add_carrier = additions_df["carrier"].astype(str).str.strip().str.lower().fillna("") if "carrier" in additions_df.columns else pd.Series("", index=additions_df.index)
 
     def _year_add(year: int, c: str) -> float:
         mask = (add_build == year) & (add_carrier == c)
@@ -607,7 +609,7 @@ def replacement_plan_payload(module_config: dict[str, Any]) -> list[dict[str, An
     # (computed split). The sheet is already filtered, so no extra check here.
     if bulk_on and carriers_sel:
         for nm, (total, by, c) in info.items():
-            if nm in seen or c not in carriers_sel or total <= 0:
+            if nm in seen or c.strip().lower() not in carriers_sel or total <= 0:
                 continue
             seen.add(nm)
             solar, wind = _computed_split(total, by)

@@ -178,13 +178,15 @@ def replace_generators(network: pypsa.Network, dashboard: "Dashboard") -> None:
     # passes Filter 2 (build_year ≥ replacement base year) and Filter 3 (the
     # attribute filter), not already picked in the table. Network is already
     # target-year-filtered (Filter 1).
-    carriers_sel = {str(c).strip() for c in getattr(settings, "replace_carriers", ()) if str(c).strip()}
+    # Carrier matching is case/whitespace-insensitive — a model spelling its
+    # carriers "Coal"/"Solar" must still match the lowercase GUI checkboxes.
+    carriers_sel = {str(c).strip().lower() for c in getattr(settings, "replace_carriers", ()) if str(c).strip()}
     bulk_added = 0
     if getattr(settings, "replace_all_carriers", False) and carriers_sel and "carrier" in network.generators.columns:
         for name in list(network.generators.index):
             if name in seen:
                 continue
-            if str(network.generators.at[name, "carrier"]).strip() not in carriers_sel:
+            if str(network.generators.at[name, "carrier"]).strip().lower() not in carriers_sel:
                 continue
             if _capacity(name) <= 0 or not _eligible(_by(name)) or not _attr_ok(name):
                 continue
@@ -267,6 +269,14 @@ def _split_capacity(
         total_add = solar_add + wind_add
         if total_add > 0:
             return capacity * solar_add / total_add, capacity * wind_add / total_add
+        # Last-resort fallback: the model has NO solar/wind unit with a build_year
+        # in or before this plant's year, so there is no ratio to follow. Say so
+        # loudly — a silent 50/50 looks like the setting was ignored.
+        print(
+            f"  Generator replacement WARNING: follow mode found no solar/wind "
+            f"additions in any year <= {year} — falling back to 50/50. Check the "
+            f"model's solar/wind build_year values, or use fixed Solar %/Wind %."
+        )
         return capacity * 0.5, capacity * 0.5
 
     solar_pct = _percentage_setting(settings, "replace_solar_pct", 50.0)
@@ -305,7 +315,7 @@ def _year_additions_by_year(network: pypsa.Network) -> dict[int, tuple[float, fl
     if gens.empty or "build_year" not in gens.columns or "carrier" not in gens.columns:
         return {}
     by = pd.to_numeric(gens["build_year"], errors="coerce")
-    carrier = gens["carrier"].astype(str).str.strip()
+    carrier = gens["carrier"].astype(str).str.strip().str.lower()
     p_nom = (
         pd.to_numeric(gens["p_nom"], errors="coerce").fillna(0.0)
         if "p_nom" in gens.columns
@@ -332,7 +342,7 @@ def _mean_marginal_cost(network: pypsa.Network, carrier: str) -> float | None:
     gens = network.generators
     if gens.empty or "carrier" not in gens.columns:
         return None
-    mask = gens["carrier"].astype(str).str.strip() == carrier
+    mask = gens["carrier"].astype(str).str.strip().str.lower() == carrier
     if "marginal_cost" not in gens.columns or not mask.any():
         return None
     values = pd.to_numeric(gens.loc[mask, "marginal_cost"], errors="coerce").dropna()

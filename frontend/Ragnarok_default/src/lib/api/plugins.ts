@@ -129,6 +129,29 @@ export async function getPluginOptions(
   }
 }
 
+export interface PluginActionResult {
+  ok: boolean;
+  message: string;
+  /** Optional patch of field → value the host writes back into the form
+   *  (e.g. a "Fill table" button populating an editable table). */
+  config?: Record<string, unknown>;
+}
+
+/** Run a named action hook `hook(config)` exported by a backend plugin —
+ *  the server-side counterpart of the frontend-plugin action contract. */
+export async function runBackendAction(
+  id: string,
+  hook: string,
+  config: Record<string, unknown>,
+): Promise<PluginActionResult> {
+  const resp = await fetch(`${API_BASE}/api/plugins/${encodeURIComponent(id)}/action`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ hook, config }),
+  });
+  return asJson<PluginActionResult>(resp);
+}
+
 /** Run a backend plugin's `analyze(result, config)` and return its output. */
 export async function analyzeBackendPlugin(
   id: string,

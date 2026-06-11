@@ -156,6 +156,81 @@ def analyze(result: dict[str, Any] | None, config: dict[str, Any]) -> dict[str, 
     return out
 
 
+def fillReallocation(config: dict[str, Any]) -> dict[str, Any]:  # noqa: N802 — manifest hook name
+    """'Fill table from carriers' action — port of the frontend plugin's hook.
+
+    Computes the bulk replacement plan (every plant of the checked carriers
+    that is active in the target year, built on/after the replacement base
+    year, and matching the optional column filter) and merges those plants
+    into the ``generator_replacements`` table, keeping existing picks. The
+    returned ``config`` patch is written back into the form by the host;
+    Solar/Wind MW stay display-only and are recomputed from the current
+    scalar settings.
+    """
+    cfg = dict(config or {})
+    carriers = [str(c).strip() for c in (cfg.get("replace_carriers") or []) if str(c).strip()]
+    if not carriers:
+        return {"ok": False, "message": "Check at least one carrier first."}
+    # Force the bulk path so the plan returns the full carrier-matched set.
+    # This flag is transient — it is never stored in the config, so the build
+    # still replaces exactly the table rows.
+    probe = _resolve_model_path({**cfg, "replace_all_carriers": True})
+    engine = _load_engine()
+    try:
+        plan = engine.replacement_plan_payload(probe) or []
+    except Exception as exc:  # noqa: BLE001 — surface the reason in the toast
+        return {"ok": False, "message": f"Could not compute the plan: {exc}"}
+    if not plan:
+        return {
+            "ok": False,
+            "message": (
+                f"No replaceable {', '.join(carriers)} plants (active in the target "
+                f"year and built on/after the replacement base year)."
+            ),
+        }
+    # Merge: keep existing plant selections; append matched plants not already
+    # listed. Rows are reduced to {generator} — MW cells are computed live.
+    rows: list[dict[str, Any]] = []
+    have: set[str] = set()
+    for r in cfg.get("generator_replacements") or []:
+        name = str((r or {}).get("generator", "")).strip() if isinstance(r, dict) else ""
+        if name and name not in have:
+            rows.append({"generator": name})
+            have.add(name)
+    added = 0
+    for r in plan:
+        name = str(r.get("generator", "")).strip()
+        if not name or name in have:
+            continue
+        rows.append({"generator": name})
+        have.add(name)
+        added += 1
+    if not added:
+        return {
+            "ok": True,
+            "message": f"All {len(plan)} matching plant(s) are already in the table.",
+            "config": {"generator_replacements": rows},
+        }
+    return {
+        "ok": True,
+        "message": (
+            f"Added {added} plant(s) to the table. Solar/Wind MW are computed "
+            f"live from the current settings."
+        ),
+        "config": {"generator_replacements": rows},
+    }
+
+
+def clearReallocation(config: dict[str, Any]) -> dict[str, Any]:  # noqa: N802 — manifest hook name
+    """'Clear table' action — empty the Generator-replacements table."""
+    n = len((config or {}).get("generator_replacements") or [])
+    return {
+        "ok": True,
+        "message": f"Cleared {n} row(s) from the table." if n else "The table is already empty.",
+        "config": {"generator_replacements": []},
+    }
+
+
 def options(name: str, config: dict[str, Any], ctx: Any) -> list[dict[str, Any]]:
     """On-demand dropdown rows for a backend-plugin select (see backend/app/plugins.py).
 

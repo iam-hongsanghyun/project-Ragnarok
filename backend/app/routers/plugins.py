@@ -73,6 +73,13 @@ class OptionsRequest(BaseModel):
     sessionId: str = "default"
 
 
+class ActionRequest(BaseModel):
+    """Body for ``POST /api/plugins/{id}/action`` (named in-form action hooks)."""
+
+    hook: str = ""
+    config: dict[str, Any] = {}
+
+
 @router.get("")
 def get_plugins(refresh: bool = False) -> dict[str, Any]:
     """List loaded backend plugins. ``refresh=true`` re-scans the plugins dir."""
@@ -296,3 +303,20 @@ def options_plugin(plugin_id: str, body: OptionsRequest) -> dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"name": body.name, "rows": rows}
+
+
+@router.post("/{plugin_id}/action")
+def action_plugin(plugin_id: str, body: ActionRequest) -> dict[str, Any]:
+    """Run a named action hook ``hook(config)`` → ``{ok, message, config?}``.
+
+    Backend counterpart of the frontend-plugin action contract: a manifest
+    ``action`` field whose hook is not transform/contribute invokes the
+    same-named ``plugin.py`` function. A returned ``config`` patch is written
+    back into the form by the frontend (e.g. a "Fill table" button).
+    """
+    try:
+        return plugins.run_action(plugin_id, body.hook, body.config)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Backend plugin {plugin_id!r} not found.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

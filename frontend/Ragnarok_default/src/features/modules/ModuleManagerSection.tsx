@@ -171,7 +171,7 @@ function ActionFieldRow({ fieldKey, field, label, onAction }: ActionFieldRowProp
         className={cls}
         onClick={handleClick}
         disabled={pending || !onAction}
-        title={!onAction ? 'Action handler not available in this context.' : undefined}
+        title={!onAction ? 'Action handler not available in this context.' : field.description}
       >
         {pending
           ? <><span className="sg-module-action-spinner" aria-hidden="true" />Working…</>
@@ -212,6 +212,9 @@ export function ConfigFieldRow({ fieldKey, field, value, onChange, carriers, mod
 
   const resolved = value !== undefined ? value : field.default;
   const label = field.label ?? fieldKey;
+  // The label column is a fixed-width ellipsis cut, and field descriptions have
+  // no inline rendering — the native tooltip is where the full text lives.
+  const labelTitle = field.description ? `${label}\n\n${field.description}` : label;
 
   if (field.type === 'group') {
     return (
@@ -235,7 +238,7 @@ export function ConfigFieldRow({ fieldKey, field, value, onChange, carriers, mod
   if (field.type === 'boolean') {
     return (
       <label className="sg-module-config-row">
-        <span className="sg-module-config-label">{label}</span>
+        <span className="sg-module-config-label" title={labelTitle}>{label}</span>
         <input
           type="checkbox"
           checked={Boolean(resolved)}
@@ -251,7 +254,7 @@ export function ConfigFieldRow({ fieldKey, field, value, onChange, carriers, mod
     const opts = selectOptions();
     return (
       <label className="sg-module-config-row">
-        <span className="sg-module-config-label">{label}</span>
+        <span className="sg-module-config-label" title={labelTitle}>{label}</span>
         <SearchableSelect
           className="sg-module-config-select"
           value={String(resolved ?? '')}
@@ -279,7 +282,7 @@ export function ConfigFieldRow({ fieldKey, field, value, onChange, carriers, mod
 
     return (
       <div className="sg-module-config-row sg-module-config-row--carrier">
-        <span className="sg-module-config-label">{label}</span>
+        <span className="sg-module-config-label" title={labelTitle}>{label}</span>
         {options.length > 0 ? (
           <div className="sg-carrier-select-list">
             {options.map((opt) => (
@@ -326,7 +329,7 @@ export function ConfigFieldRow({ fieldKey, field, value, onChange, carriers, mod
 
     return (
       <div className="sg-module-config-row sg-module-config-row--carrier">
-        <span className="sg-module-config-label">{label}</span>
+        <span className="sg-module-config-label" title={labelTitle}>{label}</span>
         {options.length > 0 ? (
           <div className="sg-carrier-select-list">
             {options.map((carrier) => (
@@ -358,7 +361,7 @@ export function ConfigFieldRow({ fieldKey, field, value, onChange, carriers, mod
     const num = Number(resolved ?? field.default ?? field.min);
     return (
       <div className="sg-module-config-row sg-module-config-row--slider">
-        <span className="sg-module-config-label">{label}</span>
+        <span className="sg-module-config-label" title={labelTitle}>{label}</span>
         <div className="sg-module-config-slider-row">
           <input
             type="range"
@@ -382,7 +385,7 @@ export function ConfigFieldRow({ fieldKey, field, value, onChange, carriers, mod
     const binary = field.binary === true;
     return (
       <div className="sg-module-config-row sg-module-config-row--file">
-        <span className="sg-module-config-label">{label}</span>
+        <span className="sg-module-config-label" title={labelTitle}>{label}</span>
         <div className="sg-module-file-row">
           <label className="tb-btn sg-module-file-btn">
             {fileVal ? 'Change' : 'Select file'}
@@ -423,7 +426,7 @@ export function ConfigFieldRow({ fieldKey, field, value, onChange, carriers, mod
       : (Array.isArray(field.default) ? (field.default as Array<Record<string, unknown>>) : []);
     return (
       <div className="sg-module-config-row sg-module-config-row--table">
-        <span className="sg-module-config-label">{label}</span>
+        <span className="sg-module-config-label" title={labelTitle}>{label}</span>
         <TableEditor
           columns={field.columns}
           rows={rows}
@@ -440,7 +443,7 @@ export function ConfigFieldRow({ fieldKey, field, value, onChange, carriers, mod
   if (field.type === 'number') {
     return (
       <label className="sg-module-config-row">
-        <span className="sg-module-config-label">{label}</span>
+        <span className="sg-module-config-label" title={labelTitle}>{label}</span>
         <NumberDraftInput
           className="sg-module-config-input"
           value={typeof resolved === 'number' ? resolved : Number(resolved ?? Number.NaN)}
@@ -455,7 +458,7 @@ export function ConfigFieldRow({ fieldKey, field, value, onChange, carriers, mod
   }
   return (
     <label className="sg-module-config-row">
-      <span className="sg-module-config-label">{label}</span>
+      <span className="sg-module-config-label" title={labelTitle}>{label}</span>
       <input
         type="text"
         className="sg-module-config-input"
