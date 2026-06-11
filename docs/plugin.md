@@ -1543,10 +1543,20 @@ Frontend and backend plugins share ONE contract:
 | `transform` | `transform(model, config) -> model` | replace the working model |
 | `contribute` | `contribute(model, config) -> {sheets, constraints}` | add sheets / DSL constraints |
 | `analyze` | `analyze(result, config) -> data` | read-only Output-tab data |
+| `options` | `options(name, config, ctx) -> [rows]` | on-demand dropdown values (backend; `ctx` gives read-only session access) |
+| *named action* | `<hook>(config) -> {ok, message, config?}` | a manifest `action` field whose hook is not transform/contribute — e.g. a "Fill table" button; a returned `config` patch is written back into the form |
 
 For a backend plugin these are Python functions in `plugin.py`; for a frontend
 plugin they are JS exports in `index.js` (section 7). `transform`/`contribute`
 write into the session.
+
+**Model handoff is one-way and return-value-only.** A backend plugin's
+`transform`/`contribute` receives a **defensive copy** of the session model
+(sheets and rows are copied before the call). Mutating the `model` argument in
+place is never persisted — only the dict returned by `transform` is saved, and
+only the fragment returned by `contribute` is merged. Plugin exceptions are
+contained: any error inside a hook surfaces as a clean HTTP `400`, never a
+crashed request, and one broken plugin never breaks discovery of the others.
 
 Use a **backend plugin** for heavy Python that belongs on the server (network
 build, PyPSA construction, large-file parsing). Use a **frontend plugin** for
@@ -1601,6 +1611,47 @@ def analyze(result: dict, config: dict) -> dict:
 A plugin may export any subset. Raising inside a hook is safe — the router
 surfaces the message as a clean `400`.
 
+**Vendoring a library: load it under a plugin-unique alias.** `plugin.py`
+itself is imported by the host under a synthetic per-id module name, so two
+installed plugins never collide on `plugin.py`. A plugin that ships its own
+package (a vendored build engine, a `*_lib/` directory) must extend the same
+discipline: **never put your plugin directory on `sys.path` and never register
+your package in `sys.modules` under its bare name.** Plugins get copy-pasted
+from each other — if two installed plugins both ship a package called
+`my_lib` and either imports it by that bare name, whichever imports first wins
+and the other plugin silently runs foreign code. Load the package under an
+alias derived from your install directory instead:
+
+```python
+import importlib, importlib.util, re, sys, threading
+from pathlib import Path
+
+PLUGIN_ROOT = Path(__file__).resolve().parent
+_LIB_ALIAS = "_ragnarok_plugin_lib_" + re.sub(r"\W", "_", PLUGIN_ROOT.name)
+_IMPORT_LOCK = threading.Lock()  # hooks run in a threadpool
+
+def _lib(submodule: str):
+    """Import a bundled my_lib submodule under a plugin-unique alias."""
+    with _IMPORT_LOCK:
+        if _LIB_ALIAS not in sys.modules:
+            init = PLUGIN_ROOT / "my_lib" / "__init__.py"
+            spec = importlib.util.spec_from_file_location(
+                _LIB_ALIAS, init, submodule_search_locations=[str(init.parent)]
+            )
+            pkg = importlib.util.module_from_spec(spec)
+            sys.modules[_LIB_ALIAS] = pkg  # register BEFORE exec: relative imports
+            try:
+                spec.loader.exec_module(pkg)
+            except BaseException:
+                sys.modules.pop(_LIB_ALIAS, None)
+                raise
+        return importlib.import_module(f"{_LIB_ALIAS}.{submodule}")
+```
+
+Inside the vendored package use **relative imports** (`from . import x`) —
+they resolve within the alias. The dashboard-importer's `pipeline.py` is the
+reference implementation of this pattern (its `_lib()` loader).
+
 ### 16.4 The `manifest.json`
 
 Same `config` schema as a frontend manifest (section 5), so the Plugins tab
@@ -1630,13 +1681,25 @@ renders the identical form. An `action` field with `"hook": "transform"` (or
 | `GET` | `/api/plugins` | list installed backend plugins (manifests) |
 | `GET` | `/api/plugins/{id}` | one manifest |
 | `POST` | `/api/plugins/install` | install from an uploaded `.zip` (multipart) → manifest |
-| `DELETE` | `/api/plugins/{id}` | uninstall (remove the dir) → `{removed}` |
+| `DELETE` | `/api/plugins/{id}` | uninstall (remove the dir + its uploaded data files) → `{removed}` |
 | `POST` | `/api/plugins/{id}/transform` | run `transform(model, config)` → save into session → meta |
 | `POST` | `/api/plugins/{id}/contribute` | run `contribute(model, config)` → merge into session → meta |
 | `POST` | `/api/plugins/{id}/analyze` | run `analyze(result, config)` → its dict |
+| `POST` | `/api/plugins/{id}/options` | run `options(name, config, ctx)` → `{name, rows}` (on-demand dropdowns) |
+| `POST` | `/api/plugins/{id}/action` | run a named action hook `hook(config)` → `{ok, message, config?}` |
+| `POST` | `/api/plugins/{id}/files` | upload a data file into the plugin's server-side scratch dir (multipart) |
+| `GET` | `/api/plugins/{id}/files` | list the plugin's uploaded data files |
+| `DELETE` | `/api/plugins/{id}/files/{name}` | delete one uploaded data file |
 
 `transform`/`contribute` body: `{config, sessionId, filename?, scenarioName?}`.
 The model is persisted server-side; the response is the lightweight session meta.
+
+**Per-plugin data files.** A plugin's heavy input (e.g. a model workbook) is
+uploaded once into a server-side scratch dir (`backend/data/plugin_files/<id>/`,
+gitignored) and thereafter referenced by *filename* in the config — the bytes
+never live in the browser. The framework injects the reserved config key
+`__plugin_data_dir__` into every hook call so the plugin can resolve those
+filenames to absolute server paths. The scratch dir is removed on uninstall.
 
 ### 16.6 The frontend side
 

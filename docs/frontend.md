@@ -39,9 +39,10 @@ an architecture overview (see `docs/architecture/`).
    - 5.1 [Build Authoring](#51-build-authoring)
    - 5.2 [Analytics Dashboard and Cards](#52-analytics-dashboard-and-cards)
    - 5.3 [Run Dialog and Run History](#53-run-dialog-and-run-history)
-   - 5.4 [Plugin Host: frontendPlugins and pluginRuntime](#54-plugin-host-frontendplugins-and-pluginruntime)
+   - 5.4 [Plugin Host: frontendPlugins and the runtime](#54-plugin-host-frontendplugins-and-the-runtime)
    - 5.5 [PluginDetail](#55-plugindetail)
    - 5.6 [PluginPanel](#56-pluginpanel)
+   - 5.6b [BackendPluginDetail](#56b-backendplugindetail)
    - 5.7 [Input Tables](#57-input-tables)
    - 5.8 [Map Components](#58-map-components)
    - 5.9 [Validation](#59-validation)
@@ -90,7 +91,7 @@ frontend/Ragnarok_default/src/
     analytics/               AnalyticsPane, ComparisonPane, useMetricOptions.
     run/                     RunDialog.
     run-history/             RunHistoryList, RunHistoryCard, RunComparisonTable.
-    plugins/                 frontendPlugins.ts, pluginRuntime.ts, PluginDetail, PluginPanel.
+    plugins/                 frontendPlugins.ts, PluginDetail, PluginPanel, BackendPluginDetail.
     input/                   TablesPane, DataGrid, grid/range.ts, tsv.ts.
     map/                     MapPane, BuildNetworkMap, FitToBounds, MapLegend.
     validation/              ValidationPane, useModelIssues.
@@ -790,9 +791,9 @@ Returns `null` when fewer than two entries exist. Entries are sorted
 newest-first. Each non-active column shows a percentage-delta badge relative
 to the active run for every numeric KPI row.
 
-### 5.4 Plugin Host: frontendPlugins and pluginRuntime
+### 5.4 Plugin Host: frontendPlugins and the runtime
 
-**Files:** `features/plugins/frontendPlugins.ts`, `features/plugins/pluginRuntime.ts`
+**Files:** `features/plugins/frontendPlugins.ts`, `lib/plugins/runtime.ts`
 
 #### `useFrontendPlugins() -> FrontendPluginHost`
 
@@ -832,7 +833,7 @@ immediately.
 | `manifest` | `Record<string, unknown>` | Full parsed `module.json` |
 | `files` | `Record<string, string>` | Text files from the package keyed by relative path |
 
-#### `pluginRuntime.ts`
+#### `lib/plugins/runtime.ts`
 
 Provides the in-browser CommonJS evaluator for plugin entry files.
 
@@ -929,6 +930,32 @@ Renders one plugin config field row. Supports types: `text`, `number`,
 `boolean` toggle, `select`, `file` picker, `action` button. Exported from
 `features/modules/ModuleManagerSection.tsx` for reuse in both `PluginPanel`
 and `PluginDetail`.
+
+### 5.6b BackendPluginDetail
+
+**Files:** `features/plugins/BackendPluginDetail.tsx`, `lib/api/plugins.ts`
+
+Detail pane for one **backend** (server-side) plugin — the counterpart of
+`PluginDetail` for plugins installed into the Ragnarok backend (see
+[docs/plugin.md §16](plugin.md#16-backend-server-side-plugins)). It renders the
+same `PluginPanel` config GUI from the manifest's `config` schema, but every
+hook runs on the server via `lib/api/plugins.ts`:
+
+- A `transform`/`contribute` action POSTs to `/api/plugins/{id}/{hook}`; the
+  backend writes the result into the session and the parent rehydrates the
+  editor from there — the model never enters the browser.
+- Any other `action` hook POSTs to `/api/plugins/{id}/action`; a returned
+  `config` patch is written back into the form (e.g. a "Fill table" button).
+- `select` fields whose option source is plugin-served POST to
+  `/api/plugins/{id}/options` on open / dependency change.
+- A manifest `file` field is rendered as a **server-side file picker**, not a
+  base64 input: the file uploads once to `/api/plugins/{id}/files` and the
+  config holds only the chosen filename.
+- `analyze` output renders in the Output tab exactly like a frontend plugin's.
+
+The single "Install plugin…" button auto-detects the package kind
+(`peekPackageKind` in `frontendPlugins.ts`): `manifest.json` + `plugin.py` →
+backend upload; `module.json` + JS entry → frontend localStorage install.
 
 ### 5.7 Input Tables
 

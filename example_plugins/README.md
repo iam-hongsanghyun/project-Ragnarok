@@ -13,17 +13,31 @@ using the prebuilt archives in [`zips/`](./zips):
 
 ## The plugin contract (both kinds)
 
-A plugin exposes any of three hooks:
+A plugin exposes any of these hooks:
 
 - `transform(model, config) -> model` — replace the working model.
 - `contribute(model, config) -> {sheets, constraints}` — add sheets / constraints.
 - `analyze(result, config) -> data` — read-only output for the Output tab.
+- `options(name, config, ctx) -> [rows]` — on-demand dropdown values (backend).
+- `<action>(config) -> {ok, message, config?}` — named form-action hooks
+  (e.g. a "Fill table" button); a returned `config` patch updates the form.
 
 **Frontend plugin** = a `.zip` of `module.json` + `index.js` (browser-evaluated JS;
 may call its own local server). **Backend plugin** = a `.zip` of `manifest.json` +
 `plugin.py` (runs in the Ragnarok backend; imports the bundled PyPSA source; no
 separate server, nothing in `plugins.env`). Installed backend plugins live under
 `backend/data/plugins/` (gitignored).
+
+Two backend-plugin rules worth knowing before copying an example:
+
+- **Return-value only.** `transform`/`contribute` get a defensive *copy* of the
+  session model — mutating the argument in place never persists anything; only
+  the returned dict/fragment is saved.
+- **No bare vendored imports.** A plugin that ships its own package (like the
+  importer's `dashboard_lib/`) must load it under a plugin-unique module alias —
+  never via `sys.path` + a bare `import` — so two installed plugins can't swap
+  each other's same-named libraries. See `dashboard-importer/pipeline.py`'s
+  `_lib()` loader and `docs/plugin.md` §16.3.
 
 See `docs/plugin.md` for the full authoring guide.
 

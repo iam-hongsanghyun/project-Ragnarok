@@ -11,7 +11,7 @@ The manual is five documents:
 | 2 | [architecture.md](./architecture.md) | How the system is built: tech stack, repo layout, topology, data flow, process logic, design |
 | 3 | [backend.md](./backend.md) | Backend details: HTTP API, solve pipeline, network build, results, modes, constraints, utils |
 | 4 | [frontend.md](./frontend.md) | Frontend details: App state, views, features, the plugin host, shared utils and types |
-| 5 | [plugin.md](./plugin.md) | Building a plugin: manifest, GUI schema, JS hooks, own local server, constraint flow, examples |
+| 5 | [plugin.md](./plugin.md) | Building a plugin (frontend JS or backend Python): manifest, GUI schema, hooks, own local server, constraint flow, examples |
 
 Supporting material:
 
