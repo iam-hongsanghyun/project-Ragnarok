@@ -28,6 +28,7 @@ import pypsa
 from ..carbon_price import apply_carbon_price, parse_carbon_price_config
 from ...app.config import load_system_defaults
 from ..pathway import parse_pathway_config
+from ..sampling import parse_sampling_config, sample_block_indices
 from ..stochastic import apply_scenarios, parse_stochastic_config
 from ..pypsa_schema import (
     input_static_attributes,
@@ -142,6 +143,7 @@ def build_network(
     notes: list[str] = []
     options = options or {}
     pathway = parse_pathway_config(options.get("pathwayConfig"))
+    sampling = parse_sampling_config(options.get("samplingConfig"))
 
     if "discountRate" not in scenario:
         from fastapi import HTTPException
@@ -259,18 +261,43 @@ def build_network(
             start = 0
         else:
             stop = min(len(full), start + count)
-            windowed = full[start:stop]
-            if step > 1:
-                windowed = windowed[::step]
+            if sampling.enabled:
+                idx, sampled_blocks = sample_block_indices(start, stop, sampling, step)
+                windowed = full[idx]
+            else:
+                windowed = full[start:stop]
+                if step > 1:
+                    windowed = windowed[::step]
         if len(windowed) == 0:
             windowed = full[:1]
         network.set_snapshots(windowed)
-        for col in ("objective", "stores", "generators"):
-            network.snapshot_weightings[col] = float(step)
-        notes.append(
-            f"Modelled {len(windowed)} snapshots at {step}h resolution "
-            f"(rows {start} → {stop} of {len(full)})."
-        )
+        # Weighting. Contiguous runs: every column = stride hours (unchanged).
+        # Sampled runs: objective/generators carry W/M so totals, costs and
+        # constraint budgets integrate to the FULL window the sample
+        # represents; stores keeps the physical stride so the storage SOC
+        # recursion stays an hours-true integration inside each block.
+        #   w = W / M   (window rows / modelled snapshots; == step when not sampling)
+        sampling_active = sampling.enabled and not pathway.enabled
+        if sampling_active:
+            represented = float(stop - start)
+        else:
+            represented = float(len(windowed) * step)
+        weight = represented / max(1, len(windowed))
+        for col in ("objective", "generators"):
+            network.snapshot_weightings[col] = weight
+        network.snapshot_weightings["stores"] = float(step)
+        if sampling_active:
+            notes.append(
+                f"Sampled {sampled_blocks} block(s) of up to {sampling.block_size} rows: "
+                f"{len(windowed)} snapshots modelled of {stop - start} window rows "
+                f"(weight ×{weight:.2f}, {step}h resolution in-block). "
+                "Totals are scaled to represent the full window."
+            )
+        else:
+            notes.append(
+                f"Modelled {len(windowed)} snapshots at {step}h resolution "
+                f"(rows {start} → {stop} of {len(full)})."
+            )
         _normalize_dynamic_snapshot_index_names(network)
 
     # ── Period-factor scaling of annual energy caps ───────────────────────────
@@ -280,7 +307,10 @@ def build_network(
         period_sizes = network.snapshot_weightings["objective"].groupby(level="period").sum()
         period_factor = min(float(period_sizes.min()) / hours_in_year, 1.0) if len(period_sizes) > 0 else 1.0
     else:
-        modelled_hours = float(len(network.snapshots)) * float(step)
+        # Sum of objective weights == len * step for contiguous runs (identical
+        # to the old len*step form) and == represented window rows for sampled
+        # runs, so annual e_sum caps scale by what the run REPRESENTS.
+        modelled_hours = float(network.snapshot_weightings["objective"].sum())
         period_factor = min(1.0, modelled_hours / hours_in_year) if modelled_hours > 0 else 1.0
     if period_factor < 1.0:
         for frame in (network.generators, network.storage_units, network.stores):

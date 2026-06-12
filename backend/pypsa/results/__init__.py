@@ -14,6 +14,7 @@ from ..constants import carrier_color
 from ..network import build_network
 from ..pathway import parse_pathway_config
 from ..rolling import parse_rolling_config
+from ..sampling import parse_sampling_config, sample_block_indices
 from ..stochastic import (
     collapse_to_representative_scenario,
     parse_stochastic_config,
@@ -157,12 +158,23 @@ def run_pypsa(
     pathway = parse_pathway_config(options.get("pathwayConfig"))
     rolling = parse_rolling_config(options.get("rollingConfig"))
     stochastic = parse_stochastic_config(options.get("stochasticConfig"))
+    sampling = parse_sampling_config(options.get("samplingConfig"))
     sclopf_cfg = options.get("securityConstrainedConfig") or {}
     sclopf_enabled = bool(sclopf_cfg.get("enabled", False))
     if stochastic.enabled and rolling.enabled:
         raise HTTPException(
             status_code=400,
             detail="Stochastic mode and rolling horizon cannot be combined.",
+        )
+    if sampling.enabled and pathway.enabled:
+        raise HTTPException(
+            status_code=400,
+            detail="Sampled snapshot blocks cannot be combined with multi-investment pathway mode.",
+        )
+    if sampling.enabled and rolling.enabled:
+        raise HTTPException(
+            status_code=400,
+            detail="Sampled snapshot blocks cannot be combined with rolling horizon.",
         )
     if sclopf_enabled and (rolling.enabled or stochastic.enabled):
         raise HTTPException(
@@ -607,12 +619,34 @@ def run_pypsa(
             f"MIP unit commitment enabled for {len(committable_gens)} generator(s): {', '.join(committable_gens[:5])}"
             + (" …" if len(committable_gens) > 5 else "") + "."
         )
+        if sampling.enabled:
+            notes.append(
+                "Unit commitment with sampled blocks: start-up and min up/down behaviour "
+                "at block boundaries is approximate (blocks are stitched as if consecutive)."
+            )
 
     notes.extend([
         f"Backend PyPSA run solved {len(network.snapshots)} hourly snapshots with {len(network.generators)} generators and {len(network.loads)} loads.",
         f"Average price settled at {average_price:.1f} {currency}/MWh and peaked at {float(price_series.max()):.1f} {currency}/MWh.",
         f"Load shedding totalled {float(weighted_sum(load_shed, generator_weights)):.2f} MWh across the day.",
     ])
+
+    # Sampled-blocks test run meta: snapshot_weight = W/M carries the
+    # full-window scaling, so W (represented window rows) is recoverable.
+    sampling_meta = None
+    if sampling.enabled:
+        represented_rows = int(round(snapshot_count * snapshot_weight))
+        store_w = float(store_weights.iloc[0]) if len(store_weights) else 1.0
+        sampling_meta = {
+            "enabled": True,
+            "mode": sampling.mode,
+            "blockSize": sampling.block_size,
+            "blockCount": sample_block_indices(0, represented_rows, sampling)[1],
+            "gapSnapshots": sampling.gap_snapshots,
+            "sampledSnapshots": snapshot_count,
+            "representedSnapshots": represented_rows,
+            "scale": snapshot_weight / store_w if store_w > 0 else snapshot_weight,
+        }
 
     return {
         "summary": summary,
@@ -649,6 +683,7 @@ def run_pypsa(
                 "stepSnapshots": rolling.step_snapshots,
                 "windowCount": len(rolling_windows),
             } if rolling.enabled else None,
+            "sampling": sampling_meta,
         },
         "pathway": {
             "enabled": pathway.enabled,

@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { ChartMode, TimeSeriesRow, TimeSeriesSeries } from 'lib/types';
 import { numberValue, isoDate, isoTime } from 'lib/utils/helpers';
+import { effectiveSpanMs } from 'lib/results/analytics';
 import { buildTimeSeriesOption } from 'lib/charts/options';
 import { readChartTheme } from 'lib/charts/theme';
 import { useEChart } from '../../../shared/echarts/useEChart';
@@ -56,11 +57,7 @@ export function InteractiveTimeSeriesCard({
 
   const option = useMemo(() => {
     if (!data.length || !visibleSeries.length) return null;
-    const firstTs = data[0]?.timestamp;
-    const lastTs  = data[data.length - 1]?.timestamp;
-    const spanMs  = firstTs && lastTs
-      ? new Date(lastTs).getTime() - new Date(firstTs).getTime()
-      : 0;
+    const spanMs = effectiveSpanMs(data);
     const xLabels = data.map((row) => (row.timestamp ? formatXLabel(row.timestamp, spanMs) : row.label));
     return buildTimeSeriesOption({
       xLabels,

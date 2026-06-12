@@ -102,6 +102,27 @@ export function getTimeBucket(timestamp: string | undefined, timeframe: Timefram
   return `${start.getFullYear()}-W${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
 }
 
+/** Effective time span for choosing x-label granularity.
+ *
+ * `last − first` over-counts for sampled-blocks runs: 4 blocks of 168 hourly
+ * rows span a whole year on the calendar but hold only 672 dense points, so
+ * span-based labels would jump to month level. Using the MEDIAN consecutive
+ * delta × row count is immune to the few huge block-gap deltas, while for
+ * contiguous data median × n ≈ true span, preserving existing behaviour. */
+export function effectiveSpanMs(rows: Array<{ timestamp?: string }>): number {
+  const times = rows
+    .map((r) => (r.timestamp ? new Date(r.timestamp).getTime() : NaN))
+    .filter((t) => Number.isFinite(t));
+  if (times.length < 2) return 0;
+  const rawSpan = times[times.length - 1] - times[0];
+  if (times.length < 3) return rawSpan;
+  const deltas = [];
+  for (let i = 1; i < times.length; i++) deltas.push(times[i] - times[i - 1]);
+  deltas.sort((a, b) => a - b);
+  const median = deltas[Math.floor(deltas.length / 2)];
+  return median > 0 ? median * times.length : rawSpan;
+}
+
 export function aggregateMetricRows(metric: MetricOption, startIndex: number, endIndex: number, timeframe: TimeframeOption, snapshotWeight = 1) {
   const rows = metric.rows.slice(startIndex, endIndex + 1);
   if (!rows.length) return [];

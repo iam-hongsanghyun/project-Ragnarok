@@ -91,7 +91,7 @@ export function KpiStripCard({ results, model, currencySymbol = '$' }: Props) {
       <KpiCard label="Load factor"  value={loadFactor !== undefined ? `${(loadFactor * 100).toFixed(1)}%` : '—'} unit="" />
       <KpiCard label="Renewables"   value={`${renewableShare.toFixed(1)}%`} unit="" green={renewableShare >= 50} />
       <KpiCard label="Emissions"    value={emissionsDisplay} unit="" />
-      <KpiCard label="Snapshots"    value={String(snapshotCount)} unit={`× ${results.runMeta.snapshotWeight}h`} />
+      <KpiCard label="Snapshots"    value={String(snapshotCount)} unit={`× ${Number(results.runMeta.snapshotWeight.toFixed(2))}h`} />
     </div>
   );
 }

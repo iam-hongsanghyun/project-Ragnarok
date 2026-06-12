@@ -92,7 +92,13 @@ export function AnalyticsView(props: AnalyticsViewProps) {
           <div className="inline-stats">
             <span>{filename}</span>
             <span>{displayResults.runMeta.snapshotCount} snapshots</span>
-            <span>{displayResults.runMeta.snapshotWeight}h weight</span>
+            <span>{Number(displayResults.runMeta.snapshotWeight.toFixed(2))}h weight</span>
+            {displayResults.runMeta.sampling?.enabled && (
+              <span>
+                {displayResults.runMeta.sampling.blockCount}×{displayResults.runMeta.sampling.blockSize} sampled
+                {' '}of {displayResults.runMeta.sampling.representedSnapshots}
+              </span>
+            )}
           </div>
         )}
       </ViewPaneHeader>

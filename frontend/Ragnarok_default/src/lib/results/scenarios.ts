@@ -5,6 +5,7 @@ import {
   PathwayConfig,
   Primitive,
   RollingHorizonConfig,
+  SamplingConfig,
   ScenarioCatalog,
   ScenarioPreset,
   SecurityConstrainedConfig,
@@ -13,6 +14,7 @@ import {
 } from '../types';
 import { defaultPathwayConfig } from 'lib/results/pathway';
 import { defaultRollingConfig, normalizeRollingConfig } from 'lib/results/rolling';
+import { cloneSamplingConfig, defaultSamplingConfig } from 'lib/results/sampling';
 
 export const SCENARIO_SHEET = 'RAGNAROK_Scenarios';
 
@@ -104,6 +106,7 @@ export function buildScenarioPreset(input: {
   // were captured default to disabled.
   stochasticConfig?: StochasticConfig;
   securityConstrainedConfig?: SecurityConstrainedConfig;
+  samplingConfig?: SamplingConfig;
   constraints: CustomConstraint[];
 }): ScenarioPreset {
   return {
@@ -123,6 +126,7 @@ export function buildScenarioPreset(input: {
     rollingConfig: cloneRollingConfig(input.rollingConfig),
     stochasticConfig: cloneStochasticConfig(input.stochasticConfig ?? defaultStochasticConfig()),
     securityConstrainedConfig: cloneSclopfConfig(input.securityConstrainedConfig ?? defaultSclopfConfig()),
+    samplingConfig: cloneSamplingConfig(input.samplingConfig ?? defaultSamplingConfig()),
     constraints: cloneConstraints(input.constraints),
   };
 }
@@ -157,6 +161,7 @@ function normalizeScenarioCatalog(catalog: ScenarioCatalog): ScenarioCatalog {
       rollingConfig: cloneRollingConfig(scenario.rollingConfig ?? defaultRollingConfig()),
       stochasticConfig: cloneStochasticConfig(scenario.stochasticConfig ?? defaultStochasticConfig()),
       securityConstrainedConfig: cloneSclopfConfig(scenario.securityConstrainedConfig ?? defaultSclopfConfig()),
+      samplingConfig: cloneSamplingConfig(scenario.samplingConfig ?? defaultSamplingConfig()),
       constraints: cloneConstraints(scenario.constraints ?? []),
     })),
   };
@@ -188,6 +193,7 @@ export function readScenarioCatalogFromModel(model: WorkbookModel): ScenarioCata
         rollingConfig: payload.rollingConfig ?? defaultRollingConfig(),
         stochasticConfig: payload.stochasticConfig ?? defaultStochasticConfig(),
         securityConstrainedConfig: payload.securityConstrainedConfig ?? defaultSclopfConfig(),
+        samplingConfig: payload.samplingConfig ?? defaultSamplingConfig(),
         constraints: Array.isArray(payload.constraints) ? payload.constraints : [],
       });
     } catch {
@@ -228,6 +234,7 @@ export function writeScenarioCatalogToModel(
       rollingConfig: scenario.rollingConfig,
       stochasticConfig: scenario.stochasticConfig,
       securityConstrainedConfig: scenario.securityConstrainedConfig,
+      samplingConfig: scenario.samplingConfig,
       constraints: scenario.constraints,
     }),
   }));

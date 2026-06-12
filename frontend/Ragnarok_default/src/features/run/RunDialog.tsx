@@ -7,7 +7,8 @@
  * Editable scenario, pathway, and rolling-horizon controls live in the sidebar.
  */
 import React from 'react';
-import { PathwayConfig, RollingHorizonConfig } from 'lib/types';
+import { PathwayConfig, RollingHorizonConfig, SamplingConfig } from 'lib/types';
+import { computeSamplingPreview } from 'lib/results/sampling';
 
 export interface RunDialogProps {
   open: boolean;
@@ -22,6 +23,7 @@ export interface RunDialogProps {
   snapshotWeight: number;
   pathwayConfig: PathwayConfig;
   rollingConfig: RollingHorizonConfig;
+  samplingConfig: SamplingConfig;
 
   onForceLpChange: (v: boolean) => void;
   onDryRunChange: (v: boolean) => void;
@@ -44,6 +46,7 @@ export function RunDialog({
   snapshotWeight,
   pathwayConfig,
   rollingConfig,
+  samplingConfig,
   onForceLpChange,
   onDryRunChange,
   onRun,
@@ -53,6 +56,10 @@ export function RunDialog({
 
   const pathwayEnabled = pathwayConfig.enabled;
   const rollingEnabled = rollingConfig.enabled;
+  const samplingEnabled = samplingConfig.enabled && !pathwayEnabled && !rollingEnabled;
+  const samplingPreview = samplingEnabled
+    ? computeSamplingPreview(Math.max(0, snapshotEnd - snapshotStart), snapshotWeight, samplingConfig)
+    : null;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -73,6 +80,12 @@ export function RunDialog({
               <span>{rollingEnabled ? `Rolling ${rollingConfig.horizonSnapshots}/${rollingConfig.overlapSnapshots}` : 'Full-horizon solve'}</span>
               <span>{pathwayEnabled ? 'Window comes from sidebar pathway settings' : `Window ${snapshotStart} → ${snapshotEnd}`}</span>
               <span>{snapshotWeight}h resolution</span>
+              {samplingPreview && (
+                <span>
+                  Sampled test run: {samplingPreview.blockCount}×{samplingConfig.blockSize} blocks,
+                  {' '}{samplingPreview.sampledSnapshots} snapshots solved (weight ×{samplingPreview.scale.toFixed(2)})
+                </span>
+              )}
               <span>{activeConstraintCount} active constraints</span>
             </div>
           </div>

@@ -12,6 +12,7 @@ import {
   GridRow,
   PathwayConfig,
   RollingHorizonConfig,
+  SamplingConfig,
   StochasticConfig,
   SecurityConstrainedConfig,
   CarbonPriceScheduleEntry,
@@ -43,6 +44,7 @@ import { withDerivedAssetDetails } from 'lib/results/assetDetails';
 import { deriveRunResults } from 'lib/results/runResults';
 import { defaultPathwayConfig, getDefaultSelectedPeriod, readPathwayConfigFromModel, samePathwayConfig, writePathwayConfigToModel } from 'lib/results/pathway';
 import { defaultRollingConfig, normalizeRollingConfig, readRollingConfigFromModel, sameRollingConfig, writeRollingConfigToModel } from 'lib/results/rolling';
+import { defaultSamplingConfig, normalizeSamplingConfig, readSamplingConfigFromModel, sameSamplingConfig, writeSamplingConfigToModel } from 'lib/results/sampling';
 import { readCustomDslFromModel, writeCustomDslToModel } from 'lib/constraints/custom';
 import { dslToSpecs, parseConstraintDsl } from 'lib/constraints/dsl';
 import { buildScenarioPreset, defaultScenarioCatalog, readScenarioCatalogFromModel, sameScenarioCatalog, writeScenarioCatalogToModel } from 'lib/results/scenarios';
@@ -202,6 +204,7 @@ function AppInner() {
   const [activeRunName, setActiveRunName] = useState<string | null>(null);
   const [pathwayConfig, setPathwayConfig] = useState<PathwayConfig>(() => defaultPathwayConfig());
   const [rollingConfig, setRollingConfig] = useState<RollingHorizonConfig>(() => defaultRollingConfig());
+  const [samplingConfig, setSamplingConfig] = useState<SamplingConfig>(() => defaultSamplingConfig());
   const [customDsl, setCustomDsl] = useState<string>('');
   const [stochasticConfig, setStochasticConfig] = useState<StochasticConfig>({ enabled: false, scenarios: [] });
   const [sclopfConfig, setSclopfConfig] = useState<SecurityConstrainedConfig>({ enabled: false });
@@ -238,6 +241,7 @@ function AppInner() {
     loadSheddingCost: settings.loadSheddingCost,
     pathwayConfig: defaultPathwayConfig(),
     rollingConfig: defaultRollingConfig(),
+    samplingConfig: defaultSamplingConfig(),
     stochasticConfig: { enabled: false, scenarios: [] },
     securityConstrainedConfig: { enabled: false },
     constraints: DEFAULT_CONSTRAINTS,
@@ -323,6 +327,7 @@ function AppInner() {
         selectedPeriod: getDefaultSelectedPeriod(pathwayConfig),
       },
       rollingConfig: normalizeRollingConfig(rollingConfig),
+      samplingConfig: normalizeSamplingConfig(samplingConfig),
       stochasticConfig,
       securityConstrainedConfig: sclopfConfig,
       constraints,
@@ -339,6 +344,7 @@ function AppInner() {
     forceLp,
     pathwayConfig,
     rollingConfig,
+    samplingConfig,
     stochasticConfig,
     sclopfConfig,
     constraints,
@@ -399,6 +405,7 @@ function AppInner() {
     const snapshotMax = snapshotMaxFromWorkbook(nextModel.snapshots);
     const nextPathway = readPathwayConfigFromModel(nextModel);
     const nextRolling = readRollingConfigFromModel(nextModel);
+    const nextSampling = readSamplingConfigFromModel(nextModel);
     setCustomDsl(readCustomDslFromModel(nextModel));
     setCarbonLibrary(readCarbonLibraryFromModel(nextModel));
     setMaxSnapshots(snapshotMax);
@@ -424,6 +431,7 @@ function AppInner() {
       selectedPeriod: getDefaultSelectedPeriod(nextPathway),
     };
     const fallbackRolling = normalizeRollingConfig(nextRolling);
+    const fallbackSampling = normalizeSamplingConfig(nextSampling);
     const fallbackScenarioCatalog = defaultScenarioCatalog({
       snapshotStart: RUN_WINDOW.initialSnapshotStart,
       snapshotEnd: snapshotMax,
@@ -436,6 +444,7 @@ function AppInner() {
       loadSheddingCost: settings.loadSheddingCost,
       pathwayConfig: fallbackPathway,
       rollingConfig: fallbackRolling,
+      samplingConfig: fallbackSampling,
       stochasticConfig,
       securityConstrainedConfig: sclopfConfig,
       constraints,
@@ -464,9 +473,11 @@ function AppInner() {
         selectedPeriod: getDefaultSelectedPeriod(activeScenarioToApply.pathwayConfig),
       });
       setRollingConfig(normalizeRollingConfig(activeScenarioToApply.rollingConfig));
+      setSamplingConfig(normalizeSamplingConfig(activeScenarioToApply.samplingConfig ?? fallbackSampling));
     } else {
       setPathwayConfig(fallbackPathway);
       setRollingConfig(fallbackRolling);
+      setSamplingConfig(fallbackSampling);
     }
     setScenarioCatalog(catalogToApply);
     setFilename(builtFilename);
@@ -558,6 +569,15 @@ function AppInner() {
 
   useEffect(() => {
     setModel((current) => {
+      const next = writeSamplingConfigToModel(current, samplingConfig);
+      if (sameSamplingConfig(readSamplingConfigFromModel(current), samplingConfig)) return current;
+      requestStaticResync();
+      return next;
+    });
+  }, [samplingConfig, requestStaticResync]);
+
+  useEffect(() => {
+    setModel((current) => {
       if (readCustomDslFromModel(current) === customDsl) return current;
       requestStaticResync();
       return writeCustomDslToModel(current, customDsl);
@@ -615,6 +635,7 @@ function AppInner() {
             // Re-apply the last live rolling/pathway AFTER resetForNewModel, so a
             // restored scenario's defaults can't quietly flip them back.
             if (controls.rollingConfig) setRollingConfig(normalizeRollingConfig(controls.rollingConfig));
+            if (controls.samplingConfig) setSamplingConfig(normalizeSamplingConfig(controls.samplingConfig));
             if (controls.pathwayConfig) setPathwayConfig(controls.pathwayConfig);
           }
           setStatus('Restored your last session.');
@@ -643,12 +664,12 @@ function AppInner() {
       void saveSessionControls({
         filename, carbonPrice, carbonPriceSchedule,
         snapshotStart, snapshotEnd, snapshotWeight, forceLp,
-        constraints, rollingConfig, pathwayConfig,
+        constraints, rollingConfig, samplingConfig, pathwayConfig,
         savedAt: Date.now(),
       });
     }, 400);
     return () => window.clearTimeout(id);
-  }, [filename, carbonPrice, carbonPriceSchedule, snapshotStart, snapshotEnd, snapshotWeight, forceLp, constraints, rollingConfig, pathwayConfig]);
+  }, [filename, carbonPrice, carbonPriceSchedule, snapshotStart, snapshotEnd, snapshotWeight, forceLp, constraints, rollingConfig, samplingConfig, pathwayConfig]);
 
   // Structural static-model changes (column ops, clear, reorder, undo/redo)
   // have no row-op equivalent — they request ONE static-merge resync here.
@@ -732,6 +753,7 @@ function AppInner() {
     setRollingConfig(normalizeRollingConfig(scenario.rollingConfig));
     // Presets saved before these modes were captured normalize to disabled —
     // applying a preset restores the FULL run configuration either way.
+    setSamplingConfig(normalizeSamplingConfig(scenario.samplingConfig ?? defaultSamplingConfig()));
     setStochasticConfig(scenario.stochasticConfig ?? { enabled: false, scenarios: [] });
     setSclopfConfig(scenario.securityConstrainedConfig ?? { enabled: false });
     setStatus(`Applied scenario: ${scenario.label}`);
@@ -1749,6 +1771,7 @@ function AppInner() {
         selectedPeriod: getDefaultSelectedPeriod(pathwayConfig),
       },
       rollingConfig: normalizeRollingConfig(rollingConfig),
+      samplingConfig: normalizeSamplingConfig(samplingConfig),
       stochasticConfig,
       securityConstrainedConfig: sclopfConfig,
       carbonPriceSchedule,
@@ -1993,7 +2016,7 @@ function AppInner() {
         <div className="topbar-right">
           <span className="topbar-file" title={filename}>{filename}</span>
           {displayResults && (
-            <span className="topbar-run-meta">{displayResults.runMeta.snapshotCount} snaps · {displayResults.runMeta.snapshotWeight}h</span>
+            <span className="topbar-run-meta">{displayResults.runMeta.snapshotCount} snaps · {Number(displayResults.runMeta.snapshotWeight.toFixed(2))}h</span>
           )}
           <span className="topbar-status" title={status}>{status}</span>
         </div>
@@ -2026,6 +2049,8 @@ function AppInner() {
               onPathwayConfigChange={setPathwayConfig}
               rollingConfig={rollingConfig}
               onRollingConfigChange={(config) => setRollingConfig(normalizeRollingConfig(config))}
+              samplingConfig={samplingConfig}
+              onSamplingConfigChange={(config) => setSamplingConfig(normalizeSamplingConfig(config))}
               stochasticConfig={stochasticConfig}
               onStochasticConfigChange={setStochasticConfig}
               sclopfConfig={sclopfConfig}
@@ -2275,6 +2300,7 @@ function AppInner() {
         snapshotWeight={snapshotWeight}
         pathwayConfig={pathwayConfig}
         rollingConfig={rollingConfig}
+        samplingConfig={samplingConfig}
         onForceLpChange={setForceLp}
         onDryRunChange={setDryRun}
         onRun={() => void handleRunModel(false)}

@@ -17,6 +17,7 @@ import {
   PathwayConfig,
   Primitive,
   RollingHorizonConfig,
+  SamplingConfig,
   ScenarioCatalog,
   SecurityConstrainedConfig,
   StochasticConfig,
@@ -104,6 +105,8 @@ export interface SettingsViewProps {
   onPathwayConfigChange: (config: PathwayConfig) => void;
   rollingConfig: RollingHorizonConfig;
   onRollingConfigChange: (config: RollingHorizonConfig) => void;
+  samplingConfig: SamplingConfig;
+  onSamplingConfigChange: (config: SamplingConfig) => void;
   stochasticConfig: StochasticConfig;
   onStochasticConfigChange: (config: StochasticConfig) => void;
   sclopfConfig: SecurityConstrainedConfig;

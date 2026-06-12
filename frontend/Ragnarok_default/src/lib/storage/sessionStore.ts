@@ -18,6 +18,7 @@ import type {
   CustomConstraint,
   PathwayConfig,
   RollingHorizonConfig,
+  SamplingConfig,
   WorkbookModel,
 } from 'lib/types';
 
@@ -44,6 +45,7 @@ export interface SessionControls {
   // them with its defaults — so the last live values are carried here and
   // re-applied after restore, guaranteeing "stay as I left it".
   rollingConfig?: RollingHorizonConfig;
+  samplingConfig?: SamplingConfig;
   pathwayConfig?: PathwayConfig;
   savedAt: number;
 }
