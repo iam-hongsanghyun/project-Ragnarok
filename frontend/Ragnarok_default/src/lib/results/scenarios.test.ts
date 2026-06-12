@@ -15,6 +15,7 @@ import {
 } from './scenarios';
 import { defaultPathwayConfig } from './pathway';
 import { defaultRollingConfig } from './rolling';
+import { defaultSamplingConfig } from './sampling';
 import { WorkbookModel } from '../types';
 
 function presetInput() {
@@ -33,6 +34,7 @@ function presetInput() {
     loadSheddingCost: 2000,
     pathwayConfig: defaultPathwayConfig(),
     rollingConfig: defaultRollingConfig(),
+    samplingConfig: { enabled: true, mode: 'gap' as const, blockSize: 96, blockCount: 4, gapSnapshots: 500 },
     stochasticConfig: {
       enabled: true,
       scenarios: [
@@ -73,6 +75,7 @@ test('stochastic + SCLOPF configs round-trip through the scenario sheet', () => 
   expect(back.stochasticConfig.scenarios).toHaveLength(1);
   expect(back.stochasticConfig.scenarios[0].weight).toBe(0.4);
   expect(back.securityConstrainedConfig.enabled).toBe(true);
+  expect(back.samplingConfig).toEqual({ enabled: true, mode: 'gap', blockSize: 96, blockCount: 4, gapSnapshots: 500 });
 });
 
 test('presets saved before the new fields normalize to disabled', () => {
@@ -86,11 +89,13 @@ test('presets saved before the new fields normalize to disabled', () => {
   const payload = JSON.parse(String(rows[0].json));
   delete payload.stochasticConfig;
   delete payload.securityConstrainedConfig;
+  delete payload.samplingConfig;
   rows[0].json = JSON.stringify(payload);
 
   const restored = readScenarioCatalogFromModel(model);
   expect(restored.scenarios[0].stochasticConfig).toEqual(defaultStochasticConfig());
   expect(restored.scenarios[0].securityConstrainedConfig).toEqual(defaultSclopfConfig());
+  expect(restored.scenarios[0].samplingConfig).toEqual(defaultSamplingConfig());
 });
 
 test('buildScenarioPreset clones configs (no shared references)', () => {

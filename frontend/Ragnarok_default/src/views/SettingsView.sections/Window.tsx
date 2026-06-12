@@ -1,11 +1,14 @@
 /**
- * Window section — simulation window (snapshot range) + resolution weight.
+ * Window section — simulation window (snapshot range), resolution weight, and
+ * the sampled-blocks test-run mode (solve N blocks of B snapshots weighted to
+ * represent the whole window).
  */
 import React from 'react';
-import { PathwayConfig } from 'lib/types';
+import { PathwayConfig, SamplingConfig } from 'lib/types';
 import { DualRangeSlider } from '../../shared/components/DualRangeSlider';
 import { NumberDraftInput } from '../../shared/components/NumberDraftInput';
 import { RUN_WINDOW } from 'lib/constants';
+import { computeSamplingPreview } from 'lib/results/sampling';
 import {
   endIndexForTime,
   isDatedAxis,
@@ -20,11 +23,13 @@ export interface WindowSectionProps {
   snapshotStart: number;
   snapshotEnd: number;
   snapshotWeight: number;
+  samplingConfig: SamplingConfig;
   /** Ordered ISO timestamps of the run axis, for the date-range picker. */
   snapshotTimestamps: string[];
   onSnapshotStartChange: (v: number) => void;
   onSnapshotEndChange: (v: number) => void;
   onSnapshotWeightChange: (v: number) => void;
+  onSamplingConfigChange: (config: SamplingConfig) => void;
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, hi));
@@ -138,6 +143,104 @@ export function WindowSection(props: WindowSectionProps) {
           ))}
         </div>
       </div>
+      <SamplingRow {...props} windowSteps={steps} />
     </section>
+  );
+}
+
+/** Sampled-blocks test run: solve N disjoint blocks of B snapshots, weighted
+ *  so totals represent the full window. Disabled under pathway mode (the
+ *  backend also rejects the combination). */
+function SamplingRow(props: WindowSectionProps & { windowSteps: number }) {
+  const cfg = props.samplingConfig;
+  const patch = (next: Partial<SamplingConfig>) =>
+    props.onSamplingConfigChange({ ...cfg, ...next });
+  const preview = computeSamplingPreview(props.windowSteps, props.snapshotWeight, cfg);
+  const summary = cfg.enabled
+    ? `${preview.blockCount} block(s) · ${preview.sampledSnapshots} of ${props.windowSteps} steps solved · weight ×${preview.scale.toFixed(2)}`
+    : 'off — the full window is solved contiguously';
+
+  if (props.pathwayConfig.enabled) {
+    return (
+      <div className="sg-setting-row">
+        <label className="sg-setting-label">Sampling (test run)</label>
+        <div className="rolling-summary">Not available in pathway mode — periods already define the horizon.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="sg-setting-row">
+      <label className="sg-setting-label">Sampling (test run) — {summary}</label>
+      <div className="sg-btn-row">
+        <button
+          className={`tb-btn sg-solver-btn${!cfg.enabled ? '' : ' tb-btn--muted'}`}
+          onClick={() => patch({ enabled: false })}
+        >
+          Contiguous window
+        </button>
+        <button
+          className={`tb-btn sg-solver-btn${cfg.enabled ? '' : ' tb-btn--muted'}`}
+          onClick={() => patch({ enabled: true })}
+        >
+          Sampled blocks
+        </button>
+      </div>
+      {cfg.enabled && (
+        <>
+          <div className="sg-btn-row">
+            <button
+              className={`tb-btn sg-solver-btn${cfg.mode === 'count' ? '' : ' tb-btn--muted'}`}
+              onClick={() => patch({ mode: 'count' })}
+            >
+              N equal blocks
+            </button>
+            <button
+              className={`tb-btn sg-solver-btn${cfg.mode === 'gap' ? '' : ' tb-btn--muted'}`}
+              onClick={() => patch({ mode: 'gap' })}
+            >
+              Block + gap
+            </button>
+          </div>
+          <div className="sg-window-inputs">
+            <label>
+              Block size (snapshots)
+              <NumberDraftInput
+                min={1}
+                max={props.windowSteps}
+                value={cfg.blockSize}
+                onCommit={(v) => patch({ blockSize: Math.max(1, Math.round(v)) })}
+              />
+            </label>
+            {cfg.mode === 'count' ? (
+              <label>
+                Blocks
+                <NumberDraftInput
+                  min={1}
+                  max={Math.max(1, Math.floor(props.windowSteps / Math.max(1, cfg.blockSize)))}
+                  value={cfg.blockCount}
+                  onCommit={(v) => patch({ blockCount: Math.max(1, Math.round(v)) })}
+                />
+              </label>
+            ) : (
+              <label>
+                Gap (snapshots)
+                <NumberDraftInput
+                  min={0}
+                  max={props.windowSteps}
+                  value={cfg.gapSnapshots}
+                  onCommit={(v) => patch({ gapSnapshots: Math.max(0, Math.round(v)) })}
+                />
+              </label>
+            )}
+          </div>
+          <div className="rolling-summary">
+            Totals (energy, cost, emissions, constraint budgets) are scaled to represent the
+            full window. Storage and ramping stitch across block boundaries — use as a fast
+            preview, not for storage sizing or peak adequacy.
+          </div>
+        </>
+      )}
+    </div>
   );
 }

@@ -108,6 +108,18 @@ export interface RollingHorizonConfig {
   selectedWindow: number | null;
 }
 
+/** Sampled snapshot blocks ("test run"): solve N disjoint blocks of B
+ *  snapshots across the window, weighted so totals represent the full
+ *  window. mode 'count' = N equally spaced blocks; 'gap' = block + gap
+ *  repeating. */
+export interface SamplingConfig {
+  enabled: boolean;
+  mode: 'count' | 'gap';
+  blockSize: number;
+  blockCount: number;
+  gapSnapshots: number;
+}
+
 export interface StochasticScenarioOverride {
   id: string;
   sheet: string;
@@ -178,6 +190,7 @@ export interface ScenarioPreset {
   loadSheddingCost: number;
   pathwayConfig: PathwayConfig;
   rollingConfig: RollingHorizonConfig;
+  samplingConfig: SamplingConfig;
   // Stochastic + SCLOPF are part of the preset so applying a scenario restores
   // the FULL run configuration (they were silently dropped before). customDsl
   // is deliberately NOT here — it persists in the model workbook sheet
@@ -595,6 +608,18 @@ export interface RunResults {
       stepSnapshots: number;
       windowCount: number;
     };
+    /** Sampled-blocks test run: snapshotWeight carries the full-window
+     *  scaling (W/M); null/absent for contiguous runs. */
+    sampling?: {
+      enabled: boolean;
+      mode: 'count' | 'gap';
+      blockSize: number;
+      blockCount: number;
+      gapSnapshots: number;
+      sampledSnapshots: number;
+      representedSnapshots: number;
+      scale: number;
+    } | null;
   };
   pathway?: {
     enabled: boolean;
