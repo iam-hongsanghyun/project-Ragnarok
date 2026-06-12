@@ -108,13 +108,14 @@ export interface RollingHorizonConfig {
   selectedWindow: number | null;
 }
 
-/** Sampled snapshot blocks ("test run"): solve N disjoint blocks of B
- *  snapshots across the window, weighted so totals represent the full
- *  window. mode 'count' = N equally spaced blocks; 'gap' = block + gap
- *  repeating. */
+/** Sampled snapshot blocks ("test run"): solve a reduced snapshot set,
+ *  weighted so totals represent the full window. mode 'count' = N equally
+ *  spaced blocks; 'gap' = block + gap repeating; 'average' = ONE synthetic
+ *  block holding the positional mean of every period (an "average week" —
+ *  exact energy totals, smoothed peaks). */
 export interface SamplingConfig {
   enabled: boolean;
-  mode: 'count' | 'gap';
+  mode: 'count' | 'gap' | 'average';
   blockSize: number;
   blockCount: number;
   gapSnapshots: number;
@@ -609,10 +610,11 @@ export interface RunResults {
       windowCount: number;
     };
     /** Sampled-blocks test run: snapshotWeight carries the full-window
-     *  scaling (W/M); null/absent for contiguous runs. */
+     *  scaling (W/M); null/absent for contiguous runs. For mode 'average',
+     *  blockCount is the number of periods folded into the profile. */
     sampling?: {
       enabled: boolean;
-      mode: 'count' | 'gap';
+      mode: 'count' | 'gap' | 'average';
       blockSize: number;
       blockCount: number;
       gapSnapshots: number;

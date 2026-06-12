@@ -28,7 +28,7 @@ import pypsa
 from ..carbon_price import apply_carbon_price, parse_carbon_price_config
 from ...app.config import load_system_defaults
 from ..pathway import parse_pathway_config
-from ..sampling import parse_sampling_config, sample_block_indices
+from ..sampling import average_window_frames, parse_sampling_config, sample_block_indices
 from ..stochastic import apply_scenarios, parse_stochastic_config
 from ..pypsa_schema import (
     input_static_attributes,
@@ -261,7 +261,13 @@ def build_network(
             start = 0
         else:
             stop = min(len(full), start + count)
-            if sampling.enabled:
+            if sampling.enabled and sampling.mode == "average":
+                B = min(max(1, sampling.block_size), max(1, stop - start))
+                averaged_periods = average_window_frames(network, start, stop, B)
+                windowed = full[start:start + B]
+                if step > 1:
+                    windowed = windowed[::step]
+            elif sampling.enabled:
                 idx, sampled_blocks = sample_block_indices(start, stop, sampling, step)
                 windowed = full[idx]
             else:
@@ -286,7 +292,14 @@ def build_network(
         for col in ("objective", "generators"):
             network.snapshot_weightings[col] = weight
         network.snapshot_weightings["stores"] = float(step)
-        if sampling_active:
+        if sampling_active and sampling.mode == "average":
+            notes.append(
+                f"Averaged {averaged_periods} period(s) into one {sampling.block_size}-row profile: "
+                f"{len(windowed)} snapshots modelled of {stop - start} window rows "
+                f"(weight ×{weight:.2f}). Totals represent the full window; "
+                "peaks and variability are smoothed by the averaging."
+            )
+        elif sampling_active:
             notes.append(
                 f"Sampled {sampled_blocks} block(s) of up to {sampling.block_size} rows: "
                 f"{len(windowed)} snapshots modelled of {stop - start} window rows "

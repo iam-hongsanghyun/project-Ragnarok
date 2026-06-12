@@ -156,9 +156,11 @@ function SamplingRow(props: WindowSectionProps & { windowSteps: number }) {
   const patch = (next: Partial<SamplingConfig>) =>
     props.onSamplingConfigChange({ ...cfg, ...next });
   const preview = computeSamplingPreview(props.windowSteps, props.snapshotWeight, cfg);
-  const summary = cfg.enabled
-    ? `${preview.blockCount} block(s) · ${preview.sampledSnapshots} of ${props.windowSteps} steps solved · weight ×${preview.scale.toFixed(2)}`
-    : 'off — the full window is solved contiguously';
+  const summary = !cfg.enabled
+    ? 'off — the full window is solved contiguously'
+    : cfg.mode === 'average'
+      ? `${preview.blockCount} period(s) averaged into one ${cfg.blockSize}-step profile · ${preview.sampledSnapshots} steps solved · weight ×${preview.scale.toFixed(2)}`
+      : `${preview.blockCount} block(s) · ${preview.sampledSnapshots} of ${props.windowSteps} steps solved · weight ×${preview.scale.toFixed(2)}`;
 
   if (props.pathwayConfig.enabled) {
     return (
@@ -201,6 +203,12 @@ function SamplingRow(props: WindowSectionProps & { windowSteps: number }) {
             >
               Block + gap
             </button>
+            <button
+              className={`tb-btn sg-solver-btn${cfg.mode === 'average' ? '' : ' tb-btn--muted'}`}
+              onClick={() => patch({ mode: 'average' })}
+            >
+              Averaged profile
+            </button>
           </div>
           <div className="sg-window-inputs">
             <label>
@@ -212,7 +220,7 @@ function SamplingRow(props: WindowSectionProps & { windowSteps: number }) {
                 onCommit={(v) => patch({ blockSize: Math.max(1, Math.round(v)) })}
               />
             </label>
-            {cfg.mode === 'count' ? (
+            {cfg.mode === 'count' && (
               <label>
                 Blocks
                 <NumberDraftInput
@@ -222,7 +230,8 @@ function SamplingRow(props: WindowSectionProps & { windowSteps: number }) {
                   onCommit={(v) => patch({ blockCount: Math.max(1, Math.round(v)) })}
                 />
               </label>
-            ) : (
+            )}
+            {cfg.mode === 'gap' && (
               <label>
                 Gap (snapshots)
                 <NumberDraftInput
@@ -235,9 +244,13 @@ function SamplingRow(props: WindowSectionProps & { windowSteps: number }) {
             )}
           </div>
           <div className="rolling-summary">
-            Totals (energy, cost, emissions, constraint budgets) are scaled to represent the
-            full window. Storage and ramping stitch across block boundaries — use as a fast
-            preview, not for storage sizing or peak adequacy.
+            {cfg.mode === 'average'
+              ? 'Every period of the window is averaged into one synthetic profile: annual '
+                + 'energy totals are exact, but averaging smooths peaks — curtailment, storage '
+                + 'value and scarcity prices will be underestimated. Screening tool only.'
+              : 'Totals (energy, cost, emissions, constraint budgets) are scaled to represent '
+                + 'the full window. Storage and ramping stitch across block boundaries — use as '
+                + 'a fast preview, not for storage sizing or peak adequacy.'}
           </div>
         </>
       )}

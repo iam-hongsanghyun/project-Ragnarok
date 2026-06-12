@@ -234,3 +234,84 @@ def test_e_sum_caps_scale_by_represented_hours() -> None:
     })
     # period factor = represented(48)/8760 — same as a contiguous 48 h run
     assert float(n.generators.at["G_gas", "e_sum_max"]) == pytest.approx(8760.0 * 48 / 8760.0)
+
+
+# ── Averaged-profile mode ──────────────────────────────────────────────────────
+
+
+def _varying_model(n_snaps: int = 48, period: int = 12) -> dict[str, Any]:
+    """Load alternates per period: period k has constant load 100 + 10*k MW."""
+    model = _model(n_snaps)
+    rows = model["loads-p_set"]
+    for i, row in enumerate(rows):
+        row["L"] = 100.0 + 10.0 * (i // period)
+    return model
+
+
+def test_average_window_frames_positional_mean() -> None:
+    """4 periods of 12 rows with loads 100/110/120/130 → averaged 115 MW."""
+    from backend.pypsa.results import run_pypsa
+
+    result = run_pypsa(_varying_model(48, period=12), SCENARIO, {
+        "snapshotCount": 48,
+        "samplingConfig": {"enabled": True, "mode": "average", "blockSize": 12},
+    })
+    meta = result["runMeta"]
+    assert meta["snapshotCount"] == 12
+    assert meta["snapshotWeight"] == pytest.approx(4.0)
+    assert meta["sampling"]["mode"] == "average"
+    assert meta["sampling"]["blockCount"] == 4  # periods folded
+    assert meta["sampling"]["representedSnapshots"] == 48
+    # Generation follows the averaged load: every modelled snapshot serves
+    # exactly the positional mean (115 MW), and the weighted total equals the
+    # full-window energy exactly (mean preservation).
+    by_name = {ge["name"]: ge["value"] for ge in result["generatorEnergy"]}
+    total = sum(by_name.values())
+    full_total = sum(100.0 + 10.0 * (i // 12) for i in range(48))  # 5520 MWh
+    assert total == pytest.approx(full_total)
+
+
+def test_average_mode_weighting_and_stores() -> None:
+    n, notes = build_network(_varying_model(48, period=12), SCENARIO, {
+        "snapshotCount": 48,
+        "samplingConfig": {"enabled": True, "mode": "average", "blockSize": 12},
+    })
+    assert len(n.snapshots) == 12
+    assert float(n.snapshot_weightings["objective"].iloc[0]) == pytest.approx(4.0)
+    assert float(n.snapshot_weightings["objective"].sum()) == pytest.approx(48.0)
+    assert float(n.snapshot_weightings["stores"].iloc[0]) == pytest.approx(1.0)
+    # The averaged load really is the positional mean of the four periods.
+    assert float(n.loads_t.p_set["L"].iloc[0]) == pytest.approx(115.0)
+    assert any("Averaged 4 period(s)" in note for note in notes)
+
+
+def test_average_mode_composes_with_stride() -> None:
+    """B=12 averaged, stride 3 → 4 modelled snapshots, weight 12."""
+    n, _ = build_network(_varying_model(48, period=12), SCENARIO, {
+        "snapshotCount": 48,
+        "snapshotWeight": 3,
+        "samplingConfig": {"enabled": True, "mode": "average", "blockSize": 12},
+    })
+    assert len(n.snapshots) == 4
+    assert float(n.snapshot_weightings["objective"].iloc[0]) == pytest.approx(12.0)
+    assert float(n.snapshot_weightings["stores"].iloc[0]) == pytest.approx(3.0)
+
+
+def test_average_mode_guards_and_no_seam_note() -> None:
+    from fastapi import HTTPException
+
+    from backend.pypsa.results import run_pypsa
+
+    with pytest.raises(HTTPException):
+        run_pypsa(_model(48), SCENARIO, {
+            "samplingConfig": {"enabled": True, "mode": "average"},
+            "rollingConfig": {"enabled": True, "horizonSnapshots": 12, "overlapSnapshots": 0},
+        })
+    # Committable + average: the block-seam UC note must NOT appear.
+    model = _model(48)
+    model["generators"][0]["committable"] = True
+    result = run_pypsa(model, SCENARIO, {
+        "snapshotCount": 48,
+        "samplingConfig": {"enabled": True, "mode": "average", "blockSize": 12},
+    })
+    assert not any("block boundaries" in note for note in result["narrative"])

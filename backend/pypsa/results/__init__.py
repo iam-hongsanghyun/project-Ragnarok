@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import math
 import time
 from collections import defaultdict
 from typing import Any
@@ -619,7 +620,8 @@ def run_pypsa(
             f"MIP unit commitment enabled for {len(committable_gens)} generator(s): {', '.join(committable_gens[:5])}"
             + (" …" if len(committable_gens) > 5 else "") + "."
         )
-        if sampling.enabled:
+        if sampling.enabled and sampling.mode != "average":
+            # An averaged profile is one contiguous block — no seams to warn about.
             notes.append(
                 "Unit commitment with sampled blocks: start-up and min up/down behaviour "
                 "at block boundaries is approximate (blocks are stitched as if consecutive)."
@@ -637,11 +639,16 @@ def run_pypsa(
     if sampling.enabled:
         represented_rows = int(round(snapshot_count * snapshot_weight))
         store_w = float(store_weights.iloc[0]) if len(store_weights) else 1.0
+        if sampling.mode == "average":
+            # blockCount = periods folded into the average profile.
+            block_count = max(1, math.ceil(represented_rows / max(1, sampling.block_size)))
+        else:
+            block_count = sample_block_indices(0, represented_rows, sampling)[1]
         sampling_meta = {
             "enabled": True,
             "mode": sampling.mode,
             "blockSize": sampling.block_size,
-            "blockCount": sample_block_indices(0, represented_rows, sampling)[1],
+            "blockCount": block_count,
             "gapSnapshots": sampling.gap_snapshots,
             "sampledSnapshots": snapshot_count,
             "representedSnapshots": represented_rows,

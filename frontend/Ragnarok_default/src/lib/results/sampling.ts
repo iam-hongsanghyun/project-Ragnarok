@@ -44,7 +44,7 @@ export function defaultSamplingConfig(): SamplingConfig {
 export function normalizeSamplingConfig(config: SamplingConfig): SamplingConfig {
   return {
     enabled: Boolean(config.enabled),
-    mode: config.mode === 'gap' ? 'gap' : 'count',
+    mode: config.mode === 'gap' || config.mode === 'average' ? config.mode : 'count',
     blockSize: Math.max(1, Math.floor(Number(config.blockSize) || 168)),
     blockCount: Math.max(1, Math.floor(Number(config.blockCount) || 4)),
     gapSnapshots: Math.max(0, Math.floor(Number(config.gapSnapshots) || 0)),
@@ -57,9 +57,10 @@ export function cloneSamplingConfig(config: SamplingConfig): SamplingConfig {
 
 export function readSamplingConfigFromModel(model: WorkbookModel): SamplingConfig {
   const row = (model[SAMPLING_CONFIG_SHEET] ?? [])[0] ?? {};
+  const rawMode = String(row.mode ?? 'count');
   return normalizeSamplingConfig({
     enabled: primitiveBoolean(row.enabled as Primitive, false),
-    mode: (String(row.mode ?? 'count') === 'gap' ? 'gap' : 'count'),
+    mode: (rawMode === 'gap' || rawMode === 'average' ? rawMode : 'count'),
     blockSize: primitiveNumber(row.blockSize as Primitive, 168),
     blockCount: primitiveNumber(row.blockCount as Primitive, 4),
     gapSnapshots: primitiveNumber(row.gapSnapshots as Primitive, 672),
@@ -88,14 +89,16 @@ export function sameSamplingConfig(left: SamplingConfig, right: SamplingConfig):
 export interface SamplingPreview {
   /** Modelled snapshots M (after blocks + in-block stride). */
   sampledSnapshots: number;
-  /** Actual block count after clamping/truncation. */
+  /** Actual block count after clamping/truncation; for mode 'average', the
+   *  number of periods folded into the profile. */
   blockCount: number;
   /** Weight multiplier W / M applied to objective/generators. */
   scale: number;
 }
 
 /** Preview of what the backend will sample over a window of `windowSteps`
- *  rows at stride `step` — same clamp/truncate rules as sample_block_indices. */
+ *  rows at stride `step` — same clamp/truncate rules as sample_block_indices
+ *  / average_window_frames. */
 export function computeSamplingPreview(
   windowSteps: number,
   step: number,
@@ -106,6 +109,15 @@ export function computeSamplingPreview(
   const stride = Math.max(1, Math.floor(step) || 1);
   if (W <= 0) return { sampledSnapshots: 0, blockCount: 0, scale: 1 };
   const B = Math.min(cfg.blockSize, W);
+
+  if (cfg.mode === 'average') {
+    const sampled = Math.ceil(B / stride);
+    return {
+      sampledSnapshots: sampled,
+      blockCount: Math.ceil(W / B), // periods folded
+      scale: sampled > 0 ? W / sampled : 1,
+    };
+  }
 
   const blocks: Array<[number, number]> = [];
   if (cfg.mode === 'gap') {
