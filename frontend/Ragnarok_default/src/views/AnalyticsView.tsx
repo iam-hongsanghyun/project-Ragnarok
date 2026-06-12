@@ -95,8 +95,9 @@ export function AnalyticsView(props: AnalyticsViewProps) {
             <span>{Number(displayResults.runMeta.snapshotWeight.toFixed(2))}h weight</span>
             {displayResults.runMeta.sampling?.enabled && (
               <span>
-                {displayResults.runMeta.sampling.blockCount}×{displayResults.runMeta.sampling.blockSize} sampled
-                {' '}of {displayResults.runMeta.sampling.representedSnapshots}
+                {displayResults.runMeta.sampling.mode === 'average'
+                  ? `${displayResults.runMeta.sampling.blockCount} periods averaged (${displayResults.runMeta.sampling.blockSize} steps)`
+                  : `${displayResults.runMeta.sampling.blockCount}×${displayResults.runMeta.sampling.blockSize} sampled of ${displayResults.runMeta.sampling.representedSnapshots}`}
               </span>
             )}
           </div>

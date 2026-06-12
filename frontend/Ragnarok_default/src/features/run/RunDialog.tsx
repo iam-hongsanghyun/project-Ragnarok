@@ -80,7 +80,13 @@ export function RunDialog({
               <span>{rollingEnabled ? `Rolling ${rollingConfig.horizonSnapshots}/${rollingConfig.overlapSnapshots}` : 'Full-horizon solve'}</span>
               <span>{pathwayEnabled ? 'Window comes from sidebar pathway settings' : `Window ${snapshotStart} → ${snapshotEnd}`}</span>
               <span>{snapshotWeight}h resolution</span>
-              {samplingPreview && (
+              {samplingPreview && samplingConfig.mode === 'average' && (
+                <span>
+                  Averaged test run: {samplingPreview.blockCount} periods → one {samplingConfig.blockSize}-step
+                  {' '}profile (weight ×{samplingPreview.scale.toFixed(2)})
+                </span>
+              )}
+              {samplingPreview && samplingConfig.mode !== 'average' && (
                 <span>
                   Sampled test run: {samplingPreview.blockCount}×{samplingConfig.blockSize} blocks,
                   {' '}{samplingPreview.sampledSnapshots} snapshots solved (weight ×{samplingPreview.scale.toFixed(2)})

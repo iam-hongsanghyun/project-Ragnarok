@@ -67,6 +67,24 @@ describe('computeSamplingPreview (mirrors backend sample_block_indices)', () => 
   test('empty window yields a no-op preview', () => {
     expect(computeSamplingPreview(0, 1, cfg())).toEqual({ sampledSnapshots: 0, blockCount: 0, scale: 1 });
   });
+
+  test('average mode: one block, blockCount = periods folded', () => {
+    const p = computeSamplingPreview(8760, 1, cfg({ mode: 'average', blockSize: 168 }));
+    expect(p.sampledSnapshots).toBe(168);
+    expect(p.blockCount).toBe(Math.ceil(8760 / 168)); // 53 periods (8760/168 = 52.14)
+    expect(p.scale).toBeCloseTo(8760 / 168, 4);
+  });
+
+  test('average mode composes with stride', () => {
+    const p = computeSamplingPreview(8760, 4, cfg({ mode: 'average', blockSize: 168 }));
+    expect(p.sampledSnapshots).toBe(42);
+    expect(p.scale).toBeCloseTo(8760 / 42, 4);
+  });
+
+  test('normalize accepts average mode', () => {
+    const n = normalizeSamplingConfig(cfg({ mode: 'average' }));
+    expect(n.mode).toBe('average');
+  });
 });
 
 describe('normalize + model sheet round-trip', () => {
