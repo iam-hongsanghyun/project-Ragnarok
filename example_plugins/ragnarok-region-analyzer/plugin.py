@@ -308,6 +308,22 @@ def _analyze_run(rs: Any, run_name: str, cfg: dict[str, Any]) -> dict[str, Any]:
             carrier_total[c] = carrier_total.get(c, 0.0) + mwh
     total_generation = sum(carrier_total.values())
 
+    # ── Curtailment by region (MWh) ───────────────────────────────────────────
+    # Reuse the per-generator curtailmentMwh the run store already computed
+    # (renewable available-minus-dispatched, snapshot-weighted) and fold it onto
+    # each generator's region — so the total never recomputes the physics here.
+    gen_energy_rows = (light.get("result") or {}).get("generatorEnergy") or []
+    curtail_total: dict[str, float] = {}
+    for row in gen_energy_rows:
+        mwh = _num(row.get("curtailmentMwh"))
+        if mwh <= 0.0:
+            continue
+        region = gen_region.get(_key(row.get("name")))
+        if region is None:
+            continue
+        curtail_total[region] = curtail_total.get(region, 0.0) + mwh
+    total_curtailment = sum(curtail_total.values())
+
     # ── Inter-region flows (lines + links + transformers) ─────────────────────
     pair_net: dict[tuple[str, str], float] = {}
     pair_gross: dict[tuple[str, str], float] = {}
@@ -408,6 +424,14 @@ def _analyze_run(rs: Any, run_name: str, cfg: dict[str, Any]) -> dict[str, Any]:
         "series": [{"key": "net", "label": f"net {unit_label}"}],
         "rows": [{"label": f"{f['from']}→{f['to']}", "net": f[f"net_{unit_label}"]} for f in flow_rows],
     }
+    curtail_regions = sorted(curtail_total, key=lambda r: -curtail_total[r])
+    curtail_bar = {
+        "kind": "bar",
+        "description": f"Curtailment by region ({unit_label})",
+        "yAxisTitle": unit_label,
+        "series": [{"key": "curtailment", "label": f"curtailment {unit_label}"}],
+        "rows": [{"label": r, "curtailment": energy(curtail_total[r])} for r in curtail_regions],
+    }
 
     centroid_of = _region_centroid_fn(cfg, mapping_col)
     map_nodes = []
@@ -475,6 +499,18 @@ def _analyze_run(rs: Any, run_name: str, cfg: dict[str, Any]) -> dict[str, Any]:
         ),
         key=lambda r: -r[f"energy_{unit_label}"],
     )
+    # Curtailment by region — total + its share of that region's generation.
+    curtailment_table = [
+        {
+            "region": r,
+            f"curtailment_{unit_label}": energy(curtail_total[r]),
+            "share_of_gen_pct": (
+                round(curtail_total[r] / region_total[r] * 100, 2)
+                if region_total.get(r, 0.0) > 0 else 0
+            ),
+        }
+        for r in curtail_regions
+    ]
 
     grouping = (
         "per-bus"
@@ -488,8 +524,10 @@ def _analyze_run(rs: Any, run_name: str, cfg: dict[str, Any]) -> dict[str, Any]:
         + (f", UNMAPPED buses={len(unmapped)} (kept per-bus — check model/bus numbering)" if unmapped else "")
     )
     out[f"Total generation ({unit_label})"] = energy(total_generation)
+    out[f"Total curtailment ({unit_label})"] = energy(total_curtailment)
     out["Carrier mix (system)"] = donut_system
     out["Generation by region"] = bar_by_region
+    out["Curtailment by region"] = curtail_bar
     out[f"Carrier mix — {selected}"] = donut_region
     out[f"Hourly generation — {selected}"] = area_region
     out["Inter-region net flow"] = flow_bar
@@ -497,6 +535,7 @@ def _analyze_run(rs: Any, run_name: str, cfg: dict[str, Any]) -> dict[str, Any]:
     out[f"Generation by region — table ({unit_label})"] = generation_table
     if capacity_table is not None:
         out["Capacity by region — table (MW)"] = capacity_table
+    out[f"Curtailment by region — table ({unit_label})"] = curtailment_table
     out[f"Carrier totals — table ({unit_label})"] = carrier_table
     out[f"Regional flow — table ({unit_label})"] = flow_rows
     return out

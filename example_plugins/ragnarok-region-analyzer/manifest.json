@@ -1,7 +1,7 @@
 {
   "id": "ragnarok-region-analyzer",
   "name": "Region & Carrier Analyzer",
-  "version": "7.1.0",
+  "version": "7.2.0",
   "kind": "backend",
   "description": "Aggregates a solved run to REGIONAL output and charts it: a system carrier-mix donut, generation-by-region stacked bar, a per-region carrier-mix donut + hourly stacked-area (pick the region), an inter-region net-flow bar and a flow MAP — plus the underlying tables. Runs ENTIRELY in the Ragnarok backend and reads the run from the server-side run store, so it works on any STORED run (View result) without shipping time-series to the browser. Blank run = the most recent stored run.",
   "capabilities": [
