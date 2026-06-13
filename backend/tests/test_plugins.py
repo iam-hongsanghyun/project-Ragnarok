@@ -499,6 +499,49 @@ def test_region_analyzer_analyzes_stored_run(_plugins_dir, tmp_path, monkeypatch
     assert rows and rows[0]["name"] == meta["name"]
 
 
+def test_region_analyzer_groups_new_bus_via_model_province(_plugins_dir, tmp_path, monkeypatch) -> None:
+    """A bus OUTSIDE the hardcoded reference grid (1..204) is grouped by its OWN
+    ``Province`` column from the run's buses sheet — not left unmapped.
+
+    Regression: the analyzer previously mapped buses only via the embedded
+    BUS_PROVINCE dict, so any new bus (e.g. "999", or a plant-named bus) fell to
+    per-bus / UNMAPPED even when it carried a perfectly good province.
+    """
+    from backend.app import run_store
+
+    monkeypatch.setattr(run_store, "RUNS_DIR", tmp_path / "runs")
+    _install_example("ragnarok-region-analyzer.zip")
+
+    model = {
+        "buses": [{"name": "999", "Province": "강원특별자치도", "x": 128.2, "y": 37.8}],
+        "generators": [{"name": "g1", "bus": "999", "carrier": "wind", "p_nom": 200}],
+    }
+    result = {
+        "outputs": {
+            "static": {},
+            "series": {
+                "generators-p": [
+                    {"snapshot": "2024-01-01T00:00:00", "g1": 100.0},
+                    {"snapshot": "2024-01-01T01:00:00", "g1": 120.0},
+                ],
+            },
+        },
+    }
+    run_store.store_run(model, {}, {"snapshotWeight": 1, "filename": "new_bus.xlsx"}, result)
+
+    cfg = {
+        "aggregate_by_region": True,
+        "region_column": "group1",
+        "province_mapping": [{"short": "강원", "official": "강원특별자치도", "group1": "East"}],
+    }
+    out = plugins.run_analyze("ragnarok-region-analyzer", {}, cfg)
+    assert "note" not in out, out.get("note")
+    # Bus 999's province → group1 "East"; never per-bus / unmapped.
+    regions = {r["region"] for r in out["Generation by region — table (GWh)"]}
+    assert regions == {"East"}
+    assert "UNMAPPED" not in out["Settings"]
+
+
 def test_dashboard_manifest_actions_all_have_server_hooks(_plugins_dir) -> None:
     """Every `action` field's hook must be runnable server-side: transform/
     contribute (build path) or a same-named function exported by plugin.py
