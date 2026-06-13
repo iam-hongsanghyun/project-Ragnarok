@@ -251,7 +251,16 @@ function AppInner() {
 
   // Topology that owns the currently displayed results: the snapshot taken at
   // run/restore time when available, else the live model (e.g. before any run).
-  const analyticsModel = resultsModel ?? model;
+  // A restored/imported topology can be PARTIAL — an external results file may
+  // carry no `lines` / `transformers` / `stores` sheet at all, and the light
+  // analytics view only ships the sheets that exist. Spread it over an empty
+  // workbook so EVERY component sheet is guaranteed an array; analytics cards
+  // (which already treat an empty sheet as "no components") then never hit
+  // `undefined.map`. The live `model` is already full, so it passes through.
+  const analyticsModel = useMemo(
+    () => (resultsModel ? { ...createEmptyWorkbook(), ...resultsModel } : model),
+    [resultsModel, model],
+  );
   // Derivation inputs that own the displayed results: frozen run-time values
   // when available, else the live sliders (e.g. before any run).
   const analyticsCarbonPrice = resultsContext?.carbonPrice ?? carbonPrice;
@@ -537,6 +546,7 @@ function AppInner() {
   }, [activeScenario?.label]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const projectImportInputRef = useRef<HTMLInputElement | null>(null);
+  const resultImportInputRef = useRef<HTMLInputElement | null>(null);
 
   // No workbook is auto-loaded — the user must explicitly Open a file or
   // Import Project. This avoids surprising the user with someone else's data
@@ -783,27 +793,89 @@ function AppInner() {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
-      // Upload to the backend, which parses the project workbook into a run
-      // bundle, persists it (run_store), and returns the new run's name. The
-      // backend is the single source of truth for history, so an imported
-      // project becomes a History entry openable with full analytics — exactly
-      // like a freshly solved run. (Replaces the old in-browser parse, which
-      // could not read the server-built workbook and dropped the outputs.)
+      // Importing a project is OPENING A FILE — load its model + solved results
+      // into the editor (like File→Open). It does NOT create a History entry:
+      // History is an audit trail of solves + explicit result imports, not of
+      // files the user opened. Re-run the loaded model to put it in History.
+      // The backend parses the project (.zip / .xlsx) and returns the bundle
+      // WITHOUT persisting; the heavy load-into-editor happens client-side.
       const form = new FormData();
       form.append('file', file);
-      const resp = await fetch(`${API_BASE}/api/import/project`, { method: 'POST', body: form });
+      const resp = await fetch(`${API_BASE}/api/import/project/load`, { method: 'POST', body: form });
+      if (!resp.ok) {
+        throw new Error((await resp.text()) || `Import failed (HTTP ${resp.status})`);
+      }
+      const bundle = (await resp.json()) as {
+        model?: WorkbookModel;
+        scenario?: { constraints?: CustomConstraint[]; carbonPrice?: number; discountRate?: number };
+        options?: { snapshotStart?: number; snapshotEnd?: number; snapshotWeight?: number };
+        result?: RunResults;
+        filename?: string;
+      };
+      const importedModel = bundle.model;
+      // Input dates land canonical (ISO) for Ragnarok-exported projects; a
+      // hand-built workbook may not — normalise before loading, as the CSV /
+      // netCDF import paths do.
+      if (importedModel) normalizeInputDatesToIso(importedModel, settings.dateFormat);
+      handleRestoreRun(
+        {
+          label: bundle.filename || file.name,
+          results: (bundle.result ?? {}) as RunResults,
+          model: importedModel,
+          carbonPrice: bundle.scenario?.carbonPrice ?? 0,
+          discountRate: bundle.scenario?.discountRate,
+          snapshotStart: bundle.options?.snapshotStart ?? 0,
+          snapshotEnd: bundle.options?.snapshotEnd ?? 0,
+          snapshotWeight: bundle.options?.snapshotWeight ?? 1,
+        },
+        { loadIntoEditor: true },
+      );
+      // No backing stored run — clear the active-run pin so Export Project falls
+      // back to the live {model, result} path and Comparison won't highlight a
+      // run that doesn't exist.
+      setActiveRunName(null);
+      // Restore the project's custom constraints so a re-run uses them.
+      const importedConstraints = bundle.scenario?.constraints;
+      if (Array.isArray(importedConstraints)) {
+        setConstraints(importedConstraints);
+      }
+      setStatus(`Imported project: ${file.name} — loaded into the editor.`);
+      showToast(`Project loaded (${file.name})`, 'success');
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Project import failed.';
+      setStatus(msg);
+      showToast(msg, 'error');
+    } finally {
+      if (event.target) event.target.value = '';
+    }
+  };
+
+  const handleImportResultXlsx = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      // Import an EXTERNAL Excel results file as a persistent History entry.
+      // Unlike Import Project (which only loads into the editor), this writes
+      // to the run store via store_run(origin="xlsx_import"), so the result is
+      // permanent — comparable like any solved run and surviving refresh /
+      // restart. The backend maps the sheets to the canonical result schema.
+      const form = new FormData();
+      form.append('file', file);
+      const resp = await fetch(`${API_BASE}/api/import/result/xlsx`, { method: 'POST', body: form });
       if (!resp.ok) {
         throw new Error((await resp.text()) || `Import failed (HTTP ${resp.status})`);
       }
       const { name } = (await resp.json()) as { name?: string };
       await refreshBackendRuns();
       if (name) {
-        await handleOpenBackendRun(name, { restoreConstraints: true });
+        await handleOpenBackendRun(name);
+        setTab('Analytics');
+        setAnalyticsSubTab('Result');
       }
-      setStatus(`Imported project: ${file.name} — stored in History.`);
-      showToast(`Project imported (${file.name})`, 'success');
+      setStatus(`Imported result: ${file.name} — stored in History.`);
+      showToast(`Result imported (${file.name})`, 'success');
     } catch (error) {
-      const msg = error instanceof Error ? error.message : 'Project import failed.';
+      const msg = error instanceof Error ? error.message : 'Result import failed.';
       setStatus(msg);
       showToast(msg, 'error');
     } finally {
@@ -1900,6 +1972,7 @@ function AppInner() {
     <div className="studio-shell">
       <input ref={fileInputRef} type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden onChange={handleImport} />
       <input ref={projectImportInputRef} type="file" accept=".zip,application/zip,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden onChange={handleImportProject} />
+      <input ref={resultImportInputRef} type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden onChange={handleImportResultXlsx} />
       <input ref={csvFolderImportInputRef} type="file" accept=".zip,application/zip" hidden onChange={handleImportCsvFolder} />
       <input ref={netcdfImportInputRef} type="file" accept=".nc" hidden onChange={handleImportNetcdf} />
       <input ref={hdf5ImportInputRef} type="file" accept=".h5,.hdf5" hidden onChange={handleImportHdf5} />
@@ -2238,6 +2311,7 @@ function AppInner() {
                     backendRuns={backendRuns}
                     onViewSelected={handleViewSelectedRuns}
                     onImportBackendRun={(name) => void handleOpenBackendRun(name, { asProject: true, restoreConstraints: true })}
+                    onImportResult={() => resultImportInputRef.current?.click()}
                     onDownloadBackendXlsx={handleDownloadBackendXlsx}
                     onExportBackendProject={handleExportBackendProject}
                     onDeleteBackendRuns={handleDeleteBackendRuns}

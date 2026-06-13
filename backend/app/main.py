@@ -1414,16 +1414,56 @@ def export_project(payload: ExportProjectPayload) -> Response:
     )
 
 
+@app.post("/api/import/project/load")
+async def import_project_load(file: UploadFile) -> dict[str, Any]:
+    """Parse an uploaded project file into a bundle and RETURN it — no History.
+
+    This is the default "Import Project" path. Importing a project is *opening a
+    file*: the browser loads the returned model + its solved results into the
+    editor (like File→Open), and nothing is persisted. History stays an audit
+    trail of solves and explicit result imports
+    (:func:`import_result_xlsx`) — re-run the loaded model to create a History
+    entry. Accepts a Ragnarok Project ``.zip`` (canonical JSON + readable xlsx)
+    or a bare ``.xlsx``; returns ``{model, scenario, options, result, filename}``.
+    """
+    from . import project_workbook
+
+    raw = await file.read()
+    filename = file.filename or "imported_project.zip"
+
+    # Parsing the workbook is heavy, synchronous CPU work — run it off the event
+    # loop so a large import never blocks other requests (incl. the boot poll).
+    try:
+        bundle = await asyncio.to_thread(
+            project_workbook.import_bundle_from_upload, raw, filename
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Project import failed: {exc}") from exc
+
+    options = bundle.get("options") or {}
+    options.setdefault("filename", filename)
+    return {
+        "model": bundle.get("model") or {},
+        "scenario": bundle.get("scenario") or {},
+        "options": options,
+        "result": bundle.get("result") or {},
+        "filename": filename,
+    }
+
+
 @app.post("/api/import/project")
 async def import_project(file: UploadFile) -> dict[str, Any]:
-    """Parse an uploaded project xlsx into a run bundle and store it in History.
+    """Parse an uploaded project file into a run bundle and store it in History.
 
-    The browser uploads a Ragnarok Project ``.zip`` (canonical JSON + readable
-    xlsx) — or a bare ``.xlsx`` — and the backend converts it to the canonical
+    The explicit-persist variant: it converts the upload to the canonical
     bundle (verbatim from the package JSON when present) and persists it with
-    ``run_store.store_run``. So an imported project becomes a History entry,
+    ``run_store.store_run``, so the imported project becomes a History entry
     openable with full analytics like any solved run. Returns the new run's meta
     (its ``name`` lets the frontend open it immediately).
+
+    The default "Import Project" button uses :func:`import_project_load`
+    instead — opening a file should NOT create a History entry. This endpoint
+    remains for API clients that *want* the imported project persisted.
     """
     from . import project_workbook
 
@@ -1449,6 +1489,53 @@ async def import_project(file: UploadFile) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=f"Project import failed: {exc}") from exc
     if meta is None:
         raise HTTPException(status_code=500, detail="Imported project could not be stored.")
+    return {"meta": meta, "name": meta.get("name")}
+
+
+@app.post("/api/import/result/xlsx")
+async def import_result_xlsx(file: UploadFile) -> dict[str, Any]:
+    """Import an external Excel RESULTS file as a persistent History entry.
+
+    Accepts an ``.xlsx`` / ``.xls`` produced outside a normal solve — a
+    third-party model, a plugin's output, a hand-assembled results table, or a
+    Ragnarok-exported workbook. The sheets are mapped to Ragnarok's canonical
+    result schema (``outputs.static`` / ``outputs.series``) by
+    ``project_workbook.workbook_to_bundle`` (component sheets split input vs
+    solved-output columns; ``<component>-<attr>`` sheets become output series),
+    then persisted with ``run_store.store_run(origin="xlsx_import")``. So the
+    result lands in History, is comparable like any solved run, and survives
+    refresh / restart. Returns the new run's name.
+
+    Distinct from :func:`import_project_load`, which only loads a project into
+    the editor without persisting. This endpoint always writes to the run store.
+    """
+    from . import project_workbook
+
+    raw = await file.read()
+    filename = file.filename or "imported_result.xlsx"
+    if not filename.lower().endswith((".xlsx", ".xls")):
+        raise HTTPException(
+            status_code=400, detail="Result import expects an .xlsx / .xls file."
+        )
+
+    def _parse_and_store() -> dict[str, Any] | None:
+        bundle = project_workbook.workbook_to_bundle(raw, filename=filename)
+        options = bundle.get("options") or {}
+        options.setdefault("filename", filename)
+        return run_store.store_run(
+            bundle.get("model") or {},
+            bundle.get("scenario") or {},
+            options,
+            bundle.get("result") or {},
+            origin="xlsx_import",
+        )
+
+    try:
+        meta = await asyncio.to_thread(_parse_and_store)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Result import failed: {exc}") from exc
+    if meta is None:
+        raise HTTPException(status_code=500, detail="Imported result could not be stored.")
     return {"meta": meta, "name": meta.get("name")}
 
 

@@ -188,6 +188,15 @@ export function deriveRunResults(
     rolling = null,
   } = options;
 
+  // The light analytics view ships `series: null` (the heavy per-component
+  // output series are stripped and fetched windowed on demand). A result
+  // restored from it that lacks server-derived analytics still flows through
+  // here — normalise once so EVERY series/static access below (period
+  // detection, branch loading, per-period filters, capacity lookups) is
+  // null-safe rather than guarding each call site. Missing data simply derives
+  // to empty dispatch / mix / loading.
+  outputs = { ...outputs, series: outputs.series ?? {}, static: outputs.static ?? {} };
+
   const detectedPeriods = detectPeriods(outputs.series);
   const activePeriod =
     detectedPeriods.length > 0
@@ -477,7 +486,7 @@ export function deriveRunResults(
     rows: Record<string, GridRow>, capAttr: 's_nom' | 'p_nom', p0Sheet: string,
     staticSheet: string,
   ) {
-    const p0 = outputs.series[p0Sheet];
+    const p0 = (outputs.series ?? {})[p0Sheet];
     if (!p0) return;
     for (const name of Object.keys(rows)) {
       // Use optimised capacity when available (extendable lines after solve),

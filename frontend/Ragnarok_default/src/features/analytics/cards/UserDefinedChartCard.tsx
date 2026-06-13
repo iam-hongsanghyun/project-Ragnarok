@@ -44,15 +44,18 @@ const FOCUS_LABELS: Record<FocusType, string> = {
 };
 
 function assetNamesFor(focusType: FocusType, model: WorkbookModel): string[] {
+  // An IMPORTED result can carry a partial model (a results-only file may have
+  // no `generators` sheet at all), so every component sheet is optional here —
+  // never assume the array exists.
   switch (focusType) {
-    case 'generator':   return model.generators.map((r)    => stringValue(r.name)).filter(Boolean);
-    case 'bus':         return model.buses.map((r)          => stringValue(r.name)).filter(Boolean);
-    case 'storageUnit': return model.storage_units.map((r) => stringValue(r.name)).filter(Boolean);
-    case 'store':       return model.stores.map((r)         => stringValue(r.name)).filter(Boolean);
+    case 'generator':   return (model.generators || []).map((r)    => stringValue(r.name)).filter(Boolean);
+    case 'bus':         return (model.buses || []).map((r)          => stringValue(r.name)).filter(Boolean);
+    case 'storageUnit': return (model.storage_units || []).map((r) => stringValue(r.name)).filter(Boolean);
+    case 'store':       return (model.stores || []).map((r)         => stringValue(r.name)).filter(Boolean);
     case 'branch':      return [
-      ...model.lines.map((r)        => stringValue(r.name)),
-      ...model.links.map((r)        => stringValue(r.name)),
-      ...model.transformers.map((r) => stringValue(r.name)),
+      ...(model.lines || []).map((r)        => stringValue(r.name)),
+      ...(model.links || []).map((r)        => stringValue(r.name)),
+      ...(model.transformers || []).map((r) => stringValue(r.name)),
     ].filter(Boolean);
     case 'process':     return (model.processes || []).map((r) => stringValue(r.name)).filter(Boolean);
     case 'shuntImpedance': return (model.shunt_impedances || []).map((r) => stringValue(r.name)).filter(Boolean);

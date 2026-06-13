@@ -3017,6 +3017,13 @@ path.leaflet-interactive:focus {
   color: var(--brand);
   background: color-mix(in srgb, var(--brand) 12%, transparent);
 }
+/* "imported" origin chip — amber-tinted so an externally-imported result reads
+   as distinct from a solved run at a glance. */
+.history-row-chip--imported {
+  color: var(--warn, #b45309);
+  background: color-mix(in srgb, var(--warn, #b45309) 14%, transparent);
+  font-weight: 600;
+}
 .history-row-spacer { flex: 1 1 auto; }
 .history-row .tb-btn { flex: 0 0 auto; }
 
