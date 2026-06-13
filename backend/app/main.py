@@ -1520,15 +1520,31 @@ async def import_result_xlsx(file: UploadFile) -> dict[str, Any]:
 
     def _parse_and_store() -> dict[str, Any] | None:
         bundle = project_workbook.workbook_to_bundle(raw, filename=filename)
+        model = bundle.get("model") or {}
+        scenario = bundle.get("scenario") or {}
         options = bundle.get("options") or {}
         options.setdefault("filename", filename)
-        return run_store.store_run(
-            bundle.get("model") or {},
-            bundle.get("scenario") or {},
-            options,
-            bundle.get("result") or {},
-            origin="xlsx_import",
-        )
+        result = bundle.get("result") or {}
+        outputs = result.get("outputs") or {}
+        # An imported result never had a solve, so it carries the raw output
+        # frames but none of the derived analytics the Result view renders.
+        # Rebuild the network from the model + original options (which reproduce
+        # the exact snapshot grid), inject the stored outputs, and run the same
+        # extraction helpers a solve uses — so the summary / carrier mix /
+        # dispatch / price series all populate. Best-effort: on any failure the
+        # raw outputs are still stored (the run is openable, just sparser).
+        if outputs.get("series") or outputs.get("static"):
+            try:
+                from ..pypsa.results.from_outputs import derive_imported_result
+
+                derived = derive_imported_result(model, scenario, options, outputs)
+                result = {**result, **derived, "outputs": outputs}
+            except Exception:  # noqa: BLE001
+                logging.getLogger("pypsa_gui.import").exception(
+                    "Could not derive analytics for imported result %s; storing raw outputs",
+                    filename,
+                )
+        return run_store.store_run(model, scenario, options, result, origin="xlsx_import")
 
     try:
         meta = await asyncio.to_thread(_parse_and_store)

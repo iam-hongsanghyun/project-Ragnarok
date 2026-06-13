@@ -20,6 +20,9 @@ interface HistoryViewProps {
   onImportBackendRun: (name: string) => void;
   /** Import an external Excel results file as a new persistent History entry. */
   onImportResult: () => void;
+  /** Filenames of result imports currently converting — shown as placeholder
+   *  rows so a slow (tens-of-seconds) import doesn't read as "nothing happened". */
+  convertingImports?: string[];
   /** Explicit Excel export; `parts` ⊆ ['metadata','model','result'] selects sheet groups. */
   onDownloadBackendXlsx: (name: string, parts: string[]) => void;
   /** Download the full project package (.zip of bundle JSON + meta JSON + xlsx). */
@@ -52,6 +55,7 @@ export function HistoryView({
   onViewSelected,
   onImportBackendRun,
   onImportResult,
+  convertingImports,
   onDownloadBackendXlsx,
   onExportBackendProject,
   onDeleteBackendRuns,
@@ -168,7 +172,7 @@ export function HistoryView({
         )}
       </div>
 
-      {sorted.length === 0 ? (
+      {sorted.length === 0 && (convertingImports?.length ?? 0) === 0 ? (
         <div className="history-empty">
           {backendRuns.length === 0
             ? 'No saved runs yet — run the model to populate history.'
@@ -176,6 +180,14 @@ export function HistoryView({
         </div>
       ) : (
         <div className="history-list">
+          {(convertingImports ?? []).map((filename) => (
+            <div key={`converting:${filename}`} className="history-row history-row--converting">
+              <span className="history-row-spinner" aria-hidden="true" />
+              <span className="history-row-name">{filename}</span>
+              <span className="history-row-chip history-row-chip--converting">Converting…</span>
+              <span className="history-row-spacer" />
+            </div>
+          ))}
           {sorted.map((meta) => (
             <BackendHistoryRow
               key={meta.name}

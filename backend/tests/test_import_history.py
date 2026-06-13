@@ -143,3 +143,84 @@ def test_import_result_xlsx_rejects_non_excel(_runs_dir: Path) -> None:
     resp = client.post("/api/import/result/xlsx", files=files)
     assert resp.status_code == 400
     assert run_store.list_runs() == []
+
+
+# ── Server-side analytics derivation from stored outputs ────────────────────
+
+
+def _result_only_bundle() -> dict[str, Any]:
+    """A complete two-snapshot result with the frames the derivation needs:
+    snapshots, a carrier mapping, generator dispatch, and nodal prices."""
+    return {
+        "model": {
+            "snapshots": [
+                {"snapshot": "2025-01-01T00:00:00"},
+                {"snapshot": "2025-01-01T01:00:00"},
+            ],
+            "carriers": [
+                {"name": "wind", "co2_emissions": 0.0},
+                {"name": "gas", "co2_emissions": 0.4},
+            ],
+            "buses": [{"name": "n1", "v_nom": 380.0}],
+            "generators": [
+                {"name": "wind", "bus": "n1", "carrier": "wind", "p_nom": 100.0, "marginal_cost": 0.0},
+                {"name": "gas", "bus": "n1", "carrier": "gas", "p_nom": 100.0, "marginal_cost": 50.0},
+            ],
+            "loads": [{"name": "L", "bus": "n1", "p_set": 120.0}],
+        },
+        "scenario": {},
+        "options": {"snapshotStart": 0, "snapshotEnd": 2, "snapshotWeight": 1, "filename": "ext.xlsx"},
+        "result": {
+            "outputs": {
+                "static": {"generators": {"wind": {"p_nom_opt": 100.0}, "gas": {"p_nom_opt": 100.0}}},
+                "series": {
+                    "generators-p": [
+                        {"snapshot": "2025-01-01T00:00:00", "wind": 80.0, "gas": 40.0},
+                        {"snapshot": "2025-01-01T01:00:00", "wind": 60.0, "gas": 60.0},
+                    ],
+                    "buses-marginal_price": [
+                        {"snapshot": "2025-01-01T00:00:00", "n1": 50.0},
+                        {"snapshot": "2025-01-01T01:00:00", "n1": 50.0},
+                    ],
+                },
+            },
+        },
+    }
+
+
+def test_derive_imported_result_populates_analytics() -> None:
+    """The derivation rebuilds the network, injects the stored outputs, and
+    produces the analytics the Result view renders — with the right numbers."""
+    from backend.pypsa.results.from_outputs import derive_imported_result
+
+    b = _result_only_bundle()
+    derived = derive_imported_result(b["model"], b["scenario"], b["options"], b["result"]["outputs"])
+
+    mix = {m["label"]: m["value"] for m in derived["carrierMix"]}
+    # Wind energy = 80 + 60 = 140 MWh; gas = 40 + 60 = 100 MWh (weight 1).
+    assert mix["wind"] == 140.0
+    assert mix["gas"] == 100.0
+    # Series span both snapshots; price series carries the injected 50/MWh.
+    assert len(derived["dispatchSeries"]) == 2
+    assert len(derived["systemPriceSeries"]) == 2
+    assert derived["systemPriceSeries"][0]["value"] == 50.0
+    # A non-empty summary makes the run render like a solved one in History.
+    assert any(s["label"] == "Installed capacity" for s in derived["summary"])
+    assert derived["runMeta"]["componentCounts"]["generators"] == 2
+
+
+def test_import_result_xlsx_stores_derived_analytics(_runs_dir: Path) -> None:
+    """End to end: importing a results workbook persists the derived summary +
+    carrier mix into the History meta (not just the raw outputs)."""
+    client = TestClient(app)
+    data = pw.bundle_to_workbook(_result_only_bundle(), include_bundle=False)
+    files = {"file": ("ext.xlsx", io.BytesIO(data), _XLSX_MIME)}
+
+    resp = client.post("/api/import/result/xlsx", files=files)
+    assert resp.status_code == 200, resp.text
+
+    meta = run_store.list_runs()[0]
+    assert meta["origin"] == "xlsx_import"
+    assert len(meta["summary"]) > 0
+    assert len(meta["carrierMix"]) == 2
+    assert meta["componentCounts"]["generators"] == 2

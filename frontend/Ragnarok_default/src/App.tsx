@@ -198,6 +198,11 @@ function AppInner() {
   const [runDialogOpen, setRunDialogOpen] = useState(false);
   const [dryRun, setDryRun] = useState(false);
   const [backendRuns, setBackendRuns] = useState<BackendRunMeta[]>([]);
+  // Filenames of external result imports currently being converted to History
+  // entries. Importing a full-year result takes tens of seconds (parse + derive
+  // analytics + build the run db), so History shows a "Converting…" placeholder
+  // row per in-flight import until the real entry lands.
+  const [convertingImports, setConvertingImports] = useState<string[]>([]);
   // Name of the backend run currently shown in the viewer — drives the
   // Comparison "active" column highlight. Set after a run completes (to the
   // newest stored meta) and when opening a stored run.
@@ -852,13 +857,20 @@ function AppInner() {
 
   const handleImportResultXlsx = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
+    if (event.target) event.target.value = '';
     if (!file) return;
+    // Show a "Converting…" placeholder in History immediately — the backend
+    // parse + analytics derivation + db build takes tens of seconds for a
+    // full-year result, and a silent wait reads as "nothing happened".
+    setConvertingImports((prev) => [...prev, file.name]);
+    setStatus(`Converting ${file.name}…`);
     try {
       // Import an EXTERNAL Excel results file as a persistent History entry.
       // Unlike Import Project (which only loads into the editor), this writes
       // to the run store via store_run(origin="xlsx_import"), so the result is
       // permanent — comparable like any solved run and surviving refresh /
-      // restart. The backend maps the sheets to the canonical result schema.
+      // restart. The backend maps the sheets to the canonical result schema and
+      // derives the analytics so the Result view populates.
       const form = new FormData();
       form.append('file', file);
       const resp = await fetch(`${API_BASE}/api/import/result/xlsx`, { method: 'POST', body: form });
@@ -879,7 +891,7 @@ function AppInner() {
       setStatus(msg);
       showToast(msg, 'error');
     } finally {
-      if (event.target) event.target.value = '';
+      setConvertingImports((prev) => prev.filter((n) => n !== file.name));
     }
   };
 
@@ -2312,6 +2324,7 @@ function AppInner() {
                     onViewSelected={handleViewSelectedRuns}
                     onImportBackendRun={(name) => void handleOpenBackendRun(name, { asProject: true, restoreConstraints: true })}
                     onImportResult={() => resultImportInputRef.current?.click()}
+                    convertingImports={convertingImports}
                     onDownloadBackendXlsx={handleDownloadBackendXlsx}
                     onExportBackendProject={handleExportBackendProject}
                     onDeleteBackendRuns={handleDeleteBackendRuns}
