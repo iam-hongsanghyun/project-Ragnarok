@@ -315,6 +315,11 @@ def _compute_region_bus_attrs(
     """
     attr_rules, default_rule = _region_rule_lookup(rules_df, "buses")
     buses_df = network.buses
+    # The province column (if any) is force-set to the region on every output
+    # bus, so an aggregated network keeps a populated province — re-aggregation
+    # and the region analyzer can then place these buses instead of treating
+    # them as unmapped one-bus regions.
+    prov_col = _find_province_column(buses_df)
 
     members_by_region: dict[str, list[str]] = {}
     for old_name, region in bus_to_region.items():
@@ -337,6 +342,8 @@ def _compute_region_bus_attrs(
                 except (TypeError, ValueError):
                     value = 0.0
             attrs[col] = value
+        if prov_col is not None:
+            attrs[prov_col] = region
         out[region] = attrs
     return out
 

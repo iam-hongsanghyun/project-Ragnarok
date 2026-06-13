@@ -40,15 +40,19 @@ are counted in the `Settings` row as `UNMAPPED buses=N`.
 |---|---|
 | `Settings` | echo of run + active options (+ unmapped-bus count) |
 | `Total generation` | system total (energy unit) |
+| `Total curtailment` | system total (energy unit) |
 | `Carrier mix (system)` | donut |
 | `Generation by region` | stacked bar, × carrier |
+| `Curtailment by region` | bar (energy unit) — renewable available-minus-dispatched |
 | `Carrier mix — <region>` | donut for the chart region |
 | `Hourly generation — <region>` | stacked area (MW) for the chart region |
 | `Inter-region net flow` | bar (energy unit) |
 | `Inter-region flow map` | map: node = region (pie = carrier mix, size = generation), line = net flow |
-| `… — table` rows | the underlying tables (generation, capacity MW, carrier totals, flows) |
+| `… — table` rows | the underlying tables (generation, capacity MW, curtailment + share of generation, carrier totals, flows) |
 
 - Total energy = Σ(max(MW, 0) over snapshots) × snapshot weight (from the run).
+- Curtailment = Σ max(p_max_pu × p_nom_opt − dispatch, 0) × weight per renewable
+  generator (computed by the run), folded onto each generator's region.
 - Capacity = solved `p_nom_opt` when present, else the input `p_nom`.
 - Flows aggregate lines + links + transformers whose endpoints map to
   different regions; `net` is the magnitude of the signed sum, `gross` the sum

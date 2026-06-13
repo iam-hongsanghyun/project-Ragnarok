@@ -27,7 +27,7 @@ export function FileToolbar(props: FileToolbarProps) {
       <button className="tb-btn" onClick={props.onSave}>Save</button>
       <button className="tb-btn" onClick={props.onSaveAs}>Save As</button>
       <div className="view-toolbar-sep" />
-      <button className="tb-btn" onClick={props.onImportProject} title="Import a project workbook (input + solved outputs)">
+      <button className="tb-btn" onClick={props.onImportProject} title="Open a project workbook (input + solved outputs) into the editor — re-run to add it to History">
         Import Project
       </button>
       <button

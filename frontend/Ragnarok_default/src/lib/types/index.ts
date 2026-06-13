@@ -665,6 +665,11 @@ export interface RunResults {
   outputs?: {
     static: Record<string, Record<string, Record<string, Primitive>>>;
     series: Record<string, GridRow[]>;
+    /** Light analytics view only: the names of the output series sheets that
+     *  were stripped (`series` is null there). Lets a viewer detect it must
+     *  refetch the full bundle to client-derive analytics. Absent on a full
+     *  bundle, where `series` itself is populated. */
+    seriesSheets?: string[];
   };
 }
 
@@ -765,6 +770,10 @@ export interface BackendRunMeta {
   /** Short chips for non-standard / notable settings (carbon price, force-LP,
    *  load-shed, custom solver, pathway, stochastic, N-1, constraint count). */
   tags?: string[];
+  /** How this entry entered History: a normal solve (`'solve'`) or an imported
+   *  external results file (`'xlsx_import'`). Absent on legacy entries → treat
+   *  as `'solve'`. Drives the History "imported" chip. */
+  origin?: string;
 }
 
 /** A run on the backend's serial queue (GET /api/queue). */

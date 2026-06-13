@@ -261,6 +261,10 @@ def build_run_meta(name: str, bundle: dict[str, Any], size_bytes: int = 0) -> di
         "savedAt": bundle.get("savedAt"),
         "label": bundle.get("label") or _label_for_bundle(scenario, options, filename),
         "filename": filename,
+        # How this entry entered History: a normal solve ("solve") or an
+        # imported external results file ("xlsx_import"). Legacy entries lack
+        # this key — readers default to "solve".
+        "origin": bundle.get("origin") or "solve",
         "snapshotStart": options.get("snapshotStart"),
         "snapshotEnd": options.get("snapshotEnd"),
         "snapshotWeight": options.get("snapshotWeight"),
@@ -756,6 +760,8 @@ def store_run(
     scenario: dict[str, Any],
     options: dict[str, Any],
     result: dict[str, Any],
+    *,
+    origin: str = "solve",
 ) -> dict[str, Any] | None:
     """Persist a finished run as a JSON bundle plus a lightweight meta sidecar.
 
@@ -765,6 +771,10 @@ def store_run(
         options: The run options dict (carries snapshot window + an optional
             ``runLabel`` / ``filename``).
         result: The solver result dict returned by ``backend.run(...)``.
+        origin: How this entry enters History — ``"solve"`` (a normal run) or
+            ``"xlsx_import"`` (an external Excel results file imported via
+            ``POST /api/import/result/xlsx``). Recorded in the meta so History
+            can visually distinguish imported results from solved runs.
 
     Returns:
         The meta dict that was written to disk, or ``None`` if storage failed
@@ -784,6 +794,7 @@ def store_run(
             "savedAt": saved_at,
             "label": label,
             "filename": filename,
+            "origin": origin,
             "snapshotStart": options.get("snapshotStart"),
             "snapshotEnd": options.get("snapshotEnd"),
             "snapshotWeight": options.get("snapshotWeight"),
