@@ -355,7 +355,13 @@ def build_network(
         if not ext.any():
             continue
         if "lifetime" in frame.columns:
-            lifetimes = frame.loc[ext, "lifetime"].replace(0, pd.NA).fillna(20.0)
+            # PyPSA DEFAULTS lifetime to +inf, which has no finite annuity factor
+            # (annuity_factor(rate, inf) → NaN). Without this guard the extendable
+            # asset's capital_cost annuitises to NaN → 0 in the objective, so it
+            # builds for FREE up to its max. Treat inf / NaN / ≤0 as a 20-year
+            # fallback so CAPEX is actually priced.
+            lifetimes = pd.to_numeric(frame.loc[ext, "lifetime"], errors="coerce")
+            lifetimes = lifetimes.where((lifetimes > 0) & (lifetimes < float("inf")), 20.0)
         else:
             lifetimes = pd.Series(20.0, index=frame.index[ext])
         afs = lifetimes.apply(lambda L: annuity_factor(discount_rate, float(L)))

@@ -37,8 +37,10 @@ group can add a `StorageUnit` at every bus where a plant was replaced. Size it
 as a **proportion of the replaced capacity** (e.g. 30%) or a **fixed MW** per
 bus, with configurable duration (`max_hours`) and round-trip efficiency (split
 √ into charge/discharge). Turn on **Capacity expansion** to make it
-`p_nom_extendable` between a min/max with a capital cost. The carrier (default
-`ESS`) is added to the model's carriers if absent. The per-bus ESS sizing is
+`p_nom_extendable` between a min/max (each as MW *or* a % of the bus's replaced
+capacity) with an **overnight** capital cost that the backend annuitises over
+the configured **lifetime**. The carrier (default `ESS`) is added to the model's
+carriers if absent. The per-bus ESS sizing (and resolved expansion bounds) is
 previewed in the Output tab next to the reallocation plan.
 
 Solve-time effects travel **as data** (Ragnarok runs no plugin code in-solve):

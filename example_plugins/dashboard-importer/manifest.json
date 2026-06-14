@@ -1,7 +1,7 @@
 {
   "id": "dashboard-importer",
   "name": "Dashboard Importer (backend)",
-  "version": "3.6.0",
+  "version": "3.6.1",
   "kind": "backend",
   "description": "Builds a Ragnarok workbook from a PyPSA dashboard model + GUI settings. Runs ENTIRELY in the Ragnarok backend (imports the bundled PyPSA source); the model is written straight into the session and never enters the browser. Backend port of the frontend dashboard importer — no separate server, nothing in plugins.env.",
   "capabilities": [
@@ -418,9 +418,16 @@
     },
     "ess_capital_cost": {
       "type": "number",
-      "label": "Capital cost (per MW)",
-      "description": "Annualised capital cost per MW of ESS power. Drives capacity expansion; leave 0 for no cost.",
+      "label": "Capital cost (overnight, per MW)",
+      "description": "Overnight (total) capital cost per MW of ESS power. The backend annuitises it over the lifetime below at the project discount rate. Drives capacity expansion; leave 0 for no cost.",
       "default": 0,
+      "visibleWhen": { "field": "add_ess", "equals": true }
+    },
+    "ess_lifetime": {
+      "type": "number",
+      "label": "Lifetime (years)",
+      "description": "Economic lifetime used to annuitise the capital cost above (annuity factor at the project discount rate). Typical battery ≈ 10–15 years.",
+      "default": 15,
       "visibleWhen": { "field": "add_ess", "equals": true }
     },
     "ess_expandable": {

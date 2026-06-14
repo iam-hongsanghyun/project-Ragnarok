@@ -872,6 +872,7 @@ def _settings_from_config(settings_mod: Any, cfg: dict[str, Any]) -> Any:
         ess_proportion_pct=_as_float(cfg, "ess_proportion_pct", 30.0),
         ess_fixed_mw=_as_float(cfg, "ess_fixed_mw", 100.0),
         ess_capital_cost=_as_float(cfg, "ess_capital_cost", 0.0),
+        ess_lifetime=_as_float(cfg, "ess_lifetime", 15.0),
         ess_expandable=_as_bool(cfg, "ess_expandable", False),
         ess_expansion_mode=_as_str(cfg, "ess_expansion_mode", "proportional"),
         ess_p_nom_min=_as_float(cfg, "ess_p_nom_min", 0.0),
@@ -919,6 +920,7 @@ def _apply_config_to_settings(settings: Any, cfg: dict[str, Any]) -> None:
     _override_float(settings, cfg, "ess_proportion_pct")
     _override_float(settings, cfg, "ess_fixed_mw")
     _override_float(settings, cfg, "ess_capital_cost")
+    _override_float(settings, cfg, "ess_lifetime")
     _override_bool(settings, cfg, "ess_expandable")
     _override_str(settings, cfg, "ess_expansion_mode")
     _override_float(settings, cfg, "ess_p_nom_min")
