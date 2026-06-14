@@ -70,7 +70,7 @@ def test_ess_proportional_with_expansion(libs: dict[str, Any]) -> None:
     dash = _dashboard(
         libs, add_ess=True, ess_carrier="MyBattery", ess_hours=4, ess_efficiency=0.81,
         ess_sizing_mode="proportional", ess_proportion_pct=30, ess_capital_cost=12345,
-        ess_expandable=True, ess_p_nom_min=10, ess_p_nom_max=500,
+        ess_expandable=True, ess_expansion_mode="fixed", ess_p_nom_min=10, ess_p_nom_max=500,
     )
     replaced = libs["generator_replacement"].replace_generators(n, dash)
     libs["ess"].add_storage_at_replaced_buses(n, dash, replaced)
@@ -89,6 +89,40 @@ def test_ess_proportional_with_expansion(libs: dict[str, Any]) -> None:
     assert su.at["ESS_b1", "p_nom_min"] == pytest.approx(10.0)
     assert su.at["ESS_b1", "p_nom_max"] == pytest.approx(500.0)
     assert su.at["ESS_b1", "carrier"] == "MyBattery"
+
+
+def test_ess_proportional_expansion_bounds(libs: dict[str, Any]) -> None:
+    """Expansion min/max can be a % of the bus's (summed) replaced capacity."""
+    n = _network()
+    dash = _dashboard(
+        libs, add_ess=True, ess_sizing_mode="proportional", ess_proportion_pct=30,
+        ess_expandable=True, ess_expansion_mode="proportional",
+        ess_p_nom_min=10, ess_p_nom_max=200,
+    )
+    replaced = libs["generator_replacement"].replace_generators(n, dash)  # b1=600, b2=300
+    libs["ess"].add_storage_at_replaced_buses(n, dash, replaced)
+
+    su = n.storage_units
+    # b1: 10%..200% of 600 → [60, 1200]; b2: of 300 → [30, 600].
+    assert su.at["ESS_b1", "p_nom_min"] == pytest.approx(60.0)
+    assert su.at["ESS_b1", "p_nom_max"] == pytest.approx(1200.0)
+    assert su.at["ESS_b2", "p_nom_min"] == pytest.approx(30.0)
+    assert su.at["ESS_b2", "p_nom_max"] == pytest.approx(600.0)
+
+
+def test_ess_fixed_expansion_bounds_are_mw(libs: dict[str, Any]) -> None:
+    """In fixed mode the min/max are MW, identical on every bus."""
+    n = _network()
+    dash = _dashboard(
+        libs, add_ess=True, ess_sizing_mode="fixed", ess_fixed_mw=100,
+        ess_expandable=True, ess_expansion_mode="fixed", ess_p_nom_min=50, ess_p_nom_max=300,
+    )
+    replaced = libs["generator_replacement"].replace_generators(n, dash)
+    libs["ess"].add_storage_at_replaced_buses(n, dash, replaced)
+    su = n.storage_units
+    assert su.at["ESS_b1", "p_nom_min"] == pytest.approx(50.0)
+    assert su.at["ESS_b1", "p_nom_max"] == pytest.approx(300.0)
+    assert su.at["ESS_b2", "p_nom_max"] == pytest.approx(300.0)
 
 
 def test_ess_fixed_mw_no_expansion(libs: dict[str, Any]) -> None:
