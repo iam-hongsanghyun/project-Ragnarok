@@ -209,6 +209,21 @@ function AppInner() {
   // analytics + build the run db), so History shows a "Converting…" placeholder
   // row per in-flight import until the real entry lands.
   const [convertingImports, setConvertingImports] = useState<string[]>([]);
+  // Per-stored-run in-flight activity (run name → label like "Importing" /
+  // "Exporting" / "Deleting"), so each History row shows a spinner + label while
+  // an action on it is running — the way the Queue shows "Running".
+  const [runActivity, setRunActivity] = useState<Record<string, string>>({});
+  const setRunBusy = useCallback((name: string, label: string | null) => {
+    setRunActivity((current) => {
+      if (label === null) {
+        if (!(name in current)) return current;
+        const next = { ...current };
+        delete next[name];
+        return next;
+      }
+      return { ...current, [name]: label };
+    });
+  }, []);
   // Name of the backend run currently shown in the viewer — drives the
   // Comparison "active" column highlight. Set after a run completes (to the
   // newest stored meta) and when opening a stored run.
@@ -1543,6 +1558,7 @@ function AppInner() {
     name: string,
     opts?: { restoreConstraints?: boolean; asProject?: boolean },
   ) => {
+    if (opts?.asProject) setRunBusy(name, 'Importing');
     try {
       if (opts?.asProject) {
         // FAST IMPORT. Promote the run into the session SERVER-SIDE (model copied
@@ -1621,6 +1637,8 @@ function AppInner() {
       // exactly where they are.
     } catch {
       showToast('Stored run could not be opened.', 'error');
+    } finally {
+      if (opts?.asProject) setRunBusy(name, null);
     }
   };
 
@@ -1650,6 +1668,7 @@ function AppInner() {
     parts?: string[],
   ): Promise<void> => {
     const label = kind === 'package' ? 'project (.zip)' : 'workbook (.xlsx)';
+    setRunBusy(name, 'Exporting');
     try {
       const createResp = await fetch(`${API_BASE}/api/exports`, {
         method: 'POST',
@@ -1692,6 +1711,8 @@ function AppInner() {
       const msg = error instanceof Error ? error.message : 'Export failed.';
       setStatus(msg);
       showToast(msg, 'error');
+    } finally {
+      setRunBusy(name, null);
     }
   };
 
@@ -1709,11 +1730,13 @@ function AppInner() {
 
   const handleDeleteBackendRuns = async (names: string[]) => {
     // Delete all selected, then refresh once.
+    names.forEach((name) => setRunBusy(name, 'Deleting'));
     await Promise.all(
       names.map((name) =>
         fetch(`${API_BASE}/api/runs/${encodeURIComponent(name)}`, { method: 'DELETE' }).catch(() => undefined),
       ),
     );
+    names.forEach((name) => setRunBusy(name, null));
     setActiveRunName((current) => (current && names.includes(current) ? null : current));
     void refreshBackendRuns();
   };
@@ -2396,6 +2419,7 @@ function AppInner() {
                     onImportBackendRun={(name) => void handleOpenBackendRun(name, { asProject: true, restoreConstraints: true })}
                     onImportResult={() => resultImportInputRef.current?.click()}
                     convertingImports={convertingImports}
+                    runActivity={runActivity}
                     onDownloadBackendXlsx={handleDownloadBackendXlsx}
                     onExportBackendProject={handleExportBackendProject}
                     onDeleteBackendRuns={handleDeleteBackendRuns}

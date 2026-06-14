@@ -23,6 +23,9 @@ interface HistoryViewProps {
   /** Filenames of result imports currently converting — shown as placeholder
    *  rows so a slow (tens-of-seconds) import doesn't read as "nothing happened". */
   convertingImports?: string[];
+  /** Per-run in-flight activity (name → "Importing" / "Exporting" / "Deleting"),
+   *  shown as a spinner + label on that row. */
+  runActivity?: Record<string, string>;
   /** Explicit Excel export; `parts` ⊆ ['metadata','model','result'] selects sheet groups. */
   onDownloadBackendXlsx: (name: string, parts: string[]) => void;
   /** Download the full project package (.zip of bundle JSON + meta JSON + xlsx). */
@@ -56,6 +59,7 @@ export function HistoryView({
   onImportBackendRun,
   onImportResult,
   convertingImports,
+  runActivity,
   onDownloadBackendXlsx,
   onExportBackendProject,
   onDeleteBackendRuns,
@@ -193,6 +197,7 @@ export function HistoryView({
               key={meta.name}
               meta={meta}
               selected={visibleSelected.includes(meta.name)}
+              activity={runActivity?.[meta.name]}
               onSelect={(checked) => toggleName(meta.name, checked)}
               onActivate={() => onViewSelected([meta.name])}
               onRename={(newName) => onRenameBackendRun(meta.name, newName)}
@@ -262,10 +267,12 @@ function formatDemand(mwh: number | null | undefined): string | null {
 // ── Backend (server-stored) run row ─────────────────────────────────────────
 
 function BackendHistoryRow({
-  meta, selected, onSelect, onActivate, onRename,
+  meta, selected, activity, onSelect, onActivate, onRename,
 }: {
   meta: BackendRunMeta;
   selected: boolean;
+  /** In-flight action on this run ("Importing" / "Exporting" / "Deleting"), or undefined. */
+  activity?: string;
   onSelect: (checked: boolean) => void;
   /** Double-click / Enter on the row → view this single run (toolbar handles the rest). */
   onActivate: () => void;
@@ -352,6 +359,12 @@ function BackendHistoryRow({
       ))}
 
       <span className="history-row-spacer" />
+      {activity && (
+        <span className="history-row-activity" role="status">
+          <span className="topbar-spinner" aria-hidden="true" />
+          {activity}…
+        </span>
+      )}
     </div>
   );
 }
