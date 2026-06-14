@@ -11,6 +11,10 @@
 import React, { useMemo, useState } from 'react';
 import { BackendRunMeta } from 'lib/types';
 import { formatRelTime } from 'lib/utils/formatRelTime';
+import { usePersistedState } from 'shared/hooks/usePersistedState';
+
+/** localStorage key for the user's manual drag-and-drop ordering of runs (by name). */
+const ORDER_KEY = 'ragnarok.history.manualOrder';
 
 interface HistoryViewProps {
   backendRuns: BackendRunMeta[];
@@ -35,6 +39,22 @@ interface HistoryViewProps {
   onRenameBackendRun: (name: string, newName: string) => void;
   /** Manually re-fetch the run list from the backend. */
   onReload?: () => void;
+}
+
+/**
+ * Reorder a list of run names after a drag-and-drop: lift `names[fromIndex]`
+ * out and reinsert it relative to `names[toIndex]` — below the target when the
+ * drag moved downward, above it when the drag moved upward. Returns a new array
+ * (the input is not mutated). A no-op `fromIndex === toIndex` returns a copy.
+ */
+export function reorderNames(names: string[], fromIndex: number, toIndex: number): string[] {
+  if (fromIndex === toIndex) return [...names];
+  const dragged = names[fromIndex];
+  const without = names.filter((n) => n !== dragged);
+  let insertAt = without.indexOf(names[toIndex]);
+  if (fromIndex < toIndex) insertAt += 1;
+  without.splice(insertAt, 0, dragged);
+  return without;
 }
 
 /** Case-insensitive match for a backend run's meta. */
@@ -68,6 +88,15 @@ export function HistoryView({
 }: HistoryViewProps) {
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<string[]>([]);
+  // Manual drag-and-drop order, persisted by run name. Empty → fall back to the
+  // default newest-first (savedAt) sort. Once the user drags a row, the whole
+  // visible order is captured here and from then on the list follows it; brand
+  // new runs (not yet placed) surface at the top so they're never hidden.
+  const [manualOrder, setManualOrder] = usePersistedState<string[]>(ORDER_KEY, []);
+  // Index of the row being dragged and the row currently hovered, for the live
+  // drop indicator. Both null when no drag is in progress.
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [overIndex, setOverIndex] = useState<number | null>(null);
   // Export dialog: which run is being exported (null = closed) + the three
   // sheet-group checkboxes. All on by default so the file is a complete,
   // PyPSA-import-ready workbook with the Result included.
@@ -79,12 +108,46 @@ export function HistoryView({
     [backendRuns, query],
   );
 
-  const sorted = useMemo(
-    () => [...filtered].sort((a, b) => (a.savedAt < b.savedAt ? 1 : a.savedAt > b.savedAt ? -1 : 0)),
-    [filtered],
-  );
+  // Default order: newest first. The manual order (if any) then takes over —
+  // placed runs follow it; anything not yet placed stays newest-first on top.
+  const sorted = useMemo(() => {
+    const byDate = [...filtered].sort((a, b) =>
+      a.savedAt < b.savedAt ? 1 : a.savedAt > b.savedAt ? -1 : 0,
+    );
+    if (manualOrder.length === 0) return byDate;
+    const rank = new Map(manualOrder.map((name, i) => [name, i]));
+    const placed = byDate.filter((m) => rank.has(m.name)).sort((a, b) => rank.get(a.name)! - rank.get(b.name)!);
+    const unplaced = byDate.filter((m) => !rank.has(m.name));
+    return [...unplaced, ...placed];
+  }, [filtered, manualOrder]);
 
   const visibleNames = useMemo(() => sorted.map((m) => m.name), [sorted]);
+
+  // Reordering only makes sense over the full, unfiltered list — a drag within
+  // a search-filtered subset would silently rearrange hidden rows. So the drag
+  // handles are live only when no search query is active.
+  const reorderable = query.trim() === '';
+
+  const onRowDragStart = (index: number) => (e: React.DragEvent) => {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(index));
+    setDragIndex(index);
+  };
+  const onRowDragOver = (index: number) => (e: React.DragEvent) => {
+    if (dragIndex === null) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setOverIndex(index);
+  };
+  const endDrag = () => { setDragIndex(null); setOverIndex(null); };
+  const onRowDrop = (index: number) => (e: React.DragEvent) => {
+    e.preventDefault();
+    if (dragIndex === null || dragIndex === index) { endDrag(); return; }
+    // Capture the current visible order and reinsert the dragged run relative to
+    // the hovered row; this "freezes" the merged order into the explicit one.
+    setManualOrder(reorderNames(visibleNames, dragIndex, index));
+    endDrag();
+  };
   const visibleSelected = useMemo(
     () => selected.filter((n) => visibleNames.includes(n)),
     [selected, visibleNames],
@@ -169,6 +232,15 @@ export function HistoryView({
         <button className="tb-btn" onClick={deleteSelected} disabled={n === 0}>
           Delete ({n})
         </button>
+        {manualOrder.length > 0 && (
+          <button
+            className="tb-btn"
+            onClick={() => setManualOrder([])}
+            title="Discard the custom drag order and sort newest-first again"
+          >
+            Reset order
+          </button>
+        )}
         {onReload && (
           <button className="tb-btn" onClick={onReload} title="Re-fetch run history from the backend">
             Reload
@@ -192,12 +264,23 @@ export function HistoryView({
               <span className="history-row-spacer" />
             </div>
           ))}
-          {sorted.map((meta) => (
+          {sorted.map((meta, index) => (
             <BackendHistoryRow
               key={meta.name}
               meta={meta}
               selected={visibleSelected.includes(meta.name)}
               activity={runActivity?.[meta.name]}
+              reorderable={reorderable}
+              dragging={dragIndex === index}
+              dropEdge={
+                overIndex === index && dragIndex !== null && dragIndex !== index
+                  ? dragIndex < index ? 'after' : 'before'
+                  : null
+              }
+              onGripDragStart={onRowDragStart(index)}
+              onRowDragOver={onRowDragOver(index)}
+              onRowDrop={onRowDrop(index)}
+              onDragEnd={endDrag}
               onSelect={(checked) => toggleName(meta.name, checked)}
               onActivate={() => onViewSelected([meta.name])}
               onRename={(newName) => onRenameBackendRun(meta.name, newName)}
@@ -267,12 +350,24 @@ function formatDemand(mwh: number | null | undefined): string | null {
 // ── Backend (server-stored) run row ─────────────────────────────────────────
 
 function BackendHistoryRow({
-  meta, selected, activity, onSelect, onActivate, onRename,
+  meta, selected, activity, reorderable, dragging, dropEdge,
+  onGripDragStart, onRowDragOver, onRowDrop, onDragEnd,
+  onSelect, onActivate, onRename,
 }: {
   meta: BackendRunMeta;
   selected: boolean;
   /** In-flight action on this run ("Importing" / "Exporting" / "Deleting"), or undefined. */
   activity?: string;
+  /** Whether the drag handle is live (false while a search query is filtering rows). */
+  reorderable: boolean;
+  /** This row is the one currently being dragged. */
+  dragging: boolean;
+  /** Show a drop indicator on this row's top ('before') or bottom ('after') edge. */
+  dropEdge: 'before' | 'after' | null;
+  onGripDragStart: (e: React.DragEvent) => void;
+  onRowDragOver: (e: React.DragEvent) => void;
+  onRowDrop: (e: React.DragEvent) => void;
+  onDragEnd: () => void;
   onSelect: (checked: boolean) => void;
   /** Double-click / Enter on the row → view this single run (toolbar handles the rest). */
   onActivate: () => void;
@@ -296,11 +391,32 @@ function BackendHistoryRow({
   // Rows are otherwise display-only: select with the checkbox (or click the
   // row), then use the toolbar actions at the top. This keeps every row a
   // clean, aligned line instead of a ragged strip of buttons.
+  const rowClass =
+    `history-row${selected ? ' is-selected' : ''}${dragging ? ' is-dragging' : ''}` +
+    (dropEdge ? ` is-drop-${dropEdge}` : '');
+
   return (
     <div
-      className={`history-row${selected ? ' is-selected' : ''}`}
+      className={rowClass}
       onDoubleClick={onActivate}
+      onDragOver={reorderable ? onRowDragOver : undefined}
+      onDrop={reorderable ? onRowDrop : undefined}
     >
+      {reorderable && (
+        <span
+          className="history-row-grip"
+          draggable
+          onDragStart={onGripDragStart}
+          onDragEnd={onDragEnd}
+          onClick={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          title="Drag to reorder"
+          aria-label={`Reorder ${name}`}
+          role="button"
+        >
+          ⠿
+        </span>
+      )}
       <input
         type="checkbox"
         className="history-row-select"
