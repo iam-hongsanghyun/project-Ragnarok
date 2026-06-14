@@ -431,3 +431,42 @@ def test_rename_run_guards(_runs_dir: Path) -> None:
     # No-op rename returns the current meta unchanged.
     same, err = run_store.rename_run(meta_a["name"], meta_a["name"])
     assert err == "" and same is not None and same["name"] == meta_a["name"]
+
+
+def test_get_run_model_returns_input_model_without_output_series(_runs_dir: Path) -> None:
+    """The promote source reads the input model (static + INPUT series) and the
+    head (scenario / window), but NOT the heavy OUTPUT series."""
+    model = {
+        "buses": [{"name": "n1"}],
+        "loads": [{"name": "L", "bus": "n1"}],
+        # An INPUT time-series — part of the editable model, must come through.
+        "loads-p_set": [
+            {"snapshot": "2025-01-01T00:00:00", "L": 80.0},
+            {"snapshot": "2025-01-01T01:00:00", "L": 90.0},
+        ],
+    }
+    # An OUTPUT series lives under result.outputs.series — NOT the model.
+    result = {
+        "outputs": {
+            "static": {},
+            "series": {"generators-p": [{"snapshot": "2025-01-01T00:00:00", "g": 5.0}]},
+        },
+    }
+    meta = run_store.store_run(model, {"label": "Promote me", "discountRate": 0.05}, {"snapshotWeight": 2}, result)
+    assert meta is not None
+
+    data = run_store.get_run_model(meta["name"])
+    assert data is not None
+    # Input model incl. the input time-series round-trips.
+    assert "buses" in data["model"] and "loads" in data["model"]
+    assert data["model"]["loads-p_set"] == [
+        {"snapshot": "2025-01-01T00:00:00", "L": 80.0},
+        {"snapshot": "2025-01-01T01:00:00", "L": 90.0},
+    ]
+    # The output series is NOT pulled in (it pages on demand later).
+    assert "generators-p" not in data["model"]
+    # Head carries scenario + window for restoring constraints / controls.
+    assert data["scenario"]["label"] == "Promote me"
+    assert data["snapshotWeight"] == 2
+
+    assert run_store.get_run_model("does-not-exist") is None

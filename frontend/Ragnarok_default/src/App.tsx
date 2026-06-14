@@ -50,7 +50,7 @@ import { dslToSpecs, parseConstraintDsl } from 'lib/constraints/dsl';
 import { buildScenarioPreset, defaultScenarioCatalog, readScenarioCatalogFromModel, sameScenarioCatalog, writeScenarioCatalogToModel } from 'lib/results/scenarios';
 import { readCarbonLibraryFromModel, writeCarbonLibraryToModel, sameCarbonLibrary } from 'lib/results/carbonLibrary';
 import { saveSessionControls, loadSessionControls, clearSession, clearSessionModelOnly } from 'lib/storage/sessionStore';
-import { clearSessionModel, putSessionModel, putStaticModel, getSessionFullModel, getSessionMeta, getSheetPage, isSeriesSheet, patchSheet, DEFAULT_SESSION_ID } from 'lib/api/session';
+import { clearSessionModel, putSessionModel, putStaticModel, getSessionFullModel, getSessionMeta, getSheetPage, isSeriesSheet, patchSheet, seriesSheetCounts, DEFAULT_SESSION_ID } from 'lib/api/session';
 import type { SheetEditOp } from 'lib/api/session';
 import { RunDialog } from './features/run/RunDialog';
 import { SettingsView } from './views/SettingsView';
@@ -659,13 +659,7 @@ function AppInner() {
           // demand) instead of hiding them.
           try {
             const sessionMeta = await getSessionMeta();
-            if (!cancelled) {
-              const counts: Record<string, number> = {};
-              for (const sheet of sessionMeta.sheets ?? []) {
-                if (sheet.kind === 'series' && sheet.rowCount > 0) counts[sheet.name] = sheet.rowCount;
-              }
-              setSessionSeriesCounts(counts);
-            }
+            if (!cancelled) setSessionSeriesCounts(seriesSheetCounts(sessionMeta));
           } catch { /* tree just won't list series until next load */ }
           if (controls) {
             setCarbonPrice(controls.carbonPrice);
@@ -1294,7 +1288,7 @@ function AppInner() {
     snapshotWeight: number;
   };
 
-  const handleRestoreRun = (entry: RestorableRun, opts?: { loadIntoEditor?: boolean }) => {
+  const handleRestoreRun = (entry: RestorableRun, opts?: { loadIntoEditor?: boolean; sessionAlreadyLoaded?: boolean }) => {
     // Older persisted entries may predate canonicalisation — re-canonicalise
     // the restored outputs in place so display/derivation see ISO-`T` + leading
     // `snapshot` consistently.
@@ -1328,8 +1322,13 @@ function AppInner() {
       // The session is the source of truth and runs submit by sessionId — push
       // the FULL restored model (incl. its time-series; a static merge would
       // leave the previous model's series in place and the next run would solve
-      // a chimera).
-      void putSessionModel(restoredModel, { filename: entry.label ?? '' }).catch(() => { /* best-effort */ });
+      // a chimera). SKIP when the session ALREADY holds this model server-side
+      // (the History "Import project" fast path promoted it DB→session, and
+      // `entry.model` here is only the static topology) — re-pushing would wipe
+      // the series.
+      if (!opts?.sessionAlreadyLoaded) {
+        void putSessionModel(restoredModel, { filename: entry.label ?? '' }).catch(() => { /* best-effort */ });
+      }
       const snapshotMax = snapshotMaxFromWorkbook(restoredModel.snapshots);
       setMaxSnapshots(snapshotMax);
       setSnapshotStart(entry.snapshotStart);
@@ -1541,14 +1540,57 @@ function AppInner() {
     opts?: { restoreConstraints?: boolean; asProject?: boolean },
   ) => {
     try {
+      if (opts?.asProject) {
+        // FAST IMPORT. Promote the run into the session SERVER-SIDE (model copied
+        // db→session, no full year of series through the browser), then rehydrate
+        // the editor static-only and fetch the LIGHT analytics for the results.
+        // The series page into the grid on demand, exactly like a fresh load.
+        setStatus(`Importing ${name}…`);
+        const promoteResp = await fetch(`${API_BASE}/api/runs/${encodeURIComponent(name)}/promote`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: DEFAULT_SESSION_ID }),
+        });
+        if (!promoteResp.ok) {
+          showToast('Stored run could not be imported.', 'error');
+          return;
+        }
+        const promoted = (await promoteResp.json()) as {
+          scenario?: { constraints?: CustomConstraint[]; carbonPrice?: number; discountRate?: number; label?: string };
+          snapshotStart?: number; snapshotEnd?: number; snapshotWeight?: number; filename?: string;
+        };
+        const aResp = await fetch(`${API_BASE}/api/runs/${encodeURIComponent(name)}/analytics`);
+        const light = aResp.ok ? await aResp.json() : {};
+        handleRestoreRun(
+          {
+            label: light.label || promoted.filename || name,
+            results: (light.result ?? {}) as RunResults,
+            // Static topology only — the editor pages the series on demand; the
+            // FULL model already lives in the session (promoted above).
+            model: light.modelStatic ?? {},
+            carbonPrice: light.scenario?.carbonPrice ?? promoted.scenario?.carbonPrice ?? 0,
+            discountRate: light.scenario?.discountRate ?? promoted.scenario?.discountRate,
+            snapshotStart: promoted.snapshotStart ?? light.options?.snapshotStart ?? 0,
+            snapshotEnd: promoted.snapshotEnd ?? light.options?.snapshotEnd ?? 0,
+            snapshotWeight: promoted.snapshotWeight ?? light.options?.snapshotWeight ?? 1,
+          },
+          { loadIntoEditor: true, sessionAlreadyLoaded: true },
+        );
+        setActiveRunName(name);
+        // List the session's temporal sheets in the Model tree (they're not in
+        // the static model; selecting one pages its rows from the session).
+        try {
+          setSessionSeriesCounts(seriesSheetCounts(await getSessionMeta()));
+        } catch { /* tree just won't list series */ }
+        const importedConstraints = promoted.scenario?.constraints;
+        if (Array.isArray(importedConstraints)) setConstraints(importedConstraints);
+        return;
+      }
+
       // VIEW is light: the analytics endpoint omits the input model and the
       // heavy per-component output series (charts get the small carrier-level
-      // series + KPIs inline). IMPORT needs the full bundle to load the model
-      // into the editor, so it pays for the full payload deliberately.
-      const url = opts?.asProject
-        ? `${API_BASE}/api/runs/${encodeURIComponent(name)}`
-        : `${API_BASE}/api/runs/${encodeURIComponent(name)}/analytics`;
-      const resp = await fetch(url);
+      // series + KPIs inline).
+      const resp = await fetch(`${API_BASE}/api/runs/${encodeURIComponent(name)}/analytics`);
       if (!resp.ok) {
         showToast('Stored run could not be opened.', 'error');
         return;
@@ -1558,33 +1600,20 @@ function AppInner() {
       handleRestoreRun({
         label: bundle.label || name,
         results: result,
-        // VIEW carries only the topology (modelStatic) for the map; IMPORT
-        // carries the full model to load into the editor.
-        model: bundle.model ?? bundle.modelStatic,
+        model: bundle.modelStatic,
         carbonPrice: bundle.scenario?.carbonPrice ?? 0,
         discountRate: bundle.scenario?.discountRate,
         snapshotStart: bundle.snapshotStart ?? bundle.options?.snapshotStart ?? 0,
         snapshotEnd: bundle.snapshotEnd ?? bundle.options?.snapshotEnd ?? 0,
         snapshotWeight: bundle.snapshotWeight ?? bundle.options?.snapshotWeight ?? 1,
-      }, { loadIntoEditor: !!opts?.asProject });
+      }, { loadIntoEditor: false });
       // Mark this stored run as the active one so Comparison highlights it.
       setActiveRunName(name);
-      // Importing as a project also pushes the run's model into the backend
-      // session so the editable working model and the backend agree.
-      if (opts?.asProject && bundle.model) {
-        void putSessionModel(bundle.model, {
-          filename: bundle.filename || `${name}.xlsx`,
-          scenarioName: bundle.scenario?.label || name,
-        }).catch(() => { /* best-effort; live edit still works */ });
-      }
-      // On import, restore the project's custom constraints so a re-run uses
-      // them (history "View results" leaves the live constraint list alone).
-      if ((opts?.restoreConstraints || opts?.asProject) && Array.isArray(bundle.scenario?.constraints)) {
+      if (opts?.restoreConstraints && Array.isArray(bundle.scenario?.constraints)) {
         setConstraints(bundle.scenario.constraints);
       }
-      // Intentionally do NOT switch tabs here — opening/importing a run leaves
-      // the user exactly where they are (the results are available the moment
-      // they choose to look at Analytics).
+      // Intentionally do NOT switch tabs here — opening a run leaves the user
+      // exactly where they are.
     } catch {
       showToast('Stored run could not be opened.', 'error');
     }
@@ -2388,12 +2417,7 @@ function AppInner() {
                   // temporal sheets from its meta — otherwise the Model tree would
                   // hide them and they'd look "missing" (they're solved either way).
                   try {
-                    const sessionMeta = await getSessionMeta();
-                    const counts: Record<string, number> = {};
-                    for (const sheet of sessionMeta.sheets ?? []) {
-                      if (sheet.kind === 'series' && sheet.rowCount > 0) counts[sheet.name] = sheet.rowCount;
-                    }
-                    setSessionSeriesCounts(counts);
+                    setSessionSeriesCounts(seriesSheetCounts(await getSessionMeta()));
                   } catch { /* tree just won't list series; they still solve */ }
                   setTab('Model');
                 } catch {
