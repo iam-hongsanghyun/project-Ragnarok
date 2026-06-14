@@ -945,8 +945,22 @@ def _as_int(cfg: dict[str, Any], key: str, default: int) -> int:
     return int(raw) if raw else default
 
 
+def _raw(cfg: dict[str, Any], key: str) -> str:
+    """Stripped string for *key*, or '' only when genuinely absent/blank.
+
+    Critically, a numeric ``0`` must NOT collapse to ''. The old
+    ``str(cfg.get(key, "") or "")`` did exactly that — ``0`` is falsy, so a
+    user-entered ``0`` reverted to the field's default (e.g. ESS 0 MW → 100 MW).
+    Only ``None`` / missing / whitespace counts as unset here.
+    """
+    val = cfg.get(key)
+    if val is None:
+        return ""
+    return str(val).strip()
+
+
 def _as_float(cfg: dict[str, Any], key: str, default: float) -> float:
-    raw = str(cfg.get(key, "") or "").strip()
+    raw = _raw(cfg, key)
     return float(raw) if raw else default
 
 
@@ -972,19 +986,19 @@ def _as_str_list(cfg: dict[str, Any], key: str) -> tuple[str, ...]:
 
 
 def _override_str(s: Any, cfg: dict[str, Any], field: str) -> None:
-    raw = str(cfg.get(field, "") or "").strip()
+    raw = _raw(cfg, field)
     if raw:
         setattr(s, field, raw)
 
 
 def _override_int(s: Any, cfg: dict[str, Any], field: str) -> None:
-    raw = str(cfg.get(field, "") or "").strip()
+    raw = _raw(cfg, field)
     if raw:
         setattr(s, field, int(raw))
 
 
 def _override_float(s: Any, cfg: dict[str, Any], field: str) -> None:
-    raw = str(cfg.get(field, "") or "").strip()
+    raw = _raw(cfg, field)
     if raw:
         setattr(s, field, float(raw))
 

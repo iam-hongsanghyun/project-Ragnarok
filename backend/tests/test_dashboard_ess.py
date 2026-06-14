@@ -14,7 +14,8 @@ from typing import Any
 import pandas as pd
 import pytest
 
-_LIB = Path(__file__).resolve().parents[2] / "example_plugins" / "dashboard-importer" / "dashboard_lib"
+_PLUGIN = Path(__file__).resolve().parents[2] / "example_plugins" / "dashboard-importer"
+_LIB = _PLUGIN / "dashboard_lib"
 
 
 def _load(name: str) -> Any:
@@ -22,6 +23,14 @@ def _load(name: str) -> Any:
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module  # dataclass needs the module registered
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_pipeline() -> Any:
+    spec = importlib.util.spec_from_file_location("dashboard_pipeline_under_test", _PLUGIN / "pipeline.py")
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
@@ -148,6 +157,59 @@ def test_ess_fixed_mw_no_expansion(libs: dict[str, Any]) -> None:
 def test_ess_off_adds_nothing(libs: dict[str, Any]) -> None:
     n = _network()
     dash = _dashboard(libs, add_ess=False)
+    replaced = libs["generator_replacement"].replace_generators(n, dash)
+    libs["ess"].add_storage_at_replaced_buses(n, dash, replaced)
+    assert len(n.storage_units) == 0
+
+
+def test_config_float_zero_is_not_reverted_to_default() -> None:
+    """Regression: a user-entered 0 must survive the GUI-config → Settings map.
+
+    The old ``str(cfg.get(k, '') or '')`` collapsed a numeric ``0`` to '' (0 is
+    falsy), so 0 MW silently became the field default (100 MW). Cover both the
+    numeric (JSON-number) and string forms, and confirm blank still defaults.
+    """
+    pl = _load_pipeline()
+    # numeric 0 (what the GUI number input actually sends) → 0, not the default.
+    assert pl._as_float({"ess_fixed_mw": 0}, "ess_fixed_mw", 100.0) == 0.0
+    assert pl._as_float({"ess_fixed_mw": 0.0}, "ess_fixed_mw", 100.0) == 0.0
+    assert pl._as_float({"ess_fixed_mw": "0"}, "ess_fixed_mw", 100.0) == 0.0
+    # genuinely absent / blank still falls back to the default.
+    assert pl._as_float({}, "ess_fixed_mw", 100.0) == 100.0
+    assert pl._as_float({"ess_fixed_mw": ""}, "ess_fixed_mw", 100.0) == 100.0
+    assert pl._as_float({"ess_fixed_mw": "  "}, "ess_fixed_mw", 100.0) == 100.0
+
+    class _S:
+        ess_fixed_mw = 100.0
+
+    s = _S()
+    pl._override_float(s, {"ess_fixed_mw": 0}, "ess_fixed_mw")
+    assert s.ess_fixed_mw == 0.0  # 0 overrides; was kept at 100 by the bug
+    s2 = _S()
+    pl._override_float(s2, {"ess_fixed_mw": ""}, "ess_fixed_mw")
+    assert s2.ess_fixed_mw == 100.0  # blank leaves the prior value untouched
+
+
+def test_config_zero_fixed_mw_yields_no_storage_end_to_end(libs: dict[str, Any]) -> None:
+    """0 MW fixed, expansion off → built model has no ESS (not a 100 MW unit)."""
+    pl = _load_pipeline()
+    cfg = {
+        "add_ess": True,
+        "ess_sizing_mode": "fixed",
+        "ess_fixed_mw": 0,  # the user's exact input
+        "ess_expandable": False,
+        "replace_generators": True,
+        "replace_all_carriers": True,
+        "replace_carriers": "coal",
+        "replace_solar_pct": 60,
+        "replace_wind_pct": 40,
+    }
+    settings = pl._settings_from_config(libs["settings"], cfg)
+    assert settings.ess_fixed_mw == 0.0
+    dash = libs["settings"].Dashboard(
+        settings=settings, cc_rules=None, cf_constraints=pd.DataFrame(), carbon_price_usd=0.0,
+    )
+    n = _network()
     replaced = libs["generator_replacement"].replace_generators(n, dash)
     libs["ess"].add_storage_at_replaced_buses(n, dash, replaced)
     assert len(n.storage_units) == 0

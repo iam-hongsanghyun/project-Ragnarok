@@ -1,7 +1,7 @@
 {
   "id": "dashboard-importer",
   "name": "Dashboard Importer (backend)",
-  "version": "3.6.1",
+  "version": "3.6.2",
   "kind": "backend",
   "description": "Builds a Ragnarok workbook from a PyPSA dashboard model + GUI settings. Runs ENTIRELY in the Ragnarok backend (imports the bundled PyPSA source); the model is written straight into the session and never enters the browser. Backend port of the frontend dashboard importer — no separate server, nothing in plugins.env.",
   "capabilities": [
