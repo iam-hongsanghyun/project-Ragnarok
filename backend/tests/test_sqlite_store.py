@@ -179,3 +179,20 @@ def test_build_db_survives_concurrent_kv_create(_dir) -> None:
     assert meta["filename"] == "m.xlsx"
     assert sq.get_meta("sql") is not None
     assert len(sq.get_sheet_page("sql", "generators")["rows"]) == 3
+
+
+def test_build_db_over_existing_sheets_no_primary_key_error(_dir) -> None:
+    """Regression: a second build whose sheet_* tables already exist must not 500.
+
+    A double-fire / retried importer "send" can run _build_db twice on one
+    session with the db still on disk. The bare ``CREATE TABLE sheet_0`` then
+    collided — surfacing the failing SQL (``... INTEGER PRIMARY KEY ...``) as an
+    "integer primary key" error even though the first build had stored the model.
+    Drop-then-create is last-writer-wins: no error, second build's content sticks.
+    """
+    sq._build_db("sql", _model(), filename="a.xlsx")  # creates sheet_0..N
+    model2 = _model()
+    model2["generators"] = model2["generators"][:1]  # different content, same sheets
+    meta = sq._build_db("sql", model2, filename="b.xlsx")  # must NOT raise
+    assert meta["filename"] == "b.xlsx"
+    assert len(sq.get_sheet_page("sql", "generators")["rows"]) == 1  # second build won

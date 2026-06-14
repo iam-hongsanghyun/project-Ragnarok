@@ -192,6 +192,13 @@ def _build_db(
             if not isinstance(rows, list):
                 continue
             tbl = f"sheet_{i}"
+            # DROP-then-CREATE for the same race as _kv above: two near-simultaneous
+            # save_model calls on one session (a double-fire / retry of an importer
+            # "send") otherwise have the second hit a bare CREATE on an existing
+            # sheet_0 — which surfaces the failing SQL ("... INTEGER PRIMARY KEY ...")
+            # as an error even though the first build already stored the model.
+            # Drop-then-create is last-writer-wins (both builds carry the same model).
+            conn.execute(f"DROP TABLE IF EXISTS {tbl}")
             conn.execute(f"CREATE TABLE {tbl} (__row INTEGER PRIMARY KEY AUTOINCREMENT, d TEXT)")
             conn.executemany(
                 f"INSERT INTO {tbl}(d) VALUES(?)",
@@ -241,9 +248,10 @@ def merge_static_model(session_id: str, model: dict[str, list[dict[str, Any]]]) 
             if tbl is None:
                 tbl = f"sheet_{len(tables)}"
                 tables[name] = tbl
-                conn.execute(f"CREATE TABLE {tbl} (__row INTEGER PRIMARY KEY AUTOINCREMENT, d TEXT)")
-            else:
-                conn.execute(f"DELETE FROM {tbl}")
+            # IF NOT EXISTS + unconditional DELETE: race-safe for new and existing
+            # sheets alike (same concurrent-write class as _build_db / _kv above).
+            conn.execute(f"CREATE TABLE IF NOT EXISTS {tbl} (__row INTEGER PRIMARY KEY AUTOINCREMENT, d TEXT)")
+            conn.execute(f"DELETE FROM {tbl}")
             conn.executemany(
                 f"INSERT INTO {tbl}(d) VALUES(?)",
                 [(json.dumps(row, ensure_ascii=False),) for row in rows if isinstance(row, dict)],
