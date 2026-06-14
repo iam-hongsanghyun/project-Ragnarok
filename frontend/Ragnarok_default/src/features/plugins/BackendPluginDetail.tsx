@@ -274,10 +274,22 @@ export function BackendPluginDetail({ manifest, model, onBuilt }: Props) {
   // plugins populate it. Re-runs when the config changes — debounced so typing
   // never fires per keystroke; the result is null when the plugin has no
   // analyze hook or it fails (Output then shows the empty hint).
+  //
+  // EXCEPTION: plugins that declare `analyzeOnDemand` (their analyze is
+  // expensive — e.g. the region analyzer reads a full year of dispatch) are NOT
+  // auto-run, so opening the panel stays instant. The user triggers them with
+  // the "Run analysis" button below.
   const [analytics, setAnalytics] = useState<PluginAnalyticsEntry | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
   const configKey = useDebouncedValue(JSON.stringify(withDefaults(manifest.config, config)), 500);
   useEffect(() => {
     if (!manifest.hooks.analyze) {
+      setAnalytics(null);
+      return undefined;
+    }
+    if (manifest.analyzeOnDemand) {
+      // Don't auto-run; reset so a stale result from a previous plugin/config
+      // doesn't linger. The button drives the (re-)run.
       setAnalytics(null);
       return undefined;
     }
@@ -291,7 +303,24 @@ export function BackendPluginDetail({ manifest, model, onBuilt }: Props) {
       }
     })();
     return () => { cancelled = true; };
-  }, [manifest.id, manifest.name, manifest.hooks.analyze, configKey]);
+  }, [manifest.id, manifest.name, manifest.hooks.analyze, manifest.analyzeOnDemand, configKey]);
+
+  // Manual trigger for on-demand analyze plugins (uses the current config).
+  const runAnalysis = async () => {
+    if (!manifest.hooks.analyze) return;
+    setAnalyzing(true);
+    try {
+      const data = await analyzeBackendPlugin(
+        manifest.id, {}, withDefaults(manifest.config, config) as Record<string, unknown>,
+      );
+      setAnalytics({ name: manifest.name, ui: inferPluginUi(data), data });
+    } catch (err) {
+      setAnalytics(null);
+      showToast(`${manifest.name}: ${err instanceof Error ? err.message : 'analysis failed'}`, 'error');
+    } finally {
+      setAnalyzing(false);
+    }
+  };
 
   const runHook = async (hook: 'transform' | 'contribute', successMessage?: string) => {
     setBusy(true);
@@ -366,6 +395,13 @@ export function BackendPluginDetail({ manifest, model, onBuilt }: Props) {
           onModuleAction={handleAction}
         />
       </PluginOptionsContext.Provider>
+      {manifest.analyzeOnDemand && manifest.hooks.analyze && (
+        <div className="sg-setting-row plugin-detail-footer">
+          <button className="tb-btn tb-btn--primary" disabled={analyzing} onClick={runAnalysis}>
+            {analyzing ? 'Analyzing…' : analytics ? 'Re-run analysis' : 'Run analysis'}
+          </button>
+        </div>
+      )}
       {fallbackHook && !hasActionField && (
         <div className="sg-setting-row plugin-detail-footer">
           <button className="tb-btn" disabled={busy} onClick={() => runHook(fallbackHook)}>

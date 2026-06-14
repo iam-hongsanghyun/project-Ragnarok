@@ -157,6 +157,11 @@ class BackendPlugin:
     config_schema: dict[str, Any]
     module: ModuleType = field(repr=False)
     directory: Path = field(repr=False)
+    # When true, the frontend does NOT auto-run analyze on panel open — it
+    # shows a "Run analysis" button instead. For plugins whose analyze is
+    # expensive (e.g. the region analyzer reads a full year of dispatch), so
+    # opening the panel stays instant.
+    analyze_on_demand: bool = False
 
     @property
     def has_transform(self) -> bool:
@@ -195,6 +200,7 @@ class BackendPlugin:
                 "analyze": self.has_analyze,
                 "options": self.has_options,
             },
+            "analyzeOnDemand": self.analyze_on_demand,
         }
 
 
@@ -233,6 +239,7 @@ def _load_one(directory: Path) -> BackendPlugin | None:
             config_schema=dict(manifest.get("config") or {}),
             module=module,
             directory=directory,
+            analyze_on_demand=bool(manifest.get("analyzeOnDemand", False)),
         )
         if not (plugin.has_transform or plugin.has_contribute or plugin.has_analyze):
             logger.warning("Skip backend plugin %s: no transform/contribute/analyze hook", plugin.id)
