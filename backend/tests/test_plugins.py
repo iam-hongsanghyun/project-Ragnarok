@@ -434,6 +434,8 @@ def test_region_analyzer_analyzes_stored_run(_plugins_dir, tmp_path, monkeypatch
     manifest = _install_example("ragnarok-region-analyzer.zip")
     assert manifest["id"] == "ragnarok-region-analyzer"
     assert manifest["hooks"]["analyze"] is True and manifest["hooks"]["options"] is True
+    # Its analyze is expensive (reads a full year of dispatch) → not auto-run.
+    assert manifest["analyzeOnDemand"] is True
 
     # No stored runs yet → actionable note, never an exception.
     note = plugins.run_analyze("ragnarok-region-analyzer", {}, {})

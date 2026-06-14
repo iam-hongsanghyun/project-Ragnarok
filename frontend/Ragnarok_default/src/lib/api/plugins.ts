@@ -26,6 +26,9 @@ export interface BackendPluginManifest {
   capabilities: string[];
   config: ModuleConfigSchema;
   hooks: { transform: boolean; contribute: boolean; analyze: boolean; options?: boolean };
+  /** When true, analyze is NOT auto-run on panel open — the Output tab shows a
+   *  "Run analysis" button instead (for plugins whose analyze is expensive). */
+  analyzeOnDemand?: boolean;
 }
 
 async function asJson<T>(resp: Response): Promise<T> {
