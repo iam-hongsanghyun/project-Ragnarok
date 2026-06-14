@@ -819,6 +819,10 @@ function AppInner() {
   const handleImportProject = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
+    // Progress feedback (mirrors the export flow): a persistent topbar status +
+    // a bottom-right toast, since parsing a full-year project takes a moment.
+    setStatus(`Importing ${file.name}…`);
+    showToast(`Importing ${file.name} — this can take a moment for a full run.`, 'info');
     try {
       // Importing a project is OPENING A FILE — load its model + solved results
       // into the editor (like File→Open). It does NOT create a History entry:
@@ -1546,6 +1550,7 @@ function AppInner() {
         // the editor static-only and fetch the LIGHT analytics for the results.
         // The series page into the grid on demand, exactly like a fresh load.
         setStatus(`Importing ${name}…`);
+        showToast(`Importing ${name} — this can take a moment for a full run.`, 'info');
         const promoteResp = await fetch(`${API_BASE}/api/runs/${encodeURIComponent(name)}/promote`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
