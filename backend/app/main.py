@@ -1492,48 +1492,55 @@ async def import_project(file: UploadFile) -> dict[str, Any]:
     return {"meta": meta, "name": meta.get("name")}
 
 
-@app.post("/api/import/result/xlsx")
-async def import_result_xlsx(file: UploadFile) -> dict[str, Any]:
-    """Import an external Excel RESULTS file as a persistent History entry.
+@app.post("/api/import/result")
+@app.post("/api/import/result/xlsx")  # legacy alias (pre-zip-support frontends)
+async def import_result(file: UploadFile) -> dict[str, Any]:
+    """Import a RESULT-bearing file as a persistent History entry (model + results).
 
-    Accepts an ``.xlsx`` / ``.xls`` produced outside a normal solve — a
-    third-party model, a plugin's output, a hand-assembled results table, or a
-    Ragnarok-exported workbook. The sheets are mapped to Ragnarok's canonical
-    result schema (``outputs.static`` / ``outputs.series``) by
-    ``project_workbook.workbook_to_bundle`` (component sheets split input vs
-    solved-output columns; ``<component>-<attr>`` sheets become output series),
-    then persisted with ``run_store.store_run(origin="xlsx_import")``. So the
-    result lands in History, is comparable like any solved run, and survives
-    refresh / restart. Returns the new run's name.
+    Accepts:
 
-    Distinct from :func:`import_project_load`, which only loads a project into
-    the editor without persisting. This endpoint always writes to the run store.
+    * a **Ragnarok project ``.zip``** (or an ``.xlsx`` carrying the embedded
+      bundle) — the full model **and** its solved results round-trip verbatim
+      from the canonical bundle, so summary / carrier mix / dispatch are
+      preserved exactly as they were exported (no re-derivation);
+    * a **bare results ``.xlsx``** (third-party model, plugin output,
+      hand-assembled table) — sheets are mapped to the canonical result schema
+      (``outputs.static`` / ``outputs.series``) and the analytics the Result
+      view renders are DERIVED from the stored outputs (network rebuilt + the
+      outputs injected + the same extraction helpers a solve uses).
+
+    Either way it persists via ``run_store.store_run(origin="xlsx_import")`` —
+    so the result lands in History, opens with full analytics, is comparable
+    like any solved run, and survives refresh / restart. Returns the new run's
+    name. Distinct from :func:`import_project_load`, which only loads a project
+    into the editor without persisting.
     """
     from . import project_workbook
 
     raw = await file.read()
     filename = file.filename or "imported_result.xlsx"
-    if not filename.lower().endswith((".xlsx", ".xls")):
+    if not filename.lower().endswith((".xlsx", ".xls", ".zip")):
         raise HTTPException(
-            status_code=400, detail="Result import expects an .xlsx / .xls file."
+            status_code=400, detail="Result import expects an .xlsx / .xls / .zip file."
         )
 
     def _parse_and_store() -> dict[str, Any] | None:
-        bundle = project_workbook.workbook_to_bundle(raw, filename=filename)
+        # Handles both a project package (.zip / embedded-bundle .xlsx → full
+        # model+results verbatim) and a bare workbook (reconstruct outputs).
+        bundle = project_workbook.import_bundle_from_upload(raw, filename)
         model = bundle.get("model") or {}
         scenario = bundle.get("scenario") or {}
         options = bundle.get("options") or {}
         options.setdefault("filename", filename)
         result = bundle.get("result") or {}
         outputs = result.get("outputs") or {}
-        # An imported result never had a solve, so it carries the raw output
-        # frames but none of the derived analytics the Result view renders.
-        # Rebuild the network from the model + original options (which reproduce
-        # the exact snapshot grid), inject the stored outputs, and run the same
-        # extraction helpers a solve uses — so the summary / carrier mix /
-        # dispatch / price series all populate. Best-effort: on any failure the
-        # raw outputs are still stored (the run is openable, just sparser).
-        if outputs.get("series") or outputs.get("static"):
+        # A project package already carries the derived analytics (summary,
+        # carrierMix, …) — keep them verbatim. Only a bare results workbook
+        # arrives with raw outputs and no derived analytics; rebuild + inject +
+        # extract so the Result view populates. Best-effort: on failure the raw
+        # outputs are still stored (openable, just sparser).
+        has_derived = isinstance(result.get("summary"), list) and bool(result.get("summary"))
+        if not has_derived and (outputs.get("series") or outputs.get("static")):
             try:
                 from ..pypsa.results.from_outputs import derive_imported_result
 

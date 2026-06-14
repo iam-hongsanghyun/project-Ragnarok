@@ -3,7 +3,7 @@
 H1 — "Import Project" is *opening a file*: ``POST /api/import/project/load``
 returns the parsed bundle and creates NO History entry.
 H2 — "Import result" is *persisting an external result*:
-``POST /api/import/result/xlsx`` writes a History entry tagged
+``POST /api/import/result`` writes a History entry tagged
 ``origin="xlsx_import"``.
 
 Everything runs against a throwaway RUNS_DIR so nothing touches the real
@@ -118,7 +118,7 @@ def test_import_result_xlsx_persists_history_entry(_runs_dir: Path) -> None:
     data = pw.bundle_to_workbook(_sample_bundle(), include_bundle=False)
     files = {"file": ("third_party_result.xlsx", io.BytesIO(data), _XLSX_MIME)}
 
-    resp = client.post("/api/import/result/xlsx", files=files)
+    resp = client.post("/api/import/result", files=files)
     assert resp.status_code == 200, resp.text
     name = resp.json()["name"]
     assert name
@@ -137,10 +137,34 @@ def test_import_result_xlsx_persists_history_entry(_runs_dir: Path) -> None:
     assert bundle["result"]["outputs"]["static"]["generators"]["wind"]["p_nom_opt"] == 120.0
 
 
-def test_import_result_xlsx_rejects_non_excel(_runs_dir: Path) -> None:
+def test_import_result_zip_preserves_model_and_results(_runs_dir: Path) -> None:
+    """A project .zip imports into History with BOTH model and results — the
+    embedded bundle's derived analytics round-trip verbatim (not re-derived)."""
+    client = TestClient(app)
+    pkg = pw.bundle_to_package(
+        _sample_bundle(), "north-sea", meta={"name": "north-sea", "label": "North Sea", "kpis": []}
+    )
+    files = {"file": ("north-sea.zip", io.BytesIO(pkg), "application/zip")}
+
+    resp = client.post("/api/import/result", files=files)
+    assert resp.status_code == 200, resp.text
+    name = resp.json()["name"]
+
+    stored = {m["name"]: m for m in run_store.list_runs()}[name]
+    assert stored["origin"] == "xlsx_import"
+    # Results preserved verbatim from the embedded bundle (summary kept as-is).
+    assert any(s.get("label") == "Total cost" for s in (stored.get("summary") or []))
+    # Model round-tripped too.
+    bundle = run_store.get_run(name)
+    assert bundle is not None
+    assert {row["name"] for row in bundle["model"]["generators"]} == {"wind", "gas"}
+    assert bundle["result"]["outputs"]["static"]["generators"]["wind"]["p_nom_opt"] == 120.0
+
+
+def test_import_result_rejects_unsupported_file(_runs_dir: Path) -> None:
     client = TestClient(app)
     files = {"file": ("notes.txt", io.BytesIO(b"not a workbook"), "text/plain")}
-    resp = client.post("/api/import/result/xlsx", files=files)
+    resp = client.post("/api/import/result", files=files)
     assert resp.status_code == 400
     assert run_store.list_runs() == []
 
@@ -216,7 +240,7 @@ def test_import_result_xlsx_stores_derived_analytics(_runs_dir: Path) -> None:
     data = pw.bundle_to_workbook(_result_only_bundle(), include_bundle=False)
     files = {"file": ("ext.xlsx", io.BytesIO(data), _XLSX_MIME)}
 
-    resp = client.post("/api/import/result/xlsx", files=files)
+    resp = client.post("/api/import/result", files=files)
     assert resp.status_code == 200, resp.text
 
     meta = run_store.list_runs()[0]

@@ -158,7 +158,7 @@ export function HistoryView({
         <button
           className="tb-btn"
           onClick={onImportResult}
-          title="Import an external Excel results file as a new, permanent History entry"
+          title="Import a project .zip (model + results) or a results .xlsx as a new, permanent History entry"
         >
           Import result
         </button>
