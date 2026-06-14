@@ -34,7 +34,7 @@ import { usePersistedState } from 'shared/hooks/usePersistedState';
 import { CategoryDatabaseList } from './CategoryDatabaseList';
 import { FilterPanel, SourceEntry } from './FilterPanel';
 import { WorldMap } from './WorldMap';
-import { dataImportStore, runStatus } from 'lib/data/store';
+import { dataImportStore, runStatus, type Run } from 'lib/data/store';
 
 // Persistent state keys — selections stick across tab switches and reloads.
 const KEY_COUNTRY = 'ragnarok:data-import:country-iso';
@@ -75,6 +75,13 @@ function mergeOverlays(overlays: Array<GeoJSONFeatureCollection | null | undefin
   const features = overlays.flatMap((o) => o?.features ?? []);
   if (features.length === 0) return null;
   return { type: 'FeatureCollection', features };
+}
+
+/** Stable fingerprint of a run's parts — identifies which selection produced it.
+ *  Pure (depends only on `run`), so it lives at module scope and never needs to
+ *  be an effect/memo dependency. */
+function runKey(run: Run): string {
+  return JSON.stringify(run.parts.map((p) => [p.sourceId, p.datasetIds, p.filtersJson]));
 }
 
 export function DataImportView({ applyFragment }: Props) {
@@ -201,10 +208,6 @@ export function DataImportView({ applyFragment }: Props) {
       ),
     [entries],
   );
-  const runKey = (run: NonNullable<typeof activeRun>) =>
-    JSON.stringify(
-      run.parts.map((p) => [p.sourceId, p.datasetIds, p.filtersJson]),
-    );
   const currentRun =
     activeRun &&
     activeRun.countryIso === selectedIso &&
