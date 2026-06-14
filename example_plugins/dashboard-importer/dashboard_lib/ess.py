@@ -93,8 +93,14 @@ def add_storage_at_replaced_buses(
     max_hours = float(getattr(s, "ess_hours", 4.0) or 0.0)
     capital_cost = float(getattr(s, "ess_capital_cost", 0.0) or 0.0)
     expandable = bool(getattr(s, "ess_expandable", False))
-    p_nom_min = float(getattr(s, "ess_p_nom_min", 0.0) or 0.0)
-    p_nom_max = float(getattr(s, "ess_p_nom_max", 0.0) or 0.0)
+    expansion_mode = str(getattr(s, "ess_expansion_mode", "proportional") or "proportional").strip().lower()
+    p_nom_min_in = float(getattr(s, "ess_p_nom_min", 0.0) or 0.0)
+    p_nom_max_in = float(getattr(s, "ess_p_nom_max", 0.0) or 0.0)
+
+    def _bound(value: float, replaced_cap: float) -> float:
+        """Resolve a min/max input to MW: a % of the bus's replaced capacity in
+        proportional mode, else the value as-is (MW)."""
+        return replaced_cap * value / 100.0 if expansion_mode == "proportional" else value
 
     # Province lookup so the ESS carries the bus's province (region aggregation
     # remaps by bus anyway, but a province keeps it consistent with its neighbours).
@@ -130,10 +136,10 @@ def add_storage_at_replaced_buses(
             "p_nom_extendable": bool(expandable),
         }
         if expandable:
-            attrs["p_nom_min"] = p_nom_min
+            attrs["p_nom_min"] = _bound(p_nom_min_in, float(replaced_cap))
             # PyPSA treats a missing p_nom_max as +inf; only set a finite cap.
-            if p_nom_max > 0.0:
-                attrs["p_nom_max"] = p_nom_max
+            if p_nom_max_in > 0.0:
+                attrs["p_nom_max"] = _bound(p_nom_max_in, float(replaced_cap))
         network.add("StorageUnit", name, **attrs)
         if "province" in network.storage_units.columns and bus_province.get(bus):
             network.storage_units.at[name, "province"] = bus_province[bus]
@@ -142,8 +148,9 @@ def add_storage_at_replaced_buses(
 
     sizing = f"fixed {fixed_mw:g} MW" if mode == "fixed" else f"{proportion * 100:g}% of replaced p_nom"
     if expandable:
-        max_label = f"{p_nom_max:g}" if p_nom_max > 0 else "inf"
-        exp = f", extendable [{p_nom_min:g}, {max_label}] MW"
+        unit = "%" if expansion_mode == "proportional" else "MW"
+        max_label = f"{p_nom_max_in:g}{unit}" if p_nom_max_in > 0 else "inf"
+        exp = f", extendable [{p_nom_min_in:g}{unit}, {max_label}]"
     else:
         exp = ""
     logger.info(

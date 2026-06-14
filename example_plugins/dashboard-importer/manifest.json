@@ -1,7 +1,7 @@
 {
   "id": "dashboard-importer",
   "name": "Dashboard Importer (backend)",
-  "version": "3.5.0",
+  "version": "3.6.0",
   "kind": "backend",
   "description": "Builds a Ragnarok workbook from a PyPSA dashboard model + GUI settings. Runs ENTIRELY in the Ragnarok backend (imports the bundled PyPSA source); the model is written straight into the session and never enters the browser. Backend port of the frontend dashboard importer — no separate server, nothing in plugins.env.",
   "capabilities": [
@@ -430,17 +430,28 @@
       "default": false,
       "visibleWhen": { "field": "add_ess", "equals": true }
     },
+    "ess_expansion_mode": {
+      "type": "select",
+      "label": "Expansion bounds mode",
+      "description": "How the min/max below are read: as MW, or as a % of the bus's total replaced capacity (e.g. 10% – 200%).",
+      "default": "proportional",
+      "options": [
+        { "value": "proportional", "label": "proportional — % of replaced capacity" },
+        { "value": "fixed", "label": "fixed — MW" }
+      ],
+      "visibleWhen": { "field": "ess_expandable", "equals": true }
+    },
     "ess_p_nom_min": {
       "type": "number",
-      "label": "Expansion min (MW)",
-      "description": "Lower bound on ESS power when capacity expansion is on.",
+      "label": "Expansion min (MW or %)",
+      "description": "Lower bound on ESS power. MW in fixed mode; % of the bus's total replaced capacity in proportional mode (e.g. 10 = 10%).",
       "default": 0,
       "visibleWhen": { "field": "ess_expandable", "equals": true }
     },
     "ess_p_nom_max": {
       "type": "number",
-      "label": "Expansion max (MW)",
-      "description": "Upper bound on ESS power when capacity expansion is on. 0 or blank → unbounded.",
+      "label": "Expansion max (MW or %)",
+      "description": "Upper bound on ESS power. MW in fixed mode; % of the bus's total replaced capacity in proportional mode (e.g. 200 = 200%). 0 or blank → unbounded.",
       "default": 0,
       "visibleWhen": { "field": "ess_expandable", "equals": true }
     },

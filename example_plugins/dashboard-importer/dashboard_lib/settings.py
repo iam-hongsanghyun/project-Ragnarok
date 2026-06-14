@@ -58,8 +58,11 @@ class Settings:
     ess_fixed_mw: float = 100.0        # fixed MW per bus (fixed mode)
     ess_capital_cost: float = 0.0      # annualised capital cost per MW (drives expansion)
     ess_expandable: bool = False       # True → p_nom_extendable with the min/max below
-    ess_p_nom_min: float = 0.0         # expansion lower bound (MW)
-    ess_p_nom_max: float = 0.0         # expansion upper bound (MW); 0/blank → unbounded
+    # Bounds are read as MW ("fixed") or as a % of the bus's replaced capacity
+    # ("proportional", e.g. 10 % – 200 %).
+    ess_expansion_mode: str = "proportional"  # "proportional" | "fixed"
+    ess_p_nom_min: float = 0.0         # expansion lower bound (MW or %, per mode)
+    ess_p_nom_max: float = 0.0         # expansion upper bound (MW or %); 0/blank → unbounded
     marginal_cost_multiplier: bool = False  # True → scale generator marginal cost per carrier
     plot_map: bool = True       # True → save a network map PNG before optimisation
     cc_rule: bool = True        # False → skip CC merge

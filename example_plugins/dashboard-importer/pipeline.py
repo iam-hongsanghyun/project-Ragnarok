@@ -580,10 +580,23 @@ def ess_plan_payload(module_config: dict[str, Any]) -> list[dict[str, Any]]:
     mode = _as_str(module_config, "ess_sizing_mode", "proportional").strip().lower()
     fixed_mw = _as_float(module_config, "ess_fixed_mw", 100.0)
     proportion = _as_float(module_config, "ess_proportion_pct", 30.0) / 100.0
+    # Expansion bounds (resolved to MW per bus) for the preview.
+    expandable = _as_bool(module_config, "ess_expandable", False)
+    exp_mode = _as_str(module_config, "ess_expansion_mode", "proportional").strip().lower()
+    min_in = _as_float(module_config, "ess_p_nom_min", 0.0)
+    max_in = _as_float(module_config, "ess_p_nom_max", 0.0)
+
+    def _bound(value: float, cap: float) -> float:
+        return cap * value / 100.0 if exp_mode == "proportional" else value
+
     rows: list[dict[str, Any]] = []
     for bus, cap in sorted(replaced_by_bus.items(), key=lambda kv: -kv[1]):
         ess = fixed_mw if mode == "fixed" else cap * proportion
-        rows.append({"bus": bus, "replaced_mw": round(cap, 1), "ess_mw": round(max(ess, 0.0), 1)})
+        row = {"bus": bus, "replaced_mw": round(cap, 1), "ess_mw": round(max(ess, 0.0), 1)}
+        if expandable:
+            row["min_mw"] = round(max(_bound(min_in, cap), 0.0), 1)
+            row["max_mw"] = round(_bound(max_in, cap), 1) if max_in > 0 else None
+        rows.append(row)
     return rows
 
 
@@ -860,6 +873,7 @@ def _settings_from_config(settings_mod: Any, cfg: dict[str, Any]) -> Any:
         ess_fixed_mw=_as_float(cfg, "ess_fixed_mw", 100.0),
         ess_capital_cost=_as_float(cfg, "ess_capital_cost", 0.0),
         ess_expandable=_as_bool(cfg, "ess_expandable", False),
+        ess_expansion_mode=_as_str(cfg, "ess_expansion_mode", "proportional"),
         ess_p_nom_min=_as_float(cfg, "ess_p_nom_min", 0.0),
         ess_p_nom_max=_as_float(cfg, "ess_p_nom_max", 0.0),
         marginal_cost_multiplier=_as_bool(cfg, "marginal_cost_multiplier", False),
@@ -906,6 +920,7 @@ def _apply_config_to_settings(settings: Any, cfg: dict[str, Any]) -> None:
     _override_float(settings, cfg, "ess_fixed_mw")
     _override_float(settings, cfg, "ess_capital_cost")
     _override_bool(settings, cfg, "ess_expandable")
+    _override_str(settings, cfg, "ess_expansion_mode")
     _override_float(settings, cfg, "ess_p_nom_min")
     _override_float(settings, cfg, "ess_p_nom_max")
     _override_bool(settings, cfg, "marginal_cost_multiplier")

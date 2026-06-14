@@ -158,8 +158,17 @@ def analyze(result: dict[str, Any] | None, config: dict[str, Any]) -> dict[str, 
         ess = engine.ess_plan_payload(cfg) or []
         if ess:
             carrier = str(cfg.get("ess_carrier") or "ESS").strip() or "ESS"
+            expandable = any("min_mw" in r for r in ess)
             out[f"ESS plan — {carrier} (MW per bus)"] = [
-                {"bus": r.get("bus"), "replaced (MW)": r.get("replaced_mw"), "ESS (MW)": r.get("ess_mw")}
+                {
+                    "bus": r.get("bus"),
+                    "replaced (MW)": r.get("replaced_mw"),
+                    "ESS (MW)": r.get("ess_mw"),
+                    **(
+                        {"min (MW)": r.get("min_mw"), "max (MW)": r.get("max_mw")}
+                        if expandable else {}
+                    ),
+                }
                 for r in ess
             ]
     except Exception:  # noqa: BLE001
