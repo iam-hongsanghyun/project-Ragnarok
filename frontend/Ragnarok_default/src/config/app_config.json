@@ -39,7 +39,7 @@
     "defaultEndYear": 2050
   },
   "settings": {
-    "storageKey": "pypsa_gui_settings",
+    "storageKey": "project_ragnarok_settings",
     "defaults": {
       "dateFormat": "auto",
       "solverThreads": 0,
@@ -50,18 +50,16 @@
       "enableLoadShedding": false,
       "loadSheddingCost": 2000,
       "discountRate": 0.05,
-      "queuePollSeconds": 2.5,
+      "queuePollSeconds": 30,
       "solveAcceptance": "lenient"
     },
     "ranges": {
       "carbonPrice": {
         "min": 0,
-        "max": 10000,
         "step": 1
       },
       "discountRate": {
         "min": 0,
-        "max": 1,
         "step": 0.005
       },
       "loadSheddingCost": {

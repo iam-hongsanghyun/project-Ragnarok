@@ -152,7 +152,6 @@ export function CarbonSection(props: CarbonSectionProps) {
             id="rs-carbon-price"
             className="sg-carbon-input"
             min={settingsRanges.carbonPrice.min}
-            max={settingsRanges.carbonPrice.max}
             step={settingsRanges.carbonPrice.step}
             value={props.carbonPrice}
             disabled={scheduleActive}

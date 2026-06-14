@@ -27,7 +27,7 @@ import { ConfigBootstrap } from './ConfigBootstrap';
  * this browser's localStorage — a local, never-committed store — and are
  * still wiped by the explicit "Clear cache" button.)
  *
- * `pypsa_gui_settings` is reset on a build change too (see WIPE_KEYS): app
+ * `project_ragnarok_settings` is reset on a build change too (see WIPE_KEYS): app
  * settings are derived from the app's *current* defaults, so a new build /
  * restart / deploy must re-sync them — a value cached in one browser must
  * never pin a stale default (e.g. an old solver method) over a changed one.
@@ -41,7 +41,7 @@ const BUILD_ID_KEY = 'ragnarok:build-id';
 // Wiped on a build change (derived / volatile state only — grid layout, view
 // selection, cached results). NOT user preferences.
 const WIPE_PREFIXES = ['pypsa.', 'ragnarok:', 'ui:'];
-// No exact keys are wiped on a build change. App settings (`pypsa_gui_settings`)
+// No exact keys are wiped on a build change. App settings (`project_ragnarok_settings`)
 // used to be reset here to re-sync to defaults, but that meant every dev-server
 // restart / deploy silently discarded the user's settings — so they persist
 // now. New default fields are still picked up because `loadSettings` merges each

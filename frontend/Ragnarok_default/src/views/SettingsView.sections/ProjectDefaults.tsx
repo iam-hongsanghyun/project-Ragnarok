@@ -75,7 +75,6 @@ export function ProjectDefaultsSection(props: ProjectDefaultsSectionProps) {
             id="set-discount-rate"
             className="sg-carbon-input"
             min={settingsRanges.discountRate.min}
-            max={settingsRanges.discountRate.max}
             step={settingsRanges.discountRate.step}
             value={props.discountRate}
             onCommit={props.onDiscountRateChange}
