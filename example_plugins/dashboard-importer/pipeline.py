@@ -236,6 +236,7 @@ def _build_dashboard_network(
     p_max_pu_mod   = _lib("p_max_pu")
     demand_redist_mod = _lib("demand_redistribution")
     gen_replace_mod = _lib("generator_replacement")
+    ess_mod = _lib("ess")
     marginal_cost_mod = _lib("marginal_cost")
 
     if dashboard_path is not None:
@@ -265,7 +266,11 @@ def _build_dashboard_network(
     # Replace selected new plants with solar/wind while generators are still
     # individual and carry their province — before p_max_pu so the new units
     # inherit the province's renewable profile via apply_standard_p_max_pu.
-    gen_replace_mod.replace_generators(network, dashboard)
+    replaced_by_bus = gen_replace_mod.replace_generators(network, dashboard)
+    # Add an ESS StorageUnit at each replacement bus (sized from the replaced
+    # capacity), while buses are still individual — so it rides onto its region
+    # bus through aggregation's bus-remap like every other component.
+    ess_mod.add_storage_at_replaced_buses(network, dashboard, replaced_by_bus)
     # Scale generator marginal cost per carrier (uniform factor commutes with the
     # capacity-weighted carrier merge, so order vs aggregation is immaterial).
     marginal_cost_mod.apply_marginal_cost_multipliers(network, dashboard)
@@ -545,6 +550,43 @@ def replacement_plan_payload(module_config: dict[str, Any]) -> list[dict[str, An
     return rows
 
 
+def ess_plan_payload(module_config: dict[str, Any]) -> list[dict[str, Any]]:
+    """Per-bus ESS sizing preview — mirrors the build's ``add_storage_at_replaced_buses``.
+
+    Maps each replaced plant to its bus, sums the replaced capacity per bus, and
+    applies the chosen sizing rule (proportional % of that capacity, or a fixed
+    MW). Returns ``[]`` when ESS is off, nothing is replaced, or the model has no
+    generators/bus columns.
+    """
+    if not _as_bool(module_config, "add_ess", False):
+        return []
+    plan = replacement_plan_payload(module_config)
+    if not plan:
+        return []
+    model_path, _base_year, _target_year = _resolve_model_for_analytics(module_config)
+    gdf = _read_generators_sheet(model_path)
+    if gdf is None or "name" not in gdf.columns or "bus" not in gdf.columns:
+        return []
+    name_to_bus = {
+        str(n).strip(): str(b).strip() for n, b in zip(gdf["name"], gdf["bus"])
+    }
+    replaced_by_bus: dict[str, float] = {}
+    for r in plan:
+        bus = name_to_bus.get(str(r.get("generator", "")).strip(), "")
+        if not bus:
+            continue
+        replaced_by_bus[bus] = replaced_by_bus.get(bus, 0.0) + float(r.get("total_mw") or 0.0)
+
+    mode = _as_str(module_config, "ess_sizing_mode", "proportional").strip().lower()
+    fixed_mw = _as_float(module_config, "ess_fixed_mw", 100.0)
+    proportion = _as_float(module_config, "ess_proportion_pct", 30.0) / 100.0
+    rows: list[dict[str, Any]] = []
+    for bus, cap in sorted(replaced_by_bus.items(), key=lambda kv: -kv[1]):
+        ess = fixed_mw if mode == "fixed" else cap * proportion
+        rows.append({"bus": bus, "replaced_mw": round(cap, 1), "ess_mw": round(max(ess, 0.0), 1)})
+    return rows
+
+
 def _read_generators_sheet(model_path: str) -> "pd.DataFrame | None":
     """Read the model workbook's ``generators`` sheet (raw, unfiltered).
 
@@ -809,6 +851,17 @@ def _settings_from_config(settings_mod: Any, cfg: dict[str, Any]) -> Any:
         replace_carriers=_as_str_list(cfg, "replace_carriers"),
         replace_filter_column=_as_str(cfg, "replace_filter_column", ""),
         replace_filter_value=_as_str(cfg, "replace_filter_value", ""),
+        add_ess=_as_bool(cfg, "add_ess", False),
+        ess_carrier=_as_str(cfg, "ess_carrier", "ESS"),
+        ess_hours=_as_float(cfg, "ess_hours", 4.0),
+        ess_efficiency=_as_float(cfg, "ess_efficiency", 0.9),
+        ess_sizing_mode=_as_str(cfg, "ess_sizing_mode", "proportional"),
+        ess_proportion_pct=_as_float(cfg, "ess_proportion_pct", 30.0),
+        ess_fixed_mw=_as_float(cfg, "ess_fixed_mw", 100.0),
+        ess_capital_cost=_as_float(cfg, "ess_capital_cost", 0.0),
+        ess_expandable=_as_bool(cfg, "ess_expandable", False),
+        ess_p_nom_min=_as_float(cfg, "ess_p_nom_min", 0.0),
+        ess_p_nom_max=_as_float(cfg, "ess_p_nom_max", 0.0),
         marginal_cost_multiplier=_as_bool(cfg, "marginal_cost_multiplier", False),
         plot_map=_as_bool(cfg, "plot_map", True),
         cc_rule=_as_bool(cfg, "cc_rule", True),
@@ -844,6 +897,17 @@ def _apply_config_to_settings(settings: Any, cfg: dict[str, Any]) -> None:
     _override_float(settings, cfg, "replace_wind_pct")
     _override_str(settings, cfg, "replace_filter_column")
     _override_str(settings, cfg, "replace_filter_value")
+    _override_bool(settings, cfg, "add_ess")
+    _override_str(settings, cfg, "ess_carrier")
+    _override_float(settings, cfg, "ess_hours")
+    _override_float(settings, cfg, "ess_efficiency")
+    _override_str(settings, cfg, "ess_sizing_mode")
+    _override_float(settings, cfg, "ess_proportion_pct")
+    _override_float(settings, cfg, "ess_fixed_mw")
+    _override_float(settings, cfg, "ess_capital_cost")
+    _override_bool(settings, cfg, "ess_expandable")
+    _override_float(settings, cfg, "ess_p_nom_min")
+    _override_float(settings, cfg, "ess_p_nom_max")
     _override_bool(settings, cfg, "marginal_cost_multiplier")
     _override_bool(settings, cfg, "replace_all_carriers")
     if "replace_carriers" in cfg:

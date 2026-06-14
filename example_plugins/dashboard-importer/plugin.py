@@ -154,6 +154,16 @@ def analyze(result: dict[str, Any] | None, config: dict[str, Any]) -> dict[str, 
             ]
     except Exception:  # noqa: BLE001
         pass
+    try:  # ESS plan — alongside the reallocation, the storage added per bus
+        ess = engine.ess_plan_payload(cfg) or []
+        if ess:
+            carrier = str(cfg.get("ess_carrier") or "ESS").strip() or "ESS"
+            out[f"ESS plan — {carrier} (MW per bus)"] = [
+                {"bus": r.get("bus"), "replaced (MW)": r.get("replaced_mw"), "ESS (MW)": r.get("ess_mw")}
+                for r in ess
+            ]
+    except Exception:  # noqa: BLE001
+        pass
     return out
 
 
