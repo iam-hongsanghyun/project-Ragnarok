@@ -56,7 +56,8 @@ class Settings:
     ess_sizing_mode: str = "proportional"  # "proportional" (% of replaced p_nom) | "fixed" (MW)
     ess_proportion_pct: float = 30.0   # % of the bus's total replaced capacity (proportional)
     ess_fixed_mw: float = 100.0        # fixed MW per bus (fixed mode)
-    ess_capital_cost: float = 0.0      # annualised capital cost per MW (drives expansion)
+    ess_capital_cost: float = 0.0      # OVERNIGHT capital cost per MW (annuitised by the backend over the lifetime)
+    ess_lifetime: float = 15.0         # asset lifetime (years) → annuity factor for the capital cost
     ess_expandable: bool = False       # True → p_nom_extendable with the min/max below
     # Bounds are read as MW ("fixed") or as a % of the bus's replaced capacity
     # ("proportional", e.g. 10 % – 200 %).

@@ -89,6 +89,9 @@ def test_ess_proportional_with_expansion(libs: dict[str, Any]) -> None:
     assert su.at["ESS_b1", "p_nom_min"] == pytest.approx(10.0)
     assert su.at["ESS_b1", "p_nom_max"] == pytest.approx(500.0)
     assert su.at["ESS_b1", "carrier"] == "MyBattery"
+    # A finite lifetime is set so the backend can annuitise capital_cost
+    # (PyPSA's default +inf has no annuity → would zero the CAPEX).
+    assert su.at["ESS_b1", "lifetime"] == pytest.approx(15.0)
 
 
 def test_ess_proportional_expansion_bounds(libs: dict[str, Any]) -> None:

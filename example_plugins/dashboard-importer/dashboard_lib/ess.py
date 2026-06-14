@@ -92,6 +92,7 @@ def add_storage_at_replaced_buses(
     proportion = float(getattr(s, "ess_proportion_pct", 0.0) or 0.0) / 100.0
     max_hours = float(getattr(s, "ess_hours", 4.0) or 0.0)
     capital_cost = float(getattr(s, "ess_capital_cost", 0.0) or 0.0)
+    lifetime = float(getattr(s, "ess_lifetime", 15.0) or 15.0)
     expandable = bool(getattr(s, "ess_expandable", False))
     expansion_mode = str(getattr(s, "ess_expansion_mode", "proportional") or "proportional").strip().lower()
     p_nom_min_in = float(getattr(s, "ess_p_nom_min", 0.0) or 0.0)
@@ -133,6 +134,9 @@ def add_storage_at_replaced_buses(
             "efficiency_store": eff,
             "efficiency_dispatch": eff,
             "capital_cost": capital_cost,
+            # Finite lifetime so the backend annuitises the (overnight) capital
+            # cost — PyPSA's default lifetime is +inf, which has no annuity.
+            "lifetime": lifetime,
             "p_nom_extendable": bool(expandable),
         }
         if expandable:
