@@ -184,6 +184,17 @@ export function isSeriesSheet(name: string): boolean {
   return name !== 'snapshots' && name.includes('-');
 }
 
+/** Map of `<series sheet> → row count` from a session meta. Time-series sheets
+ *  aren't held in the in-memory model (they page on demand), so this is what
+ *  makes them visible + selectable in the Model tree. */
+export function seriesSheetCounts(meta: SessionMeta): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const s of meta.sheets ?? []) {
+    if (s.kind === 'series' && s.rowCount > 0) out[s.name] = s.rowCount;
+  }
+  return out;
+}
+
 export type SheetEditOp =
   | { op: 'set'; row: number; column: string; value: unknown }
   | { op: 'addRow'; values?: Record<string, unknown>; index?: number }

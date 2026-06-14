@@ -1206,6 +1206,47 @@ def rename_backend_run(name: str, body: RenameRunRequest) -> dict[str, Any]:
     return meta
 
 
+class PromoteRunRequest(BaseModel):
+    """Body for ``POST /api/runs/{name}/promote``."""
+
+    sessionId: str = "default"
+
+
+@app.post("/api/runs/{name}/promote")
+def promote_run_to_session(name: str, body: PromoteRunRequest) -> dict[str, Any]:
+    """Make a stored run the editable working model — SERVER-SIDE.
+
+    The History "Import project" fast path. Copies the run's input model
+    (static sheets + input time-series) straight from the run db into the
+    session, so a full year of series never travels DB → browser → session (the
+    old path fetched the whole bundle, cloned it, then re-pushed it — doubled).
+    The editor rehydrates static-only and pages the series on demand. Returns
+    the session meta plus the run's scenario / window so the client can restore
+    constraints + run controls without a second heavy fetch.
+    """
+    data = run_store.get_run_model(name)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Stored run not found.")
+    model = data.get("model") or {}
+    scenario = data.get("scenario") or {}
+    options = data.get("options") or {}
+    filename = str(options.get("filename") or data.get("filename") or f"{name}.xlsx")
+    try:
+        meta = model_store.save_model(
+            body.sessionId, model, filename=filename, scenario_name=str(scenario.get("label") or ""),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "meta": meta,
+        "scenario": scenario,
+        "snapshotStart": data.get("snapshotStart") if data.get("snapshotStart") is not None else options.get("snapshotStart"),
+        "snapshotEnd": data.get("snapshotEnd") if data.get("snapshotEnd") is not None else options.get("snapshotEnd"),
+        "snapshotWeight": data.get("snapshotWeight") if data.get("snapshotWeight") is not None else options.get("snapshotWeight"),
+        "filename": filename,
+    }
+
+
 _ZIP_MEDIA_TYPE = "application/zip"
 
 

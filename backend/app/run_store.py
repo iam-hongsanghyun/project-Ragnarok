@@ -893,6 +893,33 @@ def get_run(name: str) -> dict[str, Any] | None:
         return None
 
 
+def get_run_model(name: str) -> dict[str, Any] | None:
+    """Reassemble only the INPUT model (+ head: scenario / options / window) for
+    a run, skipping the heavy OUTPUT series.
+
+    Used to promote a stored run into the working session server-side (the
+    History "Import project" fast path): the editable model — static sheets AND
+    input time-series (``loads-p_set`` …) all live in ``model_tables`` — is
+    copied straight into the session without the output series (which the editor
+    pages on demand anyway). ``None`` if missing / unsafe.
+    """
+    if not _is_safe_name(name):
+        logger.warning("Rejected unsafe run name: %r", name)
+        return None
+    _ensure_run_migrated(name)
+    if not _db_path(name).exists():
+        return None
+    try:
+        with _connect(name) as conn:
+            head = _kv_get(conn, "head") or {}
+            model_tables = _kv_get(conn, "model_tables") or {}
+            model = {sheet: _read_table(conn, tbl) for sheet, tbl in model_tables.items()}
+        return {**head, "model": model}
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to read backend run model %s", name)
+        return None
+
+
 def get_run_analytics(name: str) -> dict[str, Any] | None:
     """Return the lightweight analytics bundle (no input model, no output series).
 
