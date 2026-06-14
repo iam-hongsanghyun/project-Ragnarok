@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@jest/globals';
-import { matchesBackendQuery } from './HistoryView';
+import { matchesBackendQuery, reorderNames } from './HistoryView';
 import { BackendRunMeta } from 'lib/types';
 
 const meta = {
@@ -40,5 +40,41 @@ describe('matchesBackendQuery', () => {
 
   it('returns false when nothing matches', () => {
     expect(matchesBackendQuery(meta, 'nuclear')).toBe(false);
+  });
+});
+
+describe('reorderNames', () => {
+  const names = ['A', 'B', 'C', 'D'];
+
+  it('drops below the target when dragging downward', () => {
+    // Drag A (0) onto C (2): A lands just after C.
+    expect(reorderNames(names, 0, 2)).toEqual(['B', 'C', 'A', 'D']);
+  });
+
+  it('drops above the target when dragging upward', () => {
+    // Drag D (3) onto B (1): D lands just before B.
+    expect(reorderNames(names, 3, 1)).toEqual(['A', 'D', 'B', 'C']);
+  });
+
+  it('swaps adjacent rows', () => {
+    expect(reorderNames(names, 0, 1)).toEqual(['B', 'A', 'C', 'D']);
+    expect(reorderNames(names, 1, 0)).toEqual(['B', 'A', 'C', 'D']);
+  });
+
+  it('moves a row to the very top and bottom', () => {
+    expect(reorderNames(names, 2, 0)).toEqual(['C', 'A', 'B', 'D']);
+    expect(reorderNames(names, 1, 3)).toEqual(['A', 'C', 'D', 'B']);
+  });
+
+  it('is a no-op (copy) when source and target match', () => {
+    const out = reorderNames(names, 2, 2);
+    expect(out).toEqual(names);
+    expect(out).not.toBe(names);
+  });
+
+  it('does not mutate the input array', () => {
+    const input = [...names];
+    reorderNames(input, 0, 3);
+    expect(input).toEqual(names);
   });
 });
