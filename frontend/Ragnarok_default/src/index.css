@@ -3048,6 +3048,18 @@ path.leaflet-interactive:focus {
   to { transform: rotate(360deg); }
 }
 .history-row-spacer { flex: 1 1 auto; }
+/* Per-row in-flight activity (Importing / Exporting / Deleting) — spinner +
+   label, mirroring the Queue's "Running" indicator. */
+.history-row-activity {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--brand);
+  white-space: nowrap;
+}
 .history-row .tb-btn { flex: 0 0 auto; }
 
 /* Click-to-rename name on backend rows: text cursor + dotted underline on
