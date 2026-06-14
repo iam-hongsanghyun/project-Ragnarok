@@ -50,7 +50,7 @@ import { dslToSpecs, parseConstraintDsl } from 'lib/constraints/dsl';
 import { buildScenarioPreset, defaultScenarioCatalog, readScenarioCatalogFromModel, sameScenarioCatalog, writeScenarioCatalogToModel } from 'lib/results/scenarios';
 import { readCarbonLibraryFromModel, writeCarbonLibraryToModel, sameCarbonLibrary } from 'lib/results/carbonLibrary';
 import { saveSessionControls, loadSessionControls, clearSession, clearSessionModelOnly } from 'lib/storage/sessionStore';
-import { clearSessionModel, putSessionModel, putStaticModel, getSessionFullModel, getSheetPage, isSeriesSheet, patchSheet, DEFAULT_SESSION_ID } from 'lib/api/session';
+import { clearSessionModel, putSessionModel, putStaticModel, getSessionFullModel, getSessionMeta, getSheetPage, isSeriesSheet, patchSheet, DEFAULT_SESSION_ID } from 'lib/api/session';
 import type { SheetEditOp } from 'lib/api/session';
 import { RunDialog } from './features/run/RunDialog';
 import { SettingsView } from './views/SettingsView';
@@ -198,6 +198,12 @@ function AppInner() {
   const [runDialogOpen, setRunDialogOpen] = useState(false);
   const [dryRun, setDryRun] = useState(false);
   const [backendRuns, setBackendRuns] = useState<BackendRunMeta[]>([]);
+  // Temporal sheet name → row count in the backend session. Time-series sheets
+  // are stripped from the in-memory model (held server-side, paged on demand),
+  // so this is what makes them visible + selectable in the Model tree. Set from
+  // the loaded model's own series, and refreshed from the session after a
+  // backend-plugin build (which rehydrates the editor static-only).
+  const [sessionSeriesCounts, setSessionSeriesCounts] = useState<Record<string, number>>({});
   // Filenames of external result imports currently being converted to History
   // entries. Importing a full-year result takes tens of seconds (parse + derive
   // analytics + build the run db), so History shows a "Converting…" placeholder
@@ -426,7 +432,16 @@ function AppInner() {
     setSnapshotEnd(snapshotMax);
     setSnapshotStart(RUN_WINDOW.initialSnapshotStart);
     // React holds only the small static sheets; the heavy time-series stay in
-    // the backend session and are paged into the grid on demand.
+    // the backend session and are paged into the grid on demand. Record the
+    // incoming model's series-sheet row counts so the Model tree still lists
+    // them (and the table can lazy-load them) even though they're stripped here.
+    const incomingSeriesCounts: Record<string, number> = {};
+    for (const [sheetName, rows] of Object.entries(nextModel)) {
+      if (isSeriesSheet(sheetName) && Array.isArray(rows) && rows.length > 0) {
+        incomingSeriesCounts[sheetName] = rows.length;
+      }
+    }
+    setSessionSeriesCounts(incomingSeriesCounts);
     setModel(stripSeriesSheets(nextModel));
     setResults(null);
     setResultsModel(null);
@@ -639,6 +654,19 @@ function AppInner() {
         if (!cancelled && savedModel && hasRows) {
           // Already in the session — don't push it straight back.
           resetForNewModel(savedModel, controls?.filename, { pushToSession: false });
+          // Static rehydrate drops series; learn them from the session meta so
+          // the Model tree lists the temporal sheets (paged into the grid on
+          // demand) instead of hiding them.
+          try {
+            const sessionMeta = await getSessionMeta();
+            if (!cancelled) {
+              const counts: Record<string, number> = {};
+              for (const sheet of sessionMeta.sheets ?? []) {
+                if (sheet.kind === 'series' && sheet.rowCount > 0) counts[sheet.name] = sheet.rowCount;
+              }
+              setSessionSeriesCounts(counts);
+            }
+          } catch { /* tree just won't list series until next load */ }
           if (controls) {
             setCarbonPrice(controls.carbonPrice);
             setCarbonPriceSchedule((controls.carbonPriceSchedule ?? []).map((r) => ({ ...r })));
@@ -1745,6 +1773,14 @@ function AppInner() {
     // CSV/manual import boundary so the in-memory model stays PyPSA-canonical.
     const canonical = canonicalizeTemporalRows(rows, settings.dateFormat);
     setModel((current) => ({ ...current, [sheet]: canonical }));
+    // Keep the tree's series-count map in step (imported sheet now has rows;
+    // an empty import clears it).
+    setSessionSeriesCounts((c) => {
+      const next = { ...c };
+      if (canonical.length > 0) next[String(sheet)] = canonical.length;
+      else delete next[String(sheet)];
+      return next;
+    });
     // Time-series live in the backend session (static merges skip them) —
     // replace the sheet there too, like the Model tab's CSV import does. The
     // current row count comes from the BACKEND (the mirror strips series).
@@ -2228,6 +2264,7 @@ function AppInner() {
               jumpTo={jumpTo}
               currencySymbol={settings.currencySymbol}
               dateFormat={settings.dateFormat}
+              seriesSheetCounts={sessionSeriesCounts}
               hasResults={Boolean(results)}
               onOpen={handleOpenWorkbook}
               onSave={saveWorkbook}
@@ -2347,6 +2384,17 @@ function AppInner() {
                 try {
                   const savedModel = await getSessionFullModel({ staticOnly: true });
                   if (savedModel) resetForNewModel(savedModel, meta.filename, { pushToSession: false });
+                  // The static rehydrate carries no series, so learn the session's
+                  // temporal sheets from its meta — otherwise the Model tree would
+                  // hide them and they'd look "missing" (they're solved either way).
+                  try {
+                    const sessionMeta = await getSessionMeta();
+                    const counts: Record<string, number> = {};
+                    for (const sheet of sessionMeta.sheets ?? []) {
+                      if (sheet.kind === 'series' && sheet.rowCount > 0) counts[sheet.name] = sheet.rowCount;
+                    }
+                    setSessionSeriesCounts(counts);
+                  } catch { /* tree just won't list series; they still solve */ }
                   setTab('Model');
                 } catch {
                   showToast('Built, but the editor could not reload from the session.', 'error');

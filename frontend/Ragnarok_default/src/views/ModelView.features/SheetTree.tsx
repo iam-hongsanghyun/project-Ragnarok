@@ -1,9 +1,12 @@
 /**
  * Sheet tree — component → attribute navigator.
  *
- * Only sheets with at least one row are shown; empty sheets and
- * temporal sheets without data are hidden. Selecting a leaf flips
- * the central table view to that sheet.
+ * Only sheets with at least one row are shown; empty sheets are hidden.
+ * Temporal (time-series) sheets are stripped from the in-memory model (they
+ * live in the backend session and are paged into the grid on demand), so their
+ * presence + row count come from `seriesSheetCounts` — the session's series
+ * sheets. Selecting a temporal leaf flips the central table to it, which then
+ * lazy-loads its rows from the session.
  */
 import React, { useMemo, useState } from 'react';
 import { GridRow, SheetName, TableSel, WorkbookModel } from 'lib/types';
@@ -15,9 +18,17 @@ interface Props {
   issues: ModelIssue[];
   sel: TableSel;
   onSelChange: (sel: TableSel) => void;
+  /** Temporal sheet name → row count in the backend session. Series sheets are
+   *  not held in the in-memory model, so this is what makes them visible and
+   *  selectable in the tree (the table loads the rows on demand when selected). */
+  seriesSheetCounts?: Record<string, number>;
 }
 
-export function SheetTree({ model, issues, sel, onSelChange }: Props) {
+export function SheetTree({ model, issues, sel, onSelChange, seriesSheetCounts }: Props) {
+  // Row count for a temporal sheet: the session's count (source of truth, since
+  // series aren't kept in the in-memory model), else any in-memory rows.
+  const tsCount = (sheet: string): number =>
+    seriesSheetCounts?.[sheet] ?? ((model as unknown as Record<string, GridRow[]>)[sheet]?.length ?? 0);
   const [navSearch, setNavSearch] = useState('');
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
@@ -45,9 +56,7 @@ export function SheetTree({ model, issues, sel, onSelChange }: Props) {
   const visibleGroups = TABLE_GROUPS.filter((g) => {
     const staticRows = (model[g.sheet] ?? []) as GridRow[];
     const hasStatic = staticRows.length > 0;
-    const hasAnyTs = g.temporalSheets.some(
-      (ts) => (((model as unknown as Record<string, GridRow[]>)[ts.sheet]) ?? []).length > 0,
-    );
+    const hasAnyTs = g.temporalSheets.some((ts) => tsCount(ts.sheet) > 0);
     if (!hasStatic && !hasAnyTs) return false;
     if (!navSearch) return true;
     return (
@@ -97,10 +106,8 @@ export function SheetTree({ model, issues, sel, onSelChange }: Props) {
           const open = !collapsed.has(g.sheet);
           const staticActive = sel.kind === 'static' && sel.sheet === g.sheet;
 
-          // Only temporal sheets with data
-          const tsEntries = g.temporalSheets.filter(
-            (ts) => (((model as unknown as Record<string, GridRow[]>)[ts.sheet]) ?? []).length > 0,
-          );
+          // Only temporal sheets that exist in the session (or carry in-memory rows).
+          const tsEntries = g.temporalSheets.filter((ts) => tsCount(ts.sheet) > 0);
 
           return (
             <div key={g.sheet} className="sheet-tree-group">
@@ -132,7 +139,6 @@ export function SheetTree({ model, issues, sel, onSelChange }: Props) {
                     </button>
                   )}
                   {tsEntries.map((ts) => {
-                    const tsRows = ((model as unknown as Record<string, GridRow[]>)[ts.sheet]) ?? [];
                     const tsActive = sel.kind === 'ts' && sel.sheet === ts.sheet;
                     return (
                       <button
@@ -142,7 +148,7 @@ export function SheetTree({ model, issues, sel, onSelChange }: Props) {
                       >
                         <span className="sheet-tree-item-icon">t</span>
                         <span className="sheet-tree-item-label">{ts.attribute}</span>
-                        <span className="sheet-tree-count">{tsRows.length}</span>
+                        <span className="sheet-tree-count">{tsCount(ts.sheet)}</span>
                       </button>
                     );
                   })}

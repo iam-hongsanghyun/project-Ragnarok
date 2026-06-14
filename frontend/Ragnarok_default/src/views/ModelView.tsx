@@ -51,6 +51,8 @@ export interface ModelViewProps extends FileToolbarProps {
   jumpTo: { sheet: string; rowIndex: number } | null;
   currencySymbol: string;
   dateFormat: DateFormat;
+  /** Session series-sheet row counts (temporal sheets live server-side). */
+  seriesSheetCounts?: Record<string, number>;
 }
 
 export function ModelView(props: ModelViewProps) {
@@ -66,6 +68,7 @@ export function ModelView(props: ModelViewProps) {
             issues={props.modelIssues}
             sel={sel}
             onSelChange={setSel}
+            seriesSheetCounts={props.seriesSheetCounts}
           />
         </section>
         <section className="model-column model-column-table">
