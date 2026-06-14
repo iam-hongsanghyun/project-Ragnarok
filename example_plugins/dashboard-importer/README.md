@@ -32,6 +32,15 @@ dashboard_lib/    # topology, region, scaling, snapshots, carriers, …
    model and writes it into the session; the editor rehydrates from there.
 4. Press the topbar **Run** to solve. *Uninstall* with the **x** in the rail.
 
+**Energy storage (ESS).** Alongside generator replacement, the *Energy storage*
+group can add a `StorageUnit` at every bus where a plant was replaced. Size it
+as a **proportion of the replaced capacity** (e.g. 30%) or a **fixed MW** per
+bus, with configurable duration (`max_hours`) and round-trip efficiency (split
+√ into charge/discharge). Turn on **Capacity expansion** to make it
+`p_nom_extendable` between a min/max with a capital cost. The carrier (default
+`ESS`) is added to the model's carriers if absent. The per-bus ESS sizing is
+previewed in the Output tab next to the reallocation plan.
+
 Solve-time effects travel **as data** (Ragnarok runs no plugin code in-solve):
 CF constraints are emitted as `RAGNAROK_CustomDSL` lines, and the carbon price
 is folded into generator marginal costs at build time (so it also shows up in

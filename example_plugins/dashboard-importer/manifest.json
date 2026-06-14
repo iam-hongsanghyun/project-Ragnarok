@@ -1,7 +1,7 @@
 {
   "id": "dashboard-importer",
   "name": "Dashboard Importer (backend)",
-  "version": "3.4.1",
+  "version": "3.5.0",
   "kind": "backend",
   "description": "Builds a Ragnarok workbook from a PyPSA dashboard model + GUI settings. Runs ENTIRELY in the Ragnarok backend (imports the bundled PyPSA source); the model is written straight into the session and never enters the browser. Backend port of the frontend dashboard importer — no separate server, nothing in plugins.env.",
   "capabilities": [
@@ -357,6 +357,92 @@
         "field": "replace_generators",
         "equals": true
       }
+    },
+    "grp_ess": {
+      "type": "group",
+      "column": "left",
+      "label": "Energy storage (ESS)",
+      "description": "Add a storage unit (ESS) at every bus where a generator was replaced above. Size it as a share of the replaced capacity or a fixed MW, and optionally make it capacity-expandable."
+    },
+    "add_ess": {
+      "type": "boolean",
+      "label": "Add ESS at replacement buses",
+      "description": "When on, one StorageUnit is built at each bus where the generator replacement above happened.",
+      "default": false
+    },
+    "ess_carrier": {
+      "type": "string",
+      "label": "ESS carrier",
+      "description": "Carrier name for the storage units. Added to the model's carriers automatically if it doesn't already exist.",
+      "default": "ESS",
+      "visibleWhen": { "field": "add_ess", "equals": true }
+    },
+    "ess_hours": {
+      "type": "number",
+      "label": "Storage duration (hours)",
+      "description": "Energy-to-power ratio (max_hours): energy capacity = power × hours. E.g. 4 = a 4-hour battery.",
+      "default": 4,
+      "visibleWhen": { "field": "add_ess", "equals": true }
+    },
+    "ess_efficiency": {
+      "type": "number",
+      "label": "Round-trip efficiency",
+      "description": "Round-trip efficiency (0–1). Split as √ into the charge and discharge efficiencies.",
+      "default": 0.9,
+      "visibleWhen": { "field": "add_ess", "equals": true }
+    },
+    "ess_sizing_mode": {
+      "type": "select",
+      "label": "Sizing mode",
+      "description": "How each ESS power rating is set: a proportion of the bus's replaced capacity, or a flat MW per bus.",
+      "default": "proportional",
+      "options": [
+        { "value": "proportional", "label": "proportional — % of replaced capacity" },
+        { "value": "fixed", "label": "fixed — flat MW per bus" }
+      ],
+      "visibleWhen": { "field": "add_ess", "equals": true }
+    },
+    "ess_proportion_pct": {
+      "type": "number",
+      "label": "Proportional size (% of replaced capacity)",
+      "description": "Used when Sizing mode = proportional: ESS power = this % of the total generator capacity replaced at the bus (e.g. 30).",
+      "default": 30,
+      "visibleWhen": { "field": "add_ess", "equals": true }
+    },
+    "ess_fixed_mw": {
+      "type": "number",
+      "label": "Fixed size (MW per bus)",
+      "description": "Used when Sizing mode = fixed: every ESS gets this power rating (MW).",
+      "default": 100,
+      "visibleWhen": { "field": "add_ess", "equals": true }
+    },
+    "ess_capital_cost": {
+      "type": "number",
+      "label": "Capital cost (per MW)",
+      "description": "Annualised capital cost per MW of ESS power. Drives capacity expansion; leave 0 for no cost.",
+      "default": 0,
+      "visibleWhen": { "field": "add_ess", "equals": true }
+    },
+    "ess_expandable": {
+      "type": "boolean",
+      "label": "Capacity expansion",
+      "description": "When on, the ESS power is extendable (p_nom_extendable = True) between the min and max below; the size above is the starting point.",
+      "default": false,
+      "visibleWhen": { "field": "add_ess", "equals": true }
+    },
+    "ess_p_nom_min": {
+      "type": "number",
+      "label": "Expansion min (MW)",
+      "description": "Lower bound on ESS power when capacity expansion is on.",
+      "default": 0,
+      "visibleWhen": { "field": "ess_expandable", "equals": true }
+    },
+    "ess_p_nom_max": {
+      "type": "number",
+      "label": "Expansion max (MW)",
+      "description": "Upper bound on ESS power when capacity expansion is on. 0 or blank → unbounded.",
+      "default": 0,
+      "visibleWhen": { "field": "ess_expandable", "equals": true }
     },
     "grp_mc": {
       "type": "group",

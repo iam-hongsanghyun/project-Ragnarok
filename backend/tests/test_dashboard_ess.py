@@ -1,0 +1,116 @@
+"""ESS (energy storage) added at generator-replacement buses (dashboard-importer).
+
+Loads the plugin's dashboard_lib modules directly (the same files the plugin
+runs) and pins: replace_generators reports the replaced capacity per bus, and
+ess.add_storage_at_replaced_buses sizes + configures the StorageUnits from it.
+"""
+from __future__ import annotations
+
+import importlib.util
+import sys
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+import pytest
+
+_LIB = Path(__file__).resolve().parents[2] / "example_plugins" / "dashboard-importer" / "dashboard_lib"
+
+
+def _load(name: str) -> Any:
+    spec = importlib.util.spec_from_file_location(f"dashboard_lib.{name}", _LIB / f"{name}.py")
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # dataclass needs the module registered
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture(scope="module")
+def libs() -> dict[str, Any]:
+    return {n: _load(n) for n in ("settings", "generator_replacement", "ess")}
+
+
+def _network() -> Any:
+    import pypsa
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2025-01-01", periods=3, freq="h"))
+    n.add("Bus", "b1")
+    n.add("Bus", "b2")
+    n.add("Carrier", "coal")
+    n.add("Generator", "coalA", bus="b1", carrier="coal", p_nom=400.0, build_year=2030)
+    n.add("Generator", "coalB", bus="b1", carrier="coal", p_nom=200.0, build_year=2030)
+    n.add("Generator", "coalC", bus="b2", carrier="coal", p_nom=300.0, build_year=2030)
+    n.generators["province"] = ""
+    return n
+
+
+def _dashboard(libs: dict[str, Any], **ess_kwargs: Any) -> Any:
+    s = libs["settings"].Settings(
+        model="", base_year=2025, target_year=2030, target_load_twh=0,
+        snapshot_start="01/01/2025 00:00", snapshot_length=3,
+        replace_generators=True, replace_all_carriers=True, replace_carriers=("coal",),
+        replace_solar_pct=60, replace_wind_pct=40, **ess_kwargs,
+    )
+    return libs["settings"].Dashboard(
+        settings=s, cc_rules=None, cf_constraints=pd.DataFrame(), carbon_price_usd=0.0,
+    )
+
+
+def test_replace_generators_reports_capacity_per_bus(libs: dict[str, Any]) -> None:
+    n = _network()
+    replaced = libs["generator_replacement"].replace_generators(n, _dashboard(libs))
+    # b1 had 400 + 200 replaced, b2 had 300.
+    assert replaced == {"b1": 600.0, "b2": 300.0}
+
+
+def test_ess_proportional_with_expansion(libs: dict[str, Any]) -> None:
+    n = _network()
+    dash = _dashboard(
+        libs, add_ess=True, ess_carrier="MyBattery", ess_hours=4, ess_efficiency=0.81,
+        ess_sizing_mode="proportional", ess_proportion_pct=30, ess_capital_cost=12345,
+        ess_expandable=True, ess_p_nom_min=10, ess_p_nom_max=500,
+    )
+    replaced = libs["generator_replacement"].replace_generators(n, dash)
+    libs["ess"].add_storage_at_replaced_buses(n, dash, replaced)
+
+    assert "MyBattery" in n.carriers.index  # carrier auto-added
+    su = n.storage_units
+    assert set(su.index) == {"ESS_b1", "ESS_b2"}
+    # 30% of the replaced capacity at each bus.
+    assert su.at["ESS_b1", "p_nom"] == pytest.approx(180.0)
+    assert su.at["ESS_b2", "p_nom"] == pytest.approx(90.0)
+    # Round-trip 0.81 → √ = 0.9 each way.
+    assert su.at["ESS_b1", "efficiency_store"] == pytest.approx(0.9)
+    assert su.at["ESS_b1", "efficiency_dispatch"] == pytest.approx(0.9)
+    assert su.at["ESS_b1", "max_hours"] == pytest.approx(4.0)
+    assert bool(su.at["ESS_b1", "p_nom_extendable"]) is True
+    assert su.at["ESS_b1", "p_nom_min"] == pytest.approx(10.0)
+    assert su.at["ESS_b1", "p_nom_max"] == pytest.approx(500.0)
+    assert su.at["ESS_b1", "carrier"] == "MyBattery"
+
+
+def test_ess_fixed_mw_no_expansion(libs: dict[str, Any]) -> None:
+    n = _network()
+    dash = _dashboard(
+        libs, add_ess=True, ess_carrier="ESS", ess_hours=2, ess_efficiency=1.0,
+        ess_sizing_mode="fixed", ess_fixed_mw=100, ess_expandable=False,
+    )
+    replaced = libs["generator_replacement"].replace_generators(n, dash)
+    libs["ess"].add_storage_at_replaced_buses(n, dash, replaced)
+
+    su = n.storage_units
+    assert set(su.index) == {"ESS_b1", "ESS_b2"}
+    # Flat 100 MW per bus regardless of replaced capacity.
+    assert su.at["ESS_b1", "p_nom"] == pytest.approx(100.0)
+    assert su.at["ESS_b2", "p_nom"] == pytest.approx(100.0)
+    assert bool(su.at["ESS_b1", "p_nom_extendable"]) is False
+
+
+def test_ess_off_adds_nothing(libs: dict[str, Any]) -> None:
+    n = _network()
+    dash = _dashboard(libs, add_ess=False)
+    replaced = libs["generator_replacement"].replace_generators(n, dash)
+    libs["ess"].add_storage_at_replaced_buses(n, dash, replaced)
+    assert len(n.storage_units) == 0

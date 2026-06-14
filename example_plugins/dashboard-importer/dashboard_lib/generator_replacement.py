@@ -88,13 +88,19 @@ _REQUIRED_COLUMNS = ("generator",)
 _RENEWABLES = ("solar", "wind")
 
 
-def replace_generators(network: pypsa.Network, dashboard: "Dashboard") -> None:
+def replace_generators(network: pypsa.Network, dashboard: "Dashboard") -> dict[str, float]:
     """Replace selected new plants with solar/wind, modifying *network* in place.
 
     Args:
         network:   PyPSA Network to modify in place.  Expected after demand
             redistribution and before region aggregation / p_max_pu.
         dashboard: Parsed :class:`~dashboard_lib.settings.Dashboard`.
+
+    Returns:
+        ``{bus: total replaced p_nom (MW)}`` — the original capacity removed at
+        each bus where a replacement happened. Used to size the optional ESS
+        added at those buses (see :mod:`dashboard_lib.ess`). Empty when
+        replacement is disabled or nothing matched.
 
     Raises:
         ValueError: On any invalid row — unknown plant (not active in the target
@@ -103,7 +109,7 @@ def replace_generators(network: pypsa.Network, dashboard: "Dashboard") -> None:
     """
     settings = dashboard.settings
     if not getattr(settings, "replace_generators", False):
-        return
+        return {}
 
     base_year = int(settings.base_year)
     follow = bool(getattr(settings, "replace_follow", False))
@@ -203,10 +209,11 @@ def replace_generators(network: pypsa.Network, dashboard: "Dashboard") -> None:
         logger.info(
             "Generator replacement: enabled but nothing selected (no table rows, no bulk carriers) — skipping"
         )
-        return
+        return {}
 
     # ── Apply each replacement ────────────────────────────────────────────────
     added = 0
+    replaced_by_bus: dict[str, float] = {}
     annual_additions = _year_additions_by_year(network)
     for name in targets:
         # A pre-existing plant (no build_year) is "always built" → inherit base_year
@@ -234,6 +241,10 @@ def replace_generators(network: pypsa.Network, dashboard: "Dashboard") -> None:
             "Generator replacement: %s (build %s): %.1f MW -> solar %.1f + wind %.1f",
             name, by, capacity, solar_cap, wind_cap,
         )
+
+        # Record the original capacity removed at this bus so an ESS can be
+        # sized as a proportion of it (summed when several plants share a bus).
+        replaced_by_bus[bus] = replaced_by_bus.get(bus, 0.0) + capacity
 
         network.remove("Generator", name)
         for carrier, cap in (("solar", solar_cap), ("wind", wind_cap)):
@@ -264,6 +275,7 @@ def replace_generators(network: pypsa.Network, dashboard: "Dashboard") -> None:
         "(solar mc=%s, wind mc=%s)",
         len(targets), added, mode, bulk_note, carrier_mc["solar"], carrier_mc["wind"],
     )
+    return replaced_by_bus
 
 
 # ---------------------------------------------------------------------------

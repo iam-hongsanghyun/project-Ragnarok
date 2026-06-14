@@ -48,6 +48,18 @@ class Settings:
     replace_carriers: tuple = ()  # carriers selected for the dropdown filter / bulk reallocation
     replace_filter_column: str = ""  # extra attribute filter: generators sheet column name
     replace_filter_value: str = ""   # ... keep only generators whose column == this value
+    # ── ESS (energy storage) added at each replacement bus ──────────────────
+    add_ess: bool = False              # True → add a StorageUnit at every replacement bus
+    ess_carrier: str = "ESS"           # storage carrier name (added to carriers if absent)
+    ess_hours: float = 4.0             # energy/power ratio → StorageUnit.max_hours
+    ess_efficiency: float = 0.9        # ROUND-TRIP efficiency (split √ to store/dispatch)
+    ess_sizing_mode: str = "proportional"  # "proportional" (% of replaced p_nom) | "fixed" (MW)
+    ess_proportion_pct: float = 30.0   # % of the bus's total replaced capacity (proportional)
+    ess_fixed_mw: float = 100.0        # fixed MW per bus (fixed mode)
+    ess_capital_cost: float = 0.0      # annualised capital cost per MW (drives expansion)
+    ess_expandable: bool = False       # True → p_nom_extendable with the min/max below
+    ess_p_nom_min: float = 0.0         # expansion lower bound (MW)
+    ess_p_nom_max: float = 0.0         # expansion upper bound (MW); 0/blank → unbounded
     marginal_cost_multiplier: bool = False  # True → scale generator marginal cost per carrier
     plot_map: bool = True       # True → save a network map PNG before optimisation
     cc_rule: bool = True        # False → skip CC merge
