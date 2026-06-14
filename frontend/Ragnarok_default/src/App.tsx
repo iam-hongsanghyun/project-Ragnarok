@@ -893,15 +893,15 @@ function AppInner() {
     setConvertingImports((prev) => [...prev, file.name]);
     setStatus(`Converting ${file.name}…`);
     try {
-      // Import an EXTERNAL Excel results file as a persistent History entry.
-      // Unlike Import Project (which only loads into the editor), this writes
-      // to the run store via store_run(origin="xlsx_import"), so the result is
-      // permanent — comparable like any solved run and surviving refresh /
-      // restart. The backend maps the sheets to the canonical result schema and
-      // derives the analytics so the Result view populates.
+      // Import a result-bearing file as a persistent History entry. Accepts a
+      // Ragnarok project .zip / embedded-bundle .xlsx (full model + results
+      // round-trip verbatim) OR a bare results .xlsx (analytics derived from the
+      // stored outputs). Unlike Import Project (which only loads into the
+      // editor), this writes to the run store, so the entry is permanent —
+      // comparable like any solved run and surviving refresh.
       const form = new FormData();
       form.append('file', file);
-      const resp = await fetch(`${API_BASE}/api/import/result/xlsx`, { method: 'POST', body: form });
+      const resp = await fetch(`${API_BASE}/api/import/result`, { method: 'POST', body: form });
       if (!resp.ok) {
         throw new Error((await resp.text()) || `Import failed (HTTP ${resp.status})`);
       }
@@ -2020,7 +2020,7 @@ function AppInner() {
     <div className="studio-shell">
       <input ref={fileInputRef} type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden onChange={handleImport} />
       <input ref={projectImportInputRef} type="file" accept=".zip,application/zip,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden onChange={handleImportProject} />
-      <input ref={resultImportInputRef} type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden onChange={handleImportResultXlsx} />
+      <input ref={resultImportInputRef} type="file" accept=".zip,application/zip,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden onChange={handleImportResultXlsx} />
       <input ref={csvFolderImportInputRef} type="file" accept=".zip,application/zip" hidden onChange={handleImportCsvFolder} />
       <input ref={netcdfImportInputRef} type="file" accept=".nc" hidden onChange={handleImportNetcdf} />
       <input ref={hdf5ImportInputRef} type="file" accept=".h5,.hdf5" hidden onChange={handleImportHdf5} />
