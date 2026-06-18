@@ -978,42 +978,58 @@ function AppInner() {
   };
 
   const handleImportResultXlsx = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+    const files = Array.from(event.target.files ?? []);
     if (event.target) event.target.value = '';
-    if (!file) return;
-    // Show a "Converting…" placeholder in History immediately — the backend
-    // parse + analytics derivation + db build takes tens of seconds for a
-    // full-year result, and a silent wait reads as "nothing happened".
-    setConvertingImports((prev) => [...prev, file.name]);
-    setStatus(`Converting ${file.name}…`);
-    try {
-      // Import a result-bearing file as a persistent History entry. Accepts a
-      // Ragnarok project .zip / embedded-bundle .xlsx (full model + results
-      // round-trip verbatim) OR a bare results .xlsx (analytics derived from the
-      // stored outputs). Unlike Import Project (which only loads into the
-      // editor), this writes to the run store, so the entry is permanent —
-      // comparable like any solved run and surviving refresh.
-      const form = new FormData();
-      form.append('file', file);
-      const resp = await fetch(`${API_BASE}/api/import/result`, { method: 'POST', body: form });
-      if (!resp.ok) {
-        throw new Error((await resp.text()) || `Import failed (HTTP ${resp.status})`);
+    if (files.length === 0) return;
+    // Show a "Converting…" placeholder per file in History immediately — the
+    // backend parse + analytics derivation + db build takes tens of seconds for
+    // a full-year result, and a silent wait reads as "nothing happened".
+    setConvertingImports((prev) => [...prev, ...files.map((f) => f.name)]);
+
+    // Import each result-bearing file as a persistent History entry. Accepts a
+    // Ragnarok project .zip / embedded-bundle .xlsx (full model + results
+    // round-trip verbatim) OR a bare results .xlsx (analytics derived from the
+    // stored outputs). Unlike Import Project (which only loads into the editor),
+    // this writes to the run store, so each entry is permanent. Files are
+    // imported sequentially so one slow conversion can't stall the others'
+    // placeholders; a per-file failure is reported but doesn't abort the batch.
+    let lastImported: string | null = null;
+    let ok = 0;
+    for (const file of files) {
+      setStatus(`Converting ${file.name}…`);
+      try {
+        const form = new FormData();
+        form.append('file', file);
+        const resp = await fetch(`${API_BASE}/api/import/result`, { method: 'POST', body: form });
+        if (!resp.ok) {
+          throw new Error((await resp.text()) || `Import failed (HTTP ${resp.status})`);
+        }
+        const { name } = (await resp.json()) as { name?: string };
+        if (name) lastImported = name;
+        ok += 1;
+        showToast(`Result imported (${file.name})`, 'success');
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : 'Result import failed.';
+        setStatus(`${file.name}: ${msg}`);
+        showToast(`${file.name}: ${msg}`, 'error');
+      } finally {
+        setConvertingImports((prev) => prev.filter((n) => n !== file.name));
       }
-      const { name } = (await resp.json()) as { name?: string };
-      await refreshBackendRuns();
-      if (name) {
-        await handleOpenBackendRun(name);
-        setTab('Analytics');
-        setAnalyticsSubTab('Result');
-      }
-      setStatus(`Imported result: ${file.name} — stored in History.`);
-      showToast(`Result imported (${file.name})`, 'success');
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : 'Result import failed.';
-      setStatus(msg);
-      showToast(msg, 'error');
-    } finally {
-      setConvertingImports((prev) => prev.filter((n) => n !== file.name));
+    }
+
+    await refreshBackendRuns();
+    // Open the last successfully imported run so the user lands on a result.
+    if (lastImported) {
+      await handleOpenBackendRun(lastImported);
+      setTab('Analytics');
+      setAnalyticsSubTab('Result');
+    }
+    if (ok > 0) {
+      setStatus(
+        files.length === 1
+          ? `Imported result: ${files[0].name} — stored in History.`
+          : `Imported ${ok} of ${files.length} results — stored in History.`,
+      );
     }
   };
 
@@ -1824,14 +1840,22 @@ function AppInner() {
 
   // Explicit Excel export — the ONLY path that creates a workbook (the backend
   // never auto-writes xlsx). `parts` mirrors the Export dialog's checkboxes.
-  const handleDownloadBackendXlsx = (name: string, parts?: string[]) => {
-    void runExportJob(name, 'xlsx', parts);
+  // Export one or more stored runs as Excel workbooks. Runs are built and
+  // downloaded sequentially so a multi-select doesn't fire N concurrent export
+  // jobs at the backend (or N simultaneous browser downloads).
+  const handleDownloadBackendXlsx = (names: string[], parts?: string[]) => {
+    void (async () => {
+      for (const name of names) await runExportJob(name, 'xlsx', parts);
+    })();
   };
 
-  // Export a stored run as the full Ragnarok Project package (.zip of all three
-  // files: bundle JSON + meta JSON + readable xlsx).
-  const handleExportBackendProject = (name: string) => {
-    void runExportJob(name, 'package');
+  // Export one or more stored runs as full Ragnarok Project packages (.zip of
+  // all three files: bundle JSON + meta JSON + readable xlsx). Sequential, same
+  // rationale as the xlsx path above.
+  const handleExportBackendProject = (names: string[]) => {
+    void (async () => {
+      for (const name of names) await runExportJob(name, 'package');
+    })();
   };
 
   const handleDeleteBackendRuns = async (names: string[]) => {
@@ -2183,7 +2207,7 @@ function AppInner() {
     <div className="studio-shell">
       <input ref={fileInputRef} type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden onChange={handleImport} />
       <input ref={projectImportInputRef} type="file" accept=".zip,application/zip,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden onChange={handleImportProject} />
-      <input ref={resultImportInputRef} type="file" accept=".zip,application/zip,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden onChange={handleImportResultXlsx} />
+      <input ref={resultImportInputRef} type="file" accept=".zip,application/zip,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden multiple onChange={handleImportResultXlsx} />
       <input ref={csvFolderImportInputRef} type="file" accept=".zip,application/zip" hidden onChange={handleImportCsvFolder} />
       <input ref={netcdfImportInputRef} type="file" accept=".nc" hidden onChange={handleImportNetcdf} />
       <input ref={hdf5ImportInputRef} type="file" accept=".h5,.hdf5" hidden onChange={handleImportHdf5} />

@@ -22,7 +22,8 @@ interface HistoryViewProps {
   onViewSelected: (names: string[]) => void;
   /** Import the run's model into the editable session for edit + re-run (heavy). */
   onImportBackendRun: (name: string) => void;
-  /** Import an external Excel results file as a new persistent History entry. */
+  /** Import one or more external project/results files as new persistent
+   *  History entries (the file picker is multi-select). */
   onImportResult: () => void;
   /** Filenames of result imports currently converting — shown as placeholder
    *  rows so a slow (tens-of-seconds) import doesn't read as "nothing happened". */
@@ -30,10 +31,11 @@ interface HistoryViewProps {
   /** Per-run in-flight activity (name → "Importing" / "Exporting" / "Deleting"),
    *  shown as a spinner + label on that row. */
   runActivity?: Record<string, string>;
-  /** Explicit Excel export; `parts` ⊆ ['metadata','model','result'] selects sheet groups. */
-  onDownloadBackendXlsx: (name: string, parts: string[]) => void;
-  /** Download the full project package (.zip of bundle JSON + meta JSON + xlsx). */
-  onExportBackendProject: (name: string) => void;
+  /** Explicit Excel export of one or more runs; `parts` ⊆ ['metadata','model','result']
+   *  selects sheet groups, applied to every run. */
+  onDownloadBackendXlsx: (names: string[], parts: string[]) => void;
+  /** Download each run as a full project package (.zip of bundle JSON + meta JSON + xlsx). */
+  onExportBackendProject: (names: string[]) => void;
   onDeleteBackendRuns: (names: string[]) => void;
   /** Rename a stored run — click the row label to edit it in place. */
   onRenameBackendRun: (name: string, newName: string) => void;
@@ -97,10 +99,11 @@ export function HistoryView({
   // drop indicator. Both null when no drag is in progress.
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
-  // Export dialog: which run is being exported (null = closed) + the three
-  // sheet-group checkboxes. All on by default so the file is a complete,
-  // PyPSA-import-ready workbook with the Result included.
-  const [exportFor, setExportFor] = useState<string | null>(null);
+  // Export dialog: which runs are being exported (null = closed) + the three
+  // sheet-group checkboxes. All on by default so each file is a complete,
+  // PyPSA-import-ready workbook with the Result included. One workbook is built
+  // per run with the same part selection.
+  const [exportFor, setExportFor] = useState<string[] | null>(null);
   const [exportParts, setExportParts] = useState({ metadata: true, model: true, result: true });
 
   const filtered = useMemo(
@@ -207,25 +210,33 @@ export function HistoryView({
         </button>
         <button
           className="tb-btn"
-          onClick={() => single && onExportBackendProject(single)}
-          disabled={!single}
-          title="Download the full project package (.zip of bundle + meta + workbook)"
+          onClick={() => n > 0 && onExportBackendProject(visibleSelected)}
+          disabled={n === 0}
+          title={
+            n > 1
+              ? `Download ${n} project packages (.zip each: bundle + meta + workbook)`
+              : 'Download the full project package (.zip of bundle + meta + workbook)'
+          }
         >
-          Project .zip
+          {n > 1 ? `Project .zip (${n})` : 'Project .zip'}
         </button>
         <button
           className="tb-btn"
-          onClick={() => single && setExportFor(single)}
-          disabled={!single}
-          title="Export an Excel workbook (choose Metadata / Model / Result)"
+          onClick={() => n > 0 && setExportFor(visibleSelected)}
+          disabled={n === 0}
+          title={
+            n > 1
+              ? `Export ${n} Excel workbooks (choose Metadata / Model / Result)`
+              : 'Export an Excel workbook (choose Metadata / Model / Result)'
+          }
         >
-          Excel .xlsx
+          {n > 1 ? `Excel .xlsx (${n})` : 'Excel .xlsx'}
         </button>
         <span className="history-toolbar-spacer" />
         <button
           className="tb-btn"
           onClick={onImportResult}
-          title="Import a project .zip (model + results) or a results .xlsx as a new, permanent History entry"
+          title="Import one or more project .zip (model + results) or results .xlsx files as new, permanent History entries"
         >
           Import result
         </button>
@@ -296,9 +307,15 @@ export function HistoryView({
               <span className="validation-eyebrow">Export</span>
               <h2>Export Excel</h2>
               <p className="sg-setting-hint">
-                Builds one workbook on demand from <b>{exportFor}</b> — nothing is
-                stored server-side. With all three parts selected the file is
-                PyPSA-import-ready.
+                {exportFor.length === 1 ? (
+                  <>Builds one workbook on demand from <b>{exportFor[0]}</b> — nothing is
+                  stored server-side. With all three parts selected the file is
+                  PyPSA-import-ready.</>
+                ) : (
+                  <>Builds one workbook per run for the <b>{exportFor.length}</b> selected
+                  runs — nothing is stored server-side. With all three parts selected each
+                  file is PyPSA-import-ready.</>
+                )}
               </p>
               <div className="validation-section">
                 <h3>Include</h3>
@@ -328,7 +345,7 @@ export function HistoryView({
                     setExportFor(null);
                   }}
                 >
-                  Download .xlsx
+                  {exportFor.length > 1 ? `Download ${exportFor.length} .xlsx` : 'Download .xlsx'}
                 </button>
               </div>
             </div>
