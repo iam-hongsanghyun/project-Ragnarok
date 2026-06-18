@@ -69,11 +69,9 @@ export interface AnalyticsViewProps {
   currencySymbol: string;
   pathwayConfig: PathwayConfig;
   onSelectedPeriodChange: (period: number) => void;
-  /** Lazily hydrate only the per-asset output-series sheets the dashboard needs. */
-  onNeedSeries?: (sheets: string[]) => void;
-  /** Hours of per-asset temporal data to hydrate (null = whole run). */
-  chartWindowHours?: number | null;
-  onChartWindowChange?: (hours: number | null) => void;
+  /** Lazily hydrate the per-asset output-series sheets the dashboard needs,
+   *  each at its max requested window (hours; null = whole run). */
+  onNeedSeries?: (windows: Record<string, number | null>) => void;
 
   // Comparison — backend metas are the single source of truth.
   backendRuns: BackendRunMeta[];
@@ -153,8 +151,6 @@ export function AnalyticsView(props: AnalyticsViewProps) {
             pathwayConfig={props.pathwayConfig}
             onSelectedPeriodChange={props.onSelectedPeriodChange}
             onNeedSeries={props.onNeedSeries}
-            chartWindowHours={props.chartWindowHours}
-            onChartWindowChange={props.onChartWindowChange}
           />
         )
       )}

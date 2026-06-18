@@ -853,6 +853,11 @@ export interface ChartSectionConfig {
   showLegend?: boolean;      // default true
   showAxisLabels?: boolean;  // default true — tick labels on both axes
   xLabelAngle?: number;      // rotation (deg) of x-axis tick labels; 0 = horizontal
+  // Per-asset temporal window (hours) this chart loads + shows. Bounds how much
+  // stripped per-component series is hydrated/rendered (light "View" bundles).
+  // undefined = DEFAULT_CHART_WINDOW_HOURS (1 week); null = whole run. Ignored
+  // for `system` focus (those read small inline aggregates, no hydration).
+  windowHours?: number | null;
 }
 
 // ── Tables pane ───────────────────────────────────────────────────────────────

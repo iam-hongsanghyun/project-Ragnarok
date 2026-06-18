@@ -24,6 +24,23 @@ import type { DownsampleAgg, SeriesWindow } from './session';
 const FULL_RESOLUTION = 100_000_000;
 
 /**
+ * Default per-chart temporal window (hours) for a per-asset chart. Bounds how
+ * much per-asset series a chart loads + renders by default; a long run with one
+ * series per asset froze the tab when loading every snapshot. Each chart's gear
+ * settings can override this (incl. "Full run" = null). One week.
+ */
+export const DEFAULT_CHART_WINDOW_HOURS = 168;
+
+/** Window-length options offered in each chart's gear (hours; null = full run). */
+export const CHART_WINDOW_OPTIONS: Array<{ value: number | null; label: string }> = [
+  { value: 168, label: '1 week' },
+  { value: 744, label: '1 month' },
+  { value: 2208, label: '3 months' },
+  { value: 8760, label: '1 year' },
+  { value: null, label: 'Full run' },
+];
+
+/**
  * Output series sheets `deriveAssetDetails` reads for a given non-`system`
  * focus type. Used to scope on-demand hydration to ONLY the sheets the
  * displayed per-asset charts need — fetching (and client-deriving) the whole
@@ -77,28 +94,27 @@ export function seriesRowsFromWindow(window: Pick<SeriesWindow, 'indexCol' | 'ro
 }
 
 /**
- * Fetch every named output series sheet for a run at full resolution and
- * assemble the `outputs.series` map that `deriveAssetDetails` expects: sheet
- * name → rows, each row keyed by component name plus a `snapshot` index column.
+ * Fetch a set of output series sheets, each windowed to its own first-`end`
+ * snapshots (`end` null = whole run), and assemble the `outputs.series` map
+ * `deriveAssetDetails` expects: sheet name → rows, each keyed by component name
+ * plus a `snapshot` index. FULL resolution WITHIN each window so donut/sum
+ * totals stay exact. Per-sheet windows let different charts pull different
+ * lengths of the same sheet (the caller requests the max each sheet needs).
  *
- * Sheets that fail to load are skipped (per-asset charts for those components
- * stay empty) rather than failing the whole hydration.
+ * Sheets that fail to load are skipped (their charts stay empty) rather than
+ * failing the whole hydration.
  */
-export async function fetchRunOutputSeries(
+export async function fetchRunOutputSeriesWindows(
   runName: string,
-  sheets: string[],
-  opts: { end?: number } = {},
+  items: Array<{ sheet: string; end: number | null }>,
 ): Promise<Record<string, GridRow[]>> {
-  // Window to the first `end` snapshots when given (the analytics chart window),
-  // keeping FULL resolution WITHIN that window so donut/sum totals stay exact.
-  // `end` undefined = whole run.
   const windows = await Promise.all(
-    sheets.map((sheet) =>
-      getRunSeriesWindow(runName, sheet, { end: opts.end, maxPoints: FULL_RESOLUTION }).catch(() => null),
+    items.map(({ sheet, end }) =>
+      getRunSeriesWindow(runName, sheet, { end: end ?? undefined, maxPoints: FULL_RESOLUTION }).catch(() => null),
     ),
   );
   const series: Record<string, GridRow[]> = {};
-  sheets.forEach((sheet, i) => {
+  items.forEach(({ sheet }, i) => {
     const w = windows[i];
     if (!w) return;
     series[sheet] = seriesRowsFromWindow(w);

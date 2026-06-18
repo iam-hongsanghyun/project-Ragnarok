@@ -7196,19 +7196,6 @@ code, kbd, samp, tt,
 .dashboard-toolbar-menu {
   position: relative;
 }
-.dashboard-toolbar-window {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.dashboard-toolbar-window > span {
-  font-size: 11px;
-  color: var(--muted);
-}
-.dashboard-toolbar-window > select.tb-btn {
-  padding: 4px 6px;
-  cursor: pointer;
-}
 .dashboard-toolbar-pop {
   position: absolute;
   top: calc(100% + 4px);

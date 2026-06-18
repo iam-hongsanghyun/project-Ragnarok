@@ -27,11 +27,9 @@ interface Props {
   pathwayConfig?: PathwayConfig;
   onSelectedPeriodChange?: (period: number) => void;
   /** Lazily hydrate only the output-series sheets the dashboard's per-asset
-   *  charts need (light "View" bundles strip them). */
-  onNeedSeries?: (sheets: string[]) => void;
-  /** Hours of per-asset temporal data to hydrate (null = whole run). */
-  chartWindowHours?: number | null;
-  onChartWindowChange?: (hours: number | null) => void;
+   *  charts need, each at its max requested window (light "View" bundles strip
+   *  them). */
+  onNeedSeries?: (windows: Record<string, number | null>) => void;
 }
 
 function EmptyAnalytics() {
@@ -59,8 +57,6 @@ export function AnalyticsPane({
   pathwayConfig,
   onSelectedPeriodChange,
   onNeedSeries,
-  chartWindowHours,
-  onChartWindowChange,
 }: Props) {
   return (
     <div className="pane analytics-pane">
@@ -115,8 +111,6 @@ export function AnalyticsPane({
           initialLayout={subTab === 'Result' ? buildResultPreset(results) : PRESETS[0].build()}
           showPresets={subTab === 'Analytics'}
           onNeedSeries={onNeedSeries}
-          chartWindowHours={chartWindowHours}
-          onChartWindowChange={onChartWindowChange}
         />
       )}
     </div>

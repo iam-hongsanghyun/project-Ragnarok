@@ -40,7 +40,7 @@ import { Dashboard, newId } from './Dashboard';
 import { Card, DashboardLayout } from 'lib/dashboard/types';
 import { useDashboardLayout } from './useDashboardLayout';
 import { PRESETS } from 'lib/dashboard/presets';
-import { OUTPUT_SHEETS_FOR_FOCUS } from 'lib/api/runs';
+import { DEFAULT_CHART_WINDOW_HOURS, OUTPUT_SHEETS_FOR_FOCUS } from 'lib/api/runs';
 
 const DEFAULT_LAYOUT: DashboardLayout = { rows: [], cards: [] };
 
@@ -140,14 +140,11 @@ interface Props {
   initialLayout?: DashboardLayout;
   /** Show the Presets ▾ picker. Off for the curated Result tab. */
   showPresets?: boolean;
-  /** Report which output-series sheets the current layout's per-asset charts
-   *  need, so the parent can lazily hydrate only those (light "View" bundles
-   *  strip the series). Empty when the layout is system-only. */
-  onNeedSeries?: (sheets: string[]) => void;
-  /** Hours of per-asset temporal data to hydrate (null = whole run). Shown as
-   *  the "Chart window" control when the layout has per-asset charts. */
-  chartWindowHours?: number | null;
-  onChartWindowChange?: (hours: number | null) => void;
+  /** Report, per output-series sheet, the MAX temporal window (hours; null =
+   *  whole run) the current layout's per-asset charts ask for, so the parent
+   *  hydrates only those sheets at the length needed. Each chart sets its own
+   *  window in its gear. Empty when the layout is system-only. */
+  onNeedSeries?: (windows: Record<string, number | null>) => void;
 }
 
 export function AnalyticsDashboard({
@@ -160,25 +157,33 @@ export function AnalyticsDashboard({
   initialLayout = DEFAULT_LAYOUT,
   showPresets = true,
   onNeedSeries,
-  chartWindowHours,
-  onChartWindowChange,
 }: Props) {
   const { layout, setLayout, editing, setEditing, resetToDefault } =
     useDashboardLayout(initialLayout, storageKey);
 
-  // Tell the parent which per-asset output-series sheets this layout needs, so
-  // it can lazily hydrate only those. Runs on layout change (a per-asset chart
-  // added / a preset loaded), not on every render. System-only layouts report
-  // none → no fetch → the common result view stays instant.
+  // Tell the parent, per output-series sheet, the MAX temporal window the
+  // layout's per-asset charts ask for (each chart sets its own in its gear), so
+  // it hydrates only those sheets at the length needed. Runs on layout change
+  // (chart added / window changed / preset loaded), not every render. A
+  // system-only layout reports {} → no fetch → the common result view is instant.
   useEffect(() => {
     if (!onNeedSeries) return;
-    const sheets = new Set<string>();
+    const windows: Record<string, number | null> = {};
     for (const card of layout.cards) {
-      if (card.kind === 'chart' && card.config.focusType !== 'system') {
-        for (const s of OUTPUT_SHEETS_FOR_FOCUS[card.config.focusType] ?? []) sheets.add(s);
+      if (card.kind !== 'chart' || card.config.focusType === 'system') continue;
+      const hours = card.config.windowHours === undefined
+        ? DEFAULT_CHART_WINDOW_HOURS
+        : card.config.windowHours;
+      for (const sheet of OUTPUT_SHEETS_FOR_FOCUS[card.config.focusType] ?? []) {
+        if (!(sheet in windows)) windows[sheet] = hours;
+        else {
+          const cur = windows[sheet];
+          // null (full run) wins; otherwise keep the longer window.
+          windows[sheet] = cur == null || hours == null ? null : Math.max(cur, hours);
+        }
       }
     }
-    onNeedSeries(Array.from(sheets).sort());
+    onNeedSeries(windows);
   }, [layout, onNeedSeries]);
   const [openMenu, setOpenMenu] = useState<'presets' | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -278,12 +283,6 @@ export function AnalyticsDashboard({
     else resetToDefault();
     setOpenMenu(null);
   };
-
-  // The chart-window control only matters when something reads per-asset
-  // temporal series (a non-system chart), so show it only then.
-  const hasAssetCharts = layout.cards.some(
-    (c) => c.kind === 'chart' && c.config.focusType !== 'system',
-  );
 
   // Sorted load / price for duration curves and merit-order systemLoad.
   const sortedLoad = systemLoadRows
@@ -461,26 +460,6 @@ export function AnalyticsDashboard({
                 </div>
               )}
             </div>
-          </>
-        )}
-
-        {hasAssetCharts && onChartWindowChange && (
-          <>
-            <div className="dashboard-toolbar-sep" />
-            <label className="dashboard-toolbar-window" title="How much per-asset temporal data to load for the charts. A longer window loads and renders more data.">
-              <span>Chart window</span>
-              <select
-                className="tb-btn"
-                value={chartWindowHours == null ? 'full' : String(chartWindowHours)}
-                onChange={(e) => onChartWindowChange(e.target.value === 'full' ? null : Number(e.target.value))}
-              >
-                <option value="168">1 week</option>
-                <option value="744">1 month</option>
-                <option value="2208">3 months</option>
-                <option value="8760">1 year</option>
-                <option value="full">Full run</option>
-              </select>
-            </label>
           </>
         )}
 

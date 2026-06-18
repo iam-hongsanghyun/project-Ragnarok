@@ -52,7 +52,7 @@ import { readCarbonLibraryFromModel, writeCarbonLibraryToModel, sameCarbonLibrar
 import { saveSessionControls, loadSessionControls, clearSession, clearSessionModelOnly } from 'lib/storage/sessionStore';
 import { clearSessionModel, putSessionModel, putStaticModel, getSessionFullModel, getSessionMeta, getSheetPage, isSeriesSheet, patchSheet, seriesSheetCounts, DEFAULT_SESSION_ID } from 'lib/api/session';
 import type { SheetEditOp } from 'lib/api/session';
-import { fetchRunOutputSeries } from 'lib/api/runs';
+import { fetchRunOutputSeriesWindows } from 'lib/api/runs';
 import { RunDialog } from './features/run/RunDialog';
 import { SettingsView } from './views/SettingsView';
 import { PluginsView } from './views/PluginsView';
@@ -98,12 +98,6 @@ function stripSeriesSheets(model: WorkbookModel): WorkbookModel {
   }
   return out;
 }
-
-// Default per-asset chart window: one week. Per-asset analytics series are
-// hydrated on demand (light "View" bundles strip them); fetching + rendering
-// every snapshot × every asset for a long run froze the tab, so bound it by
-// default. The dashboard toolbar's "Chart window" control widens it.
-const ANALYTICS_DEFAULT_WINDOW_HOURS = 168;
 
 function AppInner() {
   const { showToast } = useToast();
@@ -240,20 +234,17 @@ function AppInner() {
   // per-asset analytics (generator / storage / bus / branch charts and the map
   // asset-detail popups) derive empty. Cached for one run at a time; refetched
   // when `activeRunName` changes. See the hydration effect + `displayResults`.
+  // Per-run cache of hydrated output series. `series[sheet]` holds the rows;
+  // `ends[sheet]` records the window each sheet was fetched at (snapshot count,
+  // null = whole run) so a chart asking for a longer window triggers a refetch.
   const [hydratedRunSeries, setHydratedRunSeries] = useState<
-    { runName: string; end: number | null; series: Record<string, GridRow[]> } | null
+    { runName: string; series: Record<string, GridRow[]>; ends: Record<string, number | null> } | null
   >(null);
-  // Output-series sheets the currently-displayed analytics layout needs (driven
-  // by the dashboard's per-asset charts). Empty for system-only layouts → no
+  // Per output-series sheet, the MAX temporal window (hours; null = whole run)
+  // the displayed analytics layout's per-asset charts ask for. Driven by the
+  // dashboard (each chart's gear). Empty {} for system-only layouts → no
   // hydration fetch, so the common result view stays instant.
-  const [neededRunSheets, setNeededRunSheets] = useState<string[]>([]);
-  // How many hours of per-asset temporal data to hydrate for charts. Bounded by
-  // default so a long run doesn't fetch + render every snapshot × every asset
-  // (which froze the tab); the dashboard toolbar lets the user widen it. null =
-  // whole run.
-  const [analyticsWindowHours, setAnalyticsWindowHours] = useState<number | null>(
-    ANALYTICS_DEFAULT_WINDOW_HOURS,
-  );
+  const [neededRunWindows, setNeededRunWindows] = useState<Record<string, number | null>>({});
   const [pathwayConfig, setPathwayConfig] = useState<PathwayConfig>(() => defaultPathwayConfig());
   const [rollingConfig, setRollingConfig] = useState<RollingHorizonConfig>(() => defaultRollingConfig());
   const [samplingConfig, setSamplingConfig] = useState<SamplingConfig>(() => defaultSamplingConfig());
@@ -384,39 +375,50 @@ function AppInner() {
   // Hydrate the active run's stripped per-component output series ON DEMAND.
   // The light "View" bundle ships `outputs.series = null` to render instantly;
   // per-asset analytics need the real series. Fetch ONLY the sheets the
-  // displayed dashboard actually needs (`neededRunSheets`, driven by its
-  // per-asset charts) — pulling and client-deriving the whole bundle on every
-  // view froze the tab on large runs. System-only layouts need nothing, so the
-  // common result view does zero work here. Fetched sheets merge into a per-run
-  // cache; re-viewing the same chart is free.
+  // displayed dashboard needs, each at the MAX window its charts ask for
+  // (`neededRunWindows`, driven by each chart's gear) — pulling + client-
+  // deriving the whole bundle on every view froze the tab on large runs.
+  // System-only layouts need nothing, so the common result view does zero work
+  // here. Fetched sheets merge into a per-run cache; revisiting is free.
   useEffect(() => {
     const outputs = results?.outputs;
-    if (!outputs || outputs.series || !activeRunName || neededRunSheets.length === 0) return;
-    // Window the fetch to the first N snapshots (N = window hours / hours-per-
-    // snapshot). null window = whole run. Cache is keyed by (run, window) so
-    // widening the window in the toolbar refetches at the new length.
+    if (!outputs || outputs.series || !activeRunName) return;
+    const sheets = Object.keys(neededRunWindows);
+    if (sheets.length === 0) return;
+    // Per sheet, the window (snapshot count; null = whole run) the layout needs.
+    // N = ceil(window hours / hours-per-snapshot). Fetch a sheet only when it's
+    // absent OR cached at a SHORTER window than now requested (then refetch
+    // longer — the longer series covers shorter-window charts, which slice down).
     const weight = results?.runMeta?.snapshotWeight || 1;
-    const windowEnd = analyticsWindowHours == null
-      ? null
-      : Math.max(1, Math.ceil(analyticsWindowHours / weight));
-    const sameWindow = hydratedRunSeries?.runName === activeRunName && hydratedRunSeries.end === windowEnd;
     const available = new Set(outputs.seriesSheets ?? []);
-    const have = sameWindow ? hydratedRunSeries!.series : {};
-    const missing = neededRunSheets.filter((s) => available.has(s) && !(s in have));
-    if (missing.length === 0) return;
+    const cache = hydratedRunSeries?.runName === activeRunName ? hydratedRunSeries : null;
+    const covers = (cachedEnd: number | null | undefined, end: number | null): boolean =>
+      cachedEnd === null || (end !== null && cachedEnd !== undefined && cachedEnd >= end);
+    const toFetch: Array<{ sheet: string; end: number | null }> = [];
+    for (const sheet of sheets) {
+      if (!available.has(sheet)) continue;
+      const hours = neededRunWindows[sheet];
+      const end = hours == null ? null : Math.max(1, Math.ceil(hours / weight));
+      const haveSheet = cache && sheet in cache.series;
+      if (!haveSheet || !covers(cache?.ends[sheet], end)) toFetch.push({ sheet, end });
+    }
+    if (toFetch.length === 0) return;
     const runName = activeRunName;
     let cancelled = false;
-    void fetchRunOutputSeries(runName, missing, { end: windowEnd ?? undefined })
+    void fetchRunOutputSeriesWindows(runName, toFetch)
       .then((fetched) => {
         if (cancelled) return;
         setHydratedRunSeries((prev) => {
-          const base = prev?.runName === runName && prev.end === windowEnd ? prev.series : {};
-          return { runName, end: windowEnd, series: { ...base, ...fetched } };
+          const same = prev?.runName === runName ? prev : null;
+          const series = { ...(same?.series ?? {}), ...fetched };
+          const ends = { ...(same?.ends ?? {}) };
+          for (const { sheet, end } of toFetch) if (sheet in fetched) ends[sheet] = end;
+          return { runName, series, ends };
         });
       })
       .catch(() => { /* leave per-asset charts empty — system charts still render */ });
     return () => { cancelled = true; };
-  }, [results, activeRunName, neededRunSheets, hydratedRunSeries, analyticsWindowHours]);
+  }, [results, activeRunName, neededRunWindows, hydratedRunSeries]);
 
   const captureCurrentScenario = useCallback((overrides: Partial<ScenarioPreset> = {}): ScenarioPreset => (
     buildScenarioPreset({
@@ -2456,9 +2458,7 @@ function AppInner() {
               currencySymbol={settings.currencySymbol}
               pathwayConfig={pathwayConfig}
               onSelectedPeriodChange={(period) => setPathwayConfig((current) => ({ ...current, selectedPeriod: period }))}
-              onNeedSeries={setNeededRunSheets}
-              chartWindowHours={analyticsWindowHours}
-              onChartWindowChange={setAnalyticsWindowHours}
+              onNeedSeries={setNeededRunWindows}
               backendRuns={backendRuns}
               activeRunName={activeRunName}
             />

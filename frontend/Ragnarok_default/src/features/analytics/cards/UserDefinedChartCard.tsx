@@ -13,6 +13,7 @@ import {
 import { clamp, numberValue, stringValue } from 'lib/utils/helpers';
 import { aggregateMetricRows, buildDonutFromMetric } from 'lib/results/analytics';
 import { EMPTY_METRIC_KEY } from 'lib/constants';
+import { CHART_WINDOW_OPTIONS, DEFAULT_CHART_WINDOW_HOURS } from 'lib/api/runs';
 import { exportChartToExcel } from 'lib/export/chart';
 import { useToast } from '../../../shared/components/Toast';
 import { DonutChart } from './DonutChart';
@@ -150,13 +151,25 @@ export function UserDefinedChartCard({
     active.carrierFilter ?? [],
   );
 
-  const metric     = metricOptions.find((m) => m.key === active.metricKey);
-  const hasMetric  = Boolean(metric);
-  const metricRows = metric?.rows || [];
-
   // Hours per snapshot — integrates MW-rate rows into MWh when summing
   // (donut totals, 'sum'-reducer buckets) on runs with snapshot gaps.
   const snapshotWeight = results?.runMeta?.snapshotWeight ?? 1;
+
+  // Per-asset charts load + show a bounded temporal window (this chart's
+  // `windowHours`, default 1 week) so a long run with one series per asset
+  // doesn't render every snapshot. The shared hydration fetches each sheet at
+  // the MAX window across charts; here we slice this chart's metric down to its
+  // own window. System charts read small inline aggregates — no windowing.
+  const windowHours = active.focusType === 'system'
+    ? null
+    : (active.windowHours === undefined ? DEFAULT_CHART_WINDOW_HOURS : active.windowHours);
+  const windowSnaps = windowHours == null ? Infinity : Math.max(1, Math.ceil(windowHours / snapshotWeight));
+  const baseMetric = metricOptions.find((m) => m.key === active.metricKey);
+  const metric = baseMetric && Number.isFinite(windowSnaps) && baseMetric.rows.length > windowSnaps
+    ? { ...baseMetric, rows: baseMetric.rows.slice(0, windowSnaps) }
+    : baseMetric;
+  const hasMetric  = Boolean(metric);
+  const metricRows = metric?.rows || [];
 
   const safeStart = hasMetric
     ? clamp(Math.min(active.startIndex, active.endIndex), 0, Math.max(metricRows.length - 1, 0))
@@ -310,6 +323,25 @@ export function UserDefinedChartCard({
                 { value: 'hourly', label: 'By hour' },
               ]}
               onChange={(v) => patch({ ...active, timeframe: v as TimeframeOption })}
+            />
+          </label>
+        )}
+
+        {/* Chart window — how much per-asset temporal data this chart loads +
+            shows. Only for per-asset focus (system charts use small inline
+            aggregates, no hydration). A longer window loads + renders more. */}
+        {active.focusType !== 'system' && (
+          <label className="chart-control">
+            <span>Chart window</span>
+            <SearchableSelect
+              value={active.windowHours === undefined
+                ? String(DEFAULT_CHART_WINDOW_HOURS)
+                : (active.windowHours == null ? 'full' : String(active.windowHours))}
+              options={CHART_WINDOW_OPTIONS.map((o) => ({
+                value: o.value == null ? 'full' : String(o.value),
+                label: o.label,
+              }))}
+              onChange={(v) => patch({ ...active, windowHours: v === 'full' ? null : Number(v) })}
             />
           </label>
         )}
