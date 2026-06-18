@@ -2404,7 +2404,6 @@ function AppInner() {
               currencySymbol={settings.currencySymbol}
               dateFormat={settings.dateFormat}
               onOpenRunSetup={() => { setDryRun(false); setRunDialogOpen(true); }}
-              onOpenInModel={(sheet) => { setTab('Model'); setJumpTo({ sheet, rowIndex: 0 }); }}
             />
           )}
 
@@ -2428,7 +2427,6 @@ function AppInner() {
               dateFormat={settings.dateFormat}
               seriesSheetCounts={sessionSeriesCounts}
               hasResults={Boolean(results)}
-              onOpenBuild={() => setTab('Build')}
               onOpen={handleOpenWorkbook}
               onSave={saveWorkbook}
               onSaveAs={saveAsWorkbook}

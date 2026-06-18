@@ -54,8 +54,6 @@ export interface BuildViewProps {
   dateFormat: DateFormat;
   onOpenConstraintsWorkspace?: () => void;
   onOpenRunSetup?: () => void;
-  /** Open the current step's sheet in the raw spreadsheet (Model tab). */
-  onOpenInModel?: (sheet: string) => void;
 }
 
 /** Short, sheet-appropriate base for auto-generated component names. */
@@ -415,7 +413,7 @@ export function BuildView(props: BuildViewProps) {
       </ViewPaneHeader>
 
       {/* Per-step guidance: what this step is for, a one-click "add your first"
-          when it's empty, a link to the raw spreadsheet, and Next/Skip. */}
+          when it's empty, and a completion-aware Next/Skip. */}
       <div className="build-step-guide">
         <p className="build-step-guide__desc">{step.description}</p>
         <div className="build-step-guide__actions">
@@ -433,11 +431,6 @@ export function BuildView(props: BuildViewProps) {
               }}
             >
               + Add your first {STEP_NOUN[step.primarySheet]}
-            </button>
-          )}
-          {props.onOpenInModel && step.id !== 'constraints' && step.id !== 'review' && (
-            <button type="button" className="ghost-button sm" onClick={() => props.onOpenInModel!(step.primarySheet)}>
-              Open in spreadsheet →
             </button>
           )}
           {stepIndex < BUILD_STEPS.length - 1 && (
