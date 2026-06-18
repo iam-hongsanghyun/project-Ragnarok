@@ -16,6 +16,21 @@ import type { ChartTheme } from './theme';
 
 const CHAR_PX = 6.6; // approximate glyph width of the 11px tick font
 
+/**
+ * Max over an array WITHOUT spreading into `Math.max`. Spreading a large array
+ * (`Math.max(1, ...arr)`) passes every element as a function argument and
+ * overflows the call stack at ~10⁵ items — a per-asset time-series chart can
+ * have far more points than that (assets × snapshots). Reduce instead.
+ */
+function maxOf(nums: ArrayLike<number>, seed = 1): number {
+  let m = seed;
+  for (let i = 0; i < nums.length; i++) {
+    const n = nums[i];
+    if (n > m) m = n;
+  }
+  return m;
+}
+
 export function fmtNum(v: number | string): string {
   const n = typeof v === 'number' ? v : Number(v);
   if (!Number.isFinite(n)) return '—';
@@ -74,9 +89,10 @@ export function buildTimeSeriesOption(input: TimeSeriesOptionInput): EChartsCore
 
   // Budget the y-axis name gap from the widest plausible tick label so the
   // rotated name clears the tick column (containLabel only covers the ticks).
-  const maxAbs = Math.max(1, ...values.flat().map((v) => Math.abs(v)));
+  let maxAbs = 1;
+  for (const sv of values) for (const v of sv) { const a = Math.abs(v); if (a > maxAbs) maxAbs = a; }
   const yLabelPx = (fmtNum(maxAbs).length + 1) * CHAR_PX;
-  const maxXLabelPx = Math.max(1, ...xLabels.map((l) => l.length)) * CHAR_PX;
+  const maxXLabelPx = maxOf(xLabels.map((l) => l.length)) * CHAR_PX;
   const rad = (Math.abs(xLabelAngle) * Math.PI) / 180;
 
   const echartsSeries = series.map((s, i) => {
@@ -313,7 +329,7 @@ export function buildMeritOrderOption(input: MeritOrderOptionInput): EChartsCore
       nameLocation: 'middle',
       // Clear the widest tick label (e.g. "500,000" ≈ 7ch) so the rotated
       // name never overlaps the tick column.
-      nameGap: (fmtNum(Math.max(1, ...entries.map((e) => e.marginal_cost))).length + 1) * CHAR_PX + 10,
+      nameGap: (fmtNum(maxOf(entries.map((e) => e.marginal_cost))).length + 1) * CHAR_PX + 10,
       nameTextStyle: axisName(theme),
       axisLine: { show: false },
       axisTick: { show: false },

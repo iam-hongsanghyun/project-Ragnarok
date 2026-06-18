@@ -69,6 +69,9 @@ export interface AnalyticsViewProps {
   currencySymbol: string;
   pathwayConfig: PathwayConfig;
   onSelectedPeriodChange: (period: number) => void;
+  /** Lazily hydrate the per-asset output-series sheets the dashboard needs,
+   *  each at the max snapshot count requested (the chart's slider right edge). */
+  onNeedSeries?: (windows: Record<string, number>) => void;
 
   // Comparison — backend metas are the single source of truth.
   backendRuns: BackendRunMeta[];
@@ -147,6 +150,7 @@ export function AnalyticsView(props: AnalyticsViewProps) {
             currencySymbol={props.currencySymbol}
             pathwayConfig={props.pathwayConfig}
             onSelectedPeriodChange={props.onSelectedPeriodChange}
+            onNeedSeries={props.onNeedSeries}
           />
         )
       )}

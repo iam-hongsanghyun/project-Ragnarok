@@ -26,6 +26,10 @@ interface Props {
   currencySymbol: string;
   pathwayConfig?: PathwayConfig;
   onSelectedPeriodChange?: (period: number) => void;
+  /** Lazily hydrate only the output-series sheets the dashboard's per-asset
+   *  charts need, each at the max snapshot count requested (light "View"
+   *  bundles strip them). */
+  onNeedSeries?: (windows: Record<string, number>) => void;
 }
 
 function EmptyAnalytics() {
@@ -52,6 +56,7 @@ export function AnalyticsPane({
   currencySymbol,
   pathwayConfig,
   onSelectedPeriodChange,
+  onNeedSeries,
 }: Props) {
   return (
     <div className="pane analytics-pane">
@@ -105,6 +110,7 @@ export function AnalyticsPane({
           storageKey={subTab === 'Result' ? null : ANALYTICS_STORAGE_KEY}
           initialLayout={subTab === 'Result' ? buildResultPreset(results) : PRESETS[0].build()}
           showPresets={subTab === 'Analytics'}
+          onNeedSeries={onNeedSeries}
         />
       )}
     </div>

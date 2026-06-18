@@ -52,6 +52,7 @@ import { readCarbonLibraryFromModel, writeCarbonLibraryToModel, sameCarbonLibrar
 import { saveSessionControls, loadSessionControls, clearSession, clearSessionModelOnly } from 'lib/storage/sessionStore';
 import { clearSessionModel, putSessionModel, putStaticModel, getSessionFullModel, getSessionMeta, getSheetPage, isSeriesSheet, patchSheet, seriesSheetCounts, DEFAULT_SESSION_ID } from 'lib/api/session';
 import type { SheetEditOp } from 'lib/api/session';
+import { fetchRunOutputSeriesWindows } from 'lib/api/runs';
 import { RunDialog } from './features/run/RunDialog';
 import { SettingsView } from './views/SettingsView';
 import { PluginsView } from './views/PluginsView';
@@ -230,6 +231,22 @@ function AppInner() {
   // Comparison "active" column highlight. Set after a run completes (to the
   // newest stored meta) and when opening a stored run.
   const [activeRunName, setActiveRunName] = useState<string | null>(null);
+  // Per-component output series fetched on demand for the active run. The light
+  // "View" bundle strips them (`outputs.series = null`); without them the
+  // per-asset analytics (generator / storage / bus / branch charts and the map
+  // asset-detail popups) derive empty. Cached for one run at a time; refetched
+  // when `activeRunName` changes. See the hydration effect + `displayResults`.
+  // Per-run cache of hydrated output series. `series[sheet]` holds the rows;
+  // `ends[sheet]` records how many snapshots that sheet was fetched at, so a
+  // chart whose slider extends past it triggers a longer refetch.
+  const [hydratedRunSeries, setHydratedRunSeries] = useState<
+    { runName: string; series: Record<string, GridRow[]>; ends: Record<string, number> } | null
+  >(null);
+  // Per output-series sheet, the MAX number of snapshots the displayed analytics
+  // layout's per-asset charts need loaded (each chart's slider right edge).
+  // Driven by the dashboard. Empty {} for system-only layouts → no hydration
+  // fetch, so the common result view stays instant.
+  const [neededRunWindows, setNeededRunWindows] = useState<Record<string, number>>({});
   const [pathwayConfig, setPathwayConfig] = useState<PathwayConfig>(() => defaultPathwayConfig());
   const [rollingConfig, setRollingConfig] = useState<RollingHorizonConfig>(() => defaultRollingConfig());
   const [samplingConfig, setSamplingConfig] = useState<SamplingConfig>(() => defaultSamplingConfig());
@@ -297,17 +314,29 @@ function AppInner() {
 
   const displayResults = useMemo(() => {
     if (!results) return null;
+    // In the light "View" bundle the per-component output series are stripped
+    // (`outputs.series === null`) and fetched back on demand. Splice in any
+    // we've hydrated for THIS run so per-asset analytics (assetDetails) derive
+    // with data; the system charts read inline aggregates and don't need this.
+    const baseOutputs = results.outputs;
+    const canHydrate =
+      !!baseOutputs && !baseOutputs.series &&
+      !!hydratedRunSeries && hydratedRunSeries.runName === activeRunName &&
+      Object.keys(hydratedRunSeries.series).length > 0;
+    const effResults = canHydrate
+      ? { ...results, outputs: { ...baseOutputs!, series: hydratedRunSeries!.series } }
+      : results;
     // A normal solved run arrives with the full backend-derived analytics
     // (summary, carrierMix, …) attached; trust them as-is. A *reconstructed*
     // bundle — an imported project — carries only `outputs` and re-derives its
     // analytics on the client, so it must fall through to deriveRunResults even
     // when it isn't a pathway run. (Without this, KPI/summary cards read
     // `undefined.reduce` and crash.)
-    const hasDerivedSummary = Array.isArray(results.summary) && results.summary.length > 0;
-    if (!results.outputs || (!results.pathway?.enabled && hasDerivedSummary)) {
-      return withDerivedAssetDetails(analyticsModel, results, settings.currencySymbol);
+    const hasDerivedSummary = Array.isArray(effResults.summary) && effResults.summary.length > 0;
+    if (!effResults.outputs || (!effResults.pathway?.enabled && hasDerivedSummary)) {
+      return withDerivedAssetDetails(analyticsModel, effResults, settings.currencySymbol);
     }
-    const activePathway = results.pathway?.enabled ? results.pathway : null;
+    const activePathway = effResults.pathway?.enabled ? effResults.pathway : null;
     const selectedPeriod: number | null = activePathway
       ? getDefaultSelectedPeriod({
         ...pathwayConfig,
@@ -321,29 +350,75 @@ function AppInner() {
           })),
       })
       : null;
-    const derived = deriveRunResults(analyticsModel, results.outputs, {
+    const derived = deriveRunResults(analyticsModel, effResults.outputs, {
       carbonPrice: analyticsCarbonPrice,
       currencySymbol: settings.currencySymbol,
       discountRate: analyticsDiscountRate,
       snapshotWeight: analyticsSnapshotWeight,
-      narrative: results.narrative,
+      narrative: effResults.narrative,
       selectedPeriod,
       pathway: activePathway ? { ...activePathway, selectedPeriod } : null,
-      rolling: results.rolling,
+      rolling: effResults.rolling,
     });
     return {
-      ...results,
+      ...effResults,
       ...derived,
-      pluginAnalytics: results.pluginAnalytics,
-      meritOrder: results.meritOrder,
-      co2Shadow: results.co2Shadow,
-      appliedConstraints: results.appliedConstraints,
-      emissionsBreakdown: results.emissionsBreakdown,
-      outputs: results.outputs,
+      pluginAnalytics: effResults.pluginAnalytics,
+      meritOrder: effResults.meritOrder,
+      co2Shadow: effResults.co2Shadow,
+      appliedConstraints: effResults.appliedConstraints,
+      emissionsBreakdown: effResults.emissionsBreakdown,
+      outputs: effResults.outputs,
       pathway: derived.pathway,
       runMeta: derived.runMeta,
     };
-  }, [results, analyticsModel, settings.currencySymbol, analyticsDiscountRate, analyticsCarbonPrice, analyticsSnapshotWeight, pathwayConfig]);
+  }, [results, analyticsModel, settings.currencySymbol, analyticsDiscountRate, analyticsCarbonPrice, analyticsSnapshotWeight, pathwayConfig, hydratedRunSeries, activeRunName]);
+
+  // Hydrate the active run's stripped per-component output series ON DEMAND.
+  // The light "View" bundle ships `outputs.series = null` to render instantly;
+  // per-asset analytics need the real series. Fetch ONLY the sheets the
+  // displayed dashboard needs, each at the MAX window its charts ask for
+  // (`neededRunWindows`, driven by each chart's gear) — pulling + client-
+  // deriving the whole bundle on every view froze the tab on large runs.
+  // System-only layouts need nothing, so the common result view does zero work
+  // here. Fetched sheets merge into a per-run cache; revisiting is free.
+  useEffect(() => {
+    const outputs = results?.outputs;
+    if (!outputs || outputs.series || !activeRunName) return;
+    const sheets = Object.keys(neededRunWindows);
+    if (sheets.length === 0) return;
+    // Per sheet, the snapshot count the layout needs loaded. Fetch a sheet only
+    // when it's absent OR cached at a SHORTER window than now requested (then
+    // refetch longer — the longer series covers shorter-window charts, which
+    // clamp their display down to their own slider range).
+    const available = new Set(outputs.seriesSheets ?? []);
+    const cache = hydratedRunSeries?.runName === activeRunName ? hydratedRunSeries : null;
+    const toFetch: Array<{ sheet: string; end: number }> = [];
+    for (const sheet of sheets) {
+      if (!available.has(sheet)) continue;
+      const end = neededRunWindows[sheet];
+      const cachedEnd = cache?.ends[sheet];
+      if (!cache || !(sheet in cache.series) || cachedEnd === undefined || cachedEnd < end) {
+        toFetch.push({ sheet, end });
+      }
+    }
+    if (toFetch.length === 0) return;
+    const runName = activeRunName;
+    let cancelled = false;
+    void fetchRunOutputSeriesWindows(runName, toFetch)
+      .then((fetched) => {
+        if (cancelled) return;
+        setHydratedRunSeries((prev) => {
+          const same = prev?.runName === runName ? prev : null;
+          const series = { ...(same?.series ?? {}), ...fetched };
+          const ends = { ...(same?.ends ?? {}) };
+          for (const { sheet, end } of toFetch) if (sheet in fetched) ends[sheet] = end;
+          return { runName, series, ends };
+        });
+      })
+      .catch(() => { /* leave per-asset charts empty — system charts still render */ });
+    return () => { cancelled = true; };
+  }, [results, activeRunName, neededRunWindows, hydratedRunSeries]);
 
   const captureCurrentScenario = useCallback((overrides: Partial<ScenarioPreset> = {}): ScenarioPreset => (
     buildScenarioPreset({
@@ -463,6 +538,7 @@ function AppInner() {
     setResults(null);
     setResultsModel(null);
     setResultsContext(null);
+    setHydratedRunSeries(null);
     // Run history is session-scoped: it survives model swaps (new/demo/workbook/
     // project open) so prior runs stay available for comparison, and is only
     // emptied when the user clicks "Clear all" or reloads/closes Ragnarok (the
@@ -2383,6 +2459,7 @@ function AppInner() {
               currencySymbol={settings.currencySymbol}
               pathwayConfig={pathwayConfig}
               onSelectedPeriodChange={(period) => setPathwayConfig((current) => ({ ...current, selectedPeriod: period }))}
+              onNeedSeries={setNeededRunWindows}
               backendRuns={backendRuns}
               activeRunName={activeRunName}
             />

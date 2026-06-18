@@ -13,6 +13,7 @@ import {
   fmtNum,
 } from './options';
 import { FALLBACK_CHART_THEME } from './theme';
+import type { TimeSeriesRow } from 'lib/types';
 
 const theme = FALLBACK_CHART_THEME;
 
@@ -65,6 +66,30 @@ describe('buildTimeSeriesOption', () => {
       showAxisLabels: true, xLabelAngle: 0, theme,
     }) as { series: Array<{ type: string }> };
     expect(bar.series[0].type).toBe('bar');
+  });
+
+  test('does not overflow the call stack on a large many-series dataset', () => {
+    // Regression: a per-asset chart (e.g. storage fleet, one series per unit)
+    // over a long run flattens to >10⁵ points. `Math.max(1, ...values.flat())`
+    // spread every point as an argument and threw "Maximum call stack size
+    // exceeded". The y-axis max must come from a reduce, not a spread.
+    const N_SERIES = 80;
+    const N_ROWS = 2200; // 80 × 2200 = 176k points, past the spread arg limit
+    const bigSeries = Array.from({ length: N_SERIES }, (_, i) => ({
+      key: `s${i}`, label: `Unit ${i}`, color: '#123456',
+    }));
+    const bigRows: TimeSeriesRow[] = Array.from({ length: N_ROWS }, (_, r) => {
+      const row: TimeSeriesRow = { label: String(r) };
+      for (let i = 0; i < N_SERIES; i++) row[`s${i}`] = (r * i) % 1000;
+      return row;
+    });
+    expect(() =>
+      buildTimeSeriesOption({
+        xLabels: bigRows.map((r) => String(r.label)), rows: bigRows, series: bigSeries,
+        mode: 'line', stacked: false,
+        showAxisLabels: true, xLabelAngle: 0, theme,
+      }),
+    ).not.toThrow();
   });
 
   test('axis titles land as axis names and labels can be hidden', () => {

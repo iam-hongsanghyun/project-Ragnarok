@@ -41,6 +41,7 @@ import { Dashboard, newId } from './Dashboard';
 import { Card, DashboardLayout } from 'lib/dashboard/types';
 import { useDashboardLayout } from './useDashboardLayout';
 import { PRESETS } from 'lib/dashboard/presets';
+import { effectiveEndIndex, fullRunTimeline, OUTPUT_SHEETS_FOR_FOCUS } from 'lib/api/runs';
 
 const DEFAULT_LAYOUT: DashboardLayout = { rows: [], cards: [] };
 
@@ -140,6 +141,11 @@ interface Props {
   initialLayout?: DashboardLayout;
   /** Show the Presets ▾ picker. Off for the curated Result tab. */
   showPresets?: boolean;
+  /** Report, per output-series sheet, the MAX number of snapshots the current
+   *  layout's per-asset charts need loaded (each chart's slider right edge), so
+   *  the parent hydrates only those sheets at the length needed. Empty {} when
+   *  the layout is system-only. */
+  onNeedSeries?: (windows: Record<string, number>) => void;
 }
 
 export function AnalyticsDashboard({
@@ -151,10 +157,32 @@ export function AnalyticsDashboard({
   storageKey,
   initialLayout = DEFAULT_LAYOUT,
   showPresets = true,
+  onNeedSeries,
 }: Props) {
   const { layout, setLayout, editing, setEditing, resetToDefault } =
     useDashboardLayout(initialLayout, storageKey);
   const { alert: alertDialog } = useDialog();
+
+  // Tell the parent, per output-series sheet, the MAX snapshot count the
+  // layout's per-asset charts need loaded (each chart's slider right edge), so
+  // it hydrates only those sheets at that length. Runs on layout change (chart
+  // added / slider moved / preset loaded), not every render. A system-only
+  // layout reports {} → no fetch → the common result view is instant.
+  useEffect(() => {
+    if (!onNeedSeries) return;
+    const totalSnaps = fullRunTimeline(results).length;
+    const weight = results.runMeta?.snapshotWeight ?? 1;
+    const windows: Record<string, number> = {};
+    for (const card of layout.cards) {
+      if (card.kind !== 'chart' || card.config.focusType === 'system') continue;
+      const end = effectiveEndIndex(card.config.focusType, card.config.endIndex, totalSnaps, weight);
+      const snaps = end + 1;
+      for (const sheet of OUTPUT_SHEETS_FOR_FOCUS[card.config.focusType] ?? []) {
+        windows[sheet] = Math.max(windows[sheet] ?? 0, snaps);
+      }
+    }
+    onNeedSeries(windows);
+  }, [layout, onNeedSeries, results]);
   const [openMenu, setOpenMenu] = useState<'presets' | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const presetsMenuRef = useRef<HTMLDivElement | null>(null);

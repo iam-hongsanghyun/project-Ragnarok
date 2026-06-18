@@ -853,6 +853,10 @@ export interface ChartSectionConfig {
   showLegend?: boolean;      // default true
   showAxisLabels?: boolean;  // default true — tick labels on both axes
   xLabelAngle?: number;      // rotation (deg) of x-axis tick labels; 0 = horizontal
+  // The per-asset temporal window is the slider range itself: `endIndex` (full-
+  // run index) is how much stripped per-component series gets hydrated. A
+  // preset's "unbounded" endIndex resolves to a 1-week default for per-asset
+  // charts (DEFAULT_CHART_WINDOW_HOURS); see effectiveEndIndex in lib/api/runs.
 }
 
 // ── Tables pane ───────────────────────────────────────────────────────────────
