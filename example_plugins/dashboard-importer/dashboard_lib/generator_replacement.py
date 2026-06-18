@@ -23,16 +23,17 @@ A GUI table ``dashboard.generator_replacements`` with one column, ``generator``
     swapped for renewables.
 * ``replace_follow`` — when True, split each plant's capacity between solar and
   wind by the **ratio of solar:wind capacity added in a reference year** (across
-  the model).  The reference year is the plant's **build year** for new builds,
-  but its **close year** for existing plants (built before the replacement base
-  year) — when an existing plant retires, that is when its replacement renewables
-  come online, so the split follows the mix added that year.  Because a still-
-  active plant's close year is after the target year, the close-year lookup uses
-  the full-model additions (incl. post-target years) supplied on the dashboard.
-  The close-year reference is **capped at** ``replace_max_close_year`` (default:
-  the target year): a plant closing on/after that year — or one that never closes
-  — follows that year's mix instead of its own far-future close year.
-  The fixed share boxes are ignored in this mode.
+  the model).  The reference year is each plant's **build year** by default, but
+  its **close year** when ``replace_include_existing`` is on — when a plant
+  retires, that is when its replacement renewables come online, so the split
+  follows the mix added that year (applied uniformly to every replaced plant, so
+  plants of different vintages share one mix).  Because a still-active plant's
+  close year is after the target year, the close-year lookup uses the full-model
+  additions (incl. post-target years) supplied on the dashboard.  The close-year
+  reference is **capped at** ``replace_max_close_year`` (default: the target
+  year): a plant closing on/after that year — or one that never closes — follows
+  that year's mix instead of its own far-future close year.  The fixed share
+  boxes are ignored in this mode.
 * ``replace_solar_pct`` / ``replace_wind_pct`` — fixed solar / wind shares (%),
   used only when not following.  They are direct percentages of the original
   plant capacity, not normalized ratios.
@@ -137,14 +138,14 @@ def replace_generators(network: pypsa.Network, dashboard: "Dashboard") -> dict[s
     # replaced. When off, only build_year ≥ threshold plants are touched.
     include_existing = bool(getattr(settings, "replace_include_existing", False))
     threshold = 0 if include_existing else replace_base_year
-    # The replacement base year also separates "existing" plants (built before it,
-    # i.e. the ones the toggle pulls in) from "new" builds (≥ it) — see the
-    # follow-mode reference-year choice in the loop below. Fall back to the model
-    # base year when no replacement base year is set.
-    existing_cutoff = replace_base_year if replace_base_year > 0 else base_year
-    # Cap for the existing-plant close-year reference: a plant closing on/after
-    # this year (or that never closes) follows this year's solar:wind mix instead
-    # of its own (far-future) close year. 0/blank → the target year.
+    # Follow-mode reference year: by default every replaced plant follows its own
+    # BUILD year. When "Include existing plants" is on, every replaced plant
+    # follows its CLOSE year instead (when it retires and the renewables come
+    # online) — uniformly, so plants of different vintages get the same mix.
+    follow_close_year = follow and include_existing
+    # Cap for that close-year reference: a plant closing on/after this year (or
+    # that never closes) follows this year's mix instead of its own (far-future)
+    # close year. 0/blank → the target year.
     target_year = int(settings.target_year)
     max_close_year = int(getattr(settings, "replace_max_close_year", 0) or 0) or target_year
 
@@ -268,12 +269,10 @@ def replace_generators(network: pypsa.Network, dashboard: "Dashboard") -> dict[s
             if "province" in network.generators.columns and pd.notna(network.generators.at[name, "province"])
             else ""
         )
-        # Existing plants (built before the replacement base year, or undated)
-        # follow the solar:wind additions of their CLOSE year — that is when they
-        # retire and the replacement renewables come online. New builds keep
-        # following their own build year against the target-year fleet.
-        is_existing = follow and (raw_by is None or raw_by < existing_cutoff)
-        if is_existing:
+        # With "Include existing plants" on, follow the CLOSE year (capped) for
+        # every replaced plant; otherwise follow each plant's BUILD year against
+        # the target-year fleet.
+        if follow_close_year:
             close = _close_year(name)
             # Cap the reference year: a plant closing on/after max_close_year (or
             # one that never closes) follows max_close_year's mix.

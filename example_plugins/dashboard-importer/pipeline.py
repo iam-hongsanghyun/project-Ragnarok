@@ -497,23 +497,21 @@ def replacement_plan_payload(module_config: dict[str, Any]) -> list[dict[str, An
     solar_pct = max(solar_pct, 0.0)
     wind_pct = max(wind_pct, 0.0)
 
-    # New builds follow their build year against the (target-year) active fleet;
-    # existing plants (built before the replacement base year, or undated) follow
-    # their CLOSE year against the full-model additions. Mirrors the build's
-    # generator_replacement split exactly.
+    # Follow-mode reference: each plant's build year by default; the close year
+    # (capped) for every plant when "Include existing plants" is on. Mirrors the
+    # build's generator_replacement split exactly. Cap is 0/blank → target year.
     active_additions = _additions_by_year(additions_df)
-    replace_base_year = _as_int(module_config, "replace_build_year", 0)
-    existing_cutoff = replace_base_year if replace_base_year > 0 else int(base_year)
-    # Close-year reference cap (0/blank → target year); see generator_replacement.
+    follow_close_year = follow and _as_bool(module_config, "replace_include_existing", False)
     max_close_year = _as_int(module_config, "replace_max_close_year", 0) or int(target_year)
 
     def _computed_split(total: float, by: int | None, close: int | None) -> tuple[float, float]:
         if follow:
-            if by is None or by < existing_cutoff:          # existing → close year (capped)
+            if follow_close_year:                            # close year (capped)
                 ref = close if (close is not None and close < max_close_year) else max_close_year
                 solar_add, wind_add = _latest_nonzero(full_additions, ref)
-            else:                                            # new build → build year
-                solar_add, wind_add = _latest_nonzero(active_additions, by)
+            else:                                            # build year
+                ref = by if by is not None else int(base_year)
+                solar_add, wind_add = _latest_nonzero(active_additions, ref)
             total_add = solar_add + wind_add
             if total_add > 0:
                 return total * solar_add / total_add, total * wind_add / total_add

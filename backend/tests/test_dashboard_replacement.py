@@ -194,8 +194,8 @@ def test_existing_plant_uses_close_year_within_cap(libs: dict[str, Any]) -> None
     assert n.generators.at["coal_old_wind_2010", "p_nom"] == pytest.approx(250.0)
 
 
-def test_new_plant_still_follows_build_year(libs: dict[str, Any]) -> None:
-    """New build (>= base year): split follows its BUILD year, not the close year."""
+def test_default_follows_build_year_when_not_including_existing(libs: dict[str, Any]) -> None:
+    """Include-existing OFF: split follows each plant's BUILD year, not close year."""
     import pypsa
 
     n = pypsa.Network()
@@ -209,12 +209,35 @@ def test_new_plant_still_follows_build_year(libs: dict[str, Any]) -> None:
     n.add("Generator", "wind30", bus="b1", carrier="wind", p_nom=600.0, build_year=2030)
     n.generators["close_year"] = 2045
     n.generators["province"] = ""
-    # The close-year (2045) mix is 900:100 — it must be ignored for a new build.
+    # The close-year (2045) mix is 900:100 — must be ignored when include-existing is off.
     dash = _follow_dashboard(libs, include_existing=False, full_additions={2045: (900.0, 100.0)})
     libs["generator_replacement"].replace_generators(n, dash)
     # 25/75 of 1000 from the build-year (2030) mix, not 90/10 from the close year.
     assert n.generators.at["coal_new_solar_2030", "p_nom"] == pytest.approx(250.0)
     assert n.generators.at["coal_new_wind_2030", "p_nom"] == pytest.approx(750.0)
+
+
+def test_include_existing_makes_all_plants_share_one_close_year_mix(libs: dict[str, Any]) -> None:
+    """Regression (삼척#1/#2): with include-existing on, plants of different build
+    years all follow the SAME capped close-year mix — the build year is irrelevant."""
+    import pypsa
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2038-01-01", periods=3, freq="h"))
+    n.add("Bus", "b1")
+    n.add("Carrier", "coal")
+    n.add("Generator", "samcheok1", bus="b1", carrier="coal", p_nom=1050.0, build_year=2024)
+    n.add("Generator", "samcheok2", bus="b1", carrier="coal", p_nom=1050.0, build_year=2025)
+    n.generators["close_year"] = [2040, 2041]  # both after the target year (2038)
+    n.generators["province"] = ""
+    # Default cap = target 2038 → both plants use the 2038 mix (300:100 = 75/25),
+    # regardless of the 2024 vs 2025 build year that previously split them.
+    dash = _follow_dashboard(libs, include_existing=True, full_additions={2038: (300.0, 100.0)})
+    libs["generator_replacement"].replace_generators(n, dash)
+    for solar in ("samcheok1_solar_2024", "samcheok2_solar_2025"):
+        assert n.generators.at[solar, "p_nom"] == pytest.approx(787.5)
+    for wind in ("samcheok1_wind_2024", "samcheok2_wind_2025"):
+        assert n.generators.at[wind, "p_nom"] == pytest.approx(262.5)
 
 
 def test_additions_helpers() -> None:

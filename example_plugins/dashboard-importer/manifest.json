@@ -220,7 +220,7 @@
     "replace_include_existing": {
       "type": "boolean",
       "label": "Include existing plants (whole fleet)",
-      "description": "Replace the entire fleet of the chosen carriers, not just new builds. When on, the 'Replacement base year' filter is ignored: every plant active in the target year is replaceable — so e.g. ticking this with coal selected replaces the whole coal fleet (existing units included). When off, only plants built on/after the base year are replaced.",
+      "description": "Replace the entire fleet of the chosen carriers, not just new builds. When on, the 'Replacement base year' filter is ignored: every plant active in the target year is replaceable — so e.g. ticking this with coal selected replaces the whole coal fleet (existing units included). When off, only plants built on/after the base year are replaced. This also switches the 'Follow yearly additions' reference from each plant's build year to its CLOSE year (see that option).",
       "default": false,
       "visibleWhen": {
         "field": "replace_generators",
@@ -230,7 +230,7 @@
     "replace_follow": {
       "type": "boolean",
       "label": "Follow yearly solar/wind additions",
-      "description": "Split each replaced plant's capacity between solar and wind by the ratio of solar:wind capacity ADDED in a reference year (across the model). New builds use their build year; existing plants (built before the replacement base year) use their CLOSE year — when they retire and the renewables come online. When on, the fixed Solar %/Wind % boxes are ignored. If a year has no solar/wind additions, the split falls back to the latest earlier year with nonzero additions.",
+      "description": "Split each replaced plant's capacity between solar and wind by the ratio of solar:wind capacity ADDED in a reference year (across the model). By default the reference is each plant's build year; when 'Include existing plants' is on, it is each plant's CLOSE year instead (when it retires and the renewables come online), applied uniformly so plants of different vintages share one mix. When on, the fixed Solar %/Wind % boxes are ignored. If a year has no solar/wind additions, the split falls back to the latest earlier year with nonzero additions.",
       "default": false,
       "visibleWhen": {
         "field": "replace_generators",
@@ -240,7 +240,7 @@
     "replace_max_close_year": {
       "type": "number",
       "label": "Max close year (follow mode)",
-      "description": "Caps the close-year reference used for existing plants when following yearly additions: a plant closing on/after this year — or one that never closes — follows this year's solar/wind mix instead of its own (far-future) close year. Leave 0/blank to use the target year. Only used in 'Follow yearly solar/wind additions' mode.",
+      "description": "Caps the close-year reference (used when both 'Follow yearly additions' and 'Include existing plants' are on): a plant closing on/after this year — or one that never closes — follows this year's solar/wind mix instead of its own (far-future) close year. Leave 0/blank to use the target year.",
       "default": 0,
       "visibleWhen": {
         "field": "replace_follow",
