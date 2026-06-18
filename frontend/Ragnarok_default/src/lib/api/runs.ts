@@ -23,6 +23,23 @@ import type { DownsampleAgg, SeriesWindow } from './session';
 // emissions totals. Per-snapshot fidelity is required, not optional.
 const FULL_RESOLUTION = 100_000_000;
 
+/**
+ * Output series sheets `deriveAssetDetails` reads for a given non-`system`
+ * focus type. Used to scope on-demand hydration to ONLY the sheets the
+ * displayed per-asset charts need — fetching (and client-deriving) the whole
+ * bundle on every result view froze the tab on large runs. Keys mirror
+ * `AnalyticsFocus['type']`; system charts read inline aggregates and need none.
+ */
+export const OUTPUT_SHEETS_FOR_FOCUS: Record<string, string[]> = {
+  generator:      ['generators-p'],
+  bus:            ['generators-p', 'buses-marginal_price', 'buses-v_mag_pu', 'buses-v_ang'],
+  storageUnit:    ['storage_units-p', 'storage_units-state_of_charge'],
+  store:          ['stores-e', 'stores-p'],
+  branch:         ['lines-p0', 'lines-p1', 'links-p0', 'links-p1', 'transformers-p0', 'transformers-p1'],
+  process:        ['processes-p0', 'processes-p1'],
+  shuntImpedance: ['shunt_impedances-p', 'shunt_impedances-q'],
+};
+
 /** A windowed slice of a stored run's output time-series sheet. Same wire shape
  *  as the session window — both are served by `run_store.run_series_window`. */
 export async function getRunSeriesWindow(

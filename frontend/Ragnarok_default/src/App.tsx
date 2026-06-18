@@ -237,6 +237,10 @@ function AppInner() {
   const [hydratedRunSeries, setHydratedRunSeries] = useState<
     { runName: string; series: Record<string, GridRow[]> } | null
   >(null);
+  // Output-series sheets the currently-displayed analytics layout needs (driven
+  // by the dashboard's per-asset charts). Empty for system-only layouts → no
+  // hydration fetch, so the common result view stays instant.
+  const [neededRunSheets, setNeededRunSheets] = useState<string[]>([]);
   const [pathwayConfig, setPathwayConfig] = useState<PathwayConfig>(() => defaultPathwayConfig());
   const [rollingConfig, setRollingConfig] = useState<RollingHorizonConfig>(() => defaultRollingConfig());
   const [samplingConfig, setSamplingConfig] = useState<SamplingConfig>(() => defaultSamplingConfig());
@@ -364,26 +368,34 @@ function AppInner() {
     };
   }, [results, analyticsModel, settings.currencySymbol, analyticsDiscountRate, analyticsCarbonPrice, analyticsSnapshotWeight, pathwayConfig, hydratedRunSeries, activeRunName]);
 
-  // Hydrate the active run's stripped per-component output series on demand.
+  // Hydrate the active run's stripped per-component output series ON DEMAND.
   // The light "View" bundle ships `outputs.series = null` to render instantly;
-  // per-asset analytics need the real series, so fetch them (full resolution,
-  // from `/api/runs/{name}/series/{sheet}`) once the user is on the Analytics
-  // tab. Gated on that tab so merely scanning History doesn't trigger the heavy
-  // pull; cached per run so re-viewing the same run is free.
+  // per-asset analytics need the real series. Fetch ONLY the sheets the
+  // displayed dashboard actually needs (`neededRunSheets`, driven by its
+  // per-asset charts) — pulling and client-deriving the whole bundle on every
+  // view froze the tab on large runs. System-only layouts need nothing, so the
+  // common result view does zero work here. Fetched sheets merge into a per-run
+  // cache; re-viewing the same chart is free.
   useEffect(() => {
     const outputs = results?.outputs;
-    const sheets = outputs?.seriesSheets ?? [];
-    const needsHydration =
-      tab === 'Analytics' && !!outputs && !outputs.series && sheets.length > 0 && !!activeRunName;
-    if (!needsHydration) return;
-    if (hydratedRunSeries?.runName === activeRunName) return; // already cached
+    if (!outputs || outputs.series || !activeRunName || neededRunSheets.length === 0) return;
+    const available = new Set(outputs.seriesSheets ?? []);
+    const have = hydratedRunSeries?.runName === activeRunName ? hydratedRunSeries.series : {};
+    const missing = neededRunSheets.filter((s) => available.has(s) && !(s in have));
+    if (missing.length === 0) return;
     const runName = activeRunName;
     let cancelled = false;
-    void fetchRunOutputSeries(runName, sheets)
-      .then((series) => { if (!cancelled) setHydratedRunSeries({ runName, series }); })
+    void fetchRunOutputSeries(runName, missing)
+      .then((fetched) => {
+        if (cancelled) return;
+        setHydratedRunSeries((prev) => {
+          const base = prev?.runName === runName ? prev.series : {};
+          return { runName, series: { ...base, ...fetched } };
+        });
+      })
       .catch(() => { /* leave per-asset charts empty — system charts still render */ });
     return () => { cancelled = true; };
-  }, [results, activeRunName, tab, hydratedRunSeries]);
+  }, [results, activeRunName, neededRunSheets, hydratedRunSeries]);
 
   const captureCurrentScenario = useCallback((overrides: Partial<ScenarioPreset> = {}): ScenarioPreset => (
     buildScenarioPreset({
@@ -2423,6 +2435,7 @@ function AppInner() {
               currencySymbol={settings.currencySymbol}
               pathwayConfig={pathwayConfig}
               onSelectedPeriodChange={(period) => setPathwayConfig((current) => ({ ...current, selectedPeriod: period }))}
+              onNeedSeries={setNeededRunSheets}
               backendRuns={backendRuns}
               activeRunName={activeRunName}
             />

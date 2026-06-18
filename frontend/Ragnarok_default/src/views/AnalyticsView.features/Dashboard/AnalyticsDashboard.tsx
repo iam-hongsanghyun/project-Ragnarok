@@ -40,6 +40,7 @@ import { Dashboard, newId } from './Dashboard';
 import { Card, DashboardLayout } from 'lib/dashboard/types';
 import { useDashboardLayout } from './useDashboardLayout';
 import { PRESETS } from 'lib/dashboard/presets';
+import { OUTPUT_SHEETS_FOR_FOCUS } from 'lib/api/runs';
 
 const DEFAULT_LAYOUT: DashboardLayout = { rows: [], cards: [] };
 
@@ -139,6 +140,10 @@ interface Props {
   initialLayout?: DashboardLayout;
   /** Show the Presets ▾ picker. Off for the curated Result tab. */
   showPresets?: boolean;
+  /** Report which output-series sheets the current layout's per-asset charts
+   *  need, so the parent can lazily hydrate only those (light "View" bundles
+   *  strip the series). Empty when the layout is system-only. */
+  onNeedSeries?: (sheets: string[]) => void;
 }
 
 export function AnalyticsDashboard({
@@ -150,9 +155,25 @@ export function AnalyticsDashboard({
   storageKey,
   initialLayout = DEFAULT_LAYOUT,
   showPresets = true,
+  onNeedSeries,
 }: Props) {
   const { layout, setLayout, editing, setEditing, resetToDefault } =
     useDashboardLayout(initialLayout, storageKey);
+
+  // Tell the parent which per-asset output-series sheets this layout needs, so
+  // it can lazily hydrate only those. Runs on layout change (a per-asset chart
+  // added / a preset loaded), not on every render. System-only layouts report
+  // none → no fetch → the common result view stays instant.
+  useEffect(() => {
+    if (!onNeedSeries) return;
+    const sheets = new Set<string>();
+    for (const card of layout.cards) {
+      if (card.kind === 'chart' && card.config.focusType !== 'system') {
+        for (const s of OUTPUT_SHEETS_FOR_FOCUS[card.config.focusType] ?? []) sheets.add(s);
+      }
+    }
+    onNeedSeries(Array.from(sheets).sort());
+  }, [layout, onNeedSeries]);
   const [openMenu, setOpenMenu] = useState<'presets' | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const presetsMenuRef = useRef<HTMLDivElement | null>(null);
