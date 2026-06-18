@@ -54,6 +54,8 @@ export interface BuildViewProps {
   dateFormat: DateFormat;
   onOpenConstraintsWorkspace?: () => void;
   onOpenRunSetup?: () => void;
+  /** Open the current step's sheet in the raw spreadsheet (Model tab). */
+  onOpenInModel?: (sheet: string) => void;
 }
 
 /** Short, sheet-appropriate base for auto-generated component names. */
@@ -66,6 +68,19 @@ const NAME_BASE: Record<string, string> = {
   lines: 'line',
   links: 'link',
   transformers: 'transformer',
+};
+
+/** Readable singular noun for the per-step "Add your first X" prompt. */
+const STEP_NOUN: Record<string, string> = {
+  network: 'network',
+  carriers: 'carrier',
+  buses: 'bus',
+  generators: 'generator',
+  loads: 'load',
+  storage_units: 'storage unit',
+  lines: 'line',
+  links: 'link',
+  processes: 'process',
 };
 
 /** First `${base}_${n}` not already used as a name in `rows`. */
@@ -398,6 +413,40 @@ export function BuildView(props: BuildViewProps) {
         })}
       </nav>
       </ViewPaneHeader>
+
+      {/* Per-step guidance: what this step is for, a one-click "add your first"
+          when it's empty, a link to the raw spreadsheet, and Next/Skip. */}
+      <div className="build-step-guide">
+        <p className="build-step-guide__desc">{step.description}</p>
+        <div className="build-step-guide__actions">
+          {STEP_NOUN[step.primarySheet]
+            && step.id !== 'constraints' && step.id !== 'review'
+            && (!Array.isArray(props.model[step.primarySheet]) || props.model[step.primarySheet].length === 0) && (
+            <button
+              type="button"
+              className="tb-btn tb-btn--active"
+              onClick={() => {
+                const sheet = step.primarySheet as SheetName;
+                const idx = Array.isArray(props.model[step.primarySheet]) ? props.model[step.primarySheet].length : 0;
+                props.onAddRow(sheet);
+                setFocusedRowIndex(idx);
+              }}
+            >
+              + Add your first {STEP_NOUN[step.primarySheet]}
+            </button>
+          )}
+          {props.onOpenInModel && step.id !== 'constraints' && step.id !== 'review' && (
+            <button type="button" className="ghost-button sm" onClick={() => props.onOpenInModel!(step.primarySheet)}>
+              Open in spreadsheet →
+            </button>
+          )}
+          {stepIndex < BUILD_STEPS.length - 1 && (
+            <button type="button" className="tb-btn" onClick={() => goStep(stepIndex + 1)}>
+              {completionByIndex[stepIndex] ? 'Next →' : 'Skip →'}
+            </button>
+          )}
+        </div>
+      </div>
 
       {step.id === 'constraints' ? (
         <ResizablePanels id="build" direction="horizontal" className="build-body" initialSizes={[72, 28]} minSize={220}>

@@ -7969,6 +7969,28 @@ code, kbd, samp, tt,
 .subnav-btn--ok    .build-step-num { background: #ccfbf1; color: var(--brand-strong); }
 .subnav-btn--error .build-step-num { background: #fee2e2; color: #b91c1c; }
 .subnav-btn--warn  .build-step-num { background: #fef3c7; color: #92400e; }
+/* Per-step guidance bar (description + add-first / spreadsheet / Next-Skip). */
+.build-step-guide {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  background: var(--bg-hover, #f1f5f9);
+  border-bottom: 1px solid var(--border);
+}
+.build-step-guide__desc {
+  margin: 0;
+  font-size: 0.84rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.build-step-guide__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
 .build-body {
   flex: 1;
   min-height: 0;

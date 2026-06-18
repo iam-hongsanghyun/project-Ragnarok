@@ -7,6 +7,8 @@ import { ViewPaneHeader } from '../../shared/components/primitives';
 
 export interface FileToolbarProps {
   hasResults: boolean;
+  /** Switch to the guided Build wizard (cross-link from the raw spreadsheet). */
+  onOpenBuild?: () => void;
   onOpen: () => void;
   onSave: () => void;
   onSaveAs: () => void;
@@ -23,6 +25,14 @@ export interface FileToolbarProps {
 export function FileToolbar(props: FileToolbarProps) {
   return (
     <ViewPaneHeader variant="toolbar">
+      {props.onOpenBuild && (
+        <>
+          <button className="tb-btn" onClick={props.onOpenBuild} title="Switch to the step-by-step guided builder">
+            Guided builder →
+          </button>
+          <div className="view-toolbar-sep" />
+        </>
+      )}
       <button className="tb-btn" onClick={props.onOpen}>Open</button>
       <button className="tb-btn" onClick={props.onSave}>Save</button>
       <button className="tb-btn" onClick={props.onSaveAs}>Save As</button>
