@@ -43,6 +43,7 @@ class Settings:
     replace_build_year: int = 0  # filter 2: only plants with build_year ≥ this are replaceable (0 → no filter)
     replace_include_existing: bool = False  # True → ignore filter 2 and replace the whole fleet (existing plants too)
     replace_follow: bool = False  # True → split by that year's solar:wind additions
+    replace_max_close_year: int = 0  # follow mode: cap the existing-plant close-year reference (0 → target year)
     replace_solar_pct: float = 50.0  # direct solar share (%) when not following
     replace_wind_pct: float = 50.0   # direct wind share (%) when not following
     replace_all_carriers: bool = False  # True → bulk-reallocate all plants of replace_carriers
@@ -116,6 +117,12 @@ class Dashboard:
     # Generator replacements (GUI table only — not read from xlsx).
     # Required column: generator.  None when absent.
     generator_replacements: pd.DataFrame | None = None
+    # Full-model solar/wind additions by build year ``{year: (solar_mw, wind_mw)}``
+    # across ALL build years (incl. years after the target year), set by the
+    # pipeline from the raw model. Used for the close-year follow-mode split of
+    # existing plants (whose close year is after the target year). None → the
+    # replacement falls back to the target-year network's additions.
+    renewable_additions_by_year: dict | None = None
     # Marginal-cost multipliers (GUI table only — not read from xlsx).
     # Columns: carrier, multiplier_pct (% of original).  None when absent.
     marginal_cost_rules: pd.DataFrame | None = None

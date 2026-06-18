@@ -250,6 +250,10 @@ def _build_dashboard_network(
     settings.model = str(_resolve_model_workbook(module_config, dashboard_path, settings.model))
 
     dashboard = _build_dashboard(settings_mod, settings, module_config, xlsx_dashboard)
+    # Full-model solar/wind additions by build year (incl. years after the target
+    # year) for the close-year follow split of existing plants — read from the raw
+    # generators sheet, since the built network is filtered to the target year.
+    dashboard.renewable_additions_by_year = _additions_by_year(_read_generators_sheet(settings.model))
 
     network = loader_mod.build_network_for_year(settings.model, settings.target_year)
     loader_mod.select_base_year_temporal(network, settings.base_year)
@@ -443,8 +447,9 @@ def replacement_plan_payload(module_config: dict[str, Any]) -> list[dict[str, An
     Mirrors the build's split: fixed ``replace_solar_pct`` /
     ``replace_wind_pct`` are direct percentages of the original capacity when
     not following; ``replace_follow`` uses the solar:wind ratio of capacity
-    added in the plant's build year and ignores fixed shares. Returns ``[]``
-    when nothing is selected / no model.
+    added in a reference year (the build year for new builds, the close year for
+    existing plants — see :mod:`dashboard_lib.generator_replacement`) and ignores
+    fixed shares. Returns ``[]`` when nothing is selected / no model.
 
     Args:
         module_config: The plugin GUI config (``moduleConfig``).
@@ -461,10 +466,13 @@ def replacement_plan_payload(module_config: dict[str, Any]) -> list[dict[str, An
     if not sel_rows and not (bulk_on and carriers_sel):
         return []
 
-    model_path, _base_year, target_year = _resolve_model_for_analytics(module_config)
+    model_path, base_year, target_year = _resolve_model_for_analytics(module_config)
     df = _read_generators_sheet(model_path)
     if df is None or "name" not in df.columns:
         return []
+    # Full-model additions (all build years, incl. years after the target year)
+    # for the close-year split of existing plants — taken before the target filter.
+    full_additions = _additions_by_year(df)
     # Filter 1: active in the target year. Annual additions are computed from
     # this full active fleet before replacement-specific filters are applied, so
     # the solar:wind ratio is not affected by carrier/filter dropdown choices.
@@ -489,41 +497,36 @@ def replacement_plan_payload(module_config: dict[str, Any]) -> list[dict[str, An
     solar_pct = max(solar_pct, 0.0)
     wind_pct = max(wind_pct, 0.0)
 
-    add_build = pd.to_numeric(additions_df["build_year"], errors="coerce") if "build_year" in additions_df.columns else pd.Series(index=additions_df.index, dtype="float64")
-    add_pnom = pd.to_numeric(additions_df["p_nom"], errors="coerce").fillna(0.0) if "p_nom" in additions_df.columns else pd.Series(0.0, index=additions_df.index)
-    add_carrier = additions_df["carrier"].astype(str).str.strip().str.lower().fillna("") if "carrier" in additions_df.columns else pd.Series("", index=additions_df.index)
+    # New builds follow their build year against the (target-year) active fleet;
+    # existing plants (built before the replacement base year, or undated) follow
+    # their CLOSE year against the full-model additions. Mirrors the build's
+    # generator_replacement split exactly.
+    active_additions = _additions_by_year(additions_df)
+    replace_base_year = _as_int(module_config, "replace_build_year", 0)
+    existing_cutoff = replace_base_year if replace_base_year > 0 else int(base_year)
+    # Close-year reference cap (0/blank → target year); see generator_replacement.
+    max_close_year = _as_int(module_config, "replace_max_close_year", 0) or int(target_year)
 
-    def _year_add(year: int, c: str) -> float:
-        mask = (add_build == year) & (add_carrier == c)
-        return float(add_pnom[mask].sum())
-
-    def _latest_nonzero_additions(year: int) -> tuple[float, float]:
-        solar_add, wind_add = _year_add(year, "solar"), _year_add(year, "wind")
-        if solar_add + wind_add > 0:
-            return solar_add, wind_add
-
-        candidate_years = sorted({int(y) for y in add_build.dropna().unique() if int(y) <= year}, reverse=True)
-        for candidate_year in candidate_years:
-            solar_add, wind_add = _year_add(candidate_year, "solar"), _year_add(candidate_year, "wind")
-            if solar_add + wind_add > 0:
-                return solar_add, wind_add
-        return 0.0, 0.0
-
-    def _computed_split(total: float, by: int | None) -> tuple[float, float]:
-        if follow and by is not None:
-            solar_add, wind_add = _latest_nonzero_additions(by)
+    def _computed_split(total: float, by: int | None, close: int | None) -> tuple[float, float]:
+        if follow:
+            if by is None or by < existing_cutoff:          # existing → close year (capped)
+                ref = close if (close is not None and close < max_close_year) else max_close_year
+                solar_add, wind_add = _latest_nonzero(full_additions, ref)
+            else:                                            # new build → build year
+                solar_add, wind_add = _latest_nonzero(active_additions, by)
             total_add = solar_add + wind_add
             if total_add > 0:
                 return total * solar_add / total_add, total * wind_add / total_add
             return total * 0.5, total * 0.5
         return total * solar_pct / 100.0, total * wind_pct / 100.0
 
-    # name → (p_nom, build_year, carrier), first occurrence wins.
-    info: dict[str, tuple[float, int | None, str]] = {}
-    for nm, b, p, c in zip(names, build, pnom, carrier, strict=False):
+    # name → (p_nom, build_year, carrier, close_year), first occurrence wins.
+    close = pd.to_numeric(df["close_year"], errors="coerce") if "close_year" in df.columns else pd.Series(index=df.index, dtype="float64")
+    info: dict[str, tuple[float, int | None, str, int | None]] = {}
+    for nm, b, p, c, cl in zip(names, build, pnom, carrier, close, strict=False):
         if not nm or nm.lower() == "nan" or nm in info:
             continue
-        info[nm] = (float(p), int(b) if pd.notna(b) else None, c)
+        info[nm] = (float(p), int(b) if pd.notna(b) else None, c, int(cl) if pd.notna(cl) else None)
 
     rows: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -535,18 +538,18 @@ def replacement_plan_payload(module_config: dict[str, Any]) -> list[dict[str, An
         if g in seen or g not in info:
             continue
         seen.add(g)
-        total, by, _ = info[g]
-        solar, wind = _computed_split(total, by)
+        total, by, _, close_y = info[g]
+        solar, wind = _computed_split(total, by, close_y)
         rows.append({"generator": g, "build_year": by, "total_mw": round(total, 1), "solar_mw": round(solar, 1), "wind_mw": round(wind, 1)})
 
     # Bulk: every plant of the selected carriers passing both filters above
     # (computed split). The sheet is already filtered, so no extra check here.
     if bulk_on and carriers_sel:
-        for nm, (total, by, c) in info.items():
+        for nm, (total, by, c, close_y) in info.items():
             if nm in seen or c.strip().lower() not in carriers_sel or total <= 0:
                 continue
             seen.add(nm)
-            solar, wind = _computed_split(total, by)
+            solar, wind = _computed_split(total, by, close_y)
             rows.append({"generator": nm, "build_year": by, "total_mw": round(total, 1), "solar_mw": round(solar, 1), "wind_mw": round(wind, 1)})
 
     return rows
@@ -627,6 +630,50 @@ def _read_generators_sheet(model_path: str) -> "pd.DataFrame | None":
         return None
     df.columns = [str(c).strip() for c in df.columns]
     return df
+
+
+def _additions_by_year(df: "pd.DataFrame | None") -> dict[int, tuple[float, float]]:
+    """``{build_year: (solar_mw, wind_mw)}`` from a raw generators DataFrame.
+
+    Sums solar/wind ``p_nom`` per build year across **all** rows (no target-year
+    filtering), so the result carries additions in years after the target year —
+    needed for the close-year follow-mode split of existing plants. Mirrors
+    :func:`dashboard_lib.generator_replacement._year_additions_by_year`, which
+    runs on the (target-filtered) network.
+    """
+    if df is None or df.empty or "build_year" not in df.columns or "carrier" not in df.columns:
+        return {}
+    by = pd.to_numeric(df["build_year"], errors="coerce")
+    carrier = df["carrier"].astype(str).str.strip().str.lower()
+    pnom = (
+        pd.to_numeric(df["p_nom"], errors="coerce").fillna(0.0)
+        if "p_nom" in df.columns
+        else pd.Series(0.0, index=df.index)
+    )
+    rows = pd.DataFrame({"year": by, "carrier": carrier, "p_nom": pnom})
+    rows = rows[rows["year"].notna() & rows["carrier"].isin(("solar", "wind"))]
+    if rows.empty:
+        return {}
+    grouped = rows.groupby(["year", "carrier"])["p_nom"].sum()
+    out: dict[int, tuple[float, float]] = {}
+    for year_value in rows["year"].dropna().unique():
+        out[int(year_value)] = (
+            float(grouped.get((year_value, "solar"), 0.0)),
+            float(grouped.get((year_value, "wind"), 0.0)),
+        )
+    return out
+
+
+def _latest_nonzero(additions: dict[int, tuple[float, float]], year: int) -> tuple[float, float]:
+    """Additions for *year*, else the latest earlier year with nonzero additions."""
+    solar_add, wind_add = additions.get(year, (0.0, 0.0))
+    if solar_add + wind_add > 0:
+        return solar_add, wind_add
+    for candidate in sorted((y for y in additions if y <= year), reverse=True):
+        solar_add, wind_add = additions[candidate]
+        if solar_add + wind_add > 0:
+            return solar_add, wind_add
+    return 0.0, 0.0
 
 
 def _read_model_sheet(model_path: str, sheet: str) -> "pd.DataFrame | None":
@@ -861,6 +908,7 @@ def _settings_from_config(settings_mod: Any, cfg: dict[str, Any]) -> Any:
         replace_build_year=_as_int(cfg, "replace_build_year", 0),
         replace_include_existing=_as_bool(cfg, "replace_include_existing", False),
         replace_follow=_as_bool(cfg, "replace_follow", False),
+        replace_max_close_year=_as_int(cfg, "replace_max_close_year", 0),
         replace_solar_pct=_as_float(cfg, "replace_solar_pct", 50.0),
         replace_wind_pct=_as_float(cfg, "replace_wind_pct", 50.0),
         replace_all_carriers=_as_bool(cfg, "replace_all_carriers", False),
@@ -912,6 +960,7 @@ def _apply_config_to_settings(settings: Any, cfg: dict[str, Any]) -> None:
     _override_int(settings, cfg, "replace_build_year")
     _override_bool(settings, cfg, "replace_include_existing")
     _override_bool(settings, cfg, "replace_follow")
+    _override_int(settings, cfg, "replace_max_close_year")
     _override_float(settings, cfg, "replace_solar_pct")
     _override_float(settings, cfg, "replace_wind_pct")
     _override_str(settings, cfg, "replace_filter_column")

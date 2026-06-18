@@ -22,8 +22,17 @@ A GUI table ``dashboard.generator_replacements`` with one column, ``generator``
     built before the base year included), so e.g. an entire coal fleet can be
     swapped for renewables.
 * ``replace_follow`` — when True, split each plant's capacity between solar and
-  wind by the **ratio of solar:wind capacity added in that plant's build year**
-  (across the network).  The fixed share boxes are ignored in this mode.
+  wind by the **ratio of solar:wind capacity added in a reference year** (across
+  the model).  The reference year is the plant's **build year** for new builds,
+  but its **close year** for existing plants (built before the replacement base
+  year) — when an existing plant retires, that is when its replacement renewables
+  come online, so the split follows the mix added that year.  Because a still-
+  active plant's close year is after the target year, the close-year lookup uses
+  the full-model additions (incl. post-target years) supplied on the dashboard.
+  The close-year reference is **capped at** ``replace_max_close_year`` (default:
+  the target year): a plant closing on/after that year — or one that never closes
+  — follows that year's mix instead of its own far-future close year.
+  The fixed share boxes are ignored in this mode.
 * ``replace_solar_pct`` / ``replace_wind_pct`` — fixed solar / wind shares (%),
   used only when not following.  They are direct percentages of the original
   plant capacity, not normalized ratios.
@@ -121,14 +130,23 @@ def replace_generators(network: pypsa.Network, dashboard: "Dashboard") -> dict[s
     # ≥ this replacement base year. The network is already filtered to the target
     # year (Filter 1); this further restricts which of those plants get replaced —
     # everything built earlier stays as-is. 0/blank → no extra restriction.
-    threshold = int(getattr(settings, "replace_build_year", 0) or 0)
+    replace_base_year = int(getattr(settings, "replace_build_year", 0) or 0)
     # "Include existing plants" overrides Filter 2: when on, the whole fleet
     # (every plant active in the target year, regardless of build_year) is
     # replaceable — so e.g. an entire coal fleet, existing units included, is
     # replaced. When off, only build_year ≥ threshold plants are touched.
     include_existing = bool(getattr(settings, "replace_include_existing", False))
-    if include_existing:
-        threshold = 0
+    threshold = 0 if include_existing else replace_base_year
+    # The replacement base year also separates "existing" plants (built before it,
+    # i.e. the ones the toggle pulls in) from "new" builds (≥ it) — see the
+    # follow-mode reference-year choice in the loop below. Fall back to the model
+    # base year when no replacement base year is set.
+    existing_cutoff = replace_base_year if replace_base_year > 0 else base_year
+    # Cap for the existing-plant close-year reference: a plant closing on/after
+    # this year (or that never closes) follows this year's solar:wind mix instead
+    # of its own (far-future) close year. 0/blank → the target year.
+    target_year = int(settings.target_year)
+    max_close_year = int(getattr(settings, "replace_max_close_year", 0) or 0) or target_year
 
     # Mean marginal cost per renewable carrier, from the EXISTING units, taken
     # once up front (before any removals change the population).
@@ -136,6 +154,12 @@ def replace_generators(network: pypsa.Network, dashboard: "Dashboard") -> dict[s
 
     def _by(name: str) -> int | None:
         v = pd.to_numeric(network.generators.at[name, "build_year"], errors="coerce")
+        return int(v) if pd.notna(v) else None
+
+    def _close_year(name: str) -> int | None:
+        if "close_year" not in network.generators.columns:
+            return None
+        v = pd.to_numeric(network.generators.at[name, "close_year"], errors="coerce")
         return int(v) if pd.notna(v) else None
 
     def _eligible(by: int | None) -> bool:
@@ -225,13 +249,18 @@ def replace_generators(network: pypsa.Network, dashboard: "Dashboard") -> dict[s
     # ── Apply each replacement ────────────────────────────────────────────────
     added = 0
     replaced_by_bus: dict[str, float] = {}
+    # Additions for NEW builds come from the (target-year) network. For EXISTING
+    # plants we follow the mix of their CLOSE year, which is after the target year
+    # — so we need additions across ALL build years (incl. post-target). The
+    # pipeline supplies that full table on the dashboard; fall back to the network
+    # table when it's absent (then a close year just resolves to the latest mix).
     annual_additions = _year_additions_by_year(network)
+    full_additions = getattr(dashboard, "renewable_additions_by_year", None) or annual_additions
     for name in targets:
         # A pre-existing plant (no build_year) is "always built" → inherit base_year
         # so the renewable unit it becomes is likewise active from the start.
-        by = _by(name)
-        if by is None:
-            by = base_year
+        raw_by = _by(name)
+        by = raw_by if raw_by is not None else base_year
         capacity = _capacity(name)
         bus = str(network.generators.at[name, "bus"])
         province = (
@@ -239,18 +268,34 @@ def replace_generators(network: pypsa.Network, dashboard: "Dashboard") -> dict[s
             if "province" in network.generators.columns and pd.notna(network.generators.at[name, "province"])
             else ""
         )
+        # Existing plants (built before the replacement base year, or undated)
+        # follow the solar:wind additions of their CLOSE year — that is when they
+        # retire and the replacement renewables come online. New builds keep
+        # following their own build year against the target-year fleet.
+        is_existing = follow and (raw_by is None or raw_by < existing_cutoff)
+        if is_existing:
+            close = _close_year(name)
+            # Cap the reference year: a plant closing on/after max_close_year (or
+            # one that never closes) follows max_close_year's mix.
+            split_year = close if (close is not None and close < max_close_year) else max_close_year
+            split_additions = full_additions
+        else:
+            split_year = by
+            split_additions = annual_additions
         solar_cap, wind_cap = _split_capacity(
             settings=settings,
-            annual_additions=annual_additions,
-            year=by,
+            annual_additions=split_additions,
+            year=split_year,
             capacity=capacity,
             follow=follow,
         )
         # Per-plant trace in the Log tab — makes the applied ratio verifiable
         # against the reference table (and a 50/50 fallback visible as such).
+        # "split-year" is the year whose solar:wind mix was followed (close year
+        # for existing plants, build year for new ones).
         logger.info(
-            "Generator replacement: %s (build %s): %.1f MW -> solar %.1f + wind %.1f",
-            name, by, capacity, solar_cap, wind_cap,
+            "Generator replacement: %s (build %s, split-year %s): %.1f MW -> solar %.1f + wind %.1f",
+            name, by, split_year, capacity, solar_cap, wind_cap,
         )
 
         # Record the original capacity removed at this bus so an ESS can be

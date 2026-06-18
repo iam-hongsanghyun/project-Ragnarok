@@ -129,17 +129,131 @@ def test_table_pick_of_existing_plant_allowed_when_on(libs: dict[str, Any]) -> N
     assert "coal_new" in n.generators.index  # bulk off → the new plant is untouched
 
 
+def _follow_dashboard(
+    libs: dict[str, Any],
+    *,
+    include_existing: bool,
+    full_additions: dict | None,
+    max_close_year: int = 0,
+) -> Any:
+    s = libs["settings"].Settings(
+        model="", base_year=2025, target_year=2038, target_load_twh=0,
+        snapshot_start="01/01/2038 00:00", snapshot_length=3,
+        replace_generators=True, replace_build_year=2025,
+        replace_include_existing=include_existing, replace_follow=True,
+        replace_max_close_year=max_close_year,
+        replace_all_carriers=True, replace_carriers=("coal",),
+    )
+    d = libs["settings"].Dashboard(
+        settings=s, cc_rules=None, cf_constraints=pd.DataFrame(), carbon_price_usd=0.0,
+    )
+    d.renewable_additions_by_year = full_additions
+    return d
+
+
+def test_existing_plant_close_year_capped_at_target(libs: dict[str, Any]) -> None:
+    """Default cap: a far-future close year is clamped to the target year's mix."""
+    import pypsa
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2038-01-01", periods=3, freq="h"))
+    n.add("Bus", "b1")
+    n.add("Carrier", "coal")
+    n.add("Generator", "coal_old", bus="b1", carrier="coal", p_nom=1000.0, build_year=2010)
+    n.generators["close_year"] = 2040  # after the target year (2038)
+    n.generators["province"] = ""
+    # close 2040 >= max (default = target 2038) → use the 2038 mix (600:200 = 75/25),
+    # NOT the 2050 entry (which a naive close-year follow might pick up).
+    dash = _follow_dashboard(
+        libs, include_existing=True,
+        full_additions={2038: (600.0, 200.0), 2050: (100.0, 900.0)},
+    )
+    libs["generator_replacement"].replace_generators(n, dash)
+    assert n.generators.at["coal_old_solar_2010", "p_nom"] == pytest.approx(750.0)
+    assert n.generators.at["coal_old_wind_2010", "p_nom"] == pytest.approx(250.0)
+
+
+def test_existing_plant_uses_close_year_within_cap(libs: dict[str, Any]) -> None:
+    """A raised cap lets the actual close year (below the cap) drive the split."""
+    import pypsa
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2038-01-01", periods=3, freq="h"))
+    n.add("Bus", "b1")
+    n.add("Carrier", "coal")
+    n.add("Generator", "coal_old", bus="b1", carrier="coal", p_nom=1000.0, build_year=2010)
+    n.generators["close_year"] = 2042
+    n.generators["province"] = ""
+    # max_close_year 2045 > close 2042 → use the 2042 mix (600:200 = 75/25), NOT 2038.
+    dash = _follow_dashboard(
+        libs, include_existing=True, max_close_year=2045,
+        full_additions={2038: (100.0, 900.0), 2042: (600.0, 200.0)},
+    )
+    libs["generator_replacement"].replace_generators(n, dash)
+    assert n.generators.at["coal_old_solar_2010", "p_nom"] == pytest.approx(750.0)
+    assert n.generators.at["coal_old_wind_2010", "p_nom"] == pytest.approx(250.0)
+
+
+def test_new_plant_still_follows_build_year(libs: dict[str, Any]) -> None:
+    """New build (>= base year): split follows its BUILD year, not the close year."""
+    import pypsa
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2038-01-01", periods=3, freq="h"))
+    n.add("Bus", "b1")
+    for c in ("coal", "solar", "wind"):
+        n.add("Carrier", c)
+    n.add("Generator", "coal_new", bus="b1", carrier="coal", p_nom=1000.0, build_year=2030)
+    # Renewables added in 2030 (the build year): 200:600 solar:wind in the network.
+    n.add("Generator", "solar30", bus="b1", carrier="solar", p_nom=200.0, build_year=2030)
+    n.add("Generator", "wind30", bus="b1", carrier="wind", p_nom=600.0, build_year=2030)
+    n.generators["close_year"] = 2045
+    n.generators["province"] = ""
+    # The close-year (2045) mix is 900:100 — it must be ignored for a new build.
+    dash = _follow_dashboard(libs, include_existing=False, full_additions={2045: (900.0, 100.0)})
+    libs["generator_replacement"].replace_generators(n, dash)
+    # 25/75 of 1000 from the build-year (2030) mix, not 90/10 from the close year.
+    assert n.generators.at["coal_new_solar_2030", "p_nom"] == pytest.approx(250.0)
+    assert n.generators.at["coal_new_wind_2030", "p_nom"] == pytest.approx(750.0)
+
+
+def test_additions_helpers() -> None:
+    """The pipeline's full-model additions + latest-nonzero fallback are correct."""
+    pl = _load_pipeline()
+    df = pd.DataFrame({
+        "name": ["s1", "w1", "s2", "c1"],
+        "carrier": ["solar", "wind", "Solar", "coal"],  # mixed case must still match
+        "build_year": [2030, 2030, 2040, 2010],
+        "p_nom": [100, 50, 300, 999],
+    })
+    adds = pl._additions_by_year(df)
+    assert adds[2030] == (100.0, 50.0)
+    assert adds[2040] == (300.0, 0.0)
+    assert 2010 not in adds  # coal is not solar/wind
+    # latest-nonzero walks back to the most recent earlier year with additions.
+    assert pl._latest_nonzero(adds, 2045) == (300.0, 0.0)   # 2040 is the latest <= 2045
+    assert pl._latest_nonzero(adds, 2035) == (100.0, 50.0)  # 2030 is the latest <= 2035
+    assert pl._latest_nonzero(adds, 2000) == (0.0, 0.0)     # nothing <= 2000
+
+
 def test_config_flag_flows_into_settings() -> None:
     """The GUI flag maps through both Settings constructors in the pipeline."""
     pl = _load_pipeline()
     s = _load("settings")
-    built = pl._settings_from_config(s, {"replace_include_existing": True})
+    built = pl._settings_from_config(
+        s, {"replace_include_existing": True, "replace_max_close_year": 2045}
+    )
     assert built.replace_include_existing is True
+    assert built.replace_max_close_year == 2045
     # Overlay path (xlsx-derived settings + GUI overrides).
     base = s.Settings(
         model="", base_year=2025, target_year=2030, target_load_twh=0,
         snapshot_start="01/01/2030 00:00", snapshot_length=3,
     )
     assert base.replace_include_existing is False  # default
-    pl._apply_config_to_settings(base, {"replace_include_existing": True})
+    assert base.replace_max_close_year == 0  # default → target year at use-time
+    pl._apply_config_to_settings(
+        base, {"replace_include_existing": True, "replace_max_close_year": 2045}
+    )
     assert base.replace_include_existing is True
+    assert base.replace_max_close_year == 2045
