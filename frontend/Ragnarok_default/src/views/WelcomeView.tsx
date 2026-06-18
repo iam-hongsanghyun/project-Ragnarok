@@ -1,20 +1,25 @@
 /**
  * Welcome view — first-time landing page.
  *
- * Three blocks:
- *  1. A short paragraph of what Ragnarok is.
- *  2. A quick manual (numbered steps the user reads top-to-bottom).
- *  3. A 2x3 grid of tiles, one per workspace view, that double as
- *     navigation shortcuts.
+ *  1. A start chooser: "Start from scratch" or "Start with an example"
+ *     (examples are bundled SQLite starter projects loaded via the backend).
+ *  2. A short paragraph of what Ragnarok is.
+ *  3. A quick manual (numbered steps the user reads top-to-bottom).
+ *  4. A grid of tiles, one per workspace view, that double as navigation.
  *
  * Click the "Ragnarok" word in the top-bar to return here from anywhere.
  */
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { WorkspaceTab } from 'lib/types';
 import { RagnarokLogo } from 'shared/components/RagnarokLogo';
+import { ExampleMeta, listExamples } from 'lib/api/examples';
 
 interface Props {
   onNavigate: (tab: WorkspaceTab) => void;
+  /** Start a brand-new empty model (and jump into the guided builder). */
+  onStartScratch?: () => void;
+  /** Load a bundled example into the session by id. */
+  onLoadExample?: (id: string) => void | Promise<void>;
 }
 
 interface Tile {
@@ -68,7 +73,76 @@ const TILES: Tile[] = [
   },
 ];
 
-export function WelcomeView({ onNavigate }: Props) {
+function StartChooser({ onStartScratch, onLoadExample }: { onStartScratch?: () => void; onLoadExample?: (id: string) => void | Promise<void> }) {
+  const [picking, setPicking] = useState(false);
+  const [examples, setExamples] = useState<ExampleMeta[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loadingId, setLoadingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!picking || examples) return;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    listExamples()
+      .then((list) => { if (!cancelled) setExamples(list); })
+      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : 'Could not load examples.'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [picking, examples]);
+
+  const pick = async (id: string) => {
+    if (!onLoadExample) return;
+    setLoadingId(id);
+    try { await onLoadExample(id); } finally { setLoadingId(null); }
+  };
+
+  return (
+    <section className="welcome-section welcome-start">
+      <h2>Get started</h2>
+      {!picking ? (
+        <div className="welcome-start-choices">
+          <button type="button" className="welcome-start-card" onClick={onStartScratch}>
+            <span className="welcome-start-card__title">Start from scratch</span>
+            <span className="welcome-start-card__blurb">Begin with an empty model and build it up step by step in the guided builder.</span>
+          </button>
+          <button type="button" className="welcome-start-card" onClick={() => setPicking(true)}>
+            <span className="welcome-start-card__title">Start with an example</span>
+            <span className="welcome-start-card__blurb">Open a ready-made network that already solves — the fastest way to learn the workflow.</span>
+          </button>
+        </div>
+      ) : (
+        <div className="welcome-examples">
+          <button type="button" className="welcome-back" onClick={() => setPicking(false)}>← Back</button>
+          {loading && <p className="welcome-examples-note">Loading examples…</p>}
+          {error && <p className="welcome-examples-note welcome-examples-note--error">{error}</p>}
+          {!loading && !error && examples && examples.length === 0 && (
+            <p className="welcome-examples-note">No examples available.</p>
+          )}
+          <div className="welcome-examples-list">
+            {(examples ?? []).map((ex) => (
+              <button
+                key={ex.id}
+                type="button"
+                className="welcome-example-card"
+                disabled={loadingId !== null}
+                onClick={() => void pick(ex.id)}
+              >
+                <span className="welcome-example-card__title">
+                  {ex.label}{loadingId === ex.id ? ' · loading…' : ''}
+                </span>
+                {ex.description && <span className="welcome-example-card__blurb">{ex.description}</span>}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+export function WelcomeView({ onNavigate, onStartScratch, onLoadExample }: Props) {
   return (
     <div className="view welcome-view">
       <div className="welcome-content">
@@ -82,17 +156,21 @@ export function WelcomeView({ onNavigate }: Props) {
           </p>
         </header>
 
+        {(onStartScratch || onLoadExample) && (
+          <StartChooser onStartScratch={onStartScratch} onLoadExample={onLoadExample} />
+        )}
+
         <section className="welcome-section">
           <h2>Quick start</h2>
           <ol className="welcome-steps">
             <li>
-              Open <b>Data</b> and pick a country on the map. Pull the grid
-              from OSM, the power-plant fleet from WRI, demand from World
-              Bank or OPSD.
+              Pick <b>Start with an example</b> above to open a ready-made network,
+              or <b>Start from scratch</b> for an empty model. You can also import
+              your own data from <b>Data</b> (pick a country on the map).
             </li>
             <li>
-              Switch to <b>Build</b> to refine the network on the map, or
-              <b> Model</b> to edit any sheet / cell / snapshot directly.
+              Refine the network in <b>Build</b> (map-driven) or <b>Model</b>
+              (edit any sheet / cell / snapshot directly).
             </li>
             <li>
               In <b>Settings</b>, pick the run mode (single-period, pathway,

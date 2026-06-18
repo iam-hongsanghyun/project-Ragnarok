@@ -53,6 +53,7 @@ import { saveSessionControls, loadSessionControls, clearSession, clearSessionMod
 import { clearSessionModel, putSessionModel, putStaticModel, getSessionFullModel, getSessionMeta, getSheetPage, isSeriesSheet, patchSheet, seriesSheetCounts, DEFAULT_SESSION_ID } from 'lib/api/session';
 import type { SheetEditOp } from 'lib/api/session';
 import { fetchRunOutputSeriesWindows } from 'lib/api/runs';
+import { loadExample } from 'lib/api/examples';
 import { RunDialog } from './features/run/RunDialog';
 import { SettingsView } from './views/SettingsView';
 import { PluginsView } from './views/PluginsView';
@@ -1613,6 +1614,30 @@ function AppInner() {
     void refreshQueue();
   }, [refreshQueue]);
 
+  // Welcome → "Start from scratch": a fresh empty model, straight into Build.
+  const handleStartFromScratch = useCallback(() => {
+    resetForNewModel(createEmptyWorkbook(), 'untitled.xlsx');
+    setTab('Build');
+    showToast('Started a new model', 'success');
+  }, [resetForNewModel, setTab, showToast]);
+
+  // Welcome → "Start with an example": the backend copies the example's
+  // project.db into the session; we rehydrate the editor from there (same path
+  // as Import project) and open the guided builder.
+  const handleLoadExample = useCallback(async (id: string) => {
+    try {
+      const { label } = await loadExample(id);
+      const savedModel = await getSessionFullModel({ staticOnly: true });
+      if (!savedModel) throw new Error('Example could not be read back from the session.');
+      resetForNewModel(savedModel, label, { pushToSession: false });
+      try { setSessionSeriesCounts(seriesSheetCounts(await getSessionMeta())); } catch { /* tree just won't list series */ }
+      setTab('Build');
+      showToast(`Loaded "${label}"`, 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Failed to load example.', 'error');
+    }
+  }, [resetForNewModel, setTab, showToast]);
+
   // Import project (Queue tab): load a queued/finished item's retained model
   // snapshot into the editor as a new working project. The backend writes it to
   // the session; we then rehydrate the editor from there (static sheets only —
@@ -2416,7 +2441,13 @@ function AppInner() {
             />
           )}
 
-          {tab === 'Welcome' && <WelcomeView onNavigate={setTab} />}
+          {tab === 'Welcome' && (
+            <WelcomeView
+              onNavigate={setTab}
+              onStartScratch={handleStartFromScratch}
+              onLoadExample={handleLoadExample}
+            />
+          )}
 
           {tab === 'Data' && <DataView onApplyFragment={handleApplyImportedFragment} />}
 

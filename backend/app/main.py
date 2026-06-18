@@ -772,6 +772,10 @@ app.include_router(_importers_router.router)
 from .routers import session as _session_router  # noqa: E402
 app.include_router(_session_router.router)
 
+# Bundled starter projects ("Start with Examples" on the welcome screen).
+from .routers import examples as _examples_router  # noqa: E402
+app.include_router(_examples_router.router)
+
 # Backend (server-side) plugins. Discovered from disk and run in-process — they
 # import the bundled PyPSA source directly (no separate server / plugins.env).
 from .routers import plugins as _plugins_router  # noqa: E402

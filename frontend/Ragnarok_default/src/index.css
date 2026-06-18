@@ -9342,6 +9342,84 @@ section.data-import-filters__group {
   color: var(--muted);
   line-height: 1.45;
 }
+/* Start chooser (Start from scratch / Start with an example) */
+.welcome-start-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+.welcome-start-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 18px 18px;
+  background: var(--brand-soft, #f0fdfa);
+  border: 1px solid var(--brand-tint, #ccfbf1);
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+}
+.welcome-start-card:hover {
+  border-color: var(--brand, #0f766e);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+}
+.welcome-start-card__title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.welcome-start-card__blurb {
+  font-size: 0.85rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.welcome-back {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 0 0 8px;
+  color: var(--brand, #0f766e);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.welcome-examples-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+.welcome-example-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+}
+.welcome-example-card:hover:not(:disabled) {
+  border-color: var(--brand, #0f766e);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+}
+.welcome-example-card:disabled { opacity: 0.6; cursor: default; }
+.welcome-example-card__title {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.welcome-example-card__blurb {
+  font-size: 0.84rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.welcome-examples-note { font-size: 0.85rem; color: var(--muted); }
+.welcome-examples-note--error { color: var(--danger, #dc2626); }
+
 .welcome-footer {
   margin-top: 36px;
   padding-top: 16px;
