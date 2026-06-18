@@ -52,6 +52,7 @@ import { readCarbonLibraryFromModel, writeCarbonLibraryToModel, sameCarbonLibrar
 import { saveSessionControls, loadSessionControls, clearSession, clearSessionModelOnly } from 'lib/storage/sessionStore';
 import { clearSessionModel, putSessionModel, putStaticModel, getSessionFullModel, getSessionMeta, getSheetPage, isSeriesSheet, patchSheet, seriesSheetCounts, DEFAULT_SESSION_ID } from 'lib/api/session';
 import type { SheetEditOp } from 'lib/api/session';
+import { fetchRunOutputSeries } from 'lib/api/runs';
 import { RunDialog } from './features/run/RunDialog';
 import { SettingsView } from './views/SettingsView';
 import { PluginsView } from './views/PluginsView';
@@ -228,6 +229,14 @@ function AppInner() {
   // Comparison "active" column highlight. Set after a run completes (to the
   // newest stored meta) and when opening a stored run.
   const [activeRunName, setActiveRunName] = useState<string | null>(null);
+  // Per-component output series fetched on demand for the active run. The light
+  // "View" bundle strips them (`outputs.series = null`); without them the
+  // per-asset analytics (generator / storage / bus / branch charts and the map
+  // asset-detail popups) derive empty. Cached for one run at a time; refetched
+  // when `activeRunName` changes. See the hydration effect + `displayResults`.
+  const [hydratedRunSeries, setHydratedRunSeries] = useState<
+    { runName: string; series: Record<string, GridRow[]> } | null
+  >(null);
   const [pathwayConfig, setPathwayConfig] = useState<PathwayConfig>(() => defaultPathwayConfig());
   const [rollingConfig, setRollingConfig] = useState<RollingHorizonConfig>(() => defaultRollingConfig());
   const [samplingConfig, setSamplingConfig] = useState<SamplingConfig>(() => defaultSamplingConfig());
@@ -295,17 +304,29 @@ function AppInner() {
 
   const displayResults = useMemo(() => {
     if (!results) return null;
+    // In the light "View" bundle the per-component output series are stripped
+    // (`outputs.series === null`) and fetched back on demand. Splice in any
+    // we've hydrated for THIS run so per-asset analytics (assetDetails) derive
+    // with data; the system charts read inline aggregates and don't need this.
+    const baseOutputs = results.outputs;
+    const canHydrate =
+      !!baseOutputs && !baseOutputs.series &&
+      !!hydratedRunSeries && hydratedRunSeries.runName === activeRunName &&
+      Object.keys(hydratedRunSeries.series).length > 0;
+    const effResults = canHydrate
+      ? { ...results, outputs: { ...baseOutputs!, series: hydratedRunSeries!.series } }
+      : results;
     // A normal solved run arrives with the full backend-derived analytics
     // (summary, carrierMix, …) attached; trust them as-is. A *reconstructed*
     // bundle — an imported project — carries only `outputs` and re-derives its
     // analytics on the client, so it must fall through to deriveRunResults even
     // when it isn't a pathway run. (Without this, KPI/summary cards read
     // `undefined.reduce` and crash.)
-    const hasDerivedSummary = Array.isArray(results.summary) && results.summary.length > 0;
-    if (!results.outputs || (!results.pathway?.enabled && hasDerivedSummary)) {
-      return withDerivedAssetDetails(analyticsModel, results, settings.currencySymbol);
+    const hasDerivedSummary = Array.isArray(effResults.summary) && effResults.summary.length > 0;
+    if (!effResults.outputs || (!effResults.pathway?.enabled && hasDerivedSummary)) {
+      return withDerivedAssetDetails(analyticsModel, effResults, settings.currencySymbol);
     }
-    const activePathway = results.pathway?.enabled ? results.pathway : null;
+    const activePathway = effResults.pathway?.enabled ? effResults.pathway : null;
     const selectedPeriod: number | null = activePathway
       ? getDefaultSelectedPeriod({
         ...pathwayConfig,
@@ -319,29 +340,50 @@ function AppInner() {
           })),
       })
       : null;
-    const derived = deriveRunResults(analyticsModel, results.outputs, {
+    const derived = deriveRunResults(analyticsModel, effResults.outputs, {
       carbonPrice: analyticsCarbonPrice,
       currencySymbol: settings.currencySymbol,
       discountRate: analyticsDiscountRate,
       snapshotWeight: analyticsSnapshotWeight,
-      narrative: results.narrative,
+      narrative: effResults.narrative,
       selectedPeriod,
       pathway: activePathway ? { ...activePathway, selectedPeriod } : null,
-      rolling: results.rolling,
+      rolling: effResults.rolling,
     });
     return {
-      ...results,
+      ...effResults,
       ...derived,
-      pluginAnalytics: results.pluginAnalytics,
-      meritOrder: results.meritOrder,
-      co2Shadow: results.co2Shadow,
-      appliedConstraints: results.appliedConstraints,
-      emissionsBreakdown: results.emissionsBreakdown,
-      outputs: results.outputs,
+      pluginAnalytics: effResults.pluginAnalytics,
+      meritOrder: effResults.meritOrder,
+      co2Shadow: effResults.co2Shadow,
+      appliedConstraints: effResults.appliedConstraints,
+      emissionsBreakdown: effResults.emissionsBreakdown,
+      outputs: effResults.outputs,
       pathway: derived.pathway,
       runMeta: derived.runMeta,
     };
-  }, [results, analyticsModel, settings.currencySymbol, analyticsDiscountRate, analyticsCarbonPrice, analyticsSnapshotWeight, pathwayConfig]);
+  }, [results, analyticsModel, settings.currencySymbol, analyticsDiscountRate, analyticsCarbonPrice, analyticsSnapshotWeight, pathwayConfig, hydratedRunSeries, activeRunName]);
+
+  // Hydrate the active run's stripped per-component output series on demand.
+  // The light "View" bundle ships `outputs.series = null` to render instantly;
+  // per-asset analytics need the real series, so fetch them (full resolution,
+  // from `/api/runs/{name}/series/{sheet}`) once the user is on the Analytics
+  // tab. Gated on that tab so merely scanning History doesn't trigger the heavy
+  // pull; cached per run so re-viewing the same run is free.
+  useEffect(() => {
+    const outputs = results?.outputs;
+    const sheets = outputs?.seriesSheets ?? [];
+    const needsHydration =
+      tab === 'Analytics' && !!outputs && !outputs.series && sheets.length > 0 && !!activeRunName;
+    if (!needsHydration) return;
+    if (hydratedRunSeries?.runName === activeRunName) return; // already cached
+    const runName = activeRunName;
+    let cancelled = false;
+    void fetchRunOutputSeries(runName, sheets)
+      .then((series) => { if (!cancelled) setHydratedRunSeries({ runName, series }); })
+      .catch(() => { /* leave per-asset charts empty — system charts still render */ });
+    return () => { cancelled = true; };
+  }, [results, activeRunName, tab, hydratedRunSeries]);
 
   const captureCurrentScenario = useCallback((overrides: Partial<ScenarioPreset> = {}): ScenarioPreset => (
     buildScenarioPreset({
@@ -461,6 +503,7 @@ function AppInner() {
     setResults(null);
     setResultsModel(null);
     setResultsContext(null);
+    setHydratedRunSeries(null);
     // Run history is session-scoped: it survives model swaps (new/demo/workbook/
     // project open) so prior runs stay available for comparison, and is only
     // emptied when the user clicks "Clear all" or reloads/closes Ragnarok (the
