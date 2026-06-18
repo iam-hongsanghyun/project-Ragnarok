@@ -144,6 +144,10 @@ interface Props {
    *  need, so the parent can lazily hydrate only those (light "View" bundles
    *  strip the series). Empty when the layout is system-only. */
   onNeedSeries?: (sheets: string[]) => void;
+  /** Hours of per-asset temporal data to hydrate (null = whole run). Shown as
+   *  the "Chart window" control when the layout has per-asset charts. */
+  chartWindowHours?: number | null;
+  onChartWindowChange?: (hours: number | null) => void;
 }
 
 export function AnalyticsDashboard({
@@ -156,6 +160,8 @@ export function AnalyticsDashboard({
   initialLayout = DEFAULT_LAYOUT,
   showPresets = true,
   onNeedSeries,
+  chartWindowHours,
+  onChartWindowChange,
 }: Props) {
   const { layout, setLayout, editing, setEditing, resetToDefault } =
     useDashboardLayout(initialLayout, storageKey);
@@ -272,6 +278,12 @@ export function AnalyticsDashboard({
     else resetToDefault();
     setOpenMenu(null);
   };
+
+  // The chart-window control only matters when something reads per-asset
+  // temporal series (a non-system chart), so show it only then.
+  const hasAssetCharts = layout.cards.some(
+    (c) => c.kind === 'chart' && c.config.focusType !== 'system',
+  );
 
   // Sorted load / price for duration curves and merit-order systemLoad.
   const sortedLoad = systemLoadRows
@@ -449,6 +461,26 @@ export function AnalyticsDashboard({
                 </div>
               )}
             </div>
+          </>
+        )}
+
+        {hasAssetCharts && onChartWindowChange && (
+          <>
+            <div className="dashboard-toolbar-sep" />
+            <label className="dashboard-toolbar-window" title="How much per-asset temporal data to load for the charts. A longer window loads and renders more data.">
+              <span>Chart window</span>
+              <select
+                className="tb-btn"
+                value={chartWindowHours == null ? 'full' : String(chartWindowHours)}
+                onChange={(e) => onChartWindowChange(e.target.value === 'full' ? null : Number(e.target.value))}
+              >
+                <option value="168">1 week</option>
+                <option value="744">1 month</option>
+                <option value="2208">3 months</option>
+                <option value="8760">1 year</option>
+                <option value="full">Full run</option>
+              </select>
+            </label>
           </>
         )}
 

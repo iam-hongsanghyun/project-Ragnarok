@@ -99,6 +99,12 @@ function stripSeriesSheets(model: WorkbookModel): WorkbookModel {
   return out;
 }
 
+// Default per-asset chart window: one week. Per-asset analytics series are
+// hydrated on demand (light "View" bundles strip them); fetching + rendering
+// every snapshot × every asset for a long run froze the tab, so bound it by
+// default. The dashboard toolbar's "Chart window" control widens it.
+const ANALYTICS_DEFAULT_WINDOW_HOURS = 168;
+
 function AppInner() {
   const { showToast } = useToast();
   const [model, setModel] = useState<WorkbookModel>(() => createEmptyWorkbook());
@@ -235,12 +241,19 @@ function AppInner() {
   // asset-detail popups) derive empty. Cached for one run at a time; refetched
   // when `activeRunName` changes. See the hydration effect + `displayResults`.
   const [hydratedRunSeries, setHydratedRunSeries] = useState<
-    { runName: string; series: Record<string, GridRow[]> } | null
+    { runName: string; end: number | null; series: Record<string, GridRow[]> } | null
   >(null);
   // Output-series sheets the currently-displayed analytics layout needs (driven
   // by the dashboard's per-asset charts). Empty for system-only layouts → no
   // hydration fetch, so the common result view stays instant.
   const [neededRunSheets, setNeededRunSheets] = useState<string[]>([]);
+  // How many hours of per-asset temporal data to hydrate for charts. Bounded by
+  // default so a long run doesn't fetch + render every snapshot × every asset
+  // (which froze the tab); the dashboard toolbar lets the user widen it. null =
+  // whole run.
+  const [analyticsWindowHours, setAnalyticsWindowHours] = useState<number | null>(
+    ANALYTICS_DEFAULT_WINDOW_HOURS,
+  );
   const [pathwayConfig, setPathwayConfig] = useState<PathwayConfig>(() => defaultPathwayConfig());
   const [rollingConfig, setRollingConfig] = useState<RollingHorizonConfig>(() => defaultRollingConfig());
   const [samplingConfig, setSamplingConfig] = useState<SamplingConfig>(() => defaultSamplingConfig());
@@ -379,23 +392,31 @@ function AppInner() {
   useEffect(() => {
     const outputs = results?.outputs;
     if (!outputs || outputs.series || !activeRunName || neededRunSheets.length === 0) return;
+    // Window the fetch to the first N snapshots (N = window hours / hours-per-
+    // snapshot). null window = whole run. Cache is keyed by (run, window) so
+    // widening the window in the toolbar refetches at the new length.
+    const weight = results?.runMeta?.snapshotWeight || 1;
+    const windowEnd = analyticsWindowHours == null
+      ? null
+      : Math.max(1, Math.ceil(analyticsWindowHours / weight));
+    const sameWindow = hydratedRunSeries?.runName === activeRunName && hydratedRunSeries.end === windowEnd;
     const available = new Set(outputs.seriesSheets ?? []);
-    const have = hydratedRunSeries?.runName === activeRunName ? hydratedRunSeries.series : {};
+    const have = sameWindow ? hydratedRunSeries!.series : {};
     const missing = neededRunSheets.filter((s) => available.has(s) && !(s in have));
     if (missing.length === 0) return;
     const runName = activeRunName;
     let cancelled = false;
-    void fetchRunOutputSeries(runName, missing)
+    void fetchRunOutputSeries(runName, missing, { end: windowEnd ?? undefined })
       .then((fetched) => {
         if (cancelled) return;
         setHydratedRunSeries((prev) => {
-          const base = prev?.runName === runName ? prev.series : {};
-          return { runName, series: { ...base, ...fetched } };
+          const base = prev?.runName === runName && prev.end === windowEnd ? prev.series : {};
+          return { runName, end: windowEnd, series: { ...base, ...fetched } };
         });
       })
       .catch(() => { /* leave per-asset charts empty — system charts still render */ });
     return () => { cancelled = true; };
-  }, [results, activeRunName, neededRunSheets, hydratedRunSeries]);
+  }, [results, activeRunName, neededRunSheets, hydratedRunSeries, analyticsWindowHours]);
 
   const captureCurrentScenario = useCallback((overrides: Partial<ScenarioPreset> = {}): ScenarioPreset => (
     buildScenarioPreset({
@@ -2436,6 +2457,8 @@ function AppInner() {
               pathwayConfig={pathwayConfig}
               onSelectedPeriodChange={(period) => setPathwayConfig((current) => ({ ...current, selectedPeriod: period }))}
               onNeedSeries={setNeededRunSheets}
+              chartWindowHours={analyticsWindowHours}
+              onChartWindowChange={setAnalyticsWindowHours}
               backendRuns={backendRuns}
               activeRunName={activeRunName}
             />

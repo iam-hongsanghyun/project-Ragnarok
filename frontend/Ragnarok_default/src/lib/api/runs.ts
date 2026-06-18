@@ -87,10 +87,14 @@ export function seriesRowsFromWindow(window: Pick<SeriesWindow, 'indexCol' | 'ro
 export async function fetchRunOutputSeries(
   runName: string,
   sheets: string[],
+  opts: { end?: number } = {},
 ): Promise<Record<string, GridRow[]>> {
+  // Window to the first `end` snapshots when given (the analytics chart window),
+  // keeping FULL resolution WITHIN that window so donut/sum totals stay exact.
+  // `end` undefined = whole run.
   const windows = await Promise.all(
     sheets.map((sheet) =>
-      getRunSeriesWindow(runName, sheet, { maxPoints: FULL_RESOLUTION }).catch(() => null),
+      getRunSeriesWindow(runName, sheet, { end: opts.end, maxPoints: FULL_RESOLUTION }).catch(() => null),
     ),
   );
   const series: Record<string, GridRow[]> = {};
