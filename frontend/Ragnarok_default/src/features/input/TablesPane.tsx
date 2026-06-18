@@ -46,6 +46,48 @@ function inferInputValue(raw: string, current: Primitive): Primitive {
   return raw;
 }
 
+// ── Column statistics ──────────────────────────────────────────────────────────
+
+/** Numeric summary of one column's filled cells. `count` is how many rows held a
+ *  finite number (blanks/text are skipped); the rest follow. Lets the user read
+ *  e.g. total installed capacity (sum of `p_nom`) before solving. */
+interface ColumnStats {
+  count: number;
+  sum: number;
+  mean: number;
+  min: number;
+  max: number;
+}
+
+function computeColumnStats(rows: GridRow[], col: string): ColumnStats | null {
+  let count = 0;
+  let sum = 0;
+  let min = Infinity;
+  let max = -Infinity;
+  for (const r of rows) {
+    const v = r[col];
+    if (v === null || v === undefined || v === '' || typeof v === 'boolean') continue;
+    const n = typeof v === 'number' ? v : Number(v);
+    if (!Number.isFinite(n)) continue;
+    count += 1;
+    sum += n;
+    if (n < min) min = n;
+    if (n > max) max = n;
+  }
+  if (count === 0) return null;
+  return { count, sum, mean: sum / count, min, max };
+}
+
+/** Compact, locale-aware number for the stat chips: integers stay whole, the
+ *  fraction count scales with magnitude so small ratios stay legible. */
+function fmtStat(v: number): string {
+  if (!Number.isFinite(v)) return '—';
+  if (Number.isInteger(v)) return v.toLocaleString();
+  const abs = Math.abs(v);
+  const digits = abs >= 100 ? 1 : abs >= 1 ? 2 : 4;
+  return v.toLocaleString(undefined, { maximumFractionDigits: digits });
+}
+
 /** Singular, human noun for an "+ Add <component>" button. Falls back to the
  *  group label when a sheet isn't listed. */
 const COMPONENT_NOUN: Record<string, string> = {
@@ -698,6 +740,7 @@ export function TablesPane({
     <AttributeDoc
       attr={focusedCol ? getAttributeSchema(sel.sheet, focusedCol) : null}
       colName={focusedCol}
+      stats={focusedCol ? computeColumnStats(rows, focusedCol) : null}
     />
   );
 
@@ -725,13 +768,16 @@ export function TablesPane({
 interface AttributeDocProps {
   attr: PypsaAttribute | null;
   colName: string | null;
+  /** Numeric summary of the focused column (null when not numeric / no column). */
+  stats: ColumnStats | null;
 }
 
-function AttributeDoc({ attr, colName }: AttributeDocProps) {
+function AttributeDoc({ attr, colName, stats }: AttributeDocProps) {
+  const unit = attr?.unit && attr.unit !== 'n/a' ? attr.unit : '';
   return (
     <div className="tables-attr-doc">
       {!colName ? (
-        <p className="tables-attr-doc-hint">Select a cell or a column to see its description.</p>
+        <p className="tables-attr-doc-hint">Select a cell or a column to see its description and statistics.</p>
       ) : !attr ? (
         <>
           <div className="tables-attr-doc-head">
@@ -744,7 +790,7 @@ function AttributeDoc({ attr, colName }: AttributeDocProps) {
         <>
           <div className="tables-attr-doc-head">
             <span className="tables-attr-doc-name">{attr.attribute}</span>
-            {attr.unit && attr.unit !== 'n/a' && <span className="tables-attr-doc-unit">{attr.unit}</span>}
+            {unit && <span className="tables-attr-doc-unit">{unit}</span>}
             <span className={`tables-attr-doc-type tables-attr-doc-type--${attr.type}`}>{attr.type}</span>
             {attr.required && <span className="tables-attr-doc-required">required</span>}
             {attr.status === 'output' && <span className="tables-attr-doc-output">output</span>}
@@ -755,6 +801,35 @@ function AttributeDoc({ attr, colName }: AttributeDocProps) {
           <p className="tables-attr-doc-desc">{attr.description || 'No description available.'}</p>
         </>
       )}
+
+      {colName && (
+        stats ? <ColumnStatsBlock stats={stats} unit={unit} /> : (
+          <p className="tables-attr-doc-hint">No numeric values in this column to summarise.</p>
+        )
+      )}
+    </div>
+  );
+}
+
+/** Five-up stat grid (count / sum / average / min / max) for the focused column.
+ *  Sum/min/max carry the column unit so totals like installed capacity read in
+ *  context; count and average stay unit-free. */
+function ColumnStatsBlock({ stats, unit }: { stats: ColumnStats; unit: string }) {
+  const items: { label: string; value: string }[] = [
+    { label: 'Count', value: fmtStat(stats.count) },
+    { label: 'Sum', value: `${fmtStat(stats.sum)}${unit ? ` ${unit}` : ''}` },
+    { label: 'Average', value: `${fmtStat(stats.mean)}${unit ? ` ${unit}` : ''}` },
+    { label: 'Min', value: `${fmtStat(stats.min)}${unit ? ` ${unit}` : ''}` },
+    { label: 'Max', value: `${fmtStat(stats.max)}${unit ? ` ${unit}` : ''}` },
+  ];
+  return (
+    <div className="tables-attr-doc-stats">
+      {items.map((s) => (
+        <div key={s.label} className="tables-attr-doc-stat">
+          <span className="tables-attr-doc-stat-label">{s.label}</span>
+          <span className="tables-attr-doc-stat-value">{s.value}</span>
+        </div>
+      ))}
     </div>
   );
 }

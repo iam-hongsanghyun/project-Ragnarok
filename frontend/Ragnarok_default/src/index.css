@@ -6709,6 +6709,32 @@ th:hover .col-delete-btn {
   line-height: 1.5;
   color: var(--text);
 }
+.tables-attr-doc-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(82px, 1fr));
+  gap: 6px;
+  margin-top: 2px;
+}
+.tables-attr-doc-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+.tables-attr-doc-stat-label {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.tables-attr-doc-stat-value {
+  font-family: var(--font-mono);
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text);
+}
 
 /* ── Sheet tree (left column) ──────────────────────────────────────── */
 
