@@ -90,6 +90,29 @@ def _kv_set(conn: sqlite3.Connection, key: str, value: Any) -> None:
     )
 
 
+def read_kv(db_path: Path, key: str) -> Any | None:
+    """Read one ``_kv`` value from an arbitrary ``project.db`` (e.g. a bundled
+    example) — keeps example metadata inside the SQLite file, not a sidecar."""
+    if not db_path.exists():
+        return None
+    conn = sqlite3.connect(str(db_path))
+    try:
+        return _kv_get(conn, key)
+    finally:
+        conn.close()
+
+
+def write_kv(db_path: Path, key: str, value: Any) -> None:
+    """Write one ``_kv`` value into an arbitrary ``project.db`` (authoring helper)."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS _kv (k TEXT PRIMARY KEY, v TEXT)")
+        _kv_set(conn, key, value)
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _legacy_artifacts(session_id: str) -> list[Path]:
     """The legacy JSON/Parquet artifacts for a session (meta + static/ + series/ + controls)."""
     base = ss.SESSION_DIR / session_id

@@ -1,22 +1,21 @@
 """``/api/examples`` — bundled starter projects (SQLite ``project.db`` files).
 
 Each example is a directory under ``backend/data/examples/<id>/`` holding a
-``project.db`` (the very same per-session SQLite the working store uses) and an
-optional ``meta.json`` (``{label, description, order}``). The welcome screen's
-"Start with Examples" lists these and loads one into the active session by
-copying its ``project.db`` over the session's — so the editor opens a real,
-ready-to-solve model with zero client-side parsing. Drop a new folder in to add
-an example; no code change needed.
+single ``project.db`` — the very same per-session SQLite the working store uses.
+Its label/description/order live INSIDE the db (the ``_kv`` table under
+``example``), so an example is entirely SQLite: no JSON/xlsx sidecars. The
+welcome screen's "Start with Examples" lists these and loads one by copying its
+``project.db`` over the session's — so the editor opens a real, ready-to-solve
+model with zero client-side parsing. Drop a new folder in to add an example.
 """
 from __future__ import annotations
 
-import json
 import logging
 import shutil
 
 from fastapi import APIRouter, HTTPException, Query
 
-from .. import model_store, session_store
+from .. import model_store, session_store, sqlite_store
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +23,8 @@ router = APIRouter(prefix="/api/examples", tags=["examples"])
 
 # Tracked (committed) — sits beside the runtime session/ dir but is NOT ignored.
 EXAMPLES_DIR = session_store.SESSION_DIR.parent / "examples"
+# `_kv` key holding {label, description, order} inside each example's project.db.
+EXAMPLE_KV_KEY = "example"
 
 
 def _is_safe_id(example_id: str) -> bool:
@@ -31,14 +32,9 @@ def _is_safe_id(example_id: str) -> bool:
 
 
 def _read_meta(example_id: str) -> dict:
-    path = EXAMPLES_DIR / example_id / "meta.json"
-    if not path.exists():
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except (OSError, ValueError):
-        return {}
+    """Example metadata, read from the project.db's ``_kv`` (never a sidecar)."""
+    meta = sqlite_store.read_kv(EXAMPLES_DIR / example_id / "project.db", EXAMPLE_KV_KEY)
+    return meta if isinstance(meta, dict) else {}
 
 
 @router.get("")

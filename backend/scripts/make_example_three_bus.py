@@ -9,18 +9,25 @@ snapshots that db into ``backend/data/examples/three_bus/``. Re-runnable.
 """
 from __future__ import annotations
 
-import json
 import shutil
 
 import numpy as np
 import pandas as pd
 import pypsa
 
-from backend.app import model_store, session_store
+from backend.app import model_store, session_store, sqlite_store
 from backend.app.main import _network_to_model_json
+
+# Metadata lives INSIDE the project.db (_kv "example") — no JSON/xlsx sidecar.
+EXAMPLE_META = {
+    "label": "Three-bus example",
+    "description": "A small 3-bus grid (gas, wind, solar) with hourly demand — solves out of the box. A good starting point to learn the workflow.",
+    "order": 1,
+}
 
 AUTHOR_SESSION = "__example_author__"
 EXAMPLE_ID = "three_bus"
+EXAMPLE_KV_KEY = "example"  # matches routers/examples.py
 HOURS = 24
 
 
@@ -83,22 +90,13 @@ def main() -> None:
     src = session_store.SESSION_DIR / AUTHOR_SESSION / "project.db"
     assert src.exists(), f"author session db missing: {src}"
 
+    # Embed the example metadata in the db itself, then snapshot it.
+    sqlite_store.write_kv(src, EXAMPLE_KV_KEY, EXAMPLE_META)
     dest = session_store.SESSION_DIR.parent / "examples" / EXAMPLE_ID
     dest.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dest / "project.db")
-    (dest / "meta.json").write_text(
-        json.dumps(
-            {
-                "label": "Three-bus example",
-                "description": "A small 3-bus grid (gas, wind, solar) with hourly demand — solves out of the box. A good starting point to learn the workflow.",
-                "order": 1,
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
     shutil.rmtree(session_store.SESSION_DIR / AUTHOR_SESSION, ignore_errors=True)
-    print(f"wrote {dest / 'project.db'}")
+    print(f"wrote {dest / 'project.db'} (meta embedded: {EXAMPLE_KV_KEY})")
 
 
 if __name__ == "__main__":

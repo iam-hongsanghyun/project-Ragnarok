@@ -1,5 +1,0 @@
-{
-  "label": "Three-bus example",
-  "description": "A small 3-bus grid (gas, wind, solar) with hourly demand \u2014 solves out of the box. A good starting point to learn the workflow.",
-  "order": 1
-}
