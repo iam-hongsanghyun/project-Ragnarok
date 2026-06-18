@@ -40,7 +40,7 @@ import { Dashboard, newId } from './Dashboard';
 import { Card, DashboardLayout } from 'lib/dashboard/types';
 import { useDashboardLayout } from './useDashboardLayout';
 import { PRESETS } from 'lib/dashboard/presets';
-import { DEFAULT_CHART_WINDOW_HOURS, OUTPUT_SHEETS_FOR_FOCUS } from 'lib/api/runs';
+import { effectiveEndIndex, fullRunTimeline, OUTPUT_SHEETS_FOR_FOCUS } from 'lib/api/runs';
 
 const DEFAULT_LAYOUT: DashboardLayout = { rows: [], cards: [] };
 
@@ -140,11 +140,11 @@ interface Props {
   initialLayout?: DashboardLayout;
   /** Show the Presets ▾ picker. Off for the curated Result tab. */
   showPresets?: boolean;
-  /** Report, per output-series sheet, the MAX temporal window (hours; null =
-   *  whole run) the current layout's per-asset charts ask for, so the parent
-   *  hydrates only those sheets at the length needed. Each chart sets its own
-   *  window in its gear. Empty when the layout is system-only. */
-  onNeedSeries?: (windows: Record<string, number | null>) => void;
+  /** Report, per output-series sheet, the MAX number of snapshots the current
+   *  layout's per-asset charts need loaded (each chart's slider right edge), so
+   *  the parent hydrates only those sheets at the length needed. Empty {} when
+   *  the layout is system-only. */
+  onNeedSeries?: (windows: Record<string, number>) => void;
 }
 
 export function AnalyticsDashboard({
@@ -161,30 +161,26 @@ export function AnalyticsDashboard({
   const { layout, setLayout, editing, setEditing, resetToDefault } =
     useDashboardLayout(initialLayout, storageKey);
 
-  // Tell the parent, per output-series sheet, the MAX temporal window the
-  // layout's per-asset charts ask for (each chart sets its own in its gear), so
-  // it hydrates only those sheets at the length needed. Runs on layout change
-  // (chart added / window changed / preset loaded), not every render. A
-  // system-only layout reports {} → no fetch → the common result view is instant.
+  // Tell the parent, per output-series sheet, the MAX snapshot count the
+  // layout's per-asset charts need loaded (each chart's slider right edge), so
+  // it hydrates only those sheets at that length. Runs on layout change (chart
+  // added / slider moved / preset loaded), not every render. A system-only
+  // layout reports {} → no fetch → the common result view is instant.
   useEffect(() => {
     if (!onNeedSeries) return;
-    const windows: Record<string, number | null> = {};
+    const totalSnaps = fullRunTimeline(results).length;
+    const weight = results.runMeta?.snapshotWeight ?? 1;
+    const windows: Record<string, number> = {};
     for (const card of layout.cards) {
       if (card.kind !== 'chart' || card.config.focusType === 'system') continue;
-      const hours = card.config.windowHours === undefined
-        ? DEFAULT_CHART_WINDOW_HOURS
-        : card.config.windowHours;
+      const end = effectiveEndIndex(card.config.focusType, card.config.endIndex, totalSnaps, weight);
+      const snaps = end + 1;
       for (const sheet of OUTPUT_SHEETS_FOR_FOCUS[card.config.focusType] ?? []) {
-        if (!(sheet in windows)) windows[sheet] = hours;
-        else {
-          const cur = windows[sheet];
-          // null (full run) wins; otherwise keep the longer window.
-          windows[sheet] = cur == null || hours == null ? null : Math.max(cur, hours);
-        }
+        windows[sheet] = Math.max(windows[sheet] ?? 0, snaps);
       }
     }
     onNeedSeries(windows);
-  }, [layout, onNeedSeries]);
+  }, [layout, onNeedSeries, results]);
   const [openMenu, setOpenMenu] = useState<'presets' | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const presetsMenuRef = useRef<HTMLDivElement | null>(null);

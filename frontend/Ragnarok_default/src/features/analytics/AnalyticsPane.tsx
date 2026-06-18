@@ -27,9 +27,9 @@ interface Props {
   pathwayConfig?: PathwayConfig;
   onSelectedPeriodChange?: (period: number) => void;
   /** Lazily hydrate only the output-series sheets the dashboard's per-asset
-   *  charts need, each at its max requested window (light "View" bundles strip
-   *  them). */
-  onNeedSeries?: (windows: Record<string, number | null>) => void;
+   *  charts need, each at the max snapshot count requested (light "View"
+   *  bundles strip them). */
+  onNeedSeries?: (windows: Record<string, number>) => void;
 }
 
 function EmptyAnalytics() {

@@ -70,8 +70,8 @@ export interface AnalyticsViewProps {
   pathwayConfig: PathwayConfig;
   onSelectedPeriodChange: (period: number) => void;
   /** Lazily hydrate the per-asset output-series sheets the dashboard needs,
-   *  each at its max requested window (hours; null = whole run). */
-  onNeedSeries?: (windows: Record<string, number | null>) => void;
+   *  each at the max snapshot count requested (the chart's slider right edge). */
+  onNeedSeries?: (windows: Record<string, number>) => void;
 
   // Comparison — backend metas are the single source of truth.
   backendRuns: BackendRunMeta[];

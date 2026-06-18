@@ -235,16 +235,16 @@ function AppInner() {
   // asset-detail popups) derive empty. Cached for one run at a time; refetched
   // when `activeRunName` changes. See the hydration effect + `displayResults`.
   // Per-run cache of hydrated output series. `series[sheet]` holds the rows;
-  // `ends[sheet]` records the window each sheet was fetched at (snapshot count,
-  // null = whole run) so a chart asking for a longer window triggers a refetch.
+  // `ends[sheet]` records how many snapshots that sheet was fetched at, so a
+  // chart whose slider extends past it triggers a longer refetch.
   const [hydratedRunSeries, setHydratedRunSeries] = useState<
-    { runName: string; series: Record<string, GridRow[]>; ends: Record<string, number | null> } | null
+    { runName: string; series: Record<string, GridRow[]>; ends: Record<string, number> } | null
   >(null);
-  // Per output-series sheet, the MAX temporal window (hours; null = whole run)
-  // the displayed analytics layout's per-asset charts ask for. Driven by the
-  // dashboard (each chart's gear). Empty {} for system-only layouts → no
-  // hydration fetch, so the common result view stays instant.
-  const [neededRunWindows, setNeededRunWindows] = useState<Record<string, number | null>>({});
+  // Per output-series sheet, the MAX number of snapshots the displayed analytics
+  // layout's per-asset charts need loaded (each chart's slider right edge).
+  // Driven by the dashboard. Empty {} for system-only layouts → no hydration
+  // fetch, so the common result view stays instant.
+  const [neededRunWindows, setNeededRunWindows] = useState<Record<string, number>>({});
   const [pathwayConfig, setPathwayConfig] = useState<PathwayConfig>(() => defaultPathwayConfig());
   const [rollingConfig, setRollingConfig] = useState<RollingHorizonConfig>(() => defaultRollingConfig());
   const [samplingConfig, setSamplingConfig] = useState<SamplingConfig>(() => defaultSamplingConfig());
@@ -385,22 +385,20 @@ function AppInner() {
     if (!outputs || outputs.series || !activeRunName) return;
     const sheets = Object.keys(neededRunWindows);
     if (sheets.length === 0) return;
-    // Per sheet, the window (snapshot count; null = whole run) the layout needs.
-    // N = ceil(window hours / hours-per-snapshot). Fetch a sheet only when it's
-    // absent OR cached at a SHORTER window than now requested (then refetch
-    // longer — the longer series covers shorter-window charts, which slice down).
-    const weight = results?.runMeta?.snapshotWeight || 1;
+    // Per sheet, the snapshot count the layout needs loaded. Fetch a sheet only
+    // when it's absent OR cached at a SHORTER window than now requested (then
+    // refetch longer — the longer series covers shorter-window charts, which
+    // clamp their display down to their own slider range).
     const available = new Set(outputs.seriesSheets ?? []);
     const cache = hydratedRunSeries?.runName === activeRunName ? hydratedRunSeries : null;
-    const covers = (cachedEnd: number | null | undefined, end: number | null): boolean =>
-      cachedEnd === null || (end !== null && cachedEnd !== undefined && cachedEnd >= end);
-    const toFetch: Array<{ sheet: string; end: number | null }> = [];
+    const toFetch: Array<{ sheet: string; end: number }> = [];
     for (const sheet of sheets) {
       if (!available.has(sheet)) continue;
-      const hours = neededRunWindows[sheet];
-      const end = hours == null ? null : Math.max(1, Math.ceil(hours / weight));
-      const haveSheet = cache && sheet in cache.series;
-      if (!haveSheet || !covers(cache?.ends[sheet], end)) toFetch.push({ sheet, end });
+      const end = neededRunWindows[sheet];
+      const cachedEnd = cache?.ends[sheet];
+      if (!cache || !(sheet in cache.series) || cachedEnd === undefined || cachedEnd < end) {
+        toFetch.push({ sheet, end });
+      }
     }
     if (toFetch.length === 0) return;
     const runName = activeRunName;

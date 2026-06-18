@@ -13,7 +13,7 @@ import {
 import { clamp, numberValue, stringValue } from 'lib/utils/helpers';
 import { aggregateMetricRows, buildDonutFromMetric } from 'lib/results/analytics';
 import { EMPTY_METRIC_KEY } from 'lib/constants';
-import { CHART_WINDOW_OPTIONS, DEFAULT_CHART_WINDOW_HOURS } from 'lib/api/runs';
+import { effectiveEndIndex, fullRunTimeline } from 'lib/api/runs';
 import { exportChartToExcel } from 'lib/export/chart';
 import { useToast } from '../../../shared/components/Toast';
 import { DonutChart } from './DonutChart';
@@ -155,27 +155,27 @@ export function UserDefinedChartCard({
   // (donut totals, 'sum'-reducer buckets) on runs with snapshot gaps.
   const snapshotWeight = results?.runMeta?.snapshotWeight ?? 1;
 
-  // Per-asset charts load + show a bounded temporal window (this chart's
-  // `windowHours`, default 1 week) so a long run with one series per asset
-  // doesn't render every snapshot. The shared hydration fetches each sheet at
-  // the MAX window across charts; here we slice this chart's metric down to its
-  // own window. System charts read small inline aggregates — no windowing.
-  const windowHours = active.focusType === 'system'
-    ? null
-    : (active.windowHours === undefined ? DEFAULT_CHART_WINDOW_HOURS : active.windowHours);
-  const windowSnaps = windowHours == null ? Infinity : Math.max(1, Math.ceil(windowHours / snapshotWeight));
-  const baseMetric = metricOptions.find((m) => m.key === active.metricKey);
-  const metric = baseMetric && Number.isFinite(windowSnaps) && baseMetric.rows.length > windowSnaps
-    ? { ...baseMetric, rows: baseMetric.rows.slice(0, windowSnaps) }
-    : baseMetric;
+  const metric     = metricOptions.find((m) => m.key === active.metricKey);
   const hasMetric  = Boolean(metric);
   const metricRows = metric?.rows || [];
 
+  // The timeline slider spans the WHOLE run (from a full-length system series),
+  // so the user can scrub/extend the window even past what's loaded. Per-asset
+  // series hydrate lazily up to the slider's right edge (default 1 week); a
+  // preset's "unbounded" endIndex resolves to that default. `metricRows` holds
+  // only the loaded prefix [0, loaded), so display clamps to it until the wider
+  // window finishes loading.
+  const fullTimeline = fullRunTimeline(results);
+  const totalSnaps = Math.max(fullTimeline.length, metricRows.length);
+  const sliderData = fullTimeline.length ? fullTimeline : metricRows;
+  const effEndIndex = effectiveEndIndex(active.focusType, active.endIndex, totalSnaps, snapshotWeight);
+  const effStartIndex = clamp(active.startIndex, 0, effEndIndex);
+
   const safeStart = hasMetric
-    ? clamp(Math.min(active.startIndex, active.endIndex), 0, Math.max(metricRows.length - 1, 0))
+    ? clamp(Math.min(effStartIndex, effEndIndex), 0, Math.max(metricRows.length - 1, 0))
     : 0;
   const safeEnd = hasMetric
-    ? clamp(Math.max(active.endIndex, safeStart), safeStart, Math.max(metricRows.length - 1, 0))
+    ? clamp(Math.max(effEndIndex, safeStart), safeStart, Math.max(metricRows.length - 1, 0))
     : 0;
   const aggregatedRows = hasMetric
     ? aggregateMetricRows(metric!, safeStart, safeEnd, active.timeframe, snapshotWeight)
@@ -220,9 +220,12 @@ export function UserDefinedChartCard({
   };
 
   const handleMetricChange = (newKey: string) => {
-    const m   = metricOptions.find((x) => x.key === newKey);
-    const len = m?.rows.length || 1;
-    patch({ ...active, metricKey: newKey, startIndex: 0, endIndex: Math.max(len - 1, 0) });
+    const m = metricOptions.find((x) => x.key === newKey);
+    // Default the window to the full run (system) or the default 1-week slice
+    // (per-asset); passing endIndex === total trips the "unbounded" resolution.
+    const total = Math.max(totalSnaps, m?.rows.length ?? 0, 1);
+    const end = effectiveEndIndex(active.focusType, total, total, snapshotWeight);
+    patch({ ...active, metricKey: newKey, startIndex: 0, endIndex: end });
   };
 
   const handleExport = () => {
@@ -323,25 +326,6 @@ export function UserDefinedChartCard({
                 { value: 'hourly', label: 'By hour' },
               ]}
               onChange={(v) => patch({ ...active, timeframe: v as TimeframeOption })}
-            />
-          </label>
-        )}
-
-        {/* Chart window — how much per-asset temporal data this chart loads +
-            shows. Only for per-asset focus (system charts use small inline
-            aggregates, no hydration). A longer window loads + renders more. */}
-        {active.focusType !== 'system' && (
-          <label className="chart-control">
-            <span>Chart window</span>
-            <SearchableSelect
-              value={active.windowHours === undefined
-                ? String(DEFAULT_CHART_WINDOW_HOURS)
-                : (active.windowHours == null ? 'full' : String(active.windowHours))}
-              options={CHART_WINDOW_OPTIONS.map((o) => ({
-                value: o.value == null ? 'full' : String(o.value),
-                label: o.label,
-              }))}
-              onChange={(v) => patch({ ...active, windowHours: v === 'full' ? null : Number(v) })}
             />
           </label>
         )}
@@ -468,13 +452,14 @@ export function UserDefinedChartCard({
         </div>
       )}
 
-      {/* Timeline slider — drives the visible window for line/bar charts AND the
-          summed range for donuts. */}
-      {hasMetric && (
+      {/* Timeline slider — spans the WHOLE run (drag to scrub or extend the
+          window; per-asset data hydrates lazily up to the right edge). Drives
+          the visible window for line/bar charts AND the summed donut range. */}
+      {hasMetric && sliderData.length > 0 && (
         <TimelineSlider
-          data={metric!.rows}
-          startIndex={safeStart}
-          endIndex={safeEnd}
+          data={sliderData}
+          startIndex={effStartIndex}
+          endIndex={effEndIndex}
           onChange={(lo, hi) => patch({ ...active, startIndex: lo, endIndex: hi })}
         />
       )}

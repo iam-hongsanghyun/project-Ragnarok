@@ -13,7 +13,7 @@
  * run (`/api/runs/{name}/series/{sheet}`) instead of the live editor session.
  */
 import { API_BASE } from 'lib/constants';
-import type { GridRow } from 'lib/types';
+import type { GridRow, RunResults } from 'lib/types';
 import type { DownsampleAgg, SeriesWindow } from './session';
 
 // Above any realistic snapshot count (≈ 100 years hourly) so the backend's
@@ -24,21 +24,53 @@ import type { DownsampleAgg, SeriesWindow } from './session';
 const FULL_RESOLUTION = 100_000_000;
 
 /**
- * Default per-chart temporal window (hours) for a per-asset chart. Bounds how
- * much per-asset series a chart loads + renders by default; a long run with one
- * series per asset froze the tab when loading every snapshot. Each chart's gear
- * settings can override this (incl. "Full run" = null). One week.
+ * Default per-asset chart window (hours): one week. A per-asset chart loads +
+ * renders only this much temporal data by default — a long run with one series
+ * per asset froze the tab when loading every snapshot. The user widens it by
+ * dragging the chart's timeline slider (which spans the whole run); there is no
+ * separate window control.
  */
 export const DEFAULT_CHART_WINDOW_HOURS = 168;
 
-/** Window-length options offered in each chart's gear (hours; null = full run). */
-export const CHART_WINDOW_OPTIONS: Array<{ value: number | null; label: string }> = [
-  { value: 168, label: '1 week' },
-  { value: 744, label: '1 month' },
-  { value: 2208, label: '3 months' },
-  { value: 8760, label: '1 year' },
-  { value: null, label: 'Full run' },
-];
+/**
+ * The full run's snapshot timeline (one `{timestamp}` per snapshot), taken from
+ * the longest full-length system series in the (possibly light) bundle. Per-
+ * asset series are hydrated lazily and may be shorter than the run, so charts
+ * use THIS for the slider's domain — letting the user scrub/extend across the
+ * whole run even before the data for the later part has loaded.
+ */
+export function fullRunTimeline(results: RunResults | null): Array<{ timestamp?: string }> {
+  if (!results) return [];
+  const candidates: Array<Array<{ timestamp?: string }>> = [
+    results.dispatchSeries, results.systemPriceSeries,
+    results.systemEmissionsSeries, results.storageSeries,
+  ].filter(Boolean) as Array<Array<{ timestamp?: string }>>;
+  let best: Array<{ timestamp?: string }> = [];
+  for (const s of candidates) if (s.length > best.length) best = s;
+  return best;
+}
+
+/**
+ * Resolve a chart's stored `endIndex` to a concrete full-run index. A preset's
+ * "unbounded" sentinel (>= total) resolves to the default window (1 week) for
+ * per-asset charts, or the whole run for `system` charts (those are already
+ * loaded full + small). A real stored index (the user moved the slider) is
+ * honoured. `totalSnaps` is `fullRunTimeline(...).length`.
+ */
+export function effectiveEndIndex(
+  focusType: string,
+  endIndex: number,
+  totalSnaps: number,
+  snapshotWeight: number,
+): number {
+  if (totalSnaps <= 0) return 0;
+  if (endIndex >= totalSnaps) {
+    if (focusType === 'system') return totalSnaps - 1;
+    const def = Math.min(Math.max(1, Math.ceil(DEFAULT_CHART_WINDOW_HOURS / (snapshotWeight || 1))), totalSnaps);
+    return def - 1;
+  }
+  return Math.max(0, Math.min(endIndex, totalSnaps - 1));
+}
 
 /**
  * Output series sheets `deriveAssetDetails` reads for a given non-`system`
