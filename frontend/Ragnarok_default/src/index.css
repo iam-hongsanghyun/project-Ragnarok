@@ -3776,7 +3776,7 @@ path.leaflet-interactive:focus {
   position: fixed;
   bottom: 24px;
   right: 24px;
-  z-index: 9999;
+  z-index: var(--z-toast);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -3964,7 +3964,7 @@ th:hover .col-delete-btn {
 /* Dropdown panel */
 .col-filter-dropdown {
   position: fixed;
-  z-index: 9999;
+  z-index: var(--z-popover);
   background: var(--surface);
   border: 1px solid #e2e8f0;
   border-radius: 0;
@@ -4040,7 +4040,7 @@ th:hover .col-delete-btn {
 /* ── Add Column Dropdown ─────────────────────────────────────────────────── */
 .add-col-dropdown {
   position: fixed;
-  z-index: 9999;
+  z-index: var(--z-popover);
   width: 300px;
   max-height: 420px;
   display: flex;
@@ -4056,7 +4056,7 @@ th:hover .col-delete-btn {
    Radix (Floating UI) owns positioning via a popper wrapper, so the content
    itself carries no `position`/coords; we only style it. */
 [data-radix-popper-content-wrapper] {
-  z-index: 9999;
+  z-index: var(--z-popover);
 }
 .grid-ctxmenu {
   min-width: 150px;
@@ -5456,7 +5456,7 @@ th:hover .col-delete-btn {
   background: var(--surface);
   border: 1px solid var(--border);
   box-shadow: 0 4px 14px rgba(15, 23, 42, 0.14);
-  z-index: 9999;
+  z-index: var(--z-popover);
   font-family: var(--font-mono);
   font-size: 0.82rem;
 }
@@ -5668,9 +5668,8 @@ th:hover .col-delete-btn {
   border: 1px solid var(--border-strong);
   border-radius: 0;
   box-shadow: 0 8px 24px rgba(0,0,0,0.12);
-  /* Above Leaflet, whose panes/controls reach z-index 1000, so the map in the
-     view body never overlaps this dropdown. */
-  z-index: 2000;
+  /* Above any map (--z-map), so the view-body map never overlaps this dropdown. */
+  z-index: var(--z-popover);
   min-width: 200px;
 }
 .view-toolbar-more-pop .tb-btn {
@@ -7726,9 +7725,8 @@ code, kbd, samp, tt,
   display: flex;
   align-items: center;
   justify-content: center;
-  /* Above Leaflet, whose panes/controls reach z-index 1000 in the root
-   * stacking context — otherwise a map card paints over this modal. */
-  z-index: 2000;
+  /* Above Leaflet/maps (--z-map) — otherwise a map card paints over this modal. */
+  z-index: var(--z-overlay);
   padding: 24px;
 }
 
@@ -8479,7 +8477,7 @@ code, kbd, samp, tt,
 
 /* Per-cell validation message tooltip (hover over a flagged grid cell). */
 .grid-cell-tip {
-  z-index: 10000;
+  z-index: var(--z-tooltip);
   transform: translate(-50%, -100%);
   max-width: 280px;
   padding: 4px 8px;
@@ -8494,6 +8492,77 @@ code, kbd, samp, tt,
 }
 .grid-cell-tip[data-sev="error"] { background: #b91c1c; }
 .grid-cell-tip[data-sev="warning"] { background: #b45309; }
+
+/* ── App dialog (styled alert / confirm / prompt) ──────────────────────────
+   Replaces the browser natives. Slides in from the top, above every overlay. */
+.app-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-dialog);
+  background: rgba(15, 23, 42, 0.35);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 10vh 24px 24px;
+}
+.app-dialog {
+  width: min(440px, 94vw);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.22);
+  padding: 18px 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  opacity: 0;
+  transform: translateY(-18px);
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+.app-dialog--visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+.app-dialog-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.app-dialog-message {
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: var(--muted);
+  white-space: pre-line;
+}
+.app-dialog-input {
+  width: 100%;
+  padding: 7px 9px;
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-button);
+}
+.app-dialog-input:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-ring);
+}
+.app-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+.tb-btn--danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+.tb-btn--danger:hover {
+  background: var(--danger-strong);
+  border-color: var(--danger-strong);
+}
 
 /* Column header menu — rename + delete bar above the value filter */
 .cfd-colops {

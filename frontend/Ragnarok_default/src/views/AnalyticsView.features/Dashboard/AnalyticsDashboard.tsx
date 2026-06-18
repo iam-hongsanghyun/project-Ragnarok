@@ -23,6 +23,7 @@ import {
   WorkbookModel,
 } from 'lib/types';
 import { EMPTY_METRIC_KEY } from 'lib/constants';
+import { useDialog } from '../../../shared/components/Dialog';
 import { UserDefinedChartCard } from '../../../features/analytics/cards/UserDefinedChartCard';
 import { AnalyticsMapCard } from '../../../features/analytics/AnalyticsMapCard';
 import { KpiStripCard } from '../../../features/analytics/cards/KpiStripCard';
@@ -153,6 +154,7 @@ export function AnalyticsDashboard({
 }: Props) {
   const { layout, setLayout, editing, setEditing, resetToDefault } =
     useDashboardLayout(initialLayout, storageKey);
+  const { alert: alertDialog } = useDialog();
   const [openMenu, setOpenMenu] = useState<'presets' | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const presetsMenuRef = useRef<HTMLDivElement | null>(null);
@@ -228,10 +230,10 @@ export function AnalyticsDashboard({
         if (parsed && Array.isArray(parsed.rows) && Array.isArray(parsed.cards)) {
           setLayout(parsed);
         } else {
-          window.alert('That file is not a valid dashboard layout.');
+          void alertDialog('That file is not a valid dashboard layout.', { title: 'Import failed' });
         }
       } catch {
-        window.alert('Could not read that file as JSON.');
+        void alertDialog('Could not read that file as JSON.', { title: 'Import failed' });
       }
     };
     reader.readAsText(file);

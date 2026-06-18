@@ -68,6 +68,7 @@ import { ActivityBar } from './layout/ActivityBar';
 import { useModelIssues } from './features/validation/useModelIssues';
 import { useFrontendPlugins } from './features/plugins/frontendPlugins';
 import { ToastProvider, useToast } from './shared/components/Toast';
+import { DialogProvider, useDialog } from './shared/components/Dialog';
 
 /**
  * Strip every trailing project/data extension from a filename so export names
@@ -100,6 +101,7 @@ function stripSeriesSheets(model: WorkbookModel): WorkbookModel {
 
 function AppInner() {
   const { showToast } = useToast();
+  const { confirm: confirmDialog, prompt: promptDialog } = useDialog();
   const [model, setModel] = useState<WorkbookModel>(() => createEmptyWorkbook());
   // Cell-level undo/redo. Each entry is a full (immutable) model snapshot;
   // since every mutation already builds a fresh object this is cheap to retain.
@@ -1864,7 +1866,7 @@ function AppInner() {
     const saver = (window as any).showSaveFilePicker;
     const suggestedName = filename || 'ragnarok_case.xlsx';
     if (!saver) {
-      const requested = window.prompt('Save workbook as', suggestedName) || suggestedName;
+      const requested = (await promptDialog('Save workbook as', { title: 'Save workbook', defaultValue: suggestedName, confirmText: 'Save' })) || suggestedName;
       exportWorkbook(model, requested, settings.dateFormat);
       setFilename(requested);
       setStatus(`Saved workbook as ${requested}.`);
@@ -2109,13 +2111,13 @@ function AppInner() {
           <button
             className="tb-btn tb-btn--muted"
             onClick={async () => {
-              if (!window.confirm(
-                'Clear the model?\n\n'
-                + 'This removes the loaded model, every unsaved edit, and the current\n'
+              if (!(await confirmDialog(
+                'This removes the loaded model, every unsaved edit, and the current '
                 + 'results — on both the frontend and the backend session.\n\n'
-                + 'Your settings, run controls, history, and installed plugins are KEPT.\n'
+                + 'Your settings, run controls, history, and installed plugins are KEPT. '
                 + '(Use "Clear cache" to also wipe settings and reload.)',
-              )) return;
+                { title: 'Clear the model?', confirmText: 'Clear model', danger: true },
+              ))) return;
               // Clear the MODEL only: reset the frontend workbook + results, drop
               // the backend session model, and remove just the persisted model
               // record (controls/settings/prefs survive). No reload.
@@ -2132,15 +2134,15 @@ function AppInner() {
           <button
             className="tb-btn tb-btn--muted"
             onClick={async () => {
-              if (!window.confirm(
-                'Clear the cache?\n\n'
-                + 'This removes:\n'
+              if (!(await confirmDialog(
+                'This removes:\n'
                 + '  • the loaded model + every unsaved edit + every result\n'
                 + '  • every persisted UI preference (column widths, panel sizes,\n'
                 + '    Data-view selection, settings, run history, recent files)\n\n'
                 + 'Installed plugins are KEPT (uninstall them from the Plugins tab).\n\n'
                 + 'Ragnarok will reload to the Welcome page.',
-              )) return;
+                { title: 'Clear the cache?', confirmText: 'Clear cache', danger: true },
+              ))) return;
               // Wipe Ragnarok-owned cache / preference keys (`pypsa.*`,
               // `ragnarok:*`, `ui:*`). Installed plugins are USER-OWNED
               // CONTENT, not cache — Clear must NOT uninstall them (same
@@ -2502,7 +2504,9 @@ function AppInner() {
 function App() {
   return (
     <ToastProvider>
-      <AppInner />
+      <DialogProvider>
+        <AppInner />
+      </DialogProvider>
     </ToastProvider>
   );
 }

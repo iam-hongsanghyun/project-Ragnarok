@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
+import { useDialog } from '../../../shared/components/Dialog';
 
 interface FilterDropdownProps {
   col: string;
@@ -23,6 +24,7 @@ export function FilterDropdown({
   const [search, setSearch] = useState('');
   const [rename, setRename] = useState(col);
   const ref = useRef<HTMLDivElement>(null);
+  const { confirm } = useDialog();
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -68,10 +70,9 @@ export function FilterDropdown({
               className="cfd-delete"
               title={`Remove column "${col}"`}
               onClick={() => {
-                if (window.confirm(`Remove column "${col}" from all rows? This cannot be undone.`)) {
-                  onDelete();
-                  onClose();
-                }
+                void confirm(`Remove column "${col}" from all rows? This cannot be undone.`, { title: 'Delete column', confirmText: 'Delete', danger: true }).then((ok) => {
+                  if (ok) { onDelete(); onClose(); }
+                });
               }}
             >
               Delete

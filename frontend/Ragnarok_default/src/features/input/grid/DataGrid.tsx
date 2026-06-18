@@ -19,6 +19,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { GridRow, Primitive } from 'lib/types';
 import { stringValue } from 'lib/utils/helpers';
 import { resolvePaste } from 'lib/input/range';
+import { useDialog } from '../../../shared/components/Dialog';
 import { FilterDropdown } from './FilterDropdown';
 
 type Row = GridRow & { __i: number };
@@ -179,6 +180,7 @@ export function DataGrid({
 }: DataGridProps) {
   const gridRef = useRef<any>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const { confirm } = useDialog();
   useEffect(() => { ensurePortal(); }, []);
 
   // User-overridden column widths persist per storageKey (sheet name).
@@ -578,7 +580,7 @@ export function DataGrid({
                 <>
                   <DropdownMenu.Separator className="grid-ctxmenu-sep" />
                   <DropdownMenu.Item className="grid-ctxmenu-item danger"
-                    onSelect={() => { if (window.confirm('Remove every row from this table?')) onClearTable(); }}>
+                    onSelect={() => { void confirm('Remove every row from this table?', { title: 'Clear table', confirmText: 'Clear table', danger: true }).then((ok) => { if (ok) onClearTable(); }); }}>
                     Clear table
                   </DropdownMenu.Item>
                 </>

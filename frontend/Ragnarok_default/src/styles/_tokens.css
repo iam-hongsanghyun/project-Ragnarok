@@ -63,6 +63,17 @@
   --radius-button: 4px;
   --radius: 0;
   --radius-lg: 0;
+
+  /* ── Layering scale ───────────────────────────────────────────────────────
+   * Leaflet assigns its panes/controls z-indexes up to ~1000; a map container
+   * is confined at --z-map. EVERY popup/overlay must sit above it. Use these
+   * tokens for new overlays instead of ad-hoc magic numbers. */
+  --z-map: 2000;        /* map container (confines Leaflet's internal stacking) */
+  --z-overlay: 9000;    /* modal backdrops (chart settings, etc.) */
+  --z-popover: 9500;    /* dropdowns, context menus, filter popovers, selects */
+  --z-toast: 9800;      /* toast notifications */
+  --z-tooltip: 9900;    /* hover tooltips */
+  --z-dialog: 10050;    /* blocking alert/confirm/prompt — above everything */
 }
 
 * {

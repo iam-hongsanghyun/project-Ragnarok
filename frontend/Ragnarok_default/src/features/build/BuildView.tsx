@@ -31,6 +31,7 @@ import { BuildNetworkMap, BRANCH_SHEETS, isGeoSheet, LinkMode } from './BuildNet
 import { BuildAttributeForm } from './BuildAttributeForm';
 import { ResizablePanels } from '../../layout/ResizablePanels';
 import { ViewPaneHeader } from '../../shared/components/primitives';
+import { useDialog } from '../../shared/components/Dialog';
 
 export interface BuildViewProps {
   model: WorkbookModel;
@@ -100,6 +101,7 @@ function TemporalProfilesPanel({
   const [collapsed, setCollapsed] = useState(true);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const pendingSheet = useRef<string | null>(null);
+  const { alert: alertDialog } = useDialog();
 
   const triggerImport = (sheet: string) => {
     pendingSheet.current = sheet;
@@ -116,7 +118,7 @@ function TemporalProfilesPanel({
       onImport(sheet, rows);
       onSelectTs(sheet);
     } catch (err) {
-      window.alert(`CSV import failed: ${err instanceof Error ? err.message : String(err)}`);
+      void alertDialog(`${err instanceof Error ? err.message : String(err)}`, { title: 'CSV import failed' });
     } finally {
       pendingSheet.current = null;
       e.target.value = '';

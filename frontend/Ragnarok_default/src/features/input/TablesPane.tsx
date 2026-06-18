@@ -13,6 +13,7 @@ import { PYPSA_STANDARD_LINE_TYPES, PYPSA_STANDARD_TRANSFORMER_TYPES } from 'lib
 import { InputAnalyser } from './InputAnalyser';
 import { DataGrid } from './grid/DataGrid';
 import { getSheetPage, patchSheet } from 'lib/api/session';
+import { useDialog } from '../../shared/components/Dialog';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -275,6 +276,7 @@ export function TablesPane({
 }: TablesPaneProps) {
   const [jumpHighlight, setJumpHighlight] = useState<number | null>(null);
   const [focusedCol, setFocusedCol] = useState<string | null>(null);
+  const { alert: alertDialog } = useDialog();
 
   // The selected attribute is only meaningful within the current sheet.
   useEffect(() => { setFocusedCol(null); }, [sel.sheet]);
@@ -353,7 +355,7 @@ export function TablesPane({
       setTsRows(imported);
       await patchSheet(String(sel.sheet), ops);
     } catch (err) {
-      window.alert(`CSV import failed: ${err instanceof Error ? err.message : String(err)}`);
+      void alertDialog(`${err instanceof Error ? err.message : String(err)}`, { title: 'CSV import failed' });
     } finally {
       e.target.value = '';
     }
