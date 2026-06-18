@@ -31,7 +31,7 @@ import {
   AnalyticsSubTab,
   QueueJob,
 } from 'lib/types';
-import { API_BASE, DEFAULT_CONSTRAINTS, getDefaultRowForSheet, RUN_WINDOW, SHEETS } from 'lib/constants';
+import { API_BASE, DEFAULT_CONSTRAINTS, getDefaultRowForSheet, getNewRowDefaults, RUN_WINDOW, SHEETS } from 'lib/constants';
 import { canonicalizeOutputSeries, canonicalizeTemporalRows, createEmptyWorkbook, exportWorkbook, normalizeInputDatesToIso, parseWorkbook, workbookToArrayBuffer } from 'lib/workbook/workbook';
 import { mergeWorkbookFragment } from 'lib/workbook/mergeFragment';
 import type { WorkbookFragment } from 'lib/api/databases';
@@ -1212,12 +1212,13 @@ function AppInner() {
 
   const addRow = (sheet: SheetName) => {
     pushHistory();
+    const defaults = getNewRowDefaults(sheet);
     setModel((current) => {
-      const nextRows = [...(current[sheet] ?? []), { ...getDefaultRowForSheet(sheet) }];
+      const nextRows = [...(current[sheet] ?? []), { ...defaults }];
       return { ...current, [sheet]: nextRows };
     });
     pushStaticOps(sheet, [
-      { op: 'addRow', values: { ...getDefaultRowForSheet(sheet) } as Record<string, unknown> },
+      { op: 'addRow', values: { ...defaults } as Record<string, unknown> },
     ]);
     setStatus(`Added a new row to ${sheet}.`);
   };

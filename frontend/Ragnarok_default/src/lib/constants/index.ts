@@ -11,6 +11,7 @@ export {
   getAddableAttributes,
   getComponentSchema,
   getDefaultRowForSheet,
+  getNewRowDefaults,
   getOrderedInputAttributes,
   getProtectedColumns,
   normalizeSheetName,

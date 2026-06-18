@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
 import { GridRow, Primitive, SheetName, TableSel, TsSheetName, WorkbookModel } from 'lib/types';
 import { ModelIssue } from '../validation/useModelIssues';
@@ -43,6 +43,98 @@ function inferInputValue(raw: string, current: Primitive): Primitive {
   const parsed = Number(raw);
   if (Number.isFinite(parsed) && /^-?\d+(\.\d+)?$/.test(raw.trim())) return parsed;
   return raw;
+}
+
+/** Singular, human noun for an "+ Add <component>" button. Falls back to the
+ *  group label when a sheet isn't listed. */
+const COMPONENT_NOUN: Record<string, string> = {
+  buses: 'bus',
+  generators: 'generator',
+  loads: 'load',
+  storage_units: 'storage unit',
+  stores: 'store',
+  lines: 'line',
+  links: 'link',
+  transformers: 'transformer',
+  carriers: 'carrier',
+  processes: 'process',
+  shunt_impedances: 'shunt impedance',
+  global_constraints: 'constraint',
+};
+
+// Hidden-column sets persist per sheet so a curated view survives sheet
+// switches and reloads. Mirrors the grid's column-width persistence.
+const HIDDEN_COLS_PREFIX = 'pypsa.hiddenCols.';
+
+function loadHiddenCols(sheet: string): Set<string> {
+  try {
+    const raw = window.localStorage.getItem(HIDDEN_COLS_PREFIX + sheet);
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    return new Set(Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveHiddenCols(sheet: string, hidden: Set<string>): void {
+  try {
+    if (hidden.size === 0) window.localStorage.removeItem(HIDDEN_COLS_PREFIX + sheet);
+    else window.localStorage.setItem(HIDDEN_COLS_PREFIX + sheet, JSON.stringify(Array.from(hidden)));
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+// ── ColumnsDropdown ────────────────────────────────────────────────────────────
+
+interface ColumnsDropdownProps {
+  cols: string[];
+  frozenCol: string | null;
+  hidden: Set<string>;
+  anchorRect: DOMRect;
+  onToggle: (col: string) => void;
+  onEssentials: () => void;
+  onShowAll: () => void;
+  onClose: () => void;
+}
+
+function ColumnsDropdown({ cols, frozenCol, hidden, anchorRect, onToggle, onEssentials, onShowAll, onClose }: ColumnsDropdownProps) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const handler = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onClose(); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [onClose]);
+
+  const top = Math.min(anchorRect.bottom + 4, window.innerHeight - 420);
+  const left = Math.min(anchorRect.left, window.innerWidth - 280);
+
+  return ReactDOM.createPortal(
+    <div ref={ref} className="add-col-dropdown" style={{ top, left }} onKeyDown={(e) => e.key === 'Escape' && onClose()}>
+      <div className="add-col-header">Show columns</div>
+      <div className="section-toolbar" style={{ padding: '6px 10px', gap: 6 }}>
+        <button className="ghost-button sm" onClick={onEssentials}>Essentials only</button>
+        <button className="ghost-button sm" onClick={onShowAll}>Show all</button>
+      </div>
+      <div className="add-col-list">
+        {cols.map((col) => {
+          const locked = col === frozenCol;
+          return (
+            <label key={col} className="add-col-item" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: locked ? 'default' : 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={!hidden.has(col)}
+                disabled={locked}
+                onChange={() => onToggle(col)}
+              />
+              <span className="add-col-name">{col}{locked ? ' (pinned)' : ''}</span>
+            </label>
+          );
+        })}
+      </div>
+    </div>,
+    document.body,
+  );
 }
 
 // ── AddColumnDropdown ─────────────────────────────────────────────────────────
@@ -203,6 +295,17 @@ export function TablesPane({
   const [analyseFocusCol, setAnalyseFocusCol] = useState<string | null>(null);
   const csvInputRef = useRef<HTMLInputElement | null>(null);
 
+  // Per-sheet hidden columns (column picker). Reload when the sheet changes so
+  // each sheet shows its own curated set.
+  const [hiddenCols, setHiddenCols] = useState<Set<string>>(() => loadHiddenCols(String(sel.sheet)));
+  const [colsMenuOpen, setColsMenuOpen] = useState(false);
+  const [colsMenuAnchor, setColsMenuAnchor] = useState<DOMRect | null>(null);
+  useEffect(() => { setHiddenCols(loadHiddenCols(String(sel.sheet))); setColsMenuOpen(false); }, [sel.sheet]);
+  const persistHidden = useCallback((next: Set<string>) => {
+    setHiddenCols(next);
+    saveHiddenCols(String(sel.sheet), next);
+  }, [sel.sheet]);
+
   // Row issue map for the currently visible sheet
   const rowIssueMap = useMemo(() => {
     const map = new Map<number, 'error' | 'warning'>();
@@ -212,6 +315,23 @@ export function TablesPane({
         const existing = map.get(issue.rowIndex);
         if (!existing || issue.severity === 'error') {
           map.set(issue.rowIndex, issue.severity);
+        }
+      });
+    return map;
+  }, [issues, sel.sheet]);
+
+  // Per-cell issue map: pinpoints the offending field within a tinted row, with
+  // its message for the hover tooltip. Only issues that name a column qualify;
+  // errors win over warnings on the same cell.
+  const cellIssueMap = useMemo(() => {
+    const map = new Map<string, { severity: 'error' | 'warning'; message: string }>();
+    issues
+      .filter((i) => i.sheet === sel.sheet && i.col)
+      .forEach((issue) => {
+        const key = `${issue.rowIndex}|${issue.col}`;
+        const existing = map.get(key);
+        if (!existing || issue.severity === 'error') {
+          map.set(key, { severity: issue.severity, message: issue.message });
         }
       });
     return map;
@@ -333,12 +453,51 @@ export function TablesPane({
   // The first data column is always frozen (sticky)
   const frozenCol = cols[0] ?? null;
 
+  // Column picker (static sheets only): hide columns the user has tucked away,
+  // but never the frozen first column. Temporal sheets show all columns.
+  const visibleCols = isTs ? cols : cols.filter((c) => c === frozenCol || !hiddenCols.has(c));
+
+  // Decorate static-sheet headers with the attribute's unit + a required mark,
+  // so users don't need the attribute-doc panel to read them.
+  const getColumnHeaderLabel = useCallback((col: string): string => {
+    if (isTs) return col;
+    const attr = getAttributeSchema(sel.sheet, col);
+    if (!attr) return col;
+    const unit = attr.unit && attr.unit !== 'n/a' ? ` (${attr.unit})` : '';
+    return `${col}${unit}${attr.required ? ' *' : ''}`;
+  }, [isTs, sel.sheet]);
+
+  // "Essentials only" = required columns + the frozen col + any column that
+  // actually holds data; hide the rest. Reuses the schema's protected set.
+  const showEssentialsOnly = () => {
+    const keep = new Set<string>([frozenCol ?? '', ...getProtectedColumns(sel.sheet)]);
+    cols.forEach((c) => {
+      if (rows.some((r) => { const v = r[c]; return v !== undefined && v !== null && v !== ''; })) keep.add(c);
+    });
+    persistHidden(new Set(cols.filter((c) => !keep.has(c))));
+  };
+  const toggleColumn = (col: string) => {
+    const next = new Set(hiddenCols);
+    next.has(col) ? next.delete(col) : next.add(col);
+    next.delete(frozenCol ?? ''); // never hide the pinned column
+    persistHidden(next);
+  };
+
+  // Add a component row and scroll/flash it into view (focus-after-add).
+  const handleAddComponent = () => {
+    const newIndex = rows.length;
+    onAddRow(sel.sheet as SheetName);
+    setJumpHighlight(newIndex);
+    setTimeout(() => setJumpHighlight((cur) => (cur === newIndex ? null : cur)), 2500);
+  };
+
   const parentGroup: TableGroup | undefined = isTs
     ? TABLE_GROUPS.find((g) => g.temporalSheets.some((ts) => ts.sheet === sel.sheet))
     : TABLE_GROUPS.find((g) => g.sheet === sel.sheet);
   const temporalMeta = isTs
     ? parentGroup?.temporalSheets.find((ts) => ts.sheet === sel.sheet)
     : null;
+  const componentNoun = COMPONENT_NOUN[String(sel.sheet)] ?? (parentGroup?.label ?? String(sel.sheet));
 
   // Temporal data is loaded by CSV import (right-hand Temporal panel in Build);
   // value cells are editable inline, but the snapshot/time index column stays
@@ -398,6 +557,37 @@ export function TablesPane({
             </button>
           </div>
         )}
+        {/* Static-sheet quick actions: add a component without learning the
+            grid, and curate which columns are shown (40+ on some sheets). */}
+        {!isTs && (
+          <div className="section-toolbar">
+            <button className="ghost-button sm" onClick={handleAddComponent}>
+              + Add {componentNoun}
+            </button>
+            <button
+              className="ghost-button sm"
+              onClick={(e) => {
+                const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                setColsMenuAnchor(new DOMRect(r.left, r.top, r.width, r.height));
+                setColsMenuOpen((v) => !v);
+              }}
+            >
+              Columns{hiddenCols.size > 0 ? ` (${cols.length - hiddenCols.size}/${cols.length})` : ''}
+            </button>
+          </div>
+        )}
+        {colsMenuOpen && colsMenuAnchor && !isTs && (
+          <ColumnsDropdown
+            cols={cols}
+            frozenCol={frozenCol}
+            hidden={hiddenCols}
+            anchorRect={colsMenuAnchor}
+            onToggle={toggleColumn}
+            onEssentials={() => { showEssentialsOnly(); setColsMenuOpen(false); }}
+            onShowAll={() => { persistHidden(new Set()); setColsMenuOpen(false); }}
+            onClose={() => setColsMenuOpen(false)}
+          />
+        )}
         {addColOpen && addColAnchor && !isTs && (
           <AddColumnDropdown
             sheet={sel.sheet as SheetName}
@@ -443,9 +633,10 @@ export function TablesPane({
           ) : (
             <DataGrid
               rows={rows}
-              cols={cols}
+              cols={visibleCols}
               frozenCol={frozenCol}
               storageKey={`${sel.kind}:${String(sel.sheet)}`}
+              getColumnHeaderLabel={getColumnHeaderLabel}
               readOnly={isTs && !editableTs}
               onUpdate={
                 isTs
@@ -462,6 +653,7 @@ export function TablesPane({
               onRequestAddColumn={isTs ? undefined : (rect) => { setAddColAnchor(rect); setAddColOpen(true); }}
               readOnlyCols={lockSnapshotCol && frozenCol ? [frozenCol] : undefined}
               rowIssues={isTs ? undefined : rowIssueMap}
+              cellIssues={isTs ? undefined : cellIssueMap}
               highlightRow={isTs ? null : jumpHighlight}
               onDeleteColumn={isTs ? undefined : (col) => onDeleteColumn(sel.sheet as SheetName, col)}
               onRenameColumn={isTs ? undefined : (old, next) => onRenameColumn(sel.sheet as SheetName, old, next)}

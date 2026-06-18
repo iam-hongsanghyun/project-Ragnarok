@@ -224,6 +224,29 @@ export function getDefaultRowForSheet(sheet: string): GridRow {
   return row;
 }
 
+/**
+ * Defaults for a NEWLY ADDED component row (the "+ Add" action). Richer than
+ * {@link getDefaultRowForSheet}: besides the required fields, it pre-fills any
+ * non-required input attribute that PyPSA itself defines a concrete default for
+ * (e.g. `p_nom=0`, `efficiency=1`), so a fresh generator/load isn't mostly
+ * blank. Only schema-backed defaults are written — never guessed values.
+ *
+ * Kept separate from {@link getDefaultRowForSheet} (which seeds the empty-sheet
+ * COLUMN baseline) so adding rich defaults here doesn't balloon the default
+ * column set of every sheet.
+ */
+export function getNewRowDefaults(sheet: string): GridRow {
+  const component = getComponentSchema(sheet);
+  if (!component) return { name: '' };
+  const row: GridRow = getDefaultRowForSheet(sheet);
+  for (const attr of component.attributes) {
+    if (!isStaticInputAttr(attr) || attr.required || attr.attribute in row) continue;
+    const v = defaultCellValue(attr);
+    if (v !== '') row[attr.attribute] = v; // only seed real schema defaults
+  }
+  return row;
+}
+
 export function getOrderedInputAttributes(sheet: string): PypsaAttribute[] {
   const component = getComponentSchema(sheet);
   if (!component) return [];

@@ -6,6 +6,7 @@ import DataEditor, {
   GridCell,
   GridCellKind,
   GridColumn,
+  GridMouseEventArgs,
   GridSelection,
   HeaderClickedEventArgs,
   Item,
@@ -63,6 +64,10 @@ export interface DataGridProps {
   readOnly?: boolean;
   onUpdate?: (rowIndex: number, col: string, val: Primitive) => void;
   rowIssues?: Map<number, 'error' | 'warning'>;
+  /** Per-cell validation issues, keyed `"${originalRowIndex}|${col}"`. Drives a
+   *  per-cell tint + a hover tooltip pinpointing the offending field, on top of
+   *  the whole-row tint from `rowIssues`. */
+  cellIssues?: Map<string, { severity: 'error' | 'warning'; message: string }>;
   highlightRow?: number | null;
   onDeleteColumn?: (col: string) => void;
   onRenameColumn?: (oldCol: string, newCol: string) => void;
@@ -74,6 +79,9 @@ export interface DataGridProps {
   formatDisplayValue?: (col: string, val: Primitive) => string;
   coerceEditedValue?: (col: string, raw: string, current: Primitive) => Primitive;
   getCellSuggestions?: (col: string) => string[] | null;
+  /** Decorate a column header label (e.g. append unit, mark required). Falls
+   *  back to the raw column name when omitted. */
+  getColumnHeaderLabel?: (col: string) => string;
   onFocusRow?: (rowIndex: number) => void;
   /** Fires with the column under the active cell, or a selected column header. */
   onFocusColumn?: (col: string | null) => void;
@@ -149,6 +157,7 @@ export function DataGrid({
   readOnly = false,
   onUpdate,
   rowIssues,
+  cellIssues,
   highlightRow,
   onDeleteColumn,
   onRenameColumn,
@@ -157,6 +166,7 @@ export function DataGrid({
   formatDisplayValue,
   coerceEditedValue,
   getCellSuggestions,
+  getColumnHeaderLabel,
   onFocusRow,
   onFocusColumn,
   onPasteEdits,
@@ -203,6 +213,12 @@ export function DataGrid({
     (col: string, v: Primitive): string => (formatDisplayValue ? formatDisplayValue(col, v) : stringValue(v)),
     [formatDisplayValue],
   );
+
+  // Hover tooltip for a cell that has a validation issue (item 1). Screen-
+  // positioned (glide bounds are client coords, same basis as the ctx menu).
+  const [cellTip, setCellTip] = useState<
+    { x: number; y: number; msg: string; sev: 'error' | 'warning' } | null
+  >(null);
 
   // ── Column filters (Excel-style) ──────────────────────────────────────────
   const [colFilters, setColFilters] = useState<Record<string, Set<string>>>({});
@@ -262,7 +278,8 @@ export function DataGrid({
   // column stays where the user put it across re-renders / tab switches.
   const columns: GridColumn[] = useMemo(
     () => cols.map((col) => {
-      const title = col + (isActive(col) ? ' ▾' : '');
+      const label = getColumnHeaderLabel ? getColumnHeaderLabel(col) : col;
+      const title = label + (isActive(col) ? ' ▾' : '');
       let width: number;
       if (columnWidths[col]) {
         width = columnWidths[col];
@@ -278,7 +295,7 @@ export function DataGrid({
       // The header ▾ menu opens the Excel-style filter (+ rename / delete).
       return { title, id: col, hasMenu: true, width };
     }),
-    [cols, isActive, rows, display, columnWidths],
+    [cols, isActive, rows, display, columnWidths, getColumnHeaderLabel],
   );
   const freezeColumns = frozenCol && cols[0] === frozenCol ? 1 : 0;
 
@@ -302,8 +319,19 @@ export function DataGrid({
     const col = cols[c];
     const row = gridRows[r];
     const text = row ? display(col, row[col]) : '';
-    const themeOverride: Partial<Theme> | undefined =
+    let themeOverride: Partial<Theme> | undefined =
       isColorColumn(col) && text ? { bgCell: text } : undefined;
+    // Per-cell validation tint — a stronger shade than the whole-row tint so the
+    // exact offending field stands out. Skip color cells (their bg is the value).
+    if (!themeOverride) {
+      const orig = displayToOrig[r];
+      const issue = orig != null ? cellIssues?.get(`${orig}|${col}`) : undefined;
+      if (issue) {
+        themeOverride = issue.severity === 'error'
+          ? { bgCell: '#fee2e2', textDark: '#b91c1c' }
+          : { bgCell: '#fef3c7', textDark: '#b45309' };
+      }
+    }
     const cellReadOnly = readOnly || (readOnlyCols?.includes(col) ?? false);
     return {
       kind: GridCellKind.Text,
@@ -313,7 +341,7 @@ export function DataGrid({
       readonly: cellReadOnly,
       themeOverride,
     };
-  }, [cols, gridRows, display, readOnly, readOnlyCols]);
+  }, [cols, gridRows, display, readOnly, readOnlyCols, displayToOrig, cellIssues]);
 
   const onCellEdited = useCallback(([c, r]: Item, newVal: EditableGridCell) => {
     if (readOnly || !onUpdate) return;
@@ -367,6 +395,10 @@ export function DataGrid({
       const listId = useMemo(() => 'dl-' + Math.random().toString(36).slice(2), []);
       const commit = (mv?: readonly [-1 | 0 | 1, -1 | 0 | 1]) =>
         onFinishedEditing({ ...tc, data: v, displayData: v }, mv);
+      // Soft guidance only — free text is allowed (a name may be created later,
+      // and paste/CSV import must keep working); we just flag an unknown value.
+      const known = useMemo(() => new Set(suggestions), []); // eslint-disable-line react-hooks/exhaustive-deps
+      const unknown = v.trim() !== '' && !known.has(v);
       return (
         <div className="rdg-combobox">
           <input
@@ -384,6 +416,9 @@ export function DataGrid({
           <datalist id={listId}>
             {suggestions.map((s) => <option key={s} value={s} />)}
           </datalist>
+          {unknown && (
+            <div className="rdg-combobox-hint">Not in the list yet — pick an existing value, or keep it if you’ll add it.</div>
+          )}
         </div>
       );
     };
@@ -399,6 +434,19 @@ export function DataGrid({
     if (sev === 'warning') return { bgCell: '#fffbeb', accentColor: '#d97706' };
     return undefined;
   }, [displayToOrig, rowIssues]);
+
+  // ── Hover a cell with a validation issue → message tooltip ────────────────
+  const onItemHovered = useCallback((args: GridMouseEventArgs) => {
+    if (!cellIssues || cellIssues.size === 0) { if (cellTip) setCellTip(null); return; }
+    if (args.kind !== 'cell') { setCellTip(null); return; }
+    const [c, r] = args.location;
+    if (c < 0 || r < 0 || c >= cols.length) { setCellTip(null); return; }
+    const orig = displayToOrig[r];
+    const issue = orig != null ? cellIssues.get(`${orig}|${cols[c]}`) : undefined;
+    if (!issue) { setCellTip(null); return; }
+    const b = args.bounds;
+    setCellTip({ x: b.x + b.width / 2, y: b.y, msg: issue.message, sev: issue.severity });
+  }, [cellIssues, cellTip, cols, displayToOrig]);
 
   // ── Right-click a body cell → cell context menu ───────────────────────────
   const onCellContextMenu = useCallback(([c, r]: Item, e: CellClickedEventArgs) => {
@@ -467,6 +515,7 @@ export function DataGrid({
           onHeaderMenuClick={onHeaderMenuClick}
           onHeaderClicked={addColEnabled ? onHeaderClicked : undefined}
           onCellContextMenu={hasCellMenu ? onCellContextMenu : undefined}
+          onItemHovered={cellIssues && cellIssues.size > 0 ? onItemHovered : undefined}
           onRowAppended={onAppendRow ? () => { onAppendRow(); } : undefined}
           trailingRowOptions={onAppendRow ? { sticky: false, tint: true, hint: 'New row…' } : undefined}
           width="100%"
@@ -562,6 +611,16 @@ export function DataGrid({
           onDelete={onDeleteColumn && !menuProtected ? () => onDeleteColumn(menuCol) : undefined}
           onClose={() => setMenuCol(null)}
         />
+      )}
+      {cellTip && (
+        <div
+          className="grid-cell-tip"
+          data-sev={cellTip.sev}
+          style={{ position: 'fixed', left: cellTip.x, top: cellTip.y - 6 }}
+          role="tooltip"
+        >
+          {cellTip.msg}
+        </div>
       )}
     </div>
   );

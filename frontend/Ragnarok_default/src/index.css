@@ -8469,6 +8469,31 @@ code, kbd, samp, tt,
   background: transparent;
 }
 .rdg-combobox-input:focus { outline: none; }
+.rdg-combobox-hint {
+  font-size: 11px;
+  color: var(--warm, #b45309);
+  padding: 2px 8px 4px;
+  background: var(--surface, #fff);
+  white-space: nowrap;
+}
+
+/* Per-cell validation message tooltip (hover over a flagged grid cell). */
+.grid-cell-tip {
+  z-index: 10000;
+  transform: translate(-50%, -100%);
+  max-width: 280px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.3;
+  color: #fff;
+  background: #1f2937;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  white-space: normal;
+}
+.grid-cell-tip[data-sev="error"] { background: #b91c1c; }
+.grid-cell-tip[data-sev="warning"] { background: #b45309; }
 
 /* Column header menu — rename + delete bar above the value filter */
 .cfd-colops {
