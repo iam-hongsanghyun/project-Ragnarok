@@ -17,6 +17,10 @@ A GUI table ``dashboard.generator_replacements`` with one column, ``generator``
   - **Filter 2 (which of those are replaceable):** ``replace_build_year`` — only
     plants with ``build_year ≥ replace_build_year`` are replaced; everything
     built earlier stays as-is.  ``0``/blank → no extra restriction.
+  - **``replace_include_existing``** — when True, Filter 2 is ignored entirely:
+    the whole fleet active in the target year is replaceable (existing plants
+    built before the base year included), so e.g. an entire coal fleet can be
+    swapped for renewables.
 * ``replace_follow`` — when True, split each plant's capacity between solar and
   wind by the **ratio of solar:wind capacity added in that plant's build year**
   (across the network).  The fixed share boxes are ignored in this mode.
@@ -118,6 +122,13 @@ def replace_generators(network: pypsa.Network, dashboard: "Dashboard") -> dict[s
     # year (Filter 1); this further restricts which of those plants get replaced —
     # everything built earlier stays as-is. 0/blank → no extra restriction.
     threshold = int(getattr(settings, "replace_build_year", 0) or 0)
+    # "Include existing plants" overrides Filter 2: when on, the whole fleet
+    # (every plant active in the target year, regardless of build_year) is
+    # replaceable — so e.g. an entire coal fleet, existing units included, is
+    # replaced. When off, only build_year ≥ threshold plants are touched.
+    include_existing = bool(getattr(settings, "replace_include_existing", False))
+    if include_existing:
+        threshold = 0
 
     # Mean marginal cost per renewable carrier, from the EXISTING units, taken
     # once up front (before any removals change the population).

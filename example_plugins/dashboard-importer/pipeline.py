@@ -396,8 +396,9 @@ def generators_payload(module_config: dict[str, Any]) -> list[dict[str, Any]] | 
     if df is None or "name" not in df.columns:
         return None
     df = df[_active_in_year(df, target_year)]  # Filter 1: active in target year
-    # Filter 2 (replacement only): build_year ≥ replacement base year.
-    threshold = _as_int(module_config, "replace_build_year", 0)
+    # Filter 2 (replacement only): build_year ≥ replacement base year — skipped
+    # entirely when "Include existing plants" is on (the whole fleet is replaceable).
+    threshold = 0 if _as_bool(module_config, "replace_include_existing", False) else _as_int(module_config, "replace_build_year", 0)
     if threshold > 0 and "build_year" in df.columns:
         df = df[pd.to_numeric(df["build_year"], errors="coerce") >= threshold]
     df = _apply_attr_filter(df, module_config)  # Filter 3: column == value (optional)
@@ -470,8 +471,9 @@ def replacement_plan_payload(module_config: dict[str, Any]) -> list[dict[str, An
     df = df[_active_in_year(df, target_year)]
     additions_df = df.copy()
 
-    # Filter 2: build_year ≥ replacement base year.
-    threshold = _as_int(module_config, "replace_build_year", 0)
+    # Filter 2: build_year ≥ replacement base year — skipped entirely when
+    # "Include existing plants" is on (the whole fleet is replaceable).
+    threshold = 0 if _as_bool(module_config, "replace_include_existing", False) else _as_int(module_config, "replace_build_year", 0)
     if threshold > 0 and "build_year" in df.columns:
         df = df[pd.to_numeric(df["build_year"], errors="coerce") >= threshold]
     df = _apply_attr_filter(df, module_config)  # Filter 3: column == value (optional)
@@ -857,6 +859,7 @@ def _settings_from_config(settings_mod: Any, cfg: dict[str, Any]) -> Any:
         demand_redistribution=_as_bool(cfg, "demand_redistribution", False),
         replace_generators=_as_bool(cfg, "replace_generators", False),
         replace_build_year=_as_int(cfg, "replace_build_year", 0),
+        replace_include_existing=_as_bool(cfg, "replace_include_existing", False),
         replace_follow=_as_bool(cfg, "replace_follow", False),
         replace_solar_pct=_as_float(cfg, "replace_solar_pct", 50.0),
         replace_wind_pct=_as_float(cfg, "replace_wind_pct", 50.0),
@@ -907,6 +910,7 @@ def _apply_config_to_settings(settings: Any, cfg: dict[str, Any]) -> None:
     _override_bool(settings, cfg, "demand_redistribution")
     _override_bool(settings, cfg, "replace_generators")
     _override_int(settings, cfg, "replace_build_year")
+    _override_bool(settings, cfg, "replace_include_existing")
     _override_bool(settings, cfg, "replace_follow")
     _override_float(settings, cfg, "replace_solar_pct")
     _override_float(settings, cfg, "replace_wind_pct")

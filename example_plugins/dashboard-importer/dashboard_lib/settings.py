@@ -41,6 +41,7 @@ class Settings:
     demand_redistribution: bool = False  # True → move annual demand between bus/region groups
     replace_generators: bool = False  # True → replace target-year plants with solar/wind
     replace_build_year: int = 0  # filter 2: only plants with build_year ≥ this are replaceable (0 → no filter)
+    replace_include_existing: bool = False  # True → ignore filter 2 and replace the whole fleet (existing plants too)
     replace_follow: bool = False  # True → split by that year's solar:wind additions
     replace_solar_pct: float = 50.0  # direct solar share (%) when not following
     replace_wind_pct: float = 50.0   # direct wind share (%) when not following

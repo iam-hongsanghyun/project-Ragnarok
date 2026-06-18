@@ -101,7 +101,7 @@ _OPTION_BUILDERS = {
     "/generator_filter_values": "generator_filter_values_payload",
     "/demand_values": "demand_values_payload",
     "/replacement_plan": "replacement_plan_payload",
-    "/generators": "generator_filter_values_payload",
+    "/generators": "generators_payload",
 }
 
 
@@ -181,8 +181,9 @@ def fillReallocation(config: dict[str, Any]) -> dict[str, Any]:  # noqa: N802 â€
 
     Computes the bulk replacement plan (every plant of the checked carriers
     that is active in the target year, built on/after the replacement base
-    year, and matching the optional column filter) and merges those plants
-    into the ``generator_replacements`` table, keeping existing picks. The
+    year â€” or the whole fleet when ``replace_include_existing`` is on â€” and
+    matching the optional column filter) and merges those plants into the
+    ``generator_replacements`` table, keeping existing picks. The
     returned ``config`` patch is written back into the form by the host;
     Solar/Wind MW stay display-only and are recomputed from the current
     scalar settings.
@@ -205,7 +206,8 @@ def fillReallocation(config: dict[str, Any]) -> dict[str, Any]:  # noqa: N802 â€
             "ok": False,
             "message": (
                 f"No replaceable {', '.join(carriers)} plants (active in the target "
-                f"year and built on/after the replacement base year)."
+                f"year and built on/after the replacement base year, or the whole "
+                f"fleet when 'Include existing plants' is on)."
             ),
         }
     # Merge: keep existing plant selections; append matched plants not already

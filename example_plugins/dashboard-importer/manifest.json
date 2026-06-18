@@ -210,8 +210,18 @@
     "replace_build_year": {
       "type": "number",
       "label": "Replacement base year",
-      "description": "Filter 2 (replacement only): only plants whose build_year ≥ this year are replaceable, and the Plant dropdown is filtered to them. Plants built before it (but still active in the target year) stay as-is. This is layered on top of the target-year filter — leave 0/blank for no extra restriction.",
+      "description": "Filter 2 (replacement only): only plants whose build_year ≥ this year are replaceable, and the Plant dropdown is filtered to them. Plants built before it (but still active in the target year) stay as-is. This is layered on top of the target-year filter — leave 0/blank for no extra restriction. Ignored when 'Include existing plants' is on.",
       "default": 2025,
+      "visibleWhen": {
+        "field": "replace_generators",
+        "equals": true
+      }
+    },
+    "replace_include_existing": {
+      "type": "boolean",
+      "label": "Include existing plants (whole fleet)",
+      "description": "Replace the entire fleet of the chosen carriers, not just new builds. When on, the 'Replacement base year' filter is ignored: every plant active in the target year is replaceable — so e.g. ticking this with coal selected replaces the whole coal fleet (existing units included). When off, only plants built on/after the base year are replaced.",
+      "default": false,
       "visibleWhen": {
         "field": "replace_generators",
         "equals": true
@@ -321,7 +331,7 @@
       "label": "Fill table from carriers",
       "hook": "fillReallocation",
       "variant": "secondary",
-      "description": "Add every plant of the checked carriers that is replaceable (active in the target year and build_year ≥ the replacement base year) to the table below. Solar/Wind MW are computed live from the current replacement settings.",
+      "description": "Add every plant of the checked carriers that is replaceable (active in the target year and build_year ≥ the replacement base year, or the whole fleet when 'Include existing plants' is on) to the table below. Solar/Wind MW are computed live from the current replacement settings.",
       "visibleWhen": {
         "field": "replace_generators",
         "equals": true
@@ -1206,7 +1216,7 @@
     "generator_replacements": {
       "type": "table",
       "label": "Generator replacements",
-      "description": "Pick plants to replace with renewables. Each plant's own capacity is split into solar + wind from the current settings: yearly solar/wind additions when 'Follow yearly additions' is on, otherwise direct Solar %/Wind % of original capacity. New units are added at the same bus/province with that province's solar/wind profile and a marginal cost = mean of existing same-carrier units. New units are named <plant>_solar_<year> / <plant>_wind_<year>. The dropdown lists the replaceable plants — active in the target year and built on/after the replacement base year (each option shows its build year). Active when Replace plants with renewables is on.",
+      "description": "Pick plants to replace with renewables. Each plant's own capacity is split into solar + wind from the current settings: yearly solar/wind additions when 'Follow yearly additions' is on, otherwise direct Solar %/Wind % of original capacity. New units are added at the same bus/province with that province's solar/wind profile and a marginal cost = mean of existing same-carrier units. New units are named <plant>_solar_<year> / <plant>_wind_<year>. The dropdown lists the replaceable plants — active in the target year and built on/after the replacement base year, or the whole fleet when 'Include existing plants' is on (each option shows its build year). Active when Replace plants with renewables is on.",
       "visibleWhen": {
         "field": "replace_generators",
         "equals": true
@@ -1223,11 +1233,6 @@
             "column": "name",
             "labelSuffixColumn": "build_year",
             "filter": [
-              {
-                "column": "build_year",
-                "op": ">=",
-                "valueFrom": "replace_build_year"
-              },
               {
                 "column": "carrier",
                 "op": "in",
