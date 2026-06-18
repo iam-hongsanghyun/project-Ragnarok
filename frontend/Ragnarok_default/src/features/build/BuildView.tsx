@@ -399,17 +399,10 @@ export function BuildView(props: BuildViewProps) {
       </nav>
       </ViewPaneHeader>
 
-      {/* Per-step guidance: what this step is for + completion-aware Next/Skip.
-          (Adding components uses the existing add button in the editor.) */}
+      {/* Per-step guidance: what this step is for. (Step navigation is the
+          strip above; adding components uses the editor's Add button.) */}
       <div className="build-step-guide">
         <p className="build-step-guide__desc">{step.description}</p>
-        <div className="build-step-guide__actions">
-          {stepIndex < BUILD_STEPS.length - 1 && (
-            <button type="button" className="tb-btn" onClick={() => goStep(stepIndex + 1)}>
-              {completionByIndex[stepIndex] ? 'Next →' : 'Skip →'}
-            </button>
-          )}
-        </div>
       </div>
 
       {step.id === 'constraints' ? (

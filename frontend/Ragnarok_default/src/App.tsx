@@ -152,7 +152,9 @@ function AppInner() {
     setModel(next);
     requestStaticResync();
   }, [model, requestStaticResync]);
-  const [tab, setTab] = usePersistedState<WorkspaceTab>('ui:workspace-tab', 'Welcome');
+  // Always open on the Welcome / intro screen — the workspace tab is NOT
+  // persisted across reloads (was restoring the last view, e.g. Comparison).
+  const [tab, setTab] = useState<WorkspaceTab>('Welcome');
   // Ctrl/Cmd+Z / Ctrl+Y (or Shift+Z) undo-redo for model edits, only on the
   // Model/Build tabs and never while a text field is focused (so it doesn't
   // hijack native input undo).
