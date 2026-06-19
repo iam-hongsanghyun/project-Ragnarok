@@ -5533,6 +5533,71 @@ th:hover .col-delete-btn {
   background: #e8f0ef;
   font-weight: 600;
 }
+
+/* ── SearchableMultiSelect ─────────────────────────────────────────── */
+.ssm-wrap { position: relative; width: 100%; }
+.ssm-control {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  min-height: 28px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  cursor: pointer;
+}
+.ssm-control.is-disabled { opacity: 0.5; pointer-events: none; }
+.ssm-placeholder { color: var(--muted); font-family: var(--font-mono); font-size: 0.82rem; }
+.ssm-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  font-size: 0.76rem;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+.ssm-pill-x { color: var(--muted); font-weight: 700; }
+.ssm-pill:hover .ssm-pill-x { color: var(--danger); }
+.ssm-menu {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.14);
+  z-index: var(--z-popover);
+}
+.ssm-search { border: none; border-bottom: 1px solid var(--border); }
+.ssm-actions { display: flex; gap: 8px; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+.ssm-action {
+  font-size: 0.74rem;
+  color: var(--brand);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+.ssm-list { border: none; box-shadow: none; max-height: 200px; }
+.ssm-option { display: flex; align-items: center; gap: 7px; }
+.ssm-check { pointer-events: none; }
+.ssm-empty { color: var(--muted); cursor: default; }
+
+/* ── Pivot chart filters ───────────────────────────────────────────── */
+.chart-control-row--stack { align-items: flex-start; }
+.pivot-filters { display: flex; flex-direction: column; gap: 6px; flex: 1 1 auto; min-width: 0; }
+.pivot-filter-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.pivot-filter-scope { width: 140px; flex: 0 0 auto; }
+.pivot-filter-field { width: 130px; flex: 0 0 auto; }
+.pivot-filter-op { width: 96px; flex: 0 0 auto; }
+.pivot-filter-val { flex: 1 1 160px; min-width: 140px; }
+.pivot-filter-num { width: 110px; flex: 0 0 auto; }
+.pivot-filter-x {
+  background: none; border: none; cursor: pointer;
+  color: var(--muted); font-size: 1rem; font-weight: 700; padding: 0 4px;
+}
+.pivot-filter-x:hover { color: var(--danger); }
+.pivot-filter-add { align-self: flex-start; }
 .constraints-help {
   margin-bottom: 12px;
   padding: 8px 10px;

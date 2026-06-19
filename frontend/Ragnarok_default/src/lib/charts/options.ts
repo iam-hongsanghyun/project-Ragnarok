@@ -452,3 +452,152 @@ export function buildExpansionOption(rows: ExpansionRow[], theme: ChartTheme): E
     ],
   };
 }
+
+// ── Category bar (horizontal / grouped / stacked) ───────────────────────────
+// A generic categorical bar over `labels` with one or more `series`. Drives the
+// pivot's grouped-bar and horizontal-bar types (stackable). When a single
+// series carries `barColors`, each bar is coloured individually (value-by-carrier).
+
+export interface CategorySeriesInput {
+  labels: string[];
+  series: { key: string; label: string; color: string; values: number[] }[];
+  stacked: boolean;
+  /** Per-label colours for a single-series category chart (else use series colour). */
+  barColors?: string[];
+  unit?: string;
+  xAxisTitle?: string;
+  yAxisTitle?: string;
+  showAxisLabels: boolean;
+  xLabelAngle?: number;
+  theme: ChartTheme;
+}
+
+function categoryBarSeries(input: CategorySeriesInput) {
+  const single = input.series.length === 1 && input.barColors;
+  return input.series.map((s) => ({
+    name: s.label,
+    type: 'bar' as const,
+    stack: input.stacked ? 'total' : undefined,
+    barMaxWidth: 36,
+    itemStyle: single ? undefined : { color: s.color },
+    data: single
+      ? s.values.map((v, i) => ({ value: v, itemStyle: { color: input.barColors![i] ?? s.color } }))
+      : s.values,
+    emphasis: { focus: input.series.length > 1 ? ('series' as const) : ('none' as const) },
+  }));
+}
+
+export function buildHorizontalBarOption(input: CategorySeriesInput): EChartsCoreOption {
+  const { labels, theme, showAxisLabels } = input;
+  return {
+    animation: false,
+    grid: { left: 4, right: 16, top: 8, bottom: 4, containLabel: true },
+    tooltip: { ...darkTooltip(theme), trigger: 'axis', axisPointer: { type: 'shadow' }, valueFormatter: fmtNum },
+    xAxis: {
+      type: 'value',
+      name: input.xAxisTitle,
+      nameLocation: 'middle',
+      nameGap: 24,
+      nameTextStyle: axisName(theme),
+      axisLine: { show: false },
+      axisTick: { show: false },
+      splitLine: dashedSplitLine(theme),
+      axisLabel: { show: showAxisLabels, ...tickLabel(theme), formatter: fmtNum },
+    },
+    yAxis: {
+      type: 'category',
+      inverse: true,
+      data: labels,
+      axisLine: { show: false },
+      axisTick: { show: false },
+      axisLabel: { show: showAxisLabels, ...tickLabel(theme), width: 130, overflow: 'truncate' as const },
+    },
+    series: categoryBarSeries(input),
+  };
+}
+
+export function buildGroupedBarOption(input: CategorySeriesInput): EChartsCoreOption {
+  const { labels, theme, showAxisLabels } = input;
+  const maxLabel = maxOf(labels.map((l) => l.length)) * CHAR_PX;
+  return {
+    animation: false,
+    grid: { left: 8, right: 12, top: 10, bottom: 4, containLabel: true },
+    tooltip: { ...darkTooltip(theme), trigger: 'axis', axisPointer: { type: 'shadow' }, valueFormatter: fmtNum },
+    xAxis: {
+      type: 'category',
+      boundaryGap: true,
+      data: labels,
+      name: input.xAxisTitle,
+      nameLocation: 'middle',
+      nameGap: maxLabel > 40 ? 52 : 26,
+      nameTextStyle: axisName(theme),
+      axisLine: { lineStyle: { color: theme.border } },
+      axisTick: { show: false },
+      axisLabel: { show: showAxisLabels, ...tickLabel(theme), rotate: input.xLabelAngle ? Math.abs(input.xLabelAngle) : 0, hideOverlap: true },
+    },
+    yAxis: {
+      type: 'value',
+      name: input.yAxisTitle,
+      nameTextStyle: axisName(theme),
+      axisLine: { show: false },
+      axisTick: { show: false },
+      splitLine: dashedSplitLine(theme),
+      axisLabel: { show: showAxisLabels, ...tickLabel(theme), formatter: fmtNum },
+    },
+    series: categoryBarSeries(input).map((s) => ({ ...s, barGap: '20%' })),
+  };
+}
+
+// ── Scatter (value X vs value Y per component) ───────────────────────────────
+
+export interface ScatterOptionInput {
+  points: { x: number; y: number; label: string; color: string }[];
+  xName: string;
+  yName: string;
+  showAxisLabels: boolean;
+  theme: ChartTheme;
+}
+
+export function buildScatterOption(input: ScatterOptionInput): EChartsCoreOption {
+  const { points, xName, yName, showAxisLabels, theme } = input;
+  return {
+    animation: false,
+    grid: { left: 16, right: 20, top: 12, bottom: 22, containLabel: true },
+    tooltip: {
+      ...darkTooltip(theme),
+      trigger: 'item',
+      formatter: (p: { data: { value: [number, number]; name: string } }) =>
+        `<b>${p.data.name}</b><br/>${xName}: ${fmtNum(p.data.value[0])}<br/>${yName}: ${fmtNum(p.data.value[1])}`,
+    },
+    xAxis: {
+      type: 'value',
+      scale: true,
+      name: xName,
+      nameLocation: 'middle',
+      nameGap: 26,
+      nameTextStyle: axisName(theme),
+      axisLine: { show: false },
+      axisTick: { show: false },
+      splitLine: dashedSplitLine(theme),
+      axisLabel: { show: showAxisLabels, ...tickLabel(theme), formatter: fmtNum },
+    },
+    yAxis: {
+      type: 'value',
+      scale: true,
+      name: yName,
+      nameLocation: 'middle',
+      nameGap: 48,
+      nameTextStyle: axisName(theme),
+      axisLine: { show: false },
+      axisTick: { show: false },
+      splitLine: dashedSplitLine(theme),
+      axisLabel: { show: showAxisLabels, ...tickLabel(theme), formatter: fmtNum },
+    },
+    series: [{
+      type: 'scatter',
+      symbolSize: 10,
+      emphasis: { scale: 1.4 },
+      data: points.map((p) => ({ value: [p.x, p.y], name: p.label, itemStyle: { color: p.color } })),
+    }],
+  };
+}

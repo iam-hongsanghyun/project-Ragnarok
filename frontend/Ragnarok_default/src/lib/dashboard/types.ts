@@ -12,10 +12,11 @@
  * re-rendered as their config (e.g. a chart's metric, timeframe)
  * changes without touching the grid structure.
  */
-import { ChartSectionConfig } from 'lib/types';
+import { ChartSectionConfig, ChartSectionType, TimeframeOption } from 'lib/types';
 
 export type CardKind =
   | 'chart'
+  | 'pivot'
   | 'map'
   | 'notes'
   | 'kpi-strip'
@@ -38,6 +39,67 @@ interface CardBase {
 export interface ChartCard extends CardBase {
   kind: 'chart';
   config: ChartSectionConfig;
+}
+
+/** Operators for a pivot filter. `in` = categorical set membership; the rest are
+ *  numeric comparisons. */
+/** Pivot chart types — a superset of the metric chart's `ChartSectionType`.
+ *  `hbar`/`grouped-bar`/`scatter` work for any value; `duration`/`daily-profile`
+ *  are series-only. */
+export type PivotChartType =
+  | ChartSectionType            // 'line' | 'area' | 'bar' | 'donut'
+  | 'hbar'
+  | 'grouped-bar'
+  | 'scatter'
+  | 'duration'
+  | 'daily-profile';
+
+export type PivotFilterOp = 'in' | '>' | '>=' | '<' | '<=' | '=';
+
+export interface PivotFilter {
+  /** `component` filters which components are included by one of their
+   *  attributes; `value` is a per-snapshot threshold on the plotted value. */
+  scope: 'component' | 'value';
+  /** Attribute name for a component-scope filter (ignored for value scope). */
+  field: string;
+  op: PivotFilterOp;
+  /** Categorical picks for `op:'in'`. */
+  values?: string[];
+  /** Threshold for numeric operators. */
+  value?: number;
+}
+
+/**
+ * A generic "pivot from outputs" chart: plot any component attribute (output
+ * series, static output, or input numeric), grouped by one or more input
+ * dimensions (carrier, bus, …) and filtered by component attributes and/or
+ * per-snapshot value thresholds. Derives everything from actual values rather
+ * than the hardcoded metric registry.
+ */
+export interface PivotChartConfig {
+  id: number;
+  sheet: string;                 // component list_name: 'generators','lines',…
+  valueAttribute: string;        // exact schema attr name: 'p','p_nom_opt','p_nom',…
+  groupBy: string[];             // input dims → composite key; [] = per-component
+  filters: PivotFilter[];
+  aggregate: 'sum' | 'mean' | 'max' | 'min' | 'count';
+  chartType: PivotChartType;
+  /** Second value attribute for the scatter Y axis (X axis = valueAttribute). */
+  scatterYAttribute?: string;
+  timeframe: TimeframeOption;
+  stacked: boolean;
+  startIndex: number;
+  endIndex: number;
+  xAxisTitle?: string;
+  yAxisTitle?: string;
+  showLegend?: boolean;
+  showAxisLabels?: boolean;
+  xLabelAngle?: number;
+}
+
+export interface PivotCard extends CardBase {
+  kind: 'pivot';
+  config: PivotChartConfig;
 }
 
 export interface MapCard extends CardBase {
@@ -92,6 +154,7 @@ export interface StochasticScenariosCardData extends CardBase {
 
 export type Card =
   | ChartCard
+  | PivotCard
   | MapCard
   | NotesCard
   | KpiStripCard

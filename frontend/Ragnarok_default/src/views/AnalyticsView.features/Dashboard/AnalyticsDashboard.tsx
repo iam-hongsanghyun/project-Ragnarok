@@ -38,10 +38,12 @@ import { LoadAnalysisCard } from '../../../features/analytics/cards/LoadAnalysis
 import { StochasticScenariosCard } from '../../../features/analytics/cards/StochasticScenariosCard';
 import { numberValue } from 'lib/utils/helpers';
 import { Dashboard, newId } from './Dashboard';
-import { Card, DashboardLayout } from 'lib/dashboard/types';
+import { Card, DashboardLayout, PivotChartConfig } from 'lib/dashboard/types';
 import { useDashboardLayout } from './useDashboardLayout';
 import { PRESETS } from 'lib/dashboard/presets';
 import { effectiveEndIndex, fullRunTimeline, OUTPUT_SHEETS_FOR_FOCUS } from 'lib/api/runs';
+import { PivotChartCard } from '../../../features/analytics/cards/PivotChartCard';
+import { pivotSeriesSheet } from 'lib/results/pivot';
 
 const DEFAULT_LAYOUT: DashboardLayout = { rows: [], cards: [] };
 
@@ -100,22 +102,42 @@ function defaultChartConfig(): ChartSectionConfig {
   };
 }
 
+function defaultPivotConfig(): PivotChartConfig {
+  return {
+    id: Date.now(),
+    sheet: 'generators',
+    valueAttribute: '',
+    groupBy: ['carrier'],
+    filters: [],
+    aggregate: 'sum',
+    chartType: 'area',
+    timeframe: 'hourly',
+    stacked: true,
+    startIndex: 0,
+    endIndex: 100000,
+  };
+}
+
+function newPivotCard(): Card { return { id: newId('pivot'), kind: 'pivot', config: defaultPivotConfig() }; }
 function newChartCard(): Card { return { id: newId('chart'), kind: 'chart', config: defaultChartConfig() }; }
 function newMapCard(): Card   { return { id: newId('map'),   kind: 'map' }; }
 function newNotesCard(): Card { return { id: newId('notes'), kind: 'notes' }; }
 
-/** Kinds offered from an empty placeholder cell's "+" menu. */
+/** Kinds offered from an empty placeholder cell's "+" menu. The Pivot chart is
+ *  the primary chart builder; the legacy metric chart stays available. */
 const ADDABLE_CARDS = [
-  { kind: 'chart', label: 'Chart' },
+  { kind: 'pivot', label: 'Chart' },
+  { kind: 'chart', label: 'Metric chart' },
   { kind: 'map',   label: 'Map' },
   { kind: 'notes', label: 'Run notes' },
 ];
 
 function createCard(kind: string): Card {
   switch (kind) {
+    case 'chart': return newChartCard();
     case 'map':   return newMapCard();
     case 'notes': return newNotesCard();
-    default:      return newChartCard();
+    default:      return newPivotCard();
   }
 }
 
@@ -174,11 +196,19 @@ export function AnalyticsDashboard({
     const weight = results.runMeta?.snapshotWeight ?? 1;
     const windows: Record<string, number> = {};
     for (const card of layout.cards) {
-      if (card.kind !== 'chart' || card.config.focusType === 'system') continue;
-      const end = effectiveEndIndex(card.config.focusType, card.config.endIndex, totalSnaps, weight);
-      const snaps = end + 1;
-      for (const sheet of OUTPUT_SHEETS_FOR_FOCUS[card.config.focusType] ?? []) {
-        windows[sheet] = Math.max(windows[sheet] ?? 0, snaps);
+      if (card.kind === 'chart' && card.config.focusType !== 'system') {
+        const end = effectiveEndIndex(card.config.focusType, card.config.endIndex, totalSnaps, weight);
+        const snaps = end + 1;
+        for (const sheet of OUTPUT_SHEETS_FOR_FOCUS[card.config.focusType] ?? []) {
+          windows[sheet] = Math.max(windows[sheet] ?? 0, snaps);
+        }
+      } else if (card.kind === 'pivot') {
+        // A pivot whose value is an output series needs that one sheet hydrated,
+        // up to the chart's window right-edge. Static / input values need none.
+        const sheet = pivotSeriesSheet(card.config.sheet, card.config.valueAttribute);
+        if (!sheet) continue;
+        const end = effectiveEndIndex('generator', card.config.endIndex, totalSnaps, weight);
+        windows[sheet] = Math.max(windows[sheet] ?? 0, end + 1);
       }
     }
     onNeedSeries(windows);
@@ -227,6 +257,14 @@ export function AnalyticsDashboard({
       ...layout,
       cards: layout.cards.map((c) =>
         c.id === cardId && c.kind === 'chart' ? { ...c, config: next } : c,
+      ),
+    });
+
+  const updatePivotConfig = (cardId: string, next: PivotChartConfig) =>
+    setLayout({
+      ...layout,
+      cards: layout.cards.map((c) =>
+        c.id === cardId && c.kind === 'pivot' ? { ...c, config: next } : c,
       ),
     });
 
@@ -305,6 +343,19 @@ export function AnalyticsDashboard({
               onChange={(next) => updateChartConfig(card.id, next)}
               onClean={() => updateChartConfig(card.id, defaultChartConfig())}
               onRemove={() => { /* dashboard cell × handles removal */ }}
+              title={card.title}
+              onTitleChange={(next) => updateCard(card.id, { title: next.trim() || undefined })}
+            />
+          );
+        case 'pivot':
+          return (
+            <PivotChartCard
+              compact
+              config={card.config}
+              results={results}
+              model={model}
+              onChange={(next) => updatePivotConfig(card.id, next)}
+              onClean={() => updatePivotConfig(card.id, defaultPivotConfig())}
               title={card.title}
               onTitleChange={(next) => updateCard(card.id, { title: next.trim() || undefined })}
             />
@@ -391,6 +442,13 @@ export function AnalyticsDashboard({
 
   const cardTitle = (card: Card): string => {
     if (card.title) return card.title;
+    if (card.kind === 'pivot') {
+      const cfg = card.config;
+      if (!cfg.valueAttribute) return 'Empty chart';
+      const grp = cfg.groupBy.length ? ` by ${cfg.groupBy.join(' + ')}` : '';
+      const tf = cfg.chartType !== 'donut' && cfg.timeframe && cfg.timeframe !== 'hourly' ? ` · ${cfg.timeframe}` : '';
+      return `${cfg.sheet} · ${cfg.valueAttribute}${grp}${tf}`;
+    }
     if (card.kind === 'chart') {
       const label = chartCardTitle(card.config);
       const tf = card.config.timeframe;
