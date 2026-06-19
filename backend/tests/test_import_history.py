@@ -229,7 +229,8 @@ def test_derive_imported_result_populates_analytics() -> None:
     assert len(derived["systemPriceSeries"]) == 2
     assert derived["systemPriceSeries"][0]["value"] == 50.0
     # A non-empty summary makes the run render like a solved one in History.
-    assert any(s["label"] == "Installed capacity" for s in derived["summary"])
+    # Capacity is reported split into generator + storage installed nameplate.
+    assert any(s["label"] == "Generator capacity" for s in derived["summary"])
     assert derived["runMeta"]["componentCounts"]["generators"] == 2
 
 

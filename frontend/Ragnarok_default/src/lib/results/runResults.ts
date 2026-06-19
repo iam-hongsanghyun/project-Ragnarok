@@ -571,9 +571,12 @@ export function deriveRunResults(
     });
 
   // ── Summary cards ─────────────────────────────────────────────────────────
-  let totalCap = 0;
-  for (const n of generators) totalCap += numberValue(genStatic[n].p_nom);
-  for (const n of storageUnits) totalCap += numberValue(storageStatic[n].p_nom);
+  // Generator vs storage capacity (and reserve) reported separately, each as
+  // installed nameplate p_nom minus peak demand.
+  let genCap = 0;
+  for (const n of generators) genCap += numberValue(genStatic[n].p_nom);
+  let storCap = 0;
+  for (const n of storageUnits) storCap += numberValue(storageStatic[n].p_nom);
   const peakLoad = loadPerSnapshot.reduce((m, v) => (v > m ? v : m), 0);
   const avgPrice = systemPriceSeries.length
     ? systemPriceSeries.reduce((s, p) => s + p.value, 0) / systemPriceSeries.length
@@ -588,11 +591,15 @@ export function deriveRunResults(
   const stressedCount = lineLoading.filter((x) => x.value > 80).length;
 
   const summary: SummaryItem[] = [
-    { label: 'Installed capacity', value: `${fmt(totalCap)} MW`,
-      detail: `${generators.length} generators + ${storageUnits.length} storage units` },
+    { label: 'Generator capacity', value: `${fmt(genCap)} MW`,
+      detail: `${generators.length} generators (installed nameplate)` },
+    { label: 'Storage capacity', value: `${fmt(storCap)} MW`,
+      detail: `${storageUnits.length} storage units (installed nameplate)` },
     { label: 'Peak demand', value: `${fmt(peakLoad)} MW`, detail: 'from workbook load profile' },
-    { label: 'Reserve position', value: `${fmt(totalCap - peakLoad)} MW`,
-      detail: 'installed capacity vs peak demand' },
+    { label: 'Generator reserve', value: `${fmt(genCap - peakLoad)} MW`,
+      detail: 'generator capacity vs peak demand' },
+    { label: 'Storage reserve', value: `${fmt(storCap - peakLoad)} MW`,
+      detail: 'storage capacity vs peak demand' },
     { label: 'Peak price', value: `${fmt(peakPrice)} ${currencySymbol}/MWh`,
       detail: `${fmt(peakLoad)} MW peak load` },
     { label: 'System emissions', value: `${fmt(totalEmissionsKt)} ktCO2e`,

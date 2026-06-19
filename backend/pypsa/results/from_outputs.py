@@ -177,7 +177,9 @@ def derive_imported_result(
     )
     generator_weights = network.snapshot_weightings["generators"].reindex(network.snapshots).fillna(1.0)
 
-    total_capacity = float(network.generators.p_nom.sum() + network.storage_units.p_nom.sum())
+    generator_capacity = float(network.generators.p_nom.sum())
+    storage_capacity = float(network.storage_units.p_nom.sum())
+    total_capacity = generator_capacity + storage_capacity
     total_load = float(load_dispatch.max()) if len(load_dispatch) else 0.0
     reserve_requirement = total_load
 
@@ -279,11 +281,15 @@ def derive_imported_result(
     peak_net_load = round(float(load_dispatch.max())) if len(load_dispatch) else 0
 
     summary = [
-        {"label": "Installed capacity", "value": f"{round(total_capacity):,} MW",
-         "detail": f"{len(network.generators)} generators + {len(network.storage_units)} storage units"},
+        {"label": "Generator capacity", "value": f"{round(generator_capacity):,} MW",
+         "detail": f"{len(network.generators)} generators (installed nameplate)"},
+        {"label": "Storage capacity", "value": f"{round(storage_capacity):,} MW",
+         "detail": f"{len(network.storage_units)} storage units (installed nameplate)"},
         {"label": "Peak demand", "value": f"{round(total_load):,} MW", "detail": "from workbook load profile"},
-        {"label": "Reserve position", "value": f"{round(total_capacity - reserve_requirement):,} MW",
-         "detail": "installed capacity vs peak demand"},
+        {"label": "Generator reserve", "value": f"{round(generator_capacity - reserve_requirement):,} MW",
+         "detail": "generator capacity vs peak demand"},
+        {"label": "Storage reserve", "value": f"{round(storage_capacity - reserve_requirement):,} MW",
+         "detail": "storage capacity vs peak demand"},
         {"label": "Peak price", "value": f"{round(peak_price):,} {currency}/MWh", "detail": f"{peak_net_load:,} MW peak load"},
         {"label": "System emissions", "value": f"{round(total_emissions):,} ktCO2e",
          "detail": f"Carbon price {carbon_price:.0f} {currency}/t"},

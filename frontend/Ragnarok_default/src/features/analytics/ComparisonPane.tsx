@@ -1,25 +1,69 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { API_BASE } from 'lib/constants';
-import { BackendRunMeta, MixItem, RunResults } from 'lib/types';
+import { BackendRunMeta, MixItem, RunResults, SummaryItem } from 'lib/types';
 import { carrierColor, numberValue, stringValue } from 'lib/utils/helpers';
 import { ComparisonMatrix, ComparisonScenario, topicNeedsFull } from './ComparisonMatrix';
 
-/** Installed nameplate capacity (input p_nom) summed by carrier — the comparison
- *  analogue of the result's energy carrierMix. Derived from the run's input
- *  model (modelStatic), so it's available for any stored run. */
-function capacityMixFromModel(modelStatic: unknown): MixItem[] {
-  const gens = (modelStatic as { generators?: Array<Record<string, unknown>> } | null)?.generators ?? [];
+interface CapacityInfo {
+  /** Installed nameplate (input p_nom) by carrier — the energy-carrierMix analogue. */
+  mix: MixItem[];
+  /** Total installed generator nameplate (Σ generators.p_nom). */
+  genCap: number;
+  /** Total installed storage nameplate (Σ storage_units.p_nom). */
+  storCap: number;
+}
+
+/** Derive installed nameplate capacity from a run's input model (modelStatic),
+ *  so it's available for any stored run without re-solving. */
+function capacityInfoFromModel(modelStatic: unknown): CapacityInfo {
+  const root = modelStatic as {
+    generators?: Array<Record<string, unknown>>;
+    storage_units?: Array<Record<string, unknown>>;
+  } | null;
   const byCarrier = new Map<string, number>();
-  for (const r of gens) {
+  let genCap = 0;
+  for (const r of root?.generators ?? []) {
     const name = stringValue(r.name as string | number | undefined);
     if (!name || name.startsWith('load_shedding_')) continue;
+    const p = numberValue(r.p_nom as string | number | undefined);
+    genCap += p;
     const carrier = stringValue(r.carrier as string | number | undefined) || 'Other';
-    byCarrier.set(carrier, (byCarrier.get(carrier) ?? 0) + numberValue(r.p_nom as string | number | undefined));
+    byCarrier.set(carrier, (byCarrier.get(carrier) ?? 0) + p);
   }
-  return Array.from(byCarrier.entries())
+  let storCap = 0;
+  for (const r of root?.storage_units ?? []) {
+    if (!stringValue(r.name as string | number | undefined)) continue;
+    storCap += numberValue(r.p_nom as string | number | undefined);
+  }
+  const mix = Array.from(byCarrier.entries())
     .filter(([, v]) => v > 0)
     .sort((a, b) => b[1] - a[1])
     .map(([label, value]) => ({ label, value, color: carrierColor(label) }));
+  return { mix, genCap, storCap };
+}
+
+/** Replace the stored single "Installed capacity" / "Reserve position" KPIs with
+ *  the Generator + Storage split (matching the result view), once the run's model
+ *  has been fetched. Newer runs already carry the split, so there's nothing to
+ *  replace. */
+function splitCapacitySummary(base: SummaryItem[], info: CapacityInfo | undefined): SummaryItem[] {
+  if (!info) return base;
+  const mw = (n: number) => `${Math.round(n).toLocaleString()} MW`;
+  const peakItem = base.find((s) => /^peak demand$/i.test(s.label.trim()));
+  const peak = peakItem ? Number(peakItem.value.replace(/[^\d.-]/g, '')) || 0 : 0;
+  const out: SummaryItem[] = [];
+  for (const item of base) {
+    if (/^installed capacity$/i.test(item.label.trim())) {
+      out.push({ label: 'Generator capacity', value: mw(info.genCap), detail: 'installed nameplate' });
+      out.push({ label: 'Storage capacity', value: mw(info.storCap), detail: 'installed nameplate' });
+    } else if (/^reserve position$/i.test(item.label.trim())) {
+      out.push({ label: 'Generator reserve', value: mw(info.genCap - peak), detail: 'generator capacity vs peak demand' });
+      out.push({ label: 'Storage reserve', value: mw(info.storCap - peak), detail: 'storage capacity vs peak demand' });
+    } else {
+      out.push(item);
+    }
+  }
+  return out;
 }
 
 // How many scenarios can sit side by side. The matrix fills the width with this
@@ -134,8 +178,9 @@ export function ComparisonPane({ backendRuns, activeRunName, currencySymbol = '$
 
   // Lazy full-results cache, populated only when a FULL topic is active.
   const [fullCache, setFullCache] = useState<Record<string, RunResults | 'loading' | 'error'>>({});
-  // Per-carrier installed capacity (input p_nom), derived from the same fetch.
-  const [capacityCache, setCapacityCache] = useState<Record<string, MixItem[]>>({});
+  // Installed capacity (input p_nom: per-carrier mix + gen/storage totals),
+  // derived from the same fetch.
+  const [capacityCache, setCapacityCache] = useState<Record<string, CapacityInfo>>({});
   const needFull = enabled.some(topicNeedsFull);
 
   useEffect(() => {
@@ -146,7 +191,7 @@ export function ComparisonPane({ backendRuns, activeRunName, currencySymbol = '$
         if (!resp.ok) throw new Error('fetch failed');
         const bundle = await resp.json();
         setFullCache((c) => ({ ...c, [name]: (bundle.result ?? {}) as RunResults }));
-        setCapacityCache((c) => ({ ...c, [name]: capacityMixFromModel(bundle.modelStatic) }));
+        setCapacityCache((c) => ({ ...c, [name]: capacityInfoFromModel(bundle.modelStatic) }));
       } catch {
         setFullCache((c) => ({ ...c, [name]: 'error' }));
       }
@@ -161,12 +206,13 @@ export function ComparisonPane({ backendRuns, activeRunName, currencySymbol = '$
   const scenarios: ComparisonScenario[] = selected.flatMap((name) => {
     const m = metaByName.get(name);
     if (!m) return [];
+    const capInfo = capacityCache[name];
     return [{
       name,
       label: m.label,
       carrierMix: m.carrierMix ?? [],
-      capacityMix: capacityCache[name] ?? [],
-      summary: m.summary ?? [],
+      capacityMix: capInfo?.mix ?? [],
+      summary: splitCapacitySummary(m.summary ?? [], capInfo),
       full: needFull ? (fullCache[name] ?? 'loading') : undefined,
     }];
   });

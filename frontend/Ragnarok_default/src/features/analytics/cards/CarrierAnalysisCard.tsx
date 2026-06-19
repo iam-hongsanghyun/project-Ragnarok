@@ -88,6 +88,9 @@ export function CarrierAnalysisCard({ results, model }: Props) {
         for (let i = 0; i < d.curtailmentSeries.length; i++) curt += Math.max(0, d.curtailmentSeries[i]?.curtailment ?? 0) * snapshotWeight;
         hasCurt = true;
       }
+      // Safety net: if no input p_nom was available, fall back to peak availability
+      // (= p_nom × max p_max_pu) so a live run never reports zero capacity.
+      if (nameplate <= 0) nameplate = d.availableSeries.reduce((m, p) => Math.max(m, p.available), 0);
     } else {
       // Stored run: pre-aggregated energy + curtailment (absent ⇒ idle, 0).
       const ge = geByName.get(name);
