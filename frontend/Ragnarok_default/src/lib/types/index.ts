@@ -786,16 +786,27 @@ export interface QueueJob {
   finishedAt?: string | null;
   error?: string | null;
   payloadAvailable?: boolean;
+  /** Cores assigned to this solve — actual once running, projected while queued. */
+  cores?: number | null;
   // Display-only run settings.
   snapshots?: number | null;
   snapshotWeight?: number | null;
   scenarioLabel?: string | null;
   solver?: string | null;
+  solverThreads?: number | null;
   carbonPrice?: number | null;
   rolling?: boolean;
   pathway?: boolean;
   backend?: string | null;
   filename?: string | null;
+}
+
+/** Response of GET /api/queue: the jobs plus the server's concurrency budget. */
+export interface QueueResponse {
+  jobs: QueueJob[];
+  concurrency: number;
+  maxConcurrency: number;
+  cpuCount: number;
 }
 
 export type AnalyticsFocus =

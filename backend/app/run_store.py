@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import secrets
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -551,6 +552,28 @@ def _db_path(name: str) -> Path:
     return RUNS_DIR / f"{name}.db"
 
 
+def _unique_name(base: str) -> str:
+    """A run name whose .db file does not yet exist.
+
+    ``_derive_name`` stamps to the second, so two concurrent solves of the same
+    scenario finishing in the same second would derive the same name — and
+    ``_build_run_db`` unlinks+recreates, silently overwriting the first run. Add
+    a ``-2``/``-3``… suffix (then a short hex token as a pathological fallback)
+    so each concurrent run keeps its own file. At concurrency 1 the base name is
+    always free, so names are unchanged.
+    """
+    if not _db_path(base).exists():
+        return base
+    for i in range(2, 100):
+        cand = f"{base}-{i}"
+        if not _db_path(cand).exists():
+            return cand
+    while True:
+        cand = f"{base}-{secrets.token_hex(2)}"
+        if not _db_path(cand).exists():
+            return cand
+
+
 @contextmanager
 def _connect(name: str) -> Iterator[sqlite3.Connection]:
     """Open a run db for one operation and ALWAYS close it (see sqlite_store:
@@ -785,7 +808,7 @@ def store_run(
         scenario = scenario or {}
         RUNS_DIR.mkdir(parents=True, exist_ok=True)
 
-        name = _derive_name(model, scenario, options)
+        name = _unique_name(_derive_name(model, scenario, options))
         saved_at = datetime.now(timezone.utc).isoformat()
         filename = str(options.get("filename") or "")
         label = _label_for_bundle(scenario, options, filename)

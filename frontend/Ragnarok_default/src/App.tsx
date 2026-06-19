@@ -269,10 +269,13 @@ function AppInner() {
   const [status, setStatus] = useState('Ready. Open a workbook or import a project.');
   const [fileHandle, setFileHandle] = useState<BrowserFileHandle | null>(null);
   const [jumpTo, setJumpTo] = useState<{ sheet: string; rowIndex: number } | null>(null);
-  // Server-side run queue (serial). Runs are enqueued and execute one at a time;
-  // the frontend polls /api/queue, shows retained queue rows in the Queue tab,
-  // and is notified when active rows finish (successful runs also appear in History).
+  // Server-side run queue. Runs are enqueued and execute up to `queueConcurrency`
+  // at a time (1 = serial queue, the default); the frontend polls /api/queue,
+  // shows retained queue rows in the Queue tab, and is notified when active rows
+  // finish (successful runs also appear in History).
   const [queueJobs, setQueueJobs] = useState<QueueJob[]>([]);
+  const [queueConcurrency, setQueueConcurrency] = useState(1);
+  const [queueCpuCount, setQueueCpuCount] = useState(1);
   const seenTerminalRef = useRef<Set<string>>(new Set());
   const queueStatusRef = useRef<Map<string, QueueJob['status']>>(new Map());
 
@@ -1558,6 +1561,8 @@ function AppInner() {
       if (!resp.ok) return;
       const data = await resp.json();
       const jobs: QueueJob[] = Array.isArray(data.jobs) ? data.jobs : [];
+      if (typeof data.concurrency === 'number') setQueueConcurrency(data.concurrency);
+      if (typeof data.cpuCount === 'number') setQueueCpuCount(data.cpuCount);
       const previousStatuses = queueStatusRef.current;
       setQueueJobs(jobs);
       let anyFinished = false;
@@ -1585,6 +1590,31 @@ function AppInner() {
       /* backend unreachable — leave the queue as-is */
     }
   }, [showToast, refreshBackendRuns]);
+
+  // Set how many solves run at once (1 = serial queue). The backend clamps to
+  // the core count and persists the choice; running jobs are never interrupted.
+  const handleSetQueueConcurrency = useCallback(async (value: number): Promise<void> => {
+    try {
+      const resp = await fetch(`${API_BASE}/api/queue/concurrency`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value }),
+      });
+      if (!resp.ok) throw new Error((await resp.text()) || 'Failed to update concurrency.');
+      const data = await resp.json();
+      if (typeof data.concurrency === 'number') setQueueConcurrency(data.concurrency);
+      if (typeof data.cpuCount === 'number') setQueueCpuCount(data.cpuCount);
+      showToast(
+        data.concurrency > 1
+          ? `Running up to ${data.concurrency} solves at once`
+          : 'Queue mode — one solve at a time',
+        'info',
+      );
+      void refreshQueue();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Failed to update concurrency.', 'error');
+    }
+  }, [showToast, refreshQueue]);
 
   // Poll fast (2.5s) while jobs are active so the Queue tab stays live and the
   // completion toast fires promptly; back off to a slow heartbeat (15s) when the
@@ -2544,6 +2574,9 @@ function AppInner() {
                 {historySubTab === 'Queue' ? (
                   <QueueView
                     jobs={queueJobs}
+                    concurrency={queueConcurrency}
+                    cpuCount={queueCpuCount}
+                    onSetConcurrency={(n) => void handleSetQueueConcurrency(n)}
                     onCancel={handleCancelQueueItem}
                     onRerun={handleRerunQueueItem}
                     onImport={handleImportQueueItem}

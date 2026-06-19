@@ -2953,6 +2953,63 @@ path.leaflet-interactive:focus {
 .queue-status--staged { color: var(--muted); font-style: italic; }
 .topbar-queue { display: inline-flex; align-items: center; gap: 6px; }
 
+/* ── Queue toolbar: parallel-runs control + core-budget bar ──────────── */
+.queue-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+  padding: 10px 0 6px;
+}
+.queue-conc-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.queue-conc-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.queue-conc-select {
+  font-size: 0.8rem;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+.queue-core-budget {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 240px;
+  flex: 1 1 240px;
+  max-width: 420px;
+}
+.queue-core-bar {
+  position: relative;
+  flex: 1 1 auto;
+  height: 8px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.queue-core-fill {
+  display: block;
+  height: 100%;
+  background: var(--brand);
+  transition: width 0.3s ease;
+}
+.queue-core-fill.is-over { background: var(--danger); }
+.queue-core-text {
+  font-size: 0.74rem;
+  font-family: var(--font-mono);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.queue-core-text.is-over { color: var(--danger); font-weight: 600; }
+.queue-conc-hint { margin: 0 0 10px; }
+
 /* Flat, full-width rows (no card chrome) — one run per line, info horizontal. */
 .history-list {
   display: flex;

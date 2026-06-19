@@ -1,9 +1,11 @@
 /**
- * Queue view — the backend's serial run queue.
+ * Queue view — the backend's run queue.
  *
- * Runs execute one at a time. Each row mirrors the History row design (flat,
- * full-width) and carries the run's settings plus a Cancel action; cancelling
- * the currently-running job kills it and the queue advances to the next.
+ * Runs execute up to "Parallel runs" at a time (1 = serial queue, the default).
+ * A core-budget bar shows how many CPU cores the running solves are using out of
+ * what's available. Each row mirrors the History row design (flat, full-width)
+ * and carries the run's settings, its assigned core count, and a Cancel action;
+ * cancelling a running job kills it and frees its slot for the next.
  * Finished/cancelled/failed rows stay until deleted so they can be rerun.
  */
 import React from 'react';
@@ -12,6 +14,11 @@ import { formatRelTime } from 'lib/utils/formatRelTime';
 
 interface QueueViewProps {
   jobs: QueueJob[];
+  /** Max solves running at once (1 = serial queue). */
+  concurrency: number;
+  /** Cores available on the host — the ceiling for concurrency and the bar. */
+  cpuCount: number;
+  onSetConcurrency: (value: number) => void;
   onCancel: (id: string) => void;
   onRerun: (id: string) => void;
   onImport: (id: string) => void;
@@ -19,17 +26,66 @@ interface QueueViewProps {
 }
 
 export function QueueView({
-  jobs, onCancel, onRerun, onImport, onDelete,
+  jobs, concurrency, cpuCount, onSetConcurrency, onCancel, onRerun, onImport, onDelete,
 }: QueueViewProps) {
   // Only "queued" items get a live position number; "staged" jobs are parked
   // and never auto-run, so they're numbered separately as "(paused)".
   let queuePos = 0;
+
+  // Cores in use right now = sum over the running solves. Over-subscribed only
+  // happens when the user pins explicit thread counts that exceed the host.
+  const running = jobs.filter((j) => j.status === 'running');
+  const assigned = running.reduce((sum, j) => sum + (j.cores ?? 0), 0);
+  const max = Math.max(1, cpuCount);
+  const over = assigned > max;
+  const fillPct = Math.min(100, (assigned / max) * 100);
+
   return (
     <div className="history-view">
+      <div className="queue-toolbar">
+        <label className="queue-conc-control">
+          <span className="queue-conc-label">Parallel runs</span>
+          <select
+            className="queue-conc-select"
+            value={Math.min(concurrency, max)}
+            onChange={(e) => onSetConcurrency(Number(e.target.value))}
+          >
+            {Array.from({ length: max }, (_, i) => i + 1).map((n) => (
+              <option key={n} value={n}>
+                {n === 1 ? '1 — Queue (one at a time)' : `${n} — Concurrent`}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <div className="queue-core-budget" title={`${assigned} of ${max} cores assigned to running solves`}>
+          <div className="queue-core-bar">
+            <span
+              className={`queue-core-fill${over ? ' is-over' : ''}`}
+              style={{ width: `${fillPct}%` }}
+            />
+          </div>
+          <span className={`queue-core-text${over ? ' is-over' : ''}`}>
+            Cores in use: {assigned} / {max}{over ? ' — over-subscribed' : ''}
+          </span>
+        </div>
+      </div>
+
+      <p className="sg-setting-hint queue-conc-hint">
+        {concurrency > 1
+          ? `Up to ${concurrency} solves run at once.`
+          : 'Solves run one at a time.'}{' '}
+        An explicit thread count (Settings → Solver) is honoured as-is; <b>Auto</b>{' '}
+        splits cores evenly across the parallel-runs setting (≈{Math.max(1, Math.floor(max / Math.max(1, concurrency)))} each now).
+        Leave headroom to avoid over-subscribing the CPU.
+      </p>
+
       {jobs.length === 0 ? (
         <div className="history-empty">
           The queue is empty — click Run to queue a solve, or "Queue next Run" to
-          stage one for later. Runs execute one at a time and stay here until deleted.
+          stage one for later. {concurrency > 1
+            ? `Up to ${concurrency} run at a time`
+            : 'Runs execute one at a time'} and stay here until deleted.
         </div>
       ) : (
         <div className="history-list">
@@ -92,6 +148,13 @@ function QueueRow({
       {when && (
         <span className="history-row-time" title={new Date(when).toLocaleString()}>
           {formatRelTime(when)}
+        </span>
+      )}
+      {/* Cores assigned to this solve — actual once running, projected while it
+          waits. Shown for active rows; terminal rows drop it to reduce clutter. */}
+      {active && job.cores != null && (
+        <span className="history-row-chip" title="CPU cores assigned to this solve">
+          {job.cores} core{job.cores === 1 ? '' : 's'}
         </span>
       )}
       {job.snapshots != null && <span className="history-row-chip">{job.snapshots} snaps</span>}

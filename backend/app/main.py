@@ -91,6 +91,7 @@ _jobs: dict[str, _Job] = {}
 def _solve_worker(
     payload: RunPayload | str,
     result_queue: "mp.Queue[tuple[str, Any]]",
+    thread_override: int | None = None,
 ) -> None:
     """Run in a child process. Puts ("ok", result) or ("err", message) on the queue.
 
@@ -143,6 +144,11 @@ def _solve_worker(
         if isinstance(payload, str):
             payload = _read_queue_payload(Path(payload))
         options = payload.options or {}
+        # The parent resolved this solve's core budget at dispatch (Auto =
+        # cpu // concurrency); pin it so HiGHS uses exactly what the Queue UI
+        # shows and concurrent solves don't oversubscribe the machine.
+        if thread_override is not None and int(thread_override) > 0:
+            options = {**options, "solverThreads": int(thread_override)}
         backend = get_backend(options.get("backend"))
         result = backend.run(payload.model, payload.scenario, options)
         if outcome_path is not None:
@@ -224,6 +230,75 @@ _QUEUE_META = "meta.json"
 # finishedAt}) — the disk-based completion signal that lets a solve survive a
 # backend restart (the new process adopts it instead of marking the job lost).
 _QUEUE_OUTCOME = "outcome.json"
+# Server-wide queue settings (currently just the concurrency limit). Persisted at
+# the queue root so a user's Queue-vs-Concurrency choice survives restarts.
+_QUEUE_SETTINGS = "settings.json"
+
+# Cores available to divide between concurrent solves. Also the hard ceiling for
+# the user-set concurrency (more parallel solves than cores only thrashes).
+_CPU_COUNT = max(1, os.cpu_count() or 1)
+
+
+def _read_queue_concurrency() -> int:
+    """Startup default for max concurrent solves, from RAGNAROK_QUEUE_CONCURRENCY.
+
+    Clamped to ``[1, _CPU_COUNT]``; any malformed value falls back to 1 (serial)
+    with a warning rather than crashing module import (a bare ``int()`` would
+    raise on ``"2.0"`` / ``""``). 1 reproduces the original serial queue exactly.
+    """
+    raw = os.environ.get("RAGNAROK_QUEUE_CONCURRENCY", "1")
+    try:
+        n = int(str(raw).strip())
+    except (TypeError, ValueError):
+        _queue_logger.warning(
+            "Invalid RAGNAROK_QUEUE_CONCURRENCY=%r; defaulting to 1 (serial).", raw
+        )
+        return 1
+    return max(1, min(n, _CPU_COUNT))
+
+
+# Mutable at runtime via POST /api/queue/concurrency; seeded from the env var,
+# then overridden by the persisted value (if any) on startup. Read live by the
+# pump each tick, so a change takes effect within one poll interval.
+_queue_concurrency: int = _read_queue_concurrency()
+
+
+def _queue_settings_path() -> Path:
+    return _QUEUE_DIR / _QUEUE_SETTINGS
+
+
+def _save_queue_concurrency() -> None:
+    try:
+        _write_json_atomic(_queue_settings_path(), {"concurrency": _queue_concurrency})
+    except Exception:  # noqa: BLE001
+        _queue_logger.exception("Failed to persist queue concurrency")
+
+
+def _load_queue_concurrency() -> None:
+    """Override the env default with the persisted value, if present and valid."""
+    global _queue_concurrency
+    path = _queue_settings_path()
+    try:
+        if not path.exists():
+            return
+        data = json.loads(path.read_text(encoding="utf-8"))
+        n = int(data.get("concurrency"))
+        _queue_concurrency = max(1, min(n, _CPU_COUNT))
+    except Exception:  # noqa: BLE001
+        _queue_logger.warning("Ignoring unreadable queue settings at %s", path)
+
+
+def _resolve_cores(solver_threads: Any) -> int:
+    """Cores a solve gets: an explicit positive count verbatim, else (Auto / 0)
+    an equal share of the machine, ``cpu // concurrency`` (>= 1). With
+    concurrency 1 the Auto share is all cores — the original behaviour."""
+    try:
+        n = int(solver_threads)
+    except (TypeError, ValueError):
+        n = 0
+    if n > 0:
+        return n
+    return max(1, _CPU_COUNT // max(1, _queue_concurrency))
 
 
 def _now_iso() -> str:
@@ -247,8 +322,15 @@ class _QueueItem:
     # mp.Process handle is gone, but the pid lets the new process check whether
     # the orphaned solver is still alive (recovery + cancel).
     pid: int | None = None
+    # Cores assigned to this solve, resolved at dispatch (see _resolve_cores).
+    # None until dispatched — to_dict then reports a live projection instead.
+    cores: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
+        # Running/done items report the cores actually assigned at dispatch; a
+        # still-queued item has none yet, so project from its solver-thread
+        # setting + the current concurrency (the UI previews it this way).
+        cores = self.cores if self.cores is not None else _resolve_cores(self.summary.get("solverThreads"))
         return {
             "id": self.id,
             "label": self.label,
@@ -258,6 +340,7 @@ class _QueueItem:
             "finishedAt": self.finished_at,
             "error": self.error,
             "payloadAvailable": self.payload_path.exists(),
+            "cores": cores,
             **self.summary,
         }
 
@@ -373,6 +456,7 @@ def _queue_meta(item: _QueueItem) -> dict[str, Any]:
         "finishedAt": item.finished_at,
         "error": item.error,
         "pid": item.pid,
+        "cores": item.cores,
         "payloadFile": _QUEUE_PAYLOAD,
     }
 
@@ -386,6 +470,7 @@ def _persist_queue_meta(item: _QueueItem) -> None:
 
 def _load_queue_from_disk() -> None:
     """Restore queued metadata and payload references from backend/data/queue."""
+    _load_queue_concurrency()
     if not _QUEUE_DIR.exists():
         return
     restored: list[_QueueItem] = []
@@ -403,6 +488,8 @@ def _load_queue_from_disk() -> None:
             error = meta.get("error")
             pid_raw = meta.get("pid")
             pid = pid_raw if isinstance(pid_raw, int) else None
+            cores_raw = meta.get("cores")
+            cores = cores_raw if isinstance(cores_raw, int) else None
             if status == "running":
                 # The previous backend died mid-solve. Three possibilities:
                 # 1) the worker FINISHED while we were down → adopt its outcome;
@@ -436,6 +523,7 @@ def _load_queue_from_disk() -> None:
                 finished_at=str(finished_at) if finished_at else None,
                 error=str(error) if error else None,
                 pid=pid,
+                cores=cores,
             )
             restored.append(item)
             if status != meta.get("status") or finished_at != meta.get("finishedAt"):
@@ -477,6 +565,9 @@ def _queue_summary(payload: RunPayload) -> dict[str, Any]:
         "snapshotWeight": opts.get("snapshotWeight"),
         "scenarioLabel": opts.get("scenarioLabel") or scen.get("label"),
         "solver": opts.get("solverType"),
+        # Raw solver-thread setting (0 = Auto). Drives the projected core count
+        # in the Queue UI before this job is dispatched.
+        "solverThreads": opts.get("solverThreads", 0),
         "carbonPrice": scen.get("carbonPrice"),
         "rolling": bool((opts.get("rollingConfig") or {}).get("enabled")),
         "pathway": bool((opts.get("pathwayConfig") or {}).get("enabled")),
@@ -507,65 +598,87 @@ def _find_queue_item(item_id: str) -> _QueueItem | None:
     return next((it for it in _run_queue if it.id == item_id), None)
 
 
-async def _run_queue_item(item: _QueueItem) -> None:
-    """Run one queued job to completion in a child process (serial)."""
-    ctx = mp.get_context("spawn")
-    item.result_queue = ctx.Queue()
-    item.proc = ctx.Process(
-        target=_solve_worker,
-        args=(str(item.payload_path), item.result_queue),
-        daemon=True,
-    )
-    item.status = "running"
-    item.started_at = _now_iso()
-    item.finished_at = None
-    item.error = None
-    # A rerun reuses this item's dir — drop any outcome from a previous attempt
-    # so restart-recovery can never adopt a stale result.
-    _queue_outcome_path(item.id).unlink(missing_ok=True)
-    item.proc.start()
-    item.pid = item.proc.pid  # persisted so a restarted backend can find the orphan
-    _persist_queue_meta(item)
+def _finalize_queue_item(item: _QueueItem) -> None:
+    """Guarantee a dispatched item never stays stuck at "running".
 
-    # Read the result FIRST. The worker puts a (possibly large) result dict on
-    # the queue and only then exits; a multiprocessing.Queue blocks the child's
-    # exit until that payload is drained by the parent, so calling join() before
-    # reading deadlocks (the job appears stuck "running" forever). Poll
-    # get_nowait without blocking the event loop until the message arrives.
-    status: str | None = None
-    data: Any = None
-    while True:
-        if item.status == "cancelled":
-            return
-        try:
-            status, data = item.result_queue.get_nowait()
-            break
-        except queue.Empty:
-            if not item.proc.is_alive():
-                break  # exited without delivering a result
-            await asyncio.sleep(0.3)
-
-    # The result is drained, so the child can now finish persisting (store_run
-    # runs after the put) and exit. Wait for that — process exit guarantees the
-    # run + its xlsx are on disk before we start the next job (serial, no
-    # contention). Bounded so a stuck child can never wedge the whole queue.
-    await asyncio.to_thread(item.proc.join, 600)
-    if item.proc.is_alive():
-        _queue_logger.warning("Queue item %s did not exit within 600s after result", item.id)
-    if item.status == "cancelled":
+    Each job runs as a fire-and-forget task (see _queue_pump), so an exception
+    thrown before the terminal-status assignment — e.g. ctx.Process(...) or
+    proc.start() raising — would otherwise leave status="running" forever and
+    permanently consume a concurrency slot. Force it to error here; leave
+    already-terminal states (done/error/cancelled) untouched.
+    """
+    if item.status == "running":
+        item.status = "error"
+        item.error = item.error or "Solve dispatch failed before completion."
+        item.finished_at = _now_iso()
         _persist_queue_meta(item)
-        return
-    if status == "ok":
-        item.status = "done"
-    elif status == "err":
-        item.status = "error"
-        item.error = str(data)
-    else:
-        item.status = "error"
-        item.error = "Worker exited without delivering a result."
-    item.finished_at = _now_iso()
-    _persist_queue_meta(item)
-    _queue_logger.info("Queue item %s finished: %s", item.id, item.status)
+        _queue_logger.error("Queue item %s forced to error in finalizer", item.id)
+
+
+async def _run_queue_item(item: _QueueItem) -> None:
+    """Run one already-claimed (status=='running') job in a child process.
+
+    The pump sets status/started_at/cores synchronously before scheduling this
+    coroutine (so the same item is never dispatched twice); here we only spawn
+    the worker, await its result, and record the terminal status. The try/finally
+    guarantees the slot is released even on an unexpected failure.
+    """
+    try:
+        ctx = mp.get_context("spawn")
+        item.result_queue = ctx.Queue()
+        item.proc = ctx.Process(
+            target=_solve_worker,
+            args=(str(item.payload_path), item.result_queue, item.cores),
+            daemon=True,
+        )
+        # A rerun reuses this item's dir — drop any outcome from a previous
+        # attempt so restart-recovery can never adopt a stale result.
+        _queue_outcome_path(item.id).unlink(missing_ok=True)
+        item.proc.start()
+        item.pid = item.proc.pid  # persisted so a restarted backend can find the orphan
+        _persist_queue_meta(item)
+
+        # Read the result FIRST. The worker puts a (possibly large) result dict on
+        # the queue and only then exits; a multiprocessing.Queue blocks the child's
+        # exit until that payload is drained by the parent, so calling join() before
+        # reading deadlocks (the job appears stuck "running" forever). Poll
+        # get_nowait without blocking the event loop until the message arrives.
+        status: str | None = None
+        data: Any = None
+        while True:
+            if item.status == "cancelled":
+                return
+            try:
+                status, data = item.result_queue.get_nowait()
+                break
+            except queue.Empty:
+                if not item.proc.is_alive():
+                    break  # exited without delivering a result
+                await asyncio.sleep(0.3)
+
+        # The result is drained, so the child can now finish persisting (store_run
+        # runs after the put) and exit. Wait for that — process exit guarantees the
+        # run + its xlsx are on disk. Bounded so a stuck child can never wedge its
+        # slot indefinitely; other concurrent jobs are unaffected.
+        await asyncio.to_thread(item.proc.join, 600)
+        if item.proc.is_alive():
+            _queue_logger.warning("Queue item %s did not exit within 600s after result", item.id)
+        if item.status == "cancelled":
+            _persist_queue_meta(item)
+            return
+        if status == "ok":
+            item.status = "done"
+        elif status == "err":
+            item.status = "error"
+            item.error = str(data)
+        else:
+            item.status = "error"
+            item.error = "Worker exited without delivering a result."
+        item.finished_at = _now_iso()
+        _persist_queue_meta(item)
+        _queue_logger.info("Queue item %s finished: %s", item.id, item.status)
+    finally:
+        _finalize_queue_item(item)
 
 
 async def _watch_orphan(item: _QueueItem) -> None:
@@ -600,23 +713,63 @@ async def _watch_orphan(item: _QueueItem) -> None:
 
 
 # Monotonic timestamp of the pump's last loop iteration — the health check uses
-# it to verify the background queue worker is actually ticking. While a solve is
-# RUNNING the pump is awaited inside _run_queue_item (no ticks), so health also
-# treats "a job is running" as alive.
+# it to verify the background queue worker is actually ticking. The pump now
+# dispatches jobs as fire-and-forget tasks and keeps ticking while they run, so
+# the heartbeat stays fresh throughout a solve.
 _PUMP_HEARTBEAT: float | None = None
+
+# Strong references to in-flight job tasks. asyncio holds only weak refs to
+# tasks created with ensure_future, so without this a job task could be
+# garbage-collected mid-run ("Task was destroyed but it is pending"). Discarded
+# in the done-callback.
+_inflight_tasks: "set[asyncio.Task]" = set()
+
+
+def _on_queue_task_done(task: "asyncio.Task") -> None:
+    _inflight_tasks.discard(task)
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        # _run_queue_item's finally already forced a terminal status; just log.
+        _queue_logger.error("Queue job task crashed", exc_info=exc)
 
 
 async def _queue_pump() -> None:
-    """Background loop: run the next queued job whenever none is running."""
+    """Background loop: keep up to ``_queue_concurrency`` solves running.
+
+    Each tick fills every free slot by claiming queued items in submitted order.
+    The claim (status→running, started_at, cores) is done SYNCHRONOUSLY before
+    ``ensure_future`` — with no ``await`` in between — so a second pump iteration
+    can never re-dispatch the same item (it already reads as "running"). With
+    concurrency 1 this is exactly the original one-at-a-time behaviour.
+    """
     global _PUMP_HEARTBEAT
     while True:
         try:
             _PUMP_HEARTBEAT = time.monotonic()
-            running = any(it.status == "running" for it in _run_queue)
-            nxt = next((it for it in _run_queue if it.status == "queued"), None)
-            if nxt is not None and not running:
-                await _run_queue_item(nxt)
-            else:
+            dispatched = False
+            running = sum(1 for it in _run_queue if it.status == "running")
+            free = _queue_concurrency - running
+            if free > 0:
+                for it in _run_queue:
+                    if free <= 0:
+                        break
+                    if it.status != "queued":
+                        continue
+                    # --- synchronous claim: no await until ensure_future ---
+                    it.status = "running"
+                    it.started_at = _now_iso()
+                    it.finished_at = None
+                    it.error = None
+                    it.cores = _resolve_cores(it.summary.get("solverThreads"))
+                    _persist_queue_meta(it)
+                    task = asyncio.ensure_future(_run_queue_item(it))
+                    _inflight_tasks.add(task)
+                    task.add_done_callback(_on_queue_task_done)
+                    free -= 1
+                    dispatched = True
+            if not dispatched:
                 await asyncio.sleep(0.4)
         except asyncio.CancelledError:
             raise
@@ -709,8 +862,9 @@ def health() -> dict[str, Any]:
         checks["runs"] = {"error": str(exc)}
         problems.append("runs")
 
-    # Queue: job counts + pump liveness (while a solve runs the pump is awaited
-    # inside it, so "running > 0" also counts as alive).
+    # Queue: job counts + pump liveness. The pump keeps ticking while solves run
+    # (they're fire-and-forget tasks), so the heartbeat alone is authoritative;
+    # "running > 0" is kept as a harmless extra signal.
     running = sum(1 for it in _run_queue if it.status == "running")
     pump_fresh = _PUMP_HEARTBEAT is not None and (time.monotonic() - _PUMP_HEARTBEAT) < 10.0
     pump_alive = pump_fresh or running > 0
@@ -980,8 +1134,31 @@ async def enqueue_run(payload: RunPayload, staged: bool = False) -> dict[str, An
 
 @app.get("/api/queue")
 def get_queue() -> dict[str, Any]:
-    """List queue items until the user explicitly deletes them."""
-    return {"jobs": [it.to_dict() for it in _run_queue]}
+    """List queue items, plus the concurrency setting + core budget for the UI."""
+    return {
+        "jobs": [it.to_dict() for it in _run_queue],
+        "concurrency": _queue_concurrency,
+        "maxConcurrency": _CPU_COUNT,
+        "cpuCount": _CPU_COUNT,
+    }
+
+
+@app.post("/api/queue/concurrency")
+def set_queue_concurrency(body: dict[str, Any]) -> dict[str, Any]:
+    """Set max concurrent solves (1 = serial queue). Clamped to [1, cpuCount].
+
+    Lowering it never kills running jobs — they finish and no new ones start
+    until a slot frees. Raising it lets the pump fill the new slots on its next
+    tick. Persisted so the choice survives a restart.
+    """
+    global _queue_concurrency
+    try:
+        n = int(body.get("value"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="`value` must be an integer.")
+    _queue_concurrency = max(1, min(n, _CPU_COUNT))
+    _save_queue_concurrency()
+    return {"concurrency": _queue_concurrency, "maxConcurrency": _CPU_COUNT, "cpuCount": _CPU_COUNT}
 
 
 @app.post("/api/queue/{item_id}/cancel")

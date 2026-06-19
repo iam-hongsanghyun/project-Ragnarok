@@ -215,6 +215,21 @@ def test_filename_label_stem_strips_extension_and_drops_defaults() -> None:
     assert run_store._filename_label_stem("ragnarok") == ""
 
 
+def test_unique_name_suffixes_on_collision(_runs_dir: Path) -> None:
+    # A free base name is returned unchanged (concurrency=1 / serial path).
+    assert run_store._unique_name("north-sea_2026-06-09T14-30-00") == "north-sea_2026-06-09T14-30-00"
+
+    # Two concurrent same-scenario solves finishing in the same second would
+    # derive the same base name; each must keep its own .db file rather than
+    # overwriting the first (last-writer-wins data loss).
+    _runs_dir.mkdir(parents=True, exist_ok=True)
+    base = "dup_2026-06-09T14-30-00"
+    run_store._db_path(base).write_bytes(b"")
+    assert run_store._unique_name(base) == f"{base}-2"
+    run_store._db_path(f"{base}-2").write_bytes(b"")
+    assert run_store._unique_name(base) == f"{base}-3"
+
+
 def test_results_split_writes_analytics_and_series(_runs_dir: Path) -> None:
     meta = run_store.store_run(
         {"buses": [{"name": "n1"}]},

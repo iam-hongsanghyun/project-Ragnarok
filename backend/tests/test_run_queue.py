@@ -33,6 +33,8 @@ def _payload(label: str = "A", snaps: int = 10) -> RunPayload:
 @pytest.fixture(autouse=True)
 def _clear_queue(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "_QUEUE_DIR", tmp_path / "queue")
+    # Each test starts from the serial default; monkeypatch restores after.
+    monkeypatch.setattr(main, "_queue_concurrency", 1)
     main._run_queue.clear()
     yield
     main._run_queue.clear()
@@ -251,3 +253,103 @@ def test_orphan_watcher_flips_running_to_done() -> None:
     asyncio.run(run_watch())
     assert item.status == "done"
     assert item.finished_at is not None
+
+
+# ── Concurrency: user-selectable parallel runs + per-run core budget ──────────
+
+
+def test_get_queue_reports_concurrency_and_core_budget() -> None:
+    body = main.get_queue()
+    assert body["concurrency"] == 1
+    assert body["maxConcurrency"] == main._CPU_COUNT
+    assert body["cpuCount"] == main._CPU_COUNT
+
+
+def test_set_concurrency_clamps_and_persists(monkeypatch) -> None:
+    monkeypatch.setattr(main, "_CPU_COUNT", 4)
+    # Above the core count clamps down; below 1 clamps up.
+    assert main.set_queue_concurrency({"value": 99})["concurrency"] == 4
+    assert main.set_queue_concurrency({"value": 0})["concurrency"] == 1
+
+    # A valid value is persisted and survives a reload (restart).
+    main.set_queue_concurrency({"value": 3})
+    monkeypatch.setattr(main, "_queue_concurrency", 1)
+    main._load_queue_concurrency()
+    assert main._queue_concurrency == 3
+
+
+def test_set_concurrency_rejects_non_int() -> None:
+    with pytest.raises(main.HTTPException) as exc:
+        main.set_queue_concurrency({"value": "lots"})
+    assert exc.value.status_code == 400
+
+
+def test_job_cores_auto_splits_by_concurrency(monkeypatch) -> None:
+    # Auto (solverThreads 0) → an equal share of the machine: cpu // concurrency.
+    monkeypatch.setattr(main, "_CPU_COUNT", 8)
+    monkeypatch.setattr(main, "_queue_concurrency", 4)
+    asyncio.run(main.enqueue_run(_payload("Auto")))
+    assert main.get_queue()["jobs"][0]["cores"] == 2  # 8 // 4
+
+    # An explicit thread count is honoured verbatim, regardless of concurrency.
+    pinned = _payload("Pinned")
+    pinned.options["solverThreads"] = 5
+    asyncio.run(main.enqueue_run(pinned))
+    assert main.get_queue()["jobs"][1]["cores"] == 5
+
+
+def test_pump_fills_up_to_concurrency_without_double_dispatch(monkeypatch) -> None:
+    # Replace the real solve with a stub that stays "running" so we can observe
+    # how many slots the pump fills, and prove no item is dispatched twice.
+    monkeypatch.setattr(main, "_CPU_COUNT", 8)
+    monkeypatch.setattr(main, "_queue_concurrency", 2)
+    dispatched: list[str] = []
+
+    async def _stub(item) -> None:
+        dispatched.append(item.id)
+        await asyncio.sleep(30)  # hold the slot; cancelled at teardown
+
+    monkeypatch.setattr(main, "_run_queue_item", _stub)
+    ids = [asyncio.run(main.enqueue_run(_payload(n)))["id"] for n in ("A", "B", "C")]
+
+    async def drive() -> None:
+        pump = asyncio.ensure_future(main._queue_pump())
+        await asyncio.sleep(1.0)
+        pump.cancel()
+        for t in list(main._inflight_tasks):
+            t.cancel()
+
+    asyncio.run(drive())
+
+    status = {j["id"]: j["status"] for j in main.get_queue()["jobs"]}
+    running = [i for i in ids if status[i] == "running"]
+    queued = [i for i in ids if status[i] == "queued"]
+    assert len(running) == 2          # exactly concurrency slots filled
+    assert len(queued) == 1           # the rest wait
+    assert len(dispatched) == 2       # no over-dispatch
+    assert len(set(dispatched)) == 2  # and never the same item twice
+    # Each running job recorded its resolved core share (8 // 2 = 4).
+    for it in main._run_queue:
+        if it.status == "running":
+            assert it.cores == 4
+
+
+def test_run_queue_item_finalizer_frees_slot_on_dispatch_failure(monkeypatch) -> None:
+    # If spawning the worker throws, the item must not stay stuck "running"
+    # (which would permanently consume a concurrency slot). The try/finally
+    # forces it to "error" so the slot is reclaimed.
+    asyncio.run(main.enqueue_run(_payload("Boom")))
+    item = main._run_queue[0]
+    item.status = "running"  # the pump claims it synchronously before dispatch
+
+    def _explode(*_a, **_k):
+        raise RuntimeError("spawn failed")
+
+    monkeypatch.setattr(main.mp, "get_context", _explode)
+    # The coroutine re-raises (the pump's task done-callback logs it), but the
+    # finally clause must have already flipped the item off "running".
+    with pytest.raises(RuntimeError):
+        asyncio.run(main._run_queue_item(item))
+
+    assert item.status == "error"
+    assert item.error is not None
