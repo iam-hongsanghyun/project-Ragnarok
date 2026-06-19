@@ -1,7 +1,26 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { API_BASE } from 'lib/constants';
-import { BackendRunMeta, RunResults } from 'lib/types';
+import { BackendRunMeta, MixItem, RunResults } from 'lib/types';
+import { carrierColor, numberValue, stringValue } from 'lib/utils/helpers';
 import { ComparisonMatrix, ComparisonScenario, topicNeedsFull } from './ComparisonMatrix';
+
+/** Installed nameplate capacity (input p_nom) summed by carrier — the comparison
+ *  analogue of the result's energy carrierMix. Derived from the run's input
+ *  model (modelStatic), so it's available for any stored run. */
+function capacityMixFromModel(modelStatic: unknown): MixItem[] {
+  const gens = (modelStatic as { generators?: Array<Record<string, unknown>> } | null)?.generators ?? [];
+  const byCarrier = new Map<string, number>();
+  for (const r of gens) {
+    const name = stringValue(r.name as string | number | undefined);
+    if (!name || name.startsWith('load_shedding_')) continue;
+    const carrier = stringValue(r.carrier as string | number | undefined) || 'Other';
+    byCarrier.set(carrier, (byCarrier.get(carrier) ?? 0) + numberValue(r.p_nom as string | number | undefined));
+  }
+  return Array.from(byCarrier.entries())
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([label, value]) => ({ label, value, color: carrierColor(label) }));
+}
 
 // How many scenarios can sit side by side. The matrix fills the width with this
 // many 1fr columns (+ a legend column), so the cap keeps each chart readable.
@@ -115,6 +134,8 @@ export function ComparisonPane({ backendRuns, activeRunName, currencySymbol = '$
 
   // Lazy full-results cache, populated only when a FULL topic is active.
   const [fullCache, setFullCache] = useState<Record<string, RunResults | 'loading' | 'error'>>({});
+  // Per-carrier installed capacity (input p_nom), derived from the same fetch.
+  const [capacityCache, setCapacityCache] = useState<Record<string, MixItem[]>>({});
   const needFull = enabled.some(topicNeedsFull);
 
   useEffect(() => {
@@ -125,6 +146,7 @@ export function ComparisonPane({ backendRuns, activeRunName, currencySymbol = '$
         if (!resp.ok) throw new Error('fetch failed');
         const bundle = await resp.json();
         setFullCache((c) => ({ ...c, [name]: (bundle.result ?? {}) as RunResults }));
+        setCapacityCache((c) => ({ ...c, [name]: capacityMixFromModel(bundle.modelStatic) }));
       } catch {
         setFullCache((c) => ({ ...c, [name]: 'error' }));
       }
@@ -143,6 +165,7 @@ export function ComparisonPane({ backendRuns, activeRunName, currencySymbol = '$
       name,
       label: m.label,
       carrierMix: m.carrierMix ?? [],
+      capacityMix: capacityCache[name] ?? [],
       summary: m.summary ?? [],
       full: needFull ? (fullCache[name] ?? 'loading') : undefined,
     }];

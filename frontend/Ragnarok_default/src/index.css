@@ -5652,6 +5652,17 @@ th:hover .col-delete-btn {
 .stochastic-representative {
   background: var(--accent-soft, var(--brand-soft));
 }
+/* Carrier performance: 9 columns — let the table scroll inside the card on
+   narrow viewports instead of forcing the page to scroll sideways. */
+.carrier-table-wrap {
+  overflow-x: auto;
+}
+.carrier-perf-table .carrier-perf-total td {
+  font-weight: 700;
+  color: var(--text);
+  border-top: 2px solid var(--border-strong, var(--border));
+  border-bottom: none;
+}
 
 /* ── PR R2: 4 separated views ─────────────────────────────────────── */
 

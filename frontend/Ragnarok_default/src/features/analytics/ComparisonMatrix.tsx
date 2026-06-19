@@ -32,6 +32,9 @@ export interface ComparisonScenario {
   name: string;
   label: string;
   carrierMix: MixItem[];
+  /** Installed nameplate capacity (input p_nom) by carrier; populated with the
+   *  FULL fetch (needs the run's input model). */
+  capacityMix: MixItem[];
   summary: SummaryItem[];
   full?: RunResults | 'loading' | 'error';
 }
@@ -63,6 +66,7 @@ interface TopicDef {
 export const TOPICS: TopicDef[] = [
   { id: 'kpi', title: 'Key metrics', chartTypes: [], hasStacked: false, needsFull: false, defaults: { chartType: 'donut', stacked: false } },
   { id: 'generation-mix', title: 'Annual generation mix', chartTypes: ['donut', 'bar'], hasStacked: false, needsFull: false, defaults: { chartType: 'donut', stacked: false } },
+  { id: 'installed-capacity', title: 'Installed capacity by carrier', chartTypes: ['donut', 'bar'], hasStacked: false, needsFull: true, defaults: { chartType: 'bar', stacked: false } },
   { id: 'generation-time', title: 'Generation over time', chartTypes: ['area', 'line', 'bar'], hasStacked: true, needsFull: true, defaults: { chartType: 'area', stacked: true } },
   { id: 'cost', title: 'Cost breakdown', chartTypes: ['donut', 'bar'], hasStacked: false, needsFull: true, defaults: { chartType: 'donut', stacked: false } },
   { id: 'emissions', title: 'Emissions by carrier', chartTypes: ['donut', 'bar'], hasStacked: false, needsFull: true, defaults: { chartType: 'bar', stacked: false } },
@@ -76,6 +80,7 @@ export function topicNeedsFull(id: string): boolean {
 function unitFor(topicId: string, currencySymbol: string): string {
   switch (topicId) {
     case 'generation-mix': return 'MWh';
+    case 'installed-capacity': return 'MW';
     case 'generation-time': return 'MW';
     case 'cost': return currencySymbol;
     case 'emissions': return 'tCO₂e';
@@ -169,11 +174,15 @@ function expansionCellOption(r: RunResults, colorOf: Map<string, string>): EChar
 
 // ── Unified legend / colour map per row ───────────────────────────────────────
 
-function carrierColorMap(scenarios: ComparisonScenario[]): { legend: LegendItem[]; colorOf: Map<string, string> } {
+function mixColorMap(scenarios: ComparisonScenario[], get: (s: ComparisonScenario) => MixItem[]): { legend: LegendItem[]; colorOf: Map<string, string> } {
   const colorOf = new Map<string, string>();
   const order: string[] = [];
-  for (const s of scenarios) for (const m of s.carrierMix) if (!colorOf.has(m.label)) { colorOf.set(m.label, m.color); order.push(m.label); }
+  for (const s of scenarios) for (const m of get(s)) if (!colorOf.has(m.label)) { colorOf.set(m.label, m.color); order.push(m.label); }
   return { legend: order.map((l) => ({ key: l, label: l, color: colorOf.get(l)! })), colorOf };
+}
+
+function carrierColorMap(scenarios: ComparisonScenario[]): { legend: LegendItem[]; colorOf: Map<string, string> } {
+  return mixColorMap(scenarios, (s) => s.carrierMix);
 }
 
 /** Union of categories from each scenario's FULL results, palette-coloured. */
@@ -209,6 +218,16 @@ function TopicRow({ topic, scenarios, settings, onSettings, currencySymbol, grid
     if (topic.id === 'generation-mix') {
       const { legend: lg, colorOf } = carrierColorMap(scenarios);
       return { legend: lg, cells: scenarios.map((s) => ({ kind: 'chart' as const, option: categoryCellOption(s.carrierMix.map((m) => ({ label: m.label, value: m.value, color: m.color })), colorOf, settings, unit) })) };
+    }
+
+    // Installed capacity by carrier — FULL (needs each run's input model), the
+    // capacity analogue of the generation mix. Installed nameplate (input p_nom).
+    if (topic.id === 'installed-capacity') {
+      const { legend: lg, colorOf } = mixColorMap(scenarios, (s) => s.capacityMix);
+      return { legend: lg, cells: scenarios.map((s) => {
+        if (s.full === undefined || s.full === 'loading') return { kind: 'loading' as const };
+        return { kind: 'chart' as const, option: categoryCellOption(s.capacityMix.map((m) => ({ label: m.label, value: m.value, color: m.color })), colorOf, settings, unit) };
+      }) };
     }
 
     // Generation over time — FULL, carrier-coloured.

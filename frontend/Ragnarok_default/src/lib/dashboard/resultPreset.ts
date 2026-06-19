@@ -105,10 +105,13 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   const priceDur: Card = { id: id('dur-price'), kind: 'duration-curve', source: 'price' };
   rows.push(row({ cards: [{ card: loadDur }, { card: priceDur }] }));
 
-  // 5. Merit order + CO₂ shadow
+  // 5. Merit order + curtailment-by-carrier line chart. The curtailment chart
+  // takes the slot the CO₂-shadow card used to occupy; the carrier-analysis
+  // table below is now full-width. (The co2-shadow card kind still exists and
+  // can be added manually — only the default layout drops it.)
   const merit:  Card = { id: id('merit'),    kind: 'merit-order' };
-  const shadow: Card = { id: id('co2'),      kind: 'co2-shadow' };
-  rows.push(row({ cards: [{ card: merit }, { card: shadow }] }));
+  const curt = makeChart({ metricKey: 'curtailment', chartType: 'line' });
+  rows.push(row({ cards: [{ card: merit }, { card: curt }] }));
 
   // 6. Emissions breakdown (conditional)
   if (hasEmissionsBd) {
@@ -130,12 +133,9 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
     rows.push(row({ cards: [{ card: ce }] }));
   }
 
-  // 10. Carrier analysis + temporal curtailment line chart by carrier.
-  // System-level 'curtailment' metric: backend per-carrier curtailmentSeries,
-  // available in the light analytics bundle too (unlike per-generator details).
+  // 10. Carrier analysis — full-width performance table.
   const ca: Card = { id: id('ca'), kind: 'carrier-analysis' };
-  const curt = makeChart({ metricKey: 'curtailment', chartType: 'line' });
-  rows.push(row({ cards: [{ card: ca }, { card: curt }] }));
+  rows.push(row({ cards: [{ card: ca }] }));
 
   // 11. Stochastic scenarios (conditional)
   if (hasStoch) {
