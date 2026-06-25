@@ -1,6 +1,6 @@
 # Ragnarok TODO
 
-Last updated: 2026-06-13
+Last updated: 2026-06-24
 
 Single living todo for Ragnarok. Open work is grouped below by theme. Completed and deliberately-dropped items are kept at the bottom in compact form so they are not re-proposed.
 
@@ -13,7 +13,7 @@ Single living todo for Ragnarok. Open work is grouped below by theme. Completed 
 
 ## Open work
 
-Thirty-three items across twelve groups. Each group is internally coherent (shared infrastructure, schema, or interfaces); cross-group dependencies are called out in the *Why* column.
+Thirty-seven items across thirteen groups. Each group is internally coherent (shared infrastructure, schema, or interfaces); cross-group dependencies are called out in the *Why* column.
 
 ### Backend adapters
 
@@ -21,19 +21,19 @@ Adapters that plug into the existing `Backend` protocol (`backend/app/backends/`
 
 | ID | Pri | Surface | Task | Why | Cost |
 |---|---|---|---|---|---:|
-| `B1` | `High` | `Both` | **Merchant / price-taker optimisation** — asset-owner adapter that maximises one owner's profit (NPV of dispatch + investment) against an **exogenous price signal**: either user-supplied or taken from a stage-1 system cost-min run (`buses_t.marginal_price`). Stays a single-level LP/MILP on the existing **PyPSA + linopy + HiGHS** stack via `extra_functionality` (a market node priced at `−p(t)`, or a custom linear objective term — same hook carbon pricing and custom constraints already use). Genuinely non-trivial for storage / hydro / unit-commitment and for build-vs-retire timing; degenerate (a threshold rule) only for an unconstrained single asset. | Current solve answers *least-cost for the whole system*; investor / IPP / merchant use-cases need *most-profitable for this owner*. The two-stage form (system price → owner optimises against it) is the standard merchant-investor model and feeds **F2** directly. Foundation for **F1**, **F2**. Does **not** model market power — that is **B4**. | 24,000 |
+| `B1` | `High` | `Both` | **Merchant / price-taker optimisation** — asset-owner adapter that maximises one owner's profit (NPV of dispatch + investment) against an **exogenous price signal**: either user-supplied or taken from a stage-1 system cost-min run (`buses_t.marginal_price`). Stays a single-level LP/MILP on the existing **PyPSA + linopy + HiGHS** stack via `extra_functionality` (a market node priced at `−p(t)`, or a custom linear objective term — the same hook custom constraints already use; note carbon pricing is no longer in this hook — it became a build-time `marginal_cost` adder in v3.4.0). Genuinely non-trivial for storage / hydro / unit-commitment and for build-vs-retire timing; degenerate (a threshold rule) only for an unconstrained single asset. | Current solve answers *least-cost for the whole system*; investor / IPP / merchant use-cases need *most-profitable for this owner*. The two-stage form (system price → owner optimises against it) is the standard merchant-investor model and feeds **F2** directly. Foundation for **F1**, **F2**. Does **not** model market power — that is **B4**. | 24,000 |
 | `B2` | `High` | `Both` | **Simulation adapter** — non-optimisation. Given dispatch rules / bids / prices, step the system through the horizon and report flows, prices, and revenues. | Take a fixed strategy or operating rule and simulate the outcome under a chosen market structure. Different from **B3** (steady-state network analysis, not time-stepped market simulation). | 30,000 |
 | `B3` | `Medium` | `Both` | **Power-flow-only study mode** — non-optimisation `network.pf()` / `network.lpf()` workflow with its own UI surface. | Steady-state network-analysis use case that pairs with the optimiser / simulator pair (**B1**, **B2**). Currently `Not supported` in the README support matrix. | 16,000 |
 | `B4` | `Low` | `Both` | **Strategic / price-maker optimisation (deferred)** — endogenous prices where the owner's bids move the clearing price (market power, capacity withholding). A **bilevel / MPEC** problem (lower-level market clearing reformulated via KKT + complementarity) that PyPSA's single-level LP **cannot express**; needs a hand-built linopy / pyomo / gurobipy model (MILP via SOS1) or an iterative equilibrium solver — a different stack, not an adapter over PyPSA. Research-grade and data-hungry (requires rivals' cost curves). | The only flavour of profit-max that captures market power, i.e. *strategic* decision-making per company. Separated from **B1** because it is a different problem class and a different solver stack. **Deferred** — documented, not built. | 40,000 |
 
 ### Financial model
 
-Items that turn dispatch / capacity-expansion results into investor- and company-level financial metrics. Depends on **B1** for the revenue signal.
+Items that turn dispatch / capacity-expansion results into investor- and company-level financial metrics. **Revenue signal:** the *competitive-benchmark* revenue/profit comes from **F0** (shipped — see *Already shipped → Analytics & UX*); the *strategic / exogenous-price* revenue comes from **B1**.
 
 | ID | Pri | Surface | Task | Why | Cost |
 |---|---|---|---|---|---:|
 | `F1` | `High` | `Both` | **Company / owner dimension** — `owner` attribute on generators / storage / lines / stores, schema-driven through workbook I/O, with per-company KPIs (capacity, dispatch, revenue, emissions) and a company drill-down view in Analytics. | Components have no owner field today, so every analytics surface treats the system as one consolidated entity. Bridges dispatch results to **F2**. | 22,000 |
-| `F2` | `High` | `Both` | **Company-level financial model** — per-owner cashflow, revenue, opex, capex, debt service, IRR / NPV / DSCR / payback over the modelled horizon, driven by dispatch + capacity-expansion results. | Investors need project- and company-finance metrics, not raw revenue. Makes the tool usable for infrastructure investors and corporate planners. Required input to **R2**. | 26,000 |
+| `F2` | `High` | `Both` | **Company-level financial model** — per-owner cashflow, revenue, opex, capex, debt service, IRR / NPV / DSCR / payback over the modelled horizon, driven by dispatch + capacity-expansion results. | Investors need project- and company-finance metrics, not raw revenue. Makes the tool usable for infrastructure investors and corporate planners. Required input to **R2**. Revenue inputs: **F0** (competitive benchmark, shipped) and/or **B1** (merchant / strategic). | 26,000 |
 
 ### Power procurement
 
@@ -165,8 +165,7 @@ Items that tighten what History means and extend what can be brought into it. Hi
 
 | ID | Pri | Surface | Task | Why | Cost |
 |---|---|---|---|---|---:|
-| `H1` | `High` | `Both` | **Decouple "import project" from History** — currently `POST /api/import/project` calls `store_run` directly, so every imported ZIP/XLSX lands in History alongside solver runs. Change the flow: importing a project loads the model into the editor (like "File → Open") without creating a History entry. History entries are created only by (a) a completed solve, or (b) the new explicit `POST /api/import/result` path (**H2**). If the user wants the imported model to appear in History they can re-run it. Migration: existing import-sourced History entries should carry an `origin: "import"` tag so they remain accessible but are visually distinguished until they are cleaned up. Frontend change: the Import Project button in the sidebar calls a new `POST /api/import/project/load` endpoint that returns the model payload directly without persisting — the existing `POST /api/import/project` persists only when explicitly requested. | Importing a project is *opening a file*, not completing a run. Mixing opens and runs in History makes the list noisy and erodes its meaning as an audit trail of solver results. Users who want to see "what I had before I edited this model" already have the workbook itself; they do not need a History entry for it. | 12,000 |
-| `H2` | `High` | `Both` | **Import external XLSX results → persistent History entry** — a dedicated import path (`POST /api/import/result/xlsx`) that accepts an Excel results file produced *outside* Ragnarok (e.g. from the dashboard-importer plugin's output, a third-party model, or a manually assembled results table) and converts it into a full History DB entry. The backend maps the Excel sheets to Ragnarok's canonical result schema (`outputs.static` / `outputs.series`), writes the entry via `store_run`, and returns its `name` so the frontend can open it immediately in the History / Analytics views. Column-mapping rules are defined per source format in a small registry (extendable by plugins via a `result_mapper` hook); unrecognised sheets are stored verbatim and surfaced as raw tables. The entry is flagged `origin: "xlsx_import"` and tagged with the source filename and import timestamp. | Users who receive results from other tools (Excel-based models, consultant reports, plugin outputs) cannot currently bring those results into Ragnarok for comparison or analytics. This path makes every result — regardless of origin — available in History and comparable via the Comparison tab. Always-available: unlike a project import that loads a model state, this import is permanent in the run store and survives browser refresh / tab close / app restart. | 20,000 |
+| `H2′` | `Medium` | `Both` | **Pluggable result-mapper registry + raw-sheet surfacing** — the **core** of H2 shipped (see *Already shipped → Project exchange*): `POST /api/import/result` ingests a Ragnarok package verbatim or reconstructs analytics from a bare results `.xlsx` via `from_outputs`, persists with `origin="xlsx_import"`. What remains: per-source-format **column-mapping rules in a small registry** (extendable by plugins via a `result_mapper` hook) so arbitrary third-party result layouts map onto `outputs.{static,series}`, and **unrecognised sheets stored verbatim + surfaced as raw tables**. | Today's reconstruction handles Ragnarok's own schema and bare workbooks that already use canonical attribute names; a true third-party layout (different column names) needs a mapping layer. The residual after H2's core landed. | 10,000 |
 
 ### Architecture
 
@@ -182,33 +181,61 @@ Cross-cutting platform direction (not a single feature). Assumes a dedicated bac
 
 ## Suggested execution order
 
-Across groups, respecting cross-group dependencies marked above.
+Forward plan from 2026-06-24, respecting the cross-group dependencies marked above. The list is renumbered as one clean sequence (the previous pass had duplicate / skipped numbers).
 
-1. **H1** — Decouple import-project from History (small, clean-up; sequence first so History's semantic contract is clean before H2 adds a new import path).
-2. **H2** — Import external XLSX results → persistent History entry (depends on H1 for the `origin` tagging and the clean store_run contract).
-3. **T1** — Forecast tool (lightweight; immediately useful for pathway runs).
-2. **M2** — Demand response (small, modular — slots into the existing Load editor; useful for every other run from here on).
-3. **B1** — Profit-focused optimisation (foundation for the financial model layer).
-4. **F1** — Company / owner dimension (frontend-heavy; can run in parallel with **B1**).
-5. **F2** — Company-level financial model (consumes **B1** + **F1**).
-6. **R1** — Physical-climate-risk module.
-7. **R2** — Transition-risk module (depends on **F2**).
-10. **T2** — Reduced-order / clustering tool.
-11. **D1** — Profile / weather data layer.
-12. **I1** — Location-based data & model bootstrap (user surface above **D1**).
-13. **I4** — Renewable resource profile importer (polygon / buffer region selection).
-14. **I3** — Driver-based demand forecast.
-15. **M1** — Sector coupling (largest single item; lifts Ragnarok out of electricity-only).
-16. **W2** — Country starter models (KPG193-style baseline packs per country / year, composed from the importers above).
-17. **W1** — Guided model-builder wizard (composes every importer + tool + **M1**/**M2** above).
-18. **B2** — Simulation backend adapter.
-19. **B3** — Power-flow-only study mode.
-20. **A1** — Stochastic renewable profile generator (reuses the shipped stochastic engine; produces the ensemble for **A2**).
-21. **A2** — LOLE calculator (depends on **A1**).
-22. **PP1** — PPA contract modeler (depends on **B1** for a meaningful dispatch/price signal; can be front-loaded with an exogenous price series if **B1** is not yet ready).
-23. **PP2** — Procurement strategy optimizer (depends on **PP1** for single-contract valuation; the CVaR-LP layer adds on top).
-24. **L1** — Bifrost AI conversational model builder (new project wrapper; depends on Ragnarok backend API being stable — sequence after core importers and guided-workflow items are in place so the LLM has real data sources and schema to call into).
-25. **L2** — Bifrost data-ask loop (depends on **L1**).
+**Done:** ~~F0 — Asset profit & revenue reporting~~ (shipped 2026-06-26), ~~H1 — Decouple import-project from History~~ and ~~H2 (core) — Import external results → History~~ (verified already implemented 2026-06-26). See *Already shipped*.
+
+**Near-term — small, modular, useful for every run from here:**
+
+1. **T1** — Forecast / snapshot editor (lightweight; immediately useful for pathway runs).
+2. **M2** — Demand response (slots into the existing Load editor).
+3. **H2′** — Pluggable result-mapper registry + raw-sheet surfacing (the residual after H2's core; do when a real third-party result layout needs it).
+
+**Financial / strategic layer:**
+
+4. **B1** — Merchant / price-taker optimisation (foundation for the *strategic* financial layer; F0 already covers the competitive case).
+5. **F1** — Company / owner dimension (frontend-heavy; can run in parallel with **B1**).
+6. **F2** — Company-level financial model (consumes **F0**/**B1** + **F1**).
+7. **R1** — Physical-climate-risk module.
+8. **R2** — Transition-risk module (depends on **F2**).
+
+**Data & model-assembly layer:**
+
+9. **T2** — Reduced-order / clustering tool.
+10. **D1** — Profile / weather data layer.
+11. **I1** — Location-based data & model bootstrap (user surface above **D1**).
+12. **I4** — Renewable resource profile importer (polygon / buffer region selection).
+13. **I3** — Driver-based demand forecast.
+14. **I5** — Fuel & commodity-price importer (moves the dispatch answer more than any other input).
+15. **I6** — Hourly load & price (ENTSO-E / EIA-930).
+
+**Modelling reach & guided surfaces:**
+
+16. **M3** — Fuel system (efficiency-aware emissions / carbon; lands *with* **M1**).
+17. **M1** — Sector coupling (largest single item; lifts Ragnarok out of electricity-only — land together with **M3**).
+18. **W2** — Country starter models (per-country baseline packs, composed from the importers above).
+19. **W1** — Guided model-builder wizard (composes every importer + tool + **M1**/**M2**).
+
+**Backend adapters & adequacy:**
+
+20. **B2** — Simulation backend adapter.
+21. **B3** — Power-flow-only study mode.
+22. **A1** — Stochastic renewable profile generator (reuses the shipped stochastic engine; feeds **A2**).
+23. **A2** — LOLE calculator (depends on **A1**).
+
+**Procurement & conversational front-end:**
+
+24. **PP1** — PPA contract modeler (depends on **B1** for a meaningful price signal; front-loadable with an exogenous series).
+25. **PP2** — Procurement strategy optimizer (depends on **PP1**).
+26. **L1** — Bifrost AI conversational model builder (sequence after core importers + guided workflows so the LLM has real data sources and schema to call into).
+27. **L2** — Bifrost data-ask loop (depends on **L1**).
+
+**Off the linear path** (sequenced opportunistically, not blocking the above):
+
+- **I7**, **I8** — lower-priority calibration / policy importers.
+- **B4** — strategic / price-maker (MPEC) optimisation — research-grade, different solver stack; deferred.
+- **I9** — PyPSA-Earth network builder — heavy async job; deferred.
+- **X1**–**X6** — architecture / thin-browser direction; pursue after targeted perf wins prove insufficient.
 
 ## Already shipped
 
@@ -225,6 +252,8 @@ Compact history of work completed in earlier passes, grouped by area. Kept so co
 
 ### Project exchange
 
+- **`H1` Import-project decoupled from History** — "Import Project" is now *opening a file*, not a run. The frontend (`handleImportProject` in `App.tsx`) calls `POST /api/import/project/load`, which parses the package (`.zip`/`.xlsx`) and **returns the bundle without persisting**; the model + solved results load into the editor and `activeRunName` is cleared. History entries come only from a solve or the explicit `POST /api/import/result` path. `POST /api/import/project` (persisting) is retained for API clients that explicitly want it. Residual: a one-off backfill to tag pre-decouple import-sourced entries `origin:"import"` (cosmetic; no new such entries are created).
+- **`H2` (core) Import external results → persistent History** — `POST /api/import/result` (alias `/result/xlsx`) ingests a Ragnarok package verbatim or reconstructs analytics from a bare results `.xlsx` (rebuild network → inject outputs → `derive_imported_result`), persists via `store_run(origin="xlsx_import")`, returns the run name. The pluggable per-format mapper registry + raw-sheet surfacing remain as **H2′** (open).
 - Pure-JSON project export/import (PR #9) — backend returns schema-driven `outputs.{static,series}`; frontend assembles the project workbook locally. Sidebar split into Import Project / Export Project / Export Result.
 - `deriveRunResults` (PR #11) rebuilds summary / dispatch / costs / carrier mix / nodal balance / line loading / merit order / emissions / expansion / asset details from `(model, outputs)` on import. `co2Shadow` is the one field still needing a fresh solve.
 - Ragnarok metadata sheets round-trip end-to-end: settings (incl. date format, currency, solver config), active constraints, run window, scenarios, pathway, rolling-horizon, plugin analytics, CO2 shadow, solver narrative, import provenance.
@@ -234,6 +263,7 @@ Compact history of work completed in earlier passes, grouped by area. Kept so co
 
 ### Analytics & UX
 
+- **`F0` Asset economics (revenue / margin / capex recovery)** — competitive-benchmark profit read out of the cost-min solve with **no extra solve** (least-cost dispatch = perfectly-competitive profit-max equilibrium). `build_generator_economics(network)` in `backend/pypsa/results/market.py` computes per-generator / per-storage / per-carrier revenue (Σ LMP·dispatch), gross margin, capture price, and capex recovery (margin ÷ annualised `capital_cost`·`p_nom_opt`, pro-rated to the modeled horizon); wired into both analytics paths (`results/__init__.py` solve + `from_outputs.py` import). `GeneratorEconomicsCard` renders it (default Result layout + addable card); XLSX export sheets `OUT_EconBy{Generator,Carrier,Storage}`. Preserved through the client `deriveRunResults` merge (`App.tsx`), so it shows for solves, stored/light views, pathway runs, and re-imported bundles that carry it. Math pinned by `backend/tests/test_generator_economics.py` (hand-computed + a real-solve check that the marginal unit earns zero margin). **Not** recomputed by `deriveRunResults`, so a bundle fully re-derived from bare outputs with no backend economics (e.g. a pre-F0 export re-opened) lacks it — acceptable, not a functional hole.
 - Capacity-by-period chart for pathway runs (PR #16).
 - Cross-scenario `ScenarioPivotCard` in the Comparison tab — Δ columns vs the leftmost scenario; appears when ≥ 2 scenarios are present.
 - Carrier-level analytics card — capacity factor, curtailment ratio, effective cost / MWh, emissions intensity.
