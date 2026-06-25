@@ -372,6 +372,10 @@ function AppInner() {
       pluginAnalytics: effResults.pluginAnalytics,
       meritOrder: effResults.meritOrder,
       co2Shadow: effResults.co2Shadow,
+      // Backend-provided (deriveRunResults doesn't recompute it); preserve it
+      // through the merge like meritOrder/co2Shadow so it survives for pathway
+      // and reconstructed bundles that carry it.
+      generatorEconomics: effResults.generatorEconomics,
       appliedConstraints: effResults.appliedConstraints,
       emissionsBreakdown: effResults.emissionsBreakdown,
       outputs: effResults.outputs,

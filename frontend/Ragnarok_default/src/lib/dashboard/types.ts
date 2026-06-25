@@ -23,6 +23,7 @@ export type CardKind =
   | 'duration-curve'
   | 'merit-order'
   | 'co2-shadow'
+  | 'generator-economics'
   | 'emissions-breakdown'
   | 'capacity-expansion'
   | 'capacity-by-period'
@@ -128,6 +129,10 @@ export interface Co2ShadowCardData extends CardBase {
   kind: 'co2-shadow';
 }
 
+export interface GeneratorEconomicsCardData extends CardBase {
+  kind: 'generator-economics';
+}
+
 export interface EmissionsBreakdownCardData extends CardBase {
   kind: 'emissions-breakdown';
 }
@@ -161,6 +166,7 @@ export type Card =
   | DurationCurveCardData
   | MeritOrderCardData
   | Co2ShadowCardData
+  | GeneratorEconomicsCardData
   | EmissionsBreakdownCardData
   | CapacityExpansionCardData
   | CapacityByPeriodCardData

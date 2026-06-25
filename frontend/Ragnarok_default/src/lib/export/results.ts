@@ -185,6 +185,60 @@ export function buildFullResultsWorkbook(
     })));
   }
 
+  // Asset economics (F0) — per-generator, per-carrier, and storage
+  if (results.generatorEconomics) {
+    const econ = results.generatorEconomics;
+    if (econ.generators.length > 0) {
+      appendSheet('OUT_EconByGenerator', econ.generators.map((g) => ({
+        name: g.name,
+        carrier: g.carrier,
+        bus: g.bus,
+        energy_MWh: g.energyMwh,
+        capacity_MW: g.capacityMw,
+        capture_price: g.capturePrice ?? '',
+        revenue: g.revenue,
+        variable_cost: g.variableCost,
+        gross_margin: g.grossMargin,
+        fixed_cost_annual: g.fixedCostAnnual,
+        fixed_cost_horizon: g.fixedCostHorizon,
+        net_horizon: g.netHorizon,
+        recovery_pct: g.recoveryPct ?? '',
+      })));
+    }
+    if (econ.byCarrier.length > 0) {
+      appendSheet('OUT_EconByCarrier', econ.byCarrier.map((c) => ({
+        carrier: c.carrier,
+        energy_MWh: c.energyMwh,
+        capacity_MW: c.capacityMw,
+        capture_price: c.capturePrice ?? '',
+        revenue: c.revenue,
+        variable_cost: c.variableCost,
+        gross_margin: c.grossMargin,
+        fixed_cost_annual: c.fixedCostAnnual,
+        fixed_cost_horizon: c.fixedCostHorizon,
+        net_horizon: c.netHorizon,
+        recovery_pct: c.recoveryPct ?? '',
+      })));
+    }
+    if (econ.storage.length > 0) {
+      appendSheet('OUT_EconByStorage', econ.storage.map((s) => ({
+        name: s.name,
+        carrier: s.carrier,
+        bus: s.bus,
+        discharged_MWh: s.energyDischargedMwh,
+        charged_MWh: s.energyChargedMwh,
+        capacity_MW: s.capacityMw,
+        revenue: s.revenue,
+        variable_cost: s.variableCost,
+        gross_margin: s.grossMargin,
+        fixed_cost_annual: s.fixedCostAnnual,
+        fixed_cost_horizon: s.fixedCostHorizon,
+        net_horizon: s.netHorizon,
+        recovery_pct: s.recoveryPct ?? '',
+      })));
+    }
+  }
+
   // CO2 shadow price
   if (results.co2Shadow && results.co2Shadow.found) {
     appendSheet('OUT_CO2Shadow', [{

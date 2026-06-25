@@ -68,6 +68,9 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   const hasEmissionsBd = !!(results.emissionsBreakdown && (
     results.emissionsBreakdown.byCarrier.length > 0 || results.emissionsBreakdown.byGenerator.length > 0
   ));
+  const hasEconomics = !!(results.generatorEconomics && (
+    results.generatorEconomics.generators.length > 0 || results.generatorEconomics.storage.length > 0
+  ));
 
   const rows: Array<ReturnType<typeof row>> = [];
 
@@ -131,6 +134,12 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   if (hasExpansion) {
     const ce: Card = { id: id('ce'), kind: 'capacity-expansion' };
     rows.push(row({ cards: [{ card: ce }] }));
+  }
+
+  // 9b. Asset economics — revenue / margin / capex recovery (F0, conditional)
+  if (hasEconomics) {
+    const econ: Card = { id: id('econ'), kind: 'generator-economics' };
+    rows.push(row({ cards: [{ card: econ }] }));
   }
 
   // 10. Carrier analysis — full-width performance table.

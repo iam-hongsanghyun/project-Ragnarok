@@ -403,6 +403,87 @@ export interface Co2Shadow {
   note: string;
 }
 
+// ── Asset economics (F0 — revenue / margin / capex recovery) ──────────────────
+// Competitive-benchmark profit read out of the cost-min solve (no extra solve):
+// under the least-cost LP, optimal dispatch is the perfectly-competitive
+// profit-max equilibrium. Money columns are on the modeled-horizon basis;
+// `recoveryPct` is scale-invariant. Backend-provided (see market.py) and
+// preserved through the client deriveRunResults merge; present whenever the
+// backend supplied it (solve, stored/light view, pathway, result-import).
+// deriveRunResults does not recompute it, so a bundle fully re-derived from bare
+// outputs with no backend economics (e.g. a pre-F0 export re-opened) lacks it.
+
+export interface GeneratorEconomicsEntry {
+  name: string;
+  carrier: string;
+  bus: string;
+  color: string;
+  energyMwh: number;
+  capacityMw: number;
+  revenue: number;
+  variableCost: number;
+  grossMargin: number;
+  /** Volume-weighted average price captured ($/MWh); null when no energy. */
+  capturePrice: number | null;
+  fixedCostAnnual: number;
+  fixedCostHorizon: number;
+  netHorizon: number;
+  /** 100·grossMargin / fixedCostHorizon; null when there is no fixed cost. */
+  recoveryPct: number | null;
+}
+
+export interface StorageEconomicsEntry {
+  name: string;
+  carrier: string;
+  bus: string;
+  color: string;
+  energyDischargedMwh: number;
+  energyChargedMwh: number;
+  capacityMw: number;
+  revenue: number;
+  variableCost: number;
+  grossMargin: number;
+  fixedCostAnnual: number;
+  fixedCostHorizon: number;
+  netHorizon: number;
+  recoveryPct: number | null;
+}
+
+export interface CarrierEconomicsEntry {
+  carrier: string;
+  color: string;
+  energyMwh: number;
+  capacityMw: number;
+  revenue: number;
+  variableCost: number;
+  grossMargin: number;
+  capturePrice: number | null;
+  fixedCostAnnual: number;
+  fixedCostHorizon: number;
+  netHorizon: number;
+  recoveryPct: number | null;
+}
+
+export interface GeneratorEconomics {
+  currency: string;
+  modeledHours: number;
+  horizonYears: number;
+  generators: GeneratorEconomicsEntry[];
+  storage: StorageEconomicsEntry[];
+  byCarrier: CarrierEconomicsEntry[];
+  system: {
+    revenue: number;
+    variableCost: number;
+    grossMargin: number;
+    fixedCostAnnual: number;
+    fixedCostHorizon: number;
+    netHorizon: number;
+    recoveryPct: number | null;
+    generatorsModeled: number;
+    generatorsRecovered: number;
+  };
+}
+
 // ── Capacity expansion result ─────────────────────────────────────────────────
 
 export interface ExpansionAsset {
@@ -592,6 +673,10 @@ export interface RunResults {
   expansionResults?: ExpansionAsset[];
   meritOrder?: MeritOrderEntry[];
   co2Shadow?: Co2Shadow;
+  /** Per-asset competitive-benchmark economics (F0). Backend-provided and
+   *  preserved through the deriveRunResults merge; see the GeneratorEconomics
+   *  doc comment for when it is present. */
+  generatorEconomics?: GeneratorEconomics;
   appliedConstraints?: AppliedConstraint[];
   emissionsBreakdown?: EmissionsBreakdown;
   narrative: string[];

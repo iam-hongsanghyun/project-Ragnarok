@@ -35,7 +35,12 @@ from .dispatch import (
 from .emissions import build_emissions_breakdown
 from .expansion import build_expansion_results
 from .full_outputs import build_full_outputs
-from .market import build_applied_constraints, build_co2_shadow, build_merit_order
+from .market import (
+    build_applied_constraints,
+    build_co2_shadow,
+    build_generator_economics,
+    build_merit_order,
+)
 from .summaries import _rolling_window_summaries, _pathway_period_summaries
 
 # Solve-phase timing and notes are logged here. With the run worker no longer
@@ -541,6 +546,7 @@ def run_pypsa(
     merit_order = build_merit_order(network)
     co2_shadow = build_co2_shadow(network, float(scenario.get("carbonPrice", 0.0)), currency)
     applied_constraints = build_applied_constraints(network)
+    generator_economics = build_generator_economics(network, currency)
     emissions_breakdown = build_emissions_breakdown(network, emissions_factors)
 
     cost_breakdown = [
@@ -680,6 +686,7 @@ def run_pypsa(
         "meritOrder": merit_order,
         "co2Shadow": co2_shadow,
         "appliedConstraints": applied_constraints,
+        "generatorEconomics": generator_economics,
         "emissionsBreakdown": emissions_breakdown,
         "narrative": notes,
         "runMeta": {

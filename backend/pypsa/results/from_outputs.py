@@ -37,7 +37,12 @@ from .dispatch import (
 )
 from .emissions import build_emissions_breakdown
 from .expansion import build_expansion_results
-from .market import build_applied_constraints, build_co2_shadow, build_merit_order
+from .market import (
+    build_applied_constraints,
+    build_co2_shadow,
+    build_generator_economics,
+    build_merit_order,
+)
 
 # Fallback discount rate when an imported file omits the setting (build_network
 # requires it). Matches the app's default; only annualises extendable-asset
@@ -249,6 +254,7 @@ def derive_imported_result(
     carbon_price = float((scenario or {}).get("carbonPrice", 0.0))
     co2_shadow = build_co2_shadow(network, carbon_price, currency)
     applied_constraints = build_applied_constraints(network)
+    generator_economics = build_generator_economics(network, currency)
     emissions_breakdown = build_emissions_breakdown(network, emissions_factors)
 
     # Nodal balance + line loading (mirror run_pypsa).
@@ -321,6 +327,7 @@ def derive_imported_result(
         "meritOrder": merit_order,
         "co2Shadow": co2_shadow,
         "appliedConstraints": applied_constraints,
+        "generatorEconomics": generator_economics,
         "emissionsBreakdown": emissions_breakdown,
         "narrative": notes,
         "runMeta": {
