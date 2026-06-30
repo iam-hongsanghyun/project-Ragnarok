@@ -134,7 +134,7 @@ function newNotesCard(): Card { return { id: newId('notes'), kind: 'notes' }; }
 /** Kinds offered from an empty placeholder cell's "+" menu. The Pivot chart is
  *  the primary chart builder; the legacy metric chart stays available. */
 const ADDABLE_CARDS = [
-  { kind: 'pivot', label: 'Chart' },
+  { kind: 'pivot', label: 'Pivot chart' },
   { kind: 'chart', label: 'Metric chart' },
   { kind: 'map',   label: 'Map' },
   { kind: 'notes', label: 'Run notes' },
