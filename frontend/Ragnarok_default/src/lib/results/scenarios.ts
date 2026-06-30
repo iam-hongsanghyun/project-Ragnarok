@@ -2,6 +2,7 @@ import {
   CarbonPriceScheduleEntry,
   ContingencyConfig,
   CustomConstraint,
+  FinanceConfig,
   GridRow,
   MgaConfig,
   MerchantConfig,
@@ -89,6 +90,10 @@ export function defaultOwnerColumn(): string {
   return 'owner';
 }
 
+export function defaultFinanceConfig(): FinanceConfig {
+  return { gearing: 0, interestRate: 0.05, tenorYears: 15 };
+}
+
 function cloneStochasticConfig(config: StochasticConfig): StochasticConfig {
   return {
     ...config,
@@ -117,6 +122,10 @@ function cloneMgaConfig(config: MgaConfig): MgaConfig {
 
 function cloneMerchantConfig(config: MerchantConfig): MerchantConfig {
   return { ...config, priceSeries: config.priceSeries ? [...config.priceSeries] : undefined };
+}
+
+function cloneFinanceConfig(config: FinanceConfig): FinanceConfig {
+  return { ...config };
 }
 
 function cloneSchedule(schedule: CarbonPriceScheduleEntry[]): CarbonPriceScheduleEntry[] {
@@ -151,6 +160,7 @@ export function buildScenarioPreset(input: {
   mgaConfig?: MgaConfig;
   merchantConfig?: MerchantConfig;
   ownerColumn?: string;
+  financeConfig?: FinanceConfig;
   samplingConfig?: SamplingConfig;
   constraints: CustomConstraint[];
 }): ScenarioPreset {
@@ -176,6 +186,7 @@ export function buildScenarioPreset(input: {
     mgaConfig: cloneMgaConfig(input.mgaConfig ?? defaultMgaConfig()),
     merchantConfig: cloneMerchantConfig(input.merchantConfig ?? defaultMerchantConfig()),
     ownerColumn: (input.ownerColumn ?? defaultOwnerColumn()) || defaultOwnerColumn(),
+    financeConfig: cloneFinanceConfig(input.financeConfig ?? defaultFinanceConfig()),
     samplingConfig: cloneSamplingConfig(input.samplingConfig ?? defaultSamplingConfig()),
     constraints: cloneConstraints(input.constraints),
   };
@@ -216,6 +227,7 @@ function normalizeScenarioCatalog(catalog: ScenarioCatalog): ScenarioCatalog {
       mgaConfig: cloneMgaConfig(scenario.mgaConfig ?? defaultMgaConfig()),
       merchantConfig: cloneMerchantConfig(scenario.merchantConfig ?? defaultMerchantConfig()),
       ownerColumn: (scenario.ownerColumn ?? defaultOwnerColumn()) || defaultOwnerColumn(),
+      financeConfig: cloneFinanceConfig(scenario.financeConfig ?? defaultFinanceConfig()),
       samplingConfig: cloneSamplingConfig(scenario.samplingConfig ?? defaultSamplingConfig()),
       constraints: cloneConstraints(scenario.constraints ?? []),
     })),
@@ -253,6 +265,7 @@ export function readScenarioCatalogFromModel(model: WorkbookModel): ScenarioCata
         mgaConfig: payload.mgaConfig ?? defaultMgaConfig(),
         merchantConfig: payload.merchantConfig ?? defaultMerchantConfig(),
         ownerColumn: payload.ownerColumn ?? payload.merchantConfig?.ownerColumn ?? defaultOwnerColumn(),
+        financeConfig: payload.financeConfig ?? defaultFinanceConfig(),
         samplingConfig: payload.samplingConfig ?? defaultSamplingConfig(),
         constraints: Array.isArray(payload.constraints) ? payload.constraints : [],
       });
@@ -299,6 +312,7 @@ export function writeScenarioCatalogToModel(
       mgaConfig: scenario.mgaConfig,
       merchantConfig: scenario.merchantConfig,
       ownerColumn: scenario.ownerColumn,
+      financeConfig: scenario.financeConfig,
       samplingConfig: scenario.samplingConfig,
       constraints: scenario.constraints,
     }),

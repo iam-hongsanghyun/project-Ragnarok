@@ -91,6 +91,7 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   const hasNearOptimal = !!(results.nearOptimal && results.nearOptimal.alternatives.length > 0);
   const hasMerchant = !!(results.merchant && results.merchant.assets.length > 0);
   const hasCompanies = !!(results.companies && results.companies.companies.length > 0);
+  const hasCompanyFinance = !!(results.companyFinance && results.companyFinance.companies.length > 0);
 
   const rows: Array<ReturnType<typeof row>> = [];
 
@@ -184,6 +185,12 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   if (hasCompanies) {
     const co: Card = { id: id('co'), kind: 'company-breakdown' };
     rows.push(row({ cards: [{ card: co }] }));
+  }
+
+  // 9g. Company-level financial model — NPV/IRR/payback/DSCR (F2, conditional)
+  if (hasCompanyFinance) {
+    const fin: Card = { id: id('fin'), kind: 'company-finance' };
+    rows.push(row({ cards: [{ card: fin }] }));
   }
 
   // 10. Carrier analysis — full-width performance table.

@@ -19,6 +19,7 @@ import {
   ContingencyConfig,
   MgaConfig,
   MerchantConfig,
+  FinanceConfig,
   CarbonPriceScheduleEntry,
   CarbonScheduleProfile,
   Primitive,
@@ -266,6 +267,7 @@ function AppInner() {
   const [mgaConfig, setMgaConfig] = useState<MgaConfig>({ enabled: false, slack: 0.05, carriers: [] });
   const [merchantConfig, setMerchantConfig] = useState<MerchantConfig>({ enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 });
   const [ownerColumn, setOwnerColumn] = useState<string>('owner');
+  const [financeConfig, setFinanceConfig] = useState<FinanceConfig>({ gearing: 0, interestRate: 0.05, tenorYears: 15 });
   const [carbonPriceSchedule, setCarbonPriceSchedule] = useState<CarbonPriceScheduleEntry[]>([]);
   const [carbonLibrary, setCarbonLibrary] = useState<CarbonScheduleProfile[]>([]);
   const [validateResult, setValidateResult] = useState<{
@@ -310,6 +312,7 @@ function AppInner() {
     mgaConfig: { enabled: false, slack: 0.05, carriers: [] },
     merchantConfig: { enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 },
     ownerColumn: 'owner',
+    financeConfig: { gearing: 0, interestRate: 0.05, tenorYears: 15 },
     constraints: DEFAULT_CONSTRAINTS,
   }));
   const frontendPlugins = useFrontendPlugins();
@@ -472,6 +475,7 @@ function AppInner() {
       mgaConfig,
       merchantConfig,
       ownerColumn,
+      financeConfig,
       constraints,
     })
   ), [
@@ -494,6 +498,7 @@ function AppInner() {
     mgaConfig,
     merchantConfig,
     ownerColumn,
+    financeConfig,
     constraints,
   ]);
 
@@ -609,6 +614,7 @@ function AppInner() {
       mgaConfig,
       merchantConfig,
       ownerColumn,
+      financeConfig,
       constraints,
     });
     const catalogToApply = nextScenarioCatalog.scenarios.length > 0
@@ -659,6 +665,7 @@ function AppInner() {
     mgaConfig,
     merchantConfig,
     ownerColumn,
+    financeConfig,
     constraints,
     updateSettings,
     setAnalyticsFocus,
@@ -978,6 +985,7 @@ function AppInner() {
     setMgaConfig(scenario.mgaConfig ?? { enabled: false, slack: 0.05, carriers: [] });
     setMerchantConfig(scenario.merchantConfig ?? { enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 });
     setOwnerColumn(scenario.ownerColumn ?? 'owner');
+    setFinanceConfig(scenario.financeConfig ?? { gearing: 0, interestRate: 0.05, tenorYears: 15 });
     setStatus(`Applied scenario: ${scenario.label}`);
     showToast(`Scenario applied: ${scenario.label}`, 'success');
   }, [maxSnapshots, showToast, updateSettings]);
@@ -2202,6 +2210,7 @@ function AppInner() {
       mgaConfig,
       merchantConfig,
       ownerColumn,
+      financeConfig,
       carbonPriceSchedule,
     };
 
@@ -2495,6 +2504,8 @@ function AppInner() {
               merchantOwners={merchantOwners}
               ownerColumn={ownerColumn}
               onOwnerColumnChange={setOwnerColumn}
+              financeConfig={financeConfig}
+              onFinanceConfigChange={setFinanceConfig}
               maxSnapshots={maxSnapshots}
               snapshotStart={snapshotStart}
               snapshotEnd={snapshotEnd}

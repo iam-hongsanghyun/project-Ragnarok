@@ -289,6 +289,39 @@ export interface CompanyBreakdownResult {
   untaggedCount: number;
 }
 
+/** Optional debt assumptions (F2) for DSCR. Gearing 0 = all-equity. */
+export interface FinanceConfig {
+  /** Debt share of overnight capex (0–1). */
+  gearing: number;
+  /** Debt interest rate (fraction). */
+  interestRate: number;
+  /** Debt tenor (years). */
+  tenorYears: number;
+}
+
+/** One company's project-finance metrics (F2). */
+export interface CompanyFinanceEntry {
+  company: string;
+  overnightCapex: number;
+  annualMargin: number;
+  horizonYears: number;
+  npv: number;
+  /** Internal rate of return (fraction); null if not bracketable. */
+  irr: number | null;
+  paybackYears: number | null;
+  discountedPaybackYears: number | null;
+  /** Debt-service coverage ratio; null when no debt is configured. */
+  dscr: number | null;
+}
+
+/** Company-level financial model (F2) — NPV/IRR/payback/DSCR per owner. */
+export interface CompanyFinanceResult {
+  ownerColumn: string;
+  currency: string;
+  discountRate: number;
+  companies: CompanyFinanceEntry[];
+}
+
 /** Merchant result block — one owner's profit against the price signal. */
 export interface MerchantResult {
   owner: string;
@@ -372,6 +405,8 @@ export interface ScenarioPreset {
   merchantConfig: MerchantConfig;
   /** Model column holding the owner/company tag (F1 + B1). Default `owner`. */
   ownerColumn: string;
+  /** Optional debt assumptions for company finance DSCR (F2). */
+  financeConfig: FinanceConfig;
   constraints: CustomConstraint[];
 }
 
@@ -863,6 +898,8 @@ export interface RunResults {
   merchant?: MerchantResult;
   /** Per-company KPIs (present only when assets carry an owner tag). */
   companies?: CompanyBreakdownResult;
+  /** Per-company project finance (NPV/IRR/payback/DSCR); needs an LP run. */
+  companyFinance?: CompanyFinanceResult;
   appliedConstraints?: AppliedConstraint[];
   emissionsBreakdown?: EmissionsBreakdown;
   narrative: string[];

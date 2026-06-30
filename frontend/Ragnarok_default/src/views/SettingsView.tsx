@@ -19,6 +19,7 @@ import {
   PowerFlowConfig,
   MgaConfig,
   MerchantConfig,
+  FinanceConfig,
   Primitive,
   RollingHorizonConfig,
   SamplingConfig,
@@ -139,6 +140,8 @@ export interface SettingsViewProps {
   merchantOwners: string[];
   ownerColumn: string;
   onOwnerColumnChange: (column: string) => void;
+  financeConfig: FinanceConfig;
+  onFinanceConfigChange: (config: FinanceConfig) => void;
   contingencyConfig: ContingencyConfig;
   onContingencyConfigChange: (config: ContingencyConfig) => void;
   maxSnapshots: number;

@@ -35,6 +35,7 @@ import { StatisticsCard } from '../../../features/analytics/cards/StatisticsCard
 import { NearOptimalCard } from '../../../features/analytics/cards/NearOptimalCard';
 import { MerchantCard } from '../../../features/analytics/cards/MerchantCard';
 import { CompanyBreakdownCard } from '../../../features/analytics/cards/CompanyBreakdownCard';
+import { CompanyFinanceCard } from '../../../features/analytics/cards/CompanyFinanceCard';
 import { PowerFlowCard } from '../../../features/analytics/cards/PowerFlowCard';
 import { ContingencyCard } from '../../../features/analytics/cards/ContingencyCard';
 import { EmissionsBreakdownCard } from '../../../features/analytics/cards/EmissionsBreakdownCard';
@@ -440,6 +441,10 @@ export function AnalyticsDashboard({
           return results.companies
             ? <CompanyBreakdownCard data={results.companies} />
             : <p className="dashboard-cell-missing">No owner-tagged assets in this run.</p>;
+        case 'company-finance':
+          return results.companyFinance
+            ? <CompanyFinanceCard data={results.companyFinance} />
+            : <p className="dashboard-cell-missing">No company finance for this run (needs owner tags and an LP run).</p>;
         case 'power-flow':
           return results.powerFlow
             ? <PowerFlowCard data={results.powerFlow} />
@@ -506,6 +511,7 @@ export function AnalyticsDashboard({
       case 'near-optimal': return 'Near-optimal capacity corridor (MGA)';
       case 'merchant': return 'Merchant economics (price-taker)';
       case 'company-breakdown': return 'Company breakdown (per-owner KPIs)';
+      case 'company-finance': return 'Company finance (NPV / IRR / payback)';
       case 'power-flow': return 'Power flow (convergence & voltages)';
       case 'contingency': return 'N-1 contingency (security)';
       case 'emissions-breakdown': return 'Emissions by generator / carrier';

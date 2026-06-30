@@ -37,6 +37,7 @@ from .statistics import build_statistics
 from .mga import build_mga
 from .merchant import build_merchant
 from .company import build_company_breakdown
+from .finance import build_company_finance
 from .expansion import build_expansion_results
 from .full_outputs import build_full_outputs
 from .market import (
@@ -795,6 +796,14 @@ def run_pypsa(
         network, model,
         owner_column=owner_column, currency=currency, emissions_factors=emissions_factors,
     )
+    # Company-level financial model (F2) — NPV / IRR / payback / DSCR per owner.
+    company_finance = build_company_finance(
+        network, model,
+        owner_column=owner_column,
+        discount_rate=float(scenario.get("discountRate", 0.0) or 0.0),
+        currency=currency,
+        debt=options.get("financeConfig") or None,
+    )
 
     return {
         "summary": summary,
@@ -820,6 +829,7 @@ def run_pypsa(
         "nearOptimal": near_optimal,
         "merchant": merchant,
         "companies": company_breakdown,
+        "companyFinance": company_finance,
         "emissionsBreakdown": emissions_breakdown,
         "narrative": notes,
         "runMeta": {
