@@ -15,6 +15,11 @@ import {
   CarbonScheduleProfile,
   CustomConstraint,
   PathwayConfig,
+  ContingencyConfig,
+  PowerFlowConfig,
+  MgaConfig,
+  MerchantConfig,
+  FinanceConfig,
   Primitive,
   RollingHorizonConfig,
   SamplingConfig,
@@ -33,6 +38,11 @@ import { PlanningSection } from './SettingsView.sections/Planning';
 import { RollingSection } from './SettingsView.sections/Rolling';
 import { StochasticSection } from './SettingsView.sections/Stochastic/Stochastic';
 import { SclopfSection } from './SettingsView.sections/Sclopf';
+import { PowerFlowSection } from './SettingsView.sections/PowerFlow';
+import { ContingencySection } from './SettingsView.sections/Contingency';
+import { MgaSection } from './SettingsView.sections/Mga';
+import { MerchantSection } from './SettingsView.sections/Merchant';
+import { CompanySection } from './SettingsView.sections/Company';
 import { StandardConstraintsSection, AdvancedConstraintsSection } from './SettingsView.sections/Constraints';
 import { AppearanceSection } from './SettingsView.sections/Appearance';
 import { ProjectDefaultsSection } from './SettingsView.sections/ProjectDefaults';
@@ -47,6 +57,11 @@ type SectionId =
   | 'rolling'
   | 'stochastic'
   | 'sclopf'
+  | 'powerflow'
+  | 'contingency'
+  | 'mga'
+  | 'merchant'
+  | 'company'
   | 'constraints'
   | 'constraintsAdvanced'
   | 'appearance'
@@ -77,6 +92,11 @@ const SECTIONS: Section[] = [
   // Solve — how the optimiser is run
   { id: 'stochastic', label: 'Stochastic',                    group: 'Solve' },
   { id: 'sclopf',     label: 'Security-constrained (SCLOPF)',  group: 'Solve' },
+  { id: 'powerflow', label: 'Power flow',                     group: 'Solve' },
+  { id: 'contingency', label: 'N-1 contingency',              group: 'Solve' },
+  { id: 'mga',        label: 'Near-optimal (MGA)',            group: 'Solve' },
+  { id: 'company',    label: 'Company / ownership',           group: 'Solve' },
+  { id: 'merchant',   label: 'Merchant (price-taker)',        group: 'Solve' },
   { id: 'solver',     label: 'Solver',                        group: 'Solve' },
   // Data — external-source credentials
   { id: 'apiKeys',    label: 'API keys',                      group: 'Data' },
@@ -111,6 +131,19 @@ export interface SettingsViewProps {
   onStochasticConfigChange: (config: StochasticConfig) => void;
   sclopfConfig: SecurityConstrainedConfig;
   onSclopfConfigChange: (config: SecurityConstrainedConfig) => void;
+  powerFlowConfig: PowerFlowConfig;
+  onPowerFlowConfigChange: (config: PowerFlowConfig) => void;
+  mgaConfig: MgaConfig;
+  onMgaConfigChange: (config: MgaConfig) => void;
+  merchantConfig: MerchantConfig;
+  onMerchantConfigChange: (config: MerchantConfig) => void;
+  merchantOwners: string[];
+  ownerColumn: string;
+  onOwnerColumnChange: (column: string) => void;
+  financeConfig: FinanceConfig;
+  onFinanceConfigChange: (config: FinanceConfig) => void;
+  contingencyConfig: ContingencyConfig;
+  onContingencyConfigChange: (config: ContingencyConfig) => void;
   maxSnapshots: number;
   snapshotStart: number;
   snapshotEnd: number;
@@ -199,6 +232,11 @@ export function SettingsView(props: SettingsViewProps) {
         {section === 'rolling'        && <RollingSection {...props} />}
         {section === 'stochastic'     && <StochasticSection {...props} />}
         {section === 'sclopf'         && <SclopfSection {...props} />}
+        {section === 'powerflow'      && <PowerFlowSection {...props} />}
+        {section === 'contingency'    && <ContingencySection {...props} />}
+        {section === 'mga'            && <MgaSection {...props} />}
+        {section === 'company'        && <CompanySection {...props} />}
+        {section === 'merchant'       && <MerchantSection {...props} />}
         {section === 'constraints'    && <StandardConstraintsSection {...props} />}
         {section === 'constraintsAdvanced' && <AdvancedConstraintsSection {...props} />}
         {section === 'appearance'     && <AppearanceSection {...props} />}

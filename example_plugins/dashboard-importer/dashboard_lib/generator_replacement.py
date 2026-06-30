@@ -7,8 +7,12 @@ profile when :func:`~dashboard_lib.p_max_pu.apply_standard_p_max_pu` runs).
 
 User input
 ----------
-A GUI table ``dashboard.generator_replacements`` with one column, ``generator``
-(the plant to replace), plus scalar settings:
+A GUI table ``dashboard.generator_replacements`` with a ``generator`` column (the
+plant to replace) and optional ``solar_mw`` / ``wind_mw`` columns: when both are
+present on a row the split is **frozen** — that plant is replaced with exactly
+those MW (and the row skips the base-year filter), so batches added under
+different settings keep their own rule. Rows without a frozen split use the
+scalar settings below. Plus scalar settings:
 
 * Eligibility — two independent filters:
   - **Filter 1 (which plants exist):** the network reaching this step is already
@@ -175,10 +179,14 @@ def replace_generators(network: pypsa.Network, dashboard: "Dashboard") -> dict[s
 
     # ── Collect targets (ordered): explicit table rows first, then bulk-by-carrier.
     # Table picks are validated strictly (raise on a bad pick); bulk matches are
-    # filtered silently. Capacity splits are always computed from the current
-    # scalar settings; stale table solar_mw/wind_mw cells are ignored.
+    # filtered silently. A row carrying a FROZEN solar_mw/wind_mw split (captured
+    # by "Fill table from carriers" at add-time) is replaced with exactly those
+    # MW — and bypasses the base-year check, so an earlier batch keeps its rule
+    # even after you change settings to add another. Rows without a frozen split
+    # are computed live from the current scalar settings.
     targets: list[str] = []
     seen: set[str] = set()
+    frozen_split: dict[str, tuple[float, float]] = {}
 
     rules = dashboard.generator_replacements
     if rules is not None and not rules.empty:
@@ -202,13 +210,18 @@ def replace_generators(network: pypsa.Network, dashboard: "Dashboard") -> dict[s
                 )
             if _capacity(name) <= 0:
                 raise ValueError(f"Generator replacement: plant {name!r} has no capacity (p_nom) to distribute")
-            if not _eligible(_by(name)):
+            fs = _frozen_split_from_row(row)
+            # A frozen row carries its own decision, so it skips the base-year
+            # filter; only live rows are held to the replacement base year.
+            if fs is None and not _eligible(_by(name)):
                 raise ValueError(
                     f"Generator replacement: plant {name!r} (build_year={_by(name)}) is "
                     f"before the replacement base year ({threshold})"
                 )
             seen.add(name)
             targets.append(name)
+            if fs is not None:
+                frozen_split[name] = fs
 
     # Filter 3 (optional): an attribute filter — keep only generators whose
     # <filter_column> equals <filter_value> (any generators column / value).
@@ -269,33 +282,41 @@ def replace_generators(network: pypsa.Network, dashboard: "Dashboard") -> dict[s
             if "province" in network.generators.columns and pd.notna(network.generators.at[name, "province"])
             else ""
         )
-        # With "Include existing plants" on, follow the CLOSE year (capped) for
-        # every replaced plant; otherwise follow each plant's BUILD year against
-        # the target-year fleet.
-        if follow_close_year:
-            close = _close_year(name)
-            # Cap the reference year: a plant closing on/after max_close_year (or
-            # one that never closes) follows max_close_year's mix.
-            split_year = close if (close is not None and close < max_close_year) else max_close_year
-            split_additions = full_additions
+        if name in frozen_split:
+            # Frozen at add-time — use the stored split verbatim, no recompute.
+            solar_cap, wind_cap = frozen_split[name]
+            logger.info(
+                "Generator replacement: %s (build %s, frozen): %.1f MW -> solar %.1f + wind %.1f",
+                name, by, capacity, solar_cap, wind_cap,
+            )
         else:
-            split_year = by
-            split_additions = annual_additions
-        solar_cap, wind_cap = _split_capacity(
-            settings=settings,
-            annual_additions=split_additions,
-            year=split_year,
-            capacity=capacity,
-            follow=follow,
-        )
-        # Per-plant trace in the Log tab — makes the applied ratio verifiable
-        # against the reference table (and a 50/50 fallback visible as such).
-        # "split-year" is the year whose solar:wind mix was followed (close year
-        # for existing plants, build year for new ones).
-        logger.info(
-            "Generator replacement: %s (build %s, split-year %s): %.1f MW -> solar %.1f + wind %.1f",
-            name, by, split_year, capacity, solar_cap, wind_cap,
-        )
+            # With "Include existing plants" on, follow the CLOSE year (capped)
+            # for every replaced plant; otherwise follow each plant's BUILD year
+            # against the target-year fleet.
+            if follow_close_year:
+                close = _close_year(name)
+                # Cap the reference year: a plant closing on/after max_close_year
+                # (or one that never closes) follows max_close_year's mix.
+                split_year = close if (close is not None and close < max_close_year) else max_close_year
+                split_additions = full_additions
+            else:
+                split_year = by
+                split_additions = annual_additions
+            solar_cap, wind_cap = _split_capacity(
+                settings=settings,
+                annual_additions=split_additions,
+                year=split_year,
+                capacity=capacity,
+                follow=follow,
+            )
+            # Per-plant trace in the Log tab — makes the applied ratio verifiable
+            # against the reference table (and a 50/50 fallback visible as such).
+            # "split-year" is the year whose solar:wind mix was followed (close
+            # year when including existing, build year otherwise).
+            logger.info(
+                "Generator replacement: %s (build %s, split-year %s): %.1f MW -> solar %.1f + wind %.1f",
+                name, by, split_year, capacity, solar_cap, wind_cap,
+            )
 
         # Record the original capacity removed at this bus so an ESS can be
         # sized as a proportion of it (summed when several plants share a bus).
@@ -380,6 +401,23 @@ def _latest_nonzero_additions(
         if solar_add + wind_add > 0:
             return solar_add, wind_add
     return 0.0, 0.0
+
+
+def _frozen_split_from_row(row: "pd.Series") -> tuple[float, float] | None:
+    """Return ``(solar_mw, wind_mw)`` frozen on a table row, or ``None`` if absent.
+
+    "Fill table from carriers" stores the split it computed at add-time in each
+    row's ``solar_mw`` / ``wind_mw`` cells. When both are present and numeric the
+    row is replaced with exactly that split (no recompute); otherwise the split
+    is computed live. Either cell missing / blank / non-numeric → not frozen.
+    """
+    if "solar_mw" not in row.index or "wind_mw" not in row.index:
+        return None
+    solar = pd.to_numeric(row["solar_mw"], errors="coerce")
+    wind = pd.to_numeric(row["wind_mw"], errors="coerce")
+    if pd.isna(solar) or pd.isna(wind):
+        return None
+    return float(solar), float(wind)
 
 
 def _percentage_setting(settings: object, field: str, default: float) -> float:

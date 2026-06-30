@@ -17,7 +17,7 @@ import { usePersistedState } from 'shared/hooks/usePersistedState';
 import { FORGE_CONFIG, VALIDATION_CONFIG } from 'lib/constants';
 import { LeftRail, ViewPanel } from 'shared/components/primitives';
 import { NumberDraftInput } from 'shared/components/NumberDraftInput';
-import { applyRounding, numericColumns, type RoundOp } from 'lib/forge/transforms';
+import { applyRounding, numericColumns, type RoundOp, type ClusterResult } from 'lib/forge/transforms';
 import {
   buildTargets,
   sheetSnappable,
@@ -32,10 +32,15 @@ interface Props {
   model: WorkbookModel;
   /** Merge transformed sheets back into the model (keeps everything else). */
   onApplySheets: (partial: Record<string, GridRow[]>) => void;
+  /** Reduce the session model to N clustered buses; returns the reduced model
+   *  for preview (no mutation). Absent ⇒ the cluster tool is read-only. */
+  onClusterPreview?: (nClusters: number, method: string) => Promise<ClusterResult>;
+  /** Replace the working model with a previewed clustered model. */
+  onClusterApply?: (model: WorkbookModel) => void;
 }
 
-type Operation = 'round' | 'adjust' | 'snap';
-type OpGroup = 'Numeric' | 'Geospatial';
+type Operation = 'round' | 'adjust' | 'snap' | 'cluster';
+type OpGroup = 'Numeric' | 'Geospatial' | 'Topology';
 
 /** Catalog of Forge tools, grouped. Add a new tool by adding an entry here
  *  (and its panel + findings wiring) — the rail renders groups from this. */
@@ -43,8 +48,9 @@ const OPERATIONS: Array<{ id: Operation; label: string; group: OpGroup }> = [
   { id: 'round', label: 'Round / Ceil / Floor', group: 'Numeric' },
   { id: 'adjust', label: 'Adjust values', group: 'Numeric' },
   { id: 'snap', label: 'Snap to nearest bus', group: 'Geospatial' },
+  { id: 'cluster', label: 'Reduce / cluster network', group: 'Topology' },
 ];
-const OP_GROUPS: OpGroup[] = ['Numeric', 'Geospatial'];
+const OP_GROUPS: OpGroup[] = ['Numeric', 'Geospatial', 'Topology'];
 
 const ROUND_OPS: Array<{ value: RoundOp; label: string }> = [
   { value: 'round', label: 'Round' },
@@ -54,7 +60,48 @@ const ROUND_OPS: Array<{ value: RoundOp; label: string }> = [
 
 const rowsOf = (model: WorkbookModel, sheet: string): GridRow[] => model[sheet] ?? [];
 
-export function ForgeView({ model, onApplySheets }: Props) {
+const CLUSTER_PALETTE = [
+  '#4e79a7', '#f28e2b', '#e15759', '#76b7b2', '#59a14f',
+  '#edc948', '#b07aa1', '#ff9da7', '#9c755f', '#bab0ab',
+];
+
+/** Dependency-free SVG scatter of the busmap: each original bus plotted at its
+ *  x/y and coloured by the cluster it merges into, with a ring at each cluster
+ *  centroid. Returns null when buses carry no coordinates (e.g. a modularity
+ *  clustering on a coordinate-less network) — the counts preview still shows. */
+function ClusterScatter({ model, busmap }: { model: WorkbookModel; busmap: Record<string, string> }) {
+  const buses = rowsOf(model, 'buses')
+    .map((r) => ({ name: String(r.name ?? ''), x: Number(r.x), y: Number(r.y) }))
+    .filter((b) => b.name && Number.isFinite(b.x) && Number.isFinite(b.y));
+  if (buses.length < 2) return null;
+  const xs = buses.map((b) => b.x);
+  const ys = buses.map((b) => b.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  const W = 320, H = 200, pad = 12;
+  const sx = (x: number) => pad + ((x - minX) / ((maxX - minX) || 1)) * (W - 2 * pad);
+  const sy = (y: number) => H - pad - ((y - minY) / ((maxY - minY) || 1)) * (H - 2 * pad); // north up
+  const clusters = Array.from(new Set(Object.values(busmap)));
+  const colorOf = (c: string) => CLUSTER_PALETTE[Math.max(0, clusters.indexOf(c)) % CLUSTER_PALETTE.length];
+  const cent: Record<string, { x: number; y: number; n: number }> = {};
+  for (const b of buses) {
+    const c = busmap[b.name];
+    if (!c) continue;
+    const e = (cent[c] ??= { x: 0, y: 0, n: 0 });
+    e.x += b.x; e.y += b.y; e.n += 1;
+  }
+  return (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', maxWidth: '100%' }} role="img" aria-label="Cluster map">
+      {buses.map((b) => (
+        <circle key={b.name} cx={sx(b.x)} cy={sy(b.y)} r={2.5} fill={colorOf(busmap[b.name])} fillOpacity={0.7} />
+      ))}
+      {Object.entries(cent).map(([c, e]) => (
+        <circle key={c} cx={sx(e.x / e.n)} cy={sy(e.y / e.n)} r={6} fill="none" stroke={colorOf(c)} strokeWidth={2} />
+      ))}
+    </svg>
+  );
+}
+
+export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApply }: Props) {
   // Persisted so the chosen tool + validation result survive leaving and
   // returning to the Forge tab (the view unmounts on tab switch). The findings
   // scan the whole model, so these three drivers fully restore the result.
@@ -127,6 +174,37 @@ export function ForgeView({ model, onApplySheets }: Props) {
     onApplySheets(partial);
     setSnapReport({ assigned, outside, noCoords, perSheet });
     setStatus(`Snapped ${assigned} connection${assigned === 1 ? '' : 's'} to nearest bus${outside.length ? `, ${outside.length} beyond ${bufferKm} km` : ''}.`);
+  };
+
+  // ── Operation 4: Reduce / cluster network ───────────────────────────────
+  const busCount = rowsOf(model, 'buses').length;
+  const defaultClusterN = Math.max(1, Math.min(Math.max(busCount - 1, 1), Math.round(busCount / 2)));
+  const [clusterN, setClusterN] = useState<number | null>(null);
+  const [clusterMethod, setClusterMethod] = useState<'modularity' | 'kmeans'>('modularity');
+  const [clusterBusy, setClusterBusy] = useState(false);
+  const [clusterResult, setClusterResult] = useState<ClusterResult | null>(null);
+  const [clusterError, setClusterError] = useState<string | null>(null);
+  const effClusterN = clusterN ?? defaultClusterN;
+
+  const runClusterPreview = async () => {
+    if (!onClusterPreview) return;
+    setClusterBusy(true);
+    setClusterError(null);
+    setClusterResult(null);
+    try {
+      setClusterResult(await onClusterPreview(effClusterN, clusterMethod));
+    } catch (e) {
+      setClusterError(e instanceof Error ? e.message : 'Clustering failed.');
+    } finally {
+      setClusterBusy(false);
+    }
+  };
+
+  const applyCluster = () => {
+    if (!clusterResult || !onClusterApply) return;
+    onClusterApply(clusterResult.model);
+    setStatus(`Reduced ${clusterResult.before.buses} → ${clusterResult.after.buses} buses; working model replaced.`);
+    setClusterResult(null);
   };
 
   // Context-aware "what needs handling" for the active tool. Recomputes when
@@ -280,7 +358,7 @@ export function ForgeView({ model, onApplySheets }: Props) {
             onApplySheets={onApplySheets}
             onStatus={setStatus}
           />
-        ) : (
+        ) : operation === 'snap' ? (
           <section className="forge-section">
             <header className="forge-section-header">
               <h3>Snap to nearest bus</h3>
@@ -353,6 +431,80 @@ export function ForgeView({ model, onApplySheets }: Props) {
                     {snapReport.outside.length > 30 && <li>… and {snapReport.outside.length - 30} more</li>}
                   </ul>
                 )}
+              </div>
+            )}
+          </section>
+        ) : (
+          <section className="forge-section">
+            <header className="forge-section-header">
+              <h3>Reduce / cluster network</h3>
+              <p>Aggregate buses (and the generators, loads and lines on them) into fewer clustered buses — a smaller network that runs the same physics. Preview the reduction, then apply to replace the working model.</p>
+            </header>
+
+            <div className="sg-setting-row">
+              <label className="sg-setting-label">Method</label>
+              <div className="sg-btn-row">
+                <button
+                  className={`tb-btn sg-solver-btn${clusterMethod === 'modularity' ? '' : ' tb-btn--muted'}`}
+                  onClick={() => setClusterMethod('modularity')}
+                >
+                  Modularity
+                </button>
+                <button
+                  className={`tb-btn sg-solver-btn${clusterMethod === 'kmeans' ? '' : ' tb-btn--muted'}`}
+                  onClick={() => setClusterMethod('kmeans')}
+                >
+                  k-means (spatial)
+                </button>
+              </div>
+              <p className="sg-setting-hint">
+                {clusterMethod === 'modularity'
+                  ? 'Groups electrically-connected regions by network topology — no coordinates needed.'
+                  : 'Groups geographically-near buses — needs bus x/y and scikit-learn on the server.'}
+              </p>
+            </div>
+
+            <div className="sg-setting-row">
+              <label className="sg-setting-label">Target buses</label>
+              <NumberDraftInput
+                className="forge-number"
+                min={1}
+                max={Math.max(1, busCount - 1)}
+                value={effClusterN}
+                onCommit={(v) => setClusterN(Math.max(1, Math.min(Math.max(busCount - 1, 1), Math.trunc(v))))}
+              />
+              <p className="sg-setting-hint">{busCount} bus{busCount === 1 ? '' : 'es'} now → reduce to this many clusters.</p>
+            </div>
+
+            <div className="forge-actions">
+              <button
+                className="run-button"
+                disabled={busCount < 2 || clusterBusy || !onClusterPreview}
+                onClick={runClusterPreview}
+              >
+                {clusterBusy ? 'Reducing…' : 'Preview reduction'}
+              </button>
+              {busCount < 2 && <span className="sg-setting-hint">Need at least 2 buses to cluster.</span>}
+            </div>
+
+            {clusterError && <p className="forge-status" style={{ color: 'var(--danger, #dc2626)' }}>{clusterError}</p>}
+
+            {clusterResult && (
+              <div className="forge-report">
+                <p className="forge-report-line">
+                  Reduced <b>{clusterResult.before.buses} → {clusterResult.after.buses}</b> buses
+                  {' · '}lines {clusterResult.before.lines} → {clusterResult.after.lines}
+                  {' · '}generators {clusterResult.before.generators} → {clusterResult.after.generators}
+                  {' · '}loads {clusterResult.before.loads} → {clusterResult.after.loads}
+                  <span style={{ color: 'var(--muted)', marginLeft: 6 }}>({clusterResult.method})</span>
+                </p>
+                <ClusterScatter model={model} busmap={clusterResult.busmap} />
+                <div className="forge-actions">
+                  <button className="run-button" disabled={!onClusterApply} onClick={applyCluster}>
+                    Apply — replace model
+                  </button>
+                  <span className="sg-setting-hint">Replaces the working model with the reduced network. Re-run to add it to History.</span>
+                </div>
               </div>
             )}
           </section>

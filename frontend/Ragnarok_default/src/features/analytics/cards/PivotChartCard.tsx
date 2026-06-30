@@ -16,11 +16,13 @@ import { SearchableSelect } from '../../../shared/components/SearchableSelect';
 import { SearchableMultiSelect } from '../../../shared/components/SearchableMultiSelect';
 import {
   buildPivotCategory,
+  buildPivotCategoryMulti,
   buildPivotDailyProfile,
   buildPivotDurationCurve,
   buildPivotMix,
   buildPivotScatter,
   buildPivotSeries,
+  buildPivotSeriesMulti,
   pivotComponents,
   pivotDimensionFields,
   pivotFieldNumeric,
@@ -92,6 +94,11 @@ export function PivotChartCard({
   const valueAttrs = pivotValueAttributes(active.sheet);
   const dimFields = pivotDimensionFields(active.sheet, model);
   const hasValue = !!active.valueAttribute;
+  // Effective attribute list: the multi-set when present, else the single column.
+  // `valueAttribute` stays the canonical first column (units, kind, donut/scatter).
+  const valueList = (active.valueAttributes && active.valueAttributes.length)
+    ? active.valueAttributes
+    : (active.valueAttribute ? [active.valueAttribute] : []);
   const kind = hasValue ? pivotValueKind(active.sheet, active.valueAttribute) : null;
   const isSeries = kind === 'series';
   const unit = valueAttrs.find((a) => a.value === active.valueAttribute)?.unit ?? '';
@@ -108,10 +115,17 @@ export function PivotChartCard({
   const handleSheet = (sheet: string) =>
     patch({ ...active, sheet, valueAttribute: '', groupBy: [], filters: [], startIndex: 0, endIndex: 100000 });
   const handleValue = (valueAttribute: string) => {
-    const k = pivotValueKind(active.sheet, valueAttribute);
+    const k = valueAttribute ? pivotValueKind(active.sheet, valueAttribute) : null;
     // Static / input have no time axis — fall back series-only types to bar.
     const chartType = k === 'series' || !SERIES_ONLY.includes(active.chartType) ? active.chartType : 'bar';
-    patch({ ...active, valueAttribute, chartType, startIndex: 0, endIndex: 100000 });
+    patch({ ...active, valueAttribute, valueAttributes: valueAttribute ? [valueAttribute] : [], chartType, startIndex: 0, endIndex: 100000 });
+  };
+  // Multi-attribute: first column stays canonical; the rest plot as extra series.
+  const handleValues = (vals: string[]) => {
+    const first = vals[0] ?? '';
+    const k = first ? pivotValueKind(active.sheet, first) : null;
+    const chartType = k === 'series' || !SERIES_ONLY.includes(active.chartType) ? active.chartType : 'bar';
+    patch({ ...active, valueAttribute: first, valueAttributes: vals, chartType, startIndex: 0, endIndex: 100000 });
   };
   const updateFilter = (i: number, next: PivotFilter) =>
     patch({ ...active, filters: active.filters.map((f, idx) => (idx === i ? next : f)) });
@@ -215,7 +229,7 @@ export function PivotChartCard({
       );
     }
     if (ct === 'hbar' || ct === 'grouped-bar') {
-      const data = buildPivotCategory(buildCfg, results, model, snapshotWeight);
+      const data = buildPivotCategoryMulti(buildCfg, valueList, results, model, snapshotWeight);
       if (data.loading) return loadingBody;
       return data.labels.length
         ? (
@@ -234,9 +248,10 @@ export function PivotChartCard({
       return values.length ? <DurationCurveCard title={compact ? '' : active.valueAttribute} data={values} unit={u} color={color} /> : emptyBody('No data for current selection.');
     }
     // line / area / bar (time axis) and daily-profile all feed InteractiveTimeSeriesCard.
+    // Multiple value columns become additional series (daily-profile stays single).
     const { rows, series, loading } = ct === 'daily-profile'
       ? buildPivotDailyProfile(buildCfg, results, model, snapshotWeight)
-      : buildPivotSeries(buildCfg, results, model, snapshotWeight);
+      : buildPivotSeriesMulti(buildCfg, valueList, results, model, snapshotWeight);
     if (loading) return loadingBody;
     return (
       <InteractiveTimeSeriesCard
@@ -264,13 +279,23 @@ export function PivotChartCard({
           <SearchableSelect value={active.sheet} options={components} onChange={handleSheet} />
         </label>
         <label className="chart-control">
-          <span>{active.chartType === 'scatter' ? 'X attribute' : 'Attribute'}</span>
-          <SearchableSelect
-            value={active.valueAttribute}
-            disabled={!results}
-            options={[{ value: '', label: 'Select attribute' }, ...valueAttrs.map((a) => ({ value: a.value, label: a.label }))]}
-            onChange={handleValue}
-          />
+          <span>{active.chartType === 'scatter' ? 'X attribute' : 'Attribute(s)'}</span>
+          {active.chartType === 'scatter' ? (
+            <SearchableSelect
+              value={active.valueAttribute}
+              disabled={!results}
+              options={[{ value: '', label: 'Select attribute' }, ...valueAttrs.map((a) => ({ value: a.value, label: a.label }))]}
+              onChange={handleValue}
+            />
+          ) : (
+            <SearchableMultiSelect
+              values={valueList}
+              disabled={!results}
+              placeholder="Select attribute(s)"
+              options={valueAttrs.map((a) => ({ value: a.value, label: a.label }))}
+              onChange={handleValues}
+            />
+          )}
         </label>
         {active.chartType === 'scatter' && (
           <label className="chart-control">
@@ -291,7 +316,7 @@ export function PivotChartCard({
         )}
         <label className="chart-control">
           <span>Chart</span>
-          <SearchableSelect value={active.chartType} disabled={!hasValue} options={chartTypeOptions} onChange={(v) => patch({ ...active, chartType: v as PivotChartType })} />
+          <SearchableSelect value={active.chartType} options={chartTypeOptions} onChange={(v) => patch({ ...active, chartType: v as PivotChartType })} />
         </label>
         {isSeries && !['donut', 'scatter', 'duration', 'daily-profile'].includes(active.chartType) && (
           <label className="chart-control">
@@ -450,7 +475,7 @@ export function PivotChartCard({
   }
 
   return (
-    <div className={`chart-builder-compact${settingsOpen ? ' is-settings-open' : ''}`}>
+    <div className={`chart-builder-compact${settingsOpen ? ' is-settings-open' : ''}${hasValue ? '' : ' is-empty'}`}>
       <button type="button" className="chart-builder-gear" onClick={openSettings} aria-label="Chart settings" title="Chart settings" />
       <div className="chart-body" ref={chartContainerRef}>{chartBody}</div>
       {settingsOpen && createPortal(

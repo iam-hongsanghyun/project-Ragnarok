@@ -1,8 +1,13 @@
 import {
   CarbonPriceScheduleEntry,
+  ContingencyConfig,
   CustomConstraint,
+  FinanceConfig,
   GridRow,
+  MgaConfig,
+  MerchantConfig,
   PathwayConfig,
+  PowerFlowConfig,
   Primitive,
   RollingHorizonConfig,
   SamplingConfig,
@@ -65,6 +70,30 @@ export function defaultSclopfConfig(): SecurityConstrainedConfig {
   return { enabled: false };
 }
 
+export function defaultPowerFlowConfig(): PowerFlowConfig {
+  return { enabled: false, linear: false };
+}
+
+export function defaultContingencyConfig(): ContingencyConfig {
+  return { enabled: false };
+}
+
+export function defaultMgaConfig(): MgaConfig {
+  return { enabled: false, slack: 0.05, carriers: [] };
+}
+
+export function defaultMerchantConfig(): MerchantConfig {
+  return { enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 };
+}
+
+export function defaultOwnerColumn(): string {
+  return 'owner';
+}
+
+export function defaultFinanceConfig(): FinanceConfig {
+  return { gearing: 0, interestRate: 0.05, tenorYears: 15 };
+}
+
 function cloneStochasticConfig(config: StochasticConfig): StochasticConfig {
   return {
     ...config,
@@ -76,6 +105,26 @@ function cloneStochasticConfig(config: StochasticConfig): StochasticConfig {
 }
 
 function cloneSclopfConfig(config: SecurityConstrainedConfig): SecurityConstrainedConfig {
+  return { ...config };
+}
+
+function clonePowerFlowConfig(config: PowerFlowConfig): PowerFlowConfig {
+  return { ...config };
+}
+
+function cloneContingencyConfig(config: ContingencyConfig): ContingencyConfig {
+  return { ...config };
+}
+
+function cloneMgaConfig(config: MgaConfig): MgaConfig {
+  return { ...config, carriers: [...(config.carriers ?? [])] };
+}
+
+function cloneMerchantConfig(config: MerchantConfig): MerchantConfig {
+  return { ...config, priceSeries: config.priceSeries ? [...config.priceSeries] : undefined };
+}
+
+function cloneFinanceConfig(config: FinanceConfig): FinanceConfig {
   return { ...config };
 }
 
@@ -106,6 +155,12 @@ export function buildScenarioPreset(input: {
   // were captured default to disabled.
   stochasticConfig?: StochasticConfig;
   securityConstrainedConfig?: SecurityConstrainedConfig;
+  powerFlowConfig?: PowerFlowConfig;
+  contingencyConfig?: ContingencyConfig;
+  mgaConfig?: MgaConfig;
+  merchantConfig?: MerchantConfig;
+  ownerColumn?: string;
+  financeConfig?: FinanceConfig;
   samplingConfig?: SamplingConfig;
   constraints: CustomConstraint[];
 }): ScenarioPreset {
@@ -126,6 +181,12 @@ export function buildScenarioPreset(input: {
     rollingConfig: cloneRollingConfig(input.rollingConfig),
     stochasticConfig: cloneStochasticConfig(input.stochasticConfig ?? defaultStochasticConfig()),
     securityConstrainedConfig: cloneSclopfConfig(input.securityConstrainedConfig ?? defaultSclopfConfig()),
+    powerFlowConfig: clonePowerFlowConfig(input.powerFlowConfig ?? defaultPowerFlowConfig()),
+    contingencyConfig: cloneContingencyConfig(input.contingencyConfig ?? defaultContingencyConfig()),
+    mgaConfig: cloneMgaConfig(input.mgaConfig ?? defaultMgaConfig()),
+    merchantConfig: cloneMerchantConfig(input.merchantConfig ?? defaultMerchantConfig()),
+    ownerColumn: (input.ownerColumn ?? defaultOwnerColumn()) || defaultOwnerColumn(),
+    financeConfig: cloneFinanceConfig(input.financeConfig ?? defaultFinanceConfig()),
     samplingConfig: cloneSamplingConfig(input.samplingConfig ?? defaultSamplingConfig()),
     constraints: cloneConstraints(input.constraints),
   };
@@ -161,6 +222,12 @@ function normalizeScenarioCatalog(catalog: ScenarioCatalog): ScenarioCatalog {
       rollingConfig: cloneRollingConfig(scenario.rollingConfig ?? defaultRollingConfig()),
       stochasticConfig: cloneStochasticConfig(scenario.stochasticConfig ?? defaultStochasticConfig()),
       securityConstrainedConfig: cloneSclopfConfig(scenario.securityConstrainedConfig ?? defaultSclopfConfig()),
+      powerFlowConfig: clonePowerFlowConfig(scenario.powerFlowConfig ?? defaultPowerFlowConfig()),
+      contingencyConfig: cloneContingencyConfig(scenario.contingencyConfig ?? defaultContingencyConfig()),
+      mgaConfig: cloneMgaConfig(scenario.mgaConfig ?? defaultMgaConfig()),
+      merchantConfig: cloneMerchantConfig(scenario.merchantConfig ?? defaultMerchantConfig()),
+      ownerColumn: (scenario.ownerColumn ?? defaultOwnerColumn()) || defaultOwnerColumn(),
+      financeConfig: cloneFinanceConfig(scenario.financeConfig ?? defaultFinanceConfig()),
       samplingConfig: cloneSamplingConfig(scenario.samplingConfig ?? defaultSamplingConfig()),
       constraints: cloneConstraints(scenario.constraints ?? []),
     })),
@@ -193,6 +260,12 @@ export function readScenarioCatalogFromModel(model: WorkbookModel): ScenarioCata
         rollingConfig: payload.rollingConfig ?? defaultRollingConfig(),
         stochasticConfig: payload.stochasticConfig ?? defaultStochasticConfig(),
         securityConstrainedConfig: payload.securityConstrainedConfig ?? defaultSclopfConfig(),
+        powerFlowConfig: payload.powerFlowConfig ?? defaultPowerFlowConfig(),
+        contingencyConfig: payload.contingencyConfig ?? defaultContingencyConfig(),
+        mgaConfig: payload.mgaConfig ?? defaultMgaConfig(),
+        merchantConfig: payload.merchantConfig ?? defaultMerchantConfig(),
+        ownerColumn: payload.ownerColumn ?? payload.merchantConfig?.ownerColumn ?? defaultOwnerColumn(),
+        financeConfig: payload.financeConfig ?? defaultFinanceConfig(),
         samplingConfig: payload.samplingConfig ?? defaultSamplingConfig(),
         constraints: Array.isArray(payload.constraints) ? payload.constraints : [],
       });
@@ -234,6 +307,12 @@ export function writeScenarioCatalogToModel(
       rollingConfig: scenario.rollingConfig,
       stochasticConfig: scenario.stochasticConfig,
       securityConstrainedConfig: scenario.securityConstrainedConfig,
+      powerFlowConfig: scenario.powerFlowConfig,
+      contingencyConfig: scenario.contingencyConfig,
+      mgaConfig: scenario.mgaConfig,
+      merchantConfig: scenario.merchantConfig,
+      ownerColumn: scenario.ownerColumn,
+      financeConfig: scenario.financeConfig,
       samplingConfig: scenario.samplingConfig,
       constraints: scenario.constraints,
     }),

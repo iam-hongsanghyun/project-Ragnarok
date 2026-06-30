@@ -10,7 +10,7 @@
  */
 import { RunResults, ChartSectionConfig } from 'lib/types';
 import { EMPTY_METRIC_KEY } from 'lib/constants';
-import { Card, DashboardLayout } from './types';
+import { Card, DashboardLayout, PivotChartConfig } from './types';
 
 let _id = 0;
 const id = (p: string) => `${p}-${Date.now().toString(36)}-${(_id++).toString(36)}`;
@@ -55,7 +55,47 @@ function makeChart(patch: Partial<ChartSectionConfig>): Card {
   return { id: id('chart'), kind: 'chart', config: chartConfig(patch) };
 }
 
+function pivotConfig(patch: Partial<PivotChartConfig>): PivotChartConfig {
+  return {
+    id: Date.now() + Math.random(),
+    sheet: 'generators',
+    valueAttribute: 'p',
+    groupBy: ['carrier'],
+    filters: [],
+    aggregate: 'sum',
+    chartType: 'area',
+    timeframe: 'hourly',
+    stacked: true,
+    startIndex: 0,
+    endIndex: 100000,
+    ...patch,
+  };
+}
+
+// The fully-configurable chart: any component, any column (static / temporal /
+// input), multi group-by, multi filter, any chart type — unlike the metric
+// chart, which is locked to a fixed metric registry.
+function makePivot(patch: Partial<PivotChartConfig>): Card {
+  return { id: id('pivot'), kind: 'pivot', config: pivotConfig(patch) };
+}
+
 export function buildResultPreset(results: RunResults): DashboardLayout {
+  // Network-analysis runs (power flow / N-1 contingency) carry no optimise data
+  // (dispatch / cost / price), so the standard charts would be empty. Give them
+  // a focused layout: KPIs + the study card + the map.
+  if (results.powerFlow || results.contingency) {
+    const studyCard: Card = results.powerFlow
+      ? { id: id('pf'), kind: 'power-flow' }
+      : { id: id('ctg'), kind: 'contingency' };
+    const naRows = [
+      row({ height: 90, autoHeight: false, cards: [{ card: { id: id('kpi'), kind: 'kpi-strip' } }] }),
+      row({ cards: [{ card: studyCard }] }),
+      row({ cards: [{ card: { id: id('map'), kind: 'map' } }] }),
+      row({ cards: [{ card: { id: id('notes'), kind: 'notes' } }] }),
+    ];
+    return { rows: naRows.map((r) => r.row), cards: naRows.flatMap((r) => r.cards) };
+  }
+
   // Check storageUnits in assetDetails (live run) OR any non-zero value in the
   // pre-computed storageSeries (analytics-bundle view where series = null and
   // assetDetails is empty).
@@ -68,6 +108,14 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   const hasEmissionsBd = !!(results.emissionsBreakdown && (
     results.emissionsBreakdown.byCarrier.length > 0 || results.emissionsBreakdown.byGenerator.length > 0
   ));
+  const hasEconomics = !!(results.generatorEconomics && (
+    results.generatorEconomics.generators.length > 0 || results.generatorEconomics.storage.length > 0
+  ));
+  const hasStatistics = !!(results.statistics && results.statistics.rows.length > 0);
+  const hasNearOptimal = !!(results.nearOptimal && results.nearOptimal.alternatives.length > 0);
+  const hasMerchant = !!(results.merchant && results.merchant.assets.length > 0);
+  const hasCompanies = !!(results.companies && results.companies.companies.length > 0);
+  const hasCompanyFinance = !!(results.companyFinance && results.companyFinance.companies.length > 0);
 
   const rows: Array<ReturnType<typeof row>> = [];
 
@@ -89,6 +137,17 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
       { card: makeChart({ metricKey: 'load' }) },
       { card: makeChart({ metricKey: 'system_price' }) },
       ...(hasStorage ? [{ card: makeChart({ metricKey: 'storage_soc_by_carrier' }) }] : []),
+    ],
+  }));
+
+  // 3b. Explore — a fully-configurable Pivot chart, front and centre. Unlike the
+  //     curated metric charts above, this one plots ANY component and column
+  //     (static / temporal / input), with multi group-by, multi filter and any
+  //     chart type. Two starters: dispatch over time, and capacity by carrier.
+  rows.push(row({
+    cards: [
+      { card: makePivot({ valueAttribute: 'p', chartType: 'area', stacked: true }) },
+      { card: makePivot({ valueAttribute: 'p_nom_opt', chartType: 'grouped-bar', stacked: false, timeframe: 'aggregated' }) },
     ],
   }));
 
@@ -131,6 +190,42 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   if (hasExpansion) {
     const ce: Card = { id: id('ce'), kind: 'capacity-expansion' };
     rows.push(row({ cards: [{ card: ce }] }));
+  }
+
+  // 9b. Asset economics — revenue / margin / capex recovery (F0, conditional)
+  if (hasEconomics) {
+    const econ: Card = { id: id('econ'), kind: 'generator-economics' };
+    rows.push(row({ cards: [{ card: econ }] }));
+  }
+
+  // 9c. PyPSA statistics — canonical per-carrier metrics table (conditional)
+  if (hasStatistics) {
+    const stats: Card = { id: id('stats'), kind: 'statistics' };
+    rows.push(row({ cards: [{ card: stats }] }));
+  }
+
+  // 9d. MGA near-optimal capacity corridor (conditional)
+  if (hasNearOptimal) {
+    const mga: Card = { id: id('mga'), kind: 'near-optimal' };
+    rows.push(row({ cards: [{ card: mga }] }));
+  }
+
+  // 9e. Merchant / price-taker owner economics (conditional)
+  if (hasMerchant) {
+    const merch: Card = { id: id('merch'), kind: 'merchant' };
+    rows.push(row({ cards: [{ card: merch }] }));
+  }
+
+  // 9f. Company / owner dimension — per-company KPIs (F1, conditional)
+  if (hasCompanies) {
+    const co: Card = { id: id('co'), kind: 'company-breakdown' };
+    rows.push(row({ cards: [{ card: co }] }));
+  }
+
+  // 9g. Company-level financial model — NPV/IRR/payback/DSCR (F2, conditional)
+  if (hasCompanyFinance) {
+    const fin: Card = { id: id('fin'), kind: 'company-finance' };
+    rows.push(row({ cards: [{ card: fin }] }));
   }
 
   // 10. Carrier analysis — full-width performance table.

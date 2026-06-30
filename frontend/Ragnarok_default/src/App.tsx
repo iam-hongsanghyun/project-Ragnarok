@@ -15,6 +15,11 @@ import {
   SamplingConfig,
   StochasticConfig,
   SecurityConstrainedConfig,
+  PowerFlowConfig,
+  ContingencyConfig,
+  MgaConfig,
+  MerchantConfig,
+  FinanceConfig,
   CarbonPriceScheduleEntry,
   CarbonScheduleProfile,
   Primitive,
@@ -51,6 +56,7 @@ import { buildScenarioPreset, defaultScenarioCatalog, readScenarioCatalogFromMod
 import { readCarbonLibraryFromModel, writeCarbonLibraryToModel, sameCarbonLibrary } from 'lib/results/carbonLibrary';
 import { saveSessionControls, loadSessionControls, clearSession, clearSessionModelOnly } from 'lib/storage/sessionStore';
 import { clearSessionModel, putSessionModel, putStaticModel, getSessionFullModel, getSessionMeta, getSheetPage, isSeriesSheet, patchSheet, seriesSheetCounts, DEFAULT_SESSION_ID } from 'lib/api/session';
+import type { ClusterResult } from 'lib/forge/transforms';
 import type { SheetEditOp } from 'lib/api/session';
 import { fetchRunOutputSeriesWindows } from 'lib/api/runs';
 import { loadExample } from 'lib/api/examples';
@@ -256,6 +262,12 @@ function AppInner() {
   const [customDsl, setCustomDsl] = useState<string>('');
   const [stochasticConfig, setStochasticConfig] = useState<StochasticConfig>({ enabled: false, scenarios: [] });
   const [sclopfConfig, setSclopfConfig] = useState<SecurityConstrainedConfig>({ enabled: false });
+  const [powerFlowConfig, setPowerFlowConfig] = useState<PowerFlowConfig>({ enabled: false, linear: false });
+  const [contingencyConfig, setContingencyConfig] = useState<ContingencyConfig>({ enabled: false });
+  const [mgaConfig, setMgaConfig] = useState<MgaConfig>({ enabled: false, slack: 0.05, carriers: [] });
+  const [merchantConfig, setMerchantConfig] = useState<MerchantConfig>({ enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 });
+  const [ownerColumn, setOwnerColumn] = useState<string>('owner');
+  const [financeConfig, setFinanceConfig] = useState<FinanceConfig>({ gearing: 0, interestRate: 0.05, tenorYears: 15 });
   const [carbonPriceSchedule, setCarbonPriceSchedule] = useState<CarbonPriceScheduleEntry[]>([]);
   const [carbonLibrary, setCarbonLibrary] = useState<CarbonScheduleProfile[]>([]);
   const [validateResult, setValidateResult] = useState<{
@@ -295,6 +307,12 @@ function AppInner() {
     samplingConfig: defaultSamplingConfig(),
     stochasticConfig: { enabled: false, scenarios: [] },
     securityConstrainedConfig: { enabled: false },
+    powerFlowConfig: { enabled: false, linear: false },
+    contingencyConfig: { enabled: false },
+    mgaConfig: { enabled: false, slack: 0.05, carriers: [] },
+    merchantConfig: { enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 },
+    ownerColumn: 'owner',
+    financeConfig: { gearing: 0, interestRate: 0.05, tenorYears: 15 },
     constraints: DEFAULT_CONSTRAINTS,
   }));
   const frontendPlugins = useFrontendPlugins();
@@ -372,6 +390,10 @@ function AppInner() {
       pluginAnalytics: effResults.pluginAnalytics,
       meritOrder: effResults.meritOrder,
       co2Shadow: effResults.co2Shadow,
+      // Backend-provided (deriveRunResults doesn't recompute it); preserve it
+      // through the merge like meritOrder/co2Shadow so it survives for pathway
+      // and reconstructed bundles that carry it.
+      generatorEconomics: effResults.generatorEconomics,
       appliedConstraints: effResults.appliedConstraints,
       emissionsBreakdown: effResults.emissionsBreakdown,
       outputs: effResults.outputs,
@@ -448,6 +470,12 @@ function AppInner() {
       samplingConfig: normalizeSamplingConfig(samplingConfig),
       stochasticConfig,
       securityConstrainedConfig: sclopfConfig,
+      powerFlowConfig,
+      contingencyConfig,
+      mgaConfig,
+      merchantConfig,
+      ownerColumn,
+      financeConfig,
       constraints,
     })
   ), [
@@ -465,6 +493,12 @@ function AppInner() {
     samplingConfig,
     stochasticConfig,
     sclopfConfig,
+    powerFlowConfig,
+    contingencyConfig,
+    mgaConfig,
+    merchantConfig,
+    ownerColumn,
+    financeConfig,
     constraints,
   ]);
 
@@ -575,6 +609,12 @@ function AppInner() {
       samplingConfig: fallbackSampling,
       stochasticConfig,
       securityConstrainedConfig: sclopfConfig,
+      powerFlowConfig,
+      contingencyConfig,
+      mgaConfig,
+      merchantConfig,
+      ownerColumn,
+      financeConfig,
       constraints,
     });
     const catalogToApply = nextScenarioCatalog.scenarios.length > 0
@@ -620,6 +660,12 @@ function AppInner() {
     forceLp,
     stochasticConfig,
     sclopfConfig,
+    powerFlowConfig,
+    contingencyConfig,
+    mgaConfig,
+    merchantConfig,
+    ownerColumn,
+    financeConfig,
     constraints,
     updateSettings,
     setAnalyticsFocus,
@@ -630,6 +676,36 @@ function AppInner() {
     normalizeInputDatesToIso(cloned, settings.dateFormat);
     return cloned;
   }, [settings.dateFormat]);
+
+  // Forge → network clustering. Sync the working model to the session (same as a
+  // run — the browser holds only static sheets, the backend keeps the series),
+  // then ask the backend to reduce it. Returns the reduced model for preview.
+  const handleClusterPreview = useCallback(
+    async (nClusters: number, method: string): Promise<ClusterResult> => {
+      await putStaticModel(prepareModelForBackend(model));
+      const resp = await fetch(`${API_BASE}/api/transform/cluster`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: DEFAULT_SESSION_ID, nClusters, method }),
+      });
+      if (!resp.ok) {
+        throw new Error((await resp.text()) || `Clustering failed (HTTP ${resp.status})`);
+      }
+      return (await resp.json()) as ClusterResult;
+    },
+    [model, prepareModelForBackend],
+  );
+
+  // Apply a previewed clustering: the reduced topology becomes the new working
+  // model (it's a different network, so a full replace, not a sheet merge).
+  const handleClusterApply = useCallback(
+    (clustered: WorkbookModel) => {
+      resetForNewModel(clustered);
+      setActiveRunName(null);
+      showToast('Network reduced — clustered model loaded into the editor', 'success');
+    },
+    [resetForNewModel],
+  );
 
   // Guard against accidental session loss on browser back / forward / refresh /
   // close. The workbook lives only in memory and there is no client-side
@@ -844,6 +920,18 @@ function AppInner() {
     }
     return { emittingGenerators, hasCo2Column, totalGenerators: generators.length };
   }, [model.carriers, model.generators]);
+  // Distinct values of the chosen owner column across generators + storage —
+  // drives the merchant (price-taker) owner picker. The column is user-chosen
+  // (e.g. `owner`, `Company`) and authored in the Model grid.
+  const merchantOwners = useMemo(() => {
+    const col = (ownerColumn || 'owner').trim() || 'owner';
+    const seen: string[] = [];
+    for (const row of [...(model.generators ?? []), ...(model.storage_units ?? [])]) {
+      const owner = stringValue(row[col]).trim();
+      if (owner && !seen.includes(owner)) seen.push(owner);
+    }
+    return seen;
+  }, [model.generators, model.storage_units, ownerColumn]);
   // Map geometry for the analytics view follows the results-owning topology.
   const analyticsBounds = useMemo(() => getBounds(analyticsModel), [analyticsModel.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
   const analyticsBusIndex = useMemo(() => getBusIndex(analyticsModel), [analyticsModel.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
@@ -892,6 +980,12 @@ function AppInner() {
     setSamplingConfig(normalizeSamplingConfig(scenario.samplingConfig ?? defaultSamplingConfig()));
     setStochasticConfig(scenario.stochasticConfig ?? { enabled: false, scenarios: [] });
     setSclopfConfig(scenario.securityConstrainedConfig ?? { enabled: false });
+    setPowerFlowConfig(scenario.powerFlowConfig ?? { enabled: false, linear: false });
+    setContingencyConfig(scenario.contingencyConfig ?? { enabled: false });
+    setMgaConfig(scenario.mgaConfig ?? { enabled: false, slack: 0.05, carriers: [] });
+    setMerchantConfig(scenario.merchantConfig ?? { enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 });
+    setOwnerColumn(scenario.ownerColumn ?? 'owner');
+    setFinanceConfig(scenario.financeConfig ?? { gearing: 0, interestRate: 0.05, tenorYears: 15 });
     setStatus(`Applied scenario: ${scenario.label}`);
     showToast(`Scenario applied: ${scenario.label}`, 'success');
   }, [maxSnapshots, showToast, updateSettings]);
@@ -2111,6 +2205,12 @@ function AppInner() {
       samplingConfig: normalizeSamplingConfig(samplingConfig),
       stochasticConfig,
       securityConstrainedConfig: sclopfConfig,
+      powerFlowConfig,
+      contingencyConfig,
+      mgaConfig,
+      merchantConfig,
+      ownerColumn,
+      financeConfig,
       carbonPriceSchedule,
     };
 
@@ -2393,6 +2493,19 @@ function AppInner() {
               onStochasticConfigChange={setStochasticConfig}
               sclopfConfig={sclopfConfig}
               onSclopfConfigChange={setSclopfConfig}
+              powerFlowConfig={powerFlowConfig}
+              onPowerFlowConfigChange={setPowerFlowConfig}
+              contingencyConfig={contingencyConfig}
+              onContingencyConfigChange={setContingencyConfig}
+              mgaConfig={mgaConfig}
+              onMgaConfigChange={setMgaConfig}
+              merchantConfig={merchantConfig}
+              onMerchantConfigChange={setMerchantConfig}
+              merchantOwners={merchantOwners}
+              ownerColumn={ownerColumn}
+              onOwnerColumnChange={setOwnerColumn}
+              financeConfig={financeConfig}
+              onFinanceConfigChange={setFinanceConfig}
               maxSnapshots={maxSnapshots}
               snapshotStart={snapshotStart}
               snapshotEnd={snapshotEnd}
@@ -2514,6 +2627,8 @@ function AppInner() {
                 setModel((prev) => ({ ...prev, ...partial }));
                 requestStaticResync(); // Forge edits static sheets → sync the session
               }}
+              onClusterPreview={handleClusterPreview}
+              onClusterApply={handleClusterApply}
             />
           )}
 

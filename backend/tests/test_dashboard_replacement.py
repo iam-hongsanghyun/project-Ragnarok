@@ -240,6 +240,44 @@ def test_include_existing_makes_all_plants_share_one_close_year_mix(libs: dict[s
         assert n.generators.at[wind, "p_nom"] == pytest.approx(262.5)
 
 
+def test_frozen_split_used_verbatim_and_bypasses_base_year(libs: dict[str, Any]) -> None:
+    """A row with frozen solar_mw/wind_mw is replaced with exactly those MW, even
+    when the plant is below the base year and include-existing is off."""
+    import pypsa
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2038-01-01", periods=3, freq="h"))
+    n.add("Bus", "b1")
+    n.add("Carrier", "coal")
+    n.add("Generator", "coal_old", bus="b1", carrier="coal", p_nom=1000.0, build_year=2010)
+    n.generators["province"] = ""
+    s = libs["settings"].Settings(
+        model="", base_year=2025, target_year=2038, target_load_twh=0,
+        snapshot_start="01/01/2038 00:00", snapshot_length=3,
+        replace_generators=True, replace_build_year=2025,
+        replace_include_existing=False, replace_follow=True,  # would normally reject 2010
+    )
+    rules = pd.DataFrame([{"generator": "coal_old", "total_mw": 1000, "solar_mw": 700, "wind_mw": 300}])
+    dash = libs["settings"].Dashboard(
+        settings=s, cc_rules=None, cf_constraints=pd.DataFrame(), carbon_price_usd=0.0,
+        generator_replacements=rules,
+    )
+    replaced = libs["generator_replacement"].replace_generators(n, dash)
+    assert replaced == {"b1": 1000.0}  # built despite being below the base year
+    assert n.generators.at["coal_old_solar_2010", "p_nom"] == pytest.approx(700.0)
+    assert n.generators.at["coal_old_wind_2010", "p_nom"] == pytest.approx(300.0)
+
+
+def test_frozen_split_helper() -> None:
+    """The pipeline's frozen-split parser accepts numeric/string, rejects blanks."""
+    pl = _load_pipeline()
+    assert pl._frozen_split({"generator": "x", "solar_mw": 700, "wind_mw": 300}) == (700.0, 300.0)
+    assert pl._frozen_split({"generator": "x", "solar_mw": "700", "wind_mw": "300"}) == (700.0, 300.0)
+    assert pl._frozen_split({"generator": "x"}) is None
+    assert pl._frozen_split({"generator": "x", "solar_mw": "", "wind_mw": ""}) is None
+    assert pl._frozen_split({"generator": "x", "solar_mw": None, "wind_mw": 5}) is None
+
+
 def test_additions_helpers() -> None:
     """The pipeline's full-model additions + latest-nonzero fallback are correct."""
     pl = _load_pipeline()

@@ -145,6 +145,10 @@ export function applyConfigBundle(
   PYPSA_COMPONENTS = Object.values(schema.components).sort(
     (a, b) => a.order - b.order || a.label.localeCompare(b.label),
   );
+  // Ragnarok extension: an optional `owner` tag on generators / storage units.
+  // Not a PyPSA attribute (the backend drops it before building the network),
+  // but it persists in the workbook and drives merchant (price-taker) analysis.
+  PYPSA_COMPONENTS.forEach(injectOwnerAttribute);
   PYPSA_COMPONENT_BY_SHEET = Object.fromEntries(
     PYPSA_COMPONENTS.map((component) => [component.sheet_name, component]),
   ) as Record<string, PypsaComponentSchema>;
@@ -180,6 +184,31 @@ export function applyConfigBundle(
 }
 
 // ── Helpers (read from the live state above on every call) ──────────────────
+
+/** Sheets that carry the Ragnarok `owner` extension column. */
+const OWNER_SHEETS = new Set(['generators', 'storage_units']);
+
+/** Add the synthetic optional `owner` attribute to a component schema in place. */
+function injectOwnerAttribute(component: PypsaComponentSchema): void {
+  if (!OWNER_SHEETS.has(component.sheet_name)) return;
+  if (component.attributes.some((attr) => attr.attribute === 'owner')) return;
+  component.attributes.push({
+    attribute: 'owner',
+    type: 'string',
+    unit: '',
+    default: '',
+    description:
+      'Owner / operator tag (Ragnarok extension). Groups assets for merchant ' +
+      '(price-taker) analysis. Not a PyPSA attribute — ignored by the solver.',
+    status: 'input',
+    raw_status: 'input',
+    required: false,
+    storage: 'static',
+  });
+  for (const list of [component.input_attributes, component.static_attributes, component.input_static_attributes]) {
+    if (!list.includes('owner')) list.push('owner');
+  }
+}
 
 function defaultCellValue(attr: PypsaAttribute): Primitive {
   const raw = String(attr.default ?? '').trim();

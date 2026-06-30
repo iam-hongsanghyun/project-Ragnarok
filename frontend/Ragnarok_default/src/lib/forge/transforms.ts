@@ -5,9 +5,29 @@
  * and reusable by the Forge view. Non-numeric or empty cells are always left
  * untouched; only cells that actually change are rewritten.
  */
-import type { GridRow } from 'lib/types';
+import type { GridRow, WorkbookModel } from 'lib/types';
 
 export type RoundOp = 'round' | 'ceil' | 'floor';
+
+/** Component counts before/after a clustering reduction. */
+export interface ClusterCounts {
+  buses: number;
+  lines: number;
+  transformers: number;
+  links: number;
+  generators: number;
+  loads: number;
+  storageUnits: number;
+}
+
+/** Result of POST /api/transform/cluster — the reduced model + a busmap. */
+export interface ClusterResult {
+  model: WorkbookModel;
+  busmap: Record<string, string>;
+  method: string;
+  before: ClusterCounts;
+  after: ClusterCounts;
+}
 
 /** A cell as a finite number, or null when it is empty / non-numeric. */
 function asFiniteNumber(value: unknown): number | null {

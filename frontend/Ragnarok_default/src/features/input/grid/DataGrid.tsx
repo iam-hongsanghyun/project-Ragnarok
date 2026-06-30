@@ -380,6 +380,73 @@ export function DataGrid({
     return false; // we applied it ourselves
   }, [readOnly, cols, displayToOrig, rows, coerceEditedValue, onPasteEdits, onUpdate, readOnlyCols]);
 
+  // ── Copy / Paste from the right-click menu ────────────────────────────────
+  // Cmd/Ctrl+C/V already work through Glide; these mirror them for discovery
+  // and mouse-only users. Copy emits TSV of the selection (raw values, so it
+  // round-trips through onPaste); Paste reuses the same auto-growing pipeline.
+  const copySelection = useCallback(() => {
+    let r0: number;
+    let r1: number;
+    let colIdxs: number[];
+    if (selection.current?.range) {
+      const { x, y, width, height } = selection.current.range;
+      r0 = y;
+      r1 = y + height - 1;
+      colIdxs = Array.from({ length: width }, (_, k) => x + k);
+    } else if (selection.rows.length > 0) {
+      const sel = selection.rows.toArray();
+      r0 = Math.min(...sel);
+      r1 = Math.max(...sel);
+      colIdxs = cols.map((_, k) => k);
+    } else if (selection.columns.length > 0) {
+      colIdxs = selection.columns.toArray();
+      r0 = 0;
+      r1 = displayToOrig.length - 1;
+    } else if (ctxMenu) {
+      const disp = ctxMenu.origIndex != null ? origToDisplay.get(ctxMenu.origIndex) : undefined;
+      if (disp == null) return;
+      r0 = disp;
+      r1 = disp;
+      colIdxs = [Math.max(0, cols.indexOf(ctxMenu.col))];
+    } else {
+      return;
+    }
+    colIdxs = colIdxs.filter((c) => c >= 0 && c < cols.length);
+    const rowSet = selection.rows.length > 0 ? new Set(selection.rows.toArray()) : null;
+    const lines: string[] = [];
+    for (let dr = r0; dr <= r1; dr += 1) {
+      if (rowSet && !rowSet.has(dr)) continue;
+      const orig = displayToOrig[dr];
+      if (orig == null) continue;
+      lines.push(colIdxs.map((c) => String(rows[orig]?.[cols[c]] ?? '')).join('\t'));
+    }
+    void navigator.clipboard?.writeText?.(lines.join('\n'));
+  }, [selection, ctxMenu, rows, cols, displayToOrig, origToDisplay]);
+
+  const pasteFromMenu = useCallback(() => {
+    if (readOnly) return;
+    void (async () => {
+      const text = await navigator.clipboard?.readText?.();
+      if (!text) return;
+      const matrix = text
+        .replace(/\r\n/g, '\n')
+        .replace(/\n$/, '')
+        .split('\n')
+        .map((ln) => ln.split('\t'));
+      let startCol: number;
+      let startRow: number;
+      if (selection.current?.cell) {
+        [startCol, startRow] = selection.current.cell;
+      } else if (ctxMenu) {
+        startCol = Math.max(0, cols.indexOf(ctxMenu.col));
+        startRow = (ctxMenu.origIndex != null ? origToDisplay.get(ctxMenu.origIndex) : undefined) ?? 0;
+      } else {
+        return;
+      }
+      onPaste([startCol, startRow] as Item, matrix);
+    })();
+  }, [readOnly, selection, ctxMenu, cols, origToDisplay, onPaste]);
+
   // ── Combobox editor for suggestion columns ────────────────────────────────
   const provideEditor: ProvideEditorCallback<GridCell> = useCallback((cell) => {
     if (readOnly || cell.kind !== GridCellKind.Text) return undefined;
@@ -486,7 +553,9 @@ export function DataGrid({
 
   // Which cell right-click actions are reachable (column actions + filter live
   // in the header ▾ menu, not the cell menu).
-  const hasCellMenu = !!onAnalyse || (!readOnly && (!!onAppendRow || !!onRequestAddColumn || !!onDeleteRow || !!onClearTable));
+  // Always show the cell menu — Copy is available everywhere (incl. read-only
+  // result tables); the row/column/analyse items below gate themselves.
+  const hasCellMenu = true;
   const menuProtected = menuCol ? protectedCols?.includes(menuCol) ?? false : false;
 
   return (
@@ -507,6 +576,9 @@ export function DataGrid({
           onPaste={readOnly ? undefined : onPaste}
           onColumnResize={onColumnResize}
           getCellsForSelection={true}
+          rangeSelect="multi-rect"
+          columnSelect="multi"
+          rowSelect="multi"
           fillHandle={!readOnly}
           rowMarkers="number"
           freezeColumns={freezeColumns}
@@ -546,6 +618,15 @@ export function DataGrid({
               collisionPadding={8}
               onCloseAutoFocus={(e) => e.preventDefault()}
             >
+              <DropdownMenu.Item className="grid-ctxmenu-item" onSelect={() => copySelection()}>
+                Copy
+              </DropdownMenu.Item>
+              {!readOnly && (
+                <DropdownMenu.Item className="grid-ctxmenu-item" onSelect={() => pasteFromMenu()}>
+                  Paste
+                </DropdownMenu.Item>
+              )}
+              <DropdownMenu.Separator className="grid-ctxmenu-sep" />
               {!readOnly && onAppendRow && (
                 <DropdownMenu.Item className="grid-ctxmenu-item" onSelect={() => onAppendRow()}>
                   Add row

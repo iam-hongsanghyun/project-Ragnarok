@@ -159,6 +159,207 @@ export interface SecurityConstrainedConfig {
   enabled: boolean;
 }
 
+/** Power-flow study mode — solve network physics (pf/lpf) instead of an LP. */
+export interface PowerFlowConfig {
+  enabled: boolean;
+  /** true → linear (DC) lpf(); false → AC Newton-Raphson pf(). */
+  linear: boolean;
+}
+
+/** Per-bus voltage magnitude (pu) across the modelled snapshots. */
+export interface VoltageProfileEntry {
+  bus: string;
+  min: number;
+  mean: number;
+  max: number;
+}
+
+/** Backend power-flow result block (present only on a pf/lpf run). */
+export interface PowerFlowResult {
+  linear: boolean;
+  method: string;
+  converged: boolean;
+  iterations: number;
+  maxError: number;
+  /** Non-null when the flow failed to run (e.g. missing reactance / slack). */
+  error: string | null;
+  voltageProfile: VoltageProfileEntry[];
+  lossesMwh: number;
+  peakLossMw: number;
+  currency: string;
+}
+
+/** One row of PyPSA's statistics() table — a component/carrier slice. */
+export interface StatisticsRow {
+  component: string;
+  carrier: string;
+  values: Record<string, number | null>;
+}
+
+/** PyPSA statistics() passthrough: the metric columns + per-carrier rows. */
+export interface StatisticsResult {
+  columns: string[];
+  rows: StatisticsRow[];
+}
+
+/** N-1 contingency study mode — branch loading under each single outage. */
+export interface ContingencyConfig {
+  enabled: boolean;
+}
+
+/** MGA (modelling-to-generate-alternatives) — map the near-optimal capacity
+ *  space. Layered on top of a normal optimise run. `carriers` empty = explore
+ *  every extendable-generator carrier (backend-capped). */
+export interface MgaConfig {
+  enabled: boolean;
+  /** Cost slack: alternatives stay within `1 + slack` of the optimal cost. */
+  slack: number;
+  carriers: string[];
+}
+
+/** One MGA alternative — the system at one corner of the near-optimal space. */
+export interface MgaAlternative {
+  carrier: string;
+  sense: 'min' | 'max';
+  status: string;
+  cost: number;
+  /** cost / optimal cost (≈ 1 + slack at the budget boundary). */
+  costRatio: number | null;
+  capacityByCarrier: Record<string, number>;
+}
+
+/** MGA result block — the optimum plus its near-optimal corridor. */
+export interface NearOptimalResult {
+  slack: number;
+  currency: string;
+  optimum: { cost: number; capacityByCarrier: Record<string, number> };
+  carriers: string[];
+  alternatives: MgaAlternative[];
+  droppedCarriers: string[];
+}
+
+/** Merchant / price-taker analysis (B1) — maximise one owner's profit against a
+ *  price signal. Layered on top of a normal optimise run. */
+export interface MerchantConfig {
+  enabled: boolean;
+  /** Owner value whose assets to analyse (a value found in the owner column). */
+  owner: string;
+  /** `lmp` = stage-1 system marginal price; `series` = exogenous user price. */
+  priceSource: 'lmp' | 'series';
+  /** Flat price (run currency / MWh) used when priceSource = `series`. */
+  flatPrice: number;
+  /** Optional hourly price overriding `flatPrice` in series mode. */
+  priceSeries?: number[];
+}
+
+/** One owner asset's merchant economics. */
+export interface MerchantAsset {
+  name: string;
+  type: 'generator' | 'storage';
+  bus: string;
+  carrier: string;
+  capacityMW: number;
+  energyMWh: number;
+  revenue: number;
+  operatingCost: number;
+  capex: number;
+  profit: number;
+  /** Time-weighted price the asset actually sold at (revenue / energy). */
+  capturePrice: number | null;
+}
+
+/** One company's KPIs (F1) — its slice of the solved system. */
+export interface CompanyKpi {
+  company: string;
+  capacityMW: number;
+  energyMWh: number;
+  /** Competitive-benchmark revenue (LMP × dispatch); null if no LMPs. */
+  revenue: number | null;
+  emissionsTonnes: number;
+  generatorCount: number;
+  storageCount: number;
+}
+
+/** Company / owner dimension (F1) — per-company KPIs grouped by owner tag. */
+export interface CompanyBreakdownResult {
+  ownerColumn: string;
+  currency: string;
+  companies: CompanyKpi[];
+  /** Assets with no owner tag (not attributed to any company). */
+  untaggedCount: number;
+}
+
+/** Optional debt assumptions (F2) for DSCR. Gearing 0 = all-equity. */
+export interface FinanceConfig {
+  /** Debt share of overnight capex (0–1). */
+  gearing: number;
+  /** Debt interest rate (fraction). */
+  interestRate: number;
+  /** Debt tenor (years). */
+  tenorYears: number;
+}
+
+/** One company's project-finance metrics (F2). */
+export interface CompanyFinanceEntry {
+  company: string;
+  overnightCapex: number;
+  annualMargin: number;
+  horizonYears: number;
+  npv: number;
+  /** Internal rate of return (fraction); null if not bracketable. */
+  irr: number | null;
+  paybackYears: number | null;
+  discountedPaybackYears: number | null;
+  /** Debt-service coverage ratio; null when no debt is configured. */
+  dscr: number | null;
+}
+
+/** Company-level financial model (F2) — NPV/IRR/payback/DSCR per owner. */
+export interface CompanyFinanceResult {
+  ownerColumn: string;
+  currency: string;
+  discountRate: number;
+  companies: CompanyFinanceEntry[];
+}
+
+/** Merchant result block — one owner's profit against the price signal. */
+export interface MerchantResult {
+  owner: string;
+  ownerColumn: string;
+  priceSource: 'lmp' | 'series';
+  currency: string;
+  priceStats: { mean: number | null; min: number | null; max: number | null };
+  assets: MerchantAsset[];
+  totals: {
+    revenue: number;
+    operatingCost: number;
+    capex: number;
+    profit: number;
+    energyMWh: number;
+  };
+}
+
+export interface ContingencyEntry {
+  /** Name of the outaged passive branch. */
+  outage: string;
+  /** Worst post-outage loading (%) on any remaining branch. */
+  worstLoadingPct: number;
+  /** Which branch hit that worst loading (null if none). */
+  worstBranch: string | null;
+  overloadCount: number;
+}
+
+export interface ContingencyResult {
+  snapshot: string;
+  secure: boolean;
+  baseMaxLoadingPct: number;
+  outagesTested: number;
+  insecureCount: number;
+  contingencies: ContingencyEntry[];
+  error: string | null;
+  currency: string;
+}
+
 export interface StochasticScenarioResult {
   name: string;
   weight: number;
@@ -198,6 +399,14 @@ export interface ScenarioPreset {
   // RAGNAROK_CustomDSL, not per preset.
   stochasticConfig: StochasticConfig;
   securityConstrainedConfig: SecurityConstrainedConfig;
+  powerFlowConfig: PowerFlowConfig;
+  contingencyConfig: ContingencyConfig;
+  mgaConfig: MgaConfig;
+  merchantConfig: MerchantConfig;
+  /** Model column holding the owner/company tag (F1 + B1). Default `owner`. */
+  ownerColumn: string;
+  /** Optional debt assumptions for company finance DSCR (F2). */
+  financeConfig: FinanceConfig;
   constraints: CustomConstraint[];
 }
 
@@ -403,6 +612,87 @@ export interface Co2Shadow {
   note: string;
 }
 
+// ── Asset economics (F0 — revenue / margin / capex recovery) ──────────────────
+// Competitive-benchmark profit read out of the cost-min solve (no extra solve):
+// under the least-cost LP, optimal dispatch is the perfectly-competitive
+// profit-max equilibrium. Money columns are on the modeled-horizon basis;
+// `recoveryPct` is scale-invariant. Backend-provided (see market.py) and
+// preserved through the client deriveRunResults merge; present whenever the
+// backend supplied it (solve, stored/light view, pathway, result-import).
+// deriveRunResults does not recompute it, so a bundle fully re-derived from bare
+// outputs with no backend economics (e.g. a pre-F0 export re-opened) lacks it.
+
+export interface GeneratorEconomicsEntry {
+  name: string;
+  carrier: string;
+  bus: string;
+  color: string;
+  energyMwh: number;
+  capacityMw: number;
+  revenue: number;
+  variableCost: number;
+  grossMargin: number;
+  /** Volume-weighted average price captured ($/MWh); null when no energy. */
+  capturePrice: number | null;
+  fixedCostAnnual: number;
+  fixedCostHorizon: number;
+  netHorizon: number;
+  /** 100·grossMargin / fixedCostHorizon; null when there is no fixed cost. */
+  recoveryPct: number | null;
+}
+
+export interface StorageEconomicsEntry {
+  name: string;
+  carrier: string;
+  bus: string;
+  color: string;
+  energyDischargedMwh: number;
+  energyChargedMwh: number;
+  capacityMw: number;
+  revenue: number;
+  variableCost: number;
+  grossMargin: number;
+  fixedCostAnnual: number;
+  fixedCostHorizon: number;
+  netHorizon: number;
+  recoveryPct: number | null;
+}
+
+export interface CarrierEconomicsEntry {
+  carrier: string;
+  color: string;
+  energyMwh: number;
+  capacityMw: number;
+  revenue: number;
+  variableCost: number;
+  grossMargin: number;
+  capturePrice: number | null;
+  fixedCostAnnual: number;
+  fixedCostHorizon: number;
+  netHorizon: number;
+  recoveryPct: number | null;
+}
+
+export interface GeneratorEconomics {
+  currency: string;
+  modeledHours: number;
+  horizonYears: number;
+  generators: GeneratorEconomicsEntry[];
+  storage: StorageEconomicsEntry[];
+  byCarrier: CarrierEconomicsEntry[];
+  system: {
+    revenue: number;
+    variableCost: number;
+    grossMargin: number;
+    fixedCostAnnual: number;
+    fixedCostHorizon: number;
+    netHorizon: number;
+    recoveryPct: number | null;
+    generatorsModeled: number;
+    generatorsRecovered: number;
+  };
+}
+
 // ── Capacity expansion result ─────────────────────────────────────────────────
 
 export interface ExpansionAsset {
@@ -592,6 +882,24 @@ export interface RunResults {
   expansionResults?: ExpansionAsset[];
   meritOrder?: MeritOrderEntry[];
   co2Shadow?: Co2Shadow;
+  /** Per-asset competitive-benchmark economics (F0). Backend-provided and
+   *  preserved through the deriveRunResults merge; see the GeneratorEconomics
+   *  doc comment for when it is present. */
+  generatorEconomics?: GeneratorEconomics;
+  /** Present only when the run was a power-flow study (pf/lpf), not an LP. */
+  powerFlow?: PowerFlowResult;
+  /** Present only when the run was an N-1 contingency analysis. */
+  contingency?: ContingencyResult;
+  /** PyPSA statistics() table (per-carrier capacity/CF/curtailment/revenue/…). */
+  statistics?: StatisticsResult;
+  /** MGA near-optimal capacity corridor (present only when MGA was enabled). */
+  nearOptimal?: NearOptimalResult;
+  /** Merchant / price-taker owner economics (present only when enabled). */
+  merchant?: MerchantResult;
+  /** Per-company KPIs (present only when assets carry an owner tag). */
+  companies?: CompanyBreakdownResult;
+  /** Per-company project finance (NPV/IRR/payback/DSCR); needs an LP run. */
+  companyFinance?: CompanyFinanceResult;
   appliedConstraints?: AppliedConstraint[];
   emissionsBreakdown?: EmissionsBreakdown;
   narrative: string[];

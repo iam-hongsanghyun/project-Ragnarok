@@ -33,10 +33,22 @@ from .dispatch import (
     dispatch_by_carrier,
 )
 from .emissions import build_emissions_breakdown
+from .statistics import build_statistics
+from .mga import build_mga
+from .merchant import build_merchant
+from .company import build_company_breakdown
+from .finance import build_company_finance
 from .expansion import build_expansion_results
 from .full_outputs import build_full_outputs
-from .market import build_applied_constraints, build_co2_shadow, build_merit_order
+from .market import (
+    build_applied_constraints,
+    build_co2_shadow,
+    build_generator_economics,
+    build_merit_order,
+)
 from .summaries import _rolling_window_summaries, _pathway_period_summaries
+from .power_flow import run_power_flow
+from .contingency import run_contingency
 
 # Solve-phase timing and notes are logged here. With the run worker no longer
 # redirecting file descriptors, these INFO lines stream to the launching
@@ -162,6 +174,21 @@ def run_pypsa(
     sampling = parse_sampling_config(options.get("samplingConfig"))
     sclopf_cfg = options.get("securityConstrainedConfig") or {}
     sclopf_enabled = bool(sclopf_cfg.get("enabled", False))
+    powerflow_cfg = options.get("powerFlowConfig") or {}
+    pf_enabled = bool(powerflow_cfg.get("enabled", False))
+    pf_linear = bool(powerflow_cfg.get("linear", False))
+    contingency_cfg = options.get("contingencyConfig") or {}
+    contingency_enabled = bool(contingency_cfg.get("enabled", False))
+    mga_cfg = options.get("mgaConfig") or {}
+    mga_enabled = bool(mga_cfg.get("enabled", False))
+    merchant_cfg = options.get("merchantConfig") or {}
+    merchant_enabled = bool(merchant_cfg.get("enabled", False))
+    # The owner/company column (F1 + B1) is a shared, top-level concern. Fall
+    # back to the legacy merchantConfig.ownerColumn for scenarios saved before
+    # it was promoted out of the merchant config.
+    owner_column = str(
+        options.get("ownerColumn") or merchant_cfg.get("ownerColumn") or "owner"
+    )
     if stochastic.enabled and rolling.enabled:
         raise HTTPException(
             status_code=400,
@@ -187,6 +214,48 @@ def run_pypsa(
             status_code=400,
             detail="Security-constrained (SCLOPF) cannot be combined with multi-investment pathway mode.",
         )
+    if pf_enabled and (
+        rolling.enabled or stochastic.enabled or sclopf_enabled or pathway.enabled or sampling.enabled
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Power-flow study mode cannot be combined with rolling horizon, stochastic, "
+            "security-constrained, multi-investment pathway, or sampled-block modes.",
+        )
+    if contingency_enabled and (
+        rolling.enabled or stochastic.enabled or sclopf_enabled or pathway.enabled
+        or sampling.enabled or pf_enabled
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="N-1 contingency analysis cannot be combined with rolling horizon, stochastic, "
+            "security-constrained, multi-investment pathway, sampled-block, or power-flow modes.",
+        )
+    # MGA layers on top of a full optimise (it needs the optimum to set the cost
+    # budget), so it is incompatible with the modes that change *how* the LP is
+    # solved or that skip the LP entirely. It may combine with multi-investment
+    # pathway runs (optimize_mga takes multi_investment_periods).
+    if mga_enabled and (
+        rolling.enabled or stochastic.enabled or sclopf_enabled
+        or sampling.enabled or pf_enabled or contingency_enabled
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="MGA near-optimal exploration cannot be combined with rolling horizon, stochastic, "
+            "security-constrained, sampled-block, power-flow, or contingency modes.",
+        )
+    # Merchant mode needs the stage-1 optimum's LMPs, so it layers on the normal
+    # optimise like MGA and is incompatible with the modes that skip or reshape
+    # that solve. (Pathway is allowed; a series price source bypasses the LMP.)
+    if merchant_enabled and (
+        rolling.enabled or stochastic.enabled or sclopf_enabled
+        or sampling.enabled or pf_enabled or contingency_enabled
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Merchant (price-taker) analysis cannot be combined with rolling horizon, stochastic, "
+            "security-constrained, sampled-block, power-flow, or contingency modes.",
+        )
 
     # The Ragnarok backend is plugin-agnostic: it only ever receives a model,
     # scenario and options and solves them. Plugins live entirely on the
@@ -204,6 +273,28 @@ def run_pypsa(
 
     snapshot_count = len(network.snapshots)
     snapshot_weight = float(network.snapshot_weightings["objective"].iloc[0]) if snapshot_count else 1.0
+
+    # Power-flow study mode (pf/lpf) solves network physics, not an LP — none of
+    # the cost/price/economics extraction below applies, so delegate to the
+    # focused power-flow path and return its payload directly.
+    if pf_enabled:
+        return run_power_flow(
+            network,
+            linear=pf_linear,
+            currency=str(options.get("currencySymbol", "$")),
+            snapshot_count=snapshot_count,
+            snapshot_weight=snapshot_weight,
+            notes=notes,
+        )
+    if contingency_enabled:
+        return run_contingency(
+            network,
+            currency=str(options.get("currencySymbol", "$")),
+            snapshot_count=snapshot_count,
+            snapshot_weight=snapshot_weight,
+            notes=notes,
+        )
+
     # CO₂ emission factors are a static carrier property, shared across
     # scenarios. Strip any scenario level from the MultiIndex so emission
     # totals key by carrier name only.
@@ -541,6 +632,8 @@ def run_pypsa(
     merit_order = build_merit_order(network)
     co2_shadow = build_co2_shadow(network, float(scenario.get("carbonPrice", 0.0)), currency)
     applied_constraints = build_applied_constraints(network)
+    generator_economics = build_generator_economics(network, currency)
+    statistics = build_statistics(network)
     emissions_breakdown = build_emissions_breakdown(network, emissions_factors)
 
     cost_breakdown = [
@@ -661,6 +754,57 @@ def run_pypsa(
             "scale": snapshot_weight / store_w if store_w > 0 else snapshot_weight,
         }
 
+    # MGA near-optimal exploration runs last: it copies the solved network and
+    # detaches the solver model, so it must follow every read of the optimum's
+    # solution dataframes above. It never mutates the base network's solution.
+    near_optimal = (
+        build_mga(
+            network,
+            slack=float(mga_cfg.get("slack", 0.05) or 0.05),
+            carriers=mga_cfg.get("carriers") or None,
+            currency=currency,
+            solver_options=solver_options if solver_options else {},
+            io_api=_SOLVER_IO_API,
+            multi_investment_periods=pathway.enabled,
+        )
+        if mga_enabled
+        else None
+    )
+
+    # Merchant / price-taker analysis — like MGA, runs last on a copy of the
+    # solved optimum (it reads stage-1 LMPs and detaches the solver model).
+    merchant = (
+        build_merchant(
+            network,
+            model,
+            owner=str(merchant_cfg.get("owner", "") or ""),
+            owner_column=owner_column,
+            price_source=str(merchant_cfg.get("priceSource", "lmp") or "lmp"),
+            flat_price=float(merchant_cfg.get("flatPrice", 0.0) or 0.0),
+            price_series=merchant_cfg.get("priceSeries") or None,
+            currency=currency,
+            solver_options=solver_options if solver_options else {},
+            io_api=_SOLVER_IO_API,
+        )
+        if merchant_enabled
+        else None
+    )
+
+    # Company / owner dimension (F1) — per-company KPIs whenever assets carry an
+    # owner tag. Independent of merchant mode; reads only solved dataframes.
+    company_breakdown = build_company_breakdown(
+        network, model,
+        owner_column=owner_column, currency=currency, emissions_factors=emissions_factors,
+    )
+    # Company-level financial model (F2) — NPV / IRR / payback / DSCR per owner.
+    company_finance = build_company_finance(
+        network, model,
+        owner_column=owner_column,
+        discount_rate=float(scenario.get("discountRate", 0.0) or 0.0),
+        currency=currency,
+        debt=options.get("financeConfig") or None,
+    )
+
     return {
         "summary": summary,
         "dispatchSeries": dispatch_s,
@@ -680,6 +824,12 @@ def run_pypsa(
         "meritOrder": merit_order,
         "co2Shadow": co2_shadow,
         "appliedConstraints": applied_constraints,
+        "generatorEconomics": generator_economics,
+        "statistics": statistics,
+        "nearOptimal": near_optimal,
+        "merchant": merchant,
+        "companies": company_breakdown,
+        "companyFinance": company_finance,
         "emissionsBreakdown": emissions_breakdown,
         "narrative": notes,
         "runMeta": {

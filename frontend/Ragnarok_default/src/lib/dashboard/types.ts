@@ -23,6 +23,14 @@ export type CardKind =
   | 'duration-curve'
   | 'merit-order'
   | 'co2-shadow'
+  | 'generator-economics'
+  | 'statistics'
+  | 'near-optimal'
+  | 'merchant'
+  | 'company-breakdown'
+  | 'company-finance'
+  | 'power-flow'
+  | 'contingency'
   | 'emissions-breakdown'
   | 'capacity-expansion'
   | 'capacity-by-period'
@@ -80,6 +88,10 @@ export interface PivotChartConfig {
   id: number;
   sheet: string;                 // component list_name: 'generators','lines',…
   valueAttribute: string;        // exact schema attr name: 'p','p_nom_opt','p_nom',…
+  /** Optional extra value attributes plotted as additional series alongside
+   *  `valueAttribute` (line/area/bar + grouped/horizontal bar). `valueAttribute`
+   *  stays the canonical first column for back-compat. */
+  valueAttributes?: string[];
   groupBy: string[];             // input dims → composite key; [] = per-component
   filters: PivotFilter[];
   aggregate: 'sum' | 'mean' | 'max' | 'min' | 'count';
@@ -128,6 +140,38 @@ export interface Co2ShadowCardData extends CardBase {
   kind: 'co2-shadow';
 }
 
+export interface GeneratorEconomicsCardData extends CardBase {
+  kind: 'generator-economics';
+}
+
+export interface StatisticsCardData extends CardBase {
+  kind: 'statistics';
+}
+
+export interface NearOptimalCardData extends CardBase {
+  kind: 'near-optimal';
+}
+
+export interface MerchantCardData extends CardBase {
+  kind: 'merchant';
+}
+
+export interface CompanyBreakdownCardData extends CardBase {
+  kind: 'company-breakdown';
+}
+
+export interface CompanyFinanceCardData extends CardBase {
+  kind: 'company-finance';
+}
+
+export interface PowerFlowCardData extends CardBase {
+  kind: 'power-flow';
+}
+
+export interface ContingencyCardData extends CardBase {
+  kind: 'contingency';
+}
+
 export interface EmissionsBreakdownCardData extends CardBase {
   kind: 'emissions-breakdown';
 }
@@ -161,6 +205,14 @@ export type Card =
   | DurationCurveCardData
   | MeritOrderCardData
   | Co2ShadowCardData
+  | GeneratorEconomicsCardData
+  | StatisticsCardData
+  | NearOptimalCardData
+  | MerchantCardData
+  | CompanyBreakdownCardData
+  | CompanyFinanceCardData
+  | PowerFlowCardData
+  | ContingencyCardData
   | EmissionsBreakdownCardData
   | CapacityExpansionCardData
   | CapacityByPeriodCardData

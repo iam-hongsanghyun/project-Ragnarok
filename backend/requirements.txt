@@ -8,6 +8,7 @@ numpy>=2.1
 scipy>=1.14
 linopy>=0.5
 highspy>=1.8
+scikit-learn>=1.4  # k-means / HAC bus clustering (pypsa.clustering.spatial) — Forge "Reduce network"
 openpyxl>=3.1
 python-calamine>=0.2  # PyPSA's preferred excel engine for import_from_excel
 xarray<2026

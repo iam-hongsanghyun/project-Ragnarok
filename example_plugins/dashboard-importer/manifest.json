@@ -341,7 +341,7 @@
       "label": "Fill table from carriers",
       "hook": "fillReallocation",
       "variant": "secondary",
-      "description": "Add every plant of the checked carriers that is replaceable (active in the target year and build_year ≥ the replacement base year, or the whole fleet when 'Include existing plants' is on) to the table below. Solar/Wind MW are computed live from the current replacement settings.",
+      "description": "Add every plant of the checked carriers that is replaceable (active in the target year and build_year ≥ the replacement base year, or the whole fleet when 'Include existing plants' is on) to the table below. Each added plant's Solar/Wind split is FROZEN at the current settings — change the settings and fill again to add another batch with a different rule; earlier rows are left untouched.",
       "visibleWhen": {
         "field": "replace_generators",
         "equals": true
@@ -1226,7 +1226,7 @@
     "generator_replacements": {
       "type": "table",
       "label": "Generator replacements",
-      "description": "Pick plants to replace with renewables. Each plant's own capacity is split into solar + wind from the current settings: yearly solar/wind additions when 'Follow yearly additions' is on, otherwise direct Solar %/Wind % of original capacity. New units are added at the same bus/province with that province's solar/wind profile and a marginal cost = mean of existing same-carrier units. New units are named <plant>_solar_<year> / <plant>_wind_<year>. The dropdown lists the replaceable plants — active in the target year and built on/after the replacement base year, or the whole fleet when 'Include existing plants' is on (each option shows its build year). Active when Replace plants with renewables is on.",
+      "description": "Pick plants to replace with renewables. Rows added via 'Fill table from carriers' carry a FROZEN Solar/Wind split (the split under the settings at add-time), so different batches can use different rules and earlier rows stay put. Rows you add by hand compute live from the current settings: yearly solar/wind additions when 'Follow yearly additions' is on, otherwise direct Solar %/Wind % of original capacity. New units are added at the same bus/province with that province's solar/wind profile and a marginal cost = mean of existing same-carrier units. New units are named <plant>_solar_<year> / <plant>_wind_<year>. The dropdown lists the replaceable plants — active in the target year and built on/after the replacement base year, or the whole fleet when 'Include existing plants' is on (each option shows its build year). Active when Replace plants with renewables is on.",
       "visibleWhen": {
         "field": "replace_generators",
         "equals": true

@@ -33,6 +33,7 @@ from .log_capture import (
 from .models import ExportProjectPayload, RunPayload
 from . import model_store, run_store
 from ..pypsa.network import build_network, validate_model
+from ..pypsa.network.serialize import network_to_model as _network_to_model_json
 
 # xlsx MIME used by the run export endpoint below.
 _XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -920,6 +921,8 @@ app.include_router(_config_router.router)
 # filter blob to /api/import/run; fetch + convert run server-side.
 from .routers import importers as _importers_router  # noqa: E402
 app.include_router(_importers_router.router)
+from .routers import transforms as _transforms_router  # noqa: E402
+app.include_router(_transforms_router.router)
 
 # Server-side working model ("session"). The backend is the source of truth for
 # the model; the frontend imports once and then fetches pages/windows on demand.
@@ -1900,71 +1903,9 @@ async def export_hdf5(payload: RunPayload) -> Response:
     )
 
 
-def _network_to_model_json(network) -> dict[str, Any]:
-    """Round-trip a built `pypsa.Network` back into the in-memory model shape.
-
-    The frontend already knows how to consume `{sheet: rows[]}` payloads
-    (it's what every workbook open / project import produces). For each
-    schema-known component class we emit a row per component, copying the
-    static columns and turning any non-empty `*_t` dynamic frame into a
-    `<list_name>-<attr>` sheet with one row per snapshot.
-    """
-    from ..pypsa.pypsa_schema import (
-        input_static_attributes,
-        input_temporal_attributes,
-        component_sheets,
-    )
-    model: dict[str, list[dict[str, Any]]] = {}
-    # Snapshots
-    model["snapshots"] = [{"snapshot": str(ts)} for ts in list(network.snapshots)]
-    # network row
-    if network.name:
-        model["network"] = [{"name": str(network.name)}]
-    for sheet in component_sheets():
-        if sheet in {"network", "snapshots"}:
-            continue
-        if sheet not in network.components.keys():
-            continue
-        comp = network.components[sheet]
-        static = comp.static
-        if not isinstance(static, type(network.lines)):  # DataFrame
-            pass
-        allowed_static = input_static_attributes(sheet)
-        if static is not None and len(static) > 0:
-            rows: list[dict[str, Any]] = []
-            for name, row in static.iterrows():
-                d: dict[str, Any] = {"name": str(name)}
-                for col, val in row.items():
-                    if allowed_static and col not in allowed_static:
-                        continue
-                    if val is None or (hasattr(val, "__float__") and (val != val)):
-                        continue  # NaN
-                    d[str(col)] = val.item() if hasattr(val, "item") else val
-                rows.append(d)
-            if rows:
-                model[sheet] = rows
-        # Time-series sheets
-        allowed_temporal = input_temporal_attributes(sheet)
-        dynamic = getattr(comp, "dynamic", None)
-        if dynamic is None:
-            continue
-        for attr in list(dynamic.keys()):
-            if allowed_temporal and attr not in allowed_temporal:
-                continue
-            df = dynamic[attr]
-            if df is None or df.empty:
-                continue
-            ts_rows: list[dict[str, Any]] = []
-            for ts, ser in df.iterrows():
-                row_d: dict[str, Any] = {"snapshot": str(ts)}
-                for col, val in ser.items():
-                    if val is None or (hasattr(val, "__float__") and (val != val)):
-                        continue
-                    row_d[str(col)] = val.item() if hasattr(val, "item") else val
-                ts_rows.append(row_d)
-            if ts_rows:
-                model[f"{sheet}-{attr}"] = ts_rows
-    return model
+# `_network_to_model_json` (network → workbook-model JSON) now lives in
+# `backend/pypsa/network/serialize.py` and is imported above — it's shared with
+# the clustering transform. Imported under the old name to keep call sites stable.
 
 
 @app.post("/api/import/netcdf")
