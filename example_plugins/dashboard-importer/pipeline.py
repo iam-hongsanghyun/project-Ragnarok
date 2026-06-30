@@ -529,11 +529,22 @@ def replacement_plan_payload(module_config: dict[str, Any]) -> list[dict[str, An
     rows: list[dict[str, Any]] = []
     seen: set[str] = set()
 
-    # Explicit table picks. Table MW cells are display-only/stale-safe; the
-    # current scalar settings always compute the split.
+    # Explicit table picks. A row carrying a FROZEN solar_mw/wind_mw split (set by
+    # "Fill table from carriers" at add-time) is shown verbatim — regardless of
+    # the current settings or even the base-year filter — so earlier batches keep
+    # their numbers. Rows without a frozen split compute live from the settings.
     for r in sel_rows:
         g = str(r.get("generator", "")).strip()
-        if g in seen or g not in info:
+        if g in seen:
+            continue
+        fz = _frozen_split(r)
+        if fz is not None:
+            seen.add(g)
+            solar, wind = fz
+            by = info[g][1] if g in info else None
+            rows.append({"generator": g, "build_year": by, "total_mw": round(solar + wind, 1), "solar_mw": round(solar, 1), "wind_mw": round(wind, 1)})
+            continue
+        if g not in info:
             continue
         seen.add(g)
         total, by, _, close_y = info[g]
@@ -660,6 +671,24 @@ def _additions_by_year(df: "pd.DataFrame | None") -> dict[int, tuple[float, floa
             float(grouped.get((year_value, "wind"), 0.0)),
         )
     return out
+
+
+def _frozen_split(row: Any) -> tuple[float, float] | None:
+    """Return ``(solar_mw, wind_mw)`` frozen on a table row, or ``None`` if absent.
+
+    "Fill table from carriers" stores the split it computed at add-time in the
+    row's ``solar_mw`` / ``wind_mw`` keys. Both present + numeric → frozen (shown
+    and built verbatim); otherwise the split is computed live.
+    """
+    if not isinstance(row, dict):
+        return None
+    solar, wind = row.get("solar_mw"), row.get("wind_mw")
+    if solar is None or wind is None or solar == "" or wind == "":
+        return None
+    try:
+        return float(solar), float(wind)
+    except (TypeError, ValueError):
+        return None
 
 
 def _latest_nonzero(additions: dict[int, tuple[float, float]], year: int) -> tuple[float, float]:

@@ -183,10 +183,11 @@ def fillReallocation(config: dict[str, Any]) -> dict[str, Any]:  # noqa: N802 â€
     that is active in the target year, built on/after the replacement base
     year â€” or the whole fleet when ``replace_include_existing`` is on â€” and
     matching the optional column filter) and merges those plants into the
-    ``generator_replacements`` table, keeping existing picks. The
-    returned ``config`` patch is written back into the form by the host;
-    Solar/Wind MW stay display-only and are recomputed from the current
-    scalar settings.
+    ``generator_replacements`` table, keeping existing picks. The split each new
+    plant gets under the CURRENT settings is FROZEN into its row (``solar_mw`` /
+    ``wind_mw``); existing rows are preserved verbatim, so a later fill with a
+    different rule leaves them untouched. The returned ``config`` patch is
+    written back into the form by the host.
     """
     cfg = dict(config or {})
     carriers = [str(c).strip() for c in (cfg.get("replace_carriers") or []) if str(c).strip()]
@@ -210,21 +211,27 @@ def fillReallocation(config: dict[str, Any]) -> dict[str, Any]:  # noqa: N802 â€
                 f"fleet when 'Include existing plants' is on)."
             ),
         }
-    # Merge: keep existing plant selections; append matched plants not already
-    # listed. Rows are reduced to {generator} â€” MW cells are computed live.
+    # Merge: keep existing rows verbatim (their frozen split is preserved, never
+    # recomputed); append matched plants not already listed, each carrying the
+    # split this plan computed under the current settings (frozen at add-time).
     rows: list[dict[str, Any]] = []
     have: set[str] = set()
     for r in cfg.get("generator_replacements") or []:
         name = str((r or {}).get("generator", "")).strip() if isinstance(r, dict) else ""
         if name and name not in have:
-            rows.append({"generator": name})
+            rows.append(dict(r))
             have.add(name)
     added = 0
     for r in plan:
         name = str(r.get("generator", "")).strip()
         if not name or name in have:
             continue
-        rows.append({"generator": name})
+        rows.append({
+            "generator": name,
+            "total_mw": r.get("total_mw"),
+            "solar_mw": r.get("solar_mw"),
+            "wind_mw": r.get("wind_mw"),
+        })
         have.add(name)
         added += 1
     if not added:
@@ -236,8 +243,9 @@ def fillReallocation(config: dict[str, Any]) -> dict[str, Any]:  # noqa: N802 â€
     return {
         "ok": True,
         "message": (
-            f"Added {added} plant(s) to the table. Solar/Wind MW are computed "
-            f"live from the current settings."
+            f"Added {added} plant(s) to the table. Their Solar/Wind split is "
+            f"frozen at the current settings â€” change settings and fill again to "
+            f"add another batch with a different rule."
         ),
         "config": {"generator_replacements": rows},
     }
