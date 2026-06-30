@@ -56,17 +56,20 @@ function makeChart(patch: Partial<ChartSectionConfig>): Card {
 }
 
 export function buildResultPreset(results: RunResults): DashboardLayout {
-  // Power-flow study runs carry no optimise data (dispatch / cost / price), so
-  // the standard layout's charts would all be empty. Give them a focused layout:
-  // KPIs + the power-flow card (convergence, voltages, losses) + the map.
-  if (results.powerFlow) {
-    const pfRows = [
+  // Network-analysis runs (power flow / N-1 contingency) carry no optimise data
+  // (dispatch / cost / price), so the standard charts would be empty. Give them
+  // a focused layout: KPIs + the study card + the map.
+  if (results.powerFlow || results.contingency) {
+    const studyCard: Card = results.powerFlow
+      ? { id: id('pf'), kind: 'power-flow' }
+      : { id: id('ctg'), kind: 'contingency' };
+    const naRows = [
       row({ height: 90, autoHeight: false, cards: [{ card: { id: id('kpi'), kind: 'kpi-strip' } }] }),
-      row({ cards: [{ card: { id: id('pf'), kind: 'power-flow' } }] }),
+      row({ cards: [{ card: studyCard }] }),
       row({ cards: [{ card: { id: id('map'), kind: 'map' } }] }),
       row({ cards: [{ card: { id: id('notes'), kind: 'notes' } }] }),
     ];
-    return { rows: pfRows.map((r) => r.row), cards: pfRows.flatMap((r) => r.cards) };
+    return { rows: naRows.map((r) => r.row), cards: naRows.flatMap((r) => r.cards) };
   }
 
   // Check storageUnits in assetDetails (live run) OR any non-zero value in the

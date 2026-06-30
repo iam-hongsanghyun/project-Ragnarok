@@ -32,6 +32,7 @@ import { MeritOrderCard } from '../../../features/analytics/cards/MeritOrderCard
 import { Co2ShadowCard } from '../../../features/analytics/cards/Co2ShadowCard';
 import { GeneratorEconomicsCard } from '../../../features/analytics/cards/GeneratorEconomicsCard';
 import { PowerFlowCard } from '../../../features/analytics/cards/PowerFlowCard';
+import { ContingencyCard } from '../../../features/analytics/cards/ContingencyCard';
 import { EmissionsBreakdownCard } from '../../../features/analytics/cards/EmissionsBreakdownCard';
 import { CapacityExpansionCard } from '../../../features/analytics/cards/CapacityExpansionCard';
 import { CapacityByPeriodCard } from '../../../features/analytics/cards/CapacityByPeriodCard';
@@ -423,6 +424,10 @@ export function AnalyticsDashboard({
           return results.powerFlow
             ? <PowerFlowCard data={results.powerFlow} />
             : <p className="dashboard-cell-missing">This run was not a power-flow study.</p>;
+        case 'contingency':
+          return results.contingency
+            ? <ContingencyCard data={results.contingency} />
+            : <p className="dashboard-cell-missing">This run was not an N-1 contingency analysis.</p>;
         case 'emissions-breakdown':
           return results.emissionsBreakdown
             ? <EmissionsBreakdownCard data={results.emissionsBreakdown} />
@@ -478,6 +483,7 @@ export function AnalyticsDashboard({
       case 'co2-shadow': return 'CO₂ shadow price';
       case 'generator-economics': return 'Asset economics (revenue & recovery)';
       case 'power-flow': return 'Power flow (convergence & voltages)';
+      case 'contingency': return 'N-1 contingency (security)';
       case 'emissions-breakdown': return 'Emissions by generator / carrier';
       case 'capacity-expansion': return 'Capacity expansion';
       case 'capacity-by-period': return 'Capacity by period';

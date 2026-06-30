@@ -189,6 +189,32 @@ export interface PowerFlowResult {
   currency: string;
 }
 
+/** N-1 contingency study mode — branch loading under each single outage. */
+export interface ContingencyConfig {
+  enabled: boolean;
+}
+
+export interface ContingencyEntry {
+  /** Name of the outaged passive branch. */
+  outage: string;
+  /** Worst post-outage loading (%) on any remaining branch. */
+  worstLoadingPct: number;
+  /** Which branch hit that worst loading (null if none). */
+  worstBranch: string | null;
+  overloadCount: number;
+}
+
+export interface ContingencyResult {
+  snapshot: string;
+  secure: boolean;
+  baseMaxLoadingPct: number;
+  outagesTested: number;
+  insecureCount: number;
+  contingencies: ContingencyEntry[];
+  error: string | null;
+  currency: string;
+}
+
 export interface StochasticScenarioResult {
   name: string;
   weight: number;
@@ -709,6 +735,8 @@ export interface RunResults {
   generatorEconomics?: GeneratorEconomics;
   /** Present only when the run was a power-flow study (pf/lpf), not an LP. */
   powerFlow?: PowerFlowResult;
+  /** Present only when the run was an N-1 contingency analysis. */
+  contingency?: ContingencyResult;
   appliedConstraints?: AppliedConstraint[];
   emissionsBreakdown?: EmissionsBreakdown;
   narrative: string[];
