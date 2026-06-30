@@ -43,6 +43,7 @@ from .market import (
 )
 from .summaries import _rolling_window_summaries, _pathway_period_summaries
 from .power_flow import run_power_flow
+from .contingency import run_contingency
 
 # Solve-phase timing and notes are logged here. With the run worker no longer
 # redirecting file descriptors, these INFO lines stream to the launching
@@ -171,6 +172,8 @@ def run_pypsa(
     powerflow_cfg = options.get("powerFlowConfig") or {}
     pf_enabled = bool(powerflow_cfg.get("enabled", False))
     pf_linear = bool(powerflow_cfg.get("linear", False))
+    contingency_cfg = options.get("contingencyConfig") or {}
+    contingency_enabled = bool(contingency_cfg.get("enabled", False))
     if stochastic.enabled and rolling.enabled:
         raise HTTPException(
             status_code=400,
@@ -204,6 +207,15 @@ def run_pypsa(
             detail="Power-flow study mode cannot be combined with rolling horizon, stochastic, "
             "security-constrained, multi-investment pathway, or sampled-block modes.",
         )
+    if contingency_enabled and (
+        rolling.enabled or stochastic.enabled or sclopf_enabled or pathway.enabled
+        or sampling.enabled or pf_enabled
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="N-1 contingency analysis cannot be combined with rolling horizon, stochastic, "
+            "security-constrained, multi-investment pathway, sampled-block, or power-flow modes.",
+        )
 
     # The Ragnarok backend is plugin-agnostic: it only ever receives a model,
     # scenario and options and solves them. Plugins live entirely on the
@@ -229,6 +241,14 @@ def run_pypsa(
         return run_power_flow(
             network,
             linear=pf_linear,
+            currency=str(options.get("currencySymbol", "$")),
+            snapshot_count=snapshot_count,
+            snapshot_weight=snapshot_weight,
+            notes=notes,
+        )
+    if contingency_enabled:
+        return run_contingency(
+            network,
             currency=str(options.get("currencySymbol", "$")),
             snapshot_count=snapshot_count,
             snapshot_weight=snapshot_weight,

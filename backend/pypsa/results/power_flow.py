@@ -29,7 +29,7 @@ from .full_outputs import build_full_outputs
 
 # Empty optimise-only result fields, kept so the stored payload is the same
 # shape the frontend expects for any run (the charts simply render empty).
-_EMPTY_OPTIMISE_FIELDS: dict[str, Any] = {
+EMPTY_OPTIMISE_FIELDS: dict[str, Any] = {
     "dispatchSeries": [],
     "curtailmentSeries": [],
     "generatorDispatchSeries": [],
@@ -277,7 +277,7 @@ def run_power_flow(
         )
 
     return {
-        **_EMPTY_OPTIMISE_FIELDS,
+        **EMPTY_OPTIMISE_FIELDS,
         "summary": summary,
         "lineLoading": line_loading,
         "nodalBalance": nodal_balance,
