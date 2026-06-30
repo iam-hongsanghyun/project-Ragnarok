@@ -33,6 +33,7 @@ from .dispatch import (
     dispatch_by_carrier,
 )
 from .emissions import build_emissions_breakdown
+from .statistics import build_statistics
 from .expansion import build_expansion_results
 from .full_outputs import build_full_outputs
 from .market import (
@@ -593,6 +594,7 @@ def run_pypsa(
     co2_shadow = build_co2_shadow(network, float(scenario.get("carbonPrice", 0.0)), currency)
     applied_constraints = build_applied_constraints(network)
     generator_economics = build_generator_economics(network, currency)
+    statistics = build_statistics(network)
     emissions_breakdown = build_emissions_breakdown(network, emissions_factors)
 
     cost_breakdown = [
@@ -733,6 +735,7 @@ def run_pypsa(
         "co2Shadow": co2_shadow,
         "appliedConstraints": applied_constraints,
         "generatorEconomics": generator_economics,
+        "statistics": statistics,
         "emissionsBreakdown": emissions_breakdown,
         "narrative": notes,
         "runMeta": {

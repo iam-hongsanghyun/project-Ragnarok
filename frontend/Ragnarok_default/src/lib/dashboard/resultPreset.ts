@@ -87,6 +87,7 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   const hasEconomics = !!(results.generatorEconomics && (
     results.generatorEconomics.generators.length > 0 || results.generatorEconomics.storage.length > 0
   ));
+  const hasStatistics = !!(results.statistics && results.statistics.rows.length > 0);
 
   const rows: Array<ReturnType<typeof row>> = [];
 
@@ -156,6 +157,12 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   if (hasEconomics) {
     const econ: Card = { id: id('econ'), kind: 'generator-economics' };
     rows.push(row({ cards: [{ card: econ }] }));
+  }
+
+  // 9c. PyPSA statistics — canonical per-carrier metrics table (conditional)
+  if (hasStatistics) {
+    const stats: Card = { id: id('stats'), kind: 'statistics' };
+    rows.push(row({ cards: [{ card: stats }] }));
   }
 
   // 10. Carrier analysis — full-width performance table.

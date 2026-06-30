@@ -189,6 +189,19 @@ export interface PowerFlowResult {
   currency: string;
 }
 
+/** One row of PyPSA's statistics() table — a component/carrier slice. */
+export interface StatisticsRow {
+  component: string;
+  carrier: string;
+  values: Record<string, number | null>;
+}
+
+/** PyPSA statistics() passthrough: the metric columns + per-carrier rows. */
+export interface StatisticsResult {
+  columns: string[];
+  rows: StatisticsRow[];
+}
+
 /** N-1 contingency study mode — branch loading under each single outage. */
 export interface ContingencyConfig {
   enabled: boolean;
@@ -739,6 +752,8 @@ export interface RunResults {
   powerFlow?: PowerFlowResult;
   /** Present only when the run was an N-1 contingency analysis. */
   contingency?: ContingencyResult;
+  /** PyPSA statistics() table (per-carrier capacity/CF/curtailment/revenue/…). */
+  statistics?: StatisticsResult;
   appliedConstraints?: AppliedConstraint[];
   emissionsBreakdown?: EmissionsBreakdown;
   narrative: string[];

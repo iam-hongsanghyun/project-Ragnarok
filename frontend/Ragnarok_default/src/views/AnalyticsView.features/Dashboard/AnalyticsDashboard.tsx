@@ -31,6 +31,7 @@ import { DurationCurveCard } from '../../../features/analytics/cards/DurationCur
 import { MeritOrderCard } from '../../../features/analytics/cards/MeritOrderCard';
 import { Co2ShadowCard } from '../../../features/analytics/cards/Co2ShadowCard';
 import { GeneratorEconomicsCard } from '../../../features/analytics/cards/GeneratorEconomicsCard';
+import { StatisticsCard } from '../../../features/analytics/cards/StatisticsCard';
 import { PowerFlowCard } from '../../../features/analytics/cards/PowerFlowCard';
 import { ContingencyCard } from '../../../features/analytics/cards/ContingencyCard';
 import { EmissionsBreakdownCard } from '../../../features/analytics/cards/EmissionsBreakdownCard';
@@ -420,6 +421,10 @@ export function AnalyticsDashboard({
           return results.generatorEconomics
             ? <GeneratorEconomicsCard data={results.generatorEconomics} currencySymbol={currencySymbol} />
             : <p className="dashboard-cell-missing">No asset economics available for this run.</p>;
+        case 'statistics':
+          return results.statistics
+            ? <StatisticsCard data={results.statistics} />
+            : <p className="dashboard-cell-missing">No statistics available for this run.</p>;
         case 'power-flow':
           return results.powerFlow
             ? <PowerFlowCard data={results.powerFlow} />
@@ -482,6 +487,7 @@ export function AnalyticsDashboard({
       case 'merit-order': return 'Merit order (supply stack)';
       case 'co2-shadow': return 'CO₂ shadow price';
       case 'generator-economics': return 'Asset economics (revenue & recovery)';
+      case 'statistics': return 'PyPSA statistics (per-carrier metrics)';
       case 'power-flow': return 'Power flow (convergence & voltages)';
       case 'contingency': return 'N-1 contingency (security)';
       case 'emissions-breakdown': return 'Emissions by generator / carrier';
