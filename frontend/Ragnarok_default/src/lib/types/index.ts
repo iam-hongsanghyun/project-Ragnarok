@@ -242,9 +242,7 @@ export interface NearOptimalResult {
  *  price signal. Layered on top of a normal optimise run. */
 export interface MerchantConfig {
   enabled: boolean;
-  /** Which model column holds the owner/operator tag (e.g. `owner`, `Company`). */
-  ownerColumn: string;
-  /** Owner value whose assets to analyse (a value found in `ownerColumn`). */
+  /** Owner value whose assets to analyse (a value found in the owner column). */
   owner: string;
   /** `lmp` = stage-1 system marginal price; `series` = exogenous user price. */
   priceSource: 'lmp' | 'series';
@@ -268,6 +266,27 @@ export interface MerchantAsset {
   profit: number;
   /** Time-weighted price the asset actually sold at (revenue / energy). */
   capturePrice: number | null;
+}
+
+/** One company's KPIs (F1) — its slice of the solved system. */
+export interface CompanyKpi {
+  company: string;
+  capacityMW: number;
+  energyMWh: number;
+  /** Competitive-benchmark revenue (LMP × dispatch); null if no LMPs. */
+  revenue: number | null;
+  emissionsTonnes: number;
+  generatorCount: number;
+  storageCount: number;
+}
+
+/** Company / owner dimension (F1) — per-company KPIs grouped by owner tag. */
+export interface CompanyBreakdownResult {
+  ownerColumn: string;
+  currency: string;
+  companies: CompanyKpi[];
+  /** Assets with no owner tag (not attributed to any company). */
+  untaggedCount: number;
 }
 
 /** Merchant result block — one owner's profit against the price signal. */
@@ -351,6 +370,8 @@ export interface ScenarioPreset {
   contingencyConfig: ContingencyConfig;
   mgaConfig: MgaConfig;
   merchantConfig: MerchantConfig;
+  /** Model column holding the owner/company tag (F1 + B1). Default `owner`. */
+  ownerColumn: string;
   constraints: CustomConstraint[];
 }
 
@@ -840,6 +861,8 @@ export interface RunResults {
   nearOptimal?: NearOptimalResult;
   /** Merchant / price-taker owner economics (present only when enabled). */
   merchant?: MerchantResult;
+  /** Per-company KPIs (present only when assets carry an owner tag). */
+  companies?: CompanyBreakdownResult;
   appliedConstraints?: AppliedConstraint[];
   emissionsBreakdown?: EmissionsBreakdown;
   narrative: string[];

@@ -82,7 +82,11 @@ export function defaultMgaConfig(): MgaConfig {
 }
 
 export function defaultMerchantConfig(): MerchantConfig {
-  return { enabled: false, ownerColumn: 'owner', owner: '', priceSource: 'lmp', flatPrice: 0 };
+  return { enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 };
+}
+
+export function defaultOwnerColumn(): string {
+  return 'owner';
 }
 
 function cloneStochasticConfig(config: StochasticConfig): StochasticConfig {
@@ -146,6 +150,7 @@ export function buildScenarioPreset(input: {
   contingencyConfig?: ContingencyConfig;
   mgaConfig?: MgaConfig;
   merchantConfig?: MerchantConfig;
+  ownerColumn?: string;
   samplingConfig?: SamplingConfig;
   constraints: CustomConstraint[];
 }): ScenarioPreset {
@@ -170,6 +175,7 @@ export function buildScenarioPreset(input: {
     contingencyConfig: cloneContingencyConfig(input.contingencyConfig ?? defaultContingencyConfig()),
     mgaConfig: cloneMgaConfig(input.mgaConfig ?? defaultMgaConfig()),
     merchantConfig: cloneMerchantConfig(input.merchantConfig ?? defaultMerchantConfig()),
+    ownerColumn: (input.ownerColumn ?? defaultOwnerColumn()) || defaultOwnerColumn(),
     samplingConfig: cloneSamplingConfig(input.samplingConfig ?? defaultSamplingConfig()),
     constraints: cloneConstraints(input.constraints),
   };
@@ -209,6 +215,7 @@ function normalizeScenarioCatalog(catalog: ScenarioCatalog): ScenarioCatalog {
       contingencyConfig: cloneContingencyConfig(scenario.contingencyConfig ?? defaultContingencyConfig()),
       mgaConfig: cloneMgaConfig(scenario.mgaConfig ?? defaultMgaConfig()),
       merchantConfig: cloneMerchantConfig(scenario.merchantConfig ?? defaultMerchantConfig()),
+      ownerColumn: (scenario.ownerColumn ?? defaultOwnerColumn()) || defaultOwnerColumn(),
       samplingConfig: cloneSamplingConfig(scenario.samplingConfig ?? defaultSamplingConfig()),
       constraints: cloneConstraints(scenario.constraints ?? []),
     })),
@@ -245,6 +252,7 @@ export function readScenarioCatalogFromModel(model: WorkbookModel): ScenarioCata
         contingencyConfig: payload.contingencyConfig ?? defaultContingencyConfig(),
         mgaConfig: payload.mgaConfig ?? defaultMgaConfig(),
         merchantConfig: payload.merchantConfig ?? defaultMerchantConfig(),
+        ownerColumn: payload.ownerColumn ?? payload.merchantConfig?.ownerColumn ?? defaultOwnerColumn(),
         samplingConfig: payload.samplingConfig ?? defaultSamplingConfig(),
         constraints: Array.isArray(payload.constraints) ? payload.constraints : [],
       });
@@ -290,6 +298,7 @@ export function writeScenarioCatalogToModel(
       contingencyConfig: scenario.contingencyConfig,
       mgaConfig: scenario.mgaConfig,
       merchantConfig: scenario.merchantConfig,
+      ownerColumn: scenario.ownerColumn,
       samplingConfig: scenario.samplingConfig,
       constraints: scenario.constraints,
     }),

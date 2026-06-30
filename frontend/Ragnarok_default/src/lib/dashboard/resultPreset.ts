@@ -90,6 +90,7 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   const hasStatistics = !!(results.statistics && results.statistics.rows.length > 0);
   const hasNearOptimal = !!(results.nearOptimal && results.nearOptimal.alternatives.length > 0);
   const hasMerchant = !!(results.merchant && results.merchant.assets.length > 0);
+  const hasCompanies = !!(results.companies && results.companies.companies.length > 0);
 
   const rows: Array<ReturnType<typeof row>> = [];
 
@@ -177,6 +178,12 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   if (hasMerchant) {
     const merch: Card = { id: id('merch'), kind: 'merchant' };
     rows.push(row({ cards: [{ card: merch }] }));
+  }
+
+  // 9f. Company / owner dimension — per-company KPIs (F1, conditional)
+  if (hasCompanies) {
+    const co: Card = { id: id('co'), kind: 'company-breakdown' };
+    rows.push(row({ cards: [{ card: co }] }));
   }
 
   // 10. Carrier analysis — full-width performance table.

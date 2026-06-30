@@ -264,7 +264,8 @@ function AppInner() {
   const [powerFlowConfig, setPowerFlowConfig] = useState<PowerFlowConfig>({ enabled: false, linear: false });
   const [contingencyConfig, setContingencyConfig] = useState<ContingencyConfig>({ enabled: false });
   const [mgaConfig, setMgaConfig] = useState<MgaConfig>({ enabled: false, slack: 0.05, carriers: [] });
-  const [merchantConfig, setMerchantConfig] = useState<MerchantConfig>({ enabled: false, ownerColumn: 'owner', owner: '', priceSource: 'lmp', flatPrice: 0 });
+  const [merchantConfig, setMerchantConfig] = useState<MerchantConfig>({ enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 });
+  const [ownerColumn, setOwnerColumn] = useState<string>('owner');
   const [carbonPriceSchedule, setCarbonPriceSchedule] = useState<CarbonPriceScheduleEntry[]>([]);
   const [carbonLibrary, setCarbonLibrary] = useState<CarbonScheduleProfile[]>([]);
   const [validateResult, setValidateResult] = useState<{
@@ -307,7 +308,8 @@ function AppInner() {
     powerFlowConfig: { enabled: false, linear: false },
     contingencyConfig: { enabled: false },
     mgaConfig: { enabled: false, slack: 0.05, carriers: [] },
-    merchantConfig: { enabled: false, ownerColumn: 'owner', owner: '', priceSource: 'lmp', flatPrice: 0 },
+    merchantConfig: { enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 },
+    ownerColumn: 'owner',
     constraints: DEFAULT_CONSTRAINTS,
   }));
   const frontendPlugins = useFrontendPlugins();
@@ -469,6 +471,7 @@ function AppInner() {
       contingencyConfig,
       mgaConfig,
       merchantConfig,
+      ownerColumn,
       constraints,
     })
   ), [
@@ -490,6 +493,7 @@ function AppInner() {
     contingencyConfig,
     mgaConfig,
     merchantConfig,
+    ownerColumn,
     constraints,
   ]);
 
@@ -604,6 +608,7 @@ function AppInner() {
       contingencyConfig,
       mgaConfig,
       merchantConfig,
+      ownerColumn,
       constraints,
     });
     const catalogToApply = nextScenarioCatalog.scenarios.length > 0
@@ -653,6 +658,7 @@ function AppInner() {
     contingencyConfig,
     mgaConfig,
     merchantConfig,
+    ownerColumn,
     constraints,
     updateSettings,
     setAnalyticsFocus,
@@ -911,14 +917,14 @@ function AppInner() {
   // drives the merchant (price-taker) owner picker. The column is user-chosen
   // (e.g. `owner`, `Company`) and authored in the Model grid.
   const merchantOwners = useMemo(() => {
-    const col = (merchantConfig.ownerColumn || 'owner').trim() || 'owner';
+    const col = (ownerColumn || 'owner').trim() || 'owner';
     const seen: string[] = [];
     for (const row of [...(model.generators ?? []), ...(model.storage_units ?? [])]) {
       const owner = stringValue(row[col]).trim();
       if (owner && !seen.includes(owner)) seen.push(owner);
     }
     return seen;
-  }, [model.generators, model.storage_units, merchantConfig.ownerColumn]);
+  }, [model.generators, model.storage_units, ownerColumn]);
   // Map geometry for the analytics view follows the results-owning topology.
   const analyticsBounds = useMemo(() => getBounds(analyticsModel), [analyticsModel.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
   const analyticsBusIndex = useMemo(() => getBusIndex(analyticsModel), [analyticsModel.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
@@ -970,7 +976,8 @@ function AppInner() {
     setPowerFlowConfig(scenario.powerFlowConfig ?? { enabled: false, linear: false });
     setContingencyConfig(scenario.contingencyConfig ?? { enabled: false });
     setMgaConfig(scenario.mgaConfig ?? { enabled: false, slack: 0.05, carriers: [] });
-    setMerchantConfig(scenario.merchantConfig ?? { enabled: false, ownerColumn: 'owner', owner: '', priceSource: 'lmp', flatPrice: 0 });
+    setMerchantConfig(scenario.merchantConfig ?? { enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 });
+    setOwnerColumn(scenario.ownerColumn ?? 'owner');
     setStatus(`Applied scenario: ${scenario.label}`);
     showToast(`Scenario applied: ${scenario.label}`, 'success');
   }, [maxSnapshots, showToast, updateSettings]);
@@ -2194,6 +2201,7 @@ function AppInner() {
       contingencyConfig,
       mgaConfig,
       merchantConfig,
+      ownerColumn,
       carbonPriceSchedule,
     };
 
@@ -2485,6 +2493,8 @@ function AppInner() {
               merchantConfig={merchantConfig}
               onMerchantConfigChange={setMerchantConfig}
               merchantOwners={merchantOwners}
+              ownerColumn={ownerColumn}
+              onOwnerColumnChange={setOwnerColumn}
               maxSnapshots={maxSnapshots}
               snapshotStart={snapshotStart}
               snapshotEnd={snapshotEnd}

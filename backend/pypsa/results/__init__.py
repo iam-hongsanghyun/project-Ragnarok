@@ -36,6 +36,7 @@ from .emissions import build_emissions_breakdown
 from .statistics import build_statistics
 from .mga import build_mga
 from .merchant import build_merchant
+from .company import build_company_breakdown
 from .expansion import build_expansion_results
 from .full_outputs import build_full_outputs
 from .market import (
@@ -181,6 +182,12 @@ def run_pypsa(
     mga_enabled = bool(mga_cfg.get("enabled", False))
     merchant_cfg = options.get("merchantConfig") or {}
     merchant_enabled = bool(merchant_cfg.get("enabled", False))
+    # The owner/company column (F1 + B1) is a shared, top-level concern. Fall
+    # back to the legacy merchantConfig.ownerColumn for scenarios saved before
+    # it was promoted out of the merchant config.
+    owner_column = str(
+        options.get("ownerColumn") or merchant_cfg.get("ownerColumn") or "owner"
+    )
     if stochastic.enabled and rolling.enabled:
         raise HTTPException(
             status_code=400,
@@ -770,7 +777,7 @@ def run_pypsa(
             network,
             model,
             owner=str(merchant_cfg.get("owner", "") or ""),
-            owner_column=str(merchant_cfg.get("ownerColumn", "owner") or "owner"),
+            owner_column=owner_column,
             price_source=str(merchant_cfg.get("priceSource", "lmp") or "lmp"),
             flat_price=float(merchant_cfg.get("flatPrice", 0.0) or 0.0),
             price_series=merchant_cfg.get("priceSeries") or None,
@@ -780,6 +787,13 @@ def run_pypsa(
         )
         if merchant_enabled
         else None
+    )
+
+    # Company / owner dimension (F1) — per-company KPIs whenever assets carry an
+    # owner tag. Independent of merchant mode; reads only solved dataframes.
+    company_breakdown = build_company_breakdown(
+        network, model,
+        owner_column=owner_column, currency=currency, emissions_factors=emissions_factors,
     )
 
     return {
@@ -805,6 +819,7 @@ def run_pypsa(
         "statistics": statistics,
         "nearOptimal": near_optimal,
         "merchant": merchant,
+        "companies": company_breakdown,
         "emissionsBreakdown": emissions_breakdown,
         "narrative": notes,
         "runMeta": {

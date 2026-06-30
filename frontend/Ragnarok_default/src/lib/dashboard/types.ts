@@ -27,6 +27,7 @@ export type CardKind =
   | 'statistics'
   | 'near-optimal'
   | 'merchant'
+  | 'company-breakdown'
   | 'power-flow'
   | 'contingency'
   | 'emissions-breakdown'
@@ -150,6 +151,10 @@ export interface MerchantCardData extends CardBase {
   kind: 'merchant';
 }
 
+export interface CompanyBreakdownCardData extends CardBase {
+  kind: 'company-breakdown';
+}
+
 export interface PowerFlowCardData extends CardBase {
   kind: 'power-flow';
 }
@@ -195,6 +200,7 @@ export type Card =
   | StatisticsCardData
   | NearOptimalCardData
   | MerchantCardData
+  | CompanyBreakdownCardData
   | PowerFlowCardData
   | ContingencyCardData
   | EmissionsBreakdownCardData

@@ -21,6 +21,7 @@ export interface MerchantSectionProps {
   merchantConfig: MerchantConfig;
   onMerchantConfigChange: (config: MerchantConfig) => void;
   merchantOwners: string[];
+  ownerColumn: string;
   rollingConfig: RollingHorizonConfig;
   stochasticConfig: StochasticConfig;
   samplingConfig: SamplingConfig;
@@ -86,22 +87,6 @@ export function MerchantSection(props: MerchantSectionProps) {
         <>
           <div className="sg-setting-divider" />
           <div className="sg-setting-row">
-            <label className="sg-setting-label" htmlFor="rs-merchant-owner-col">Owner column</label>
-            <input
-              id="rs-merchant-owner-col"
-              type="text"
-              className="sg-num-input"
-              placeholder="owner"
-              value={cfg.ownerColumn}
-              onChange={(e) => set({ ownerColumn: e.target.value, owner: '' })}
-            />
-            <p className="sg-setting-hint">
-              Which grid column identifies the owner/operator. Defaults to <code>owner</code>;
-              point it at any column you have (e.g. <code>Company</code>, <code>operator</code>).
-            </p>
-          </div>
-
-          <div className="sg-setting-row">
             <label className="sg-setting-label" htmlFor="rs-merchant-owner">Owner</label>
             {owners.length > 0 ? (
               <select
@@ -125,8 +110,8 @@ export function MerchantSection(props: MerchantSectionProps) {
             )}
             <p className="sg-setting-hint">
               {owners.length > 0
-                ? `${owners.length} distinct value${owners.length === 1 ? '' : 's'} in “${cfg.ownerColumn || 'owner'}”.`
-                : `No values found in “${cfg.ownerColumn || 'owner'}” — tag generators / storage in that column in the Model grid.`}
+                ? `${owners.length} distinct value${owners.length === 1 ? '' : 's'} in “${props.ownerColumn || 'owner'}” (set in Company settings).`
+                : `No values found in “${props.ownerColumn || 'owner'}” — set the owner column in Company settings and tag assets in the Model grid.`}
             </p>
           </div>
 
