@@ -60,6 +60,47 @@ const ROUND_OPS: Array<{ value: RoundOp; label: string }> = [
 
 const rowsOf = (model: WorkbookModel, sheet: string): GridRow[] => model[sheet] ?? [];
 
+const CLUSTER_PALETTE = [
+  '#4e79a7', '#f28e2b', '#e15759', '#76b7b2', '#59a14f',
+  '#edc948', '#b07aa1', '#ff9da7', '#9c755f', '#bab0ab',
+];
+
+/** Dependency-free SVG scatter of the busmap: each original bus plotted at its
+ *  x/y and coloured by the cluster it merges into, with a ring at each cluster
+ *  centroid. Returns null when buses carry no coordinates (e.g. a modularity
+ *  clustering on a coordinate-less network) — the counts preview still shows. */
+function ClusterScatter({ model, busmap }: { model: WorkbookModel; busmap: Record<string, string> }) {
+  const buses = rowsOf(model, 'buses')
+    .map((r) => ({ name: String(r.name ?? ''), x: Number(r.x), y: Number(r.y) }))
+    .filter((b) => b.name && Number.isFinite(b.x) && Number.isFinite(b.y));
+  if (buses.length < 2) return null;
+  const xs = buses.map((b) => b.x);
+  const ys = buses.map((b) => b.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  const W = 320, H = 200, pad = 12;
+  const sx = (x: number) => pad + ((x - minX) / ((maxX - minX) || 1)) * (W - 2 * pad);
+  const sy = (y: number) => H - pad - ((y - minY) / ((maxY - minY) || 1)) * (H - 2 * pad); // north up
+  const clusters = Array.from(new Set(Object.values(busmap)));
+  const colorOf = (c: string) => CLUSTER_PALETTE[Math.max(0, clusters.indexOf(c)) % CLUSTER_PALETTE.length];
+  const cent: Record<string, { x: number; y: number; n: number }> = {};
+  for (const b of buses) {
+    const c = busmap[b.name];
+    if (!c) continue;
+    const e = (cent[c] ??= { x: 0, y: 0, n: 0 });
+    e.x += b.x; e.y += b.y; e.n += 1;
+  }
+  return (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', maxWidth: '100%' }} role="img" aria-label="Cluster map">
+      {buses.map((b) => (
+        <circle key={b.name} cx={sx(b.x)} cy={sy(b.y)} r={2.5} fill={colorOf(busmap[b.name])} fillOpacity={0.7} />
+      ))}
+      {Object.entries(cent).map(([c, e]) => (
+        <circle key={c} cx={sx(e.x / e.n)} cy={sy(e.y / e.n)} r={6} fill="none" stroke={colorOf(c)} strokeWidth={2} />
+      ))}
+    </svg>
+  );
+}
+
 export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApply }: Props) {
   // Persisted so the chosen tool + validation result survive leaving and
   // returning to the Forge tab (the view unmounts on tab switch). The findings
@@ -457,6 +498,7 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
                   {' · '}loads {clusterResult.before.loads} → {clusterResult.after.loads}
                   <span style={{ color: 'var(--muted)', marginLeft: 6 }}>({clusterResult.method})</span>
                 </p>
+                <ClusterScatter model={model} busmap={clusterResult.busmap} />
                 <div className="forge-actions">
                   <button className="run-button" disabled={!onClusterApply} onClick={applyCluster}>
                     Apply — replace model
