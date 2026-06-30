@@ -634,7 +634,12 @@ def test_dashboard_fill_and_clear_reallocation_actions(_plugins_dir, tmp_path) -
     res = plugins.run_action("dashboard-importer", "fillReallocation", cfg)
     assert res["ok"], res["message"]
     rows = res["config"]["generator_replacements"]
-    assert rows == [{"generator": "gas_new"}, {"generator": "coal_new"}]  # coal_old filtered out
+    # Existing picks are kept verbatim; newly-added plants carry the solar/wind
+    # split frozen at the current settings (default 50/50 of the plant's p_nom).
+    assert rows == [
+        {"generator": "gas_new"},
+        {"generator": "coal_new", "total_mw": 100.0, "solar_mw": 50.0, "wind_mw": 50.0},
+    ]  # coal_old filtered out (built before the replacement base year)
 
     # No carriers checked → actionable error, no patch applied.
     res = plugins.run_action("dashboard-importer", "fillReallocation", {**cfg, "replace_carriers": []})
