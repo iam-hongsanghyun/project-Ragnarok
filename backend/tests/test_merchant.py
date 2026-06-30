@@ -76,6 +76,26 @@ def test_merchant_series_price_source() -> None:
     assert wind["capturePrice"] == pytest.approx(75.0, rel=1e-6)
 
 
+def test_merchant_custom_owner_column() -> None:
+    # Tag assets under a "Company" column instead of "owner".
+    model = _model()
+    for g in model["generators"]:
+        if g["name"] == "wind1":
+            g.pop("owner", None)
+            g["Company"] = "Globex"
+    for s in model["storage_units"]:
+        s.pop("owner", None)
+        s["Company"] = "Globex"
+    res = run_pypsa(
+        model, SCENARIO,
+        {"merchantConfig": {"enabled": True, "owner": "Globex", "ownerColumn": "Company"}},
+    )
+    m = res["merchant"]
+    assert m is not None
+    assert m["ownerColumn"] == "Company"
+    assert {a["name"] for a in m["assets"]} == {"wind1", "batt1"}
+
+
 def test_merchant_absent_when_disabled() -> None:
     assert run_pypsa(_model(), SCENARIO, {})["merchant"] is None
 

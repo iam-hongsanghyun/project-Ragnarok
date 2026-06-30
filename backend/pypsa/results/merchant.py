@@ -36,30 +36,32 @@ _MARKET_PREFIX = "__market_"
 
 
 def owner_assets_from_model(
-    model: dict[str, list[dict[str, Any]]], owner: str,
+    model: dict[str, list[dict[str, Any]]], owner: str, *, column: str = "owner",
 ) -> dict[str, list[str]]:
-    """Names of the generators / storage units tagged with ``owner``.
+    """Names of the generators / storage units whose ``column`` equals ``owner``.
 
-    The ``owner`` tag lives on the model rows (a custom column); PyPSA drops
-    unknown columns at build time, so we read ownership from the model, not the
-    network.
+    The owner tag lives on the model rows (a user-chosen column — ``owner``,
+    ``Company``, ``operator``, …); PyPSA drops unknown columns at build time, so
+    we read ownership from the model, not the network.
     """
     want = owner.strip()
     out: dict[str, list[str]] = {"generators": [], "storage_units": []}
     for sheet, key in (("generators", "generators"), ("storage_units", "storage_units")):
         for row in model.get(sheet, []) or []:
             name = str(row.get("name", "")).strip()
-            if name and str(row.get("owner", "")).strip() == want:
+            if name and str(row.get(column, "")).strip() == want:
                 out[key].append(name)
     return out
 
 
-def distinct_owners(model: dict[str, list[dict[str, Any]]]) -> list[str]:
-    """Every distinct non-blank ``owner`` tag across generators and storage."""
+def distinct_owners(
+    model: dict[str, list[dict[str, Any]]], *, column: str = "owner",
+) -> list[str]:
+    """Every distinct non-blank value of ``column`` across generators / storage."""
     seen: list[str] = []
     for sheet in ("generators", "storage_units"):
         for row in model.get(sheet, []) or []:
-            owner = str(row.get("owner", "")).strip()
+            owner = str(row.get(column, "")).strip()
             if owner and owner not in seen:
                 seen.append(owner)
     return seen
@@ -98,6 +100,7 @@ def build_merchant(
     model: dict[str, list[dict[str, Any]]],
     *,
     owner: str,
+    owner_column: str = "owner",
     price_source: str,
     flat_price: float,
     price_series: list[float] | None,
@@ -109,8 +112,10 @@ def build_merchant(
 
     Args:
         network: A network already solved by ``n.optimize()`` (stage 1).
-        model: The raw model dict — source of the ``owner`` tags.
-        owner: Which owner to analyse.
+        model: The raw model dict — source of the owner tags.
+        owner: Which owner value to analyse.
+        owner_column: Which model column holds the owner tag (``owner``,
+            ``Company``, …).
         price_source: ``"lmp"`` (stage-1 marginal price) or ``"series"`` (exogenous).
         flat_price: Flat price for ``"series"`` mode (per MWh, run currency).
         price_series: Optional hourly price overriding ``flat_price`` in series mode.
@@ -125,7 +130,8 @@ def build_merchant(
     """
     if not getattr(network, "is_solved", False):
         return None
-    assets = owner_assets_from_model(model, owner)
+    column = (owner_column or "owner").strip() or "owner"
+    assets = owner_assets_from_model(model, owner, column=column)
     own_gens = [g for g in assets["generators"] if g in network.generators.index]
     own_storage = [s for s in assets["storage_units"] if s in network.storage_units.index]
     if not own_gens and not own_storage:
@@ -267,6 +273,7 @@ def build_merchant(
     )
     return {
         "owner": owner,
+        "ownerColumn": column,
         "priceSource": price_source,
         "currency": currency,
         "priceStats": price_stats,

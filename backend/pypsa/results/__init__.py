@@ -770,6 +770,7 @@ def run_pypsa(
             network,
             model,
             owner=str(merchant_cfg.get("owner", "") or ""),
+            owner_column=str(merchant_cfg.get("ownerColumn", "owner") or "owner"),
             price_source=str(merchant_cfg.get("priceSource", "lmp") or "lmp"),
             flat_price=float(merchant_cfg.get("flatPrice", 0.0) or 0.0),
             price_series=merchant_cfg.get("priceSeries") or None,

@@ -264,7 +264,7 @@ function AppInner() {
   const [powerFlowConfig, setPowerFlowConfig] = useState<PowerFlowConfig>({ enabled: false, linear: false });
   const [contingencyConfig, setContingencyConfig] = useState<ContingencyConfig>({ enabled: false });
   const [mgaConfig, setMgaConfig] = useState<MgaConfig>({ enabled: false, slack: 0.05, carriers: [] });
-  const [merchantConfig, setMerchantConfig] = useState<MerchantConfig>({ enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 });
+  const [merchantConfig, setMerchantConfig] = useState<MerchantConfig>({ enabled: false, ownerColumn: 'owner', owner: '', priceSource: 'lmp', flatPrice: 0 });
   const [carbonPriceSchedule, setCarbonPriceSchedule] = useState<CarbonPriceScheduleEntry[]>([]);
   const [carbonLibrary, setCarbonLibrary] = useState<CarbonScheduleProfile[]>([]);
   const [validateResult, setValidateResult] = useState<{
@@ -307,7 +307,7 @@ function AppInner() {
     powerFlowConfig: { enabled: false, linear: false },
     contingencyConfig: { enabled: false },
     mgaConfig: { enabled: false, slack: 0.05, carriers: [] },
-    merchantConfig: { enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 },
+    merchantConfig: { enabled: false, ownerColumn: 'owner', owner: '', priceSource: 'lmp', flatPrice: 0 },
     constraints: DEFAULT_CONSTRAINTS,
   }));
   const frontendPlugins = useFrontendPlugins();
@@ -907,16 +907,18 @@ function AppInner() {
     }
     return { emittingGenerators, hasCo2Column, totalGenerators: generators.length };
   }, [model.carriers, model.generators]);
-  // Distinct owner tags across generators + storage — drives the merchant
-  // (price-taker) owner picker. The `owner` column is user-authored in the grid.
+  // Distinct values of the chosen owner column across generators + storage —
+  // drives the merchant (price-taker) owner picker. The column is user-chosen
+  // (e.g. `owner`, `Company`) and authored in the Model grid.
   const merchantOwners = useMemo(() => {
+    const col = (merchantConfig.ownerColumn || 'owner').trim() || 'owner';
     const seen: string[] = [];
     for (const row of [...(model.generators ?? []), ...(model.storage_units ?? [])]) {
-      const owner = stringValue(row.owner).trim();
+      const owner = stringValue(row[col]).trim();
       if (owner && !seen.includes(owner)) seen.push(owner);
     }
     return seen;
-  }, [model.generators, model.storage_units]);
+  }, [model.generators, model.storage_units, merchantConfig.ownerColumn]);
   // Map geometry for the analytics view follows the results-owning topology.
   const analyticsBounds = useMemo(() => getBounds(analyticsModel), [analyticsModel.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
   const analyticsBusIndex = useMemo(() => getBusIndex(analyticsModel), [analyticsModel.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
@@ -968,7 +970,7 @@ function AppInner() {
     setPowerFlowConfig(scenario.powerFlowConfig ?? { enabled: false, linear: false });
     setContingencyConfig(scenario.contingencyConfig ?? { enabled: false });
     setMgaConfig(scenario.mgaConfig ?? { enabled: false, slack: 0.05, carriers: [] });
-    setMerchantConfig(scenario.merchantConfig ?? { enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 });
+    setMerchantConfig(scenario.merchantConfig ?? { enabled: false, ownerColumn: 'owner', owner: '', priceSource: 'lmp', flatPrice: 0 });
     setStatus(`Applied scenario: ${scenario.label}`);
     showToast(`Scenario applied: ${scenario.label}`, 'success');
   }, [maxSnapshots, showToast, updateSettings]);

@@ -82,7 +82,7 @@ export function defaultMgaConfig(): MgaConfig {
 }
 
 export function defaultMerchantConfig(): MerchantConfig {
-  return { enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 };
+  return { enabled: false, ownerColumn: 'owner', owner: '', priceSource: 'lmp', flatPrice: 0 };
 }
 
 function cloneStochasticConfig(config: StochasticConfig): StochasticConfig {

@@ -242,7 +242,9 @@ export interface NearOptimalResult {
  *  price signal. Layered on top of a normal optimise run. */
 export interface MerchantConfig {
   enabled: boolean;
-  /** Owner tag whose assets to analyse (matches the `owner` column on rows). */
+  /** Which model column holds the owner/operator tag (e.g. `owner`, `Company`). */
+  ownerColumn: string;
+  /** Owner value whose assets to analyse (a value found in `ownerColumn`). */
   owner: string;
   /** `lmp` = stage-1 system marginal price; `series` = exogenous user price. */
   priceSource: 'lmp' | 'series';
@@ -271,6 +273,7 @@ export interface MerchantAsset {
 /** Merchant result block — one owner's profit against the price signal. */
 export interface MerchantResult {
   owner: string;
+  ownerColumn: string;
   priceSource: 'lmp' | 'series';
   currency: string;
   priceStats: { mean: number | null; min: number | null; max: number | null };
