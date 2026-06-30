@@ -254,6 +254,8 @@ export interface ScenarioPreset {
   // RAGNAROK_CustomDSL, not per preset.
   stochasticConfig: StochasticConfig;
   securityConstrainedConfig: SecurityConstrainedConfig;
+  powerFlowConfig: PowerFlowConfig;
+  contingencyConfig: ContingencyConfig;
   constraints: CustomConstraint[];
 }
 

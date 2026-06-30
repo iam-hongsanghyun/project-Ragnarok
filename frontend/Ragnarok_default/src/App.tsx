@@ -300,6 +300,8 @@ function AppInner() {
     samplingConfig: defaultSamplingConfig(),
     stochasticConfig: { enabled: false, scenarios: [] },
     securityConstrainedConfig: { enabled: false },
+    powerFlowConfig: { enabled: false, linear: false },
+    contingencyConfig: { enabled: false },
     constraints: DEFAULT_CONSTRAINTS,
   }));
   const frontendPlugins = useFrontendPlugins();
@@ -457,6 +459,8 @@ function AppInner() {
       samplingConfig: normalizeSamplingConfig(samplingConfig),
       stochasticConfig,
       securityConstrainedConfig: sclopfConfig,
+      powerFlowConfig,
+      contingencyConfig,
       constraints,
     })
   ), [
@@ -474,6 +478,8 @@ function AppInner() {
     samplingConfig,
     stochasticConfig,
     sclopfConfig,
+    powerFlowConfig,
+    contingencyConfig,
     constraints,
   ]);
 
@@ -584,6 +590,8 @@ function AppInner() {
       samplingConfig: fallbackSampling,
       stochasticConfig,
       securityConstrainedConfig: sclopfConfig,
+      powerFlowConfig,
+      contingencyConfig,
       constraints,
     });
     const catalogToApply = nextScenarioCatalog.scenarios.length > 0
@@ -629,6 +637,8 @@ function AppInner() {
     forceLp,
     stochasticConfig,
     sclopfConfig,
+    powerFlowConfig,
+    contingencyConfig,
     constraints,
     updateSettings,
     setAnalyticsFocus,
@@ -931,6 +941,8 @@ function AppInner() {
     setSamplingConfig(normalizeSamplingConfig(scenario.samplingConfig ?? defaultSamplingConfig()));
     setStochasticConfig(scenario.stochasticConfig ?? { enabled: false, scenarios: [] });
     setSclopfConfig(scenario.securityConstrainedConfig ?? { enabled: false });
+    setPowerFlowConfig(scenario.powerFlowConfig ?? { enabled: false, linear: false });
+    setContingencyConfig(scenario.contingencyConfig ?? { enabled: false });
     setStatus(`Applied scenario: ${scenario.label}`);
     showToast(`Scenario applied: ${scenario.label}`, 'success');
   }, [maxSnapshots, showToast, updateSettings]);
