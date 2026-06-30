@@ -7574,6 +7574,46 @@ code, kbd, samp, tt,
 .dashboard-row-remove:hover,
 .sg-module-table-row-delete:hover { color: var(--danger); border-color: var(--danger); }
 
+/* Right-side card controls in the cell header: type-switcher + remove. */
+.dashboard-cell-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.dashboard-cell-kind {
+  position: relative;
+  display: inline-flex;
+}
+.dashboard-cell-kind-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.dashboard-cell-kind-btn:hover { color: var(--brand); border-color: var(--brand); }
+/* Type-switcher dropdown — drops below the button, right-aligned. */
+.dashboard-cell-kind-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  z-index: 30;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-button);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+}
+
 .dashboard-cell-body {
   flex: 1 1 auto;
   min-height: 0;

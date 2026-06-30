@@ -70,6 +70,8 @@ export function Dashboard({ layout, onLayoutChange, editing, renderCard, cardTit
 
   // Which empty placeholder cell currently has its "+" menu open.
   const [addMenuCellId, setAddMenuCellId] = useState<string | null>(null);
+  // Which existing card currently has its type-switcher menu open.
+  const [kindMenuCellId, setKindMenuCellId] = useState<string | null>(null);
 
   // Container-width observer so auto-height rows can compute their
   // pixel height from the current dashboard width on every layout pass.
@@ -134,6 +136,19 @@ export function Dashboard({ layout, onLayoutChange, editing, renderCard, cardTit
           ? { ...r, cells: r.cells.map((c) => (c.id === cellId ? { ...c, cardId: card.id } : c)) }
           : r,
       ),
+    });
+  };
+
+  // Swap an existing card's kind in place — keeps the same id so the cell's
+  // cardId reference stays valid, replacing config with the new kind's default.
+  const changeCardKind = (cardId: string, kind: string) => {
+    if (!createCard) return;
+    setKindMenuCellId(null);
+    const fresh = createCard(kind);
+    const replaced = { ...fresh, id: cardId } as Card;
+    onLayoutChange({
+      ...layout,
+      cards: layout.cards.map((c) => (c.id === cardId ? replaced : c)),
     });
   };
 
@@ -337,14 +352,41 @@ export function Dashboard({ layout, onLayoutChange, editing, renderCard, cardTit
                           <span className="dashboard-cell-title">{cardTitle(card)}</span>
                         )}
                         {editing && (
-                          <button
-                            className="dashboard-cell-remove"
-                            onClick={() => removeCell(row.id, cell.id)}
-                            title="Remove card"
-                            aria-label="Remove card"
-                          >
-                            ×
-                          </button>
+                          <div className="dashboard-cell-actions">
+                            {createCard && addableCards.length > 0 && (
+                              <div className="dashboard-cell-kind">
+                                <button
+                                  className="dashboard-cell-kind-btn"
+                                  onClick={() => setKindMenuCellId(kindMenuCellId === cell.id ? null : cell.id)}
+                                  title="Change card type"
+                                  aria-label="Change card type"
+                                >
+                                  ⇄
+                                </button>
+                                {kindMenuCellId === cell.id && (
+                                  <div className="dashboard-cell-add-menu dashboard-cell-kind-menu">
+                                    {addableCards.map((opt) => (
+                                      <button
+                                        key={opt.kind}
+                                        className={`tb-btn${card.kind === opt.kind ? ' tb-btn--active' : ''}`}
+                                        onClick={() => changeCardKind(card.id, opt.kind)}
+                                      >
+                                        {opt.label}
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            <button
+                              className="dashboard-cell-remove"
+                              onClick={() => removeCell(row.id, cell.id)}
+                              title="Remove card"
+                              aria-label="Remove card"
+                            >
+                              ×
+                            </button>
+                          </div>
                         )}
                       </div>
                       <div className="dashboard-cell-body">{renderCard(card)}</div>
