@@ -53,6 +53,7 @@ import { buildScenarioPreset, defaultScenarioCatalog, readScenarioCatalogFromMod
 import { readCarbonLibraryFromModel, writeCarbonLibraryToModel, sameCarbonLibrary } from 'lib/results/carbonLibrary';
 import { saveSessionControls, loadSessionControls, clearSession, clearSessionModelOnly } from 'lib/storage/sessionStore';
 import { clearSessionModel, putSessionModel, putStaticModel, getSessionFullModel, getSessionMeta, getSheetPage, isSeriesSheet, patchSheet, seriesSheetCounts, DEFAULT_SESSION_ID } from 'lib/api/session';
+import type { ClusterResult } from 'lib/forge/transforms';
 import type { SheetEditOp } from 'lib/api/session';
 import { fetchRunOutputSeriesWindows } from 'lib/api/runs';
 import { loadExample } from 'lib/api/examples';
@@ -638,6 +639,36 @@ function AppInner() {
     normalizeInputDatesToIso(cloned, settings.dateFormat);
     return cloned;
   }, [settings.dateFormat]);
+
+  // Forge → network clustering. Sync the working model to the session (same as a
+  // run — the browser holds only static sheets, the backend keeps the series),
+  // then ask the backend to reduce it. Returns the reduced model for preview.
+  const handleClusterPreview = useCallback(
+    async (nClusters: number, method: string): Promise<ClusterResult> => {
+      await putStaticModel(prepareModelForBackend(model));
+      const resp = await fetch(`${API_BASE}/api/transform/cluster`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: DEFAULT_SESSION_ID, nClusters, method }),
+      });
+      if (!resp.ok) {
+        throw new Error((await resp.text()) || `Clustering failed (HTTP ${resp.status})`);
+      }
+      return (await resp.json()) as ClusterResult;
+    },
+    [model, prepareModelForBackend],
+  );
+
+  // Apply a previewed clustering: the reduced topology becomes the new working
+  // model (it's a different network, so a full replace, not a sheet merge).
+  const handleClusterApply = useCallback(
+    (clustered: WorkbookModel) => {
+      resetForNewModel(clustered);
+      setActiveRunName(null);
+      showToast('Network reduced — clustered model loaded into the editor', 'success');
+    },
+    [resetForNewModel],
+  );
 
   // Guard against accidental session loss on browser back / forward / refresh /
   // close. The workbook lives only in memory and there is no client-side
@@ -2528,6 +2559,8 @@ function AppInner() {
                 setModel((prev) => ({ ...prev, ...partial }));
                 requestStaticResync(); // Forge edits static sheets → sync the session
               }}
+              onClusterPreview={handleClusterPreview}
+              onClusterApply={handleClusterApply}
             />
           )}
 
