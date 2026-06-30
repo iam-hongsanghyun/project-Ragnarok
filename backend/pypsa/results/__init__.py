@@ -34,6 +34,7 @@ from .dispatch import (
 )
 from .emissions import build_emissions_breakdown
 from .statistics import build_statistics
+from .mga import build_mga
 from .expansion import build_expansion_results
 from .full_outputs import build_full_outputs
 from .market import (
@@ -175,6 +176,8 @@ def run_pypsa(
     pf_linear = bool(powerflow_cfg.get("linear", False))
     contingency_cfg = options.get("contingencyConfig") or {}
     contingency_enabled = bool(contingency_cfg.get("enabled", False))
+    mga_cfg = options.get("mgaConfig") or {}
+    mga_enabled = bool(mga_cfg.get("enabled", False))
     if stochastic.enabled and rolling.enabled:
         raise HTTPException(
             status_code=400,
@@ -216,6 +219,19 @@ def run_pypsa(
             status_code=400,
             detail="N-1 contingency analysis cannot be combined with rolling horizon, stochastic, "
             "security-constrained, multi-investment pathway, sampled-block, or power-flow modes.",
+        )
+    # MGA layers on top of a full optimise (it needs the optimum to set the cost
+    # budget), so it is incompatible with the modes that change *how* the LP is
+    # solved or that skip the LP entirely. It may combine with multi-investment
+    # pathway runs (optimize_mga takes multi_investment_periods).
+    if mga_enabled and (
+        rolling.enabled or stochastic.enabled or sclopf_enabled
+        or sampling.enabled or pf_enabled or contingency_enabled
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="MGA near-optimal exploration cannot be combined with rolling horizon, stochastic, "
+            "security-constrained, sampled-block, power-flow, or contingency modes.",
         )
 
     # The Ragnarok backend is plugin-agnostic: it only ever receives a model,
@@ -715,6 +731,23 @@ def run_pypsa(
             "scale": snapshot_weight / store_w if store_w > 0 else snapshot_weight,
         }
 
+    # MGA near-optimal exploration runs last: it copies the solved network and
+    # detaches the solver model, so it must follow every read of the optimum's
+    # solution dataframes above. It never mutates the base network's solution.
+    near_optimal = (
+        build_mga(
+            network,
+            slack=float(mga_cfg.get("slack", 0.05) or 0.05),
+            carriers=mga_cfg.get("carriers") or None,
+            currency=currency,
+            solver_options=solver_options if solver_options else {},
+            io_api=_SOLVER_IO_API,
+            multi_investment_periods=pathway.enabled,
+        )
+        if mga_enabled
+        else None
+    )
+
     return {
         "summary": summary,
         "dispatchSeries": dispatch_s,
@@ -736,6 +769,7 @@ def run_pypsa(
         "appliedConstraints": applied_constraints,
         "generatorEconomics": generator_economics,
         "statistics": statistics,
+        "nearOptimal": near_optimal,
         "emissionsBreakdown": emissions_breakdown,
         "narrative": notes,
         "runMeta": {

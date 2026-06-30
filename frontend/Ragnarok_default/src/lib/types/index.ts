@@ -207,6 +207,37 @@ export interface ContingencyConfig {
   enabled: boolean;
 }
 
+/** MGA (modelling-to-generate-alternatives) — map the near-optimal capacity
+ *  space. Layered on top of a normal optimise run. `carriers` empty = explore
+ *  every extendable-generator carrier (backend-capped). */
+export interface MgaConfig {
+  enabled: boolean;
+  /** Cost slack: alternatives stay within `1 + slack` of the optimal cost. */
+  slack: number;
+  carriers: string[];
+}
+
+/** One MGA alternative — the system at one corner of the near-optimal space. */
+export interface MgaAlternative {
+  carrier: string;
+  sense: 'min' | 'max';
+  status: string;
+  cost: number;
+  /** cost / optimal cost (≈ 1 + slack at the budget boundary). */
+  costRatio: number | null;
+  capacityByCarrier: Record<string, number>;
+}
+
+/** MGA result block — the optimum plus its near-optimal corridor. */
+export interface NearOptimalResult {
+  slack: number;
+  currency: string;
+  optimum: { cost: number; capacityByCarrier: Record<string, number> };
+  carriers: string[];
+  alternatives: MgaAlternative[];
+  droppedCarriers: string[];
+}
+
 export interface ContingencyEntry {
   /** Name of the outaged passive branch. */
   outage: string;
@@ -269,6 +300,7 @@ export interface ScenarioPreset {
   securityConstrainedConfig: SecurityConstrainedConfig;
   powerFlowConfig: PowerFlowConfig;
   contingencyConfig: ContingencyConfig;
+  mgaConfig: MgaConfig;
   constraints: CustomConstraint[];
 }
 
@@ -754,6 +786,8 @@ export interface RunResults {
   contingency?: ContingencyResult;
   /** PyPSA statistics() table (per-carrier capacity/CF/curtailment/revenue/…). */
   statistics?: StatisticsResult;
+  /** MGA near-optimal capacity corridor (present only when MGA was enabled). */
+  nearOptimal?: NearOptimalResult;
   appliedConstraints?: AppliedConstraint[];
   emissionsBreakdown?: EmissionsBreakdown;
   narrative: string[];

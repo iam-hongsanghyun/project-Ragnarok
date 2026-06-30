@@ -88,6 +88,7 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
     results.generatorEconomics.generators.length > 0 || results.generatorEconomics.storage.length > 0
   ));
   const hasStatistics = !!(results.statistics && results.statistics.rows.length > 0);
+  const hasNearOptimal = !!(results.nearOptimal && results.nearOptimal.alternatives.length > 0);
 
   const rows: Array<ReturnType<typeof row>> = [];
 
@@ -163,6 +164,12 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   if (hasStatistics) {
     const stats: Card = { id: id('stats'), kind: 'statistics' };
     rows.push(row({ cards: [{ card: stats }] }));
+  }
+
+  // 9d. MGA near-optimal capacity corridor (conditional)
+  if (hasNearOptimal) {
+    const mga: Card = { id: id('mga'), kind: 'near-optimal' };
+    rows.push(row({ cards: [{ card: mga }] }));
   }
 
   // 10. Carrier analysis — full-width performance table.

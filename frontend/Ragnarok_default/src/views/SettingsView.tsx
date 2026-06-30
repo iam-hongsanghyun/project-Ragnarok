@@ -17,6 +17,7 @@ import {
   PathwayConfig,
   ContingencyConfig,
   PowerFlowConfig,
+  MgaConfig,
   Primitive,
   RollingHorizonConfig,
   SamplingConfig,
@@ -37,6 +38,7 @@ import { StochasticSection } from './SettingsView.sections/Stochastic/Stochastic
 import { SclopfSection } from './SettingsView.sections/Sclopf';
 import { PowerFlowSection } from './SettingsView.sections/PowerFlow';
 import { ContingencySection } from './SettingsView.sections/Contingency';
+import { MgaSection } from './SettingsView.sections/Mga';
 import { StandardConstraintsSection, AdvancedConstraintsSection } from './SettingsView.sections/Constraints';
 import { AppearanceSection } from './SettingsView.sections/Appearance';
 import { ProjectDefaultsSection } from './SettingsView.sections/ProjectDefaults';
@@ -53,6 +55,7 @@ type SectionId =
   | 'sclopf'
   | 'powerflow'
   | 'contingency'
+  | 'mga'
   | 'constraints'
   | 'constraintsAdvanced'
   | 'appearance'
@@ -85,6 +88,7 @@ const SECTIONS: Section[] = [
   { id: 'sclopf',     label: 'Security-constrained (SCLOPF)',  group: 'Solve' },
   { id: 'powerflow', label: 'Power flow',                     group: 'Solve' },
   { id: 'contingency', label: 'N-1 contingency',              group: 'Solve' },
+  { id: 'mga',        label: 'Near-optimal (MGA)',            group: 'Solve' },
   { id: 'solver',     label: 'Solver',                        group: 'Solve' },
   // Data — external-source credentials
   { id: 'apiKeys',    label: 'API keys',                      group: 'Data' },
@@ -121,6 +125,8 @@ export interface SettingsViewProps {
   onSclopfConfigChange: (config: SecurityConstrainedConfig) => void;
   powerFlowConfig: PowerFlowConfig;
   onPowerFlowConfigChange: (config: PowerFlowConfig) => void;
+  mgaConfig: MgaConfig;
+  onMgaConfigChange: (config: MgaConfig) => void;
   contingencyConfig: ContingencyConfig;
   onContingencyConfigChange: (config: ContingencyConfig) => void;
   maxSnapshots: number;
@@ -213,6 +219,7 @@ export function SettingsView(props: SettingsViewProps) {
         {section === 'sclopf'         && <SclopfSection {...props} />}
         {section === 'powerflow'      && <PowerFlowSection {...props} />}
         {section === 'contingency'    && <ContingencySection {...props} />}
+        {section === 'mga'            && <MgaSection {...props} />}
         {section === 'constraints'    && <StandardConstraintsSection {...props} />}
         {section === 'constraintsAdvanced' && <AdvancedConstraintsSection {...props} />}
         {section === 'appearance'     && <AppearanceSection {...props} />}

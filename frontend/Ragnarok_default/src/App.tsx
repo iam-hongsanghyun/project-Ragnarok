@@ -17,6 +17,7 @@ import {
   SecurityConstrainedConfig,
   PowerFlowConfig,
   ContingencyConfig,
+  MgaConfig,
   CarbonPriceScheduleEntry,
   CarbonScheduleProfile,
   Primitive,
@@ -261,6 +262,7 @@ function AppInner() {
   const [sclopfConfig, setSclopfConfig] = useState<SecurityConstrainedConfig>({ enabled: false });
   const [powerFlowConfig, setPowerFlowConfig] = useState<PowerFlowConfig>({ enabled: false, linear: false });
   const [contingencyConfig, setContingencyConfig] = useState<ContingencyConfig>({ enabled: false });
+  const [mgaConfig, setMgaConfig] = useState<MgaConfig>({ enabled: false, slack: 0.05, carriers: [] });
   const [carbonPriceSchedule, setCarbonPriceSchedule] = useState<CarbonPriceScheduleEntry[]>([]);
   const [carbonLibrary, setCarbonLibrary] = useState<CarbonScheduleProfile[]>([]);
   const [validateResult, setValidateResult] = useState<{
@@ -302,6 +304,7 @@ function AppInner() {
     securityConstrainedConfig: { enabled: false },
     powerFlowConfig: { enabled: false, linear: false },
     contingencyConfig: { enabled: false },
+    mgaConfig: { enabled: false, slack: 0.05, carriers: [] },
     constraints: DEFAULT_CONSTRAINTS,
   }));
   const frontendPlugins = useFrontendPlugins();
@@ -461,6 +464,7 @@ function AppInner() {
       securityConstrainedConfig: sclopfConfig,
       powerFlowConfig,
       contingencyConfig,
+      mgaConfig,
       constraints,
     })
   ), [
@@ -480,6 +484,7 @@ function AppInner() {
     sclopfConfig,
     powerFlowConfig,
     contingencyConfig,
+    mgaConfig,
     constraints,
   ]);
 
@@ -592,6 +597,7 @@ function AppInner() {
       securityConstrainedConfig: sclopfConfig,
       powerFlowConfig,
       contingencyConfig,
+      mgaConfig,
       constraints,
     });
     const catalogToApply = nextScenarioCatalog.scenarios.length > 0
@@ -639,6 +645,7 @@ function AppInner() {
     sclopfConfig,
     powerFlowConfig,
     contingencyConfig,
+    mgaConfig,
     constraints,
     updateSettings,
     setAnalyticsFocus,
@@ -943,6 +950,7 @@ function AppInner() {
     setSclopfConfig(scenario.securityConstrainedConfig ?? { enabled: false });
     setPowerFlowConfig(scenario.powerFlowConfig ?? { enabled: false, linear: false });
     setContingencyConfig(scenario.contingencyConfig ?? { enabled: false });
+    setMgaConfig(scenario.mgaConfig ?? { enabled: false, slack: 0.05, carriers: [] });
     setStatus(`Applied scenario: ${scenario.label}`);
     showToast(`Scenario applied: ${scenario.label}`, 'success');
   }, [maxSnapshots, showToast, updateSettings]);
@@ -2164,6 +2172,7 @@ function AppInner() {
       securityConstrainedConfig: sclopfConfig,
       powerFlowConfig,
       contingencyConfig,
+      mgaConfig,
       carbonPriceSchedule,
     };
 
@@ -2450,6 +2459,8 @@ function AppInner() {
               onPowerFlowConfigChange={setPowerFlowConfig}
               contingencyConfig={contingencyConfig}
               onContingencyConfigChange={setContingencyConfig}
+              mgaConfig={mgaConfig}
+              onMgaConfigChange={setMgaConfig}
               maxSnapshots={maxSnapshots}
               snapshotStart={snapshotStart}
               snapshotEnd={snapshotEnd}

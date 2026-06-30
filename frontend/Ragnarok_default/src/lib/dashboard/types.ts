@@ -25,6 +25,7 @@ export type CardKind =
   | 'co2-shadow'
   | 'generator-economics'
   | 'statistics'
+  | 'near-optimal'
   | 'power-flow'
   | 'contingency'
   | 'emissions-breakdown'
@@ -140,6 +141,10 @@ export interface StatisticsCardData extends CardBase {
   kind: 'statistics';
 }
 
+export interface NearOptimalCardData extends CardBase {
+  kind: 'near-optimal';
+}
+
 export interface PowerFlowCardData extends CardBase {
   kind: 'power-flow';
 }
@@ -183,6 +188,7 @@ export type Card =
   | Co2ShadowCardData
   | GeneratorEconomicsCardData
   | StatisticsCardData
+  | NearOptimalCardData
   | PowerFlowCardData
   | ContingencyCardData
   | EmissionsBreakdownCardData
