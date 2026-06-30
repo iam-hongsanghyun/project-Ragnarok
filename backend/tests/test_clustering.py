@@ -80,7 +80,20 @@ def test_clustering_rejects_bad_target() -> None:
         cluster_model(_path_model(4), n_clusters=0, scenario=SCENARIO)
 
 
-def test_kmeans_degrades_cleanly_without_sklearn() -> None:
-    # scikit-learn isn't installed → k-means must surface a 400, never a 500.
+def test_kmeans_clustering_reduces_buses() -> None:
+    # scikit-learn is a dependency, so spatial k-means runs (buses have distinct x).
+    res = cluster_model(_path_model(4), n_clusters=2, method="kmeans", scenario=SCENARIO)
+    assert res["method"] == "kmeans"
+    assert res["before"]["buses"] == 4
+    assert res["after"]["buses"] == 2
+    assert len(set(res["busmap"].values())) == 2
+
+
+def test_kmeans_requires_distinct_coordinates() -> None:
+    # All buses on the same coordinate → k-means has no spatial signal → 400.
+    model = _path_model(4)
+    for row in model["buses"]:
+        row["x"] = 0.0
+        row["y"] = 0.0
     with pytest.raises(HTTPException):
-        cluster_model(_path_model(4), n_clusters=2, method="kmeans", scenario=SCENARIO)
+        cluster_model(model, n_clusters=2, method="kmeans", scenario=SCENARIO)
