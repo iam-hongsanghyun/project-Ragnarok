@@ -18,6 +18,7 @@ import {
   ContingencyConfig,
   PowerFlowConfig,
   MgaConfig,
+  MerchantConfig,
   Primitive,
   RollingHorizonConfig,
   SamplingConfig,
@@ -39,6 +40,7 @@ import { SclopfSection } from './SettingsView.sections/Sclopf';
 import { PowerFlowSection } from './SettingsView.sections/PowerFlow';
 import { ContingencySection } from './SettingsView.sections/Contingency';
 import { MgaSection } from './SettingsView.sections/Mga';
+import { MerchantSection } from './SettingsView.sections/Merchant';
 import { StandardConstraintsSection, AdvancedConstraintsSection } from './SettingsView.sections/Constraints';
 import { AppearanceSection } from './SettingsView.sections/Appearance';
 import { ProjectDefaultsSection } from './SettingsView.sections/ProjectDefaults';
@@ -56,6 +58,7 @@ type SectionId =
   | 'powerflow'
   | 'contingency'
   | 'mga'
+  | 'merchant'
   | 'constraints'
   | 'constraintsAdvanced'
   | 'appearance'
@@ -89,6 +92,7 @@ const SECTIONS: Section[] = [
   { id: 'powerflow', label: 'Power flow',                     group: 'Solve' },
   { id: 'contingency', label: 'N-1 contingency',              group: 'Solve' },
   { id: 'mga',        label: 'Near-optimal (MGA)',            group: 'Solve' },
+  { id: 'merchant',   label: 'Merchant (price-taker)',        group: 'Solve' },
   { id: 'solver',     label: 'Solver',                        group: 'Solve' },
   // Data — external-source credentials
   { id: 'apiKeys',    label: 'API keys',                      group: 'Data' },
@@ -127,6 +131,9 @@ export interface SettingsViewProps {
   onPowerFlowConfigChange: (config: PowerFlowConfig) => void;
   mgaConfig: MgaConfig;
   onMgaConfigChange: (config: MgaConfig) => void;
+  merchantConfig: MerchantConfig;
+  onMerchantConfigChange: (config: MerchantConfig) => void;
+  merchantOwners: string[];
   contingencyConfig: ContingencyConfig;
   onContingencyConfigChange: (config: ContingencyConfig) => void;
   maxSnapshots: number;
@@ -220,6 +227,7 @@ export function SettingsView(props: SettingsViewProps) {
         {section === 'powerflow'      && <PowerFlowSection {...props} />}
         {section === 'contingency'    && <ContingencySection {...props} />}
         {section === 'mga'            && <MgaSection {...props} />}
+        {section === 'merchant'       && <MerchantSection {...props} />}
         {section === 'constraints'    && <StandardConstraintsSection {...props} />}
         {section === 'constraintsAdvanced' && <AdvancedConstraintsSection {...props} />}
         {section === 'appearance'     && <AppearanceSection {...props} />}

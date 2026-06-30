@@ -238,6 +238,52 @@ export interface NearOptimalResult {
   droppedCarriers: string[];
 }
 
+/** Merchant / price-taker analysis (B1) — maximise one owner's profit against a
+ *  price signal. Layered on top of a normal optimise run. */
+export interface MerchantConfig {
+  enabled: boolean;
+  /** Owner tag whose assets to analyse (matches the `owner` column on rows). */
+  owner: string;
+  /** `lmp` = stage-1 system marginal price; `series` = exogenous user price. */
+  priceSource: 'lmp' | 'series';
+  /** Flat price (run currency / MWh) used when priceSource = `series`. */
+  flatPrice: number;
+  /** Optional hourly price overriding `flatPrice` in series mode. */
+  priceSeries?: number[];
+}
+
+/** One owner asset's merchant economics. */
+export interface MerchantAsset {
+  name: string;
+  type: 'generator' | 'storage';
+  bus: string;
+  carrier: string;
+  capacityMW: number;
+  energyMWh: number;
+  revenue: number;
+  operatingCost: number;
+  capex: number;
+  profit: number;
+  /** Time-weighted price the asset actually sold at (revenue / energy). */
+  capturePrice: number | null;
+}
+
+/** Merchant result block — one owner's profit against the price signal. */
+export interface MerchantResult {
+  owner: string;
+  priceSource: 'lmp' | 'series';
+  currency: string;
+  priceStats: { mean: number | null; min: number | null; max: number | null };
+  assets: MerchantAsset[];
+  totals: {
+    revenue: number;
+    operatingCost: number;
+    capex: number;
+    profit: number;
+    energyMWh: number;
+  };
+}
+
 export interface ContingencyEntry {
   /** Name of the outaged passive branch. */
   outage: string;
@@ -301,6 +347,7 @@ export interface ScenarioPreset {
   powerFlowConfig: PowerFlowConfig;
   contingencyConfig: ContingencyConfig;
   mgaConfig: MgaConfig;
+  merchantConfig: MerchantConfig;
   constraints: CustomConstraint[];
 }
 
@@ -788,6 +835,8 @@ export interface RunResults {
   statistics?: StatisticsResult;
   /** MGA near-optimal capacity corridor (present only when MGA was enabled). */
   nearOptimal?: NearOptimalResult;
+  /** Merchant / price-taker owner economics (present only when enabled). */
+  merchant?: MerchantResult;
   appliedConstraints?: AppliedConstraint[];
   emissionsBreakdown?: EmissionsBreakdown;
   narrative: string[];

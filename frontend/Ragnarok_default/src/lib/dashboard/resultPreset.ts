@@ -89,6 +89,7 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   ));
   const hasStatistics = !!(results.statistics && results.statistics.rows.length > 0);
   const hasNearOptimal = !!(results.nearOptimal && results.nearOptimal.alternatives.length > 0);
+  const hasMerchant = !!(results.merchant && results.merchant.assets.length > 0);
 
   const rows: Array<ReturnType<typeof row>> = [];
 
@@ -170,6 +171,12 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   if (hasNearOptimal) {
     const mga: Card = { id: id('mga'), kind: 'near-optimal' };
     rows.push(row({ cards: [{ card: mga }] }));
+  }
+
+  // 9e. Merchant / price-taker owner economics (conditional)
+  if (hasMerchant) {
+    const merch: Card = { id: id('merch'), kind: 'merchant' };
+    rows.push(row({ cards: [{ card: merch }] }));
   }
 
   // 10. Carrier analysis — full-width performance table.

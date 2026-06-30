@@ -33,6 +33,7 @@ import { Co2ShadowCard } from '../../../features/analytics/cards/Co2ShadowCard';
 import { GeneratorEconomicsCard } from '../../../features/analytics/cards/GeneratorEconomicsCard';
 import { StatisticsCard } from '../../../features/analytics/cards/StatisticsCard';
 import { NearOptimalCard } from '../../../features/analytics/cards/NearOptimalCard';
+import { MerchantCard } from '../../../features/analytics/cards/MerchantCard';
 import { PowerFlowCard } from '../../../features/analytics/cards/PowerFlowCard';
 import { ContingencyCard } from '../../../features/analytics/cards/ContingencyCard';
 import { EmissionsBreakdownCard } from '../../../features/analytics/cards/EmissionsBreakdownCard';
@@ -430,6 +431,10 @@ export function AnalyticsDashboard({
           return results.nearOptimal
             ? <NearOptimalCard data={results.nearOptimal} />
             : <p className="dashboard-cell-missing">This run did not include MGA near-optimal exploration.</p>;
+        case 'merchant':
+          return results.merchant
+            ? <MerchantCard data={results.merchant} />
+            : <p className="dashboard-cell-missing">This run did not include merchant (price-taker) analysis.</p>;
         case 'power-flow':
           return results.powerFlow
             ? <PowerFlowCard data={results.powerFlow} />
@@ -494,6 +499,7 @@ export function AnalyticsDashboard({
       case 'generator-economics': return 'Asset economics (revenue & recovery)';
       case 'statistics': return 'PyPSA statistics (per-carrier metrics)';
       case 'near-optimal': return 'Near-optimal capacity corridor (MGA)';
+      case 'merchant': return 'Merchant economics (price-taker)';
       case 'power-flow': return 'Power flow (convergence & voltages)';
       case 'contingency': return 'N-1 contingency (security)';
       case 'emissions-breakdown': return 'Emissions by generator / carrier';

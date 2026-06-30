@@ -4,6 +4,7 @@ import {
   CustomConstraint,
   GridRow,
   MgaConfig,
+  MerchantConfig,
   PathwayConfig,
   PowerFlowConfig,
   Primitive,
@@ -80,6 +81,10 @@ export function defaultMgaConfig(): MgaConfig {
   return { enabled: false, slack: 0.05, carriers: [] };
 }
 
+export function defaultMerchantConfig(): MerchantConfig {
+  return { enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 };
+}
+
 function cloneStochasticConfig(config: StochasticConfig): StochasticConfig {
   return {
     ...config,
@@ -104,6 +109,10 @@ function cloneContingencyConfig(config: ContingencyConfig): ContingencyConfig {
 
 function cloneMgaConfig(config: MgaConfig): MgaConfig {
   return { ...config, carriers: [...(config.carriers ?? [])] };
+}
+
+function cloneMerchantConfig(config: MerchantConfig): MerchantConfig {
+  return { ...config, priceSeries: config.priceSeries ? [...config.priceSeries] : undefined };
 }
 
 function cloneSchedule(schedule: CarbonPriceScheduleEntry[]): CarbonPriceScheduleEntry[] {
@@ -136,6 +145,7 @@ export function buildScenarioPreset(input: {
   powerFlowConfig?: PowerFlowConfig;
   contingencyConfig?: ContingencyConfig;
   mgaConfig?: MgaConfig;
+  merchantConfig?: MerchantConfig;
   samplingConfig?: SamplingConfig;
   constraints: CustomConstraint[];
 }): ScenarioPreset {
@@ -159,6 +169,7 @@ export function buildScenarioPreset(input: {
     powerFlowConfig: clonePowerFlowConfig(input.powerFlowConfig ?? defaultPowerFlowConfig()),
     contingencyConfig: cloneContingencyConfig(input.contingencyConfig ?? defaultContingencyConfig()),
     mgaConfig: cloneMgaConfig(input.mgaConfig ?? defaultMgaConfig()),
+    merchantConfig: cloneMerchantConfig(input.merchantConfig ?? defaultMerchantConfig()),
     samplingConfig: cloneSamplingConfig(input.samplingConfig ?? defaultSamplingConfig()),
     constraints: cloneConstraints(input.constraints),
   };
@@ -197,6 +208,7 @@ function normalizeScenarioCatalog(catalog: ScenarioCatalog): ScenarioCatalog {
       powerFlowConfig: clonePowerFlowConfig(scenario.powerFlowConfig ?? defaultPowerFlowConfig()),
       contingencyConfig: cloneContingencyConfig(scenario.contingencyConfig ?? defaultContingencyConfig()),
       mgaConfig: cloneMgaConfig(scenario.mgaConfig ?? defaultMgaConfig()),
+      merchantConfig: cloneMerchantConfig(scenario.merchantConfig ?? defaultMerchantConfig()),
       samplingConfig: cloneSamplingConfig(scenario.samplingConfig ?? defaultSamplingConfig()),
       constraints: cloneConstraints(scenario.constraints ?? []),
     })),
@@ -232,6 +244,7 @@ export function readScenarioCatalogFromModel(model: WorkbookModel): ScenarioCata
         powerFlowConfig: payload.powerFlowConfig ?? defaultPowerFlowConfig(),
         contingencyConfig: payload.contingencyConfig ?? defaultContingencyConfig(),
         mgaConfig: payload.mgaConfig ?? defaultMgaConfig(),
+        merchantConfig: payload.merchantConfig ?? defaultMerchantConfig(),
         samplingConfig: payload.samplingConfig ?? defaultSamplingConfig(),
         constraints: Array.isArray(payload.constraints) ? payload.constraints : [],
       });
@@ -276,6 +289,7 @@ export function writeScenarioCatalogToModel(
       powerFlowConfig: scenario.powerFlowConfig,
       contingencyConfig: scenario.contingencyConfig,
       mgaConfig: scenario.mgaConfig,
+      merchantConfig: scenario.merchantConfig,
       samplingConfig: scenario.samplingConfig,
       constraints: scenario.constraints,
     }),

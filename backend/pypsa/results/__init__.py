@@ -35,6 +35,7 @@ from .dispatch import (
 from .emissions import build_emissions_breakdown
 from .statistics import build_statistics
 from .mga import build_mga
+from .merchant import build_merchant
 from .expansion import build_expansion_results
 from .full_outputs import build_full_outputs
 from .market import (
@@ -178,6 +179,8 @@ def run_pypsa(
     contingency_enabled = bool(contingency_cfg.get("enabled", False))
     mga_cfg = options.get("mgaConfig") or {}
     mga_enabled = bool(mga_cfg.get("enabled", False))
+    merchant_cfg = options.get("merchantConfig") or {}
+    merchant_enabled = bool(merchant_cfg.get("enabled", False))
     if stochastic.enabled and rolling.enabled:
         raise HTTPException(
             status_code=400,
@@ -231,6 +234,18 @@ def run_pypsa(
         raise HTTPException(
             status_code=400,
             detail="MGA near-optimal exploration cannot be combined with rolling horizon, stochastic, "
+            "security-constrained, sampled-block, power-flow, or contingency modes.",
+        )
+    # Merchant mode needs the stage-1 optimum's LMPs, so it layers on the normal
+    # optimise like MGA and is incompatible with the modes that skip or reshape
+    # that solve. (Pathway is allowed; a series price source bypasses the LMP.)
+    if merchant_enabled and (
+        rolling.enabled or stochastic.enabled or sclopf_enabled
+        or sampling.enabled or pf_enabled or contingency_enabled
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Merchant (price-taker) analysis cannot be combined with rolling horizon, stochastic, "
             "security-constrained, sampled-block, power-flow, or contingency modes.",
         )
 
@@ -748,6 +763,24 @@ def run_pypsa(
         else None
     )
 
+    # Merchant / price-taker analysis — like MGA, runs last on a copy of the
+    # solved optimum (it reads stage-1 LMPs and detaches the solver model).
+    merchant = (
+        build_merchant(
+            network,
+            model,
+            owner=str(merchant_cfg.get("owner", "") or ""),
+            price_source=str(merchant_cfg.get("priceSource", "lmp") or "lmp"),
+            flat_price=float(merchant_cfg.get("flatPrice", 0.0) or 0.0),
+            price_series=merchant_cfg.get("priceSeries") or None,
+            currency=currency,
+            solver_options=solver_options if solver_options else {},
+            io_api=_SOLVER_IO_API,
+        )
+        if merchant_enabled
+        else None
+    )
+
     return {
         "summary": summary,
         "dispatchSeries": dispatch_s,
@@ -770,6 +803,7 @@ def run_pypsa(
         "generatorEconomics": generator_economics,
         "statistics": statistics,
         "nearOptimal": near_optimal,
+        "merchant": merchant,
         "emissionsBreakdown": emissions_breakdown,
         "narrative": notes,
         "runMeta": {
