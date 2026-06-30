@@ -24,9 +24,10 @@ class PypsaBackend:
             "name": self.name,
             "label": self.label,
             "solver": "HiGHS",
-            # Study modes this backend can run today. Power-flow-only modes
-            # ("pf"/"lpf") are roadmapped, not yet implemented.
-            "studyModes": ["optimize"],
+            # Study modes this backend can run. "pf" = AC Newton-Raphson power
+            # flow, "lpf" = linear (DC) power flow — both via the powerFlowConfig
+            # option (network physics, not optimisation).
+            "studyModes": ["optimize", "pf", "lpf"],
             "features": {
                 "singlePeriod": True,
                 "pathway": True,
@@ -38,6 +39,7 @@ class PypsaBackend:
                 "carbonPrice": True,
                 "loadShedding": True,
                 "unitCommitment": True,
+                "powerFlow": True,
             },
         }
 

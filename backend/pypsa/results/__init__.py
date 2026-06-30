@@ -42,6 +42,7 @@ from .market import (
     build_merit_order,
 )
 from .summaries import _rolling_window_summaries, _pathway_period_summaries
+from .power_flow import run_power_flow
 
 # Solve-phase timing and notes are logged here. With the run worker no longer
 # redirecting file descriptors, these INFO lines stream to the launching
@@ -167,6 +168,9 @@ def run_pypsa(
     sampling = parse_sampling_config(options.get("samplingConfig"))
     sclopf_cfg = options.get("securityConstrainedConfig") or {}
     sclopf_enabled = bool(sclopf_cfg.get("enabled", False))
+    powerflow_cfg = options.get("powerFlowConfig") or {}
+    pf_enabled = bool(powerflow_cfg.get("enabled", False))
+    pf_linear = bool(powerflow_cfg.get("linear", False))
     if stochastic.enabled and rolling.enabled:
         raise HTTPException(
             status_code=400,
@@ -192,6 +196,14 @@ def run_pypsa(
             status_code=400,
             detail="Security-constrained (SCLOPF) cannot be combined with multi-investment pathway mode.",
         )
+    if pf_enabled and (
+        rolling.enabled or stochastic.enabled or sclopf_enabled or pathway.enabled or sampling.enabled
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Power-flow study mode cannot be combined with rolling horizon, stochastic, "
+            "security-constrained, multi-investment pathway, or sampled-block modes.",
+        )
 
     # The Ragnarok backend is plugin-agnostic: it only ever receives a model,
     # scenario and options and solves them. Plugins live entirely on the
@@ -209,6 +221,20 @@ def run_pypsa(
 
     snapshot_count = len(network.snapshots)
     snapshot_weight = float(network.snapshot_weightings["objective"].iloc[0]) if snapshot_count else 1.0
+
+    # Power-flow study mode (pf/lpf) solves network physics, not an LP — none of
+    # the cost/price/economics extraction below applies, so delegate to the
+    # focused power-flow path and return its payload directly.
+    if pf_enabled:
+        return run_power_flow(
+            network,
+            linear=pf_linear,
+            currency=str(options.get("currencySymbol", "$")),
+            snapshot_count=snapshot_count,
+            snapshot_weight=snapshot_weight,
+            notes=notes,
+        )
+
     # CO₂ emission factors are a static carrier property, shared across
     # scenarios. Strip any scenario level from the MultiIndex so emission
     # totals key by carrier name only.
