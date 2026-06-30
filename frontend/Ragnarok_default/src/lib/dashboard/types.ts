@@ -88,6 +88,10 @@ export interface PivotChartConfig {
   id: number;
   sheet: string;                 // component list_name: 'generators','lines',…
   valueAttribute: string;        // exact schema attr name: 'p','p_nom_opt','p_nom',…
+  /** Optional extra value attributes plotted as additional series alongside
+   *  `valueAttribute` (line/area/bar + grouped/horizontal bar). `valueAttribute`
+   *  stays the canonical first column for back-compat. */
+  valueAttributes?: string[];
   groupBy: string[];             // input dims → composite key; [] = per-component
   filters: PivotFilter[];
   aggregate: 'sum' | 'mean' | 'max' | 'min' | 'count';

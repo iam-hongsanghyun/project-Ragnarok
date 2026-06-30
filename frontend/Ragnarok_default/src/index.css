@@ -7827,7 +7827,11 @@ code, kbd, samp, tt,
   mask: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%3E%3Cpath%20d='M19.14%2012.94c.04-.3.06-.61.06-.94%200-.32-.02-.64-.07-.94l2.03-1.58a.49.49%200%200%200%20.12-.61l-1.92-3.32a.488.488%200%200%200-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484%200%200%200-.48-.41h-3.84c-.24%200-.43.17-.47.41l-.36%202.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47%200-.59.22L2.74%208.87c-.12.21-.08.47.12.61l2.03%201.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03%201.58a.49.49%200%200%200-.12.61l1.92%203.32c.12.22.37.29.59.22l2.39-.96c.5.38%201.03.7%201.62.94l.36%202.54c.05.24.24.41.48.41h3.84c.24%200%20.44-.17.47-.41l.36-2.54c.59-.24%201.13-.56%201.62-.94l2.39.96c.22.08.47%200%20.59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12%2015.6c-1.98%200-3.6-1.62-3.6-3.6s1.62-3.6%203.6-3.6%203.6%201.62%203.6%203.6-1.62%203.6-3.6%203.6z'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 .chart-builder-compact:hover .chart-builder-gear,
-.chart-builder-compact.is-settings-open .chart-builder-gear {
+.chart-builder-compact.is-settings-open .chart-builder-gear,
+/* An unconfigured chart has nothing inviting a hover, so keep its gear
+   visible — otherwise "click the settings button" points at an invisible
+   control and the chart looks un-editable. */
+.chart-builder-compact.is-empty .chart-builder-gear {
   opacity: 1;
 }
 .chart-builder-gear:hover {

@@ -280,6 +280,86 @@ export function buildPivotSeries(
   return { rows, series, unit, loading: false };
 }
 
+/** Attribute display label for series naming (falls back to the raw name). */
+function attrLabel(sheet: string, attr: string): string {
+  return getAttributeSchema(sheet, attr)?.attribute ?? attr;
+}
+
+/**
+ * Multi-attribute time series: build one pass per value attribute and merge into
+ * a single chart. Each attribute's group series are namespaced (`attr::key`) so
+ * the same group across different attributes stays a distinct series; rows are
+ * merged by timestamp. Falls back to the single-attribute builder for one (or
+ * zero) attributes — existing behaviour unchanged.
+ */
+export function buildPivotSeriesMulti(
+  config: PivotChartConfig,
+  attrs: string[],
+  results: RunResults | null,
+  model: WorkbookModel,
+  snapshotWeight = 1,
+): PivotSeriesResult {
+  const list = (attrs && attrs.length ? attrs : [config.valueAttribute]).filter(Boolean);
+  if (list.length <= 1) {
+    return buildPivotSeries({ ...config, valueAttribute: list[0] ?? config.valueAttribute }, results, model, snapshotWeight);
+  }
+  const rowByKey = new Map<string, TimeSeriesRow>();
+  const order: string[] = [];
+  const series: TimeSeriesSeries[] = [];
+  let unit = '';
+  let unitSet = false;
+  let loading = false;
+  for (const attr of list) {
+    const pass = buildPivotSeries({ ...config, valueAttribute: attr }, results, model, snapshotWeight);
+    loading = loading || pass.loading;
+    if (!unitSet) { unit = pass.unit; unitSet = true; } else if (unit !== pass.unit) unit = '';
+    const al = attrLabel(config.sheet, attr);
+    for (const s of pass.series) {
+      series.push({ key: `${attr}::${s.key}`, label: `${al} · ${s.label}`, color: s.color });
+    }
+    for (const r of pass.rows) {
+      const rk = String(r.timestamp ?? r.label);
+      let merged = rowByKey.get(rk);
+      if (!merged) { merged = { label: r.label, timestamp: r.timestamp }; rowByKey.set(rk, merged); order.push(rk); }
+      for (const s of pass.series) if (s.key in r) merged[`${attr}::${s.key}`] = r[s.key];
+    }
+  }
+  return { rows: order.map((k) => rowByKey.get(k)!), series, unit, loading };
+}
+
+/**
+ * Multi-attribute category chart (grouped / horizontal bar): each attribute
+ * becomes one series across the shared category labels, with its sub-group
+ * series collapsed to a single total per category. Falls back to the
+ * single-attribute builder for one (or zero) attributes.
+ */
+export function buildPivotCategoryMulti(
+  config: PivotChartConfig,
+  attrs: string[],
+  results: RunResults | null,
+  model: WorkbookModel,
+  snapshotWeight = 1,
+): PivotCategoryResult {
+  const list = (attrs && attrs.length ? attrs : [config.valueAttribute]).filter(Boolean);
+  if (list.length <= 1) {
+    return buildPivotCategory({ ...config, valueAttribute: list[0] ?? config.valueAttribute }, results, model, snapshotWeight);
+  }
+  const passes = list.map((attr) => ({ attr, r: buildPivotCategory({ ...config, valueAttribute: attr }, results, model, snapshotWeight) }));
+  const loading = passes.some((p) => p.r.loading);
+  const labels: string[] = [];
+  for (const { r } of passes) for (const l of r.labels) if (!labels.includes(l)) labels.push(l);
+  let unit = passes[0]?.r.unit ?? '';
+  if (passes.some((p) => p.r.unit !== unit)) unit = '';
+  const series = passes.map(({ attr, r }) => {
+    const perLabel = new Map<string, number>();
+    r.labels.forEach((l, i) => {
+      perLabel.set(l, r.series.reduce((sum, ser) => sum + (ser.values[i] ?? 0), 0));
+    });
+    return { key: attr, label: attrLabel(config.sheet, attr), color: hashColor(attr), values: labels.map((l) => perLabel.get(l) ?? 0) };
+  });
+  return { labels, series, unit, loading };
+}
+
 function bucketRows(
   perRow: TimeSeriesRow[],
   keys: string[],

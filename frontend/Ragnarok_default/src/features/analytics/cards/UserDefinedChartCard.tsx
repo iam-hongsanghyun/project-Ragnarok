@@ -335,7 +335,6 @@ export function UserDefinedChartCard({
           <span>Chart</span>
           <SearchableSelect
             value={active.chartType}
-            disabled={!hasMetric}
             options={[
               { value: 'line', label: 'Line' },
               { value: 'area', label: 'Area' },
@@ -506,7 +505,7 @@ export function UserDefinedChartCard({
   // ── Compact render (Bloomberg dashboard cell) ────────────────────────────
   if (compact) {
     return (
-      <div className={`chart-builder-compact${settingsOpen ? ' is-settings-open' : ''}`}>
+      <div className={`chart-builder-compact${settingsOpen ? ' is-settings-open' : ''}${hasMetric ? '' : ' is-empty'}`}>
         <button
           type="button"
           className="chart-builder-gear"
