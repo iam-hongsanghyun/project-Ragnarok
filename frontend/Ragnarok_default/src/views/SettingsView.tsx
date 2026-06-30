@@ -15,6 +15,7 @@ import {
   CarbonScheduleProfile,
   CustomConstraint,
   PathwayConfig,
+  PowerFlowConfig,
   Primitive,
   RollingHorizonConfig,
   SamplingConfig,
@@ -33,6 +34,7 @@ import { PlanningSection } from './SettingsView.sections/Planning';
 import { RollingSection } from './SettingsView.sections/Rolling';
 import { StochasticSection } from './SettingsView.sections/Stochastic/Stochastic';
 import { SclopfSection } from './SettingsView.sections/Sclopf';
+import { PowerFlowSection } from './SettingsView.sections/PowerFlow';
 import { StandardConstraintsSection, AdvancedConstraintsSection } from './SettingsView.sections/Constraints';
 import { AppearanceSection } from './SettingsView.sections/Appearance';
 import { ProjectDefaultsSection } from './SettingsView.sections/ProjectDefaults';
@@ -47,6 +49,7 @@ type SectionId =
   | 'rolling'
   | 'stochastic'
   | 'sclopf'
+  | 'powerflow'
   | 'constraints'
   | 'constraintsAdvanced'
   | 'appearance'
@@ -77,6 +80,7 @@ const SECTIONS: Section[] = [
   // Solve — how the optimiser is run
   { id: 'stochastic', label: 'Stochastic',                    group: 'Solve' },
   { id: 'sclopf',     label: 'Security-constrained (SCLOPF)',  group: 'Solve' },
+  { id: 'powerflow', label: 'Power flow',                     group: 'Solve' },
   { id: 'solver',     label: 'Solver',                        group: 'Solve' },
   // Data — external-source credentials
   { id: 'apiKeys',    label: 'API keys',                      group: 'Data' },
@@ -111,6 +115,8 @@ export interface SettingsViewProps {
   onStochasticConfigChange: (config: StochasticConfig) => void;
   sclopfConfig: SecurityConstrainedConfig;
   onSclopfConfigChange: (config: SecurityConstrainedConfig) => void;
+  powerFlowConfig: PowerFlowConfig;
+  onPowerFlowConfigChange: (config: PowerFlowConfig) => void;
   maxSnapshots: number;
   snapshotStart: number;
   snapshotEnd: number;
@@ -199,6 +205,7 @@ export function SettingsView(props: SettingsViewProps) {
         {section === 'rolling'        && <RollingSection {...props} />}
         {section === 'stochastic'     && <StochasticSection {...props} />}
         {section === 'sclopf'         && <SclopfSection {...props} />}
+        {section === 'powerflow'      && <PowerFlowSection {...props} />}
         {section === 'constraints'    && <StandardConstraintsSection {...props} />}
         {section === 'constraintsAdvanced' && <AdvancedConstraintsSection {...props} />}
         {section === 'appearance'     && <AppearanceSection {...props} />}

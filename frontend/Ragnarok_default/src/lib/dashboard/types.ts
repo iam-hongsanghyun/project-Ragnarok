@@ -24,6 +24,7 @@ export type CardKind =
   | 'merit-order'
   | 'co2-shadow'
   | 'generator-economics'
+  | 'power-flow'
   | 'emissions-breakdown'
   | 'capacity-expansion'
   | 'capacity-by-period'
@@ -133,6 +134,10 @@ export interface GeneratorEconomicsCardData extends CardBase {
   kind: 'generator-economics';
 }
 
+export interface PowerFlowCardData extends CardBase {
+  kind: 'power-flow';
+}
+
 export interface EmissionsBreakdownCardData extends CardBase {
   kind: 'emissions-breakdown';
 }
@@ -167,6 +172,7 @@ export type Card =
   | MeritOrderCardData
   | Co2ShadowCardData
   | GeneratorEconomicsCardData
+  | PowerFlowCardData
   | EmissionsBreakdownCardData
   | CapacityExpansionCardData
   | CapacityByPeriodCardData

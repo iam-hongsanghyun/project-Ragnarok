@@ -159,6 +159,36 @@ export interface SecurityConstrainedConfig {
   enabled: boolean;
 }
 
+/** Power-flow study mode — solve network physics (pf/lpf) instead of an LP. */
+export interface PowerFlowConfig {
+  enabled: boolean;
+  /** true → linear (DC) lpf(); false → AC Newton-Raphson pf(). */
+  linear: boolean;
+}
+
+/** Per-bus voltage magnitude (pu) across the modelled snapshots. */
+export interface VoltageProfileEntry {
+  bus: string;
+  min: number;
+  mean: number;
+  max: number;
+}
+
+/** Backend power-flow result block (present only on a pf/lpf run). */
+export interface PowerFlowResult {
+  linear: boolean;
+  method: string;
+  converged: boolean;
+  iterations: number;
+  maxError: number;
+  /** Non-null when the flow failed to run (e.g. missing reactance / slack). */
+  error: string | null;
+  voltageProfile: VoltageProfileEntry[];
+  lossesMwh: number;
+  peakLossMw: number;
+  currency: string;
+}
+
 export interface StochasticScenarioResult {
   name: string;
   weight: number;
@@ -677,6 +707,8 @@ export interface RunResults {
    *  preserved through the deriveRunResults merge; see the GeneratorEconomics
    *  doc comment for when it is present. */
   generatorEconomics?: GeneratorEconomics;
+  /** Present only when the run was a power-flow study (pf/lpf), not an LP. */
+  powerFlow?: PowerFlowResult;
   appliedConstraints?: AppliedConstraint[];
   emissionsBreakdown?: EmissionsBreakdown;
   narrative: string[];

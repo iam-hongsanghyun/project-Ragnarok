@@ -56,6 +56,19 @@ function makeChart(patch: Partial<ChartSectionConfig>): Card {
 }
 
 export function buildResultPreset(results: RunResults): DashboardLayout {
+  // Power-flow study runs carry no optimise data (dispatch / cost / price), so
+  // the standard layout's charts would all be empty. Give them a focused layout:
+  // KPIs + the power-flow card (convergence, voltages, losses) + the map.
+  if (results.powerFlow) {
+    const pfRows = [
+      row({ height: 90, autoHeight: false, cards: [{ card: { id: id('kpi'), kind: 'kpi-strip' } }] }),
+      row({ cards: [{ card: { id: id('pf'), kind: 'power-flow' } }] }),
+      row({ cards: [{ card: { id: id('map'), kind: 'map' } }] }),
+      row({ cards: [{ card: { id: id('notes'), kind: 'notes' } }] }),
+    ];
+    return { rows: pfRows.map((r) => r.row), cards: pfRows.flatMap((r) => r.cards) };
+  }
+
   // Check storageUnits in assetDetails (live run) OR any non-zero value in the
   // pre-computed storageSeries (analytics-bundle view where series = null and
   // assetDetails is empty).

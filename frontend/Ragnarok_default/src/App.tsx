@@ -15,6 +15,7 @@ import {
   SamplingConfig,
   StochasticConfig,
   SecurityConstrainedConfig,
+  PowerFlowConfig,
   CarbonPriceScheduleEntry,
   CarbonScheduleProfile,
   Primitive,
@@ -256,6 +257,7 @@ function AppInner() {
   const [customDsl, setCustomDsl] = useState<string>('');
   const [stochasticConfig, setStochasticConfig] = useState<StochasticConfig>({ enabled: false, scenarios: [] });
   const [sclopfConfig, setSclopfConfig] = useState<SecurityConstrainedConfig>({ enabled: false });
+  const [powerFlowConfig, setPowerFlowConfig] = useState<PowerFlowConfig>({ enabled: false, linear: false });
   const [carbonPriceSchedule, setCarbonPriceSchedule] = useState<CarbonPriceScheduleEntry[]>([]);
   const [carbonLibrary, setCarbonLibrary] = useState<CarbonScheduleProfile[]>([]);
   const [validateResult, setValidateResult] = useState<{
@@ -2115,6 +2117,7 @@ function AppInner() {
       samplingConfig: normalizeSamplingConfig(samplingConfig),
       stochasticConfig,
       securityConstrainedConfig: sclopfConfig,
+      powerFlowConfig,
       carbonPriceSchedule,
     };
 
@@ -2397,6 +2400,8 @@ function AppInner() {
               onStochasticConfigChange={setStochasticConfig}
               sclopfConfig={sclopfConfig}
               onSclopfConfigChange={setSclopfConfig}
+              powerFlowConfig={powerFlowConfig}
+              onPowerFlowConfigChange={setPowerFlowConfig}
               maxSnapshots={maxSnapshots}
               snapshotStart={snapshotStart}
               snapshotEnd={snapshotEnd}
