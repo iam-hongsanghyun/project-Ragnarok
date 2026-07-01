@@ -191,6 +191,45 @@ def test_merge_profile_rows_unions_by_snapshot_new_cols_win() -> None:
     assert merged[1] == {"snapshot": "2022-01-01 01:00", "solar1": 0.3}
 
 
+# ── source adapters (offline parsing) ──────────────────────────────────────────
+class _FakeHttp:
+    def __init__(self, payload: dict) -> None:
+        self.payload = payload
+
+    async def get_json(self, url: str, params: dict | None = None) -> dict:
+        return self.payload
+
+
+def test_pvgis_adapter_parses_time_ghi_wind() -> None:
+    import asyncio
+
+    from backend.app.importers.databases.openmeteo_renewable.sources import pvgis
+
+    payload = {"outputs": {"hourly": [
+        {"time": "20220101:0010", "Gb(i)": 100.0, "Gd(i)": 50.0, "Gr(i)": 0.0, "WS10m": 10.0},
+        {"time": "20220101:0110", "Gb(i)": 0.0, "Gd(i)": 0.0, "Gr(i)": 0.0, "WS10m": 0.0},
+    ]}}
+    r = asyncio.run(pvgis(_FakeHttp(payload), 45.0, 8.0, "2022-01-01", "2022-01-01", None))
+    assert r["time"] == ["2022-01-01 00:00", "2022-01-01 01:00"]
+    assert r["ghi"] == [150.0, 0.0]                       # Gb + Gd + Gr
+    assert r["wind_ms"][0] == pytest.approx(10.0 * (10.0 ** (1 / 7)), rel=1e-3)  # 10m → 100m
+
+
+def test_nasa_power_adapter_parses_and_handles_missing() -> None:
+    import asyncio
+
+    from backend.app.importers.databases.openmeteo_renewable.sources import nasa_power
+
+    payload = {"properties": {"parameter": {
+        "ALLSKY_SFC_SW_DWN": {"2022010100": 800.0, "2022010101": -999.0},
+        "WS50M": {"2022010100": 5.0, "2022010101": 5.0},
+    }}}
+    r = asyncio.run(nasa_power(_FakeHttp(payload), 45.0, 8.0, "2022-01-01", "2022-01-01", None))
+    assert r["time"] == ["2022-01-01 00:00", "2022-01-01 01:00"]
+    assert r["ghi"] == [800.0, 0.0]                       # -999 → 0
+    assert r["wind_ms"][0] == pytest.approx(5.0 * (2.0 ** (1 / 7)), rel=1e-3)  # 50m → 100m
+
+
 def test_cache_snap_and_roundtrip(tmp_path, monkeypatch) -> None:
     from backend.app.importers.databases.openmeteo_renewable import cache
 

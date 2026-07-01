@@ -1396,7 +1396,7 @@ function AppInner() {
   // x/y from the session model), call the transform, and merge the returned
   // generators-p_max_pu via the same fragment path the importers use.
   const handleAttachRenewableProfiles = useCallback(
-    async (opts: { dateFrom: string; dateTo: string; performanceRatio: number }) => {
+    async (opts: { dateFrom: string; dateTo: string; performanceRatio: number; source: string }) => {
       await putStaticModel(prepareModelForBackend(model));
       const resp = await fetch(`${API_BASE}/api/transform/renewable-profiles`, {
         method: 'POST',
@@ -1406,6 +1406,7 @@ function AppInner() {
           dateFrom: opts.dateFrom,
           dateTo: opts.dateTo,
           performanceRatio: opts.performanceRatio,
+          source: opts.source,
         }),
       });
       if (!resp.ok) {

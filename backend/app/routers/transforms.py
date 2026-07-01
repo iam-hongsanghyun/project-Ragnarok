@@ -261,6 +261,7 @@ class RenewableProfilesRequest(BaseModel):
     dateFrom: str = "2022-01-01"
     dateTo: str = "2022-01-31"
     performanceRatio: float = 0.9
+    source: str = "open-meteo"
     # Optional explicit carrier→tech mapping; otherwise names are classified by hint.
     solarCarriers: list[str] | None = None
     windCarriers: list[str] | None = None
@@ -294,7 +295,7 @@ async def attach_renewable_profiles(req: RenewableProfilesRequest) -> dict[str, 
     try:
         keys = list(uniq)
         fetched = await asyncio.gather(
-            *[fetch_point(http, lat, lon, req.dateFrom, req.dateTo) for lat, lon in uniq.values()],
+            *[fetch_point(http, lat, lon, req.dateFrom, req.dateTo, req.source) for lat, lon in uniq.values()],
             return_exceptions=True,
         )
     finally:

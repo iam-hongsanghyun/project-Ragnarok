@@ -61,6 +61,14 @@ META = DatabaseMeta(
     country_coverage="global",
     requires_secrets=[],  # keyless
     filters=[
+        Filter(id="source", label="Weather source", kind="select", default="open-meteo",
+               options=[
+                   {"value": "open-meteo", "label": "Open-Meteo (ERA5, global)"},
+                   {"value": "pvgis", "label": "PVGIS (EU JRC, SARAH/ERA5)"},
+                   {"value": "nasa-power", "label": "NASA POWER (global)"},
+               ],
+               description="All keyless. PVGIS is strongest over Europe/Africa/Asia; "
+                           "Open-Meteo and NASA POWER are global."),
         Filter(id="date_from", label="From", kind="date", default="2022-01-01",
                description="Weather window start. ERA5 has a multi-day lag and recent "
                            "dates can miss irradiance — 2022 or earlier is safest."),
@@ -127,8 +135,9 @@ class OpenMeteoRenewable:
         pts = _sample_points(region.polygon, int(filters.get("grid_points") or 1))
         date_from = str(filters.get("date_from") or "2022-01-01")
         date_to = str(filters.get("date_to") or "2022-01-31")
+        source = str(filters.get("source") or "open-meteo")
         fetched = await asyncio.gather(
-            *[fetch_point(ctx.http, lat, lon, date_from, date_to) for lat, lon in pts]
+            *[fetch_point(ctx.http, lat, lon, date_from, date_to, source) for lat, lon in pts]
         )
         points = [{"lat": lat, "lon": lon, **res} for (lat, lon), res in zip(pts, fetched)]
         return FetchResult(META.id, region, dict(filters), {"points": points})

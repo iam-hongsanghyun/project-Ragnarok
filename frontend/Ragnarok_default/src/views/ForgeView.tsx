@@ -43,6 +43,7 @@ interface Props {
     dateFrom: string;
     dateTo: string;
     performanceRatio: number;
+    source: string;
   }) => Promise<AttachProfilesResult>;
 }
 
@@ -228,6 +229,7 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
     const isRen = (c: string) => /solar|pv|wind/i.test(c);
     return rowsOf(model, 'generators').filter((g) => isRen(String(g.carrier ?? ''))).length;
   }, [model]);
+  const [renewSource, setRenewSource] = useState<'open-meteo' | 'pvgis' | 'nasa-power'>('open-meteo');
   const [renewFrom, setRenewFrom] = useState('2022-01-01');
   const [renewTo, setRenewTo] = useState('2022-01-31');
   const [renewPr, setRenewPr] = useState(0.9);
@@ -241,7 +243,7 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
     setRenewError(null);
     setRenewResult(null);
     try {
-      const res = await onAttachRenewableProfiles({ dateFrom: renewFrom, dateTo: renewTo, performanceRatio: renewPr });
+      const res = await onAttachRenewableProfiles({ dateFrom: renewFrom, dateTo: renewTo, performanceRatio: renewPr, source: renewSource });
       setRenewResult(res);
       setStatus(`Attached weather profiles to ${res.attached.length} generator(s) from ${res.sites} site(s).`);
     } catch (e) {
@@ -484,6 +486,21 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
               <h3>Attach renewable profiles</h3>
               <p>Fetch hourly wind/solar capacity factors from Open-Meteo (keyless global ERA5) for each renewable generator's location — its own x/y, else its bus's — and attach them as <code>generators-p_max_pu</code>. Weather is fetched once per 0.1° grid cell and cached. Match the window to your run snapshots (or realign with the snapshot editor).</p>
             </header>
+
+            <div className="sg-setting-row">
+              <label className="sg-setting-label" htmlFor="forge-renew-source">Weather source</label>
+              <select
+                id="forge-renew-source"
+                className="forge-select"
+                value={renewSource}
+                onChange={(e) => setRenewSource(e.target.value as typeof renewSource)}
+              >
+                <option value="open-meteo">Open-Meteo (ERA5, global)</option>
+                <option value="pvgis">PVGIS (EU JRC — Europe/Africa/Asia)</option>
+                <option value="nasa-power">NASA POWER (global)</option>
+              </select>
+              <p className="sg-setting-hint">All keyless. PVGIS is strongest over Europe/Africa/Asia; the others are global.</p>
+            </div>
 
             <div className="sg-setting-row">
               <label className="sg-setting-label" htmlFor="forge-renew-from">Weather window</label>
