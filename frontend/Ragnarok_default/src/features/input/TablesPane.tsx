@@ -13,6 +13,7 @@ import { PYPSA_STANDARD_LINE_TYPES, PYPSA_STANDARD_TRANSFORMER_TYPES } from 'lib
 import { InputAnalyser } from './InputAnalyser';
 import { DataGrid } from './grid/DataGrid';
 import { getSheetPage, patchSheet, transformSeries, SeriesTransformOp } from 'lib/api/session';
+import { SearchableMultiSelect } from '../../shared/components/SearchableMultiSelect';
 import { useDialog } from '../../shared/components/Dialog';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -469,8 +470,9 @@ export function TablesPane({
   const [txMin, setTxMin] = useState('');
   const [txMax, setTxMax] = useState('');
   const [txGrowth, setTxGrowth] = useState(10);
+  const [txColumns, setTxColumns] = useState<string[]>([]);
   const [txBusy, setTxBusy] = useState(false);
-  useEffect(() => { setTxOpen(false); }, [sel.sheet]);
+  useEffect(() => { setTxOpen(false); setTxColumns([]); }, [sel.sheet]);
   const applyTransform = async () => {
     setTxBusy(true);
     try {
@@ -484,6 +486,7 @@ export function TablesPane({
         minValue: num(txMin),
         maxValue: num(txMax),
         growthPct: txGrowth,
+        columns: txColumns.length ? txColumns : undefined,
       });
       setTsReloadKey((k) => k + 1); // re-fetch the transformed series
       setTxOpen(false);
@@ -697,8 +700,14 @@ export function TablesPane({
             {txOp === 'interpolate' && (
               <span className="sg-setting-hint" style={{ margin: 0 }}>Linear-fill blank cells across each column.</span>
             )}
+            <SearchableMultiSelect
+              values={txColumns}
+              options={cols.filter((c) => c !== frozenCol)}
+              placeholder="All columns"
+              onChange={setTxColumns}
+            />
             <button className="tb-btn sm" disabled={txBusy} onClick={() => void applyTransform()}>
-              {txBusy ? 'Applying…' : 'Apply to all columns'}
+              {txBusy ? 'Applying…' : `Apply to ${txColumns.length ? `${txColumns.length} column${txColumns.length === 1 ? '' : 's'}` : 'all columns'}`}
             </button>
             <button className="ghost-button sm" disabled={txBusy} onClick={() => setTxOpen(false)}>Cancel</button>
           </div>
