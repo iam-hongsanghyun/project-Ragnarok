@@ -11,6 +11,22 @@ Single living todo for Ragnarok. Open work is grouped below by theme. Completed 
 - **Surface** — `Frontend` / `Backend` / `Both`.
 - **Cost** — rough implementation budget for one focused coding pass (reading, patching, verification, light docs). Not a calendar estimate.
 
+## North star — a fully-available PyPSA frontend
+
+Where Ragnarok stands against "the GUI for *any* PyPSA model": the **modeling core is ~80–90 % complete**. The grid schema is generated at runtime from PyPSA's own component registry (`backend/app/pypsa_schema_builder.build_pypsa_schema`), so **every component and attribute is already editable** — committable / ramp / min-up-down, storage inflow / spillage / cyclic, multi-port Links, global constraints, line & transformer types. All major `optimize()` modes are wired (LOPF / capacity-expansion, unit commitment, multi-investment pathways, stochastic, rolling-horizon, SCLOPF, MGA) plus AC/DC power flow, and I/O (netCDF / CSV-folder / HDF5 / Excel / JSON) round-trips.
+
+So the gap is **not** "expose more of PyPSA" — it is the five layers *around* the core:
+
+| Layer | Gap → items | Status |
+|---|---|---|
+| **1. Data-in for arbitrary regions** (highest leverage) | general weather → renewable profiles (**D1** + **I4**), fuel & carbon prices (**I5**), driver-based demand (**I3**), any-country network (**I9**) | mostly open — KOR / EU / US already covered |
+| **2. Feature-exposure polish** | carrier-aware charts + multi-port Links (**M1** remainder), full `n.statistics()` family + more duals, non-CO₂ global-constraint UI, optional extra solvers | small gaps on a shipped core |
+| **3. Usability for any user** | guided model wizard (**W1**), country starter framework (**W2**), in-app tour (**W3**), infeasibility / solver diagnostics (**Q2**) | open — demo networks + Build wizard shipped |
+| **4. Scale & robustness** | thin-client for 1000s-of-bus networks — port analytics derivation server-side (**X1** / **X2**) | session-store backbone shipped; derivation port open |
+| **5. Correctness & trust** | PyPSA reference-parity test suite (**Q1**) | round-trip I/O tested; end-to-end result parity not systematically pinned |
+
+**Critical path** to "any PyPSA model, trusted, at scale": **D1 → I4** (model any region) → **X1 / X2** (handle large networks) → **W2** (get users to a runnable model fast) → **Q1** (prove parity with native PyPSA). Everything else is breadth on top of that spine. The per-group tables below hold the full backlog; the *Suggested execution order* sequences it.
+
 ## Open work
 
 Genuinely-open or partially-complete items only. The whole financial / decision-workflow spine and the modelling-reach items (B1, F1, F2, PP1, DW1–DW4, M1–M3, B3, T2) have shipped — they live under *Already shipped*. The remaining frontier is **risk, resource adequacy, the weather/data-import layer, guided & conversational surfaces, and architecture**.
@@ -135,9 +151,20 @@ Cross-cutting platform direction (not single features). Assumes a dedicated back
 | `X3` | `Open` | `Low` | `Both` | **Scenario library vs. run history — review.** Decide whether to slim/deprecate the in-model scenario library (`RAGNAROK_Scenarios` presets) or reposition it explicitly as "named run-config *presets*" distinct from History ("runs I actually executed"). A scoping decision, not a build. | History captures "what I ran" comprehensively, so the preset library is less load-bearing. | 4,000 |
 | `X5` | `Low` | `Low` | `Frontend` | **Frontend-plugin Worker sandbox** — evaluate frontend-plugin JS in a Web Worker instead of in-page `new Function`; hooks become postMessage round-trips, `worker.terminate()` enforces a timeout. | The JS runtime is the weakest isolation point. Deferred while backend plugins absorb plugin workloads — build only if 3rd-party *frontend* plugins stay first-class. | 12,000 |
 
+### Correctness & trust
+
+What makes Ragnarok a *faithful* PyPSA frontend rather than just a feature-alike — see *North star* layer 5 (and layer 3 for diagnostics).
+
+| ID | Status | Pri | Surface | Task | Why | Cost |
+|---|---|---|---|---|---|---:|
+| `Q1` | `Open` | `High` | `Backend` | **PyPSA reference-parity test suite** — run PyPSA's own example networks plus a curated set covering unit commitment / multi-investment / storage / sector coupling / SCLOPF end-to-end through Ragnarok's build → solve → results path, and assert objective, dispatch, prices, and optimal capacities match native `n.optimize()` within tolerance. | The strongest "faithful frontend" guarantee: proves Ragnarok *reproduces* PyPSA, not just round-trips its files. Round-trip I/O is already tested; end-to-end result parity across features is not systematically pinned. | 18,000 |
+| `Q2` | `Open` | `Medium` | `Both` | **Infeasibility & solver diagnostics** — when a solve is infeasible / unbounded / numerically ill, surface *why* (offending constraint group, per-bus energy-balance shortfall, suspect coefficient ranges) instead of a raw solver string, and suggest fixes (enable load shedding, relax a cap). | A proper frontend must *explain* failure, not just report it. Today an infeasible model returns a solver error with no self-diagnosis path. Pairs with the shipped `load_shedding` backstop. | 14,000 |
+
 ## Suggested execution order
 
 Forward plan from 2026-07-01 (re-sequenced after the status audit — the financial/decision spine + modelling reach are done). Respecting cross-group dependencies.
+
+> **If the goal is "a fully-available PyPSA frontend"**, follow the *North star* critical path first: **D1 → I4 → X1/X2 → W2 → Q1**. The theme-ordered list below is the fuller backlog; the near-term block leads with the pieces on that path.
 
 **Recently shipped** (see *Already shipped* for detail): B1, F1, F2, PP1, DW1–DW4, M1 (core), M2, M3, B3, T2, statistics passthrough, MGA near-optimal, the strategic-pricing analytics tiers, and the bulk-transform half of T1.
 
@@ -159,17 +186,22 @@ Forward plan from 2026-07-01 (re-sequenced after the status audit — the financ
 8. **R1** — physical-climate-risk · **R2** — transition-risk (depends on F2 ✓).
 9. **A1** — stochastic renewable ensemble → **A2** — LOLE calculator.
 
+**Scale & trust (the "frontend-of-PyPSA" backbone):**
+
+10. **X1 / X2** — thin-client: port analytics derivation server-side so 1000s-of-bus networks don't choke the browser (session store shipped).
+11. **Q1** — PyPSA reference-parity test suite · **Q2** — infeasibility & solver diagnostics.
+
 **Guided & conversational surfaces:**
 
-10. **W2** — country starter-pack framework (KPG193 prototype shipped).
-11. **W1** — guided model-builder wizard · **W3** — in-app tutorial (demo networks shipped).
-12. **L1** — Bifrost AI model builder → **L2** — data-ask loop.
+12. **W2** — country starter-pack framework (KPG193 prototype shipped).
+13. **W1** — guided model-builder wizard · **W3** — in-app tutorial (demo networks shipped).
+14. **L1** — Bifrost AI model builder → **L2** — data-ask loop.
 
 **Financial-decision surface:**
 
-13. **PP2** — procurement optimizer, inside a dedicated use-case surface that also reframes PP1 + DW4 (deferred design decision).
+15. **PP2** — procurement optimizer, inside a dedicated use-case surface that also reframes PP1 + DW4 (deferred design decision).
 
-**Off the linear path** (opportunistic, non-blocking): **B2** simulation adapter · **I7**/**I8** calibration/policy importers · **D2** self-hosted demand DB · **H2′** result-mapper registry · **X1**–**X6** architecture / thin-browser · **B4** strategic MPEC (deferred) · **I9** PyPSA-Earth builder (deferred).
+**Off the linear path** (opportunistic, non-blocking): **B2** simulation adapter · **I7**/**I8** calibration/policy importers · **D2** self-hosted demand DB · **H2′** result-mapper registry · **X3**/**X5**/**X6** architecture / plugin-sandbox items · **B4** strategic MPEC (deferred) · **I9** PyPSA-Earth builder (deferred).
 
 ## Already shipped
 
