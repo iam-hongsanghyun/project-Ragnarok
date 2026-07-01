@@ -37,9 +37,22 @@ interface Props {
   onClusterPreview?: (nClusters: number, method: string) => Promise<ClusterResult>;
   /** Replace the working model with a previewed clustered model. */
   onClusterApply?: (model: WorkbookModel) => void;
+  /** Attach Open-Meteo weather profiles to the existing renewable fleet by
+   *  coordinate; applies server-side + merges, returns a summary. */
+  onAttachRenewableProfiles?: (opts: {
+    dateFrom: string;
+    dateTo: string;
+    performanceRatio: number;
+  }) => Promise<AttachProfilesResult>;
 }
 
-type Operation = 'round' | 'adjust' | 'snap' | 'cluster';
+export interface AttachProfilesResult {
+  attached: string[];
+  skipped: string[];
+  sites: number;
+}
+
+type Operation = 'round' | 'adjust' | 'snap' | 'cluster' | 'renewable';
 type OpGroup = 'Numeric' | 'Geospatial' | 'Topology';
 
 /** Catalog of Forge tools, grouped. Add a new tool by adding an entry here
@@ -48,6 +61,7 @@ const OPERATIONS: Array<{ id: Operation; label: string; group: OpGroup }> = [
   { id: 'round', label: 'Round / Ceil / Floor', group: 'Numeric' },
   { id: 'adjust', label: 'Adjust values', group: 'Numeric' },
   { id: 'snap', label: 'Snap to nearest bus', group: 'Geospatial' },
+  { id: 'renewable', label: 'Attach renewable profiles', group: 'Geospatial' },
   { id: 'cluster', label: 'Reduce / cluster network', group: 'Topology' },
 ];
 const OP_GROUPS: OpGroup[] = ['Numeric', 'Geospatial', 'Topology'];
@@ -101,7 +115,7 @@ function ClusterScatter({ model, busmap }: { model: WorkbookModel; busmap: Recor
   );
 }
 
-export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApply }: Props) {
+export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApply, onAttachRenewableProfiles }: Props) {
   // Persisted so the chosen tool + validation result survive leaving and
   // returning to the Forge tab (the view unmounts on tab switch). The findings
   // scan the whole model, so these three drivers fully restore the result.
@@ -205,6 +219,34 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
     onClusterApply(clusterResult.model);
     setStatus(`Reduced ${clusterResult.before.buses} → ${clusterResult.after.buses} buses; working model replaced.`);
     setClusterResult(null);
+  };
+
+  // ── Operation 5: Attach renewable profiles (Open-Meteo, by coordinate) ────
+  const renewableGenCount = useMemo(() => {
+    const isRen = (c: string) => /solar|pv|wind/i.test(c);
+    return rowsOf(model, 'generators').filter((g) => isRen(String(g.carrier ?? ''))).length;
+  }, [model]);
+  const [renewFrom, setRenewFrom] = useState('2022-01-01');
+  const [renewTo, setRenewTo] = useState('2022-01-31');
+  const [renewPr, setRenewPr] = useState(0.9);
+  const [renewBusy, setRenewBusy] = useState(false);
+  const [renewResult, setRenewResult] = useState<AttachProfilesResult | null>(null);
+  const [renewError, setRenewError] = useState<string | null>(null);
+
+  const runAttachProfiles = async () => {
+    if (!onAttachRenewableProfiles) return;
+    setRenewBusy(true);
+    setRenewError(null);
+    setRenewResult(null);
+    try {
+      const res = await onAttachRenewableProfiles({ dateFrom: renewFrom, dateTo: renewTo, performanceRatio: renewPr });
+      setRenewResult(res);
+      setStatus(`Attached weather profiles to ${res.attached.length} generator(s) from ${res.sites} site(s).`);
+    } catch (e) {
+      setRenewError(e instanceof Error ? e.message : 'Attaching profiles failed.');
+    } finally {
+      setRenewBusy(false);
+    }
   };
 
   // Context-aware "what needs handling" for the active tool. Recomputes when
@@ -431,6 +473,60 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
                     {snapReport.outside.length > 30 && <li>… and {snapReport.outside.length - 30} more</li>}
                   </ul>
                 )}
+              </div>
+            )}
+          </section>
+        ) : operation === 'renewable' ? (
+          <section className="forge-section">
+            <header className="forge-section-header">
+              <h3>Attach renewable profiles</h3>
+              <p>Fetch hourly wind/solar capacity factors from Open-Meteo (keyless global ERA5) for each renewable generator's location — its own x/y, else its bus's — and attach them as <code>generators-p_max_pu</code>. Weather is fetched once per 0.1° grid cell and cached. Match the window to your run snapshots (or realign with the snapshot editor).</p>
+            </header>
+
+            <div className="sg-setting-row">
+              <label className="sg-setting-label" htmlFor="forge-renew-from">Weather window</label>
+              <div className="sg-btn-row" style={{ gap: 8 }}>
+                <input id="forge-renew-from" type="date" className="forge-number" value={renewFrom} onChange={(e) => setRenewFrom(e.target.value)} />
+                <input type="date" className="forge-number" value={renewTo} onChange={(e) => setRenewTo(e.target.value)} />
+              </div>
+              <p className="sg-setting-hint">ERA5 has a multi-day lag and recent dates can miss irradiance — 2022 or earlier is safest.</p>
+            </div>
+
+            <div className="sg-setting-row">
+              <label className="sg-setting-label">Solar performance ratio</label>
+              <NumberDraftInput
+                className="forge-number"
+                min={0.1}
+                max={1}
+                value={renewPr}
+                onCommit={(v) => setRenewPr(Math.max(0.1, Math.min(1, v)))}
+              />
+              <p className="sg-setting-hint">Flat derate on solar CF (inverter / soiling / temperature).</p>
+            </div>
+
+            <div className="forge-actions">
+              <button
+                className="run-button"
+                disabled={renewableGenCount < 1 || renewBusy || !onAttachRenewableProfiles}
+                onClick={runAttachProfiles}
+              >
+                {renewBusy ? 'Fetching weather…' : `Attach to ${renewableGenCount} renewable generator${renewableGenCount === 1 ? '' : 's'}`}
+              </button>
+              {renewableGenCount < 1 && <span className="sg-setting-hint">No solar/wind generators in the model.</span>}
+            </div>
+
+            {renewError && <p className="forge-status" style={{ color: 'var(--danger, #dc2626)' }}>{renewError}</p>}
+
+            {renewResult && (
+              <div className="forge-report">
+                <p className="forge-report-line">
+                  Attached profiles to <b>{renewResult.attached.length}</b> generator(s) from <b>{renewResult.sites}</b> weather site(s).
+                  {renewResult.skipped.length > 0 && (
+                    <span style={{ color: 'var(--muted)', marginLeft: 6 }}>
+                      Skipped {renewResult.skipped.length} without a coordinate: {renewResult.skipped.slice(0, 6).join(', ')}{renewResult.skipped.length > 6 ? '…' : ''}
+                    </span>
+                  )}
+                </p>
               </div>
             )}
           </section>

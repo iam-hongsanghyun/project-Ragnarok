@@ -123,3 +123,20 @@ def build_profile_rows(
                 row[name] = round(cf[i], 4)
         rows.append(row)
     return rows, snapshots, list(series)
+
+
+def merge_profile_rows(
+    existing: list[dict[str, Any]], new: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Merge attached ``new`` p_max_pu rows into the session's ``existing`` rows,
+    unioned by snapshot (new columns win). The browser has no server-side series,
+    so the transform returns the COMPLETE sheet for a clean delete-all + re-add.
+    """
+    by_snap: dict[str, dict[str, Any]] = {}
+    for r in [*existing, *new]:
+        s = r.get("snapshot")
+        if s is None:
+            continue
+        bucket = by_snap.setdefault(str(s), {"snapshot": str(s)})
+        bucket.update({k: v for k, v in r.items() if k != "snapshot"})
+    return [by_snap[s] for s in sorted(by_snap)]

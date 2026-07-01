@@ -1391,6 +1391,41 @@ function AppInner() {
     [pushHistory, showToast, requestStaticResync],
   );
 
+  // Forge → attach Open-Meteo renewable profiles to the existing fleet by
+  // coordinate. Sync static sheets first (the backend resolves each generator's
+  // x/y from the session model), call the transform, and merge the returned
+  // generators-p_max_pu via the same fragment path the importers use.
+  const handleAttachRenewableProfiles = useCallback(
+    async (opts: { dateFrom: string; dateTo: string; performanceRatio: number }) => {
+      await putStaticModel(prepareModelForBackend(model));
+      const resp = await fetch(`${API_BASE}/api/transform/renewable-profiles`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: DEFAULT_SESSION_ID,
+          dateFrom: opts.dateFrom,
+          dateTo: opts.dateTo,
+          performanceRatio: opts.performanceRatio,
+        }),
+      });
+      if (!resp.ok) {
+        throw new Error((await resp.text()) || `Attaching profiles failed (HTTP ${resp.status})`);
+      }
+      const data = await resp.json();
+      handleApplyImportedFragment(
+        { sheets: data.sheets ?? {}, snapshots: data.snapshots ?? undefined } as WorkbookFragment,
+        'Open-Meteo renewable profiles',
+        'the existing fleet',
+      );
+      return {
+        attached: (data.attached ?? []) as string[],
+        skipped: (data.skipped ?? []) as string[],
+        sites: (data.sites ?? 0) as number,
+      };
+    },
+    [model, prepareModelForBackend, handleApplyImportedFragment],
+  );
+
   const handleOpenWorkbook = async () => {
     const picker = (window as any).showOpenFilePicker;
     if (!picker) {
@@ -2705,6 +2740,7 @@ function AppInner() {
               }}
               onClusterPreview={handleClusterPreview}
               onClusterApply={handleClusterApply}
+              onAttachRenewableProfiles={handleAttachRenewableProfiles}
             />
           )}
 

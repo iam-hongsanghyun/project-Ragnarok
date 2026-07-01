@@ -178,6 +178,19 @@ def test_build_profile_rows_attaches_cf_per_generator() -> None:
     assert rows[1]["solar1"] == 0.0 and rows[1]["wind1"] == 0.0
 
 
+def test_merge_profile_rows_unions_by_snapshot_new_cols_win() -> None:
+    from backend.app.importers.databases.openmeteo_renewable.attach import merge_profile_rows
+    existing = [{"snapshot": "2022-01-01 00:00", "wind_old": 0.5}]
+    new = [
+        {"snapshot": "2022-01-01 00:00", "solar1": 0.9},
+        {"snapshot": "2022-01-01 01:00", "solar1": 0.3},
+    ]
+    merged = merge_profile_rows(existing, new)
+    assert [r["snapshot"] for r in merged] == ["2022-01-01 00:00", "2022-01-01 01:00"]
+    assert merged[0] == {"snapshot": "2022-01-01 00:00", "wind_old": 0.5, "solar1": 0.9}
+    assert merged[1] == {"snapshot": "2022-01-01 01:00", "solar1": 0.3}
+
+
 def test_cache_snap_and_roundtrip(tmp_path, monkeypatch) -> None:
     from backend.app.importers.databases.openmeteo_renewable import cache
 

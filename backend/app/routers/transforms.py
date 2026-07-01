@@ -25,6 +25,7 @@ from pydantic import BaseModel
 from .. import model_store
 from ..importers.databases.openmeteo_renewable.attach import (
     build_profile_rows,
+    merge_profile_rows,
     point_key,
     resolve_targets,
 )
@@ -208,8 +209,13 @@ async def attach_renewable_profiles(req: RenewableProfilesRequest) -> dict[str, 
     if not attached:
         raise HTTPException(status_code=502, detail="No profiles could be built from the weather data.")
 
+    # Return the COMPLETE merged sheet (existing server-side profiles + newly
+    # attached columns) so the frontend can apply it with a clean replace.
+    existing = model.get("generators-p_max_pu") or []
+    merged = merge_profile_rows(existing, rows)
+
     return {
-        "sheets": {"generators-p_max_pu": rows},
+        "sheets": {"generators-p_max_pu": merged},
         "snapshots": snapshots,
         "attached": attached,
         "skipped": skipped,
