@@ -21,6 +21,11 @@ import pandas as pd
 import pypsa
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from pypsa.clustering.spatial import (
+    DEFAULT_BUS_STRATEGIES as _DEFAULT_BUS_STRATEGIES,
+    DEFAULT_LINE_STRATEGIES as _DEFAULT_LINE_STRATEGIES,
+)
+import pandas.api.types  # noqa: F401  (ensures pd.api.types is importable)
 
 from .. import model_store
 from ..importers.databases.openmeteo_renewable.attach import (
@@ -44,25 +49,24 @@ class ClusterRequest(BaseModel):
     sessionId: str
     nClusters: int
     method: str = "modularity"
-    # When true (default), buses/lines whose text attributes (carrier, unit, …)
-    # disagree within a cluster are merged by keeping the most common value,
-    # instead of failing. Turn off to enforce strict agreement.
+    # When true (default), buses/lines whose attributes disagree within a cluster
+    # are merged instead of failing. Turn off to enforce strict agreement.
     resolveConflicts: bool = True
+    # How to merge a NUMERIC conflicting attribute (e.g. v_mag_pu_set): the
+    # cluster's mean / max / min, zero, or the attribute's schema default. Text
+    # attributes (carrier, unit) always merge to the most common value.
+    conflictStrategy: str = "mean"
     scenario: dict[str, Any] | None = None
     options: dict[str, Any] | None = None
 
 
 # Bus-reference columns are remapped by clustering itself — never "resolve" them.
 _BUS_REFS = {"bus", "bus0", "bus1", "bus2", "bus3", "bus4"}
+_NUMERIC_STRATEGIES = ("mean", "max", "min", "zero", "default")
 
 
 def _majority(x: "pd.Series") -> Any:
-    """Aggregation that keeps the most common non-null value (ties → first).
-
-    Replaces PyPSA's strict ``make_consense`` (which raises when a cluster's
-    values disagree) so clustering can merge, e.g., AC+DC buses or mixed voltage
-    units by keeping the dominant value.
-    """
+    """Keep the most common non-null value (ties → first). For text attributes."""
     s = x.dropna()
     if s.empty:
         return x.iloc[0] if len(x) else None
@@ -70,23 +74,52 @@ def _majority(x: "pd.Series") -> Any:
     return m.iloc[0] if len(m) else s.iloc[0]
 
 
-def _object_strategies(df: "pd.DataFrame") -> dict[str, Any]:
-    """A majority strategy for every text (object) attribute of a component."""
-    return {
-        col: _majority
-        for col in df.columns
-        if col not in _BUS_REFS and df[col].dtype == object
-    }
+def _numeric_strategy(kind: str, default_value: Any) -> Any:
+    """A pandas-agg strategy for a numeric attribute per the user's choice."""
+    if kind in ("mean", "max", "min"):
+        return kind
+    if kind == "zero":
+        return lambda _x: 0.0
+    # "default" (or anything unknown) → the attribute's schema default value
+    return lambda _x, _d=default_value: _d
 
 
-def _bus_conflicts(network: pypsa.Network, busmap: "pd.Series") -> list[str]:
-    """Text bus attributes that disagree within at least one cluster."""
-    buses = network.buses
+def _component_defaults(component: str) -> "pd.Series":
+    """Schema default values for a component's attributes (from a fresh add)."""
+    probe = pypsa.Network()
+    probe.add(component, "_probe")
+    static = getattr(probe, {"Bus": "buses", "Line": "lines"}[component])
+    return static.loc["_probe"]
+
+
+def _conflict_strategies(
+    df: "pd.DataFrame", defaults_keys: set[str], component: str, numeric_kind: str
+) -> dict[str, Any]:
+    """Aggregation strategies for attributes PyPSA has no default for (which
+    otherwise raise on disagreement): the chosen strategy for numeric columns,
+    most-common for text.
+    """
+    gap = [c for c in df.columns if c not in _BUS_REFS and c not in defaults_keys]
+    if not gap:
+        return {}
+    schema_defaults = _component_defaults(component) if numeric_kind == "default" else None
+    out: dict[str, Any] = {}
+    for col in gap:
+        if pd.api.types.is_numeric_dtype(df[col]):
+            dv = float(schema_defaults[col]) if (schema_defaults is not None and col in schema_defaults.index) else 0.0
+            out[col] = _numeric_strategy(numeric_kind, dv)
+        else:
+            out[col] = _majority
+    return out
+
+
+def _conflicting_attrs(df: "pd.DataFrame", groups: "pd.Series", defaults_keys: set[str]) -> list[str]:
+    """Attributes (outside PyPSA's defaults) that disagree within a cluster."""
     out: list[str] = []
-    for col in buses.columns:
-        if col in _BUS_REFS or buses[col].dtype != object:
+    for col in df.columns:
+        if col in _BUS_REFS or col in defaults_keys:
             continue
-        if buses.groupby(busmap)[col].nunique(dropna=True).gt(1).any():
+        if df.groupby(groups)[col].nunique(dropna=True).gt(1).any():
             out.append(col)
     return out
 
@@ -109,6 +142,7 @@ def cluster_model(
     n_clusters: int,
     method: str = "modularity",
     resolve_conflicts: bool = True,
+    conflict_strategy: str = "mean",
     scenario: dict[str, Any] | None = None,
     options: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -156,25 +190,28 @@ def cluster_model(
                 detail=f"Unknown clustering method '{method}'. Use 'modularity' or 'kmeans'.",
             )
 
-        # Which text bus attributes disagree within a cluster (for the report /
-        # a clear error). Merging AC+DC buses or mixed units is a real change, so
-        # it's surfaced either way.
-        conflicts = _bus_conflicts(network, busmap)
+        # Bus attributes that disagree within a cluster and have no PyPSA default
+        # aggregation (these are what raise). Surfaced either way — merging
+        # AC+DC buses or averaging voltage setpoints is a real change.
+        bus_keys = set(_DEFAULT_BUS_STRATEGIES)
+        conflicts = _conflicting_attrs(network.buses, busmap, bus_keys)
         if conflicts and not resolve_conflicts:
             raise HTTPException(
                 status_code=400,
                 detail=(
                     "Buses in a cluster disagree on: " + ", ".join(conflicts)
-                    + ". Enable “Merge conflicting attributes” to cluster anyway "
-                    "(keeps the most common value per cluster)."
+                    + ". Enable “Merge conflicting attributes” to cluster anyway."
                 ),
             )
 
         strategies: dict[str, Any] = {}
         if resolve_conflicts:
+            kind = conflict_strategy if conflict_strategy in _NUMERIC_STRATEGIES else "mean"
             strategies = {
-                "bus_strategies": _object_strategies(network.buses),
-                "line_strategies": _object_strategies(network.lines),
+                "bus_strategies": _conflict_strategies(network.buses, bus_keys, "Bus", kind),
+                "line_strategies": _conflict_strategies(
+                    network.lines, set(_DEFAULT_LINE_STRATEGIES), "Line", kind
+                ),
             }
         clustered = network.cluster.spatial.cluster_by_busmap(busmap, **strategies)
         clustered = getattr(clustered, "n", clustered)  # Clustering wrapper vs Network
@@ -213,6 +250,7 @@ async def cluster_network(req: ClusterRequest) -> dict[str, Any]:
         n_clusters=req.nClusters,
         method=req.method,
         resolve_conflicts=req.resolveConflicts,
+        conflict_strategy=req.conflictStrategy,
         scenario=req.scenario,
         options=req.options,
     )

@@ -716,12 +716,12 @@ function AppInner() {
   // run — the browser holds only static sheets, the backend keeps the series),
   // then ask the backend to reduce it. Returns the reduced model for preview.
   const handleClusterPreview = useCallback(
-    async (nClusters: number, method: string, resolveConflicts: boolean): Promise<ClusterResult> => {
+    async (nClusters: number, method: string, resolveConflicts: boolean, conflictStrategy: string): Promise<ClusterResult> => {
       await putStaticModel(prepareModelForBackend(model));
       const resp = await fetch(`${API_BASE}/api/transform/cluster`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: DEFAULT_SESSION_ID, nClusters, method, resolveConflicts }),
+        body: JSON.stringify({ sessionId: DEFAULT_SESSION_ID, nClusters, method, resolveConflicts, conflictStrategy }),
       });
       if (!resp.ok) {
         throw new Error((await resp.text()) || `Clustering failed (HTTP ${resp.status})`);

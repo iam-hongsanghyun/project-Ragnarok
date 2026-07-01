@@ -123,6 +123,38 @@ def test_clustering_strict_mode_reports_conflicting_attributes() -> None:
     assert "merge conflicting attributes" in detail
 
 
+def _vmag_model() -> dict[str, list[dict[str, Any]]]:
+    """Two buses with differing v_mag_pu_set (a numeric attr PyPSA has no default
+    aggregation for) that cluster into one."""
+    snaps = ["2030-01-01T00:00:00", "2030-01-01T01:00:00"]
+    return {
+        "buses": [
+            {"name": "A", "v_nom": 380.0, "x": 0.0, "y": 0.0, "v_mag_pu_set": 1.0},
+            {"name": "B", "v_nom": 380.0, "x": 1.0, "y": 0.0, "v_mag_pu_set": 1.2},
+        ],
+        "carriers": [{"name": "gas"}],
+        "snapshots": [{"snapshot": s} for s in snaps],
+        "lines": [{"name": "AB", "bus0": "A", "bus1": "B", "x": 0.1, "r": 0.01, "s_nom": 500.0}],
+        "generators": [{"name": "G", "bus": "A", "carrier": "gas", "p_nom": 900.0, "marginal_cost": 10.0}],
+        "loads": [{"name": "L", "bus": "B", "p_set": 300.0}],
+        "loads-p_set": [{"snapshot": s, "L": 300.0} for s in snaps],
+    }
+
+
+@pytest.mark.parametrize(
+    "strategy,expected",
+    [("mean", 1.1), ("max", 1.2), ("min", 1.0), ("zero", 0.0), ("default", 1.0)],
+)
+def test_clustering_numeric_conflict_strategy(strategy: str, expected: float) -> None:
+    res = cluster_model(
+        _vmag_model(), n_clusters=1, method="modularity",
+        conflict_strategy=strategy, scenario=SCENARIO,
+    )
+    assert "v_mag_pu_set" in res["resolvedConflicts"]
+    net, _ = build_network(res["model"], SCENARIO, {})
+    assert float(net.buses["v_mag_pu_set"].iloc[0]) == pytest.approx(expected)
+
+
 def test_kmeans_requires_distinct_coordinates() -> None:
     # All buses on the same coordinate → k-means has no spatial signal → 400.
     model = _path_model(4)
