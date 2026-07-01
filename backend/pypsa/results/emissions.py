@@ -11,6 +11,7 @@ from typing import Any
 
 import pypsa
 
+from ..utils.emissions import per_generator_emission_factor
 from ..utils.series import weighted_sum
 
 
@@ -38,6 +39,10 @@ def build_emissions_breakdown(
 
     weights = network.snapshot_weightings["generators"].reindex(network.snapshots).fillna(1.0)
 
+    # Per-generator emission factor on the electrical basis (co2_emissions / η,
+    # M3), so a low-efficiency unit reports the extra fuel it actually burns.
+    eff_ef = per_generator_emission_factor(network, emissions_factors)
+
     # ── Per-generator ─────────────────────────────────────────────────────────
     by_generator: list[dict[str, Any]] = []
     carrier_energy: dict[str, float] = defaultdict(float)
@@ -51,7 +56,7 @@ def build_emissions_breakdown(
             continue
 
         carrier = str(network.generators.at[name, "carrier"])
-        ef = emissions_factors.get(carrier, 0.0)       # tCO₂/MWh_e
+        ef = float(eff_ef.get(name, 0.0))              # tCO₂/MWh_e (co2 / η)
         bus = str(network.generators.at[name, "bus"])
 
         dispatch = network.generators_t.p[name].clip(lower=0.0)

@@ -20,6 +20,7 @@ from typing import Any
 
 import pypsa
 
+from ..utils.emissions import per_generator_emission_factor
 from .finance import _crf
 
 _log = logging.getLogger("pypsa.solver")
@@ -39,11 +40,14 @@ def _emissions(net: pypsa.Network, factors: dict[str, float]) -> float:
     if net.generators.empty or net.generators_t.p.empty:
         return 0.0
     w = net.snapshot_weightings["objective"].to_numpy()
+    # Per-generator co2_emissions / η (thermal basis, M3): a swap that trades
+    # efficiency (e.g. old gas → new CCGT) shows the true emissions delta.
+    eff_ef = per_generator_emission_factor(net, factors)
     total = 0.0
     for g in net.generators.index:
         if g not in net.generators_t.p.columns:
             continue
-        f = float(factors.get(str(net.generators.at[g, "carrier"]), 0.0))
+        f = float(eff_ef.get(g, 0.0))
         if f:
             total += f * float((net.generators_t.p[g].to_numpy() * w).sum())
     return total

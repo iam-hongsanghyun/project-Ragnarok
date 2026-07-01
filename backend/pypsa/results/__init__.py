@@ -21,6 +21,7 @@ from ..stochastic import (
     parse_stochastic_config,
     per_scenario_summaries,
 )
+from ..utils.emissions import per_generator_emission_factor
 from ..utils.series import weighted_sum
 from ..network.custom_constraints import apply_custom_constraints
 from ..network.constraint_dsl import apply_constraint_specs, apply_dsl_constraints
@@ -594,9 +595,23 @@ def run_pypsa(
     for carrier, series in by_carrier.items():
         if carrier in shed_carriers:
             continue
-        positive = series.clip(lower=0.0)
-        carrier_energy[carrier] += weighted_sum(positive, generator_weights)
-        emission_totals[carrier] += weighted_sum(positive * emissions_factors.get(carrier, 0.0), generator_weights)
+        carrier_energy[carrier] += weighted_sum(series.clip(lower=0.0), generator_weights)
+    # Emissions on the thermal basis: dispatch × co2_emissions / η (M3), summed
+    # per generator then grouped by carrier — η varies by unit, not by carrier,
+    # so it can't be applied to the carrier-summed dispatch.
+    eff_ef = per_generator_emission_factor(network, emissions_factors)
+    for name in generator_dispatch_frame.columns:
+        if str(name).startswith("load_shedding_"):
+            continue
+        factor = float(eff_ef.get(name, 0.0))
+        if not factor:
+            continue
+        carrier = str(network.generators.at[name, "carrier"])
+        if carrier in shed_carriers:
+            continue
+        emission_totals[carrier] += weighted_sum(
+            generator_dispatch_frame[name].clip(lower=0.0) * factor, generator_weights
+        )
 
     carrier_mix = [
         {"label": c, "value": v, "color": carrier_color(network, c)}
@@ -663,8 +678,10 @@ def run_pypsa(
     for name in network.generators.index:
         if name not in generator_dispatch_frame.columns:
             continue
-        carrier = network.generators.at[name, "carrier"]
-        ef = emissions_factors.get(carrier, 0.0)
+        # ef is the per-generator electrical-basis factor (co2 / η) — the SAME
+        # quantity carbon_price folded into marginal_cost, so backing it out here
+        # recovers the fuel component exactly (M3).
+        ef = float(eff_ef.get(name, 0.0))
         dispatch_pos = generator_dispatch_frame[name].clip(lower=0.0)
         mc_s = mc_dense[name]
         if name.startswith("load_shedding_"):

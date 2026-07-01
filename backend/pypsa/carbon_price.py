@@ -25,6 +25,7 @@ import pandas as pd
 import pypsa
 
 from .utils.coerce import number
+from .utils.emissions import per_generator_emission_factor
 
 
 @dataclass(frozen=True)
@@ -122,7 +123,10 @@ def apply_carbon_price(
     if isinstance(ef_per_carrier.index, pd.MultiIndex) and "name" in ef_per_carrier.index.names:
         ef_per_carrier = ef_per_carrier.groupby(level="name").first()
 
-    gen_ef = network.generators["carrier"].map(ef_per_carrier).fillna(0.0)
+    # Per-generator emission factor on the electrical basis: co2_emissions / η.
+    # The carbon adder is $/MWh_electrical, so it must reflect the fuel actually
+    # burned per MWh out (M3). η = 1 reproduces the historical output-basis adder.
+    gen_ef = per_generator_emission_factor(network, ef_per_carrier.to_dict())
     emitting = gen_ef[gen_ef > 0]
     if emitting.empty:
         return

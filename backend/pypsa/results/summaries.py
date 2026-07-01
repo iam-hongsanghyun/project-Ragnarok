@@ -5,6 +5,8 @@ from typing import Any
 import pandas as pd
 import pypsa
 
+from ..utils.emissions import per_generator_emission_factor
+
 
 
 def _snapshot_label(snapshot: Any) -> str:
@@ -57,6 +59,8 @@ def _pathway_period_summaries(
         return []
     summaries: list[dict[str, Any]] = []
     dispatch_only = dispatch_frame.clip(lower=0.0)
+    # Per-generator co2_emissions / η (thermal basis, M3).
+    eff_ef = per_generator_emission_factor(network, emissions_factors)
     for period in network.snapshots.get_level_values("period").unique():
         period_index = network.snapshots[network.snapshots.get_level_values("period") == period]
         weight = network.snapshot_weightings["objective"].reindex(period_index).fillna(1.0)
@@ -66,8 +70,7 @@ def _pathway_period_summaries(
         for name in dispatch_period.columns:
             if name not in network.generators.index:
                 continue
-            carrier = str(network.generators.at[name, "carrier"])
-            total_emissions += float((dispatch_period[name] * emissions_factors.get(carrier, 0.0) * weight).sum())
+            total_emissions += float((dispatch_period[name] * float(eff_ef.get(name, 0.0)) * weight).sum())
         summaries.append({
             "period": int(period),
             "snapshotCount": int(len(period_index)),

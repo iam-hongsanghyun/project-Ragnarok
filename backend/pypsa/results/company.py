@@ -13,6 +13,8 @@ from typing import Any
 
 import pypsa
 
+from ..utils.emissions import per_generator_emission_factor
+
 _log = logging.getLogger("pypsa.solver")
 
 _UNASSIGNED = "(unassigned)"
@@ -61,6 +63,8 @@ def build_company_breakdown(
         return None
 
     weights = network.snapshot_weightings["objective"].to_numpy()
+    # Per-generator co2_emissions / η (thermal basis, M3).
+    eff_ef = per_generator_emission_factor(network, emissions_factors)
     mp = network.buses_t.marginal_price
     has_lmp = mp is not None and not mp.empty
 
@@ -94,8 +98,7 @@ def build_company_breakdown(
         b["energyMWh"] += energy
         if pi is not None and p is not None:
             b["revenue"] += float((p * pi * weights).sum())
-        carrier = str(network.generators.at[g, "carrier"])
-        b["emissionsTonnes"] += energy * float(emissions_factors.get(carrier, 0.0))
+        b["emissionsTonnes"] += energy * float(eff_ef.get(g, 0.0))
         b["generatorCount"] += 1
 
     for s in network.storage_units.index:

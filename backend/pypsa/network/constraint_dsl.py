@@ -34,6 +34,7 @@ from dataclasses import dataclass
 
 import pypsa
 
+from ..utils.emissions import per_generator_emission_factor
 from .custom_constraints import ModelContext, build_model_context
 
 _FUNC_ATOMS = ("gen", "cap", "cf", "emissions")
@@ -224,9 +225,10 @@ def _cap_expr(ctx: ModelContext, carrier: str | None):
 def _emissions_expr(ctx: ModelContext, carrier: str | None):
     n = ctx.network
     gens = _carrier_gens(ctx, carrier) if carrier is not None else ctx.supply_gens
-    emitters = [
-        (g, ctx.emissions_factors.get(n.generators.at[g, "carrier"], 0.0)) for g in gens
-    ]
+    # tCO₂ per MWh_electrical = carrier co2_emissions / η (thermal basis, M3), so
+    # a low-efficiency unit burns — and emits — more per MWh delivered.
+    eff_ef = per_generator_emission_factor(n, ctx.emissions_factors)
+    emitters = [(g, float(eff_ef.get(g, 0.0))) for g in gens]
     emitters = [(g, co2) for g, co2 in emitters if co2 > 0]
     if not emitters:
         raise ValueError(

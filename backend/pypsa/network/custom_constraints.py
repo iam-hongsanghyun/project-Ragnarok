@@ -5,6 +5,8 @@ from typing import Any
 
 import pypsa
 
+from ..utils.emissions import per_generator_emission_factor
+
 
 @dataclass
 class ModelContext:
@@ -135,9 +137,12 @@ def apply_custom_constraints(
             # carriers.co2_emissions, so no conversion is needed.
             if metric == "co2_cap":
                 value_tco2 = value
+                # Per-generator co2_emissions / η (thermal basis, M3): the cap is
+                # on emissions per MWh_electrical delivered, so a lower-efficiency
+                # emitter counts more against it.
+                eff_ef = per_generator_emission_factor(n, emissions_factors)
                 emitters = [
-                    (g, emissions_factors.get(n.generators.at[g, "carrier"], 0.0))
-                    for g in n.generators.index
+                    (g, float(eff_ef.get(g, 0.0))) for g in n.generators.index
                 ]
                 emitters = [(g, co2) for g, co2 in emitters if co2 > 0]
                 if not emitters:

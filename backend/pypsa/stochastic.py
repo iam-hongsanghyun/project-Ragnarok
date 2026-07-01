@@ -261,7 +261,13 @@ def per_scenario_summaries(
             scenario_static = generators_static
 
         carriers = scenario_static.get("carrier", pd.Series(dtype=str))
+        # tCO₂ per MWh_electrical = carrier co2_emissions / η (thermal basis, M3).
         ef_per_gen = carriers.map(emissions_factors).fillna(0.0)
+        eta = pd.to_numeric(
+            scenario_static.get("efficiency", pd.Series(dtype=float)), errors="coerce"
+        ).reindex(ef_per_gen.index).fillna(1.0)
+        eta = eta.where(eta > 1e-6, 1.0)
+        ef_per_gen = ef_per_gen / eta
         marginal_cost_static = scenario_static.get("marginal_cost", pd.Series(dtype=float)).fillna(0.0)
 
         energy_per_gen = scenario_dispatch.clip(lower=0.0).multiply(weights, axis=0).sum()

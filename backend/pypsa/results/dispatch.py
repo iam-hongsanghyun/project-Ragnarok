@@ -4,6 +4,7 @@ from __future__ import annotations
 import pandas as pd
 import pypsa
 
+from ..utils.emissions import per_generator_emission_factor
 from ..utils.series import safe_series
 
 
@@ -132,20 +133,20 @@ def build_price_emissions_series(
             if "co2_emissions" in network.carriers.columns
             else {}
         )
-    # Vectorised: emissions = Σ_carrier clip(dispatch, 0) × factor as a single
-    # column op, then `tolist()` both series once — no per-snapshot `.loc[]`.
     snapshots = network.snapshots
     labels = [_snapshot_label(s) for s in snapshots]
-    emissions_total = None
-    for c, s in by_carrier.items():
-        ef = emissions_factors.get(c, 0.0)
-        if ef:
-            contrib = s.clip(lower=0.0) * ef
-            emissions_total = contrib if emissions_total is None else emissions_total.add(contrib, fill_value=0.0)
-    emission_vals = (
-        emissions_total.reindex(snapshots).fillna(0.0).to_numpy().tolist()
-        if emissions_total is not None else [0.0] * len(labels)
-    )
+    # Per-snapshot system emissions (tCO₂/h) = Σ_g clip(dispatch_g, 0) × co2 / η
+    # (thermal basis, M3). Summed per generator because η varies by unit, not by
+    # carrier — so it can't be applied to the carrier-summed ``by_carrier``.
+    eff_ef = per_generator_emission_factor(network, emissions_factors)
+    emitting = eff_ef[eff_ef > 0]
+    p = network.generators_t.p
+    cols = [g for g in emitting.index if g in p.columns] if not p.empty else []
+    if cols:
+        emissions_total = (p[cols].clip(lower=0.0) * emitting.reindex(cols)).sum(axis=1)
+        emission_vals = emissions_total.reindex(snapshots).fillna(0.0).to_numpy().tolist()
+    else:
+        emission_vals = [0.0] * len(labels)
     price_vals = price_series.reindex(snapshots).to_numpy().tolist()
 
     system_price = [
