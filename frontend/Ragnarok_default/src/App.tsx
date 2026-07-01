@@ -20,6 +20,7 @@ import {
   MgaConfig,
   MerchantConfig,
   BidStrategyConfig,
+  AssetSwapConfig,
   FinanceConfig,
   CarbonPriceScheduleEntry,
   CarbonScheduleProfile,
@@ -270,6 +271,7 @@ function AppInner() {
   const [ownerColumn, setOwnerColumn] = useState<string>('owner');
   const [financeConfig, setFinanceConfig] = useState<FinanceConfig>({ gearing: 0, interestRate: 0.05, tenorYears: 15 });
   const [bidStrategyConfig, setBidStrategyConfig] = useState<BidStrategyConfig>({ enabled: false, mode: 'fixed', owner: '', markupType: 'percent', markup: 0.2, maxMarkup: 2.0, steps: 8 });
+  const [assetSwapConfig, setAssetSwapConfig] = useState<AssetSwapConfig>({ enabled: false, removeCarrier: '', addCarrier: '', addCapitalCost: 0, addMarginalCost: 0 });
   const [carbonPriceSchedule, setCarbonPriceSchedule] = useState<CarbonPriceScheduleEntry[]>([]);
   const [carbonLibrary, setCarbonLibrary] = useState<CarbonScheduleProfile[]>([]);
   const [validateResult, setValidateResult] = useState<{
@@ -314,6 +316,7 @@ function AppInner() {
     mgaConfig: { enabled: false, slack: 0.05, carriers: [] },
     merchantConfig: { enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 },
     bidStrategyConfig: { enabled: false, mode: 'fixed', owner: '', markupType: 'percent', markup: 0.2, maxMarkup: 2.0, steps: 8 },
+    assetSwapConfig: { enabled: false, removeCarrier: '', addCarrier: '', addCapitalCost: 0, addMarginalCost: 0 },
     ownerColumn: 'owner',
     financeConfig: { gearing: 0, interestRate: 0.05, tenorYears: 15 },
     constraints: DEFAULT_CONSTRAINTS,
@@ -478,6 +481,7 @@ function AppInner() {
       mgaConfig,
       merchantConfig,
       bidStrategyConfig,
+      assetSwapConfig,
       ownerColumn,
       financeConfig,
       constraints,
@@ -502,6 +506,7 @@ function AppInner() {
     mgaConfig,
     merchantConfig,
     bidStrategyConfig,
+    assetSwapConfig,
     ownerColumn,
     financeConfig,
     constraints,
@@ -619,6 +624,7 @@ function AppInner() {
       mgaConfig,
       merchantConfig,
       bidStrategyConfig,
+      assetSwapConfig,
       ownerColumn,
       financeConfig,
       constraints,
@@ -671,6 +677,7 @@ function AppInner() {
     mgaConfig,
     merchantConfig,
     bidStrategyConfig,
+    assetSwapConfig,
     ownerColumn,
     financeConfig,
     constraints,
@@ -939,6 +946,15 @@ function AppInner() {
     }
     return seen;
   }, [model.generators, model.storage_units, ownerColumn]);
+  // Distinct carrier names — drives the asset-swap (DW2) carrier pickers.
+  const modelCarriers = useMemo(() => {
+    const seen: string[] = [];
+    for (const row of model.carriers ?? []) {
+      const c = stringValue(row.name).trim();
+      if (c && !seen.includes(c)) seen.push(c);
+    }
+    return seen;
+  }, [model.carriers]);
   // Map geometry for the analytics view follows the results-owning topology.
   const analyticsBounds = useMemo(() => getBounds(analyticsModel), [analyticsModel.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
   const analyticsBusIndex = useMemo(() => getBusIndex(analyticsModel), [analyticsModel.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
@@ -992,6 +1008,7 @@ function AppInner() {
     setMgaConfig(scenario.mgaConfig ?? { enabled: false, slack: 0.05, carriers: [] });
     setMerchantConfig(scenario.merchantConfig ?? { enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 });
     setBidStrategyConfig(scenario.bidStrategyConfig ?? { enabled: false, mode: 'fixed', owner: '', markupType: 'percent', markup: 0.2, maxMarkup: 2.0, steps: 8 });
+    setAssetSwapConfig(scenario.assetSwapConfig ?? { enabled: false, removeCarrier: '', addCarrier: '', addCapitalCost: 0, addMarginalCost: 0 });
     setOwnerColumn(scenario.ownerColumn ?? 'owner');
     setFinanceConfig(scenario.financeConfig ?? { gearing: 0, interestRate: 0.05, tenorYears: 15 });
     setStatus(`Applied scenario: ${scenario.label}`);
@@ -2218,6 +2235,7 @@ function AppInner() {
       mgaConfig,
       merchantConfig,
       bidStrategyConfig,
+      assetSwapConfig,
       ownerColumn,
       financeConfig,
       carbonPriceSchedule,
@@ -2513,6 +2531,9 @@ function AppInner() {
               onMerchantConfigChange={setMerchantConfig}
               bidStrategyConfig={bidStrategyConfig}
               onBidStrategyConfigChange={setBidStrategyConfig}
+              assetSwapConfig={assetSwapConfig}
+              onAssetSwapConfigChange={setAssetSwapConfig}
+              modelCarriers={modelCarriers}
               merchantOwners={merchantOwners}
               ownerColumn={ownerColumn}
               onOwnerColumnChange={setOwnerColumn}

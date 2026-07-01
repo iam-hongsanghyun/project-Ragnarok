@@ -42,6 +42,7 @@ from .price_formation import build_price_formation
 from .commitment import build_commitment
 from .bid_strategy import build_bid_strategy
 from .optimal_bid import build_optimal_bid
+from .asset_swap import build_asset_swap
 from .expansion import build_expansion_results
 from .full_outputs import build_full_outputs
 from .market import (
@@ -190,6 +191,8 @@ def run_pypsa(
     bid_cfg = options.get("bidStrategyConfig") or {}
     bid_enabled = bool(bid_cfg.get("enabled", False))
     bid_mode = str(bid_cfg.get("mode", "fixed") or "fixed")
+    swap_cfg = options.get("assetSwapConfig") or {}
+    swap_enabled = bool(swap_cfg.get("enabled", False))
     # The owner/company column (F1 + B1) is a shared, top-level concern. Fall
     # back to the legacy merchantConfig.ownerColumn for scenarios saved before
     # it was promoted out of the merchant config.
@@ -272,6 +275,17 @@ def run_pypsa(
         raise HTTPException(
             status_code=400,
             detail="Bid-strategy simulation cannot be combined with rolling horizon, stochastic, "
+            "security-constrained, sampled-block, power-flow, or contingency modes.",
+        )
+    # Asset-swap re-solves the whole system with a carrier swapped, so it needs
+    # the plain optimise path (a cost/emissions LP solution to diff against).
+    if swap_enabled and (
+        rolling.enabled or stochastic.enabled or sclopf_enabled
+        or sampling.enabled or pf_enabled or contingency_enabled
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Asset-swap what-if cannot be combined with rolling horizon, stochastic, "
             "security-constrained, sampled-block, power-flow, or contingency modes.",
         )
 
@@ -843,6 +857,28 @@ def run_pypsa(
         else None
     )
 
+    # Asset-swap / repowering what-if (DW2) — retire a carrier, add a
+    # replacement 1:1, re-solve, and report the before-vs-after delta.
+    asset_swap = (
+        build_asset_swap(
+            network,
+            model,
+            scenario,
+            options,
+            build_network,
+            remove_carrier=str(swap_cfg.get("removeCarrier", "") or ""),
+            add_carrier=str(swap_cfg.get("addCarrier", "") or ""),
+            add_capital_cost=float(swap_cfg.get("addCapitalCost", 0.0) or 0.0),
+            add_marginal_cost=float(swap_cfg.get("addMarginalCost", 0.0) or 0.0),
+            currency=currency,
+            emissions_factors=emissions_factors,
+            solver_options=solver_options if solver_options else {},
+            io_api=_SOLVER_IO_API,
+        )
+        if swap_enabled
+        else None
+    )
+
     # Company / owner dimension (F1) — per-company KPIs whenever assets carry an
     # owner tag. Independent of merchant mode; reads only solved dataframes.
     company_breakdown = build_company_breakdown(
@@ -892,6 +928,7 @@ def run_pypsa(
         "commitment": commitment,
         "bidStrategy": bid_strategy,
         "optimalBid": optimal_bid,
+        "assetSwap": asset_swap,
         "emissionsBreakdown": emissions_breakdown,
         "narrative": notes,
         "runMeta": {

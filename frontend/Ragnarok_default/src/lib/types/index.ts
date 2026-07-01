@@ -279,6 +279,38 @@ export interface MgaConfig {
   carriers: string[];
 }
 
+/** Asset-swap / repowering what-if (DW2) — retire a carrier, add another 1:1. */
+export interface AssetSwapConfig {
+  enabled: boolean;
+  removeCarrier: string;
+  addCarrier: string;
+  /** Replacement cost when the target carrier isn't already in the model. */
+  addCapitalCost: number;
+  addMarginalCost: number;
+}
+
+/** One side (before / after / delta) of the asset-swap comparison. */
+export interface AssetSwapSide {
+  systemCost: number;
+  operatingCost: number;
+  emissionsTonnes: number;
+}
+
+/** Asset-swap result (DW2) — before vs after a carrier swap. */
+export interface AssetSwapResult {
+  removeCarrier: string;
+  addCarrier: string;
+  currency: string;
+  removedCapacityMW: number;
+  addedCapacityMW: number;
+  replacementCapex: number;
+  replacementFirm: boolean;
+  before: AssetSwapSide;
+  after: AssetSwapSide;
+  delta: AssetSwapSide;
+  paybackYears: number | null;
+}
+
 /** Bid-strategy simulator (Tier 2) + optimal-bid finder (Tier 3a). */
 export interface BidStrategyConfig {
   enabled: boolean;
@@ -526,6 +558,7 @@ export interface ScenarioPreset {
   mgaConfig: MgaConfig;
   merchantConfig: MerchantConfig;
   bidStrategyConfig: BidStrategyConfig;
+  assetSwapConfig: AssetSwapConfig;
   /** Model column holding the owner/company tag (F1 + B1). Default `owner`. */
   ownerColumn: string;
   /** Optional debt assumptions for company finance DSCR (F2). */
@@ -1031,6 +1064,8 @@ export interface RunResults {
   bidStrategy?: BidStrategyResult;
   /** Optimal-bid finder (profit-maximising markup + sweep curve). */
   optimalBid?: OptimalBidResult;
+  /** Asset-swap / repowering what-if (before vs after a carrier swap). */
+  assetSwap?: AssetSwapResult;
   appliedConstraints?: AppliedConstraint[];
   emissionsBreakdown?: EmissionsBreakdown;
   narrative: string[];

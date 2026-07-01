@@ -33,6 +33,7 @@ export type CardKind =
   | 'commitment'
   | 'bid-strategy'
   | 'optimal-bid'
+  | 'asset-swap'
   | 'power-flow'
   | 'contingency'
   | 'emissions-breakdown'
@@ -184,6 +185,10 @@ export interface OptimalBidCardData extends CardBase {
   kind: 'optimal-bid';
 }
 
+export interface AssetSwapCardData extends CardBase {
+  kind: 'asset-swap';
+}
+
 export interface PowerFlowCardData extends CardBase {
   kind: 'power-flow';
 }
@@ -235,6 +240,7 @@ export type Card =
   | CommitmentCardData
   | BidStrategyCardData
   | OptimalBidCardData
+  | AssetSwapCardData
   | PowerFlowCardData
   | ContingencyCardData
   | EmissionsBreakdownCardData

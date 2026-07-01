@@ -20,6 +20,7 @@ import {
   MgaConfig,
   MerchantConfig,
   BidStrategyConfig,
+  AssetSwapConfig,
   FinanceConfig,
   Primitive,
   RollingHorizonConfig,
@@ -44,6 +45,7 @@ import { ContingencySection } from './SettingsView.sections/Contingency';
 import { MgaSection } from './SettingsView.sections/Mga';
 import { MerchantSection } from './SettingsView.sections/Merchant';
 import { BiddingSection } from './SettingsView.sections/Bidding';
+import { AssetSwapSection } from './SettingsView.sections/AssetSwap';
 import { CompanySection } from './SettingsView.sections/Company';
 import { StandardConstraintsSection, AdvancedConstraintsSection } from './SettingsView.sections/Constraints';
 import { AppearanceSection } from './SettingsView.sections/Appearance';
@@ -64,6 +66,7 @@ type SectionId =
   | 'mga'
   | 'merchant'
   | 'bidding'
+  | 'assetSwap'
   | 'company'
   | 'constraints'
   | 'constraintsAdvanced'
@@ -107,6 +110,7 @@ const SECTIONS: Section[] = [
   { id: 'company',    label: 'Company / ownership',           group: 'Market' },
   { id: 'merchant',   label: 'Merchant (price-taker)',        group: 'Market' },
   { id: 'bidding',    label: 'Bid strategy (market power)',   group: 'Market' },
+  { id: 'assetSwap',  label: 'Asset swap (repowering)',       group: 'Market' },
   // Data — external-source credentials
   { id: 'apiKeys',    label: 'API keys',                      group: 'Data' },
   // App — workspace preferences
@@ -150,6 +154,9 @@ export interface SettingsViewProps {
   onMerchantConfigChange: (config: MerchantConfig) => void;
   bidStrategyConfig: BidStrategyConfig;
   onBidStrategyConfigChange: (config: BidStrategyConfig) => void;
+  assetSwapConfig: AssetSwapConfig;
+  onAssetSwapConfigChange: (config: AssetSwapConfig) => void;
+  modelCarriers: string[];
   merchantOwners: string[];
   ownerColumn: string;
   onOwnerColumnChange: (column: string) => void;
@@ -263,6 +270,7 @@ export function SettingsView(props: SettingsViewProps) {
         {section === 'company'        && <CompanySection {...props} />}
         {section === 'merchant'       && <MerchantSection {...props} />}
         {section === 'bidding'        && <BiddingSection {...props} />}
+        {section === 'assetSwap'      && <AssetSwapSection {...props} />}
         {section === 'constraints'    && <StandardConstraintsSection {...props} />}
         {section === 'constraintsAdvanced' && <AdvancedConstraintsSection {...props} />}
         {section === 'appearance'     && <AppearanceSection {...props} />}

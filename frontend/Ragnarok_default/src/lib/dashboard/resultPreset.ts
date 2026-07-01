@@ -120,6 +120,7 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   const hasCommitment = !!(results.commitment && results.commitment.generators.length > 0);
   const hasBidStrategy = !!results.bidStrategy;
   const hasOptimalBid = !!(results.optimalBid && results.optimalBid.curve.length > 0);
+  const hasAssetSwap = !!results.assetSwap;
 
   const rows: Array<ReturnType<typeof row>> = [];
 
@@ -242,6 +243,12 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   if (hasOptimalBid) {
     const ob: Card = { id: id('optbid'), kind: 'optimal-bid' };
     rows.push(row({ cards: [{ card: ob }] }));
+  }
+
+  // 9e4. Asset-swap / repowering what-if — before vs after delta (conditional)
+  if (hasAssetSwap) {
+    const sw: Card = { id: id('swap'), kind: 'asset-swap' };
+    rows.push(row({ cards: [{ card: sw }] }));
   }
 
   // 9f. Company / owner dimension — per-company KPIs (F1, conditional)
