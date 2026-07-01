@@ -7,6 +7,7 @@ cleanly (scikit-learn is optional and not installed here).
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -14,6 +15,7 @@ from fastapi import HTTPException
 
 from backend.app.routers.transforms import cluster_model
 from backend.pypsa.network import build_network
+from backend.pypsa.network.serialize import network_to_model
 
 SCENARIO = {"discountRate": 0.0}
 
@@ -71,6 +73,24 @@ def test_modularity_clustering_reduces_buses() -> None:
     # the reduced model rebuilds into a valid 2-bus network
     net, _ = build_network(res["model"], SCENARIO, {})
     assert len(net.buses) == 2
+
+
+def test_serialized_model_is_json_safe_with_subnetworks() -> None:
+    """Regression: sub_networks carry a live SubNetwork object; the serialized
+    model must drop it (and any non-scalar) so the HTTP response serialises."""
+    net, _ = build_network(_path_model(4), SCENARIO, {})
+    net.determine_network_topology()  # populates sub_networks (with an `obj` col)
+    assert len(net.sub_networks) > 0
+    model = network_to_model(net)
+    assert "sub_networks" not in model
+    json.dumps(model)  # must not raise (this is what FastAPI does for the response)
+
+
+def test_clustered_result_is_json_serializable() -> None:
+    net, _ = build_network(_path_model(4), SCENARIO, {})
+    net.determine_network_topology()
+    res = cluster_model(_path_model(4), n_clusters=2, method="modularity", scenario=SCENARIO)
+    json.dumps(res)  # the whole transform response must serialise
 
 
 def test_clustering_rejects_bad_target() -> None:

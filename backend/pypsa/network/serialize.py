@@ -18,6 +18,33 @@ from ..pypsa_schema import (
     input_temporal_attributes,
 )
 
+# Derived components PyPSA recomputes from topology — never round-tripped as data
+# (``sub_networks`` rows carry a live ``SubNetwork`` object in ``obj``).
+_SKIP_SHEETS = {"network", "snapshots", "sub_networks"}
+
+# Cell values safe to emit into the workbook model (JSON-friendly scalars).
+_JSON_SCALARS = (str, bool, int, float)
+
+
+def _scalar(val: Any) -> tuple[bool, Any]:
+    """``(keep, value)`` — coerce a cell to a JSON-safe scalar or drop it.
+
+    Drops ``None``, NaN, and any non-scalar object (e.g. a ``SubNetwork`` or
+    other component reference) so the payload always serialises.
+    """
+    if val is None:
+        return False, None
+    if hasattr(val, "item"):  # numpy / pandas scalar → python scalar
+        try:
+            val = val.item()
+        except Exception:  # noqa: BLE001
+            return False, None
+    if isinstance(val, float) and val != val:  # NaN
+        return False, None
+    if isinstance(val, _JSON_SCALARS):
+        return True, val
+    return False, None
+
 
 def network_to_model(network: pypsa.Network) -> dict[str, list[dict[str, Any]]]:
     """Round-trip a built network into the in-memory model shape.
@@ -32,7 +59,7 @@ def network_to_model(network: pypsa.Network) -> dict[str, list[dict[str, Any]]]:
     if network.name:
         model["network"] = [{"name": str(network.name)}]
     for sheet in component_sheets():
-        if sheet in {"network", "snapshots"}:
+        if sheet in _SKIP_SHEETS:
             continue
         if sheet not in network.components.keys():
             continue
@@ -46,9 +73,9 @@ def network_to_model(network: pypsa.Network) -> dict[str, list[dict[str, Any]]]:
                 for col, val in row.items():
                     if allowed_static and col not in allowed_static:
                         continue
-                    if val is None or (hasattr(val, "__float__") and (val != val)):
-                        continue  # NaN
-                    d[str(col)] = val.item() if hasattr(val, "item") else val
+                    keep, sval = _scalar(val)
+                    if keep:
+                        d[str(col)] = sval
                 rows.append(d)
             if rows:
                 model[sheet] = rows
@@ -66,9 +93,9 @@ def network_to_model(network: pypsa.Network) -> dict[str, list[dict[str, Any]]]:
             for ts, ser in df.iterrows():
                 row_d: dict[str, Any] = {"snapshot": str(ts)}
                 for col, val in ser.items():
-                    if val is None or (hasattr(val, "__float__") and (val != val)):
-                        continue
-                    row_d[str(col)] = val.item() if hasattr(val, "item") else val
+                    keep, sval = _scalar(val)
+                    if keep:
+                        row_d[str(col)] = sval
                 ts_rows.append(row_d)
             if ts_rows:
                 model[f"{sheet}-{attr}"] = ts_rows

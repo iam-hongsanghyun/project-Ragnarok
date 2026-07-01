@@ -739,7 +739,7 @@ function AppInner() {
       setActiveRunName(null);
       showToast('Network reduced — clustered model loaded into the editor', 'success');
     },
-    [resetForNewModel],
+    [resetForNewModel, showToast],
   );
 
   // Guard against accidental session loss on browser back / forward / refresh /
