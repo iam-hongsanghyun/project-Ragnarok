@@ -86,6 +86,10 @@ def build_asset_swap(
     add_carrier: str,
     add_capital_cost: float,
     add_marginal_cost: float,
+    replace_ratio: float = 1.0,
+    add_storage_mw: float = 0.0,
+    add_storage_hours: float = 4.0,
+    add_storage_capex_per_mw: float = 0.0,
     currency: str,
     emissions_factors: dict[str, float],
     solver_options: dict[str, Any] | None = None,
@@ -116,21 +120,26 @@ def build_asset_swap(
     marg_cost = float(existing_add.get("marginal_cost", add_marginal_cost)) if existing_add else add_marginal_cost
     profile_ref = _profile_ref(model, add_carrier)
 
-    # Build the "after" model: drop the matched gens, add 1:1 replacements.
+    # Build the "after" model: drop the matched gens, add replacements sized at
+    # `replace_ratio` × the retired capacity (renewables often need oversizing).
+    ratio = max(0.0, float(replace_ratio or 1.0))
     after = copy.deepcopy(model)
     after["generators"] = [r for r in after.get("generators", []) if str(r.get("name", "")) not in removed_names]
     replacements: list[dict[str, Any]] = []
     removed_capacity = 0.0
     added_capacity = 0.0
+    bus_capacity: dict[str, float] = {}
     for r in removed:
         p_nom = float(r.get("p_nom", 0.0) or 0.0)
         removed_capacity += p_nom
-        added_capacity += p_nom
+        new_p = p_nom * ratio
+        added_capacity += new_p
+        bus_capacity[str(r.get("bus"))] = bus_capacity.get(str(r.get("bus")), 0.0) + p_nom
         replacements.append({
             "name": f"{r.get('name')}_repl",
             "bus": r.get("bus"),
             "carrier": add_carrier,
-            "p_nom": p_nom,
+            "p_nom": new_p,
             "capital_cost": cap_cost,
             "marginal_cost": marg_cost,
         })
@@ -140,6 +149,32 @@ def build_asset_swap(
     carriers = after.setdefault("carriers", [])
     if not any(str(c.get("name", "")) == add_carrier for c in carriers):
         carriers.append({"name": add_carrier})
+
+    # Optional paired storage — a battery co-located with the new units, split
+    # across the retired buses in proportion to the capacity retired there.
+    storage_mw = max(0.0, float(add_storage_mw or 0.0))
+    added_storage_mw = 0.0
+    storage_capex = 0.0
+    if storage_mw > 0 and removed_capacity > 0:
+        if not any(str(c.get("name", "")) == "battery" for c in carriers):
+            carriers.append({"name": "battery"})
+        after_storage = after.setdefault("storage_units", [])
+        for i, (bus, cap) in enumerate(bus_capacity.items()):
+            mw = storage_mw * (cap / removed_capacity)
+            if mw <= 0:
+                continue
+            added_storage_mw += mw
+            after_storage.append({
+                "name": f"__swap_ess_{i}",
+                "bus": bus,
+                "carrier": "battery",
+                "p_nom": mw,
+                "max_hours": max(0.5, float(add_storage_hours or 4.0)),
+                "marginal_cost": 0.0,
+                "capital_cost": float(add_storage_capex_per_mw or 0.0),
+                "cyclic_state_of_charge": True,
+            })
+        storage_capex = added_storage_mw * float(add_storage_capex_per_mw or 0.0)
 
     # Copy the target carrier's availability profile onto the replacements.
     replacement_firm = True
@@ -182,19 +217,22 @@ def build_asset_swap(
         "emissionsTonnes": round(after_m["emissionsTonnes"] - before["emissionsTonnes"], 2),
     }
 
-    annualised_capex = cap_cost * added_capacity
+    annualised_capex = cap_cost * added_capacity + storage_capex
     r = float(scenario.get("discountRate", 0.0) or 0.0)
     overnight_capex = annualised_capex / _crf(r, _DEFAULT_LIFETIME) if annualised_capex > 0 else 0.0
     opex_savings = before["operatingCost"] - after_m["operatingCost"]
     payback = round(overnight_capex / opex_savings, 2) if opex_savings > 1e-9 and overnight_capex > 0 else None
 
     remove_summary = " · ".join(f"{f['field']} ∈ {{{', '.join(f['values'])}}}" for f in filters)
-    _log.info("asset-swap [%s]→%s: Δcost=%.1f Δemissions=%.1f", remove_summary, add_carrier, delta["systemCost"], delta["emissionsTonnes"])
+    _log.info("asset-swap [%s]→%s ×%.2f +%.0fMW ess: Δcost=%.1f Δemissions=%.1f",
+              remove_summary, add_carrier, ratio, added_storage_mw, delta["systemCost"], delta["emissionsTonnes"])
     return {
         "removeSummary": remove_summary,
         "removeFilters": filters,
         "removedCount": len(removed),
         "addCarrier": add_carrier,
+        "replaceRatio": round(ratio, 3),
+        "addedStorageMW": round(added_storage_mw, 2),
         "currency": currency,
         "removedCapacityMW": round(removed_capacity, 2),
         "addedCapacityMW": round(added_capacity, 2),

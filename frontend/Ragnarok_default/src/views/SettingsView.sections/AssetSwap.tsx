@@ -170,6 +170,39 @@ export function AssetSwapSection(props: AssetSwapSectionProps) {
               </div>
             </>
           )}
+
+          <div className="sg-setting-row">
+            <label className="sg-setting-label" htmlFor="rs-swap-ratio">Replacement ratio (×)</label>
+            <input id="rs-swap-ratio" type="number" min={0} step={0.25} className="sg-num-input"
+              value={cfg.replaceRatio}
+              onChange={(e) => { const v = parseFloat(e.target.value); if (Number.isFinite(v)) set({ replaceRatio: Math.max(0, v) }); }} />
+            <p className="sg-setting-hint">Replacement MW = retired MW × this. Renewables often need &gt;1 (e.g. 2–3× to match a firm plant’s energy).</p>
+          </div>
+
+          <div className="sg-setting-divider" />
+          <div className="sg-setting-row">
+            <label className="sg-setting-label" htmlFor="rs-swap-ess">Paired storage (MW)</label>
+            <input id="rs-swap-ess" type="number" min={0} step={10} className="sg-num-input"
+              value={cfg.addStorageMW}
+              onChange={(e) => { const v = parseFloat(e.target.value); if (Number.isFinite(v)) set({ addStorageMW: Math.max(0, v) }); }} />
+            <p className="sg-setting-hint">Add a battery co-located with the replacement (0 = none). Split across the retired buses.</p>
+          </div>
+          {cfg.addStorageMW > 0 && (
+            <>
+              <div className="sg-setting-row">
+                <label className="sg-setting-label" htmlFor="rs-swap-ess-hours">Storage duration (hours)</label>
+                <input id="rs-swap-ess-hours" type="number" min={0.5} step={0.5} className="sg-num-input"
+                  value={cfg.addStorageHours}
+                  onChange={(e) => { const v = parseFloat(e.target.value); if (Number.isFinite(v)) set({ addStorageHours: Math.max(0.5, v) }); }} />
+              </div>
+              <div className="sg-setting-row">
+                <label className="sg-setting-label" htmlFor="rs-swap-ess-capex">Storage capital cost (/MW/yr)</label>
+                <input id="rs-swap-ess-capex" type="number" min={0} step={1000} className="sg-num-input"
+                  value={cfg.addStorageCapexPerMW}
+                  onChange={(e) => { const v = parseFloat(e.target.value); if (Number.isFinite(v)) set({ addStorageCapexPerMW: Math.max(0, v) }); }} />
+              </div>
+            </>
+          )}
         </>
       )}
     </section>

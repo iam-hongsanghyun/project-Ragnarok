@@ -333,6 +333,12 @@ export interface AssetSwapConfig {
   /** Replacement cost when the target carrier isn't already in the model. */
   addCapitalCost: number;
   addMarginalCost: number;
+  /** Replacement MW = retired MW × this ratio (renewables often need >1). */
+  replaceRatio: number;
+  /** Optional paired battery co-located with the replacement (0 = none). */
+  addStorageMW: number;
+  addStorageHours: number;
+  addStorageCapexPerMW: number;
 }
 
 /** One side (before / after / delta) of the asset-swap comparison. */
@@ -349,6 +355,8 @@ export interface AssetSwapResult {
   removeFilters: AssetSwapFilter[];
   removedCount: number;
   addCarrier: string;
+  replaceRatio: number;
+  addedStorageMW: number;
   currency: string;
   removedCapacityMW: number;
   addedCapacityMW: number;

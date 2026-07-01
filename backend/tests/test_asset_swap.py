@@ -71,6 +71,26 @@ def test_asset_swap_multi_filter() -> None:
     assert "owner" in sw["removeSummary"]
 
 
+def test_asset_swap_ratio_and_paired_storage() -> None:
+    # Oversize the solar 2× and pair it with a 30 MW / 4 h battery.
+    res = run_pypsa(
+        _model(), SCENARIO,
+        {"assetSwapConfig": {
+            "enabled": True, "addCarrier": "solar",
+            "removeFilters": [{"field": "carrier", "values": ["gas"]}],
+            "replaceRatio": 2.0, "addStorageMW": 30, "addStorageHours": 4, "addStorageCapexPerMW": 20000,
+        }},
+    )
+    sw = res["assetSwap"]
+    assert sw is not None
+    assert sw["replaceRatio"] == 2.0
+    # 200 MW gas retired → 400 MW solar added (2×).
+    assert sw["addedCapacityMW"] == round(sw["removedCapacityMW"] * 2.0, 2)
+    assert sw["addedStorageMW"] == 30.0
+    # Capex now includes the battery.
+    assert sw["replacementCapex"] > 0
+
+
 def test_asset_swap_legacy_remove_carrier() -> None:
     # Back-compat: the old removeCarrier field still works.
     res = run_pypsa(_model(), SCENARIO, {"assetSwapConfig": {"enabled": True, "removeCarrier": "gas", "addCarrier": "solar"}})

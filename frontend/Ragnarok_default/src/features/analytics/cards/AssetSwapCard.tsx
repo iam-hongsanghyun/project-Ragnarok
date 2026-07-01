@@ -37,7 +37,11 @@ export function AssetSwapCard({ data }: Props) {
             {' → '}
             <span className="carrier-dot" style={{ backgroundColor: carrierColor(addCarrier) }} />{addCarrier}
           </div>
-          <div className="econ-kpi-unit">{data.removedCount} unit{data.removedCount === 1 ? '' : 's'}, {Math.round(data.removedCapacityMW).toLocaleString()} MW → 1:1{data.replacementFirm ? ' · firm (no profile)' : ''}</div>
+          <div className="econ-kpi-unit">
+            {data.removedCount} unit{data.removedCount === 1 ? '' : 's'}, {Math.round(data.removedCapacityMW).toLocaleString()} → {Math.round(data.addedCapacityMW).toLocaleString()} MW ({data.replaceRatio}×)
+            {data.addedStorageMW > 0 ? ` + ${Math.round(data.addedStorageMW).toLocaleString()} MW storage` : ''}
+            {data.replacementFirm ? ' · firm (no profile)' : ''}
+          </div>
         </div>
         <div className="econ-kpi">
           <div className="econ-kpi-label">Δ Emissions</div>

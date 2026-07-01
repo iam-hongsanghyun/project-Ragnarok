@@ -94,7 +94,7 @@ export function defaultBidStrategyConfig(): BidStrategyConfig {
 }
 
 export function defaultAssetSwapConfig(): AssetSwapConfig {
-  return { enabled: false, removeFilters: [], addCarrier: '', addCapitalCost: 0, addMarginalCost: 0 };
+  return { enabled: false, removeFilters: [], addCarrier: '', addCapitalCost: 0, addMarginalCost: 0, replaceRatio: 1, addStorageMW: 0, addStorageHours: 4, addStorageCapexPerMW: 20000 };
 }
 
 export function defaultEssConfig(): EssConfig {
