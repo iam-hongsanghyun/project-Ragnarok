@@ -1,10 +1,10 @@
 /**
- * PyPSA-Earth whole-country network builder (I9) — Data-view panel.
+ * PyPSA-Earth whole-country network builder (I9) — Data-view right rail.
  *
- * Unlike the synchronous importers in the rails, this submits an async build job
- * and polls it, then applies the ingested network through the same
- * `applyFragment` path. Availability-gated: on a server without PyPSA-Earth
- * configured it shows setup guidance instead of a build form.
+ * Focused from the left rail like a source, but it's an async server job: submit
+ * a build, poll it, then apply the ingested network through the same
+ * `applyFragment` path importers use. Availability-gated — on a server without
+ * PyPSA-Earth configured it shows setup guidance instead of a build form.
  */
 import React, { useEffect, useRef, useState } from 'react';
 import type { WorkbookFragment } from 'lib/api/databases';
@@ -25,7 +25,6 @@ interface Props {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export function PypsaEarthPanel({ selectedCountry, applyFragment }: Props) {
-  const [open, setOpen] = useState(false);
   const [avail, setAvail] = useState<PypsaEarthAvailability | null>(null);
   const [horizon, setHorizon] = useState(2030);
   const [clusters, setClusters] = useState(10);
@@ -49,7 +48,7 @@ export function PypsaEarthPanel({ selectedCountry, applyFragment }: Props) {
         horizonYear: horizon, clusters,
       });
       setJob(s);
-      // Poll until terminal (the real build is minutes–hours; cap generously).
+      // The real build is minutes–hours; poll generously until terminal.
       for (let i = 0; i < 4000 && (s.status === 'queued' || s.status === 'running'); i++) {
         await sleep(2500);
         if (!mounted.current) return;
@@ -69,55 +68,48 @@ export function PypsaEarthPanel({ selectedCountry, applyFragment }: Props) {
     }
   };
 
-  if (!avail) return null;
-
   return (
-    <div className="pe-panel">
-      <button className="pe-panel__toggle" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-        <span>{open ? '▾' : '▸'} Whole-country network — PyPSA-Earth</span>
-        <span className={`pe-panel__badge${avail.available ? ' pe-panel__badge--on' : ''}`}>
-          {avail.available ? 'available' : 'needs setup'}
-        </span>
-      </button>
-      {open && (
-        <div className="pe-panel__body">
-          <p className="sg-setting-hint">
-            Build an entire country's network — buses, lines, power plants with capacities, renewable
-            profiles and demand — from PyPSA-Earth, then merge it into the workbook. This is a
-            long-running server job, not an instant fetch.
-          </p>
+    <aside className="view-rail view-rail--right data-import-filters">
+      <div className="view-rail-header"><span>PyPSA-Earth</span></div>
+      <div className="view-rail-body data-import-filters__body">
+        <p className="sg-setting-hint">
+          Build an entire country's network — buses, lines, power plants with capacities, renewable
+          profiles and demand — from PyPSA-Earth, then merge it into the workbook. This is a
+          long-running server job, not an instant fetch.
+        </p>
 
-          {!avail.available ? (
-            <div className="pe-panel__notice">
-              <strong>Not configured on this server.</strong>
-              <p className="sg-setting-hint">{avail.detail}</p>
-              <p className="sg-setting-hint">See <code>{avail.docs}</code>.</p>
+        {!avail ? (
+          <p className="sg-setting-hint">Checking availability…</p>
+        ) : !avail.available ? (
+          <div className="pe-panel__notice">
+            <strong>Not configured on this server.</strong>
+            <p className="sg-setting-hint">{avail.detail}</p>
+            <p className="sg-setting-hint">See <code>{avail.docs}</code>.</p>
+          </div>
+        ) : (
+          <>
+            <div className="pe-panel__row">
+              <label>Horizon year
+                <input type="number" className="ss-input" min={2020} max={2100} value={horizon}
+                  onChange={(e) => setHorizon(Math.trunc(Number(e.target.value) || 2030))} />
+              </label>
+              <label>Clusters (buses)
+                <input type="number" className="ss-input" min={1} max={512} value={clusters}
+                  onChange={(e) => setClusters(Math.max(1, Math.trunc(Number(e.target.value) || 10)))} />
+              </label>
             </div>
-          ) : (
-            <>
-              <div className="pe-panel__row">
-                <label>Horizon year
-                  <input type="number" className="ss-input" min={2020} max={2100} value={horizon}
-                    onChange={(e) => setHorizon(Math.trunc(Number(e.target.value) || 2030))} />
-                </label>
-                <label>Clusters (buses)
-                  <input type="number" className="ss-input" min={1} max={512} value={clusters}
-                    onChange={(e) => setClusters(Math.max(1, Math.trunc(Number(e.target.value) || 10)))} />
-                </label>
-              </div>
-              <button className="run-button" disabled={!selectedCountry || busy} onClick={build}>
-                {busy ? 'Building…' : selectedCountry ? `Build ${selectedCountry.name}` : 'Pick a country first'}
-              </button>
-              {job && (
-                <p className="sg-setting-hint">
-                  <b>{job.status}</b> — {job.phase}{job.detail ? `: ${job.detail}` : ''}
-                </p>
-              )}
-            </>
-          )}
-          {error && <p className="pe-panel__error">{error}</p>}
-        </div>
-      )}
-    </div>
+            <button className="run-button" disabled={!selectedCountry || busy} onClick={build}>
+              {busy ? 'Building…' : selectedCountry ? `Build ${selectedCountry.name}` : 'Pick a country first'}
+            </button>
+            {job && (
+              <p className="sg-setting-hint">
+                <b>{job.status}</b> — {job.phase}{job.detail ? `: ${job.detail}` : ''}
+              </p>
+            )}
+          </>
+        )}
+        {error && <p className="pe-panel__error">{error}</p>}
+      </div>
+    </aside>
   );
 }

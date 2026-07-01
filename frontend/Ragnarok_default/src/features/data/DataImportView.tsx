@@ -93,6 +93,9 @@ export function DataImportView({ applyFragment }: Props) {
 
   const [selectedIso, setSelectedIso] = usePersistedState<string | null>(KEY_COUNTRY, null);
   const [focusedSourceId, setFocusedSourceId] = usePersistedState<string | null>(KEY_SOURCE, null);
+  // The PyPSA-Earth whole-country builder is focused in the left rail like a
+  // source, but it's an async job — its panel replaces the right-rail settings.
+  const [pypsaEarthFocused, setPypsaEarthFocused] = useState(false);
   // Which datasets are ticked, per source. Absent → default = none.
   const [selectionBySource, setSelectionBySource] = usePersistedState<Record<string, string[]>>(
     KEY_SELECTION,
@@ -177,7 +180,7 @@ export function DataImportView({ applyFragment }: Props) {
   );
 
   const handleFocusSource = useCallback(
-    (sourceId: string) => setFocusedSourceId(sourceId),
+    (sourceId: string) => { setFocusedSourceId(sourceId); setPypsaEarthFocused(false); },
     [setFocusedSourceId],
   );
 
@@ -320,6 +323,8 @@ export function DataImportView({ applyFragment }: Props) {
           selectionBySource={selectionBySource}
           onFocusSource={handleFocusSource}
           onToggleDataset={handleToggleDataset}
+          onFocusPypsaEarth={() => { setPypsaEarthFocused(true); setFocusedSourceId(null); }}
+          pypsaEarthFocused={pypsaEarthFocused}
         />
         <main className="view-main data-import-main">
           <WorldMap
@@ -336,22 +341,25 @@ export function DataImportView({ applyFragment }: Props) {
               <b>{lastAdded.countryName}</b>. Switch to <b>Model</b> or <b>Build</b> to review.
             </div>
           )}
+        </main>
+        {pypsaEarthFocused ? (
           <PypsaEarthPanel
             selectedCountry={selectedCountry ? { iso: selectedCountry.iso, name: selectedCountry.name } : null}
             applyFragment={applyFragment}
           />
-        </main>
-        <FilterPanel
-          entries={entries}
-          onChange={updateFilterValue}
-          onFetch={handleFetch}
-          onApply={handleApply}
-          fetching={fetching}
-          applying={false}
-          parts={currentRun?.parts ?? null}
-          canApply={!fetching && readyParts.length > 0}
-          errors={errors}
-        />
+        ) : (
+          <FilterPanel
+            entries={entries}
+            onChange={updateFilterValue}
+            onFetch={handleFetch}
+            onApply={handleApply}
+            fetching={fetching}
+            applying={false}
+            parts={currentRun?.parts ?? null}
+            canApply={!fetching && readyParts.length > 0}
+            errors={errors}
+          />
+        )}
       </ResizablePanels>
     </div>
   );

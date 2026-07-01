@@ -9672,42 +9672,6 @@ section.data-import-filters__group {
 }
 
 /* ── PyPSA-Earth whole-country builder (I9) ─────────────────────────────────── */
-.pe-panel {
-  border-top: 1px solid var(--border);
-  background: var(--surface);
-}
-.pe-panel__toggle {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 12px;
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-size: 0.86rem;
-  font-weight: 600;
-  color: var(--text);
-}
-.pe-panel__badge {
-  font-size: 0.72rem;
-  font-weight: 500;
-  padding: 1px 8px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--text-muted, #888);
-}
-.pe-panel__badge--on {
-  color: var(--success, #16a34a);
-  border-color: var(--success, #16a34a);
-}
-.pe-panel__body {
-  padding: 0 12px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
 .pe-panel__row {
   display: flex;
   gap: 12px;

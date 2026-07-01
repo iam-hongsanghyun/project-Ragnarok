@@ -29,6 +29,9 @@ interface Props {
   selectionBySource: Record<string, string[]>;
   onFocusSource: (sourceId: string) => void;
   onToggleDataset: (sourceId: string, datasetId: string) => void;
+  /** Focus the PyPSA-Earth whole-country builder (an async job, not a source). */
+  onFocusPypsaEarth: () => void;
+  pypsaEarthFocused: boolean;
 }
 
 const COLLAPSE_KEY = 'ragnarok:data-import:tree-collapsed';
@@ -65,10 +68,15 @@ export function CategoryDatabaseList({
   selectionBySource,
   onFocusSource,
   onToggleDataset,
+  onFocusPypsaEarth,
+  pypsaEarthFocused,
 }: Props) {
   const visibleSources = useMemo(() => {
-    if (!selectedCountry) return sources;
-    return sources.filter((s) => coversCountry(s, selectedCountry.iso));
+    const base = selectedCountry
+      ? sources.filter((s) => coversCountry(s, selectedCountry.iso))
+      : sources;
+    // Alphabetical by source label (a copy — never mutate the prop).
+    return [...base].sort((a, b) => a.source_label.localeCompare(b.source_label));
   }, [sources, selectedCountry]);
   const [collapsed, setCollapsed] = usePersistedState<Record<string, boolean>>(COLLAPSE_KEY, {});
   const [query, setQuery] = useState('');
@@ -199,6 +207,20 @@ export function CategoryDatabaseList({
               </div>
             );
           })}
+          {(!queryActive || matchesQuery('PyPSA-Earth whole-country network builder', query)) && (
+            <div className="sheet-tree-group">
+              <button
+                type="button"
+                className={`sheet-tree-group-header${pypsaEarthFocused ? ' is-active' : ''}`}
+                onClick={onFocusPypsaEarth}
+                title="Build an entire country's network with PyPSA-Earth (async server job)"
+              >
+                <span className="sheet-tree-chevron">›</span>
+                <span className="sheet-tree-group-label">PyPSA-Earth — whole-country build</span>
+                <span className="sheet-tree-count">job</span>
+              </button>
+            </div>
+          )}
         </div>
       </nav>
     </aside>
