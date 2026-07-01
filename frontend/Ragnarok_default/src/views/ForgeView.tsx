@@ -44,6 +44,8 @@ interface Props {
     dateTo: string;
     performanceRatio: number;
     source: string;
+    solarCarriers?: string[];
+    windCarriers?: string[];
   }) => Promise<AttachProfilesResult>;
   /** T1(a) — retarget the snapshot window + reindex all temporal sheets. */
   onRetargetSnapshots?: (opts: {
@@ -235,17 +237,45 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
   };
 
   // ── Operation 5: Attach renewable profiles (Open-Meteo, by coordinate) ────
-  const renewableGenCount = useMemo(() => {
-    const isRen = (c: string) => /solar|pv|wind/i.test(c);
-    return rowsOf(model, 'generators').filter((g) => isRen(String(g.carrier ?? ''))).length;
+  // Mirrors the backend's carrier classifier: name a generator's tech by its
+  // carrier, wind hints taking priority over solar.
+  const autoClassify = (carrier: string): 'solar' | 'wind' | null => {
+    const c = carrier.toLowerCase();
+    if (/wind|onwind|offwind/.test(c)) return 'wind';
+    if (/solar|pv/.test(c)) return 'solar';
+    return null;
+  };
+  // Distinct generator carriers + how many generators carry each — the user can
+  // override the auto guess per carrier (answers "which is wind, which is PV?").
+  const genCarriers = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const g of rowsOf(model, 'generators')) {
+      const c = String(g.carrier ?? '').trim();
+      if (c) counts.set(c, (counts.get(c) ?? 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .map(([carrier, count]) => ({ carrier, count, auto: autoClassify(carrier) }))
+      .sort((a, b) => a.carrier.localeCompare(b.carrier));
   }, [model]);
   const [renewSource, setRenewSource] = useState<'open-meteo' | 'pvgis' | 'nasa-power'>('open-meteo');
-  const [renewFrom, setRenewFrom] = useState('2022-01-01');
-  const [renewTo, setRenewTo] = useState('2022-01-31');
+  const [renewFrom, setRenewFrom] = useState('2019-01-01');
+  const [renewTo, setRenewTo] = useState('2019-01-31');
   const [renewPr, setRenewPr] = useState(0.9);
   const [renewBusy, setRenewBusy] = useState(false);
   const [renewResult, setRenewResult] = useState<AttachProfilesResult | null>(null);
   const [renewError, setRenewError] = useState<string | null>(null);
+  // Per-carrier override: 'auto' | 'solar' | 'wind'. Missing = 'auto'.
+  const [carrierKind, setCarrierKind] = useState<Record<string, 'auto' | 'solar' | 'wind'>>({});
+  const effectiveKind = (c: { carrier: string; auto: 'solar' | 'wind' | null }): 'solar' | 'wind' | null => {
+    const k = carrierKind[c.carrier] ?? 'auto';
+    return k === 'auto' ? c.auto : k;
+  };
+  const renewableGenCount = useMemo(
+    () => genCarriers
+      .filter((c) => (carrierKind[c.carrier] ?? 'auto') === 'auto' ? c.auto : carrierKind[c.carrier])
+      .reduce((n, c) => n + c.count, 0),
+    [genCarriers, carrierKind],
+  );
 
   const runAttachProfiles = async () => {
     if (!onAttachRenewableProfiles) return;
@@ -253,7 +283,12 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
     setRenewError(null);
     setRenewResult(null);
     try {
-      const res = await onAttachRenewableProfiles({ dateFrom: renewFrom, dateTo: renewTo, performanceRatio: renewPr, source: renewSource });
+      const solarCarriers = genCarriers.filter((c) => effectiveKind(c) === 'solar').map((c) => c.carrier);
+      const windCarriers = genCarriers.filter((c) => effectiveKind(c) === 'wind').map((c) => c.carrier);
+      const res = await onAttachRenewableProfiles({
+        dateFrom: renewFrom, dateTo: renewTo, performanceRatio: renewPr, source: renewSource,
+        solarCarriers, windCarriers,
+      });
       setRenewResult(res);
       setStatus(`Attached weather profiles to ${res.attached.length} generator(s) from ${res.sites} site(s).`);
     } catch (e) {
@@ -528,7 +563,7 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
           <section className="forge-section">
             <header className="forge-section-header">
               <h3>Attach renewable profiles</h3>
-              <p>Fetch hourly wind/solar capacity factors from Open-Meteo (keyless global ERA5) for each renewable generator's location — its own x/y, else its bus's — and attach them as <code>generators-p_max_pu</code>. Weather is fetched once per 0.1° grid cell and cached. Match the window to your run snapshots (or realign with the snapshot editor).</p>
+              <p>Fetch hourly wind/solar capacity factors (keyless reanalysis) for each renewable generator's location — its own x/y, else its bus's — and attach them as <code>generators-p_max_pu</code>. Weather is fetched once per 0.1° grid cell and cached. Match the window to your run snapshots (or realign with the snapshot editor).</p>
             </header>
 
             <div className="sg-setting-row">
@@ -552,7 +587,7 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
                 <input id="forge-renew-from" type="date" className="forge-number" value={renewFrom} onChange={(e) => setRenewFrom(e.target.value)} />
                 <input type="date" className="forge-number" value={renewTo} onChange={(e) => setRenewTo(e.target.value)} />
               </div>
-              <p className="sg-setting-hint">ERA5 has a multi-day lag and recent dates can miss irradiance — 2022 or earlier is safest.</p>
+              <p className="sg-setting-hint">Reanalyses lag by days and recent dates can miss irradiance; PVGIS covers 2005–2020. 2019 is a safe default.</p>
             </div>
 
             <div className="sg-setting-row">
@@ -567,6 +602,42 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
               <p className="sg-setting-hint">Flat derate on solar CF (inverter / soiling / temperature).</p>
             </div>
 
+            {genCarriers.length > 0 && (
+              <div className="sg-setting-row">
+                <label className="sg-setting-label">Carrier → technology</label>
+                <p className="sg-setting-hint">
+                  Each generator's tech is guessed from its carrier (<code>wind/onwind/offwind</code> → wind;
+                  <code>solar/pv</code> → solar). Override any carrier here; “Auto” uses the guess and skips
+                  carriers it can't classify.
+                </p>
+                <div className="forge-carrier-map">
+                  {genCarriers.map((c) => {
+                    const kind = carrierKind[c.carrier] ?? 'auto';
+                    const eff = effectiveKind(c);
+                    return (
+                      <div key={c.carrier} className="forge-carrier-row">
+                        <span className="forge-carrier-name">
+                          {c.carrier} <span className="sg-setting-hint">×{c.count}</span>
+                        </span>
+                        <div className="sg-btn-row">
+                          {(['auto', 'solar', 'wind'] as const).map((opt) => (
+                            <button
+                              key={opt}
+                              className={`tb-btn sg-solver-btn${kind === opt ? '' : ' tb-btn--muted'}`}
+                              onClick={() => setCarrierKind((m) => ({ ...m, [c.carrier]: opt }))}
+                            >
+                              {opt === 'auto' ? `Auto${c.auto ? ` (${c.auto})` : ' (skip)'}` : opt}
+                            </button>
+                          ))}
+                        </div>
+                        {!eff && <span className="sg-setting-hint">Skipped — no profile attached.</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             <div className="forge-actions">
               <button
                 className="run-button"
@@ -575,7 +646,7 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
               >
                 {renewBusy ? 'Fetching weather…' : `Attach to ${renewableGenCount} renewable generator${renewableGenCount === 1 ? '' : 's'}`}
               </button>
-              {renewableGenCount < 1 && <span className="sg-setting-hint">No solar/wind generators in the model.</span>}
+              {renewableGenCount < 1 && <span className="sg-setting-hint">No generators classified as solar/wind. Set a carrier above.</span>}
             </div>
 
             {renewError && <p className="forge-status" style={{ color: 'var(--danger, #dc2626)' }}>{renewError}</p>}

@@ -6025,6 +6025,25 @@ th:hover .col-delete-btn {
   gap: 12px;
 }
 
+/* ── Carrier → technology map (attach renewable profiles) ─────────────────── */
+.forge-carrier-map {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+.forge-carrier-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.forge-carrier-name {
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+}
+
 /* ── Adjust-values tool ─────────────────────────────────────────────────── */
 .forge-adjust-card {
   border: 1px solid var(--border);
