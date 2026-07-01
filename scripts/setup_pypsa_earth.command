@@ -56,8 +56,22 @@ elif [ -z "$CONDA_BIN" ]; then
 elif conda env list 2>/dev/null | grep -qE '^pypsa-earth[[:space:]]'; then
   echo "✓ conda env 'pypsa-earth' already exists"
 else
-  echo "→ creating conda env 'pypsa-earth' with $CONDA_BIN (this takes ~20–30 min) …"
-  "$CONDA_BIN" env create -f "$TARGET/envs/environment.yaml"
+  # Solving this env with conda's classic solver is very slow (10–30+ min just to
+  # "Collect package metadata"). Use the fast libmamba solver when available
+  # (mamba, or conda's --solver flag) so it's minutes, not tens of minutes.
+  # (Plain string, not a bash array — macOS ships bash 3.2, where expanding an
+  # empty array under `set -u` errors.)
+  SOLVER_FLAG=""
+  if [ "$CONDA_BIN" = "conda" ] && conda env create --help 2>/dev/null | grep -q -- '--solver'; then
+    SOLVER_FLAG="--solver=libmamba"
+    echo "  (using the libmamba solver)"
+  fi
+  echo "→ creating conda env 'pypsa-earth' with $CONDA_BIN (a few minutes with libmamba; longer on the classic solver) …"
+  if [ -n "$SOLVER_FLAG" ]; then
+    "$CONDA_BIN" env create "$SOLVER_FLAG" -f "$TARGET/envs/environment.yaml"
+  else
+    "$CONDA_BIN" env create -f "$TARGET/envs/environment.yaml"
+  fi
   echo "✓ conda env created"
 fi
 
