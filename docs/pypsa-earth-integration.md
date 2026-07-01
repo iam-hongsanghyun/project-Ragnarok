@@ -1,7 +1,7 @@
 # PyPSA-Earth integration — feasibility
 
-*Status: investigated, build deferred (2026-06). Captured so the option isn't
-re-litigated from scratch.*
+*Status: async-job scaffold BUILT (2026-07, first cut); the heavy workflow run
+still needs an external environment. See "First cut" at the end.*
 
 The question: can [PyPSA-Earth](https://pypsa-earth.readthedocs.io/) be wired
 into Ragnarok as a data source, the way OSM / WRI / ENTSO-E / KPG193 are?
@@ -76,7 +76,31 @@ lightweight single-source importers when a user only wants one slice of data.
 
 A first integration is a substantial, multi-pass effort: the async job runner +
 status plumbing, packaging the PyPSA-Earth environment, wiring CDS/cutout
-caching, and the network→workbook ingest. **Deferred for now** — documented here
-so the path is clear when prioritised. The near-term value (OSM topology + power
-plants, ENTSO-E load + installed capacity, EIA demand, KPG193) is covered by the
-existing importer sources.
+caching, and the network→workbook ingest. The near-term value (OSM topology +
+power plants, ENTSO-E load + installed capacity, EIA demand, KPG193) is covered
+by the existing importer sources.
+
+## First cut (built, 2026-07)
+
+`backend/app/routers/pypsa_earth.py` implements the **async job seam** and the
+**network→workbook ingest** — the two architectural pieces — with the heavy
+workflow gated behind an external environment:
+
+- `POST /api/pypsa-earth/build` queues a job (`BuildRequest`: country, horizon,
+  carriers, clusters) and returns a `jobId`; `GET …/build/{id}` polls
+  phase/status; `GET …/build/{id}/result` returns the ingested `WorkbookFragment`
+  when done; `GET …/available` reports whether the environment is set up.
+- The job coroutine checks `RAGNAROK_PYPSA_EARTH_DIR` (a checked-out workflow dir
+  with a `Snakefile`). **Not configured → the job fails cleanly** with a pointer
+  to this doc; **configured →** it shells out to `snakemake … results/networks/
+  elec_s_{clusters}.nc` and ingests the result via
+  `ingest_network()` → `serialize.network_to_model` (proven on a real `.nc` in
+  `tests/test_pypsa_earth.py`).
+
+**Still to do for a full integration:** (1) a frontend surface (country + config
+form, progress panel, "not configured" guidance) — I9 is not yet in the Data
+view; (2) writing a per-request `config.yaml` override into the workflow dir
+(currently it runs the dir's own config); (3) provisioning/packaging the
+PyPSA-Earth conda env + CDS key + cutout cache on the host; (4) cutout reuse
+across requests. The seam + ingest are done and tested — those four are the
+operational/UX remainder.
