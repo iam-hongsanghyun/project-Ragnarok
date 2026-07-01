@@ -48,6 +48,7 @@ from .optimal_bid import build_optimal_bid
 from .asset_swap import build_asset_swap
 from .ess import build_ess_business_case
 from .ppa import build_ppa
+from .ppa_explorer import build_ppa_explorer
 from .expansion import build_expansion_results
 from .full_outputs import build_full_outputs
 from .market import (
@@ -967,6 +968,20 @@ def run_pypsa(
         if ppa_enabled
         else None
     )
+    # PPA opportunity explorer (DW4) — rank alternative contract shapes at the
+    # same strike; a companion read to PP1, so it reuses the PPA config.
+    ppa_explorer = (
+        build_ppa_explorer(
+            network, model,
+            owner=str(ppa_cfg.get("owner", "") or ""),
+            owner_column=owner_column,
+            flat_mw=float(ppa_cfg.get("flatMW", 0.0) or 0.0),
+            strike_price=float(ppa_cfg.get("strikePrice", 0.0) or 0.0),
+            currency=currency,
+        )
+        if ppa_enabled
+        else None
+    )
     # Company-level financial model (F2) — NPV / IRR / payback / DSCR per owner.
     company_finance = build_company_finance(
         network, model,
@@ -1004,6 +1019,7 @@ def run_pypsa(
         "priceFormation": price_formation,
         "commitment": commitment,
         "ppa": ppa,
+        "ppaExplorer": ppa_explorer,
         "bidStrategy": bid_strategy,
         "optimalBid": optimal_bid,
         "assetSwap": asset_swap,

@@ -123,6 +123,7 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   const hasAssetSwap = !!results.assetSwap;
   const hasEss = !!(results.essBusinessCase && results.essBusinessCase.sizes.length > 0);
   const hasPpa = !!(results.ppa && results.ppa.energyMWh > 0);
+  const hasPpaExplorer = !!(results.ppaExplorer && results.ppaExplorer.shapes.length > 0);
   const hasEnergyBalance = !!(results.energyBalance && results.energyBalance.carriers.length > 0);
   const hasDemandResponse = !!(results.demandResponse && results.demandResponse.loads.length > 0);
 
@@ -265,6 +266,12 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   if (hasPpa) {
     const ppa: Card = { id: id('ppa'), kind: 'ppa' };
     rows.push(row({ cards: [{ card: ppa }] }));
+  }
+
+  // 9e6b. PPA opportunity explorer — shape ranking (DW4, conditional)
+  if (hasPpaExplorer) {
+    const pe: Card = { id: id('ppa-explorer'), kind: 'ppa-explorer' };
+    rows.push(row({ cards: [{ card: pe }] }));
   }
 
   // 9e7. Per-carrier energy balance — sector coupling (conditional; multi-carrier)

@@ -43,6 +43,7 @@ import { OptimalBidCard } from '../../../features/analytics/cards/OptimalBidCard
 import { AssetSwapCard } from '../../../features/analytics/cards/AssetSwapCard';
 import { EssCard } from '../../../features/analytics/cards/EssCard';
 import { PpaCard } from '../../../features/analytics/cards/PpaCard';
+import { PpaExplorerCard } from '../../../features/analytics/cards/PpaExplorerCard';
 import { EnergyBalanceCard } from '../../../features/analytics/cards/EnergyBalanceCard';
 import { DemandResponseCard } from '../../../features/analytics/cards/DemandResponseCard';
 import { PowerFlowCard } from '../../../features/analytics/cards/PowerFlowCard';
@@ -482,6 +483,10 @@ export function AnalyticsDashboard({
           return results.ppa
             ? <PpaCard data={results.ppa} />
             : <p className="dashboard-cell-missing">This run did not include a PPA valuation.</p>;
+        case 'ppa-explorer':
+          return results.ppaExplorer
+            ? <PpaExplorerCard data={results.ppaExplorer} />
+            : <p className="dashboard-cell-missing">This run did not include a PPA shape comparison.</p>;
         case 'energy-balance':
           return results.energyBalance
             ? <EnergyBalanceCard data={results.energyBalance} />
@@ -564,6 +569,7 @@ export function AnalyticsDashboard({
       case 'asset-swap': return 'Asset swap (repowering what-if)';
       case 'ess-business-case': return 'ESS business case (size sweep)';
       case 'ppa': return 'PPA contract (CfD settlement)';
+      case 'ppa-explorer': return 'PPA opportunity explorer (shape ranking)';
       case 'energy-balance': return 'Energy balance (by carrier)';
       case 'demand-response': return 'Demand response (shiftable load)';
       case 'power-flow': return 'Power flow (convergence & voltages)';

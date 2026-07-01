@@ -305,6 +305,21 @@ export interface PpaResult {
   buyerNet: number;
 }
 
+/** PPA opportunity explorer (DW4) — candidate contract shapes ranked by capture. */
+export interface PpaExplorerShape {
+  shape: string;
+  energyMWh: number;
+  avgSpotPrice: number;
+  sellerNet: number;
+  buyerNet: number;
+}
+
+export interface PpaExplorerResult {
+  currency: string;
+  strikePrice: number;
+  shapes: PpaExplorerShape[];
+}
+
 /** Demand response (M2) — shiftable load: consumption moves in time (energy
  *  conserved), unlike load shedding which drops it. */
 export interface DemandResponseConfig {
@@ -1202,6 +1217,7 @@ export interface RunResults {
   essBusinessCase?: EssBusinessCaseResult;
   /** PPA contract valuation (settlement vs spot). */
   ppa?: PpaResult;
+  ppaExplorer?: PpaExplorerResult;
   appliedConstraints?: AppliedConstraint[];
   emissionsBreakdown?: EmissionsBreakdown;
   energyBalance?: EnergyBalanceResult;
