@@ -20,6 +20,13 @@ from backend.app.routers import pypsa_earth as pe
 client = TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def _isolate_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point the persisted-override file at a throwaway path so tests never read
+    or write the real backend/data/pypsa_earth.json."""
+    monkeypatch.setattr(pe, "_STATE_FILE", tmp_path / "pe_state.json")
+
+
 def test_available_reports_not_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("RAGNAROK_PYPSA_EARTH_DIR", raising=False)
     r = client.get("/api/pypsa-earth/available").json()
@@ -56,6 +63,38 @@ def test_build_job_fails_cleanly_when_not_configured(monkeypatch: pytest.MonkeyP
 
 def test_build_status_404_for_unknown_job() -> None:
     assert client.get("/api/pypsa-earth/build/nope").status_code == 404
+
+
+def test_configure_persists_a_valid_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RAGNAROK_PYPSA_EARTH_DIR", raising=False)
+    workflow = tmp_path / "pypsa-earth"
+    workflow.mkdir()
+    (workflow / "Snakefile").write_text("# workflow root\n")
+
+    r = client.post("/api/pypsa-earth/configure", json={"dir": str(workflow)}).json()
+    assert r["available"] is True and r["dir"] == str(workflow)
+    # Persisted → a fresh /available (no env var) still reports it.
+    assert client.get("/api/pypsa-earth/available").json()["available"] is True
+
+
+def test_configure_rejects_missing_directory() -> None:
+    r = client.post("/api/pypsa-earth/configure", json={"dir": "/no/such/dir-xyz"})
+    assert r.status_code == 400 and "No such directory" in r.json()["detail"]
+
+
+def test_configure_rejects_dir_without_snakefile(tmp_path: Path) -> None:
+    (tmp_path / "empty").mkdir()
+    r = client.post("/api/pypsa-earth/configure", json={"dir": str(tmp_path / "empty")})
+    assert r.status_code == 400 and "Snakefile" in r.json()["detail"]
+
+
+def test_configure_clear_removes_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RAGNAROK_PYPSA_EARTH_DIR", raising=False)
+    workflow = tmp_path / "pe"
+    workflow.mkdir()
+    (workflow / "Snakefile").write_text("# root\n")
+    assert client.post("/api/pypsa-earth/configure", json={"dir": str(workflow)}).json()["available"] is True
+    assert client.post("/api/pypsa-earth/configure", json={"dir": ""}).json()["available"] is False
 
 
 def test_ingest_network_maps_a_netcdf_to_sheets(tmp_path: Path) -> None:

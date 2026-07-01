@@ -13,6 +13,7 @@ export interface PypsaEarthAvailability {
   available: boolean;
   detail: string;
   docs: string;
+  dir?: string;
 }
 
 export interface BuildJobStatus {
@@ -39,6 +40,15 @@ async function j<T>(resp: Response): Promise<T> {
 
 export async function checkAvailable(): Promise<PypsaEarthAvailability> {
   return j(await fetch(`${API_BASE}/api/pypsa-earth/available`));
+}
+
+/** Point Ragnarok at a pypsa-earth checkout dir (empty string clears it). */
+export async function configureEnv(dir: string): Promise<PypsaEarthAvailability> {
+  return j(await fetch(`${API_BASE}/api/pypsa-earth/configure`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dir }),
+  }));
 }
 
 export async function startBuild(req: BuildRequest): Promise<BuildJobStatus> {

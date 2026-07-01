@@ -25,6 +25,7 @@ ingest are what run (and are tested) everywhere.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import uuid
@@ -39,29 +40,51 @@ log = logging.getLogger(__name__)
 
 _ENV_VAR = "RAGNAROK_PYPSA_EARTH_DIR"
 _DOC = "docs/pypsa-earth-integration.md"
+# Persisted "point at an existing checkout" override — set via the Data-view
+# button so setup survives without an env var or a restart (backend/data/).
+_STATE_FILE = Path(__file__).resolve().parents[2] / "data" / "pypsa_earth.json"
 
 # Single-process in-memory job registry (mirrors startup_status's convention).
 _JOBS: dict[str, dict[str, Any]] = {}
 
 
-def resolve_env() -> Path | None:
-    """The configured PyPSA-Earth workflow dir, or None if not set up.
-
-    Valid when ``$RAGNAROK_PYPSA_EARTH_DIR`` points at a directory containing a
-    ``Snakefile`` (the workflow root).
-    """
-    raw = os.environ.get(_ENV_VAR, "").strip()
+def _valid_workflow_dir(raw: str) -> Path | None:
+    """A directory that looks like a pypsa-earth checkout (has a Snakefile)."""
+    raw = (raw or "").strip()
     if not raw:
         return None
     path = Path(raw).expanduser()
     return path if (path.is_dir() and (path / "Snakefile").is_file()) else None
 
 
+def _load_override() -> str:
+    try:
+        return str((json.loads(_STATE_FILE.read_text(encoding="utf-8")) or {}).get("dir") or "")
+    except Exception:  # noqa: BLE001 — missing/corrupt file → no override
+        return ""
+
+
+def _save_override(dir_str: str) -> None:
+    _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _STATE_FILE.write_text(json.dumps({"dir": dir_str}), encoding="utf-8")
+
+
+def resolve_env() -> Path | None:
+    """The configured PyPSA-Earth workflow dir, or None if not set up.
+
+    Prefers the persisted directory set via ``POST /configure`` (the Data-view
+    button), then falls back to ``$RAGNAROK_PYPSA_EARTH_DIR``. A dir is valid
+    only if it contains a ``Snakefile`` (the workflow root).
+    """
+    return _valid_workflow_dir(_load_override()) or _valid_workflow_dir(os.environ.get(_ENV_VAR, ""))
+
+
 def _not_configured_message() -> str:
     return (
-        f"PyPSA-Earth is not configured on this server. Set {_ENV_VAR} to a "
-        f"checked-out pypsa-earth workflow directory (with its own conda env and a "
-        f"CDS API key for ERA5 cutouts), then retry. See {_DOC}."
+        f"PyPSA-Earth is not configured on this server. Point Ragnarok at a "
+        f"checked-out pypsa-earth workflow directory below (or set {_ENV_VAR}). "
+        f"The directory needs its own conda env and a CDS API key for ERA5 "
+        f"cutouts — see {_DOC}."
     )
 
 
@@ -157,9 +180,38 @@ def available() -> dict[str, Any]:
     env = resolve_env()
     return {
         "available": env is not None,
+        "dir": str(env) if env else "",
         "detail": f"PyPSA-Earth workflow at {env}" if env else _not_configured_message(),
         "docs": _DOC,
     }
+
+
+class ConfigureRequest(BaseModel):
+    """Point Ragnarok at a pypsa-earth checkout (or clear it with an empty dir)."""
+
+    dir: str | None = None
+
+
+@router.post("/configure")
+def configure(req: ConfigureRequest) -> dict[str, Any]:
+    """Persist a PyPSA-Earth workflow directory (the Data-view "use this
+    directory" button). Validates it's a real checkout so the user gets an
+    immediate, specific error rather than a failed build later."""
+    raw = (req.dir or "").strip()
+    if not raw:
+        _save_override("")  # clear the override
+        return available()
+    path = Path(raw).expanduser()
+    if not path.is_dir():
+        raise HTTPException(status_code=400, detail=f"No such directory on the server: {raw}")
+    if not (path / "Snakefile").is_file():
+        raise HTTPException(
+            status_code=400,
+            detail=(f"{raw} has no Snakefile — is it a pypsa-earth checkout? "
+                    f"Clone it with: git clone https://github.com/pypsa-meets-earth/pypsa-earth"),
+        )
+    _save_override(str(path))
+    return available()
 
 
 @router.post("/build")

@@ -9688,6 +9688,31 @@ section.data-import-filters__group {
   border: 1px dashed var(--border);
   padding: 8px 10px;
   border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pe-panel__dir {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 0.78rem;
+  color: var(--text-muted, #888);
+}
+.pe-panel__setup summary {
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: var(--text);
+}
+.pe-panel__cmd {
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px;
+  font-size: 0.72rem;
+  overflow-x: auto;
 }
 .pe-panel__error {
   color: var(--danger, #dc2626);

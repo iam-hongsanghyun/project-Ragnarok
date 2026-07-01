@@ -10,6 +10,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import type { WorkbookFragment } from 'lib/api/databases';
 import {
   checkAvailable,
+  configureEnv,
   getBuildResult,
   getBuildStatus,
   startBuild,
@@ -31,6 +32,9 @@ export function PypsaEarthPanel({ selectedCountry, applyFragment }: Props) {
   const [job, setJob] = useState<BuildJobStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dir, setDir] = useState('');
+  const [configuring, setConfiguring] = useState(false);
+  const [configError, setConfigError] = useState<string | null>(null);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -38,6 +42,19 @@ export function PypsaEarthPanel({ selectedCountry, applyFragment }: Props) {
     checkAvailable().then((a) => mounted.current && setAvail(a)).catch(() => {});
     return () => { mounted.current = false; };
   }, []);
+
+  const applyDirectory = async () => {
+    if (!dir.trim()) return;
+    setConfiguring(true); setConfigError(null);
+    try {
+      const a = await configureEnv(dir.trim());
+      if (mounted.current) setAvail(a);  // flips to the build form when valid
+    } catch (e) {
+      if (mounted.current) setConfigError(e instanceof Error ? e.message : 'Could not use that directory.');
+    } finally {
+      if (mounted.current) setConfiguring(false);
+    }
+  };
 
   const build = async () => {
     if (!selectedCountry) return;
@@ -83,8 +100,34 @@ export function PypsaEarthPanel({ selectedCountry, applyFragment }: Props) {
         ) : !avail.available ? (
           <div className="pe-panel__notice">
             <strong>Not configured on this server.</strong>
-            <p className="sg-setting-hint">{avail.detail}</p>
-            <p className="sg-setting-hint">See <code>{avail.docs}</code>.</p>
+            <p className="sg-setting-hint">
+              Point Ragnarok at a pypsa-earth checkout on the <b>server</b> (the machine running the
+              backend). It must have its conda env installed and a CDS API key configured.
+            </p>
+            <label className="pe-panel__dir">
+              PyPSA-Earth directory (server path)
+              <input
+                type="text"
+                className="ss-input"
+                placeholder="/path/to/pypsa-earth"
+                value={dir}
+                onChange={(e) => setDir(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') void applyDirectory(); }}
+              />
+            </label>
+            <button className="run-button" disabled={!dir.trim() || configuring} onClick={applyDirectory}>
+              {configuring ? 'Checking…' : 'Use this directory'}
+            </button>
+            {configError && <p className="pe-panel__error">{configError}</p>}
+            <details className="pe-panel__setup">
+              <summary>First time? One-time setup</summary>
+              <p className="sg-setting-hint">Run these on the server, then paste the path above:</p>
+              <pre className="pe-panel__cmd">{`git clone https://github.com/pypsa-meets-earth/pypsa-earth
+cd pypsa-earth
+conda env create -f envs/environment.yaml   # ~20-30 min
+# then add a CDS API key: https://cds.climate.copernicus.eu (see ~/.cdsapirc)`}</pre>
+              <p className="sg-setting-hint">Full guide: <code>{avail.docs}</code>.</p>
+            </details>
           </div>
         ) : (
           <>
