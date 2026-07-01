@@ -30,12 +30,13 @@ def _factories() -> list[Callable[[], Database]]:
     from .databases.entsoe_load import build as build_entsoe
     from .databases.entsoe_capacity import build as build_entsoe_cap
     from .databases.openmeteo_renewable import build as build_openmeteo
+    from .databases.openmeteo_demand import build as build_openmeteo_demand
 
     return [
         build_osm, build_osm_pp, build_wri, build_wb,
         build_kpg_network, build_kpg_rencap, build_kpg_demand, build_kpg_renprof,
         build_eia, build_entsoe, build_entsoe_cap,
-        build_openmeteo,
+        build_openmeteo, build_openmeteo_demand,
     ]
 
 
