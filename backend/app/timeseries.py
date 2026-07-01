@@ -121,6 +121,48 @@ def transform_rows(
     return out.replace({np.nan: None}).to_dict(orient="records")
 
 
+def generate_snapshots(start: str, end: str, step_hours: float = 1.0) -> list[str]:
+    """Snapshot timestamps for ``[start, end]`` at ``step_hours`` (T1 retarget).
+
+    Returns ``"YYYY-MM-DD HH:MM"`` strings (the app's canonical snapshot form).
+    """
+    step = max(step_hours, 1e-6)
+    # pandas freq wants an integer-ish alias; minutes keep sub-hourly steps exact.
+    freq = f"{int(round(step * 60))}min"
+    idx = pd.date_range(start=start, end=end, freq=freq)
+    return [ts.strftime("%Y-%m-%d %H:%M") for ts in idx]
+
+
+def retarget_rows(
+    rows: list[dict[str, Any]],
+    index_col: str,
+    new_snapshots: list[str],
+    fill: str = "tile",
+) -> list[dict[str, Any]]:
+    """Reindex wide series ``rows`` onto ``new_snapshots`` positionally (T1).
+
+    Each new snapshot takes the source row at the same position; when the new
+    window is longer, ``tile`` cycles the source (reuse a base year to fill future
+    years) and ``pad`` repeats the last row. Shorter windows truncate. The value
+    columns carry over; the index column is set to the new snapshot.
+    """
+    out: list[dict[str, Any]] = []
+    n_src = len(rows)
+    for i, snap in enumerate(new_snapshots):
+        row: dict[str, Any] = {}
+        if n_src:
+            if i < n_src:
+                src = rows[i]
+            elif fill == "pad":
+                src = rows[-1]
+            else:  # tile
+                src = rows[i % n_src]
+            row = {k: v for k, v in src.items() if k != index_col}
+        row[index_col] = snap
+        out.append(row)
+    return out
+
+
 def downsample(df: pd.DataFrame, max_points: int, agg: Agg, index_col: str) -> pd.DataFrame:
     """Reduce ``df`` to at most ``max_points`` rows using ``agg``.
 

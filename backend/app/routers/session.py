@@ -202,6 +202,49 @@ def transform_series(name: str, payload: SeriesTransform) -> dict:
     return result
 
 
+class SnapshotRetarget(BaseModel):
+    """Body for ``POST /api/session/snapshots/retarget`` (T1).
+
+    Regenerate the snapshot index over ``[start, end]`` at ``stepHours`` and
+    reindex every temporal sheet onto it (``fill``: ``tile`` = cycle the source to
+    fill a longer window, ``pad`` = repeat the last value).
+    """
+
+    start: str
+    end: str
+    stepHours: float = 1.0
+    fill: str = "tile"
+    sessionId: str = "default"
+
+
+@router.post("/snapshots/retarget")
+def retarget_snapshots(payload: SnapshotRetarget) -> dict:
+    """Retarget the session's snapshot window and reindex all temporal sheets."""
+    from .. import timeseries  # local import: keeps the module's import graph light
+
+    model = model_store.load_full_model(payload.sessionId)
+    if not model:
+        raise HTTPException(status_code=400, detail="No working model in this session.")
+    try:
+        new_snaps = timeseries.generate_snapshots(payload.start, payload.end, payload.stepHours)
+    except Exception as exc:  # noqa: BLE001 — bad dates → 400, not 500
+        raise HTTPException(status_code=400, detail=f"Invalid window: {exc}") from exc
+    if not new_snaps:
+        raise HTTPException(status_code=400, detail="The window produced no snapshots (check start/end/step).")
+
+    retargeted: list[str] = []
+    for sheet, rows in list(model.items()):
+        if not model_store.is_series_sheet(sheet, rows):
+            continue
+        index_col = timeseries.series_index_col(list(rows[0].keys()) if rows else ["snapshot"])
+        model[sheet] = timeseries.retarget_rows(rows, index_col, new_snaps, payload.fill)
+        retargeted.append(sheet)
+    model["snapshots"] = [{"snapshot": s} for s in new_snaps]
+
+    model_store.save_model(payload.sessionId, model)
+    return {"snapshots": len(new_snaps), "retargeted": retargeted}
+
+
 @router.post("/clear")
 def clear_session(session_id: str = Query("default", alias="session_id")) -> dict:
     """Clear the session's working model (settings are a separate frontend concern)."""
