@@ -103,11 +103,16 @@ create_env() {
   done
   echo
   echo "ERROR: conda env create failed after $attempts attempts."
-  echo "  conda-forge is usually reachable, so this is typically a LOCAL network issue:"
-  echo "    • check your internet connection"
-  echo "    • if on a VPN or corporate proxy, it may block conda.anaconda.org —"
-  echo "      disconnect the VPN, or set HTTPS_PROXY, or add the proxy to ~/.condarc"
-  echo "    • then re-run:  bash \"$0\" --recreate"
+  echo "  First check whether it's the network or conda itself:"
+  echo "    curl -sI https://conda.anaconda.org/conda-forge/osx-arm64/repodata.json | head -1"
+  echo "  • If that curl FAILS → network/VPN/proxy: fix the connection (or set HTTPS_PROXY)."
+  echo "  • If that curl says 200 but conda still gets 'HTTP 000 CONNECTION FAILED',"
+  echo "    it's conda's own networking, not your internet. Most likely fixes:"
+  echo "      - stale proxy in conda config:   cat ~/.condarc   (remove any proxy_servers)"
+  echo "      - clear a corrupt cache:         conda clean -a -y"
+  echo "      - a broken conda install → reinstall Miniforge (healthy arm64 conda+mamba):"
+  echo "          https://github.com/conda-forge/miniforge  (then re-run this script)"
+  echo "  Then re-run:  bash \"$0\" --recreate"
   return 1
 }
 
