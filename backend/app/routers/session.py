@@ -180,6 +180,7 @@ class SeriesTransform(BaseModel):
     wrap: bool = True
     minValue: float | None = None
     maxValue: float | None = None
+    growthPct: float = 0.0
     sessionId: str = "default"
 
 
@@ -190,6 +191,7 @@ def transform_series(name: str, payload: SeriesTransform) -> dict:
         "columns": payload.columns, "factor": payload.factor, "delta": payload.delta,
         "shift": payload.shift, "wrap": payload.wrap,
         "minValue": payload.minValue, "maxValue": payload.maxValue,
+        "growthPct": payload.growthPct,
     }
     try:
         result = model_store.transform_series(payload.sessionId, name, payload.op, params)

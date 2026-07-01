@@ -7,6 +7,8 @@ over this function.
 """
 from __future__ import annotations
 
+import pytest
+
 from backend.app.timeseries import transform_rows
 
 
@@ -61,6 +63,15 @@ def test_interpolate_fills_gaps_linearly() -> None:
     assert [r["a"] for r in out] == [10.0, 20.0, 30.0, 40.0]
 
 
+def test_grow_ramps_first_unchanged_last_by_growth() -> None:
+    # 4 rows, +30% total: ramp factor = 1.0, 1.1, 1.2, 1.3.
+    out = transform_rows(_rows(), "snapshot", "grow", growth_pct=30.0)
+    assert [round(r["a"], 4) for r in out] == [10.0, 22.0, 36.0, 52.0]
+    # first snapshot unchanged, last scaled by exactly 1.30
+    assert out[0]["a"] == pytest.approx(10.0)
+    assert out[3]["a"] == pytest.approx(40.0 * 1.30)
+
+
 def test_clip_bounds_values() -> None:
     out = transform_rows(_rows(), "snapshot", "clip", min_value=15.0, max_value=35.0)
     assert [r["a"] for r in out] == [15.0, 20.0, 30.0, 35.0]
@@ -68,6 +79,5 @@ def test_clip_bounds_values() -> None:
 
 def test_empty_rows_and_bad_op() -> None:
     assert transform_rows([], "snapshot", "scale", factor=2.0) == []
-    import pytest
     with pytest.raises(ValueError):
         transform_rows(_rows(), "snapshot", "nonsense")  # type: ignore[arg-type]

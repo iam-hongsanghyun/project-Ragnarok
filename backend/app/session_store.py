@@ -516,6 +516,7 @@ def transform_series(
         wrap=bool(params.get("wrap", True)),
         min_value=params.get("minValue"),
         max_value=params.get("maxValue"),
+        growth_pct=float(params.get("growthPct", 0.0)),
     )
     pd.DataFrame(rows).to_parquet(path, index=False)
     columns = list(rows[0].keys()) if rows else list(entry.get("columns", []))

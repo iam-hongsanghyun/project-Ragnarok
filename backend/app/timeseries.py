@@ -36,8 +36,8 @@ def df_to_records(df: pd.DataFrame) -> list[dict[str, Any]]:
     return df.replace({np.nan: None}).to_dict(orient="records")
 
 
-TransformOp = Literal["scale", "offset", "shift", "interpolate", "clip"]
-VALID_TRANSFORMS = ("scale", "offset", "shift", "interpolate", "clip")
+TransformOp = Literal["scale", "offset", "shift", "interpolate", "clip", "grow"]
+VALID_TRANSFORMS = ("scale", "offset", "shift", "interpolate", "clip", "grow")
 
 
 def transform_rows(
@@ -52,6 +52,7 @@ def transform_rows(
     wrap: bool = True,
     min_value: float | None = None,
     max_value: float | None = None,
+    growth_pct: float = 0.0,
 ) -> list[dict[str, Any]]:
     """Apply a bulk transform to the value columns of wide series ``rows`` (T1).
 
@@ -67,9 +68,13 @@ def transform_rows(
                     gaps, reversible) or edge-fill the exposed end
         interpolate linear-fill blank/None/NaN cells (edge → nearest neighbour)
         clip        bound to ``[min_value, max_value]``
+        grow        ramp-scale for a demand-growth forecast: the first snapshot is
+                    unchanged and the last is scaled by ``1 + growth_pct/100``,
+                    linearly in between
 
     Algorithm (shift): ``out[i] = in[(i - shift) mod N]`` when ``wrap`` else
     ``out[i] = in[i - shift]`` with the exposed end held at the nearest value.
+    Algorithm (grow): ``out[i] = in[i] · (1 + (growth_pct/100)·i/(N-1))``.
     """
     if not rows:
         return rows
@@ -102,6 +107,11 @@ def transform_rows(
         lo = None if min_value is None else float(min_value)
         hi = None if max_value is None else float(max_value)
         num = num.clip(lower=lo, upper=hi)
+    elif op == "grow":
+        n = len(num)
+        if n > 1:
+            ramp = 1.0 + (float(growth_pct) / 100.0) * (np.arange(n) / (n - 1))
+            num = num.mul(pd.Series(ramp, index=num.index), axis=0)
     else:
         raise ValueError(f"unknown transform op {op!r}")
 

@@ -468,6 +468,7 @@ export function TablesPane({
   const [txWrap, setTxWrap] = useState(true);
   const [txMin, setTxMin] = useState('');
   const [txMax, setTxMax] = useState('');
+  const [txGrowth, setTxGrowth] = useState(10);
   const [txBusy, setTxBusy] = useState(false);
   useEffect(() => { setTxOpen(false); }, [sel.sheet]);
   const applyTransform = async () => {
@@ -482,6 +483,7 @@ export function TablesPane({
         wrap: txWrap,
         minValue: num(txMin),
         maxValue: num(txMax),
+        growthPct: txGrowth,
       });
       setTsReloadKey((k) => k + 1); // re-fetch the transformed series
       setTxOpen(false);
@@ -653,6 +655,7 @@ export function TablesPane({
               <option value="scale">Scale ×</option>
               <option value="offset">Offset +</option>
               <option value="shift">Shift steps</option>
+              <option value="grow">Grow % (ramp)</option>
               <option value="interpolate">Interpolate gaps</option>
               <option value="clip">Clip min/max</option>
             </select>
@@ -685,6 +688,11 @@ export function TablesPane({
                   <input type="number" className="sg-num-input" style={{ width: 80 }} placeholder="—" value={txMax} onChange={(e) => setTxMax(e.target.value)} />
                 </label>
               </>
+            )}
+            {txOp === 'grow' && (
+              <label style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>total %
+                <input type="number" step="1" className="sg-num-input" style={{ width: 90 }} value={txGrowth} onChange={(e) => setTxGrowth(Number(e.target.value))} />
+              </label>
             )}
             {txOp === 'interpolate' && (
               <span className="sg-setting-hint" style={{ margin: 0 }}>Linear-fill blank cells across each column.</span>

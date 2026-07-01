@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 from backend.pypsa.network import build_network
+from backend.pypsa.results.emissions import build_emissions_breakdown
 from backend.pypsa.results.energy_balance import build_energy_balance
 
 SCENARIO = {"discountRate": 0.0, "carbonPrice": 0.0}
@@ -92,3 +93,21 @@ def test_sector_coupled_balance_is_exact() -> None:
     gas_snk = {s["label"]: s for s in gas["sinks"]}
     assert gas_snk["CCGT"]["energyMWh"] == pytest.approx(800.0, abs=1e-3)
     assert gas_snk["CCGT"]["kind"] == "conversion"
+
+
+def test_conversion_emissions_counted_once_at_fuel_generator() -> None:
+    """M1+M3: fuel burned in a Link is counted at the fuel generator (primary
+    energy), efficiency-aware, and never double-counted on the Link itself.
+
+    Gas well makes 800 MWh of gas to drive the η=0.5 CCGT to 400 MWh of power, so
+    emissions = 800 × 0.2 = 160 tCO₂ — attributed to the well, not the CCGT.
+    """
+    n, _ = build_network(_sector_model(), SCENARIO, OPTIONS)
+    n.optimize(solver_name="highs")
+    out = build_emissions_breakdown(n, {"gas": 0.2, "electricity": 0.0, "CCGT": 0.0})
+    gas = next(r for r in out["byGenerator"] if r["name"] == "gas_well")
+    assert gas["emissions_tco2"] == pytest.approx(160.0, abs=1e-1)
+    # The CCGT Link is not a generator → not a second emissions source.
+    assert all(r["name"] != "CCGT" for r in out["byGenerator"])
+    # System total equals the single fuel-generator figure (no double count).
+    assert sum(r["emissions_tco2"] for r in out["byGenerator"]) == pytest.approx(160.0, abs=1e-1)

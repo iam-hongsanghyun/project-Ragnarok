@@ -214,7 +214,7 @@ export async function patchSheet(
   return asJson(resp);
 }
 
-export type SeriesTransformOp = 'scale' | 'offset' | 'shift' | 'interpolate' | 'clip';
+export type SeriesTransformOp = 'scale' | 'offset' | 'shift' | 'interpolate' | 'clip' | 'grow';
 
 export interface SeriesTransformParams {
   op: SeriesTransformOp;
@@ -226,6 +226,8 @@ export interface SeriesTransformParams {
   wrap?: boolean;
   minValue?: number | null;
   maxValue?: number | null;
+  /** Total % growth ramped first→last snapshot (op 'grow'). */
+  growthPct?: number;
 }
 
 /** Apply a bulk transform to a temporal sheet server-side (T1). */

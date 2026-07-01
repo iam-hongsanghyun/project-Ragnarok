@@ -493,6 +493,7 @@ def transform_series(
             wrap=bool(params.get("wrap", True)),
             min_value=params.get("minValue"),
             max_value=params.get("maxValue"),
+            growth_pct=float(params.get("growthPct", 0.0)),
         )
         conn.execute(f"DELETE FROM {tbl}")
         conn.executemany(
