@@ -26,7 +26,7 @@ def test_registry_lists_expected_modules():
         "kpg193_demand_profile", "kpg193_renewable_profile",
         "eia_demand", "entsoe_load", "entsoe_capacity", "entsoe_generation_profile",
         "openelectricity_demand", "openelectricity_renewable",
-        "elexon_demand", "elexon_renewable", "renewables_ninja",
+        "elexon_demand", "elexon_renewable", "renewables_ninja", "climatewatch_policy",
         "openmeteo_renewable", "pvgis_renewable", "nasa_power_renewable",
         "openmeteo_demand",
     }
