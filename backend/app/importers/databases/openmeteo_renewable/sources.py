@@ -56,6 +56,10 @@ async def open_meteo(http: Any, lat: float, lon: float, date_from: str, date_to:
 
 # ── PVGIS (EU JRC, keyless) ───────────────────────────────────────────────────
 _PVGIS_URL = "https://re.jrc.ec.europa.eu/api/v5_2/seriescalc"
+# PVGIS hourly radiation is only served for these years; a later request year is
+# mapped onto the nearest available year (the profile shape is the point, not the
+# calendar), then re-stamped so the snapshots match what the user asked for.
+_PVGIS_MIN_YEAR, _PVGIS_MAX_YEAR = 2005, 2020
 
 
 def _pvgis_time(t: str) -> str:
@@ -64,22 +68,44 @@ def _pvgis_time(t: str) -> str:
     return f"{s[0:4]}-{s[4:6]}-{s[6:8]} {s[9:11]}:00"
 
 
+def _is_leap(year: int) -> bool:
+    return year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
+
+
+def _restamp_year(label: str, shift: int) -> str | None:
+    """Shift a ``"YYYY-MM-DD HH:00"`` label's year by ``shift``; drop 29 Feb when
+    the target year isn't a leap year (returns None)."""
+    if not shift:
+        return label
+    new_year = int(label[:4]) + shift
+    if label[5:10] == "02-29" and not _is_leap(new_year):
+        return None
+    return f"{new_year}{label[4:]}"
+
+
 async def pvgis(http: Any, lat: float, lon: float, date_from: str, date_to: str, secret: str | None) -> dict[str, Any]:
-    y0, y1 = int(date_from[:4]), int(date_to[:4])
+    req_y0, req_y1 = int(date_from[:4]), int(date_to[:4])
+    f_y0 = min(max(req_y0, _PVGIS_MIN_YEAR), _PVGIS_MAX_YEAR)
+    f_y1 = min(max(req_y1, _PVGIS_MIN_YEAR), _PVGIS_MAX_YEAR)
+    shift = req_y0 - f_y0  # re-stamp the fetched year back to the requested one
     body = await http.get_json(_PVGIS_URL, params={
-        "lat": lat, "lon": lon, "startyear": y0, "endyear": y1,
+        "lat": lat, "lon": lon, "startyear": f_y0, "endyear": f_y1,
         "outputformat": "json", "pvcalculation": 0, "components": 1,
         "angle": 0, "aspect": 0,  # horizontal plane → GHI
     })
     hourly = (((body or {}).get("outputs") or {}).get("hourly")) or []
-    times = [_pvgis_time(r.get("time", "")) for r in hourly]
-    ghi = [
-        float(r.get("Gb(i)") or 0.0) + float(r.get("Gd(i)") or 0.0) + float(r.get("Gr(i)") or 0.0)
-        for r in hourly
-    ]
-    wind = _extrapolate_wind([r.get("WS10m") for r in hourly], from_height=10.0)
-    kept = _clip_to_range(times, ghi, wind, date_from, date_to)
-    return kept
+    times: list[str] = []
+    ghi: list[float] = []
+    wind_raw: list[Any] = []
+    for r in hourly:
+        t = _restamp_year(_pvgis_time(r.get("time", "")), shift)
+        if t is None:
+            continue
+        times.append(t)
+        ghi.append(float(r.get("Gb(i)") or 0.0) + float(r.get("Gd(i)") or 0.0) + float(r.get("Gr(i)") or 0.0))
+        wind_raw.append(r.get("WS10m"))
+    wind = _extrapolate_wind(wind_raw, from_height=10.0)
+    return _clip_to_range(times, ghi, wind, date_from, date_to)
 
 
 # ── NASA POWER (keyless, global) ──────────────────────────────────────────────

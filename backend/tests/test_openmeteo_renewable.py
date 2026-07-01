@@ -85,12 +85,13 @@ def test_to_sheets_builds_runnable_renewable_fragment() -> None:
     frag = build().to_sheets(_result(["solar", "wind"]), ConvertOptions())
     assert set(frag.sheets) == {"carriers", "buses", "generators", "generators-p_max_pu"}
 
-    # One bus at the region point; a solar + wind generator on it.
-    assert [b["name"] for b in frag.sheets["buses"]] == ["re_USA"]
+    # One bus at the region point; a solar + wind generator on it. Names carry
+    # the source tag (``om`` = Open-Meteo) so grouped providers can't collide.
+    assert [b["name"] for b in frag.sheets["buses"]] == ["re_USA_om"]
     gens = {g["name"]: g for g in frag.sheets["generators"]}
-    assert set(gens) == {"solar_USA", "wind_USA"}
-    assert gens["solar_USA"]["bus"] == "re_USA" and gens["solar_USA"]["carrier"] == "solar"
-    assert gens["wind_USA"]["p_nom"] == 100.0
+    assert set(gens) == {"solar_USA_om", "wind_USA_om"}
+    assert gens["solar_USA_om"]["bus"] == "re_USA_om" and gens["solar_USA_om"]["carrier"] == "solar"
+    assert gens["wind_USA_om"]["p_nom"] == 100.0
 
     # Carriers include the electricity bus carrier + the two techs.
     assert {c["name"] for c in frag.sheets["carriers"]} == {"AC", "solar", "wind"}
@@ -98,31 +99,59 @@ def test_to_sheets_builds_runnable_renewable_fragment() -> None:
     # p_max_pu series match the conversion (solar PR=0.9; wind curve).
     rows = frag.sheets["generators-p_max_pu"]
     assert [r["snapshot"] for r in rows] == ["2023-01-01 00:00", "2023-01-01 01:00", "2023-01-01 02:00"]
-    assert [r["solar_USA"] for r in rows] == [0.0, 0.45, 0.9]
-    assert [r["wind_USA"] for r in rows] == [0.0, 1.0, 0.0]  # 0<cut-in, 12=rated, 30>cut-out
+    assert [r["solar_USA_om"] for r in rows] == [0.0, 0.45, 0.9]
+    assert [r["wind_USA_om"] for r in rows] == [0.0, 1.0, 0.0]  # 0<cut-in, 12=rated, 30>cut-out
     assert frag.snapshots == [r["snapshot"] for r in rows]
     assert frag.provenance is not None
 
 
 def test_to_sheets_respects_technology_selection() -> None:
     frag = build().to_sheets(_result(["solar"]), ConvertOptions())
-    assert [g["name"] for g in frag.sheets["generators"]] == ["solar_USA"]
-    assert all("wind_USA" not in r for r in frag.sheets["generators-p_max_pu"])
+    assert [g["name"] for g in frag.sheets["generators"]] == ["solar_USA_om"]
+    assert all("wind_USA_om" not in r for r in frag.sheets["generators-p_max_pu"])
 
 
 def test_to_sheets_multi_point_creates_a_site_per_point() -> None:
     pts = [_point(35.0, -110.0), _point(38.0, -105.0)]
     frag = build().to_sheets(_result(["solar", "wind"], pts), ConvertOptions())
-    assert {b["name"] for b in frag.sheets["buses"]} == {"re_USA_1", "re_USA_2"}
+    assert {b["name"] for b in frag.sheets["buses"]} == {"re_USA_om_1", "re_USA_om_2"}
     assert {g["name"] for g in frag.sheets["generators"]} == {
-        "solar_USA_1", "wind_USA_1", "solar_USA_2", "wind_USA_2"
+        "solar_USA_om_1", "wind_USA_om_1", "solar_USA_om_2", "wind_USA_om_2"
     }
     # each site's generators sit on its own bus at its own coordinate
     g2 = {g["name"]: g for g in frag.sheets["generators"]}
-    assert g2["solar_USA_2"]["bus"] == "re_USA_2" and g2["solar_USA_2"]["y"] == 38.0
+    assert g2["solar_USA_om_2"]["bus"] == "re_USA_om_2" and g2["solar_USA_om_2"]["y"] == 38.0
     # one shared snapshot axis; every generator has a column
     row0 = frag.sheets["generators-p_max_pu"][0]
-    assert {"solar_USA_1", "wind_USA_1", "solar_USA_2", "wind_USA_2"} <= set(row0)
+    assert {"solar_USA_om_1", "wind_USA_om_1", "solar_USA_om_2", "wind_USA_om_2"} <= set(row0)
+
+
+def test_to_sheets_applies_utc_offset_to_snapshots() -> None:
+    """utc_offset shifts snapshot labels from UTC to local time so the diurnal
+    profile lines up with local demand (e.g. +9 for Korea)."""
+    result = _result(["solar"])
+    result.filters["utc_offset"] = 9
+    frag = build().to_sheets(result, ConvertOptions())
+    assert [r["snapshot"] for r in frag.sheets["generators-p_max_pu"]] == [
+        "2023-01-01 09:00", "2023-01-01 10:00", "2023-01-01 11:00"
+    ]
+
+
+def test_pvgis_and_nasa_are_distinct_datasets_of_one_source() -> None:
+    from backend.app.importers.databases.openmeteo_renewable import (
+        build_nasa_power,
+        build_pvgis,
+    )
+
+    om, pvgis_db, nasa = build(), build_pvgis(), build_nasa_power()
+    # Three datasets, one shared source group.
+    assert {om.meta.id, pvgis_db.meta.id, nasa.meta.id} == {
+        "openmeteo_renewable", "pvgis_renewable", "nasa_power_renewable"
+    }
+    assert om.meta.source_id == pvgis_db.meta.source_id == nasa.meta.source_id
+    # Source-tagged names keep multi-selected providers from colliding.
+    pv_gens = {g["name"] for g in pvgis_db.to_sheets(_result(["solar"]), ConvertOptions()).sheets["generators"]}
+    assert pv_gens == {"solar_USA_pvgis"}
 
 
 def test_module_conforms_to_database_protocol() -> None:
@@ -206,13 +235,32 @@ def test_pvgis_adapter_parses_time_ghi_wind() -> None:
     from backend.app.importers.databases.openmeteo_renewable.sources import pvgis
 
     payload = {"outputs": {"hourly": [
-        {"time": "20220101:0010", "Gb(i)": 100.0, "Gd(i)": 50.0, "Gr(i)": 0.0, "WS10m": 10.0},
-        {"time": "20220101:0110", "Gb(i)": 0.0, "Gd(i)": 0.0, "Gr(i)": 0.0, "WS10m": 0.0},
+        {"time": "20180101:0010", "Gb(i)": 100.0, "Gd(i)": 50.0, "Gr(i)": 0.0, "WS10m": 10.0},
+        {"time": "20180101:0110", "Gb(i)": 0.0, "Gd(i)": 0.0, "Gr(i)": 0.0, "WS10m": 0.0},
     ]}}
-    r = asyncio.run(pvgis(_FakeHttp(payload), 45.0, 8.0, "2022-01-01", "2022-01-01", None))
-    assert r["time"] == ["2022-01-01 00:00", "2022-01-01 01:00"]
+    r = asyncio.run(pvgis(_FakeHttp(payload), 45.0, 8.0, "2018-01-01", "2018-01-01", None))
+    assert r["time"] == ["2018-01-01 00:00", "2018-01-01 01:00"]
     assert r["ghi"] == [150.0, 0.0]                       # Gb + Gd + Gr
     assert r["wind_ms"][0] == pytest.approx(10.0 * (10.0 ** (1 / 7)), rel=1e-3)  # 10m → 100m
+
+
+def test_pvgis_clamps_out_of_range_year_and_restamps() -> None:
+    """Requesting 2022 (out of PVGIS's 2005–2020 range) fetches the nearest
+    available year and re-stamps the timestamps back to 2022 so snapshots match
+    the requested window — instead of the raw 400 the API returns."""
+    import asyncio
+
+    from backend.app.importers.databases.openmeteo_renewable.sources import pvgis
+
+    # A real fetch would return 2020 data (the clamped year); re-stamp → 2022.
+    payload = {"outputs": {"hourly": [
+        {"time": "20200101:0010", "Gb(i)": 200.0, "Gd(i)": 0.0, "Gr(i)": 0.0, "WS10m": 5.0},
+        {"time": "20200601:0010", "Gb(i)": 0.0, "Gd(i)": 0.0, "Gr(i)": 0.0, "WS10m": 5.0},
+    ]}}
+    r = asyncio.run(pvgis(_FakeHttp(payload), 45.0, 8.0, "2022-01-01", "2022-01-31", None))
+    # Only the January hour survives the clip; its year is re-stamped to 2022.
+    assert r["time"] == ["2022-01-01 00:00"]
+    assert r["ghi"] == [200.0]
 
 
 def test_nasa_power_adapter_parses_and_handles_missing() -> None:

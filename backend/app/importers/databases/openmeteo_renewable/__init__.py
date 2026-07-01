@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from shapely.geometry import Point
@@ -43,12 +43,17 @@ _TECHS = [
 ]
 _MAX_POINTS = 16
 
-# Each weather provider is its own Data-view source (separate left-rail entry),
-# not a dropdown — they are genuinely different reanalyses. Same CF machinery;
-# only the fetch adapter (keyed here) and the presentation metadata differ.
+# The three reanalyses are genuinely different providers, but all produce the
+# same thing (renewable capacity factors), so they group under ONE Data-view
+# source with a dataset per provider (like KPG193's datasets) rather than a
+# hidden dropdown or three separate rail groups. ``tag`` disambiguates the
+# generator/bus names so multi-selecting two providers can't collide.
+_SOURCE_ID = "renewable_cf"
+_SOURCE_LABEL = "Renewable capacity factors (weather reanalysis)"
 _SOURCES: dict[str, dict[str, Any]] = {
     "open-meteo": {
         "id": "openmeteo_renewable",
+        "tag": "om",
         "name": "Open-Meteo — renewable capacity factors (any location)",
         "short_name": "Open-Meteo CF",
         "license": "CC-BY 4.0 (Open-Meteo / ERA5)",
@@ -62,19 +67,22 @@ _SOURCES: dict[str, dict[str, Any]] = {
     },
     "pvgis": {
         "id": "pvgis_renewable",
+        "tag": "pvgis",
         "name": "PVGIS — renewable capacity factors (EU JRC)",
         "short_name": "PVGIS CF",
         "license": "EU JRC PVGIS (free reuse)",
         "homepage": "https://joint-research-centre.ec.europa.eu/photovoltaic-geographical-information-system-pvgis_en",
-        "version_hint": "PVGIS hourly (SARAH3 / ERA5)",
+        "version_hint": "PVGIS hourly (SARAH/ERA5, 2005–2020)",
         "description": (
             "Hourly wind & solar capacity factors from the EU JRC's keyless PVGIS "
-            "hourly radiation service. Strongest over Europe, Africa and Asia. Lands a "
+            "hourly radiation service (data 2005–2020; later years are mapped onto the "
+            "nearest available year). Strongest over Europe, Africa and Asia. Lands a "
             "bus + solar/wind generator(s) with weather-driven p_max_pu profiles."
         ),
     },
     "nasa-power": {
         "id": "nasa_power_renewable",
+        "tag": "nasa",
         "name": "NASA POWER — renewable capacity factors (global)",
         "short_name": "NASA POWER CF",
         "license": "NASA POWER (public domain)",
@@ -97,6 +105,8 @@ def _meta_for(source_key: str) -> DatabaseMeta:
         short_name=cfg["short_name"],
         category="generation",
         subcategory="Hourly profiles",
+        source_id=_SOURCE_ID,
+        source_label=_SOURCE_LABEL,
         license=cfg["license"],
         homepage=cfg["homepage"],
         version_hint=cfg["version_hint"],
@@ -105,11 +115,16 @@ def _meta_for(source_key: str) -> DatabaseMeta:
         country_coverage="global",
         requires_secrets=[],  # keyless
         filters=[
-            Filter(id="date_from", label="From", kind="date", default="2022-01-01",
+            Filter(id="date_from", label="From", kind="date", default="2019-01-01",
                    description="Weather window start. Reanalyses have a multi-day lag and "
-                               "recent dates can miss irradiance — 2022 or earlier is safest."),
-            Filter(id="date_to", label="To", kind="date", default="2022-01-31",
+                               "recent dates can miss irradiance; PVGIS covers 2005–2020."),
+            Filter(id="date_to", label="To", kind="date", default="2019-01-31",
                    description="Weather window end."),
+            Filter(id="utc_offset", label="Local UTC offset (hours)", kind="number",
+                   default=0, min=-12, max=14, step=1, unit="h",
+                   description="Shift snapshots from UTC to local time so the diurnal "
+                               "profile lines up with local demand (e.g. 9 for Korea). "
+                               "Weather is always fetched in UTC."),
             Filter(id="technologies", label="Technologies", kind="multiselect",
                    default=["solar", "wind"], options=_TECHS),
             Filter(id="grid_points", label="Sample points", kind="number",
@@ -130,6 +145,17 @@ META = _meta_for("open-meteo")
 
 def _iso(region: Region) -> str:
     return (region.country_iso or "REG").strip().upper() or "REG"
+
+
+def _shift_label(label: str, offset_hours: int) -> str:
+    """Shift a ``"YYYY-MM-DD HH:MM"`` snapshot label from UTC to local time."""
+    if not offset_hours:
+        return label
+    try:
+        dt = datetime.strptime(label, "%Y-%m-%d %H:%M")
+    except ValueError:
+        return label
+    return (dt + timedelta(hours=offset_hours)).strftime("%Y-%m-%d %H:%M")
 
 
 def _techs(filters: dict[str, Any]) -> list[str]:
@@ -182,8 +208,8 @@ class OpenMeteoRenewable:
         self, region: Region, filters: dict[str, Any], ctx: ImportContext
     ) -> FetchResult:
         pts = _sample_points(region.polygon, int(filters.get("grid_points") or 1))
-        date_from = str(filters.get("date_from") or "2022-01-01")
-        date_to = str(filters.get("date_to") or "2022-01-31")
+        date_from = str(filters.get("date_from") or "2019-01-01")
+        date_to = str(filters.get("date_to") or "2019-01-31")
         fetched = await asyncio.gather(
             *[fetch_point(ctx.http, lat, lon, date_from, date_to, self._source) for lat, lon in pts]
         )
@@ -215,12 +241,14 @@ class OpenMeteoRenewable:
         points = result.payload.get("points") or []
         techs = _techs(result.filters)
         iso = _iso(result.region)
+        tag = _SOURCES[self._source]["tag"]
+        offset = int(result.filters.get("utc_offset") or 0)
         pr = float(result.filters.get("performance_ratio") or 0.9)
         capacity = max(0.0, float(result.filters.get("capacity_mw") or 100.0))
         multi = len(points) > 1
 
         times = points[0]["time"] if points else []
-        snapshots = [str(t).replace("T", " ") for t in times]
+        snapshots = [_shift_label(str(t).replace("T", " "), offset) for t in times]
 
         carriers: list[dict[str, Any]] = [{"name": "AC"}]
         carrier_seen = {"AC"}
@@ -230,17 +258,17 @@ class OpenMeteoRenewable:
 
         for idx, pt in enumerate(points, start=1):
             suffix = f"_{idx}" if multi else ""
-            bus = f"re_{iso}{suffix}"
+            bus = f"re_{iso}_{tag}{suffix}"
             lat, lon = pt["lat"], pt["lon"]
             made = False
             if "solar" in techs and any(pt.get("ghi") or []):
-                gen = f"solar_{iso}{suffix}"
+                gen = f"solar_{iso}_{tag}{suffix}"
                 series_by_gen[gen] = solar_cf(pt["ghi"], pr)
                 gen_rows.append({"name": gen, "bus": bus, "carrier": "solar",
                                  "p_nom": capacity, "marginal_cost": 0.0, "x": lon, "y": lat})
                 made = True
             if "wind" in techs and (pt.get("wind_ms") or []):
-                gen = f"wind_{iso}{suffix}"
+                gen = f"wind_{iso}_{tag}{suffix}"
                 series_by_gen[gen] = wind_cf(pt["wind_ms"])
                 gen_rows.append({"name": gen, "bus": bus, "carrier": "wind",
                                  "p_nom": capacity, "marginal_cost": 0.0, "x": lon, "y": lat})

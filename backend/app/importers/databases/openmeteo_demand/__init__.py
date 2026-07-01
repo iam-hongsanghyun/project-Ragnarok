@@ -23,6 +23,7 @@ from ...protocol import (
     Region,
     WorkbookFragment,
 )
+from ..openmeteo_renewable import _shift_label
 from ..openmeteo_renewable.cache import cache_key, get as cache_get, put as cache_put, snap
 from .demand import demand_shape, scale_to_annual
 
@@ -50,6 +51,10 @@ META = DatabaseMeta(
                description="Weather window start (ERA5; 2022 or earlier is safest)."),
         Filter(id="date_to", label="To", kind="date", default="2022-12-31",
                description="Weather window end. A full year gives the most realistic profile."),
+        Filter(id="utc_offset", label="Local UTC offset (hours)", kind="number",
+               default=0, min=-12, max=14, step=1, unit="h",
+               description="Shift snapshots from UTC to local time so the daily demand "
+                           "peak lands in local evening (e.g. 9 for Korea)."),
         Filter(id="annual_demand_gwh", label="Annual demand (GWh)", kind="number",
                default=10.0, min=0.0, step=1.0, unit="GWh",
                description="Total yearly energy the profile is scaled to."),
@@ -125,7 +130,8 @@ class OpenMeteoDemand:
         )
 
     def to_sheets(self, result: FetchResult, options: ConvertOptions) -> WorkbookFragment:
-        times = result.payload.get("time") or []
+        offset = int(result.filters.get("utc_offset") or 0)
+        times = [_shift_label(str(t), offset) for t in (result.payload.get("time") or [])]
         pset = self._pset(result)
         frag = WorkbookFragment()
         if not times or not pset:
