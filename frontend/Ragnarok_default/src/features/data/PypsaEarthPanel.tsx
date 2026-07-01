@@ -43,11 +43,12 @@ export function PypsaEarthPanel({ selectedCountry, applyFragment }: Props) {
     return () => { mounted.current = false; };
   }, []);
 
-  const applyDirectory = async () => {
-    if (!dir.trim()) return;
+  const applyDirectory = async (path?: string) => {
+    const target = (path ?? dir).trim();
+    if (!target) return;
     setConfiguring(true); setConfigError(null);
     try {
-      const a = await configureEnv(dir.trim());
+      const a = await configureEnv(target);
       if (mounted.current) setAvail(a);  // flips to the build form when valid
     } catch (e) {
       if (mounted.current) setConfigError(e instanceof Error ? e.message : 'Could not use that directory.');
@@ -104,6 +105,23 @@ export function PypsaEarthPanel({ selectedCountry, applyFragment }: Props) {
               Point Ragnarok at a pypsa-earth checkout on the <b>server</b> (the machine running the
               backend). It must have its conda env installed and a CDS API key configured.
             </p>
+            {(avail.candidates?.length ?? 0) > 0 && (
+              <div className="pe-panel__found">
+                <span className="sg-setting-hint">Found on this server — click to use:</span>
+                {avail.candidates!.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    className="pe-panel__candidate"
+                    disabled={configuring}
+                    onClick={() => { setDir(c); void applyDirectory(c); }}
+                    title={c}
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+            )}
             <label className="pe-panel__dir">
               PyPSA-Earth directory (server path)
               <input
@@ -115,7 +133,7 @@ export function PypsaEarthPanel({ selectedCountry, applyFragment }: Props) {
                 onKeyDown={(e) => { if (e.key === 'Enter') void applyDirectory(); }}
               />
             </label>
-            <button className="run-button" disabled={!dir.trim() || configuring} onClick={applyDirectory}>
+            <button className="run-button" disabled={!dir.trim() || configuring} onClick={() => applyDirectory()}>
               {configuring ? 'Checking…' : 'Use this directory'}
             </button>
             {configError && <p className="pe-panel__error">{configError}</p>}

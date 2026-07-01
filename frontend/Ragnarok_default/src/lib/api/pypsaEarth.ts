@@ -14,6 +14,8 @@ export interface PypsaEarthAvailability {
   detail: string;
   docs: string;
   dir?: string;
+  /** Valid pypsa-earth checkouts found on the server, for one-click selection. */
+  candidates?: string[];
 }
 
 export interface BuildJobStatus {
@@ -34,7 +36,15 @@ export interface BuildRequest {
 }
 
 async function j<T>(resp: Response): Promise<T> {
-  if (!resp.ok) throw new Error((await resp.text()) || `HTTP ${resp.status}`);
+  if (!resp.ok) {
+    const text = await resp.text();
+    let msg = text;
+    try {
+      const body = JSON.parse(text);
+      if (body && typeof body.detail === 'string') msg = body.detail;
+    } catch { /* not JSON — use the raw text */ }
+    throw new Error(msg || `HTTP ${resp.status}`);
+  }
   return resp.json() as Promise<T>;
 }
 

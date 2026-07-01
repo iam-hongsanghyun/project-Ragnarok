@@ -9699,6 +9699,30 @@ section.data-import-filters__group {
   font-size: 0.78rem;
   color: var(--text-muted, #888);
 }
+.pe-panel__found {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.pe-panel__candidate {
+  text-align: left;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.74rem;
+  padding: 5px 8px;
+  border: 1px solid var(--accent, #2f855a);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.pe-panel__candidate:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.pe-panel__candidate:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
 .pe-panel__setup summary {
   cursor: pointer;
   font-size: 0.8rem;

@@ -69,14 +69,47 @@ def _save_override(dir_str: str) -> None:
     _STATE_FILE.write_text(json.dumps({"dir": dir_str}), encoding="utf-8")
 
 
+def _auto_dir() -> Path | None:
+    """The default in-project location the setup script installs into
+    (``<repo>/pypsa-earth``) — auto-detected so no configure step is needed."""
+    return _valid_workflow_dir(str(Path(__file__).resolve().parents[3] / "pypsa-earth"))
+
+
+def _suggested_dirs() -> list[str]:
+    """Valid pypsa-earth checkouts found in common locations, offered as
+    one-click choices when nothing is configured yet."""
+    root = Path(__file__).resolve().parents[3]
+    home = Path.home()
+    candidates = [
+        root / "pypsa-earth", root.parent / "pypsa-earth",
+        home / "pypsa-earth", home / "github" / "pypsa-earth",
+        home / "Documents" / "pypsa-earth",
+    ]
+    out: list[str] = []
+    seen: set[str] = set()
+    for c in candidates:
+        v = _valid_workflow_dir(str(c))
+        if v is not None:
+            key = str(v.resolve())
+            if key not in seen:
+                seen.add(key)
+                out.append(str(v))
+    return out
+
+
 def resolve_env() -> Path | None:
     """The configured PyPSA-Earth workflow dir, or None if not set up.
 
-    Prefers the persisted directory set via ``POST /configure`` (the Data-view
-    button), then falls back to ``$RAGNAROK_PYPSA_EARTH_DIR``. A dir is valid
-    only if it contains a ``Snakefile`` (the workflow root).
+    Order: the directory set via ``POST /configure`` (the Data-view button), then
+    ``$RAGNAROK_PYPSA_EARTH_DIR``, then the in-project ``<repo>/pypsa-earth`` the
+    setup script installs into (auto-detected). A dir is valid only if it contains
+    a ``Snakefile`` (the workflow root).
     """
-    return _valid_workflow_dir(_load_override()) or _valid_workflow_dir(os.environ.get(_ENV_VAR, ""))
+    return (
+        _valid_workflow_dir(_load_override())
+        or _valid_workflow_dir(os.environ.get(_ENV_VAR, ""))
+        or _auto_dir()
+    )
 
 
 def _not_configured_message() -> str:
@@ -178,10 +211,13 @@ async def _run(job_id: str, req: BuildRequest) -> None:
 def available() -> dict[str, Any]:
     """Whether the PyPSA-Earth environment is set up on this server."""
     env = resolve_env()
+    active = str(env.resolve()) if env else ""
+    candidates = [c for c in _suggested_dirs() if str(Path(c).resolve()) != active]
     return {
         "available": env is not None,
         "dir": str(env) if env else "",
         "detail": f"PyPSA-Earth workflow at {env}" if env else _not_configured_message(),
+        "candidates": candidates,
         "docs": _DOC,
     }
 

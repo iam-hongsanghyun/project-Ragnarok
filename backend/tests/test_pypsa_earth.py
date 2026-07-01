@@ -22,9 +22,12 @@ client = TestClient(app)
 
 @pytest.fixture(autouse=True)
 def _isolate_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Point the persisted-override file at a throwaway path so tests never read
-    or write the real backend/data/pypsa_earth.json."""
+    """Isolate all env-detection so tests never see the real
+    backend/data/pypsa_earth.json, a locally-cloned <repo>/pypsa-earth, or a
+    checkout in the developer's home dir."""
     monkeypatch.setattr(pe, "_STATE_FILE", tmp_path / "pe_state.json")
+    monkeypatch.setattr(pe, "_auto_dir", lambda: None)
+    monkeypatch.setattr(pe, "_suggested_dirs", lambda: [])
 
 
 def test_available_reports_not_configured(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -86,6 +89,29 @@ def test_configure_rejects_dir_without_snakefile(tmp_path: Path) -> None:
     (tmp_path / "empty").mkdir()
     r = client.post("/api/pypsa-earth/configure", json={"dir": str(tmp_path / "empty")})
     assert r.status_code == 400 and "Snakefile" in r.json()["detail"]
+
+
+def test_auto_detects_in_project_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RAGNAROK_PYPSA_EARTH_DIR", raising=False)
+    workflow = tmp_path / "pypsa-earth"
+    workflow.mkdir()
+    (workflow / "Snakefile").write_text("# root\n")
+    # Simulate the setup script's in-project clone being present.
+    monkeypatch.setattr(pe, "_auto_dir", lambda: workflow)
+    r = client.get("/api/pypsa-earth/available").json()
+    assert r["available"] is True and r["dir"] == str(workflow)
+
+
+def test_available_offers_clickable_candidates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RAGNAROK_PYPSA_EARTH_DIR", raising=False)
+    found = tmp_path / "somewhere" / "pypsa-earth"
+    found.mkdir(parents=True)
+    (found / "Snakefile").write_text("# root\n")
+    monkeypatch.setattr(pe, "_suggested_dirs", lambda: [str(found)])
+    r = client.get("/api/pypsa-earth/available").json()
+    # Not auto-configured (not the in-project default), but offered as a choice.
+    assert r["available"] is False
+    assert str(found) in r["candidates"]
 
 
 def test_configure_clear_removes_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
