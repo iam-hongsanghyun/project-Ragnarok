@@ -80,6 +80,20 @@ def test_build_demand_response_reports_shift() -> None:
     assert row["peakReductionPct"] == pytest.approx(33.3, abs=0.5)
 
 
+def test_dr_load_subset_only_shifts_selected() -> None:
+    snaps = ["2030-01-01T00:00:00", "2030-01-01T01:00:00"]
+    model = _model()
+    model["loads"].append({"name": "L2", "bus": "b"})
+    model["loads-p_set"] = [
+        {"snapshot": snaps[0], "L": 50.0, "L2": 30.0},
+        {"snapshot": snaps[1], "L": 150.0, "L2": 30.0},
+    ]
+    n, _ = build_network(model, SCENARIO, _dr_options(loads=["L"]))
+    # Only the selected load is rewired.
+    assert "dr_L" in n.buses.index and n.loads.at["L", "bus"] == "dr_L"
+    assert "dr_L2" not in n.buses.index and n.loads.at["L2", "bus"] == "b"
+
+
 def test_no_dr_config_returns_none() -> None:
     n, _ = build_network(_model(), SCENARIO, OPTIONS)
     n.optimize(solver_name="highs")

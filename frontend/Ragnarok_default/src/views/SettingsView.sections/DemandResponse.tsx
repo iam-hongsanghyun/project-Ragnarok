@@ -7,11 +7,13 @@
  * power (fraction of the load's peak) × a buffer duration.
  */
 import React from 'react';
-import { DemandResponseConfig } from 'lib/types';
+import { DemandResponseConfig, WorkbookModel } from 'lib/types';
+import { SearchableMultiSelect } from '../../shared/components/SearchableMultiSelect';
 
 export interface DemandResponseSectionProps {
   demandResponseConfig: DemandResponseConfig;
   onDemandResponseConfigChange: (config: DemandResponseConfig) => void;
+  model: WorkbookModel;
 }
 
 export function DemandResponseSection(props: DemandResponseSectionProps) {
@@ -19,6 +21,8 @@ export function DemandResponseSection(props: DemandResponseSectionProps) {
   const set = (patch: Partial<DemandResponseConfig>) => props.onDemandResponseConfigChange({ ...cfg, ...patch });
   const num = (v: string, f: (n: number) => void) => { const n = parseFloat(v); if (Number.isFinite(n)) f(n); };
   const pct = Math.round((cfg.shiftFraction || 0) * 100);
+  const loadNames = ((props.model.loads ?? []) as Array<{ name?: unknown }>)
+    .map((r) => String(r.name ?? '')).filter(Boolean);
 
   return (
     <section className="constraints-workspace-section">
@@ -39,12 +43,28 @@ export function DemandResponseSection(props: DemandResponseSectionProps) {
           <button className={`tb-btn sg-solver-btn${!cfg.enabled ? '' : ' tb-btn--muted'}`} onClick={() => set({ enabled: false })}>Fixed demand</button>
           <button className={`tb-btn sg-solver-btn${cfg.enabled ? '' : ' tb-btn--muted'}`} onClick={() => set({ enabled: true })}>Shiftable</button>
         </div>
-        <p className="sg-setting-hint">Applies to all loads in the model.</p>
+        <p className="sg-setting-hint">Move demand in time without dropping it.</p>
       </div>
 
       {cfg.enabled && (
         <>
           <div className="sg-setting-divider" />
+          {loadNames.length > 0 && (
+            <div className="sg-setting-row">
+              <label className="sg-setting-label">Shiftable loads</label>
+              <SearchableMultiSelect
+                values={cfg.loads}
+                options={loadNames}
+                placeholder="All loads"
+                onChange={(vals) => set({ loads: vals })}
+              />
+              <p className="sg-setting-hint">
+                {cfg.loads.length === 0
+                  ? `All ${loadNames.length} load(s) are shiftable. Pick a subset to restrict.`
+                  : `${cfg.loads.length} of ${loadNames.length} load(s) shiftable.`}
+              </p>
+            </div>
+          )}
           <div className="sg-setting-row">
             <label className="sg-setting-label" htmlFor="rs-dr-frac">Shiftable power (% of peak)</label>
             <input
