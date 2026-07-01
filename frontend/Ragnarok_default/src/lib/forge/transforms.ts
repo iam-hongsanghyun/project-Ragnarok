@@ -27,6 +27,9 @@ export interface ClusterResult {
   method: string;
   before: ClusterCounts;
   after: ClusterCounts;
+  /** Bus text attributes (e.g. carrier, unit) that disagreed within a cluster
+   *  and were merged by keeping the most common value. */
+  resolvedConflicts?: string[];
 }
 
 /** A cell as a finite number, or null when it is empty / non-numeric. */

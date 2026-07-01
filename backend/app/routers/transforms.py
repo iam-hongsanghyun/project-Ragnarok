@@ -44,8 +44,51 @@ class ClusterRequest(BaseModel):
     sessionId: str
     nClusters: int
     method: str = "modularity"
+    # When true (default), buses/lines whose text attributes (carrier, unit, …)
+    # disagree within a cluster are merged by keeping the most common value,
+    # instead of failing. Turn off to enforce strict agreement.
+    resolveConflicts: bool = True
     scenario: dict[str, Any] | None = None
     options: dict[str, Any] | None = None
+
+
+# Bus-reference columns are remapped by clustering itself — never "resolve" them.
+_BUS_REFS = {"bus", "bus0", "bus1", "bus2", "bus3", "bus4"}
+
+
+def _majority(x: "pd.Series") -> Any:
+    """Aggregation that keeps the most common non-null value (ties → first).
+
+    Replaces PyPSA's strict ``make_consense`` (which raises when a cluster's
+    values disagree) so clustering can merge, e.g., AC+DC buses or mixed voltage
+    units by keeping the dominant value.
+    """
+    s = x.dropna()
+    if s.empty:
+        return x.iloc[0] if len(x) else None
+    m = s.mode()
+    return m.iloc[0] if len(m) else s.iloc[0]
+
+
+def _object_strategies(df: "pd.DataFrame") -> dict[str, Any]:
+    """A majority strategy for every text (object) attribute of a component."""
+    return {
+        col: _majority
+        for col in df.columns
+        if col not in _BUS_REFS and df[col].dtype == object
+    }
+
+
+def _bus_conflicts(network: pypsa.Network, busmap: "pd.Series") -> list[str]:
+    """Text bus attributes that disagree within at least one cluster."""
+    buses = network.buses
+    out: list[str] = []
+    for col in buses.columns:
+        if col in _BUS_REFS or buses[col].dtype != object:
+            continue
+        if buses.groupby(busmap)[col].nunique(dropna=True).gt(1).any():
+            out.append(col)
+    return out
 
 
 def _counts(network: pypsa.Network) -> dict[str, int]:
@@ -65,6 +108,7 @@ def cluster_model(
     *,
     n_clusters: int,
     method: str = "modularity",
+    resolve_conflicts: bool = True,
     scenario: dict[str, Any] | None = None,
     options: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -111,7 +155,28 @@ def cluster_model(
                 status_code=400,
                 detail=f"Unknown clustering method '{method}'. Use 'modularity' or 'kmeans'.",
             )
-        clustered = network.cluster.spatial.cluster_by_busmap(busmap)
+
+        # Which text bus attributes disagree within a cluster (for the report /
+        # a clear error). Merging AC+DC buses or mixed units is a real change, so
+        # it's surfaced either way.
+        conflicts = _bus_conflicts(network, busmap)
+        if conflicts and not resolve_conflicts:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Buses in a cluster disagree on: " + ", ".join(conflicts)
+                    + ". Enable “Merge conflicting attributes” to cluster anyway "
+                    "(keeps the most common value per cluster)."
+                ),
+            )
+
+        strategies: dict[str, Any] = {}
+        if resolve_conflicts:
+            strategies = {
+                "bus_strategies": _object_strategies(network.buses),
+                "line_strategies": _object_strategies(network.lines),
+            }
+        clustered = network.cluster.spatial.cluster_by_busmap(busmap, **strategies)
         clustered = getattr(clustered, "n", clustered)  # Clustering wrapper vs Network
     except HTTPException:
         raise
@@ -131,6 +196,7 @@ def cluster_model(
         "method": method,
         "before": _counts(network),
         "after": _counts(clustered),
+        "resolvedConflicts": conflicts if resolve_conflicts else [],
     }
 
 
@@ -146,6 +212,7 @@ async def cluster_network(req: ClusterRequest) -> dict[str, Any]:
         model,
         n_clusters=req.nClusters,
         method=req.method,
+        resolve_conflicts=req.resolveConflicts,
         scenario=req.scenario,
         options=req.options,
     )

@@ -34,7 +34,7 @@ interface Props {
   onApplySheets: (partial: Record<string, GridRow[]>) => void;
   /** Reduce the session model to N clustered buses; returns the reduced model
    *  for preview (no mutation). Absent ⇒ the cluster tool is read-only. */
-  onClusterPreview?: (nClusters: number, method: string) => Promise<ClusterResult>;
+  onClusterPreview?: (nClusters: number, method: string, resolveConflicts: boolean) => Promise<ClusterResult>;
   /** Replace the working model with a previewed clustered model. */
   onClusterApply?: (model: WorkbookModel) => void;
   /** Attach Open-Meteo weather profiles to the existing renewable fleet by
@@ -195,6 +195,7 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
   const defaultClusterN = Math.max(1, Math.min(Math.max(busCount - 1, 1), Math.round(busCount / 2)));
   const [clusterN, setClusterN] = useState<number | null>(null);
   const [clusterMethod, setClusterMethod] = useState<'modularity' | 'kmeans'>('modularity');
+  const [clusterResolveConflicts, setClusterResolveConflicts] = useState(true);
   const [clusterBusy, setClusterBusy] = useState(false);
   const [clusterResult, setClusterResult] = useState<ClusterResult | null>(null);
   const [clusterError, setClusterError] = useState<string | null>(null);
@@ -206,7 +207,7 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
     setClusterError(null);
     setClusterResult(null);
     try {
-      setClusterResult(await onClusterPreview(effClusterN, clusterMethod));
+      setClusterResult(await onClusterPreview(effClusterN, clusterMethod, clusterResolveConflicts));
     } catch (e) {
       setClusterError(e instanceof Error ? e.message : 'Clustering failed.');
     } finally {
@@ -572,6 +573,23 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
               <p className="sg-setting-hint">{busCount} bus{busCount === 1 ? '' : 'es'} now → reduce to this many clusters.</p>
             </div>
 
+            <div className="sg-setting-row">
+              <label className="sg-setting-label">Attribute conflicts</label>
+              <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                <input
+                  type="checkbox"
+                  checked={clusterResolveConflicts}
+                  onChange={(e) => setClusterResolveConflicts(e.target.checked)}
+                />
+                Merge conflicting attributes (keep most common)
+              </label>
+              <p className="sg-setting-hint">
+                {clusterResolveConflicts
+                  ? 'When buses in a cluster disagree on carrier, unit, etc., the cluster keeps the most common value.'
+                  : 'Fail the reduction if buses in a cluster disagree on carrier, unit, etc.'}
+              </p>
+            </div>
+
             <div className="forge-actions">
               <button
                 className="run-button"
@@ -594,6 +612,11 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
                   {' · '}loads {clusterResult.before.loads} → {clusterResult.after.loads}
                   <span style={{ color: 'var(--muted)', marginLeft: 6 }}>({clusterResult.method})</span>
                 </p>
+                {clusterResult.resolvedConflicts && clusterResult.resolvedConflicts.length > 0 && (
+                  <p className="forge-report-line" style={{ color: 'var(--muted)' }}>
+                    Merged conflicting attribute{clusterResult.resolvedConflicts.length === 1 ? '' : 's'} by most-common value: <b>{clusterResult.resolvedConflicts.join(', ')}</b>.
+                  </p>
+                )}
                 <ClusterScatter model={model} busmap={clusterResult.busmap} />
                 <div className="forge-actions">
                   <button className="run-button" disabled={!onClusterApply} onClick={applyCluster}>

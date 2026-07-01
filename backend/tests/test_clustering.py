@@ -89,6 +89,40 @@ def test_kmeans_clustering_reduces_buses() -> None:
     assert len(set(res["busmap"].values())) == 2
 
 
+def _mixed_attr_model() -> dict[str, list[dict[str, Any]]]:
+    """Path model where buses disagree on carrier + unit so a k-means cluster
+    ({A,B} and {C,D} by x) mixes them: A/C=AC, B/D=DC; units kV vs a 'kv' typo."""
+    m = _path_model(4)
+    m["carriers"] = [{"name": "gas"}, {"name": "AC"}, {"name": "DC"}]
+    carrier = {"A": "AC", "B": "DC", "C": "AC", "D": "DC"}
+    unit = {"A": "kV", "B": "kv", "C": "kV", "D": "kV"}
+    for row in m["buses"]:
+        row["carrier"] = carrier[row["name"]]
+        row["unit"] = unit[row["name"]]
+    return m
+
+
+def test_clustering_resolves_attribute_conflicts_by_default() -> None:
+    # Default resolve_conflicts=True → merge AC+DC (and kV/kv) by most-common value.
+    res = cluster_model(_mixed_attr_model(), n_clusters=2, method="kmeans", scenario=SCENARIO)
+    assert res["after"]["buses"] == 2
+    assert set(res["resolvedConflicts"]) >= {"carrier", "unit"}
+    # the merged model still rebuilds into a valid network
+    net, _ = build_network(res["model"], SCENARIO, {})
+    assert len(net.buses) == 2
+
+
+def test_clustering_strict_mode_reports_conflicting_attributes() -> None:
+    with pytest.raises(HTTPException) as ei:
+        cluster_model(
+            _mixed_attr_model(), n_clusters=2, method="kmeans",
+            resolve_conflicts=False, scenario=SCENARIO,
+        )
+    detail = str(ei.value.detail).lower()
+    assert "carrier" in detail or "unit" in detail
+    assert "merge conflicting attributes" in detail
+
+
 def test_kmeans_requires_distinct_coordinates() -> None:
     # All buses on the same coordinate → k-means has no spatial signal → 400.
     model = _path_model(4)
