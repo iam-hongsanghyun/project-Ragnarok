@@ -123,6 +123,7 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   const hasAssetSwap = !!results.assetSwap;
   const hasEss = !!(results.essBusinessCase && results.essBusinessCase.sizes.length > 0);
   const hasPpa = !!(results.ppa && results.ppa.energyMWh > 0);
+  const hasEnergyBalance = !!(results.energyBalance && results.energyBalance.carriers.length > 0);
 
   const rows: Array<ReturnType<typeof row>> = [];
 
@@ -263,6 +264,12 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   if (hasPpa) {
     const ppa: Card = { id: id('ppa'), kind: 'ppa' };
     rows.push(row({ cards: [{ card: ppa }] }));
+  }
+
+  // 9e7. Per-carrier energy balance — sector coupling (conditional; multi-carrier)
+  if (hasEnergyBalance) {
+    const eb: Card = { id: id('energy-balance'), kind: 'energy-balance' };
+    rows.push(row({ cards: [{ card: eb }] }));
   }
 
   // 9f. Company / owner dimension — per-company KPIs (F1, conditional)

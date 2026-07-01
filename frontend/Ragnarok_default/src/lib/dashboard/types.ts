@@ -36,6 +36,7 @@ export type CardKind =
   | 'asset-swap'
   | 'ess-business-case'
   | 'ppa'
+  | 'energy-balance'
   | 'power-flow'
   | 'contingency'
   | 'emissions-breakdown'
@@ -199,6 +200,10 @@ export interface PpaCardData extends CardBase {
   kind: 'ppa';
 }
 
+export interface EnergyBalanceCardData extends CardBase {
+  kind: 'energy-balance';
+}
+
 export interface PowerFlowCardData extends CardBase {
   kind: 'power-flow';
 }
@@ -253,6 +258,7 @@ export type Card =
   | AssetSwapCardData
   | EssCardData
   | PpaCardData
+  | EnergyBalanceCardData
   | PowerFlowCardData
   | ContingencyCardData
   | EmissionsBreakdownCardData

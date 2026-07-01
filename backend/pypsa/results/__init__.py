@@ -34,6 +34,7 @@ from .dispatch import (
     dispatch_by_carrier,
 )
 from .emissions import build_emissions_breakdown
+from .energy_balance import build_energy_balance
 from .statistics import build_statistics
 from .mga import build_mga
 from .merchant import build_merchant
@@ -701,6 +702,7 @@ def run_pypsa(
     generator_economics = build_generator_economics(network, currency)
     statistics = build_statistics(network)
     emissions_breakdown = build_emissions_breakdown(network, emissions_factors)
+    energy_balance = build_energy_balance(network)  # per-carrier; None if single-carrier
 
     cost_breakdown = [
         {"label": "Fuel cost", "value": round(fuel_cost)},
@@ -1005,6 +1007,7 @@ def run_pypsa(
         "assetSwap": asset_swap,
         "essBusinessCase": ess_business_case,
         "emissionsBreakdown": emissions_breakdown,
+        "energyBalance": energy_balance,
         "narrative": notes,
         "runMeta": {
             "snapshotCount": snapshot_count,

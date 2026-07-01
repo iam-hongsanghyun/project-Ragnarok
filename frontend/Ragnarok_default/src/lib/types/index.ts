@@ -831,6 +831,27 @@ export interface EmissionsBreakdown {
   byCarrier: CarrierEmission[];
 }
 
+// ── Per-carrier energy balance (M1 — sector coupling) ──────────────────────────
+export type EnergyBalanceFlowKind = 'generation' | 'load' | 'conversion' | 'storage';
+
+export interface EnergyBalanceFlow {
+  label: string;
+  energyMWh: number;
+  kind: EnergyBalanceFlowKind;
+}
+
+export interface EnergyBalanceCarrier {
+  carrier: string;
+  supplyMWh: number;
+  demandMWh: number;
+  sources: EnergyBalanceFlow[];
+  sinks: EnergyBalanceFlow[];
+}
+
+export interface EnergyBalanceResult {
+  carriers: EnergyBalanceCarrier[];
+}
+
 // ── Market analysis types ─────────────────────────────────────────────────────
 
 export interface MeritOrderEntry {
@@ -1157,6 +1178,7 @@ export interface RunResults {
   ppa?: PpaResult;
   appliedConstraints?: AppliedConstraint[];
   emissionsBreakdown?: EmissionsBreakdown;
+  energyBalance?: EnergyBalanceResult;
   narrative: string[];
   runMeta: {
     snapshotCount: number;
