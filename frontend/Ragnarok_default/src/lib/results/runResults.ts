@@ -243,6 +243,17 @@ export function deriveRunResults(
   }
 
   // ── Dispatch by carrier and load profile per snapshot ─────────────────────
+  // Carrier-aware for sector coupling (mirrors backend electricity_dispatch_by
+  // _carrier): the mix is the ELECTRICITY vector, so only generators on
+  // electricity buses count, plus conversion-Link injections into electricity
+  // buses under the Link's carrier. A blank bus carrier defaults to electricity.
+  const ELEC_CARRIERS = new Set(['', 'ac', 'dc', 'electricity', 'elec', 'power']);
+  const isElec = (c: unknown): boolean => {
+    const s = String(c ?? '').trim().toLowerCase();
+    return s === '' || s === 'nan' || ELEC_CARRIERS.has(s);
+  };
+  const elecBuses = new Set(buses.filter((b) => isElec(busStatic[b]?.carrier)));
+
   const carrierDispatch: Record<string, number[]> = {};
   const generatorDispatch: Record<string, number[]> = {};
   const loadPerSnapshot: number[] = new Array(snapshots.length).fill(0);
@@ -251,14 +262,17 @@ export function deriveRunResults(
   for (const name of generators) {
     const carrier = genCarrier[name];
     const ef = genEf[name];
+    const onElec = elecBuses.has(genBus[name]);
     const arr: number[] = new Array(snapshots.length).fill(0);
     generatorDispatch[name] = arr;
-    if (!carrierDispatch[carrier]) carrierDispatch[carrier] = new Array(snapshots.length).fill(0);
+    if (onElec && !carrierDispatch[carrier]) carrierDispatch[carrier] = new Array(snapshots.length).fill(0);
     for (let i = 0; i < snapshots.length; i++) {
       const v = seriesValueAt(pGen, i, name);
       arr[i] = v;
       const pos = Math.max(v, 0);
-      carrierDispatch[carrier][i] += pos;
+      // Fuel-supply generators on non-electricity buses (e.g. gas) are not part
+      // of the electricity mix — but they still emit (counted below).
+      if (onElec) carrierDispatch[carrier][i] += pos;
       emissionsPerSnapshot[i] += pos * ef;
     }
   }
@@ -272,6 +286,29 @@ export function deriveRunResults(
       // Backend includes both directions in dispatch_frame — but discharge
       // (positive) shows as supply on the carrier-stacked chart.
       if (v > 0) carrierDispatch[carrier][i] += v;
+    }
+  }
+  // Conversion-Link electricity output (e.g. CCGT gas→elec) under the Link's
+  // carrier, using p0 × efficiency. Only links whose input bus is NOT
+  // electricity count as supply, so transmission links stay out.
+  const pLink = (outputs.series ?? {})['links-p0'];
+  if (pLink) {
+    const ports: [string, string][] = [['bus1', 'efficiency'], ['bus2', 'efficiency2'], ['bus3', 'efficiency3']];
+    for (const name of Object.keys(linksStatic)) {
+      const l = linksStatic[name];
+      if (elecBuses.has(stringValue(l.bus0))) continue;
+      const carrier = stringValue(l.carrier) || name;
+      for (const [busCol, effCol] of ports) {
+        const outBus = stringValue(l[busCol]);
+        if (!outBus || !elecBuses.has(outBus)) continue;
+        const raw = l[effCol];
+        const eff = raw !== undefined && raw !== null && raw !== '' ? numberValue(raw) : (busCol === 'bus1' ? 1 : 0);
+        if (!eff) continue;
+        if (!carrierDispatch[carrier]) carrierDispatch[carrier] = new Array(snapshots.length).fill(0);
+        for (let i = 0; i < snapshots.length; i++) {
+          carrierDispatch[carrier][i] += Math.max(seriesValueAt(pLink, i, name), 0) * eff;
+        }
+      }
     }
   }
 

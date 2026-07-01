@@ -34,7 +34,7 @@ from .dispatch import (
     build_price_emissions_series,
     build_storage_series,
     build_storage_soc_series,
-    dispatch_by_carrier,
+    electricity_dispatch_by_carrier,
 )
 from .emissions import build_emissions_breakdown
 from .expansion import build_expansion_results
@@ -165,7 +165,7 @@ def derive_imported_result(
 
     # ── Intermediates (mirror run_pypsa) ────────────────────────────────────
     generator_dispatch_frame = network.generators_t.p.copy()
-    by_carrier = dispatch_by_carrier(generator_dispatch_frame, network.generators)
+    by_carrier = electricity_dispatch_by_carrier(network, generator_dispatch_frame)
     # Resolve static + time-varying load into a dense frame. run_pypsa reads
     # network.loads_t.p_set directly because the solve has already densified it;
     # this path never solved, so a STATIC p_set would leave that frame empty —

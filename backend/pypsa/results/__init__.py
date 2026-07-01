@@ -32,7 +32,7 @@ from .dispatch import (
     build_price_emissions_series,
     build_storage_series,
     build_storage_soc_series,
-    dispatch_by_carrier,
+    electricity_dispatch_by_carrier,
 )
 from .emissions import build_emissions_breakdown
 from .energy_balance import build_energy_balance
@@ -562,7 +562,7 @@ def run_pypsa(
     else:
         dispatch_frame = generator_dispatch_frame
 
-    by_carrier = dispatch_by_carrier(generator_dispatch_frame, network.generators)
+    by_carrier = electricity_dispatch_by_carrier(network, generator_dispatch_frame)
     load_dispatch = network.loads_t.p_set.sum(axis=1)
     price_series = (
         network.buses_t.marginal_price.mean(axis=1)

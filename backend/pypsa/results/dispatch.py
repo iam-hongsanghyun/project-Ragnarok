@@ -35,6 +35,93 @@ def dispatch_by_carrier(
     return result
 
 
+# Carrier names treated as the electricity vector when splitting the dispatch
+# mix. A blank / missing bus carrier defaults to electricity — PyPSA's own
+# default bus carrier is "AC".
+ELECTRICITY_CARRIERS = {"", "ac", "dc", "electricity", "elec", "power"}
+
+
+def _is_electricity(carrier: object) -> bool:
+    s = "" if carrier is None else str(carrier).strip().lower()
+    return s in ("", "nan", "none") or s in ELECTRICITY_CARRIERS
+
+
+def _electricity_bus_names(network: pypsa.Network) -> set[str]:
+    buses = network.buses
+    if "carrier" not in buses.columns:
+        return {str(b) for b in buses.index}
+    return {str(b) for b, c in buses["carrier"].items() if _is_electricity(c)}
+
+
+def electricity_dispatch_by_carrier(
+    network: pypsa.Network,
+    generator_dispatch_frame: pd.DataFrame,
+) -> dict[str, pd.Series]:
+    """The electricity dispatch mix, carrier-aware for sector-coupled models.
+
+    Generators on electricity buses grouped by carrier, plus conversion-Link
+    injections into electricity buses grouped by the Link's carrier — so a CCGT
+    modelled as a gas→electricity Link shows up as ``CCGT`` power, while its gas
+    fuel-supply generator (on the gas bus) is excluded rather than lumped in as a
+    huge primary-energy slice. Pure transmission Links (electricity→electricity,
+    e.g. HVDC) are not counted as supply.
+
+    For a single-carrier (all-electricity) model this reduces exactly to grouping
+    every generator by carrier — the previous behaviour.
+    """
+    elec_buses = _electricity_bus_names(network)
+    gens = network.generators
+    if "bus" in gens.columns:
+        gens = gens[gens["bus"].astype(str).isin(elec_buses)]
+    result = dispatch_by_carrier(generator_dispatch_frame, gens)
+    _add_conversion_link_injections(network, elec_buses, result)
+    return result
+
+
+def _add_conversion_link_injections(
+    network: pypsa.Network,
+    elec_buses: set[str],
+    result: dict[str, pd.Series],
+) -> None:
+    """Fold each conversion Link's electricity output into ``result`` under the
+    Link's carrier.
+
+    A Link injects ``efficiency`` × its (positive) input flow ``p0`` into an
+    output bus; only Links whose input (bus0) is NOT electricity count as supply
+    (transmission links stay out). Uses ``p0`` × efficiency rather than ``p1`` so
+    it works on the light stored-run path too, which injects ``p0`` only.
+    """
+    links = network.links
+    if len(links) == 0 or network.links_t.p0.empty:
+        return
+    p0 = network.links_t.p0
+    snapshots = network.snapshots
+    ports = [("bus1", "efficiency"), ("bus2", "efficiency2"), ("bus3", "efficiency3")]
+    for link in links.index:
+        if link not in p0.columns:
+            continue
+        bus0 = str(links.at[link, "bus0"]) if "bus0" in links.columns else ""
+        if bus0 in elec_buses:
+            continue  # same-vector / transmission link, not a conversion into power
+        inflow = p0[link].reindex(snapshots).fillna(0.0).clip(lower=0.0)
+        carrier = str(links.at[link, "carrier"]) if "carrier" in links.columns else ""
+        key = carrier or str(link)
+        for bus_col, eff_col in ports:
+            if bus_col not in links.columns:
+                continue
+            out_bus = links.at[link, bus_col]
+            if not isinstance(out_bus, str) or out_bus not in elec_buses:
+                continue
+            if eff_col in links.columns and pd.notna(links.at[link, eff_col]):
+                eff = float(links.at[link, eff_col])
+            else:
+                eff = 1.0 if bus_col == "bus1" else 0.0
+            if eff == 0.0:
+                continue
+            inj = inflow * eff
+            result[key] = result[key].add(inj, fill_value=0.0) if key in result else inj
+
+
 def build_dispatch_series(
     network: pypsa.Network,
     by_carrier: dict[str, pd.Series],
