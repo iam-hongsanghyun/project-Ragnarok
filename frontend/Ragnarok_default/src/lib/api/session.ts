@@ -214,6 +214,34 @@ export async function patchSheet(
   return asJson(resp);
 }
 
+export type SeriesTransformOp = 'scale' | 'offset' | 'shift' | 'interpolate' | 'clip';
+
+export interface SeriesTransformParams {
+  op: SeriesTransformOp;
+  /** Restrict to a subset of asset columns; omit for all value columns. */
+  columns?: string[] | null;
+  factor?: number;
+  delta?: number;
+  shift?: number;
+  wrap?: boolean;
+  minValue?: number | null;
+  maxValue?: number | null;
+}
+
+/** Apply a bulk transform to a temporal sheet server-side (T1). */
+export async function transformSeries(
+  name: string,
+  params: SeriesTransformParams,
+  sessionId = DEFAULT_SESSION_ID,
+): Promise<{ name: string; kind: string; total: number; columns: string[] }> {
+  const resp = await fetch(`${API_BASE}/api/session/series/${encodeURIComponent(name)}/transform`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...params, sessionId }),
+  });
+  return asJson(resp);
+}
+
 /** Clear the session's working model server-side (keeps frontend settings). */
 export async function clearSessionModel(sessionId = DEFAULT_SESSION_ID): Promise<boolean> {
   const resp = await fetch(

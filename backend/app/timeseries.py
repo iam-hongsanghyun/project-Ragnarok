@@ -36,6 +36,81 @@ def df_to_records(df: pd.DataFrame) -> list[dict[str, Any]]:
     return df.replace({np.nan: None}).to_dict(orient="records")
 
 
+TransformOp = Literal["scale", "offset", "shift", "interpolate", "clip"]
+VALID_TRANSFORMS = ("scale", "offset", "shift", "interpolate", "clip")
+
+
+def transform_rows(
+    rows: list[dict[str, Any]],
+    index_col: str,
+    op: TransformOp,
+    *,
+    columns: list[str] | None = None,
+    factor: float = 1.0,
+    delta: float = 0.0,
+    shift: int = 0,
+    wrap: bool = True,
+    min_value: float | None = None,
+    max_value: float | None = None,
+) -> list[dict[str, Any]]:
+    """Apply a bulk transform to the value columns of wide series ``rows`` (T1).
+
+    ``rows`` are ``{index_col: <ts>, <asset>: <value>, …}``. Only the value
+    columns are touched (all columns except ``index_col``, optionally restricted
+    to ``columns``); the timestamp column is preserved. Non-numeric cells coerce
+    to NaN → ``None``.
+
+    Ops:
+        scale       ``v → v · factor``
+        offset      ``v → v + delta``
+        shift       roll each column by ``shift`` steps; ``wrap`` cyclically (no
+                    gaps, reversible) or edge-fill the exposed end
+        interpolate linear-fill blank/None/NaN cells (edge → nearest neighbour)
+        clip        bound to ``[min_value, max_value]``
+
+    Algorithm (shift): ``out[i] = in[(i - shift) mod N]`` when ``wrap`` else
+    ``out[i] = in[i - shift]`` with the exposed end held at the nearest value.
+    """
+    if not rows:
+        return rows
+    df = pd.DataFrame(rows)
+    value_cols = [c for c in df.columns if c != index_col]
+    if columns:
+        wanted = set(columns)
+        value_cols = [c for c in value_cols if c in wanted]
+    if not value_cols:
+        return rows
+
+    num = df[value_cols].apply(pd.to_numeric, errors="coerce")
+
+    if op == "scale":
+        num = num * float(factor)
+    elif op == "offset":
+        num = num + float(delta)
+    elif op == "shift":
+        k = int(shift)
+        if wrap:
+            num = pd.DataFrame(
+                {c: np.roll(num[c].to_numpy(dtype=float), k) for c in value_cols},
+                index=num.index,
+            )
+        else:
+            num = num.shift(k).ffill().bfill()
+    elif op == "interpolate":
+        num = num.interpolate(method="linear", limit_direction="both")
+    elif op == "clip":
+        lo = None if min_value is None else float(min_value)
+        hi = None if max_value is None else float(max_value)
+        num = num.clip(lower=lo, upper=hi)
+    else:
+        raise ValueError(f"unknown transform op {op!r}")
+
+    out = df.copy()
+    for c in value_cols:
+        out[c] = num[c]
+    return out.replace({np.nan: None}).to_dict(orient="records")
+
+
 def downsample(df: pd.DataFrame, max_points: int, agg: Agg, index_col: str) -> pd.DataFrame:
     """Reduce ``df`` to at most ``max_points`` rows using ``agg``.
 

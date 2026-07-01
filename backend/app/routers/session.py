@@ -163,6 +163,43 @@ def patch_sheet(name: str, payload: SheetPatch) -> dict:
     return result
 
 
+class SeriesTransform(BaseModel):
+    """Body for ``POST /api/session/series/{name}/transform`` (T1 bulk edit).
+
+    ``op`` ∈ scale | offset | shift | interpolate | clip. Params: ``factor``
+    (scale), ``delta`` (offset), ``shift`` + ``wrap`` (shift), ``minValue`` /
+    ``maxValue`` (clip), and optional ``columns`` to restrict to a subset of
+    assets. Operates server-side on the stored series.
+    """
+
+    op: str
+    columns: list[str] | None = None
+    factor: float = 1.0
+    delta: float = 0.0
+    shift: int = 0
+    wrap: bool = True
+    minValue: float | None = None
+    maxValue: float | None = None
+    sessionId: str = "default"
+
+
+@router.post("/series/{name}/transform")
+def transform_series(name: str, payload: SeriesTransform) -> dict:
+    """Apply a bulk transform (scale/shift/interpolate/…) to a series sheet."""
+    params = {
+        "columns": payload.columns, "factor": payload.factor, "delta": payload.delta,
+        "shift": payload.shift, "wrap": payload.wrap,
+        "minValue": payload.minValue, "maxValue": payload.maxValue,
+    }
+    try:
+        result = model_store.transform_series(payload.sessionId, name, payload.op, params)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Time-series sheet {name!r} not found in session.")
+    return result
+
+
 @router.post("/clear")
 def clear_session(session_id: str = Query("default", alias="session_id")) -> dict:
     """Clear the session's working model (settings are a separate frontend concern)."""

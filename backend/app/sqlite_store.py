@@ -458,6 +458,55 @@ def patch_sheet(session_id: str, sheet: str, ops: list[dict[str, Any]]) -> dict[
     return {"name": sheet, "kind": entry.get("kind"), "total": len(rows), "columns": columns}
 
 
+def transform_series(
+    session_id: str, sheet: str, op: str, params: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Apply a bulk transform (scale/shift/interpolate/…) to a series sheet (T1).
+
+    Reads the full sheet, transforms the value columns via
+    :func:`timeseries.transform_rows`, and rewrites it in one transaction — the
+    same read→rewrite shape as :func:`patch_sheet`. Returns ``None`` for a
+    missing/static sheet.
+    """
+    if not ss._is_safe_id(session_id) or not ss._is_safe_sheet(sheet):
+        return None
+    if op not in timeseries.VALID_TRANSFORMS:
+        raise ValueError(f"unknown transform op {op!r}")
+    meta = _raw_meta(session_id)
+    if meta is None:
+        return None
+    entry = _sheet_entry(meta, sheet)
+    if entry is None or entry.get("kind") != "series":
+        return None
+    with _connect(session_id) as conn:
+        tbl = (_kv_get(conn, "tables") or {}).get(sheet)
+        if tbl is None:
+            return None
+        rows = [json.loads(r[0]) for r in conn.execute(f"SELECT d FROM {tbl} ORDER BY __row").fetchall()]
+        index_col = timeseries.series_index_col(list(rows[0].keys()) if rows else list(entry.get("columns", [])))
+        rows = timeseries.transform_rows(
+            rows, index_col, op,  # type: ignore[arg-type]  (validated above)
+            columns=params.get("columns"),
+            factor=float(params.get("factor", 1.0)),
+            delta=float(params.get("delta", 0.0)),
+            shift=int(params.get("shift", 0)),
+            wrap=bool(params.get("wrap", True)),
+            min_value=params.get("minValue"),
+            max_value=params.get("maxValue"),
+        )
+        conn.execute(f"DELETE FROM {tbl}")
+        conn.executemany(
+            f"INSERT INTO {tbl}(d) VALUES(?)",
+            [(json.dumps(row, ensure_ascii=False),) for row in rows],
+        )
+        columns = list(rows[0].keys()) if rows else list(entry.get("columns", []))
+        entry["rowCount"] = len(rows)
+        entry["columns"] = columns
+        _kv_set(conn, "meta", meta)
+        conn.commit()
+    return {"name": sheet, "kind": "series", "total": len(rows), "columns": columns}
+
+
 # ── distinct values (generic; Forge + a plugin's on-demand filter hook) ──────────
 
 def distinct_values(session_id: str, sheet: str, column: str) -> list[str] | None:

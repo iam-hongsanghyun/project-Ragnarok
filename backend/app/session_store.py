@@ -490,6 +490,39 @@ def patch_sheet(session_id: str, sheet: str, ops: list[dict[str, Any]]) -> dict[
     return {"name": sheet, "kind": kind, "total": len(rows), "columns": columns}
 
 
+def transform_series(
+    session_id: str, sheet: str, op: str, params: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Apply a bulk transform to a series sheet (T1); mirror of the sqlite store."""
+    if not _is_safe_id(session_id) or not _is_safe_sheet(sheet):
+        return None
+    if op not in timeseries.VALID_TRANSFORMS:
+        raise ValueError(f"unknown transform op {op!r}")
+    entry = _sheet_meta(session_id, sheet)
+    if entry is None or entry.get("kind") != "series":
+        return None
+    path = _series_path(session_id, sheet)
+    if not path.exists():
+        return None
+    df = pd.read_parquet(path)
+    rows = timeseries.df_to_records(df)
+    index_col = timeseries.series_index_col(list(df.columns))
+    rows = timeseries.transform_rows(
+        rows, index_col, op,  # type: ignore[arg-type]  (validated above)
+        columns=params.get("columns"),
+        factor=float(params.get("factor", 1.0)),
+        delta=float(params.get("delta", 0.0)),
+        shift=int(params.get("shift", 0)),
+        wrap=bool(params.get("wrap", True)),
+        min_value=params.get("minValue"),
+        max_value=params.get("maxValue"),
+    )
+    pd.DataFrame(rows).to_parquet(path, index=False)
+    columns = list(rows[0].keys()) if rows else list(entry.get("columns", []))
+    _update_sheet_meta(session_id, sheet, row_count=len(rows), columns=columns)
+    return {"name": sheet, "kind": "series", "total": len(rows), "columns": columns}
+
+
 def _apply_ops(rows: list[dict[str, Any]], ops: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Apply edit ops to a list of row dicts in order (pure; returns a new list)."""
     out = [dict(r) for r in rows]

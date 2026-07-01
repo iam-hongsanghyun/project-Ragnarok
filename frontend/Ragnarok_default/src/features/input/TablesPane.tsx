@@ -12,7 +12,7 @@ import type { DateFormat } from '../settings/useSettings';
 import { PYPSA_STANDARD_LINE_TYPES, PYPSA_STANDARD_TRANSFORMER_TYPES } from 'lib/constants/pypsa_standard_types';
 import { InputAnalyser } from './InputAnalyser';
 import { DataGrid } from './grid/DataGrid';
-import { getSheetPage, patchSheet } from 'lib/api/session';
+import { getSheetPage, patchSheet, transformSeries, SeriesTransformOp } from 'lib/api/session';
 import { useDialog } from '../../shared/components/Dialog';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -410,6 +410,7 @@ export function TablesPane({
   // still come from the in-memory model.
   const [tsRows, setTsRows] = useState<GridRow[] | null>(null);
   const [tsLoading, setTsLoading] = useState(false);
+  const [tsReloadKey, setTsReloadKey] = useState(0);
   useEffect(() => {
     if (!isTs) { setTsRows(null); return undefined; }
     let cancelled = false;
@@ -421,7 +422,7 @@ export function TablesPane({
       .catch(() => { if (!cancelled) setTsRows([]); })
       .finally(() => { if (!cancelled) setTsLoading(false); });
     return () => { cancelled = true; };
-  }, [isTs, sel.sheet]);
+  }, [isTs, sel.sheet, tsReloadKey]);
 
   const rows: GridRow[] = isTs
     ? (tsRows ?? [])
@@ -456,6 +457,39 @@ export function TablesPane({
       String(sel.sheet),
       [{ op: 'deleteRows', rows: Array.from({ length: count }, (_, i) => i) }],
     ).catch(() => { /* best-effort */ });
+  };
+
+  // ── Bulk series transform (T1): scale / shift / interpolate / clip ──────────
+  const [txOpen, setTxOpen] = useState(false);
+  const [txOp, setTxOp] = useState<SeriesTransformOp>('scale');
+  const [txFactor, setTxFactor] = useState(1);
+  const [txDelta, setTxDelta] = useState(0);
+  const [txShift, setTxShift] = useState(1);
+  const [txWrap, setTxWrap] = useState(true);
+  const [txMin, setTxMin] = useState('');
+  const [txMax, setTxMax] = useState('');
+  const [txBusy, setTxBusy] = useState(false);
+  useEffect(() => { setTxOpen(false); }, [sel.sheet]);
+  const applyTransform = async () => {
+    setTxBusy(true);
+    try {
+      const num = (s: string) => (s.trim() === '' ? null : Number(s));
+      await transformSeries(String(sel.sheet), {
+        op: txOp,
+        factor: txFactor,
+        delta: txDelta,
+        shift: txShift,
+        wrap: txWrap,
+        minValue: num(txMin),
+        maxValue: num(txMax),
+      });
+      setTsReloadKey((k) => k + 1); // re-fetch the transformed series
+      setTxOpen(false);
+    } catch {
+      /* best-effort; leave the panel open so the user can retry */
+    } finally {
+      setTxBusy(false);
+    }
   };
 
   // Build ordered column list with pinned first column
@@ -587,18 +621,78 @@ export function TablesPane({
             filter) live in the grid right-click menu. The Model tab keeps an
             inline CSV import for temporal sheets since it has no side panel;
             Build (editableTs) imports from the right-hand Temporal panel. */}
-        {isTs && !editableTs && (
+        {isTs && (
           <div className="section-toolbar">
-            <input
-              ref={csvInputRef}
-              type="file"
-              accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain"
-              hidden
-              onChange={handleCsvFile}
-            />
-            <button className="ghost-button sm" onClick={() => csvInputRef.current?.click()}>
-              Import CSV
+            {!editableTs && (
+              <>
+                <input
+                  ref={csvInputRef}
+                  type="file"
+                  accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain"
+                  hidden
+                  onChange={handleCsvFile}
+                />
+                <button className="ghost-button sm" onClick={() => csvInputRef.current?.click()}>
+                  Import CSV
+                </button>
+              </>
+            )}
+            <button
+              className="ghost-button sm"
+              disabled={rows.length === 0}
+              title={rows.length === 0 ? 'Import or add a profile first' : 'Bulk-transform this series'}
+              onClick={() => setTxOpen((v) => !v)}
+            >
+              Transform{txOpen ? ' ▾' : ''}
             </button>
+          </div>
+        )}
+        {isTs && txOpen && (
+          <div className="section-toolbar ts-transform-panel" style={{ flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+            <select className="sg-num-input" value={txOp} onChange={(e) => setTxOp(e.target.value as SeriesTransformOp)}>
+              <option value="scale">Scale ×</option>
+              <option value="offset">Offset +</option>
+              <option value="shift">Shift steps</option>
+              <option value="interpolate">Interpolate gaps</option>
+              <option value="clip">Clip min/max</option>
+            </select>
+            {txOp === 'scale' && (
+              <label style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>factor
+                <input type="number" step="0.1" className="sg-num-input" style={{ width: 90 }} value={txFactor} onChange={(e) => setTxFactor(Number(e.target.value))} />
+              </label>
+            )}
+            {txOp === 'offset' && (
+              <label style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>delta
+                <input type="number" step="1" className="sg-num-input" style={{ width: 90 }} value={txDelta} onChange={(e) => setTxDelta(Number(e.target.value))} />
+              </label>
+            )}
+            {txOp === 'shift' && (
+              <>
+                <label style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>steps
+                  <input type="number" step="1" className="sg-num-input" style={{ width: 80 }} value={txShift} onChange={(e) => setTxShift(Math.round(Number(e.target.value)))} />
+                </label>
+                <label style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                  <input type="checkbox" checked={txWrap} onChange={(e) => setTxWrap(e.target.checked)} /> wrap
+                </label>
+              </>
+            )}
+            {txOp === 'clip' && (
+              <>
+                <label style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>min
+                  <input type="number" className="sg-num-input" style={{ width: 80 }} placeholder="—" value={txMin} onChange={(e) => setTxMin(e.target.value)} />
+                </label>
+                <label style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>max
+                  <input type="number" className="sg-num-input" style={{ width: 80 }} placeholder="—" value={txMax} onChange={(e) => setTxMax(e.target.value)} />
+                </label>
+              </>
+            )}
+            {txOp === 'interpolate' && (
+              <span className="sg-setting-hint" style={{ margin: 0 }}>Linear-fill blank cells across each column.</span>
+            )}
+            <button className="tb-btn sm" disabled={txBusy} onClick={() => void applyTransform()}>
+              {txBusy ? 'Applying…' : 'Apply to all columns'}
+            </button>
+            <button className="ghost-button sm" disabled={txBusy} onClick={() => setTxOpen(false)}>Cancel</button>
           </div>
         )}
         {/* Static-sheet quick actions: add a component without learning the
