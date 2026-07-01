@@ -39,6 +39,7 @@ import { CompanyFinanceCard } from '../../../features/analytics/cards/CompanyFin
 import { PriceFormationCard } from '../../../features/analytics/cards/PriceFormationCard';
 import { CommitmentCard } from '../../../features/analytics/cards/CommitmentCard';
 import { BidStrategyCard } from '../../../features/analytics/cards/BidStrategyCard';
+import { OptimalBidCard } from '../../../features/analytics/cards/OptimalBidCard';
 import { PowerFlowCard } from '../../../features/analytics/cards/PowerFlowCard';
 import { ContingencyCard } from '../../../features/analytics/cards/ContingencyCard';
 import { EmissionsBreakdownCard } from '../../../features/analytics/cards/EmissionsBreakdownCard';
@@ -460,6 +461,10 @@ export function AnalyticsDashboard({
           return results.bidStrategy
             ? <BidStrategyCard data={results.bidStrategy} />
             : <p className="dashboard-cell-missing">This run did not include bid-strategy simulation.</p>;
+        case 'optimal-bid':
+          return results.optimalBid
+            ? <OptimalBidCard data={results.optimalBid} />
+            : <p className="dashboard-cell-missing">This run did not include optimal-bid search.</p>;
         case 'power-flow':
           return results.powerFlow
             ? <PowerFlowCard data={results.powerFlow} />
@@ -530,6 +535,7 @@ export function AnalyticsDashboard({
       case 'price-formation': return 'Price formation (why the price is what it is)';
       case 'commitment': return 'Unit commitment (starts & on/off)';
       case 'bid-strategy': return 'Bid strategy (markup vs price-taker)';
+      case 'optimal-bid': return 'Optimal bid (profit-maximising markup)';
       case 'power-flow': return 'Power flow (convergence & voltages)';
       case 'contingency': return 'N-1 contingency (security)';
       case 'emissions-breakdown': return 'Emissions by generator / carrier';

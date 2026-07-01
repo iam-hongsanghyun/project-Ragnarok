@@ -88,7 +88,7 @@ export function defaultMerchantConfig(): MerchantConfig {
 }
 
 export function defaultBidStrategyConfig(): BidStrategyConfig {
-  return { enabled: false, owner: '', markupType: 'percent', markup: 0.2 };
+  return { enabled: false, mode: 'fixed', owner: '', markupType: 'percent', markup: 0.2, maxMarkup: 2.0, steps: 8 };
 }
 
 export function defaultOwnerColumn(): string {

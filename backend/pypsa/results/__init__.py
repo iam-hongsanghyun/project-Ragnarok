@@ -41,6 +41,7 @@ from .finance import build_company_finance
 from .price_formation import build_price_formation
 from .commitment import build_commitment
 from .bid_strategy import build_bid_strategy
+from .optimal_bid import build_optimal_bid
 from .expansion import build_expansion_results
 from .full_outputs import build_full_outputs
 from .market import (
@@ -188,6 +189,7 @@ def run_pypsa(
     merchant_enabled = bool(merchant_cfg.get("enabled", False))
     bid_cfg = options.get("bidStrategyConfig") or {}
     bid_enabled = bool(bid_cfg.get("enabled", False))
+    bid_mode = str(bid_cfg.get("mode", "fixed") or "fixed")
     # The owner/company column (F1 + B1) is a shared, top-level concern. Fall
     # back to the legacy merchantConfig.ownerColumn for scenarios saved before
     # it was promoted out of the merchant config.
@@ -820,7 +822,24 @@ def run_pypsa(
             solver_options=solver_options if solver_options else {},
             io_api=_SOLVER_IO_API,
         )
-        if bid_enabled
+        if bid_enabled and bid_mode != "optimal"
+        else None
+    )
+    # Optimal-bid finder (Tier 3a) — sweep the markup for the profit-max bid.
+    optimal_bid = (
+        build_optimal_bid(
+            network,
+            model,
+            owner=str(bid_cfg.get("owner", "") or ""),
+            owner_column=owner_column,
+            markup_type=str(bid_cfg.get("markupType", "percent") or "percent"),
+            max_markup=float(bid_cfg.get("maxMarkup", 2.0) or 2.0),
+            steps=int(bid_cfg.get("steps", 8) or 8),
+            currency=currency,
+            solver_options=solver_options if solver_options else {},
+            io_api=_SOLVER_IO_API,
+        )
+        if bid_enabled and bid_mode == "optimal"
         else None
     )
 
@@ -872,6 +891,7 @@ def run_pypsa(
         "priceFormation": price_formation,
         "commitment": commitment,
         "bidStrategy": bid_strategy,
+        "optimalBid": optimal_bid,
         "emissionsBreakdown": emissions_breakdown,
         "narrative": notes,
         "runMeta": {

@@ -104,6 +104,19 @@ export function BiddingSection(props: BiddingSectionProps) {
           </div>
 
           <div className="sg-setting-row">
+            <label className="sg-setting-label">Strategy</label>
+            <div className="sg-btn-row">
+              <button className={`tb-btn sg-solver-btn${cfg.mode === 'fixed' ? '' : ' tb-btn--muted'}`} onClick={() => set({ mode: 'fixed' })}>Fixed markup</button>
+              <button className={`tb-btn sg-solver-btn${cfg.mode === 'optimal' ? '' : ' tb-btn--muted'}`} onClick={() => set({ mode: 'optimal' })}>Find optimal</button>
+            </div>
+            <p className="sg-setting-hint">
+              {cfg.mode === 'optimal'
+                ? 'Ragnarok sweeps the markup and reports the profit-maximising bid (one re-solve per step).'
+                : 'Simulate a single markup you choose.'}
+            </p>
+          </div>
+
+          <div className="sg-setting-row">
             <label className="sg-setting-label">Markup type</label>
             <div className="sg-btn-row">
               <button className={`tb-btn sg-solver-btn${cfg.markupType === 'percent' ? '' : ' tb-btn--muted'}`} onClick={() => set({ markupType: 'percent' })}>Percent</button>
@@ -111,28 +124,68 @@ export function BiddingSection(props: BiddingSectionProps) {
             </div>
           </div>
 
-          <div className="sg-setting-row">
-            <label className="sg-setting-label" htmlFor="rs-bid-markup">
-              {cfg.markupType === 'percent' ? 'Markup (%)' : 'Markup (/MWh)'}
-            </label>
-            <input
-              id="rs-bid-markup"
-              type="number"
-              min={0}
-              step={cfg.markupType === 'percent' ? 5 : 1}
-              className="sg-num-input"
-              value={cfg.markupType === 'percent' ? markupPct : cfg.markup}
-              onChange={(e) => {
-                const v = parseFloat(e.target.value);
-                if (Number.isFinite(v)) set({ markup: cfg.markupType === 'percent' ? Math.max(0, v / 100) : Math.max(0, v) });
-              }}
-            />
-            <p className="sg-setting-hint">
-              {cfg.markupType === 'percent'
-                ? 'Offer = marginal cost × (1 + markup). e.g. 50% bids at 1.5× cost.'
-                : 'Offer = marginal cost + this fixed amount per MWh.'}
-            </p>
-          </div>
+          {cfg.mode === 'fixed' ? (
+            <div className="sg-setting-row">
+              <label className="sg-setting-label" htmlFor="rs-bid-markup">
+                {cfg.markupType === 'percent' ? 'Markup (%)' : 'Markup (/MWh)'}
+              </label>
+              <input
+                id="rs-bid-markup"
+                type="number"
+                min={0}
+                step={cfg.markupType === 'percent' ? 5 : 1}
+                className="sg-num-input"
+                value={cfg.markupType === 'percent' ? markupPct : cfg.markup}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  if (Number.isFinite(v)) set({ markup: cfg.markupType === 'percent' ? Math.max(0, v / 100) : Math.max(0, v) });
+                }}
+              />
+              <p className="sg-setting-hint">
+                {cfg.markupType === 'percent'
+                  ? 'Offer = marginal cost × (1 + markup). e.g. 50% bids at 1.5× cost.'
+                  : 'Offer = marginal cost + this fixed amount per MWh.'}
+              </p>
+            </div>
+          ) : (
+            <>
+              <div className="sg-setting-row">
+                <label className="sg-setting-label" htmlFor="rs-bid-maxmarkup">
+                  {cfg.markupType === 'percent' ? 'Max markup (%)' : 'Max markup (/MWh)'}
+                </label>
+                <input
+                  id="rs-bid-maxmarkup"
+                  type="number"
+                  min={0}
+                  step={cfg.markupType === 'percent' ? 10 : 5}
+                  className="sg-num-input"
+                  value={cfg.markupType === 'percent' ? Math.round((cfg.maxMarkup || 0) * 1000) / 10 : cfg.maxMarkup}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value);
+                    if (Number.isFinite(v)) set({ maxMarkup: cfg.markupType === 'percent' ? Math.max(0, v / 100) : Math.max(0, v) });
+                  }}
+                />
+                <p className="sg-setting-hint">Upper bound of the markup sweep.</p>
+              </div>
+              <div className="sg-setting-row">
+                <label className="sg-setting-label" htmlFor="rs-bid-steps">Sweep steps</label>
+                <input
+                  id="rs-bid-steps"
+                  type="number"
+                  min={2}
+                  max={20}
+                  step={1}
+                  className="sg-num-input"
+                  value={cfg.steps}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    if (Number.isFinite(v)) set({ steps: Math.max(2, Math.min(20, v)) });
+                  }}
+                />
+                <p className="sg-setting-hint">More steps = finer curve, but one extra solve each.</p>
+              </div>
+            </>
+          )}
         </>
       )}
     </section>

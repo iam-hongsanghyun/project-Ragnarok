@@ -119,6 +119,7 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   const hasPriceFormation = !!(results.priceFormation && results.priceFormation.series.length > 0);
   const hasCommitment = !!(results.commitment && results.commitment.generators.length > 0);
   const hasBidStrategy = !!results.bidStrategy;
+  const hasOptimalBid = !!(results.optimalBid && results.optimalBid.curve.length > 0);
 
   const rows: Array<ReturnType<typeof row>> = [];
 
@@ -235,6 +236,12 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   if (hasBidStrategy) {
     const bid: Card = { id: id('bid'), kind: 'bid-strategy' };
     rows.push(row({ cards: [{ card: bid }] }));
+  }
+
+  // 9e3. Optimal-bid finder — profit-maximising markup sweep (conditional)
+  if (hasOptimalBid) {
+    const ob: Card = { id: id('optbid'), kind: 'optimal-bid' };
+    rows.push(row({ cards: [{ card: ob }] }));
   }
 
   // 9f. Company / owner dimension — per-company KPIs (F1, conditional)

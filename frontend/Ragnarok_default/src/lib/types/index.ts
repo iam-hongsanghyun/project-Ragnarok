@@ -279,15 +279,22 @@ export interface MgaConfig {
   carriers: string[];
 }
 
-/** Bid-strategy simulator (Tier 2) — a markup rule for one owner's offers. */
+/** Bid-strategy simulator (Tier 2) + optimal-bid finder (Tier 3a). */
 export interface BidStrategyConfig {
   enabled: boolean;
+  /** `fixed` = simulate the given markup (Tier 2); `optimal` = sweep for the
+   *  profit-maximising markup (Tier 3a). */
+  mode: 'fixed' | 'optimal';
   /** Owner value whose offers to mark up (a value found in the owner column). */
   owner: string;
   /** `percent` = offer = cost×(1+markup); `absolute` = offer = cost+markup. */
   markupType: 'percent' | 'absolute';
-  /** Markup: fraction for percent (0.5 = +50%), currency/MWh for absolute. */
+  /** Fixed-mode markup: fraction for percent (0.5 = +50%), currency/MWh absolute. */
   markup: number;
+  /** Optimal-mode: upper bound of the markup sweep. */
+  maxMarkup: number;
+  /** Optimal-mode: number of sweep steps. */
+  steps: number;
 }
 
 /** One side (baseline / strategic) of the bid-strategy comparison. */
@@ -296,6 +303,27 @@ export interface BidStrategySide {
   revenue: number;
   energyMWh: number;
   capturePrice: number | null;
+}
+
+/** One point on the optimal-bid profit-vs-markup sweep. */
+export interface OptimalBidPoint {
+  markup: number;
+  profit: number;
+  energyMWh: number;
+  systemAvgPrice: number | null;
+}
+
+/** Optimal-bid result (Tier 3a) — the profit-maximising markup + sweep curve. */
+export interface OptimalBidResult {
+  owner: string;
+  markupType: 'percent' | 'absolute';
+  currency: string;
+  generatorCount: number;
+  baselineProfit: number;
+  optimalMarkup: number;
+  optimalProfit: number;
+  deltaProfit: number;
+  curve: OptimalBidPoint[];
 }
 
 /** Bid-strategy result — owner profit under a markup vs the price-taker baseline. */
@@ -1001,6 +1029,8 @@ export interface RunResults {
   commitment?: CommitmentResult;
   /** Bid-strategy simulation (markup vs price-taker baseline). */
   bidStrategy?: BidStrategyResult;
+  /** Optimal-bid finder (profit-maximising markup + sweep curve). */
+  optimalBid?: OptimalBidResult;
   appliedConstraints?: AppliedConstraint[];
   emissionsBreakdown?: EmissionsBreakdown;
   narrative: string[];

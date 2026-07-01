@@ -269,7 +269,7 @@ function AppInner() {
   const [merchantConfig, setMerchantConfig] = useState<MerchantConfig>({ enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 });
   const [ownerColumn, setOwnerColumn] = useState<string>('owner');
   const [financeConfig, setFinanceConfig] = useState<FinanceConfig>({ gearing: 0, interestRate: 0.05, tenorYears: 15 });
-  const [bidStrategyConfig, setBidStrategyConfig] = useState<BidStrategyConfig>({ enabled: false, owner: '', markupType: 'percent', markup: 0.2 });
+  const [bidStrategyConfig, setBidStrategyConfig] = useState<BidStrategyConfig>({ enabled: false, mode: 'fixed', owner: '', markupType: 'percent', markup: 0.2, maxMarkup: 2.0, steps: 8 });
   const [carbonPriceSchedule, setCarbonPriceSchedule] = useState<CarbonPriceScheduleEntry[]>([]);
   const [carbonLibrary, setCarbonLibrary] = useState<CarbonScheduleProfile[]>([]);
   const [validateResult, setValidateResult] = useState<{
@@ -313,7 +313,7 @@ function AppInner() {
     contingencyConfig: { enabled: false },
     mgaConfig: { enabled: false, slack: 0.05, carriers: [] },
     merchantConfig: { enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 },
-    bidStrategyConfig: { enabled: false, owner: '', markupType: 'percent', markup: 0.2 },
+    bidStrategyConfig: { enabled: false, mode: 'fixed', owner: '', markupType: 'percent', markup: 0.2, maxMarkup: 2.0, steps: 8 },
     ownerColumn: 'owner',
     financeConfig: { gearing: 0, interestRate: 0.05, tenorYears: 15 },
     constraints: DEFAULT_CONSTRAINTS,
@@ -991,7 +991,7 @@ function AppInner() {
     setContingencyConfig(scenario.contingencyConfig ?? { enabled: false });
     setMgaConfig(scenario.mgaConfig ?? { enabled: false, slack: 0.05, carriers: [] });
     setMerchantConfig(scenario.merchantConfig ?? { enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 });
-    setBidStrategyConfig(scenario.bidStrategyConfig ?? { enabled: false, owner: '', markupType: 'percent', markup: 0.2 });
+    setBidStrategyConfig(scenario.bidStrategyConfig ?? { enabled: false, mode: 'fixed', owner: '', markupType: 'percent', markup: 0.2, maxMarkup: 2.0, steps: 8 });
     setOwnerColumn(scenario.ownerColumn ?? 'owner');
     setFinanceConfig(scenario.financeConfig ?? { gearing: 0, interestRate: 0.05, tenorYears: 15 });
     setStatus(`Applied scenario: ${scenario.label}`);
