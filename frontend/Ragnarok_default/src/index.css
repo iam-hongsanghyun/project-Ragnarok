@@ -6025,22 +6025,78 @@ th:hover .col-delete-btn {
   gap: 12px;
 }
 
-/* ── Carrier → technology map (attach renewable profiles) ─────────────────── */
-.forge-carrier-map {
+/* ── Carrier → technology picker (attach renewable profiles) ──────────────── */
+.forge-carrier-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+}
+.forge-carrier-picker__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.forge-carrier-picker__label {
+  flex: 0 0 48px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.forge-carrier-picker__row .forge-msel {
+  flex: 1 1 auto;
+}
+
+/* Searchable multi-select (reuses .ss-* dropdown chrome) */
+.forge-msel {
+  position: relative;
+}
+.forge-msel__trigger {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+.forge-msel__panel {
+  position: absolute;
+  z-index: 40;
+  left: 0;
+  right: 0;
+  margin-top: 2px;
+  padding: 6px;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-top: 6px;
+  max-height: 280px;
 }
-.forge-carrier-row {
+.forge-msel__search {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+}
+.forge-msel__head {
+  display: flex;
+  gap: 8px;
+}
+.forge-msel__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+}
+.forge-msel__option label {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 2px;
+  cursor: pointer;
+  font-size: 13px;
 }
-.forge-carrier-name {
-  font-family: var(--font-mono, monospace);
+.forge-msel__empty {
+  padding: 6px 2px;
+  color: var(--text-muted, #888);
   font-size: 13px;
 }
 

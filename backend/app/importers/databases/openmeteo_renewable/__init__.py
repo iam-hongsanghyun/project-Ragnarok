@@ -43,17 +43,15 @@ _TECHS = [
 ]
 _MAX_POINTS = 16
 
-# The three reanalyses are genuinely different providers, but all produce the
-# same thing (renewable capacity factors), so they group under ONE Data-view
-# source with a dataset per provider (like KPG193's datasets) rather than a
-# hidden dropdown or three separate rail groups. ``tag`` disambiguates the
-# generator/bus names so multi-selecting two providers can't collide.
-_SOURCE_ID = "renewable_cf"
-_SOURCE_LABEL = "Renewable capacity factors (weather reanalysis)"
+# Grouped by PROVIDER: each weather provider is its own Data-view source, and a
+# provider's datasets share one group. Open-Meteo's renewable-CF dataset shares
+# the "open_meteo" source with the synthetic-demand dataset (see openmeteo_demand);
+# PVGIS and NASA POWER are their own single-dataset sources.
 _SOURCES: dict[str, dict[str, Any]] = {
     "open-meteo": {
         "id": "openmeteo_renewable",
-        "tag": "om",
+        "source_id": "open_meteo",
+        "source_label": "Open-Meteo (global ERA5, keyless)",
         "name": "Open-Meteo — renewable capacity factors (any location)",
         "short_name": "Open-Meteo CF",
         "license": "CC-BY 4.0 (Open-Meteo / ERA5)",
@@ -67,7 +65,8 @@ _SOURCES: dict[str, dict[str, Any]] = {
     },
     "pvgis": {
         "id": "pvgis_renewable",
-        "tag": "pvgis",
+        "source_id": "pvgis",
+        "source_label": "PVGIS (EU JRC, keyless)",
         "name": "PVGIS — renewable capacity factors (EU JRC)",
         "short_name": "PVGIS CF",
         "license": "EU JRC PVGIS (free reuse)",
@@ -82,7 +81,8 @@ _SOURCES: dict[str, dict[str, Any]] = {
     },
     "nasa-power": {
         "id": "nasa_power_renewable",
-        "tag": "nasa",
+        "source_id": "nasa_power",
+        "source_label": "NASA POWER (global, keyless)",
         "name": "NASA POWER — renewable capacity factors (global)",
         "short_name": "NASA POWER CF",
         "license": "NASA POWER (public domain)",
@@ -105,8 +105,8 @@ def _meta_for(source_key: str) -> DatabaseMeta:
         short_name=cfg["short_name"],
         category="generation",
         subcategory="Hourly profiles",
-        source_id=_SOURCE_ID,
-        source_label=_SOURCE_LABEL,
+        source_id=cfg["source_id"],
+        source_label=cfg["source_label"],
         license=cfg["license"],
         homepage=cfg["homepage"],
         version_hint=cfg["version_hint"],
@@ -241,7 +241,6 @@ class OpenMeteoRenewable:
         points = result.payload.get("points") or []
         techs = _techs(result.filters)
         iso = _iso(result.region)
-        tag = _SOURCES[self._source]["tag"]
         offset = int(result.filters.get("utc_offset") or 0)
         pr = float(result.filters.get("performance_ratio") or 0.9)
         capacity = max(0.0, float(result.filters.get("capacity_mw") or 100.0))
@@ -258,17 +257,17 @@ class OpenMeteoRenewable:
 
         for idx, pt in enumerate(points, start=1):
             suffix = f"_{idx}" if multi else ""
-            bus = f"re_{iso}_{tag}{suffix}"
+            bus = f"re_{iso}{suffix}"
             lat, lon = pt["lat"], pt["lon"]
             made = False
             if "solar" in techs and any(pt.get("ghi") or []):
-                gen = f"solar_{iso}_{tag}{suffix}"
+                gen = f"solar_{iso}{suffix}"
                 series_by_gen[gen] = solar_cf(pt["ghi"], pr)
                 gen_rows.append({"name": gen, "bus": bus, "carrier": "solar",
                                  "p_nom": capacity, "marginal_cost": 0.0, "x": lon, "y": lat})
                 made = True
             if "wind" in techs and (pt.get("wind_ms") or []):
-                gen = f"wind_{iso}_{tag}{suffix}"
+                gen = f"wind_{iso}{suffix}"
                 series_by_gen[gen] = wind_cf(pt["wind_ms"])
                 gen_rows.append({"name": gen, "bus": bus, "carrier": "wind",
                                  "p_nom": capacity, "marginal_cost": 0.0, "x": lon, "y": lat})

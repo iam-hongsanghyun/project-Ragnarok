@@ -258,10 +258,12 @@ async def cluster_network(req: ClusterRequest) -> dict[str, Any]:
 
 class RenewableProfilesRequest(BaseModel):
     sessionId: str
-    dateFrom: str = "2022-01-01"
-    dateTo: str = "2022-01-31"
+    dateFrom: str = "2019-01-01"
+    dateTo: str = "2019-01-31"
     performanceRatio: float = 0.9
     source: str = "open-meteo"
+    # Shift snapshot labels from UTC to local time (e.g. 9 for Korea).
+    utcOffset: int = 0
     # Optional explicit carrier→tech mapping; otherwise names are classified by hint.
     solarCarriers: list[str] | None = None
     windCarriers: list[str] | None = None
@@ -311,7 +313,9 @@ async def attach_renewable_profiles(req: RenewableProfilesRequest) -> dict[str, 
     if not point_by_key:
         raise HTTPException(status_code=502, detail="Weather fetch failed for every point.")
 
-    rows, snapshots, attached = build_profile_rows(targets, point_by_key, req.performanceRatio)
+    rows, snapshots, attached = build_profile_rows(
+        targets, point_by_key, req.performanceRatio, req.utcOffset
+    )
     if not attached:
         raise HTTPException(status_code=502, detail="No profiles could be built from the weather data.")
 

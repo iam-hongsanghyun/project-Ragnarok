@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import _shift_label
 from .cache import snap
 from .conversion import solar_cf, wind_cf
 
@@ -96,11 +97,13 @@ def build_profile_rows(
     targets: list[tuple[str, str, float, float]],
     point_by_key: dict[str, dict[str, Any]],
     performance_ratio: float = 0.9,
+    utc_offset: int = 0,
 ) -> tuple[list[dict[str, Any]], list[str], list[str]]:
     """Assemble ``generators-p_max_pu`` rows attaching each target to its point.
 
     ``point_by_key`` maps :func:`point_key` → ``{"time", "ghi", "wind_ms"}``.
-    Returns ``(rows, snapshots, attached_gen_names)``.
+    ``utc_offset`` shifts snapshot labels from UTC to local time so the diurnal
+    profile lines up with local demand. Returns ``(rows, snapshots, attached)``.
     """
     series: dict[str, list[float]] = {}
     times: list[str] = []
@@ -114,7 +117,7 @@ def build_profile_rows(
         if cf:
             series[name] = cf
 
-    snapshots = [str(t).replace("T", " ") for t in times]
+    snapshots = [_shift_label(str(t).replace("T", " "), utc_offset) for t in times]
     rows: list[dict[str, Any]] = []
     for i, snap_label in enumerate(snapshots):
         row: dict[str, Any] = {"snapshot": snap_label}

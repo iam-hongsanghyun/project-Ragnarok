@@ -11,7 +11,7 @@
  * The view is presentation + orchestration only; the numeric and spatial
  * logic lives in `lib/forge/*` so it is unit-tested independently.
  */
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { GridRow, WorkbookModel } from 'lib/types';
 import { usePersistedState } from 'shared/hooks/usePersistedState';
 import { FORGE_CONFIG, VALIDATION_CONFIG } from 'lib/constants';
@@ -44,6 +44,7 @@ interface Props {
     dateTo: string;
     performanceRatio: number;
     source: string;
+    utcOffset?: number;
     solarCarriers?: string[];
     windCarriers?: string[];
   }) => Promise<AttachProfilesResult>;
@@ -125,6 +126,75 @@ function ClusterScatter({ model, busmap }: { model: WorkbookModel; busmap: Recor
         <circle key={c} cx={sx(e.x / e.n)} cy={sy(e.y / e.n)} r={6} fill="none" stroke={colorOf(c)} strokeWidth={2} />
       ))}
     </svg>
+  );
+}
+
+/**
+ * Searchable multi-select for a (potentially large) list of string options —
+ * e.g. picking which carriers are solar vs wind without one row per carrier.
+ * Trigger shows a summary; the panel has a search box + checkboxes and closes
+ * on outside click or Escape.
+ */
+function SearchableMultiSelect({
+  options, selected, onChange, placeholder = 'None selected',
+}: {
+  options: string[];
+  selected: string[];
+  onChange: (v: string[]) => void;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (!rootRef.current?.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
+  }, [open]);
+  const selectedSet = new Set(selected);
+  const shown = query.trim()
+    ? options.filter((o) => o.toLowerCase().includes(query.trim().toLowerCase()))
+    : options;
+  const summary = selected.length === 0
+    ? placeholder
+    : selected.length <= 3 ? selected.join(', ') : `${selected.length} selected`;
+  const toggle = (o: string) =>
+    onChange(selectedSet.has(o) ? selected.filter((x) => x !== o) : [...selected, o]);
+  return (
+    <div ref={rootRef} className="ss-wrap forge-msel">
+      <button type="button" className="ss-input forge-msel__trigger" onClick={() => setOpen((s) => !s)} aria-expanded={open}>
+        {summary}
+      </button>
+      {open && (
+        <div className="ss-menu forge-msel__panel">
+          <input
+            className="forge-msel__search"
+            placeholder="Search…"
+            value={query}
+            autoFocus
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          <div className="forge-msel__head">
+            <button type="button" className="data-import-multiselect__head-btn" onClick={() => onChange(Array.from(new Set([...selected, ...shown])))}>Select shown</button>
+            <button type="button" className="data-import-multiselect__head-btn" onClick={() => onChange(selected.filter((s) => !shown.includes(s)))}>Clear shown</button>
+          </div>
+          <ul className="forge-msel__list" role="listbox" aria-multiselectable="true">
+            {shown.length === 0 && <li className="forge-msel__empty">No matches</li>}
+            {shown.map((o) => (
+              <li key={o} className="ss-option forge-msel__option">
+                <label>
+                  <input type="checkbox" checked={selectedSet.has(o)} onChange={() => toggle(o)} />
+                  <span>{o}</span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -257,25 +327,53 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
       .map(([carrier, count]) => ({ carrier, count, auto: autoClassify(carrier) }))
       .sort((a, b) => a.carrier.localeCompare(b.carrier));
   }, [model]);
+  const carrierNames = useMemo(() => genCarriers.map((c) => c.carrier), [genCarriers]);
+  const countByCarrier = useMemo(
+    () => new Map(genCarriers.map((c) => [c.carrier, c.count])),
+    [genCarriers],
+  );
+  // Representative fleet longitude → a suggested UTC offset (≈ lon / 15), so
+  // snapshots default to local time instead of UTC.
+  const fleetLon = useMemo(() => {
+    const buses = new Map(rowsOf(model, 'buses').map((b) => [String(b.name), b]));
+    const lons: number[] = [];
+    for (const g of rowsOf(model, 'generators')) {
+      const gx = Number(g.x);
+      if (Number.isFinite(gx)) { lons.push(gx); continue; }
+      const bx = Number(buses.get(String(g.bus))?.x);
+      if (Number.isFinite(bx)) lons.push(bx);
+    }
+    return lons.length ? lons.reduce((a, b) => a + b, 0) / lons.length : null;
+  }, [model]);
+  const suggestedOffset = fleetLon == null ? 0 : Math.max(-12, Math.min(14, Math.round(fleetLon / 15)));
+
   const [renewSource, setRenewSource] = useState<'open-meteo' | 'pvgis' | 'nasa-power'>('open-meteo');
   const [renewFrom, setRenewFrom] = useState('2019-01-01');
   const [renewTo, setRenewTo] = useState('2019-01-31');
   const [renewPr, setRenewPr] = useState(0.9);
+  const [renewOffset, setRenewOffset] = useState(0);
   const [renewBusy, setRenewBusy] = useState(false);
   const [renewResult, setRenewResult] = useState<AttachProfilesResult | null>(null);
   const [renewError, setRenewError] = useState<string | null>(null);
-  // Per-carrier override: 'auto' | 'solar' | 'wind'. Missing = 'auto'.
-  const [carrierKind, setCarrierKind] = useState<Record<string, 'auto' | 'solar' | 'wind'>>({});
-  const effectiveKind = (c: { carrier: string; auto: 'solar' | 'wind' | null }): 'solar' | 'wind' | null => {
-    const k = carrierKind[c.carrier] ?? 'auto';
-    return k === 'auto' ? c.auto : k;
-  };
-  const renewableGenCount = useMemo(
-    () => genCarriers
-      .filter((c) => (carrierKind[c.carrier] ?? 'auto') === 'auto' ? c.auto : carrierKind[c.carrier])
-      .reduce((n, c) => n + c.count, 0),
-    [genCarriers, carrierKind],
-  );
+  // Which carriers are solar / which are wind — seeded from the auto guess, then
+  // freely editable via the searchable multi-selects. Reseed when the model's
+  // carrier set changes.
+  const [solarCarriers, setSolarCarriers] = useState<string[]>([]);
+  const [windCarriers, setWindCarriers] = useState<string[]>([]);
+  const carrierKey = carrierNames.join('|');
+  useEffect(() => {
+    setSolarCarriers(genCarriers.filter((c) => c.auto === 'solar').map((c) => c.carrier));
+    setWindCarriers(genCarriers.filter((c) => c.auto === 'wind').map((c) => c.carrier));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [carrierKey]);
+  useEffect(() => { setRenewOffset(suggestedOffset); }, [suggestedOffset]);
+
+  const renewableGenCount = useMemo(() => {
+    const picked = new Set([...solarCarriers, ...windCarriers]);
+    let n = 0;
+    picked.forEach((c) => { n += countByCarrier.get(c) ?? 0; });
+    return n;
+  }, [solarCarriers, windCarriers, countByCarrier]);
 
   const runAttachProfiles = async () => {
     if (!onAttachRenewableProfiles) return;
@@ -283,11 +381,9 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
     setRenewError(null);
     setRenewResult(null);
     try {
-      const solarCarriers = genCarriers.filter((c) => effectiveKind(c) === 'solar').map((c) => c.carrier);
-      const windCarriers = genCarriers.filter((c) => effectiveKind(c) === 'wind').map((c) => c.carrier);
       const res = await onAttachRenewableProfiles({
         dateFrom: renewFrom, dateTo: renewTo, performanceRatio: renewPr, source: renewSource,
-        solarCarriers, windCarriers,
+        utcOffset: renewOffset, solarCarriers, windCarriers,
       });
       setRenewResult(res);
       setStatus(`Attached weather profiles to ${res.attached.length} generator(s) from ${res.sites} site(s).`);
@@ -591,6 +687,22 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
             </div>
 
             <div className="sg-setting-row">
+              <label className="sg-setting-label">Local UTC offset (hours)</label>
+              <NumberDraftInput
+                className="forge-number"
+                min={-12}
+                max={14}
+                step={1}
+                value={renewOffset}
+                onCommit={(v) => setRenewOffset(Math.max(-12, Math.min(14, Math.trunc(v))))}
+              />
+              <p className="sg-setting-hint">
+                Weather is fetched in UTC; this shifts snapshots to local time so the diurnal profile lines up with local demand.
+                {fleetLon != null && ` Suggested from the fleet: ${suggestedOffset >= 0 ? '+' : ''}${suggestedOffset}.`}
+              </p>
+            </div>
+
+            <div className="sg-setting-row">
               <label className="sg-setting-label">Solar performance ratio</label>
               <NumberDraftInput
                 className="forge-number"
@@ -602,38 +714,22 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
               <p className="sg-setting-hint">Flat derate on solar CF (inverter / soiling / temperature).</p>
             </div>
 
-            {genCarriers.length > 0 && (
+            {carrierNames.length > 0 && (
               <div className="sg-setting-row">
                 <label className="sg-setting-label">Carrier → technology</label>
                 <p className="sg-setting-hint">
-                  Each generator's tech is guessed from its carrier (<code>wind/onwind/offwind</code> → wind;
-                  <code>solar/pv</code> → solar). Override any carrier here; “Auto” uses the guess and skips
-                  carriers it can't classify.
+                  Pick which carriers are solar and which are wind (pre-filled from a guess:
+                  <code> wind/onwind/offwind</code> → wind, <code>solar/pv</code> → solar). Carriers in neither list are skipped.
                 </p>
-                <div className="forge-carrier-map">
-                  {genCarriers.map((c) => {
-                    const kind = carrierKind[c.carrier] ?? 'auto';
-                    const eff = effectiveKind(c);
-                    return (
-                      <div key={c.carrier} className="forge-carrier-row">
-                        <span className="forge-carrier-name">
-                          {c.carrier} <span className="sg-setting-hint">×{c.count}</span>
-                        </span>
-                        <div className="sg-btn-row">
-                          {(['auto', 'solar', 'wind'] as const).map((opt) => (
-                            <button
-                              key={opt}
-                              className={`tb-btn sg-solver-btn${kind === opt ? '' : ' tb-btn--muted'}`}
-                              onClick={() => setCarrierKind((m) => ({ ...m, [c.carrier]: opt }))}
-                            >
-                              {opt === 'auto' ? `Auto${c.auto ? ` (${c.auto})` : ' (skip)'}` : opt}
-                            </button>
-                          ))}
-                        </div>
-                        {!eff && <span className="sg-setting-hint">Skipped — no profile attached.</span>}
-                      </div>
-                    );
-                  })}
+                <div className="forge-carrier-picker">
+                  <div className="forge-carrier-picker__row">
+                    <span className="forge-carrier-picker__label">Solar</span>
+                    <SearchableMultiSelect options={carrierNames} selected={solarCarriers} onChange={setSolarCarriers} placeholder="No solar carriers" />
+                  </div>
+                  <div className="forge-carrier-picker__row">
+                    <span className="forge-carrier-picker__label">Wind</span>
+                    <SearchableMultiSelect options={carrierNames} selected={windCarriers} onChange={setWindCarriers} placeholder="No wind carriers" />
+                  </div>
                 </div>
               </div>
             )}
