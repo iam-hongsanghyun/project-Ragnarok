@@ -97,10 +97,14 @@ workflow gated behind an external environment:
   `ingest_network()` → `serialize.network_to_model` (proven on a real `.nc` in
   `tests/test_pypsa_earth.py`).
 
-**Still to do for a full integration:** (1) a frontend surface (country + config
-form, progress panel, "not configured" guidance) — I9 is not yet in the Data
-view; (2) writing a per-request `config.yaml` override into the workflow dir
-(currently it runs the dir's own config); (3) provisioning/packaging the
-PyPSA-Earth conda env + CDS key + cutout cache on the host; (4) cutout reuse
-across requests. The seam + ingest are done and tested — those four are the
-operational/UX remainder.
+**Frontend surface — DONE.** `frontend/.../features/data/PypsaEarthPanel.tsx`
+(+ `lib/api/pypsaEarth.ts`) sits below the Data-view map: an availability-gated
+panel (checks `…/available` on mount) that submits a build for the selected
+country, polls status, and applies the result via the importer `applyFragment`
+path; shows setup guidance when the server isn't configured.
+
+**Still to do for a full integration:** (1) writing a per-request `config.yaml`
+override into the workflow dir (currently it runs the dir's own config);
+(2) provisioning/packaging the PyPSA-Earth conda env + CDS key + cutout cache on
+the host; (3) cutout reuse across requests. The seam + ingest + frontend are
+done and tested — those three are the operational remainder.
