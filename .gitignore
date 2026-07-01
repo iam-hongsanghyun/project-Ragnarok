@@ -65,6 +65,10 @@ backend/data/plugins/
 backend/data/plugin_files/
 # Server-recorded importer API keys (credentials — never commit)
 backend/data/secrets.json
+# PyPSA-Earth (I9): the workflow checkout installed by scripts/setup_pypsa_earth.sh
+# and the runtime override pointing Ragnarok at it — installed locally, never committed
+/pypsa-earth/
+backend/data/pypsa_earth.json
 /data
 
 # Local scratch output (sample/exported workbooks — not source)

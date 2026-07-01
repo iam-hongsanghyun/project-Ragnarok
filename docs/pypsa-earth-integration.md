@@ -98,10 +98,18 @@ workflow gated behind an external environment:
   `tests/test_pypsa_earth.py`).
 
 **Frontend surface — DONE.** `frontend/.../features/data/PypsaEarthPanel.tsx`
-(+ `lib/api/pypsaEarth.ts`) sits below the Data-view map: an availability-gated
-panel (checks `…/available` on mount) that submits a build for the selected
-country, polls status, and applies the result via the importer `applyFragment`
-path; shows setup guidance when the server isn't configured.
+(+ `lib/api/pypsaEarth.ts`) is a left-rail "PyPSA-Earth — whole-country build"
+entry whose panel (right rail) is availability-gated: when configured it submits
+a build for the selected country, polls status, and applies the result via the
+importer `applyFragment` path; when not, it offers a "use this directory" field
+(→ `POST /configure`, persisted to `backend/data/pypsa_earth.json`) and the
+one-time setup commands.
+
+**One-command install — `scripts/setup_pypsa_earth.sh`** (gitignored target):
+clones pypsa-earth into `<repo>/pypsa-earth`, optionally builds its conda env
+(`--no-env` to skip), and writes the override so Ragnarok is pointed at it. The
+clone + override are gitignored; only the script is committed. The CDS key is
+still a manual one-time step (it's a credential).
 
 **Still to do for a full integration:** (1) writing a per-request `config.yaml`
 override into the workflow dir (currently it runs the dir's own config);
