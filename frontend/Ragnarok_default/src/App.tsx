@@ -1437,6 +1437,25 @@ function AppInner() {
     [pushHistory, showToast, requestStaticResync],
   );
 
+  // Build → add a sector-coupling conversion technology (CCGT / electrolyser /
+  // heat pump / …): merge the pure-built fragment (Link + carrier bus + carriers
+  // + fuel supply) into the working model via the same path the importers use.
+  const handleApplyConversion = useCallback(
+    (fragment: WorkbookFragment, label: string) => {
+      pushHistory();
+      const merged = mergeWorkbookFragment(modelRef.current, fragment);
+      setModel(merged);
+      requestStaticResync();
+      const counts = Object.entries(fragment.sheets)
+        .map(([sheet, rows]) => `${rows.length} ${sheet}`)
+        .join(', ');
+      const msg = `Added ${label}${counts ? ` (${counts})` : ''}`;
+      setStatus(msg);
+      showToast(msg, 'success');
+    },
+    [pushHistory, showToast, requestStaticResync],
+  );
+
   // Forge → attach Open-Meteo renewable profiles to the existing fleet by
   // coordinate. Sync static sheets first (the backend resolves each generator's
   // x/y from the session model), call the transform, and merge the returned
@@ -2734,6 +2753,7 @@ function AppInner() {
               currencySymbol={settings.currencySymbol}
               dateFormat={settings.dateFormat}
               onOpenRunSetup={() => { setDryRun(false); setRunDialogOpen(true); }}
+              onApplyConversion={handleApplyConversion}
             />
           )}
 

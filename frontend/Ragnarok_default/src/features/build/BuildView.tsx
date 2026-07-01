@@ -29,6 +29,8 @@ import { BUILD_STEPS, BuildStep, getStepIssues } from 'lib/build/steps';
 import { BuildDetailPane } from './BuildDetailPane';
 import { BuildNetworkMap, BRANCH_SHEETS, isGeoSheet, LinkMode } from './BuildNetworkMap';
 import { BuildAttributeForm } from './BuildAttributeForm';
+import { ConversionPicker } from './ConversionPicker';
+import type { WorkbookFragment } from 'lib/api/databases';
 import { ResizablePanels } from '../../layout/ResizablePanels';
 import { ViewPaneHeader } from '../../shared/components/primitives';
 import { useDialog } from '../../shared/components/Dialog';
@@ -54,6 +56,9 @@ export interface BuildViewProps {
   dateFormat: DateFormat;
   onOpenConstraintsWorkspace?: () => void;
   onOpenRunSetup?: () => void;
+  /** Merge a conversion-technology fragment (Link + carrier bus + carriers +
+   *  fuel supply) into the working model. */
+  onApplyConversion?: (fragment: WorkbookFragment, label: string) => void;
 }
 
 /** Short, sheet-appropriate base for auto-generated component names. */
@@ -326,6 +331,13 @@ export function BuildView(props: BuildViewProps) {
   const rightColumn = (
     <div className="build-top-right">
       {attributeForm}
+      {step.primarySheet === 'links' && props.onApplyConversion && (
+        <ConversionPicker
+          model={props.model}
+          busNames={busNames}
+          onApply={props.onApplyConversion}
+        />
+      )}
       {temporalSheets.length > 0 && (
         <TemporalProfilesPanel
           profiles={temporalSheets}
