@@ -742,6 +742,52 @@ function AppInner() {
     [resetForNewModel, showToast],
   );
 
+  // Reload the editor after a server-side session mutation (retarget/forecast):
+  // rehydrate static sheets (incl. snapshots) WITHOUT re-pushing (that would
+  // clobber the server's series), and relearn the session's temporal sheets.
+  const reloadSessionModel = useCallback(async () => {
+    const saved = await getSessionFullModel({ staticOnly: true }).catch(() => null);
+    if (saved) resetForNewModel(saved, undefined, { pushToSession: false });
+    try {
+      setSessionSeriesCounts(seriesSheetCounts(await getSessionMeta()));
+    } catch { /* tree just won't list series; they still solve */ }
+  }, [resetForNewModel]);
+
+  // Forge → T1(a) snapshot-window retarget. Sync static edits, retarget on the
+  // server (regenerates snapshots + reindexes all temporal sheets), then reload.
+  const handleRetargetSnapshots = useCallback(
+    async (opts: { start: string; end: string; stepHours: number; fill: string }) => {
+      await putStaticModel(prepareModelForBackend(model));
+      const resp = await fetch(`${API_BASE}/api/session/snapshots/retarget`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: DEFAULT_SESSION_ID, ...opts }),
+      });
+      if (!resp.ok) throw new Error((await resp.text()) || `Retarget failed (HTTP ${resp.status})`);
+      const data = await resp.json();
+      await reloadSessionModel();
+      showToast(`Snapshots retargeted to ${data.snapshots} steps`, 'success');
+      return data as { snapshots: number; retargeted: string[] };
+    },
+    [model, prepareModelForBackend, reloadSessionModel, showToast],
+  );
+
+  // Forge → T1(b) multi-year forecast (grow demand + re-date to a future year).
+  const handleForecastSnapshots = useCallback(
+    async (opts: { fromYear: number; toYear: number; growthPct: number; method: string }) => {
+      await putStaticModel(prepareModelForBackend(model));
+      const resp = await fetch(`${API_BASE}/api/session/snapshots/forecast`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: DEFAULT_SESSION_ID, ...opts }),
+      });
+      if (!resp.ok) throw new Error((await resp.text()) || `Forecast failed (HTTP ${resp.status})`);
+      const data = await resp.json();
+      await reloadSessionModel();
+      showToast(`Projected to ${opts.toYear} (demand ×${data.growthFactor})`, 'success');
+      return data as { toYear: number; growthFactor: number; grown: string[] };
+    },
+    [model, prepareModelForBackend, reloadSessionModel, showToast],
+  );
+
   // Guard against accidental session loss on browser back / forward / refresh /
   // close. The workbook lives only in memory and there is no client-side
   // router, so a stray back-swipe (the macOS trackpad gesture) unloads the app
@@ -2742,6 +2788,8 @@ function AppInner() {
               onClusterPreview={handleClusterPreview}
               onClusterApply={handleClusterApply}
               onAttachRenewableProfiles={handleAttachRenewableProfiles}
+              onRetargetSnapshots={handleRetargetSnapshots}
+              onForecastSnapshots={handleForecastSnapshots}
             />
           )}
 

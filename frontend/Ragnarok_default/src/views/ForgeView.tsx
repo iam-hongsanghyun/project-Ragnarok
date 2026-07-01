@@ -45,6 +45,14 @@ interface Props {
     performanceRatio: number;
     source: string;
   }) => Promise<AttachProfilesResult>;
+  /** T1(a) — retarget the snapshot window + reindex all temporal sheets. */
+  onRetargetSnapshots?: (opts: {
+    start: string; end: string; stepHours: number; fill: string;
+  }) => Promise<{ snapshots: number; retargeted: string[] }>;
+  /** T1(b) — project the series to a future year (grow demand, re-date). */
+  onForecastSnapshots?: (opts: {
+    fromYear: number; toYear: number; growthPct: number; method: string;
+  }) => Promise<{ toYear: number; growthFactor: number; grown: string[] }>;
 }
 
 export interface AttachProfilesResult {
@@ -53,8 +61,8 @@ export interface AttachProfilesResult {
   sites: number;
 }
 
-type Operation = 'round' | 'adjust' | 'snap' | 'cluster' | 'renewable';
-type OpGroup = 'Numeric' | 'Geospatial' | 'Topology';
+type Operation = 'round' | 'adjust' | 'snap' | 'cluster' | 'renewable' | 'retarget' | 'forecast';
+type OpGroup = 'Numeric' | 'Geospatial' | 'Topology' | 'Temporal';
 
 /** Catalog of Forge tools, grouped. Add a new tool by adding an entry here
  *  (and its panel + findings wiring) — the rail renders groups from this. */
@@ -64,8 +72,10 @@ const OPERATIONS: Array<{ id: Operation; label: string; group: OpGroup }> = [
   { id: 'snap', label: 'Snap to nearest bus', group: 'Geospatial' },
   { id: 'renewable', label: 'Attach renewable profiles', group: 'Geospatial' },
   { id: 'cluster', label: 'Reduce / cluster network', group: 'Topology' },
+  { id: 'retarget', label: 'Retarget snapshot window', group: 'Temporal' },
+  { id: 'forecast', label: 'Forecast to future year', group: 'Temporal' },
 ];
-const OP_GROUPS: OpGroup[] = ['Numeric', 'Geospatial', 'Topology'];
+const OP_GROUPS: OpGroup[] = ['Numeric', 'Geospatial', 'Topology', 'Temporal'];
 
 const ROUND_OPS: Array<{ value: RoundOp; label: string }> = [
   { value: 'round', label: 'Round' },
@@ -116,7 +126,7 @@ function ClusterScatter({ model, busmap }: { model: WorkbookModel; busmap: Recor
   );
 }
 
-export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApply, onAttachRenewableProfiles }: Props) {
+export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApply, onAttachRenewableProfiles, onRetargetSnapshots, onForecastSnapshots }: Props) {
   // Persisted so the chosen tool + validation result survive leaving and
   // returning to the Forge tab (the view unmounts on tab switch). The findings
   // scan the whole model, so these three drivers fully restore the result.
@@ -251,6 +261,40 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
     } finally {
       setRenewBusy(false);
     }
+  };
+
+  // ── Operation 6/7: Temporal — retarget window + forecast to a future year ──
+  const [tStart, setTStart] = useState('2025-01-01');
+  const [tEnd, setTEnd] = useState('2025-12-31 23:00');
+  const [tStep, setTStep] = useState(1);
+  const [tFill, setTFill] = useState<'tile' | 'pad'>('tile');
+  const [fFrom, setFFrom] = useState(2025);
+  const [fTo, setFTo] = useState(2035);
+  const [fGrowth, setFGrowth] = useState(2);
+  const [fMethod, setFMethod] = useState<'cagr' | 'linear'>('cagr');
+  const [tempBusy, setTempBusy] = useState(false);
+  const [tempError, setTempError] = useState<string | null>(null);
+
+  const runRetarget = async () => {
+    if (!onRetargetSnapshots) return;
+    setTempBusy(true); setTempError(null);
+    try {
+      const r = await onRetargetSnapshots({ start: tStart, end: tEnd, stepHours: tStep, fill: tFill });
+      setStatus(`Snapshots retargeted to ${r.snapshots} steps; ${r.retargeted.length} series reindexed.`);
+    } catch (e) {
+      setTempError(e instanceof Error ? e.message : 'Retarget failed.');
+    } finally { setTempBusy(false); }
+  };
+
+  const runForecast = async () => {
+    if (!onForecastSnapshots) return;
+    setTempBusy(true); setTempError(null);
+    try {
+      const r = await onForecastSnapshots({ fromYear: fFrom, toYear: fTo, growthPct: fGrowth, method: fMethod });
+      setStatus(`Projected to ${r.toYear}: demand ×${r.growthFactor} on ${r.grown.length} sheet(s).`);
+    } catch (e) {
+      setTempError(e instanceof Error ? e.message : 'Forecast failed.');
+    } finally { setTempBusy(false); }
   };
 
   // Context-aware "what needs handling" for the active tool. Recomputes when
@@ -548,6 +592,74 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
                 </p>
               </div>
             )}
+          </section>
+        ) : operation === 'retarget' ? (
+          <section className="forge-section">
+            <header className="forge-section-header">
+              <h3>Retarget snapshot window</h3>
+              <p>Regenerate the snapshot index over a new start/end at a chosen step, and reindex every temporal sheet onto it. A longer window <b>tiles</b> the source (reuse a base year to fill more time) or <b>pads</b> the last value; a shorter one clips. Use this to re-aim an imported profile onto the window you want to run.</p>
+            </header>
+            <div className="sg-setting-row">
+              <label className="sg-setting-label">Window</label>
+              <div className="sg-btn-row" style={{ gap: 8 }}>
+                <input type="datetime-local" className="forge-number" value={tStart.replace(' ', 'T')} onChange={(e) => setTStart(e.target.value.replace('T', ' '))} />
+                <input type="datetime-local" className="forge-number" value={tEnd.replace(' ', 'T')} onChange={(e) => setTEnd(e.target.value.replace('T', ' '))} />
+              </div>
+            </div>
+            <div className="sg-setting-row">
+              <label className="sg-setting-label">Step (hours)</label>
+              <NumberDraftInput className="forge-number" min={1} value={tStep} onCommit={(v) => setTStep(Math.max(1, Math.trunc(v)))} />
+            </div>
+            <div className="sg-setting-row">
+              <label className="sg-setting-label">Fill longer windows</label>
+              <div className="sg-btn-row">
+                <button className={`tb-btn sg-solver-btn${tFill === 'tile' ? '' : ' tb-btn--muted'}`} onClick={() => setTFill('tile')}>Tile (cycle)</button>
+                <button className={`tb-btn sg-solver-btn${tFill === 'pad' ? '' : ' tb-btn--muted'}`} onClick={() => setTFill('pad')}>Pad (repeat last)</button>
+              </div>
+            </div>
+            <div className="forge-actions">
+              <button className="run-button" disabled={tempBusy || !onRetargetSnapshots} onClick={runRetarget}>
+                {tempBusy ? 'Retargeting…' : 'Retarget snapshots'}
+              </button>
+            </div>
+            {tempError && <p className="forge-status" style={{ color: 'var(--danger, #dc2626)' }}>{tempError}</p>}
+          </section>
+        ) : operation === 'forecast' ? (
+          <section className="forge-section">
+            <header className="forge-section-header">
+              <h3>Forecast to future year</h3>
+              <p>Project the current series to a future year: shift every snapshot's year and grow demand by a CAGR or linear rate. Availability profiles (p_max_pu) are re-dated but not grown. For a pathway across several years, run this per target year into separate scenarios.</p>
+            </header>
+            <div className="sg-setting-row">
+              <label className="sg-setting-label">From year → to year</label>
+              <div className="sg-btn-row" style={{ gap: 8 }}>
+                <NumberDraftInput className="forge-number" min={1900} max={2100} value={fFrom} onCommit={(v) => setFFrom(Math.trunc(v))} />
+                <NumberDraftInput className="forge-number" min={1900} max={2100} value={fTo} onCommit={(v) => setFTo(Math.trunc(v))} />
+              </div>
+              <p className="sg-setting-hint">Snapshots move by {fTo - fFrom} year(s).</p>
+            </div>
+            <div className="sg-setting-row">
+              <label className="sg-setting-label">Demand growth (%/yr)</label>
+              <NumberDraftInput className="forge-number" step={0.5} value={fGrowth} onCommit={setFGrowth} />
+            </div>
+            <div className="sg-setting-row">
+              <label className="sg-setting-label">Growth model</label>
+              <div className="sg-btn-row">
+                <button className={`tb-btn sg-solver-btn${fMethod === 'cagr' ? '' : ' tb-btn--muted'}`} onClick={() => setFMethod('cagr')}>Compound (CAGR)</button>
+                <button className={`tb-btn sg-solver-btn${fMethod === 'linear' ? '' : ' tb-btn--muted'}`} onClick={() => setFMethod('linear')}>Linear</button>
+              </div>
+              <p className="sg-setting-hint">
+                {fMethod === 'cagr'
+                  ? `Demand ×${(((1 + fGrowth / 100) ** Math.max(0, fTo - fFrom))).toFixed(3)} by ${fTo}.`
+                  : `Demand ×${(1 + (fGrowth / 100) * Math.max(0, fTo - fFrom)).toFixed(3)} by ${fTo}.`}
+              </p>
+            </div>
+            <div className="forge-actions">
+              <button className="run-button" disabled={tempBusy || fTo < fFrom || !onForecastSnapshots} onClick={runForecast}>
+                {tempBusy ? 'Projecting…' : `Project to ${fTo}`}
+              </button>
+            </div>
+            {tempError && <p className="forge-status" style={{ color: 'var(--danger, #dc2626)' }}>{tempError}</p>}
           </section>
         ) : (
           <section className="forge-section">
