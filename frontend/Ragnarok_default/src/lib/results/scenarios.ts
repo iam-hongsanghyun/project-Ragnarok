@@ -4,6 +4,7 @@ import {
   AssetSwapConfig,
   BidStrategyConfig,
   CustomConstraint,
+  EssConfig,
   FinanceConfig,
   GridRow,
   MgaConfig,
@@ -96,6 +97,10 @@ export function defaultAssetSwapConfig(): AssetSwapConfig {
   return { enabled: false, removeCarrier: '', addCarrier: '', addCapitalCost: 0, addMarginalCost: 0 };
 }
 
+export function defaultEssConfig(): EssConfig {
+  return { enabled: false, bus: '', maxHours: 4, capitalCostPerMW: 30000, minSizeMW: 10, maxSizeMW: 100, steps: 6, roundTripEfficiency: 0.9 };
+}
+
 export function defaultOwnerColumn(): string {
   return 'owner';
 }
@@ -142,6 +147,10 @@ function cloneAssetSwapConfig(config: AssetSwapConfig): AssetSwapConfig {
   return { ...config };
 }
 
+function cloneEssConfig(config: EssConfig): EssConfig {
+  return { ...config };
+}
+
 function cloneFinanceConfig(config: FinanceConfig): FinanceConfig {
   return { ...config };
 }
@@ -179,6 +188,7 @@ export function buildScenarioPreset(input: {
   merchantConfig?: MerchantConfig;
   bidStrategyConfig?: BidStrategyConfig;
   assetSwapConfig?: AssetSwapConfig;
+  essConfig?: EssConfig;
   ownerColumn?: string;
   financeConfig?: FinanceConfig;
   samplingConfig?: SamplingConfig;
@@ -207,6 +217,7 @@ export function buildScenarioPreset(input: {
     merchantConfig: cloneMerchantConfig(input.merchantConfig ?? defaultMerchantConfig()),
     bidStrategyConfig: cloneBidStrategyConfig(input.bidStrategyConfig ?? defaultBidStrategyConfig()),
     assetSwapConfig: cloneAssetSwapConfig(input.assetSwapConfig ?? defaultAssetSwapConfig()),
+    essConfig: cloneEssConfig(input.essConfig ?? defaultEssConfig()),
     ownerColumn: (input.ownerColumn ?? defaultOwnerColumn()) || defaultOwnerColumn(),
     financeConfig: cloneFinanceConfig(input.financeConfig ?? defaultFinanceConfig()),
     samplingConfig: cloneSamplingConfig(input.samplingConfig ?? defaultSamplingConfig()),
@@ -250,6 +261,7 @@ function normalizeScenarioCatalog(catalog: ScenarioCatalog): ScenarioCatalog {
       merchantConfig: cloneMerchantConfig(scenario.merchantConfig ?? defaultMerchantConfig()),
       bidStrategyConfig: cloneBidStrategyConfig(scenario.bidStrategyConfig ?? defaultBidStrategyConfig()),
       assetSwapConfig: cloneAssetSwapConfig(scenario.assetSwapConfig ?? defaultAssetSwapConfig()),
+      essConfig: cloneEssConfig(scenario.essConfig ?? defaultEssConfig()),
       ownerColumn: (scenario.ownerColumn ?? defaultOwnerColumn()) || defaultOwnerColumn(),
       financeConfig: cloneFinanceConfig(scenario.financeConfig ?? defaultFinanceConfig()),
       samplingConfig: cloneSamplingConfig(scenario.samplingConfig ?? defaultSamplingConfig()),
@@ -290,6 +302,7 @@ export function readScenarioCatalogFromModel(model: WorkbookModel): ScenarioCata
         merchantConfig: payload.merchantConfig ?? defaultMerchantConfig(),
         bidStrategyConfig: payload.bidStrategyConfig ?? defaultBidStrategyConfig(),
         assetSwapConfig: payload.assetSwapConfig ?? defaultAssetSwapConfig(),
+        essConfig: payload.essConfig ?? defaultEssConfig(),
         ownerColumn: payload.ownerColumn ?? payload.merchantConfig?.ownerColumn ?? defaultOwnerColumn(),
         financeConfig: payload.financeConfig ?? defaultFinanceConfig(),
         samplingConfig: payload.samplingConfig ?? defaultSamplingConfig(),
@@ -339,6 +352,7 @@ export function writeScenarioCatalogToModel(
       merchantConfig: scenario.merchantConfig,
       bidStrategyConfig: scenario.bidStrategyConfig,
       assetSwapConfig: scenario.assetSwapConfig,
+      essConfig: scenario.essConfig,
       ownerColumn: scenario.ownerColumn,
       financeConfig: scenario.financeConfig,
       samplingConfig: scenario.samplingConfig,

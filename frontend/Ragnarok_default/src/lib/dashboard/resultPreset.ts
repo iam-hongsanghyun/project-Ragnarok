@@ -121,6 +121,7 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   const hasBidStrategy = !!results.bidStrategy;
   const hasOptimalBid = !!(results.optimalBid && results.optimalBid.curve.length > 0);
   const hasAssetSwap = !!results.assetSwap;
+  const hasEss = !!(results.essBusinessCase && results.essBusinessCase.sizes.length > 0);
 
   const rows: Array<ReturnType<typeof row>> = [];
 
@@ -249,6 +250,12 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   if (hasAssetSwap) {
     const sw: Card = { id: id('swap'), kind: 'asset-swap' };
     rows.push(row({ cards: [{ card: sw }] }));
+  }
+
+  // 9e5. ESS business case — battery size sweep (conditional)
+  if (hasEss) {
+    const ess: Card = { id: id('ess'), kind: 'ess-business-case' };
+    rows.push(row({ cards: [{ card: ess }] }));
   }
 
   // 9f. Company / owner dimension — per-company KPIs (F1, conditional)

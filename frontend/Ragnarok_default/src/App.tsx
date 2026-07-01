@@ -21,6 +21,7 @@ import {
   MerchantConfig,
   BidStrategyConfig,
   AssetSwapConfig,
+  EssConfig,
   FinanceConfig,
   CarbonPriceScheduleEntry,
   CarbonScheduleProfile,
@@ -272,6 +273,7 @@ function AppInner() {
   const [financeConfig, setFinanceConfig] = useState<FinanceConfig>({ gearing: 0, interestRate: 0.05, tenorYears: 15 });
   const [bidStrategyConfig, setBidStrategyConfig] = useState<BidStrategyConfig>({ enabled: false, mode: 'fixed', owner: '', markupType: 'percent', markup: 0.2, maxMarkup: 2.0, steps: 8 });
   const [assetSwapConfig, setAssetSwapConfig] = useState<AssetSwapConfig>({ enabled: false, removeCarrier: '', addCarrier: '', addCapitalCost: 0, addMarginalCost: 0 });
+  const [essConfig, setEssConfig] = useState<EssConfig>({ enabled: false, bus: '', maxHours: 4, capitalCostPerMW: 30000, minSizeMW: 10, maxSizeMW: 100, steps: 6, roundTripEfficiency: 0.9 });
   const [carbonPriceSchedule, setCarbonPriceSchedule] = useState<CarbonPriceScheduleEntry[]>([]);
   const [carbonLibrary, setCarbonLibrary] = useState<CarbonScheduleProfile[]>([]);
   const [validateResult, setValidateResult] = useState<{
@@ -317,6 +319,7 @@ function AppInner() {
     merchantConfig: { enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 },
     bidStrategyConfig: { enabled: false, mode: 'fixed', owner: '', markupType: 'percent', markup: 0.2, maxMarkup: 2.0, steps: 8 },
     assetSwapConfig: { enabled: false, removeCarrier: '', addCarrier: '', addCapitalCost: 0, addMarginalCost: 0 },
+    essConfig: { enabled: false, bus: '', maxHours: 4, capitalCostPerMW: 30000, minSizeMW: 10, maxSizeMW: 100, steps: 6, roundTripEfficiency: 0.9 },
     ownerColumn: 'owner',
     financeConfig: { gearing: 0, interestRate: 0.05, tenorYears: 15 },
     constraints: DEFAULT_CONSTRAINTS,
@@ -482,6 +485,7 @@ function AppInner() {
       merchantConfig,
       bidStrategyConfig,
       assetSwapConfig,
+      essConfig,
       ownerColumn,
       financeConfig,
       constraints,
@@ -507,6 +511,7 @@ function AppInner() {
     merchantConfig,
     bidStrategyConfig,
     assetSwapConfig,
+    essConfig,
     ownerColumn,
     financeConfig,
     constraints,
@@ -625,6 +630,7 @@ function AppInner() {
       merchantConfig,
       bidStrategyConfig,
       assetSwapConfig,
+      essConfig,
       ownerColumn,
       financeConfig,
       constraints,
@@ -678,6 +684,7 @@ function AppInner() {
     merchantConfig,
     bidStrategyConfig,
     assetSwapConfig,
+    essConfig,
     ownerColumn,
     financeConfig,
     constraints,
@@ -955,6 +962,15 @@ function AppInner() {
     }
     return seen;
   }, [model.carriers]);
+  // Distinct bus names — drives the ESS (DW3) siting picker.
+  const modelBuses = useMemo(() => {
+    const seen: string[] = [];
+    for (const row of model.buses ?? []) {
+      const b = stringValue(row.name).trim();
+      if (b && !seen.includes(b)) seen.push(b);
+    }
+    return seen;
+  }, [model.buses]);
   // Map geometry for the analytics view follows the results-owning topology.
   const analyticsBounds = useMemo(() => getBounds(analyticsModel), [analyticsModel.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
   const analyticsBusIndex = useMemo(() => getBusIndex(analyticsModel), [analyticsModel.buses]);  // eslint-disable-line react-hooks/exhaustive-deps
@@ -1009,6 +1025,7 @@ function AppInner() {
     setMerchantConfig(scenario.merchantConfig ?? { enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 });
     setBidStrategyConfig(scenario.bidStrategyConfig ?? { enabled: false, mode: 'fixed', owner: '', markupType: 'percent', markup: 0.2, maxMarkup: 2.0, steps: 8 });
     setAssetSwapConfig(scenario.assetSwapConfig ?? { enabled: false, removeCarrier: '', addCarrier: '', addCapitalCost: 0, addMarginalCost: 0 });
+    setEssConfig(scenario.essConfig ?? { enabled: false, bus: '', maxHours: 4, capitalCostPerMW: 30000, minSizeMW: 10, maxSizeMW: 100, steps: 6, roundTripEfficiency: 0.9 });
     setOwnerColumn(scenario.ownerColumn ?? 'owner');
     setFinanceConfig(scenario.financeConfig ?? { gearing: 0, interestRate: 0.05, tenorYears: 15 });
     setStatus(`Applied scenario: ${scenario.label}`);
@@ -2236,6 +2253,7 @@ function AppInner() {
       merchantConfig,
       bidStrategyConfig,
       assetSwapConfig,
+      essConfig,
       ownerColumn,
       financeConfig,
       carbonPriceSchedule,
@@ -2533,7 +2551,10 @@ function AppInner() {
               onBidStrategyConfigChange={setBidStrategyConfig}
               assetSwapConfig={assetSwapConfig}
               onAssetSwapConfigChange={setAssetSwapConfig}
+              essConfig={essConfig}
+              onEssConfigChange={setEssConfig}
               modelCarriers={modelCarriers}
+              modelBuses={modelBuses}
               merchantOwners={merchantOwners}
               ownerColumn={ownerColumn}
               onOwnerColumnChange={setOwnerColumn}

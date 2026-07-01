@@ -279,6 +279,45 @@ export interface MgaConfig {
   carriers: string[];
 }
 
+/** ESS business-case builder (DW3) — battery size sweep vs arbitrage. */
+export interface EssConfig {
+  enabled: boolean;
+  /** Bus to site the battery; '' = auto (most price-volatile bus). */
+  bus: string;
+  /** Storage duration (hours at rated power). */
+  maxHours: number;
+  capitalCostPerMW: number;
+  minSizeMW: number;
+  maxSizeMW: number;
+  steps: number;
+  /** Round-trip efficiency (0–1). */
+  roundTripEfficiency: number;
+}
+
+/** One size point of the ESS sweep. */
+export interface EssSizeResult {
+  sizeMW: number;
+  energyMWh: number;
+  arbitrageRevenue: number;
+  annualisedCapex: number;
+  npv: number;
+  irr: number | null;
+  paybackYears: number | null;
+}
+
+/** ESS business-case result (DW3) — the size sweep + NPV-maximising size. */
+export interface EssBusinessCaseResult {
+  bus: string;
+  maxHours: number;
+  roundTripEfficiency: number;
+  discountRate: number;
+  lifetimeYears: number;
+  currency: string;
+  sizes: EssSizeResult[];
+  bestSizeMW: number;
+  bestNpv: number;
+}
+
 /** Asset-swap / repowering what-if (DW2) — retire a carrier, add another 1:1. */
 export interface AssetSwapConfig {
   enabled: boolean;
@@ -559,6 +598,7 @@ export interface ScenarioPreset {
   merchantConfig: MerchantConfig;
   bidStrategyConfig: BidStrategyConfig;
   assetSwapConfig: AssetSwapConfig;
+  essConfig: EssConfig;
   /** Model column holding the owner/company tag (F1 + B1). Default `owner`. */
   ownerColumn: string;
   /** Optional debt assumptions for company finance DSCR (F2). */
@@ -1066,6 +1106,8 @@ export interface RunResults {
   optimalBid?: OptimalBidResult;
   /** Asset-swap / repowering what-if (before vs after a carrier swap). */
   assetSwap?: AssetSwapResult;
+  /** ESS business case (battery size sweep vs arbitrage). */
+  essBusinessCase?: EssBusinessCaseResult;
   appliedConstraints?: AppliedConstraint[];
   emissionsBreakdown?: EmissionsBreakdown;
   narrative: string[];

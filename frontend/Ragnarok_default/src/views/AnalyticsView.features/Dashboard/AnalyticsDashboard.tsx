@@ -41,6 +41,7 @@ import { CommitmentCard } from '../../../features/analytics/cards/CommitmentCard
 import { BidStrategyCard } from '../../../features/analytics/cards/BidStrategyCard';
 import { OptimalBidCard } from '../../../features/analytics/cards/OptimalBidCard';
 import { AssetSwapCard } from '../../../features/analytics/cards/AssetSwapCard';
+import { EssCard } from '../../../features/analytics/cards/EssCard';
 import { PowerFlowCard } from '../../../features/analytics/cards/PowerFlowCard';
 import { ContingencyCard } from '../../../features/analytics/cards/ContingencyCard';
 import { EmissionsBreakdownCard } from '../../../features/analytics/cards/EmissionsBreakdownCard';
@@ -470,6 +471,10 @@ export function AnalyticsDashboard({
           return results.assetSwap
             ? <AssetSwapCard data={results.assetSwap} />
             : <p className="dashboard-cell-missing">This run did not include an asset-swap what-if.</p>;
+        case 'ess-business-case':
+          return results.essBusinessCase
+            ? <EssCard data={results.essBusinessCase} />
+            : <p className="dashboard-cell-missing">This run did not include an ESS business case.</p>;
         case 'power-flow':
           return results.powerFlow
             ? <PowerFlowCard data={results.powerFlow} />
@@ -542,6 +547,7 @@ export function AnalyticsDashboard({
       case 'bid-strategy': return 'Bid strategy (markup vs price-taker)';
       case 'optimal-bid': return 'Optimal bid (profit-maximising markup)';
       case 'asset-swap': return 'Asset swap (repowering what-if)';
+      case 'ess-business-case': return 'ESS business case (size sweep)';
       case 'power-flow': return 'Power flow (convergence & voltages)';
       case 'contingency': return 'N-1 contingency (security)';
       case 'emissions-breakdown': return 'Emissions by generator / carrier';

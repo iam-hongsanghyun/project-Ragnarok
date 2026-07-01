@@ -43,6 +43,7 @@ from .commitment import build_commitment
 from .bid_strategy import build_bid_strategy
 from .optimal_bid import build_optimal_bid
 from .asset_swap import build_asset_swap
+from .ess import build_ess_business_case
 from .expansion import build_expansion_results
 from .full_outputs import build_full_outputs
 from .market import (
@@ -193,6 +194,8 @@ def run_pypsa(
     bid_mode = str(bid_cfg.get("mode", "fixed") or "fixed")
     swap_cfg = options.get("assetSwapConfig") or {}
     swap_enabled = bool(swap_cfg.get("enabled", False))
+    ess_cfg = options.get("essConfig") or {}
+    ess_enabled = bool(ess_cfg.get("enabled", False))
     # The owner/company column (F1 + B1) is a shared, top-level concern. Fall
     # back to the legacy merchantConfig.ownerColumn for scenarios saved before
     # it was promoted out of the merchant config.
@@ -286,6 +289,17 @@ def run_pypsa(
         raise HTTPException(
             status_code=400,
             detail="Asset-swap what-if cannot be combined with rolling horizon, stochastic, "
+            "security-constrained, sampled-block, power-flow, or contingency modes.",
+        )
+    # ESS business case prices arbitrage against the base LMP, so it needs the
+    # plain optimise path (marginal prices to arbitrage against).
+    if ess_enabled and (
+        rolling.enabled or stochastic.enabled or sclopf_enabled
+        or sampling.enabled or pf_enabled or contingency_enabled
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="ESS business case cannot be combined with rolling horizon, stochastic, "
             "security-constrained, sampled-block, power-flow, or contingency modes.",
         )
 
@@ -879,6 +893,26 @@ def run_pypsa(
         else None
     )
 
+    # ESS business-case builder (DW3) — size sweep of a price-taker battery.
+    ess_business_case = (
+        build_ess_business_case(
+            network,
+            bus=str(ess_cfg.get("bus", "") or ""),
+            max_hours=float(ess_cfg.get("maxHours", 4.0) or 4.0),
+            capital_cost_per_mw=float(ess_cfg.get("capitalCostPerMW", 0.0) or 0.0),
+            min_size_mw=float(ess_cfg.get("minSizeMW", 0.0) or 0.0),
+            max_size_mw=float(ess_cfg.get("maxSizeMW", 0.0) or 0.0),
+            steps=int(ess_cfg.get("steps", 6) or 6),
+            round_trip_efficiency=float(ess_cfg.get("roundTripEfficiency", 0.9) or 0.9),
+            discount_rate=float(scenario.get("discountRate", 0.0) or 0.0),
+            currency=currency,
+            solver_options=solver_options if solver_options else {},
+            io_api=_SOLVER_IO_API,
+        )
+        if ess_enabled
+        else None
+    )
+
     # Company / owner dimension (F1) — per-company KPIs whenever assets carry an
     # owner tag. Independent of merchant mode; reads only solved dataframes.
     company_breakdown = build_company_breakdown(
@@ -929,6 +963,7 @@ def run_pypsa(
         "bidStrategy": bid_strategy,
         "optimalBid": optimal_bid,
         "assetSwap": asset_swap,
+        "essBusinessCase": ess_business_case,
         "emissionsBreakdown": emissions_breakdown,
         "narrative": notes,
         "runMeta": {
