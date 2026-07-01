@@ -228,6 +228,42 @@ export interface PriceFormationResult {
   marginalSummary: PriceFormationMarginalCarrier[];
 }
 
+/** Run-length on/off segment of a committable unit's status. */
+export interface CommitmentSegment {
+  on: boolean;
+  length: number;
+}
+
+/** One committable generator's commitment summary (Tier 1). */
+export interface CommitmentGenerator {
+  name: string;
+  carrier: string;
+  starts: number;
+  startUpCost: number;
+  startUpCostTotal: number;
+  onlineHours: number;
+  onlineFraction: number;
+  minUpTime: number;
+  minDownTime: number;
+  segments: CommitmentSegment[];
+}
+
+export interface CommitmentCarrier {
+  carrier: string;
+  starts: number;
+  startUpCostTotal: number;
+  units: number;
+}
+
+/** Unit-commitment view (Tier 1) — starts, start-up costs, on/off patterns. */
+export interface CommitmentResult {
+  currency: string;
+  snapshotCount: number;
+  generators: CommitmentGenerator[];
+  byCarrier: CommitmentCarrier[];
+  totals: { committableCount: number; starts: number; startUpCostTotal: number };
+}
+
 /** N-1 contingency study mode — branch loading under each single outage. */
 export interface ContingencyConfig {
   enabled: boolean;
@@ -928,6 +964,8 @@ export interface RunResults {
   companyFinance?: CompanyFinanceResult;
   /** Price-formation view (price vs residual demand, marginal carrier). */
   priceFormation?: PriceFormationResult;
+  /** Unit-commitment view (starts, start-up costs, on/off patterns). */
+  commitment?: CommitmentResult;
   appliedConstraints?: AppliedConstraint[];
   emissionsBreakdown?: EmissionsBreakdown;
   narrative: string[];

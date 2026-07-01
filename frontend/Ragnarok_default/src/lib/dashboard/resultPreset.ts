@@ -117,6 +117,7 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   const hasCompanies = !!(results.companies && results.companies.companies.length > 0);
   const hasCompanyFinance = !!(results.companyFinance && results.companyFinance.companies.length > 0);
   const hasPriceFormation = !!(results.priceFormation && results.priceFormation.series.length > 0);
+  const hasCommitment = !!(results.commitment && results.commitment.generators.length > 0);
 
   const rows: Array<ReturnType<typeof row>> = [];
 
@@ -169,6 +170,12 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   if (hasPriceFormation) {
     const pf: Card = { id: id('pf'), kind: 'price-formation' };
     rows.push(row({ cards: [{ card: pf }] }));
+  }
+
+  // 4c. Unit commitment — starts & on/off patterns (conditional on committable)
+  if (hasCommitment) {
+    const cm: Card = { id: id('commit'), kind: 'commitment' };
+    rows.push(row({ cards: [{ card: cm }] }));
   }
 
   // 5. Merit order + curtailment-by-carrier line chart. The curtailment chart
