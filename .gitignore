@@ -69,6 +69,9 @@ backend/data/secrets.json
 # and the runtime override pointing Ragnarok at it — installed locally, never committed
 /pypsa-earth/
 backend/data/pypsa_earth.json
+# stray clone that can land here if the setup script gets a '#' arg (escaped —
+# a bare # is a gitignore comment)
+/\#/
 /data
 
 # Local scratch output (sample/exported workbooks — not source)
