@@ -24,7 +24,7 @@ def test_registry_lists_expected_modules():
         "osm", "osm_powerplants", "wri_gppd", "worldbank_demand",
         "kpg193_network", "kpg193_renewable_capacity",
         "kpg193_demand_profile", "kpg193_renewable_profile",
-        "eia_demand", "entsoe_load", "entsoe_capacity",
+        "eia_demand", "entsoe_load", "entsoe_capacity", "entsoe_generation_profile",
         "openmeteo_renewable", "pvgis_renewable", "nasa_power_renewable",
         "openmeteo_demand",
     }
@@ -35,7 +35,7 @@ def test_osm_and_entsoe_are_multi_dataset_sources():
     sources = {s["source_id"]: s for s in available_sources()}
     assert [d["id"] for d in sources["osm"]["datasets"]] == ["osm", "osm_powerplants"]
     assert [d["id"] for d in sources["entsoe"]["datasets"]] == [
-        "entsoe_load", "entsoe_capacity",
+        "entsoe_load", "entsoe_capacity", "entsoe_generation_profile",
     ]
     # Installed-capacity generators sit on the load's national bus, so it
     # declares the dependency (auto-included on fetch).
