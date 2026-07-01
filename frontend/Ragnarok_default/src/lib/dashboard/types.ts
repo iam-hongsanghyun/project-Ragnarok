@@ -31,6 +31,7 @@ export type CardKind =
   | 'company-finance'
   | 'price-formation'
   | 'commitment'
+  | 'bid-strategy'
   | 'power-flow'
   | 'contingency'
   | 'emissions-breakdown'
@@ -174,6 +175,10 @@ export interface CommitmentCardData extends CardBase {
   kind: 'commitment';
 }
 
+export interface BidStrategyCardData extends CardBase {
+  kind: 'bid-strategy';
+}
+
 export interface PowerFlowCardData extends CardBase {
   kind: 'power-flow';
 }
@@ -223,6 +228,7 @@ export type Card =
   | CompanyFinanceCardData
   | PriceFormationCardData
   | CommitmentCardData
+  | BidStrategyCardData
   | PowerFlowCardData
   | ContingencyCardData
   | EmissionsBreakdownCardData

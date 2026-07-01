@@ -279,6 +279,38 @@ export interface MgaConfig {
   carriers: string[];
 }
 
+/** Bid-strategy simulator (Tier 2) — a markup rule for one owner's offers. */
+export interface BidStrategyConfig {
+  enabled: boolean;
+  /** Owner value whose offers to mark up (a value found in the owner column). */
+  owner: string;
+  /** `percent` = offer = cost×(1+markup); `absolute` = offer = cost+markup. */
+  markupType: 'percent' | 'absolute';
+  /** Markup: fraction for percent (0.5 = +50%), currency/MWh for absolute. */
+  markup: number;
+}
+
+/** One side (baseline / strategic) of the bid-strategy comparison. */
+export interface BidStrategySide {
+  profit: number;
+  revenue: number;
+  energyMWh: number;
+  capturePrice: number | null;
+}
+
+/** Bid-strategy result — owner profit under a markup vs the price-taker baseline. */
+export interface BidStrategyResult {
+  owner: string;
+  markupType: 'percent' | 'absolute';
+  markup: number;
+  currency: string;
+  generatorCount: number;
+  baseline: BidStrategySide;
+  strategic: BidStrategySide;
+  deltaProfit: number;
+  systemAvgPrice: { baseline: number; strategic: number | null };
+}
+
 /** One MGA alternative — the system at one corner of the near-optimal space. */
 export interface MgaAlternative {
   carrier: string;
@@ -465,6 +497,7 @@ export interface ScenarioPreset {
   contingencyConfig: ContingencyConfig;
   mgaConfig: MgaConfig;
   merchantConfig: MerchantConfig;
+  bidStrategyConfig: BidStrategyConfig;
   /** Model column holding the owner/company tag (F1 + B1). Default `owner`. */
   ownerColumn: string;
   /** Optional debt assumptions for company finance DSCR (F2). */
@@ -966,6 +999,8 @@ export interface RunResults {
   priceFormation?: PriceFormationResult;
   /** Unit-commitment view (starts, start-up costs, on/off patterns). */
   commitment?: CommitmentResult;
+  /** Bid-strategy simulation (markup vs price-taker baseline). */
+  bidStrategy?: BidStrategyResult;
   appliedConstraints?: AppliedConstraint[];
   emissionsBreakdown?: EmissionsBreakdown;
   narrative: string[];

@@ -1,6 +1,7 @@
 import {
   CarbonPriceScheduleEntry,
   ContingencyConfig,
+  BidStrategyConfig,
   CustomConstraint,
   FinanceConfig,
   GridRow,
@@ -86,6 +87,10 @@ export function defaultMerchantConfig(): MerchantConfig {
   return { enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 };
 }
 
+export function defaultBidStrategyConfig(): BidStrategyConfig {
+  return { enabled: false, owner: '', markupType: 'percent', markup: 0.2 };
+}
+
 export function defaultOwnerColumn(): string {
   return 'owner';
 }
@@ -124,6 +129,10 @@ function cloneMerchantConfig(config: MerchantConfig): MerchantConfig {
   return { ...config, priceSeries: config.priceSeries ? [...config.priceSeries] : undefined };
 }
 
+function cloneBidStrategyConfig(config: BidStrategyConfig): BidStrategyConfig {
+  return { ...config };
+}
+
 function cloneFinanceConfig(config: FinanceConfig): FinanceConfig {
   return { ...config };
 }
@@ -159,6 +168,7 @@ export function buildScenarioPreset(input: {
   contingencyConfig?: ContingencyConfig;
   mgaConfig?: MgaConfig;
   merchantConfig?: MerchantConfig;
+  bidStrategyConfig?: BidStrategyConfig;
   ownerColumn?: string;
   financeConfig?: FinanceConfig;
   samplingConfig?: SamplingConfig;
@@ -185,6 +195,7 @@ export function buildScenarioPreset(input: {
     contingencyConfig: cloneContingencyConfig(input.contingencyConfig ?? defaultContingencyConfig()),
     mgaConfig: cloneMgaConfig(input.mgaConfig ?? defaultMgaConfig()),
     merchantConfig: cloneMerchantConfig(input.merchantConfig ?? defaultMerchantConfig()),
+    bidStrategyConfig: cloneBidStrategyConfig(input.bidStrategyConfig ?? defaultBidStrategyConfig()),
     ownerColumn: (input.ownerColumn ?? defaultOwnerColumn()) || defaultOwnerColumn(),
     financeConfig: cloneFinanceConfig(input.financeConfig ?? defaultFinanceConfig()),
     samplingConfig: cloneSamplingConfig(input.samplingConfig ?? defaultSamplingConfig()),
@@ -226,6 +237,7 @@ function normalizeScenarioCatalog(catalog: ScenarioCatalog): ScenarioCatalog {
       contingencyConfig: cloneContingencyConfig(scenario.contingencyConfig ?? defaultContingencyConfig()),
       mgaConfig: cloneMgaConfig(scenario.mgaConfig ?? defaultMgaConfig()),
       merchantConfig: cloneMerchantConfig(scenario.merchantConfig ?? defaultMerchantConfig()),
+      bidStrategyConfig: cloneBidStrategyConfig(scenario.bidStrategyConfig ?? defaultBidStrategyConfig()),
       ownerColumn: (scenario.ownerColumn ?? defaultOwnerColumn()) || defaultOwnerColumn(),
       financeConfig: cloneFinanceConfig(scenario.financeConfig ?? defaultFinanceConfig()),
       samplingConfig: cloneSamplingConfig(scenario.samplingConfig ?? defaultSamplingConfig()),
@@ -264,6 +276,7 @@ export function readScenarioCatalogFromModel(model: WorkbookModel): ScenarioCata
         contingencyConfig: payload.contingencyConfig ?? defaultContingencyConfig(),
         mgaConfig: payload.mgaConfig ?? defaultMgaConfig(),
         merchantConfig: payload.merchantConfig ?? defaultMerchantConfig(),
+        bidStrategyConfig: payload.bidStrategyConfig ?? defaultBidStrategyConfig(),
         ownerColumn: payload.ownerColumn ?? payload.merchantConfig?.ownerColumn ?? defaultOwnerColumn(),
         financeConfig: payload.financeConfig ?? defaultFinanceConfig(),
         samplingConfig: payload.samplingConfig ?? defaultSamplingConfig(),
@@ -311,6 +324,7 @@ export function writeScenarioCatalogToModel(
       contingencyConfig: scenario.contingencyConfig,
       mgaConfig: scenario.mgaConfig,
       merchantConfig: scenario.merchantConfig,
+      bidStrategyConfig: scenario.bidStrategyConfig,
       ownerColumn: scenario.ownerColumn,
       financeConfig: scenario.financeConfig,
       samplingConfig: scenario.samplingConfig,

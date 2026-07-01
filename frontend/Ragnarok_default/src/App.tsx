@@ -19,6 +19,7 @@ import {
   ContingencyConfig,
   MgaConfig,
   MerchantConfig,
+  BidStrategyConfig,
   FinanceConfig,
   CarbonPriceScheduleEntry,
   CarbonScheduleProfile,
@@ -268,6 +269,7 @@ function AppInner() {
   const [merchantConfig, setMerchantConfig] = useState<MerchantConfig>({ enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 });
   const [ownerColumn, setOwnerColumn] = useState<string>('owner');
   const [financeConfig, setFinanceConfig] = useState<FinanceConfig>({ gearing: 0, interestRate: 0.05, tenorYears: 15 });
+  const [bidStrategyConfig, setBidStrategyConfig] = useState<BidStrategyConfig>({ enabled: false, owner: '', markupType: 'percent', markup: 0.2 });
   const [carbonPriceSchedule, setCarbonPriceSchedule] = useState<CarbonPriceScheduleEntry[]>([]);
   const [carbonLibrary, setCarbonLibrary] = useState<CarbonScheduleProfile[]>([]);
   const [validateResult, setValidateResult] = useState<{
@@ -311,6 +313,7 @@ function AppInner() {
     contingencyConfig: { enabled: false },
     mgaConfig: { enabled: false, slack: 0.05, carriers: [] },
     merchantConfig: { enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 },
+    bidStrategyConfig: { enabled: false, owner: '', markupType: 'percent', markup: 0.2 },
     ownerColumn: 'owner',
     financeConfig: { gearing: 0, interestRate: 0.05, tenorYears: 15 },
     constraints: DEFAULT_CONSTRAINTS,
@@ -474,6 +477,7 @@ function AppInner() {
       contingencyConfig,
       mgaConfig,
       merchantConfig,
+      bidStrategyConfig,
       ownerColumn,
       financeConfig,
       constraints,
@@ -497,6 +501,7 @@ function AppInner() {
     contingencyConfig,
     mgaConfig,
     merchantConfig,
+    bidStrategyConfig,
     ownerColumn,
     financeConfig,
     constraints,
@@ -613,6 +618,7 @@ function AppInner() {
       contingencyConfig,
       mgaConfig,
       merchantConfig,
+      bidStrategyConfig,
       ownerColumn,
       financeConfig,
       constraints,
@@ -664,6 +670,7 @@ function AppInner() {
     contingencyConfig,
     mgaConfig,
     merchantConfig,
+    bidStrategyConfig,
     ownerColumn,
     financeConfig,
     constraints,
@@ -984,6 +991,7 @@ function AppInner() {
     setContingencyConfig(scenario.contingencyConfig ?? { enabled: false });
     setMgaConfig(scenario.mgaConfig ?? { enabled: false, slack: 0.05, carriers: [] });
     setMerchantConfig(scenario.merchantConfig ?? { enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 });
+    setBidStrategyConfig(scenario.bidStrategyConfig ?? { enabled: false, owner: '', markupType: 'percent', markup: 0.2 });
     setOwnerColumn(scenario.ownerColumn ?? 'owner');
     setFinanceConfig(scenario.financeConfig ?? { gearing: 0, interestRate: 0.05, tenorYears: 15 });
     setStatus(`Applied scenario: ${scenario.label}`);
@@ -2209,6 +2217,7 @@ function AppInner() {
       contingencyConfig,
       mgaConfig,
       merchantConfig,
+      bidStrategyConfig,
       ownerColumn,
       financeConfig,
       carbonPriceSchedule,
@@ -2501,6 +2510,8 @@ function AppInner() {
               onMgaConfigChange={setMgaConfig}
               merchantConfig={merchantConfig}
               onMerchantConfigChange={setMerchantConfig}
+              bidStrategyConfig={bidStrategyConfig}
+              onBidStrategyConfigChange={setBidStrategyConfig}
               merchantOwners={merchantOwners}
               ownerColumn={ownerColumn}
               onOwnerColumnChange={setOwnerColumn}

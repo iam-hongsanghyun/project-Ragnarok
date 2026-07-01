@@ -40,6 +40,7 @@ from .company import build_company_breakdown
 from .finance import build_company_finance
 from .price_formation import build_price_formation
 from .commitment import build_commitment
+from .bid_strategy import build_bid_strategy
 from .expansion import build_expansion_results
 from .full_outputs import build_full_outputs
 from .market import (
@@ -185,6 +186,8 @@ def run_pypsa(
     mga_enabled = bool(mga_cfg.get("enabled", False))
     merchant_cfg = options.get("merchantConfig") or {}
     merchant_enabled = bool(merchant_cfg.get("enabled", False))
+    bid_cfg = options.get("bidStrategyConfig") or {}
+    bid_enabled = bool(bid_cfg.get("enabled", False))
     # The owner/company column (F1 + B1) is a shared, top-level concern. Fall
     # back to the legacy merchantConfig.ownerColumn for scenarios saved before
     # it was promoted out of the merchant config.
@@ -256,6 +259,17 @@ def run_pypsa(
         raise HTTPException(
             status_code=400,
             detail="Merchant (price-taker) analysis cannot be combined with rolling horizon, stochastic, "
+            "security-constrained, sampled-block, power-flow, or contingency modes.",
+        )
+    # Bid-strategy re-clears the full market with modified offers, so like
+    # merchant it needs the plain optimise path.
+    if bid_enabled and (
+        rolling.enabled or stochastic.enabled or sclopf_enabled
+        or sampling.enabled or pf_enabled or contingency_enabled
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Bid-strategy simulation cannot be combined with rolling horizon, stochastic, "
             "security-constrained, sampled-block, power-flow, or contingency modes.",
         )
 
@@ -792,6 +806,24 @@ def run_pypsa(
         else None
     )
 
+    # Bid-strategy simulator (Tier 2) — raise one owner's offers by a markup,
+    # re-clear the market, and compare profit to the price-taker baseline.
+    bid_strategy = (
+        build_bid_strategy(
+            network,
+            model,
+            owner=str(bid_cfg.get("owner", "") or ""),
+            owner_column=owner_column,
+            markup_type=str(bid_cfg.get("markupType", "percent") or "percent"),
+            markup=float(bid_cfg.get("markup", 0.0) or 0.0),
+            currency=currency,
+            solver_options=solver_options if solver_options else {},
+            io_api=_SOLVER_IO_API,
+        )
+        if bid_enabled
+        else None
+    )
+
     # Company / owner dimension (F1) — per-company KPIs whenever assets carry an
     # owner tag. Independent of merchant mode; reads only solved dataframes.
     company_breakdown = build_company_breakdown(
@@ -839,6 +871,7 @@ def run_pypsa(
         "companyFinance": company_finance,
         "priceFormation": price_formation,
         "commitment": commitment,
+        "bidStrategy": bid_strategy,
         "emissionsBreakdown": emissions_breakdown,
         "narrative": notes,
         "runMeta": {

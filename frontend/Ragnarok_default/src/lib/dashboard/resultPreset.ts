@@ -118,6 +118,7 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   const hasCompanyFinance = !!(results.companyFinance && results.companyFinance.companies.length > 0);
   const hasPriceFormation = !!(results.priceFormation && results.priceFormation.series.length > 0);
   const hasCommitment = !!(results.commitment && results.commitment.generators.length > 0);
+  const hasBidStrategy = !!results.bidStrategy;
 
   const rows: Array<ReturnType<typeof row>> = [];
 
@@ -228,6 +229,12 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   if (hasMerchant) {
     const merch: Card = { id: id('merch'), kind: 'merchant' };
     rows.push(row({ cards: [{ card: merch }] }));
+  }
+
+  // 9e2. Bid-strategy simulation — markup vs price-taker baseline (conditional)
+  if (hasBidStrategy) {
+    const bid: Card = { id: id('bid'), kind: 'bid-strategy' };
+    rows.push(row({ cards: [{ card: bid }] }));
   }
 
   // 9f. Company / owner dimension — per-company KPIs (F1, conditional)
