@@ -29,6 +29,7 @@ import json
 import logging
 import os
 import shutil
+import subprocess
 import uuid
 from pathlib import Path
 from typing import Any
@@ -180,6 +181,51 @@ def _snakemake_argv(target: str) -> list[str]:
     )
 
 
+def _conda_env_exists(runner: str, env_name: str) -> bool:
+    """Whether ``<runner> env list`` shows an env named ``env_name``.
+
+    Returns True (don't block) if the listing can't be obtained — the real run
+    will then surface the actual error.
+    """
+    try:
+        out = subprocess.run([runner, "env", "list"], capture_output=True, text=True, timeout=60)  # noqa: S603
+    except Exception:  # noqa: BLE001
+        return True
+    if out.returncode != 0:
+        return True
+    for line in (out.stdout or "").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        if parts and parts[0] == env_name:
+            return True
+        if parts and parts[-1].rstrip("/").endswith(f"/envs/{env_name}"):
+            return True
+    return False
+
+
+def _preflight(env: Path, argv: list[str]) -> None:
+    """Fast checks before the multi-hour run so mistakes fail in seconds.
+
+    Verifies the conda env actually exists (the common "installed the checkout but
+    not the env" case) and warns if no CDS API key is configured (ERA5 cutouts
+    need it).
+    """
+    if len(argv) >= 5 and argv[1] == "run" and "-n" in argv:
+        runner = argv[0]
+        env_name = argv[argv.index("-n") + 1]
+        if not _conda_env_exists(runner, env_name):
+            raise RuntimeError(
+                f"The '{env_name}' conda env does not exist. Create it with:\n"
+                f"    conda env create -f {env / 'envs' / 'environment.yaml'}\n"
+                f"(or run scripts/setup_pypsa_earth.command without --no-env). If your "
+                f"env has a different name, set {_CONDA_ENV_VAR}."
+            )
+    if not (Path.home() / ".cdsapirc").is_file():
+        log.warning("PyPSA-Earth: no ~/.cdsapirc found — ERA5 cutouts will fail until a CDS API key is set.")
+
+
 def _run_workflow_and_ingest(env: Path, req: BuildRequest, job_id: str) -> dict[str, Any]:
     """Run PyPSA-Earth for ``req`` and ingest the resulting network.
 
@@ -188,16 +234,17 @@ def _run_workflow_and_ingest(env: Path, req: BuildRequest, job_id: str) -> dict[
     then reuses :func:`ingest_network`. The heavy lifting is PyPSA-Earth's; this
     is the integration seam.
     """
-    import subprocess
+    target = f"results/networks/elec_s_{int(req.clusters)}.nc"
+    argv = _snakemake_argv(target)
+    _set(job_id, phase="checking environment", detail="Verifying the pypsa-earth conda env…")
+    _preflight(env, argv)
 
     _set(job_id, phase="running PyPSA-Earth workflow",
          detail="Snakemake is building cutouts, bus regions, powerplants and profiles…")
-    target = f"results/networks/elec_s_{int(req.clusters)}.nc"
     # The workflow reads its own config.yaml; a per-request override would be
     # written here in a full integration. We invoke the documented target.
     proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
-        _snakemake_argv(target),
-        cwd=str(env), capture_output=True, text=True,
+        argv, cwd=str(env), capture_output=True, text=True,
     )
     if proc.returncode != 0:
         tail = (proc.stderr or proc.stdout or "").strip()[-600:]

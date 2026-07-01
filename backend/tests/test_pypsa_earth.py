@@ -144,6 +144,37 @@ def test_snakemake_argv_raises_when_nothing_available(monkeypatch: pytest.Monkey
         pe._snakemake_argv("t.nc")
 
 
+class _FakeProc:
+    def __init__(self, stdout: str, returncode: int = 0) -> None:
+        self.stdout = stdout
+        self.returncode = returncode
+
+
+def test_conda_env_exists_parses_env_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    listing = ("# conda environments:\n"
+               "base                  *  /opt/miniconda3\n"
+               "pypsa-earth              /opt/miniconda3/envs/pypsa-earth\n")
+    monkeypatch.setattr(pe.subprocess, "run", lambda *a, **k: _FakeProc(listing))
+    assert pe._conda_env_exists("conda", "pypsa-earth") is True
+    assert pe._conda_env_exists("conda", "nope") is False
+
+
+def test_preflight_raises_when_conda_env_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "envs").mkdir()
+    monkeypatch.setattr(pe.subprocess, "run", lambda *a, **k: _FakeProc("base  /opt/miniconda3\n"))
+    argv = ["/opt/miniconda3/bin/conda", "run", "--no-capture-output", "-n", "pypsa-earth", "snakemake", "x.nc"]
+    with pytest.raises(RuntimeError, match="conda env does not exist"):
+        pe._preflight(tmp_path, argv)
+
+
+def test_preflight_ok_when_env_present(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pe.subprocess, "run", lambda *a, **k: _FakeProc("pypsa-earth  /x/envs/pypsa-earth\n"))
+    argv = ["conda", "run", "--no-capture-output", "-n", "pypsa-earth", "snakemake", "x.nc"]
+    pe._preflight(tmp_path, argv)  # no raise
+    # Direct-PATH invocation (no conda run) skips the env check entirely.
+    pe._preflight(tmp_path, ["snakemake", "-j", "4", "x.nc"])
+
+
 def test_ingest_network_maps_a_netcdf_to_sheets(tmp_path: Path) -> None:
     n = pypsa.Network()
     n.set_snapshots(pd.date_range("2030-01-01", periods=2, freq="h"))
