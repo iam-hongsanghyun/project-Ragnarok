@@ -11,8 +11,12 @@
 # that's committed. It's a macOS .command file: double-click it in Finder, or run
 # it from a terminal:
 #
-#   scripts/setup_pypsa_earth.command [TARGET_DIR] [--no-env]
+#   scripts/setup_pypsa_earth.command [TARGET_DIR] [--no-env] [--recreate]
 #   # or: bash scripts/setup_pypsa_earth.command [TARGET_DIR] [--no-env]
+#
+#   --no-env     clone + configure only; don't build the conda env
+#   --recreate   remove and rebuild the conda env (use if a previous run was
+#                interrupted and left a broken/partial env)
 #
 # It also prompts (interactively) for a CDS API key and writes ~/.cdsapirc so
 # ERA5 cutouts work. You still have to create the key yourself at
@@ -21,9 +25,25 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TARGET="${1:-$REPO_ROOT/pypsa-earth}"
-NO_ENV="${2:-}"
 PE_REPO="https://github.com/pypsa-meets-earth/pypsa-earth.git"
+ENV_NAME="pypsa-earth"
+
+# ── Args (flags accepted in any order; first non-flag is the target dir) ──────
+TARGET=""
+NO_ENV=0
+RECREATE=0
+for arg in "$@"; do
+  case "$arg" in
+    --no-env)   NO_ENV=1 ;;
+    --recreate) RECREATE=1 ;;
+    -h|--help)
+      echo "Usage: setup_pypsa_earth.command [TARGET_DIR] [--no-env] [--recreate]"
+      exit 0 ;;
+    -*) echo "ERROR: unknown option: $arg" >&2; exit 2 ;;
+    *)  [ -z "$TARGET" ] && TARGET="$arg" ;;
+  esac
+done
+TARGET="${TARGET:-$REPO_ROOT/pypsa-earth}"
 
 echo "Ragnarok · PyPSA-Earth setup"
 echo "  repo:   $REPO_ROOT"
@@ -47,32 +67,57 @@ CONDA_BIN=""
 if command -v mamba >/dev/null 2>&1; then CONDA_BIN="mamba"
 elif command -v conda >/dev/null 2>&1; then CONDA_BIN="conda"; fi
 
-if [ "$NO_ENV" = "--no-env" ]; then
-  echo "! skipping conda env (--no-env). Create it later with:"
-  echo "    conda env create -f \"$TARGET/envs/environment.yaml\""
-elif [ -z "$CONDA_BIN" ]; then
-  echo "! conda/mamba not found — skipping env. Install miniforge, then run:"
-  echo "    conda env create -f \"$TARGET/envs/environment.yaml\""
-elif conda env list 2>/dev/null | grep -qE '^pypsa-earth[[:space:]]'; then
-  echo "✓ conda env 'pypsa-earth' already exists"
-else
-  # Solving this env with conda's classic solver is very slow (10–30+ min just to
-  # "Collect package metadata"). Use the fast libmamba solver when available
-  # (mamba, or conda's --solver flag) so it's minutes, not tens of minutes.
-  # (Plain string, not a bash array — macOS ships bash 3.2, where expanding an
-  # empty array under `set -u` errors.)
+# True if an env named $ENV_NAME is listed; and if snakemake actually runs in it
+# (the check Ragnarok itself does before a build — catches partial/broken envs).
+env_exists() { "$CONDA_BIN" env list 2>/dev/null | awk 'NF && $1 !~ /^#/ {print $1}' | grep -qx "$ENV_NAME"; }
+env_usable() { "$CONDA_BIN" run -n "$ENV_NAME" snakemake --version >/dev/null 2>&1; }
+
+create_env() {
+  # The classic conda solver can sit on "Collecting package metadata" for 10–30
+  # min (looks frozen — it isn't). Use libmamba when available so it's minutes.
   SOLVER_FLAG=""
   if [ "$CONDA_BIN" = "conda" ] && conda env create --help 2>/dev/null | grep -q -- '--solver'; then
     SOLVER_FLAG="--solver=libmamba"
-    echo "  (using the libmamba solver)"
+    echo "  (using the fast libmamba solver)"
   fi
-  echo "→ creating conda env 'pypsa-earth' with $CONDA_BIN (a few minutes with libmamba; longer on the classic solver) …"
+  echo "→ creating conda env '$ENV_NAME' with $CONDA_BIN …"
+  echo "  (the classic solver may sit silently on 'Collecting package metadata' for"
+  echo "   10–30 min — that is normal, not stuck; libmamba/mamba take a few minutes)"
   if [ -n "$SOLVER_FLAG" ]; then
     "$CONDA_BIN" env create "$SOLVER_FLAG" -f "$TARGET/envs/environment.yaml"
   else
     "$CONDA_BIN" env create -f "$TARGET/envs/environment.yaml"
   fi
-  echo "✓ conda env created"
+}
+
+if [ "$NO_ENV" -eq 1 ]; then
+  echo "! skipping conda env (--no-env). Create it later with:"
+  echo "    conda env create -f \"$TARGET/envs/environment.yaml\""
+elif [ -z "$CONDA_BIN" ]; then
+  echo "! conda/mamba not found — skipping env. Install miniforge, then re-run this."
+  echo "    (or: conda env create -f \"$TARGET/envs/environment.yaml\")"
+else
+  if [ "$RECREATE" -eq 1 ] && env_exists; then
+    echo "→ removing existing '$ENV_NAME' env (--recreate) …"
+    "$CONDA_BIN" env remove -n "$ENV_NAME" -y >/dev/null
+  fi
+  if env_exists; then
+    if env_usable; then
+      echo "✓ conda env '$ENV_NAME' already exists and runs snakemake"
+    else
+      echo "! conda env '$ENV_NAME' exists but snakemake won't run in it — likely a"
+      echo "  partial/interrupted install. Rebuild it with:"
+      echo "    bash \"$0\" --recreate"
+    fi
+  else
+    create_env
+    if env_usable; then
+      echo "✓ conda env created and verified (snakemake runs)"
+    else
+      echo "! conda env created, but snakemake didn't run — check the output above,"
+      echo "  or rebuild with:  bash \"$0\" --recreate"
+    fi
+  fi
 fi
 
 # ── 4. Point Ragnarok at the checkout ────────────────────────────────────────
