@@ -29,6 +29,7 @@ export type CardKind =
   | 'merchant'
   | 'company-breakdown'
   | 'company-finance'
+  | 'price-formation'
   | 'power-flow'
   | 'contingency'
   | 'emissions-breakdown'
@@ -164,6 +165,10 @@ export interface CompanyFinanceCardData extends CardBase {
   kind: 'company-finance';
 }
 
+export interface PriceFormationCardData extends CardBase {
+  kind: 'price-formation';
+}
+
 export interface PowerFlowCardData extends CardBase {
   kind: 'power-flow';
 }
@@ -211,6 +216,7 @@ export type Card =
   | MerchantCardData
   | CompanyBreakdownCardData
   | CompanyFinanceCardData
+  | PriceFormationCardData
   | PowerFlowCardData
   | ContingencyCardData
   | EmissionsBreakdownCardData

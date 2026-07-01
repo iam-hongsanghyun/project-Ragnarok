@@ -38,6 +38,7 @@ from .mga import build_mga
 from .merchant import build_merchant
 from .company import build_company_breakdown
 from .finance import build_company_finance
+from .price_formation import build_price_formation
 from .expansion import build_expansion_results
 from .full_outputs import build_full_outputs
 from .market import (
@@ -796,6 +797,9 @@ def run_pypsa(
         network, model,
         owner_column=owner_column, currency=currency, emissions_factors=emissions_factors,
     )
+    # Price-formation view (Tier 0) — price vs residual demand & the marginal
+    # (price-setting) carrier each snapshot. Best-effort; None on non-LP runs.
+    price_formation = build_price_formation(network, currency=currency)
     # Company-level financial model (F2) — NPV / IRR / payback / DSCR per owner.
     company_finance = build_company_finance(
         network, model,
@@ -830,6 +834,7 @@ def run_pypsa(
         "merchant": merchant,
         "companies": company_breakdown,
         "companyFinance": company_finance,
+        "priceFormation": price_formation,
         "emissionsBreakdown": emissions_breakdown,
         "narrative": notes,
         "runMeta": {
