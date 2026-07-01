@@ -36,12 +36,18 @@ export function PypsaEarthPanel({ selectedCountry, applyFragment }: Props) {
   const [configuring, setConfiguring] = useState(false);
   const [configError, setConfigError] = useState<string | null>(null);
   const mounted = useRef(true);
+  const logRef = useRef<HTMLPreElement>(null);
 
   useEffect(() => {
     mounted.current = true;
     checkAvailable().then((a) => mounted.current && setAvail(a)).catch(() => {});
     return () => { mounted.current = false; };
   }, []);
+
+  // Keep the streamed log pinned to the newest line.
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+  }, [job?.log]);
 
   const applyDirectory = async (path?: string) => {
     const target = (path ?? dir).trim();
@@ -163,9 +169,19 @@ conda env create -f envs/environment.yaml   # ~20-30 min
               {busy ? 'Building…' : selectedCountry ? `Build ${selectedCountry.name}` : 'Pick a country first'}
             </button>
             {job && (
-              <p className="sg-setting-hint">
-                <b>{job.status}</b> — {job.phase}{job.detail ? `: ${job.detail}` : ''}
-              </p>
+              <div className="pe-panel__job">
+                <p className="sg-setting-hint">
+                  <b>{job.status}</b> — {job.phase}
+                  {typeof job.progress === 'number' ? ` · ${job.progress}%` : ''}
+                  {job.detail ? `: ${job.detail}` : ''}
+                </p>
+                {typeof job.progress === 'number' && (
+                  <div className="pe-panel__bar"><span style={{ width: `${Math.max(2, Math.min(100, job.progress))}%` }} /></div>
+                )}
+                {job.log && job.log.length > 0 && (
+                  <pre ref={logRef} className="pe-panel__log">{job.log.join('\n')}</pre>
+                )}
+              </div>
             )}
           </>
         )}

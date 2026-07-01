@@ -25,6 +25,10 @@ export interface BuildJobStatus {
   detail: string;
   error: string | null;
   counts?: Record<string, number>;
+  /** Coarse Snakemake progress (0–100) when available. */
+  progress?: number;
+  /** Recent Snakemake log lines (tail), streamed while the build runs. */
+  log?: string[];
 }
 
 export interface BuildRequest {

@@ -9743,6 +9743,36 @@ section.data-import-filters__group {
   font-size: 0.8rem;
   margin: 0;
 }
+.pe-panel__job {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pe-panel__bar {
+  height: 6px;
+  background: var(--bg-hover);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.pe-panel__bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent, #2f855a);
+  transition: width 0.4s ease;
+}
+.pe-panel__log {
+  max-height: 220px;
+  overflow: auto;
+  margin: 0;
+  padding: 8px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 
 /* ── Welcome view ───────────────────────────────────────────────────────── */
 .welcome-view {

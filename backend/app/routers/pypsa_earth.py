@@ -28,9 +28,11 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import uuid
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +41,11 @@ from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/pypsa-earth", tags=["pypsa-earth"])
 log = logging.getLogger(__name__)
+
+# Snakemake prints coarse progress like "12 of 45 steps (27%) done".
+_PROGRESS_RE = re.compile(r"\((\d+)%\)\s*done")
+_LOG_TAIL = 200  # lines kept in memory
+_LOG_SHOWN = 60  # lines exposed to the poller each tick
 
 _ENV_VAR = "RAGNAROK_PYPSA_EARTH_DIR"
 # The pypsa-earth conda env name (snakemake + the workflow's deps live there,
@@ -226,6 +233,28 @@ def _preflight(env: Path, argv: list[str]) -> None:
         log.warning("PyPSA-Earth: no ~/.cdsapirc found — ERA5 cutouts will fail until a CDS API key is set.")
 
 
+def _stream_log(lines: Any, job_id: str) -> deque[str]:
+    """Fold Snakemake output lines into the job snapshot as they arrive.
+
+    Keeps a bounded tail, exposes the last ``_LOG_SHOWN`` lines to the poller as
+    ``log``, and lifts a coarse ``progress`` % + ``detail`` from
+    ``"(NN%) done"`` lines. Blank lines are dropped.
+    """
+    log_lines: deque[str] = deque(maxlen=_LOG_TAIL)
+    for raw in lines:
+        line = str(raw).rstrip()
+        if not line:
+            continue
+        log_lines.append(line)
+        fields: dict[str, Any] = {"log": list(log_lines)[-_LOG_SHOWN:]}
+        m = _PROGRESS_RE.search(line)
+        if m:
+            fields["progress"] = int(m.group(1))
+            fields["detail"] = line
+        _set(job_id, **fields)
+    return log_lines
+
+
 def _run_workflow_and_ingest(env: Path, req: BuildRequest, job_id: str) -> dict[str, Any]:
     """Run PyPSA-Earth for ``req`` and ingest the resulting network.
 
@@ -239,15 +268,20 @@ def _run_workflow_and_ingest(env: Path, req: BuildRequest, job_id: str) -> dict[
     _set(job_id, phase="checking environment", detail="Verifying the pypsa-earth conda env…")
     _preflight(env, argv)
 
-    _set(job_id, phase="running PyPSA-Earth workflow",
+    _set(job_id, phase="running PyPSA-Earth workflow", progress=0,
          detail="Snakemake is building cutouts, bus regions, powerplants and profiles…")
-    # The workflow reads its own config.yaml; a per-request override would be
-    # written here in a full integration. We invoke the documented target.
-    proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
-        argv, cwd=str(env), capture_output=True, text=True,
+    # Stream stdout/stderr line-by-line into the job snapshot so the panel shows a
+    # live log + coarse % instead of a spinner. The workflow reads its own
+    # config.yaml; a per-request override would be written here in a fuller build.
+    proc = subprocess.Popen(  # noqa: S603 — fixed argv, no shell
+        argv, cwd=str(env), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, bufsize=1,
     )
+    assert proc.stdout is not None
+    log_lines = _stream_log(proc.stdout, job_id)
+    proc.wait()
     if proc.returncode != 0:
-        tail = (proc.stderr or proc.stdout or "").strip()[-600:]
+        tail = "\n".join(list(log_lines)[-40:]) or f"exit {proc.returncode}"
         raise RuntimeError(f"PyPSA-Earth workflow failed (exit {proc.returncode}). {tail}")
     out = env / target
     if not out.is_file():

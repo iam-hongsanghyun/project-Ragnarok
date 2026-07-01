@@ -175,6 +175,26 @@ def test_preflight_ok_when_env_present(tmp_path: Path, monkeypatch: pytest.Monke
     pe._preflight(tmp_path, ["snakemake", "-j", "4", "x.nc"])
 
 
+def test_stream_log_tails_lines_and_lifts_progress() -> None:
+    pe._JOBS["stream-t"] = {"jobId": "stream-t", "status": "running"}
+    try:
+        lines = [
+            "Building DAG of jobs...\n",
+            "1 of 4 steps (25%) done\n",
+            "\n",  # blank — dropped
+            "rule build_cutout:\n",
+            "4 of 4 steps (100%) done\n",
+        ]
+        pe._stream_log(iter(lines), "stream-t")
+        job = pe._JOBS["stream-t"]
+        assert job["progress"] == 100
+        assert "100%" in job["detail"]
+        assert "" not in job["log"]                       # blanks skipped
+        assert any("25%" in line for line in job["log"])  # earlier lines retained in the tail
+    finally:
+        pe._JOBS.pop("stream-t", None)
+
+
 def test_ingest_network_maps_a_netcdf_to_sheets(tmp_path: Path) -> None:
     n = pypsa.Network()
     n.set_snapshots(pd.date_range("2030-01-01", periods=2, freq="h"))
