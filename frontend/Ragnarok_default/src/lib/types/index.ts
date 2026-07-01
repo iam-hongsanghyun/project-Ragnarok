@@ -305,6 +305,31 @@ export interface PpaResult {
   buyerNet: number;
 }
 
+/** Demand response (M2) — shiftable load: consumption moves in time (energy
+ *  conserved), unlike load shedding which drops it. */
+export interface DemandResponseConfig {
+  enabled: boolean;
+  /** Loads to make shiftable; empty = all loads. */
+  loads: string[];
+  /** Buffer power as a fraction of each load's peak (0–1). */
+  shiftFraction: number;
+  /** Buffer duration (hours); shiftable energy = power × hours. */
+  maxShiftHours: number;
+}
+
+export interface DemandResponseLoad {
+  name: string;
+  shiftedMWh: number;
+  peakBeforeMW: number;
+  peakAfterMW: number;
+  peakReductionPct: number;
+}
+
+export interface DemandResponseResult {
+  loads: DemandResponseLoad[];
+  totalShiftedMWh: number;
+}
+
 /** ESS business-case builder (DW3) — battery size sweep vs arbitrage. */
 export interface EssConfig {
   enabled: boolean;
@@ -644,6 +669,7 @@ export interface ScenarioPreset {
   assetSwapConfig: AssetSwapConfig;
   essConfig: EssConfig;
   ppaConfig: PpaConfig;
+  demandResponseConfig: DemandResponseConfig;
   /** Model column holding the owner/company tag (F1 + B1). Default `owner`. */
   ownerColumn: string;
   /** Optional debt assumptions for company finance DSCR (F2). */
@@ -1179,6 +1205,7 @@ export interface RunResults {
   appliedConstraints?: AppliedConstraint[];
   emissionsBreakdown?: EmissionsBreakdown;
   energyBalance?: EnergyBalanceResult;
+  demandResponse?: DemandResponseResult;
   narrative: string[];
   runMeta: {
     snapshotCount: number;

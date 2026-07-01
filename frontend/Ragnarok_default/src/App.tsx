@@ -23,6 +23,7 @@ import {
   AssetSwapConfig,
   EssConfig,
   PpaConfig,
+  DemandResponseConfig,
   FinanceConfig,
   CarbonPriceScheduleEntry,
   CarbonScheduleProfile,
@@ -276,6 +277,7 @@ function AppInner() {
   const [assetSwapConfig, setAssetSwapConfig] = useState<AssetSwapConfig>({ enabled: false, removeFilters: [], addCarrier: '', addCapitalCost: 0, addMarginalCost: 0, replaceRatio: 1, addStorageMW: 0, addStorageHours: 4, addStorageCapexPerMW: 20000 });
   const [essConfig, setEssConfig] = useState<EssConfig>({ enabled: false, bus: '', maxHours: 4, capitalCostPerMW: 30000, minSizeMW: 10, maxSizeMW: 100, steps: 6, roundTripEfficiency: 0.9 });
   const [ppaConfig, setPpaConfig] = useState<PpaConfig>({ enabled: false, owner: '', volumeType: 'generation', flatMW: 0, strikePrice: 0 });
+  const [demandResponseConfig, setDemandResponseConfig] = useState<DemandResponseConfig>({ enabled: false, loads: [], shiftFraction: 0.2, maxShiftHours: 4 });
   const [carbonPriceSchedule, setCarbonPriceSchedule] = useState<CarbonPriceScheduleEntry[]>([]);
   const [carbonLibrary, setCarbonLibrary] = useState<CarbonScheduleProfile[]>([]);
   const [validateResult, setValidateResult] = useState<{
@@ -323,6 +325,7 @@ function AppInner() {
     assetSwapConfig: { enabled: false, removeFilters: [], addCarrier: '', addCapitalCost: 0, addMarginalCost: 0, replaceRatio: 1, addStorageMW: 0, addStorageHours: 4, addStorageCapexPerMW: 20000 },
     essConfig: { enabled: false, bus: '', maxHours: 4, capitalCostPerMW: 30000, minSizeMW: 10, maxSizeMW: 100, steps: 6, roundTripEfficiency: 0.9 },
     ppaConfig: { enabled: false, owner: '', volumeType: 'generation', flatMW: 0, strikePrice: 0 },
+    demandResponseConfig: { enabled: false, loads: [], shiftFraction: 0.2, maxShiftHours: 4 },
     ownerColumn: 'owner',
     financeConfig: { gearing: 0, interestRate: 0.05, tenorYears: 15 },
     constraints: DEFAULT_CONSTRAINTS,
@@ -490,6 +493,7 @@ function AppInner() {
       assetSwapConfig,
       essConfig,
       ppaConfig,
+      demandResponseConfig,
       ownerColumn,
       financeConfig,
       constraints,
@@ -517,6 +521,7 @@ function AppInner() {
     assetSwapConfig,
     essConfig,
     ppaConfig,
+    demandResponseConfig,
     ownerColumn,
     financeConfig,
     constraints,
@@ -637,6 +642,7 @@ function AppInner() {
       assetSwapConfig,
       essConfig,
       ppaConfig,
+      demandResponseConfig,
       ownerColumn,
       financeConfig,
       constraints,
@@ -692,6 +698,7 @@ function AppInner() {
     assetSwapConfig,
     essConfig,
     ppaConfig,
+    demandResponseConfig,
     ownerColumn,
     financeConfig,
     constraints,
@@ -1034,6 +1041,7 @@ function AppInner() {
     setAssetSwapConfig(scenario.assetSwapConfig ?? { enabled: false, removeFilters: [], addCarrier: '', addCapitalCost: 0, addMarginalCost: 0, replaceRatio: 1, addStorageMW: 0, addStorageHours: 4, addStorageCapexPerMW: 20000 });
     setEssConfig(scenario.essConfig ?? { enabled: false, bus: '', maxHours: 4, capitalCostPerMW: 30000, minSizeMW: 10, maxSizeMW: 100, steps: 6, roundTripEfficiency: 0.9 });
     setPpaConfig(scenario.ppaConfig ?? { enabled: false, owner: '', volumeType: 'generation', flatMW: 0, strikePrice: 0 });
+    setDemandResponseConfig(scenario.demandResponseConfig ?? { enabled: false, loads: [], shiftFraction: 0.2, maxShiftHours: 4 });
     setOwnerColumn(scenario.ownerColumn ?? 'owner');
     setFinanceConfig(scenario.financeConfig ?? { gearing: 0, interestRate: 0.05, tenorYears: 15 });
     setStatus(`Applied scenario: ${scenario.label}`);
@@ -2263,6 +2271,7 @@ function AppInner() {
       assetSwapConfig,
       essConfig,
       ppaConfig,
+      demandResponseConfig,
       ownerColumn,
       financeConfig,
       carbonPriceSchedule,
@@ -2564,6 +2573,8 @@ function AppInner() {
               onEssConfigChange={setEssConfig}
               ppaConfig={ppaConfig}
               onPpaConfigChange={setPpaConfig}
+              demandResponseConfig={demandResponseConfig}
+              onDemandResponseConfigChange={setDemandResponseConfig}
               modelCarriers={modelCarriers}
               modelBuses={modelBuses}
               merchantOwners={merchantOwners}

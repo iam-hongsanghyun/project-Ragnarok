@@ -23,6 +23,7 @@ import {
   AssetSwapConfig,
   EssConfig,
   PpaConfig,
+  DemandResponseConfig,
   FinanceConfig,
   Primitive,
   RollingHorizonConfig,
@@ -50,6 +51,7 @@ import { BiddingSection } from './SettingsView.sections/Bidding';
 import { AssetSwapSection } from './SettingsView.sections/AssetSwap';
 import { EssSection } from './SettingsView.sections/Ess';
 import { PpaSection } from './SettingsView.sections/Ppa';
+import { DemandResponseSection } from './SettingsView.sections/DemandResponse';
 import { DecisionsSection } from './SettingsView.sections/Decisions';
 import { CompanySection } from './SettingsView.sections/Company';
 import { StandardConstraintsSection, AdvancedConstraintsSection } from './SettingsView.sections/Constraints';
@@ -64,6 +66,7 @@ type SectionId =
   | 'carbon'
   | 'planning'
   | 'rolling'
+  | 'demandResponse'
   | 'stochastic'
   | 'sclopf'
   | 'powerflow'
@@ -103,6 +106,7 @@ const SECTIONS: Section[] = [
   { id: 'window',     label: 'Simulation window',   group: 'Setup' },
   { id: 'planning',   label: 'Multi-year planning', group: 'Setup' },
   { id: 'rolling',    label: 'Rolling horizon',     group: 'Setup' },
+  { id: 'demandResponse', label: 'Demand response',  group: 'Setup' },
   // Policy — economic / regulatory assumptions imposed on the model
   { id: 'carbon',             label: 'Carbon price',          group: 'Policy' },
   { id: 'constraints',        label: 'Standard Constraints',  group: 'Policy' },
@@ -171,6 +175,8 @@ export interface SettingsViewProps {
   onEssConfigChange: (config: EssConfig) => void;
   ppaConfig: PpaConfig;
   onPpaConfigChange: (config: PpaConfig) => void;
+  demandResponseConfig: DemandResponseConfig;
+  onDemandResponseConfigChange: (config: DemandResponseConfig) => void;
   modelCarriers: string[];
   modelBuses: string[];
   merchantOwners: string[];
@@ -290,6 +296,7 @@ export function SettingsView(props: SettingsViewProps) {
         {section === 'assetSwap'      && <AssetSwapSection {...props} />}
         {section === 'ess'            && <EssSection {...props} />}
         {section === 'ppa'            && <PpaSection {...props} />}
+        {section === 'demandResponse' && <DemandResponseSection {...props} />}
         {section === 'decisions'      && <DecisionsSection {...props} onNavigate={(s) => setSection(s as SectionId)} />}
         {section === 'constraints'    && <StandardConstraintsSection {...props} />}
         {section === 'constraintsAdvanced' && <AdvancedConstraintsSection {...props} />}

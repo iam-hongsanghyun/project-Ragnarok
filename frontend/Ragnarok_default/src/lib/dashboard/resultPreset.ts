@@ -124,6 +124,7 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   const hasEss = !!(results.essBusinessCase && results.essBusinessCase.sizes.length > 0);
   const hasPpa = !!(results.ppa && results.ppa.energyMWh > 0);
   const hasEnergyBalance = !!(results.energyBalance && results.energyBalance.carriers.length > 0);
+  const hasDemandResponse = !!(results.demandResponse && results.demandResponse.loads.length > 0);
 
   const rows: Array<ReturnType<typeof row>> = [];
 
@@ -270,6 +271,12 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   if (hasEnergyBalance) {
     const eb: Card = { id: id('energy-balance'), kind: 'energy-balance' };
     rows.push(row({ cards: [{ card: eb }] }));
+  }
+
+  // 9e8. Demand response — shiftable-load outcome (conditional)
+  if (hasDemandResponse) {
+    const dr: Card = { id: id('demand-response'), kind: 'demand-response' };
+    rows.push(row({ cards: [{ card: dr }] }));
   }
 
   // 9f. Company / owner dimension — per-company KPIs (F1, conditional)

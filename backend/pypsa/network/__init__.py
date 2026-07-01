@@ -36,6 +36,7 @@ from ..pypsa_schema import (
 )
 from ..utils.annuity import annuity_factor
 from ..utils.coerce import number
+from .demand_response import apply_demand_response
 from .load_shedding import add_load_shedding
 from .validators import validate_model  # re-export for backend.app.main
 from .snapshots import (
@@ -402,6 +403,19 @@ def build_network(
         load_shedding_cost=load_shedding_cost,
         currency=currency,
     )
+
+    # ── Demand response (shiftable load) — rewire tagged loads into the DR
+    # bus + Link + Store pattern before stochastic broadcasting ────────────────
+    dr_cfg = options.get("demandResponseConfig") or {}
+    if dr_cfg.get("enabled"):
+        apply_demand_response(
+            network,
+            notes,
+            enabled=True,
+            loads=dr_cfg.get("loads") or None,
+            shift_fraction=float(dr_cfg.get("shiftFraction", 0.2) or 0.0),
+            max_shift_hours=float(dr_cfg.get("maxShiftHours", 4.0) or 0.0),
+        )
 
     # ── Stochastic scenarios (must run after every deterministic setup is in
     # place so the scenario dimension can broadcast over the final values) ──

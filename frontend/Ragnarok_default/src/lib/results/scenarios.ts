@@ -6,6 +6,7 @@ import {
   CustomConstraint,
   EssConfig,
   PpaConfig,
+  DemandResponseConfig,
   FinanceConfig,
   GridRow,
   MgaConfig,
@@ -106,6 +107,10 @@ export function defaultPpaConfig(): PpaConfig {
   return { enabled: false, owner: '', volumeType: 'generation', flatMW: 0, strikePrice: 0 };
 }
 
+export function defaultDemandResponseConfig(): DemandResponseConfig {
+  return { enabled: false, loads: [], shiftFraction: 0.2, maxShiftHours: 4 };
+}
+
 export function defaultOwnerColumn(): string {
   return 'owner';
 }
@@ -160,6 +165,10 @@ function clonePpaConfig(config: PpaConfig): PpaConfig {
   return { ...config };
 }
 
+function cloneDemandResponseConfig(config: DemandResponseConfig): DemandResponseConfig {
+  return { ...config, loads: [...(config.loads ?? [])] };
+}
+
 function cloneFinanceConfig(config: FinanceConfig): FinanceConfig {
   return { ...config };
 }
@@ -199,6 +208,7 @@ export function buildScenarioPreset(input: {
   assetSwapConfig?: AssetSwapConfig;
   essConfig?: EssConfig;
   ppaConfig?: PpaConfig;
+  demandResponseConfig?: DemandResponseConfig;
   ownerColumn?: string;
   financeConfig?: FinanceConfig;
   samplingConfig?: SamplingConfig;
@@ -229,6 +239,7 @@ export function buildScenarioPreset(input: {
     assetSwapConfig: cloneAssetSwapConfig(input.assetSwapConfig ?? defaultAssetSwapConfig()),
     essConfig: cloneEssConfig(input.essConfig ?? defaultEssConfig()),
     ppaConfig: clonePpaConfig(input.ppaConfig ?? defaultPpaConfig()),
+    demandResponseConfig: cloneDemandResponseConfig(input.demandResponseConfig ?? defaultDemandResponseConfig()),
     ownerColumn: (input.ownerColumn ?? defaultOwnerColumn()) || defaultOwnerColumn(),
     financeConfig: cloneFinanceConfig(input.financeConfig ?? defaultFinanceConfig()),
     samplingConfig: cloneSamplingConfig(input.samplingConfig ?? defaultSamplingConfig()),
@@ -274,6 +285,7 @@ function normalizeScenarioCatalog(catalog: ScenarioCatalog): ScenarioCatalog {
       assetSwapConfig: cloneAssetSwapConfig(scenario.assetSwapConfig ?? defaultAssetSwapConfig()),
       essConfig: cloneEssConfig(scenario.essConfig ?? defaultEssConfig()),
       ppaConfig: clonePpaConfig(scenario.ppaConfig ?? defaultPpaConfig()),
+      demandResponseConfig: cloneDemandResponseConfig(scenario.demandResponseConfig ?? defaultDemandResponseConfig()),
       ownerColumn: (scenario.ownerColumn ?? defaultOwnerColumn()) || defaultOwnerColumn(),
       financeConfig: cloneFinanceConfig(scenario.financeConfig ?? defaultFinanceConfig()),
       samplingConfig: cloneSamplingConfig(scenario.samplingConfig ?? defaultSamplingConfig()),
@@ -316,6 +328,7 @@ export function readScenarioCatalogFromModel(model: WorkbookModel): ScenarioCata
         assetSwapConfig: payload.assetSwapConfig ?? defaultAssetSwapConfig(),
         essConfig: payload.essConfig ?? defaultEssConfig(),
         ppaConfig: payload.ppaConfig ?? defaultPpaConfig(),
+        demandResponseConfig: payload.demandResponseConfig ?? defaultDemandResponseConfig(),
         ownerColumn: payload.ownerColumn ?? payload.merchantConfig?.ownerColumn ?? defaultOwnerColumn(),
         financeConfig: payload.financeConfig ?? defaultFinanceConfig(),
         samplingConfig: payload.samplingConfig ?? defaultSamplingConfig(),
@@ -367,6 +380,7 @@ export function writeScenarioCatalogToModel(
       assetSwapConfig: scenario.assetSwapConfig,
       essConfig: scenario.essConfig,
       ppaConfig: scenario.ppaConfig,
+      demandResponseConfig: scenario.demandResponseConfig,
       ownerColumn: scenario.ownerColumn,
       financeConfig: scenario.financeConfig,
       samplingConfig: scenario.samplingConfig,
