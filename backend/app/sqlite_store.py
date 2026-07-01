@@ -433,14 +433,31 @@ def patch_sheet(session_id: str, sheet: str, ops: list[dict[str, Any]]) -> dict[
     if meta is None:
         return None
     entry = _sheet_entry(meta, sheet)
-    if entry is None:
-        return None
     with _connect(session_id) as conn:
-        tbl = (_kv_get(conn, "tables") or {}).get(sheet)
-        if tbl is None:
-            return None
-        cur = conn.execute(f"SELECT d FROM {tbl} ORDER BY __row")
-        rows = [json.loads(r[0]) for r in cur.fetchall()]
+        tables = _kv_get(conn, "tables") or {}
+        tbl = tables.get(sheet)
+        if entry is None or tbl is None:
+            # Create the sheet on first write — importing a NEW series/static
+            # sheet (e.g. generators-p_max_pu into a session that lacks it) must
+            # not silently no-op.
+            n = 0
+            existing = set(tables.values())
+            while f"sheet_{n}" in existing:
+                n += 1
+            tbl = f"sheet_{n}"
+            conn.execute(f"DROP TABLE IF EXISTS {tbl}")
+            conn.execute(f"CREATE TABLE {tbl} (__row INTEGER PRIMARY KEY AUTOINCREMENT, d TEXT)")
+            tables[sheet] = tbl
+            _kv_set(conn, "tables", tables)
+            entry = {
+                "name": sheet,
+                "kind": "series" if ss.is_series_sheet(sheet) else "static",
+                "rowCount": 0, "columns": [],
+            }
+            meta.setdefault("sheets", []).append(entry)
+            rows: list[dict[str, Any]] = []
+        else:
+            rows = [json.loads(r[0]) for r in conn.execute(f"SELECT d FROM {tbl} ORDER BY __row").fetchall()]
         rows = ss._apply_ops(rows, ops)
         # Rewrite the sheet's rows (correct for set/addRow/deleteRows alike).
         conn.execute(f"DELETE FROM {tbl}")

@@ -80,6 +80,35 @@ def test_bad_op_is_400(_session_dir: Path) -> None:
     assert resp.status_code == 400
 
 
+def test_patch_creates_a_missing_series_sheet(_session_dir: Path) -> None:
+    """Regression: importing a NEW series sheet (not yet in the session) must
+    create it, not silently no-op — this is why renewable/demand profiles didn't
+    land on import."""
+    model = {
+        "buses": [{"name": "b"}],
+        "snapshots": [{"snapshot": "2022-01-01 00:00"}, {"snapshot": "2022-01-01 01:00"}],
+        "generators": [{"name": "pv", "bus": "b", "carrier": "solar"}],
+    }
+    assert client.post(
+        "/api/session/model",
+        json={"sessionId": "default", "model": model, "filename": "c.xlsx", "scenarioName": "ref"},
+    ).status_code == 200
+
+    # generators-p_max_pu does NOT exist yet — the import adds it via PATCH addRow.
+    resp = client.patch("/api/session/sheet/generators-p_max_pu", json={
+        "sessionId": "default",
+        "ops": [
+            {"op": "addRow", "values": {"snapshot": "2022-01-01 00:00", "pv": 0.5}},
+            {"op": "addRow", "values": {"snapshot": "2022-01-01 01:00", "pv": 0.8}},
+        ],
+    })
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["kind"] == "series"
+    page = client.get("/api/session/sheet/generators-p_max_pu", params={"limit": 100}).json()
+    assert page["total"] == 2
+    assert [r["pv"] for r in page["rows"]] == [0.5, 0.8]
+
+
 def test_static_or_missing_sheet_is_404(_session_dir: Path) -> None:
     _load([{"snapshot": "2030-01-01T00:00:00", "L": 5.0}])
     # 'buses' is a static sheet → not transformable.

@@ -462,31 +462,29 @@ def patch_sheet(session_id: str, sheet: str, ops: list[dict[str, Any]]) -> dict[
     if not _is_safe_id(session_id) or not _is_safe_sheet(sheet):
         return None
     entry = _sheet_meta(session_id, sheet)
-    if entry is None:
-        return None
-    kind = entry.get("kind")
+    # Create the sheet on first write (importing a NEW series/static sheet).
+    kind = (entry or {}).get("kind") or ("series" if is_series_sheet(sheet) else "static")
 
     if kind == "series":
         path = _series_path(session_id, sheet)
-        if not path.exists():
-            return None
-        df = pd.read_parquet(path)
-        rows = timeseries.df_to_records(df)
+        rows = timeseries.df_to_records(pd.read_parquet(path)) if path.exists() else []
     else:
         path = _static_path(session_id, sheet)
-        if not path.exists():
-            return None
-        rows = json.loads(path.read_text(encoding="utf-8"))
+        rows = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
 
     rows = _apply_ops(rows, ops)
 
     if kind == "series":
-        pd.DataFrame(rows).to_parquet(_series_path(session_id, sheet), index=False)
+        p = _series_path(session_id, sheet)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(rows).to_parquet(p, index=False)
     else:
-        _static_path(session_id, sheet).write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+        p = _static_path(session_id, sheet)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
 
-    columns = list(rows[0].keys()) if rows else list(entry.get("columns", []))
-    _update_sheet_meta(session_id, sheet, row_count=len(rows), columns=columns)
+    columns = list(rows[0].keys()) if rows else list((entry or {}).get("columns", []))
+    _update_sheet_meta(session_id, sheet, row_count=len(rows), columns=columns, kind=kind)
     return {"name": sheet, "kind": kind, "total": len(rows), "columns": columns}
 
 
@@ -549,16 +547,30 @@ def _apply_ops(rows: list[dict[str, Any]], ops: list[dict[str, Any]]) -> list[di
     return out
 
 
-def _update_sheet_meta(session_id: str, sheet: str, *, row_count: int, columns: list[str]) -> None:
-    """Refresh a sheet's rowCount/columns in the session meta after an edit."""
+def _update_sheet_meta(
+    session_id: str, sheet: str, *, row_count: int, columns: list[str], kind: str | None = None
+) -> None:
+    """Refresh a sheet's rowCount/columns in the session meta after an edit.
+
+    Appends a new sheet entry (using ``kind``) when the sheet isn't in the meta
+    yet — i.e. a first write that created it.
+    """
     meta = get_meta(session_id)
     if not meta:
         return
+    found = False
     for entry in meta.get("sheets", []):
         if isinstance(entry, dict) and entry.get("name") == sheet:
             entry["rowCount"] = row_count
             entry["columns"] = columns
+            found = True
             break
+    if not found:
+        meta.setdefault("sheets", []).append({
+            "name": sheet,
+            "kind": kind or ("series" if is_series_sheet(sheet) else "static"),
+            "rowCount": row_count, "columns": columns,
+        })
     # Keep snapshot count in step when the snapshots sheet is edited.
     if sheet == "snapshots":
         meta["snapshotCount"] = row_count

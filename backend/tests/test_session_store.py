@@ -250,9 +250,20 @@ def test_patch_snapshots_updates_meta_count(_session_dir: Path) -> None:
     assert meta is not None and meta["snapshotCount"] == 9
 
 
-def test_patch_sheet_missing_returns_none(_session_dir: Path) -> None:
+def test_patch_sheet_creates_missing_series_sheet(_session_dir: Path) -> None:
+    """A sheet absent from the session is created on first patch — this is what
+    lets an importer land a new series (e.g. generators-p_max_pu) via addRow."""
     session_store.save_model("default", _model())
-    assert session_store.patch_sheet("default", "nope", [{"op": "set", "row": 0, "column": "x", "value": 1}]) is None
+    # loads-p_set is not present in _model() — the importer creates it on first write.
+    res = session_store.patch_sheet(
+        "default",
+        "loads-p_set",
+        [{"op": "addRow", "values": {"snapshot": "2030-01-01T00:00:00", "L1": 0.5}}],
+    )
+    assert res is not None and res["kind"] == "series" and res["total"] == 1
+    meta = session_store.get_meta("default")
+    assert meta is not None
+    assert any(s.get("name") == "loads-p_set" for s in meta["sheets"])
 
 
 def test_controls_roundtrip(_session_dir: Path) -> None:
