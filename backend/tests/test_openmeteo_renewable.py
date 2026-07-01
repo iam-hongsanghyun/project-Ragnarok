@@ -18,19 +18,22 @@ from backend.app.importers.databases.openmeteo_renewable.conversion import (
 from backend.app.importers.protocol import ConvertOptions, Database, FetchResult, Region
 
 
-def _result(techs: list[str]) -> FetchResult:
-    region = Region("USA", "United States", box(-120.0, 30.0, -100.0, 40.0))
-    payload = {
-        "lat": 35.0,
-        "lon": -110.0,
-        "hourly": {
-            "time": ["2023-01-01T00:00", "2023-01-01T01:00", "2023-01-01T02:00"],
-            "shortwave_radiation": [0.0, 500.0, 1000.0],
-            "wind_speed_100m": [0.0, 12.0, 30.0],
-        },
+def _point(lat: float = 35.0, lon: float = -110.0) -> dict:
+    # ghi is pre-computed by fetch.fetch_point (combined_ghi); to_sheets consumes it.
+    return {
+        "lat": lat, "lon": lon,
+        "time": ["2023-01-01T00:00", "2023-01-01T01:00", "2023-01-01T02:00"],
+        "ghi": [0.0, 500.0, 1000.0],
+        "wind_ms": [0.0, 12.0, 30.0],
     }
+
+
+def _result(techs: list[str], points: list[dict] | None = None) -> FetchResult:
+    region = Region("USA", "United States", box(-120.0, 30.0, -100.0, 40.0))
     filters = {"technologies": techs, "capacity_mw": 100.0, "performance_ratio": 0.9}
-    return FetchResult("openmeteo_renewable", region, filters, payload)
+    return FetchResult(
+        "openmeteo_renewable", region, filters, {"points": points or [_point()]}
+    )
 
 
 def test_solar_cf_is_ghi_over_stc_times_pr() -> None:
@@ -107,8 +110,85 @@ def test_to_sheets_respects_technology_selection() -> None:
     assert all("wind_USA" not in r for r in frag.sheets["generators-p_max_pu"])
 
 
+def test_to_sheets_multi_point_creates_a_site_per_point() -> None:
+    pts = [_point(35.0, -110.0), _point(38.0, -105.0)]
+    frag = build().to_sheets(_result(["solar", "wind"], pts), ConvertOptions())
+    assert {b["name"] for b in frag.sheets["buses"]} == {"re_USA_1", "re_USA_2"}
+    assert {g["name"] for g in frag.sheets["generators"]} == {
+        "solar_USA_1", "wind_USA_1", "solar_USA_2", "wind_USA_2"
+    }
+    # each site's generators sit on its own bus at its own coordinate
+    g2 = {g["name"]: g for g in frag.sheets["generators"]}
+    assert g2["solar_USA_2"]["bus"] == "re_USA_2" and g2["solar_USA_2"]["y"] == 38.0
+    # one shared snapshot axis; every generator has a column
+    row0 = frag.sheets["generators-p_max_pu"][0]
+    assert {"solar_USA_1", "wind_USA_1", "solar_USA_2", "wind_USA_2"} <= set(row0)
+
+
 def test_module_conforms_to_database_protocol() -> None:
     db = build()
     assert isinstance(db, Database)
     assert db.meta.id == "openmeteo_renewable"
     assert not db.meta.requires_secrets  # keyless
+
+
+# ── attach-to-fleet transform logic ─────────────────────────────────────────────
+def test_resolve_targets_uses_gen_then_bus_coord_and_skips_non_renewable() -> None:
+    from backend.app.importers.databases.openmeteo_renewable.attach import (
+        classify,
+        resolve_targets,
+    )
+    assert classify("solar") == "solar" and classify("onwind") == "wind" and classify("gas") is None
+
+    model = {
+        "buses": [
+            {"name": "b1", "x": 127.0, "y": 37.5},   # gives wind1 its coord
+            {"name": "b2"},                            # no coords
+        ],
+        "generators": [
+            {"name": "solar1", "carrier": "solar", "bus": "b2", "x": 10.0, "y": 20.0},  # own coord
+            {"name": "wind1", "carrier": "onwind", "bus": "b1"},                          # bus coord
+            {"name": "gas1", "carrier": "gas", "bus": "b1"},                              # not renewable
+            {"name": "solar2", "carrier": "solar", "bus": "b2"},                          # no coord → skipped
+        ],
+    }
+    targets, skipped = resolve_targets(model)
+    by = {t[0]: t for t in targets}
+    assert set(by) == {"solar1", "wind1"}
+    assert by["solar1"][1:] == ("solar", 20.0, 10.0)   # (kind, lat, lon) from own x/y
+    assert by["wind1"][1:] == ("wind", 37.5, 127.0)    # inherited from bus b1
+    assert skipped == ["solar2"]
+
+
+def test_build_profile_rows_attaches_cf_per_generator() -> None:
+    from backend.app.importers.databases.openmeteo_renewable.attach import (
+        build_profile_rows,
+        point_key,
+    )
+    targets = [("solar1", "solar", 20.0, 10.0), ("wind1", "wind", 37.5, 127.0)]
+    point_by_key = {
+        point_key(20.0, 10.0): {"time": ["2022-01-01T00:00", "2022-01-01T01:00"], "ghi": [1000.0, 0.0], "wind_ms": [0.0, 0.0]},
+        point_key(37.5, 127.0): {"time": ["2022-01-01T00:00", "2022-01-01T01:00"], "ghi": [0.0, 0.0], "wind_ms": [12.0, 0.0]},
+    }
+    rows, snapshots, attached = build_profile_rows(targets, point_by_key, performance_ratio=0.9)
+    assert set(attached) == {"solar1", "wind1"}
+    assert snapshots == ["2022-01-01 00:00", "2022-01-01 01:00"]
+    assert rows[0]["solar1"] == 0.9   # GHI 1000 × PR 0.9
+    assert rows[0]["wind1"] == 1.0    # 12 m/s = rated
+    assert rows[1]["solar1"] == 0.0 and rows[1]["wind1"] == 0.0
+
+
+def test_cache_snap_and_roundtrip(tmp_path, monkeypatch) -> None:
+    from backend.app.importers.databases.openmeteo_renewable import cache
+
+    # snap to the 0.1° grid so nearby points share an entry
+    assert cache.snap(37.54) == 37.5
+    assert cache.snap(37.56) == 37.6
+    assert cache.cache_key(37.54, 127.01, "2022-01-01", "2022-01-31", "v") == \
+        cache.cache_key(37.55, 127.02, "2022-01-01", "2022-01-31", "v")  # same grid cell
+
+    monkeypatch.setenv("RAGNAROK_WEATHER_CACHE", str(tmp_path))
+    key = cache.cache_key(10.0, 20.0, "2022-01-01", "2022-01-02", "v")
+    assert cache.get(key) is None
+    cache.put(key, {"time": ["t"], "ghi": [1.0], "wind_ms": [2.0]})
+    assert cache.get(key) == {"time": ["t"], "ghi": [1.0], "wind_ms": [2.0]}

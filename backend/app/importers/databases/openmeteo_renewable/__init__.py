@@ -1,23 +1,26 @@
 """Open-Meteo renewable capacity-factor importer (I4).
 
-Fetches hourly ERA5 weather (global, keyless) at the selected region's
-representative point and converts it to wind / solar **capacity-factor** profiles,
-landing a complete, runnable renewable fragment: a bus at that point, a solar
-and/or wind generator on it, and their ``generators-p_max_pu`` series.
+Fetches hourly ERA5 weather (global, keyless, cached) at one or more points in the
+selected region and converts it to wind / solar **capacity-factor** profiles,
+landing a complete, runnable renewable fragment per point: a bus, a solar and/or
+wind generator on it, and their ``generators-p_max_pu`` series.
 
-This is the general, any-coordinate complement to the curated per-country packs
-(KPG193). Source: Open-Meteo Archive API — CC-BY, no API key, global ERA5
-reanalysis. The weather→CF maths live in :mod:`.conversion` (a first-order plane-
-of-array solar proxy + a generic turbine power curve); it gives a realistic
-*shape* and plausible yield for a ``p_max_pu`` series, not a plant-engineering
-tool. One representative point per region for now — per-bus / polygon sampling is
-a follow-on.
+The general, any-coordinate complement to the curated per-country packs (KPG193).
+Source: Open-Meteo Archive API — CC-BY, no key, global ERA5. Weather→CF maths in
+:mod:`.conversion`; the cached fetch in :mod:`.fetch`. ``grid_points`` samples a
+grid across the region (default 1 = centroid) so a large country gets spatial
+variation. To attach profiles to an *existing* fleet by coordinate, use the
+attach-to-fleet transform (``POST /api/transform/renewable-profiles``) instead.
 """
 from __future__ import annotations
 
+import asyncio
 import json
+import math
 from datetime import datetime, timezone
 from typing import Any
+
+from shapely.geometry import Point
 
 from ...context import ImportContext
 from ...protocol import (
@@ -31,20 +34,14 @@ from ...protocol import (
     Region,
     WorkbookFragment,
 )
-from .conversion import combined_ghi, mean_cf, solar_cf, wind_cf
-
-_ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
-
-# Open-Meteo hourly variables. GHI (W/m²) for solar — request the components too
-# since ``shortwave_radiation`` is occasionally null for recent dates while
-# ``direct``/``diffuse`` are present (see conversion.combined_ghi). 100 m wind
-# speed (hub height) for wind, forced to m/s (the API defaults to km/h).
-_HOURLY_VARS = "shortwave_radiation,direct_radiation,diffuse_radiation,wind_speed_100m"
+from .conversion import mean_cf, solar_cf, wind_cf
+from .fetch import fetch_point
 
 _TECHS = [
     {"value": "solar", "label": "Solar PV"},
     {"value": "wind", "label": "Wind"},
 ]
+_MAX_POINTS = 16
 
 META = DatabaseMeta(
     id="openmeteo_renewable",
@@ -57,8 +54,8 @@ META = DatabaseMeta(
     version_hint="Archive API (ERA5)",
     description=(
         "Hourly wind & solar capacity factors for any coordinate on Earth, derived "
-        "from Open-Meteo's keyless global ERA5 reanalysis. Lands a bus + solar/wind "
-        "generator(s) with weather-driven p_max_pu profiles."
+        "from Open-Meteo's keyless global ERA5 reanalysis (cached). Lands a bus + "
+        "solar/wind generator(s) with weather-driven p_max_pu profiles."
     ),
     targets=["carriers", "buses", "generators", "generators-p_max_pu"],
     country_coverage="global",
@@ -71,6 +68,10 @@ META = DatabaseMeta(
                description="Weather window end."),
         Filter(id="technologies", label="Technologies", kind="multiselect",
                default=["solar", "wind"], options=_TECHS),
+        Filter(id="grid_points", label="Sample points", kind="number",
+               default=1, min=1, max=_MAX_POINTS, step=1,
+               description="1 = region centroid; >1 samples a grid across the region "
+                           "for spatial variation (one renewable site per point)."),
         Filter(id="capacity_mw", label="Capacity per generator (MW)", kind="number",
                default=100.0, min=0.0, step=10.0, unit="MW"),
         Filter(id="performance_ratio", label="Solar performance ratio", kind="number",
@@ -91,93 +92,123 @@ def _techs(filters: dict[str, Any]) -> list[str]:
     return picked or ["solar", "wind"]
 
 
+def _sample_points(polygon: Any, n: int) -> list[tuple[float, float]]:
+    """Up to ``n`` (lat, lon) sample points inside the region.
+
+    ``n == 1`` returns the centroid; otherwise a roughly-square grid over the
+    bounding box, kept to points inside the polygon (falling back to the centroid
+    if the grid misses entirely — e.g. a thin/curved country).
+    """
+    n = max(1, min(int(n or 1), _MAX_POINTS))
+    if n == 1:
+        c = polygon.centroid
+        return [(round(float(c.y), 4), round(float(c.x), 4))]
+    minx, miny, maxx, maxy = polygon.bounds
+    side = int(math.ceil(math.sqrt(n)))
+    pts: list[tuple[float, float]] = []
+    for i in range(side):
+        for j in range(side):
+            x = minx + (i + 0.5) / side * (maxx - minx)
+            y = miny + (j + 0.5) / side * (maxy - miny)
+            if polygon.contains(Point(x, y)):
+                pts.append((round(y, 4), round(x, 4)))
+    if not pts:
+        c = polygon.centroid
+        return [(round(float(c.y), 4), round(float(c.x), 4))]
+    return pts[:n]
+
+
 class OpenMeteoRenewable:
     meta = META
 
     async def fetch(
         self, region: Region, filters: dict[str, Any], ctx: ImportContext
     ) -> FetchResult:
-        c = region.polygon.centroid
-        lat, lon = round(float(c.y), 4), round(float(c.x), 4)
-        params = {
-            "latitude": lat,
-            "longitude": lon,
-            "start_date": str(filters.get("date_from") or "2022-01-01"),
-            "end_date": str(filters.get("date_to") or "2022-01-31"),
-            "hourly": _HOURLY_VARS,
-            "wind_speed_unit": "ms",
-            "timezone": "UTC",
-        }
-        body = await ctx.http.get_json(_ARCHIVE_URL, params=params)
-        hourly = (body or {}).get("hourly") or {}
-        return FetchResult(
-            META.id, region, dict(filters),
-            {"hourly": hourly, "lat": lat, "lon": lon},
+        pts = _sample_points(region.polygon, int(filters.get("grid_points") or 1))
+        date_from = str(filters.get("date_from") or "2022-01-01")
+        date_to = str(filters.get("date_to") or "2022-01-31")
+        fetched = await asyncio.gather(
+            *[fetch_point(ctx.http, lat, lon, date_from, date_to) for lat, lon in pts]
         )
+        points = [{"lat": lat, "lon": lon, **res} for (lat, lon), res in zip(pts, fetched)]
+        return FetchResult(META.id, region, dict(filters), {"points": points})
 
     def preview(self, result: FetchResult) -> PreviewSummary:
-        hourly = result.payload.get("hourly") or {}
-        times = hourly.get("time") or []
+        points = result.payload.get("points") or []
+        times = points[0]["time"] if points else []
         techs = _techs(result.filters)
         pr = float(result.filters.get("performance_ratio") or 0.9)
-        counts = {"hours": len(times), "generators": len(techs)}
-        notes = [f"{len(times)} hourly points at ({result.payload['lat']:.2f}, {result.payload['lon']:.2f})."]
-        ghi = combined_ghi(hourly.get("shortwave_radiation"), hourly.get("direct_radiation"), hourly.get("diffuse_radiation"))
-        if "solar" in techs and any(ghi):
-            notes.append(f"Solar mean CF ≈ {mean_cf(solar_cf(ghi, pr)):.2f}.")
-        if "wind" in techs and hourly.get("wind_speed_100m"):
-            notes.append(f"Wind mean CF ≈ {mean_cf(wind_cf(hourly['wind_speed_100m'])):.2f}.")
-        return PreviewSummary(counts=counts, samples={"hours": [{"time": t} for t in times[:24]]}, notes=notes)
+        counts = {"hours": len(times), "sites": len(points), "generators": len(points) * len(techs)}
+        notes = [f"{len(points)} site(s), {len(times)} hourly points."]
+        if "solar" in techs:
+            allcf = [c for pt in points for c in solar_cf(pt.get("ghi") or [], pr)]
+            if allcf:
+                notes.append(f"Solar mean CF ≈ {mean_cf(allcf):.2f}.")
+        if "wind" in techs:
+            allcf = [c for pt in points for c in wind_cf(pt.get("wind_ms") or [])]
+            if allcf:
+                notes.append(f"Wind mean CF ≈ {mean_cf(allcf):.2f}.")
+        return PreviewSummary(
+            counts=counts,
+            samples={"sites": [{"lat": pt["lat"], "lon": pt["lon"]} for pt in points[:8]]},
+            notes=notes,
+        )
 
     def to_sheets(self, result: FetchResult, options: ConvertOptions) -> WorkbookFragment:
-        hourly = result.payload.get("hourly") or {}
-        times = list(hourly.get("time") or [])
+        points = result.payload.get("points") or []
         techs = _techs(result.filters)
         iso = _iso(result.region)
         pr = float(result.filters.get("performance_ratio") or 0.9)
         capacity = max(0.0, float(result.filters.get("capacity_mw") or 100.0))
-        bus = f"re_{iso}"
+        multi = len(points) > 1
 
-        # Per-technology CF series, aligned to the hourly time axis.
-        series: dict[str, list[float]] = {}
-        if "solar" in techs:
-            ghi = combined_ghi(
-                hourly.get("shortwave_radiation"), hourly.get("direct_radiation"), hourly.get("diffuse_radiation")
-            )
-            if any(ghi):
-                series[f"solar_{iso}"] = solar_cf(ghi, pr)
-        if "wind" in techs and hourly.get("wind_speed_100m"):
-            series[f"wind_{iso}"] = wind_cf(hourly["wind_speed_100m"])
-
+        times = points[0]["time"] if points else []
         snapshots = [str(t).replace("T", " ") for t in times]
+
+        carriers: list[dict[str, Any]] = [{"name": "AC"}]
+        carrier_seen = {"AC"}
+        bus_rows: list[dict[str, Any]] = []
+        gen_rows: list[dict[str, Any]] = []
+        series_by_gen: dict[str, list[float]] = {}
+
+        for idx, pt in enumerate(points, start=1):
+            suffix = f"_{idx}" if multi else ""
+            bus = f"re_{iso}{suffix}"
+            lat, lon = pt["lat"], pt["lon"]
+            made = False
+            if "solar" in techs and any(pt.get("ghi") or []):
+                gen = f"solar_{iso}{suffix}"
+                series_by_gen[gen] = solar_cf(pt["ghi"], pr)
+                gen_rows.append({"name": gen, "bus": bus, "carrier": "solar",
+                                 "p_nom": capacity, "marginal_cost": 0.0, "x": lon, "y": lat})
+                made = True
+            if "wind" in techs and (pt.get("wind_ms") or []):
+                gen = f"wind_{iso}{suffix}"
+                series_by_gen[gen] = wind_cf(pt["wind_ms"])
+                gen_rows.append({"name": gen, "bus": bus, "carrier": "wind",
+                                 "p_nom": capacity, "marginal_cost": 0.0, "x": lon, "y": lat})
+                made = True
+            if made:
+                bus_rows.append({"name": bus, "carrier": "AC", "x": lon, "y": lat})
+                for c in (g["carrier"] for g in gen_rows if g["bus"] == bus):
+                    if c not in carrier_seen:
+                        carriers.append({"name": c, "co2_emissions": 0.0})
+                        carrier_seen.add(c)
+
+        frag = WorkbookFragment()
+        if not series_by_gen or not snapshots:
+            return frag
+
         p_max_pu_rows: list[dict[str, Any]] = []
         for i, snap in enumerate(snapshots):
             row: dict[str, Any] = {"snapshot": snap}
-            for gen, cf in series.items():
+            for gen, cf in series_by_gen.items():
                 if i < len(cf):
                     row[gen] = round(cf[i], 4)
             p_max_pu_rows.append(row)
 
-        frag = WorkbookFragment()
-        if not series or not snapshots:
-            return frag  # nothing usable came back
-
-        carriers = [{"name": "AC"}]
-        gen_rows: list[dict[str, Any]] = []
-        for gen in series:
-            carrier = "solar" if gen.startswith("solar_") else "wind"
-            carriers.append({"name": carrier, "co2_emissions": 0.0})
-            gen_rows.append({
-                "name": gen, "bus": bus, "carrier": carrier,
-                "p_nom": capacity, "marginal_cost": 0.0,
-                "x": result.payload["lon"], "y": result.payload["lat"],
-            })
-
         frag.sheets["carriers"] = carriers
-        frag.sheets["buses"] = [{
-            "name": bus, "carrier": "AC",
-            "x": result.payload["lon"], "y": result.payload["lat"],
-        }]
+        frag.sheets["buses"] = bus_rows
         frag.sheets["generators"] = gen_rows
         frag.sheets["generators-p_max_pu"] = p_max_pu_rows
         frag.snapshots = snapshots
