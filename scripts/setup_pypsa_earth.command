@@ -14,9 +14,10 @@
 #   scripts/setup_pypsa_earth.command [TARGET_DIR] [--no-env]
 #   # or: bash scripts/setup_pypsa_earth.command [TARGET_DIR] [--no-env]
 #
-# NOTE: the CDS API key for ERA5 cutouts is a credential you must create
-# yourself (register at https://cds.climate.copernicus.eu) — it can't be
-# automated. This script reminds you at the end.
+# It also prompts (interactively) for a CDS API key and writes ~/.cdsapirc so
+# ERA5 cutouts work. You still have to create the key yourself at
+# https://cds.climate.copernicus.eu (and accept the ERA5 licence once); the
+# script just saves it. An existing ~/.cdsapirc is left untouched.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -69,13 +70,45 @@ printf '{"dir": "%s"}\n' "$TARGET" > "$STATE_FILE"
 echo "✓ pointed Ragnarok at $TARGET"
 echo "  (wrote $STATE_FILE — restart the backend if it's already running)"
 
-# ── 5. CDS API key reminder (credential — can't be automated) ────────────────
-cat <<EOF
+# ── 5. CDS API key for ERA5 cutouts (~/.cdsapirc) ────────────────────────────
+# atlite/cdsapi read this file; PyPSA-Earth can't fetch weather cutouts without
+# it. Prompt for it here (interactive only) so setup is one flow. Never printed
+# back, written 0600, and an existing file is left untouched.
+CDSAPIRC="$HOME/.cdsapirc"
+CDS_DONE=0
+if [ -f "$CDSAPIRC" ]; then
+  echo "✓ CDS API key already present at $CDSAPIRC (keeping it)"
+  CDS_DONE=1
+elif [ -t 0 ]; then
+  echo
+  echo "CDS API key for ERA5 cutouts (from https://cds.climate.copernicus.eu → your"
+  echo "profile → 'API'; copy the url + key/token it shows). Press Enter to skip."
+  DEFAULT_URL="https://cds.climate.copernicus.eu/api"
+  read -r -p "  CDS url [$DEFAULT_URL]: " CDS_URL || true
+  CDS_URL="${CDS_URL:-$DEFAULT_URL}"
+  read -rs -p "  CDS key/token: " CDS_KEY || true
+  echo
+  if [ -n "${CDS_KEY:-}" ]; then
+    printf 'url: %s\nkey: %s\n' "$CDS_URL" "$CDS_KEY" > "$CDSAPIRC"
+    chmod 600 "$CDSAPIRC"
+    echo "✓ wrote $CDSAPIRC"
+    echo "  (also accept the ERA5 dataset licence once on the CDS website)"
+    CDS_DONE=1
+  else
+    echo "! no key entered — skipped."
+  fi
+else
+  echo "! non-interactive shell — skipping CDS key prompt."
+fi
 
-NEXT — add a CDS API key for ERA5 cutouts (one-time, free):
-  1. register at https://cds.climate.copernicus.eu
-  2. save your key to ~/.cdsapirc  (see the PyPSA-Earth docs)
-
-Then in Ragnarok → Data → "PyPSA-Earth — whole-country build" the build form
-should be available. Full guide: docs/pypsa-earth-integration.md
-EOF
+# ── Done ─────────────────────────────────────────────────────────────────────
+echo
+if [ "$CDS_DONE" -eq 0 ]; then
+  echo "NEXT — add a CDS API key for ERA5 cutouts (one-time, free):"
+  echo "  1. register at https://cds.climate.copernicus.eu"
+  echo "  2. copy the url + key from your profile's 'API' page into ~/.cdsapirc"
+  echo "  3. accept the ERA5 dataset licence on the CDS website"
+  echo
+fi
+echo "Done. In Ragnarok → Data → \"PyPSA-Earth — whole-country build\" the build"
+echo "form should be available. Full guide: docs/pypsa-earth-integration.md"

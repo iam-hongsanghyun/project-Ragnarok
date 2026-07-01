@@ -108,9 +108,11 @@ one-time setup commands.
 **One-command install — `scripts/setup_pypsa_earth.command`** (double-click in
 Finder, or run in a terminal; gitignored target):
 clones pypsa-earth into `<repo>/pypsa-earth`, optionally builds its conda env
-(`--no-env` to skip), and writes the override so Ragnarok is pointed at it. The
-clone + override are gitignored; only the script is committed. The CDS key is
-still a manual one-time step (it's a credential).
+(`--no-env` to skip), writes the override so Ragnarok is pointed at it, and
+**prompts for a CDS API key** to write `~/.cdsapirc` (skipped if one exists, or
+if run non-interactively). The clone + override are gitignored; only the script
+is committed. You still create the CDS key yourself at cds.climate.copernicus.eu
+and accept the ERA5 licence once — the script just saves it.
 
 **Still to do for a full integration:** (1) writing a per-request `config.yaml`
 override into the workflow dir (currently it runs the dir's own config);
