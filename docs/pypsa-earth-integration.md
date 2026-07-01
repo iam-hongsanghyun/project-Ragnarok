@@ -105,7 +105,8 @@ importer `applyFragment` path; when not, it offers a "use this directory" field
 (→ `POST /configure`, persisted to `backend/data/pypsa_earth.json`) and the
 one-time setup commands.
 
-**One-command install — `scripts/setup_pypsa_earth.sh`** (gitignored target):
+**One-command install — `scripts/setup_pypsa_earth.command`** (double-click in
+Finder, or run in a terminal; gitignored target):
 clones pypsa-earth into `<repo>/pypsa-earth`, optionally builds its conda env
 (`--no-env` to skip), and writes the override so Ragnarok is pointed at it. The
 clone + override are gitignored; only the script is committed. The CDS key is

@@ -8,9 +8,11 @@
 #     "PyPSA-Earth — whole-country build" panel reads
 #
 # The clone and the override file are gitignored — this script is the only part
-# that's committed. Run it once from anywhere:
+# that's committed. It's a macOS .command file: double-click it in Finder, or run
+# it from a terminal:
 #
-#   bash scripts/setup_pypsa_earth.sh [TARGET_DIR] [--no-env]
+#   scripts/setup_pypsa_earth.command [TARGET_DIR] [--no-env]
+#   # or: bash scripts/setup_pypsa_earth.command [TARGET_DIR] [--no-env]
 #
 # NOTE: the CDS API key for ERA5 cutouts is a credential you must create
 # yourself (register at https://cds.climate.copernicus.eu) — it can't be
