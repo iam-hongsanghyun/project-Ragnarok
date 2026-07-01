@@ -48,6 +48,7 @@ import { MerchantSection } from './SettingsView.sections/Merchant';
 import { BiddingSection } from './SettingsView.sections/Bidding';
 import { AssetSwapSection } from './SettingsView.sections/AssetSwap';
 import { EssSection } from './SettingsView.sections/Ess';
+import { DecisionsSection } from './SettingsView.sections/Decisions';
 import { CompanySection } from './SettingsView.sections/Company';
 import { StandardConstraintsSection, AdvancedConstraintsSection } from './SettingsView.sections/Constraints';
 import { AppearanceSection } from './SettingsView.sections/Appearance';
@@ -66,6 +67,7 @@ type SectionId =
   | 'powerflow'
   | 'contingency'
   | 'mga'
+  | 'decisions'
   | 'merchant'
   | 'bidding'
   | 'assetSwap'
@@ -110,6 +112,7 @@ const SECTIONS: Section[] = [
   { id: 'mga',        label: 'Near-optimal (MGA)',            group: 'Solve' },
   { id: 'solver',     label: 'Solver',                        group: 'Solve' },
   // Market — ownership & market-behaviour economics (own tab, not "Solve")
+  { id: 'decisions',  label: 'Decisions (use cases)',         group: 'Market' },
   { id: 'company',    label: 'Company / ownership',           group: 'Market' },
   { id: 'merchant',   label: 'Merchant (price-taker)',        group: 'Market' },
   { id: 'bidding',    label: 'Bid strategy (market power)',   group: 'Market' },
@@ -228,7 +231,8 @@ export function SettingsView(props: SettingsViewProps) {
   const variant = props.variant ?? 'settings';
   const allowedGroups = variant === 'market' ? MARKET_GROUPS : TECHNICAL_GROUPS;
   const groups = GROUPS.filter((g) => allowedGroups.includes(g));
-  const firstSection = SECTIONS.find((s) => allowedGroups.includes(s.group))!.id;
+  // Default to the first section of the first shown group (Market ⇒ Decisions).
+  const firstSection = (SECTIONS.find((s) => s.group === groups[0]) ?? SECTIONS[0]).id;
 
   const [stored, setSection] = usePersistedState<SectionId>(
     variant === 'market' ? 'ui:market-section' : 'ui:settings-section',
@@ -279,6 +283,7 @@ export function SettingsView(props: SettingsViewProps) {
         {section === 'bidding'        && <BiddingSection {...props} />}
         {section === 'assetSwap'      && <AssetSwapSection {...props} />}
         {section === 'ess'            && <EssSection {...props} />}
+        {section === 'decisions'      && <DecisionsSection {...props} onNavigate={(s) => setSection(s as SectionId)} />}
         {section === 'constraints'    && <StandardConstraintsSection {...props} />}
         {section === 'constraintsAdvanced' && <AdvancedConstraintsSection {...props} />}
         {section === 'appearance'     && <AppearanceSection {...props} />}

@@ -5283,6 +5283,25 @@ th:hover .col-delete-btn {
   flex-direction: column;
   gap: 12px;
 }
+/* Decisions launcher (DW1) — a responsive grid of money-question cards. */
+.decision-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+.decision-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-button);
+  background: var(--surface);
+}
+.decision-card-q { font-weight: 600; font-size: 0.9rem; color: var(--text); }
+.decision-card-detail { font-size: 0.8rem; color: var(--muted); flex: 1; }
+.decision-card-answer { font-size: 0.75rem; color: var(--brand); font-family: var(--font-mono); }
+.decision-card-btn { align-self: flex-start; margin-top: 4px; }
 .constraints-workspace-section-header h3 {
   margin: 0 0 4px;
   font-size: 1rem;
