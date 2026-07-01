@@ -279,6 +279,32 @@ export interface MgaConfig {
   carriers: string[];
 }
 
+/** PPA contract modeler (PP1) — value a fixed-price PPA against the run LMP. */
+export interface PpaConfig {
+  enabled: boolean;
+  /** Owner whose generation backs the PPA (for volumeType 'generation'). */
+  owner: string;
+  /** 'generation' = the owner's hourly output; 'flat' = a constant MW block. */
+  volumeType: 'generation' | 'flat';
+  flatMW: number;
+  strikePrice: number;
+}
+
+/** PPA valuation result (PP1) — settlement vs spot, both sides. */
+export interface PpaResult {
+  owner: string;
+  volumeType: 'generation' | 'flat';
+  currency: string;
+  strikePrice: number;
+  energyMWh: number;
+  avgSpotPrice: number;
+  spotValue: number;
+  contractValue: number;
+  /** CfD settlement to the seller (= contract − spot); buyer is its negative. */
+  sellerNet: number;
+  buyerNet: number;
+}
+
 /** ESS business-case builder (DW3) — battery size sweep vs arbitrage. */
 export interface EssConfig {
   enabled: boolean;
@@ -617,6 +643,7 @@ export interface ScenarioPreset {
   bidStrategyConfig: BidStrategyConfig;
   assetSwapConfig: AssetSwapConfig;
   essConfig: EssConfig;
+  ppaConfig: PpaConfig;
   /** Model column holding the owner/company tag (F1 + B1). Default `owner`. */
   ownerColumn: string;
   /** Optional debt assumptions for company finance DSCR (F2). */
@@ -1126,6 +1153,8 @@ export interface RunResults {
   assetSwap?: AssetSwapResult;
   /** ESS business case (battery size sweep vs arbitrage). */
   essBusinessCase?: EssBusinessCaseResult;
+  /** PPA contract valuation (settlement vs spot). */
+  ppa?: PpaResult;
   appliedConstraints?: AppliedConstraint[];
   emissionsBreakdown?: EmissionsBreakdown;
   narrative: string[];

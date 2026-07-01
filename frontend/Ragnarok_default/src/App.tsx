@@ -22,6 +22,7 @@ import {
   BidStrategyConfig,
   AssetSwapConfig,
   EssConfig,
+  PpaConfig,
   FinanceConfig,
   CarbonPriceScheduleEntry,
   CarbonScheduleProfile,
@@ -274,6 +275,7 @@ function AppInner() {
   const [bidStrategyConfig, setBidStrategyConfig] = useState<BidStrategyConfig>({ enabled: false, mode: 'fixed', owner: '', markupType: 'percent', markup: 0.2, maxMarkup: 2.0, steps: 8 });
   const [assetSwapConfig, setAssetSwapConfig] = useState<AssetSwapConfig>({ enabled: false, removeFilters: [], addCarrier: '', addCapitalCost: 0, addMarginalCost: 0, replaceRatio: 1, addStorageMW: 0, addStorageHours: 4, addStorageCapexPerMW: 20000 });
   const [essConfig, setEssConfig] = useState<EssConfig>({ enabled: false, bus: '', maxHours: 4, capitalCostPerMW: 30000, minSizeMW: 10, maxSizeMW: 100, steps: 6, roundTripEfficiency: 0.9 });
+  const [ppaConfig, setPpaConfig] = useState<PpaConfig>({ enabled: false, owner: '', volumeType: 'generation', flatMW: 0, strikePrice: 0 });
   const [carbonPriceSchedule, setCarbonPriceSchedule] = useState<CarbonPriceScheduleEntry[]>([]);
   const [carbonLibrary, setCarbonLibrary] = useState<CarbonScheduleProfile[]>([]);
   const [validateResult, setValidateResult] = useState<{
@@ -320,6 +322,7 @@ function AppInner() {
     bidStrategyConfig: { enabled: false, mode: 'fixed', owner: '', markupType: 'percent', markup: 0.2, maxMarkup: 2.0, steps: 8 },
     assetSwapConfig: { enabled: false, removeFilters: [], addCarrier: '', addCapitalCost: 0, addMarginalCost: 0, replaceRatio: 1, addStorageMW: 0, addStorageHours: 4, addStorageCapexPerMW: 20000 },
     essConfig: { enabled: false, bus: '', maxHours: 4, capitalCostPerMW: 30000, minSizeMW: 10, maxSizeMW: 100, steps: 6, roundTripEfficiency: 0.9 },
+    ppaConfig: { enabled: false, owner: '', volumeType: 'generation', flatMW: 0, strikePrice: 0 },
     ownerColumn: 'owner',
     financeConfig: { gearing: 0, interestRate: 0.05, tenorYears: 15 },
     constraints: DEFAULT_CONSTRAINTS,
@@ -486,6 +489,7 @@ function AppInner() {
       bidStrategyConfig,
       assetSwapConfig,
       essConfig,
+      ppaConfig,
       ownerColumn,
       financeConfig,
       constraints,
@@ -512,6 +516,7 @@ function AppInner() {
     bidStrategyConfig,
     assetSwapConfig,
     essConfig,
+    ppaConfig,
     ownerColumn,
     financeConfig,
     constraints,
@@ -631,6 +636,7 @@ function AppInner() {
       bidStrategyConfig,
       assetSwapConfig,
       essConfig,
+      ppaConfig,
       ownerColumn,
       financeConfig,
       constraints,
@@ -685,6 +691,7 @@ function AppInner() {
     bidStrategyConfig,
     assetSwapConfig,
     essConfig,
+    ppaConfig,
     ownerColumn,
     financeConfig,
     constraints,
@@ -1026,6 +1033,7 @@ function AppInner() {
     setBidStrategyConfig(scenario.bidStrategyConfig ?? { enabled: false, mode: 'fixed', owner: '', markupType: 'percent', markup: 0.2, maxMarkup: 2.0, steps: 8 });
     setAssetSwapConfig(scenario.assetSwapConfig ?? { enabled: false, removeFilters: [], addCarrier: '', addCapitalCost: 0, addMarginalCost: 0, replaceRatio: 1, addStorageMW: 0, addStorageHours: 4, addStorageCapexPerMW: 20000 });
     setEssConfig(scenario.essConfig ?? { enabled: false, bus: '', maxHours: 4, capitalCostPerMW: 30000, minSizeMW: 10, maxSizeMW: 100, steps: 6, roundTripEfficiency: 0.9 });
+    setPpaConfig(scenario.ppaConfig ?? { enabled: false, owner: '', volumeType: 'generation', flatMW: 0, strikePrice: 0 });
     setOwnerColumn(scenario.ownerColumn ?? 'owner');
     setFinanceConfig(scenario.financeConfig ?? { gearing: 0, interestRate: 0.05, tenorYears: 15 });
     setStatus(`Applied scenario: ${scenario.label}`);
@@ -2254,6 +2262,7 @@ function AppInner() {
       bidStrategyConfig,
       assetSwapConfig,
       essConfig,
+      ppaConfig,
       ownerColumn,
       financeConfig,
       carbonPriceSchedule,
@@ -2553,6 +2562,8 @@ function AppInner() {
               onAssetSwapConfigChange={setAssetSwapConfig}
               essConfig={essConfig}
               onEssConfigChange={setEssConfig}
+              ppaConfig={ppaConfig}
+              onPpaConfigChange={setPpaConfig}
               modelCarriers={modelCarriers}
               modelBuses={modelBuses}
               merchantOwners={merchantOwners}

@@ -44,6 +44,7 @@ from .bid_strategy import build_bid_strategy
 from .optimal_bid import build_optimal_bid
 from .asset_swap import build_asset_swap
 from .ess import build_ess_business_case
+from .ppa import build_ppa
 from .expansion import build_expansion_results
 from .full_outputs import build_full_outputs
 from .market import (
@@ -196,6 +197,8 @@ def run_pypsa(
     swap_enabled = bool(swap_cfg.get("enabled", False))
     ess_cfg = options.get("essConfig") or {}
     ess_enabled = bool(ess_cfg.get("enabled", False))
+    ppa_cfg = options.get("ppaConfig") or {}
+    ppa_enabled = bool(ppa_cfg.get("enabled", False))
     # The owner/company column (F1 + B1) is a shared, top-level concern. Fall
     # back to the legacy merchantConfig.ownerColumn for scenarios saved before
     # it was promoted out of the merchant config.
@@ -929,6 +932,20 @@ def run_pypsa(
     price_formation = build_price_formation(network, currency=currency)
     # Unit-commitment view (Tier 1) — starts, start-up costs, on/off patterns.
     commitment = build_commitment(network, currency=currency)
+    # PPA contract valuation (PP1) — value a fixed-price PPA against the LMP.
+    ppa = (
+        build_ppa(
+            network, model,
+            owner=str(ppa_cfg.get("owner", "") or ""),
+            owner_column=owner_column,
+            volume_type=str(ppa_cfg.get("volumeType", "generation") or "generation"),
+            flat_mw=float(ppa_cfg.get("flatMW", 0.0) or 0.0),
+            strike_price=float(ppa_cfg.get("strikePrice", 0.0) or 0.0),
+            currency=currency,
+        )
+        if ppa_enabled
+        else None
+    )
     # Company-level financial model (F2) — NPV / IRR / payback / DSCR per owner.
     company_finance = build_company_finance(
         network, model,
@@ -965,6 +982,7 @@ def run_pypsa(
         "companyFinance": company_finance,
         "priceFormation": price_formation,
         "commitment": commitment,
+        "ppa": ppa,
         "bidStrategy": bid_strategy,
         "optimalBid": optimal_bid,
         "assetSwap": asset_swap,

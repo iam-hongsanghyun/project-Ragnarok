@@ -122,6 +122,7 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   const hasOptimalBid = !!(results.optimalBid && results.optimalBid.curve.length > 0);
   const hasAssetSwap = !!results.assetSwap;
   const hasEss = !!(results.essBusinessCase && results.essBusinessCase.sizes.length > 0);
+  const hasPpa = !!(results.ppa && results.ppa.energyMWh > 0);
 
   const rows: Array<ReturnType<typeof row>> = [];
 
@@ -256,6 +257,12 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   if (hasEss) {
     const ess: Card = { id: id('ess'), kind: 'ess-business-case' };
     rows.push(row({ cards: [{ card: ess }] }));
+  }
+
+  // 9e6. PPA contract — CfD settlement vs spot (conditional)
+  if (hasPpa) {
+    const ppa: Card = { id: id('ppa'), kind: 'ppa' };
+    rows.push(row({ cards: [{ card: ppa }] }));
   }
 
   // 9f. Company / owner dimension — per-company KPIs (F1, conditional)

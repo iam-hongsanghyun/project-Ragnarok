@@ -22,6 +22,7 @@ import {
   BidStrategyConfig,
   AssetSwapConfig,
   EssConfig,
+  PpaConfig,
   FinanceConfig,
   Primitive,
   RollingHorizonConfig,
@@ -48,6 +49,7 @@ import { MerchantSection } from './SettingsView.sections/Merchant';
 import { BiddingSection } from './SettingsView.sections/Bidding';
 import { AssetSwapSection } from './SettingsView.sections/AssetSwap';
 import { EssSection } from './SettingsView.sections/Ess';
+import { PpaSection } from './SettingsView.sections/Ppa';
 import { DecisionsSection } from './SettingsView.sections/Decisions';
 import { CompanySection } from './SettingsView.sections/Company';
 import { StandardConstraintsSection, AdvancedConstraintsSection } from './SettingsView.sections/Constraints';
@@ -72,6 +74,7 @@ type SectionId =
   | 'bidding'
   | 'assetSwap'
   | 'ess'
+  | 'ppa'
   | 'company'
   | 'constraints'
   | 'constraintsAdvanced'
@@ -118,6 +121,7 @@ const SECTIONS: Section[] = [
   { id: 'bidding',    label: 'Bid strategy (market power)',   group: 'Market' },
   { id: 'assetSwap',  label: 'Asset swap (repowering)',       group: 'Market' },
   { id: 'ess',        label: 'ESS business case',             group: 'Market' },
+  { id: 'ppa',        label: 'PPA contract',                  group: 'Market' },
   // Data — external-source credentials
   { id: 'apiKeys',    label: 'API keys',                      group: 'Data' },
   // App — workspace preferences
@@ -165,6 +169,8 @@ export interface SettingsViewProps {
   onAssetSwapConfigChange: (config: AssetSwapConfig) => void;
   essConfig: EssConfig;
   onEssConfigChange: (config: EssConfig) => void;
+  ppaConfig: PpaConfig;
+  onPpaConfigChange: (config: PpaConfig) => void;
   modelCarriers: string[];
   modelBuses: string[];
   merchantOwners: string[];
@@ -283,6 +289,7 @@ export function SettingsView(props: SettingsViewProps) {
         {section === 'bidding'        && <BiddingSection {...props} />}
         {section === 'assetSwap'      && <AssetSwapSection {...props} />}
         {section === 'ess'            && <EssSection {...props} />}
+        {section === 'ppa'            && <PpaSection {...props} />}
         {section === 'decisions'      && <DecisionsSection {...props} onNavigate={(s) => setSection(s as SectionId)} />}
         {section === 'constraints'    && <StandardConstraintsSection {...props} />}
         {section === 'constraintsAdvanced' && <AdvancedConstraintsSection {...props} />}
