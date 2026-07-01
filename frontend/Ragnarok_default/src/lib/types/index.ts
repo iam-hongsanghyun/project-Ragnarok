@@ -202,6 +202,32 @@ export interface StatisticsResult {
   rows: StatisticsRow[];
 }
 
+/** One snapshot of the price-formation view (Tier 0). */
+export interface PriceFormationRow {
+  snapshot: string;
+  price: number;
+  demand: number;
+  residualDemand: number;
+  renewableShare: number;
+  /** Carrier of the price-setting (most expensive dispatched) generator. */
+  marginalCarrier: string;
+}
+
+/** How often / at what price each carrier set the price. */
+export interface PriceFormationMarginalCarrier {
+  carrier: string;
+  hours: number;
+  shareOfHours: number;
+  avgPrice: number;
+}
+
+/** Price-formation view (Tier 0) — price vs residual demand & marginal carrier. */
+export interface PriceFormationResult {
+  currency: string;
+  series: PriceFormationRow[];
+  marginalSummary: PriceFormationMarginalCarrier[];
+}
+
 /** N-1 contingency study mode — branch loading under each single outage. */
 export interface ContingencyConfig {
   enabled: boolean;
@@ -900,6 +926,8 @@ export interface RunResults {
   companies?: CompanyBreakdownResult;
   /** Per-company project finance (NPV/IRR/payback/DSCR); needs an LP run. */
   companyFinance?: CompanyFinanceResult;
+  /** Price-formation view (price vs residual demand, marginal carrier). */
+  priceFormation?: PriceFormationResult;
   appliedConstraints?: AppliedConstraint[];
   emissionsBreakdown?: EmissionsBreakdown;
   narrative: string[];

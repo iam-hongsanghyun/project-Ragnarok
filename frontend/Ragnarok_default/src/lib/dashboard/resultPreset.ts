@@ -116,6 +116,7 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   const hasMerchant = !!(results.merchant && results.merchant.assets.length > 0);
   const hasCompanies = !!(results.companies && results.companies.companies.length > 0);
   const hasCompanyFinance = !!(results.companyFinance && results.companyFinance.companies.length > 0);
+  const hasPriceFormation = !!(results.priceFormation && results.priceFormation.series.length > 0);
 
   const rows: Array<ReturnType<typeof row>> = [];
 
@@ -163,6 +164,12 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   const loadDur:  Card = { id: id('dur-load'),  kind: 'duration-curve', source: 'load' };
   const priceDur: Card = { id: id('dur-price'), kind: 'duration-curve', source: 'price' };
   rows.push(row({ cards: [{ card: loadDur }, { card: priceDur }] }));
+
+  // 4b. Price formation — why the price is what it is (conditional on prices)
+  if (hasPriceFormation) {
+    const pf: Card = { id: id('pf'), kind: 'price-formation' };
+    rows.push(row({ cards: [{ card: pf }] }));
+  }
 
   // 5. Merit order + curtailment-by-carrier line chart. The curtailment chart
   // takes the slot the CO₂-shadow card used to occupy; the carrier-analysis
