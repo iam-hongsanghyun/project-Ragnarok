@@ -6,6 +6,7 @@ env resolution, and the network→workbook ingest on a real ``.nc``.
 """
 from __future__ import annotations
 
+import shutil
 import time
 from pathlib import Path
 
@@ -121,6 +122,26 @@ def test_configure_clear_removes_override(tmp_path: Path, monkeypatch: pytest.Mo
     (workflow / "Snakefile").write_text("# root\n")
     assert client.post("/api/pypsa-earth/configure", json={"dir": str(workflow)}).json()["available"] is True
     assert client.post("/api/pypsa-earth/configure", json={"dir": ""}).json()["available"] is False
+
+
+def test_snakemake_argv_uses_path_binary_when_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/snakemake" if name == "snakemake" else None)
+    argv = pe._snakemake_argv("results/networks/elec_s_10.nc")
+    assert argv[0] == "snakemake" and "results/networks/elec_s_10.nc" in argv
+
+
+def test_snakemake_argv_runs_through_conda_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RAGNAROK_PYPSA_EARTH_CONDA_ENV", raising=False)
+    monkeypatch.setattr(shutil, "which", lambda name: "/opt/conda/bin/mamba" if name == "mamba" else None)
+    argv = pe._snakemake_argv("results/networks/elec_s_10.nc")
+    assert argv[:2] == ["/opt/conda/bin/mamba", "run"]
+    assert "pypsa-earth" in argv and "snakemake" in argv
+
+
+def test_snakemake_argv_raises_when_nothing_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    with pytest.raises(RuntimeError, match="snakemake is not on"):
+        pe._snakemake_argv("t.nc")
 
 
 def test_ingest_network_maps_a_netcdf_to_sheets(tmp_path: Path) -> None:

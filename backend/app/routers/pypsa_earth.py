@@ -28,6 +28,7 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 import uuid
 from pathlib import Path
 from typing import Any
@@ -39,6 +40,9 @@ router = APIRouter(prefix="/api/pypsa-earth", tags=["pypsa-earth"])
 log = logging.getLogger(__name__)
 
 _ENV_VAR = "RAGNAROK_PYPSA_EARTH_DIR"
+# The pypsa-earth conda env name (snakemake + the workflow's deps live there,
+# not in the backend's env). Overridable for non-default env names.
+_CONDA_ENV_VAR = "RAGNAROK_PYPSA_EARTH_CONDA_ENV"
 _DOC = "docs/pypsa-earth-integration.md"
 # Persisted "point at an existing checkout" override — set via the Data-view
 # button so setup survives without an env var or a restart (backend/data/).
@@ -152,6 +156,30 @@ def ingest_network(path: str | Path) -> dict[str, list[dict[str, Any]]]:
     return network_to_model(network)
 
 
+def _snakemake_argv(target: str) -> list[str]:
+    """How to invoke snakemake for the build.
+
+    snakemake (and the workflow's deps) live in the pypsa-earth **conda env**, not
+    the backend's env — a bare ``snakemake`` call fails with
+    ``FileNotFoundError`` unless the backend itself runs inside that env. So: use
+    ``snakemake`` directly when it's on PATH, else run it through the conda env via
+    ``mamba run`` / ``conda run``. ``$RAGNAROK_PYPSA_EARTH_CONDA_ENV`` overrides
+    the env name (default ``pypsa-earth``).
+    """
+    base = ["snakemake", "-j", "4", "--rerun-incomplete", target]
+    if shutil.which("snakemake"):
+        return base
+    runner = shutil.which("mamba") or shutil.which("conda")
+    if runner:
+        env_name = os.environ.get(_CONDA_ENV_VAR, "pypsa-earth")
+        return [runner, "run", "--no-capture-output", "-n", env_name, *base]
+    raise RuntimeError(
+        "snakemake is not on the backend's PATH and no conda/mamba was found to "
+        "run the pypsa-earth env. Install it (scripts/setup_pypsa_earth.command) and "
+        "ensure conda/mamba is on the PATH of the process running Ragnarok."
+    )
+
+
 def _run_workflow_and_ingest(env: Path, req: BuildRequest, job_id: str) -> dict[str, Any]:
     """Run PyPSA-Earth for ``req`` and ingest the resulting network.
 
@@ -168,7 +196,7 @@ def _run_workflow_and_ingest(env: Path, req: BuildRequest, job_id: str) -> dict[
     # The workflow reads its own config.yaml; a per-request override would be
     # written here in a full integration. We invoke the documented target.
     proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
-        ["snakemake", "-j", "4", "--rerun-incomplete", target],
+        _snakemake_argv(target),
         cwd=str(env), capture_output=True, text=True,
     )
     if proc.returncode != 0:
