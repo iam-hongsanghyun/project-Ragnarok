@@ -2479,8 +2479,9 @@ function AppInner() {
         <div className="workspace-main">
 
           {/* ── Settings tab ── */}
-          {tab === 'Settings' && (
+          {(tab === 'Settings' || tab === 'Market') && (
             <SettingsView
+              variant={tab === 'Market' ? 'market' : 'settings'}
               model={model}
               scenarioCatalog={scenarioCatalog}
               activeScenarioLabel={activeScenario?.label ?? null}

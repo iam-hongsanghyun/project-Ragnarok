@@ -72,7 +72,7 @@ type SectionId =
   | 'apiKeys'
   | 'solver';
 
-type SectionGroup = 'Setup' | 'Policy' | 'Solve' | 'Data' | 'App';
+type SectionGroup = 'Setup' | 'Solve' | 'Data' | 'App' | 'Market' | 'Policy';
 
 interface Section {
   id: SectionId;
@@ -80,7 +80,11 @@ interface Section {
   group: SectionGroup;
 }
 
-const GROUPS: SectionGroup[] = ['Setup', 'Policy', 'Solve', 'Data', 'App'];
+// Order across both views. The technical view shows Setup/Solve/Data/App; the
+// Market & Policy view shows Market/Policy.
+const GROUPS: SectionGroup[] = ['Setup', 'Solve', 'Data', 'App', 'Market', 'Policy'];
+const TECHNICAL_GROUPS: SectionGroup[] = ['Setup', 'Solve', 'Data', 'App'];
+const MARKET_GROUPS: SectionGroup[] = ['Market', 'Policy'];
 
 const SECTIONS: Section[] = [
   // Setup — what scenario and time span we're solving over
@@ -98,10 +102,11 @@ const SECTIONS: Section[] = [
   { id: 'powerflow', label: 'Power flow',                     group: 'Solve' },
   { id: 'contingency', label: 'N-1 contingency',              group: 'Solve' },
   { id: 'mga',        label: 'Near-optimal (MGA)',            group: 'Solve' },
-  { id: 'company',    label: 'Company / ownership',           group: 'Solve' },
-  { id: 'merchant',   label: 'Merchant (price-taker)',        group: 'Solve' },
-  { id: 'bidding',    label: 'Bid strategy (market power)',   group: 'Solve' },
   { id: 'solver',     label: 'Solver',                        group: 'Solve' },
+  // Market — ownership & market-behaviour economics (own tab, not "Solve")
+  { id: 'company',    label: 'Company / ownership',           group: 'Market' },
+  { id: 'merchant',   label: 'Merchant (price-taker)',        group: 'Market' },
+  { id: 'bidding',    label: 'Bid strategy (market power)',   group: 'Market' },
   // Data — external-source credentials
   { id: 'apiKeys',    label: 'API keys',                      group: 'Data' },
   // App — workspace preferences
@@ -110,6 +115,8 @@ const SECTIONS: Section[] = [
 ];
 
 export interface SettingsViewProps {
+  /** `settings` = technical (Setup/Solve/Data/App); `market` = Market/Policy. */
+  variant?: 'settings' | 'market';
   model: WorkbookModel;
 
   // Scenarios
@@ -204,14 +211,26 @@ export interface SettingsViewProps {
 }
 
 export function SettingsView(props: SettingsViewProps) {
-  const [section, setSection] = usePersistedState<SectionId>('ui:settings-section', 'scenarios');
-  const groups = GROUPS;
+  const variant = props.variant ?? 'settings';
+  const allowedGroups = variant === 'market' ? MARKET_GROUPS : TECHNICAL_GROUPS;
+  const groups = GROUPS.filter((g) => allowedGroups.includes(g));
+  const firstSection = SECTIONS.find((s) => allowedGroups.includes(s.group))!.id;
+
+  const [stored, setSection] = usePersistedState<SectionId>(
+    variant === 'market' ? 'ui:market-section' : 'ui:settings-section',
+    firstSection,
+  );
+  // Guard: if the persisted section belongs to the other view, fall back to the
+  // first section of this one (so each tab always shows a valid section).
+  const section = SECTIONS.some((s) => s.id === stored && allowedGroups.includes(s.group))
+    ? stored
+    : firstSection;
 
   return (
     <ResizablePanels id="settings-rail" direction="horizontal" className="settings-view" initialSizes={[20, 80]} minSize={180}>
       <LeftRail
-        title="Settings"
-        ariaLabel="Settings sections"
+        title={variant === 'market' ? 'Market & Policy' : 'Settings'}
+        ariaLabel={variant === 'market' ? 'Market & Policy sections' : 'Settings sections'}
         className="settings-section-nav"
       >
         {groups.map((g) => (

@@ -32,6 +32,7 @@ const ENTRIES: Entry[] = [
   { id: 'Build',     glyph: 'B', label: 'Build' },
   { id: 'Model',     glyph: 'M', label: 'Model' },
   { id: 'Forge',     glyph: 'F', label: 'Forge' },
+  { id: 'Market',    glyph: 'K', label: 'Market & Policy' },
   { id: 'Settings',  glyph: 'S', label: 'Settings' },
   { id: 'Analytics', glyph: 'A', label: 'Analytics' },
   { id: 'History',   glyph: 'H', label: 'History' },
