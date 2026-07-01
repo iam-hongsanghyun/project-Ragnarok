@@ -33,6 +33,7 @@ import { ResizablePanels } from '../../layout/ResizablePanels';
 import { usePersistedState } from 'shared/hooks/usePersistedState';
 import { CategoryDatabaseList } from './CategoryDatabaseList';
 import { FilterPanel, SourceEntry } from './FilterPanel';
+import { PypsaEarthPanel } from './PypsaEarthPanel';
 import { WorldMap } from './WorldMap';
 import { dataImportStore, runStatus, type Run } from 'lib/data/store';
 
@@ -335,6 +336,10 @@ export function DataImportView({ applyFragment }: Props) {
               <b>{lastAdded.countryName}</b>. Switch to <b>Model</b> or <b>Build</b> to review.
             </div>
           )}
+          <PypsaEarthPanel
+            selectedCountry={selectedCountry ? { iso: selectedCountry.iso, name: selectedCountry.name } : null}
+            applyFragment={applyFragment}
+          />
         </main>
         <FilterPanel
           entries={entries}
