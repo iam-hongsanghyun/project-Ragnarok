@@ -43,49 +43,89 @@ _TECHS = [
 ]
 _MAX_POINTS = 16
 
-META = DatabaseMeta(
-    id="openmeteo_renewable",
-    name="Open-Meteo — renewable capacity factors (any location)",
-    short_name="Open-Meteo CF",
-    category="generation",
-    subcategory="Hourly profiles",
-    license="CC-BY 4.0 (Open-Meteo / ERA5)",
-    homepage="https://open-meteo.com/en/docs/historical-weather-api",
-    version_hint="Archive API (ERA5)",
-    description=(
-        "Hourly wind & solar capacity factors for any coordinate on Earth, derived "
-        "from Open-Meteo's keyless global ERA5 reanalysis (cached). Lands a bus + "
-        "solar/wind generator(s) with weather-driven p_max_pu profiles."
-    ),
-    targets=["carriers", "buses", "generators", "generators-p_max_pu"],
-    country_coverage="global",
-    requires_secrets=[],  # keyless
-    filters=[
-        Filter(id="source", label="Weather source", kind="select", default="open-meteo",
-               options=[
-                   {"value": "open-meteo", "label": "Open-Meteo (ERA5, global)"},
-                   {"value": "pvgis", "label": "PVGIS (EU JRC, SARAH/ERA5)"},
-                   {"value": "nasa-power", "label": "NASA POWER (global)"},
-               ],
-               description="All keyless. PVGIS is strongest over Europe/Africa/Asia; "
-                           "Open-Meteo and NASA POWER are global."),
-        Filter(id="date_from", label="From", kind="date", default="2022-01-01",
-               description="Weather window start. ERA5 has a multi-day lag and recent "
-                           "dates can miss irradiance — 2022 or earlier is safest."),
-        Filter(id="date_to", label="To", kind="date", default="2022-01-31",
-               description="Weather window end."),
-        Filter(id="technologies", label="Technologies", kind="multiselect",
-               default=["solar", "wind"], options=_TECHS),
-        Filter(id="grid_points", label="Sample points", kind="number",
-               default=1, min=1, max=_MAX_POINTS, step=1,
-               description="1 = region centroid; >1 samples a grid across the region "
-                           "for spatial variation (one renewable site per point)."),
-        Filter(id="capacity_mw", label="Capacity per generator (MW)", kind="number",
-               default=100.0, min=0.0, step=10.0, unit="MW"),
-        Filter(id="performance_ratio", label="Solar performance ratio", kind="number",
-               default=0.9, min=0.1, max=1.0, step=0.05),
-    ],
-)
+# Each weather provider is its own Data-view source (separate left-rail entry),
+# not a dropdown — they are genuinely different reanalyses. Same CF machinery;
+# only the fetch adapter (keyed here) and the presentation metadata differ.
+_SOURCES: dict[str, dict[str, Any]] = {
+    "open-meteo": {
+        "id": "openmeteo_renewable",
+        "name": "Open-Meteo — renewable capacity factors (any location)",
+        "short_name": "Open-Meteo CF",
+        "license": "CC-BY 4.0 (Open-Meteo / ERA5)",
+        "homepage": "https://open-meteo.com/en/docs/historical-weather-api",
+        "version_hint": "Archive API (ERA5)",
+        "description": (
+            "Hourly wind & solar capacity factors for any coordinate on Earth, derived "
+            "from Open-Meteo's keyless global ERA5 reanalysis (cached). Lands a bus + "
+            "solar/wind generator(s) with weather-driven p_max_pu profiles."
+        ),
+    },
+    "pvgis": {
+        "id": "pvgis_renewable",
+        "name": "PVGIS — renewable capacity factors (EU JRC)",
+        "short_name": "PVGIS CF",
+        "license": "EU JRC PVGIS (free reuse)",
+        "homepage": "https://joint-research-centre.ec.europa.eu/photovoltaic-geographical-information-system-pvgis_en",
+        "version_hint": "PVGIS hourly (SARAH3 / ERA5)",
+        "description": (
+            "Hourly wind & solar capacity factors from the EU JRC's keyless PVGIS "
+            "hourly radiation service. Strongest over Europe, Africa and Asia. Lands a "
+            "bus + solar/wind generator(s) with weather-driven p_max_pu profiles."
+        ),
+    },
+    "nasa-power": {
+        "id": "nasa_power_renewable",
+        "name": "NASA POWER — renewable capacity factors (global)",
+        "short_name": "NASA POWER CF",
+        "license": "NASA POWER (public domain)",
+        "homepage": "https://power.larc.nasa.gov/",
+        "version_hint": "POWER Hourly (MERRA-2)",
+        "description": (
+            "Hourly wind & solar capacity factors from NASA's keyless POWER service "
+            "(MERRA-2 reanalysis), global coverage. Lands a bus + solar/wind "
+            "generator(s) with weather-driven p_max_pu profiles."
+        ),
+    },
+}
+
+
+def _meta_for(source_key: str) -> DatabaseMeta:
+    cfg = _SOURCES[source_key]
+    return DatabaseMeta(
+        id=cfg["id"],
+        name=cfg["name"],
+        short_name=cfg["short_name"],
+        category="generation",
+        subcategory="Hourly profiles",
+        license=cfg["license"],
+        homepage=cfg["homepage"],
+        version_hint=cfg["version_hint"],
+        description=cfg["description"],
+        targets=["carriers", "buses", "generators", "generators-p_max_pu"],
+        country_coverage="global",
+        requires_secrets=[],  # keyless
+        filters=[
+            Filter(id="date_from", label="From", kind="date", default="2022-01-01",
+                   description="Weather window start. Reanalyses have a multi-day lag and "
+                               "recent dates can miss irradiance — 2022 or earlier is safest."),
+            Filter(id="date_to", label="To", kind="date", default="2022-01-31",
+                   description="Weather window end."),
+            Filter(id="technologies", label="Technologies", kind="multiselect",
+                   default=["solar", "wind"], options=_TECHS),
+            Filter(id="grid_points", label="Sample points", kind="number",
+                   default=1, min=1, max=_MAX_POINTS, step=1,
+                   description="1 = region centroid; >1 samples a grid across the region "
+                               "for spatial variation (one renewable site per point)."),
+            Filter(id="capacity_mw", label="Capacity per generator (MW)", kind="number",
+                   default=100.0, min=0.0, step=10.0, unit="MW"),
+            Filter(id="performance_ratio", label="Solar performance ratio", kind="number",
+                   default=0.9, min=0.1, max=1.0, step=0.05),
+        ],
+    )
+
+
+# Back-compat: the Open-Meteo meta is importable as ``META``.
+META = _meta_for("open-meteo")
 
 
 def _iso(region: Region) -> str:
@@ -127,7 +167,16 @@ def _sample_points(polygon: Any, n: int) -> list[tuple[float, float]]:
 
 
 class OpenMeteoRenewable:
-    meta = META
+    """Weather→CF importer for one reanalysis source (``source_key``).
+
+    One instance is registered per provider (Open-Meteo / PVGIS / NASA POWER) so
+    each shows as its own Data-view source; the source is fixed per instance
+    rather than chosen via a filter.
+    """
+
+    def __init__(self, source_key: str = "open-meteo") -> None:
+        self._source = source_key
+        self.meta = _meta_for(source_key)
 
     async def fetch(
         self, region: Region, filters: dict[str, Any], ctx: ImportContext
@@ -135,12 +184,11 @@ class OpenMeteoRenewable:
         pts = _sample_points(region.polygon, int(filters.get("grid_points") or 1))
         date_from = str(filters.get("date_from") or "2022-01-01")
         date_to = str(filters.get("date_to") or "2022-01-31")
-        source = str(filters.get("source") or "open-meteo")
         fetched = await asyncio.gather(
-            *[fetch_point(ctx.http, lat, lon, date_from, date_to, source) for lat, lon in pts]
+            *[fetch_point(ctx.http, lat, lon, date_from, date_to, self._source) for lat, lon in pts]
         )
         points = [{"lat": lat, "lon": lon, **res} for (lat, lon), res in zip(pts, fetched)]
-        return FetchResult(META.id, region, dict(filters), {"points": points})
+        return FetchResult(self.meta.id, region, dict(filters), {"points": points})
 
     def preview(self, result: FetchResult) -> PreviewSummary:
         points = result.payload.get("points") or []
@@ -223,7 +271,7 @@ class OpenMeteoRenewable:
         frag.snapshots = snapshots
 
         frag.provenance = Provenance(
-            META.id, result.region.country_iso, result.region.country_name,
+            self.meta.id, result.region.country_iso, result.region.country_name,
             json.dumps(result.filters, sort_keys=True, default=str),
             json.dumps(options.__dict__, sort_keys=True, default=str),
             datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -233,4 +281,12 @@ class OpenMeteoRenewable:
 
 
 def build() -> Database:
-    return OpenMeteoRenewable()
+    return OpenMeteoRenewable("open-meteo")
+
+
+def build_pvgis() -> Database:
+    return OpenMeteoRenewable("pvgis")
+
+
+def build_nasa_power() -> Database:
+    return OpenMeteoRenewable("nasa-power")
