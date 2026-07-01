@@ -108,7 +108,7 @@ export function defaultPpaConfig(): PpaConfig {
 }
 
 export function defaultDemandResponseConfig(): DemandResponseConfig {
-  return { enabled: false, loads: [], shiftFraction: 0.2, maxShiftHours: 4 };
+  return { enabled: false, loads: [], shiftFraction: 0.2, maxShiftHours: 4, elasticEnabled: false, elasticFraction: 0.2, wtpMax: 200 };
 }
 
 export function defaultOwnerColumn(): string {

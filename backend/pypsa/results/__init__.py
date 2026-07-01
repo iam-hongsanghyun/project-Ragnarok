@@ -13,7 +13,7 @@ from fastapi import HTTPException
 
 from ..constants import carrier_color
 from ..network import build_network
-from ..network.demand_response import build_demand_response
+from ..network.demand_response import build_demand_response, build_price_elastic
 from ..pathway import parse_pathway_config
 from ..rolling import parse_rolling_config
 from ..sampling import parse_sampling_config, sample_block_indices
@@ -706,6 +706,7 @@ def run_pypsa(
     emissions_breakdown = build_emissions_breakdown(network, emissions_factors)
     energy_balance = build_energy_balance(network)  # per-carrier; None if single-carrier
     demand_response = build_demand_response(network)  # shiftable-load outcome; None if no DR
+    price_elastic = build_price_elastic(network)  # elastic-demand outcome; None if none
 
     cost_breakdown = [
         {"label": "Fuel cost", "value": round(fuel_cost)},
@@ -1027,6 +1028,7 @@ def run_pypsa(
         "emissionsBreakdown": emissions_breakdown,
         "energyBalance": energy_balance,
         "demandResponse": demand_response,
+        "priceElastic": price_elastic,
         "narrative": notes,
         "runMeta": {
             "snapshotCount": snapshot_count,

@@ -46,25 +46,28 @@ export function DemandResponseSection(props: DemandResponseSectionProps) {
         <p className="sg-setting-hint">Move demand in time without dropping it.</p>
       </div>
 
-      {cfg.enabled && (
+      {(cfg.enabled || cfg.elasticEnabled) && loadNames.length > 0 && (
         <>
           <div className="sg-setting-divider" />
-          {loadNames.length > 0 && (
-            <div className="sg-setting-row">
-              <label className="sg-setting-label">Shiftable loads</label>
-              <SearchableMultiSelect
-                values={cfg.loads}
-                options={loadNames}
-                placeholder="All loads"
-                onChange={(vals) => set({ loads: vals })}
-              />
-              <p className="sg-setting-hint">
-                {cfg.loads.length === 0
-                  ? `All ${loadNames.length} load(s) are shiftable. Pick a subset to restrict.`
-                  : `${cfg.loads.length} of ${loadNames.length} load(s) shiftable.`}
-              </p>
-            </div>
-          )}
+          <div className="sg-setting-row">
+            <label className="sg-setting-label">Demand-response loads</label>
+            <SearchableMultiSelect
+              values={cfg.loads}
+              options={loadNames}
+              placeholder="All loads"
+              onChange={(vals) => set({ loads: vals })}
+            />
+            <p className="sg-setting-hint">
+              {cfg.loads.length === 0
+                ? `Applies to all ${loadNames.length} load(s). Pick a subset to restrict.`
+                : `${cfg.loads.length} of ${loadNames.length} load(s) selected.`}
+            </p>
+          </div>
+        </>
+      )}
+
+      {cfg.enabled && (
+        <>
           <div className="sg-setting-row">
             <label className="sg-setting-label" htmlFor="rs-dr-frac">Shiftable power (% of peak)</label>
             <input
@@ -85,6 +88,42 @@ export function DemandResponseSection(props: DemandResponseSectionProps) {
             <p className="sg-setting-hint">
               How far demand can move in time. Shiftable energy = shiftable power × duration.
             </p>
+          </div>
+        </>
+      )}
+
+      <div className="sg-setting-divider" />
+      <div className="sg-setting-row">
+        <label className="sg-setting-label">Price-elastic demand</label>
+        <div className="sg-btn-row">
+          <button className={`tb-btn sg-solver-btn${!cfg.elasticEnabled ? '' : ' tb-btn--muted'}`} onClick={() => set({ elasticEnabled: false })}>Off</button>
+          <button className={`tb-btn sg-solver-btn${cfg.elasticEnabled ? '' : ' tb-btn--muted'}`} onClick={() => set({ elasticEnabled: true })}>Elastic</button>
+        </div>
+        <p className="sg-setting-hint">
+          A slice of demand with a willingness-to-pay curve: it reduces only when the price beats its
+          value (a stepped demand curve, not a single shed penalty). Uses the same load selection.
+        </p>
+      </div>
+
+      {cfg.elasticEnabled && (
+        <>
+          <div className="sg-setting-row">
+            <label className="sg-setting-label" htmlFor="rs-dr-elastic-frac">Elastic share (% of demand)</label>
+            <input
+              id="rs-dr-elastic-frac" type="number" min={0} max={100} step={5} className="sg-num-input"
+              value={Math.round((cfg.elasticFraction || 0) * 100)}
+              onChange={(e) => num(e.target.value, (n) => set({ elasticFraction: Math.min(1, Math.max(0, n / 100)) }))}
+            />
+            <p className="sg-setting-hint">Fraction of each load that is price-responsive.</p>
+          </div>
+          <div className="sg-setting-row">
+            <label className="sg-setting-label" htmlFor="rs-dr-wtp">Max willingness-to-pay (/MWh)</label>
+            <input
+              id="rs-dr-wtp" type="number" min={0} step={10} className="sg-num-input"
+              value={cfg.wtpMax}
+              onChange={(e) => num(e.target.value, (n) => set({ wtpMax: Math.max(0, n) }))}
+            />
+            <p className="sg-setting-hint">Top of the demand curve; willingness-to-pay ramps down to ~0 across the elastic share.</p>
           </div>
         </>
       )}

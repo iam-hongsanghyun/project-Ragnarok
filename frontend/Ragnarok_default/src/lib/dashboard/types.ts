@@ -39,6 +39,7 @@ export type CardKind =
   | 'ppa-explorer'
   | 'energy-balance'
   | 'demand-response'
+  | 'price-elastic'
   | 'power-flow'
   | 'contingency'
   | 'emissions-breakdown'
@@ -214,6 +215,10 @@ export interface DemandResponseCardData extends CardBase {
   kind: 'demand-response';
 }
 
+export interface PriceElasticCardData extends CardBase {
+  kind: 'price-elastic';
+}
+
 export interface PowerFlowCardData extends CardBase {
   kind: 'power-flow';
 }
@@ -271,6 +276,7 @@ export type Card =
   | PpaExplorerCardData
   | EnergyBalanceCardData
   | DemandResponseCardData
+  | PriceElasticCardData
   | PowerFlowCardData
   | ContingencyCardData
   | EmissionsBreakdownCardData

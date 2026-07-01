@@ -330,6 +330,12 @@ export interface DemandResponseConfig {
   shiftFraction: number;
   /** Buffer duration (hours); shiftable energy = power × hours. */
   maxShiftHours: number;
+  /** Price-elastic demand (a stepped willingness-to-pay curve). */
+  elasticEnabled: boolean;
+  /** Fraction of each load that is price-responsive (0–1). */
+  elasticFraction: number;
+  /** Highest willingness-to-pay tier (/MWh); the curve ramps down to ~0. */
+  wtpMax: number;
 }
 
 export interface DemandResponseLoad {
@@ -343,6 +349,18 @@ export interface DemandResponseLoad {
 export interface DemandResponseResult {
   loads: DemandResponseLoad[];
   totalShiftedMWh: number;
+}
+
+/** Price-elastic demand outcome (M2) — demand reduced where price beat its WTP. */
+export interface PriceElasticLoad {
+  name: string;
+  reducedMWh: number;
+  avgWtp: number;
+}
+
+export interface PriceElasticResult {
+  loads: PriceElasticLoad[];
+  totalReducedMWh: number;
 }
 
 /** ESS business-case builder (DW3) — battery size sweep vs arbitrage. */
@@ -1222,6 +1240,7 @@ export interface RunResults {
   emissionsBreakdown?: EmissionsBreakdown;
   energyBalance?: EnergyBalanceResult;
   demandResponse?: DemandResponseResult;
+  priceElastic?: PriceElasticResult;
   narrative: string[];
   runMeta: {
     snapshotCount: number;

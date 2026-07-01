@@ -126,6 +126,7 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   const hasPpaExplorer = !!(results.ppaExplorer && results.ppaExplorer.shapes.length > 0);
   const hasEnergyBalance = !!(results.energyBalance && results.energyBalance.carriers.length > 0);
   const hasDemandResponse = !!(results.demandResponse && results.demandResponse.loads.length > 0);
+  const hasPriceElastic = !!(results.priceElastic && results.priceElastic.loads.length > 0);
 
   const rows: Array<ReturnType<typeof row>> = [];
 
@@ -284,6 +285,12 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   if (hasDemandResponse) {
     const dr: Card = { id: id('demand-response'), kind: 'demand-response' };
     rows.push(row({ cards: [{ card: dr }] }));
+  }
+
+  // 9e9. Price-elastic demand — voluntary reduction vs WTP (conditional)
+  if (hasPriceElastic) {
+    const pe: Card = { id: id('price-elastic'), kind: 'price-elastic' };
+    rows.push(row({ cards: [{ card: pe }] }));
   }
 
   // 9f. Company / owner dimension — per-company KPIs (F1, conditional)

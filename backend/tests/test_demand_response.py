@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 
 from backend.pypsa.network import build_network
-from backend.pypsa.network.demand_response import build_demand_response
+from backend.pypsa.network.demand_response import build_demand_response, build_price_elastic
 
 SCENARIO = {"discountRate": 0.0, "carbonPrice": 0.0}
 OPTIONS = {"snapshotStart": 0, "snapshotCount": 2, "snapshotWeight": 1.0}
@@ -94,7 +94,32 @@ def test_dr_load_subset_only_shifts_selected() -> None:
     assert "dr_L2" not in n.buses.index and n.loads.at["L2", "bus"] == "b"
 
 
+def _elastic_options(**dr: Any) -> dict[str, Any]:
+    return {**OPTIONS, "demandResponseConfig": {"elasticEnabled": True, "elasticFraction": 0.4, "wtpMax": 200.0, **dr}}
+
+
+def test_price_elastic_reduces_demand_worth_less_than_supply() -> None:
+    """A 4-tier WTP curve (0.4×150 peak over WTP 25/75/125/175) meets the 150 in h1
+    only where each block beats the 100 $/MWh peaker.
+
+    Merit order: cheap 100@10, elastic 15@25, elastic 15@75, then the 100 peaker
+    undercuts the 125 & 175 blocks — so only the 25 & 75 blocks shed (30 MWh
+    reduced) and the peaker serves the remaining 20 of higher-value demand. The
+    demand curve interacts with supply cost: high-value demand is still served.
+    """
+    n, _ = build_network(_model(), SCENARIO, _elastic_options())
+    n.optimize(solver_name="highs")
+    assert float(n.generators_t.p["G_peak"].sum()) == pytest.approx(20.0, abs=1e-2)
+    out = build_price_elastic(n)
+    assert out is not None
+    assert out["totalReducedMWh"] == pytest.approx(30.0, abs=1e-2)  # WTP 25 + 75 blocks
+    row = next(r for r in out["loads"] if r["name"] == "L")
+    assert row["reducedMWh"] == pytest.approx(30.0, abs=1e-2)
+    assert row["avgWtp"] == pytest.approx(50.0, abs=1e-2)  # (15·25 + 15·75) / 30
+
+
 def test_no_dr_config_returns_none() -> None:
     n, _ = build_network(_model(), SCENARIO, OPTIONS)
     n.optimize(solver_name="highs")
     assert build_demand_response(n) is None
+    assert build_price_elastic(n) is None

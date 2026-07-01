@@ -36,7 +36,7 @@ from ..pypsa_schema import (
 )
 from ..utils.annuity import annuity_factor
 from ..utils.coerce import number
-from .demand_response import apply_demand_response
+from .demand_response import apply_demand_response, apply_price_elastic
 from .load_shedding import add_load_shedding
 from .validators import validate_model  # re-export for backend.app.main
 from .snapshots import (
@@ -415,6 +415,15 @@ def build_network(
             loads=dr_cfg.get("loads") or None,
             shift_fraction=float(dr_cfg.get("shiftFraction", 0.2) or 0.0),
             max_shift_hours=float(dr_cfg.get("maxShiftHours", 4.0) or 0.0),
+        )
+    if dr_cfg.get("elasticEnabled"):
+        apply_price_elastic(
+            network,
+            notes,
+            enabled=True,
+            loads=dr_cfg.get("loads") or None,
+            fraction=float(dr_cfg.get("elasticFraction", 0.2) or 0.0),
+            wtp_max=float(dr_cfg.get("wtpMax", 200.0) or 0.0),
         )
 
     # ── Stochastic scenarios (must run after every deterministic setup is in

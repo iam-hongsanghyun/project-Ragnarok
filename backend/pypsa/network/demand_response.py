@@ -104,6 +104,112 @@ def apply_demand_response(
         notes.append("Demand response enabled but no eligible loads found.")
 
 
+_ELASTIC_PREFIX = "load_shedding_elastic_"
+
+
+def apply_price_elastic(
+    network: pypsa.Network,
+    notes: list[str],
+    *,
+    enabled: bool = False,
+    loads: list[str] | None = None,
+    fraction: float = 0.2,
+    wtp_max: float = 200.0,
+    tiers: int = 4,
+) -> None:
+    """Make a slice of demand price-elastic via a stepped willingness-to-pay curve.
+
+    Unlike shedding (one very-high VOLL tier), this splits an ``fraction`` slice of
+    each load into ``tiers`` blocks whose willingness-to-pay ramps DOWN from
+    ``wtp_max`` toward 0 — a linear demand curve. Each block is a shedding-style
+    generator priced at its WTP, so it "serves" (i.e. the demand goes unmet) only
+    when the LMP exceeds that block's value. Named with the ``load_shedding_``
+    prefix so it's excluded from energy/emissions/mix like other shedding.
+    """
+    if not enabled:
+        return
+    fraction = max(0.0, min(1.0, float(fraction or 0.0)))
+    tiers = max(1, int(tiers))
+    wtp_max = max(0.0, float(wtp_max or 0.0))
+    if fraction <= 0 or wtp_max <= 0:
+        notes.append("Price-elastic demand enabled but fraction/WTP are zero — no elastic blocks added.")
+        return
+
+    wanted = set(loads or [])
+    targets = [str(load) for load in network.loads.index if (not wanted or str(load) in wanted)]
+    count = 0
+    for load in targets:
+        bus = str(network.loads.at[load, "bus"])
+        if bus not in network.buses.index:
+            continue
+        peak = _load_peak(network, load)
+        if peak <= 0:
+            continue
+        block = fraction * peak / tiers
+        if block <= 0:
+            continue
+        for k in range(tiers):
+            wtp = wtp_max * (1.0 - (k + 0.5) / tiers)  # tier midpoint WTP, ramps to ~0
+            name = f"{_ELASTIC_PREFIX}{load}_{k}"
+            if name in network.generators.index:
+                continue
+            network.add("Generator", name, bus=bus, carrier="elastic_demand", p_nom=block, marginal_cost=wtp)
+            network.generators_t.p_max_pu.loc[:, name] = 1.0
+        count += 1
+
+    if count:
+        notes.append(
+            f"Price-elastic demand: {count} load(s) with {tiers}-tier WTP curve "
+            f"({fraction * 100:.0f}% of peak, WTP ≤ {wtp_max:.0f})."
+        )
+    else:
+        notes.append("Price-elastic demand enabled but no eligible loads found.")
+
+
+def build_price_elastic(network: pypsa.Network) -> dict[str, Any] | None:
+    """Post-solve elastic-demand outcome, or ``None`` if none configured/reduced.
+
+    Reports demand voluntarily reduced (elastic blocks that cleared because the
+    LMP beat their WTP) per load and system-wide, plus the volume-weighted average
+    WTP of the reduced demand.
+    """
+    if not getattr(network, "is_solved", False):
+        return None
+    elastic = [str(g) for g in network.generators.index if str(g).startswith(_ELASTIC_PREFIX)]
+    if not elastic:
+        return None
+    w = network.snapshot_weightings["objective"].reindex(network.snapshots).fillna(1.0)
+    gp = network.generators_t.p
+
+    per_load: dict[str, dict[str, float]] = {}
+    total_reduced = 0.0
+    for g in elastic:
+        if g not in gp.columns:
+            continue
+        energy = float(weighted_sum(gp[g].clip(lower=0.0), w))
+        if energy <= 1e-9:
+            continue
+        load = g[len(_ELASTIC_PREFIX):].rsplit("_", 1)[0]
+        wtp = float(network.generators.at[g, "marginal_cost"])
+        bucket = per_load.setdefault(load, {"reducedMWh": 0.0, "wtpValue": 0.0})
+        bucket["reducedMWh"] += energy
+        bucket["wtpValue"] += energy * wtp
+        total_reduced += energy
+
+    if total_reduced <= 1e-9:
+        return None
+    loads_out = [
+        {
+            "name": name,
+            "reducedMWh": round(v["reducedMWh"], 1),
+            "avgWtp": round(v["wtpValue"] / v["reducedMWh"], 2) if v["reducedMWh"] > 0 else 0.0,
+        }
+        for name, v in per_load.items()
+    ]
+    loads_out.sort(key=lambda r: r["reducedMWh"], reverse=True)
+    return {"loads": loads_out, "totalReducedMWh": round(total_reduced, 1)}
+
+
 def build_demand_response(network: pypsa.Network) -> dict[str, Any] | None:
     """Post-solve DR outcome per shiftable load, or ``None`` if none were shifted.
 

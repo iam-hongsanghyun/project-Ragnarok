@@ -46,6 +46,7 @@ import { PpaCard } from '../../../features/analytics/cards/PpaCard';
 import { PpaExplorerCard } from '../../../features/analytics/cards/PpaExplorerCard';
 import { EnergyBalanceCard } from '../../../features/analytics/cards/EnergyBalanceCard';
 import { DemandResponseCard } from '../../../features/analytics/cards/DemandResponseCard';
+import { PriceElasticCard } from '../../../features/analytics/cards/PriceElasticCard';
 import { PowerFlowCard } from '../../../features/analytics/cards/PowerFlowCard';
 import { ContingencyCard } from '../../../features/analytics/cards/ContingencyCard';
 import { EmissionsBreakdownCard } from '../../../features/analytics/cards/EmissionsBreakdownCard';
@@ -495,6 +496,10 @@ export function AnalyticsDashboard({
           return results.demandResponse
             ? <DemandResponseCard data={results.demandResponse} />
             : <p className="dashboard-cell-missing">This run did not include demand response.</p>;
+        case 'price-elastic':
+          return results.priceElastic
+            ? <PriceElasticCard data={results.priceElastic} />
+            : <p className="dashboard-cell-missing">This run did not include price-elastic demand.</p>;
         case 'power-flow':
           return results.powerFlow
             ? <PowerFlowCard data={results.powerFlow} />
@@ -572,6 +577,7 @@ export function AnalyticsDashboard({
       case 'ppa-explorer': return 'PPA opportunity explorer (shape ranking)';
       case 'energy-balance': return 'Energy balance (by carrier)';
       case 'demand-response': return 'Demand response (shiftable load)';
+      case 'price-elastic': return 'Price-elastic demand';
       case 'power-flow': return 'Power flow (convergence & voltages)';
       case 'contingency': return 'N-1 contingency (security)';
       case 'emissions-breakdown': return 'Emissions by generator / carrier';
