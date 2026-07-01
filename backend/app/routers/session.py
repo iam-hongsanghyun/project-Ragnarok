@@ -248,15 +248,18 @@ def retarget_snapshots(payload: SnapshotRetarget) -> dict:
 class SnapshotForecast(BaseModel):
     """Body for ``POST /api/session/snapshots/forecast`` (T1 multi-year).
 
-    Project the current series to a future year: shift every snapshot's year by
-    ``toYear − fromYear`` and grow the demand sheets by a CAGR / linear factor.
-    Availability sheets (p_max_pu) are re-dated but not grown.
+    Project the demand series to a future year. ``cagr`` / ``linear`` apply a
+    user growth ``%`` to the current series (whole window shifted forward).
+    ``regression`` / ``arima`` / ``prophet`` instead FIT the demand trend on the
+    series' annual totals (needs ≥3 years of history), project the ``from_year``
+    window forward to ``to_year``, and scale it by the fitted factor.
+    Availability sheets (p_max_pu) are re-dated but never grown.
     """
 
     fromYear: int
     toYear: int
     growthPct: float = 0.0
-    method: str = "cagr"  # cagr | linear
+    method: str = "cagr"  # cagr | linear | regression | arima | prophet
     growSheets: list[str] | None = None  # default: demand (loads-p_set)
     sessionId: str = "default"
 
@@ -269,10 +272,24 @@ def forecast_snapshots(payload: SnapshotForecast) -> dict:
     model = model_store.load_full_model(payload.sessionId)
     if not model:
         raise HTTPException(status_code=400, detail="No working model in this session.")
-    delta = int(payload.toYear) - int(payload.fromYear)
-    method = payload.method if payload.method in ("cagr", "linear") else "cagr"
-    factor = timeseries.growth_factor(payload.growthPct, delta, method)
+    from_year, to_year = int(payload.fromYear), int(payload.toYear)
+    delta = to_year - from_year
     grow = set(payload.growSheets or ["loads-p_set"])
+    method = payload.method if payload.method in ("cagr", "linear", *timeseries.STAT_METHODS) else "cagr"
+
+    note = ""
+    fit_window = method in timeseries.STAT_METHODS
+    if fit_window:
+        grow_present = {s: model[s] for s in grow if model.get(s)}
+        if not grow_present:
+            raise HTTPException(status_code=400,
+                                detail=f"No demand series to fit ({', '.join(sorted(grow))} not in the model).")
+        try:
+            factor, note = timeseries.estimate_growth_factor(grow_present, from_year, to_year, method)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    else:
+        factor = timeseries.growth_factor(payload.growthPct, delta, method)
 
     grown: list[str] = []
     for sheet, rows in list(model.items()):
@@ -280,8 +297,14 @@ def forecast_snapshots(payload: SnapshotForecast) -> dict:
             continue
         index_col = timeseries.series_index_col(list(rows[0].keys()))
         scale = factor if sheet in grow else 1.0
+        # Statistical methods project only the from_year window; cagr/linear shift
+        # the whole current series forward.
+        src = rows
+        if fit_window:
+            base = [r for r in rows if timeseries.year_of(r.get(index_col)) == from_year]
+            src = base or rows
         new_rows: list[dict[str, Any]] = []
-        for r in rows:
+        for r in src:
             nr: dict[str, Any] = {}
             for k, v in r.items():
                 if k == index_col:
@@ -296,10 +319,13 @@ def forecast_snapshots(payload: SnapshotForecast) -> dict:
             grown.append(sheet)
 
     snaps = model.get("snapshots") or []
-    model["snapshots"] = [{**s, "snapshot": timeseries.shift_snapshot_year(str(s.get("snapshot")), delta)} for s in snaps]
+    kept = [s for s in snaps if not fit_window or timeseries.year_of(s.get("snapshot")) == from_year] or snaps
+    model["snapshots"] = [
+        {**s, "snapshot": timeseries.shift_snapshot_year(str(s.get("snapshot")), delta)} for s in kept
+    ]
 
     model_store.save_model(payload.sessionId, model)
-    return {"toYear": payload.toYear, "growthFactor": round(factor, 4), "grown": grown}
+    return {"toYear": to_year, "growthFactor": round(factor, 4), "grown": grown, "method": method, "note": note}
 
 
 @router.post("/clear")

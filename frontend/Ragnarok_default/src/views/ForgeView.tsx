@@ -55,7 +55,7 @@ interface Props {
   /** T1(b) — project the series to a future year (grow demand, re-date). */
   onForecastSnapshots?: (opts: {
     fromYear: number; toYear: number; growthPct: number; method: string;
-  }) => Promise<{ toYear: number; growthFactor: number; grown: string[] }>;
+  }) => Promise<{ toYear: number; growthFactor: number; grown: string[]; note?: string }>;
 }
 
 export interface AttachProfilesResult {
@@ -402,7 +402,7 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
   const [fFrom, setFFrom] = useState(2025);
   const [fTo, setFTo] = useState(2035);
   const [fGrowth, setFGrowth] = useState(2);
-  const [fMethod, setFMethod] = useState<'cagr' | 'linear'>('cagr');
+  const [fMethod, setFMethod] = useState<'cagr' | 'linear' | 'regression' | 'arima' | 'prophet'>('cagr');
   const [tempBusy, setTempBusy] = useState(false);
   const [tempError, setTempError] = useState<string | null>(null);
 
@@ -422,7 +422,8 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
     setTempBusy(true); setTempError(null);
     try {
       const r = await onForecastSnapshots({ fromYear: fFrom, toYear: fTo, growthPct: fGrowth, method: fMethod });
-      setStatus(`Projected to ${r.toYear}: demand ×${r.growthFactor} on ${r.grown.length} sheet(s).`);
+      const how = r.note ? ` (${r.note})` : '';
+      setStatus(`Projected to ${r.toYear}: demand ×${r.growthFactor} on ${r.grown.length} sheet(s)${how}.`);
     } catch (e) {
       setTempError(e instanceof Error ? e.message : 'Forecast failed.');
     } finally { setTempBusy(false); }
@@ -795,7 +796,7 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
           <section className="forge-section">
             <header className="forge-section-header">
               <h3>Forecast to future year</h3>
-              <p>Project the current series to a future year: shift every snapshot's year and grow demand by a CAGR or linear rate. Availability profiles (p_max_pu) are re-dated but not grown. For a pathway across several years, run this per target year into separate scenarios.</p>
+              <p>Project demand to a future year. <strong>CAGR / Linear</strong> grow the current window by a rate you set. <strong>Regression / ARIMA / Prophet</strong> instead fit the trend from your series' own annual history (needs ≥3 years) and project the base-year window forward. Availability profiles (p_max_pu) are re-dated but not grown.</p>
             </header>
             <div className="sg-setting-row">
               <label className="sg-setting-label">From year → to year</label>
@@ -806,21 +807,29 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
               <p className="sg-setting-hint">Snapshots move by {fTo - fFrom} year(s).</p>
             </div>
             <div className="sg-setting-row">
-              <label className="sg-setting-label">Demand growth (%/yr)</label>
-              <NumberDraftInput className="forge-number" step={0.5} value={fGrowth} onCommit={setFGrowth} />
-            </div>
-            <div className="sg-setting-row">
-              <label className="sg-setting-label">Growth model</label>
-              <div className="sg-btn-row">
-                <button className={`tb-btn sg-solver-btn${fMethod === 'cagr' ? '' : ' tb-btn--muted'}`} onClick={() => setFMethod('cagr')}>Compound (CAGR)</button>
-                <button className={`tb-btn sg-solver-btn${fMethod === 'linear' ? '' : ' tb-btn--muted'}`} onClick={() => setFMethod('linear')}>Linear</button>
+              <label className="sg-setting-label">Method</label>
+              <div className="sg-btn-row" style={{ flexWrap: 'wrap' }}>
+                {([['cagr', 'Compound (CAGR)'], ['linear', 'Linear'], ['regression', 'Trend fit'], ['arima', 'ARIMA'], ['prophet', 'Prophet']] as const).map(([id, label]) => (
+                  <button key={id} className={`tb-btn sg-solver-btn${fMethod === id ? '' : ' tb-btn--muted'}`} onClick={() => setFMethod(id)}>{label}</button>
+                ))}
               </div>
               <p className="sg-setting-hint">
-                {fMethod === 'cagr'
-                  ? `Demand ×${(((1 + fGrowth / 100) ** Math.max(0, fTo - fFrom))).toFixed(3)} by ${fTo}.`
-                  : `Demand ×${(1 + (fGrowth / 100) * Math.max(0, fTo - fFrom)).toFixed(3)} by ${fTo}.`}
+                {fMethod === 'cagr' || fMethod === 'linear'
+                  ? 'You set the growth rate below.'
+                  : 'Growth is estimated from your series’ annual history — no rate needed.'}
               </p>
             </div>
+            {(fMethod === 'cagr' || fMethod === 'linear') && (
+              <div className="sg-setting-row">
+                <label className="sg-setting-label">Demand growth (%/yr)</label>
+                <NumberDraftInput className="forge-number" step={0.5} value={fGrowth} onCommit={setFGrowth} />
+                <p className="sg-setting-hint">
+                  {fMethod === 'cagr'
+                    ? `Demand ×${(((1 + fGrowth / 100) ** Math.max(0, fTo - fFrom))).toFixed(3)} by ${fTo}.`
+                    : `Demand ×${(1 + (fGrowth / 100) * Math.max(0, fTo - fFrom)).toFixed(3)} by ${fTo}.`}
+                </p>
+              </div>
+            )}
             <div className="forge-actions">
               <button className="run-button" disabled={tempBusy || fTo < fFrom || !onForecastSnapshots} onClick={runForecast}>
                 {tempBusy ? 'Projecting…' : `Project to ${fTo}`}

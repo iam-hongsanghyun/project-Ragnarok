@@ -783,7 +783,7 @@ function AppInner() {
       const data = await resp.json();
       await reloadSessionModel();
       showToast(`Projected to ${opts.toYear} (demand ×${data.growthFactor})`, 'success');
-      return data as { toYear: number; growthFactor: number; grown: string[] };
+      return data as { toYear: number; growthFactor: number; grown: string[]; note?: string };
     },
     [model, prepareModelForBackend, reloadSessionModel, showToast],
   );
