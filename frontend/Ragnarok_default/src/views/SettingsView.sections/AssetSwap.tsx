@@ -1,11 +1,10 @@
 /**
  * Asset-swap section (DW2) — repowering what-if.
  *
- * Retire one carrier and replace it, capacity-for-capacity, with another; the
- * run solves before vs after and reports the emissions / cost / payback delta.
- * The replacement inherits the target carrier's cost and availability if that
- * carrier already exists; otherwise the costs below are used. Mutually exclusive
- * with the LP-reshaping modes.
+ * Choose which generators to retire with one or more attribute filters (carrier,
+ * company/owner, bus, …) — matched on ALL filters — and a replacement carrier;
+ * the run solves before vs after and reports the emissions / cost / payback
+ * delta. Mutually exclusive with the LP-reshaping modes.
  */
 import React from 'react';
 import {
@@ -16,12 +15,17 @@ import {
   SamplingConfig,
   SecurityConstrainedConfig,
   StochasticConfig,
+  WorkbookModel,
 } from 'lib/types';
+import { stringValue } from 'lib/utils/helpers';
+import { SearchableSelect } from '../../shared/components/SearchableSelect';
+import { SearchableMultiSelect } from '../../shared/components/SearchableMultiSelect';
 
 export interface AssetSwapSectionProps {
   assetSwapConfig: AssetSwapConfig;
   onAssetSwapConfigChange: (config: AssetSwapConfig) => void;
   modelCarriers: string[];
+  model: WorkbookModel;
   rollingConfig: RollingHorizonConfig;
   stochasticConfig: StochasticConfig;
   samplingConfig: SamplingConfig;
@@ -30,9 +34,29 @@ export interface AssetSwapSectionProps {
   contingencyConfig: ContingencyConfig;
 }
 
+const PREFERRED_FIELDS = ['carrier', 'owner', 'bus', 'type'];
+
 export function AssetSwapSection(props: AssetSwapSectionProps) {
   const cfg = props.assetSwapConfig;
   const carriers = props.modelCarriers;
+  const gens = props.model.generators ?? [];
+
+  // Filterable generator columns (preferred first, then the rest alphabetically).
+  const fieldSet = new Set<string>();
+  for (const row of gens) for (const k of Object.keys(row)) if (k !== 'name') fieldSet.add(k);
+  const fields = [
+    ...PREFERRED_FIELDS.filter((f) => fieldSet.has(f)),
+    ...Array.from(fieldSet).filter((f) => !PREFERRED_FIELDS.includes(f)).sort(),
+  ];
+  const valuesOf = (field: string): string[] => {
+    const seen: string[] = [];
+    for (const row of gens) {
+      const v = stringValue(row[field]).trim();
+      if (v && !seen.includes(v)) seen.push(v);
+    }
+    return seen;
+  };
+
   const blockReason =
     props.rollingConfig.enabled ? 'rolling horizon' :
     props.stochasticConfig.enabled ? 'stochastic mode' :
@@ -42,28 +66,22 @@ export function AssetSwapSection(props: AssetSwapSectionProps) {
     props.contingencyConfig.enabled ? 'N-1 contingency' : '';
   const blocked = blockReason !== '';
   const set = (patch: Partial<AssetSwapConfig>) => props.onAssetSwapConfigChange({ ...cfg, ...patch });
+  const filters = cfg.removeFilters ?? [];
+  const updateFilter = (i: number, next: { field: string; values: string[] }) =>
+    set({ removeFilters: filters.map((f, idx) => (idx === i ? next : f)) });
+  const addFilter = () => set({ removeFilters: [...filters, { field: fields[0] ?? 'carrier', values: [] }] });
+  const removeFilter = (i: number) => set({ removeFilters: filters.filter((_, idx) => idx !== i) });
   const addExists = carriers.includes(cfg.addCarrier);
-
-  const carrierSelect = (value: string, onChange: (v: string) => void, id: string, placeholder: string) => (
-    carriers.length > 0 ? (
-      <select id={id} className="sg-num-input" value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value="">{placeholder}</option>
-        {carriers.map((c) => <option key={c} value={c}>{c}</option>)}
-      </select>
-    ) : (
-      <input id={id} type="text" className="sg-num-input" placeholder="carrier" value={value} onChange={(e) => onChange(e.target.value)} />
-    )
-  );
 
   return (
     <section className="constraints-workspace-section">
       <header className="constraints-workspace-section-header">
         <h3>Asset swap (repowering)</h3>
         <p>
-          Retire a carrier and replace it, capacity-for-capacity, with another —
-          e.g. gas → solar. The run solves the system before and after and reports
-          the delta: emissions, operating cost, total system cost, the
-          replacement's capex, and a simple payback. The decision as a number.
+          Retire the generators matching your filters and replace them,
+          capacity-for-capacity, with another carrier — e.g. gas → solar, or just
+          one company’s coal. The run solves before vs after and reports the delta:
+          emissions, operating cost, total system cost, replacement capex, payback.
         </p>
       </header>
 
@@ -90,14 +108,45 @@ export function AssetSwapSection(props: AssetSwapSectionProps) {
       {cfg.enabled && (
         <>
           <div className="sg-setting-divider" />
-          <div className="sg-setting-row">
-            <label className="sg-setting-label" htmlFor="rs-swap-remove">Retire carrier</label>
-            {carrierSelect(cfg.removeCarrier, (v) => set({ removeCarrier: v }), 'rs-swap-remove', 'Select carrier to retire…')}
-            <p className="sg-setting-hint">All generators of this carrier are removed.</p>
+          <div className="sg-setting-row chart-control-row--stack">
+            <span className="sg-setting-label">Retire generators matching</span>
+            <div className="pivot-filters">
+              {filters.map((f, i) => (
+                <div className="pivot-filter-row" key={i}>
+                  <SearchableSelect
+                    className="pivot-filter-field"
+                    value={f.field}
+                    options={fields}
+                    onChange={(v) => updateFilter(i, { field: v, values: [] })}
+                  />
+                  <SearchableMultiSelect
+                    className="pivot-filter-val"
+                    values={f.values}
+                    options={valuesOf(f.field)}
+                    placeholder="any value"
+                    onChange={(vals) => updateFilter(i, { ...f, values: vals })}
+                  />
+                  <button type="button" className="pivot-filter-x" onClick={() => removeFilter(i)} aria-label="Remove filter">×</button>
+                </div>
+              ))}
+              <button type="button" className="tb-btn pivot-filter-add" onClick={addFilter}>+ Add filter</button>
+            </div>
+            <p className="sg-setting-hint">
+              Generators matching <strong>all</strong> filters are retired (a value list matches any of them).
+              No filters = nothing retired.
+            </p>
           </div>
+
           <div className="sg-setting-row">
             <label className="sg-setting-label" htmlFor="rs-swap-add">Replace with</label>
-            {carrierSelect(cfg.addCarrier, (v) => set({ addCarrier: v }), 'rs-swap-add', 'Select replacement carrier…')}
+            {carriers.length > 0 ? (
+              <select id="rs-swap-add" className="sg-num-input" value={cfg.addCarrier} onChange={(e) => set({ addCarrier: e.target.value })}>
+                <option value="">Select replacement carrier…</option>
+                {carriers.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            ) : (
+              <input id="rs-swap-add" type="text" className="sg-num-input" placeholder="carrier" value={cfg.addCarrier} onChange={(e) => set({ addCarrier: e.target.value })} />
+            )}
             <p className="sg-setting-hint">
               {addExists
                 ? 'Replacement inherits this carrier’s cost and availability from an existing unit.'

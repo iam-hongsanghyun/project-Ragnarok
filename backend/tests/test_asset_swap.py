@@ -36,16 +36,16 @@ def _model() -> dict[str, list[dict[str, Any]]]:
 
 
 def test_asset_swap_gas_to_solar_cuts_emissions() -> None:
-    # Retire gas → solar. A separate 'backup' carrier keeps the after-system
-    # feasible in solar's zero-output hours.
+    # Retire gas → solar via a carrier filter. A separate 'backup' carrier keeps
+    # the after-system feasible in solar's zero-output hours.
     res = run_pypsa(
         _model(), SCENARIO,
-        {"assetSwapConfig": {"enabled": True, "removeCarrier": "gas", "addCarrier": "solar"}},
+        {"assetSwapConfig": {"enabled": True, "removeFilters": [{"field": "carrier", "values": ["gas"]}], "addCarrier": "solar"}},
     )
     sw = res["assetSwap"]
     assert sw is not None
-    assert sw["removeCarrier"] == "gas" and sw["addCarrier"] == "solar"
-    assert sw["addedCapacityMW"] > 0
+    assert "carrier" in sw["removeSummary"] and sw["addCarrier"] == "solar"
+    assert sw["removedCount"] == 1 and sw["addedCapacityMW"] > 0
     assert sw["replacementFirm"] is False  # inherited solar's profile
     # Emissions fall (gas retired) and the delta is consistent.
     assert sw["after"]["emissionsTonnes"] < sw["before"]["emissionsTonnes"]
@@ -54,10 +54,33 @@ def test_asset_swap_gas_to_solar_cuts_emissions() -> None:
     )
 
 
+def test_asset_swap_multi_filter() -> None:
+    # Tag gas1 with an owner and retire by carrier AND owner (multi-filter).
+    model = _model()
+    for g in model["generators"]:
+        if g["name"] == "gas1":
+            g["owner"] = "Acme"
+    res = run_pypsa(
+        model, SCENARIO,
+        {"assetSwapConfig": {"enabled": True, "addCarrier": "solar",
+                             "removeFilters": [{"field": "carrier", "values": ["gas"]}, {"field": "owner", "values": ["Acme"]}]}},
+    )
+    sw = res["assetSwap"]
+    assert sw is not None
+    assert sw["removedCount"] == 1  # only gas1 matches both carrier=gas AND owner=Acme
+    assert "owner" in sw["removeSummary"]
+
+
+def test_asset_swap_legacy_remove_carrier() -> None:
+    # Back-compat: the old removeCarrier field still works.
+    res = run_pypsa(_model(), SCENARIO, {"assetSwapConfig": {"enabled": True, "removeCarrier": "gas", "addCarrier": "solar"}})
+    assert res["assetSwap"] is not None
+
+
 def test_asset_swap_absent_when_disabled() -> None:
     assert run_pypsa(_model(), SCENARIO, {})["assetSwap"] is None
 
 
-def test_asset_swap_unknown_carrier_returns_none() -> None:
-    res = run_pypsa(_model(), SCENARIO, {"assetSwapConfig": {"enabled": True, "removeCarrier": "nuclear", "addCarrier": "solar"}})
+def test_asset_swap_no_match_returns_none() -> None:
+    res = run_pypsa(_model(), SCENARIO, {"assetSwapConfig": {"enabled": True, "removeFilters": [{"field": "carrier", "values": ["nuclear"]}], "addCarrier": "solar"}})
     assert res["assetSwap"] is None

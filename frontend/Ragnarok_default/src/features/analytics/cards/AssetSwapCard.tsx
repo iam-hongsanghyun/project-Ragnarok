@@ -23,7 +23,7 @@ interface Props {
 }
 
 export function AssetSwapCard({ data }: Props) {
-  const { currency, removeCarrier, addCarrier, before, after, delta } = data;
+  const { currency, removeSummary, addCarrier, before, after, delta } = data;
   const emGain = delta.emissionsTonnes <= 0; // negative delta = emissions cut = good
   const costGain = delta.systemCost <= 0;
 
@@ -32,12 +32,12 @@ export function AssetSwapCard({ data }: Props) {
       <div className="econ-kpi-row">
         <div className="econ-kpi">
           <div className="econ-kpi-label">Swap</div>
-          <div className="econ-kpi-value" style={{ fontSize: '1rem' }}>
-            <span className="carrier-dot" style={{ backgroundColor: carrierColor(removeCarrier) }} />{removeCarrier}
+          <div className="econ-kpi-value" style={{ fontSize: '0.9rem' }}>
+            {removeSummary}
             {' → '}
             <span className="carrier-dot" style={{ backgroundColor: carrierColor(addCarrier) }} />{addCarrier}
           </div>
-          <div className="econ-kpi-unit">{Math.round(data.removedCapacityMW).toLocaleString()} MW, 1:1{data.replacementFirm ? ' · firm (no profile)' : ''}</div>
+          <div className="econ-kpi-unit">{data.removedCount} unit{data.removedCount === 1 ? '' : 's'}, {Math.round(data.removedCapacityMW).toLocaleString()} MW → 1:1{data.replacementFirm ? ' · firm (no profile)' : ''}</div>
         </div>
         <div className="econ-kpi">
           <div className="econ-kpi-label">Δ Emissions</div>
@@ -105,7 +105,7 @@ export function AssetSwapCard({ data }: Props) {
       </div>
 
       <p className="econ-note">
-        Retire all “{removeCarrier}” generators and replace them 1:1 with “{addCarrier}”, then re-solve.
+        Retire generators matching [{removeSummary}] and replace them 1:1 with “{addCarrier}”, then re-solve.
         {data.replacementFirm && ' The replacement carrier has no availability profile in the model, so it is treated as firm — its output may be overstated.'}
         {' '}Payback = the replacement's overnight capex ÷ annual operating (fuel + carbon) saving; it ignores the
         retired asset's avoided capex. A repowering screen, not a full project appraisal.

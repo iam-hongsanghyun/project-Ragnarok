@@ -318,10 +318,17 @@ export interface EssBusinessCaseResult {
   bestNpv: number;
 }
 
-/** Asset-swap / repowering what-if (DW2) — retire a carrier, add another 1:1. */
+/** One retire filter — generators whose `field` is in `values` (OR within). */
+export interface AssetSwapFilter {
+  field: string;
+  values: string[];
+}
+
+/** Asset-swap / repowering what-if (DW2) — retire matched generators, add 1:1. */
 export interface AssetSwapConfig {
   enabled: boolean;
-  removeCarrier: string;
+  /** Which generators to retire — matched on ALL filters (carrier, company, …). */
+  removeFilters: AssetSwapFilter[];
   addCarrier: string;
   /** Replacement cost when the target carrier isn't already in the model. */
   addCapitalCost: number;
@@ -337,7 +344,10 @@ export interface AssetSwapSide {
 
 /** Asset-swap result (DW2) — before vs after a carrier swap. */
 export interface AssetSwapResult {
-  removeCarrier: string;
+  /** Human summary of the retire filters, e.g. "carrier ∈ {gas} · owner ∈ {Acme}". */
+  removeSummary: string;
+  removeFilters: AssetSwapFilter[];
+  removedCount: number;
   addCarrier: string;
   currency: string;
   removedCapacityMW: number;

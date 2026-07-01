@@ -94,7 +94,7 @@ export function defaultBidStrategyConfig(): BidStrategyConfig {
 }
 
 export function defaultAssetSwapConfig(): AssetSwapConfig {
-  return { enabled: false, removeCarrier: '', addCarrier: '', addCapitalCost: 0, addMarginalCost: 0 };
+  return { enabled: false, removeFilters: [], addCarrier: '', addCapitalCost: 0, addMarginalCost: 0 };
 }
 
 export function defaultEssConfig(): EssConfig {
@@ -144,7 +144,7 @@ function cloneBidStrategyConfig(config: BidStrategyConfig): BidStrategyConfig {
 }
 
 function cloneAssetSwapConfig(config: AssetSwapConfig): AssetSwapConfig {
-  return { ...config };
+  return { ...config, removeFilters: (config.removeFilters ?? []).map((f) => ({ ...f, values: [...(f.values ?? [])] })) };
 }
 
 function cloneEssConfig(config: EssConfig): EssConfig {

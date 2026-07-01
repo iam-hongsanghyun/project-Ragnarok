@@ -880,6 +880,7 @@ def run_pypsa(
             scenario,
             options,
             build_network,
+            remove_filters=swap_cfg.get("removeFilters") or None,
             remove_carrier=str(swap_cfg.get("removeCarrier", "") or ""),
             add_carrier=str(swap_cfg.get("addCarrier", "") or ""),
             add_capital_cost=float(swap_cfg.get("addCapitalCost", 0.0) or 0.0),

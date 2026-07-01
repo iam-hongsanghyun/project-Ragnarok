@@ -61,6 +61,19 @@ def _profile_ref(model: dict[str, list[dict[str, Any]]], carrier: str) -> str | 
     return None
 
 
+def _norm_filters(remove_filters: list[dict[str, Any]] | None, remove_carrier: str) -> list[dict[str, Any]]:
+    """Normalise retire filters; fall back to a single carrier filter (legacy)."""
+    out: list[dict[str, Any]] = []
+    for f in remove_filters or []:
+        field = str((f or {}).get("field", "")).strip()
+        values = [str(v).strip() for v in ((f or {}).get("values") or []) if str(v).strip()]
+        if field and values:
+            out.append({"field": field, "values": values})
+    if not out and remove_carrier.strip():
+        out.append({"field": "carrier", "values": [remove_carrier.strip()]})
+    return out
+
+
 def build_asset_swap(
     base_network: pypsa.Network,
     model: dict[str, list[dict[str, Any]]],
@@ -68,6 +81,7 @@ def build_asset_swap(
     options: dict[str, Any],
     build_network,  # injected to avoid a circular import
     *,
+    remove_filters: list[dict[str, Any]] | None,
     remove_carrier: str,
     add_carrier: str,
     add_capital_cost: float,
@@ -77,26 +91,34 @@ def build_asset_swap(
     solver_options: dict[str, Any] | None = None,
     io_api: str = "direct",
 ) -> dict[str, Any] | None:
-    """Retire ``remove_carrier``, add ``add_carrier`` 1:1, re-solve, return the delta."""
+    """Retire the generators matching ``remove_filters`` (carrier/company/…),
+    add ``add_carrier`` 1:1, re-solve, and return the delta."""
     if not getattr(base_network, "is_solved", False):
         return None
-    remove_carrier = (remove_carrier or "").strip()
     add_carrier = (add_carrier or "").strip()
-    if not remove_carrier or not add_carrier:
-        return None
-    removed = [r for r in (model.get("generators") or []) if str(r.get("carrier", "")) == remove_carrier]
-    if not removed:
+    filters = _norm_filters(remove_filters, remove_carrier)
+    if not add_carrier or not filters:
         return None
 
+    def _matches(r: dict[str, Any]) -> bool:
+        # AND across filters; OR within a filter's values.
+        return all(str(r.get(f["field"], "")).strip() in set(f["values"]) for f in filters)
+
+    gens = model.get("generators") or []
+    removed = [r for r in gens if _matches(r)]
+    if not removed:
+        return None
+    removed_names = {str(r.get("name", "")) for r in removed}
+
     # Inherit the target carrier's cost/profile from an existing unit if present.
-    existing_add = next((r for r in (model.get("generators") or []) if str(r.get("carrier", "")) == add_carrier), None)
+    existing_add = next((r for r in gens if str(r.get("carrier", "")) == add_carrier), None)
     cap_cost = float(existing_add.get("capital_cost", add_capital_cost)) if existing_add else add_capital_cost
     marg_cost = float(existing_add.get("marginal_cost", add_marginal_cost)) if existing_add else add_marginal_cost
     profile_ref = _profile_ref(model, add_carrier)
 
-    # Build the "after" model: drop removed carrier's gens, add 1:1 replacements.
+    # Build the "after" model: drop the matched gens, add 1:1 replacements.
     after = copy.deepcopy(model)
-    after["generators"] = [r for r in after.get("generators", []) if str(r.get("carrier", "")) != remove_carrier]
+    after["generators"] = [r for r in after.get("generators", []) if str(r.get("name", "")) not in removed_names]
     replacements: list[dict[str, Any]] = []
     removed_capacity = 0.0
     added_capacity = 0.0
@@ -139,7 +161,7 @@ def build_asset_swap(
             include_objective_constant=False,
         )
     except Exception as exc:  # noqa: BLE001 — never sink the run over the what-if
-        _log.warning("asset-swap re-solve failed (%s→%s): %s", remove_carrier, add_carrier, exc)
+        _log.warning("asset-swap re-solve failed (→%s): %s", add_carrier, exc)
         return None
     if not getattr(after_net, "is_solved", False):
         return None
@@ -166,9 +188,12 @@ def build_asset_swap(
     opex_savings = before["operatingCost"] - after_m["operatingCost"]
     payback = round(overnight_capex / opex_savings, 2) if opex_savings > 1e-9 and overnight_capex > 0 else None
 
-    _log.info("asset-swap %s→%s: Δcost=%.1f Δemissions=%.1f", remove_carrier, add_carrier, delta["systemCost"], delta["emissionsTonnes"])
+    remove_summary = " · ".join(f"{f['field']} ∈ {{{', '.join(f['values'])}}}" for f in filters)
+    _log.info("asset-swap [%s]→%s: Δcost=%.1f Δemissions=%.1f", remove_summary, add_carrier, delta["systemCost"], delta["emissionsTonnes"])
     return {
-        "removeCarrier": remove_carrier,
+        "removeSummary": remove_summary,
+        "removeFilters": filters,
+        "removedCount": len(removed),
         "addCarrier": add_carrier,
         "currency": currency,
         "removedCapacityMW": round(removed_capacity, 2),
