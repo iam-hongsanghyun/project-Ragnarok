@@ -83,11 +83,32 @@ create_env() {
   echo "→ creating conda env '$ENV_NAME' with $CONDA_BIN …"
   echo "  (the classic solver may sit silently on 'Collecting package metadata' for"
   echo "   10–30 min — that is normal, not stuck; libmamba/mamba take a few minutes)"
-  if [ -n "$SOLVER_FLAG" ]; then
-    "$CONDA_BIN" env create "$SOLVER_FLAG" -f "$TARGET/envs/environment.yaml"
-  else
-    "$CONDA_BIN" env create -f "$TARGET/envs/environment.yaml"
-  fi
+  # Retry: conda's repodata fetch can fail with a transient "HTTP 000 CONNECTION
+  # FAILED" on flaky wifi / VPN / proxy — conda itself says a simple retry usually
+  # works. Clear any partial env between tries.
+  attempts=3
+  i=1
+  while [ "$i" -le "$attempts" ]; do
+    if [ -n "$SOLVER_FLAG" ]; then
+      "$CONDA_BIN" env create "$SOLVER_FLAG" -f "$TARGET/envs/environment.yaml" && return 0
+    else
+      "$CONDA_BIN" env create -f "$TARGET/envs/environment.yaml" && return 0
+    fi
+    if [ "$i" -lt "$attempts" ]; then
+      echo "! env create failed (attempt $i/$attempts) — often a transient network blip; retrying in 15s…"
+      "$CONDA_BIN" env remove -n "$ENV_NAME" -y >/dev/null 2>&1 || true
+      sleep 15
+    fi
+    i=$((i + 1))
+  done
+  echo
+  echo "ERROR: conda env create failed after $attempts attempts."
+  echo "  conda-forge is usually reachable, so this is typically a LOCAL network issue:"
+  echo "    • check your internet connection"
+  echo "    • if on a VPN or corporate proxy, it may block conda.anaconda.org —"
+  echo "      disconnect the VPN, or set HTTPS_PROXY, or add the proxy to ~/.condarc"
+  echo "    • then re-run:  bash \"$0\" --recreate"
+  return 1
 }
 
 if [ "$NO_ENV" -eq 1 ]; then
