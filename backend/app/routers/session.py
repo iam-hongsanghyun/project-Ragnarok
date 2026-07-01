@@ -245,6 +245,63 @@ def retarget_snapshots(payload: SnapshotRetarget) -> dict:
     return {"snapshots": len(new_snaps), "retargeted": retargeted}
 
 
+class SnapshotForecast(BaseModel):
+    """Body for ``POST /api/session/snapshots/forecast`` (T1 multi-year).
+
+    Project the current series to a future year: shift every snapshot's year by
+    ``toYear − fromYear`` and grow the demand sheets by a CAGR / linear factor.
+    Availability sheets (p_max_pu) are re-dated but not grown.
+    """
+
+    fromYear: int
+    toYear: int
+    growthPct: float = 0.0
+    method: str = "cagr"  # cagr | linear
+    growSheets: list[str] | None = None  # default: demand (loads-p_set)
+    sessionId: str = "default"
+
+
+@router.post("/snapshots/forecast")
+def forecast_snapshots(payload: SnapshotForecast) -> dict:
+    """Project the session's series to ``toYear`` with demand growth (T1(b))."""
+    from .. import timeseries
+
+    model = model_store.load_full_model(payload.sessionId)
+    if not model:
+        raise HTTPException(status_code=400, detail="No working model in this session.")
+    delta = int(payload.toYear) - int(payload.fromYear)
+    method = payload.method if payload.method in ("cagr", "linear") else "cagr"
+    factor = timeseries.growth_factor(payload.growthPct, delta, method)
+    grow = set(payload.growSheets or ["loads-p_set"])
+
+    grown: list[str] = []
+    for sheet, rows in list(model.items()):
+        if not model_store.is_series_sheet(sheet, rows) or not rows:
+            continue
+        index_col = timeseries.series_index_col(list(rows[0].keys()))
+        scale = factor if sheet in grow else 1.0
+        new_rows: list[dict[str, Any]] = []
+        for r in rows:
+            nr: dict[str, Any] = {}
+            for k, v in r.items():
+                if k == index_col:
+                    nr[k] = timeseries.shift_snapshot_year(str(v), delta)
+                elif scale != 1.0 and isinstance(v, (int, float)) and not isinstance(v, bool):
+                    nr[k] = v * scale
+                else:
+                    nr[k] = v
+            new_rows.append(nr)
+        model[sheet] = new_rows
+        if scale != 1.0:
+            grown.append(sheet)
+
+    snaps = model.get("snapshots") or []
+    model["snapshots"] = [{**s, "snapshot": timeseries.shift_snapshot_year(str(s.get("snapshot")), delta)} for s in snaps]
+
+    model_store.save_model(payload.sessionId, model)
+    return {"toYear": payload.toYear, "growthFactor": round(factor, 4), "grown": grown}
+
+
 @router.post("/clear")
 def clear_session(session_id: str = Query("default", alias="session_id")) -> dict:
     """Clear the session's working model (settings are a separate frontend concern)."""

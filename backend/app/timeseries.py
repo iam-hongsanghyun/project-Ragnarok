@@ -163,6 +163,33 @@ def retarget_rows(
     return out
 
 
+def shift_snapshot_year(s: str, delta: int) -> str:
+    """Shift a snapshot's year by ``delta``, preserving month/day/hour.
+
+    Feb 29 in a source year that lands on a non-leap target falls back to Feb 28.
+    Unparseable values pass through unchanged.
+    """
+    try:
+        ts = pd.Timestamp(s)
+    except Exception:  # noqa: BLE001
+        return s
+    try:
+        return ts.replace(year=ts.year + delta).strftime("%Y-%m-%d %H:%M")
+    except ValueError:  # e.g. 29 Feb → 28 Feb
+        return ts.replace(year=ts.year + delta, day=28).strftime("%Y-%m-%d %H:%M")
+
+
+def growth_factor(growth_pct: float, delta_years: int, method: str = "cagr") -> float:
+    """Multiplicative growth over ``delta_years`` (T1 forecast).
+
+    ``cagr``: ``(1 + g)^Δ`` (compound); ``linear``: ``1 + g·Δ``.
+    """
+    g = float(growth_pct) / 100.0
+    if method == "linear":
+        return 1.0 + g * delta_years
+    return (1.0 + g) ** delta_years
+
+
 def downsample(df: pd.DataFrame, max_points: int, agg: Agg, index_col: str) -> pd.DataFrame:
     """Reduce ``df`` to at most ``max_points`` rows using ``agg``.
 
