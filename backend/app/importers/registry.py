@@ -34,6 +34,7 @@ def _factories() -> list[Callable[[], Database]]:
     from .databases.openelectricity import build_renewable as build_oe_renewable
     from .databases.elexon import build as build_elexon_demand
     from .databases.elexon import build_renewable as build_elexon_renewable
+    from .databases.renewables_ninja import build as build_ninja
     from .databases.openmeteo_renewable import build as build_openmeteo
     from .databases.openmeteo_renewable import build_pvgis, build_nasa_power
     from .databases.openmeteo_demand import build as build_openmeteo_demand
@@ -44,6 +45,7 @@ def _factories() -> list[Callable[[], Database]]:
         build_eia, build_entsoe, build_entsoe_cap, build_entsoe_genprof,
         build_oe_demand, build_oe_renewable,
         build_elexon_demand, build_elexon_renewable,
+        build_ninja,
         build_openmeteo, build_pvgis, build_nasa_power, build_openmeteo_demand,
     ]
 
