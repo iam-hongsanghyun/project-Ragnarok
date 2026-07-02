@@ -1359,6 +1359,39 @@ def get_backend_run_series(
     return window
 
 
+@app.get("/api/runs/{name}/derived/{metric}")
+def get_backend_run_derived(
+    name: str,
+    metric: str,
+    start: int = 0,
+    end: int | None = None,
+    max_points: int | None = Query(None, alias="maxPoints", ge=1),
+) -> dict[str, Any]:
+    """Server-side derived chart-series for a stored run (X1).
+
+    Aggregates the raw per-asset output series into a system chart series
+    (``dispatch_by_carrier`` / ``load`` / ``system_price``) on the backend, so
+    the browser fetches ready-to-plot data instead of crunching thousands of
+    per-asset columns for a large network.
+    """
+    from ..pypsa.results.derived_series import METRIC_SHEET, carrier_map, derive_series
+
+    sheet = METRIC_SHEET.get(metric)
+    if sheet is None:
+        raise HTTPException(status_code=400, detail=f"Unknown metric {metric!r}. Options: {sorted(METRIC_SHEET)}.")
+    window = run_store.run_series_window(name, sheet, start=start, end=end, max_points=max_points, agg="mean")
+    if window is None:
+        raise HTTPException(status_code=404, detail=f"Run has no {sheet!r} series.")
+    carriers = carrier_map(run_store.get_run_model(name)) if metric == "dispatch_by_carrier" else {}
+    derived = derive_series(
+        window["columns"], window["rows"], window["indexCol"],
+        metric=metric, carriers=carriers,
+    )
+    derived["window"] = window["window"]
+    derived["total"] = window["total"]
+    return derived
+
+
 @app.get("/api/runs/{name}/model/sheet/{sheet}")
 def get_backend_run_model_sheet(
     name: str, sheet: str, offset: int = 0, limit: int = 200
