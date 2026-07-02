@@ -166,6 +166,11 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
     ],
   }));
 
+  // Resource adequacy (A1+A2) — when the run has a stochastic renewable ensemble.
+  if (results.adequacy) {
+    rows.push(row({ cards: [{ card: { id: id('adq'), kind: 'adequacy' } as Card }] }));
+  }
+
   // 3. Demand + price + storage SoC by carrier, side by side. The SoC chart
   //    drops out automatically when the run has no storage.
   rows.push(row({

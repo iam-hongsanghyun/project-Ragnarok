@@ -3677,6 +3677,12 @@ path.leaflet-interactive:focus {
 .auction-book .ab-wtp { stroke: #dc2626; stroke-width: 1.5; stroke-dasharray: 4 3; }
 .auction-book .ab-point { fill: var(--brand); stroke: var(--surface); stroke-width: 1.5; }
 
+/* ── Resource-adequacy card ──────────────────────────────────────────────── */
+.adequacy-chart { width: 100%; max-width: 560px; height: auto; }
+.adequacy-chart .adq-band { fill: var(--brand); opacity: 0.15; stroke: none; }
+.adequacy-chart .adq-median { fill: none; stroke: var(--brand); stroke-width: 1.5; }
+.adequacy-chart .adq-load { fill: none; stroke: #dc2626; stroke-width: 1.5; }
+
 /* ── Merit Order Card ────────────────────────────────────────────────────── */
 .merit-card { padding: 8px 4px; }
 .merit-host { width: 100%; height: 300px; }

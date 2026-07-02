@@ -39,6 +39,7 @@ import { CompanyFinanceCard } from '../../../features/analytics/cards/CompanyFin
 import { CompanyStatementCard } from '../../../features/analytics/cards/CompanyStatementCard';
 import { CompanyComparisonCard } from '../../../features/analytics/cards/CompanyComparisonCard';
 import { TransitionRiskCard } from '../../../features/analytics/cards/TransitionRiskCard';
+import { AdequacyCard } from '../../../features/analytics/cards/AdequacyCard';
 import { PriceFormationCard } from '../../../features/analytics/cards/PriceFormationCard';
 import { CommitmentCard } from '../../../features/analytics/cards/CommitmentCard';
 import { BidStrategyCard } from '../../../features/analytics/cards/BidStrategyCard';
@@ -475,6 +476,10 @@ export function AnalyticsDashboard({
           return results.companyStatement
             ? <TransitionRiskCard data={results.companyStatement} />
             : <p className="dashboard-cell-missing">No company P&amp;L for this run (needs owner tags and an LP run).</p>;
+        case 'adequacy':
+          return results.adequacy
+            ? <AdequacyCard data={results.adequacy} />
+            : <p className="dashboard-cell-missing">No adequacy study (needs renewable generators with time-varying availability).</p>;
         case 'price-formation':
           return results.priceFormation
             ? <PriceFormationCard data={results.priceFormation} />
@@ -605,6 +610,7 @@ export function AnalyticsDashboard({
       case 'company-statement': return 'Company P&L (per-owner annual statement)';
       case 'company-comparison': return 'Company comparison (rank owners side by side)';
       case 'transition-risk': return 'Transition risk (carbon-price margin erosion)';
+      case 'adequacy': return 'Resource adequacy (LOLE / EENS)';
       case 'price-formation': return 'Price formation (why the price is what it is)';
       case 'commitment': return 'Unit commitment (starts & on/off)';
       case 'bid-strategy': return 'Bid strategy (markup vs price-taker)';

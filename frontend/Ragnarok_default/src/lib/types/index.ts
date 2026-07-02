@@ -782,6 +782,21 @@ export interface CompanyStatementEntry {
   emissionsTonnes: number;
 }
 
+/** Resource adequacy (A1 ensemble + A2 LOLE) — reliability under renewable variability. */
+export interface AdequacyResult {
+  members: number;
+  variability: number;
+  firmCapacityMW: number;
+  renewableCapacityMW: number;
+  peakLoadMW: number;
+  /** Loss-of-load expectation (h/yr). "1 day in 10 years" ≈ 2.4 h/yr. */
+  lole: number;
+  /** Expected energy not served (MWh/yr). */
+  eens: number;
+  worstPeriods: { snapshot: number; lolp: number; meanShortfallMW: number }[];
+  band: { timestamp: string; load: number; p10: number; p50: number; p90: number }[];
+}
+
 /** Consolidated per-company annual P&L statement (revenue → … → net margin). */
 export interface CompanyStatementResult {
   ownerColumn: string;
@@ -1402,6 +1417,7 @@ export interface RunResults {
   /** Per-company project finance (NPV/IRR/payback/DSCR); needs an LP run. */
   companyFinance?: CompanyFinanceResult;
   companyStatement?: CompanyStatementResult;
+  adequacy?: AdequacyResult | null;
   /** Price-formation view (price vs residual demand, marginal carrier). */
   priceFormation?: PriceFormationResult;
   /** Unit-commitment view (starts, start-up costs, on/off patterns). */
