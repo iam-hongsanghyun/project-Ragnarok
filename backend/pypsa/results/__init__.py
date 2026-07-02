@@ -200,13 +200,10 @@ def run_pypsa(
     merchant_enabled = bool(merchant_cfg.get("enabled", False))
     bid_cfg = options.get("bidStrategyConfig") or {}
     bid_enabled = bool(bid_cfg.get("enabled", False))
-    bid_mode = str(bid_cfg.get("mode", "fixed") or "fixed")
     swap_cfg = options.get("assetSwapConfig") or {}
     swap_enabled = bool(swap_cfg.get("enabled", False))
     ess_cfg = options.get("essConfig") or {}
     ess_enabled = bool(ess_cfg.get("enabled", False))
-    ppa_cfg = options.get("ppaConfig") or {}
-    ppa_enabled = bool(ppa_cfg.get("enabled", False))
     # The owner/company column (F1 + B1) is a shared, top-level concern. Fall
     # back to the legacy merchantConfig.ownerColumn for scenarios saved before
     # it was promoted out of the merchant config.
@@ -562,6 +559,69 @@ def run_pypsa(
         raise  # already-diagnosed (e.g. Q2 infeasibility) — don't re-wrap
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"PyPSA optimization failed: {exc}") from exc
+
+
+    return _build_solved_payload(
+        network, model, scenario, options, notes,
+        currency=currency,
+        owner_column=owner_column,
+        emissions_factors=emissions_factors,
+        snapshot_count=snapshot_count,
+        snapshot_weight=snapshot_weight,
+        pathway=pathway,
+        rolling=rolling,
+        stochastic=stochastic,
+        sampling=sampling,
+        rolling_windows=rolling_windows,
+        sclopf_enabled=sclopf_enabled,
+        solver_options=solver_options,
+    )
+
+
+def _build_solved_payload(
+    network: Any,  # pypsa.Network — module not imported here; annotation kept loose
+    model: dict[str, list[dict[str, Any]]],
+    scenario: dict[str, Any],
+    options: dict[str, Any],
+    notes: list[str],
+    *,
+    currency: str,
+    owner_column: str,
+    emissions_factors: dict[str, float],
+    snapshot_count: int,
+    snapshot_weight: float,
+    pathway: Any,
+    rolling: Any,
+    stochastic: Any,
+    sampling: Any,
+    rolling_windows: list[dict[str, Any]],
+    sclopf_enabled: bool,
+    solver_options: dict[str, Any],
+) -> dict[str, Any]:
+    """Assemble the full results payload from a SOLVED network.
+
+    Extracted verbatim from ``run_pypsa``'s post-solve tail so it is shared by
+    two callers: ``run_pypsa`` after a fresh solve, and
+    ``derive_results_from_outputs`` (X1) after reconstructing a solved network
+    from an imported bundle's stored outputs — imported bundles therefore get
+    analytics identical to a fresh solve (pinned by the ``test_derive_outputs``
+    parity suite).
+    """
+    # Mode configs re-read from options (pure reads; run_pypsa keeps its own
+    # copies for the pre-solve mutual-exclusion guards).
+    mga_cfg = options.get("mgaConfig") or {}
+    mga_enabled = bool(mga_cfg.get("enabled", False))
+    merchant_cfg = options.get("merchantConfig") or {}
+    merchant_enabled = bool(merchant_cfg.get("enabled", False))
+    bid_cfg = options.get("bidStrategyConfig") or {}
+    bid_enabled = bool(bid_cfg.get("enabled", False))
+    bid_mode = str(bid_cfg.get("mode", "fixed") or "fixed")
+    swap_cfg = options.get("assetSwapConfig") or {}
+    swap_enabled = bool(swap_cfg.get("enabled", False))
+    ess_cfg = options.get("essConfig") or {}
+    ess_enabled = bool(ess_cfg.get("enabled", False))
+    ppa_cfg = options.get("ppaConfig") or {}
+    ppa_enabled = bool(ppa_cfg.get("enabled", False))
 
     # ── Stochastic post-processing ──────────────────────────────────────────
     # After the stochastic solve, every static / dynamic frame is indexed by

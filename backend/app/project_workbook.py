@@ -762,23 +762,61 @@ def package_to_bundle(data: bytes, filename: str = "") -> dict[str, Any]:
     raise ValueError("Package contains no .json or .xlsx member.")
 
 
+def _fill_derived_analytics(bundle: dict[str, Any]) -> dict[str, Any]:
+    """Derive analytics server-side for a reconstructed bundle (X1).
+
+    A bundle whose ``result`` carries outputs but no ``summary`` (the
+    sheet-reconstruction path) historically forced the browser to re-derive
+    everything. Fill it here via :func:`derive_results_from_outputs` — the same
+    payload assembly as a fresh solve. Best-effort: on any failure (multi-period
+    outputs, malformed series) the bundle is returned untouched and the client
+    derivation path applies exactly as before.
+    """
+    result = bundle.get("result")
+    if not isinstance(result, dict):
+        return bundle
+    outputs = result.get("outputs")
+    has_summary = bool(result.get("summary"))
+    if has_summary or not isinstance(outputs, dict) or not outputs.get("series"):
+        return bundle
+    try:
+        from ..pypsa.results.derive_outputs import derive_results_from_outputs
+
+        derived = derive_results_from_outputs(
+            bundle.get("model") or {},
+            outputs,
+            bundle.get("scenario") or {},
+            bundle.get("options") or {},
+        )
+        # Keep any fields the bundle already carried (meta, plugin analytics, …);
+        # fill everything the derivation produced that is absent.
+        for key, value in derived.items():
+            result.setdefault(key, value)
+        logger.info("import: analytics derived server-side for reconstructed bundle")
+    except Exception as exc:  # noqa: BLE001 — never block an import on derivation
+        logger.warning("import: server-side derivation skipped (%s)", exc)
+    return bundle
+
+
 def import_bundle_from_upload(data: bytes, filename: str) -> dict[str, Any]:
     """Parse an uploaded project file into a bundle, accepting a ``.zip`` package
     or a bare ``.xlsx`` (embedded-bundle fast path, else sheet reconstruction).
 
     Detection is by extension — an xlsx is *itself* a zip (it starts with the
     ``PK`` magic), so the magic bytes alone can't tell a package from a workbook.
+    Reconstructed bundles (no embedded analytics) get their analytics derived
+    server-side before returning (X1); failures fall back to client derivation.
     """
     name = filename.lower()
     if name.endswith(".zip"):
-        return package_to_bundle(data, filename)
+        return _fill_derived_analytics(package_to_bundle(data, filename))
     if name.endswith((".xlsx", ".xls")):
-        return workbook_to_bundle(data, filename=filename)
+        return _fill_derived_analytics(workbook_to_bundle(data, filename=filename))
     # Unknown extension — try a package first, fall back to a bare workbook.
     try:
-        return package_to_bundle(data, filename)
+        return _fill_derived_analytics(package_to_bundle(data, filename))
     except Exception:  # noqa: BLE001
-        return workbook_to_bundle(data, filename=filename)
+        return _fill_derived_analytics(workbook_to_bundle(data, filename=filename))
 
 
 def project_basename(filename: str) -> str:
