@@ -269,6 +269,8 @@ def run_market_sim_study(
     snapshot_count: int,
     snapshot_weight: float,
     notes: list[str],
+    model: dict[str, Any] | None = None,
+    owner_column: str = "owner",
 ) -> dict[str, Any]:
     """The market-simulation STUDY payload (mirrors ``run_power_flow``'s shape).
 
@@ -312,6 +314,26 @@ def run_market_sim_study(
         narrative.append(f"Storage followed a price-threshold arbitrage rule "
                          f"({cycled:,.0f} MWh discharged).")
 
+    # Strategic price-maker analysis (B4) rides the same clearing engine.
+    strategic_cfg = config.get("strategic") or {}
+    strategic = None
+    if bool(strategic_cfg.get("enabled")) and model is not None:
+        from .strategic import build_strategic_bidding
+
+        strategic = build_strategic_bidding(
+            network, model,
+            config=strategic_cfg, sim_config=config,
+            owner_column=owner_column, currency=currency,
+        )
+        if strategic is None:
+            narrative.append(
+                f"Strategic bidding was enabled but owner "
+                f"{strategic_cfg.get('owner')!r} has no generators (column "
+                f"'{owner_column}') — analysis skipped."
+            )
+        else:
+            narrative.extend(strategic["notes"])
+
     return {
         **EMPTY_OPTIMISE_FIELDS,
         "dispatchSeries": sim["dispatchSeries"],
@@ -326,6 +348,7 @@ def run_market_sim_study(
             "units": sim["units"],
             "storage": sim["storage"],
         },
+        "strategicBidding": strategic,
         "narrative": narrative,
         "runMeta": {
             "snapshotCount": snapshot_count,

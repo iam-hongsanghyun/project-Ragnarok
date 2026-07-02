@@ -17,7 +17,13 @@ import {
   SamplingConfig,
   SecurityConstrainedConfig,
   StochasticConfig,
+  StrategicBiddingConfig,
 } from 'lib/types';
+
+const DEFAULT_STRATEGIC: StrategicBiddingConfig = {
+  enabled: false, owner: '', strategy: 'markup',
+  maxAdder: 100, maxWithholdPct: 0.5, steps: 12, rivalOwner: '', rounds: 4,
+};
 
 export interface MarketSimulationSectionProps {
   marketSimConfig: MarketSimConfig;
@@ -43,6 +49,9 @@ export function MarketSimulationSection(props: MarketSimulationSectionProps) {
 
   const set = (patch: Partial<MarketSimConfig>) =>
     props.onMarketSimConfigChange({ ...cfg, ...patch });
+  const strategic = cfg.strategic ?? DEFAULT_STRATEGIC;
+  const setStrategic = (patch: Partial<StrategicBiddingConfig>) =>
+    set({ strategic: { ...strategic, ...patch } });
 
   return (
     <section className="constraints-workspace-section">
@@ -138,6 +147,97 @@ export function MarketSimulationSection(props: MarketSimulationSectionProps) {
               second. Storage stays idle when the spread cannot pay for round-trip losses.
             </p>
           </div>
+
+          <div className="sg-setting-divider" />
+          <div className="sg-setting-row">
+            <label className="sg-setting-label">Strategic bidding (market power)</label>
+            <div className="sg-btn-row">
+              <button
+                className={`tb-btn sg-solver-btn${!strategic.enabled ? '' : ' tb-btn--muted'}`}
+                onClick={() => setStrategic({ enabled: false })}
+              >
+                Off
+              </button>
+              <button
+                className={`tb-btn sg-solver-btn${strategic.enabled ? '' : ' tb-btn--muted'}`}
+                onClick={() => setStrategic({ enabled: true })}
+              >
+                On
+              </button>
+            </div>
+            <p className="sg-setting-hint">
+              Sweep one owner's strategy against the simulated market and take the
+              profit-maximising level (the best response) — showing what market power is
+              worth and what it costs consumers. Uses the shared owner column.
+            </p>
+          </div>
+
+          {strategic.enabled && (
+            <>
+              <div className="sg-setting-row">
+                <label className="sg-setting-label">Strategic owner</label>
+                <input
+                  type="text" className="sg-text-input" value={strategic.owner}
+                  placeholder="owner value, e.g. AlphaCo"
+                  onChange={(e) => setStrategic({ owner: e.target.value })}
+                />
+              </div>
+              <div className="sg-setting-row">
+                <label className="sg-setting-label">Strategy</label>
+                <div className="sg-btn-row">
+                  <button
+                    className={`tb-btn sg-solver-btn${strategic.strategy === 'markup' ? '' : ' tb-btn--muted'}`}
+                    onClick={() => setStrategic({ strategy: 'markup' })}
+                  >
+                    Bid markup
+                  </button>
+                  <button
+                    className={`tb-btn sg-solver-btn${strategic.strategy === 'withhold' ? '' : ' tb-btn--muted'}`}
+                    onClick={() => setStrategic({ strategy: 'withhold' })}
+                  >
+                    Withhold capacity
+                  </button>
+                </div>
+              </div>
+              <div className="sg-setting-row">
+                <label className="sg-setting-label">
+                  {strategic.strategy === 'markup' ? 'Max bid adder (per MWh)' : 'Max withheld fraction'}
+                </label>
+                <div className="sg-btn-row" style={{ gap: 8 }}>
+                  {strategic.strategy === 'markup' ? (
+                    <input
+                      type="number" className="sg-number-input" min={0} step={10}
+                      value={strategic.maxAdder}
+                      onChange={(e) => setStrategic({ maxAdder: Math.max(0, Number(e.target.value) || 0) })}
+                    />
+                  ) : (
+                    <input
+                      type="number" className="sg-number-input" min={0} max={1} step={0.05}
+                      value={strategic.maxWithholdPct}
+                      onChange={(e) => setStrategic({ maxWithholdPct: Math.min(1, Math.max(0, Number(e.target.value) || 0)) })}
+                    />
+                  )}
+                  <input
+                    type="number" className="sg-number-input" min={2} max={40} step={1}
+                    value={strategic.steps}
+                    onChange={(e) => setStrategic({ steps: Math.max(2, Math.trunc(Number(e.target.value) || 12)) })}
+                  />
+                </div>
+                <p className="sg-setting-hint">Grid top and number of strategy levels swept.</p>
+              </div>
+              <div className="sg-setting-row">
+                <label className="sg-setting-label">Rival owner (optional)</label>
+                <input
+                  type="text" className="sg-text-input" value={strategic.rivalOwner}
+                  placeholder="empty = single strategic owner"
+                  onChange={(e) => setStrategic({ rivalOwner: e.target.value })}
+                />
+                <p className="sg-setting-hint">
+                  With a rival, both owners alternate best responses (≈ Nash equilibrium).
+                </p>
+              </div>
+            </>
+          )}
         </>
       )}
     </section>

@@ -166,6 +166,22 @@ export interface PowerFlowConfig {
   linear: boolean;
 }
 
+/** Strategic price-maker analysis (B4) riding the market simulation: sweep the
+ *  owner's strategy against the clearing engine, take the best response. */
+export interface StrategicBiddingConfig {
+  enabled: boolean;
+  owner: string;
+  strategy: 'markup' | 'withhold';
+  /** Grid top for the bid adder (currency/MWh) when strategy = markup. */
+  maxAdder: number;
+  /** Grid top for the withheld capacity fraction (0–1) when strategy = withhold. */
+  maxWithholdPct: number;
+  steps: number;
+  /** Optional second strategic owner — alternating best responses (≈ Nash). */
+  rivalOwner: string;
+  rounds: number;
+}
+
 /** Market-simulation study mode (B2) — rule-based merit-order clearing on a
  *  single zone, not an optimisation. */
 export interface MarketSimConfig {
@@ -178,6 +194,8 @@ export interface MarketSimConfig {
   chargeQuantile: number;
   /** …and discharge at/above this one. */
   dischargeQuantile: number;
+  /** Strategic price-maker analysis (B4) — optional. */
+  strategic?: StrategicBiddingConfig;
 }
 
 export interface MarketSimUnit {
@@ -212,6 +230,36 @@ export interface MarketSimulationResult {
     energyDischargedMWh: number;
     arbitrageRevenue: number;
   }[];
+}
+
+export interface StrategyCurvePoint {
+  level: number;
+  ownerProfit: number;
+  avgPrice: number;
+  consumerCost: number;
+  unservedMWh: number;
+}
+
+export interface StrategicBiddingResult {
+  owner: string;
+  strategy: 'markup' | 'withhold';
+  currency: string;
+  ownerUnits: string[];
+  baseline: { profit: number; avgPrice: number; consumerCost: number };
+  curve: StrategyCurvePoint[];
+  best: StrategyCurvePoint & {
+    profitUplift: number;
+    priceUplift: number;
+    consumerCostDelta: number;
+  };
+  equilibrium: {
+    rivalOwner: string;
+    rounds: { round: number; ownerLevel: number; rivalLevel: number }[];
+    converged: boolean;
+    ownerLevel: number;
+    rivalLevel: number;
+  } | null;
+  notes: string[];
 }
 
 /** Per-bus voltage magnitude (pu) across the modelled snapshots. */
@@ -1260,6 +1308,9 @@ export interface RunResults {
   powerFlow?: PowerFlowResult;
   /** Present only when the run was a market-simulation study (B2). */
   marketSimulation?: MarketSimulationResult;
+  /** Strategic price-maker best response (B4) — only on market-sim studies
+   *  with the strategic analysis enabled. */
+  strategicBidding?: StrategicBiddingResult | null;
   /** Present only when the run was an N-1 contingency analysis. */
   contingency?: ContingencyResult;
   /** PyPSA statistics() table (per-carrier capacity/CF/curtailment/revenue/…). */

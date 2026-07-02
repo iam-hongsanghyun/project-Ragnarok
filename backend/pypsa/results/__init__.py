@@ -353,6 +353,8 @@ def run_pypsa(
             snapshot_count=snapshot_count,
             snapshot_weight=snapshot_weight,
             notes=notes,
+            model=model,
+            owner_column=owner_column,
         )
     if contingency_enabled:
         return run_contingency(

@@ -108,6 +108,9 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
         { card: { id: id('merit'), kind: 'merit-order' } as Card },
       ] }),
       row({ cards: [{ card: { id: id('marketsim'), kind: 'market-simulation' } as Card }] }),
+      ...(results.strategicBidding
+        ? [row({ cards: [{ card: { id: id('strategic'), kind: 'strategic-bidding' } as Card }] })]
+        : []),
       row({ cards: [{ card: { id: id('notes'), kind: 'notes' } }] }),
     ];
     return { rows: msRows.map((r) => r.row), cards: msRows.flatMap((r) => r.cards) };

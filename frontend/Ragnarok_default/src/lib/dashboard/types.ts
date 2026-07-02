@@ -42,6 +42,7 @@ export type CardKind =
   | 'price-elastic'
   | 'power-flow'
   | 'market-simulation'
+  | 'strategic-bidding'
   | 'contingency'
   | 'emissions-breakdown'
   | 'capacity-expansion'
@@ -228,6 +229,10 @@ export interface MarketSimulationCardData extends CardBase {
   kind: 'market-simulation';
 }
 
+export interface StrategicBiddingCardData extends CardBase {
+  kind: 'strategic-bidding';
+}
+
 export interface ContingencyCardData extends CardBase {
   kind: 'contingency';
 }
@@ -284,6 +289,7 @@ export type Card =
   | PriceElasticCardData
   | PowerFlowCardData
   | MarketSimulationCardData
+  | StrategicBiddingCardData
   | ContingencyCardData
   | EmissionsBreakdownCardData
   | CapacityExpansionCardData

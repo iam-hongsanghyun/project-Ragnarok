@@ -49,6 +49,7 @@ import { DemandResponseCard } from '../../../features/analytics/cards/DemandResp
 import { PriceElasticCard } from '../../../features/analytics/cards/PriceElasticCard';
 import { PowerFlowCard } from '../../../features/analytics/cards/PowerFlowCard';
 import { MarketSimulationCard } from '../../../features/analytics/cards/MarketSimulationCard';
+import { StrategicBiddingCard } from '../../../features/analytics/cards/StrategicBiddingCard';
 import { ContingencyCard } from '../../../features/analytics/cards/ContingencyCard';
 import { EmissionsBreakdownCard } from '../../../features/analytics/cards/EmissionsBreakdownCard';
 import { CapacityExpansionCard } from '../../../features/analytics/cards/CapacityExpansionCard';
@@ -509,6 +510,10 @@ export function AnalyticsDashboard({
           return results.marketSimulation
             ? <MarketSimulationCard data={results.marketSimulation} />
             : <p className="dashboard-cell-missing">This run was not a market simulation.</p>;
+        case 'strategic-bidding':
+          return results.strategicBidding
+            ? <StrategicBiddingCard data={results.strategicBidding} />
+            : <p className="dashboard-cell-missing">No strategic-bidding analysis in this run.</p>;
         case 'contingency':
           return results.contingency
             ? <ContingencyCard data={results.contingency} />
@@ -585,6 +590,7 @@ export function AnalyticsDashboard({
       case 'price-elastic': return 'Price-elastic demand';
       case 'power-flow': return 'Power flow (convergence & voltages)';
       case 'market-simulation': return 'Market simulation (prices & unit economics)';
+      case 'strategic-bidding': return 'Strategic bidding (market power best response)';
       case 'contingency': return 'N-1 contingency (security)';
       case 'emissions-breakdown': return 'Emissions by generator / carrier';
       case 'capacity-expansion': return 'Capacity expansion';
