@@ -944,6 +944,11 @@ app.include_router(_plugins_router.router)
 from .routers import pypsa_earth as _pypsa_earth_router  # noqa: E402
 app.include_router(_pypsa_earth_router.router)
 
+# Power procurement portfolio optimizer (PP2) — CVaR-constrained instrument mix
+# over a price series. A decision surface on top of prices, not a solve option.
+from .routers import procurement as _procurement_router  # noqa: E402
+app.include_router(_procurement_router.router)
+
 
 @app.get("/api/backends")
 def get_backends() -> dict[str, Any]:

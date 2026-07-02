@@ -32,6 +32,7 @@ import {
   ScenarioCatalog,
   SecurityConstrainedConfig,
   StochasticConfig,
+  ValuePoint,
   WorkbookModel,
 } from 'lib/types';
 import { DateFormat, SolveAcceptance, SolverType } from '../features/settings/useSettings';
@@ -55,6 +56,7 @@ import { EssSection } from './SettingsView.sections/Ess';
 import { PpaSection } from './SettingsView.sections/Ppa';
 import { DemandResponseSection } from './SettingsView.sections/DemandResponse';
 import { DecisionsSection } from './SettingsView.sections/Decisions';
+import { ProcurementSection } from './SettingsView.sections/Procurement';
 import { CompanySection } from './SettingsView.sections/Company';
 import { StandardConstraintsSection, AdvancedConstraintsSection } from './SettingsView.sections/Constraints';
 import { AppearanceSection } from './SettingsView.sections/Appearance';
@@ -76,6 +78,7 @@ type SectionId =
   | 'contingency'
   | 'mga'
   | 'decisions'
+  | 'procurement'
   | 'merchant'
   | 'bidding'
   | 'assetSwap'
@@ -124,6 +127,7 @@ const SECTIONS: Section[] = [
   { id: 'solver',     label: 'Solver',                        group: 'Solve' },
   // Market — ownership & market-behaviour economics (own tab, not "Solve")
   { id: 'decisions',  label: 'Decisions (use cases)',         group: 'Market' },
+  { id: 'procurement', label: 'Procurement strategy',         group: 'Market' },
   { id: 'company',    label: 'Company / ownership',           group: 'Market' },
   { id: 'merchant',   label: 'Merchant (price-taker)',        group: 'Market' },
   { id: 'bidding',    label: 'Bid strategy (market power)',   group: 'Market' },
@@ -209,6 +213,8 @@ export interface SettingsViewProps {
   currencySymbol: string;
   lineCount: number;
   transformerCount: number;
+  /** Last run's cleared system price series — feeds the Procurement surface. */
+  priceSeries?: ValuePoint[] | null;
 
   // Constraints
   constraints: CustomConstraint[];
@@ -305,6 +311,7 @@ export function SettingsView(props: SettingsViewProps) {
         {section === 'ppa'            && <PpaSection {...props} />}
         {section === 'demandResponse' && <DemandResponseSection {...props} />}
         {section === 'decisions'      && <DecisionsSection {...props} onNavigate={(s) => setSection(s as SectionId)} />}
+        {section === 'procurement'    && <ProcurementSection priceSeries={props.priceSeries ?? null} currency={props.currencySymbol} />}
         {section === 'constraints'    && <StandardConstraintsSection {...props} />}
         {section === 'constraintsAdvanced' && <AdvancedConstraintsSection {...props} />}
         {section === 'appearance'     && <AppearanceSection {...props} />}

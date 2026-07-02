@@ -64,6 +64,12 @@ export function DecisionsSection(props: DecisionsSectionProps) {
       answer: 'optimal markup + curve',
       setup: () => { props.onBidStrategyConfigChange({ ...props.bidStrategyConfig, enabled: true, mode: 'optimal' }); props.onNavigate('bidding'); },
     },
+    {
+      question: 'How do I buy power cheaply without bill risk?',
+      detail: 'Mix spot, PPA, forwards and retail to hedge your load within a CVaR risk budget.',
+      answer: 'optimal mix + cost-vs-risk frontier',
+      setup: () => { props.onNavigate('procurement'); },
+    },
   ];
 
   return (

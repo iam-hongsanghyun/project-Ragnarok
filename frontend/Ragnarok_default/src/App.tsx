@@ -2650,6 +2650,7 @@ function AppInner() {
             <SettingsView
               variant={tab === 'Market' ? 'market' : 'settings'}
               model={model}
+              priceSeries={results?.systemPriceSeries ?? null}
               scenarioCatalog={scenarioCatalog}
               activeScenarioLabel={activeScenario?.label ?? null}
               scenarioDirty={scenarioDirty}
