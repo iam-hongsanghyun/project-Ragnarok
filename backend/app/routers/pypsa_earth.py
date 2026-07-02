@@ -397,6 +397,17 @@ def _run_workflow_and_ingest(env: Path, req: BuildRequest, job_id: str) -> dict[
     then reuses :func:`ingest_network`. The heavy lifting is PyPSA-Earth's; this
     is the integration seam.
     """
+    # Never kill a LIVE build: if another in-process job is running, its child is
+    # the pid on record — refuse up front instead of "reclaiming" it out from
+    # under it (or fighting over the snakemake lock).
+    others = [j for j in _JOBS.values()
+              if j.get("status") == "running" and j.get("jobId") != job_id]
+    if others:
+        raise RuntimeError(
+            "Another PyPSA-Earth build is already running — wait for it to finish "
+            "or press Stop on it first."
+        )
+
     from ..importers.region import iso2_for
 
     iso2 = iso2_for(req.countryIso)
@@ -422,7 +433,7 @@ def _run_workflow_and_ingest(env: Path, req: BuildRequest, job_id: str) -> dict[
 
     _set(job_id, phase="running PyPSA-Earth workflow", progress=0,
          detail="Snakemake is building cutouts, bus regions, powerplants and profiles…")
-    # A build orphaned by a backend restart keeps running and holds snakemake's
+    # A build orphaned by a backend RESTART keeps running and holds snakemake's
     # lock — reclaim it (it's ours: the pid file records our own child) so this
     # build doesn't die with a LockException.
     if _kill_orphaned_child():
@@ -490,6 +501,11 @@ async def _run(job_id: str, req: BuildRequest) -> None:
              detail=f"Built {req.countryIso}: " + ", ".join(f"{n} {s}" for s, n in counts.items()),
              result=result, counts=counts)
     except Exception as exc:  # noqa: BLE001 — surface any workflow/ingest failure to the client
+        if (_JOBS.get(job_id) or {}).get("stop_requested"):
+            _set(job_id, status="stopped", phase="stopped",
+                 detail="Stopped by user. Completed steps are kept — a new build resumes from them.",
+                 error=None)
+            return
         log.exception("PyPSA-Earth build failed")
         _set(job_id, status="error", phase="failed", detail=str(exc), error=str(exc))
 
@@ -546,10 +562,44 @@ async def start_build(req: BuildRequest) -> dict[str, Any]:
     _JOBS[job_id] = {
         "jobId": job_id, "status": "queued", "phase": "queued",
         "detail": f"Queued a PyPSA-Earth build for {req.countryName or req.countryIso}.",
-        "error": None, "countryIso": req.countryIso, "clusters": req.clusters,
+        "error": None, "countryIso": req.countryIso,
+        "countryName": req.countryName or req.countryIso, "clusters": req.clusters,
     }
     asyncio.create_task(_run(job_id, req))
     return _snapshot(_JOBS[job_id])
+
+
+@router.get("/builds")
+def list_builds() -> dict[str, Any]:
+    """All build jobs this backend knows about (newest last) — lets the panel
+    re-attach to a running build after a tab switch or page reload instead of
+    losing track of it."""
+    return {"jobs": [_snapshot(j) for j in _JOBS.values()]}
+
+
+@router.post("/build/{job_id}/stop")
+def stop_build(job_id: str) -> dict[str, Any]:
+    """Stop a running build. The ONLY way a build is meant to stop — switching
+    tabs or closing the panel never kills it. Progress is kept: snakemake's
+    --rerun-incomplete resumes completed rules on the next build."""
+    job = _JOBS.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Unknown build job.")
+    if job["status"] not in ("queued", "running"):
+        return _snapshot(job)  # already terminal — nothing to stop
+    job["stop_requested"] = True
+    # Kill our recorded child process group; the worker thread sees the exit and
+    # (via stop_requested) reports 'stopped' instead of 'error'.
+    import signal
+
+    try:
+        pid = int(json.loads(_PID_FILE.read_text(encoding="utf-8"))["pid"])
+        os.killpg(pid, signal.SIGTERM)
+    except Exception:  # noqa: BLE001 — no child yet / already gone
+        pass
+    job["phase"] = "stopping"
+    job["detail"] = "Stop requested — terminating the workflow…"
+    return _snapshot(job)
 
 
 @router.get("/build/{job_id}")

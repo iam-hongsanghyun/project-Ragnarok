@@ -232,6 +232,40 @@ def test_stream_log_tails_lines_and_lifts_progress() -> None:
         pe._JOBS.pop("stream-t", None)
 
 
+def test_list_builds_exposes_jobs_for_reattach() -> None:
+    pe._JOBS["reatt-1"] = {"jobId": "reatt-1", "status": "running", "phase": "x", "detail": "", "error": None}
+    try:
+        jobs = client.get("/api/pypsa-earth/builds").json()["jobs"]
+        assert any(j["jobId"] == "reatt-1" and j["status"] == "running" for j in jobs)
+    finally:
+        pe._JOBS.pop("reatt-1", None)
+
+
+def test_stop_build_flags_and_reports(monkeypatch: pytest.MonkeyPatch) -> None:
+    pe._JOBS["stop-1"] = {"jobId": "stop-1", "status": "running", "phase": "running", "detail": "", "error": None}
+    try:
+        r = client.post("/api/pypsa-earth/build/stop-1/stop").json()
+        assert r["phase"] == "stopping"
+        assert pe._JOBS["stop-1"]["stop_requested"] is True
+        # Terminal job: stop is a no-op that just returns the snapshot.
+        pe._JOBS["stop-1"]["status"] = "done"
+        assert client.post("/api/pypsa-earth/build/stop-1/stop").json()["status"] == "done"
+    finally:
+        pe._JOBS.pop("stop-1", None)
+    assert client.post("/api/pypsa-earth/build/nope/stop").status_code == 404
+
+
+def test_second_build_refuses_instead_of_killing_the_live_one(tmp_path: Path) -> None:
+    (tmp_path / "Snakefile").write_text("# root\n")
+    pe._JOBS["live-1"] = {"jobId": "live-1", "status": "running", "phase": "running", "detail": "", "error": None}
+    try:
+        req = pe.BuildRequest(countryIso="KOR", countryName="South Korea")
+        with pytest.raises(RuntimeError, match="already running"):
+            pe._run_workflow_and_ingest(tmp_path, req, "new-2")
+    finally:
+        pe._JOBS.pop("live-1", None)
+
+
 def test_kill_orphaned_child_no_pid_file_is_noop() -> None:
     assert pe._kill_orphaned_child() is False
 

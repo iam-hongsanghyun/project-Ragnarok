@@ -9748,6 +9748,24 @@ section.data-import-filters__group {
   flex-direction: column;
   gap: 6px;
 }
+.pe-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pe-panel__stop {
+  padding: 6px 14px;
+  border: 1px solid var(--danger, #dc2626);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--danger, #dc2626);
+  font-weight: 600;
+  cursor: pointer;
+}
+.pe-panel__stop:hover {
+  background: var(--danger, #dc2626);
+  color: #fff;
+}
 .pe-panel__bar {
   height: 6px;
   background: var(--bg-hover);
