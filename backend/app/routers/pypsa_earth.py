@@ -55,6 +55,9 @@ _DOC = "docs/pypsa-earth-integration.md"
 # Persisted "point at an existing checkout" override — set via the Data-view
 # button so setup survives without an env var or a restart (backend/data/).
 _STATE_FILE = Path(__file__).resolve().parents[2] / "data" / "pypsa_earth.json"
+# The running build's process-group id, persisted so a build orphaned by a
+# backend restart can be reclaimed (it keeps running and holds snakemake's lock).
+_PID_FILE = _STATE_FILE.parent / "pypsa_earth_run.pid"
 
 # Single-process in-memory job registry (mirrors startup_status's convention).
 _JOBS: dict[str, dict[str, Any]] = {}
@@ -201,8 +204,8 @@ def _target_for(iso2: str, clusters: int) -> str:
     return f"networks/ragnarok_{iso2}/elec_s{_SIMPL}_{clusters}_ec_l{_LL}_{_OPTS}.nc"
 
 
-def _snakemake_argv(target: str, configfile: str | None = None) -> list[str]:
-    """How to invoke snakemake for the build.
+def _runner_prefix() -> list[str]:
+    """How to reach snakemake: bare (on PATH) or through the conda env.
 
     snakemake (and the workflow's deps) live in the pypsa-earth **conda env**, not
     the backend's env — a bare ``snakemake`` call fails with
@@ -211,26 +214,99 @@ def _snakemake_argv(target: str, configfile: str | None = None) -> list[str]:
     ``mamba run`` / ``conda run``. ``$RAGNAROK_PYPSA_EARTH_CONDA_ENV`` overrides
     the env name (default ``pypsa-earth``).
     """
-    # Target BEFORE --configfile: snakemake's --configfile is greedy (nargs='+')
-    # and would swallow a trailing target as a second config file.
-    base = ["snakemake", "-j", "4", "--rerun-incomplete", target]
-    if configfile:
-        base += ["--configfile", configfile]
     if shutil.which("snakemake"):
-        return base
+        return []
     runner = shutil.which("mamba") or shutil.which("conda")
     if runner:
         env_name = os.environ.get(_CONDA_ENV_VAR, "pypsa-earth")
         # --no-capture-output is a CONDA flag; mamba 2.x `run` rejects it (the
         # wrapper ends up exec'ing `--` → "exec: --: invalid option").
         if Path(runner).name == "conda":
-            return [runner, "run", "--no-capture-output", "-n", env_name, *base]
-        return [runner, "run", "-n", env_name, *base]
+            return [runner, "run", "--no-capture-output", "-n", env_name]
+        return [runner, "run", "-n", env_name]
     raise RuntimeError(
         "snakemake is not on the backend's PATH and no conda/mamba was found to "
         "run the pypsa-earth env. Install it (scripts/setup_pypsa_earth.command) and "
         "ensure conda/mamba is on the PATH of the process running Ragnarok."
     )
+
+
+def _snakemake_argv(target: str, configfile: str | None = None) -> list[str]:
+    """The full snakemake invocation for a build target."""
+    # Target BEFORE --configfile: snakemake's --configfile is greedy (nargs='+')
+    # and would swallow a trailing target as a second config file.
+    base = ["snakemake", "-j", "4", "--rerun-incomplete", target]
+    if configfile:
+        base += ["--configfile", configfile]
+    return [*_runner_prefix(), *base]
+
+
+def _unlock(env: Path) -> None:
+    """Clear snakemake's directory lock (safe: only called when no build of ours
+    is running — after a kill/power-loss the lock is stale)."""
+    try:
+        subprocess.run(  # noqa: S603
+            [*_runner_prefix(), "snakemake", "--unlock"],
+            cwd=str(env), capture_output=True, text=True, timeout=300,
+        )
+    except Exception:  # noqa: BLE001 — best-effort; the retry surfaces real errors
+        log.warning("snakemake --unlock failed", exc_info=True)
+
+
+def _record_child(pid: int) -> None:
+    _PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _PID_FILE.write_text(json.dumps({"pid": pid}), encoding="utf-8")
+
+
+def _clear_child() -> None:
+    _PID_FILE.unlink(missing_ok=True)
+
+
+def _kill_orphaned_child() -> bool:
+    """Kill a build left running by a previous backend process, if any.
+
+    A backend restart orphans the snakemake child (it keeps running and holds the
+    workflow lock, so new builds fail with LockException). The pid file records
+    OUR child's process group; verify the pid is still a snakemake before
+    killing, so a recycled pid is never harmed. Returns True if one was killed.
+    """
+    import signal
+    import time
+
+    try:
+        pid = int(json.loads(_PID_FILE.read_text(encoding="utf-8"))["pid"])
+    except Exception:  # noqa: BLE001 — no/corrupt pid file → nothing to do
+        return False
+    try:
+        out = subprocess.run(  # noqa: S603
+            ["ps", "-p", str(pid), "-o", "command="],
+            capture_output=True, text=True, timeout=10,
+        )
+        cmd = (out.stdout or "").strip()
+    except Exception:  # noqa: BLE001
+        return False
+    if not cmd or "snakemake" not in cmd:
+        _clear_child()  # dead or a recycled pid — just drop the record
+        return False
+    log.warning("Reclaiming orphaned PyPSA-Earth build (pid %s)", pid)
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(pid, sig)  # child is a session leader → pgid == pid
+        except ProcessLookupError:
+            break
+        except PermissionError:
+            return False
+        for _ in range(20):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.5)
+        else:
+            continue
+        break
+    _clear_child()
+    return True
 
 
 def _conda_env_exists(runner: str, env_name: str) -> bool:
@@ -346,17 +422,43 @@ def _run_workflow_and_ingest(env: Path, req: BuildRequest, job_id: str) -> dict[
 
     _set(job_id, phase="running PyPSA-Earth workflow", progress=0,
          detail="Snakemake is building cutouts, bus regions, powerplants and profiles…")
-    # Stream stdout/stderr line-by-line into the job snapshot so the panel shows a
-    # live log + coarse % instead of a spinner. The workflow reads its own
-    # config.yaml; a per-request override would be written here in a fuller build.
-    proc = subprocess.Popen(  # noqa: S603 — fixed argv, no shell
-        argv, cwd=str(env), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, bufsize=1,
-    )
-    assert proc.stdout is not None
-    log_lines = _stream_log(proc.stdout, job_id)
-    proc.wait()
-    if proc.returncode != 0:
+    # A build orphaned by a backend restart keeps running and holds snakemake's
+    # lock — reclaim it (it's ours: the pid file records our own child) so this
+    # build doesn't die with a LockException.
+    if _kill_orphaned_child():
+        _unlock(env)
+
+    # Stream stdout/stderr line-by-line into the job snapshot so the panel shows
+    # a live log + coarse % instead of a spinner. One retry on a lock error —
+    # a stale lock (kill signal / power loss) just needs `snakemake --unlock`.
+    log_lines: deque[str] = deque()
+    for attempt in (1, 2):
+        proc = subprocess.Popen(  # noqa: S603 — fixed argv, no shell
+            argv, cwd=str(env), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1, start_new_session=True,  # own pgid → killable as a group
+        )
+        _record_child(proc.pid)
+        assert proc.stdout is not None
+        try:
+            log_lines = _stream_log(proc.stdout, job_id)
+            proc.wait()
+        finally:
+            _clear_child()
+        if proc.returncode == 0:
+            break
+        if attempt == 1 and any("cannot be locked" in line for line in log_lines):
+            others = [j for j in _JOBS.values()
+                      if j.get("status") == "running" and j.get("jobId") != job_id]
+            if others:
+                raise RuntimeError(
+                    "Another PyPSA-Earth build is already running in this checkout — "
+                    "wait for it to finish and retry."
+                )
+            _set(job_id, phase="clearing stale lock",
+                 detail="A previous build was interrupted — unlocking and retrying…")
+            _kill_orphaned_child()
+            _unlock(env)
+            continue
         tail = "\n".join(list(log_lines)[-40:]) or f"exit {proc.returncode}"
         raise RuntimeError(f"PyPSA-Earth workflow failed (exit {proc.returncode}). {tail}")
     out = env / target

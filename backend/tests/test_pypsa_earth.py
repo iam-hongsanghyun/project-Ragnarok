@@ -27,6 +27,7 @@ def _isolate_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     backend/data/pypsa_earth.json, a locally-cloned <repo>/pypsa-earth, or a
     checkout in the developer's home dir."""
     monkeypatch.setattr(pe, "_STATE_FILE", tmp_path / "pe_state.json")
+    monkeypatch.setattr(pe, "_PID_FILE", tmp_path / "pe_run.pid")
     monkeypatch.setattr(pe, "_auto_dir", lambda: None)
     monkeypatch.setattr(pe, "_suggested_dirs", lambda: [])
 
@@ -229,6 +230,24 @@ def test_stream_log_tails_lines_and_lifts_progress() -> None:
         assert any("25%" in line for line in job["log"])  # earlier lines retained in the tail
     finally:
         pe._JOBS.pop("stream-t", None)
+
+
+def test_kill_orphaned_child_no_pid_file_is_noop() -> None:
+    assert pe._kill_orphaned_child() is False
+
+
+def test_kill_orphaned_child_ignores_recycled_pid() -> None:
+    import json
+    import os
+
+    # Record OUR OWN pid — alive, but its command is pytest, not snakemake, so it
+    # must be treated as a recycled pid: not killed, record dropped.
+    pe._record_child(os.getpid())
+    assert pe._kill_orphaned_child() is False
+    assert not pe._PID_FILE.exists()
+    # And a dead pid is also just dropped.
+    pe._PID_FILE.write_text(json.dumps({"pid": 2**22 - 7}), encoding="utf-8")
+    assert pe._kill_orphaned_child() is False
 
 
 def test_stream_log_collapses_tqdm_redraws_in_place() -> None:
