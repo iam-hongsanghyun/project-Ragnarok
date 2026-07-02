@@ -278,19 +278,32 @@ def _preflight(env: Path, argv: list[str]) -> None:
         log.warning("PyPSA-Earth: no ~/.cdsapirc found — ERA5 cutouts will fail until a CDS API key is set.")
 
 
+# A tqdm-style progress redraw ("  2%|▏  | 2.0/100 [00:21<17:45, 10.87s/it]").
+# In a terminal these overwrite one line via \r; through a pipe every redraw
+# arrives as its own line and would flood the log tail.
+_TQDM_RE = re.compile(r"^\s*\d{1,3}%\|")
+
+
 def _stream_log(lines: Any, job_id: str) -> deque[str]:
     """Fold Snakemake output lines into the job snapshot as they arrive.
 
     Keeps a bounded tail, exposes the last ``_LOG_SHOWN`` lines to the poller as
     ``log``, and lifts a coarse ``progress`` % + ``detail`` from
-    ``"(NN%) done"`` lines. Blank lines are dropped.
+    ``"(NN%) done"`` lines. Blank lines are dropped. Consecutive tqdm progress
+    redraws REPLACE the previous one (in-place, like a terminal) instead of
+    stacking hundreds of near-identical lines.
     """
     log_lines: deque[str] = deque(maxlen=_LOG_TAIL)
     for raw in lines:
-        line = str(raw).rstrip()
+        # tqdm writes \r-separated redraws; keep only the final state of a chunk.
+        parts = [p for p in str(raw).rstrip("\r\n").split("\r") if p.strip()]
+        line = parts[-1].rstrip() if parts else ""
         if not line:
             continue
-        log_lines.append(line)
+        if _TQDM_RE.match(line) and log_lines and _TQDM_RE.match(log_lines[-1]):
+            log_lines[-1] = line  # redraw in place
+        else:
+            log_lines.append(line)
         fields: dict[str, Any] = {"log": list(log_lines)[-_LOG_SHOWN:]}
         m = _PROGRESS_RE.search(line)
         if m:

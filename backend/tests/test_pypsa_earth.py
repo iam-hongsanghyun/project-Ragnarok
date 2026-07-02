@@ -231,6 +231,33 @@ def test_stream_log_tails_lines_and_lifts_progress() -> None:
         pe._JOBS.pop("stream-t", None)
 
 
+def test_stream_log_collapses_tqdm_redraws_in_place() -> None:
+    pe._JOBS["tqdm-t"] = {"jobId": "tqdm-t", "status": "running"}
+    try:
+        lines = [
+            "Downloading data bundle...\n",
+            "  1%|          | 1.0/100 [00:10<16:00,  9.7s/it]\n",
+            "  2%|▏         | 2.0/100 [00:21<17:45, 10.87s/it]\n",
+            "  3%|▎         | 3.0/100 [00:32<17:30, 10.90s/it]\n",
+            "rule build_shapes:\n",
+            " 50%|█████     | 50/100 [05:00<05:00,  6.0s/it]\r 51%|█████     | 51/100 [05:06<04:54,  6.0s/it]\n",
+        ]
+        pe._stream_log(iter(lines), "tqdm-t")
+        logged = pe._JOBS["tqdm-t"]["log"]
+        # The three redraws collapsed into one (the latest), like a terminal.
+        assert sum(1 for line in logged if "/100 [" in line and "s/it]" in line) == 2
+        assert any("3.0/100" in line for line in logged)
+        assert not any("2.0/100" in line for line in logged)
+        # A \r-joined chunk keeps only its final state.
+        assert any("51/100" in line for line in logged)
+        assert not any(" 50/100" in line for line in logged)
+        # Normal lines still stack.
+        assert any(line.startswith("Downloading") for line in logged)
+        assert any(line.startswith("rule build_shapes") for line in logged)
+    finally:
+        pe._JOBS.pop("tqdm-t", None)
+
+
 def test_ingest_network_maps_a_netcdf_to_sheets(tmp_path: Path) -> None:
     n = pypsa.Network()
     n.set_snapshots(pd.date_range("2030-01-01", periods=2, freq="h"))
