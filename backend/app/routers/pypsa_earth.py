@@ -180,7 +180,11 @@ def _snakemake_argv(target: str) -> list[str]:
     runner = shutil.which("mamba") or shutil.which("conda")
     if runner:
         env_name = os.environ.get(_CONDA_ENV_VAR, "pypsa-earth")
-        return [runner, "run", "--no-capture-output", "-n", env_name, *base]
+        # --no-capture-output is a CONDA flag; mamba 2.x `run` rejects it (the
+        # wrapper ends up exec'ing `--` → "exec: --: invalid option").
+        if Path(runner).name == "conda":
+            return [runner, "run", "--no-capture-output", "-n", env_name, *base]
+        return [runner, "run", "-n", env_name, *base]
     raise RuntimeError(
         "snakemake is not on the backend's PATH and no conda/mamba was found to "
         "run the pypsa-earth env. Install it (scripts/setup_pypsa_earth.command) and "

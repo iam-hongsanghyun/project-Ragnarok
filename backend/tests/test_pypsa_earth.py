@@ -130,11 +130,21 @@ def test_snakemake_argv_uses_path_binary_when_present(monkeypatch: pytest.Monkey
     assert argv[0] == "snakemake" and "results/networks/elec_s_10.nc" in argv
 
 
-def test_snakemake_argv_runs_through_conda_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_snakemake_argv_runs_through_mamba_without_conda_only_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("RAGNAROK_PYPSA_EARTH_CONDA_ENV", raising=False)
     monkeypatch.setattr(shutil, "which", lambda name: "/opt/conda/bin/mamba" if name == "mamba" else None)
     argv = pe._snakemake_argv("results/networks/elec_s_10.nc")
     assert argv[:2] == ["/opt/conda/bin/mamba", "run"]
+    assert "pypsa-earth" in argv and "snakemake" in argv
+    # mamba 2.x rejects conda's --no-capture-output ("exec: --: invalid option").
+    assert "--no-capture-output" not in argv
+
+
+def test_snakemake_argv_keeps_no_capture_flag_for_conda(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RAGNAROK_PYPSA_EARTH_CONDA_ENV", raising=False)
+    monkeypatch.setattr(shutil, "which", lambda name: "/opt/conda/bin/conda" if name == "conda" else None)
+    argv = pe._snakemake_argv("results/networks/elec_s_10.nc")
+    assert argv[:3] == ["/opt/conda/bin/conda", "run", "--no-capture-output"]
     assert "pypsa-earth" in argv and "snakemake" in argv
 
 
