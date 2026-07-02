@@ -6649,10 +6649,54 @@ th:hover .col-delete-btn {
 }
 
 .activity-bar-glyph {
-  font-family: var(--font-mono);
-  font-size: 0.88rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Hover tooltip — appears immediately to the right of the icon, with the view
+   name and a one-line hint. */
+.activity-bar-tip {
+  position: absolute;
+  left: calc(100% + 6px);
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 9px;
+  background: var(--text, #0f172a);
+  color: var(--surface, #fff);
+  border-radius: 5px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 90ms ease;
+  z-index: 60;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
+}
+.activity-bar-tip::before {
+  content: '';
+  position: absolute;
+  right: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 5px solid transparent;
+  border-right-color: var(--text, #0f172a);
+}
+.activity-bar-tip-name {
+  font-size: 0.8rem;
   font-weight: 600;
-  letter-spacing: 0;
+}
+.activity-bar-tip-hint {
+  font-size: 0.68rem;
+  opacity: 0.75;
+}
+.activity-bar-btn:hover .activity-bar-tip,
+.activity-bar-btn:focus-visible .activity-bar-tip {
+  opacity: 1;
+  visibility: visible;
 }
 
 .activity-bar-badge {

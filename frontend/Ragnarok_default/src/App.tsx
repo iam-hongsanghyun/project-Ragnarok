@@ -167,6 +167,17 @@ function AppInner() {
   // Always open on the Welcome / intro screen — the workspace tab is NOT
   // persisted across reloads (was restoring the last view, e.g. Comparison).
   const [tab, setTab] = useState<WorkspaceTab>('Welcome');
+  // Cross-tab navigation from the Decisions launcher: the launcher lives in the
+  // Post-analysis tab but some workflows (asset swap, ESS) live in Market & Policy.
+  // Seed the destination tab's persisted section, then switch tab — SettingsView
+  // remounts (keyed by variant) and reads the seeded section on mount.
+  const handleSettingsNavigate = useCallback((section: string) => {
+    const marketSections = new Set(['assetSwap', 'ess', 'carbon', 'constraints', 'constraintsAdvanced']);
+    const dest: WorkspaceTab = marketSections.has(section) ? 'Market' : 'PostAnalysis';
+    const key = dest === 'Market' ? 'ui:market-section' : 'ui:analysis-section';
+    try { window.localStorage.setItem(key, JSON.stringify(section)); } catch { /* ignore */ }
+    setTab(dest);
+  }, []);
   // Ctrl/Cmd+Z / Ctrl+Y (or Shift+Z) undo-redo for model edits, only on the
   // Model/Build tabs and never while a text field is focused (so it doesn't
   // hijack native input undo).
@@ -2646,9 +2657,11 @@ function AppInner() {
         <div className="workspace-main">
 
           {/* ── Settings tab ── */}
-          {(tab === 'Settings' || tab === 'Market') && (
+          {(tab === 'Settings' || tab === 'Market' || tab === 'PostAnalysis') && (
             <SettingsView
-              variant={tab === 'Market' ? 'market' : 'settings'}
+              key={tab === 'Market' ? 'market' : tab === 'PostAnalysis' ? 'analysis' : 'settings'}
+              variant={tab === 'Market' ? 'market' : tab === 'PostAnalysis' ? 'analysis' : 'settings'}
+              onNavigateExternal={handleSettingsNavigate}
               model={model}
               priceSeries={results?.systemPriceSeries ?? null}
               scenarioCatalog={scenarioCatalog}
