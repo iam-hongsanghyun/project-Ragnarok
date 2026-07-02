@@ -62,6 +62,10 @@ interface Props {
     fromYear: number; toYear: number; popGrowthPct: number; gdpGrowthPct: number;
     gdpElasticity: number; heatAddedGWh: number; evAddedGWh: number;
   }) => Promise<{ snapshots: number; macroFactor: number; heatAddedMwh: number; evAddedMwh: number }>;
+  /** M4 — EV-fleet demand reshaping (home overnight / work daytime charging). */
+  onEvDemand?: (opts: {
+    fleetSize: number; kwhPerVehicleDay: number; homeChargingShare: number;
+  }) => Promise<{ rows: number; addedMwh: number; homeMwh: number; workMwh: number }>;
 }
 
 export interface AttachProfilesResult {
@@ -70,7 +74,7 @@ export interface AttachProfilesResult {
   sites: number;
 }
 
-type Operation = 'round' | 'adjust' | 'costcurve' | 'snap' | 'cluster' | 'renewable' | 'retarget' | 'forecast' | 'driverForecast';
+type Operation = 'round' | 'adjust' | 'costcurve' | 'snap' | 'cluster' | 'renewable' | 'retarget' | 'forecast' | 'driverForecast' | 'evDemand';
 type OpGroup = 'Numeric' | 'Economics' | 'Geospatial' | 'Topology' | 'Temporal';
 
 /** Catalog of Forge tools, grouped. Add a new tool by adding an entry here
@@ -85,6 +89,7 @@ const OPERATIONS: Array<{ id: Operation; label: string; group: OpGroup }> = [
   { id: 'retarget', label: 'Retarget snapshot window', group: 'Temporal' },
   { id: 'forecast', label: 'Forecast to future year', group: 'Temporal' },
   { id: 'driverForecast', label: 'Driver-based demand forecast', group: 'Temporal' },
+  { id: 'evDemand', label: 'EV fleet demand', group: 'Temporal' },
 ];
 const OP_GROUPS: OpGroup[] = ['Numeric', 'Economics', 'Geospatial', 'Topology', 'Temporal'];
 
@@ -206,7 +211,7 @@ function SearchableMultiSelect({
   );
 }
 
-export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApply, onAttachRenewableProfiles, onRetargetSnapshots, onForecastSnapshots, onDriverForecast }: Props) {
+export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApply, onAttachRenewableProfiles, onRetargetSnapshots, onForecastSnapshots, onDriverForecast, onEvDemand }: Props) {
   // Persisted so the chosen tool + validation result survive leaving and
   // returning to the Forge tab (the view unmounts on tab switch). The findings
   // scan the whole model, so these three drivers fully restore the result.
@@ -419,6 +424,21 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
   const [dElas, setDElas] = useState(0.5);
   const [dHeat, setDHeat] = useState(0);
   const [dEv, setDEv] = useState(0);
+
+  // M4 EV-demand inputs.
+  const [evFleet, setEvFleet] = useState(100000);
+  const [evKwh, setEvKwh] = useState(7);
+  const [evHome, setEvHome] = useState(0.7);
+
+  const runEvDemand = async () => {
+    if (!onEvDemand) return;
+    setTempBusy(true); setTempError(null);
+    try {
+      await onEvDemand({ fleetSize: evFleet, kwhPerVehicleDay: evKwh, homeChargingShare: evHome });
+    } catch (e) {
+      setTempError(e instanceof Error ? e.message : 'EV demand failed.');
+    } finally { setTempBusy(false); }
+  };
 
   const runDriverForecast = async () => {
     if (!onDriverForecast) return;
@@ -822,6 +842,30 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
             <div className="forge-actions">
               <button className="run-button" disabled={tempBusy || !onRetargetSnapshots} onClick={runRetarget}>
                 {tempBusy ? 'Retargeting…' : 'Retarget snapshots'}
+              </button>
+            </div>
+            {tempError && <p className="forge-status" style={{ color: 'var(--danger, #dc2626)' }}>{tempError}</p>}
+          </section>
+        ) : operation === 'evDemand' ? (
+          <section className="forge-section">
+            <header className="forge-section-header">
+              <h3>EV fleet demand</h3>
+              <p>Add an EV fleet's charging load onto the demand series, region-aware: the home-charging share lands <em>overnight</em> on home-heavy regions, workplace charging lands in <em>office hours</em> — the energy follows the fleet's location by time of day. Region home/work shares default to each load's size (per-region shares via the API).</p>
+            </header>
+            <div className="sg-setting-row">
+              <label className="sg-setting-label">Fleet size · kWh/vehicle/day · home-charging share</label>
+              <div className="sg-btn-row" style={{ gap: 8 }}>
+                <NumberDraftInput className="forge-number" min={0} step={10000} value={evFleet} onCommit={(v) => setEvFleet(Math.max(0, Math.trunc(v)))} />
+                <NumberDraftInput className="forge-number" min={0} step={0.5} value={evKwh} onCommit={(v) => setEvKwh(Math.max(0, v))} />
+                <NumberDraftInput className="forge-number" min={0} max={1} step={0.05} value={evHome} onCommit={(v) => setEvHome(Math.min(1, Math.max(0, v)))} />
+              </div>
+              <p className="sg-setting-hint">
+                ≈{Math.round((evFleet * evKwh) / 1000).toLocaleString()} MWh/day of charging; {Math.round(evHome * 100)}% overnight at home, the rest at work.
+              </p>
+            </div>
+            <div className="forge-actions">
+              <button className="run-button" disabled={tempBusy || !onEvDemand} onClick={runEvDemand}>
+                {tempBusy ? 'Applying…' : 'Add EV fleet load'}
               </button>
             </div>
             {tempError && <p className="forge-status" style={{ color: 'var(--danger, #dc2626)' }}>{tempError}</p>}

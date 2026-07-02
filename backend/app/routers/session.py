@@ -347,6 +347,50 @@ class DriverForecast(BaseModel):
     sessionId: str = "default"
 
 
+class EvDemand(BaseModel):
+    """Body for ``POST /api/session/snapshots/ev-demand`` (M4, minimal cut).
+
+    Reshape per-region demand from an EV fleet's movement: home-charging energy
+    lands overnight on each region's home share; workplace charging lands on
+    office hours at the work shares — the energy follows the fleet's location
+    by time of day (the region-to-region shift, without new components).
+    """
+
+    fleetSize: float
+    kwhPerVehicleDay: float = 7.0
+    homeChargingShare: float = 0.7
+    homeShares: dict[str, float] | None = None
+    workShares: dict[str, float] | None = None
+    snapshotWeight: float = 1.0
+    sheet: str = "loads-p_set"
+    sessionId: str = "default"
+
+
+@router.post("/snapshots/ev-demand")
+def ev_demand_snapshots(payload: EvDemand) -> dict:
+    """Apply the EV-fleet demand reshaping to the demand series (M4)."""
+    from .. import ev_demand
+
+    model = model_store.load_full_model(payload.sessionId)
+    if not model:
+        raise HTTPException(status_code=400, detail="No working model in this session.")
+    rows = model.get(payload.sheet)
+    if not rows:
+        raise HTTPException(status_code=400, detail=f"No {payload.sheet!r} series in the model.")
+    new_rows, meta = ev_demand.ev_demand_adjustment(
+        rows,
+        fleet_size=payload.fleetSize,
+        kwh_per_vehicle_day=payload.kwhPerVehicleDay,
+        home_charging_share=payload.homeChargingShare,
+        home_shares=payload.homeShares,
+        work_shares=payload.workShares,
+        snapshot_weight=payload.snapshotWeight,
+    )
+    model[payload.sheet] = new_rows
+    model_store.save_model(payload.sessionId, model)
+    return {"rows": len(new_rows), **meta}
+
+
 @router.post("/snapshots/driver-forecast")
 def driver_forecast_snapshots(payload: DriverForecast) -> dict:
     """Driver-based demand forecast (I3) — evolve the demand SHAPE, not just level."""

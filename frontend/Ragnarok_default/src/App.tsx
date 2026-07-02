@@ -828,6 +828,23 @@ function AppInner() {
     [model, prepareModelForBackend, reloadSessionModel, showToast, snapshotWeight],
   );
 
+  // Forge → M4 EV-fleet demand reshaping (home overnight / work daytime).
+  const handleEvDemand = useCallback(
+    async (opts: { fleetSize: number; kwhPerVehicleDay: number; homeChargingShare: number }) => {
+      await putStaticModel(prepareModelForBackend(model));
+      const resp = await fetch(`${API_BASE}/api/session/snapshots/ev-demand`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: DEFAULT_SESSION_ID, snapshotWeight, ...opts }),
+      });
+      if (!resp.ok) throw new Error((await resp.text()) || `EV demand failed (HTTP ${resp.status})`);
+      const data = await resp.json();
+      await reloadSessionModel();
+      showToast(`EV fleet added ${Math.round(data.addedMwh).toLocaleString()} MWh of charging load`, 'success');
+      return data as { rows: number; addedMwh: number; homeMwh: number; workMwh: number };
+    },
+    [model, prepareModelForBackend, reloadSessionModel, showToast, snapshotWeight],
+  );
+
   // Guard against accidental session loss on browser back / forward / refresh /
   // close. The workbook lives only in memory and there is no client-side
   // router, so a stray back-swipe (the macOS trackpad gesture) unloads the app
@@ -2875,6 +2892,7 @@ function AppInner() {
               onRetargetSnapshots={handleRetargetSnapshots}
               onForecastSnapshots={handleForecastSnapshots}
               onDriverForecast={handleDriverForecast}
+              onEvDemand={handleEvDemand}
             />
           )}
 
