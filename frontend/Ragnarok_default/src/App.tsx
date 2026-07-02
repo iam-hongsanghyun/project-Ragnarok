@@ -66,6 +66,7 @@ import type { ClusterResult } from 'lib/forge/transforms';
 import type { SheetEditOp } from 'lib/api/session';
 import { fetchRunOutputSeriesWindows } from 'lib/api/runs';
 import { loadExample } from 'lib/api/examples';
+import { buildStarterPack } from 'lib/api/starterPacks';
 import { RunDialog } from './features/run/RunDialog';
 import { SettingsView } from './views/SettingsView';
 import { PluginsView } from './views/PluginsView';
@@ -1961,6 +1962,18 @@ function AppInner() {
     }
   }, [resetForNewModel, setTab, showToast]);
 
+  // Welcome → "Country starter pack" (W2): assemble a runnable workbook from a
+  // recipe (importers run server-side) and merge the fragment into the editor.
+  const handleLoadStarterPack = useCallback(async (iso3: string, year: string | number) => {
+    try {
+      const build = await buildStarterPack(iso3, year);
+      handleApplyImportedFragment(build.fragment, build.label || `${iso3} starter pack`, build.countryIso || iso3);
+      setTab('Model');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Starter-pack build failed.', 'error');
+    }
+  }, [handleApplyImportedFragment, setTab, showToast]);
+
   // Import project (Queue tab): load a queued/finished item's retained model
   // snapshot into the editor as a new working project. The backend writes it to
   // the session; we then rehydrate the editor from there (static sheets only —
@@ -2822,6 +2835,7 @@ function AppInner() {
               onNavigate={setTab}
               onStartScratch={handleStartFromScratch}
               onLoadExample={handleLoadExample}
+              onLoadStarterPack={handleLoadStarterPack}
             />
           )}
 

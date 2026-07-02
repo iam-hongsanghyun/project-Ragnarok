@@ -1,0 +1,12 @@
+{
+  "iso3": "KOR",
+  "year": 2023,
+  "label": "South Korea (KPG193)",
+  "description": "Korea Power Grid 193-bus baseline: transmission network + hourly demand + renewable capacity and profiles from the KPG193 open dataset. Solves out of the box.",
+  "steps": [
+    {"slot": "network", "datasets": ["kpg193_network"], "filters": {}},
+    {"slot": "demand", "datasets": ["kpg193_demand_profile"], "filters": {}},
+    {"slot": "renewable_capacity", "datasets": ["kpg193_renewable_capacity"], "filters": {}},
+    {"slot": "renewable_profile", "datasets": ["kpg193_renewable_profile"], "filters": {}}
+  ]
+}

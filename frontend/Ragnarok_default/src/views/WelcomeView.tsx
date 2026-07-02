@@ -13,6 +13,7 @@ import React, { useEffect, useState } from 'react';
 import { WorkspaceTab } from 'lib/types';
 import { RagnarokLogo } from 'shared/components/RagnarokLogo';
 import { ExampleMeta, listExamples } from 'lib/api/examples';
+import { StarterPack, listStarterPacks } from 'lib/api/starterPacks';
 
 interface Props {
   onNavigate: (tab: WorkspaceTab) => void;
@@ -20,6 +21,8 @@ interface Props {
   onStartScratch?: () => void;
   /** Load a bundled example into the session by id. */
   onLoadExample?: (id: string) => void | Promise<void>;
+  /** Build a country starter pack (recipe-assembled runnable workbook). */
+  onLoadStarterPack?: (iso3: string, year: string | number) => void | Promise<void>;
 }
 
 interface Tile {
@@ -73,48 +76,76 @@ const TILES: Tile[] = [
   },
 ];
 
-function StartChooser({ onStartScratch, onLoadExample }: { onStartScratch?: () => void; onLoadExample?: (id: string) => void | Promise<void> }) {
-  const [picking, setPicking] = useState(false);
+type PickMode = null | 'example' | 'starter';
+
+function StartChooser({ onStartScratch, onLoadExample, onLoadStarterPack }: {
+  onStartScratch?: () => void;
+  onLoadExample?: (id: string) => void | Promise<void>;
+  onLoadStarterPack?: (iso3: string, year: string | number) => void | Promise<void>;
+}) {
+  const [picking, setPicking] = useState<PickMode>(null);
   const [examples, setExamples] = useState<ExampleMeta[] | null>(null);
+  const [packs, setPacks] = useState<StarterPack[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loadingId, setLoadingId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!picking || examples) return;
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    listExamples()
-      .then((list) => { if (!cancelled) setExamples(list); })
-      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : 'Could not load examples.'); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [picking, examples]);
+    if (picking === 'example' && !examples) {
+      let cancelled = false;
+      setLoading(true); setError(null);
+      listExamples()
+        .then((list) => { if (!cancelled) setExamples(list); })
+        .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : 'Could not load examples.'); })
+        .finally(() => { if (!cancelled) setLoading(false); });
+      return () => { cancelled = true; };
+    }
+    if (picking === 'starter' && !packs) {
+      let cancelled = false;
+      setLoading(true); setError(null);
+      listStarterPacks()
+        .then((list) => { if (!cancelled) setPacks(list); })
+        .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : 'Could not load starter packs.'); })
+        .finally(() => { if (!cancelled) setLoading(false); });
+      return () => { cancelled = true; };
+    }
+  }, [picking, examples, packs]);
 
-  const pick = async (id: string) => {
+  const pickExample = async (id: string) => {
     if (!onLoadExample) return;
     setLoadingId(id);
     try { await onLoadExample(id); } finally { setLoadingId(null); }
+  };
+  const pickPack = async (p: StarterPack) => {
+    if (!onLoadStarterPack) return;
+    const key = `${p.iso3}/${p.year}`;
+    setLoadingId(key);
+    try { await onLoadStarterPack(p.iso3, p.year); } finally { setLoadingId(null); }
   };
 
   return (
     <section className="welcome-section welcome-start">
       <h2>Get started</h2>
-      {!picking ? (
+      {picking === null ? (
         <div className="welcome-start-choices">
           <button type="button" className="welcome-start-card" onClick={onStartScratch}>
             <span className="welcome-start-card__title">Start from scratch</span>
             <span className="welcome-start-card__blurb">Begin with an empty model and build it up step by step in the guided builder.</span>
           </button>
-          <button type="button" className="welcome-start-card" onClick={() => setPicking(true)}>
+          <button type="button" className="welcome-start-card" onClick={() => setPicking('example')}>
             <span className="welcome-start-card__title">Start with an example</span>
             <span className="welcome-start-card__blurb">Open a ready-made network that already solves — the fastest way to learn the workflow.</span>
           </button>
+          {onLoadStarterPack && (
+            <button type="button" className="welcome-start-card" onClick={() => setPicking('starter')}>
+              <span className="welcome-start-card__title">Start with a country pack</span>
+              <span className="welcome-start-card__blurb">Pick a country + year — Ragnarok assembles a runnable model from open data (network, demand, renewables).</span>
+            </button>
+          )}
         </div>
-      ) : (
+      ) : picking === 'example' ? (
         <div className="welcome-examples">
-          <button type="button" className="welcome-back" onClick={() => setPicking(false)}>← Back</button>
+          <button type="button" className="welcome-back" onClick={() => setPicking(null)}>← Back</button>
           {loading && <p className="welcome-examples-note">Loading examples…</p>}
           {error && <p className="welcome-examples-note welcome-examples-note--error">{error}</p>}
           {!loading && !error && examples && examples.length === 0 && (
@@ -122,19 +153,35 @@ function StartChooser({ onStartScratch, onLoadExample }: { onStartScratch?: () =
           )}
           <div className="welcome-examples-list">
             {(examples ?? []).map((ex) => (
-              <button
-                key={ex.id}
-                type="button"
-                className="welcome-example-card"
-                disabled={loadingId !== null}
-                onClick={() => void pick(ex.id)}
-              >
-                <span className="welcome-example-card__title">
-                  {ex.label}{loadingId === ex.id ? ' · loading…' : ''}
-                </span>
+              <button key={ex.id} type="button" className="welcome-example-card"
+                disabled={loadingId !== null} onClick={() => void pickExample(ex.id)}>
+                <span className="welcome-example-card__title">{ex.label}{loadingId === ex.id ? ' · loading…' : ''}</span>
                 {ex.description && <span className="welcome-example-card__blurb">{ex.description}</span>}
               </button>
             ))}
+          </div>
+        </div>
+      ) : (
+        <div className="welcome-examples">
+          <button type="button" className="welcome-back" onClick={() => setPicking(null)}>← Back</button>
+          {loading && <p className="welcome-examples-note">Loading country packs…</p>}
+          {error && <p className="welcome-examples-note welcome-examples-note--error">{error}</p>}
+          {!loading && !error && packs && packs.length === 0 && (
+            <p className="welcome-examples-note">No country packs available yet.</p>
+          )}
+          <div className="welcome-examples-list">
+            {(packs ?? []).map((p) => {
+              const key = `${p.iso3}/${p.year}`;
+              return (
+                <button key={key} type="button" className="welcome-example-card"
+                  disabled={loadingId !== null} onClick={() => void pickPack(p)}>
+                  <span className="welcome-example-card__title">
+                    {p.label || key}{loadingId === key ? ' · building…' : ''}
+                  </span>
+                  {p.description && <span className="welcome-example-card__blurb">{p.description}</span>}
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
@@ -142,7 +189,7 @@ function StartChooser({ onStartScratch, onLoadExample }: { onStartScratch?: () =
   );
 }
 
-export function WelcomeView({ onNavigate, onStartScratch, onLoadExample }: Props) {
+export function WelcomeView({ onNavigate, onStartScratch, onLoadExample, onLoadStarterPack }: Props) {
   return (
     <div className="view welcome-view">
       <div className="welcome-content">
@@ -156,8 +203,8 @@ export function WelcomeView({ onNavigate, onStartScratch, onLoadExample }: Props
           </p>
         </header>
 
-        {(onStartScratch || onLoadExample) && (
-          <StartChooser onStartScratch={onStartScratch} onLoadExample={onLoadExample} />
+        {(onStartScratch || onLoadExample || onLoadStarterPack) && (
+          <StartChooser onStartScratch={onStartScratch} onLoadExample={onLoadExample} onLoadStarterPack={onLoadStarterPack} />
         )}
 
         <section className="welcome-section">

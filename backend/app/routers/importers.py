@@ -106,6 +106,65 @@ def list_databases() -> dict[str, Any]:
     return {"databases": available_databases()}
 
 
+@router.get("/starter-packs")
+def list_starter_packs() -> dict[str, Any]:
+    """Available country starter-pack recipes (W2) — Country → Year → build."""
+    from .. import starter_packs
+
+    return {"packs": starter_packs.list_recipes()}
+
+
+@router.post("/starter-packs/{iso3}/{year}/build")
+async def build_starter_pack(iso3: str, year: str, payload: SecretPayload | None = None) -> dict[str, Any]:
+    """Assemble a runnable workbook for a country/year from its recipe (W2).
+
+    Runs each recipe step's importer(s) for the country and folds every fragment
+    into one workbook — the "state a country + year, get a model" path.
+    """
+    from .. import starter_packs
+
+    recipe = starter_packs.load_recipe(iso3, year)
+    if recipe is None:
+        raise HTTPException(status_code=404, detail=f"No starter pack for {iso3.upper()}/{year}.")
+
+    dbs = registered_databases()
+    await _ensure_boundaries_warm()
+    try:
+        region = region_mod.get_region(str(recipe.get("iso3", iso3)))
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    options = ConvertOptions()
+    secrets = {**_server_secrets()}
+    if payload is not None:
+        secrets.update({k: v for k, v in (payload.secrets or {}).items() if str(v).strip()})
+    http = AsyncClientWrapper(secrets=list(secrets.values()))
+    ctx = ImportContext(secrets=secrets, http=http, request_id=starter_packs.new_request_id())
+    try:
+        fragment, dataset_ids, previews = await starter_packs.build_from_recipe(
+            recipe, dbs=dbs, region=region, ctx=ctx, options=options, combine=combine_fragments,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"starter-pack build failed: {exc}") from exc
+    finally:
+        await http.aclose()
+
+    summary = combine_previews(fragment, previews)
+    return {
+        "iso3": str(recipe.get("iso3", iso3)).upper(),
+        "year": recipe.get("year", year),
+        "label": recipe.get("label", ""),
+        "dataset_ids": dataset_ids,
+        "country_iso": region.country_iso,
+        "preview": summary.to_json(),
+        "fragment": fragment.to_json(),
+    }
+
+
 @router.get("/sources")
 def list_sources() -> dict[str, Any]:
     """Datasets grouped by source for the Country → Database → Datasets tree,
