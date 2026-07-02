@@ -30,6 +30,7 @@ def _factories() -> list[Callable[[], Database]]:
     from .databases.entsoe_load import build as build_entsoe
     from .databases.entsoe_capacity import build as build_entsoe_cap
     from .databases.entsoe_generation_profile import build as build_entsoe_genprof
+    from .databases.entsoe_price import build as build_entsoe_price
     from .databases.openelectricity import build as build_oe_demand
     from .databases.openelectricity import build_renewable as build_oe_renewable
     from .databases.elexon import build as build_elexon_demand
@@ -43,7 +44,7 @@ def _factories() -> list[Callable[[], Database]]:
     return [
         build_osm, build_osm_pp, build_wri, build_wb,
         build_kpg_network, build_kpg_rencap, build_kpg_demand, build_kpg_renprof,
-        build_eia, build_entsoe, build_entsoe_cap, build_entsoe_genprof,
+        build_eia, build_entsoe, build_entsoe_cap, build_entsoe_genprof, build_entsoe_price,
         build_oe_demand, build_oe_renewable,
         build_elexon_demand, build_elexon_renewable,
         build_ninja, build_cw_policy,
