@@ -2664,6 +2664,7 @@ function AppInner() {
               onNavigateExternal={handleSettingsNavigate}
               model={model}
               priceSeries={results?.systemPriceSeries ?? null}
+              loadShape={results?.dispatchSeries?.map((p) => p.total ?? Object.values(p.values ?? {}).reduce((a, b) => a + b, 0)) ?? null}
               scenarioCatalog={scenarioCatalog}
               activeScenarioLabel={activeScenario?.label ?? null}
               scenarioDirty={scenarioDirty}

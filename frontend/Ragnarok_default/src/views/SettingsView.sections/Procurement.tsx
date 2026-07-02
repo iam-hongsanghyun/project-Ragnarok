@@ -21,6 +21,8 @@ import {
 export interface ProcurementSectionProps {
   /** The last run's cleared system price series, if a run has completed. */
   priceSeries: ValuePoint[] | null;
+  /** The last run's total dispatch (≈ load) per snapshot, for a load-shaped profile. */
+  loadShape?: number[] | null;
   currency: string;
 }
 
@@ -63,6 +65,17 @@ export function ProcurementSection(props: ProcurementSectionProps) {
   const [refMean, setRefMean] = React.useState(60);
   const [refVol, setRefVol] = React.useState(40);
   const [loadMw, setLoadMw] = React.useState(100);
+  const [growthPct, setGrowthPct] = React.useState(0);
+  const [loadShaped, setLoadShaped] = React.useState(false);
+
+  // Normalised run load shape (mean 1), aligned to the price series length.
+  const loadShape = React.useMemo(() => {
+    const raw = (props.loadShape ?? []).filter((v) => Number.isFinite(v) && v > 0);
+    if (raw.length < 2) return null;
+    const mean = raw.reduce((a, b) => a + b, 0) / raw.length;
+    return mean > 0 ? raw.map((v) => v / mean) : null;
+  }, [props.loadShape]);
+  const canShape = source === 'run' && !!loadShape;
 
   const [inst, setInst] = React.useState<InstrumentState>({
     ppa: { enabled: true, strike: 60, maxMw: 100 },
@@ -81,6 +94,16 @@ export function ProcurementSection(props: ProcurementSectionProps) {
   const avgPrice = prices.length ? prices.reduce((a, b) => a + b, 0) / prices.length : 0;
   const anyInstrument = inst.ppa.enabled || inst.forward.enabled || inst.retail.enabled;
 
+  // Effective load: flat volume (optionally shaped by the run's load profile),
+  // scaled by the demand-growth factor.
+  const effectiveLoad = React.useMemo((): number | number[] => {
+    const g = 1 + growthPct / 100;
+    if (loadShaped && canShape && loadShape) {
+      return loadShape.slice(0, prices.length).map((s) => loadMw * s * g);
+    }
+    return loadMw * g;
+  }, [loadShaped, canShape, loadShape, prices.length, loadMw, growthPct]);
+
   const runOptimize = React.useCallback(async (cvarBudget: number | null) => {
     if (prices.length < 2 || !anyInstrument) return;
     setBusy(true);
@@ -88,7 +111,7 @@ export function ProcurementSection(props: ProcurementSectionProps) {
     try {
       const res = await optimizeProcurement({
         prices,
-        loadMw,
+        loadMw: effectiveLoad,
         ppa: inst.ppa,
         forward: inst.forward,
         retail: inst.retail,
@@ -106,7 +129,7 @@ export function ProcurementSection(props: ProcurementSectionProps) {
     } finally {
       setBusy(false);
     }
-  }, [prices, loadMw, inst, alpha, stress2x, anyInstrument, c]);
+  }, [prices, effectiveLoad, inst, alpha, stress2x, anyInstrument, c]);
 
   // Translate the frontier slider (0..1) into an absolute CVaR budget once a
   // frontier exists; 1.0 means "no budget" (pure min expected cost).
@@ -192,14 +215,47 @@ export function ProcurementSection(props: ProcurementSectionProps) {
       )}
 
       <div className="sg-setting-row">
-        <label className="sg-setting-label">Load to cover (MW)</label>
-        <input
-          type="number" className="sg-number-input" min={0} step={10}
-          value={loadMw}
-          onChange={(e) => setLoadMw(Math.max(0, Number(e.target.value) || 0))}
-        />
-        <p className="sg-setting-hint">The flat volume you need to procure across the horizon.</p>
+        <label className="sg-setting-label">Load to cover (MW) · demand growth %</label>
+        <div className="sg-btn-row" style={{ gap: 8 }}>
+          <input
+            type="number" className="sg-number-input" min={0} step={10}
+            value={loadMw}
+            onChange={(e) => setLoadMw(Math.max(0, Number(e.target.value) || 0))}
+          />
+          <input
+            type="number" className="sg-number-input" min={-50} max={200} step={5}
+            value={growthPct} title="scale the load up/down (sensitivity)"
+            onChange={(e) => setGrowthPct(Math.max(-50, Math.min(200, Number(e.target.value) || 0)))}
+          />
+        </div>
+        <p className="sg-setting-hint">
+          The volume you need to procure, scaled by demand growth. Growth is a sensitivity knob —
+          push it up to see how the optimal mix and cost shift if demand rises.
+        </p>
       </div>
+      {canShape && (
+        <div className="sg-setting-row">
+          <label className="sg-setting-label">Load profile</label>
+          <div className="sg-btn-row">
+            <button
+              className={`tb-btn sg-solver-btn${!loadShaped ? '' : ' tb-btn--muted'}`}
+              onClick={() => setLoadShaped(false)}
+            >
+              Flat (baseload)
+            </button>
+            <button
+              className={`tb-btn sg-solver-btn${loadShaped ? '' : ' tb-btn--muted'}`}
+              onClick={() => setLoadShaped(true)}
+            >
+              Run's load shape
+            </button>
+          </div>
+          <p className="sg-setting-hint">
+            Flat treats the volume as baseload; the run's shape scales it hour-by-hour to your
+            demand profile, so hedging correctly weights the peak-price/peak-load hours.
+          </p>
+        </div>
+      )}
 
       {/* ── Instruments ──────────────────────────────────────────────── */}
       <div className="sg-setting-divider" />

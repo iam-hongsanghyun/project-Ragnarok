@@ -15,7 +15,8 @@ export interface ProcurementInstruments {
 
 export interface ProcurementRequest {
   prices: number[];
-  loadMw: number;
+  /** Contract volume — a flat MW or a per-hour profile aligned to `prices`. */
+  loadMw: number | number[];
   ppa: ProcurementInstruments['ppa'];
   forward: ProcurementInstruments['forward'];
   retail: ProcurementInstruments['retail'];

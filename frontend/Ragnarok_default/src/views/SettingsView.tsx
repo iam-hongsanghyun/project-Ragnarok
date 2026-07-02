@@ -222,6 +222,8 @@ export interface SettingsViewProps {
   transformerCount: number;
   /** Last run's cleared system price series — feeds the Procurement surface. */
   priceSeries?: ValuePoint[] | null;
+  /** Last run's total dispatch (≈ load) per snapshot — for a load-shaped procurement profile. */
+  loadShape?: number[] | null;
 
   // Constraints
   constraints: CustomConstraint[];
@@ -335,7 +337,7 @@ export function SettingsView(props: SettingsViewProps) {
         {section === 'ppa'            && <PpaSection {...props} />}
         {section === 'demandResponse' && <DemandResponseSection {...props} />}
         {section === 'decisions'      && <DecisionsSection {...props} onNavigate={(s) => navigate(s as SectionId)} />}
-        {section === 'procurement'    && <ProcurementSection priceSeries={props.priceSeries ?? null} currency={props.currencySymbol} />}
+        {section === 'procurement'    && <ProcurementSection priceSeries={props.priceSeries ?? null} loadShape={props.loadShape ?? null} currency={props.currencySymbol} />}
         {section === 'constraints'    && <StandardConstraintsSection {...props} />}
         {section === 'constraintsAdvanced' && <AdvancedConstraintsSection {...props} />}
         {section === 'appearance'     && <AppearanceSection {...props} />}
