@@ -83,7 +83,7 @@ export function defaultPowerFlowConfig(): PowerFlowConfig {
 export function defaultMarketSimConfig(): MarketSimConfig {
   return {
     enabled: false, pricing: 'uniform', voll: 3000, chargeQuantile: 0.25, dischargeQuantile: 0.75,
-    clearingModel: 'singleSided', demandElasticFraction: 0.2, demandWtp: 120,
+    clearingModel: 'singleSided', demandElasticFraction: 0.2, demandWtp: 120, demandBids: [],
   };
 }
 

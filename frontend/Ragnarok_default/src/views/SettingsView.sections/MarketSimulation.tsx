@@ -136,6 +136,48 @@ export function MarketSimulationSection(props: MarketSimulationSectionProps) {
               </p>
             </div>
           )}
+          {cfg.clearingModel === 'twoSided' && (
+            <div className="sg-setting-row">
+              <label className="sg-setting-label">Extra demand steps (optional)</label>
+              {(cfg.demandBids ?? []).map((step, idx) => (
+                <div className="sg-btn-row" style={{ gap: 8, marginBottom: 4 }} key={idx}>
+                  <input
+                    type="number" className="sg-number-input" min={0} max={1} step={0.05}
+                    value={step.fraction} title="share of load"
+                    onChange={(e) => {
+                      const next = [...(cfg.demandBids ?? [])];
+                      next[idx] = { ...step, fraction: Math.min(1, Math.max(0, Number(e.target.value) || 0)) };
+                      set({ demandBids: next });
+                    }}
+                  />
+                  <input
+                    type="number" className="sg-number-input" min={0} step={10}
+                    value={step.wtp} title="willingness to pay (per MWh)"
+                    onChange={(e) => {
+                      const next = [...(cfg.demandBids ?? [])];
+                      next[idx] = { ...step, wtp: Math.max(0, Number(e.target.value) || 0) };
+                      set({ demandBids: next });
+                    }}
+                  />
+                  <button
+                    className="forge-adjust-remove"
+                    onClick={() => set({ demandBids: (cfg.demandBids ?? []).filter((_, i) => i !== idx) })}
+                    aria-label="Remove step"
+                  >×</button>
+                </div>
+              ))}
+              <button
+                className="tb-btn tb-btn--muted"
+                onClick={() => set({ demandBids: [...(cfg.demandBids ?? []), { fraction: 0.1, wtp: 60 }] })}
+              >
+                + Add demand step
+              </button>
+              <p className="sg-setting-hint">
+                Build a stepped demand curve — each step is a share of load with its own willingness-to-pay,
+                served highest-WTP first.
+              </p>
+            </div>
+          )}
           <div className="sg-setting-row">
             <label className="sg-setting-label">Settlement</label>
             <div className="sg-btn-row">

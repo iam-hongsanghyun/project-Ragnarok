@@ -201,6 +201,9 @@ export interface MarketSimConfig {
   demandElasticFraction: number;
   /** Elastic demand's willingness to pay (currency/MWh), two-sided only. */
   demandWtp: number;
+  /** Extra elastic demand steps (a stepped demand curve), two-sided only.
+   *  Each step is a share of load willing to pay up to its own WTP. */
+  demandBids?: { fraction: number; wtp: number }[];
   /** Strategic price-maker analysis (B4) — optional. */
   strategic?: StrategicBiddingConfig;
 }

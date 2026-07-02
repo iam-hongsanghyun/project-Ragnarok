@@ -103,21 +103,25 @@ def _clear_market(
 
 def _clear_two_sided(
     firm: np.ndarray,      # (T,) must-serve demand (MW)
-    elastic: np.ndarray,   # (T,) price-sensitive demand (MW)
+    segments: list[tuple[np.ndarray, float]],  # elastic demand steps: (mw (T,), wtp)
     avail: np.ndarray,     # (T, G) available MW per unit
     bids: np.ndarray,      # (G,) supply offer €/MWh per unit
-    wtp: float,            # elastic demand's willingness to pay (€/MWh)
     voll: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Two-sided merit-order clearing: supply offers cross a demand curve that is
-    firm below any price and elastic (only accepted while price ≤ ``wtp``).
+    """Two-sided merit-order clearing: supply offers cross a **stepped** demand
+    curve — firm demand (willing at any price) plus one or more elastic steps,
+    each a quantity willing to pay up to its own ``wtp``.
 
-    Returns (dispatch (T,G), price (T,), unserved (T,), curtailed (T,),
-    marginal-unit index (T,)). ``unserved`` is unmet *firm* demand (priced at
-    VOLL); ``curtailed`` is *elastic* demand priced out (a voluntary reduction,
-    valued below the clearing price)."""
+    Elastic steps are served highest-WTP first; a step is accepted only while the
+    marginal supply bid ≤ its WTP (and since offers ascend by bid, once a step is
+    priced out it stays out). Returns (dispatch (T,G), price (T,), unserved (T,),
+    curtailed (T,), marginal-unit index (T,)). ``unserved`` is unmet *firm* demand
+    (priced at VOLL); ``curtailed`` is *elastic* demand priced out (a voluntary
+    reduction valued below the clearing price)."""
     T, G = avail.shape
     order = np.argsort(bids, kind="stable")
+    # Serve elastic steps highest willingness-to-pay first.
+    seg_order = sorted(range(len(segments)), key=lambda k: -segments[k][1])
     dispatch = np.zeros((T, G))
     price = np.zeros(T)
     unserved = np.zeros(T)
@@ -125,31 +129,40 @@ def _clear_two_sided(
     marginal = np.full(T, -1)
     for t in range(T):
         firm_rem = float(firm[t])
-        elastic_rem = float(elastic[t])
+        seg_rem = [[float(segments[k][0][t]), float(segments[k][1])] for k in seg_order]
         last_bid: float | None = None
         for g in order:
             cap = float(avail[t, g])
             if cap <= _EPS:
                 continue
-            # Elastic demand accepts this offer only if its bid ≤ WTP.
-            want = firm_rem + (elastic_rem if bids[g] <= wtp + _EPS else 0.0)
-            if want <= _EPS:
-                break  # no acceptable demand left — remaining offers are priced out
-            take = min(cap, want)
-            dispatch[t, g] = take
-            f = min(take, firm_rem)
-            firm_rem -= f
-            elastic_rem -= (take - f)
-            last_bid = float(bids[g])
-            marginal[t] = g
-            if firm_rem <= _EPS and elastic_rem <= _EPS:
+            if firm_rem > _EPS:  # firm demand is willing at any price — serve first
+                take = min(cap, firm_rem)
+                dispatch[t, g] += take
+                firm_rem -= take
+                cap -= take
+                last_bid = float(bids[g])
+                marginal[t] = g
+            for seg in seg_rem:  # then elastic steps, only while this bid ≤ their WTP
+                if cap <= _EPS:
+                    break
+                if seg[0] <= _EPS or bids[g] > seg[1] + _EPS:
+                    continue
+                take = min(cap, seg[0])
+                dispatch[t, g] += take
+                seg[0] -= take
+                cap -= take
+                last_bid = float(bids[g])
+                marginal[t] = g
+            # Nothing further can clear once firm is met and every remaining step
+            # is either served or priced out (offers only get more expensive).
+            if firm_rem <= _EPS and all(s[0] <= _EPS or bids[g] > s[1] + _EPS for s in seg_rem):
                 break
         if firm_rem > _EPS:
             unserved[t] = firm_rem
             price[t] = voll
             marginal[t] = -1
         else:
-            curtailed[t] = max(0.0, elastic_rem)
+            curtailed[t] = sum(max(0.0, s[0]) for s in seg_rem)
             price[t] = last_bid if last_bid is not None else (float(bids[order[0]]) if G else 0.0)
     return dispatch, price, unserved, curtailed, marginal
 
@@ -204,9 +217,23 @@ def run_market_simulation(network: pypsa.Network, config: dict[str, Any] | None 
     # Clearing model: single-sided (fixed demand + VOLL) or two-sided (a share of
     # demand is price-elastic, bidding a willingness-to-pay).
     clearing_model = str(cfg.get("clearingModel") or "singleSided")
-    elastic_fraction = min(1.0, max(0.0, float(cfg.get("demandElasticFraction") or 0.0)))
+    # Demand curve for the two-sided auction: a base elastic block
+    # (demandElasticFraction @ demandWtp) plus optional extra steps (demandBids:
+    # [{fraction, wtp}, …]) → a stepped demand curve.
+    base_fraction = min(1.0, max(0.0, float(cfg.get("demandElasticFraction") or 0.0)))
     demand_wtp = float(cfg.get("demandWtp") or voll)
-    two_sided = clearing_model == "twoSided" and elastic_fraction > _EPS
+    demand_steps: list[tuple[float, float]] = []
+    if base_fraction > _EPS:
+        demand_steps.append((base_fraction, demand_wtp))
+    for step in cfg.get("demandBids") or []:
+        frac = min(1.0, max(0.0, float(step.get("fraction") or 0.0)))
+        if frac > _EPS:
+            demand_steps.append((frac, float(step.get("wtp") or 0.0)))
+    total_elastic_fraction = min(1.0, sum(f for f, _ in demand_steps))
+    two_sided = clearing_model == "twoSided" and total_elastic_fraction > _EPS
+    # Keep a representative WTP for reporting (highest-value step).
+    demand_wtp = max((w for _, w in demand_steps), default=demand_wtp) if two_sided else demand_wtp
+    elastic_fraction = total_elastic_fraction
 
     snapshots = network.snapshots
     T = len(snapshots)
@@ -230,9 +257,9 @@ def run_market_simulation(network: pypsa.Network, config: dict[str, Any] | None 
         """Clear one demand profile under the chosen model. Returns
         (dispatch, price, unserved, curtailed, marginal)."""
         if two_sided:
-            firm = demand * (1.0 - elastic_fraction)
-            elastic = demand * elastic_fraction
-            return _clear_two_sided(firm, elastic, avail, bids, demand_wtp, voll)
+            firm = demand * (1.0 - total_elastic_fraction)
+            segments = [(demand * frac, wtp) for frac, wtp in demand_steps]
+            return _clear_two_sided(firm, segments, avail, bids, voll)
         d, p, u, m = _clear_market(demand, avail, bids, voll)
         return d, p, u, np.zeros(len(demand)), m
 
