@@ -32,7 +32,7 @@ export function ScenariosSection(props: ScenariosSectionProps) {
     <section className="constraints-workspace-section">
       <header className="constraints-workspace-section-header">
         <h3>Scenarios</h3>
-        <p>Capture the current constraints, simulation window, carbon price, pathway, rolling and stochastic settings as a named preset. Switch between presets to compare configurations.</p>
+        <p>Named <b>run-configuration presets</b>: capture the current constraints, simulation window, carbon price, pathway, rolling and stochastic settings under a name, and switch between them to compare configurations. Presets describe what you <em>plan</em> to run — the record of what you <em>actually ran</em> lives in <b>History</b>.</p>
       </header>
       <div className="sg-setting-row">
         <label className="sg-setting-label">Scenario library</label>
