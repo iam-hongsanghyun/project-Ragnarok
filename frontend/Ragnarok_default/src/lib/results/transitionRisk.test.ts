@@ -51,6 +51,31 @@ describe('computeTransitionRisk', () => {
     expect(co.byYear.every((p) => p.netMargin === co.baseNetMargin)).toBe(true);
   });
 
+  it('fuel-price escalation erodes even a zero-emissions company', () => {
+    // WindCo has no carbon exposure, but a fuel/VOM cost that escalates.
+    const co = entry({ company: 'X', revenue: 1000, fuelVomCost: 400, emissionsTonnes: 0 });
+    const flat = computeTransitionRisk(statement([co]), { ...DEFAULT_TRANSITION_PARAMS, escalationPct: 0 });
+    const shocked = computeTransitionRisk(statement([co]), { ...DEFAULT_TRANSITION_PARAMS, escalationPct: 0, fuelGrowthPct: 10 });
+    // No carbon and no fuel escalation → flat margin across the horizon.
+    expect(flat.companies[0].marginErosion).toBe(0);
+    // Fuel +10%/yr eats the margin over time.
+    expect(shocked.companies[0].marginErosion).toBeGreaterThan(0);
+    expect(shocked.companies[0].byYear.at(-1)!.netMargin).toBeLessThan(shocked.companies[0].baseNetMargin);
+  });
+
+  it('demand growth scales revenue, fuel and emissions together', () => {
+    const co = entry({ company: 'X', revenue: 1000, fuelVomCost: 300, emissionsTonnes: 5 });
+    // Zero carbon price + zero fuel escalation isolates the demand-scaling effect.
+    const r = computeTransitionRisk(statement([co]), {
+      ...DEFAULT_TRANSITION_PARAMS, basePrice: 0, escalationPct: 0, demandGrowthPct: 10,
+    });
+    const y0 = r.companies[0].byYear[0].netMargin;
+    const y1 = r.companies[0].byYear[1].netMargin;
+    // Year 1: revenue and fuel both ×1.1 (carbon 0) → gross scales 1.1× on the
+    // volume-linked lines, capex/interest fixed (both 0 here) → margin ×1.1.
+    expect(y1).toBeCloseTo(y0 * 1.1, 4);
+  });
+
   it('ranks the most-at-risk company first', () => {
     const heavy = entry({ company: 'Heavy', revenue: 1000, emissionsTonnes: 20 });
     const light = entry({ company: 'Light', revenue: 1000, emissionsTonnes: 2 });

@@ -59,6 +59,14 @@ export function TransitionRiskCard({ data }: Props) {
           <input type="number" min={2000} max={2100} step={1} value={params.baseYear}
             onChange={(e) => set({ baseYear: Math.round(Number(e.target.value) || 2030) })} />
         </label>
+        <label>Demand %/yr
+          <input type="number" step={1} value={params.demandGrowthPct ?? 0}
+            onChange={(e) => set({ demandGrowthPct: Number(e.target.value) || 0 })} />
+        </label>
+        <label>Fuel price %/yr
+          <input type="number" step={1} value={params.fuelGrowthPct ?? 0}
+            onChange={(e) => set({ fuelGrowthPct: Number(e.target.value) || 0 })} />
+        </label>
         <label>Stranded ≤ {cur}
           <input type="number" step={1000} value={params.strandedThreshold}
             onChange={(e) => set({ strandedThreshold: Number(e.target.value) || 0 })} />
@@ -119,9 +127,10 @@ export function TransitionRiskCard({ data }: Props) {
       </div>
 
       <p className="econ-footnote">
-        Dispatch and revenue held at the solved outcome; only the carbon price rises. Net margin =
-        (revenue − fuel/VOM − capex − interest) − emissions × carbon price. A company is stranded
-        the first year its net margin falls to/below the threshold.
+        Dispatch held at the solved outcome; the carbon price rises along the trajectory, and
+        (optionally) demand and fuel prices escalate — scaling the volume-linked revenue, fuel and
+        emissions while capex/interest stay fixed. A company is stranded the first year its net
+        margin falls to/below the threshold.
       </p>
     </div>
   );

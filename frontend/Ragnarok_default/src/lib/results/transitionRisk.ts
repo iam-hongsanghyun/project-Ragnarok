@@ -27,6 +27,10 @@ export interface TransitionParams {
   escalationPct: number;
   /** Net margin at/below this (currency/yr) marks a company stranded. */
   strandedThreshold: number;
+  /** Annual demand growth (%/yr) — scales volume-linked revenue, fuel & emissions. */
+  demandGrowthPct?: number;
+  /** Annual fuel-price change (%/yr) — scales the fuel/VOM cost line. */
+  fuelGrowthPct?: number;
 }
 
 export interface TransitionYearPoint {
@@ -62,6 +66,8 @@ export const DEFAULT_TRANSITION_PARAMS: TransitionParams = {
   basePrice: 50,
   escalationPct: 5,
   strandedThreshold: 0,
+  demandGrowthPct: 0,
+  fuelGrowthPct: 0,
 };
 
 export function computeTransitionRisk(
@@ -75,16 +81,24 @@ export function computeTransitionRisk(
     price: params.basePrice * Math.pow(1 + esc, i),
   }));
 
+  const demandRate = (params.demandGrowthPct ?? 0) / 100;
+  const fuelRate = (params.fuelGrowthPct ?? 0) / 100;
+
   const companies: CompanyRisk[] = statement.companies.map((c) => {
-    // Margin excluding the carbon line — fixed across the horizon.
-    const marginExCarbon = c.revenue - c.fuelVomCost - c.capexAnnual - c.interest;
     const emissions = c.emissionsTonnes;
+    // Fixed lines (capex / interest) don't scale with volume; revenue, fuel and
+    // emissions do. Each year applies the demand and fuel-price trajectories.
+    const fixed = c.capexAnnual + c.interest;
 
     let strandedYear: number | null = null;
-    let baseNetMargin = marginExCarbon;
-    const byYear: TransitionYearPoint[] = trajectory.map((pt) => {
-      const carbonCost = emissions * pt.price;
-      const netMargin = marginExCarbon - carbonCost;
+    let baseNetMargin = c.revenue - c.fuelVomCost - fixed;
+    const byYear: TransitionYearPoint[] = trajectory.map((pt, i) => {
+      const d = Math.pow(1 + demandRate, i);
+      const f = Math.pow(1 + fuelRate, i);
+      const revenue = c.revenue * d;
+      const fuelVom = c.fuelVomCost * d * f;
+      const carbonCost = emissions * d * pt.price;
+      const netMargin = revenue - fuelVom - carbonCost - fixed;
       const stranded = netMargin <= params.strandedThreshold;
       if (pt.year === params.baseYear) baseNetMargin = netMargin;
       if (stranded && strandedYear === null) strandedYear = pt.year;
