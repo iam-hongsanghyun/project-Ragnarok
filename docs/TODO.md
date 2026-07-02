@@ -1,8 +1,8 @@
 # Ragnarok TODO
 
-Last updated: 2026-07-01 (status audited against the codebase — many items previously listed open were already shipped; see *Already shipped*).
+Last updated: 2026-07-02 (full status re-audit against the codebase — B2, B4, I9 config-override, PP2 confirmed shipped and moved out of the open list; only genuinely-remaining work is listed below).
 
-Single living todo for Ragnarok. Open work is grouped below by theme. Completed and deliberately-dropped items are kept at the bottom in compact form so they are not re-proposed.
+Single living todo for Ragnarok. **Open work lists only what is not yet done.** Completed and deliberately-dropped items are kept at the bottom in compact form so they are not re-proposed.
 
 ## Scales
 
@@ -19,131 +19,77 @@ So the gap is **not** "expose more of PyPSA" — it is the five layers *around* 
 
 | Layer | Gap → items | Status |
 |---|---|---|
-| **1. Data-in for arbitrary regions** (highest leverage) | general weather → renewable profiles (**D1** + **I4**), fuel & carbon prices (**I5**), driver-based demand (**I3**), any-country network (**I9**) | **weather→renewable done** — Open-Meteo importer (multi-point) + attach-to-fleet transform + on-disk cache all shipped; fuel prices (**I5**), driver demand (**I3**), any-country network (**I9**) remain |
-| **2. Feature-exposure polish** | carrier-aware charts + multi-port Links (**M1** remainder), full `n.statistics()` family + more duals, non-CO₂ global-constraint UI, optional extra solvers | small gaps on a shipped core |
-| **3. Usability for any user** | guided model wizard (**W1**), country starter framework (**W2**), in-app tour (**W3**), infeasibility / solver diagnostics (**Q2**) | open — demo networks + Build wizard shipped |
+| **1. Data-in for arbitrary regions** (highest leverage) | fuel & carbon prices (**I5**), day-ahead price half (**I6**), driver-based demand (**I3**), calibration history (**I7**), one-click location→model (**I1**), self-hosted demand cache (**D2**), data-layer health/provenance (**D1**) | weather→renewable **done** (Open-Meteo/PVGIS/NASA + measured ENTSO-E/OpenElectricity/Elexon, multi-point, cached); any-country network **done** (PyPSA-Earth builder incl. per-request config); the price/demand/driver importers remain |
+| **2. Feature-exposure polish** | full `n.statistics()` family + more duals, non-CO₂ global-constraint UI, chart-based **quadratic cost** authoring (**T4**), optional extra solvers | small gaps on a shipped core |
+| **3. Usability for any user** | guided model wizard (**W1**), country starter framework (**W2**), in-app tour (**W3**), infeasibility / solver diagnostics (**Q2**) | demo networks + Build wizard shipped; these remain |
 | **4. Scale & robustness** | thin-client for 1000s-of-bus networks — port analytics derivation server-side (**X1** / **X2**) | session-store backbone shipped; derivation port open |
 | **5. Correctness & trust** | PyPSA reference-parity test suite (**Q1**) | round-trip I/O tested; end-to-end result parity not systematically pinned |
 
-**Critical path** to "any PyPSA model, trusted, at scale": **D1 → I4** (model any region — *first cut shipped: the Open-Meteo any-coordinate renewable importer*) → **X1 / X2** (handle large networks) → **W2** (get users to a runnable model fast) → **Q1** (prove parity with native PyPSA). Everything else is breadth on top of that spine. The per-group tables below hold the full backlog; the *Suggested execution order* sequences it.
+**Critical path** to "any PyPSA model, trusted, at scale": **X1 / X2** (handle large networks) → **W2** (get users to a runnable model fast) → **Q1** (prove parity with native PyPSA). The data-in layer's highest-leverage first cut (weather→renewable, any-country network) has shipped; fuel/price/demand importers are breadth on top. The per-group tables below hold the full remaining backlog; the *Suggested execution order* sequences it.
 
 ## Open work
 
-Genuinely-open or partially-complete items only. The whole financial / decision-workflow spine and the modelling-reach items (B1, F1, F2, PP1, DW1–DW4, M1–M3, B3, T2) have shipped — they live under *Already shipped*. The remaining frontier is **risk, resource adequacy, the weather/data-import layer, guided & conversational surfaces, and architecture**.
+**Only genuinely-open or partial items.** The financial/decision spine (B1, F1, F2, PP1, PP2, DW1–DW4), the market/strategic layer (**B2** simulation, **B4** strategic bidding, price-formation / unit-commitment / bid-strategy / optimal-bid analytics), the modelling-reach items (M1–M3, B3, T1–T3), and the data importers listed under *Already shipped* are all done — do not re-propose them.
 
-### Backend adapters
+### Data importers & platform
 
-Adapters that plug into the existing `Backend` protocol (`backend/app/backends/`). PyPSA cost-min is the default; each item below is an additional adapter selectable by `options.backend`.
-
-| ID | Status | Pri | Surface | Task | Why | Cost |
-|---|---|---|---|---|---|---:|
-| `B2` | `Open` | `High` | `Both` | **Simulation adapter** — non-optimisation. Given dispatch rules / bids / prices, step the system through the horizon and report flows, prices, and revenues. | Take a fixed strategy or operating rule and simulate the outcome under a chosen market structure. Different from **B3** (steady-state network analysis, not time-stepped market simulation). | 30,000 |
-| `B4` | `Deferred` | `Low` | `Both` | **Strategic / price-maker optimisation** — endogenous prices where the owner's bids move the clearing price (market power, capacity withholding). A **bilevel / MPEC** problem (lower-level market clearing reformulated via KKT + complementarity) that PyPSA's single-level LP **cannot express**; needs a hand-built linopy / pyomo / gurobipy model (MILP via SOS1) or an iterative equilibrium solver — a different stack, not an adapter over PyPSA. Research-grade and data-hungry (requires rivals' cost curves). | The only flavour of profit-max that captures market power, i.e. *strategic* decision-making per company. Separated from **B1** because it is a different problem class and a different solver stack. **Deferred** — documented, not built. Note: the *analytics* precursors (price formation, unit commitment, bid strategy, optimal single-owner bid) already shipped — see *Already shipped → Market power & strategic pricing*. | 40,000 |
-
-### Power procurement
+User-facing surfaces that bring data in, plus the infrastructure under them. **Substantial framework + sources already shipped** (see *Already shipped → Data importers*). What remains:
 
 | ID | Status | Pri | Surface | Task | Why | Cost |
 |---|---|---|---|---|---|---:|
-| `PP2` | `Done` | `High` | `Both` | **Procurement strategy optimizer** — given a buyer's load profile and a menu of instruments (spot, fixed-price PPA, forward block, full-requirements retail), find the mix that minimises expected cost subject to a **CVaR** price-risk budget. **Shipped:** `backend/app/procurement.py` — Rockafellar–Uryasev CVaR linearization solved with `scipy.optimize.linprog` (HiGHS) over moving-block-bootstrap price scenarios + user stress cases; returns the optimal mix, spot baseline, and the cost-vs-risk **efficient frontier** (min-CVaR anchor → unconstrained min-cost). Stateless endpoint `POST /api/procurement/optimize`. Frontend: a dedicated **use-case surface** (`Procurement.tsx`, reachable from the Decisions launcher) — goal framing → price basis (last run's cleared prices or a stated reference) → instrument menu → CVaR tail + risk-budget slider → live optimal mix, KPI deltas vs all-spot, and an inline efficient-frontier plot. 7 analytical backend tests; verified live in the browser (slider re-optimises, frontier monotone). | A meaningful PP2 needs a **risk model** (CVaR) — deterministic min-cost is trivial. Built as the dedicated use-case surface the 2026-07-01 design decision required, not another Settings config panel. **Next (optional):** fold PP1 (PPA valuation) + DW4 (shape explorer) into the same surface; per-hour load profile (not just flat MW); load-growth sensitivity. | 0 |
+| `I5` | `Open` | `High` | `Frontend` | **Fuel & commodity-price importer** — historical + forward fuel prices (coal, gas, oil, uranium, biomass) plus carbon prices (EU ETS, K-ETS, RGGI) attached to the `carriers` sheet as `marginal_cost` (and `co2_price` on `global_constraints`). Sources: EIA/IEA retrospective averages, user's own futures snapshot for forward curves. | Fuel prices move the dispatch answer more than any other input; today users hand-type them from PDFs. Reuses the shipped BYOK key store. No fuel/price importer exists in code yet. | 16,000 |
+| `I6` | `In progress` | `High` | `Frontend` | **Day-ahead price importer** — the *price* half of hourly load & price. Hourly **demand** is shipped (`entsoe_load`, `eia_demand`, `elexon_demand`, `openelectricity_demand`). **Remaining:** land day-ahead price as a new `electricity_price` sheet keyed by snapshot (ENTSO-E A44 reuses the existing client; Elexon makes GB price nearly free). | Retrospective settlement / PPA valuation needs real spot price; the demand half already shipped. No price importer / `electricity_price` sheet exists yet. | 8,000 |
+| `I3` | `Open` | `High` | `Both` | **Driver-based demand forecast generator** — per-bus / per-region future demand profiles from drivers (population, GDP, electrification rate, weather sensitivity) with hourly reshaping for pathway runs. | Pathway runs need decade-spanning demand with an evolving *shape*. Distinct from **T1** (scales an existing series) — this derives a *new* shape from drivers. The World Bank importer fetches annual population/per-capita drivers but no hourly-shape generator exists. Depends on **D1** for driver datasets. | 24,000 |
+| `I7` | `Open` | `Med` | `Frontend` | **Capacity-factor / generation history (Ember / IEA)** — country-by-month / -year generation by carrier, for analytics calibration and as a fallback when hourly data is unavailable. | A cheap sanity check that catches order-of-magnitude model errors. Ember monthly data is CC-BY; IEA needs free registration. No Ember/IEA importer exists. | 10,000 |
+| `I1` | `In progress` | `High` | `Both` | **Location → runnable-model bootstrap** — the *one-click, one-location → complete runnable model* orchestration. **Done:** the Data-view country-first importer surface (pick a region → pull network / plants / demand / renewable profiles per source). **Remaining:** a single orchestration that composes those pulls into one runnable workbook (today the user pulls each source in turn). Overlaps **W1**/**W2**. | The integrated surface above the importers: one location selected → one runnable model. | 14,000 |
+| `D1` | `In progress` | `High` | `Backend` | **Profile / weather data layer** — persistent storage, source registry, source-health checks, versioned provenance. **Done:** source registry + per-database module pattern; keyless Open-Meteo weather; **on-disk weather caching** (`openmeteo_renewable/cache.py`, `RAGNAROK_WEATHER_CACHE`). **Remaining:** source-health checks, versioned provenance, and a **general (multi-source) cache abstraction** beyond the Open-Meteo-specific one. | Owns caching, versioning, provenance, health for every external dataset. Weather caching exists; the general layer + health/provenance remain. | 8,000 |
+| `D2` | `Open` | `High` | `Backend` | **Self-hosted historical hourly demand database** — Ragnarok-owned snapshot of EU + global hourly load, with a refresh process. On-demand hourly demand is already covered by the ENTSO-E/EIA-930 importers; D2 is the *self-hosted cached* alternative for scale / offline. | Fetch-per-user against ENTSO-E/EIA is rate-limited and network-bound; a per-country self-hosted slice (≈10 MB) lets the frontend fetch only what it needs. Not started. | 20,000 |
+
+### Transformation & authoring tools
+
+Tools that transform / author an already-imported workbook between Data and Run. (`T1` series transforms + retarget + forecast, `T2` clustering, `T3` snap-to-bus have shipped — see *Already shipped*.)
+
+| ID | Status | Pri | Surface | Task | Why | Cost |
+|---|---|---|---|---|---|---:|
+| `T4` | `Open` | `Med` | `Both` | **Chart-based quadratic marginal-cost editor** — an interactive editor to set PyPSA's `marginal_cost` (linear) + `marginal_cost_quadratic` (quadratic) across a *filtered selection*. Select by **carrier**, **component name**, and **multiple filters on any column** (reuse `FilterPanel`); target generators / storage_units / stores / links. The user **draws the cost curve on a chart** — click to place points, drag the curve / handles — over the output range (0 → `p_nom`); a **least-squares fit finds the closest quadratic** `C(p) = c₁·p + c₂·p²` (the PyPSA cost form; marginal cost `dC/dp = c₁ + 2c₂·p`) to the drawn points and writes `c₁ → marginal_cost`, `c₂ → marginal_cost_quadratic` onto every matched row via the session bulk-write path. Enforce convexity (`c₂ ≥ 0`) for a valid QP. | PyPSA supports convex quadratic generation cost (verified: `marginal_cost` + `marginal_cost_quadratic` on generators/storage_units/stores/links, PyPSA 1.2.4), but today users can only hand-type the two coefficients per row — no way to *see* the resulting curve, *set* it visually, or *apply* one curve to a whole filtered fleet at once. **Solver note:** quadratic terms make the solve a **QP** — needs a QP-capable solver (HiGHS/Gurobi); flag this in the UI. **Scoping (raised 2026-07-02):** clarify "on a map" — per-node curve editing on the map vs. a single chart panel over the selection (default = chart panel); and which axis the user draws (marginal-cost line vs. total-cost parabola — either maps to (c₁,c₂)). Reuse points: `features/data/FilterPanel.tsx` (multi-column filter), ECharts `graphic` + `convertFromPixel` (draggable curve), `POST /api/session/...` bulk write. | 16,000 |
+
+### Modelling extensions
+
+(`M1` sector coupling, `M2` demand response, `M3` efficiency-aware emissions have shipped — see *Already shipped*.)
+
+| ID | Status | Pri | Surface | Task | Why | Cost |
+|---|---|---|---|---|---|---:|
+| `M4` | `Open` | `Med` | `Both` | **Spatially-mobile storage / EV mobility coupling** — model demand that is *energy physically relocating between regions*, not just power flowing along a fixed edge. An EV fleet charges in region A, drives to region B, and discharges (or is unavailable) there: the stored energy moves with the vehicles. Standard PyPSA Links move power along a static edge and Stores are pinned to one bus, so neither captures a *state of charge that migrates between buses on a mobility schedule*. Approaches to evaluate: (a) PyPSA-Eur's BEV/V2G pattern (per-region transport bus + electricity↔transport Link + battery Store with time-varying `e_max_pu` + a `p_set` mobility-demand series) — captures charging flexibility but **not** inter-region transfer; (b) an OD (origin–destination) mobility matrix realised as time-varying Links between regional EV-battery Stores; (c) a dedicated mobile-storage component with a bus-assignment time series. **Scope first** (pick a/b/c) — it touches ingestion, the schema, and analytics. | Ragnarok can model EV *charging load* per region today but cannot represent the *transport of stored energy between regions* — the battery that fills at home overnight and discharges at the workplace bus. Raised as a design question 2026-07-02; not started. | 20,000 |
 
 ### Risk modules
 
-Climate-related exposure modules. Physical risk perturbs *inputs* (asset availability); transition risk perturbs *outputs* (financial-model assumptions). Neither exists in code yet.
+Climate-related exposure modules. Physical risk perturbs *inputs* (asset availability); transition risk perturbs *outputs* (financial-model assumptions). Neither exists in code yet (confirmed by audit).
 
 | ID | Status | Pri | Surface | Task | Why | Cost |
 |---|---|---|---|---|---|---:|
 | `R1` | `Open` | `High` | `Both` | **Physical-climate-risk module** — score assets against heat / drought / flood / storm / wildfire hazard layers tied to location and operating envelope; feed the result back into the model as availability / derate time series. | Thermal, hydro, transmission, and renewables all have location-dependent physical exposure that changes under climate change. Pathway runs currently assume historical availability for every future period. | 26,000 |
 | `R2` | `Open` | `High` | `Both` | **Transition-risk module** — apply carbon-price trajectories, demand shocks, policy pathways, and stranded-asset assumptions to the company-level financial model. | Today's carbon-price input is a single number (or a year→price schedule); transition-risk needs trajectories + policy pathways evaluated against each company's portfolio so stranded-asset and revenue-at-risk exposure is visible over the horizon. Depends on **F2** (shipped). | 22,000 |
 
-### Data platform
-
-Backend infrastructure that stores, versions, and serves external datasets. Read by the importers in the next group. Partially addressed: an importer **source registry** exists (`backend/app/importers/registry.py` + per-database modules); the **weather/reanalysis caching layer** does not.
-
-| ID | Status | Pri | Surface | Task | Why | Cost |
-|---|---|---|---|---|---|---:|
-| `D1` | `In progress` | `High` | `Backend` | **Profile / weather data layer** — persistent storage, source registry (versioning + provenance), and source-health checks for renewable, weather, fleet, grid, and policy datasets. **Done:** the source registry + per-database module pattern; a live keyless weather source (Open-Meteo ERA5); and **on-disk weather caching** (`openmeteo_renewable/cache.py` — keyed by 0.1°-snapped coord + date range, immutable ERA5 archive so cached forever; `RAGNAROK_WEATHER_CACHE` dir; nearby generators share a call). **Remaining:** source-health checks, versioned provenance, and a general (multi-source) cache abstraction beyond the Open-Meteo-specific one. | Owns caching, versioning, provenance, and health for every external dataset. Weather caching now exists; the general layer + health/provenance remain. | 8,000 |
-| `D2` | `Open` | `High` | `Backend` | **Self-hosted historical hourly demand database** — Ragnarok-owned snapshot of EU + global hourly load, with a refresh process. Note: on-demand hourly demand is already covered by the **ENTSO-E load** and **EIA-930** importers (shipped); D2 is the *self-hosted cached* alternative for scale / offline. | Fetch-per-user against ENTSO-E/EIA works but is rate-limited and network-bound; a per-country self-hosted slice (≈10 MB) lets the frontend fetch only what it needs and refresh on our cadence. | 20,000 |
-
-### Data importers
-
-User-facing surfaces that bring data into a Ragnarok workbook. **Substantial infrastructure already shipped** — the importer framework + these sources: **OSM** grid topology, **OSM power plants**, **WRI GPPD** fleet, **World Bank** annual demand, **ENTSO-E** hourly load / installed capacity / **measured renewable profiles** (A75÷A68), **EIA-930** hourly demand, **OpenElectricity** (Australia — hourly demand + measured renewable profiles, BYOK), **Elexon** (Great Britain — hourly demand + measured renewable profiles, keyless), **Open-Meteo / PVGIS / NASA POWER** keyless weather → renewable CF, **Renewables.ninja** validated CF (BYOK), and the **KPG193** Korea pack (network / demand profile / renewable capacity / renewable profile). The items below are what's left.
-
-| ID | Status | Pri | Surface | Task | Why | Cost |
-|---|---|---|---|---|---|---:|
-| `I1` | `In progress` | `High` | `Both` | **Location-based data & model bootstrap** — pick a point / region / country and assemble a runnable workbook. **Done:** the Data view country-first importer surface (pick a region → pull network / plants / demand / renewable profiles from OSM / WRI / World Bank / KPG193). **Remaining:** the *one-click, one-location → complete runnable model* orchestration (currently the user pulls each source in turn) — this overlaps **W1**/**W2**. | The integrated surface above the importers: one location selected → one runnable model. | 14,000 |
-| `I3` | `Open` | `High` | `Both` | **Driver-based demand forecast generator** — per-bus / per-region future demand profiles from drivers (population, GDP, electrification rate, weather sensitivity) with hourly reshaping for pathway runs. | Pathway runs need decade-spanning demand with an evolving *shape* (electrification of heat/transport shifts the hourly profile, not just the level). Distinct from **T1** (scales an existing series) — this derives a *new* shape from exogenous drivers. Depends on **D1** for driver datasets. | 24,000 |
-| `I4` | `Done` | `High` | `Both` | **Renewable resource profile importer** — fetch wind / solar capacity-factor series for a location and land them as `generators-p_max_pu`. **Shipped:** per-bus KPG193 profiles; keyless any-coordinate **weather importers** (`openmeteo_renewable`, `pvgis_renewable`, `nasa_power_renewable`) with **multi-point grid sampling** + local UTC-offset; the **BYOK validated source** (`renewables_ninja`, live-only per licence); **measured/empirical profiles** from grid operators — ENTSO-E (`entsoe_generation_profile`, actual generation ÷ installed capacity), OpenElectricity AU (`openelectricity_renewable`) and Elexon GB (`elexon_renewable`), each peak-/capacity-normalised; the **attach-to-existing-fleet transform** (`POST /api/transform/renewable-profiles` + Forge "Attach renewable profiles" — own x/y → bus x/y, fetch once per 0.1° cell); and **on-disk caching** (see **D1**). Verified live. **Remaining (minor):** hydro-inflow (`storage_units-inflow`). | A single national profile is too coarse for siting. Coordinate-driven attachment + snapshot alignment (via **T1**) puts the right shape on the right asset. | 2,000 |
-| `I5` | `Open` | `High` | `Frontend` | **Fuel & commodity-price importer** — historical + forward fuel prices (coal, gas, oil, uranium, biomass) plus carbon prices (EU ETS, K-ETS, RGGI) attached to the `carriers` sheet as `marginal_cost` (and `co2_price` on `global_constraints`). Sources: EIA/IEA retrospective averages, user's own futures snapshot for forward curves. | Fuel prices move the dispatch answer more than any other input; today users hand-type them from PDFs. Reuses the shipped BYOK key store. | 16,000 |
-| `I6` | `In progress` | `High` | `Frontend` | **Hourly load & price (ENTSO-E / EIA-930)**. **Done:** hourly demand via `entsoe_load` (EU) and `eia_demand` (US). **Remaining:** the **day-ahead price** half — land it as a new `electricity_price` sheet keyed by snapshot for retrospective settlement analytics. | The demand half shipped; the price half is what retrospective settlement / PPA valuation needs against real spot. | 8,000 |
-| `I7` | `Open` | `Med` | `Frontend` | **Capacity-factor / generation history (Ember / IEA)** — country-by-month / -year generation by carrier, for analytics calibration and as a fallback when hourly data is unavailable. | A cheap sanity check that catches order-of-magnitude model errors. Ember monthly data is CC-BY; IEA needs free registration. | 10,000 |
-| `I8` | `Done` | `Med` | `Both` | **Policy & target snapshot** — a country's climate target → a `global_constraints` CO₂ cap. **Shipped:** the `climatewatch_policy` importer — baseline emissions fetched live from Climate Watch's keyless historical-emissions API (CO₂ for the chosen sector, Electricity/Heat by default), trajectory (target year + % reduction vs the base year, default net-zero-2050) as filters, lands one `primary_energy` / `co2_emissions` constraint with provenance. Verified live. **Later (optional):** pull the reduction % itself from a queryable NDC targets dataset; RPS/CES levels. | Automates the trajectory-to-constraint step for studies that bound expansion against an emissions path. | 2,000 |
-| `I9` | `In progress` | `Med` | `Both` | **PyPSA-Earth network builder (async job)** — for an arbitrary country, run PyPSA-Earth's workflow server-side and ingest the resulting network. **Shipped:** the async job seam + ingest — `backend/app/routers/pypsa_earth.py` (`POST /api/pypsa-earth/build` queue + `GET …/build/{id}` poll + `…/result` + `…/available`), gated behind `RAGNAROK_PYPSA_EARTH_DIR` (clean "not configured" error otherwise), `ingest_network()` → `serialize.network_to_model` proven on a real `.nc`, **and the Data-tab frontend panel** (availability-gated: build form when configured, setup guidance otherwise; applies the result via the importer `applyFragment` path). **Remaining (operational):** a per-request `config.yaml` override, and provisioning the PyPSA-Earth conda env + CDS key + cutout cache on the host (external env — can't run in this repo). Design + status in [`docs/pypsa-earth-integration.md`](pypsa-earth-integration.md). | Top-down complement to the per-source importers. Heavy: ERA5 cutouts (CDS key), Atlite compute, powerplantmatching/GADM/WDPA/GEBCO. | 12,000 |
-
-#### API-key infrastructure — SHIPPED (cross-cutting, powers I4–I8)
-
-The BYOK per-user key store landed: dev-host `.env.local` seeds via `process.env.REACT_APP_RAGNAROK_*_KEY`; production users type keys into the **API-keys Settings panel** (`ApiKeys.tsx`) which writes `localStorage['ragnarok:secret:<name>']` / `sessionStorage`; resolver `src/lib/api/secrets.ts` walks `sessionStorage → localStorage → process.env` per fetch. Keys never leave the user's machine.
-
-#### I4 design — renewable profile attachment model (for the remaining general importer)
-
-A profile is `generators-p_max_pu`, so availability lives on the **generator**. Resolve the query point by a **fallback chain**: (1) generator's own `x`/`y` (imported fleet — WRI GPPD, OSM plants) → query there; (2) else its bus `x`/`y`; (3) else pin-on-map. Only attach to generators that already exist (the KPG193 rule — no orphan profiles). Snapshot alignment via **T1**. Sources: keyless **PVGIS / NASA POWER / Open-Meteo**, BYOK **Renewables.ninja** (rate-limited — cache via **D1**; redistribution license — fetch per-user, never bulk-cache).
-
-### Transformation tools
-
-Tools that transform an already-imported workbook between Data and Run.
-
-| ID | Status | Pri | Surface | Task | Why | Cost |
-|---|---|---|---|---|---|---:|
-| `T1` | `Done` | `High` | `Both` | **Forecast tool / snapshot editor.** **Shipped:** bulk series transforms (scale / offset / shift / interpolate / clip / grow) via `POST /api/session/series/{name}/transform` + Transform control; **snapshot-window retarget** (`POST /snapshots/retarget` — new start/end/resolution, tile/pad); and **multi-year forecast** (`POST /snapshots/forecast`) with five methods — user-set **CAGR / linear**, and **regression / ARIMA / Prophet** that fit the demand trend on the series' own annual totals (≥3 yrs) and project the base-year window forward. All surfaced in Forge → Temporal. | After importing series from different weather years, users need to retarget the window and project onto it. | 0 |
-
-### AI conversational interface — Bifrost
-
-A new project wrapper (sibling to Mjolnir) that places an LLM chat interface in front of Ragnarok. The anti-hallucination principle: the LLM never answers directly — it builds a Ragnarok workbook, and the answer is the solver output, traceable to workbook cells + a HiGHS solve. Neither item exists in code yet.
-
-| ID | Status | Pri | Surface | Task | Why | Cost |
-|---|---|---|---|---|---|---:|
-| `L1` | `Open` | `High` | `Both` | **Bifrost — AI conversational model builder** — stand-alone project (React/TS chat shell + thin Python relay). The user asks a question; Bifrost runs an **agentic tool-use loop**, deciding which Ragnarok importer / schema tools to call to assemble a workbook (same JSON schema `POST /api/run` accepts), then lets the user **inspect** (hand to the Model/Build editor) or **run** (submit + stream the live analytics view). Data gaps are resolved by asking, not hallucinating. Recommended brain: **Claude Opus 4.8** (or **Sonnet 4.6**) via a thin relay reusing the shipped BYOK key store. Bifrost owns no solver / DB / editor — it delegates to Ragnarok. | LLM answers to energy questions are unverifiable; routing through a real PyPSA solve makes every conclusion falsifiable. Distinct from **W1** (a stepped UI wizard): same output via a free-text affordance. | 36,000 |
-| `L2` | `Open` | `Medium` | `Both` | **Bifrost data-ask loop** — when a gap can't be filled from open data (private fleet, confidential topology), Bifrost asks the user to supply the rows directly (CSV paste / quick form / file), validated against the schema and merged before continuing. | Prevents silent gap-filling with hallucinated defaults. Depends on **L1**. | 12,000 |
-
-### Guided workflows
-
-Top-down surfaces that build a runnable workbook from high-level intent. (The existing **Build view** is a step-by-step *sheet* editor; W1/W2 build from *intent*.)
-
-| ID | Status | Pri | Surface | Task | Why | Cost |
-|---|---|---|---|---|---|---:|
-| `W1` | `Open` | `High` | `Both` | **Guided model-builder wizard** — a stepped flow (Region → Question → Time horizon → Scope → Constraints → Confidence-defaults) that composes the existing importers (`I1`, `I4`, …) + transforms (`T1`, `T2`) into a fully-populated, immediately-runnable workbook, with provenance flagging wizard-filled vs user-edited cells. | State your goal in plain language, get a model. The Data view is bottom-up (pick a database, pull rows); non-modellers can't navigate that. Zero new data-source code — it sequences what exists. | 32,000 |
-| `W2` | `In progress` | `High` | `Both` | **Country starter models (per-country baseline packs)** — three-question landing (Country → Year → What to do) that emits a curated, immediately-runnable workbook from the best baseline for that (country, year). **Done:** the **KPG193 pack** is the working prototype for KOR (network + demand + renewable capacity/profile, loadable from the Welcome screen). **Remaining:** the per-country **recipe framework** (`starter_packs/<ISO3>/<year>/recipe.json`) that picks the best source per slot for arbitrary countries. | Top-down complement to the Data view: state country + year + question, get a model. KPG193 proves the shape; the generalisation to any country is the work. | 18,000 |
-| `W3` | `Open` | `Medium` | `Frontend` | **Interactive in-app tutorial / guided tour** — a skippable, resumable coach-mark walkthrough of the core loop (build → edit → run → analyse), driven by a declarative step script, auto-offered once on first run. Runs against the bundled demo/example networks (already shipped — three solve-validated examples with a Welcome picker). | New users land in a dense five-view app with no guided path. Teaches the workflow in-context. Distinct from W1/W2 (build a model) — W3 teaches how to drive the tool. | 16,000 |
-
-### Modelling extensions
-
-| ID | Status | Pri | Surface | Task | Why | Cost |
-|---|---|---|---|---|---|---:|
-| `M1` | `Done` | `High` | `Both` | **Sector coupling** — multi-carrier buses + conversion Links (electrolyser, CCGT, heat pump, boiler, fuel cell, …). **Shipped:** ingestion of multi-carrier buses / Links / Stores (generic component path), the schema-driven Model/Build editors for them (incl. multi-port Links), **per-carrier energy-balance analytics** (`results/energy_balance.py` + card), correct **conversion emissions** (counted at the fuel generator at primary energy, efficiency-aware via **M3** — verified, no double-count), bus `carrier` settable in the Build form, carrier filtering via the Pivot chart, a **conversion-technology template library** (`lib/build/conversions.ts` + ConversionPicker on the Build Links step — one-click CCGT/OCGT/CHP/electrolyser/fuel-cell/heat-pump/resistive/gas-boiler/methanation, each wiring the Link + counterpart carrier bus + carriers + fuel supply), and a **carrier-aware dispatch mix** (`electricity_dispatch_by_carrier` + the client `deriveRunResults`): a conversion Link's power shows under its carrier (CCGT), the gas fuel-supply generator is excluded from the electricity mix, and transmission links stay out. **Remaining (minor):** non-geographic (CO₂/H₂) bus map rendering for hand-made/imported carrier buses; sector-data importers (later). | The decarbonisation studies users want need >1 vector. Engine + analytics + authoring all shipped. | 0 |
-
-| `M4` | `Open` | `Med` | `Both` | **Spatially-mobile storage / EV mobility coupling** — model demand that is *energy physically relocating between regions*, not just power flowing along a fixed edge. An EV fleet charges in region A, drives to region B, and discharges (or is unavailable) there: the stored energy moves with the vehicles. Standard PyPSA Links move power along a static edge and Stores are pinned to one bus, so neither captures a *state of charge that migrates between buses on a mobility schedule*. Approaches to evaluate: (a) PyPSA-Eur's BEV/V2G pattern — a per-region transport bus + electricity↔transport Link + battery Store with time-varying `e_max_pu`/availability + a `p_set` mobility-demand series — which captures charging flexibility but **not** the inter-region transfer; (b) an OD (origin–destination) mobility matrix realised as time-varying Links between regional EV-battery Stores that shuttle energy on a commute schedule; (c) a dedicated mobile-storage component with a bus-assignment time series. | The honest answer to "how do we incorporate EVs when the energy physically moves region to region?": today Ragnarok can model EV *charging load* per region (a Load or a Store+Link at each bus) but cannot represent the *transport of stored energy between regions* — the battery that fills up at home overnight and discharges at the workplace bus. Scope first (which of a/b/c), because it touches ingestion, the schema, and analytics. | 20,000 |
-
-#### M4 note — origin of the item
-
-Raised as a design question (2026-07-02): *"how to incorporate with EV which is not just energy but amount of energy physically moving from region to region?"* Captured here rather than answered inline — it needs a scoping pass (pick approach a/b/c above) before any build. The distinction that matters: a transmission Link moves **power** along a fixed edge every snapshot; an EV moves a **state of charge** from one bus to another on a mobility schedule. PyPSA has no native component for the latter, so M4 is a genuine extension, not a config exercise.
-
-#### M1 remainder — what's left after the core shipped
-
-The optimiser needs nothing (PyPSA does multi-carrier LP natively), the schema is complete, the **per-carrier energy balance + emissions** exist, the **conversion template library** (curated tech defaults + one-click wiring) shipped, and the **dispatch mix is carrier-aware** (`results/dispatch.py::electricity_dispatch_by_carrier` folds each conversion Link's electricity output in under its carrier via p0×efficiency and drops non-electricity-bus generators + transmission links; the client `deriveRunResults` mirrors it). Remaining nice-to-have: non-geographic carrier handling on the map (abstract CO₂/H₂ buses with no x/y — template-created buses inherit the anchor's coords, so this only bites hand-made/imported carrier buses); *(deferred)* sector-data importers (gas networks, heat/H₂ demand).
-
 ### Resource adequacy & robustness
 
-Build on the shipped stochastic engine (`backend/pypsa/stochastic.py`) + the `load_shedding` unserved-energy signal. Neither item exists yet.
+Build on the shipped stochastic engine (`backend/pypsa/stochastic.py`, a stochastic *optimiser*) + the `load_shedding` unserved-energy signal. Neither item below exists yet (confirmed by audit).
 
 | ID | Status | Pri | Surface | Task | Why | Cost |
 |---|---|---|---|---|---|---:|
-| `A1` | `Open` | `High` | `Both` | **Stochastic renewable profile generator** — an ensemble of synthetic wind/solar CF profiles from a base series, with a similarity/variability knob (target R² / RMSE / autocorrelation) preserving diurnal + seasonal shape. Feeds the shipped stochastic optimisation or a Monte-Carlo sweep, plus a robustness readout (objective / cost / curtailment / unserved-energy spread). | A model is solved against one weather year; users need sensitivity to renewable variability. Reuses the stochastic engine; produces the input ensemble for **A2**. | 18,000 |
-| `A2` | `Open` | `High` | `Both` | **LOLE calculator** — resource-adequacy metrics from an ensemble (or analytic convolution): **LOLE** (h/yr), **LOLP** per snapshot, **EUE / EENS**, worst contributing periods, against the "1 day in 10 years" yardstick. Unserved energy is already observable via `load_shedding`. | Adequacy studies need the reliability metrics regulators use. Depends on **A1**; storage + **M2** demand response contribute to the result. | 16,000 |
+| `A1` | `Open` | `High` | `Both` | **Stochastic renewable profile generator** — an ensemble of synthetic wind/solar CF profiles from a base series, with a similarity/variability knob (target R² / RMSE / autocorrelation) preserving diurnal + seasonal shape. Feeds the shipped stochastic optimisation or a Monte-Carlo sweep, plus a robustness readout. | A model is solved against one weather year; users need sensitivity to renewable variability. `stochastic.py` is the *optimiser* — it needs an input *ensemble*, which A1 produces (input to **A2**). | 18,000 |
+| `A2` | `Open` | `High` | `Both` | **LOLE calculator** — resource-adequacy metrics from an ensemble (or analytic convolution): **LOLE** (h/yr), **LOLP** per snapshot, **EUE / EENS**, worst contributing periods, against the "1 day in 10 years" yardstick. Unserved energy is already observable via `load_shedding`. | Adequacy studies need the reliability metrics regulators use. Depends on **A1**; storage + **M2** demand response contribute. | 16,000 |
 
-### Run history
+### Guided & conversational surfaces
+
+Top-down surfaces that build a runnable workbook from high-level intent, and the AI wrapper. (The **Build view** is a step-by-step *sheet* editor; these build from *intent*.)
 
 | ID | Status | Pri | Surface | Task | Why | Cost |
 |---|---|---|---|---|---|---:|
-| `H2′` | `Open` | `Medium` | `Both` | **Pluggable result-mapper registry + raw-sheet surfacing** — the **core** of H2 shipped (`POST /api/import/result`). What remains: per-source-format **column-mapping rules in a small registry** (extendable via a `result_mapper` plugin hook) so arbitrary third-party result layouts map onto `outputs.{static,series}`, and **unrecognised sheets stored verbatim + surfaced as raw tables**. | Today's reconstruction handles Ragnarok's own schema + canonical bare workbooks; a true third-party layout needs a mapping layer. Do it when a real third-party format needs it. | 10,000 |
+| `W2` | `In progress` | `High` | `Both` | **Country starter models** — three-question landing (Country → Year → What to do) emitting a curated, immediately-runnable workbook. **Done:** the **KPG193 pack** (KOR) loadable from Welcome. **Remaining:** the per-country **recipe framework** (`starter_packs/<ISO3>/<year>/recipe.json`) that picks the best source per slot for arbitrary countries. | Top-down complement to the Data view. KPG193 proves the shape; generalising to any country is the work. | 18,000 |
+| `W1` | `Open` | `High` | `Both` | **Guided model-builder wizard** — a stepped flow (Region → Question → Time horizon → Scope → Constraints → Confidence-defaults) that composes the existing importers + transforms into a fully-populated, immediately-runnable workbook, with provenance flagging wizard-filled vs user-edited cells. | State your goal in plain language, get a model. The Data view is bottom-up; non-modellers can't navigate that. Zero new data-source code — it sequences what exists. | 32,000 |
+| `W3` | `Open` | `Med` | `Frontend` | **Interactive in-app tutorial / guided tour** — a skippable, resumable coach-mark walkthrough of the core loop (build → edit → run → analyse), driven by a declarative step script, auto-offered on first run. Runs against the bundled demo/example networks (shipped). | New users land in a dense multi-view app with no guided path. Teaches the workflow in-context. Distinct from W1/W2 (build a model). | 16,000 |
+| `L1` | `Open` | `High` | `Both` | **Bifrost — AI conversational model builder** — stand-alone project (React/TS chat shell + thin Python relay). The user asks a question; Bifrost runs an **agentic tool-use loop** deciding which Ragnarok importer / schema tools to call to assemble a workbook (same JSON schema `POST /api/run` accepts), then lets the user inspect or run. Data gaps are resolved by asking, not hallucinating. Brain: **Claude Opus 4.8** (or **Sonnet 4.6**) via a thin relay reusing the BYOK key store. Bifrost owns no solver / DB / editor — it delegates to Ragnarok. | LLM answers to energy questions are unverifiable; routing through a real PyPSA solve makes every conclusion falsifiable. Not started. | 36,000 |
+| `L2` | `Open` | `Med` | `Both` | **Bifrost data-ask loop** — when a gap can't be filled from open data (private fleet, confidential topology), Bifrost asks the user to supply rows directly (CSV paste / quick form / file), validated against the schema and merged before continuing. Depends on **L1**. | Prevents silent gap-filling with hallucinated defaults. | 12,000 |
 
 ### Architecture
 
@@ -151,44 +97,48 @@ Cross-cutting platform direction (not single features). Assumes a dedicated back
 
 | ID | Status | Pri | Surface | Task | Why | Cost |
 |---|---|---|---|---|---|---:|
-| `X1` | `In progress` | `Medium` | `Both` | **Backend-centric data processing (thin browser)** — move data processing + model lifecycle to the backend so the browser is a light view layer. **Done:** the stateful server-side session store (`backend/app/{model_store,sqlite_store,session_store}.py` + `/api/session/*`), server-held time-series with windowed/downsampled fetch, server-side Python plugin execution (`/api/plugins/*`), and light stored-run views. **Remaining:** porting `deriveRunResults` / chart-series derivation server-side, JS-plugin sandboxing/migration (**X5**), and full push/poll sync. | Large models make a browser-resident app heavy; the session-store direction shipped, the analytics-derivation port + plugin sandbox remain. | 30,000 |
-| `X2` | `Open` | `Medium` | `Both` | **Data-import KPI computation → backend API** — move the remaining client-side analysis of imported data (`InputAnalyser.tsx` + in-browser KPI/statistics) to an endpoint; the frontend just renders. The import *preview* is already backend-computed. A concrete, low-risk slice of **X1**. | Keeps heavy per-row statistics off the main thread and centralises KPI definitions so they don't drift from the import preview. | 10,000 |
-| `X6` | `Open` | `Medium` | `Both` | **Richer / clearer plugin output scheme** — extend the plugin contract beyond single-run, data-in/data-out: (a) declarative **composite host-rendered layouts** (chart grids with shared legend/settings); (b) **multiple runs / scenarios** as input (analytics-over-N-runs); (c) one crisp versioned contract. Keep "host owns rendering, no raw HTML/SVG". | The scenario-comparison matrix couldn't be a plugin (single-run + no custom layout). Generalising lets multi-run analytics ship as plugins. Pairs with **X1** / **X5**. | 20,000 |
-| `X3` | `Open` | `Low` | `Both` | **Scenario library vs. run history — review.** Decide whether to slim/deprecate the in-model scenario library (`RAGNAROK_Scenarios` presets) or reposition it explicitly as "named run-config *presets*" distinct from History ("runs I actually executed"). A scoping decision, not a build. | History captures "what I ran" comprehensively, so the preset library is less load-bearing. | 4,000 |
-| `X5` | `Low` | `Low` | `Frontend` | **Frontend-plugin Worker sandbox** — evaluate frontend-plugin JS in a Web Worker instead of in-page `new Function`; hooks become postMessage round-trips, `worker.terminate()` enforces a timeout. | The JS runtime is the weakest isolation point. Deferred while backend plugins absorb plugin workloads — build only if 3rd-party *frontend* plugins stay first-class. | 12,000 |
+| `X1` | `In progress` | `Medium` | `Both` | **Backend-centric data processing (thin browser)**. **Done:** the stateful server-side session store (`model_store` / `sqlite_store` / `session_store` + `/api/session/*`), server-held time-series with windowed/downsampled fetch, server-side Python plugins, light stored-run views. **Remaining:** porting `deriveRunResults` / chart-series derivation server-side (still in `lib/results/runResults.ts`), JS-plugin sandboxing (**X5**), full push/poll sync. | Large models make a browser-resident app heavy; the session-store direction shipped, the analytics-derivation port remains. | 30,000 |
+| `X2` | `Open` | `Medium` | `Both` | **Data-import KPI computation → backend API** — move the remaining client-side analysis of imported data (`InputAnalyser.tsx` in-browser KPI/statistics) to an endpoint; the frontend just renders. The import *preview* is already backend-computed. A concrete, low-risk slice of **X1**. | Keeps heavy per-row statistics off the main thread and centralises KPI definitions. | 10,000 |
+| `X6` | `Open` | `Medium` | `Both` | **Richer / clearer plugin output scheme** — extend the plugin contract: (a) declarative **composite host-rendered layouts** (chart grids with shared legend/settings); (b) **multiple runs / scenarios** as input (analytics-over-N-runs); (c) one crisp versioned contract. Grid `inputLayout`/`outputLayout` exists; multi-run + composite layouts remain. Keep "host owns rendering, no raw HTML/SVG". | The scenario-comparison matrix couldn't be a plugin (single-run + no custom layout). Pairs with **X1** / **X5**. | 20,000 |
+| `X3` | `Open` | `Low` | `Both` | **Scenario library vs. run history — review.** Decide whether to slim/deprecate the in-model scenario library (`RAGNAROK_Scenarios` presets) or reposition it explicitly as "named run-config presets" distinct from History. A scoping decision, not a build. | History captures "what I ran" comprehensively, so the preset library is less load-bearing. | 4,000 |
+| `X5` | `Low` | `Low` | `Frontend` | **Frontend-plugin Worker sandbox** — evaluate frontend-plugin JS in a Web Worker instead of in-page `new Function` (still the case in `lib/plugins/runtime.ts`); hooks become postMessage round-trips, `worker.terminate()` enforces a timeout. | The JS runtime is the weakest isolation point. Deferred while backend plugins absorb plugin workloads. | 12,000 |
 
 ### Correctness & trust
 
-What makes Ragnarok a *faithful* PyPSA frontend rather than just a feature-alike — see *North star* layer 5 (and layer 3 for diagnostics).
+What makes Ragnarok a *faithful* PyPSA frontend rather than just a feature-alike — see *North star* layer 5 (and layer 3 for diagnostics). Neither exists yet (confirmed by audit).
 
 | ID | Status | Pri | Surface | Task | Why | Cost |
 |---|---|---|---|---|---|---:|
-| `Q1` | `Open` | `High` | `Backend` | **PyPSA reference-parity test suite** — run PyPSA's own example networks plus a curated set covering unit commitment / multi-investment / storage / sector coupling / SCLOPF end-to-end through Ragnarok's build → solve → results path, and assert objective, dispatch, prices, and optimal capacities match native `n.optimize()` within tolerance. | The strongest "faithful frontend" guarantee: proves Ragnarok *reproduces* PyPSA, not just round-trips its files. Round-trip I/O is already tested; end-to-end result parity across features is not systematically pinned. | 18,000 |
-| `Q2` | `Open` | `Medium` | `Both` | **Infeasibility & solver diagnostics** — when a solve is infeasible / unbounded / numerically ill, surface *why* (offending constraint group, per-bus energy-balance shortfall, suspect coefficient ranges) instead of a raw solver string, and suggest fixes (enable load shedding, relax a cap). | A proper frontend must *explain* failure, not just report it. Today an infeasible model returns a solver error with no self-diagnosis path. Pairs with the shipped `load_shedding` backstop. | 14,000 |
+| `Q1` | `Open` | `High` | `Backend` | **PyPSA reference-parity test suite** — run PyPSA's own example networks plus a curated set (unit commitment / multi-investment / storage / sector coupling / SCLOPF) end-to-end through Ragnarok's build → solve → results path, and assert objective, dispatch, prices, and optimal capacities match native `n.optimize()` within tolerance. | The strongest "faithful frontend" guarantee: proves Ragnarok *reproduces* PyPSA, not just round-trips its files. Round-trip I/O is tested; end-to-end result parity is not systematically pinned. | 18,000 |
+| `Q2` | `Open` | `Medium` | `Both` | **Infeasibility & solver diagnostics** — when a solve is infeasible / unbounded / numerically ill, surface *why* (offending constraint group, per-bus energy-balance shortfall, suspect coefficient ranges) and suggest fixes (enable load shedding, relax a cap), instead of a raw solver string. | A proper frontend must *explain* failure, not just report it. Pairs with the shipped `load_shedding` backstop. | 14,000 |
+
+### Run history
+
+| ID | Status | Pri | Surface | Task | Why | Cost |
+|---|---|---|---|---|---|---:|
+| `H2′` | `Open` | `Medium` | `Both` | **Pluggable result-mapper registry + raw-sheet surfacing** — the **core** of H2 shipped (`POST /api/import/result`). What remains: per-source-format **column-mapping rules in a small registry** (extendable via a `result_mapper` plugin hook) so arbitrary third-party result layouts map onto `outputs.{static,series}`, and **unrecognised sheets stored verbatim + surfaced as raw tables**. | Today's reconstruction handles Ragnarok's own schema + canonical bare workbooks; a true third-party layout needs a mapping layer. Do it when a real third-party format needs it. | 10,000 |
 
 ## Suggested execution order
 
-Forward plan from 2026-07-01 (re-sequenced after the status audit — the financial/decision spine + modelling reach are done). Respecting cross-group dependencies.
+Forward plan from 2026-07-02 (re-sequenced after the full status re-audit). Respecting cross-group dependencies.
 
-> **If the goal is "a fully-available PyPSA frontend"**, follow the *North star* critical path first: **D1 → I4 → X1/X2 → W2 → Q1**. The theme-ordered list below is the fuller backlog; the near-term block leads with the pieces on that path.
-
-**Recently shipped** (see *Already shipped* for detail): B1, F1, F2, PP1, DW1–DW4, **M1 (complete — template library + carrier-aware dispatch mix)**, M2, M3, B3, **T1 (complete — retarget + 5-method forecast incl. ARIMA/Prophet)**, T2, **I4 (complete — PVGIS/NASA/ninja + measured ENTSO-E/OpenElectricity/Elexon profiles)**, **I8 (Climate Watch → CO₂ cap)**, **I9 (seam + ingest + Data-tab panel + setup script; env provisioning proven on a real machine)**, statistics passthrough, MGA near-optimal, the strategic-pricing analytics tiers.
-
-**Near-term — finish the partials:**
-
-1. **I9** — per-request `config.yaml` override (the Build button currently runs the workflow dir's own config, ignoring the picked country/clusters/horizon) + one verified end-to-end country build now that a working env exists.
-2. **I6** — day-ahead price half (hourly load shipped; Elexon makes GB price nearly free, ENTSO-E A44 reuses the existing client).
+> **If the goal is "a fully-available PyPSA frontend"**, follow the *North star* critical path first: **X1/X2 → W2 → Q1**. The data-in first cut (weather→renewable, any-country network) has shipped; the theme-ordered list below is the fuller backlog.
 
 **Scale & trust (the "frontend-of-PyPSA" backbone — next on the critical path):**
 
-3. **Q1** — PyPSA reference-parity test suite · **Q2** — infeasibility & solver diagnostics.
-4. **X1 / X2** — thin-client: port analytics derivation server-side so 1000s-of-bus networks don't choke the browser (session store shipped).
+1. **Q1** — PyPSA reference-parity test suite · **Q2** — infeasibility & solver diagnostics.
+2. **X1 / X2** — thin-client: port analytics derivation server-side so 1000s-of-bus networks don't choke the browser (session store shipped).
 
 **Data & model-assembly layer:**
 
-5. **I1** — one-location → one-model bootstrap orchestration (the importer set is now rich enough to compose).
-6. **I3** — driver-based demand forecast · **I5** — fuel & commodity prices.
-7. **D1** — remaining: source-health checks, versioned provenance, general cache abstraction.
+3. **I6** — day-ahead price half (Elexon makes GB price nearly free; ENTSO-E A44 reuses the existing client).
+4. **I5** — fuel & commodity prices · **I1** — one-location → one-model bootstrap orchestration.
+5. **I3** — driver-based demand forecast · **I7** — calibration history · **D1** remaining (health/provenance/general cache) · **D2** self-hosted demand DB.
+
+**Authoring & modelling:**
+
+6. **T4** — chart-based quadratic marginal-cost editor (the near-term ask, 2026-07-02).
+7. **M4** — EV / spatially-mobile storage (scope a/b/c first).
 
 **Risk & adequacy:**
 
@@ -198,14 +148,10 @@ Forward plan from 2026-07-01 (re-sequenced after the status audit — the financ
 **Guided & conversational surfaces:**
 
 10. **W2** — country starter-pack framework (KPG193 prototype shipped).
-11. **W1** — guided model-builder wizard · **W3** — in-app tutorial (demo networks shipped).
+11. **W1** — guided model-builder wizard · **W3** — in-app tutorial.
 12. **L1** — Bifrost AI model builder → **L2** — data-ask loop.
 
-**Financial-decision surface:**
-
-13. **PP2** — procurement optimizer, inside a dedicated use-case surface that also reframes PP1 + DW4 (deferred design decision).
-
-**Off the linear path** (opportunistic, non-blocking): **B2** simulation adapter · **I7** calibration importer · **D2** self-hosted demand DB · **H2′** result-mapper registry · **X3**/**X5**/**X6** architecture / plugin-sandbox items · **B4** strategic MPEC (deferred).
+**Off the linear path** (opportunistic, non-blocking): **I7** calibration importer · **H2′** result-mapper registry · **X3** / **X5** / **X6** architecture & plugin-sandbox items.
 
 ## Already shipped
 
@@ -213,52 +159,58 @@ Compact history of completed work, grouped by area. Kept so completed items are 
 
 ### Financial & decision layer
 
-- **`B1` Merchant / price-taker optimisation** — `backend/pypsa/results/merchant.py`. Two-stage: stage-1 system LMP (`buses_t.marginal_price`) or a user-fixed price → reduced network of the owner's assets + a per-bus **price-taker market node** (Generator priced at π(t), `p_min_pu=-1` so it can sell *and* buy). Minimising `Σ mc·p + Σ π·p_market` = maximising owner profit. Runs on a `network.copy()` of the solved optimum. Card + preset row + tests.
-- **`F1` Company / owner dimension** — `results/company.py`; per-owner KPIs (capacity, dispatch, revenue, emissions) grouped by a configurable **owner column** (default `owner`, free-text; drives F1/F2/B1). Synthetic `owner` schema column injected so the grid offers it. Company drill-down card.
-- **`F2` Company-level financial model** — `results/finance.py`; NPV / IRR / payback / DSCR per owner. Reconstructs overnight capex from the annualised `capital_cost` via inverse CRF; IRR by bisection; optional debt config → DSCR.
-- **`PP1` PPA contract modeler** — `results/ppa.py`; fixed-price PPA valued against the run LMP as a Contract-for-Difference (owner generation at bus LMP, or a flat block at mean price). Seller/buyer net, energy, capture vs strike. Card + tests. *(Full contract-shape / P50-P90 uncertainty depth is folded into the future use-case surface with PP2/DW4.)*
-- **`DW1` Financial-first UX + use-case launcher** — `Decisions.tsx`; money-question cards that enable a workflow's config + route to setup; the Market tab's default landing.
+- **`B1` Merchant / price-taker optimisation** — `results/merchant.py`. Two-stage: stage-1 system LMP (or user-fixed price) → reduced network of the owner's assets + a per-bus **price-taker market node** (Generator at π(t), `p_min_pu=-1` so it can sell *and* buy). Minimising `Σ mc·p + Σ π·p_market` = maximising owner profit. Runs on a `network.copy()` of the solved optimum. Card + preset + tests.
+- **`F1` Company / owner dimension** — `results/company.py`; per-owner KPIs grouped by a configurable **owner column** (default `owner`, free-text; drives F1/F2/B1). Synthetic `owner` schema column injected. Drill-down card.
+- **`F2` Company-level financial model** — `results/finance.py`; NPV / IRR / payback / DSCR per owner. Overnight capex reconstructed from annualised `capital_cost` via inverse CRF; IRR by bisection; optional debt → DSCR.
+- **`PP1` PPA contract modeler** — `results/ppa.py`; fixed-price PPA valued against the run LMP as a Contract-for-Difference. Card + tests.
+- **`PP2` Procurement strategy optimizer** — `app/procurement.py` + `routers/procurement.py`; CVaR-constrained (Rockafellar–Uryasev LP via scipy/HiGHS) least-cost instrument mix (spot + PPA + forward + retail) over bootstrapped price scenarios; optimal mix + spot baseline + cost-vs-risk efficient frontier. Stateless `POST /api/procurement/optimize`. Frontend = the dedicated **Post-analysis** use-case surface (`Procurement.tsx`) with a risk-budget slider + inline frontier plot. 7 tests.
+- **`DW1` Financial-first UX + use-case launcher** — `Decisions.tsx`; money-question cards that enable a workflow's config + route to setup (cross-tab aware).
 - **`DW2` Asset-swap / repowering what-if** — `results/asset_swap.py`; retire a multi-filter selection, replace at a ratio (+ optional paired storage), re-solve, report Δemissions / Δcost / payback. Card + tests.
 - **`DW3` ESS business-case builder** — `results/ess.py`; battery size sweep, arbitrage vs LMP → NPV/IRR/payback per size. Card + tests.
-- **`DW4` PPA opportunity explorer** — `results/ppa_explorer.py`; ranks candidate PPA shapes (as-produced generation / flat block / peak block) by capture price at a given strike; companion to PP1 (reuses its config). Card + tests.
-- **Market power & strategic pricing (analytics precursors to B4)** — price formation (`price_formation.py` — price vs residual demand, marginal carrier), unit commitment (`commitment.py` — starts / on-off), bid strategy (`bid_strategy.py` — raise owner offers, re-clear, profit vs price-taker), optimal single-owner bid (`optimal_bid.py` — markup sweep for best response). Each a card + test. Full oligopoly (endogenous prices) remains **B4**, deferred.
-- **Market & Policy tab** — `SettingsView` `variant` split; technical settings vs a new top-level Market & Policy tab housing the ownership/market-behaviour sections.
+- **`DW4` PPA opportunity explorer** — `results/ppa_explorer.py`; ranks candidate PPA shapes by capture price at a given strike. Card + tests.
+- **`B2` Market simulation adapter** — `results/simulation.py` (`run_market_simulation` + `run_market_sim_study`), gated in `run_pypsa` as a study mode (`market_sim_enabled`, short-circuits before `optimize()`). Rule-based merit-order clearing: uniform vs pay-as-bid settlement, VOLL scarcity, storage price-quantile arbitrage. Frontend Market-simulation section + `MarketSimulationCard`. 10 tests.
+- **`B4` Strategic price-maker bidding** — `results/strategic.py` (`build_strategic_bidding`); best-response sweep over the B2 simulator (bid adder or capacity withholding), profits at true marginal cost, optional two-owner alternating best-response (≈ Nash). Rides the B2 study payload (`marketSimConfig.strategic`). `StrategicBiddingCard`. 6 tests. *(The old "MPEC/bilevel" framing was overkill — on single-zone merit order it reduces to a best-response search.)*
+- **Market-power analytics precursors** — price formation (`price_formation.py`), unit commitment (`commitment.py`), bid strategy (`bid_strategy.py`), optimal single-owner bid (`optimal_bid.py`). Each a card + test.
+- **Tabs = SettingsView variants** — `variant` ∈ {settings, market, analysis}: technical **Settings**; **Market & Policy** (solve-inputs: asset swap, ESS, carbon, constraints); **Post-analysis** (reads results, no re-solve: Decisions launcher, procurement, company, merchant, bidding, PPA). ActivityBar line-icons + hover tooltips; cross-tab launcher navigation.
 
 ### Optimisation & analytics modes
 
-- Statistics passthrough (PyPSA `network.statistics()` card) and **MGA near-optimal** corridor (`optimize_mga`) — Phase 2.
+- Statistics passthrough (`network.statistics()` card) and **MGA near-optimal** corridor (`optimize_mga`).
 - Single-period dispatch, multi-investment / pathway planning, rolling-horizon, stochastic (`stochastic.py`), security-constrained (SCLOPF).
-- **`B3` Power-flow study mode** — `results/power_flow.py`; standalone `n.pf()`/`n.lpf()` (gated by `pf_enabled`) returning a focused payload (convergence, branch loading, voltage profile, losses, nodal balance). Section + card + tests.
-- Backend abstraction layer (`backend/app/backends/`) — `Backend` protocol, registry, `PypsaBackend`, `GET /api/backends`.
-- **`F0` Asset economics** — competitive-benchmark profit from the cost-min solve with no extra solve; per-generator/storage/carrier revenue, margin, capture price, capex recovery. `GeneratorEconomicsCard` + XLSX sheets + tests.
+- **`B3` Power-flow study mode** — `results/power_flow.py`; standalone `n.pf()`/`n.lpf()` (gated by `pf_enabled`). Section + card + tests.
+- Backend abstraction layer (`backend/app/backends/`) — `Backend` protocol, registry, `PypsaBackend`, `GET /api/backends`. *(B2/B4 deliberately use the study-mode gate, not this adapter seam.)*
+- **`F0` Asset economics** — competitive-benchmark profit from the cost-min solve with no extra solve. `GeneratorEconomicsCard` + XLSX sheets + tests.
 
 ### Modelling extensions
 
-- **`M3` Fuel system — efficiency-aware emissions & carbon** — `co2_emissions` treated on the primary-energy (fuel) basis: emissions and the carbon adder divide by generator `efficiency` (`utils/emissions.py::per_generator_emission_factor`), applied across all 12 emission-computation sites (carbon adder, DSL `emissions`, custom `co2_cap`, breakdown, company, asset-swap, stochastic, pathway, system-emissions series, carrier totals, cost-breakdown, imported-results). η=1 reproduces the old numbers. Tests in `test_fuel_efficiency.py`.
-- **`M1` Sector coupling (core)** — per-carrier energy balance (`results/energy_balance.py`) + card; conversion emissions verified correct at the fuel generator (no double-count); multi-carrier ingestion + Model/Build editing. *Remaining polish tracked above.*
-- **`M2` Demand response** — `network/demand_response.py`: **shiftable load** (DR bus + lossless Link + cyclic Store, energy-conserving) and **price-elastic demand** (stepped willingness-to-pay curve); per-load selection; analytics (`build_demand_response`, `build_price_elastic`) + cards. Tests in `test_demand_response.py`. *(The coarse per-bus `load_shedding` shed mode predates this.)*
+- **`M3` Efficiency-aware emissions & carbon** — `co2_emissions` on the primary-energy (fuel) basis: emissions and the carbon adder divide by generator `efficiency` (`utils/emissions.py`), applied across all 12 emission-computation sites. η=1 reproduces the old numbers. `test_fuel_efficiency.py`.
+- **`M1` Sector coupling** — per-carrier energy balance (`results/energy_balance.py`) + card; conversion emissions correct at the fuel generator (no double-count); multi-carrier ingestion + Model/Build editing; **conversion-template library** (`lib/build/conversions.ts` + ConversionPicker); **carrier-aware dispatch mix** (`results/dispatch.py::electricity_dispatch_by_carrier`). *Minor remaining: non-geographic (CO₂/H₂) bus map rendering for hand-made carrier buses; sector-data importers — both deferred, low value.*
+- **`M2` Demand response** — `network/demand_response.py`: shiftable load (DR bus + lossless Link + cyclic Store) and price-elastic demand (stepped WTP curve); per-load selection; analytics + cards. `test_demand_response.py`.
 
 ### Transformation tools
 
-- **`T2` Reduced-order / clustering tool** — `backend/app/routers/transforms.py`; spatial network reduction (greedy network-**modularity** clustering + **k-means** on bus x/y via scikit-learn), returns the reduced model + busmap for map preview. Surfaced in the **Forge** view ("Reduce network").
+- **`T1` Forecast tool / snapshot editor** — bulk series transforms (scale/offset/shift/interpolate/clip/grow) via `POST /api/session/series/{name}/transform`; **snapshot retarget** (`/snapshots/retarget`); **multi-year forecast** (`/snapshots/forecast`) with five methods (CAGR / linear / regression / ARIMA / Prophet — `timeseries.py::STAT_METHODS`). Surfaced in Forge → Temporal.
+- **`T2` Reduced-order / clustering** — `routers/transforms.py`; spatial reduction (modularity clustering + k-means on bus x/y), returns reduced model + busmap. Forge "Reduce network".
 - **`T3` Component-to-bus reconciliation** — bulk **Snap to nearest bus** in Forge (`lib/forge/snap.ts`) + validation scanner; OSM import auto-snaps line endpoints.
-- **`T1` (partial)** — server-side bulk series transforms (scale/offset/shift/interpolate/clip/grow) via `/api/session/series/{name}/transform` + Transform control. *Snapshot retarget + multi-year forecast remain (see Open work).*
 
 ### Data importers (framework + sources)
 
-- Importer framework: source registry (`importers/registry.py`), per-database modules (`importers/databases/*`), region selection, combine/preview endpoints, Data view country-first surface, BYOK API-key store (`ApiKeys.tsx` + `secrets.ts`).
-- Sources shipped: **OSM** grid topology + **OSM power plants**, **WRI GPPD** fleet, **World Bank** annual demand, **ENTSO-E** hourly load + installed capacity + **measured renewable profiles** (`entsoe_generation_profile` — actual generation A75 ÷ installed capacity A68 → real CF), **EIA-930** hourly demand, **OpenElectricity** (`openelectricity_demand` + `openelectricity_renewable` — Australian NEM/WEM, BYOK), **Elexon** (`elexon_demand` + `elexon_renewable` — Great Britain BMRS, keyless), **KPG193** Korea pack (network / demand profile / renewable capacity / renewable profile), **Open-Meteo / PVGIS / NASA POWER** keyless weather → renewable CF (any coordinate; UTC-offset for local time), **Renewables.ninja** validated CF (`renewables_ninja`, BYOK, live-only per licence).
+- Importer framework: source registry (`importers/registry.py`), per-database modules (`importers/databases/*`), region selection, combine/preview endpoints, Data view country-first surface, BYOK API-key store (`ApiKeys.tsx` + `secrets.ts` — resolver walks sessionStorage → localStorage → process.env; keys never leave the machine).
+- Sources shipped: **OSM** grid topology + power plants, **WRI GPPD** fleet, **World Bank** annual demand, **ENTSO-E** hourly load + installed capacity + **measured renewable profiles** (`entsoe_generation_profile`, A75÷A68), **EIA-930** hourly demand, **OpenElectricity** (AU, BYOK — demand + measured renewable), **Elexon** (GB, keyless — demand + measured renewable), **KPG193** Korea pack (network / demand / renewable capacity / renewable profile), **Open-Meteo / PVGIS / NASA POWER** keyless weather → renewable CF (any coordinate, multi-point, UTC-offset, on-disk cache), **Renewables.ninja** validated CF (BYOK, live-only per licence).
+- **`I4` Renewable resource profile importer** — the weather + measured-profile sources above + the **attach-to-existing-fleet transform** (`POST /api/transform/renewable-profiles`, own x/y → bus x/y, fetch once per 0.1° cell) + on-disk caching. *Minor remaining: hydro-inflow (`storage_units-inflow`).*
+- **`I8` Policy & target snapshot** — `climatewatch_policy` importer; baseline emissions from Climate Watch's keyless API, trajectory (target year + % reduction) → one `primary_energy`/`co2_emissions` global constraint with provenance.
+- **`I9` PyPSA-Earth network builder (async job)** — `routers/pypsa_earth.py`: build queue + poll + result + availability, gated behind `RAGNAROK_PYPSA_EARTH_DIR`; **per-request config override** (`_build_overlay` writes `countries=[iso2]`, clusters, cost year → `ragnarok_config_{iso2}.yaml`, passed via `--configfile`); `ingest_network()` → `serialize.network_to_model`; Data-tab frontend panel; setup script. *Only external ops remain (host conda env + CDS key + cutout cache — cannot live in this repo).*
 
 ### Project exchange
 
-- **`H1` Import-project decoupled from History** — "Import Project" opens a file (no persist); History comes only from a solve or the explicit `POST /api/import/result`.
-- **`H2` (core) Import external results → History** — `POST /api/import/result` ingests a Ragnarok package verbatim or reconstructs analytics from a bare `.xlsx` (`from_outputs`), persists `origin="xlsx_import"`. Per-format mapper registry remains **H2′**.
-- Pure-JSON project export/import; `deriveRunResults` rebuild on import; metadata sheets round-trip; HTML report export; CSV-folder / netCDF / HDF5 I/O. Round-trip test suites (frontend + backend).
+- **`H1` Import-project decoupled from History** — "Import Project" opens a file (no persist); History comes only from a solve or explicit `POST /api/import/result`.
+- **`H2` (core) Import external results → History** — `POST /api/import/result` ingests a Ragnarok package verbatim or reconstructs analytics from a bare `.xlsx`, persists `origin="xlsx_import"`. Per-format mapper registry remains **H2′**.
+- Pure-JSON project export/import; `deriveRunResults` rebuild on import; metadata sheets round-trip; HTML report export; CSV-folder / netCDF / HDF5 I/O. Round-trip test suites.
 
 ### Analytics & UX
 
-- Capacity-by-period chart; cross-scenario `ScenarioPivotCard`; carrier-level analytics card; load drill-down; ECharts pivot (SVG renderer load-bearing for Excel export); dashboard card system (kind + interface + case + label + conditional preset row); chart/card-type switching; constraints workspace overlay; adaptive time-axis; standard `line_types`/`transformer_types` typeahead.
-- Bundled solve-validated **example networks** (three_bus / renewables_storage / capacity_expansion) with a Welcome-screen picker + `/api/examples` loader — the onboarding demo (W3 will teach against these).
+- Capacity-by-period chart; cross-scenario `ScenarioPivotCard`; carrier-level card; load drill-down; ECharts pivot (SVG renderer load-bearing for Excel export); dashboard card system (kind + interface + case + label + conditional preset row); chart/card-type switching; constraints workspace overlay; adaptive time-axis; standard `line_types`/`transformer_types` typeahead.
+- Bundled solve-validated **example networks** (three_bus / renewables_storage / capacity_expansion) with a Welcome picker + `/api/examples` loader.
 
 ### Data integrity
 
@@ -270,13 +222,13 @@ Compact history of completed work, grouped by area. Kept so completed items are 
 
 ### Plugin platform
 
-- In-browser plugin runtime + server-side Python plugin execution (`/api/plugins/*`). SDK 2 (documented in `docs/plugin.md`): **`P1`** chart output, **`P2`** multi-select control, **`P3`** dynamic select options (`optionsFrom`). Plugins return data; the host owns rendering.
+- In-browser plugin runtime + server-side Python plugin execution (`/api/plugins/*`). SDK 2 (`docs/plugin.md`): chart output, multi-select control, dynamic select options, grid `inputLayout`/`outputLayout`. Plugins return data; the host owns rendering.
 
 ## Deliberately not pursued
 
 - **Unifying the two plugin runtimes (`PluginDetail` vs `BackendPluginDetail`)** — duplication is managed; the thin-client direction (X1) resolves it by attrition.
-- **Backend retention of solved `pypsa.Network`** — the run store persists results (History), not the network object; the JSON cache + `deriveRunResults` round-trip losslessly, so retaining the object buys nothing.
+- **Backend retention of solved `pypsa.Network`** — the run store persists results (History), not the network object; the JSON cache + `deriveRunResults` round-trip losslessly.
 - **Separate "Topology" build mode** — the unified map-driven Build already folds in the free-form affordances.
-- **PyPSA-Earth as a registered data source** (former `I2`) — it *produces* networks from upstream data; importing its output is just importing a PyPSA `.nc` (already covered by `POST /api/import/netcdf`).
-- **PyPSA `technology-data` / OWID Energy as registered data sources** — static CSVs in git repos, not queryable databases (violates the "data only from a proper database" rule). Cost defaults will come from a queryable upstream or curated in-app.
-- **OPSD `time_series_60min_singleindex.csv`** — a ~150 MB CSV, stops ~2020; replaced by the shipped ENTSO-E/EIA on-demand importers and tracked for a self-hosted cache under **D2**.
+- **PyPSA-Earth as a registered data source** (former `I2`) — it *produces* networks; importing its output is just importing a PyPSA `.nc` (already covered by `POST /api/import/netcdf`).
+- **PyPSA `technology-data` / OWID Energy as registered data sources** — static CSVs in git repos, not queryable databases. Cost defaults will come from a queryable upstream or curated in-app.
+- **OPSD `time_series_60min_singleindex.csv`** — a ~150 MB CSV, stops ~2020; replaced by the shipped ENTSO-E/EIA on-demand importers, tracked for a self-hosted cache under **D2**.
