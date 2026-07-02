@@ -325,6 +325,80 @@ class SnapshotForecast(BaseModel):
     sessionId: str = "default"
 
 
+class DriverForecast(BaseModel):
+    """Body for ``POST /api/session/snapshots/driver-forecast`` (I3).
+
+    Unlike T1's forecast (uniform scale, same shape), this derives a NEW hourly
+    shape from drivers: macro growth (population + GDP × elasticity) scales the
+    base profile, and electrified heat / EV charging add load following their
+    own seasonal/diurnal templates. Applied to the demand sheet(s); every other
+    series is re-dated to the target year unchanged.
+    """
+
+    fromYear: int
+    toYear: int
+    popGrowthPct: float = 0.0
+    gdpGrowthPct: float = 0.0
+    gdpElasticity: float = 0.5
+    heatAddedGWh: float = 0.0
+    evAddedGWh: float = 0.0
+    snapshotWeight: float = 1.0
+    growSheets: list[str] | None = None  # default: loads-p_set
+    sessionId: str = "default"
+
+
+@router.post("/snapshots/driver-forecast")
+def driver_forecast_snapshots(payload: DriverForecast) -> dict:
+    """Driver-based demand forecast (I3) — evolve the demand SHAPE, not just level."""
+    from .. import demand_drivers, timeseries
+
+    model = model_store.load_full_model(payload.sessionId)
+    if not model:
+        raise HTTPException(status_code=400, detail="No working model in this session.")
+    delta = int(payload.toYear) - int(payload.fromYear)
+    grow = set(payload.growSheets or ["loads-p_set"])
+    if not any(model.get(s) for s in grow):
+        raise HTTPException(
+            status_code=400,
+            detail=f"No demand series to forecast ({', '.join(sorted(grow))} not in the model).",
+        )
+
+    meta: dict = {}
+    new_snaps: list[str] = []
+    for sheet, rows in list(model.items()):
+        if not model_store.is_series_sheet(sheet, rows) or not rows:
+            continue
+        if sheet in grow:
+            new_rows, meta = demand_drivers.driver_demand_forecast(
+                rows,
+                from_year=int(payload.fromYear),
+                to_year=int(payload.toYear),
+                pop_growth_pct=payload.popGrowthPct,
+                gdp_growth_pct=payload.gdpGrowthPct,
+                gdp_elasticity=payload.gdpElasticity,
+                heat_added_gwh=payload.heatAddedGWh,
+                ev_added_gwh=payload.evAddedGWh,
+                snapshot_weight=payload.snapshotWeight,
+            )
+        else:
+            # Non-demand series (availability, prices) are re-dated, never grown.
+            index_col = timeseries.series_index_col(list(rows[0].keys()))
+            new_rows = [
+                {k: (timeseries.shift_snapshot_year(str(v), delta) if k == index_col else v)
+                 for k, v in r.items()}
+                for r in rows
+            ]
+        model[sheet] = new_rows
+        if sheet in grow and new_rows:
+            idx = timeseries.series_index_col(list(new_rows[0].keys()))
+            new_snaps = [str(r.get(idx)) for r in new_rows]
+
+    if new_snaps:
+        model["snapshots"] = [{"snapshot": s} for s in new_snaps]
+    model_store.save_model(payload.sessionId, model)
+    return {"snapshots": len(new_snaps), **meta}
+
+
 @router.post("/snapshots/forecast")
 def forecast_snapshots(payload: SnapshotForecast) -> dict:
     """Project the session's series to ``toYear`` with demand growth (T1(b))."""

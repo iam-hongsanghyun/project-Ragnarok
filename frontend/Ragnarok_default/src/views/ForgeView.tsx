@@ -57,6 +57,11 @@ interface Props {
   onForecastSnapshots?: (opts: {
     fromYear: number; toYear: number; growthPct: number; method: string;
   }) => Promise<{ toYear: number; growthFactor: number; grown: string[]; note?: string }>;
+  /** I3 — driver-based demand forecast (evolve the demand SHAPE from drivers). */
+  onDriverForecast?: (opts: {
+    fromYear: number; toYear: number; popGrowthPct: number; gdpGrowthPct: number;
+    gdpElasticity: number; heatAddedGWh: number; evAddedGWh: number;
+  }) => Promise<{ snapshots: number; macroFactor: number; heatAddedMwh: number; evAddedMwh: number }>;
 }
 
 export interface AttachProfilesResult {
@@ -65,7 +70,7 @@ export interface AttachProfilesResult {
   sites: number;
 }
 
-type Operation = 'round' | 'adjust' | 'costcurve' | 'snap' | 'cluster' | 'renewable' | 'retarget' | 'forecast';
+type Operation = 'round' | 'adjust' | 'costcurve' | 'snap' | 'cluster' | 'renewable' | 'retarget' | 'forecast' | 'driverForecast';
 type OpGroup = 'Numeric' | 'Economics' | 'Geospatial' | 'Topology' | 'Temporal';
 
 /** Catalog of Forge tools, grouped. Add a new tool by adding an entry here
@@ -79,6 +84,7 @@ const OPERATIONS: Array<{ id: Operation; label: string; group: OpGroup }> = [
   { id: 'cluster', label: 'Reduce / cluster network', group: 'Topology' },
   { id: 'retarget', label: 'Retarget snapshot window', group: 'Temporal' },
   { id: 'forecast', label: 'Forecast to future year', group: 'Temporal' },
+  { id: 'driverForecast', label: 'Driver-based demand forecast', group: 'Temporal' },
 ];
 const OP_GROUPS: OpGroup[] = ['Numeric', 'Economics', 'Geospatial', 'Topology', 'Temporal'];
 
@@ -200,7 +206,7 @@ function SearchableMultiSelect({
   );
 }
 
-export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApply, onAttachRenewableProfiles, onRetargetSnapshots, onForecastSnapshots }: Props) {
+export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApply, onAttachRenewableProfiles, onRetargetSnapshots, onForecastSnapshots, onDriverForecast }: Props) {
   // Persisted so the chosen tool + validation result survive leaving and
   // returning to the Forge tab (the view unmounts on tab switch). The findings
   // scan the whole model, so these three drivers fully restore the result.
@@ -407,6 +413,25 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
   const [fMethod, setFMethod] = useState<'cagr' | 'linear' | 'regression' | 'arima' | 'prophet'>('cagr');
   const [tempBusy, setTempBusy] = useState(false);
   const [tempError, setTempError] = useState<string | null>(null);
+  // I3 driver-forecast inputs.
+  const [dPop, setDPop] = useState(0.5);
+  const [dGdp, setDGdp] = useState(2.0);
+  const [dElas, setDElas] = useState(0.5);
+  const [dHeat, setDHeat] = useState(0);
+  const [dEv, setDEv] = useState(0);
+
+  const runDriverForecast = async () => {
+    if (!onDriverForecast) return;
+    setTempBusy(true); setTempError(null);
+    try {
+      await onDriverForecast({
+        fromYear: fFrom, toYear: fTo, popGrowthPct: dPop, gdpGrowthPct: dGdp,
+        gdpElasticity: dElas, heatAddedGWh: dHeat, evAddedGWh: dEv,
+      });
+    } catch (e) {
+      setTempError(e instanceof Error ? e.message : 'Driver forecast failed.');
+    } finally { setTempBusy(false); }
+  };
 
   const runRetarget = async () => {
     if (!onRetargetSnapshots) return;
@@ -797,6 +822,45 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
             <div className="forge-actions">
               <button className="run-button" disabled={tempBusy || !onRetargetSnapshots} onClick={runRetarget}>
                 {tempBusy ? 'Retargeting…' : 'Retarget snapshots'}
+              </button>
+            </div>
+            {tempError && <p className="forge-status" style={{ color: 'var(--danger, #dc2626)' }}>{tempError}</p>}
+          </section>
+        ) : operation === 'driverForecast' ? (
+          <section className="forge-section">
+            <header className="forge-section-header">
+              <h3>Driver-based demand forecast</h3>
+              <p>Evolve the demand <em>shape</em>, not just its level: population and GDP scale the base profile, while electrified heat (winter-peaking, morning/evening) and EV charging (overnight + midday work) add load with their own hourly patterns. A decade out the peak can move to a winter evening — which uniform growth can't produce.</p>
+            </header>
+            <div className="sg-setting-row">
+              <label className="sg-setting-label">From year → to year</label>
+              <div className="sg-btn-row" style={{ gap: 8 }}>
+                <NumberDraftInput className="forge-number" min={1900} max={2100} value={fFrom} onCommit={(v) => setFFrom(Math.trunc(v))} />
+                <NumberDraftInput className="forge-number" min={1900} max={2100} value={fTo} onCommit={(v) => setFTo(Math.trunc(v))} />
+              </div>
+            </div>
+            <div className="sg-setting-row">
+              <label className="sg-setting-label">Population %/yr · GDP %/yr · GDP elasticity</label>
+              <div className="sg-btn-row" style={{ gap: 8 }}>
+                <NumberDraftInput className="forge-number" step={0.1} value={dPop} onCommit={setDPop} />
+                <NumberDraftInput className="forge-number" step={0.1} value={dGdp} onCommit={setDGdp} />
+                <NumberDraftInput className="forge-number" min={0} max={1} step={0.1} value={dElas} onCommit={setDElas} />
+              </div>
+              <p className="sg-setting-hint">
+                Macro factor ×{(((1 + dPop / 100) ** Math.max(0, fTo - fFrom)) * ((1 + (dElas * dGdp) / 100) ** Math.max(0, fTo - fFrom))).toFixed(3)} by {fTo} (scales the base profile, shape unchanged).
+              </p>
+            </div>
+            <div className="sg-setting-row">
+              <label className="sg-setting-label">Electrified heat · EV charging (GWh/yr added by {fTo})</label>
+              <div className="sg-btn-row" style={{ gap: 8 }}>
+                <NumberDraftInput className="forge-number" min={0} step={10} value={dHeat} onCommit={setDHeat} />
+                <NumberDraftInput className="forge-number" min={0} step={10} value={dEv} onCommit={setDEv} />
+              </div>
+              <p className="sg-setting-hint">Heat lands winter-heavy on morning/evening hours; EV lands overnight with a midday work bump — split across loads by their size.</p>
+            </div>
+            <div className="forge-actions">
+              <button className="run-button" disabled={tempBusy || fTo < fFrom || !onDriverForecast} onClick={runDriverForecast}>
+                {tempBusy ? 'Evolving…' : `Evolve demand to ${fTo}`}
               </button>
             </div>
             {tempError && <p className="forge-status" style={{ color: 'var(--danger, #dc2626)' }}>{tempError}</p>}

@@ -807,6 +807,27 @@ function AppInner() {
     [model, prepareModelForBackend, reloadSessionModel, showToast],
   );
 
+  // Forge → I3 driver-based demand forecast (evolve the demand SHAPE from
+  // population/GDP/electrification drivers, not just its level).
+  const handleDriverForecast = useCallback(
+    async (opts: {
+      fromYear: number; toYear: number; popGrowthPct: number; gdpGrowthPct: number;
+      gdpElasticity: number; heatAddedGWh: number; evAddedGWh: number;
+    }) => {
+      await putStaticModel(prepareModelForBackend(model));
+      const resp = await fetch(`${API_BASE}/api/session/snapshots/driver-forecast`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: DEFAULT_SESSION_ID, snapshotWeight, ...opts }),
+      });
+      if (!resp.ok) throw new Error((await resp.text()) || `Driver forecast failed (HTTP ${resp.status})`);
+      const data = await resp.json();
+      await reloadSessionModel();
+      showToast(`Demand evolved to ${opts.toYear} (macro ×${data.macroFactor})`, 'success');
+      return data as { snapshots: number; macroFactor: number; heatAddedMwh: number; evAddedMwh: number };
+    },
+    [model, prepareModelForBackend, reloadSessionModel, showToast, snapshotWeight],
+  );
+
   // Guard against accidental session loss on browser back / forward / refresh /
   // close. The workbook lives only in memory and there is no client-side
   // router, so a stray back-swipe (the macOS trackpad gesture) unloads the app
@@ -2853,6 +2874,7 @@ function AppInner() {
               onAttachRenewableProfiles={handleAttachRenewableProfiles}
               onRetargetSnapshots={handleRetargetSnapshots}
               onForecastSnapshots={handleForecastSnapshots}
+              onDriverForecast={handleDriverForecast}
             />
           )}
 
