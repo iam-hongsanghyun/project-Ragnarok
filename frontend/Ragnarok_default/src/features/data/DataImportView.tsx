@@ -36,6 +36,7 @@ import { FilterPanel, SourceEntry } from './FilterPanel';
 import { PypsaEarthPanel } from './PypsaEarthPanel';
 import { WorldMap } from './WorldMap';
 import { dataImportStore, runStatus, type Run } from 'lib/data/store';
+import { buildLocationModel } from 'lib/api/starterPacks';
 
 // Persistent state keys — selections stick across tab switches and reloads.
 const KEY_COUNTRY = 'ragnarok:data-import:country-iso';
@@ -87,6 +88,8 @@ function runKey(run: Run): string {
 
 export function DataImportView({ applyFragment }: Props) {
   const [sources, setSources] = useState<Source[]>([]);
+  const [oneClickBusy, setOneClickBusy] = useState(false);
+  const [oneClickError, setOneClickError] = useState<string | null>(null);
   const [countries, setCountries] = useState<CountryMeta[]>([]);
   const [countriesGeoJSON, setCountriesGeoJSON] = useState<GeoJSONFeatureCollection | null>(null);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
@@ -334,6 +337,33 @@ export function DataImportView({ applyFragment }: Props) {
             onSelect={handleSelectCountry}
             overlay={overlay}
           />
+          {selectedCountry && (
+            <div className="data-import-oneclick" role="group">
+              <div>
+                <b>One-click model</b> — assemble a runnable {selectedCountry.name} model from open,
+                keyless data (OSM network + plants, WRI fleet, World Bank demand) in a single step.
+              </div>
+              <button
+                type="button"
+                className="primary-button"
+                disabled={oneClickBusy}
+                onClick={async () => {
+                  setOneClickBusy(true);
+                  try {
+                    const build = await buildLocationModel(selectedCountry.iso);
+                    applyFragment(build.fragment, build.label || 'One-click model', selectedCountry.name);
+                  } catch (e) {
+                    setOneClickError(e instanceof Error ? e.message : 'One-click build failed.');
+                  } finally {
+                    setOneClickBusy(false);
+                  }
+                }}
+              >
+                {oneClickBusy ? 'Building…' : `Build ${selectedCountry.name} model`}
+              </button>
+              {oneClickError && <span className="data-import-oneclick__err">{oneClickError}</span>}
+            </div>
+          )}
           {lastAdded && (
             <div className="data-import-banner" role="status">
               Added{' '}

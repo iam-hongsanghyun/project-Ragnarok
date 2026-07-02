@@ -107,3 +107,41 @@ async def build_from_recipe(
 
 def new_request_id() -> str:
     return str(uuid.uuid4())[:8]
+
+
+# ── I1: auto-recipe for an arbitrary location ────────────────────────────────
+
+# Keyless, broad-coverage datasets composed for a one-click "pick a location →
+# runnable model", in slot order. Each is included only if it's registered,
+# available, and covers the requested country.
+_AUTO_SLOTS = [
+    ("network", "osm"),
+    ("power_plants", "osm_powerplants"),
+    ("fleet", "wri_gppd"),
+    ("demand", "worldbank_demand"),
+]
+
+
+def _covers(meta: Any, iso3: str) -> bool:
+    cov = getattr(meta, "country_coverage", "global")
+    return cov == "global" or iso3.upper() in {str(c).upper() for c in cov}
+
+
+def auto_recipe(iso3: str, dbs: dict[str, Any]) -> dict[str, Any]:
+    """Assemble a recipe for any country from the keyless global importers.
+
+    Selects the network / plants / fleet / demand datasets that are registered,
+    available, and cover ``iso3`` — the reliable no-API-key first cut of a
+    runnable model. Steps referencing an absent/uncovered dataset are dropped.
+    """
+    iso = iso3.upper()
+    steps: list[dict[str, Any]] = []
+    for slot, did in _AUTO_SLOTS:
+        db = dbs.get(did)
+        if db is None:
+            continue
+        meta = db.meta
+        if not getattr(meta, "available", True) or not _covers(meta, iso):
+            continue
+        steps.append({"slot": slot, "datasets": [did], "filters": {}})
+    return {"iso3": iso, "year": "auto", "label": f"{iso} — one-click model", "steps": steps}

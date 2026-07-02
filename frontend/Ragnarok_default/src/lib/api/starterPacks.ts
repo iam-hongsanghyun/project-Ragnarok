@@ -31,6 +31,25 @@ export async function listStarterPacks(): Promise<StarterPack[]> {
   return (await resp.json()).packs ?? [];
 }
 
+/** One-click (I1): auto-assemble a runnable model for any country from the
+ *  keyless global importers (OSM network + plants, WRI fleet, World Bank demand). */
+export async function buildLocationModel(iso3: string): Promise<StarterPackBuild> {
+  const resp = await fetch(
+    `${API_BASE}/api/import/location-model/${encodeURIComponent(iso3)}`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ secrets: {} }) },
+  );
+  if (!resp.ok) {
+    let detail = resp.statusText;
+    try { detail = (await resp.json())?.detail ?? detail; } catch { /* non-JSON */ }
+    throw new Error(`One-click model failed (${resp.status}): ${detail}`);
+  }
+  const body = await resp.json();
+  return {
+    iso3: body.iso3, year: 'auto', label: body.label,
+    datasetIds: body.dataset_ids ?? [], countryIso: body.country_iso, fragment: body.fragment,
+  };
+}
+
 export async function buildStarterPack(iso3: string, year: number | string): Promise<StarterPackBuild> {
   const resp = await fetch(
     `${API_BASE}/api/import/starter-packs/${encodeURIComponent(iso3)}/${encodeURIComponent(String(year))}/build`,

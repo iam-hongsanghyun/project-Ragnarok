@@ -9831,6 +9831,21 @@ section.data-import-filters__group {
   color: var(--text);
 }
 
+/* ── One-click location→model (I1) ─────────────────────────────────────────── */
+.data-import-oneclick {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding: 10px 12px;
+  font-size: 0.84rem;
+  color: var(--text);
+}
+.data-import-oneclick > div { flex: 1 1 260px; min-width: 220px; }
+.data-import-oneclick__err { color: var(--danger, #dc2626); font-size: 0.78rem; flex-basis: 100%; }
+
 /* ── PyPSA-Earth whole-country builder (I9) ─────────────────────────────────── */
 .pe-panel__row {
   display: flex;

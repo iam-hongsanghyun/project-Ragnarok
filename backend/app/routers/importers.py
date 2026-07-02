@@ -114,6 +114,50 @@ def list_starter_packs() -> dict[str, Any]:
     return {"packs": starter_packs.list_recipes()}
 
 
+@router.post("/location-model/{iso3}")
+async def build_location_model(iso3: str, payload: SecretPayload | None = None) -> dict[str, Any]:
+    """One-click: assemble a runnable model for any country (I1).
+
+    Auto-composes the keyless global importers (OSM network + power plants, WRI
+    fleet, World Bank demand) for the country and folds them into one workbook —
+    the "pick a location → runnable model" path, no API keys needed.
+    """
+    from .. import starter_packs
+
+    dbs = registered_databases()
+    recipe = starter_packs.auto_recipe(iso3, dbs)
+    if not recipe["steps"]:
+        raise HTTPException(status_code=404, detail=f"No keyless datasets cover {iso3.upper()}.")
+
+    await _ensure_boundaries_warm()
+    try:
+        region = region_mod.get_region(iso3)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    secrets = {**_server_secrets()}
+    if payload is not None:
+        secrets.update({k: v for k, v in (payload.secrets or {}).items() if str(v).strip()})
+    http = AsyncClientWrapper(secrets=list(secrets.values()))
+    ctx = ImportContext(secrets=secrets, http=http, request_id=starter_packs.new_request_id())
+    try:
+        fragment, dataset_ids, previews = await starter_packs.build_from_recipe(
+            recipe, dbs=dbs, region=region, ctx=ctx, options=ConvertOptions(), combine=combine_fragments,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"location-model build failed: {exc}") from exc
+    finally:
+        await http.aclose()
+
+    summary = combine_previews(fragment, previews)
+    return {
+        "iso3": recipe["iso3"], "label": recipe["label"], "dataset_ids": dataset_ids,
+        "country_iso": region.country_iso, "preview": summary.to_json(), "fragment": fragment.to_json(),
+    }
+
+
 @router.post("/starter-packs/{iso3}/{year}/build")
 async def build_starter_pack(iso3: str, year: str, payload: SecretPayload | None = None) -> dict[str, Any]:
     """Assemble a runnable workbook for a country/year from its recipe (W2).

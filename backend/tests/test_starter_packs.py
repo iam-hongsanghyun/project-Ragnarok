@@ -79,6 +79,43 @@ def test_build_from_recipe_unknown_dataset_raises() -> None:
         assert "missing" in str(e)
 
 
+def test_auto_recipe_composes_keyless_globals() -> None:
+    from backend.app.importers.registry import registered_databases
+
+    dbs = registered_databases()
+    recipe = starter_packs.auto_recipe("DEU", dbs)
+    slots = [s["slot"] for s in recipe["steps"]]
+    # The keyless global set (OSM network/plants, WRI fleet, World Bank demand)
+    # covers any country → all four slots present.
+    assert slots == ["network", "power_plants", "fleet", "demand"]
+    assert recipe["iso3"] == "DEU" and recipe["year"] == "auto"
+
+
+def test_auto_recipe_drops_absent_datasets() -> None:
+    class _Meta:
+        available = True
+        country_coverage = "global"
+
+    class _DB:
+        meta = _Meta()
+
+    # Only osm registered → only the network slot survives.
+    recipe = starter_packs.auto_recipe("FRA", {"osm": _DB()})
+    assert [s["slot"] for s in recipe["steps"]] == ["network"]
+
+
+def test_auto_recipe_respects_country_coverage() -> None:
+    class _Meta:
+        available = True
+        country_coverage = ["KOR"]  # only Korea
+
+    class _DB:
+        meta = _Meta()
+
+    assert starter_packs.auto_recipe("USA", {"osm": _DB()})["steps"] == []
+    assert [s["slot"] for s in starter_packs.auto_recipe("KOR", {"osm": _DB()})["steps"]] == ["network"]
+
+
 def test_list_endpoint() -> None:
     from fastapi.testclient import TestClient
 
