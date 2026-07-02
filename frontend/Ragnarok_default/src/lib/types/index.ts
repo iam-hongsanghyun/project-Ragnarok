@@ -194,6 +194,13 @@ export interface MarketSimConfig {
   chargeQuantile: number;
   /** …and discharge at/above this one. */
   dischargeQuantile: number;
+  /** Clearing model: single-sided merit order (fixed demand) or a two-sided
+   *  auction where a share of demand bids a willingness-to-pay. */
+  clearingModel: 'singleSided' | 'twoSided';
+  /** Share of demand that is price-elastic (0–1), two-sided only. */
+  demandElasticFraction: number;
+  /** Elastic demand's willingness to pay (currency/MWh), two-sided only. */
+  demandWtp: number;
   /** Strategic price-maker analysis (B4) — optional. */
   strategic?: StrategicBiddingConfig;
 }
@@ -211,9 +218,49 @@ export interface MarketSimUnit {
   priceSettingHours: number;
 }
 
+/** Per-participant (owner) profit from the auction clearing. */
+export interface MarketParticipant {
+  participant: string;
+  energyMWh: number;
+  revenue: number;
+  cost: number;
+  profit: number;
+  capacityMW: number;
+  priceSettingHours: number;
+  unitCount: number;
+}
+
+/** One supply offer in the auction book (sorted bid stack). */
+export interface AuctionOffer {
+  name: string;
+  carrier: string;
+  bid: number;
+  capacityMW: number;
+  cumulativeMW: number;
+  dispatchedMW: number;
+  marginal: boolean;
+}
+
+/** The bid stack at the representative (highest-price) hour. */
+export interface AuctionBook {
+  hourLabel: string;
+  timestamp: string;
+  clearingPrice: number;
+  clearedMW: number;
+  firmDemandMW: number;
+  elasticDemandMW: number;
+  wtp: number | null;
+  unservedMW: number;
+  curtailedMW: number;
+  offers: AuctionOffer[];
+}
+
 export interface MarketSimulationResult {
   pricing: string;
   voll: number;
+  clearingModel: 'singleSided' | 'twoSided';
+  demandWtp: number | null;
+  elasticFraction: number;
   currency: string;
   summary: {
     avgPrice: number;
@@ -222,8 +269,11 @@ export interface MarketSimulationResult {
     totalCost: number;
     unservedMWh: number;
     unservedHours: number;
+    curtailedMWh?: number;
   };
   units: MarketSimUnit[];
+  participants: MarketParticipant[];
+  auctionBook: AuctionBook;
   storage: {
     name: string;
     energyChargedMWh: number;

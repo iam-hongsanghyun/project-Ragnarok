@@ -45,6 +45,8 @@ export type CardKind =
   | 'price-elastic'
   | 'power-flow'
   | 'market-simulation'
+  | 'market-participants'
+  | 'auction-book'
   | 'strategic-bidding'
   | 'contingency'
   | 'emissions-breakdown'
@@ -244,6 +246,14 @@ export interface MarketSimulationCardData extends CardBase {
   kind: 'market-simulation';
 }
 
+export interface MarketParticipantsCardData extends CardBase {
+  kind: 'market-participants';
+}
+
+export interface AuctionBookCardData extends CardBase {
+  kind: 'auction-book';
+}
+
 export interface StrategicBiddingCardData extends CardBase {
   kind: 'strategic-bidding';
 }
@@ -307,6 +317,8 @@ export type Card =
   | PriceElasticCardData
   | PowerFlowCardData
   | MarketSimulationCardData
+  | MarketParticipantsCardData
+  | AuctionBookCardData
   | StrategicBiddingCardData
   | ContingencyCardData
   | EmissionsBreakdownCardData

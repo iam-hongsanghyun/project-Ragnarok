@@ -147,3 +147,82 @@ def test_storage_flattens_prices_in_the_simulation() -> None:
     # hours → the peaker is no longer needed (80 ≥ 100 − 20) → peak price falls.
     assert with_storage["summary"]["peakPrice"] == 20.0
     assert with_storage["storage"][0]["energyDischargedMWh"] == pytest.approx(40.0)
+
+
+# ── Two-sided auction, per-participant profit, auction book (clearing models) ──
+
+def _two_sided_network() -> pypsa.Network:
+    """Wind 40 @ €0, gas 50 @ €40, peaker 50 @ €150; 100 MW load."""
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=2, freq="h"))
+    n.add("Bus", "b")
+    n.add("Carrier", "wind")
+    n.add("Carrier", "gas")
+    n.add("Load", "L", bus="b", p_set=100.0)
+    n.add("Generator", "wind1", bus="b", carrier="wind", p_nom=40.0, marginal_cost=0.0)
+    n.add("Generator", "gas1", bus="b", carrier="gas", p_nom=50.0, marginal_cost=40.0)
+    n.add("Generator", "peak1", bus="b", carrier="gas", p_nom=50.0, marginal_cost=150.0)
+    return n
+
+
+def test_two_sided_elastic_demand_caps_the_price() -> None:
+    n = _two_sided_network()
+    # 30% of the 100 MW is elastic at WTP 100 (< the 150 peaker). It walks away
+    # rather than pay for the peaker, so gas (€40) is marginal, not the peaker.
+    res = run_market_simulation(n, {
+        "clearingModel": "twoSided", "demandElasticFraction": 0.3, "demandWtp": 100.0,
+    })
+    assert res["clearingModel"] == "twoSided"
+    assert res["summary"]["avgPrice"] == pytest.approx(40.0)
+    # Firm 70 + elastic served 20 (gas cap 50: 30 firm + 20 elastic) → 10 curtailed/hr.
+    assert res["summary"]["curtailedMWh"] == pytest.approx(20.0)  # 10 MW × 2 h
+    assert res["summary"]["unservedMWh"] == pytest.approx(0.0)
+
+
+def test_single_sided_serves_all_load_at_the_peaker_price() -> None:
+    n = _two_sided_network()
+    res = run_market_simulation(n, {"clearingModel": "singleSided"})
+    assert res["clearingModel"] == "singleSided"
+    assert res["summary"]["avgPrice"] == pytest.approx(150.0)   # peaker marginal
+    assert res["summary"]["curtailedMWh"] == pytest.approx(0.0)  # nothing priced out
+
+
+def test_auction_book_orders_offers_and_flags_the_marginal_unit() -> None:
+    n = _two_sided_network()
+    book = run_market_simulation(n, {"clearingModel": "singleSided"})["auctionBook"]
+    assert [o["name"] for o in book["offers"]] == ["wind1", "gas1", "peak1"]  # by bid
+    assert book["offers"][0]["cumulativeMW"] == pytest.approx(40.0)
+    assert book["offers"][-1]["cumulativeMW"] == pytest.approx(140.0)
+    marginal = [o for o in book["offers"] if o["marginal"]]
+    assert len(marginal) == 1 and marginal[0]["name"] == "peak1"
+    assert book["clearingPrice"] == pytest.approx(150.0)
+
+
+def test_per_participant_profit_aggregates_by_owner() -> None:
+    from backend.pypsa.results import run_pypsa
+
+    snaps = ["2030-01-01T00:00:00", "2030-01-01T01:00:00"]
+    model = {
+        "buses": [{"name": "b"}],
+        "carriers": [{"name": "wind"}, {"name": "gas"}],
+        "snapshots": [{"snapshot": s} for s in snaps],
+        "loads": [{"name": "L", "bus": "b", "p_set": 100.0}],
+        "generators": [
+            {"name": "wind1", "bus": "b", "carrier": "wind", "p_nom": 40, "marginal_cost": 0, "owner": "WindCo"},
+            {"name": "gas1", "bus": "b", "carrier": "gas", "p_nom": 50, "marginal_cost": 40, "owner": "GasCo"},
+            {"name": "peak1", "bus": "b", "carrier": "gas", "p_nom": 50, "marginal_cost": 150, "owner": "GasCo"},
+        ],
+    }
+    res = run_pypsa(model, {"discountRate": 0.0, "carbonPrice": 0.0}, {
+        "ownerColumn": "owner",
+        "marketSimConfig": {"enabled": True, "pricing": "uniform", "clearingModel": "singleSided"},
+    })
+    parts = res["marketSimulation"]["participants"]
+    by = {p["participant"]: p for p in parts}
+    # Uniform price 150: WindCo 40·150·2 = 12000; GasCo gas1 50·(150−40)·2 = 11000.
+    assert by["WindCo"]["profit"] == pytest.approx(12000.0)
+    assert by["GasCo"]["profit"] == pytest.approx(11000.0)
+    assert by["GasCo"]["unitCount"] == 2               # gas1 + peak1 rolled up
+    assert by["GasCo"]["priceSettingHours"] == 2       # peak1 marginal both hours
+    # Ranked by profit, WindCo first.
+    assert parts[0]["participant"] == "WindCo"

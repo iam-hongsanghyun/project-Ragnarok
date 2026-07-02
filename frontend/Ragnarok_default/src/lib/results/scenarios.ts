@@ -81,7 +81,10 @@ export function defaultPowerFlowConfig(): PowerFlowConfig {
 }
 
 export function defaultMarketSimConfig(): MarketSimConfig {
-  return { enabled: false, pricing: 'uniform', voll: 3000, chargeQuantile: 0.25, dischargeQuantile: 0.75 };
+  return {
+    enabled: false, pricing: 'uniform', voll: 3000, chargeQuantile: 0.25, dischargeQuantile: 0.75,
+    clearingModel: 'singleSided', demandElasticFraction: 0.2, demandWtp: 120,
+  };
 }
 
 export function defaultContingencyConfig(): ContingencyConfig {
@@ -143,7 +146,9 @@ function clonePowerFlowConfig(config: PowerFlowConfig): PowerFlowConfig {
 }
 
 function cloneMarketSimConfig(config: MarketSimConfig): MarketSimConfig {
-  return { ...config };
+  // Merge over defaults so scenarios saved before the clearing-model fields
+  // existed pick them up rather than carrying undefined.
+  return { ...defaultMarketSimConfig(), ...config };
 }
 
 function cloneContingencyConfig(config: ContingencyConfig): ContingencyConfig {

@@ -52,6 +52,8 @@ import { DemandResponseCard } from '../../../features/analytics/cards/DemandResp
 import { PriceElasticCard } from '../../../features/analytics/cards/PriceElasticCard';
 import { PowerFlowCard } from '../../../features/analytics/cards/PowerFlowCard';
 import { MarketSimulationCard } from '../../../features/analytics/cards/MarketSimulationCard';
+import { MarketParticipantsCard } from '../../../features/analytics/cards/MarketParticipantsCard';
+import { AuctionBookCard } from '../../../features/analytics/cards/AuctionBookCard';
 import { StrategicBiddingCard } from '../../../features/analytics/cards/StrategicBiddingCard';
 import { ContingencyCard } from '../../../features/analytics/cards/ContingencyCard';
 import { EmissionsBreakdownCard } from '../../../features/analytics/cards/EmissionsBreakdownCard';
@@ -525,6 +527,14 @@ export function AnalyticsDashboard({
           return results.marketSimulation
             ? <MarketSimulationCard data={results.marketSimulation} />
             : <p className="dashboard-cell-missing">This run was not a market simulation.</p>;
+        case 'market-participants':
+          return results.marketSimulation
+            ? <MarketParticipantsCard data={results.marketSimulation} />
+            : <p className="dashboard-cell-missing">This run was not a market simulation.</p>;
+        case 'auction-book':
+          return results.marketSimulation
+            ? <AuctionBookCard data={results.marketSimulation} />
+            : <p className="dashboard-cell-missing">This run was not a market simulation.</p>;
         case 'strategic-bidding':
           return results.strategicBidding
             ? <StrategicBiddingCard data={results.strategicBidding} />
@@ -608,6 +618,8 @@ export function AnalyticsDashboard({
       case 'price-elastic': return 'Price-elastic demand';
       case 'power-flow': return 'Power flow (convergence & voltages)';
       case 'market-simulation': return 'Market simulation (prices & unit economics)';
+      case 'market-participants': return 'Auction participants (per-owner profit)';
+      case 'auction-book': return 'Auction book (bid stack & clearing)';
       case 'strategic-bidding': return 'Strategic bidding (market power best response)';
       case 'contingency': return 'N-1 contingency (security)';
       case 'emissions-breakdown': return 'Emissions by generator / carrier';

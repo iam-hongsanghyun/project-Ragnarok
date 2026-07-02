@@ -101,6 +101,59 @@ def _clear_market(
     return dispatch, price, unserved, marginal
 
 
+def _clear_two_sided(
+    firm: np.ndarray,      # (T,) must-serve demand (MW)
+    elastic: np.ndarray,   # (T,) price-sensitive demand (MW)
+    avail: np.ndarray,     # (T, G) available MW per unit
+    bids: np.ndarray,      # (G,) supply offer €/MWh per unit
+    wtp: float,            # elastic demand's willingness to pay (€/MWh)
+    voll: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Two-sided merit-order clearing: supply offers cross a demand curve that is
+    firm below any price and elastic (only accepted while price ≤ ``wtp``).
+
+    Returns (dispatch (T,G), price (T,), unserved (T,), curtailed (T,),
+    marginal-unit index (T,)). ``unserved`` is unmet *firm* demand (priced at
+    VOLL); ``curtailed`` is *elastic* demand priced out (a voluntary reduction,
+    valued below the clearing price)."""
+    T, G = avail.shape
+    order = np.argsort(bids, kind="stable")
+    dispatch = np.zeros((T, G))
+    price = np.zeros(T)
+    unserved = np.zeros(T)
+    curtailed = np.zeros(T)
+    marginal = np.full(T, -1)
+    for t in range(T):
+        firm_rem = float(firm[t])
+        elastic_rem = float(elastic[t])
+        last_bid: float | None = None
+        for g in order:
+            cap = float(avail[t, g])
+            if cap <= _EPS:
+                continue
+            # Elastic demand accepts this offer only if its bid ≤ WTP.
+            want = firm_rem + (elastic_rem if bids[g] <= wtp + _EPS else 0.0)
+            if want <= _EPS:
+                break  # no acceptable demand left — remaining offers are priced out
+            take = min(cap, want)
+            dispatch[t, g] = take
+            f = min(take, firm_rem)
+            firm_rem -= f
+            elastic_rem -= (take - f)
+            last_bid = float(bids[g])
+            marginal[t] = g
+            if firm_rem <= _EPS and elastic_rem <= _EPS:
+                break
+        if firm_rem > _EPS:
+            unserved[t] = firm_rem
+            price[t] = voll
+            marginal[t] = -1
+        else:
+            curtailed[t] = max(0.0, elastic_rem)
+            price[t] = last_bid if last_bid is not None else (float(bids[order[0]]) if G else 0.0)
+    return dispatch, price, unserved, curtailed, marginal
+
+
 def _storage_schedule(
     prices: np.ndarray,
     power_mw: float,
@@ -148,6 +201,12 @@ def run_market_simulation(network: pypsa.Network, config: dict[str, Any] | None 
     withheld = {str(k): float(v) for k, v in (cfg.get("withheldMw") or {}).items()}
     q_charge = float(cfg.get("chargeQuantile") or 0.25)
     q_discharge = float(cfg.get("dischargeQuantile") or 0.75)
+    # Clearing model: single-sided (fixed demand + VOLL) or two-sided (a share of
+    # demand is price-elastic, bidding a willingness-to-pay).
+    clearing_model = str(cfg.get("clearingModel") or "singleSided")
+    elastic_fraction = min(1.0, max(0.0, float(cfg.get("demandElasticFraction") or 0.0)))
+    demand_wtp = float(cfg.get("demandWtp") or voll)
+    two_sided = clearing_model == "twoSided" and elastic_fraction > _EPS
 
     snapshots = network.snapshots
     T = len(snapshots)
@@ -167,8 +226,18 @@ def run_market_simulation(network: pypsa.Network, config: dict[str, Any] | None 
 
     load = _load_profile(network).to_numpy()
 
+    def _clear(demand: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Clear one demand profile under the chosen model. Returns
+        (dispatch, price, unserved, curtailed, marginal)."""
+        if two_sided:
+            firm = demand * (1.0 - elastic_fraction)
+            elastic = demand * elastic_fraction
+            return _clear_two_sided(firm, elastic, avail, bids, demand_wtp, voll)
+        d, p, u, m = _clear_market(demand, avail, bids, voll)
+        return d, p, u, np.zeros(len(demand)), m
+
     # Pass 1: clear without storage → the price shape the storage rule reads.
-    dispatch, price, unserved, marginal = _clear_market(load, avail, bids, voll)
+    dispatch, price, unserved, curtailed, marginal = _clear(load)
 
     # Storage responds to pass-1 prices; pass 2 re-clears with it in the market.
     storage_rows: list[dict[str, Any]] = []
@@ -195,7 +264,7 @@ def run_market_simulation(network: pypsa.Network, config: dict[str, Any] | None 
             })
         if extra_load.any() or extra_supply.any():
             net_load = np.clip(load + extra_load - extra_supply, 0.0, None)
-            dispatch, price, unserved, marginal = _clear_market(net_load, avail, bids, voll)
+            dispatch, price, unserved, curtailed, marginal = _clear(net_load)
 
     # Settlement + per-unit economics.
     if pricing == "payAsBid":
@@ -241,11 +310,48 @@ def run_market_simulation(network: pypsa.Network, config: dict[str, Any] | None 
             "priceSettingHours": int((marginal == i).sum()),
         })
 
-    served = load - unserved
+    # Auction book — the sorted supply offers at the representative (highest-price)
+    # hour, with the clearing point, so the frontend can draw the bid stack.
+    order = np.argsort(bids, kind="stable")
+    auction_book: dict[str, Any] = {}
+    if T and G:
+        t_star = int(np.argmax(price))
+        offers = []
+        cum = 0.0
+        for g in order:
+            cap = float(avail[t_star, g])
+            if cap <= _EPS:
+                continue
+            offers.append({
+                "name": names[g], "carrier": carriers[g],
+                "bid": round(float(bids[g]), 4),
+                "capacityMW": round(cap, 3),
+                "cumulativeMW": round(cum + cap, 3),
+                "dispatchedMW": round(float(dispatch[t_star, g]), 3),
+                "marginal": bool(marginal[t_star] == g),
+            })
+            cum += cap
+        firm_star = float(load[t_star]) * (1.0 - elastic_fraction) if two_sided else float(load[t_star])
+        auction_book = {
+            "hourLabel": labels[t_star], "timestamp": stamps[t_star],
+            "clearingPrice": round(float(price[t_star]), 4),
+            "clearedMW": round(float(dispatch[t_star].sum()), 3),
+            "firmDemandMW": round(firm_star, 3),
+            "elasticDemandMW": round(float(load[t_star]) * elastic_fraction if two_sided else 0.0, 3),
+            "wtp": round(demand_wtp, 4) if two_sided else None,
+            "unservedMW": round(float(unserved[t_star]), 3),
+            "curtailedMW": round(float(curtailed[t_star]), 3),
+            "offers": offers,
+        }
+
+    served = load - unserved - curtailed
     total_cost = float((served * price).sum()) if pricing == "uniform" else float(revenue_per_unit.sum())
     return {
         "pricing": pricing,
         "voll": voll,
+        "clearingModel": "twoSided" if two_sided else "singleSided",
+        "demandWtp": demand_wtp if two_sided else None,
+        "elasticFraction": elastic_fraction if two_sided else 0.0,
         "summary": {
             "avgPrice": round(float(price.mean()), 4) if T else 0.0,
             "peakPrice": round(float(price.max()), 4) if T else 0.0,
@@ -253,12 +359,74 @@ def run_market_simulation(network: pypsa.Network, config: dict[str, Any] | None 
             "totalCost": round(total_cost, 2),
             "unservedMWh": round(float(unserved.sum()), 3),
             "unservedHours": int((unserved > _EPS).sum()),
+            "curtailedMWh": round(float(curtailed.sum()), 3),
         },
         "priceSeries": price_series,
         "dispatchSeries": dispatch_series,
         "units": sorted(units, key=lambda u: -u["energyMWh"]),
         "storage": storage_rows,
+        "auctionBook": auction_book,
     }
+
+
+_UNASSIGNED = "(unassigned)"
+
+
+def _aggregate_participants(
+    units: list[dict[str, Any]],
+    model: dict[str, Any] | None,
+    owner_column: str,
+) -> list[dict[str, Any]]:
+    """Group per-unit auction results by owner tag → per-participant profit.
+
+    Falls back to one ``(unassigned)`` participant when no generator carries an
+    owner tag, so the view always has something to show.
+    """
+    column = (owner_column or "owner").strip() or "owner"
+    owner_of: dict[str, str] = {}
+    p_nom_of: dict[str, float] = {}
+    for row in (model or {}).get("generators", []) or []:
+        name = str(row.get("name", "")).strip()
+        if not name:
+            continue
+        tag = str(row.get(column, "")).strip()
+        if tag:
+            owner_of[name] = tag
+        try:
+            p_nom_of[name] = float(row.get("p_nom", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            p_nom_of[name] = 0.0
+
+    acc: dict[str, dict[str, float]] = {}
+    for u in units:
+        owner = owner_of.get(str(u["name"]), _UNASSIGNED)
+        b = acc.setdefault(owner, {
+            "energyMWh": 0.0, "revenue": 0.0, "cost": 0.0, "profit": 0.0,
+            "capacityMW": 0.0, "priceSettingHours": 0.0, "units": 0.0,
+        })
+        b["energyMWh"] += float(u["energyMWh"])
+        b["revenue"] += float(u["revenue"])
+        b["cost"] += float(u["cost"])
+        b["profit"] += float(u["profit"])
+        b["capacityMW"] += p_nom_of.get(str(u["name"]), 0.0)
+        b["priceSettingHours"] += float(u["priceSettingHours"])
+        b["units"] += 1
+
+    participants = [
+        {
+            "participant": owner,
+            "energyMWh": round(v["energyMWh"], 3),
+            "revenue": round(v["revenue"], 2),
+            "cost": round(v["cost"], 2),
+            "profit": round(v["profit"], 2),
+            "capacityMW": round(v["capacityMW"], 3),
+            "priceSettingHours": int(v["priceSettingHours"]),
+            "unitCount": int(v["units"]),
+        }
+        for owner, v in acc.items()
+    ]
+    participants.sort(key=lambda p: -p["profit"])
+    return participants
 
 
 def run_market_sim_study(
@@ -286,6 +454,10 @@ def run_market_sim_study(
     sim = run_market_simulation(network, config)
     s = sim["summary"]
 
+    # Per-participant (owner) profit — aggregate the per-unit auction results by
+    # the owner tag, so "who profits from the auction" is answerable directly.
+    participants = _aggregate_participants(sim["units"], model, owner_column)
+
     summary = [
         {"label": "Average price", "value": f"{currency}{s['avgPrice']:,.2f}/MWh",
          "detail": f"{sim['pricing']} settlement"},
@@ -303,12 +475,23 @@ def run_market_sim_study(
         summary.append({"label": "Price setter", "value": top["name"],
                         "detail": f"marginal in {top['priceSettingHours']} hour(s)"})
 
+    model_desc = (
+        f"two-sided auction ({sim['elasticFraction'] * 100:.0f}% of demand elastic at "
+        f"a {currency}{sim['demandWtp']:,.0f}/MWh willingness-to-pay)"
+        if sim["clearingModel"] == "twoSided"
+        else "single-sided merit order (fixed demand)"
+    )
     narrative = [
         *notes,
-        f"Market simulation (rule-based, not optimised): merit-order clearing with "
+        f"Market simulation (rule-based, not optimised): {model_desc} with "
         f"{sim['pricing']} settlement on a single zone (copper plate — network limits "
         f"are not enforced; run a power-flow study for physics).",
     ]
+    if s.get("curtailedMWh", 0) > 0:
+        narrative.append(
+            f"Two-sided clearing priced out {s['curtailedMWh']:,.1f} MWh of elastic "
+            f"demand (its bid fell below the clearing price)."
+        )
     if sim["storage"]:
         cycled = sum(r["energyDischargedMWh"] for r in sim["storage"])
         narrative.append(f"Storage followed a price-threshold arbitrage rule "
@@ -343,9 +526,14 @@ def run_market_sim_study(
         "marketSimulation": {
             "pricing": sim["pricing"],
             "voll": sim["voll"],
+            "clearingModel": sim["clearingModel"],
+            "demandWtp": sim.get("demandWtp"),
+            "elasticFraction": sim.get("elasticFraction", 0.0),
             "currency": currency,
             "summary": s,
             "units": sim["units"],
+            "participants": participants,
+            "auctionBook": sim.get("auctionBook") or {},
             "storage": sim["storage"],
         },
         "strategicBidding": strategic,

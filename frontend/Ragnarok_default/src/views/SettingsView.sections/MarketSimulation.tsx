@@ -95,6 +95,48 @@ export function MarketSimulationSection(props: MarketSimulationSectionProps) {
         <>
           <div className="sg-setting-divider" />
           <div className="sg-setting-row">
+            <label className="sg-setting-label">Clearing model</label>
+            <div className="sg-btn-row">
+              <button
+                className={`tb-btn sg-solver-btn${cfg.clearingModel !== 'twoSided' ? '' : ' tb-btn--muted'}`}
+                onClick={() => set({ clearingModel: 'singleSided' })}
+              >
+                Single-sided
+              </button>
+              <button
+                className={`tb-btn sg-solver-btn${cfg.clearingModel === 'twoSided' ? '' : ' tb-btn--muted'}`}
+                onClick={() => set({ clearingModel: 'twoSided' })}
+              >
+                Two-sided auction
+              </button>
+            </div>
+            <p className="sg-setting-hint">
+              {cfg.clearingModel === 'twoSided'
+                ? 'A share of demand bids a willingness-to-pay and clears against supply — elastic demand priced above the clearing price walks away (a voluntary reduction, not unserved energy).'
+                : 'Demand is fixed and must be served; shortfalls price at the value of lost load.'}
+            </p>
+          </div>
+          {cfg.clearingModel === 'twoSided' && (
+            <div className="sg-setting-row">
+              <label className="sg-setting-label">Elastic demand (share · willingness-to-pay)</label>
+              <div className="sg-btn-row" style={{ gap: 8 }}>
+                <input
+                  type="number" className="sg-number-input" min={0} max={1} step={0.05}
+                  value={cfg.demandElasticFraction}
+                  onChange={(e) => set({ demandElasticFraction: Math.min(1, Math.max(0, Number(e.target.value) || 0)) })}
+                />
+                <input
+                  type="number" className="sg-number-input" min={0} step={10}
+                  value={cfg.demandWtp}
+                  onChange={(e) => set({ demandWtp: Math.max(0, Number(e.target.value) || 0) })}
+                />
+              </div>
+              <p className="sg-setting-hint">
+                Fraction of load that is price-sensitive (0–1) and the per-MWh price above which it drops out.
+              </p>
+            </div>
+          )}
+          <div className="sg-setting-row">
             <label className="sg-setting-label">Settlement</label>
             <div className="sg-btn-row">
               <button

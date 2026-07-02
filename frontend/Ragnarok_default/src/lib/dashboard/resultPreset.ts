@@ -108,6 +108,10 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
         { card: { id: id('merit'), kind: 'merit-order' } as Card },
       ] }),
       row({ cards: [{ card: { id: id('marketsim'), kind: 'market-simulation' } as Card }] }),
+      row({ cards: [{ card: { id: id('auctionbook'), kind: 'auction-book' } as Card }] }),
+      ...((results.marketSimulation.participants?.length ?? 0) > 0
+        ? [row({ cards: [{ card: { id: id('parts'), kind: 'market-participants' } as Card }] })]
+        : []),
       ...(results.strategicBidding
         ? [row({ cards: [{ card: { id: id('strategic'), kind: 'strategic-bidding' } as Card }] })]
         : []),
