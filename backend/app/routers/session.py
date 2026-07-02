@@ -126,6 +126,29 @@ def get_sheet_distinct(
     return {"sheet": name, "column": column, "values": values}
 
 
+@router.get("/sheet/{name}/stats")
+def get_sheet_stats(
+    name: str,
+    session_id: str = Query("default", alias="session_id"),
+    columns: str | None = Query(None, description="Comma-separated columns; omit for all."),
+) -> dict:
+    """Per-column statistics for a sheet, computed server-side (X2).
+
+    Numeric columns → count/nulls/min/max/mean/median/std/sum/quartiles + a
+    histogram; categorical → distinct + top values. The full sheet is read from
+    the store and crunched here, so the browser fetches only the summary — never
+    thousands of rows. Backs the input-analysis KPIs.
+    """
+    from ..analysis import column_statistics
+
+    page = model_store.get_sheet_page(session_id, name, offset=0, limit=10_000_000)
+    if page is None:
+        raise HTTPException(status_code=404, detail=f"Sheet {name!r} not found in session.")
+    cols = [c.strip() for c in columns.split(",") if c.strip()] if columns else None
+    stats = column_statistics(page.get("rows", []), cols)
+    return {"sheet": name, "kind": page.get("kind"), **stats}
+
+
 @router.get("/series/{name}")
 def get_series(
     name: str,

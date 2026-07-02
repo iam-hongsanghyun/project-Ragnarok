@@ -11,6 +11,7 @@ import { normalizeDateToIso } from 'lib/utils/helpers';
 import type { DateFormat } from '../settings/useSettings';
 import { PYPSA_STANDARD_LINE_TYPES, PYPSA_STANDARD_TRANSFORMER_TYPES } from 'lib/constants/pypsa_standard_types';
 import { InputAnalyser } from './InputAnalyser';
+import { ColumnStatsPanel } from './ColumnStatsPanel';
 import { DataGrid } from './grid/DataGrid';
 import { getSheetPage, patchSheet, transformSeries, SeriesTransformOp } from 'lib/api/session';
 import { SearchableMultiSelect } from '../../shared/components/SearchableMultiSelect';
@@ -759,6 +760,7 @@ export function TablesPane({
               <span className="eyebrow">Analyser{analyseFocusCol ? ` · ${analyseFocusCol}` : ''}</span>
               <button className="ghost-button sm" onClick={() => setShowAnalyser(false)}>Close</button>
             </div>
+            <ColumnStatsPanel sheet={sel.sheet} />
             <InputAnalyser
               rows={rows}
               cols={cols}
