@@ -27,6 +27,7 @@ import {
 } from 'lib/forge/snap';
 import { nonEmptySheets, roundFindings, snapFindings, type ForgeFinding } from 'lib/forge/validate';
 import { AdjustPanel } from './ForgeView.features/AdjustPanel';
+import { CostCurvePanel } from './ForgeView.features/CostCurvePanel';
 
 interface Props {
   model: WorkbookModel;
@@ -64,21 +65,22 @@ export interface AttachProfilesResult {
   sites: number;
 }
 
-type Operation = 'round' | 'adjust' | 'snap' | 'cluster' | 'renewable' | 'retarget' | 'forecast';
-type OpGroup = 'Numeric' | 'Geospatial' | 'Topology' | 'Temporal';
+type Operation = 'round' | 'adjust' | 'costcurve' | 'snap' | 'cluster' | 'renewable' | 'retarget' | 'forecast';
+type OpGroup = 'Numeric' | 'Economics' | 'Geospatial' | 'Topology' | 'Temporal';
 
 /** Catalog of Forge tools, grouped. Add a new tool by adding an entry here
  *  (and its panel + findings wiring) — the rail renders groups from this. */
 const OPERATIONS: Array<{ id: Operation; label: string; group: OpGroup }> = [
   { id: 'round', label: 'Round / Ceil / Floor', group: 'Numeric' },
   { id: 'adjust', label: 'Adjust values', group: 'Numeric' },
+  { id: 'costcurve', label: 'Marginal cost curve', group: 'Economics' },
   { id: 'snap', label: 'Snap to nearest bus', group: 'Geospatial' },
   { id: 'renewable', label: 'Attach renewable profiles', group: 'Geospatial' },
   { id: 'cluster', label: 'Reduce / cluster network', group: 'Topology' },
   { id: 'retarget', label: 'Retarget snapshot window', group: 'Temporal' },
   { id: 'forecast', label: 'Forecast to future year', group: 'Temporal' },
 ];
-const OP_GROUPS: OpGroup[] = ['Numeric', 'Geospatial', 'Topology', 'Temporal'];
+const OP_GROUPS: OpGroup[] = ['Numeric', 'Economics', 'Geospatial', 'Topology', 'Temporal'];
 
 const ROUND_OPS: Array<{ value: RoundOp; label: string }> = [
   { value: 'round', label: 'Round' },
@@ -432,8 +434,8 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
   // Context-aware "what needs handling" for the active tool. Recomputes when
   // the tool or model changes, so switching tools re-reports automatically.
   const findings = useMemo<ForgeFinding[] | null>(() => {
-    // 'adjust' has no pre-scan; its preview is the per-card match count.
-    if (!validated || operation === 'adjust') return null;
+    // 'adjust' / 'costcurve' have no pre-scan; their preview is the match count.
+    if (!validated || operation === 'adjust' || operation === 'costcurve') return null;
     return operation === 'round'
       ? roundFindings(model, decimals, VALIDATION_CONFIG.magnitudeMax, VALIDATION_CONFIG.magnitudeMin)
       : snapFindings(model);
@@ -575,6 +577,13 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
           </section>
         ) : operation === 'adjust' ? (
           <AdjustPanel
+            model={model}
+            sheetsWithRows={sheetsWithRows}
+            onApplySheets={onApplySheets}
+            onStatus={setStatus}
+          />
+        ) : operation === 'costcurve' ? (
+          <CostCurvePanel
             model={model}
             sheetsWithRows={sheetsWithRows}
             onApplySheets={onApplySheets}

@@ -6184,6 +6184,53 @@ th:hover .col-delete-btn {
   gap: 12px;
   margin-top: 4px;
 }
+
+/* ── Marginal-cost curve editor (T4) ─────────────────────────────────────── */
+.forge-costcurve-chartwrap {
+  margin: 10px 0 6px;
+  max-width: 520px;
+}
+.forge-costcurve-chart {
+  width: 100%;
+  height: auto;
+  touch-action: none; /* let pointer-drag work on touch without scrolling */
+  cursor: crosshair;
+  user-select: none;
+}
+.forge-costcurve-chart .cc-grid { stroke: var(--border); stroke-dasharray: 3 3; }
+.forge-costcurve-chart .cc-axis { stroke: var(--muted); stroke-width: 1; }
+.forge-costcurve-chart .cc-axis-label { fill: var(--muted); font-size: 9px; }
+.forge-costcurve-chart .cc-axis-title { fill: var(--muted); font-size: 9px; }
+.forge-costcurve-chart .cc-sketch {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+  opacity: 0.6;
+}
+.forge-costcurve-chart .cc-fit {
+  stroke: var(--brand);
+  stroke-width: 2.5;
+}
+.forge-costcurve-chart .cc-point {
+  fill: var(--surface);
+  stroke: var(--brand);
+  stroke-width: 2;
+  cursor: grab;
+}
+.forge-costcurve-chart .cc-point:hover { fill: var(--brand); }
+.forge-costcurve-readout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: baseline;
+  padding: 8px 10px;
+  background: var(--bg-hover);
+  border-radius: 6px;
+  font-size: 0.86rem;
+  margin: 4px 0;
+}
+.forge-costcurve-readout b { font-family: var(--font-mono); font-weight: 600; }
 .forge-report {
   border: 1px solid var(--border);
   border-radius: 6px;
