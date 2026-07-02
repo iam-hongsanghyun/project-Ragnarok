@@ -1725,3 +1725,51 @@ model never enters the browser. If the backend is unreachable the list is simply
 empty — frontend plugins still work. See `src/lib/api/plugins.ts`,
 `src/features/plugins/BackendPluginDetail.tsx`, and `peekPackageKind` in
 `src/features/plugins/frontendPlugins.ts`.
+
+---
+
+## Contract v2 (X6) — multi-run input & composite layout
+
+Declare `"contractVersion": 2` in `manifest.json` to use either extension.
+Both are backward-compatible: v1 plugins keep working unchanged.
+
+### Multi-run input (`multiRun`)
+
+```jsonc
+// manifest.json
+{ "id": "scenario-compare", "multiRun": true, "contractVersion": 2 }
+```
+
+A multi-run plugin's analyze hook receives a **third argument**:
+
+```python
+def analyze(result, config, runs):
+    # runs = [{"name": "<stored run name>", "analytics": {…}}, …]  (may be empty)
+    ...
+```
+
+The frontend sends the user's selected stored-run names in the analyze request
+(`{"runs": ["run_a", "run_b"]}`); the backend loads each run's analytics bundle
+and passes them through (capped at 12 runs per call). This is what lets
+analytics-over-N-runs (scenario comparison matrices) ship as plugins.
+
+### Composite layout (`layout` output key)
+
+An analyze output may include a reserved `layout` key arranging the OTHER
+output keys into host-rendered rows — the host still owns all rendering
+(no raw HTML/SVG from plugins, as ever):
+
+```python
+def analyze(result, config):
+    return {
+        "prices":  {"kind": "chart", ...},
+        "volumes": {"kind": "chart", ...},
+        "summary": {"kind": "table", ...},
+        "layout":  {"rows": [["prices", "volumes"], ["summary"]]},
+    }
+```
+
+Each inner list is one row; keys in the same row render side-by-side.
+Referencing an output key that doesn't exist is a contract error (HTTP 400).
+Outputs not named in the layout render after the arranged rows, in the
+default single-column flow.

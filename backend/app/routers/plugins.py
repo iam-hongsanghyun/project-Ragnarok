@@ -84,10 +84,16 @@ class TransformRequest(BaseModel):
 
 
 class AnalyzeRequest(BaseModel):
-    """Body for ``POST /api/plugins/{id}/analyze``."""
+    """Body for ``POST /api/plugins/{id}/analyze``.
+
+    ``runs`` (contract v2, X6): stored-run names for a multiRun plugin — the
+    backend loads each run's analytics and passes them to the analyze hook, so
+    cross-run analytics (scenario comparisons) can ship as plugins.
+    """
 
     config: dict[str, Any] = {}
     result: dict[str, Any] = {}
+    runs: list[str] = []
 
 
 class OptionsRequest(BaseModel):
@@ -318,8 +324,17 @@ def contribute_plugin(plugin_id: str, body: TransformRequest) -> dict[str, Any]:
 @router.post("/{plugin_id}/analyze")
 def analyze_plugin(plugin_id: str, body: AnalyzeRequest) -> dict[str, Any]:
     """Run the plugin's ``analyze(result, config)`` and return its output."""
+    resolved_runs: list[dict[str, Any]] = []
+    if body.runs:
+        from .. import run_store
+
+        for name in body.runs[:12]:  # sane cap on cross-run fan-in
+            analytics = run_store.get_run_analytics(name)
+            if analytics is None:
+                raise HTTPException(status_code=404, detail=f"Stored run {name!r} not found.")
+            resolved_runs.append({"name": name, "analytics": analytics})
     try:
-        return plugins.run_analyze(plugin_id, body.result, body.config)
+        return plugins.run_analyze(plugin_id, body.result, body.config, runs=resolved_runs)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=f"Backend plugin {plugin_id!r} not found.") from exc
     except ValueError as exc:

@@ -945,3 +945,55 @@ def test_dashboard_capacity_spans_from_earliest_build_year(_plugins_dir, tmp_pat
     assert by_year[2025] == 150  # both active
     assert by_year[2039] == 150  # close_year 2040 exclusive: still active in 2039
     assert by_year[2040] == 50  # coal closed (Y < close_year), hydro never closes
+
+
+# ── Contract v2 (X6): multi-run input + composite layout output ──────────────
+
+MULTIRUN = """
+def analyze(result, config, runs):
+    return {
+        "count": {"kind": "table", "rows": [{"runs": len(runs)}]},
+        "names": {"kind": "table", "rows": [{"name": r["name"]} for r in runs]},
+        "layout": {"rows": [["count", "names"]]},
+    }
+"""
+
+LAYOUT_BAD = """
+def analyze(result, config):
+    return {"a": 1, "layout": {"rows": [["a", "missing_output"]]}}
+"""
+
+
+def test_multirun_plugin_receives_runs_and_layout_passes(_plugins_dir) -> None:
+    _write_plugin(_plugins_dir, "multi", MULTIRUN, {"multiRun": True, "contractVersion": 2})
+    meta = plugins.get("multi").to_dict()
+    assert meta["multiRun"] is True and meta["contractVersion"] == 2
+    out = plugins.run_analyze("multi", {}, {}, runs=[
+        {"name": "run_a", "analytics": {}}, {"name": "run_b", "analytics": {}},
+    ])
+    assert out["count"]["rows"] == [{"runs": 2}]
+    assert [r["name"] for r in out["names"]["rows"]] == ["run_a", "run_b"]
+    assert out["layout"]["rows"] == [["count", "names"]]
+
+
+def test_multirun_plugin_gets_empty_list_when_no_runs(_plugins_dir) -> None:
+    _write_plugin(_plugins_dir, "multi", MULTIRUN, {"multiRun": True})
+    out = plugins.run_analyze("multi", {}, {})
+    assert out["count"]["rows"] == [{"runs": 0}]
+
+
+SINGLE_ANALYZE = "def analyze(result, config):\n    return {'ok': {'kind': 'table', 'rows': []}}\n"
+
+
+def test_single_run_plugin_unchanged_and_ignores_runs(_plugins_dir) -> None:
+    _write_plugin(_plugins_dir, "single", SINGLE_ANALYZE)
+    meta = plugins.get("single").to_dict()
+    assert meta["multiRun"] is False and meta["contractVersion"] == 1
+    # v1 plugins keep the two-arg call even when the endpoint resolves runs.
+    plugins.run_analyze("single", {"x": 1}, {}, runs=[{"name": "r", "analytics": {}}])
+
+
+def test_layout_referencing_unknown_output_is_rejected(_plugins_dir) -> None:
+    _write_plugin(_plugins_dir, "badlayout", LAYOUT_BAD)
+    with pytest.raises(ValueError, match="unknown output"):
+        plugins.run_analyze("badlayout", {}, {})

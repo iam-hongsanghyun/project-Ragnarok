@@ -162,6 +162,10 @@ class BackendPlugin:
     # expensive (e.g. the region analyzer reads a full year of dispatch), so
     # opening the panel stays instant.
     analyze_on_demand: bool = False
+    # Contract v2 (X6): a multi-run plugin's analyze receives a third argument
+    # `runs` — a list of {name, analytics} for the stored runs the user picked.
+    multi_run: bool = False
+    contract_version: int = 1
 
     @property
     def has_transform(self) -> bool:
@@ -201,6 +205,8 @@ class BackendPlugin:
                 "options": self.has_options,
             },
             "analyzeOnDemand": self.analyze_on_demand,
+            "multiRun": self.multi_run,
+            "contractVersion": self.contract_version,
         }
 
 
@@ -240,6 +246,8 @@ def _load_one(directory: Path) -> BackendPlugin | None:
             module=module,
             directory=directory,
             analyze_on_demand=bool(manifest.get("analyzeOnDemand", False)),
+            multi_run=bool(manifest.get("multiRun", False)),
+            contract_version=int(manifest.get("contractVersion", 1) or 1),
         )
         if not (plugin.has_transform or plugin.has_contribute or plugin.has_analyze):
             logger.warning("Skip backend plugin %s: no transform/contribute/analyze hook", plugin.id)
@@ -370,16 +378,54 @@ def run_contribute(
     return out
 
 
-def run_analyze(plugin_id: str, result: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
-    """Run a plugin's ``analyze(result, config)`` and return its output."""
+def _validate_layout(plugin_id: str, out: dict[str, Any]) -> None:
+    """Contract v2 (X6): an optional reserved ``layout`` output arranges the
+    OTHER output keys into host-rendered rows — ``{"rows": [["a","b"],["c"]]}``.
+    The host owns rendering; the plugin only names its own outputs."""
+    layout = out.get("layout")
+    if layout is None:
+        return
+    rows = layout.get("rows") if isinstance(layout, dict) else None
+    if not isinstance(rows, list) or not all(
+        isinstance(row, list) and all(isinstance(k, str) for k in row) for row in rows
+    ):
+        raise ValueError(
+            f"Plugin {plugin_id!r}: 'layout' must be {{\"rows\": [[output-key, …], …]}}."
+        )
+    known = set(out.keys()) - {"layout"}
+    unknown = [k for row in rows for k in row if k not in known]
+    if unknown:
+        raise ValueError(
+            f"Plugin {plugin_id!r}: layout references unknown output(s): {unknown[:3]}."
+        )
+
+
+def run_analyze(
+    plugin_id: str,
+    result: dict[str, Any],
+    config: dict[str, Any],
+    runs: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Run a plugin's analyze hook and return its output.
+
+    Contract v1: ``analyze(result, config)``. Contract v2 with ``multiRun`` in
+    the manifest: ``analyze(result, config, runs)`` where ``runs`` is a list of
+    ``{name, analytics}`` for the stored runs the user selected (may be empty).
+    An optional reserved ``layout`` output key arranges outputs into rows.
+    """
     plugin = get(plugin_id)
     if plugin is None:
         raise KeyError(plugin_id)
     if not plugin.has_analyze:
         raise ValueError(f"Plugin {plugin_id!r} has no analyze hook.")
-    out = _call(plugin.module.analyze, result or {}, _with_data_dir(plugin_id, config))
+    cfg = _with_data_dir(plugin_id, config)
+    if plugin.multi_run:
+        out = _call(plugin.module.analyze, result or {}, cfg, list(runs or []))
+    else:
+        out = _call(plugin.module.analyze, result or {}, cfg)
     if not isinstance(out, dict):
         raise ValueError(f"Plugin {plugin_id!r} analyze() did not return a dict.")
+    _validate_layout(plugin_id, out)
     return out
 
 
