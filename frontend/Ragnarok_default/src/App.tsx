@@ -15,6 +15,7 @@ import {
   SamplingConfig,
   StochasticConfig,
   SecurityConstrainedConfig,
+  MarketSimConfig,
   PowerFlowConfig,
   ContingencyConfig,
   MgaConfig,
@@ -268,6 +269,7 @@ function AppInner() {
   const [stochasticConfig, setStochasticConfig] = useState<StochasticConfig>({ enabled: false, scenarios: [] });
   const [sclopfConfig, setSclopfConfig] = useState<SecurityConstrainedConfig>({ enabled: false });
   const [powerFlowConfig, setPowerFlowConfig] = useState<PowerFlowConfig>({ enabled: false, linear: false });
+  const [marketSimConfig, setMarketSimConfig] = useState<MarketSimConfig>({ enabled: false, pricing: 'uniform' as const, voll: 3000, chargeQuantile: 0.25, dischargeQuantile: 0.75 });
   const [contingencyConfig, setContingencyConfig] = useState<ContingencyConfig>({ enabled: false });
   const [mgaConfig, setMgaConfig] = useState<MgaConfig>({ enabled: false, slack: 0.05, carriers: [] });
   const [merchantConfig, setMerchantConfig] = useState<MerchantConfig>({ enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 });
@@ -318,6 +320,7 @@ function AppInner() {
     stochasticConfig: { enabled: false, scenarios: [] },
     securityConstrainedConfig: { enabled: false },
     powerFlowConfig: { enabled: false, linear: false },
+    marketSimConfig: { enabled: false, pricing: 'uniform' as const, voll: 3000, chargeQuantile: 0.25, dischargeQuantile: 0.75 },
     contingencyConfig: { enabled: false },
     mgaConfig: { enabled: false, slack: 0.05, carriers: [] },
     merchantConfig: { enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 },
@@ -486,6 +489,7 @@ function AppInner() {
       stochasticConfig,
       securityConstrainedConfig: sclopfConfig,
       powerFlowConfig,
+      marketSimConfig,
       contingencyConfig,
       mgaConfig,
       merchantConfig,
@@ -514,6 +518,7 @@ function AppInner() {
     stochasticConfig,
     sclopfConfig,
     powerFlowConfig,
+    marketSimConfig,
     contingencyConfig,
     mgaConfig,
     merchantConfig,
@@ -635,6 +640,7 @@ function AppInner() {
       stochasticConfig,
       securityConstrainedConfig: sclopfConfig,
       powerFlowConfig,
+      marketSimConfig,
       contingencyConfig,
       mgaConfig,
       merchantConfig,
@@ -691,6 +697,7 @@ function AppInner() {
     stochasticConfig,
     sclopfConfig,
     powerFlowConfig,
+    marketSimConfig,
     contingencyConfig,
     mgaConfig,
     merchantConfig,
@@ -1080,6 +1087,7 @@ function AppInner() {
     setStochasticConfig(scenario.stochasticConfig ?? { enabled: false, scenarios: [] });
     setSclopfConfig(scenario.securityConstrainedConfig ?? { enabled: false });
     setPowerFlowConfig(scenario.powerFlowConfig ?? { enabled: false, linear: false });
+    setMarketSimConfig(scenario.marketSimConfig ?? { enabled: false, pricing: 'uniform' as const, voll: 3000, chargeQuantile: 0.25, dischargeQuantile: 0.75 });
     setContingencyConfig(scenario.contingencyConfig ?? { enabled: false });
     setMgaConfig(scenario.mgaConfig ?? { enabled: false, slack: 0.05, carriers: [] });
     setMerchantConfig(scenario.merchantConfig ?? { enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 });
@@ -2368,6 +2376,7 @@ function AppInner() {
       stochasticConfig,
       securityConstrainedConfig: sclopfConfig,
       powerFlowConfig,
+      marketSimConfig,
       contingencyConfig,
       mgaConfig,
       merchantConfig,
@@ -2663,6 +2672,8 @@ function AppInner() {
               onSclopfConfigChange={setSclopfConfig}
               powerFlowConfig={powerFlowConfig}
               onPowerFlowConfigChange={setPowerFlowConfig}
+              marketSimConfig={marketSimConfig}
+              onMarketSimConfigChange={setMarketSimConfig}
               contingencyConfig={contingencyConfig}
               onContingencyConfigChange={setContingencyConfig}
               mgaConfig={mgaConfig}

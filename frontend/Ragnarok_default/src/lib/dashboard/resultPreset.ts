@@ -96,6 +96,23 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
     return { rows: naRows.map((r) => r.row), cards: naRows.flatMap((r) => r.cards) };
   }
 
+  // Market-simulation study (B2): rule-based clearing — no optimise economics,
+  // but dispatch + system price ARE filled from the simulation, so show them
+  // alongside the market card and the supply stack.
+  if (results.marketSimulation) {
+    const msRows = [
+      row({ height: 90, autoHeight: false, cards: [{ card: { id: id('kpi'), kind: 'kpi-strip' } }] }),
+      row({ cards: [{ card: makeChart({ metricKey: 'dispatch', chartType: 'area', stacked: true }) }] }),
+      row({ cards: [
+        { card: makeChart({ metricKey: 'system_price' }) },
+        { card: { id: id('merit'), kind: 'merit-order' } as Card },
+      ] }),
+      row({ cards: [{ card: { id: id('marketsim'), kind: 'market-simulation' } as Card }] }),
+      row({ cards: [{ card: { id: id('notes'), kind: 'notes' } }] }),
+    ];
+    return { rows: msRows.map((r) => r.row), cards: msRows.flatMap((r) => r.cards) };
+  }
+
   // Check storageUnits in assetDetails (live run) OR any non-zero value in the
   // pre-computed storageSeries (analytics-bundle view where series = null and
   // assetDetails is empty).

@@ -12,6 +12,7 @@ import {
   MgaConfig,
   MerchantConfig,
   PathwayConfig,
+  MarketSimConfig,
   PowerFlowConfig,
   Primitive,
   RollingHorizonConfig,
@@ -79,6 +80,10 @@ export function defaultPowerFlowConfig(): PowerFlowConfig {
   return { enabled: false, linear: false };
 }
 
+export function defaultMarketSimConfig(): MarketSimConfig {
+  return { enabled: false, pricing: 'uniform', voll: 3000, chargeQuantile: 0.25, dischargeQuantile: 0.75 };
+}
+
 export function defaultContingencyConfig(): ContingencyConfig {
   return { enabled: false };
 }
@@ -134,6 +139,10 @@ function cloneSclopfConfig(config: SecurityConstrainedConfig): SecurityConstrain
 }
 
 function clonePowerFlowConfig(config: PowerFlowConfig): PowerFlowConfig {
+  return { ...config };
+}
+
+function cloneMarketSimConfig(config: MarketSimConfig): MarketSimConfig {
   return { ...config };
 }
 
@@ -201,6 +210,7 @@ export function buildScenarioPreset(input: {
   stochasticConfig?: StochasticConfig;
   securityConstrainedConfig?: SecurityConstrainedConfig;
   powerFlowConfig?: PowerFlowConfig;
+  marketSimConfig?: MarketSimConfig;
   contingencyConfig?: ContingencyConfig;
   mgaConfig?: MgaConfig;
   merchantConfig?: MerchantConfig;
@@ -232,6 +242,7 @@ export function buildScenarioPreset(input: {
     stochasticConfig: cloneStochasticConfig(input.stochasticConfig ?? defaultStochasticConfig()),
     securityConstrainedConfig: cloneSclopfConfig(input.securityConstrainedConfig ?? defaultSclopfConfig()),
     powerFlowConfig: clonePowerFlowConfig(input.powerFlowConfig ?? defaultPowerFlowConfig()),
+    marketSimConfig: cloneMarketSimConfig(input.marketSimConfig ?? defaultMarketSimConfig()),
     contingencyConfig: cloneContingencyConfig(input.contingencyConfig ?? defaultContingencyConfig()),
     mgaConfig: cloneMgaConfig(input.mgaConfig ?? defaultMgaConfig()),
     merchantConfig: cloneMerchantConfig(input.merchantConfig ?? defaultMerchantConfig()),
@@ -278,6 +289,7 @@ function normalizeScenarioCatalog(catalog: ScenarioCatalog): ScenarioCatalog {
       stochasticConfig: cloneStochasticConfig(scenario.stochasticConfig ?? defaultStochasticConfig()),
       securityConstrainedConfig: cloneSclopfConfig(scenario.securityConstrainedConfig ?? defaultSclopfConfig()),
       powerFlowConfig: clonePowerFlowConfig(scenario.powerFlowConfig ?? defaultPowerFlowConfig()),
+      marketSimConfig: cloneMarketSimConfig(scenario.marketSimConfig ?? defaultMarketSimConfig()),
       contingencyConfig: cloneContingencyConfig(scenario.contingencyConfig ?? defaultContingencyConfig()),
       mgaConfig: cloneMgaConfig(scenario.mgaConfig ?? defaultMgaConfig()),
       merchantConfig: cloneMerchantConfig(scenario.merchantConfig ?? defaultMerchantConfig()),
@@ -321,6 +333,7 @@ export function readScenarioCatalogFromModel(model: WorkbookModel): ScenarioCata
         stochasticConfig: payload.stochasticConfig ?? defaultStochasticConfig(),
         securityConstrainedConfig: payload.securityConstrainedConfig ?? defaultSclopfConfig(),
         powerFlowConfig: payload.powerFlowConfig ?? defaultPowerFlowConfig(),
+        marketSimConfig: payload.marketSimConfig ?? defaultMarketSimConfig(),
         contingencyConfig: payload.contingencyConfig ?? defaultContingencyConfig(),
         mgaConfig: payload.mgaConfig ?? defaultMgaConfig(),
         merchantConfig: payload.merchantConfig ?? defaultMerchantConfig(),
@@ -373,6 +386,7 @@ export function writeScenarioCatalogToModel(
       stochasticConfig: scenario.stochasticConfig,
       securityConstrainedConfig: scenario.securityConstrainedConfig,
       powerFlowConfig: scenario.powerFlowConfig,
+      marketSimConfig: scenario.marketSimConfig,
       contingencyConfig: scenario.contingencyConfig,
       mgaConfig: scenario.mgaConfig,
       merchantConfig: scenario.merchantConfig,

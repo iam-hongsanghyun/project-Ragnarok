@@ -166,6 +166,54 @@ export interface PowerFlowConfig {
   linear: boolean;
 }
 
+/** Market-simulation study mode (B2) — rule-based merit-order clearing on a
+ *  single zone, not an optimisation. */
+export interface MarketSimConfig {
+  enabled: boolean;
+  /** Settlement: every dispatched unit paid the clearing price, or its own bid. */
+  pricing: 'uniform' | 'payAsBid';
+  /** Price applied to unserved energy (currency/MWh). */
+  voll: number;
+  /** Storage price-threshold rule: charge at/below this price quantile… */
+  chargeQuantile: number;
+  /** …and discharge at/above this one. */
+  dischargeQuantile: number;
+}
+
+export interface MarketSimUnit {
+  name: string;
+  carrier: string;
+  bid: number;
+  marginalCost: number;
+  energyMWh: number;
+  revenue: number;
+  cost: number;
+  profit: number;
+  capacityFactor: number;
+  priceSettingHours: number;
+}
+
+export interface MarketSimulationResult {
+  pricing: string;
+  voll: number;
+  currency: string;
+  summary: {
+    avgPrice: number;
+    peakPrice: number;
+    totalLoadMWh: number;
+    totalCost: number;
+    unservedMWh: number;
+    unservedHours: number;
+  };
+  units: MarketSimUnit[];
+  storage: {
+    name: string;
+    energyChargedMWh: number;
+    energyDischargedMWh: number;
+    arbitrageRevenue: number;
+  }[];
+}
+
 /** Per-bus voltage magnitude (pu) across the modelled snapshots. */
 export interface VoltageProfileEntry {
   bus: string;
@@ -695,6 +743,7 @@ export interface ScenarioPreset {
   stochasticConfig: StochasticConfig;
   securityConstrainedConfig: SecurityConstrainedConfig;
   powerFlowConfig: PowerFlowConfig;
+  marketSimConfig?: MarketSimConfig;
   contingencyConfig: ContingencyConfig;
   mgaConfig: MgaConfig;
   merchantConfig: MerchantConfig;
@@ -1209,6 +1258,8 @@ export interface RunResults {
   generatorEconomics?: GeneratorEconomics;
   /** Present only when the run was a power-flow study (pf/lpf), not an LP. */
   powerFlow?: PowerFlowResult;
+  /** Present only when the run was a market-simulation study (B2). */
+  marketSimulation?: MarketSimulationResult;
   /** Present only when the run was an N-1 contingency analysis. */
   contingency?: ContingencyResult;
   /** PyPSA statistics() table (per-carrier capacity/CF/curtailment/revenue/…). */

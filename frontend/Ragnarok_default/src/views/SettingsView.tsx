@@ -16,6 +16,7 @@ import {
   CustomConstraint,
   PathwayConfig,
   ContingencyConfig,
+  MarketSimConfig,
   PowerFlowConfig,
   MgaConfig,
   MerchantConfig,
@@ -44,6 +45,7 @@ import { RollingSection } from './SettingsView.sections/Rolling';
 import { StochasticSection } from './SettingsView.sections/Stochastic/Stochastic';
 import { SclopfSection } from './SettingsView.sections/Sclopf';
 import { PowerFlowSection } from './SettingsView.sections/PowerFlow';
+import { MarketSimulationSection } from './SettingsView.sections/MarketSimulation';
 import { ContingencySection } from './SettingsView.sections/Contingency';
 import { MgaSection } from './SettingsView.sections/Mga';
 import { MerchantSection } from './SettingsView.sections/Merchant';
@@ -70,6 +72,7 @@ type SectionId =
   | 'stochastic'
   | 'sclopf'
   | 'powerflow'
+  | 'marketsim'
   | 'contingency'
   | 'mga'
   | 'decisions'
@@ -115,6 +118,7 @@ const SECTIONS: Section[] = [
   { id: 'stochastic', label: 'Stochastic',                    group: 'Solve' },
   { id: 'sclopf',     label: 'Security-constrained (SCLOPF)',  group: 'Solve' },
   { id: 'powerflow', label: 'Power flow',                     group: 'Solve' },
+  { id: 'marketsim', label: 'Market simulation',               group: 'Solve' },
   { id: 'contingency', label: 'N-1 contingency',              group: 'Solve' },
   { id: 'mga',        label: 'Near-optimal (MGA)',            group: 'Solve' },
   { id: 'solver',     label: 'Solver',                        group: 'Solve' },
@@ -163,6 +167,8 @@ export interface SettingsViewProps {
   onSclopfConfigChange: (config: SecurityConstrainedConfig) => void;
   powerFlowConfig: PowerFlowConfig;
   onPowerFlowConfigChange: (config: PowerFlowConfig) => void;
+  marketSimConfig: MarketSimConfig;
+  onMarketSimConfigChange: (config: MarketSimConfig) => void;
   mgaConfig: MgaConfig;
   onMgaConfigChange: (config: MgaConfig) => void;
   merchantConfig: MerchantConfig;
@@ -288,6 +294,7 @@ export function SettingsView(props: SettingsViewProps) {
         {section === 'stochastic'     && <StochasticSection {...props} />}
         {section === 'sclopf'         && <SclopfSection {...props} />}
         {section === 'powerflow'      && <PowerFlowSection {...props} />}
+        {section === 'marketsim'      && <MarketSimulationSection {...props} />}
         {section === 'contingency'    && <ContingencySection {...props} />}
         {section === 'mga'            && <MgaSection {...props} />}
         {section === 'company'        && <CompanySection {...props} />}

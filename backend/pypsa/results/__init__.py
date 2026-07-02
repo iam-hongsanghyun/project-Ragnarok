@@ -188,6 +188,8 @@ def run_pypsa(
     powerflow_cfg = options.get("powerFlowConfig") or {}
     pf_enabled = bool(powerflow_cfg.get("enabled", False))
     pf_linear = bool(powerflow_cfg.get("linear", False))
+    market_sim_cfg = options.get("marketSimConfig") or {}
+    market_sim_enabled = bool(market_sim_cfg.get("enabled", False))
     contingency_cfg = options.get("contingencyConfig") or {}
     contingency_enabled = bool(contingency_cfg.get("enabled", False))
     mga_cfg = options.get("mgaConfig") or {}
@@ -334,6 +336,19 @@ def run_pypsa(
         return run_power_flow(
             network,
             linear=pf_linear,
+            currency=str(options.get("currencySymbol", "$")),
+            snapshot_count=snapshot_count,
+            snapshot_weight=snapshot_weight,
+            notes=notes,
+        )
+    # Market-simulation study mode (B2): rule-based merit-order clearing instead
+    # of an LP — same delegation pattern as the power-flow study.
+    if market_sim_enabled:
+        from .simulation import run_market_sim_study
+
+        return run_market_sim_study(
+            network,
+            market_sim_cfg,
             currency=str(options.get("currencySymbol", "$")),
             snapshot_count=snapshot_count,
             snapshot_weight=snapshot_weight,
