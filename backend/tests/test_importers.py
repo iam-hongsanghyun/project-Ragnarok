@@ -29,7 +29,7 @@ def test_registry_lists_expected_modules():
         "openelectricity_demand", "openelectricity_renewable",
         "elexon_demand", "elexon_renewable", "renewables_ninja", "climatewatch_policy",
         "openmeteo_renewable", "pvgis_renewable", "nasa_power_renewable",
-        "openmeteo_demand", "fuel_prices",
+        "openmeteo_demand", "fuel_prices", "ember_history",
     }
 
 
@@ -515,3 +515,23 @@ def test_server_recorded_secrets_roundtrip(tmp_path, monkeypatch) -> None:
     assert client.put("/api/import/secrets/../evil", json={"value": "x"}).status_code in (400, 404, 405)
     assert "evil" not in imp._stored_secrets()
     assert client.put("/api/import/secrets/UPPER", json={"value": "x"}).status_code == 400
+
+
+def test_ember_history_maps_fuels_and_converts_twh():
+    from backend.app.importers.databases.ember_history import map_fuel, rows_from_payload
+
+    assert map_fuel("Bioenergy") == "biomass"
+    assert map_fuel("Other fossil") == "oil"
+    assert map_fuel("Wind") == "wind"
+    assert map_fuel("Mystery Fuel") == "mystery_fuel"  # unknown → sanitized passthrough
+
+    rows = rows_from_payload([
+        {"entity_code": "KOR", "date": "2023-02", "series": "Coal",
+         "generation_twh": 12.5, "share_of_generation_pct": 31.2},
+        {"entity_code": "KOR", "date": "2023-01", "series": "Solar", "generation_twh": 2.0},
+        {"entity_code": "KOR", "date": "2023-01", "series": "Gas", "generation_twh": None},  # dropped
+    ])
+    assert [r["snapshot"] for r in rows] == ["2023-01", "2023-02"]  # sorted by month
+    assert rows[1] == {"snapshot": "2023-02", "carrier": "coal",
+                       "generation_gwh": 12500.0, "source": "Ember", "share_pct": 31.2}
+    assert rows[0]["generation_gwh"] == 2000.0
