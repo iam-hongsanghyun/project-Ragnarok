@@ -67,6 +67,81 @@ def _is_numeric_column(s: pd.Series) -> bool:
     return int(parsed.notna().sum()) >= max(1, int(0.5 * nonblank.size))
 
 
+_HOUR_RE = None  # lazily compiled in _extract_hour
+
+
+def _extract_hour(label: Any) -> int | None:
+    """Hour-of-day (0–23) from a snapshot label like '2020-01-01 04:00' or '04:00'."""
+    global _HOUR_RE
+    if _HOUR_RE is None:
+        import re
+        _HOUR_RE = re.compile(r"(\d{1,2}):(\d{2})")
+    m = _HOUR_RE.search(str(label))
+    return int(m.group(1)) if m else None
+
+
+def duration_curve(rows: list[dict[str, Any]], column: str, *, max_points: int = 800) -> dict[str, Any]:
+    """Sorted-descending values of ``column`` (the load/price duration curve),
+    downsampled to at most ``max_points`` by striding (order preserved)."""
+    vals = [_num(r.get(column)) for r in rows if r.get(column) not in (None, "")]
+    vals.sort(reverse=True)
+    n = len(vals)
+    if max_points and n > max_points:
+        step = n / max_points
+        vals = [vals[min(n - 1, int(i * step))] for i in range(max_points)]
+    return {"mode": "duration", "column": column, "values": [round(v, 6) for v in vals]}
+
+
+def daily_profile(rows: list[dict[str, Any]], index_col: str, columns: list[str]) -> dict[str, Any]:
+    """Mean of each column by hour-of-day (0–23), from the snapshot label."""
+    sums = {c: [0.0] * 24 for c in columns}
+    counts = [0] * 24
+    for r in rows:
+        h = _extract_hour(r.get(index_col))
+        if h is None or not (0 <= h < 24):
+            continue
+        counts[h] += 1
+        for c in columns:
+            sums[c][h] += _num(r.get(c))
+    hours = list(range(24))
+    series = [
+        {"key": c, "values": [round(sums[c][h] / counts[h], 6) if counts[h] else 0.0 for h in hours]}
+        for c in columns
+    ]
+    return {"mode": "daily_profile", "hours": hours, "series": series}
+
+
+def grouped_aggregate(
+    rows: list[dict[str, Any]], group_col: str, value_col: str, agg: str = "sum",
+) -> dict[str, Any]:
+    """Aggregate ``value_col`` grouped by ``group_col`` (sum/mean/max/min/count),
+    sorted by value descending."""
+    import numpy as np
+
+    buckets: dict[str, list[float]] = {}
+    for r in rows:
+        g = str(r.get(group_col, "")).strip() or "(blank)"
+        buckets.setdefault(g, []).append(_num(r.get(value_col)))
+
+    def _agg(vals: list[float]) -> float:
+        if not vals:
+            return 0.0
+        a = np.asarray(vals, dtype=float)
+        return float({"sum": a.sum, "mean": a.mean, "max": a.max, "min": a.min,
+                      "count": lambda: float(a.size)}.get(agg, a.sum)())
+
+    out = [{"label": g, "value": round(_agg(v), 6)} for g, v in buckets.items()]
+    out.sort(key=lambda d: d["value"], reverse=True)
+    return {"mode": "grouped", "groupBy": group_col, "value": value_col, "agg": agg, "bars": out}
+
+
+def _num(v: Any) -> float:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def column_statistics(rows: list[dict[str, Any]], columns: list[str] | None = None) -> dict[str, Any]:
     """Per-column statistics for a sheet's rows.
 

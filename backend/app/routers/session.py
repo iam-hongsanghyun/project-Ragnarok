@@ -149,6 +149,44 @@ def get_sheet_stats(
     return {"sheet": name, "kind": page.get("kind"), **stats}
 
 
+@router.get("/sheet/{name}/derive")
+def derive_sheet_series(
+    name: str,
+    mode: str = Query(..., description="duration | daily_profile | grouped"),
+    column: str | None = Query(None),
+    columns: str | None = Query(None, description="Comma-separated columns (daily_profile)."),
+    group_by: str | None = Query(None, alias="groupBy"),
+    agg: str = Query("sum"),
+    max_points: int = Query(800, alias="maxPoints", ge=1),
+    session_id: str = Query("default", alias="session_id"),
+) -> dict:
+    """Analyser chart-series derived server-side (X2) — duration curve, daily
+    profile, or grouped aggregate — so the browser renders instead of crunching
+    the whole (possibly 8760-row) sheet."""
+    from .. import analysis
+
+    page = model_store.get_sheet_page(session_id, name, offset=0, limit=10_000_000)
+    if page is None:
+        raise HTTPException(status_code=404, detail=f"Sheet {name!r} not found in session.")
+    rows = page.get("rows", [])
+    index_col = "snapshot" if rows and "snapshot" in rows[0] else (list(rows[0].keys())[0] if rows else "")
+
+    if mode == "duration":
+        if not column:
+            raise HTTPException(status_code=422, detail="duration mode needs 'column'.")
+        return analysis.duration_curve(rows, column, max_points=max_points)
+    if mode == "daily_profile":
+        cols = [c.strip() for c in columns.split(",") if c.strip()] if columns else (
+            [column] if column else [c for c in page.get("columns", []) if c != index_col]
+        )
+        return analysis.daily_profile(rows, index_col, cols)
+    if mode == "grouped":
+        if not group_by or not column:
+            raise HTTPException(status_code=422, detail="grouped mode needs 'groupBy' and 'column'.")
+        return analysis.grouped_aggregate(rows, group_by, column, agg)
+    raise HTTPException(status_code=422, detail=f"Unknown mode {mode!r}. Options: duration, daily_profile, grouped.")
+
+
 @router.get("/series/{name}")
 def get_series(
     name: str,

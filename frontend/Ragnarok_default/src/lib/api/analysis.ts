@@ -40,6 +40,32 @@ export interface SheetStats {
   columns: ColumnStats[];
 }
 
+/** Analyser chart-series derived server-side (X2) — duration curve, daily
+ *  profile, or grouped aggregate — so the browser needn't crunch the whole sheet. */
+export interface DurationResult { mode: 'duration'; column: string; values: number[] }
+export interface DailyProfileResult { mode: 'daily_profile'; hours: number[]; series: { key: string; values: number[] }[] }
+export interface GroupedResult { mode: 'grouped'; groupBy: string; value: string; agg: string; bars: { label: string; value: number }[] }
+
+async function deriveGet(sheet: string, params: Record<string, string>, sessionId: string): Promise<any> {
+  const q = new URLSearchParams({ ...params, session_id: sessionId }).toString();
+  const resp = await fetch(`${API_BASE}/api/session/sheet/${encodeURIComponent(sheet)}/derive?${q}`);
+  if (!resp.ok) {
+    let detail = resp.statusText;
+    try { detail = (await resp.json())?.detail ?? detail; } catch { /* non-JSON */ }
+    throw new Error(`Derive failed (${resp.status}): ${detail}`);
+  }
+  return resp.json();
+}
+
+export const fetchDurationCurve = (sheet: string, column: string, maxPoints = 800, sessionId = 'default') =>
+  deriveGet(sheet, { mode: 'duration', column, maxPoints: String(maxPoints) }, sessionId) as Promise<DurationResult>;
+
+export const fetchDailyProfile = (sheet: string, columns: string[], sessionId = 'default') =>
+  deriveGet(sheet, { mode: 'daily_profile', columns: columns.join(',') }, sessionId) as Promise<DailyProfileResult>;
+
+export const fetchGroupedAggregate = (sheet: string, groupBy: string, column: string, agg = 'sum', sessionId = 'default') =>
+  deriveGet(sheet, { mode: 'grouped', groupBy, column, agg }, sessionId) as Promise<GroupedResult>;
+
 export async function fetchColumnStats(sheet: string, sessionId = 'default'): Promise<SheetStats> {
   const resp = await fetch(
     `${API_BASE}/api/session/sheet/${encodeURIComponent(sheet)}/stats?session_id=${encodeURIComponent(sessionId)}`,
