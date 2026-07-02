@@ -185,6 +185,32 @@ def test_preflight_ok_when_env_present(tmp_path: Path, monkeypatch: pytest.Monke
     pe._preflight(tmp_path, ["snakemake", "-j", "4", "x.nc"])
 
 
+def test_build_overlay_pins_country_clusters_and_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    req = pe.BuildRequest(countryIso="KOR", countryName="South Korea", horizonYear=2033, clusters=12)
+    overlay = pe._build_overlay(req, "KR")
+    assert overlay["countries"] == ["KR"]
+    assert overlay["run"]["name"] == "ragnarok_KR"
+    assert overlay["scenario"]["clusters"] == [12]
+    # All four wildcards pinned so the output filename is deterministic.
+    assert overlay["scenario"]["simpl"] == [""] and overlay["scenario"]["ll"] == ["copt"]
+    assert overlay["costs"]["year"] == 2035  # snapped to the 5-year cost grid
+
+
+def test_target_is_the_prepared_network_not_the_solved_one() -> None:
+    # networks/<run>/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}.nc — pre-solve
+    # (results/… would run PyPSA-Earth's own solve, on restricted Gurobi).
+    assert pe._target_for("KR", 10) == "networks/ragnarok_KR/elec_s_10_ec_lcopt_Co2L-3h.nc"
+
+
+def test_snakemake_argv_includes_configfile(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/snakemake" if name == "snakemake" else None)
+    argv = pe._snakemake_argv("results/x.nc", "ragnarok_config_KR.yaml")
+    i = argv.index("--configfile")
+    assert argv[i + 1] == "ragnarok_config_KR.yaml"
+    # Target must come BEFORE --configfile (snakemake's flag is greedy, nargs='+').
+    assert argv.index("results/x.nc") < i
+
+
 def test_stream_log_tails_lines_and_lifts_progress() -> None:
     pe._JOBS["stream-t"] = {"jobId": "stream-t", "status": "running"}
     try:

@@ -164,7 +164,44 @@ def ingest_network(path: str | Path) -> dict[str, list[dict[str, Any]]]:
     return network_to_model(network)
 
 
-def _snakemake_argv(target: str) -> list[str]:
+# The scenario wildcards we pin in the per-request config overlay. Pinning all
+# four makes the output filename deterministic, so the target can be derived.
+_SIMPL, _LL, _OPTS = "", "copt", "Co2L-3h"
+
+
+def _snap_cost_year(year: int) -> int:
+    """Snap to the 5-year grid technology-data ships cost files for (2020–2050)."""
+    return min(2050, max(2020, int(round(year / 5.0)) * 5))
+
+
+def _build_overlay(req: BuildRequest, iso2: str) -> dict[str, Any]:
+    """The per-request PyPSA-Earth config overlay (merged over the workflow's own
+    config via snakemake ``--configfile``) — the picked country/clusters/horizon
+    actually drive the build instead of the checkout's default config."""
+    return {
+        "run": {"name": f"ragnarok_{iso2}"},  # results/ragnarok_<iso2>/… per country
+        "countries": [iso2],
+        "scenario": {
+            "simpl": [_SIMPL], "ll": [_LL],
+            "clusters": [int(req.clusters)], "opts": [_OPTS],
+        },
+        "costs": {"year": _snap_cost_year(int(req.horizonYear))},
+    }
+
+
+def _target_for(iso2: str, clusters: int) -> str:
+    """The PREPARED-network file the pinned scenario produces
+    (``networks/<run>/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}.nc``).
+
+    Deliberately the pre-solve stage: ``results/…`` would be the SOLVED network,
+    which runs an LP inside PyPSA-Earth (default solver: restricted Gurobi — a
+    real country model can exceed its size limits). Ragnarok solves the ingested
+    network itself with HiGHS, so the prepared network is the right hand-off.
+    """
+    return f"networks/ragnarok_{iso2}/elec_s{_SIMPL}_{clusters}_ec_l{_LL}_{_OPTS}.nc"
+
+
+def _snakemake_argv(target: str, configfile: str | None = None) -> list[str]:
     """How to invoke snakemake for the build.
 
     snakemake (and the workflow's deps) live in the pypsa-earth **conda env**, not
@@ -174,7 +211,11 @@ def _snakemake_argv(target: str) -> list[str]:
     ``mamba run`` / ``conda run``. ``$RAGNAROK_PYPSA_EARTH_CONDA_ENV`` overrides
     the env name (default ``pypsa-earth``).
     """
+    # Target BEFORE --configfile: snakemake's --configfile is greedy (nargs='+')
+    # and would swallow a trailing target as a second config file.
     base = ["snakemake", "-j", "4", "--rerun-incomplete", target]
+    if configfile:
+        base += ["--configfile", configfile]
     if shutil.which("snakemake"):
         return base
     runner = shutil.which("mamba") or shutil.which("conda")
@@ -267,9 +308,27 @@ def _run_workflow_and_ingest(env: Path, req: BuildRequest, job_id: str) -> dict[
     then reuses :func:`ingest_network`. The heavy lifting is PyPSA-Earth's; this
     is the integration seam.
     """
-    target = f"results/networks/elec_s_{int(req.clusters)}.nc"
-    argv = _snakemake_argv(target)
-    _set(job_id, phase="checking environment", detail="Verifying the pypsa-earth conda env…")
+    from ..importers.region import iso2_for
+
+    iso2 = iso2_for(req.countryIso)
+    if not iso2:
+        raise RuntimeError(
+            f"Could not resolve an ISO alpha-2 code for {req.countryIso!r} "
+            f"(PyPSA-Earth selects countries by alpha-2). Pick the country on the "
+            f"Data-view map and retry."
+        )
+    # Per-request config: written into the (gitignored) checkout and merged over
+    # the workflow's own config — so the picked country/clusters/horizon drive
+    # the build instead of the checkout's default (e.g. the Africa tutorial).
+    overlay = _build_overlay(req, iso2)
+    configfile = f"ragnarok_config_{iso2}.yaml"
+    import yaml
+
+    (env / configfile).write_text(yaml.safe_dump(overlay, sort_keys=False), encoding="utf-8")
+    target = _target_for(iso2, int(req.clusters))
+    argv = _snakemake_argv(target, configfile)
+    _set(job_id, phase="checking environment",
+         detail=f"Verifying the pypsa-earth conda env… (countries=[{iso2}], clusters={req.clusters})")
     _preflight(env, argv)
 
     _set(job_id, phase="running PyPSA-Earth workflow", progress=0,

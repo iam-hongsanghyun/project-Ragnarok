@@ -80,6 +80,18 @@ def _feature_iso(props: dict[str, Any]) -> str | None:
     return None
 
 
+_ISO2_KEYS = ("ISO_A2_EH", "ISO_A2", "WB_A2", "POSTAL")
+
+
+def _feature_iso2(props: dict[str, Any]) -> str | None:
+    """ISO-3166 alpha-2 code (used by e.g. PyPSA-Earth), or None."""
+    for k in _ISO2_KEYS:
+        v = props.get(k)
+        if isinstance(v, str) and len(v) == 2 and v != "-99":
+            return v.upper()
+    return None
+
+
 def _feature_name(props: dict[str, Any]) -> str:
     for k in _NAME_KEYS:
         v = props.get(k)
@@ -106,6 +118,7 @@ def _country_index() -> dict[str, dict[str, Any]]:
             continue
         out[iso] = {
             "name": _feature_name(props),
+            "iso2": _feature_iso2(props),
             "polygon": polygon,
             "bbox": tuple(float(v) for v in polygon.bounds),
             "centroid": (float(polygon.centroid.x), float(polygon.centroid.y)),
@@ -127,6 +140,16 @@ def country_list() -> list[dict[str, Any]]:
         }
         for iso, e in sorted(idx.items(), key=lambda kv: kv[1]["name"])
     ]
+
+
+def iso2_for(country_iso3: str) -> str | None:
+    """ISO alpha-2 code for an alpha-3 country code (e.g. KOR → KR), or None.
+
+    Sourced from the same cached Natural Earth boundaries the map uses, so any
+    country pickable in the Data view resolves.
+    """
+    entry = _country_index().get(country_iso3.strip().upper())
+    return entry.get("iso2") if entry else None
 
 
 def get_region(country_iso: str) -> Region:
