@@ -496,18 +496,27 @@ def run_pypsa(
                 and solve_condition not in ("infeasible", "unbounded", "infeasible_or_unbounded")
                 else ""
             )
-            raise HTTPException(
-                status_code=500,
-                detail=(
-                    f"Solver did not return a usable solution "
-                    f"(status='{solve_status}', condition='{solve_condition}'). "
-                    "The model is likely infeasible or ill-conditioned: check for "
-                    "placeholder 1e12 / inf values in p_nom_max, e_sum_min, "
-                    "e_sum_max, lifetime, or for conflicting constraints (CO₂ cap, "
-                    "capacity factor caps) against the available capacity."
-                    + strict_hint
-                ),
+            base_msg = (
+                f"Solver did not return a usable solution "
+                f"(status='{solve_status}', condition='{solve_condition}')."
             )
+            # Q2 — explain WHY (capacity shortfall, extreme coefficients, binding
+            # constraints) with concrete fixes, instead of a raw solver string.
+            if solve_condition in ("infeasible", "unbounded", "infeasible_or_unbounded"):
+                try:
+                    from .diagnostics import diagnose_infeasibility, diagnosis_text
+
+                    diag = diagnose_infeasibility(network, currency=currency)
+                    detail = f"{base_msg} {diag['headline']}.\n{diagnosis_text(diag)}{strict_hint}"
+                except Exception:  # diagnostics must never mask the real error
+                    detail = base_msg + strict_hint
+            else:
+                detail = (
+                    base_msg + " The model is likely infeasible or ill-conditioned: "
+                    "check for placeholder 1e12 / inf values in p_nom_max, e_sum_min, "
+                    "e_sum_max, lifetime, or for conflicting constraints." + strict_hint
+                )
+            raise HTTPException(status_code=500, detail=detail)
         if solve_condition != "optimal":
             notes.append(
                 f"Solver finished with condition='{solve_condition}' but linopy "
@@ -549,6 +558,8 @@ def run_pypsa(
             )
         else:
             notes.append(f"PyPSA optimize() solved with {solver_note}.")
+    except HTTPException:
+        raise  # already-diagnosed (e.g. Q2 infeasibility) — don't re-wrap
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"PyPSA optimization failed: {exc}") from exc
 
@@ -598,7 +609,6 @@ def run_pypsa(
     # the reserve position.
     generator_capacity = float(network.generators.p_nom.sum())
     storage_capacity = float(network.storage_units.p_nom.sum())
-    total_capacity = generator_capacity + storage_capacity
     total_load = float(load_dispatch.max())
     reserve_requirement = total_load  # installed capacity vs peak demand
 
