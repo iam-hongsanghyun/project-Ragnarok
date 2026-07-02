@@ -36,6 +36,9 @@ import { NearOptimalCard } from '../../../features/analytics/cards/NearOptimalCa
 import { MerchantCard } from '../../../features/analytics/cards/MerchantCard';
 import { CompanyBreakdownCard } from '../../../features/analytics/cards/CompanyBreakdownCard';
 import { CompanyFinanceCard } from '../../../features/analytics/cards/CompanyFinanceCard';
+import { CompanyStatementCard } from '../../../features/analytics/cards/CompanyStatementCard';
+import { CompanyComparisonCard } from '../../../features/analytics/cards/CompanyComparisonCard';
+import { TransitionRiskCard } from '../../../features/analytics/cards/TransitionRiskCard';
 import { PriceFormationCard } from '../../../features/analytics/cards/PriceFormationCard';
 import { CommitmentCard } from '../../../features/analytics/cards/CommitmentCard';
 import { BidStrategyCard } from '../../../features/analytics/cards/BidStrategyCard';
@@ -458,6 +461,18 @@ export function AnalyticsDashboard({
           return results.companyFinance
             ? <CompanyFinanceCard data={results.companyFinance} />
             : <p className="dashboard-cell-missing">No company finance for this run (needs owner tags and an LP run).</p>;
+        case 'company-statement':
+          return results.companyStatement
+            ? <CompanyStatementCard data={results.companyStatement} />
+            : <p className="dashboard-cell-missing">No company P&amp;L for this run (needs owner tags and an LP run).</p>;
+        case 'company-comparison':
+          return (results.companies || results.companyFinance || results.companyStatement)
+            ? <CompanyComparisonCard breakdown={results.companies} finance={results.companyFinance} statement={results.companyStatement} />
+            : <p className="dashboard-cell-missing">No owner-tagged companies to compare.</p>;
+        case 'transition-risk':
+          return results.companyStatement
+            ? <TransitionRiskCard data={results.companyStatement} />
+            : <p className="dashboard-cell-missing">No company P&amp;L for this run (needs owner tags and an LP run).</p>;
         case 'price-formation':
           return results.priceFormation
             ? <PriceFormationCard data={results.priceFormation} />
@@ -577,6 +592,9 @@ export function AnalyticsDashboard({
       case 'merchant': return 'Merchant economics (price-taker)';
       case 'company-breakdown': return 'Company breakdown (per-owner KPIs)';
       case 'company-finance': return 'Company finance (NPV / IRR / payback)';
+      case 'company-statement': return 'Company P&L (per-owner annual statement)';
+      case 'company-comparison': return 'Company comparison (rank owners side by side)';
+      case 'transition-risk': return 'Transition risk (carbon-price margin erosion)';
       case 'price-formation': return 'Price formation (why the price is what it is)';
       case 'commitment': return 'Unit commitment (starts & on/off)';
       case 'bid-strategy': return 'Bid strategy (markup vs price-taker)';

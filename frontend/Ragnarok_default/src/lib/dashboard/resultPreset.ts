@@ -136,6 +136,7 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   const hasMerchant = !!(results.merchant && results.merchant.assets.length > 0);
   const hasCompanies = !!(results.companies && results.companies.companies.length > 0);
   const hasCompanyFinance = !!(results.companyFinance && results.companyFinance.companies.length > 0);
+  const hasCompanyStatement = !!(results.companyStatement && results.companyStatement.companies.length > 0);
   const hasPriceFormation = !!(results.priceFormation && results.priceFormation.series.length > 0);
   const hasCommitment = !!(results.commitment && results.commitment.generators.length > 0);
   const hasBidStrategy = !!results.bidStrategy;
@@ -323,6 +324,24 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   if (hasCompanyFinance) {
     const fin: Card = { id: id('fin'), kind: 'company-finance' };
     rows.push(row({ cards: [{ card: fin }] }));
+  }
+
+  // 9h. Consolidated per-company P&L statement (conditional).
+  if (hasCompanyStatement) {
+    const st: Card = { id: id('stmt'), kind: 'company-statement' };
+    rows.push(row({ cards: [{ card: st }] }));
+  }
+
+  // 9i. Cross-company comparison — available whenever any per-company block is.
+  if (hasCompanies || hasCompanyFinance || hasCompanyStatement) {
+    const cmp: Card = { id: id('cmp'), kind: 'company-comparison' };
+    rows.push(row({ cards: [{ card: cmp }] }));
+  }
+
+  // 9j. Transition risk — carbon-price margin erosion (needs the P&L statement).
+  if (hasCompanyStatement) {
+    const tr: Card = { id: id('tr'), kind: 'transition-risk' };
+    rows.push(row({ cards: [{ card: tr }] }));
   }
 
   // 10. Carrier analysis — full-width performance table.

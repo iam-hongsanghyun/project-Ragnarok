@@ -713,6 +713,31 @@ export interface CompanyFinanceResult {
   companies: CompanyFinanceEntry[];
 }
 
+/** One company's annual P&L line items (consolidated F1+F2 statement). */
+export interface CompanyStatementEntry {
+  company: string;
+  revenue: number;
+  energyMWh: number;
+  carbonCost: number;
+  fuelVomCost: number;
+  variableCost: number;
+  grossMargin: number;
+  capexAnnual: number;
+  ebit: number;
+  interest: number;
+  netMargin: number;
+  emissionsTonnes: number;
+}
+
+/** Consolidated per-company annual P&L statement (revenue → … → net margin). */
+export interface CompanyStatementResult {
+  ownerColumn: string;
+  currency: string;
+  carbonPrice: number;
+  companies: CompanyStatementEntry[];
+  totals: Omit<CompanyStatementEntry, 'company'>;
+}
+
 /** Merchant result block — one owner's profit against the price signal. */
 export interface MerchantResult {
   owner: string;
@@ -1323,6 +1348,7 @@ export interface RunResults {
   companies?: CompanyBreakdownResult;
   /** Per-company project finance (NPV/IRR/payback/DSCR); needs an LP run. */
   companyFinance?: CompanyFinanceResult;
+  companyStatement?: CompanyStatementResult;
   /** Price-formation view (price vs residual demand, marginal carrier). */
   priceFormation?: PriceFormationResult;
   /** Unit-commitment view (starts, start-up costs, on/off patterns). */

@@ -3629,7 +3629,43 @@ path.leaflet-interactive:focus {
 .econ-recovered { color: var(--brand); font-weight: 600; }
 .econ-shortfall { color: #dc2626; font-weight: 600; }
 .econ-muted { color: var(--muted); }
+.econ-negative { color: #dc2626; font-weight: 600; }
 .econ-note { font-size: 0.72rem; color: var(--muted); margin: 4px 2px 0; line-height: 1.45; }
+
+/* Inline horizontal bar (strategic-bidding curve, company comparison). */
+.sb-bar { height: 8px; background: var(--bg-hover); border-radius: 999px; overflow: hidden; }
+.sb-bar > span { display: block; height: 100%; background: var(--brand); }
+
+/* ── Company P&L statement ───────────────────────────────────────────────── */
+.company-statement td:first-child { white-space: normal; }
+.company-statement .total-col { border-left: 1px solid var(--border); font-weight: 600; }
+.company-statement tr.stmt-subtotal td,
+.company-statement tr.stmt-net td { border-top: 1px solid var(--border); font-weight: 600; }
+.company-statement tr.stmt-net td { border-bottom: 2px solid var(--border); }
+.company-statement tr.stmt-cost td { color: var(--muted); }
+
+/* ── Transition-risk card ────────────────────────────────────────────────── */
+.tr-controls {
+  display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 10px;
+}
+.tr-controls label {
+  display: flex; flex-direction: column; gap: 2px;
+  font-size: 0.72rem; color: var(--muted);
+}
+.tr-controls input {
+  width: 84px; padding: 3px 6px;
+  border: 1px solid var(--border); border-radius: 4px;
+  background: var(--surface); color: var(--text); font-size: 0.82rem;
+}
+.tr-swatch {
+  display: inline-block; width: 9px; height: 9px; border-radius: 2px;
+  margin-right: 6px; vertical-align: middle;
+}
+.tr-chart { width: 100%; max-width: 520px; height: auto; }
+.tr-chart .tr-axis { stroke: var(--muted); stroke-width: 1; }
+.tr-chart .tr-threshold { stroke: #dc2626; stroke-width: 1; stroke-dasharray: 4 3; opacity: 0.7; }
+.tr-chart .tr-axis-label { fill: var(--muted); font-size: 9px; }
+.tr-chart .tr-line { fill: none; stroke-width: 2; }
 
 /* ── Merit Order Card ────────────────────────────────────────────────────── */
 .merit-card { padding: 8px 4px; }

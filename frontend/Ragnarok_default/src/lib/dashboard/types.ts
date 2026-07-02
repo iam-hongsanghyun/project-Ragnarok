@@ -29,6 +29,9 @@ export type CardKind =
   | 'merchant'
   | 'company-breakdown'
   | 'company-finance'
+  | 'company-statement'
+  | 'company-comparison'
+  | 'transition-risk'
   | 'price-formation'
   | 'commitment'
   | 'bid-strategy'
@@ -177,6 +180,18 @@ export interface CompanyFinanceCardData extends CardBase {
   kind: 'company-finance';
 }
 
+export interface CompanyStatementCardData extends CardBase {
+  kind: 'company-statement';
+}
+
+export interface CompanyComparisonCardData extends CardBase {
+  kind: 'company-comparison';
+}
+
+export interface TransitionRiskCardData extends CardBase {
+  kind: 'transition-risk';
+}
+
 export interface PriceFormationCardData extends CardBase {
   kind: 'price-formation';
 }
@@ -276,6 +291,9 @@ export type Card =
   | MerchantCardData
   | CompanyBreakdownCardData
   | CompanyFinanceCardData
+  | CompanyStatementCardData
+  | CompanyComparisonCardData
+  | TransitionRiskCardData
   | PriceFormationCardData
   | CommitmentCardData
   | BidStrategyCardData

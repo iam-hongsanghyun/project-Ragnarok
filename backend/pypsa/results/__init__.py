@@ -40,6 +40,7 @@ from .statistics import build_statistics
 from .mga import build_mga
 from .merchant import build_merchant
 from .company import build_company_breakdown
+from .company_statement import build_company_statement
 from .finance import build_company_finance
 from .price_formation import build_price_formation
 from .commitment import build_commitment
@@ -1008,6 +1009,16 @@ def run_pypsa(
         currency=currency,
         debt=options.get("financeConfig") or None,
     )
+    # Consolidated per-company annual P&L (revenue → carbon/fuel → margin → EBIT
+    # → net). Reads only solved dataframes; independent of any config.
+    company_statement = build_company_statement(
+        network, model,
+        owner_column=owner_column,
+        currency=currency,
+        emissions_factors=emissions_factors,
+        carbon_price=float(scenario.get("carbonPrice", 0.0) or 0.0),
+        debt=options.get("financeConfig") or None,
+    )
 
     return {
         "summary": summary,
@@ -1034,6 +1045,7 @@ def run_pypsa(
         "merchant": merchant,
         "companies": company_breakdown,
         "companyFinance": company_finance,
+        "companyStatement": company_statement,
         "priceFormation": price_formation,
         "commitment": commitment,
         "ppa": ppa,
