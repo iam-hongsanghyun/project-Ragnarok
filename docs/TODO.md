@@ -166,42 +166,40 @@ Forward plan from 2026-07-01 (re-sequenced after the status audit — the financ
 
 > **If the goal is "a fully-available PyPSA frontend"**, follow the *North star* critical path first: **D1 → I4 → X1/X2 → W2 → Q1**. The theme-ordered list below is the fuller backlog; the near-term block leads with the pieces on that path.
 
-**Recently shipped** (see *Already shipped* for detail): B1, F1, F2, PP1, DW1–DW4, M1 (core), M2, M3, B3, T2, statistics passthrough, MGA near-optimal, the strategic-pricing analytics tiers, and the bulk-transform half of T1.
+**Recently shipped** (see *Already shipped* for detail): B1, F1, F2, PP1, DW1–DW4, **M1 (complete — template library + carrier-aware dispatch mix)**, M2, M3, B3, **T1 (complete — retarget + 5-method forecast incl. ARIMA/Prophet)**, T2, **I4 (complete — PVGIS/NASA/ninja + measured ENTSO-E/OpenElectricity/Elexon profiles)**, **I8 (Climate Watch → CO₂ cap)**, **I9 (seam + ingest + Data-tab panel + setup script; env provisioning proven on a real machine)**, statistics passthrough, MGA near-optimal, the strategic-pricing analytics tiers.
 
 **Near-term — finish the partials:**
 
-1. **T1** — snapshot-window retarget + multi-year forecast (the remaining half; the transforms shipped).
-2. **I6** — day-ahead price half (hourly load already shipped).
-3. **M1** — carrier-aware map / dispatch-mix polish + conversion-tech defaults.
+1. **I9** — per-request `config.yaml` override (the Build button currently runs the workflow dir's own config, ignoring the picked country/clusters/horizon) + one verified end-to-end country build now that a working env exists.
+2. **I6** — day-ahead price half (hourly load shipped; Elexon makes GB price nearly free, ENTSO-E A44 reuses the existing client).
+
+**Scale & trust (the "frontend-of-PyPSA" backbone — next on the critical path):**
+
+3. **Q1** — PyPSA reference-parity test suite · **Q2** — infeasibility & solver diagnostics.
+4. **X1 / X2** — thin-client: port analytics derivation server-side so 1000s-of-bus networks don't choke the browser (session store shipped).
 
 **Data & model-assembly layer:**
 
-4. **D1** — weather/reanalysis caching layer (the registry half shipped).
-5. **I4** — general coordinate-driven renewable importer (KPG193 profiles shipped).
+5. **I1** — one-location → one-model bootstrap orchestration (the importer set is now rich enough to compose).
 6. **I3** — driver-based demand forecast · **I5** — fuel & commodity prices.
-7. **I1** — one-location → one-model bootstrap orchestration (importer surface shipped).
+7. **D1** — remaining: source-health checks, versioned provenance, general cache abstraction.
 
 **Risk & adequacy:**
 
 8. **R1** — physical-climate-risk · **R2** — transition-risk (depends on F2 ✓).
 9. **A1** — stochastic renewable ensemble → **A2** — LOLE calculator.
 
-**Scale & trust (the "frontend-of-PyPSA" backbone):**
-
-10. **X1 / X2** — thin-client: port analytics derivation server-side so 1000s-of-bus networks don't choke the browser (session store shipped).
-11. **Q1** — PyPSA reference-parity test suite · **Q2** — infeasibility & solver diagnostics.
-
 **Guided & conversational surfaces:**
 
-12. **W2** — country starter-pack framework (KPG193 prototype shipped).
-13. **W1** — guided model-builder wizard · **W3** — in-app tutorial (demo networks shipped).
-14. **L1** — Bifrost AI model builder → **L2** — data-ask loop.
+10. **W2** — country starter-pack framework (KPG193 prototype shipped).
+11. **W1** — guided model-builder wizard · **W3** — in-app tutorial (demo networks shipped).
+12. **L1** — Bifrost AI model builder → **L2** — data-ask loop.
 
 **Financial-decision surface:**
 
-15. **PP2** — procurement optimizer, inside a dedicated use-case surface that also reframes PP1 + DW4 (deferred design decision).
+13. **PP2** — procurement optimizer, inside a dedicated use-case surface that also reframes PP1 + DW4 (deferred design decision).
 
-**Off the linear path** (opportunistic, non-blocking): **B2** simulation adapter · **I7**/**I8** calibration/policy importers · **D2** self-hosted demand DB · **H2′** result-mapper registry · **X3**/**X5**/**X6** architecture / plugin-sandbox items · **B4** strategic MPEC (deferred) · **I9** PyPSA-Earth builder (deferred).
+**Off the linear path** (opportunistic, non-blocking): **B2** simulation adapter · **I7** calibration importer · **D2** self-hosted demand DB · **H2′** result-mapper registry · **X3**/**X5**/**X6** architecture / plugin-sandbox items · **B4** strategic MPEC (deferred).
 
 ## Already shipped
 
