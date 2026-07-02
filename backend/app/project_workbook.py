@@ -618,6 +618,19 @@ def workbook_to_bundle(data: bytes, filename: str = "") -> dict[str, Any]:
             except json.JSONDecodeError:
                 logger.warning("RAGNAROK_Bundle JSON unreadable — falling back to sheet reconstruction")
 
+    # H2': a registered result mapper that recognises this sheet layout takes
+    # precedence over the canonical reconstruction (third-party formats).
+    from .result_mappers import find_result_mapper
+
+    mapper = find_result_mapper(list(excel.sheet_names))
+    if mapper is not None:
+        sheets = {name: _df_rows(excel.parse(name)) for name in excel.sheet_names}
+        bundle = mapper.map(sheets, filename)
+        bundle.setdefault("options", {}).setdefault("filename", filename)
+        bundle.setdefault("options", {})["resultMapper"] = mapper.name
+        logger.info("workbook imported via result mapper %s", mapper.name)
+        return bundle
+
     # Fallback: reconstruct from the readable sheets (e.g. a hand-built workbook
     # with no embedded bundle). Derived analytics are recomputed on the client.
     model: dict[str, Any] = {}
@@ -691,9 +704,16 @@ def workbook_to_bundle(data: bytes, filename: str = "") -> dict[str, Any]:
                 if name is not None and output_part:
                     static.setdefault(sheet, {})[str(name)] = output_part
             model[sheet] = input_rows
-        else:
-            # Input temporal / config sheet — copy verbatim into the model.
+        elif (dash and ps.component_schema(comp_sheet) is not None) or sheet in ps.non_component_sheets():
+            # Input temporal sheet (loads-p_set, generators-p_max_pu, …) or a
+            # known non-component sheet (snapshots, network, shapes, …).
             model[sheet] = rows
+        else:
+            # H2': a sheet the canonical layout does not recognise — keep it
+            # verbatim on the result (surfaced as a raw table) instead of
+            # folding junk into the model.
+            if rows:
+                result.setdefault("rawSheets", {})[sheet] = rows
 
     options.setdefault("filename", filename)
     return {"model": model, "scenario": scenario, "options": options, "result": result}

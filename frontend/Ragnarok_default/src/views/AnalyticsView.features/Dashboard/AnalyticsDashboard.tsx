@@ -40,6 +40,7 @@ import { CompanyStatementCard } from '../../../features/analytics/cards/CompanyS
 import { CompanyComparisonCard } from '../../../features/analytics/cards/CompanyComparisonCard';
 import { TransitionRiskCard } from '../../../features/analytics/cards/TransitionRiskCard';
 import { AdequacyCard } from '../../../features/analytics/cards/AdequacyCard';
+import { RawSheetsCard } from '../../../features/analytics/cards/RawSheetsCard';
 import { PriceFormationCard } from '../../../features/analytics/cards/PriceFormationCard';
 import { CommitmentCard } from '../../../features/analytics/cards/CommitmentCard';
 import { BidStrategyCard } from '../../../features/analytics/cards/BidStrategyCard';
@@ -480,6 +481,10 @@ export function AnalyticsDashboard({
           return results.adequacy
             ? <AdequacyCard data={results.adequacy} />
             : <p className="dashboard-cell-missing">No adequacy study (needs renewable generators with time-varying availability).</p>;
+        case 'raw-sheets':
+          return results.rawSheets && Object.keys(results.rawSheets).length > 0
+            ? <RawSheetsCard data={results.rawSheets} />
+            : <p className="dashboard-cell-missing">No unrecognised sheets in this import.</p>;
         case 'price-formation':
           return results.priceFormation
             ? <PriceFormationCard data={results.priceFormation} />
@@ -611,6 +616,7 @@ export function AnalyticsDashboard({
       case 'company-comparison': return 'Company comparison (rank owners side by side)';
       case 'transition-risk': return 'Transition risk (carbon-price margin erosion)';
       case 'adequacy': return 'Resource adequacy (LOLE / EENS)';
+      case 'raw-sheets': return 'Imported raw sheets (unrecognised)';
       case 'price-formation': return 'Price formation (why the price is what it is)';
       case 'commitment': return 'Unit commitment (starts & on/off)';
       case 'bid-strategy': return 'Bid strategy (markup vs price-taker)';

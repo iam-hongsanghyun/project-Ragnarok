@@ -166,6 +166,11 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
     ],
   }));
 
+  // H2′ — unrecognised imported sheets, surfaced verbatim.
+  if (results.rawSheets && Object.keys(results.rawSheets).length > 0) {
+    rows.push(row({ cards: [{ card: { id: id('raw'), kind: 'raw-sheets' } as Card }] }));
+  }
+
   // Resource adequacy (A1+A2) — when the run has a stochastic renewable ensemble.
   if (results.adequacy) {
     rows.push(row({ cards: [{ card: { id: id('adq'), kind: 'adequacy' } as Card }] }));

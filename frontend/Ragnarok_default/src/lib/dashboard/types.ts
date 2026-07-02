@@ -33,6 +33,7 @@ export type CardKind =
   | 'company-comparison'
   | 'transition-risk'
   | 'adequacy'
+  | 'raw-sheets'
   | 'price-formation'
   | 'commitment'
   | 'bid-strategy'
@@ -199,6 +200,10 @@ export interface AdequacyCardData extends CardBase {
   kind: 'adequacy';
 }
 
+export interface RawSheetsCardData extends CardBase {
+  kind: 'raw-sheets';
+}
+
 export interface PriceFormationCardData extends CardBase {
   kind: 'price-formation';
 }
@@ -310,6 +315,7 @@ export type Card =
   | CompanyComparisonCardData
   | TransitionRiskCardData
   | AdequacyCardData
+  | RawSheetsCardData
   | PriceFormationCardData
   | CommitmentCardData
   | BidStrategyCardData

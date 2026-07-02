@@ -1418,6 +1418,8 @@ export interface RunResults {
   companyFinance?: CompanyFinanceResult;
   companyStatement?: CompanyStatementResult;
   adequacy?: AdequacyResult | null;
+  /** Unrecognised sheets from an imported workbook, kept verbatim (H2′). */
+  rawSheets?: Record<string, Record<string, unknown>[]>;
   /** Price-formation view (price vs residual demand, marginal carrier). */
   priceFormation?: PriceFormationResult;
   /** Unit-commitment view (starts, start-up costs, on/off patterns). */
