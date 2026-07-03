@@ -81,14 +81,17 @@ export function CategoryDatabaseList({
   const [collapsed, setCollapsed] = usePersistedState<Record<string, boolean>>(COLLAPSE_KEY, {});
   const [query, setQuery] = useState('');
 
-  const isCollapsed = (key: string): boolean => collapsed[key] === true;
+  // Default is COLLAPSED: a source is expanded only when explicitly set to
+  // `false`. An absent key therefore reads as collapsed, so a freshly-picked
+  // country shows a tidy list of closed groups the user opens one at a time.
+  const isCollapsed = (key: string): boolean => collapsed[key] !== false;
   const toggleCollapse = (key: string) => setCollapsed({ ...collapsed, [key]: !isCollapsed(key) });
-  const collapseAll = () => {
+  const collapseAll = () => setCollapsed({}); // absent = collapsed
+  const expandAll = () => {
     const next: Record<string, boolean> = {};
-    for (const s of visibleSources) next[s.source_id] = true;
+    for (const s of visibleSources) next[s.source_id] = false;
     setCollapsed(next);
   };
-  const expandAll = () => setCollapsed({});
 
   const header = (
     <div className="view-rail-header">
@@ -157,15 +160,11 @@ export function CategoryDatabaseList({
                   type="button"
                   className={`sheet-tree-group-header${isFocused ? ' is-active' : ''}`}
                   onClick={() => {
-                    // Focusing an unfocused source opens it (so its datasets
-                    // show); clicking the already-focused source toggles
-                    // collapse. So focusing never hides the datasets.
-                    if (isFocused) {
-                      toggleCollapse(source.source_id);
-                    } else {
-                      onFocusSource(source.source_id);
-                      if (isCollapsed(source.source_id)) toggleCollapse(source.source_id);
-                    }
+                    // One click both focuses the source (so its settings show
+                    // in the right rail) and toggles its expand/collapse — no
+                    // more select-then-click-again to open or close a group.
+                    onFocusSource(source.source_id);
+                    toggleCollapse(source.source_id);
                   }}
                   aria-expanded={open}
                   title={source.source_label}
