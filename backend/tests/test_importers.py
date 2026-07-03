@@ -535,3 +535,53 @@ def test_ember_history_maps_fuels_and_converts_twh():
     assert rows[1] == {"snapshot": "2023-02", "carrier": "coal",
                        "generation_gwh": 12500.0, "source": "Ember", "share_pct": 31.2}
     assert rows[0]["generation_gwh"] == 2000.0
+
+
+def test_location_model_threads_secrets_without_crashing(monkeypatch):
+    """Regression: the one-click builders read payload.secrets, so their body
+    model must actually HAVE a `secrets` map. Before the fix they used
+    SecretPayload ({value:str}) and raised AttributeError → a bare 500 that
+    (bypassing CORS middleware) surfaced in the browser as a CORS error."""
+    from fastapi.testclient import TestClient
+    from shapely.geometry import box
+
+    from backend.app import starter_packs
+    from backend.app.importers.protocol import Region, WorkbookFragment
+    from backend.app.importers import region as region_mod
+    from backend.app.main import app
+    from backend.app.routers import importers as imp_router
+
+    captured = {}
+
+    async def fake_boundaries():
+        return None
+
+    async def fake_build(recipe, *, dbs, region, ctx, options, combine):
+        captured["secrets"] = dict(ctx.secrets)
+        frag = WorkbookFragment()
+        frag.sheets["buses"] = [{"name": "KR_bus"}]
+        return frag, ["osm"], []
+
+    monkeypatch.setattr(imp_router, "_ensure_boundaries_warm", fake_boundaries)
+    monkeypatch.setattr(region_mod, "get_region",
+                        lambda iso: Region("KOR", "South Korea", box(124, 33, 132, 39)))
+    monkeypatch.setattr(starter_packs, "build_from_recipe", fake_build)
+
+    c = TestClient(app, raise_server_exceptions=False)
+
+    # No body at all (the exact call the Data-view button makes) must not 500.
+    r0 = c.post("/api/import/location-model/KOR")
+    assert r0.status_code == 200, r0.text
+    assert r0.json()["dataset_ids"] == ["osm"]
+
+    # A BYOK secret in the body is threaded through to the fetch context.
+    r1 = c.post("/api/import/location-model/KOR", json={"secrets": {"eia_key": "abc"}})
+    assert r1.status_code == 200, r1.text
+    assert captured["secrets"].get("eia_key") == "abc"
+
+
+def test_build_secrets_payload_has_secrets_map():
+    from backend.app.routers.importers import BuildSecretsPayload
+
+    assert BuildSecretsPayload().secrets == {}
+    assert BuildSecretsPayload(secrets={"k": "v"}).secrets == {"k": "v"}

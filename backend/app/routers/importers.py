@@ -88,6 +88,14 @@ def _server_secrets() -> dict[str, str]:
     return {**_env_secrets(), **_stored_secrets()}
 
 
+class BuildSecretsPayload(BaseModel):
+    """Optional BYOK secrets for the one-click builders (location-model,
+    starter-pack). Distinct from ``SecretPayload`` (a single ``value`` for the
+    secrets-store endpoints) — these builders take a name→value MAP."""
+
+    secrets: dict[str, str] = {}
+
+
 class ImportRunRequest(BaseModel):
     # Datasets of one source to fetch together (Country → Database → Datasets).
     dataset_ids: list[str] = []
@@ -132,7 +140,7 @@ def import_provenance(limit: int = 50) -> dict[str, Any]:
 
 
 @router.post("/location-model/{iso3}")
-async def build_location_model(iso3: str, payload: SecretPayload | None = None) -> dict[str, Any]:
+async def build_location_model(iso3: str, payload: BuildSecretsPayload | None = None) -> dict[str, Any]:
     """One-click: assemble a runnable model for any country (I1).
 
     Auto-composes the keyless global importers (OSM network + power plants, WRI
@@ -176,7 +184,7 @@ async def build_location_model(iso3: str, payload: SecretPayload | None = None) 
 
 
 @router.post("/starter-packs/{iso3}/{year}/build")
-async def build_starter_pack(iso3: str, year: str, payload: SecretPayload | None = None) -> dict[str, Any]:
+async def build_starter_pack(iso3: str, year: str, payload: BuildSecretsPayload | None = None) -> dict[str, Any]:
     """Assemble a runnable workbook for a country/year from its recipe (W2).
 
     Runs each recipe step's importer(s) for the country and folds every fragment
