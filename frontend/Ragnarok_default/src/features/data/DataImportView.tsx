@@ -36,7 +36,7 @@ import { FilterPanel, SourceEntry } from './FilterPanel';
 import { PypsaEarthPanel } from './PypsaEarthPanel';
 import { WorldMap } from './WorldMap';
 import { dataImportStore, runStatus, type Run } from 'lib/data/store';
-import { buildLocationModel } from 'lib/api/starterPacks';
+import { oneClickStore } from 'lib/data/oneClickStore';
 
 // Persistent state keys — selections stick across tab switches and reloads.
 const KEY_COUNTRY = 'ragnarok:data-import:country-iso';
@@ -88,8 +88,13 @@ function runKey(run: Run): string {
 
 export function DataImportView({ applyFragment }: Props) {
   const [sources, setSources] = useState<Source[]>([]);
-  const [oneClickBusy, setOneClickBusy] = useState(false);
-  const [oneClickError, setOneClickError] = useState<string | null>(null);
+  // One-click build lives in a module store so its busy/result state survives
+  // tab switches (the Data view unmounts when you navigate away).
+  const oneClick = useSyncExternalStore(
+    oneClickStore.subscribe,
+    oneClickStore.get,
+    oneClickStore.get,
+  );
   const [countries, setCountries] = useState<CountryMeta[]>([]);
   const [countriesGeoJSON, setCountriesGeoJSON] = useState<GeoJSONFeatureCollection | null>(null);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
@@ -286,6 +291,20 @@ export function DataImportView({ applyFragment }: Props) {
     setLastAddedSeq(null);
   }, [selectedCountry, entries]);
 
+  // Apply a finished one-click build as soon as the Data view is present to
+  // receive it (it may have completed while the user was on another tab), then
+  // return the store to idle so it applies exactly once.
+  useEffect(() => {
+    if (oneClick.status === 'ready' && oneClick.build) {
+      applyFragment(
+        oneClick.build.fragment,
+        oneClick.build.label || 'One-click model',
+        oneClick.countryName || '',
+      );
+      oneClickStore.consume();
+    }
+  }, [oneClick.status, oneClick.build, oneClick.countryName, applyFragment]);
+
   const handleApply = useCallback(() => {
     if (!currentRun || readyParts.length === 0 || !selectedCountry) return;
     for (const part of readyParts) {
@@ -346,22 +365,16 @@ export function DataImportView({ applyFragment }: Props) {
               <button
                 type="button"
                 className="primary-button"
-                disabled={oneClickBusy}
-                onClick={async () => {
-                  setOneClickBusy(true);
-                  try {
-                    const build = await buildLocationModel(selectedCountry.iso);
-                    applyFragment(build.fragment, build.label || 'One-click model', selectedCountry.name);
-                  } catch (e) {
-                    setOneClickError(e instanceof Error ? e.message : 'One-click build failed.');
-                  } finally {
-                    setOneClickBusy(false);
-                  }
-                }}
+                disabled={oneClick.status === 'building'}
+                onClick={() => oneClickStore.start(selectedCountry.iso, selectedCountry.name)}
               >
-                {oneClickBusy ? 'Building…' : `Build ${selectedCountry.name} model`}
+                {oneClick.status === 'building'
+                  ? `Building ${oneClick.countryName ?? ''} model…`
+                  : `Build ${selectedCountry.name} model`}
               </button>
-              {oneClickError && <span className="data-import-oneclick__err">{oneClickError}</span>}
+              {oneClick.status === 'error' && oneClick.error && (
+                <span className="data-import-oneclick__err">{oneClick.error}</span>
+              )}
             </div>
           )}
           {lastAdded && (
