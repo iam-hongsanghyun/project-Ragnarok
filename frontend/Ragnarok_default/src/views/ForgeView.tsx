@@ -69,6 +69,7 @@ interface Props {
   /** I4 — attach GloFAS discharge-shaped hydro inflow to storage units. */
   onAttachHydroInflow?: (opts: {
     dateFrom: string; dateTo: string; targetCapacityFactor: number; utcOffset: number;
+    hydroCarriers?: string[];
   }) => Promise<{ attached: string[]; skipped: string[]; sites: number; notes: string[] }>;
 }
 
@@ -436,12 +437,37 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
   const [hiCf, setHiCf] = useState(0.35);
   const [hiUtc, setHiUtc] = useState(0);
   const [hiResult, setHiResult] = useState<string | null>(null);
+  // Distinct carriers present on the storage_units sheet — the picker options.
+  const storageCarriers = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of rowsOf(model, 'storage_units')) {
+      const c = String(s.carrier ?? '').trim();
+      if (c) set.add(c);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [model]);
+  // The user picks which storage carriers count as hydro (the name-hint
+  // classifier misses non-English / custom names). Seeded with the obvious
+  // hydro-like ones; PHS/pumped excluded from the seed.
+  const [hydroCarriers, setHydroCarriers] = useState<string[]>([]);
+  const storageCarrierKey = storageCarriers.join('|');
+  useEffect(() => {
+    setHydroCarriers(storageCarriers.filter((c) => {
+      const cl = c.toLowerCase();
+      if (cl.includes('phs') || cl.includes('pump')) return false;
+      return ['hydro', 'ror', 'reservoir', 'water'].some((h) => cl.includes(h));
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storageCarrierKey]);
 
   const runHydroInflow = async () => {
     if (!onAttachHydroInflow) return;
     setTempBusy(true); setTempError(null); setHiResult(null);
     try {
-      const r = await onAttachHydroInflow({ dateFrom: hiFrom, dateTo: hiTo, targetCapacityFactor: hiCf, utcOffset: hiUtc });
+      const r = await onAttachHydroInflow({
+        dateFrom: hiFrom, dateTo: hiTo, targetCapacityFactor: hiCf, utcOffset: hiUtc,
+        hydroCarriers: hydroCarriers.length ? hydroCarriers : undefined,
+      });
       setHiResult(`Attached inflow to ${r.attached.length} unit(s) from ${r.sites} site(s)` +
         (r.skipped.length ? `; skipped ${r.skipped.length} without coordinates` : '') +
         (r.notes.length ? `. ${r.notes[0]}` : '.'));
@@ -877,6 +903,24 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
               <h3>Attach hydro inflow</h3>
               <p>Fetch GloFAS river discharge (keyless Open-Meteo Flood API) at each hydro storage unit's coordinate and land it as <code>storage_units-inflow</code>. The discharge provides the seasonal <em>shape</em>; you set the <em>level</em> as a target capacity factor (window-mean inflow = cf × p_nom). PHS/pumped units are excluded (no natural inflow).</p>
             </header>
+            <div className="sg-setting-row">
+              <label className="sg-setting-label">Hydro carriers</label>
+              {storageCarriers.length === 0 ? (
+                <p className="sg-setting-hint">No storage units in the model.</p>
+              ) : (
+                <>
+                  <SearchableMultiSelect
+                    options={storageCarriers}
+                    selected={hydroCarriers}
+                    onChange={setHydroCarriers}
+                    placeholder="No hydro carriers selected"
+                  />
+                  <p className="sg-setting-hint">
+                    Storage units with these carriers get inflow. Auto-seeded from hydro-like names — add yours if it was missed.
+                  </p>
+                </>
+              )}
+            </div>
             <div className="sg-setting-row">
               <label className="sg-setting-label">From → to (daily discharge)</label>
               <div className="sg-btn-row" style={{ gap: 8 }}>

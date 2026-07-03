@@ -1520,7 +1520,7 @@ function AppInner() {
   // generators-p_max_pu via the same fragment path the importers use.
   // Forge → I4 hydro inflow: GloFAS discharge-shaped storage_units-inflow.
   const handleAttachHydroInflow = useCallback(
-    async (opts: { dateFrom: string; dateTo: string; targetCapacityFactor: number; utcOffset: number }) => {
+    async (opts: { dateFrom: string; dateTo: string; targetCapacityFactor: number; utcOffset: number; hydroCarriers?: string[] }) => {
       await putStaticModel(prepareModelForBackend(model));
       const resp = await fetch(`${API_BASE}/api/transform/hydro-inflow`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },

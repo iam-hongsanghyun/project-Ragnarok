@@ -36,6 +36,24 @@ def test_resolve_targets_coord_chain_and_exclusions() -> None:
     assert dam[1] == 100 and dam[2] == 37.5 and dam[3] == 127.5  # p_nom + bus coords
 
 
+def test_explicit_carriers_override_name_hint() -> None:
+    # A custom carrier the substring classifier can't recognise is picked up
+    # when the user selects it explicitly (the Forge "Hydro carriers" picker).
+    model = {
+        "buses": [{"name": "b", "x": 127.5, "y": 37.5}],
+        "storage_units": [
+            {"name": "dam", "bus": "b", "carrier": "\uc218\ub825", "p_nom": 100},  # non-English name
+            {"name": "batt", "bus": "b", "carrier": "battery", "p_nom": 50},
+        ],
+    }
+    assert resolve_hydro_targets(model)[0] == []                 # name-hint misses it
+    picked, _ = resolve_hydro_targets(model, ["\uc218\ub825"])  # explicit selection
+    assert [t[0] for t in picked] == ["dam"]
+    # Explicit selection is exact: a battery carrier is never swept in even if listed elsewhere.
+    picked2, _ = resolve_hydro_targets(model, ["\uc218\ub825", "battery"])
+    assert sorted(t[0] for t in picked2) == ["batt", "dam"]
+
+
 def test_inflow_scaled_to_target_cf_and_daily_expansion() -> None:
     targets, _ = resolve_hydro_targets({
         "buses": [{"name": "b", "x": 127.5, "y": 37.5}],
