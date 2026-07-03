@@ -66,6 +66,10 @@ interface Props {
   onEvDemand?: (opts: {
     fleetSize: number; kwhPerVehicleDay: number; homeChargingShare: number;
   }) => Promise<{ rows: number; addedMwh: number; homeMwh: number; workMwh: number }>;
+  /** I4 — attach GloFAS discharge-shaped hydro inflow to storage units. */
+  onAttachHydroInflow?: (opts: {
+    dateFrom: string; dateTo: string; targetCapacityFactor: number; utcOffset: number;
+  }) => Promise<{ attached: string[]; skipped: string[]; sites: number; notes: string[] }>;
 }
 
 export interface AttachProfilesResult {
@@ -74,7 +78,7 @@ export interface AttachProfilesResult {
   sites: number;
 }
 
-type Operation = 'round' | 'adjust' | 'costcurve' | 'snap' | 'cluster' | 'renewable' | 'retarget' | 'forecast' | 'driverForecast' | 'evDemand';
+type Operation = 'round' | 'adjust' | 'costcurve' | 'snap' | 'cluster' | 'renewable' | 'hydroInflow' | 'retarget' | 'forecast' | 'driverForecast' | 'evDemand';
 type OpGroup = 'Numeric' | 'Economics' | 'Geospatial' | 'Topology' | 'Temporal';
 
 /** Catalog of Forge tools, grouped. Add a new tool by adding an entry here
@@ -85,6 +89,7 @@ const OPERATIONS: Array<{ id: Operation; label: string; group: OpGroup }> = [
   { id: 'costcurve', label: 'Marginal cost curve', group: 'Economics' },
   { id: 'snap', label: 'Snap to nearest bus', group: 'Geospatial' },
   { id: 'renewable', label: 'Attach renewable profiles', group: 'Geospatial' },
+  { id: 'hydroInflow', label: 'Attach hydro inflow', group: 'Geospatial' },
   { id: 'cluster', label: 'Reduce / cluster network', group: 'Topology' },
   { id: 'retarget', label: 'Retarget snapshot window', group: 'Temporal' },
   { id: 'forecast', label: 'Forecast to future year', group: 'Temporal' },
@@ -211,7 +216,7 @@ function SearchableMultiSelect({
   );
 }
 
-export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApply, onAttachRenewableProfiles, onRetargetSnapshots, onForecastSnapshots, onDriverForecast, onEvDemand }: Props) {
+export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApply, onAttachRenewableProfiles, onRetargetSnapshots, onForecastSnapshots, onDriverForecast, onEvDemand, onAttachHydroInflow }: Props) {
   // Persisted so the chosen tool + validation result survive leaving and
   // returning to the Forge tab (the view unmounts on tab switch). The findings
   // scan the whole model, so these three drivers fully restore the result.
@@ -424,6 +429,26 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
   const [dElas, setDElas] = useState(0.5);
   const [dHeat, setDHeat] = useState(0);
   const [dEv, setDEv] = useState(0);
+
+  // I4 hydro-inflow inputs.
+  const [hiFrom, setHiFrom] = useState('2019-01-01');
+  const [hiTo, setHiTo] = useState('2019-12-31');
+  const [hiCf, setHiCf] = useState(0.35);
+  const [hiUtc, setHiUtc] = useState(0);
+  const [hiResult, setHiResult] = useState<string | null>(null);
+
+  const runHydroInflow = async () => {
+    if (!onAttachHydroInflow) return;
+    setTempBusy(true); setTempError(null); setHiResult(null);
+    try {
+      const r = await onAttachHydroInflow({ dateFrom: hiFrom, dateTo: hiTo, targetCapacityFactor: hiCf, utcOffset: hiUtc });
+      setHiResult(`Attached inflow to ${r.attached.length} unit(s) from ${r.sites} site(s)` +
+        (r.skipped.length ? `; skipped ${r.skipped.length} without coordinates` : '') +
+        (r.notes.length ? `. ${r.notes[0]}` : '.'));
+    } catch (e) {
+      setTempError(e instanceof Error ? e.message : 'Hydro inflow failed.');
+    } finally { setTempBusy(false); }
+  };
 
   // M4 EV-demand inputs.
   const [evFleet, setEvFleet] = useState(100000);
@@ -844,6 +869,35 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
                 {tempBusy ? 'Retargeting…' : 'Retarget snapshots'}
               </button>
             </div>
+            {tempError && <p className="forge-status" style={{ color: 'var(--danger, #dc2626)' }}>{tempError}</p>}
+          </section>
+        ) : operation === 'hydroInflow' ? (
+          <section className="forge-section">
+            <header className="forge-section-header">
+              <h3>Attach hydro inflow</h3>
+              <p>Fetch GloFAS river discharge (keyless Open-Meteo Flood API) at each hydro storage unit's coordinate and land it as <code>storage_units-inflow</code>. The discharge provides the seasonal <em>shape</em>; you set the <em>level</em> as a target capacity factor (window-mean inflow = cf × p_nom). PHS/pumped units are excluded (no natural inflow).</p>
+            </header>
+            <div className="sg-setting-row">
+              <label className="sg-setting-label">From → to (daily discharge)</label>
+              <div className="sg-btn-row" style={{ gap: 8 }}>
+                <input type="date" className="forge-select" value={hiFrom} onChange={(e) => setHiFrom(e.target.value)} />
+                <input type="date" className="forge-select" value={hiTo} onChange={(e) => setHiTo(e.target.value)} />
+              </div>
+            </div>
+            <div className="sg-setting-row">
+              <label className="sg-setting-label">Target capacity factor · UTC offset (h)</label>
+              <div className="sg-btn-row" style={{ gap: 8 }}>
+                <NumberDraftInput className="forge-number" min={0} max={1} step={0.05} value={hiCf} onCommit={(v) => setHiCf(Math.min(1, Math.max(0, v)))} />
+                <NumberDraftInput className="forge-number" min={-12} max={14} step={1} value={hiUtc} onCommit={(v) => setHiUtc(Math.trunc(v))} />
+              </div>
+              <p className="sg-setting-hint">Hydro CF is typically 0.3–0.5. Daily values repeat across each day's hours.</p>
+            </div>
+            <div className="forge-actions">
+              <button className="run-button" disabled={tempBusy || !onAttachHydroInflow} onClick={runHydroInflow}>
+                {tempBusy ? 'Attaching…' : 'Attach hydro inflow'}
+              </button>
+            </div>
+            {hiResult && <p className="forge-status">{hiResult}</p>}
             {tempError && <p className="forge-status" style={{ color: 'var(--danger, #dc2626)' }}>{tempError}</p>}
           </section>
         ) : operation === 'evDemand' ? (

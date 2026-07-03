@@ -269,6 +269,85 @@ class RenewableProfilesRequest(BaseModel):
     windCarriers: list[str] | None = None
 
 
+class HydroInflowRequest(BaseModel):
+    sessionId: str
+    dateFrom: str = "2019-01-01"
+    dateTo: str = "2019-12-31"
+    # Window-mean inflow per unit = targetCapacityFactor × p_nom.
+    targetCapacityFactor: float = 0.35
+    utcOffset: int = 0
+    # Optional explicit hydro carriers; otherwise classified by name hint
+    # (hydro/ror/reservoir/water; PHS/pumped excluded).
+    hydroCarriers: list[str] | None = None
+
+
+@router.post("/hydro-inflow")
+async def attach_hydro_inflow(req: HydroInflowRequest) -> dict[str, Any]:
+    """Attach GloFAS river-discharge-shaped inflow to the session's hydro
+    storage units by coordinate (I4 remainder). Fetches once per unique 0.1°
+    cell (cached forever — reanalysis archive), returns the COMPLETE merged
+    ``storage_units-inflow`` sheet for a clean replace."""
+    from ..importers.databases.openmeteo_renewable.inflow import (
+        build_inflow_rows,
+        fetch_discharge,
+        resolve_hydro_targets,
+    )
+
+    model = model_store.load_full_model(req.sessionId)
+    if not model:
+        raise HTTPException(status_code=400, detail="No working model in this session.")
+    targets, skipped = resolve_hydro_targets(model, req.hydroCarriers)
+    if not targets:
+        raise HTTPException(
+            status_code=400,
+            detail="No hydro storage units with a resolvable coordinate found "
+                   "(need a hydro-like carrier, p_nom > 0, and x/y on the unit or its bus).",
+        )
+
+    uniq: dict[str, tuple[float, float]] = {}
+    for _name, _p_nom, lat, lon in targets:
+        uniq[point_key(lat, lon)] = (snap(lat), snap(lon))
+
+    http = AsyncClientWrapper()
+    try:
+        keys = list(uniq)
+        fetched = await asyncio.gather(
+            *[fetch_discharge(http, lat, lon, req.dateFrom, req.dateTo) for lat, lon in uniq.values()],
+            return_exceptions=True,
+        )
+    finally:
+        await http.aclose()
+
+    discharge_by_key: dict[str, Any] = {}
+    failed = 0
+    for key, res in zip(keys, fetched):
+        if isinstance(res, Exception):
+            failed += 1
+            continue
+        discharge_by_key[key] = res
+    if not discharge_by_key:
+        raise HTTPException(status_code=502, detail="Discharge fetch failed for every point.")
+
+    rows, snapshots, attached, notes = build_inflow_rows(
+        targets, discharge_by_key,
+        target_cf=req.targetCapacityFactor, utc_offset=req.utcOffset,
+    )
+    if not attached:
+        raise HTTPException(status_code=502, detail="No inflow series could be built.")
+
+    existing = model.get("storage_units-inflow") or []
+    merged = merge_profile_rows(existing, rows)
+    return {
+        "sheets": {"storage_units-inflow": merged},
+        "snapshots": snapshots,
+        "attached": attached,
+        "skipped": skipped,
+        "sites": len(discharge_by_key),
+        "failedSites": failed,
+        "notes": notes,
+    }
+
+
 @router.post("/renewable-profiles")
 async def attach_renewable_profiles(req: RenewableProfilesRequest) -> dict[str, Any]:
     """Attach Open-Meteo weather-derived profiles to the session's existing

@@ -1518,6 +1518,25 @@ function AppInner() {
   // coordinate. Sync static sheets first (the backend resolves each generator's
   // x/y from the session model), call the transform, and merge the returned
   // generators-p_max_pu via the same fragment path the importers use.
+  // Forge → I4 hydro inflow: GloFAS discharge-shaped storage_units-inflow.
+  const handleAttachHydroInflow = useCallback(
+    async (opts: { dateFrom: string; dateTo: string; targetCapacityFactor: number; utcOffset: number }) => {
+      await putStaticModel(prepareModelForBackend(model));
+      const resp = await fetch(`${API_BASE}/api/transform/hydro-inflow`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: DEFAULT_SESSION_ID, ...opts }),
+      });
+      if (!resp.ok) throw new Error((await resp.text()) || `Hydro inflow failed (HTTP ${resp.status})`);
+      const data = await resp.json();
+      handleApplyImportedFragment(
+        { sheets: data.sheets ?? {}, snapshots: data.snapshots ?? undefined } as WorkbookFragment,
+        'Hydro inflow (GloFAS)', 'working model',
+      );
+      return data as { attached: string[]; skipped: string[]; sites: number; notes: string[] };
+    },
+    [model, prepareModelForBackend, handleApplyImportedFragment],
+  );
+
   const handleAttachRenewableProfiles = useCallback(
     async (opts: { dateFrom: string; dateTo: string; performanceRatio: number; source: string; utcOffset?: number; solarCarriers?: string[]; windCarriers?: string[] }) => {
       await putStaticModel(prepareModelForBackend(model));
@@ -2893,6 +2912,7 @@ function AppInner() {
               onForecastSnapshots={handleForecastSnapshots}
               onDriverForecast={handleDriverForecast}
               onEvDemand={handleEvDemand}
+              onAttachHydroInflow={handleAttachHydroInflow}
             />
           )}
 
