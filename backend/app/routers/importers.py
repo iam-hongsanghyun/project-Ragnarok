@@ -114,6 +114,23 @@ def list_starter_packs() -> dict[str, Any]:
     return {"packs": starter_packs.list_recipes()}
 
 
+@router.get("/health")
+async def import_health(sources: str | None = None) -> dict[str, Any]:
+    """Reachability of each upstream source (D1) — {source_id: {ok, status, …}}."""
+    from ..importers import health
+
+    ids = [s.strip() for s in sources.split(",") if s.strip()] if sources else None
+    return {"sources": await health.check_sources(ids)}
+
+
+@router.get("/provenance")
+def import_provenance(limit: int = 50) -> dict[str, Any]:
+    """Recent import events from the persistent provenance log (D1), newest first."""
+    from ..importers import provenance_log
+
+    return {"imports": provenance_log.recent_imports(max(1, min(int(limit), 500)))}
+
+
 @router.post("/location-model/{iso3}")
 async def build_location_model(iso3: str, payload: SecretPayload | None = None) -> dict[str, Any]:
     """One-click: assemble a runnable model for any country (I1).
@@ -393,6 +410,10 @@ async def run_import(payload: ImportRunRequest) -> dict[str, Any]:
         dataset_ids=order,
     )
     summary = combine_previews(fragment, previews)
+    # D1 — persistent provenance log (best-effort; never blocks the import).
+    from ..importers import provenance_log
+
+    provenance_log.record_import(fragment.provenance, source_id=source_id, dataset_ids=order)
 
     return {
         "source_id": source_id,

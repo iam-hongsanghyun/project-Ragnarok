@@ -145,6 +145,16 @@ class EmberHistory:
             "end_date": date_to,
             "api_key": api_key,
         }
+        # D1 general cache: monthly aggregates are stable — 7-day TTL. The key
+        # excludes the api_key (same data for every key).
+        from ...cache import cache_get, cache_put
+
+        cache_key = {"iso": region.country_iso, "from": date_from, "to": date_to}
+        body = cache_get("ember", cache_key)
+        if body is not None:
+            rows = rows_from_payload((body or {}).get("data") or [])
+            return FetchResult(META.id, region, dict(filters),
+                               {"rows": rows, "date_from": date_from, "date_to": date_to})
         try:
             body = await ctx.http.get_json(_API_URL, params=params)
         except RuntimeError as exc:
@@ -155,6 +165,7 @@ class EmberHistory:
                     "(free key at ember-energy.org/data/api)."
                 ) from None
             raise RuntimeError(f"Ember request failed ({msg}).") from None
+        cache_put("ember", cache_key, body, ttl_days=7)
         rows = rows_from_payload((body or {}).get("data") or [])
         return FetchResult(META.id, region, dict(filters),
                            {"rows": rows, "date_from": date_from, "date_to": date_to})
