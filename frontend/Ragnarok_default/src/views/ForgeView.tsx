@@ -17,7 +17,7 @@ import { usePersistedState } from 'shared/hooks/usePersistedState';
 import { FORGE_CONFIG, VALIDATION_CONFIG } from 'lib/constants';
 import { LeftRail, ViewPanel } from 'shared/components/primitives';
 import { NumberDraftInput } from 'shared/components/NumberDraftInput';
-import { applyRounding, numericColumns, type RoundOp, type ClusterResult } from 'lib/forge/transforms';
+import { applyRounding, busColumns, numericColumns, type RoundOp, type ClusterResult } from 'lib/forge/transforms';
 import {
   buildTargets,
   sheetSnappable,
@@ -33,9 +33,18 @@ interface Props {
   model: WorkbookModel;
   /** Merge transformed sheets back into the model (keeps everything else). */
   onApplySheets: (partial: Record<string, GridRow[]>) => void;
-  /** Reduce the session model to N clustered buses; returns the reduced model
-   *  for preview (no mutation). Absent ⇒ the cluster tool is read-only. */
-  onClusterPreview?: (nClusters: number, method: string, resolveConflicts: boolean, conflictStrategy: string) => Promise<ClusterResult>;
+  /** Reduce the session model to fewer clustered buses; returns the reduced
+   *  model for preview (no mutation). Absent ⇒ the cluster tool is read-only.
+   *  `groupByColumn` groups buses by a workbook column instead of nClusters;
+   *  `aggregateComponents` additionally collapses those one-ports by carrier. */
+  onClusterPreview?: (opts: {
+    nClusters: number;
+    method: string;
+    resolveConflicts: boolean;
+    conflictStrategy: string;
+    groupByColumn?: string;
+    aggregateComponents?: string[];
+  }) => Promise<ClusterResult>;
   /** Replace the working model with a previewed clustered model. */
   onClusterApply?: (model: WorkbookModel) => void;
   /** Attach Open-Meteo weather profiles to the existing renewable fleet by
@@ -106,6 +115,16 @@ const ROUND_OPS: Array<{ value: RoundOp; label: string }> = [
 ];
 
 const rowsOf = (model: WorkbookModel, sheet: string): GridRow[] => model[sheet] ?? [];
+
+/** One-port components the reduction can collapse by carrier per merged bus.
+ *  `id` is the PyPSA component name the backend expects. */
+const AGGREGATABLE_COMPONENTS: Array<{ id: string; label: string }> = [
+  { id: 'Generator', label: 'Generators' },
+  { id: 'StorageUnit', label: 'Storage units' },
+  { id: 'Store', label: 'Stores' },
+  { id: 'Load', label: 'Loads' },
+  { id: 'ShuntImpedance', label: 'Shunt impedances' },
+];
 
 const CLUSTER_PALETTE = [
   '#4e79a7', '#f28e2b', '#e15759', '#76b7b2', '#59a14f',
@@ -296,21 +315,49 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
   const busCount = rowsOf(model, 'buses').length;
   const defaultClusterN = Math.max(1, Math.min(Math.max(busCount - 1, 1), Math.round(busCount / 2)));
   const [clusterN, setClusterN] = useState<number | null>(null);
-  const [clusterMethod, setClusterMethod] = useState<'modularity' | 'kmeans'>('modularity');
+  const [clusterMethod, setClusterMethod] = useState<'modularity' | 'kmeans' | 'column'>('modularity');
   const [clusterResolveConflicts, setClusterResolveConflicts] = useState(true);
   const [clusterConflictStrategy, setClusterConflictStrategy] = useState<'mean' | 'max' | 'min' | 'zero' | 'default'>('mean');
   const [clusterBusy, setClusterBusy] = useState(false);
   const [clusterResult, setClusterResult] = useState<ClusterResult | null>(null);
   const [clusterError, setClusterError] = useState<string | null>(null);
   const effClusterN = clusterN ?? defaultClusterN;
+  // Aggregate-by-column: which bus column to group on.
+  const busCols = busColumns(rowsOf(model, 'buses'));
+  const [clusterColumn, setClusterColumn] = useState<string>('');
+  const effClusterColumn = clusterColumn || busCols[0] || '';
+  // Aggregate one-port components by carrier per merged bus (off by default).
+  const [aggComponents, setAggComponents] = useState(false);
+  const [aggSelected, setAggSelected] = useState<Set<string>>(() => new Set(AGGREGATABLE_COMPONENTS.map((c) => c.id)));
+  const toggleAggComponent = (id: string) =>
+    setAggSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   const runClusterPreview = async () => {
     if (!onClusterPreview) return;
+    if (clusterMethod === 'column' && !effClusterColumn) {
+      setClusterError('Pick a bus column to group by.');
+      return;
+    }
     setClusterBusy(true);
     setClusterError(null);
     setClusterResult(null);
     try {
-      setClusterResult(await onClusterPreview(effClusterN, clusterMethod, clusterResolveConflicts, clusterConflictStrategy));
+      const aggregateComponents = aggComponents ? Array.from(aggSelected) : [];
+      setClusterResult(
+        await onClusterPreview({
+          nClusters: effClusterN,
+          method: clusterMethod === 'column' ? 'modularity' : clusterMethod,
+          resolveConflicts: clusterResolveConflicts,
+          conflictStrategy: clusterConflictStrategy,
+          groupByColumn: clusterMethod === 'column' ? effClusterColumn : undefined,
+          aggregateComponents,
+        }),
+      );
     } catch (e) {
       setClusterError(e instanceof Error ? e.message : 'Clustering failed.');
     } finally {
@@ -1056,7 +1103,7 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
           <section className="forge-section">
             <header className="forge-section-header">
               <h3>Reduce / cluster network</h3>
-              <p>Aggregate buses (and the generators, loads and lines on them) into fewer clustered buses — a smaller network that runs the same physics. Preview the reduction, then apply to replace the working model.</p>
+              <p>Aggregate buses (and the generators, loads and lines on them) into fewer clustered buses — a smaller network that runs the same physics. Group buses by topology, coordinates, or a column like province; optionally collapse the components on each merged bus to one per carrier. Preview the reduction, then apply to replace the working model.</p>
             </header>
 
             <div className="sg-setting-row">
@@ -1074,24 +1121,82 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
                 >
                   k-means (spatial)
                 </button>
+                <button
+                  className={`tb-btn sg-solver-btn${clusterMethod === 'column' ? '' : ' tb-btn--muted'}`}
+                  onClick={() => setClusterMethod('column')}
+                >
+                  By column
+                </button>
               </div>
               <p className="sg-setting-hint">
                 {clusterMethod === 'modularity'
                   ? 'Groups electrically-connected regions by network topology — no coordinates needed.'
-                  : 'Groups geographically-near buses — needs bus x/y and scikit-learn on the server.'}
+                  : clusterMethod === 'kmeans'
+                    ? 'Groups geographically-near buses — needs bus x/y and scikit-learn on the server.'
+                    : 'Merges buses that share a value in the chosen column (e.g. province, country). Blank-valued buses stay on their own.'}
               </p>
             </div>
 
+            {clusterMethod === 'column' ? (
+              <div className="sg-setting-row">
+                <label className="sg-setting-label" htmlFor="forge-cluster-column">Group buses by</label>
+                <select
+                  id="forge-cluster-column"
+                  className="forge-select"
+                  value={effClusterColumn}
+                  onChange={(e) => setClusterColumn(e.target.value)}
+                  disabled={busCols.length === 0}
+                >
+                  {busCols.length === 0 && <option value="">No bus columns available</option>}
+                  {busCols.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+                <p className="sg-setting-hint">Buses sharing the same {effClusterColumn || 'column'} value merge into one.</p>
+              </div>
+            ) : (
+              <div className="sg-setting-row">
+                <label className="sg-setting-label">Target buses</label>
+                <NumberDraftInput
+                  className="forge-number"
+                  min={1}
+                  max={Math.max(1, busCount - 1)}
+                  value={effClusterN}
+                  onCommit={(v) => setClusterN(Math.max(1, Math.min(Math.max(busCount - 1, 1), Math.trunc(v))))}
+                />
+                <p className="sg-setting-hint">{busCount} bus{busCount === 1 ? '' : 'es'} now → reduce to this many clusters.</p>
+              </div>
+            )}
+
             <div className="sg-setting-row">
-              <label className="sg-setting-label">Target buses</label>
-              <NumberDraftInput
-                className="forge-number"
-                min={1}
-                max={Math.max(1, busCount - 1)}
-                value={effClusterN}
-                onCommit={(v) => setClusterN(Math.max(1, Math.min(Math.max(busCount - 1, 1), Math.trunc(v))))}
-              />
-              <p className="sg-setting-hint">{busCount} bus{busCount === 1 ? '' : 'es'} now → reduce to this many clusters.</p>
+              <label className="sg-setting-label">Components</label>
+              <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                <input
+                  type="checkbox"
+                  checked={aggComponents}
+                  onChange={(e) => setAggComponents(e.target.checked)}
+                />
+                Aggregate components by carrier
+              </label>
+              <p className="sg-setting-hint">
+                {aggComponents
+                  ? 'On each merged bus, collapse the selected components so there is one row per carrier (capacities summed, costs capacity-weighted).'
+                  : 'Leave components as individual rows, just reassigned to their merged bus (default).'}
+              </p>
+              {aggComponents && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', marginTop: 6 }}>
+                  {AGGREGATABLE_COMPONENTS.map((c) => (
+                    <label key={c.id} style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                      <input
+                        type="checkbox"
+                        checked={aggSelected.has(c.id)}
+                        onChange={() => toggleAggComponent(c.id)}
+                      />
+                      {c.label}
+                    </label>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="sg-setting-row">
@@ -1133,12 +1238,15 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
             <div className="forge-actions">
               <button
                 className="run-button"
-                disabled={busCount < 2 || clusterBusy || !onClusterPreview}
+                disabled={busCount < 2 || clusterBusy || !onClusterPreview || (clusterMethod === 'column' && !effClusterColumn)}
                 onClick={runClusterPreview}
               >
                 {clusterBusy ? 'Reducing…' : 'Preview reduction'}
               </button>
               {busCount < 2 && <span className="sg-setting-hint">Need at least 2 buses to cluster.</span>}
+              {busCount >= 2 && clusterMethod === 'column' && !effClusterColumn && (
+                <span className="sg-setting-hint">Add a column to the buses sheet to group by.</span>
+              )}
             </div>
 
             {clusterError && <p className="forge-status" style={{ color: 'var(--danger, #dc2626)' }}>{clusterError}</p>}
@@ -1149,9 +1257,15 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
                   Reduced <b>{clusterResult.before.buses} → {clusterResult.after.buses}</b> buses
                   {' · '}lines {clusterResult.before.lines} → {clusterResult.after.lines}
                   {' · '}generators {clusterResult.before.generators} → {clusterResult.after.generators}
+                  {' · '}storage {clusterResult.before.storageUnits} → {clusterResult.after.storageUnits}
                   {' · '}loads {clusterResult.before.loads} → {clusterResult.after.loads}
                   <span style={{ color: 'var(--muted)', marginLeft: 6 }}>({clusterResult.method})</span>
                 </p>
+                {clusterResult.aggregatedComponents && clusterResult.aggregatedComponents.length > 0 && (
+                  <p className="forge-report-line" style={{ color: 'var(--muted)' }}>
+                    Aggregated by carrier: <b>{clusterResult.aggregatedComponents.join(', ')}</b>.
+                  </p>
+                )}
                 {clusterResult.resolvedConflicts && clusterResult.resolvedConflicts.length > 0 && (
                   <p className="forge-report-line" style={{ color: 'var(--muted)' }}>
                     Merged conflicting attribute{clusterResult.resolvedConflicts.length === 1 ? '' : 's'} by most-common value: <b>{clusterResult.resolvedConflicts.join(', ')}</b>.

@@ -18,6 +18,8 @@ export interface ClusterCounts {
   generators: number;
   loads: number;
   storageUnits: number;
+  stores?: number;
+  shuntImpedances?: number;
 }
 
 /** Result of POST /api/transform/cluster — the reduced model + a busmap. */
@@ -25,11 +27,27 @@ export interface ClusterResult {
   model: WorkbookModel;
   busmap: Record<string, string>;
   method: string;
+  /** The bus column grouped on (e.g. "province"), when the by-column method was used. */
+  groupByColumn?: string | null;
+  /** One-port components collapsed by carrier (e.g. ["Generator", "StorageUnit"]). */
+  aggregatedComponents?: string[];
   before: ClusterCounts;
   after: ClusterCounts;
   /** Bus text attributes (e.g. carrier, unit) that disagreed within a cluster
    *  and were merged by keeping the most common value. */
   resolvedConflicts?: string[];
+}
+
+/**
+ * Distinct column keys present on the buses sheet (excluding `name`), sorted for
+ * stable UI ordering. Powers the "aggregate by column" dropdown — any bus
+ * attribute (custom ones like `province`/`country` included) can be grouped on.
+ */
+export function busColumns(rows: GridRow[]): string[] {
+  const cols = new Set<string>();
+  for (const row of rows) for (const key of Object.keys(row)) cols.add(key);
+  cols.delete('name');
+  return Array.from(cols).sort();
 }
 
 /** A cell as a finite number, or null when it is empty / non-numeric. */

@@ -24,6 +24,7 @@ from pydantic import BaseModel
 from pypsa.clustering.spatial import (
     DEFAULT_BUS_STRATEGIES as _DEFAULT_BUS_STRATEGIES,
     DEFAULT_LINE_STRATEGIES as _DEFAULT_LINE_STRATEGIES,
+    DEFAULT_ONE_PORT_STRATEGIES as _DEFAULT_ONE_PORT_STRATEGIES,
 )
 import pandas.api.types  # noqa: F401  (ensures pd.api.types is importable)
 
@@ -49,6 +50,15 @@ class ClusterRequest(BaseModel):
     sessionId: str
     nClusters: int
     method: str = "modularity"
+    # When set, buses are grouped by this workbook column (e.g. "province",
+    # "country") instead of by nClusters/method. Buses sharing a value merge;
+    # blank-valued buses stay on their own. Read from the raw model — custom
+    # columns are dropped by build_network.
+    groupByColumn: str | None = None
+    # PyPSA one-port components to additionally aggregate by carrier per merged
+    # bus (e.g. ["Generator", "StorageUnit", "Store", "Load", "ShuntImpedance"]).
+    # Empty/None ⇒ components are only reassigned to their new bus (legacy).
+    aggregateComponents: list[str] | None = None
     # When true (default), buses/lines whose attributes disagree within a cluster
     # are merged instead of failing. Turn off to enforce strict agreement.
     resolveConflicts: bool = True
@@ -63,6 +73,17 @@ class ClusterRequest(BaseModel):
 # Bus-reference columns are remapped by clustering itself — never "resolve" them.
 _BUS_REFS = {"bus", "bus0", "bus1", "bus2", "bus3", "bus4"}
 _NUMERIC_STRATEGIES = ("mean", "max", "min", "zero", "default")
+
+# One-port components the aggregation can collapse by carrier, mapped to their
+# Network static-frame attribute. "Generator" is aggregated via the dedicated
+# weighted path; the rest via ``aggregate_one_ports``.
+_ONEPORT_ATTRS = {
+    "Generator": "generators",
+    "StorageUnit": "storage_units",
+    "Store": "stores",
+    "Load": "loads",
+    "ShuntImpedance": "shunt_impedances",
+}
 
 
 def _majority(x: "pd.Series") -> Any:
@@ -87,8 +108,14 @@ def _numeric_strategy(kind: str, default_value: Any) -> Any:
 def _component_defaults(component: str) -> "pd.Series":
     """Schema default values for a component's attributes (from a fresh add)."""
     probe = pypsa.Network()
-    probe.add(component, "_probe")
-    static = getattr(probe, {"Bus": "buses", "Line": "lines"}[component])
+    static_attr = {"Bus": "buses", "Line": "lines", **_ONEPORT_ATTRS}[component]
+    # One-port probes need a host bus to attach to.
+    if component in _ONEPORT_ATTRS:
+        probe.add("Bus", "_bus")
+        probe.add(component, "_probe", bus="_bus")
+    else:
+        probe.add(component, "_probe")
+    static = getattr(probe, static_attr)
     return static.loc["_probe"]
 
 
@@ -102,18 +129,26 @@ def _conflict_strategies(
     gap = [c for c in df.columns if c not in _BUS_REFS and c not in defaults_keys]
     if not gap:
         return {}
-    schema_defaults = _component_defaults(component) if numeric_kind == "default" else None
+    schema_defaults = (
+        _component_defaults(component) if numeric_kind == "default" else None
+    )
     out: dict[str, Any] = {}
     for col in gap:
         if pd.api.types.is_numeric_dtype(df[col]):
-            dv = float(schema_defaults[col]) if (schema_defaults is not None and col in schema_defaults.index) else 0.0
+            dv = (
+                float(schema_defaults[col])
+                if (schema_defaults is not None and col in schema_defaults.index)
+                else 0.0
+            )
             out[col] = _numeric_strategy(numeric_kind, dv)
         else:
             out[col] = _majority
     return out
 
 
-def _conflicting_attrs(df: "pd.DataFrame", groups: "pd.Series", defaults_keys: set[str]) -> list[str]:
+def _conflicting_attrs(
+    df: "pd.DataFrame", groups: "pd.Series", defaults_keys: set[str]
+) -> list[str]:
     """Attributes (outside PyPSA's defaults) that disagree within a cluster."""
     out: list[str] = []
     for col in df.columns:
@@ -122,6 +157,71 @@ def _conflicting_attrs(df: "pd.DataFrame", groups: "pd.Series", defaults_keys: s
         if df.groupby(groups)[col].nunique(dropna=True).gt(1).any():
             out.append(col)
     return out
+
+
+def _busmap_by_column(
+    model: dict[str, list[dict[str, Any]]], column: str
+) -> "pd.Series":
+    """Group buses by a workbook column (e.g. "province"). Buses sharing a value
+    map to that value; a blank/missing value keeps the bus on its own (maps to
+    its own name). Read from the raw model because ``build_network`` drops custom
+    bus columns. Raises 400 if the column is absent everywhere or merges nothing.
+    """
+    buses = model.get("buses") or []
+    mapping: dict[str, str] = {}
+    seen_column = False
+    for row in buses:
+        name = row.get("name")
+        if name is None:
+            continue
+        name = str(name)
+        value = row.get(column)
+        if column in row:
+            seen_column = True
+        # Blank / missing → own singleton (never merge unrelated buses).
+        if (
+            value is None
+            or (isinstance(value, float) and pd.isna(value))
+            or (isinstance(value, str) and value.strip() == "")
+        ):
+            mapping[name] = name
+        else:
+            mapping[name] = str(value)
+
+    if not seen_column:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No bus has a '{column}' column to group by.",
+        )
+    if len(set(mapping.values())) >= len(mapping):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Grouping by '{column}' merges no buses — every bus has a distinct (or blank) value.",
+        )
+    return pd.Series(mapping)
+
+
+def _component_strategies(
+    network: pypsa.Network, components: set[str], numeric_kind: str
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    """Build aggregation strategies for the components being merged by carrier,
+    covering custom columns PyPSA has no default for (which otherwise raise).
+
+    Returns ``(generator_strategies, one_port_strategies)`` matching PyPSA's
+    ``get_clustering_from_busmap`` contract: a flat ``{attr: strategy}`` for
+    generators, and a nested ``{ComponentName: {attr: strategy}}`` for the rest.
+    """
+    oneport_keys = set(_DEFAULT_ONE_PORT_STRATEGIES)
+    generator_strategies: dict[str, Any] = {}
+    one_port_strategies: dict[str, dict[str, Any]] = {}
+    for comp in components:
+        df = getattr(network, _ONEPORT_ATTRS[comp])
+        strat = _conflict_strategies(df, oneport_keys, comp, numeric_kind)
+        if comp == "Generator":
+            generator_strategies = strat
+        elif strat:
+            one_port_strategies[comp] = strat
+    return generator_strategies, one_port_strategies
 
 
 def _counts(network: pypsa.Network) -> dict[str, int]:
@@ -133,6 +233,8 @@ def _counts(network: pypsa.Network) -> dict[str, int]:
         "generators": len(network.generators),
         "loads": len(network.loads),
         "storageUnits": len(network.storage_units),
+        "stores": len(network.stores),
+        "shuntImpedances": len(network.shunt_impedances),
     }
 
 
@@ -141,13 +243,21 @@ def cluster_model(
     *,
     n_clusters: int,
     method: str = "modularity",
+    group_by_column: str | None = None,
+    aggregate_components: list[str] | None = None,
     resolve_conflicts: bool = True,
     conflict_strategy: str = "mean",
     scenario: dict[str, Any] | None = None,
     options: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Reduce a workbook model to ``n_clusters`` buses. Pure (no I/O) so it is
+    """Reduce a workbook model to fewer buses. Pure (no I/O) so it is
     unit-testable; the endpoint is a thin session-loading wrapper.
+
+    Buses are grouped either by ``group_by_column`` (merge buses sharing a
+    workbook value, e.g. "province") or, when that is unset, by ``n_clusters``
+    using the ``method`` (modularity/kmeans). When ``aggregate_components`` is
+    given, the named one-port components are additionally collapsed by carrier
+    on each merged bus.
 
     Returns ``{model, busmap, method, before, after}`` where ``model`` is the
     reduced workbook model and ``busmap`` maps each original bus to its cluster.
@@ -162,15 +272,22 @@ def cluster_model(
             status_code=400,
             detail="Network has fewer than 2 buses — nothing to cluster.",
         )
-    if n_clusters < 1 or n_clusters >= n_buses:
+
+    by_column = bool(group_by_column and str(group_by_column).strip())
+    if not by_column and (n_clusters < 1 or n_clusters >= n_buses):
         raise HTTPException(
             status_code=400,
             detail=f"Target clusters must be between 1 and {n_buses - 1} (network has {n_buses} buses).",
         )
 
     method = method.lower()
+    agg = {c for c in (aggregate_components or []) if c in _ONEPORT_ATTRS}
     try:
-        if method == "kmeans":
+        if by_column:
+            column = str(group_by_column).strip()
+            busmap = _busmap_by_column(model, column)
+            method = f"column:{column}"
+        elif method == "kmeans":
             if network.buses[["x", "y"]].drop_duplicates().shape[0] < 2:
                 raise HTTPException(
                     status_code=400,
@@ -199,20 +316,37 @@ def cluster_model(
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    "Buses in a cluster disagree on: " + ", ".join(conflicts)
+                    "Buses in a cluster disagree on: "
+                    + ", ".join(conflicts)
                     + ". Enable “Merge conflicting attributes” to cluster anyway."
                 ),
             )
 
+        kind = conflict_strategy if conflict_strategy in _NUMERIC_STRATEGIES else "mean"
         strategies: dict[str, Any] = {}
         if resolve_conflicts:
-            kind = conflict_strategy if conflict_strategy in _NUMERIC_STRATEGIES else "mean"
             strategies = {
-                "bus_strategies": _conflict_strategies(network.buses, bus_keys, "Bus", kind),
+                "bus_strategies": _conflict_strategies(
+                    network.buses, bus_keys, "Bus", kind
+                ),
                 "line_strategies": _conflict_strategies(
                     network.lines, set(_DEFAULT_LINE_STRATEGIES), "Line", kind
                 ),
             }
+
+        # Optionally collapse one-port components by carrier on each merged bus.
+        # Generators use the dedicated weighted path; the rest go through
+        # aggregate_one_ports. Custom-column strategies avoid "no default" raises.
+        if agg:
+            gen_strat, oneport_strat = _component_strategies(network, agg, kind)
+            if "Generator" in agg:
+                strategies["aggregate_generators_weighted"] = True
+                strategies["generator_strategies"] = gen_strat
+            other = agg - {"Generator"}
+            if other:
+                strategies["aggregate_one_ports"] = other
+                strategies["one_port_strategies"] = oneport_strat
+
         clustered = network.cluster.spatial.cluster_by_busmap(busmap, **strategies)
         clustered = getattr(clustered, "n", clustered)  # Clustering wrapper vs Network
     except HTTPException:
@@ -231,6 +365,8 @@ def cluster_model(
         "model": network_to_model(clustered),
         "busmap": {str(k): str(v) for k, v in busmap.to_dict().items()},
         "method": method,
+        "groupByColumn": group_by_column if by_column else None,
+        "aggregatedComponents": sorted(agg),
         "before": _counts(network),
         "after": _counts(clustered),
         "resolvedConflicts": conflicts if resolve_conflicts else [],
@@ -249,6 +385,8 @@ async def cluster_network(req: ClusterRequest) -> dict[str, Any]:
         model,
         n_clusters=req.nClusters,
         method=req.method,
+        group_by_column=req.groupByColumn,
+        aggregate_components=req.aggregateComponents,
         resolve_conflicts=req.resolveConflicts,
         conflict_strategy=req.conflictStrategy,
         scenario=req.scenario,
@@ -301,7 +439,7 @@ async def attach_hydro_inflow(req: HydroInflowRequest) -> dict[str, Any]:
         raise HTTPException(
             status_code=400,
             detail="No hydro storage units with a resolvable coordinate found "
-                   "(need a hydro-like carrier, p_nom > 0, and x/y on the unit or its bus).",
+            "(need a hydro-like carrier, p_nom > 0, and x/y on the unit or its bus).",
         )
 
     uniq: dict[str, tuple[float, float]] = {}
@@ -312,7 +450,10 @@ async def attach_hydro_inflow(req: HydroInflowRequest) -> dict[str, Any]:
     try:
         keys = list(uniq)
         fetched = await asyncio.gather(
-            *[fetch_discharge(http, lat, lon, req.dateFrom, req.dateTo) for lat, lon in uniq.values()],
+            *[
+                fetch_discharge(http, lat, lon, req.dateFrom, req.dateTo)
+                for lat, lon in uniq.values()
+            ],
             return_exceptions=True,
         )
     finally:
@@ -326,11 +467,15 @@ async def attach_hydro_inflow(req: HydroInflowRequest) -> dict[str, Any]:
             continue
         discharge_by_key[key] = res
     if not discharge_by_key:
-        raise HTTPException(status_code=502, detail="Discharge fetch failed for every point.")
+        raise HTTPException(
+            status_code=502, detail="Discharge fetch failed for every point."
+        )
 
     rows, snapshots, attached, notes = build_inflow_rows(
-        targets, discharge_by_key,
-        target_cf=req.targetCapacityFactor, utc_offset=req.utcOffset,
+        targets,
+        discharge_by_key,
+        target_cf=req.targetCapacityFactor,
+        utc_offset=req.utcOffset,
     )
     if not attached:
         raise HTTPException(status_code=502, detail="No inflow series could be built.")
@@ -364,7 +509,7 @@ async def attach_renewable_profiles(req: RenewableProfilesRequest) -> dict[str, 
         raise HTTPException(
             status_code=400,
             detail="No renewable generators with a resolvable coordinate found "
-                   "(need a solar/wind carrier and x/y on the generator or its bus).",
+            "(need a solar/wind carrier and x/y on the generator or its bus).",
         )
 
     # Dedup fetches by grid cell — many generators can share one weather point.
@@ -376,7 +521,10 @@ async def attach_renewable_profiles(req: RenewableProfilesRequest) -> dict[str, 
     try:
         keys = list(uniq)
         fetched = await asyncio.gather(
-            *[fetch_point(http, lat, lon, req.dateFrom, req.dateTo, req.source) for lat, lon in uniq.values()],
+            *[
+                fetch_point(http, lat, lon, req.dateFrom, req.dateTo, req.source)
+                for lat, lon in uniq.values()
+            ],
             return_exceptions=True,
         )
     finally:
@@ -390,13 +538,17 @@ async def attach_renewable_profiles(req: RenewableProfilesRequest) -> dict[str, 
             continue
         point_by_key[key] = res
     if not point_by_key:
-        raise HTTPException(status_code=502, detail="Weather fetch failed for every point.")
+        raise HTTPException(
+            status_code=502, detail="Weather fetch failed for every point."
+        )
 
     rows, snapshots, attached = build_profile_rows(
         targets, point_by_key, req.performanceRatio, req.utcOffset
     )
     if not attached:
-        raise HTTPException(status_code=502, detail="No profiles could be built from the weather data.")
+        raise HTTPException(
+            status_code=502, detail="No profiles could be built from the weather data."
+        )
 
     # Return the COMPLETE merged sheet (existing server-side profiles + newly
     # attached columns) so the frontend can apply it with a clean replace.
