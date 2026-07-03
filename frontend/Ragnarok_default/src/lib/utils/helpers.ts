@@ -1,5 +1,6 @@
 import type { LatLngBoundsExpression } from 'leaflet';
 import { getDefaultRowForSheet } from 'lib/constants';
+import { placeAbstractBuses } from 'lib/map/abstractPlacement';
 import { GridRow, Primitive, SheetName, WorkbookModel } from '../types';
 import type { DateFormat } from 'lib/settings/types';
 
@@ -200,6 +201,16 @@ export function getBusIndex(model: WorkbookModel): Record<string, GridRow> {
   (model.buses ?? []).forEach((bus) => {
     index[stringValue(bus.name)] = bus;
   });
+  // M1 — non-geographic (H₂/CO₂/heat) buses carry no x/y and used to vanish
+  // from the maps, taking their conversion Links with them. Give them a
+  // deterministic synthetic position (offset from a linked anchor, else an
+  // edge column) and mark them `__abstract` so maps can style them distinctly.
+  // Placement lives on a COPY — the model rows stay untouched.
+  const { placed } = placeAbstractBuses(model.buses ?? [], model.links ?? []);
+  for (const [name, pos] of Object.entries(placed)) {
+    const original = index[name];
+    if (original) index[name] = { ...original, x: pos.x, y: pos.y, __abstract: true };
+  }
   return index;
 }
 
