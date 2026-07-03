@@ -291,6 +291,19 @@ export function DataImportView({ applyFragment }: Props) {
     setLastAddedSeq(null);
   }, [selectedCountry, entries]);
 
+  // Tick once a second while a one-click build runs so the elapsed-time
+  // readout stays live (the build is a single long request with no server-side
+  // progress, so this is an honest activity indicator, not a determinate %).
+  const [, forceBuildTick] = useState(0);
+  useEffect(() => {
+    if (oneClick.status !== 'building') return undefined;
+    const iv = window.setInterval(() => forceBuildTick((t) => t + 1), 1000);
+    return () => window.clearInterval(iv);
+  }, [oneClick.status]);
+  const buildElapsedSec = oneClick.startedAt
+    ? Math.floor((Date.now() - oneClick.startedAt) / 1000)
+    : 0;
+
   // Apply a finished one-click build as soon as the Data view is present to
   // receive it (it may have completed while the user was on another tab), then
   // return the store to idle so it applies exactly once.
@@ -372,6 +385,21 @@ export function DataImportView({ applyFragment }: Props) {
                   ? `Building ${oneClick.countryName ?? ''} model…`
                   : `Build ${selectedCountry.name} model`}
               </button>
+              {oneClick.status === 'building' && (
+                <div className="oneclick-progress" role="status" aria-live="polite">
+                  <div className="oneclick-bar" aria-hidden="true">
+                    <div className="oneclick-bar__fill" />
+                  </div>
+                  <div className="oneclick-progress__text">
+                    Fetching open data for <b>{oneClick.countryName}</b> — OSM network &amp; power
+                    plants, WRI fleet, World Bank demand.{' '}
+                    <span className="oneclick-progress__elapsed">{buildElapsedSec}s elapsed</span>
+                  </div>
+                  <div className="oneclick-progress__hint">
+                    This usually takes a minute or two; you can switch tabs — the model is added when it finishes.
+                  </div>
+                </div>
+              )}
               {oneClick.status === 'error' && oneClick.error && (
                 <span className="data-import-oneclick__err">{oneClick.error}</span>
               )}

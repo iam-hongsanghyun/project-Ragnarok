@@ -25,6 +25,8 @@ export interface OneClickState {
   status: OneClickStatus;
   countryIso: string | null;
   countryName: string | null;
+  /** Epoch ms the build started — drives the elapsed-time readout. */
+  startedAt: number | null;
   /** The finished build awaiting apply (status === 'ready'). */
   build: StarterPackBuild | null;
   error: string | null;
@@ -33,7 +35,7 @@ export interface OneClickState {
 type Listener = () => void;
 
 const IDLE: OneClickState = {
-  seq: 0, status: 'idle', countryIso: null, countryName: null, build: null, error: null,
+  seq: 0, status: 'idle', countryIso: null, countryName: null, startedAt: null, build: null, error: null,
 };
 
 let _state: OneClickState = IDLE;
@@ -61,7 +63,10 @@ export const oneClickStore = {
   start(countryIso: string, countryName: string): void {
     _seq += 1;
     const seq = _seq;
-    _state = { seq, status: 'building', countryIso, countryName, build: null, error: null };
+    _state = {
+      seq, status: 'building', countryIso, countryName,
+      startedAt: Date.now(), build: null, error: null,
+    };
     emit();
     buildLocationModel(countryIso)
       .then((build) => {
