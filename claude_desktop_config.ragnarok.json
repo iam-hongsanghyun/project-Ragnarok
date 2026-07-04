@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "ragnarok": {
+      "command": "C:\\Users\\iamho\\Documents\\GitHub\\project-Ragnarok\\.venv-pypsa\\Scripts\\python.exe",
+      "args": ["-m", "backend.mcp"],
+      "env": {
+        "PYTHONPATH": "C:\\Users\\iamho\\Documents\\GitHub\\project-Ragnarok",
+        "RAGNAROK_API_BASE": "http://127.0.0.1:8000",
+        "RAGNAROK_MCP_AUTONOMY": "guided"
+      }
+    }
+  }
+}
