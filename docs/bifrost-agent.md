@@ -332,6 +332,48 @@ edits, transforms, and queued solves then appear in real time. Caveat: in that
 mode the agent shares (and can overwrite) whatever you have open in the UI, so
 use it for demos/throwaway sessions, not alongside unsaved work.
 
+### Split setup — backend on a server, agent on a client (e.g. LM Studio)
+
+Run Ragnarok on one machine and drive it from another. The MCP bridge runs on
+the **client** (the agent launches it via stdio) and is just an HTTP client of
+the backend, so the client needs **only** `mcp` + `httpx` — not the PyPSA stack.
+
+**On the server** (hosts the model + solves):
+1. `./serve.command` (macOS) / `serve.bat` (Windows) — server mode binds
+   `0.0.0.0:8000`. Note the machine's LAN IP and allow inbound TCP 8000 through
+   its firewall.
+2. The backend does **not** need the MCP deps.
+
+**On the client** (runs LM Studio / the agent):
+1. Clone Ragnarok (only `backend/__init__.py` + `backend/mcp/` are used at
+   runtime) and make a venv.
+2. `<venv>/python -m pip install -r backend/mcp/requirements-mcp.txt`
+   (self-contained: `mcp` + `httpx`, no full backend install).
+3. In LM Studio's `mcp.json` (or any client), register `ragnarok` with the
+   client's venv Python + `-m backend.mcp`, and point it at the server:
+   ```json
+   {
+     "mcpServers": {
+       "ragnarok": {
+         "command": "C:\\path\\to\\project-Ragnarok\\.venv-pypsa\\Scripts\\python.exe",
+         "args": ["-m", "backend.mcp"],
+         "env": {
+           "PYTHONPATH": "C:\\path\\to\\project-Ragnarok",
+           "RAGNAROK_API_BASE": "http://<SERVER-IP>:8000",
+           "RAGNAROK_MCP_AUTONOMY": "guided"
+         }
+       }
+     }
+   }
+   ```
+4. Restart LM Studio, load a tool-capable model → the tools drive the model on
+   the server. Sanity check: `curl http://<SERVER-IP>:8000/api/session/meta?session_id=bifrost`
+   from the client should return JSON.
+
+To watch changes live in the server's web UI, set `RAGNAROK_SESSION_ID=default`
+(so the agent shares the UI session) and open `http://<SERVER-IP>:8000` on the
+server; otherwise it uses the isolated `bifrost` session.
+
 ### Mjolnir note
 
 `backend/mcp/` is subtree-vendored into Mjolnir (the serve wrapper) on the next
