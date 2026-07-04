@@ -64,7 +64,27 @@ Grouped by the phase of a modelling session. Each tool is a thin, typed wrapper 
 | `retarget_snapshots(...)` | `POST /api/session/snapshots/retarget` |
 | `forecast_demand(...)` / `driver_forecast(...)` | `POST /api/session/snapshots/forecast` \| `/driver-forecast` |
 | `ev_reshape_demand(...)` | `POST /api/session/snapshots/ev-demand` |
-| `cluster_network(n, method)` | `POST /api/session/cluster` |
+| `cluster_network(n, method)` | `POST /api/transform/cluster` |
+
+### 2.3b Build from primitives (pypsa-mcp-style, native to the session)
+Ergonomic component constructors so an agent can build a network from scratch —
+the same low-level surface as the community [`pypsa-mcp`](https://github.com/open-energy-transition/pypsa-mcp),
+but mapped onto Ragnarok's **shared session** (via `edit_sheet` `addRow`), so what
+the agent builds is persisted, visible live in the GUI, importer-augmentable, and
+solvable via the real queue with full analytics — one unified world, not a
+separate in-memory scratch network.
+
+| Tool | Adds to sheet |
+|---|---|
+| `add_bus(name, v_nom, x, y, carrier, extra)` | `buses` |
+| `add_generator(name, bus, carrier, p_nom, marginal_cost, p_nom_extendable, …)` | `generators` |
+| `add_load(name, bus, p_set, carrier, extra)` | `loads` |
+| `add_line(name, bus0, bus1, s_nom, x, r, s_nom_extendable, …)` | `lines` |
+| `add_storage(name, bus, carrier, p_nom, max_hours, …)` | `storage_units` |
+| `set_snapshots(snapshots)` | replaces `snapshots` |
+
+Each drops unset fields and passes any other PyPSA attribute via `extra`. They're
+"cheap" in-session edits — they run under `guided`, gate only under `manual`.
 
 ### 2.4 Configure + solve
 | Tool | Endpoint | Notes |
@@ -160,7 +180,7 @@ A new **Assistant** tab (activity bar), consistent with the existing view shell:
 
 | Phase | Deliverable | Leans on |
 |---|---|---|
-| **0 · MCP prototype** ✅ *in progress (Tier 1)* | An MCP server (`backend/mcp/`) wrapping the tool catalog — ~21 tools, drivable from any MCP client with any model. Proves the tool surface end-to-end with zero UI work. See §10 to connect a client. | existing API |
+| **0 · MCP prototype** ✅ *in progress (Tier 1)* | An MCP server (`backend/mcp/`) wrapping the tool catalog — ~27 tools (introspect · data-in · edit · **build-from-primitives** · solve · analyse), drivable from any MCP client with any model. Proves the tool surface end-to-end with zero UI work. See §10 to connect a client. | existing API |
 | **1 · Embedded agent (L1 shell)** | `LLMProvider` abstraction + Claude API adapter + the plan/act/observe loop + a minimal Assistant chat tab (stream + tool cards). Happy path: "build KOR, solve, report." | Phase 0 tools |
 | **2 · Guardrails & grounding** | confirmation gates, budgets, world-state summarisation, schema retrieval tools, exemplars. | pypsa_schema_builder |
 | **3 · Verification loop** | validate-before-solve, Q2 repair loop, Ember/adequacy sanity, cited report generator. | Q2, I7, A2 |

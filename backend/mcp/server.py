@@ -368,6 +368,194 @@ async def cluster_network(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Build from primitives — GATE (cheap in-session edits). Ergonomic component
+# constructors (pypsa-mcp-style) mapped to the shared Ragnarok session, so a
+# model built here is persisted, visible live in the GUI, and solvable via the
+# real queue with full analytics — one unified world.
+# ══════════════════════════════════════════════════════════════════════════════
+_BUILD_ANN = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, openWorldHint=False
+)
+
+
+def _row(fixed: dict[str, Any], extra: dict[str, Any] | None) -> dict[str, Any]:
+    """Component row from the named fields (drop None) + any passthrough extras."""
+    row = {k: v for k, v in fixed.items() if v is not None}
+    if extra:
+        row.update(extra)
+    return row
+
+
+@mcp.tool(
+    annotations=_BUILD_ANN,
+    description="Add a bus (node) to the working model. extra passes any other PyPSA bus attribute (e.g. v_mag_pu_set).",
+)
+async def add_bus(
+    name: str,
+    v_nom: float | None = None,
+    x: float | None = None,
+    y: float | None = None,
+    carrier: str | None = None,
+    extra: dict[str, Any] | None = None,
+    confirm: bool = False,
+) -> Any:
+    row = _row(
+        {"name": name, "v_nom": v_nom, "x": x, "y": y, "carrier": carrier}, extra
+    )
+    if _needs_confirm(cheap=True) and not confirm:
+        return _preview(f"Add bus {name!r}.", {"sheet": "buses", "row": row})
+    return await get_client().add_row("buses", row)
+
+
+@mcp.tool(
+    annotations=_BUILD_ANN,
+    description="Add a generator on a bus. Set p_nom_extendable=true for capacity expansion. extra passes any other PyPSA generator attribute.",
+)
+async def add_generator(
+    name: str,
+    bus: str,
+    carrier: str | None = None,
+    p_nom: float | None = None,
+    marginal_cost: float | None = None,
+    p_nom_extendable: bool | None = None,
+    capital_cost: float | None = None,
+    efficiency: float | None = None,
+    extra: dict[str, Any] | None = None,
+    confirm: bool = False,
+) -> Any:
+    row = _row(
+        {
+            "name": name,
+            "bus": bus,
+            "carrier": carrier,
+            "p_nom": p_nom,
+            "marginal_cost": marginal_cost,
+            "p_nom_extendable": p_nom_extendable,
+            "capital_cost": capital_cost,
+            "efficiency": efficiency,
+        },
+        extra,
+    )
+    if _needs_confirm(cheap=True) and not confirm:
+        return _preview(
+            f"Add generator {name!r} on bus {bus!r}.",
+            {"sheet": "generators", "row": row},
+        )
+    return await get_client().add_row("generators", row)
+
+
+@mcp.tool(
+    annotations=_BUILD_ANN,
+    description="Add a load on a bus. p_set is the static demand (MW); use a loads-p_set time series for time-varying demand.",
+)
+async def add_load(
+    name: str,
+    bus: str,
+    p_set: float | None = None,
+    carrier: str | None = None,
+    extra: dict[str, Any] | None = None,
+    confirm: bool = False,
+) -> Any:
+    row = _row({"name": name, "bus": bus, "p_set": p_set, "carrier": carrier}, extra)
+    if _needs_confirm(cheap=True) and not confirm:
+        return _preview(
+            f"Add load {name!r} on bus {bus!r}.", {"sheet": "loads", "row": row}
+        )
+    return await get_client().add_row("loads", row)
+
+
+@mcp.tool(
+    annotations=_BUILD_ANN,
+    description="Add an AC line between two buses (bus0, bus1). s_nom = rating (MVA); set s_nom_extendable=true to size it. extra passes r/x/length etc.",
+)
+async def add_line(
+    name: str,
+    bus0: str,
+    bus1: str,
+    s_nom: float | None = None,
+    x: float | None = None,
+    r: float | None = None,
+    s_nom_extendable: bool | None = None,
+    capital_cost: float | None = None,
+    length: float | None = None,
+    extra: dict[str, Any] | None = None,
+    confirm: bool = False,
+) -> Any:
+    row = _row(
+        {
+            "name": name,
+            "bus0": bus0,
+            "bus1": bus1,
+            "s_nom": s_nom,
+            "x": x,
+            "r": r,
+            "s_nom_extendable": s_nom_extendable,
+            "capital_cost": capital_cost,
+            "length": length,
+        },
+        extra,
+    )
+    if _needs_confirm(cheap=True) and not confirm:
+        return _preview(
+            f"Add line {name!r} ({bus0}–{bus1}).", {"sheet": "lines", "row": row}
+        )
+    return await get_client().add_row("lines", row)
+
+
+@mcp.tool(
+    annotations=_BUILD_ANN,
+    description="Add a storage unit on a bus (battery, PHS, …). max_hours = energy/power ratio. extra passes efficiency_store/dispatch, standing_loss, etc.",
+)
+async def add_storage(
+    name: str,
+    bus: str,
+    carrier: str | None = None,
+    p_nom: float | None = None,
+    max_hours: float | None = None,
+    efficiency_store: float | None = None,
+    efficiency_dispatch: float | None = None,
+    capital_cost: float | None = None,
+    p_nom_extendable: bool | None = None,
+    extra: dict[str, Any] | None = None,
+    confirm: bool = False,
+) -> Any:
+    row = _row(
+        {
+            "name": name,
+            "bus": bus,
+            "carrier": carrier,
+            "p_nom": p_nom,
+            "max_hours": max_hours,
+            "efficiency_store": efficiency_store,
+            "efficiency_dispatch": efficiency_dispatch,
+            "capital_cost": capital_cost,
+            "p_nom_extendable": p_nom_extendable,
+        },
+        extra,
+    )
+    if _needs_confirm(cheap=True) and not confirm:
+        return _preview(
+            f"Add storage unit {name!r} on bus {bus!r}.",
+            {"sheet": "storage_units", "row": row},
+        )
+    return await get_client().add_row("storage_units", row)
+
+
+@mcp.tool(
+    annotations=_BUILD_ANN,
+    description="Set the model's snapshots (time steps) from an explicit list of timestamps, e.g. ['2030-01-01 00:00','2030-01-01 01:00']. Replaces the snapshots sheet. For a dated range + series reindexing use retarget_snapshots instead.",
+)
+async def set_snapshots(snapshots: list[str], confirm: bool = False) -> Any:
+    rows = [{"snapshot": s} for s in snapshots]
+    if _needs_confirm(cheap=True) and not confirm:
+        return _preview(
+            f"Set {len(rows)} snapshot(s).", {"sheet": "snapshots", "count": len(rows)}
+        )
+    await get_client().merge_sheets({"snapshots": rows})
+    return {"status": "applied", "snapshots": len(rows)}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Data-in / transforms — GATE (live network + persist). Not cheap.
 # ══════════════════════════════════════════════════════════════════════════════
 @mcp.tool(

@@ -52,6 +52,10 @@ class FakeClient:
         self.calls.append(("submit_solve", scenario, options))
         return {"id": "job1", "status": "queued"}
 
+    async def add_row(self, sheet: str, values: dict) -> dict:
+        self.calls.append(("add_row", sheet, values))
+        return {"rows": 1}
+
 
 def _install(monkeypatch, autonomy: str = "guided") -> FakeClient:
     fake = FakeClient()
@@ -64,7 +68,18 @@ def _install(monkeypatch, autonomy: str = "guided") -> FakeClient:
 def test_tool_catalog_and_annotations() -> None:
     tools = asyncio.run(mcp.list_tools())
     by_name = {t.name: t for t in tools}
-    assert len(tools) == 21, f"expected 21 tools, got {len(tools)}"
+    assert len(tools) == 27, f"expected 27 tools, got {len(tools)}"
+    # low-level builder tools (pypsa-mcp-style) are present
+    for t in (
+        "add_bus",
+        "add_generator",
+        "add_load",
+        "add_line",
+        "add_storage",
+        "set_snapshots",
+    ):
+        assert t in by_name, f"missing builder tool {t}"
+        assert by_name[t].annotations.readOnlyHint is False
 
     # A read-only tool is annotated read-only...
     assert by_name["get_world_state"].annotations.readOnlyHint is True
@@ -147,3 +162,32 @@ def test_submit_solve_previews_without_confirm(monkeypatch) -> None:
     out = asyncio.run(server.submit_solve(scenario={"carbonPrice": 50}))
     assert out["status"] == "preview"
     assert not fake.called("submit_solve")
+
+
+# ── builder tools: cheap edits run under guided, drop None, keep extras ─────────
+def test_add_generator_appends_row_under_guided(monkeypatch) -> None:
+    fake = _install(monkeypatch, "guided")
+    out = asyncio.run(
+        server.add_generator(
+            name="G1", bus="b", carrier="gas", p_nom=200, extra={"committable": True}
+        )
+    )
+    assert out.get("status") != "preview"
+    call = next(c for c in fake.calls if c[0] == "add_row")
+    assert call[1] == "generators"
+    row = call[2]
+    assert row == {
+        "name": "G1",
+        "bus": "b",
+        "carrier": "gas",
+        "p_nom": 200,
+        "committable": True,
+    }
+    assert "marginal_cost" not in row  # None fields dropped
+
+
+def test_add_bus_previews_under_manual(monkeypatch) -> None:
+    fake = _install(monkeypatch, "manual")
+    out = asyncio.run(server.add_bus(name="b", v_nom=380))
+    assert out["status"] == "preview"
+    assert not fake.called("add_row")

@@ -174,6 +174,21 @@ class RagnarokClient:
             f"/api/session/sheet/{name}", {"sessionId": self.session_id, "ops": ops}
         )
 
+    async def add_row(self, sheet: str, values: dict[str, Any]) -> Any:
+        """Append one row (component) to a sheet, creating the sheet if it does
+        not exist yet — so the low-level builder works on an empty model too.
+        """
+        try:
+            return await self.patch_sheet(sheet, [{"op": "addRow", "values": values}])
+        except RagnarokAPIError as exc:
+            if exc.status != 404:
+                raise
+            model = await self.load_full_model()
+            model.setdefault(sheet, [])
+            model[sheet].append(values)
+            await self.save_model(model)
+            return {"rows": len(model[sheet]), "created": sheet}
+
     async def retarget_snapshots(
         self, start: str, end: str, step_hours: float = 1.0, fill: str = "tile"
     ) -> Any:
