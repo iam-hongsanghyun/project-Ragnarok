@@ -1,6 +1,7 @@
 @echo off
-:: Ragnarok - run the app as ONE process (API + web UI). Windows launcher.
-:: Double-click for server mode (LAN); this-machine-only: serve.bat local
+:: Ragnarok - Windows launcher. Starts the app (API + web UI) and the Bifrost
+:: MCP bridge (http://<host>:8765/mcp) together, via serve.ps1.
+:: Double-click = server mode (LAN); this-machine-only: serve.bat local
 setlocal
 set MODE=%1
 if "%MODE%"=="" set MODE=server
