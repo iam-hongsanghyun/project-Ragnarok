@@ -123,6 +123,12 @@ class Dashboard:
     # existing plants (whose close year is after the target year). None → the
     # replacement falls back to the target-year network's additions.
     renewable_additions_by_year: dict | None = None
+    # Full raw generators sheet (every build/close year, pre target-year filter),
+    # set by the pipeline. Lets generator replacement reach plants that retire
+    # before the target year (so a coal unit closing in 2030 becomes renewables
+    # dated at its close year, present in the target-year model). None → replace
+    # only the target-year-active fleet.
+    raw_generators: pd.DataFrame | None = None
     # Marginal-cost multipliers (GUI table only — not read from xlsx).
     # Columns: carrier, multiplier_pct (% of original).  None when absent.
     marginal_cost_rules: pd.DataFrame | None = None

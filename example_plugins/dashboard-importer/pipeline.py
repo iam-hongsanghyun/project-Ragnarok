@@ -29,6 +29,7 @@ Typical workflow
 3. Topbar Run solves it; the CF DSL and carbon-adjusted costs are already in
    the model.
 """
+
 from __future__ import annotations
 
 import base64
@@ -82,10 +83,10 @@ TS_SHEET_ATTRS = {
 }
 
 
-
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
 
 def transform(
     model: dict[str, list[dict[str, Any]]],
@@ -141,6 +142,7 @@ def transform(
 # Carbon price → marginal-cost adder (build-time)
 # ---------------------------------------------------------------------------
 
+
 def _apply_carbon_price_marginal_cost(network: Any, dashboard: Any) -> None:
     """Fold the carbon cost into generator marginal costs at build time.
 
@@ -188,11 +190,15 @@ def _apply_carbon_price_marginal_cost(network: Any, dashboard: Any) -> None:
     if price_usd <= 0:
         logger.warning(
             "[dashboard-importer] Carbon price: scenario %r / year %d → %.1f per tCO₂ — skipping",
-            getattr(settings, "carbonprice_scenario", ""), settings.target_year, price_usd,
+            getattr(settings, "carbonprice_scenario", ""),
+            settings.target_year,
+            price_usd,
         )
         return
     if emission_intensity is None or emission_intensity.empty:
-        logger.warning("[dashboard-importer] Carbon price: emission intensities are empty — skipping")
+        logger.warning(
+            "[dashboard-importer] Carbon price: emission intensities are empty — skipping"
+        )
         return
 
     fx = float(getattr(settings, "currency_exchange", 1.0) or 1.0)
@@ -200,40 +206,51 @@ def _apply_carbon_price_marginal_cost(network: Any, dashboard: Any) -> None:
     for carrier, kg_per_mwh in emission_intensity.items():
         if float(kg_per_mwh) == 0:
             continue
-        gens = network.generators.index[network.generators["carrier"] == str(carrier).strip()]
+        gens = network.generators.index[
+            network.generators["carrier"] == str(carrier).strip()
+        ]
         if len(gens) == 0:
             continue
         adder = float(kg_per_mwh) * price_usd * fx / 1000.0
-        base = pd.to_numeric(network.generators.loc[gens, "marginal_cost"], errors="coerce").fillna(0.0)
+        base = pd.to_numeric(
+            network.generators.loc[gens, "marginal_cost"], errors="coerce"
+        ).fillna(0.0)
         network.generators.loc[gens, "marginal_cost"] = base + adder
         applied = True
         logger.info(
             "[dashboard-importer] carbon %s: %.0f kg CO₂/MWh × %.1f per tCO₂ × %.2f fx = +%.0f per MWh marginal cost",
-            carrier, kg_per_mwh, price_usd, fx, adder,
+            carrier,
+            kg_per_mwh,
+            price_usd,
+            fx,
+            adder,
         )
 
     if not applied:
-        logger.warning("[dashboard-importer] Carbon price: no matching generators found")
+        logger.warning(
+            "[dashboard-importer] Carbon price: no matching generators found"
+        )
 
 
 # ---------------------------------------------------------------------------
 # Core build pipeline
 # ---------------------------------------------------------------------------
 
+
 def _build_dashboard_network(
     dashboard_path: Path | None,
     module_config: dict[str, Any],
 ) -> Any:
     """Build a PyPSA network from GUI config, table edits, and optional xlsx."""
-    settings_mod   = _lib("settings")
-    loader_mod     = _lib("loader")
-    topology_mod   = _lib("topology")
-    region_mod     = _lib("region")
-    carrier_mod    = _lib("carrier")
-    scaling_mod    = _lib("scaling")
-    snapshots_mod  = _lib("snapshots")
-    merge_cc_mod   = _lib("merge_cc")
-    p_max_pu_mod   = _lib("p_max_pu")
+    settings_mod = _lib("settings")
+    loader_mod = _lib("loader")
+    topology_mod = _lib("topology")
+    region_mod = _lib("region")
+    carrier_mod = _lib("carrier")
+    scaling_mod = _lib("scaling")
+    snapshots_mod = _lib("snapshots")
+    merge_cc_mod = _lib("merge_cc")
+    p_max_pu_mod = _lib("p_max_pu")
     demand_redist_mod = _lib("demand_redistribution")
     gen_replace_mod = _lib("generator_replacement")
     ess_mod = _lib("ess")
@@ -247,13 +264,19 @@ def _build_dashboard_network(
         xlsx_dashboard = None
         settings = _settings_from_config(settings_mod, module_config)
 
-    settings.model = str(_resolve_model_workbook(module_config, dashboard_path, settings.model))
+    settings.model = str(
+        _resolve_model_workbook(module_config, dashboard_path, settings.model)
+    )
 
     dashboard = _build_dashboard(settings_mod, settings, module_config, xlsx_dashboard)
     # Full-model solar/wind additions by build year (incl. years after the target
     # year) for the close-year follow split of existing plants — read from the raw
     # generators sheet, since the built network is filtered to the target year.
-    dashboard.renewable_additions_by_year = _additions_by_year(_read_generators_sheet(settings.model))
+    raw_gens = _read_generators_sheet(settings.model)
+    dashboard.renewable_additions_by_year = _additions_by_year(raw_gens)
+    # The full raw fleet lets replacement reach plants that retire before the
+    # target year (retire-and-replace: their renewables are dated at close year).
+    dashboard.raw_generators = raw_gens
 
     network = loader_mod.build_network_for_year(settings.model, settings.target_year)
     loader_mod.select_base_year_temporal(network, settings.base_year)
@@ -288,7 +311,9 @@ def _build_dashboard_network(
     # Apply transmission losses last: split lossless bidirectional links into
     # forward + reverse one-directional lossy links (energy-consistent).
     topology_mod.apply_link_losses(network, settings.link_loss)
-    snapshots_mod.slice_snapshots(network, settings.snapshot_start, settings.snapshot_length)
+    snapshots_mod.slice_snapshots(
+        network, settings.snapshot_start, settings.snapshot_length
+    )
     topology_mod.drop_components_with_missing_buses(network)
     return network
 
@@ -304,7 +329,9 @@ def _resolve_model_for_analytics(module_config: dict[str, Any]) -> tuple[str, in
     else:
         settings = _settings_from_config(settings_mod, module_config)
 
-    model_path = str(_resolve_model_workbook(module_config, dashboard_path, settings.model))
+    model_path = str(
+        _resolve_model_workbook(module_config, dashboard_path, settings.model)
+    )
     return model_path, int(settings.base_year), int(settings.target_year)
 
 
@@ -341,10 +368,73 @@ def capacity_payload(module_config: dict[str, Any]) -> list[dict[str, Any]] | No
         Capacity-by-year rows, or ``None`` when no model is configured.
     """
     model_path, base_year, _ = _resolve_model_for_analytics(module_config)
+    # When replacement is on, reflect it: retire each replaced plant at its
+    # online year and add the solar/wind it becomes, so the chart shows the
+    # transition rather than the untouched input fleet.
+    if _as_bool(module_config, "replace_generators", False):
+        df = _read_generators_sheet(model_path)
+        if df is None:
+            return None
+        plan = replacement_plan_payload(module_config)
+        if plan:
+            df = _apply_replacement_to_fleet(df, plan)
+        return _capacity_rows_from_fleet(df, base_year)
     return _capacity_by_carrier_year(model_path, base_year)
 
 
-def _apply_attr_filter(df: "pd.DataFrame", module_config: dict[str, Any]) -> "pd.DataFrame":
+def _apply_replacement_to_fleet(
+    df: "pd.DataFrame",
+    plan: list[dict[str, Any]],
+) -> "pd.DataFrame":
+    """Return a copy of the generators fleet with the replacement plan applied.
+
+    Each replaced plant is retired at its ``online_year`` (its ``close_year`` is
+    pulled back to that year) and the solar/wind capacity it becomes is appended
+    as new rows built in that year. Used by the Output capacity chart so it
+    reflects the built model. The original ``df`` is not mutated.
+    """
+    if "name" not in df.columns:
+        return df
+    out = df.copy()
+    for col in ("build_year", "close_year"):
+        if col not in out.columns:
+            out[col] = pd.NA
+    names = out["name"].astype(str).str.strip()
+    new_rows: list[dict[str, Any]] = []
+    for row in plan:
+        g = str(row.get("generator", "")).strip()
+        ry = row.get("online_year")
+        if not g or ry is None:
+            continue
+        mask = names == g
+        if mask.any():
+            # Retire the original plant at the replacement year (no later than it
+            # already closes) so its carrier's capacity drops as it is replaced.
+            existing = pd.to_numeric(out.loc[mask, "close_year"], errors="coerce")
+            out.loc[mask, "close_year"] = existing.where(existing < ry, ry).fillna(ry)
+        for carrier, mw in (
+            ("solar", row.get("solar_mw")),
+            ("wind", row.get("wind_mw")),
+        ):
+            if not mw or float(mw) <= 0:
+                continue
+            new_rows.append(
+                {
+                    "name": f"{g}_repl_{carrier}",
+                    "carrier": carrier,
+                    "p_nom": float(mw),
+                    "build_year": ry,
+                    "close_year": pd.NA,
+                }
+            )
+    if new_rows:
+        out = pd.concat([out, pd.DataFrame(new_rows)], ignore_index=True)
+    return out
+
+
+def _apply_attr_filter(
+    df: "pd.DataFrame", module_config: dict[str, Any]
+) -> "pd.DataFrame":
     """Filter 3 (optional): keep only rows where ``column == value``.
 
     ``replace_filter_column`` / ``replace_filter_value`` come from the GUI's
@@ -355,10 +445,19 @@ def _apply_attr_filter(df: "pd.DataFrame", module_config: dict[str, Any]) -> "pd
     val = _as_str(module_config, "replace_filter_value", "").strip()
     if not col or not val or col not in df.columns:
         return df
-    return df[df[col].astype(str).str.strip() == val]
+    # String-equal OR numeric-equal, so a flag column stored as ``1.0`` still
+    # matches a typed/selected ``"1"`` (mirrors generator_replacement._attr_match).
+    match = df[col].astype(str).str.strip() == val
+    try:
+        match = match | (pd.to_numeric(df[col], errors="coerce") == float(val))
+    except ValueError:
+        pass
+    return df[match]
 
 
-def generator_filter_values_payload(module_config: dict[str, Any]) -> list[dict[str, Any]]:
+def generator_filter_values_payload(
+    module_config: dict[str, Any],
+) -> list[dict[str, Any]]:
     """Every (column, unique value) of the generators sheet for the filter dropdowns.
 
     Powers the replacement attribute filter: the column dropdown reads the
@@ -402,7 +501,11 @@ def generators_payload(module_config: dict[str, Any]) -> list[dict[str, Any]] | 
     df = df[_active_in_year(df, target_year)]  # Filter 1: active in target year
     # Filter 2 (replacement only): build_year ≥ replacement base year — skipped
     # entirely when "Include existing plants" is on (the whole fleet is replaceable).
-    threshold = 0 if _as_bool(module_config, "replace_include_existing", False) else _as_int(module_config, "replace_build_year", 0)
+    threshold = (
+        0
+        if _as_bool(module_config, "replace_include_existing", False)
+        else _as_int(module_config, "replace_build_year", 0)
+    )
     if threshold > 0 and "build_year" in df.columns:
         df = df[pd.to_numeric(df["build_year"], errors="coerce") >= threshold]
     df = _apply_attr_filter(df, module_config)  # Filter 3: column == value (optional)
@@ -418,7 +521,11 @@ def generators_payload(module_config: dict[str, Any]) -> list[dict[str, Any]] | 
         if "p_nom" in df.columns
         else pd.Series(index=df.index, dtype="float64")
     )
-    carrier = df["carrier"].astype(str).str.strip().fillna("") if "carrier" in df.columns else pd.Series("", index=df.index)
+    carrier = (
+        df["carrier"].astype(str).str.strip().fillna("")
+        if "carrier" in df.columns
+        else pd.Series("", index=df.index)
+    )
     rows: list[dict[str, Any]] = []
     for name, b, p, c in zip(names, build, pnom, carrier, strict=False):
         if not name or name.lower() == "nan":
@@ -431,13 +538,15 @@ def generators_payload(module_config: dict[str, Any]) -> list[dict[str, Any]] | 
             parts.append(str(by_int))
         if p_val is not None:
             parts.append(f"{p_val:g} MW")
-        rows.append({
-            "name": name,
-            "build_year": by_int,
-            "p_nom": p_val,
-            "carrier": "" if c.lower() == "nan" else c,
-            "detail": " · ".join(parts),
-        })
+        rows.append(
+            {
+                "name": name,
+                "build_year": by_int,
+                "p_nom": p_val,
+                "carrier": "" if c.lower() == "nan" else c,
+                "detail": " · ".join(parts),
+            }
+        )
     return rows
 
 
@@ -456,13 +565,20 @@ def replacement_plan_payload(module_config: dict[str, Any]) -> list[dict[str, An
     """
     rules = module_config.get("generator_replacements")
     sel_rows = (
-        [r for r in rules if isinstance(r, dict) and str(r.get("generator", "")).strip()]
-        if isinstance(rules, list) else []
+        [
+            r
+            for r in rules
+            if isinstance(r, dict) and str(r.get("generator", "")).strip()
+        ]
+        if isinstance(rules, list)
+        else []
     )
     bulk_on = _as_bool(module_config, "replace_all_carriers", False)
     # Carrier matching is case/whitespace-insensitive — a model spelling its
     # carriers "Solar"/"Wind" must still match the lowercase GUI checkboxes.
-    carriers_sel = {c.strip().lower() for c in _as_str_list(module_config, "replace_carriers")}
+    carriers_sel = {
+        c.strip().lower() for c in _as_str_list(module_config, "replace_carriers")
+    }
     if not sel_rows and not (bulk_on and carriers_sel):
         return []
 
@@ -473,23 +589,46 @@ def replacement_plan_payload(module_config: dict[str, Any]) -> list[dict[str, An
     # Full-model additions (all build years, incl. years after the target year)
     # for the close-year split of existing plants — taken before the target filter.
     full_additions = _additions_by_year(df)
-    # Filter 1: active in the target year. Annual additions are computed from
-    # this full active fleet before replacement-specific filters are applied, so
-    # the solar:wind ratio is not affected by carrier/filter dropdown choices.
-    df = df[_active_in_year(df, target_year)]
-    additions_df = df.copy()
+    # Annual additions (for the build-year follow ratio) come from the fleet
+    # active in the target year — computed before replacement filters so the
+    # solar:wind ratio is not affected by carrier/filter dropdown choices.
+    additions_df = df[_active_in_year(df, target_year)].copy()
+
+    # Retire-and-replace fleet: every plant built by the target year — INCLUDING
+    # those that already retire before it (close ≤ target). The target-year
+    # network dropped them, but their capacity still becomes renewables (dated at
+    # the plant's close/forced year). Mirrors generator_replacement.replace_generators.
+    if "build_year" in df.columns:
+        _built = pd.to_numeric(df["build_year"], errors="coerce")
+        df = df[_built.isna() | (_built <= target_year)]
 
     # Filter 2: build_year ≥ replacement base year — skipped entirely when
     # "Include existing plants" is on (the whole fleet is replaceable).
-    threshold = 0 if _as_bool(module_config, "replace_include_existing", False) else _as_int(module_config, "replace_build_year", 0)
+    threshold = (
+        0
+        if _as_bool(module_config, "replace_include_existing", False)
+        else _as_int(module_config, "replace_build_year", 0)
+    )
     if threshold > 0 and "build_year" in df.columns:
         df = df[pd.to_numeric(df["build_year"], errors="coerce") >= threshold]
     df = _apply_attr_filter(df, module_config)  # Filter 3: column == value (optional)
 
     names = df["name"].astype(str).str.strip().fillna("")
-    build = pd.to_numeric(df["build_year"], errors="coerce") if "build_year" in df.columns else pd.Series(index=df.index, dtype="float64")
-    pnom = pd.to_numeric(df["p_nom"], errors="coerce").fillna(0.0) if "p_nom" in df.columns else pd.Series(0.0, index=df.index)
-    carrier = df["carrier"].astype(str).str.strip().fillna("") if "carrier" in df.columns else pd.Series("", index=df.index)
+    build = (
+        pd.to_numeric(df["build_year"], errors="coerce")
+        if "build_year" in df.columns
+        else pd.Series(index=df.index, dtype="float64")
+    )
+    pnom = (
+        pd.to_numeric(df["p_nom"], errors="coerce").fillna(0.0)
+        if "p_nom" in df.columns
+        else pd.Series(0.0, index=df.index)
+    )
+    carrier = (
+        df["carrier"].astype(str).str.strip().fillna("")
+        if "carrier" in df.columns
+        else pd.Series("", index=df.index)
+    )
 
     follow = _as_bool(module_config, "replace_follow", False)
     solar_pct = _as_float(module_config, "replace_solar_pct", 50.0)
@@ -501,15 +640,30 @@ def replacement_plan_payload(module_config: dict[str, Any]) -> list[dict[str, An
     # (capped) for every plant when "Include existing plants" is on. Mirrors the
     # build's generator_replacement split exactly. Cap is 0/blank → target year.
     active_additions = _additions_by_year(additions_df)
-    follow_close_year = follow and _as_bool(module_config, "replace_include_existing", False)
-    max_close_year = _as_int(module_config, "replace_max_close_year", 0) or int(target_year)
+    follow_close_year = follow and _as_bool(
+        module_config, "replace_include_existing", False
+    )
+    # Forced-retirement cap: renewables come online at min(close, cap); a plant
+    # with no close year retires at the cap (0/blank → target year).
+    cap = _as_int(module_config, "replace_max_close_year", 0) or int(target_year)
 
-    def _computed_split(total: float, by: int | None, close: int | None) -> tuple[float, float]:
+    def _repl_year(by: int | None, close: int | None) -> int:
+        """Year the replacement comes online (mirrors generator_replacement)."""
+        ry = close if close is not None else cap
+        ry = min(ry, cap)
+        if by is not None:
+            ry = max(ry, by)
+        return min(ry, int(target_year))
+
+    def _computed_split(
+        total: float, by: int | None, close: int | None
+    ) -> tuple[float, float]:
         if follow:
-            if follow_close_year:                            # close year (capped)
-                ref = close if (close is not None and close < max_close_year) else max_close_year
-                solar_add, wind_add = _latest_nonzero(full_additions, ref)
-            else:                                            # build year
+            if follow_close_year:  # replacement (close/forced) year
+                solar_add, wind_add = _latest_nonzero(
+                    full_additions, _repl_year(by, close)
+                )
+            else:  # build year
                 ref = by if by is not None else int(base_year)
                 solar_add, wind_add = _latest_nonzero(active_additions, ref)
             total_add = solar_add + wind_add
@@ -519,12 +673,21 @@ def replacement_plan_payload(module_config: dict[str, Any]) -> list[dict[str, An
         return total * solar_pct / 100.0, total * wind_pct / 100.0
 
     # name → (p_nom, build_year, carrier, close_year), first occurrence wins.
-    close = pd.to_numeric(df["close_year"], errors="coerce") if "close_year" in df.columns else pd.Series(index=df.index, dtype="float64")
+    close = (
+        pd.to_numeric(df["close_year"], errors="coerce")
+        if "close_year" in df.columns
+        else pd.Series(index=df.index, dtype="float64")
+    )
     info: dict[str, tuple[float, int | None, str, int | None]] = {}
     for nm, b, p, c, cl in zip(names, build, pnom, carrier, close, strict=False):
         if not nm or nm.lower() == "nan" or nm in info:
             continue
-        info[nm] = (float(p), int(b) if pd.notna(b) else None, c, int(cl) if pd.notna(cl) else None)
+        info[nm] = (
+            float(p),
+            int(b) if pd.notna(b) else None,
+            c,
+            int(cl) if pd.notna(cl) else None,
+        )
 
     rows: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -542,14 +705,33 @@ def replacement_plan_payload(module_config: dict[str, Any]) -> list[dict[str, An
             seen.add(g)
             solar, wind = fz
             by = info[g][1] if g in info else None
-            rows.append({"generator": g, "build_year": by, "total_mw": round(solar + wind, 1), "solar_mw": round(solar, 1), "wind_mw": round(wind, 1)})
+            close_y = info[g][3] if g in info else None
+            rows.append(
+                {
+                    "generator": g,
+                    "build_year": by,
+                    "online_year": _repl_year(by, close_y),
+                    "total_mw": round(solar + wind, 1),
+                    "solar_mw": round(solar, 1),
+                    "wind_mw": round(wind, 1),
+                }
+            )
             continue
         if g not in info:
             continue
         seen.add(g)
         total, by, _, close_y = info[g]
         solar, wind = _computed_split(total, by, close_y)
-        rows.append({"generator": g, "build_year": by, "total_mw": round(total, 1), "solar_mw": round(solar, 1), "wind_mw": round(wind, 1)})
+        rows.append(
+            {
+                "generator": g,
+                "build_year": by,
+                "online_year": _repl_year(by, close_y),
+                "total_mw": round(total, 1),
+                "solar_mw": round(solar, 1),
+                "wind_mw": round(wind, 1),
+            }
+        )
 
     # Bulk: every plant of the selected carriers passing both filters above
     # (computed split). The sheet is already filtered, so no extra check here.
@@ -559,7 +741,16 @@ def replacement_plan_payload(module_config: dict[str, Any]) -> list[dict[str, An
                 continue
             seen.add(nm)
             solar, wind = _computed_split(total, by, close_y)
-            rows.append({"generator": nm, "build_year": by, "total_mw": round(total, 1), "solar_mw": round(solar, 1), "wind_mw": round(wind, 1)})
+            rows.append(
+                {
+                    "generator": nm,
+                    "build_year": by,
+                    "online_year": _repl_year(by, close_y),
+                    "total_mw": round(total, 1),
+                    "solar_mw": round(solar, 1),
+                    "wind_mw": round(wind, 1),
+                }
+            )
 
     return rows
 
@@ -589,14 +780,18 @@ def ess_plan_payload(module_config: dict[str, Any]) -> list[dict[str, Any]]:
         bus = name_to_bus.get(str(r.get("generator", "")).strip(), "")
         if not bus:
             continue
-        replaced_by_bus[bus] = replaced_by_bus.get(bus, 0.0) + float(r.get("total_mw") or 0.0)
+        replaced_by_bus[bus] = replaced_by_bus.get(bus, 0.0) + float(
+            r.get("total_mw") or 0.0
+        )
 
     mode = _as_str(module_config, "ess_sizing_mode", "proportional").strip().lower()
     fixed_mw = _as_float(module_config, "ess_fixed_mw", 100.0)
     proportion = _as_float(module_config, "ess_proportion_pct", 30.0) / 100.0
     # Expansion bounds (resolved to MW per bus) for the preview.
     expandable = _as_bool(module_config, "ess_expandable", False)
-    exp_mode = _as_str(module_config, "ess_expansion_mode", "proportional").strip().lower()
+    exp_mode = (
+        _as_str(module_config, "ess_expansion_mode", "proportional").strip().lower()
+    )
     min_in = _as_float(module_config, "ess_p_nom_min", 0.0)
     max_in = _as_float(module_config, "ess_p_nom_max", 0.0)
 
@@ -606,7 +801,11 @@ def ess_plan_payload(module_config: dict[str, Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for bus, cap in sorted(replaced_by_bus.items(), key=lambda kv: -kv[1]):
         ess = fixed_mw if mode == "fixed" else cap * proportion
-        row = {"bus": bus, "replaced_mw": round(cap, 1), "ess_mw": round(max(ess, 0.0), 1)}
+        row = {
+            "bus": bus,
+            "replaced_mw": round(cap, 1),
+            "ess_mw": round(max(ess, 0.0), 1),
+        }
         if expandable:
             row["min_mw"] = round(max(_bound(min_in, cap), 0.0), 1)
             row["max_mw"] = round(_bound(max_in, cap), 1) if max_in > 0 else None
@@ -650,7 +849,12 @@ def _additions_by_year(df: "pd.DataFrame | None") -> dict[int, tuple[float, floa
     :func:`dashboard_lib.generator_replacement._year_additions_by_year`, which
     runs on the (target-filtered) network.
     """
-    if df is None or df.empty or "build_year" not in df.columns or "carrier" not in df.columns:
+    if (
+        df is None
+        or df.empty
+        or "build_year" not in df.columns
+        or "carrier" not in df.columns
+    ):
         return {}
     by = pd.to_numeric(df["build_year"], errors="coerce")
     carrier = df["carrier"].astype(str).str.strip().str.lower()
@@ -691,7 +895,9 @@ def _frozen_split(row: Any) -> tuple[float, float] | None:
         return None
 
 
-def _latest_nonzero(additions: dict[int, tuple[float, float]], year: int) -> tuple[float, float]:
+def _latest_nonzero(
+    additions: dict[int, tuple[float, float]], year: int
+) -> tuple[float, float]:
     """Additions for *year*, else the latest earlier year with nonzero additions."""
     solar_add, wind_add = additions.get(year, (0.0, 0.0))
     if solar_add + wind_add > 0:
@@ -768,7 +974,8 @@ def demand_values_payload(module_config: dict[str, Any]) -> list[dict[str, Any]]
     # Per-load annual energy over the full year (first 'snapshot' column aside).
     value_cols = [c for c in pset.columns if str(c).strip().lower() != "snapshot"]
     annual: dict[str, float] = {
-        _canon(c): float(pd.to_numeric(pset[c], errors="coerce").fillna(0.0).sum()) for c in value_cols
+        _canon(c): float(pd.to_numeric(pset[c], errors="coerce").fillna(0.0).sum())
+        for c in value_cols
     }
 
     # load → bus, and optional build_year on loads / buses (for additional demand).
@@ -807,7 +1014,10 @@ def demand_values_payload(module_config: dict[str, Any]) -> list[dict[str, Any]]
         dist_target = target_twh * 1e6 - add_mwh
         if dist_mwh > 0 and dist_target > 0:
             factor = dist_target / dist_mwh
-            scaled = {ld: (e if _is_additional(ld) else e * factor) for ld, e in annual.items()}
+            scaled = {
+                ld: (e if _is_additional(ld) else e * factor)
+                for ld, e in annual.items()
+            }
 
     # Aggregate to buses.
     bus_annual: dict[str, float] = {}
@@ -818,7 +1028,14 @@ def demand_values_payload(module_config: dict[str, Any]) -> list[dict[str, Any]]
 
     # bus → province (buses 'Province'/'province').
     prov_of_bus: dict[str, str] = {}
-    prov_col = next((c for c in ("Province", "province") if buses is not None and c in buses.columns), None)
+    prov_col = next(
+        (
+            c
+            for c in ("Province", "province")
+            if buses is not None and c in buses.columns
+        ),
+        None,
+    )
     if buses is not None and "name" in buses.columns and prov_col:
         for _, r in buses.iterrows():
             prov_of_bus[_canon(r["name"])] = str(r.get(prov_col, "")).strip()
@@ -833,7 +1050,14 @@ def demand_values_payload(module_config: dict[str, Any]) -> list[dict[str, Any]]
     for bus, e in sorted(bus_annual.items()):
         if _is_blank(bus):
             continue
-        rows.append({"resolution": "bus", "value": bus, "annual_mwh": round(e, 1), "annual_label": _energy_label(e)})
+        rows.append(
+            {
+                "resolution": "bus",
+                "value": bus,
+                "annual_mwh": round(e, 1),
+                "annual_label": _energy_label(e),
+            }
+        )
     for res in ("province", "group1", "group2", "group3", "singlenode"):
         prov_to_region, _ = region_mod._build_province_to_region(pm, res)
         agg: dict[str, float] = {}
@@ -841,12 +1065,21 @@ def demand_values_payload(module_config: dict[str, Any]) -> list[dict[str, Any]]
             prov = prov_of_bus.get(bus, "")
             if _is_blank(prov):
                 continue
-            region = str(prov_to_region.get(prov, prov)).strip()  # mirror _build_bus_to_region fallback
+            region = str(
+                prov_to_region.get(prov, prov)
+            ).strip()  # mirror _build_bus_to_region fallback
             if _is_blank(region):
                 continue
             agg[region] = agg.get(region, 0.0) + e
         for region, e in sorted(agg.items()):
-            rows.append({"resolution": res, "value": region, "annual_mwh": round(e, 1), "annual_label": _energy_label(e)})
+            rows.append(
+                {
+                    "resolution": res,
+                    "value": region,
+                    "annual_mwh": round(e, 1),
+                    "annual_label": _energy_label(e),
+                }
+            )
     return rows
 
 
@@ -880,10 +1113,29 @@ def _capacity_by_carrier_year(
     df = _read_generators_sheet(model_path)
     if df is None or "carrier" not in df.columns or "p_nom" not in df.columns:
         return None
+    return _capacity_rows_from_fleet(df, base_year)
+
+
+def _capacity_rows_from_fleet(
+    df: "pd.DataFrame",
+    base_year: int,
+) -> list[dict[str, Any]] | None:
+    """Per-year installed capacity by carrier from a (possibly replacement-adjusted)
+    generators DataFrame. See :func:`_capacity_by_carrier_year` for the semantics."""
+    if "carrier" not in df.columns or "p_nom" not in df.columns:
+        return None
 
     nan_col = pd.Series(index=df.index, dtype="float64")  # all-NaN fallback
-    build = pd.to_numeric(df["build_year"], errors="coerce") if "build_year" in df.columns else nan_col
-    close = pd.to_numeric(df["close_year"], errors="coerce") if "close_year" in df.columns else nan_col
+    build = (
+        pd.to_numeric(df["build_year"], errors="coerce")
+        if "build_year" in df.columns
+        else nan_col
+    )
+    close = (
+        pd.to_numeric(df["close_year"], errors="coerce")
+        if "close_year" in df.columns
+        else nan_col
+    )
     p_nom = pd.to_numeric(df["p_nom"], errors="coerce").fillna(0.0)
     carrier = df["carrier"].astype(str).str.strip()
 
@@ -914,6 +1166,7 @@ def _capacity_by_carrier_year(
 # ---------------------------------------------------------------------------
 # Settings construction
 # ---------------------------------------------------------------------------
+
 
 def _settings_from_config(settings_mod: Any, cfg: dict[str, Any]) -> Any:
     """Build a Settings dataclass entirely from GUI module_config values."""
@@ -1101,6 +1354,7 @@ def _override_bool(s: Any, cfg: dict[str, Any], field: str) -> None:
 # Dashboard (tabular data) construction
 # ---------------------------------------------------------------------------
 
+
 def _build_dashboard(
     settings_mod: Any,
     settings: Any,
@@ -1120,11 +1374,11 @@ def _build_dashboard(
                 return xlsx_val
         return None
 
-    cc_rules         = _gui("cc_rules",         "cc_rules")
+    cc_rules = _gui("cc_rules", "cc_rules")
     province_mapping = _gui("province_mapping", "province_mapping")
-    region_rules     = _normalise_region_rules(_gui("region_rules", "region_rules"))
-    carrier_rules    = _gui("carrier_rules",    "carrier_rules")
-    carrier_rules_t  = _gui("carrier_rules_t",  "carrier_rules_t")
+    region_rules = _normalise_region_rules(_gui("region_rules", "region_rules"))
+    carrier_rules = _gui("carrier_rules", "carrier_rules")
+    carrier_rules_t = _gui("carrier_rules_t", "carrier_rules_t")
     # GUI-only (no xlsx fallback): demand redistribution moves — one row per
     # move with its own from/to resolution + value (see demand_redistribution).
     demand_redist_rules = _table_to_df(cfg.get("demand_redist_moves"))
@@ -1146,7 +1400,9 @@ def _build_dashboard(
 
     cp_df = _table_to_df(cfg.get("carbonprice_curves"))
     if cp_df is not None and not cp_df.empty:
-        carbon_price_usd = _lookup_carbon_price_long(cp_df, settings.carbonprice_scenario, settings.target_year)
+        carbon_price_usd = _lookup_carbon_price_long(
+            cp_df, settings.carbonprice_scenario, settings.target_year
+        )
     elif xlsx_dashboard is not None:
         carbon_price_usd = xlsx_dashboard.carbon_price_usd
     else:
@@ -1244,7 +1500,9 @@ def _custom_dsl_from_cf(network: Any, cfg: dict[str, Any]) -> str:
         if a.strip()
     }
     op = {"max_cf": "<=", "min_cf": ">="}
-    carriers_with_gens = set(network.generators["carrier"].dropna().astype(str).unique())
+    carriers_with_gens = set(
+        network.generators["carrier"].dropna().astype(str).unique()
+    )
 
     lines: list[str] = []
     for _, row in cf_df.iterrows():
@@ -1253,7 +1511,10 @@ def _custom_dsl_from_cf(network: Any, cfg: dict[str, Any]) -> str:
         if attribute not in active or attribute not in op or not carrier:
             continue
         if carrier not in carriers_with_gens:
-            logger.warning("[dashboard-importer] CF DSL skip: carrier %r has no generators", carrier)
+            logger.warning(
+                "[dashboard-importer] CF DSL skip: carrier %r has no generators",
+                carrier,
+            )
             continue
         lines.append(f'cf("{carrier}") {op[attribute]} {float(row["value"]):g}')
 
@@ -1280,7 +1541,9 @@ def _emission_intensity_series(df: pd.DataFrame, target_year: int) -> pd.Series:
     )
 
 
-def _lookup_carbon_price_long(df: pd.DataFrame, scenario: str, target_year: int) -> float:
+def _lookup_carbon_price_long(
+    df: pd.DataFrame, scenario: str, target_year: int
+) -> float:
     """Long-format lookup: rows are (scenario, year, value)."""
     if df is None or df.empty:
         return 0.0
@@ -1292,7 +1555,10 @@ def _lookup_carbon_price_long(df: pd.DataFrame, scenario: str, target_year: int)
     if not scenario:
         return 0.0
     df["year"] = pd.to_numeric(df["year"], errors="coerce")
-    match = df[(df["scenario"].astype(str).str.strip() == scenario) & (df["year"] == target_year)]
+    match = df[
+        (df["scenario"].astype(str).str.strip() == scenario)
+        & (df["year"] == target_year)
+    ]
     if match.empty:
         return 0.0
     val = match.iloc[0]["value"]
@@ -1303,14 +1569,10 @@ def _lookup_carbon_price_long(df: pd.DataFrame, scenario: str, target_year: int)
 # File-value helpers
 # ---------------------------------------------------------------------------
 
+
 def _is_file_value(v: Any) -> bool:
     """Detect a Ragnarok PluginFileValue dict ``{name, content, mime}``."""
-    return (
-        isinstance(v, dict)
-        and "name" in v
-        and "content" in v
-        and "mime" in v
-    )
+    return isinstance(v, dict) and "name" in v and "content" in v and "mime" in v
 
 
 def _decode_binary_file_value(file_val: dict[str, Any]) -> bytes:
@@ -1325,7 +1587,7 @@ def _decode_binary_file_value(file_val: dict[str, Any]) -> bytes:
     if content.startswith("data:"):
         comma = content.find(",")
         if comma > 0:
-            header, payload = content[5:comma], content[comma + 1:]
+            header, payload = content[5:comma], content[comma + 1 :]
             if "base64" in header.lower():
                 return base64.b64decode(payload)
             return payload.encode("utf-8", errors="replace")
@@ -1342,6 +1604,7 @@ def _decode_binary_file_value(file_val: dict[str, Any]) -> bytes:
 # ---------------------------------------------------------------------------
 # Path helpers
 # ---------------------------------------------------------------------------
+
 
 def _resolve_dashboard_path(cfg: dict[str, Any]) -> Path | None:
     raw = str(cfg.get("dashboard_path", "") or "").strip()
@@ -1398,7 +1661,9 @@ def _materialize_uploaded_model(data: bytes, suffix: str) -> Path:
         os.utime(target, None)  # touch so reuse keeps it past the TTL
         return target
     # Atomic write: a unique temp in the same dir, then rename onto the target.
-    fd, tmp_name = tempfile.mkstemp(dir=str(_MODEL_CACHE_DIR), prefix="part_", suffix=suffix)
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(_MODEL_CACHE_DIR), prefix="part_", suffix=suffix
+    )
     try:
         with os.fdopen(fd, "wb") as fh:
             fh.write(data)
@@ -1409,7 +1674,11 @@ def _materialize_uploaded_model(data: bytes, suffix: str) -> Path:
                 os.unlink(tmp_name)
             except OSError:
                 pass
-    logger.info("[dashboard-importer] cached uploaded model_file (%d bytes) -> %s", len(data), target.name)
+    logger.info(
+        "[dashboard-importer] cached uploaded model_file (%d bytes) -> %s",
+        len(data),
+        target.name,
+    )
     return target
 
 
@@ -1440,9 +1709,15 @@ def _resolve_model_workbook(
 
     if dashboard_path is not None and xlsx_model:
         candidate = Path(str(xlsx_model).strip()).expanduser()
-        resolved = candidate.resolve() if candidate.is_absolute() else (dashboard_path.parent / candidate).resolve()
+        resolved = (
+            candidate.resolve()
+            if candidate.is_absolute()
+            else (dashboard_path.parent / candidate).resolve()
+        )
         if not resolved.exists():
-            raise ValueError(f"Dashboard-embedded model path does not exist: {resolved}")
+            raise ValueError(
+                f"Dashboard-embedded model path does not exist: {resolved}"
+            )
         return resolved
 
     raise ValueError(
@@ -1482,7 +1757,9 @@ _LIB_ALIAS = "_ragnarok_plugin_lib_" + re.sub(r"\W", "_", PLUGIN_ROOT.name)
 # with changed dashboard_lib files takes effect without a backend restart.
 # In-flight holders keep their already-bound module objects; the next _lib()
 # call re-imports from this install's files.
-_STALE_LIBS = [n for n in list(sys.modules) if n == _LIB_ALIAS or n.startswith(_LIB_ALIAS + ".")]
+_STALE_LIBS = [
+    n for n in list(sys.modules) if n == _LIB_ALIAS or n.startswith(_LIB_ALIAS + ".")
+]
 for _name in _STALE_LIBS:
     del sys.modules[_name]
 
@@ -1518,6 +1795,7 @@ def _lib(submodule: str) -> Any:
 # Network → Ragnarok model conversion
 # ---------------------------------------------------------------------------
 
+
 def _network_to_model(network: Any) -> dict[str, list[dict[str, Any]]]:
     model = _empty_model()
 
@@ -1526,11 +1804,15 @@ def _network_to_model(network: Any) -> dict[str, list[dict[str, Any]]]:
         row = {"snapshot": _normalize_scalar(snapshot)}
         for col in ("objective", "stores", "generators"):
             if col in network.snapshot_weightings.columns:
-                row[col] = _normalize_scalar(network.snapshot_weightings.at[snapshot, col])
+                row[col] = _normalize_scalar(
+                    network.snapshot_weightings.at[snapshot, col]
+                )
         snapshots.append(row)
     model["snapshots"] = snapshots
 
-    model["network"] = [{"name": str(network.name)}] if getattr(network, "name", "") else []
+    model["network"] = (
+        [{"name": str(network.name)}] if getattr(network, "name", "") else []
+    )
 
     for component in network.iterate_components():
         sheet_name = component.list_name
@@ -1551,7 +1833,9 @@ def _network_to_model(network: Any) -> dict[str, list[dict[str, Any]]]:
     return model
 
 
-def _frame_to_rows(frame: pd.DataFrame, preserve_index: bool = True) -> list[dict[str, Any]]:
+def _frame_to_rows(
+    frame: pd.DataFrame, preserve_index: bool = True
+) -> list[dict[str, Any]]:
     if frame is None or frame.empty:
         return []
     out = frame.copy()
@@ -1566,7 +1850,9 @@ def _frame_to_rows(frame: pd.DataFrame, preserve_index: bool = True) -> list[dic
     return rows
 
 
-def _write_model_workbook(model: dict[str, list[dict[str, Any]]], export_path: Path) -> None:
+def _write_model_workbook(
+    model: dict[str, list[dict[str, Any]]], export_path: Path
+) -> None:
     export_path.parent.mkdir(parents=True, exist_ok=True)
     with pd.ExcelWriter(export_path, engine="openpyxl") as writer:
         for sheet in MODEL_SHEETS:

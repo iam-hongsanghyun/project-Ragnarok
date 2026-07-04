@@ -14,17 +14,25 @@ those MW (and the row skips the base-year filter), so batches added under
 different settings keep their own rule. Rows without a frozen split use the
 scalar settings below. Plus scalar settings:
 
-* Eligibility — two independent filters:
-  - **Filter 1 (which plants exist):** the network reaching this step is already
-    filtered to the target year by the loader
-    (``build_year ≤ target_year < close_year``).
-  - **Filter 2 (which of those are replaceable):** ``replace_build_year`` — only
-    plants with ``build_year ≥ replace_build_year`` are replaced; everything
-    built earlier stays as-is.  ``0``/blank → no extra restriction.
+* Eligibility — table picks vs. bulk-by-carrier:
+  - **Table picks** name a plant from the target-year dropdown, so they are
+    validated against the (target-year-filtered) network and must be active in it.
+  - **Bulk by carrier** (``replace_all_carriers`` + ``replace_carriers``) is
+    **retire-and-replace across years**: it is sourced from the RAW generators
+    sheet on the dashboard, so it reaches every selected-carrier plant built by
+    the target year — **including plants that already retire before it**
+    (``close_year ≤ target_year``), which the target-year loader dropped. Their
+    coal capacity still becomes renewables, dated at the plant's close/forced year
+    (see below), so a coal unit closing in 2030 shows up as 2030-vintage solar/wind.
+  - **Filter 2 (which are replaceable):** ``replace_build_year`` — only plants
+    with ``build_year ≥ replace_build_year`` are replaced. ``0``/blank → no extra
+    restriction.
   - **``replace_include_existing``** — when True, Filter 2 is ignored entirely:
-    the whole fleet active in the target year is replaceable (existing plants
-    built before the base year included), so e.g. an entire coal fleet can be
-    swapped for renewables.
+    the whole selected fleet is replaceable (existing plants built before the base
+    year included), so e.g. an entire coal fleet can be swapped for renewables.
+  - **Filter 3 (optional attribute filter):** ``replace_filter_column`` /
+    ``replace_filter_value`` — keep only rows whose column equals the value
+    (string- or numeric-equal, so a flag column stored as ``1.0`` matches ``"1"``).
 * ``replace_follow`` — when True, split each plant's capacity between solar and
   wind by the **ratio of solar:wind capacity added in a reference year** (across
   the model).  The reference year is each plant's **build year** by default, but
@@ -42,17 +50,22 @@ scalar settings below. Plus scalar settings:
   used only when not following.  They are direct percentages of the original
   plant capacity, not normalized ratios.
 
-For each selected plant the plant is removed and its **own capacity**
-(``p_nom``) is split into a solar unit and/or a wind unit at the **same bus and
-province**.  New units are named ``<plant>_solar_<year>`` /
-``<plant>_wind_<year>`` and carry the replaced plant's ``build_year`` and
-``province`` (the province drives the renewable profile).
+For each selected plant, the plant (if present in the network) is removed and its
+**own capacity** (``p_nom``) is split into a solar unit and/or a wind unit at the
+**same bus and province**.  The renewables come online at the plant's
+**replacement year** ``ry = min(close_year, cap)`` — forced no later than
+``cap = replace_max_close_year`` (default: the target year) and never before the
+plant is built, clamped to the target year. A plant with no close year retires at
+``cap``. So ``cap`` is a forced-retirement deadline: a unit closing in 2040 with
+``cap = 2035`` is replaced in 2035. New units are named ``<plant>_solar_<year>`` /
+``<plant>_wind_<year>`` (year = ``ry``) and carry that ``build_year`` and the
+plant's ``province`` (the province drives the renewable profile).
 
 New-unit attributes
 -------------------
 * ``carrier`` = ``"solar"`` / ``"wind"``; ``bus`` / ``province`` copied from the
   plant; ``p_nom`` = its split share of the plant's capacity; ``efficiency`` =
-  1.0; ``p_nom_extendable`` = ``False``; ``build_year`` = the plant's.
+  1.0; ``p_nom_extendable`` = ``False``; ``build_year`` = the replacement year ``ry``.
 * ``marginal_cost`` = the mean marginal cost of all existing same-carrier units
   (system-wide), computed before any removals.
 
@@ -87,6 +100,7 @@ Symbols (units):
     p_*      fixed replacement share                    [%]
     mc_*     marginal cost                             [currency/MWh]
 """
+
 from __future__ import annotations
 
 import logging
@@ -106,7 +120,9 @@ _REQUIRED_COLUMNS = ("generator",)
 _RENEWABLES = ("solar", "wind")
 
 
-def replace_generators(network: pypsa.Network, dashboard: "Dashboard") -> dict[str, float]:
+def replace_generators(
+    network: pypsa.Network, dashboard: "Dashboard"
+) -> dict[str, float]:
     """Replace selected new plants with solar/wind, modifying *network* in place.
 
     Args:
@@ -151,7 +167,9 @@ def replace_generators(network: pypsa.Network, dashboard: "Dashboard") -> dict[s
     # that never closes) follows this year's mix instead of its own (far-future)
     # close year. 0/blank → the target year.
     target_year = int(settings.target_year)
-    max_close_year = int(getattr(settings, "replace_max_close_year", 0) or 0) or target_year
+    max_close_year = (
+        int(getattr(settings, "replace_max_close_year", 0) or 0) or target_year
+    )
 
     # Mean marginal cost per renewable carrier, from the EXISTING units, taken
     # once up front (before any removals change the population).
@@ -177,16 +195,87 @@ def replace_generators(network: pypsa.Network, dashboard: "Dashboard") -> dict[s
         v = pd.to_numeric(network.generators.at[name, "p_nom"], errors="coerce")
         return float(v) if pd.notna(v) else 0.0
 
-    # ── Collect targets (ordered): explicit table rows first, then bulk-by-carrier.
-    # Table picks are validated strictly (raise on a bad pick); bulk matches are
-    # filtered silently. A row carrying a FROZEN solar_mw/wind_mw split (captured
-    # by "Fill table from carriers" at add-time) is replaced with exactly those
-    # MW — and bypasses the base-year check, so an earlier batch keeps its rule
-    # even after you change settings to add another. Rows without a frozen split
-    # are computed live from the current scalar settings.
-    targets: list[str] = []
+    # Forced-retirement cap: every replaced plant's renewables come online at
+    # ``min(close_year, cap)``; a plant with no close_year retires at ``cap``. So
+    # a unit closing after the cap is forced to close at the cap (close 2040 +
+    # cap 2035 → 2035), and one that never closes retires at the cap too. cap =
+    # ``replace_max_close_year`` when set, else the target year.
+    cap = max_close_year
+
+    def _repl_year(by: int | None, close: int | None) -> int:
+        """Year the renewable replacement comes online.
+
+        The plant's close year, forced no later than the cap; a plant with no
+        close year retires at the cap; never before it was built; and clamped to
+        the target year so the new unit is active in the (single-year) model.
+        """
+        ry = close if close is not None else cap
+        ry = min(ry, cap)
+        if by is not None:
+            ry = max(ry, by)
+        return min(ry, target_year)
+
+    def _canon_bus(v: object) -> str:
+        """Bus id as a string, collapsing float ids (53.0 → "53") so a raw-sheet
+        integer bus matches the network's string bus index."""
+        try:
+            f = float(v)  # type: ignore[arg-type]
+            if f.is_integer():
+                return str(int(f))
+        except (TypeError, ValueError):
+            pass
+        return str(v).strip()
+
+    def _attr_match(cell: object, val: str) -> bool:
+        """Filter-3 value match: string-equal, or numeric-equal so a flag column
+        stored as ``1.0`` still matches a typed ``"1"`` (the common case where a
+        boolean/flag column reads back as a float)."""
+        if str(cell).strip() == val:
+            return True
+        try:
+            return float(cell) == float(val)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return False
+
+    # ── Collect target RECORDS (ordered): explicit table rows first, then
+    # bulk-by-carrier. Each record carries everything the apply step needs —
+    # {name, capacity, bus, province, by, ry, in_net, frozen} — because a bulk
+    # target may be a plant that already RETIRED before the target year (so it is
+    # NOT in the target-year network). Table picks are validated strictly (raise
+    # on a bad pick); bulk matches are filtered silently. A row carrying a FROZEN
+    # solar_mw/wind_mw split (captured by "Fill table from carriers" at add-time)
+    # is replaced with exactly those MW and bypasses the base-year check.
+    records: list[dict] = []
     seen: set[str] = set()
-    frozen_split: dict[str, tuple[float, float]] = {}
+
+    # Raw-fleet index by name, so a table pick that already RETIRED before the
+    # target year (not in the network) is still resolvable — "Fill table from
+    # carriers" can freeze such plants, and the build must replace them too.
+    raw = getattr(dashboard, "raw_generators", None)
+    raw_index: dict[str, int] = {}
+    if raw is not None and not raw.empty and "name" in raw.columns:
+        for i, nm in raw["name"].astype(str).str.strip().items():
+            raw_index.setdefault(nm, i)
+
+    def _raw_row(name: str) -> dict | None:
+        i = raw_index.get(name)
+        if i is None:
+            return None
+
+        def g(c: str) -> object:
+            return raw.at[i, c] if c in raw.columns else None
+
+        p = pd.to_numeric(g("p_nom"), errors="coerce")
+        b = pd.to_numeric(g("build_year"), errors="coerce")
+        c = pd.to_numeric(g("close_year"), errors="coerce")
+        bus_v, prov_v = g("bus"), g("province")
+        return {
+            "p_nom": float(p) if pd.notna(p) else 0.0,
+            "by": int(b) if pd.notna(b) else None,
+            "close": int(c) if pd.notna(c) else None,
+            "bus": _canon_bus(bus_v) if pd.notna(bus_v) else "",
+            "province": str(prov_v).strip() if pd.notna(prov_v) else "",
+        }
 
     rules = dashboard.generator_replacements
     if rules is not None and not rules.empty:
@@ -202,129 +291,266 @@ def replace_generators(network: pypsa.Network, dashboard: "Dashboard") -> dict[s
             if not name:
                 continue
             if name in seen:
-                raise ValueError(f"Generator replacement: plant {name!r} is selected more than once")
-            if name not in network.generators.index:
                 raise ValueError(
-                    f"Generator replacement: plant {name!r} is not in the network "
-                    f"(not active in the target year)"
+                    f"Generator replacement: plant {name!r} is selected more than once"
                 )
-            if _capacity(name) <= 0:
-                raise ValueError(f"Generator replacement: plant {name!r} has no capacity (p_nom) to distribute")
+            in_net = name in network.generators.index
+            if in_net:
+                cap_mw = _capacity(name)
+                by = _by(name)
+                close = _close_year(name)
+                bus = _canon_bus(network.generators.at[name, "bus"])
+                province = (
+                    str(network.generators.at[name, "province"])
+                    if "province" in network.generators.columns
+                    and pd.notna(network.generators.at[name, "province"])
+                    else ""
+                )
+            else:
+                # Retired before the target year — resolve from the raw fleet
+                # (retire-and-replace), so a frozen table row for it still builds.
+                rr = _raw_row(name)
+                if rr is None:
+                    raise ValueError(
+                        f"Generator replacement: plant {name!r} is not in the network "
+                        f"or the raw model (unknown plant)"
+                    )
+                cap_mw, by, close = rr["p_nom"], rr["by"], rr["close"]
+                bus, province = rr["bus"], rr["province"]
+            if cap_mw <= 0:
+                raise ValueError(
+                    f"Generator replacement: plant {name!r} has no capacity (p_nom) to distribute"
+                )
             fs = _frozen_split_from_row(row)
             # A frozen row carries its own decision, so it skips the base-year
             # filter; only live rows are held to the replacement base year.
-            if fs is None and not _eligible(_by(name)):
+            if fs is None and not _eligible(by):
                 raise ValueError(
-                    f"Generator replacement: plant {name!r} (build_year={_by(name)}) is "
+                    f"Generator replacement: plant {name!r} (build_year={by}) is "
                     f"before the replacement base year ({threshold})"
                 )
+            records.append(
+                {
+                    "name": name,
+                    "capacity": cap_mw,
+                    "bus": bus,
+                    "province": province,
+                    "by": by,
+                    "ry": _repl_year(by, close),
+                    "in_net": in_net,
+                    "frozen": fs,
+                }
+            )
             seen.add(name)
-            targets.append(name)
-            if fs is not None:
-                frozen_split[name] = fs
 
-    # Filter 3 (optional): an attribute filter — keep only generators whose
+    # Filter 3 (optional): an attribute filter — keep only rows whose
     # <filter_column> equals <filter_value> (any generators column / value).
     filter_col = str(getattr(settings, "replace_filter_column", "") or "").strip()
     filter_val = str(getattr(settings, "replace_filter_value", "") or "").strip()
-    use_attr_filter = bool(filter_col and filter_val and filter_col in network.generators.columns)
 
-    def _attr_ok(name: str) -> bool:
-        if not use_attr_filter:
-            return True
-        return str(network.generators.at[name, filter_col]).strip() == filter_val
-
-    # Bulk: every plant of the selected carriers with positive capacity that
-    # passes Filter 2 (build_year ≥ replacement base year) and Filter 3 (the
-    # attribute filter), not already picked in the table. Network is already
-    # target-year-filtered (Filter 1).
-    # Carrier matching is case/whitespace-insensitive — a model spelling its
-    # carriers "Coal"/"Solar" must still match the lowercase GUI checkboxes.
-    carriers_sel = {str(c).strip().lower() for c in getattr(settings, "replace_carriers", ()) if str(c).strip()}
+    # Bulk: every plant of the selected carriers, built by the target year, with
+    # positive capacity, passing Filter 2 (build_year ≥ replacement base year)
+    # and Filter 3, not already picked in the table. Sourced from the RAW fleet
+    # (retire-and-replace) so plants that RETIRED before the target year are
+    # included — the target-year network dropped them, but their coal capacity
+    # must still become renewables (dated at the plant's close/forced year).
+    # Carrier matching is case/whitespace-insensitive.
+    carriers_sel = {
+        str(c).strip().lower()
+        for c in getattr(settings, "replace_carriers", ())
+        if str(c).strip()
+    }
+    bulk_on = bool(getattr(settings, "replace_all_carriers", False)) and bool(
+        carriers_sel
+    )
     bulk_added = 0
-    if getattr(settings, "replace_all_carriers", False) and carriers_sel and "carrier" in network.generators.columns:
+    retired_added = 0
+
+    if (
+        bulk_on
+        and raw is not None
+        and not raw.empty
+        and {"name", "carrier"} <= set(raw.columns)
+    ):
+        rdf = raw
+
+        def _rcol(c: str) -> pd.Series:
+            return (
+                rdf[c]
+                if c in rdf.columns
+                else pd.Series([None] * len(rdf), index=rdf.index)
+            )
+
+        r_name = _rcol("name").astype(str).str.strip()
+        r_carr = _rcol("carrier").astype(str).str.strip().str.lower()
+        r_pnom = pd.to_numeric(_rcol("p_nom"), errors="coerce")
+        r_by = pd.to_numeric(_rcol("build_year"), errors="coerce")
+        r_cl = pd.to_numeric(_rcol("close_year"), errors="coerce")
+        r_bus = _rcol("bus")
+        r_prov = _rcol("province")
+        r_filt = (
+            _rcol(filter_col) if (filter_col and filter_col in rdf.columns) else None
+        )
+        for i in rdf.index:
+            nm = r_name[i]
+            if not nm or nm.lower() == "nan" or nm in seen:
+                continue
+            if r_carr[i] not in carriers_sel:
+                continue
+            p = float(r_pnom[i]) if pd.notna(r_pnom[i]) else 0.0
+            if p <= 0:
+                continue
+            by = int(r_by[i]) if pd.notna(r_by[i]) else None
+            if by is not None and by > target_year:
+                continue  # not yet built within this horizon
+            if not _eligible(by):
+                continue
+            if (
+                r_filt is not None
+                and filter_val
+                and not _attr_match(r_filt[i], filter_val)
+            ):
+                continue
+            close = int(r_cl[i]) if pd.notna(r_cl[i]) else None
+            in_net = nm in network.generators.index
+            records.append(
+                {
+                    "name": nm,
+                    "capacity": p,
+                    "bus": _canon_bus(r_bus[i]) if pd.notna(r_bus[i]) else "",
+                    "province": str(r_prov[i]).strip() if pd.notna(r_prov[i]) else "",
+                    "by": by,
+                    "ry": _repl_year(by, close),
+                    "in_net": in_net,
+                    "frozen": None,
+                }
+            )
+            seen.add(nm)
+            bulk_added += 1
+            if not in_net:
+                retired_added += 1
+    elif bulk_on and "carrier" in network.generators.columns:
+        # Legacy fallback (no raw fleet stashed): target-year network only.
+        use_attr = bool(
+            filter_col and filter_val and filter_col in network.generators.columns
+        )
         for name in list(network.generators.index):
             if name in seen:
                 continue
-            if str(network.generators.at[name, "carrier"]).strip().lower() not in carriers_sel:
+            if (
+                str(network.generators.at[name, "carrier"]).strip().lower()
+                not in carriers_sel
+            ):
                 continue
-            if _capacity(name) <= 0 or not _eligible(_by(name)) or not _attr_ok(name):
+            by = _by(name)
+            if _capacity(name) <= 0 or not _eligible(by):
                 continue
+            if use_attr and not _attr_match(
+                network.generators.at[name, filter_col], filter_val
+            ):
+                continue
+            province = (
+                str(network.generators.at[name, "province"])
+                if "province" in network.generators.columns
+                and pd.notna(network.generators.at[name, "province"])
+                else ""
+            )
+            records.append(
+                {
+                    "name": name,
+                    "capacity": _capacity(name),
+                    "bus": _canon_bus(network.generators.at[name, "bus"]),
+                    "province": province,
+                    "by": by,
+                    "ry": _repl_year(by, _close_year(name)),
+                    "in_net": True,
+                    "frozen": None,
+                }
+            )
             seen.add(name)
             bulk_added += 1
-            targets.append(name)
 
-    if not targets:
+    if not records:
         logger.info(
-            "Generator replacement: enabled but nothing selected (no table rows, no bulk carriers) — skipping"
+            "Generator replacement: enabled but nothing matched (no table rows, no bulk carriers) — skipping"
         )
         return {}
 
     # ── Apply each replacement ────────────────────────────────────────────────
     added = 0
+    skipped_no_bus = 0
     replaced_by_bus: dict[str, float] = {}
-    # Additions for NEW builds come from the (target-year) network. For EXISTING
-    # plants we follow the mix of their CLOSE year, which is after the target year
-    # — so we need additions across ALL build years (incl. post-target). The
-    # pipeline supplies that full table on the dashboard; fall back to the network
-    # table when it's absent (then a close year just resolves to the latest mix).
+    # Additions for the solar:wind split. Following each plant's BUILD year uses
+    # the target-year network's table; following the CLOSE/forced (replacement)
+    # year needs additions across ALL build years, which the pipeline supplies as
+    # ``renewable_additions_by_year`` (fall back to the network table when absent).
     annual_additions = _year_additions_by_year(network)
-    full_additions = getattr(dashboard, "renewable_additions_by_year", None) or annual_additions
-    for name in targets:
-        # A pre-existing plant (no build_year) is "always built" → inherit base_year
-        # so the renewable unit it becomes is likewise active from the start.
-        raw_by = _by(name)
-        by = raw_by if raw_by is not None else base_year
-        capacity = _capacity(name)
-        bus = str(network.generators.at[name, "bus"])
-        province = (
-            str(network.generators.at[name, "province"])
-            if "province" in network.generators.columns and pd.notna(network.generators.at[name, "province"])
-            else ""
-        )
-        if name in frozen_split:
-            # Frozen at add-time — use the stored split verbatim, no recompute.
-            solar_cap, wind_cap = frozen_split[name]
-            logger.info(
-                "Generator replacement: %s (build %s, frozen): %.1f MW -> solar %.1f + wind %.1f",
-                name, by, capacity, solar_cap, wind_cap,
+    full_additions = (
+        getattr(dashboard, "renewable_additions_by_year", None) or annual_additions
+    )
+    # Map canonical bus id → the actual network bus name, so a raw-sheet plant's
+    # renewables attach to the right bus (and retired plants whose bus is gone are
+    # skipped rather than silently dropped).
+    bus_actual = {_canon_bus(b): b for b in network.buses.index}
+    for rec in records:
+        name = rec["name"]
+        capacity = rec["capacity"]
+        ry = rec["ry"]
+        bus = bus_actual.get(rec["bus"])
+        if bus is None:
+            skipped_no_bus += 1
+            logger.warning(
+                "Generator replacement: %s — bus %r not in network; cannot attach replacement, skipped",
+                name,
+                rec["bus"],
             )
-        else:
-            # With "Include existing plants" on, follow the CLOSE year (capped)
-            # for every replaced plant; otherwise follow each plant's BUILD year
-            # against the target-year fleet.
-            if follow_close_year:
-                close = _close_year(name)
-                # Cap the reference year: a plant closing on/after max_close_year
-                # (or one that never closes) follows max_close_year's mix.
-                split_year = close if (close is not None and close < max_close_year) else max_close_year
-                split_additions = full_additions
-            else:
-                split_year = by
-                split_additions = annual_additions
+            continue
+        # A pre-existing plant (no build_year) is "always built" → inherit base_year.
+        by = rec["by"] if rec["by"] is not None else base_year
+        province = rec["province"]
+        if rec["frozen"] is not None:
+            # Frozen at add-time — use the stored split verbatim, no recompute.
+            solar_cap, wind_cap = rec["frozen"]
+        elif follow:
+            # Reference year for the solar:wind mix: the replacement (close/forced)
+            # year when including existing plants, else the plant's build year.
+            ref_year = ry if follow_close_year else by
+            split_additions = full_additions if follow_close_year else annual_additions
             solar_cap, wind_cap = _split_capacity(
                 settings=settings,
                 annual_additions=split_additions,
-                year=split_year,
+                year=ref_year,
                 capacity=capacity,
-                follow=follow,
+                follow=True,
             )
-            # Per-plant trace in the Log tab — makes the applied ratio verifiable
-            # against the reference table (and a 50/50 fallback visible as such).
-            # "split-year" is the year whose solar:wind mix was followed (close
-            # year when including existing, build year otherwise).
-            logger.info(
-                "Generator replacement: %s (build %s, split-year %s): %.1f MW -> solar %.1f + wind %.1f",
-                name, by, split_year, capacity, solar_cap, wind_cap,
+        else:
+            solar_cap, wind_cap = _split_capacity(
+                settings=settings,
+                annual_additions=annual_additions,
+                year=ry,
+                capacity=capacity,
+                follow=False,
             )
+        # Per-plant trace in the Log tab — the ratio is verifiable against the
+        # reference table, and "online <ry>" shows the retire-and-replace year.
+        logger.info(
+            "Generator replacement: %s (build %s → renewables online %s): %.1f MW -> solar %.1f + wind %.1f",
+            name,
+            rec["by"],
+            ry,
+            capacity,
+            solar_cap,
+            wind_cap,
+        )
 
         # Record the original capacity removed at this bus so an ESS can be
         # sized as a proportion of it (summed when several plants share a bus).
         replaced_by_bus[bus] = replaced_by_bus.get(bus, 0.0) + capacity
 
-        network.remove("Generator", name)
-        for carrier, cap in (("solar", solar_cap), ("wind", wind_cap)):
-            if cap <= 0:
+        if rec["in_net"]:
+            network.remove("Generator", name)
+        for carrier, cap_mw in (("solar", solar_cap), ("wind", wind_cap)):
+            if cap_mw <= 0:
                 continue
             _add_renewable(
                 network,
@@ -332,24 +558,35 @@ def replace_generators(network: pypsa.Network, dashboard: "Dashboard") -> dict[s
                 carrier=carrier,
                 bus=bus,
                 province=province,
-                p_nom=cap,
+                p_nom=cap_mw,
                 marginal_cost=carrier_mc[carrier] or 0.0,
-                build_year=by,
+                build_year=ry,
             )
             added += 1
 
-    mode = "follow yearly additions" if follow else (
-        f"fixed {settings.replace_solar_pct:g}% solar / {settings.replace_wind_pct:g}% wind"
+    mode = (
+        "follow yearly additions"
+        if follow
+        else (
+            f"fixed {settings.replace_solar_pct:g}% solar / {settings.replace_wind_pct:g}% wind"
+        )
     )
     bulk_note = (
-        f", bulk {sorted(carriers_sel)} (+{bulk_added})"
-        if (getattr(settings, "replace_all_carriers", False) and carriers_sel)
+        f", bulk {sorted(carriers_sel)} (+{bulk_added}, {retired_added} retired-early)"
+        if bulk_on
         else ""
     )
+    skip_note = f", {skipped_no_bus} skipped (bus missing)" if skipped_no_bus else ""
     logger.info(
-        "Generator replacement: replaced %d plant(s) with %d renewable unit(s) [%s%s] "
+        "Generator replacement: replaced %d plant(s) with %d renewable unit(s) [%s%s]%s "
         "(solar mc=%s, wind mc=%s)",
-        len(targets), added, mode, bulk_note, carrier_mc["solar"], carrier_mc["wind"],
+        len(records) - skipped_no_bus,
+        added,
+        mode,
+        bulk_note,
+        skip_note,
+        carrier_mc["solar"],
+        carrier_mc["wind"],
     )
     return replaced_by_bus
 
@@ -357,6 +594,7 @@ def replace_generators(network: pypsa.Network, dashboard: "Dashboard") -> dict[s
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _split_capacity(
     settings: object,
@@ -396,7 +634,9 @@ def _latest_nonzero_additions(
     if solar_add + wind_add > 0:
         return solar_add, wind_add
 
-    for candidate_year in sorted((y for y in annual_additions if y <= year), reverse=True):
+    for candidate_year in sorted(
+        (y for y in annual_additions if y <= year), reverse=True
+    ):
         solar_add, wind_add = annual_additions[candidate_year]
         if solar_add + wind_add > 0:
             return solar_add, wind_add

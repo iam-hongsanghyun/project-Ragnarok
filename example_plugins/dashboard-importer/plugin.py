@@ -18,6 +18,7 @@ The engine reads an uploaded `model_file` (a filename into the plugin's scratch
 dir) resolved to an absolute `model_path`, or builds GUI-only from the reference
 tables.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -50,7 +51,9 @@ def _load_engine() -> ModuleType:
     return _engine
 
 
-def transform(model: dict[str, list[dict[str, Any]]], config: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+def transform(
+    model: dict[str, list[dict[str, Any]]], config: dict[str, Any]
+) -> dict[str, list[dict[str, Any]]]:
     """Build the Ragnarok workbook model server-side from GUI config (replace).
 
     The unified ``transform(model, config)`` hook. The current session ``model``
@@ -121,7 +124,9 @@ def analyze(result: dict[str, Any] | None, config: dict[str, Any]) -> dict[str, 
     except Exception as exc:  # noqa: BLE001 â€” surface the reason in the Output tab
         return {"note": f"Capacity unavailable: {exc}"}
     if not rows:
-        return {"note": "No generators found in the model â€” pick a model workbook above."}
+        return {
+            "note": "No generators found in the model â€” pick a model workbook above."
+        }
 
     carriers = sorted({k for r in rows for k in r if k not in ("year", "total")})
     chart = {
@@ -132,7 +137,8 @@ def analyze(result: dict[str, Any] | None, config: dict[str, Any]) -> dict[str, 
         "yAxisTitle": "MW",
         "series": [{"key": c} for c in carriers],
         "rows": [
-            {"label": str(r.get("year")), **{c: r.get(c) or 0 for c in carriers}} for r in rows
+            {"label": str(r.get("year")), **{c: r.get(c) or 0 for c in carriers}}
+            for r in rows
         ],
     }
     out: dict[str, Any] = {
@@ -146,6 +152,7 @@ def analyze(result: dict[str, Any] | None, config: dict[str, Any]) -> dict[str, 
                 {
                     "generator": r.get("generator"),
                     "build_year": r.get("build_year"),
+                    "online (year)": r.get("online_year"),
                     "p_nom (MW)": r.get("total_mw"),
                     "solar (MW)": r.get("solar_mw"),
                     "wind (MW)": r.get("wind_mw"),
@@ -166,7 +173,8 @@ def analyze(result: dict[str, Any] | None, config: dict[str, Any]) -> dict[str, 
                     "ESS (MW)": r.get("ess_mw"),
                     **(
                         {"min (MW)": r.get("min_mw"), "max (MW)": r.get("max_mw")}
-                        if expandable else {}
+                        if expandable
+                        else {}
                     ),
                 }
                 for r in ess
@@ -190,7 +198,9 @@ def fillReallocation(config: dict[str, Any]) -> dict[str, Any]:  # noqa: N802 â€
     written back into the form by the host.
     """
     cfg = dict(config or {})
-    carriers = [str(c).strip() for c in (cfg.get("replace_carriers") or []) if str(c).strip()]
+    carriers = [
+        str(c).strip() for c in (cfg.get("replace_carriers") or []) if str(c).strip()
+    ]
     if not carriers:
         return {"ok": False, "message": "Check at least one carrier first."}
     # Force the bulk path so the plan returns the full carrier-matched set.
@@ -206,9 +216,9 @@ def fillReallocation(config: dict[str, Any]) -> dict[str, Any]:  # noqa: N802 â€
         return {
             "ok": False,
             "message": (
-                f"No replaceable {', '.join(carriers)} plants (active in the target "
-                f"year and built on/after the replacement base year, or the whole "
-                f"fleet when 'Include existing plants' is on)."
+                f"No replaceable {', '.join(carriers)} plants (built by the target "
+                f"year â€” retired units included â€” and on/after the replacement base "
+                f"year unless 'Include existing plants' is on; check the column filter)."
             ),
         }
     # Merge: keep existing rows verbatim (their frozen split is preserved, never
@@ -217,7 +227,9 @@ def fillReallocation(config: dict[str, Any]) -> dict[str, Any]:  # noqa: N802 â€
     rows: list[dict[str, Any]] = []
     have: set[str] = set()
     for r in cfg.get("generator_replacements") or []:
-        name = str((r or {}).get("generator", "")).strip() if isinstance(r, dict) else ""
+        name = (
+            str((r or {}).get("generator", "")).strip() if isinstance(r, dict) else ""
+        )
         if name and name not in have:
             rows.append(dict(r))
             have.add(name)
@@ -226,12 +238,14 @@ def fillReallocation(config: dict[str, Any]) -> dict[str, Any]:  # noqa: N802 â€
         name = str(r.get("generator", "")).strip()
         if not name or name in have:
             continue
-        rows.append({
-            "generator": name,
-            "total_mw": r.get("total_mw"),
-            "solar_mw": r.get("solar_mw"),
-            "wind_mw": r.get("wind_mw"),
-        })
+        rows.append(
+            {
+                "generator": name,
+                "total_mw": r.get("total_mw"),
+                "solar_mw": r.get("solar_mw"),
+                "wind_mw": r.get("wind_mw"),
+            }
+        )
         have.add(name)
         added += 1
     if not added:
@@ -256,7 +270,9 @@ def clearReallocation(config: dict[str, Any]) -> dict[str, Any]:  # noqa: N802 â
     n = len((config or {}).get("generator_replacements") or [])
     return {
         "ok": True,
-        "message": f"Cleared {n} row(s) from the table." if n else "The table is already empty.",
+        "message": f"Cleared {n} row(s) from the table."
+        if n
+        else "The table is already empty.",
         "config": {"generator_replacements": []},
     }
 
