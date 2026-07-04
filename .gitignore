@@ -37,9 +37,11 @@ venv/
 __pycache__/
 *.py[cod]
 *.egg-info/
-/build/
 
-# Frontend production build — anchored to the app root, NOT src/**/build/
+# Frontend production build — anchored to the app root, NOT src/**/build/.
+# The CRA output under frontend/*/build/ stays ignored; the repo-root /build/
+# is a COMMITTED deployment copy (the backend serves it, and serve.* uses it so
+# npm-less machines can run the app). Refresh it with scripts/refresh_build.sh.
 frontend/*/build/
 
 # Tooling caches / coverage
