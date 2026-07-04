@@ -41,18 +41,27 @@ $ReqHashFile = Join-Path $VenvDir '.req_hash'
 $ReqHash     = (Get-FileHash $ReqFile -Algorithm MD5).Hash
 $StoredHash  = if (Test-Path $ReqHashFile) { (Get-Content $ReqHashFile -Raw).Trim() } else { '' }
 
-# Verify the venv actually imports the core deps (a matching hash isn't enough:
-# a prior install may have failed, or the venv was copied in). PowerShell does
-# not throw on native non-zero exits, so check $LASTEXITCODE and only stamp the
-# hash on success.
-& $PythonExe -c "import uvicorn, fastapi" 2>$null
+# Verify the venv actually imports the core deps, and (re)install if not. A
+# matching .req_hash is not enough: a prior install may have failed, or the venv
+# may have been copied from another machine. We drop ErrorActionPreference to
+# 'Continue' around the native calls: under the script's global 'Stop', Python
+# or pip writing to stderr (a missing-module traceback, a pip warning) is
+# promoted to a TERMINATING error and would kill the script here — we check
+# $LASTEXITCODE explicitly instead.
+$prevEAP = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+& $PythonExe -c "import uvicorn, fastapi" 2>&1 | Out-Null
 $DepsOk = ($LASTEXITCODE -eq 0)
 if ($ReqHash.Trim() -ne $StoredHash -or -not $DepsOk) {
     Write-Host 'Installing backend dependencies...'
     & $PipExe install --upgrade pip --quiet
     & $PipExe install -r $ReqFile
-    if ($LASTEXITCODE -ne 0) { Die 'Backend dependency install failed - see the pip error above. Fix it (e.g. use Python 3.11/3.12, or install build tools) and re-run.' }
+    $pipCode = $LASTEXITCODE
+    $ErrorActionPreference = $prevEAP
+    if ($pipCode -ne 0) { Die 'Backend dependency install failed - see the pip error above. Fix it (e.g. use Python 3.11/3.12, or install build tools) and re-run.' }
     Set-Content -Path $ReqHashFile -Value $ReqHash
+} else {
+    $ErrorActionPreference = $prevEAP
 }
 
 # -- Web build (committed at .\build; rebuild only if missing + npm present) ------

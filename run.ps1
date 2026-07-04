@@ -71,21 +71,28 @@ $ReqFile    = Join-Path $PSScriptRoot 'backend\requirements.txt'
 $ReqHash    = (Get-FileHash $ReqFile -Algorithm MD5).Hash
 $StoredHash = if (Test-Path $ReqHashFile) { Get-Content $ReqHashFile -Raw } else { '' }
 
-# Verify the venv can actually import the core deps. A matching .req_hash is not
-# enough: a previous install may have failed, or the venv may have been copied
-# from another machine. PowerShell does NOT throw on a native non-zero exit even
-# under ErrorActionPreference=Stop, so we check $LASTEXITCODE ourselves and only
-# stamp the hash on a fully successful install.
-& $PythonExe -c "import uvicorn, fastapi" 2>$null
+# Verify the venv can actually import the core deps, and (re)install if not. A
+# matching .req_hash is not enough: a previous install may have failed, or the
+# venv may have been copied from another machine. We drop ErrorActionPreference
+# to 'Continue' around the native calls: under the script's global 'Stop',
+# Python or pip writing to stderr (a missing-module traceback, a pip warning) is
+# promoted to a TERMINATING error and would kill the script here — we check
+# $LASTEXITCODE explicitly instead, and only stamp the hash on success.
+$prevEAP = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+& $PythonExe -c "import uvicorn, fastapi" 2>&1 | Out-Null
 $DepsOk = ($LASTEXITCODE -eq 0)
 
 if ($ReqHash.Trim() -ne $StoredHash.Trim() -or -not $DepsOk) {
     Write-Host 'Installing backend dependencies...'
     & $PipExe install --upgrade pip --quiet
     & $PipExe install -r $ReqFile
-    if ($LASTEXITCODE -ne 0) { Die 'Backend dependency install failed - see the pip error above. Fix it (e.g. use Python 3.11/3.12, or install build tools) and re-run.' }
+    $pipCode = $LASTEXITCODE
+    $ErrorActionPreference = $prevEAP
+    if ($pipCode -ne 0) { Die 'Backend dependency install failed - see the pip error above. Fix it (e.g. use Python 3.11/3.12, or install build tools) and re-run.' }
     Set-Content -Path $ReqHashFile -Value $ReqHash
 } else {
+    $ErrorActionPreference = $prevEAP
     Write-Host 'Backend dependencies are up to date.'
 }
 
