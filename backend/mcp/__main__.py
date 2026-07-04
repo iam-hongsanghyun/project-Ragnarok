@@ -27,9 +27,34 @@ _HTTP_ALIASES = {"http", "streamable-http", "streamable_http", "shttp"}
 def main() -> None:
     transport = os.environ.get("RAGNAROK_MCP_TRANSPORT", "stdio").strip().lower()
     if transport in _HTTP_ALIASES:
-        mcp.settings.host = os.environ.get("RAGNAROK_MCP_HOST", "127.0.0.1")
+        host = os.environ.get("RAGNAROK_MCP_HOST", "127.0.0.1")
+        mcp.settings.host = host
         mcp.settings.port = int(os.environ.get("RAGNAROK_MCP_PORT", "8765"))
         mcp.settings.streamable_http_path = os.environ.get("RAGNAROK_MCP_PATH", "/mcp")
+
+        # DNS-rebinding protection is auto-configured by FastMCP from the *default*
+        # host (127.0.0.1) at construction time, so its Host allowlist is
+        # localhost-only. When we bind beyond localhost (LAN / ``serve.ps1
+        # server``) that rejects real clients with "Invalid Host header" -> 421.
+        # This HTTP bridge is explicitly a trusted-network, no-auth deployment, so
+        # relax the allowlist. Set RAGNAROK_MCP_ALLOWED_HOSTS (comma-separated,
+        # e.g. "192.168.1.105:8765,rogsh.local:8765") to keep the check strict.
+        from mcp.server.transport_security import TransportSecuritySettings
+
+        allowed = os.environ.get("RAGNAROK_MCP_ALLOWED_HOSTS", "").strip()
+        if allowed:
+            hosts = [h.strip() for h in allowed.split(",") if h.strip()]
+            mcp.settings.transport_security = TransportSecuritySettings(
+                enable_dns_rebinding_protection=True,
+                allowed_hosts=hosts,
+                allowed_origins=[f"http://{h}" for h in hosts]
+                + [f"https://{h}" for h in hosts],
+            )
+        elif host not in ("127.0.0.1", "localhost", "::1"):
+            mcp.settings.transport_security = TransportSecuritySettings(
+                enable_dns_rebinding_protection=False,
+            )
+
         mcp.run(transport="streamable-http")
     else:
         mcp.run(transport="stdio")
