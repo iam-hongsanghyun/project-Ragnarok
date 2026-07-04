@@ -266,9 +266,32 @@ The project is steering toward five groups of work. Detailed entries (with IDs `
 
 The earlier "Topology build mode" direction was retired: the unified map-driven Build already covers the intended free-form editing affordances (own-x/y placement, click-to-link, pick-on-map, drag-to-move), so a separate `Serialised vs Topology` toggle is redundant.
 
+## Running the app
+
+Three modes, one repo — pick by how you're using it:
+
+| Mode | Command (macOS · Windows) | Binds | Frontend | Use it for |
+|---|---|---|---|---|
+| **dev** | `./run.command` · `run.bat` | `127.0.0.1` | live-reload dev server (:3000) | developing (hot reload) |
+| **local** | `./serve.command local` · `serve.bat local` | `127.0.0.1:8000` | committed `./build` | just using the app on your machine |
+| **server** | `./serve.command server` · `serve.bat server` | `0.0.0.0:8000` | committed `./build` | sharing on your LAN |
+
+`serve.*` runs **one** uvicorn process serving the API and the web UI on a
+single port, using the committed `./build` — so **no Node.js is required** to run
+it. `local` is reachable only from this machine; `server` is reachable from any
+machine on the network.
+
+> **Server-mode security:** there is **no authentication** — run on trusted
+> networks only (plugin install executes uploaded Python by design). Never
+> expose it to the internet; use a VPN overlay (e.g. Tailscale) or an
+> authenticated tunnel for remote access. Port override: `RAGNAROK_PORT`.
+
+The web UI at `./build` is committed for zero-dependency serving. After frontend
+changes, refresh it with `scripts/refresh_build.sh` and commit the result.
+
 ## Development
 
-Run locally:
+Run locally in dev mode (live reload):
 
 ```bash
 ./run.command
