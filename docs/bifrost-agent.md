@@ -218,8 +218,36 @@ uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
 | `RAGNAROK_MCP_TRANSPORT` | `stdio` | `stdio` (local agents) or `streamable-http` (networked, e.g. LibreChat) |
 | `RAGNAROK_MCP_PORT` | `8765` | Port for `streamable-http` (not 8000 — the backend uses that) |
 
-The launch command for stdio clients is
-`<repo>/.venv-pypsa/bin/python -m backend.mcp` (with `PYTHONPATH=<repo>`).
+The launch command for stdio clients is the **venv Python** running
+`-m backend.mcp` with `PYTHONPATH=<repo>`:
+
+- macOS/Linux: `<repo>/.venv-pypsa/bin/python`
+- Windows: `<repo>\.venv-pypsa\Scripts\python.exe`
+
+The examples below use the macOS path; on Windows swap in `Scripts\python.exe`
+and backslash the `PYTHONPATH`. Example Windows `claude_desktop_config.json` /
+LM Studio `mcp.json` entry:
+
+```json
+{
+  "mcpServers": {
+    "ragnarok": {
+      "command": "C:\\path\\to\\project-Ragnarok\\.venv-pypsa\\Scripts\\python.exe",
+      "args": ["-m", "backend.mcp"],
+      "env": {
+        "PYTHONPATH": "C:\\path\\to\\project-Ragnarok",
+        "RAGNAROK_API_BASE": "http://127.0.0.1:8000",
+        "RAGNAROK_MCP_AUTONOMY": "guided"
+      }
+    }
+  }
+}
+```
+
+Paths are **per-machine** — use each box's real repo/venv path. Install the MCP
+deps once (`.venv-pypsa\Scripts\python -m pip install -r backend\mcp\requirements-mcp.txt`);
+they're separate from the backend's, so `serve`/`run` don't install them. To
+drive a backend on another host, point `RAGNAROK_API_BASE` at `http://<host-ip>:8000`.
 
 ### stdio clients
 

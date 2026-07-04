@@ -287,7 +287,27 @@ machine on the network.
 > authenticated tunnel for remote access. Port override: `RAGNAROK_PORT`.
 
 The web UI at `./build` is committed for zero-dependency serving. After frontend
-changes, refresh it with `scripts/refresh_build.sh` and commit the result.
+changes, refresh it with `scripts/refresh_build.sh` (macOS/Linux) or
+`scripts/refresh_build.ps1` (Windows) and commit the result.
+
+### AI assistant (Bifrost MCP)
+
+Ragnarok ships an MCP server (`backend/mcp/`) that exposes its tool catalog to
+any MCP-capable agent — Claude Code/Desktop, Codex CLI, Gemini CLI, Goose,
+LibreChat, or a local model in LM Studio. It's a thin HTTP client of the running
+backend, so start the app first (`serve`/`run`), then:
+
+```bash
+# install the MCP server's deps (separate from the backend's)
+.venv-pypsa/bin/python -m pip install -r backend/mcp/requirements-mcp.txt      # macOS/Linux
+.venv-pypsa\Scripts\python -m pip install -r backend\mcp\requirements-mcp.txt  # Windows
+```
+
+Register it in your agent client (`command` = the venv python, `args` =
+`["-m","backend.mcp"]`, `env.PYTHONPATH` = the repo path, `env.RAGNAROK_API_BASE`
+= the backend URL). Full per-client config (macOS + Windows), the autonomy
+guard, and the "run it on another machine" setup are in
+[`docs/bifrost-agent.md`](docs/bifrost-agent.md) §10.
 
 ## Development
 

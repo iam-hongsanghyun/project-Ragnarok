@@ -40,10 +40,18 @@ $ReqFile     = Join-Path $PSScriptRoot 'backend\requirements.txt'
 $ReqHashFile = Join-Path $VenvDir '.req_hash'
 $ReqHash     = (Get-FileHash $ReqFile -Algorithm MD5).Hash
 $StoredHash  = if (Test-Path $ReqHashFile) { (Get-Content $ReqHashFile -Raw).Trim() } else { '' }
-if ($ReqHash.Trim() -ne $StoredHash) {
+
+# Verify the venv actually imports the core deps (a matching hash isn't enough:
+# a prior install may have failed, or the venv was copied in). PowerShell does
+# not throw on native non-zero exits, so check $LASTEXITCODE and only stamp the
+# hash on success.
+& $PythonExe -c "import uvicorn, fastapi" 2>$null
+$DepsOk = ($LASTEXITCODE -eq 0)
+if ($ReqHash.Trim() -ne $StoredHash -or -not $DepsOk) {
     Write-Host 'Installing backend dependencies...'
     & $PipExe install --upgrade pip --quiet
     & $PipExe install -r $ReqFile
+    if ($LASTEXITCODE -ne 0) { Die 'Backend dependency install failed - see the pip error above. Fix it (e.g. use Python 3.11/3.12, or install build tools) and re-run.' }
     Set-Content -Path $ReqHashFile -Value $ReqHash
 }
 
