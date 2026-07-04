@@ -295,11 +295,19 @@ changes, refresh it with `scripts/refresh_build.sh` (macOS/Linux) or
 
 Ragnarok ships an MCP server (`backend/mcp/`) that exposes its tool catalog to
 any MCP-capable agent — Claude Code/Desktop, Codex CLI, Gemini CLI, Goose,
-LibreChat, or a local model in LM Studio. It's a thin HTTP client of the running
-backend, so start the app first (`serve`/`run`), then:
+LibreChat, or a local model in LM Studio.
+
+**`serve` starts it for you.** Running `serve.command` / `serve.bat` launches the
+MCP bridge over HTTP at `http://<host>:8765/mcp` alongside the app (installing
+its deps on first run). A client on another machine connects by **URL with
+nothing installed** — e.g. LM Studio `mcp.json`:
+`{"mcpServers": {"ragnarok": {"url": "http://<server-ip>:8765/mcp"}}}`. Set
+`RAGNAROK_MCP=off` to skip it, `RAGNAROK_MCP_PORT` to move it.
+
+For a **stdio** setup (the agent launches the bridge locally) install its deps
+manually — they're self-contained (`mcp` + `httpx`, no PyPSA):
 
 ```bash
-# install the MCP server's deps (separate from the backend's)
 .venv-pypsa/bin/python -m pip install -r backend/mcp/requirements-mcp.txt      # macOS/Linux
 .venv-pypsa\Scripts\python -m pip install -r backend\mcp\requirements-mcp.txt  # Windows
 ```

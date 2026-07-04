@@ -334,45 +334,41 @@ use it for demos/throwaway sessions, not alongside unsaved work.
 
 ### Split setup — backend on a server, agent on a client (e.g. LM Studio)
 
-Run Ragnarok on one machine and drive it from another. The MCP bridge runs on
-the **client** (the agent launches it via stdio) and is just an HTTP client of
-the backend, so the client needs **only** `mcp` + `httpx` — not the PyPSA stack.
+Run Ragnarok on one machine and drive it from another with **nothing installed
+client-side** — `serve` starts the MCP bridge over HTTP automatically, and the
+client (LM Studio, Claude Desktop, …) just points at a URL.
 
-**On the server** (hosts the model + solves):
-1. `./serve.command` (macOS) / `serve.bat` (Windows) — server mode binds
-   `0.0.0.0:8000`. Note the machine's LAN IP and allow inbound TCP 8000 through
-   its firewall.
-2. The backend does **not** need the MCP deps.
+**On the server** (hosts the model + solves) — one command:
+1. `./serve.command` (macOS) / `serve.bat` (Windows). Server mode binds the app
+   on `0.0.0.0:8000` **and** the MCP bridge on `0.0.0.0:8765/mcp` (it installs
+   `requirements-mcp.txt` on first run). It prints both URLs.
+2. Note the machine's LAN IP; allow inbound **TCP 8000 and 8765** on the firewall.
+   (Set `RAGNAROK_MCP=off` to skip the bridge, or `RAGNAROK_MCP_PORT` to move it.)
 
-**On the client** (runs LM Studio / the agent):
-1. Clone Ragnarok (only `backend/__init__.py` + `backend/mcp/` are used at
-   runtime) and make a venv.
-2. `<venv>/python -m pip install -r backend/mcp/requirements-mcp.txt`
-   (self-contained: `mcp` + `httpx`, no full backend install).
-3. In LM Studio's `mcp.json` (or any client), register `ragnarok` with the
-   client's venv Python + `-m backend.mcp`, and point it at the server:
+**On the client** (runs LM Studio / the agent) — nothing to install:
+1. In LM Studio's `mcp.json` (or any client that supports **remote** MCP
+   servers), add a URL entry pointing at the server's MCP port:
    ```json
    {
      "mcpServers": {
-       "ragnarok": {
-         "command": "C:\\path\\to\\project-Ragnarok\\.venv-pypsa\\Scripts\\python.exe",
-         "args": ["-m", "backend.mcp"],
-         "env": {
-           "PYTHONPATH": "C:\\path\\to\\project-Ragnarok",
-           "RAGNAROK_API_BASE": "http://<SERVER-IP>:8000",
-           "RAGNAROK_MCP_AUTONOMY": "guided"
-         }
-       }
+       "ragnarok": { "url": "http://<SERVER-IP>:8765/mcp" }
      }
    }
    ```
-4. Restart LM Studio, load a tool-capable model → the tools drive the model on
-   the server. Sanity check: `curl http://<SERVER-IP>:8000/api/session/meta?session_id=bifrost`
-   from the client should return JSON.
+2. Restart LM Studio, load a tool-capable model → the tools drive the model on
+   the server. Sanity check from the client:
+   `curl http://<SERVER-IP>:8000/api/session/meta?session_id=bifrost` → JSON.
 
-To watch changes live in the server's web UI, set `RAGNAROK_SESSION_ID=default`
-(so the agent shares the UI session) and open `http://<SERVER-IP>:8000` on the
-server; otherwise it uses the isolated `bifrost` session.
+> If your client only supports **local/stdio** MCP servers (not URLs), fall back
+> to running the bridge on the client instead: clone Ragnarok there, install
+> `requirements-mcp.txt` (self-contained — `mcp` + `httpx`, no PyPSA), and use a
+> `command`/`args` entry (`-m backend.mcp`) with
+> `RAGNAROK_API_BASE=http://<SERVER-IP>:8000`.
+
+To watch changes live in the server's web UI, run the client with
+`RAGNAROK_SESSION_ID=default` (share the UI session — but on the URL setup that
+env lives on the *server's* MCP process, so set it before `serve`) and open
+`http://<SERVER-IP>:8000`; otherwise the agent uses the isolated `bifrost` session.
 
 ### Mjolnir note
 

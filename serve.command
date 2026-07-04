@@ -26,6 +26,9 @@ PY="$VENV/bin/python"
 PORT="${RAGNAROK_PORT:-8000}"
 FRONTEND="$ROOT/frontend/Ragnarok_default"
 
+# Free a TCP port held by a stale previous run, so a restart doesn't fail to bind.
+free_port() { local pids; pids=$(lsof -ti tcp:"$1" 2>/dev/null || true); [ -n "$pids" ] && kill $pids 2>/dev/null || true; }
+
 # ── Python env ────────────────────────────────────────────────────────────────
 if [ ! -x "$PY" ]; then
   echo "Creating Python virtual environment..."
@@ -62,23 +65,51 @@ if [ ! -d "$DIST" ]; then
 fi
 export RAGNAROK_FRONTEND_DIST="$DIST"
 
+# ── MCP server (Bifrost) — same-box HTTP bridge on its own port, so remote
+# agents (LM Studio, Claude Desktop, …) connect by URL with NOTHING installed
+# client-side. Set RAGNAROK_MCP=off to skip it. ───────────────────────────────
+MCP_PORT="${RAGNAROK_MCP_PORT:-8765}"
+MCP_PID=""
+if [ "${RAGNAROK_MCP:-on}" != "off" ]; then
+  if ! "$PY" -c "import mcp" >/dev/null 2>&1; then
+    echo "Installing MCP server dependencies..."
+    "$VENV/bin/pip" install -r "$ROOT/backend/mcp/requirements-mcp.txt" --quiet || true
+  fi
+  if "$PY" -c "import mcp" >/dev/null 2>&1; then
+    free_port "$MCP_PORT"
+    RAGNAROK_MCP_TRANSPORT=streamable-http RAGNAROK_MCP_HOST="$HOST" RAGNAROK_MCP_PORT="$MCP_PORT" \
+      RAGNAROK_API_BASE="http://127.0.0.1:$PORT" PYTHONPATH="$ROOT" \
+      "$PY" -m backend.mcp &
+    MCP_PID=$!
+    # Stop the MCP child when this script exits (Ctrl+C / terminal close).
+    trap '[ -n "$MCP_PID" ] && kill "$MCP_PID" 2>/dev/null' EXIT INT TERM
+  else
+    echo "NOTE: MCP deps unavailable — starting the app without the agent bridge."
+  fi
+fi
+
 # ── Announce URL(s) ───────────────────────────────────────────────────────────
 echo ""
 if [ "$MODE" = "server" ]; then
   echo "Server mode — open from any machine on this network:"
   for IF in en0 en1 en2; do
     IP=$(ipconfig getifaddr "$IF" 2>/dev/null || true)
-    [ -n "$IP" ] && echo "  http://$IP:$PORT"
+    [ -z "$IP" ] && continue
+    echo "  app:  http://$IP:$PORT"
+    [ -n "$MCP_PID" ] && echo "  mcp:  http://$IP:$MCP_PORT/mcp   (point LM Studio / agents here)"
   done
-  echo "  http://$(hostname -s).local:$PORT"
+  echo "  app:  http://$(hostname -s).local:$PORT"
   echo ""
   echo "WARNING: no authentication — trusted networks only (plugin install runs"
-  echo "uploaded Python by design). Do not expose to the internet. For remote"
-  echo "access use a VPN overlay (e.g. Tailscale) or an authenticated tunnel."
+  echo "uploaded Python by design; the mcp port drives the model too). Do not"
+  echo "expose to the internet. Open TCP $PORT${MCP_PID:+ and $MCP_PORT} on the firewall."
 else
   echo "Local mode — open on this machine:"
-  echo "  http://127.0.0.1:$PORT"
+  echo "  app:  http://127.0.0.1:$PORT"
+  [ -n "$MCP_PID" ] && echo "  mcp:  http://127.0.0.1:$MCP_PORT/mcp"
 fi
 echo ""
 
-exec "$PY" -m uvicorn backend.app.main:app --host "$HOST" --port "$PORT"
+# Foreground (not exec) so the trap can stop the MCP child on exit.
+free_port "$PORT"
+"$PY" -m uvicorn backend.app.main:app --host "$HOST" --port "$PORT"
