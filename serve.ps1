@@ -133,7 +133,8 @@ if ($Mode -eq 'server') {
     Write-Host ''
     Write-Host 'WARNING: no authentication - trusted networks only (plugin install runs'
     Write-Host "uploaded Python by design; the mcp port drives the model too). Do not expose"
-    Write-Host "to the internet. Allow inbound TCP $Port$(if ($McpProc) { \" and $McpPort\" }) on the firewall."
+    $fwPorts = if ($McpProc) { "$Port and $McpPort" } else { "$Port" }
+    Write-Host "to the internet. Allow inbound TCP $fwPorts on the firewall."
 } else {
     Write-Host 'Local mode - open on this machine:'
     Write-Host "  app:  http://127.0.0.1:$Port"
