@@ -56,6 +56,20 @@ class FakeClient:
         self.calls.append(("add_row", sheet, values))
         return {"rows": 1}
 
+    async def resolve_sheet(self, component: str) -> str:
+        self.calls.append(("resolve_sheet", component))
+        return {"Generator": "generators", "Link": "links"}.get(
+            component, component.lower()
+        )
+
+    async def set_component(self, sheet: str, name: str, attributes: dict) -> dict:
+        self.calls.append(("set_component", sheet, name, attributes))
+        return {"rows": 1}
+
+    async def delete_components(self, sheet: str, names: list) -> dict:
+        self.calls.append(("delete_components", sheet, names))
+        return {"deleted": len(names)}
+
 
 def _install(monkeypatch, autonomy: str = "guided") -> FakeClient:
     fake = FakeClient()
@@ -68,7 +82,7 @@ def _install(monkeypatch, autonomy: str = "guided") -> FakeClient:
 def test_tool_catalog_and_annotations() -> None:
     tools = asyncio.run(mcp.list_tools())
     by_name = {t.name: t for t in tools}
-    assert len(tools) == 27, f"expected 27 tools, got {len(tools)}"
+    assert len(tools) == 36, f"expected 36 tools, got {len(tools)}"
     # low-level builder tools (pypsa-mcp-style) are present
     for t in (
         "add_bus",
@@ -101,6 +115,10 @@ def test_tool_catalog_and_annotations() -> None:
         "get_analytics",
         "get_derived",
         "get_queue",
+        "list_components",
+        "describe_component",
+        "describe_run_options",
+        "list_plugins",
     }
 
 
@@ -191,3 +209,26 @@ def test_add_bus_previews_under_manual(monkeypatch) -> None:
     out = asyncio.run(server.add_bus(name="b", v_nom=380))
     assert out["status"] == "preview"
     assert not fake.called("add_row")
+
+
+# ── generic component tools: resolve any component + append via the registry ────
+def test_add_component_generic_resolves_and_appends(monkeypatch) -> None:
+    fake = _install(monkeypatch, "guided")
+    out = asyncio.run(
+        server.add_component(
+            component="Link",
+            name="L1",
+            attributes={"bus0": "a", "bus1": "b", "p_nom": 100},
+        )
+    )
+    assert out.get("status") != "preview"
+    add = next(c for c in fake.calls if c[0] == "add_row")
+    assert add[1] == "links"  # resolved Link -> links sheet
+    assert add[2] == {"name": "L1", "bus0": "a", "bus1": "b", "p_nom": 100}
+
+
+def test_remove_component_gated_under_guided(monkeypatch) -> None:
+    fake = _install(monkeypatch, "guided")  # remove is destructive -> not cheap
+    out = asyncio.run(server.remove_component(component="Generator", names=["G1"]))
+    assert out["status"] == "preview"
+    assert not fake.called("delete_components")

@@ -60,6 +60,9 @@ class RagnarokClient:
 
     def __init__(self, config: Config | None = None) -> None:
         self.config = config or Config.from_env()
+        self._config_cache: Any = (
+            None  # /api/config bundle (schema is stable per process)
+        )
         self._client = httpx.AsyncClient(
             base_url=self.config.api_base,
             timeout=self.config.timeout,
@@ -188,6 +191,79 @@ class RagnarokClient:
             model[sheet].append(values)
             await self.save_model(model)
             return {"rows": len(model[sheet]), "created": sheet}
+
+    # ── schema / generic component CRUD (covers every PyPSA component) ──────────
+    async def get_config(self) -> Any:
+        """The live boot bundle: PyPSA schema (all components + attributes),
+        capabilities, and simulation defaults. Cached for the process."""
+        if self._config_cache is None:
+            self._config_cache = await self._get("/api/config")
+        return self._config_cache
+
+    async def resolve_sheet(self, component: str) -> str:
+        """Map a component name (``Generator``/``generators``/``StorageUnit``…)
+        to its workbook sheet name, using the live schema."""
+        comps = (await self.get_config()).get("schema", {}).get("components", {})
+        if component in comps:
+            return component
+        low = component.lower()
+        for sheet, spec in comps.items():
+            names = {
+                sheet.lower(),
+                str(spec.get("component_name", "")).lower(),
+                str(spec.get("list_name", "")).lower(),
+            }
+            if low in names:
+                return sheet
+        raise RagnarokAPIError(
+            400,
+            f"unknown component {component!r} (see list_components)",
+            method="GET",
+            path="/api/config",
+        )
+
+    async def _row_indices(self, sheet: str, names: list[str]) -> list[int]:
+        page = await self.get_sheet_page(sheet, offset=0, limit=10_000_000)
+        rows = (page or {}).get("rows", [])
+        wanted = {str(n) for n in names}
+        return [i for i, r in enumerate(rows) if str(r.get("name")) in wanted]
+
+    async def set_component(
+        self, sheet: str, name: str, attributes: dict[str, Any]
+    ) -> Any:
+        idxs = await self._row_indices(sheet, [name])
+        if not idxs:
+            raise RagnarokAPIError(
+                404,
+                f"no {sheet} row named {name!r}",
+                method="PATCH",
+                path=f"/api/session/sheet/{sheet}",
+            )
+        ops = [
+            {"op": "set", "row": idxs[0], "column": k, "value": v}
+            for k, v in attributes.items()
+        ]
+        return await self.patch_sheet(sheet, ops)
+
+    async def delete_components(self, sheet: str, names: list[str]) -> Any:
+        idxs = await self._row_indices(sheet, names)
+        if not idxs:
+            return {"deleted": 0}
+        await self.patch_sheet(sheet, [{"op": "deleteRows", "rows": idxs}])
+        return {"deleted": len(idxs)}
+
+    async def transform_series(self, sheet: str, op: str, **params: Any) -> Any:
+        body = self._sid_body({"op": op})
+        body.update({k: v for k, v in params.items() if v is not None})
+        return await self._post(f"/api/session/series/{sheet}/transform", body)
+
+    async def clear_session(self) -> Any:
+        return await self._request(
+            "POST", "/api/session/clear", params={"session_id": self.session_id}
+        )
+
+    async def list_plugins(self) -> Any:
+        return await self._get("/api/plugins")
 
     async def retarget_snapshots(
         self, start: str, end: str, step_hours: float = 1.0, fill: str = "tile"

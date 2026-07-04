@@ -192,6 +192,59 @@ async def get_queue() -> Any:
     return await get_client().get_queue()
 
 
+@mcp.tool(
+    annotations=_RO,
+    description="List every PyPSA component type Ragnarok supports (Bus, Generator, Line, Link, Transformer, StorageUnit, Store, Carrier, GlobalConstraint, …) with its sheet name and attribute count — the full registry, not a curated subset.",
+)
+async def list_components() -> Any:
+    comps = (await get_client().get_config()).get("schema", {}).get("components", {})
+    return [
+        {
+            "component": spec.get("component_name") or sheet,
+            "sheet": sheet,
+            "label": spec.get("label"),
+            "attributes": len(spec.get("attributes", []) or []),
+        }
+        for sheet, spec in comps.items()
+    ]
+
+
+@mcp.tool(
+    annotations=_RO,
+    description="Describe a PyPSA component's full attribute schema (name, type, unit, default, required, description). Accepts a component name or sheet name (e.g. 'Generator' or 'generators'). Use before add_component/set_component to know valid attributes.",
+)
+async def describe_component(component: str) -> Any:
+    client = get_client()
+    sheet = await client.resolve_sheet(component)
+    spec = (await client.get_config())["schema"]["components"][sheet]
+    return {
+        "component": spec.get("component_name") or sheet,
+        "sheet": sheet,
+        "label": spec.get("label"),
+        "attributes": spec.get("attributes", []),
+    }
+
+
+@mcp.tool(
+    annotations=_RO,
+    description="All solve knobs available: backend capabilities (carbon price, multi-year pathway, rolling horizon, stochastic, SCLOPF, power flow, market simulation, MGA, …) and the simulation defaults. These are the keys you pass to submit_solve's scenario/options.",
+)
+async def describe_run_options() -> Any:
+    cfg = await get_client().get_config()
+    return {
+        "capabilities": cfg.get("capabilities"),
+        "simulation_defaults": cfg.get("simulation_defaults"),
+    }
+
+
+@mcp.tool(
+    annotations=_RO,
+    description="List installed analysis plugins and their ids/config — pass an id to run_plugin_analysis.",
+)
+async def list_plugins() -> Any:
+    return await get_client().list_plugins()
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Model edits — GATE (mutating). edit_sheet is a "cheap" in-session edit.
 # ══════════════════════════════════════════════════════════════════════════════
@@ -553,6 +606,112 @@ async def set_snapshots(snapshots: list[str], confirm: bool = False) -> Any:
         )
     await get_client().merge_sheets({"snapshots": rows})
     return {"status": "applied", "snapshots": len(rows)}
+
+
+# ── generic component CRUD — the full registry, any component + any attribute ──
+@mcp.tool(
+    annotations=_BUILD_ANN,
+    description="Add ANY PyPSA component (generic constructor over the full registry). component = 'Generator'/'Link'/'Store'/'Transformer'/'Carrier'/… ; attributes = a dict of any valid attributes (see describe_component). For common types the typed add_* tools are handier.",
+)
+async def add_component(
+    component: str,
+    name: str,
+    attributes: dict[str, Any] | None = None,
+    confirm: bool = False,
+) -> Any:
+    client = get_client()
+    sheet = await client.resolve_sheet(component)
+    row = {"name": name, **(attributes or {})}
+    if _needs_confirm(cheap=True) and not confirm:
+        return _preview(f"Add {component} {name!r}.", {"sheet": sheet, "row": row})
+    return await client.add_row(sheet, row)
+
+
+@mcp.tool(
+    annotations=_BUILD_ANN,
+    description="Set attributes on an existing component (by name) — any component, any attributes. attributes = {attribute: value}.",
+)
+async def set_component(
+    component: str, name: str, attributes: dict[str, Any], confirm: bool = False
+) -> Any:
+    client = get_client()
+    sheet = await client.resolve_sheet(component)
+    if _needs_confirm(cheap=True) and not confirm:
+        return _preview(
+            f"Set {list(attributes)} on {component} {name!r}.",
+            {"sheet": sheet, "name": name, "attributes": attributes},
+        )
+    return await client.set_component(sheet, name, attributes)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=True, openWorldHint=False
+    ),
+    description="Remove components by name (any component type). names = list of names to delete.",
+)
+async def remove_component(
+    component: str, names: list[str], confirm: bool = False
+) -> Any:
+    client = get_client()
+    sheet = await client.resolve_sheet(component)
+    if _needs_confirm(cheap=False) and not confirm:
+        return _preview(
+            f"Delete {len(names)} {component}(s): {names}.",
+            {"sheet": sheet, "names": names},
+        )
+    return await client.delete_components(sheet, names)
+
+
+@mcp.tool(
+    annotations=_BUILD_ANN,
+    description="Bulk-transform a time-series sheet (e.g. loads-p_set, generators-p_max_pu). op = scale (factor) | offset (delta) | shift (shift, wrap) | clip (min_value, max_value) | grow (growth_pct). Optional columns restricts to some assets.",
+)
+async def transform_series(
+    sheet: str,
+    op: str,
+    factor: float | None = None,
+    delta: float | None = None,
+    shift: int | None = None,
+    wrap: bool | None = None,
+    min_value: float | None = None,
+    max_value: float | None = None,
+    growth_pct: float | None = None,
+    columns: list[str] | None = None,
+    confirm: bool = False,
+) -> Any:
+    args = {
+        "factor": factor,
+        "delta": delta,
+        "shift": shift,
+        "wrap": wrap,
+        "minValue": min_value,
+        "maxValue": max_value,
+        "growthPct": growth_pct,
+        "columns": columns,
+    }
+    if _needs_confirm(cheap=True) and not confirm:
+        shown = {k: v for k, v in args.items() if v is not None}
+        return _preview(
+            f"Transform series {sheet!r} ({op}).", {"sheet": sheet, "op": op, **shown}
+        )
+    return await get_client().transform_series(sheet, op, **args)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=True, openWorldHint=False
+    ),
+    description="Clear the working model in this session (start from an empty network). Destructive — wipes the loaded model.",
+)
+async def clear_session(confirm: bool = False) -> Any:
+    client = get_client()
+    if _needs_confirm(cheap=False) and not confirm:
+        return _preview(
+            "Clear the working model (wipes the loaded network).",
+            {"session": client.session_id},
+        )
+    return await client.clear_session()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
