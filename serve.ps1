@@ -1,13 +1,13 @@
 # Ragnarok - run the app as ONE process (API + web UI on a single port). Windows.
 #
-# Usage:  .\serve.ps1 [local|server]
-#   local  (default) -> binds 127.0.0.1 : only this machine
-#   server           -> binds 0.0.0.0   : any machine on your LAN (see warning)
+# Usage:  .\serve.ps1 [server|local]
+#   server (default) -> binds 0.0.0.0   : any machine on your LAN (see warning)
+#   local            -> binds 127.0.0.1 : only this machine
 #
 # Deployment / "just use it" launcher (contrast run.* = DEV mode). One uvicorn
 # worker serves the committed web build at .\build together with the API; no
 # --reload, single worker (SQLite stores are single-writer). PowerShell 5.1 OK.
-param([ValidateSet('local','server')][string]$Mode = 'local')
+param([ValidateSet('local','server')][string]$Mode = 'server')
 
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot

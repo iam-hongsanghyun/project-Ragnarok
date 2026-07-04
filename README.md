@@ -273,13 +273,14 @@ Three modes, one repo — pick by how you're using it:
 | Mode | Command (macOS · Windows) | Binds | Frontend | Use it for |
 |---|---|---|---|---|
 | **dev** | `./run.command` · `run.bat` | `127.0.0.1` | live-reload dev server (:3000) | developing (hot reload) |
-| **local** | `./serve.command local` · `serve.bat local` | `127.0.0.1:8000` | committed `./build` | just using the app on your machine |
-| **server** | `./serve.command server` · `serve.bat server` | `0.0.0.0:8000` | committed `./build` | sharing on your LAN |
+| **server** (default) | `./serve.command` · `serve.bat` | `0.0.0.0:8000` | committed `./build` | sharing on your LAN |
+| **local** | `./serve.command local` · `serve.bat local` | `127.0.0.1:8000` | committed `./build` | just this machine |
 
 `serve.*` runs **one** uvicorn process serving the API and the web UI on a
 single port, using the committed `./build` — so **no Node.js is required** to run
-it. `local` is reachable only from this machine; `server` is reachable from any
-machine on the network.
+it. With **no argument (or a double-click) it starts server mode** (`0.0.0.0`,
+reachable from any machine on the network); pass `local` to bind `127.0.0.1`
+(this machine only).
 
 > **Server-mode security:** there is **no authentication** — run on trusted
 > networks only (plugin install executes uploaded Python by design). Never

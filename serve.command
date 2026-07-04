@@ -1,9 +1,9 @@
 #!/bin/bash
 # Ragnarok — run the app as ONE process (API + web UI on a single port).
 #
-# Usage:  ./serve.command [local|server]
-#   local  (default) → binds 127.0.0.1 : only this machine can open it
-#   server           → binds 0.0.0.0   : any machine on your LAN (see warning)
+# Usage:  ./serve.command [server|local]
+#   server (default) → binds 0.0.0.0   : any machine on your LAN (see warning)
+#   local            → binds 127.0.0.1 : only this machine can open it
 #
 # This is the deployment / "just use it" launcher. Contrast with run.command,
 # which is DEV mode (live-reload dev servers on :3000 + :8000). Here a single
@@ -14,7 +14,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 ROOT="$PWD"
 
-MODE="${1:-local}"
+MODE="${1:-server}"
 case "$MODE" in
   local)  HOST="127.0.0.1" ;;
   server) HOST="0.0.0.0" ;;
