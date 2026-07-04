@@ -160,7 +160,7 @@ A new **Assistant** tab (activity bar), consistent with the existing view shell:
 
 | Phase | Deliverable | Leans on |
 |---|---|---|
-| **0 · MCP prototype** | An MCP server wrapping the tool catalog. Drive Ragnarok from Claude Code **today** — proves the tool surface end-to-end with zero UI work. | existing API |
+| **0 · MCP prototype** ✅ *in progress (Tier 1)* | An MCP server (`backend/mcp/`) wrapping the tool catalog — ~21 tools, drivable from any MCP client with any model. Proves the tool surface end-to-end with zero UI work. See §10 to connect a client. | existing API |
 | **1 · Embedded agent (L1 shell)** | `LLMProvider` abstraction + Claude API adapter + the plan/act/observe loop + a minimal Assistant chat tab (stream + tool cards). Happy path: "build KOR, solve, report." | Phase 0 tools |
 | **2 · Guardrails & grounding** | confirmation gates, budgets, world-state summarisation, schema retrieval tools, exemplars. | pypsa_schema_builder |
 | **3 · Verification loop** | validate-before-solve, Q2 repair loop, Ember/adequacy sanity, cited report generator. | Q2, I7, A2 |
@@ -190,3 +190,123 @@ A new **Assistant** tab (activity bar), consistent with the existing view shell:
 - **No solver/importer changes** for Phases 0–3 — the tool layer is the existing, tested API.
 - **Phase 0 is days, not weeks** — an MCP wrapper + Claude Code gives a real, drivable agent immediately, and de-risks the tool design before any UI is built.
 - **Each phase is independently useful** and testable, matching the repo's "feature branch → tests → merge" rhythm and the analytical-verification bar in `CLAUDE.md`.
+
+---
+
+## 10. Connecting a client (Phase 0)
+
+The MCP server (`backend/mcp/`) is a thin HTTP client of the **running** Ragnarok
+backend. It's model-agnostic: any MCP-capable agent drives it, with any model.
+
+### Prerequisites
+
+```bash
+# 1. The Ragnarok backend must be running (the server talks to it over HTTP):
+uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+
+# 2. Install the MCP server's deps (kept separate from the backend's):
+.venv-pypsa/bin/python -m pip install -r backend/mcp/requirements-mcp.txt
+```
+
+### Configuration (environment variables)
+
+| Var | Default | Purpose |
+|---|---|---|
+| `RAGNAROK_API_BASE` | `http://127.0.0.1:8000` | URL of the running backend |
+| `RAGNAROK_SESSION_ID` | `bifrost` | Working-model session. Defaults to a **dedicated agent session** so it won't touch the web UI's `default` session. Set to `default` to share (and watch live in) the UI — see "Watching it live". |
+| `RAGNAROK_MCP_AUTONOMY` | `guided` | `guided` (gate imports/transforms/solves) · `manual` (gate every edit) · `auto` (no gating) |
+| `RAGNAROK_MCP_TRANSPORT` | `stdio` | `stdio` (local agents) or `streamable-http` (networked, e.g. LibreChat) |
+| `RAGNAROK_MCP_PORT` | `8765` | Port for `streamable-http` (not 8000 — the backend uses that) |
+
+The launch command for stdio clients is
+`<repo>/.venv-pypsa/bin/python -m backend.mcp` (with `PYTHONPATH=<repo>`).
+
+### stdio clients
+
+**Claude Code:**
+```bash
+claude mcp add ragnarok \
+  --env PYTHONPATH=<repo> \
+  --env RAGNAROK_API_BASE=http://127.0.0.1:8000 \
+  --env RAGNAROK_MCP_AUTONOMY=guided \
+  -- <repo>/.venv-pypsa/bin/python -m backend.mcp
+```
+
+**Claude Desktop / Gemini CLI** (`claude_desktop_config.json` · `~/.gemini/settings.json`) — same JSON shape:
+```json
+{
+  "mcpServers": {
+    "ragnarok": {
+      "command": "<repo>/.venv-pypsa/bin/python",
+      "args": ["-m", "backend.mcp"],
+      "env": {
+        "PYTHONPATH": "<repo>",
+        "RAGNAROK_API_BASE": "http://127.0.0.1:8000",
+        "RAGNAROK_MCP_AUTONOMY": "guided"
+      }
+    }
+  }
+}
+```
+
+**Codex CLI** (`~/.codex/config.toml`):
+```toml
+[mcp_servers.ragnarok]
+command = "<repo>/.venv-pypsa/bin/python"
+args = ["-m", "backend.mcp"]
+env = { PYTHONPATH = "<repo>", RAGNAROK_API_BASE = "http://127.0.0.1:8000", RAGNAROK_MCP_AUTONOMY = "guided" }
+```
+
+**Goose** (`~/.config/goose/config.yaml`, or `goose configure` → Add stdio extension):
+```yaml
+extensions:
+  ragnarok:
+    type: stdio
+    cmd: <repo>/.venv-pypsa/bin/python
+    args: ["-m", "backend.mcp"]
+    envs:
+      PYTHONPATH: <repo>
+      RAGNAROK_API_BASE: http://127.0.0.1:8000
+      RAGNAROK_MCP_AUTONOMY: guided
+```
+
+### Networked client — LibreChat (the near-term GUI)
+
+Run the server in HTTP mode (still pointing at the backend):
+```bash
+RAGNAROK_MCP_TRANSPORT=streamable-http RAGNAROK_MCP_PORT=8765 \
+RAGNAROK_API_BASE=http://127.0.0.1:8000 \
+PYTHONPATH=<repo> <repo>/.venv-pypsa/bin/python -m backend.mcp
+```
+Then in `librechat.yaml` (use `host.docker.internal` when LibreChat runs in Docker):
+```yaml
+mcpServers:
+  ragnarok:
+    type: streamable-http
+    url: http://host.docker.internal:8765/mcp
+```
+LibreChat gives a self-hosted web chat with model selection (OpenAI / Anthropic /
+Gemini / local Ollama) driving the Ragnarok tools.
+
+### Local models
+
+A raw local model (Ollama / llama.cpp) is not an MCP client — it needs an
+MCP-aware harness. Point **Goose** or **LibreChat** at your local model
+(Ollama provider) and connect them to this server exactly as above; the server
+is identical regardless of the model.
+
+### Watching it live
+
+By default the server uses a dedicated `bifrost` session, isolated from the web
+UI. To watch the agent work **live in the browser tab**, set
+`RAGNAROK_SESSION_ID=default` so it shares the UI's working model — imports,
+edits, transforms, and queued solves then appear in real time. Caveat: in that
+mode the agent shares (and can overwrite) whatever you have open in the UI, so
+use it for demos/throwaway sessions, not alongside unsaved work.
+
+### Mjolnir note
+
+`backend/mcp/` is subtree-vendored into Mjolnir (the serve wrapper) on the next
+pull but isn't needed there — exclude it from Mjolnir's build (or leave it
+unused; it imports nothing from `backend.app`, so it's inert without an explicit
+launch).

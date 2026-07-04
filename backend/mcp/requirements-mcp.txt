@@ -1,0 +1,10 @@
+# Bifrost MCP server (Phase 0) — dependencies for backend/mcp/ only.
+#
+# Kept separate from backend/requirements.txt so the main backend install
+# doesn't pull the MCP SDK, and so this subpackage stays extractable to its
+# own repo. httpx is already provided by the backend requirements and is
+# reused here (the server is a thin HTTP client of the running backend).
+#
+# Install:  .venv-pypsa/bin/python -m pip install -r backend/mcp/requirements-mcp.txt
+
+mcp>=1.28,<2
