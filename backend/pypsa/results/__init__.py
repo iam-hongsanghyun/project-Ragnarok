@@ -41,6 +41,7 @@ from .statistics import build_statistics
 from .mga import build_mga
 from .merchant import build_merchant
 from .adequacy import build_adequacy
+from .outage_mc import build_outage_mc
 from .company import build_company_breakdown
 from .company_statement import build_company_statement
 from .finance import build_company_finance
@@ -1102,6 +1103,19 @@ def _build_solved_payload(
     # Resource adequacy (A1 ensemble + A2 LOLE) — stochastic renewable ensemble
     # vs load. None when the run has no time-varying renewable generator.
     adequacy = build_adequacy(network)
+    # Thermal forced-outage Monte Carlo — outage-aware LOLE/EUE WITH A
+    # DISTRIBUTION across members, evaluated post-solve (pure post-process,
+    # reuses the adequacy kernel). None when disabled/absent, unsolved, or no
+    # thermal generators. Never raises into the solve — any failure degrades
+    # to a run note, mirroring build_adequacy's robustness.
+    outage_mc_cfg = options.get("outageMcConfig") or {}
+    outage_mc: dict[str, Any] | None = None
+    if bool(outage_mc_cfg.get("enabled")):
+        try:
+            outage_mc = build_outage_mc(network, options)
+        except Exception as exc:  # noqa: BLE001 — never sink the run over an MC extra
+            notes.append(f"Thermal outage Monte Carlo could not be computed: {exc}")
+            _log.warning("outage_mc failed: %s", exc)
     # Consolidated per-company annual P&L (revenue → carbon/fuel → margin → EBIT
     # → net). Reads only solved dataframes; independent of any config.
     company_statement = build_company_statement(
@@ -1145,6 +1159,7 @@ def _build_solved_payload(
         "companyFinance": company_finance,
         "companyStatement": company_statement,
         "adequacy": adequacy,
+        "outageMc": outage_mc,
         "priceFormation": price_formation,
         "commitment": commitment,
         "ppa": ppa,

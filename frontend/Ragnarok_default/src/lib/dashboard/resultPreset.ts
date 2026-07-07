@@ -153,6 +153,7 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   const hasDemandResponse = !!(results.demandResponse && results.demandResponse.loads.length > 0);
   const hasPriceElastic = !!(results.priceElastic && results.priceElastic.loads.length > 0);
   const hasReserve = !!results.reserve?.enabled;
+  const hasOutageMc = !!results.outageMc?.enabled;
 
   const rows: Array<ReturnType<typeof row>> = [];
 
@@ -241,6 +242,12 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   if (hasReserve) {
     const rsv: Card = { id: id('reserve'), kind: 'reserve' };
     rows.push(row({ cards: [{ card: rsv }] }));
+  }
+
+  // 6c. Thermal forced-outage Monte Carlo reliability (conditional)
+  if (hasOutageMc) {
+    const omc: Card = { id: id('outage-mc'), kind: 'outage-mc' };
+    rows.push(row({ cards: [{ card: omc }] }));
   }
 
   // (Storage SoC lives in the demand · price · SoC row above.)

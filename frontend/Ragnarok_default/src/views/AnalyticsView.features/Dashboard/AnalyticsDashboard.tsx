@@ -59,6 +59,7 @@ import { AuctionBookCard } from '../../../features/analytics/cards/AuctionBookCa
 import { StrategicBiddingCard } from '../../../features/analytics/cards/StrategicBiddingCard';
 import { ContingencyCard } from '../../../features/analytics/cards/ContingencyCard';
 import { ReserveCard } from '../../../features/analytics/cards/ReserveCard';
+import { OutageMcCard } from '../../../features/analytics/cards/OutageMcCard';
 import { EmissionsBreakdownCard } from '../../../features/analytics/cards/EmissionsBreakdownCard';
 import { CapacityExpansionCard } from '../../../features/analytics/cards/CapacityExpansionCard';
 import { CapacityByPeriodCard } from '../../../features/analytics/cards/CapacityByPeriodCard';
@@ -558,6 +559,10 @@ export function AnalyticsDashboard({
           return results.reserve?.enabled
             ? <ReserveCard data={results.reserve} currencySymbol={currencySymbol} />
             : <p className="dashboard-cell-missing">This run did not co-optimize operating reserve.</p>;
+        case 'outage-mc':
+          return results.outageMc?.enabled
+            ? <OutageMcCard data={results.outageMc} />
+            : <p className="dashboard-cell-missing">This run was not a thermal forced-outage Monte Carlo study.</p>;
         case 'emissions-breakdown':
           return results.emissionsBreakdown
             ? <EmissionsBreakdownCard data={results.emissionsBreakdown} />
@@ -640,6 +645,7 @@ export function AnalyticsDashboard({
       case 'strategic-bidding': return 'Strategic bidding (market power best response)';
       case 'contingency': return 'N-1 contingency (security)';
       case 'reserve': return 'Operating reserve (price & headroom)';
+      case 'outage-mc': return 'Outage Monte Carlo (LOLE / EUE distribution)';
       case 'emissions-breakdown': return 'Emissions by generator / carrier';
       case 'capacity-expansion': return 'Capacity expansion';
       case 'capacity-by-period': return 'Capacity by period';

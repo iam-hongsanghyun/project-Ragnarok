@@ -16,6 +16,7 @@ import {
   StochasticConfig,
   SecurityConstrainedConfig,
   ReserveConfig,
+  OutageMcConfig,
   MarketSimConfig,
   PowerFlowConfig,
   ContingencyConfig,
@@ -298,6 +299,7 @@ function AppInner() {
   const [stochasticConfig, setStochasticConfig] = useState<StochasticConfig>({ enabled: false, scenarios: [] });
   const [sclopfConfig, setSclopfConfig] = useState<SecurityConstrainedConfig>({ enabled: false });
   const [reserveConfig, setReserveConfig] = useState<ReserveConfig>({ enabled: false, requirementType: 'fraction', fraction: 0.1, providers: 'all', reserveCost: 0 });
+  const [outageMcConfig, setOutageMcConfig] = useState<OutageMcConfig>({ enabled: false, nMembers: 200, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, includeRenewableEnsemble: false });
   const [powerFlowConfig, setPowerFlowConfig] = useState<PowerFlowConfig>({ enabled: false, linear: false });
   const [marketSimConfig, setMarketSimConfig] = useState<MarketSimConfig>({ enabled: false, pricing: 'uniform' as const, voll: 3000, chargeQuantile: 0.25, dischargeQuantile: 0.75, clearingModel: 'singleSided' as const, demandElasticFraction: 0.2, demandWtp: 120 });
   const [contingencyConfig, setContingencyConfig] = useState<ContingencyConfig>({ enabled: false });
@@ -350,6 +352,7 @@ function AppInner() {
     stochasticConfig: { enabled: false, scenarios: [] },
     securityConstrainedConfig: { enabled: false },
     reserveConfig: { enabled: false, requirementType: 'fraction', fraction: 0.1, providers: 'all', reserveCost: 0 },
+    outageMcConfig: { enabled: false, nMembers: 200, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, includeRenewableEnsemble: false },
     powerFlowConfig: { enabled: false, linear: false },
     marketSimConfig: { enabled: false, pricing: 'uniform' as const, voll: 3000, chargeQuantile: 0.25, dischargeQuantile: 0.75, clearingModel: 'singleSided' as const, demandElasticFraction: 0.2, demandWtp: 120 },
     contingencyConfig: { enabled: false },
@@ -520,6 +523,7 @@ function AppInner() {
       stochasticConfig,
       securityConstrainedConfig: sclopfConfig,
       reserveConfig,
+      outageMcConfig,
       powerFlowConfig,
       marketSimConfig,
       contingencyConfig,
@@ -553,6 +557,7 @@ function AppInner() {
     stochasticConfig,
     sclopfConfig,
     reserveConfig,
+    outageMcConfig,
     powerFlowConfig,
     marketSimConfig,
     contingencyConfig,
@@ -677,6 +682,7 @@ function AppInner() {
       stochasticConfig,
       securityConstrainedConfig: sclopfConfig,
       reserveConfig,
+      outageMcConfig,
       powerFlowConfig,
       marketSimConfig,
       contingencyConfig,
@@ -735,6 +741,7 @@ function AppInner() {
     stochasticConfig,
     sclopfConfig,
     reserveConfig,
+    outageMcConfig,
     powerFlowConfig,
     marketSimConfig,
     contingencyConfig,
@@ -1202,6 +1209,7 @@ function AppInner() {
     setStochasticConfig(scenario.stochasticConfig ?? { enabled: false, scenarios: [] });
     setSclopfConfig(scenario.securityConstrainedConfig ?? { enabled: false });
     setReserveConfig(scenario.reserveConfig ?? { enabled: false, requirementType: 'fraction', fraction: 0.1, providers: 'all', reserveCost: 0 });
+    setOutageMcConfig(scenario.outageMcConfig ?? { enabled: false, nMembers: 200, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, includeRenewableEnsemble: false });
     setPowerFlowConfig(scenario.powerFlowConfig ?? { enabled: false, linear: false });
     setMarketSimConfig(scenario.marketSimConfig ?? { enabled: false, pricing: 'uniform' as const, voll: 3000, chargeQuantile: 0.25, dischargeQuantile: 0.75, clearingModel: 'singleSided' as const, demandElasticFraction: 0.2, demandWtp: 120 });
     setContingencyConfig(scenario.contingencyConfig ?? { enabled: false });
@@ -2908,6 +2916,8 @@ function AppInner() {
               onSclopfConfigChange={setSclopfConfig}
               reserveConfig={reserveConfig}
               onReserveConfigChange={setReserveConfig}
+              outageMcConfig={outageMcConfig}
+              onOutageMcConfigChange={setOutageMcConfig}
               powerFlowConfig={powerFlowConfig}
               onPowerFlowConfigChange={setPowerFlowConfig}
               marketSimConfig={marketSimConfig}

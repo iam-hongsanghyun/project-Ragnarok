@@ -12,6 +12,7 @@ import {
   MgaConfig,
   MerchantConfig,
   ModelOverride,
+  OutageMcConfig,
   PathwayConfig,
   MarketSimConfig,
   PowerFlowConfig,
@@ -82,6 +83,17 @@ export function defaultReserveConfig(): ReserveConfig {
   return { enabled: false, requirementType: 'fraction', fraction: 0.1, providers: 'all', reserveCost: 0 };
 }
 
+export function defaultOutageMcConfig(): OutageMcConfig {
+  return {
+    enabled: false,
+    nMembers: 200,
+    seed: 42,
+    forcedOutageRate: 0.05,
+    mttrHours: 48,
+    includeRenewableEnsemble: false,
+  };
+}
+
 export function defaultPowerFlowConfig(): PowerFlowConfig {
   return { enabled: false, linear: false };
 }
@@ -148,6 +160,10 @@ function cloneSclopfConfig(config: SecurityConstrainedConfig): SecurityConstrain
 }
 
 function cloneReserveConfig(config: ReserveConfig): ReserveConfig {
+  return { ...config };
+}
+
+function cloneOutageMcConfig(config: OutageMcConfig): OutageMcConfig {
   return { ...config };
 }
 
@@ -231,6 +247,7 @@ export function buildScenarioPreset(input: {
   stochasticConfig?: StochasticConfig;
   securityConstrainedConfig?: SecurityConstrainedConfig;
   reserveConfig?: ReserveConfig;
+  outageMcConfig?: OutageMcConfig;
   powerFlowConfig?: PowerFlowConfig;
   marketSimConfig?: MarketSimConfig;
   contingencyConfig?: ContingencyConfig;
@@ -265,6 +282,7 @@ export function buildScenarioPreset(input: {
     stochasticConfig: cloneStochasticConfig(input.stochasticConfig ?? defaultStochasticConfig()),
     securityConstrainedConfig: cloneSclopfConfig(input.securityConstrainedConfig ?? defaultSclopfConfig()),
     reserveConfig: cloneReserveConfig(input.reserveConfig ?? defaultReserveConfig()),
+    outageMcConfig: cloneOutageMcConfig(input.outageMcConfig ?? defaultOutageMcConfig()),
     powerFlowConfig: clonePowerFlowConfig(input.powerFlowConfig ?? defaultPowerFlowConfig()),
     marketSimConfig: cloneMarketSimConfig(input.marketSimConfig ?? defaultMarketSimConfig()),
     contingencyConfig: cloneContingencyConfig(input.contingencyConfig ?? defaultContingencyConfig()),
@@ -316,6 +334,7 @@ function normalizeScenarioCatalog(catalog: ScenarioCatalog): ScenarioCatalog {
       stochasticConfig: cloneStochasticConfig(scenario.stochasticConfig ?? defaultStochasticConfig()),
       securityConstrainedConfig: cloneSclopfConfig(scenario.securityConstrainedConfig ?? defaultSclopfConfig()),
       reserveConfig: cloneReserveConfig(scenario.reserveConfig ?? defaultReserveConfig()),
+      outageMcConfig: cloneOutageMcConfig(scenario.outageMcConfig ?? defaultOutageMcConfig()),
       powerFlowConfig: clonePowerFlowConfig(scenario.powerFlowConfig ?? defaultPowerFlowConfig()),
       marketSimConfig: cloneMarketSimConfig(scenario.marketSimConfig ?? defaultMarketSimConfig()),
       contingencyConfig: cloneContingencyConfig(scenario.contingencyConfig ?? defaultContingencyConfig()),
@@ -362,6 +381,7 @@ export function readScenarioCatalogFromModel(model: WorkbookModel): ScenarioCata
         stochasticConfig: payload.stochasticConfig ?? defaultStochasticConfig(),
         securityConstrainedConfig: payload.securityConstrainedConfig ?? defaultSclopfConfig(),
         reserveConfig: payload.reserveConfig ?? defaultReserveConfig(),
+        outageMcConfig: payload.outageMcConfig ?? defaultOutageMcConfig(),
         powerFlowConfig: payload.powerFlowConfig ?? defaultPowerFlowConfig(),
         marketSimConfig: payload.marketSimConfig ?? defaultMarketSimConfig(),
         contingencyConfig: payload.contingencyConfig ?? defaultContingencyConfig(),
@@ -417,6 +437,7 @@ export function writeScenarioCatalogToModel(
       stochasticConfig: scenario.stochasticConfig,
       securityConstrainedConfig: scenario.securityConstrainedConfig,
       reserveConfig: scenario.reserveConfig,
+      outageMcConfig: scenario.outageMcConfig,
       powerFlowConfig: scenario.powerFlowConfig,
       marketSimConfig: scenario.marketSimConfig,
       contingencyConfig: scenario.contingencyConfig,

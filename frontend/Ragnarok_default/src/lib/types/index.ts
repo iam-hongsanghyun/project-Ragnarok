@@ -172,6 +172,21 @@ export interface ReserveConfig {
   reserveCost: number;
 }
 
+/** Thermal forced-outage Monte-Carlo reliability run — samples random generator
+ *  up/down states (EFOR + repair time) across many synthetic years and reports
+ *  the DISTRIBUTION of loss-of-load (LOLE) and expected unserved energy (EUE). */
+export interface OutageMcConfig {
+  enabled: boolean;
+  /** Monte-Carlo samples (synthetic years). */
+  nMembers: number;
+  seed: number;
+  /** EFOR fallback used when a generator has no explicit forced-outage rate. */
+  forcedOutageRate: number;
+  /** Mean time to repair, hours. */
+  mttrHours: number;
+  includeRenewableEnsemble: boolean;
+}
+
 /** Power-flow study mode — solve network physics (pf/lpf) instead of an LP. */
 export interface PowerFlowConfig {
   enabled: boolean;
@@ -887,6 +902,30 @@ export interface ReserveResult {
   note: string | null;
 }
 
+/** P50/P90/P95/mean/max across the Monte-Carlo ensemble for one metric. */
+export interface OutageMcDistribution {
+  p50: number;
+  p90: number;
+  p95: number;
+  mean: number;
+  max: number;
+}
+
+/** Backend result block for the thermal forced-outage Monte-Carlo reliability run. */
+export interface OutageMcResult {
+  enabled: boolean;
+  nMembers: number;
+  seed: number;
+  loleDistribution: OutageMcDistribution;
+  eueDistribution: OutageMcDistribution;
+  /** Per-snapshot loss-of-load probability across the ensemble. */
+  lolpSeries: ValuePoint[];
+  byCarrierLostLoad: { label: string; value: number; color?: string }[];
+  eueHistogram: { bin: number; count: number }[];
+  summary: { label: string; value: string; detail?: string }[];
+  note: string | null;
+}
+
 export interface StochasticScenarioResult {
   name: string;
   weight: number;
@@ -927,6 +966,7 @@ export interface ScenarioPreset {
   stochasticConfig: StochasticConfig;
   securityConstrainedConfig: SecurityConstrainedConfig;
   reserveConfig: ReserveConfig;
+  outageMcConfig: OutageMcConfig;
   powerFlowConfig: PowerFlowConfig;
   marketSimConfig?: MarketSimConfig;
   contingencyConfig: ContingencyConfig;
@@ -1464,6 +1504,8 @@ export interface RunResults {
   contingency?: ContingencyResult;
   /** Present only when the run co-optimized operating reserve. */
   reserve?: ReserveResult;
+  /** Present only when the run was a thermal forced-outage Monte-Carlo reliability study. */
+  outageMc?: OutageMcResult;
   /** PyPSA statistics() table (per-carrier capacity/CF/curtailment/revenue/…). */
   statistics?: StatisticsResult;
   /** MGA near-optimal capacity corridor (present only when MGA was enabled). */

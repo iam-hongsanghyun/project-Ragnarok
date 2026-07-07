@@ -84,6 +84,7 @@ export function buildRunPayload(
     stochasticConfig: preset.stochasticConfig,
     securityConstrainedConfig: preset.securityConstrainedConfig,
     reserveConfig: preset.reserveConfig,
+    outageMcConfig: preset.outageMcConfig,
     powerFlowConfig: preset.powerFlowConfig,
     marketSimConfig: preset.marketSimConfig,
     contingencyConfig: preset.contingencyConfig,

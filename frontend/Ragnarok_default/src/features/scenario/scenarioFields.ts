@@ -28,6 +28,7 @@ const GROUP_LABELS: Record<string, string> = {
   pathwayConfig: 'Pathway', rollingConfig: 'Rolling', samplingConfig: 'Sampling',
   stochasticConfig: 'Stochastic', securityConstrainedConfig: 'Security',
   reserveConfig: 'Reserve',
+  outageMcConfig: 'Outage risk',
   powerFlowConfig: 'Power flow', marketSimConfig: 'Market', contingencyConfig: 'Contingency',
   mgaConfig: 'MGA', merchantConfig: 'Merchant', bidStrategyConfig: 'Bidding',
   assetSwapConfig: 'Asset swap', essConfig: 'Storage', ppaConfig: 'PPA',
