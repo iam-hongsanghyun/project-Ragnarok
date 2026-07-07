@@ -45,6 +45,7 @@ from .adequacy import build_adequacy
 from .outage_mc import build_outage_mc
 from .elcc import build_elcc
 from .correlated_sampling import build_correlated_sampling
+from .convergence import build_convergence
 from .company import build_company_breakdown
 from .company_statement import build_company_statement
 from .finance import build_company_finance
@@ -1167,6 +1168,20 @@ def _build_solved_payload(
         except Exception as exc:  # noqa: BLE001 — never sink the run over an MC extra
             notes.append(f"Correlated multi-driver Monte Carlo could not be computed: {exc}")
             _log.warning("correlated_sampling failed: %s", exc)
+    # Convergence-controlled outage Monte Carlo + maintenance placement — draws
+    # outage_mc's Markov sampler in incremental batches until the running
+    # EUE/LOLE estimate's relative standard error stabilises (rather than a
+    # fixed member count), optionally scheduling planned maintenance into the
+    # lowest-net-load window per unit first. Same guard pattern: never raises
+    # into the solve; None when disabled/absent or unsolved.
+    convergence_cfg = options.get("convergenceConfig") or {}
+    convergence_sampling: dict[str, Any] | None = None
+    if bool(convergence_cfg.get("enabled")):
+        try:
+            convergence_sampling = build_convergence(network, options)
+        except Exception as exc:  # noqa: BLE001 — never sink the run over an MC extra
+            notes.append(f"Convergence-controlled sampling could not be computed: {exc}")
+            _log.warning("convergence failed: %s", exc)
     # Consolidated per-company annual P&L (revenue → carbon/fuel → margin → EBIT
     # → net). Reads only solved dataframes; independent of any config.
     company_statement = build_company_statement(
@@ -1217,6 +1232,7 @@ def _build_solved_payload(
         "outageMc": outage_mc,
         "elcc": elcc,
         "correlatedSampling": correlated_sampling,
+        "convergenceSampling": convergence_sampling,
         "priceFormation": price_formation,
         "commitment": commitment,
         "ppa": ppa,

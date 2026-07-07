@@ -3,6 +3,7 @@ import {
   ContingencyConfig,
   AssetSwapConfig,
   BidStrategyConfig,
+  ConvergenceConfig,
   CorrelatedSamplingConfig,
   CustomConstraint,
   ElccConfig,
@@ -126,6 +127,22 @@ export function defaultElccConfig(): ElccConfig {
   };
 }
 
+export function defaultConvergenceConfig(): ConvergenceConfig {
+  return {
+    enabled: false,
+    targetMetric: 'eue',
+    tolerance: 0.05,
+    batchSize: 50,
+    maxMembers: 2000,
+    seed: 42,
+    forcedOutageRate: 0.05,
+    mttrHours: 48,
+    maintenanceEnabled: false,
+    maintenanceWeeks: 3,
+    maintenanceCarriers: [],
+  };
+}
+
 export function defaultPowerFlowConfig(): PowerFlowConfig {
   return { enabled: false, linear: false };
 }
@@ -209,6 +226,10 @@ function cloneRampConfig(config: RampConfig): RampConfig {
 
 function cloneElccConfig(config: ElccConfig): ElccConfig {
   return { ...config, carriers: [...(config.carriers ?? [])] };
+}
+
+function cloneConvergenceConfig(config: ConvergenceConfig): ConvergenceConfig {
+  return { ...config, maintenanceCarriers: [...(config.maintenanceCarriers ?? [])] };
 }
 
 function clonePowerFlowConfig(config: PowerFlowConfig): PowerFlowConfig {
@@ -295,6 +316,7 @@ export function buildScenarioPreset(input: {
   correlatedSamplingConfig?: CorrelatedSamplingConfig;
   rampConfig?: RampConfig;
   elccConfig?: ElccConfig;
+  convergenceConfig?: ConvergenceConfig;
   powerFlowConfig?: PowerFlowConfig;
   marketSimConfig?: MarketSimConfig;
   contingencyConfig?: ContingencyConfig;
@@ -333,6 +355,7 @@ export function buildScenarioPreset(input: {
     correlatedSamplingConfig: cloneCorrelatedSamplingConfig(input.correlatedSamplingConfig ?? defaultCorrelatedSamplingConfig()),
     rampConfig: cloneRampConfig(input.rampConfig ?? defaultRampConfig()),
     elccConfig: cloneElccConfig(input.elccConfig ?? defaultElccConfig()),
+    convergenceConfig: cloneConvergenceConfig(input.convergenceConfig ?? defaultConvergenceConfig()),
     powerFlowConfig: clonePowerFlowConfig(input.powerFlowConfig ?? defaultPowerFlowConfig()),
     marketSimConfig: cloneMarketSimConfig(input.marketSimConfig ?? defaultMarketSimConfig()),
     contingencyConfig: cloneContingencyConfig(input.contingencyConfig ?? defaultContingencyConfig()),
@@ -388,6 +411,7 @@ function normalizeScenarioCatalog(catalog: ScenarioCatalog): ScenarioCatalog {
       correlatedSamplingConfig: cloneCorrelatedSamplingConfig(scenario.correlatedSamplingConfig ?? defaultCorrelatedSamplingConfig()),
       rampConfig: cloneRampConfig(scenario.rampConfig ?? defaultRampConfig()),
       elccConfig: cloneElccConfig(scenario.elccConfig ?? defaultElccConfig()),
+      convergenceConfig: cloneConvergenceConfig(scenario.convergenceConfig ?? defaultConvergenceConfig()),
       powerFlowConfig: clonePowerFlowConfig(scenario.powerFlowConfig ?? defaultPowerFlowConfig()),
       marketSimConfig: cloneMarketSimConfig(scenario.marketSimConfig ?? defaultMarketSimConfig()),
       contingencyConfig: cloneContingencyConfig(scenario.contingencyConfig ?? defaultContingencyConfig()),
@@ -438,6 +462,7 @@ export function readScenarioCatalogFromModel(model: WorkbookModel): ScenarioCata
         correlatedSamplingConfig: payload.correlatedSamplingConfig ?? defaultCorrelatedSamplingConfig(),
         rampConfig: payload.rampConfig ?? defaultRampConfig(),
         elccConfig: payload.elccConfig ?? defaultElccConfig(),
+        convergenceConfig: payload.convergenceConfig ?? defaultConvergenceConfig(),
         powerFlowConfig: payload.powerFlowConfig ?? defaultPowerFlowConfig(),
         marketSimConfig: payload.marketSimConfig ?? defaultMarketSimConfig(),
         contingencyConfig: payload.contingencyConfig ?? defaultContingencyConfig(),
@@ -497,6 +522,7 @@ export function writeScenarioCatalogToModel(
       correlatedSamplingConfig: scenario.correlatedSamplingConfig,
       rampConfig: scenario.rampConfig,
       elccConfig: scenario.elccConfig,
+      convergenceConfig: scenario.convergenceConfig,
       powerFlowConfig: scenario.powerFlowConfig,
       marketSimConfig: scenario.marketSimConfig,
       contingencyConfig: scenario.contingencyConfig,

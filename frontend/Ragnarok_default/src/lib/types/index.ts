@@ -227,6 +227,32 @@ export interface ElccConfig {
   carriers: string[];
 }
 
+/** Convergence-controlled sampling — draws the forced-outage Monte Carlo in
+ *  batches until the target reliability metric's standard error falls below
+ *  a tolerance, so the ensemble size is defensible rather than a fixed guess.
+ *  Optional maintenance placement schedules planned outages into low-load
+ *  windows and folds them into the risk. */
+export interface ConvergenceConfig {
+  enabled: boolean;
+  targetMetric: 'eue' | 'lole';
+  /** Relative standard error at which sampling stops. */
+  tolerance: number;
+  /** Samples drawn per batch. */
+  batchSize: number;
+  /** Hard cap on total samples even if not converged. */
+  maxMembers: number;
+  seed: number;
+  /** EFOR fallback used when a generator has no explicit forced-outage rate. */
+  forcedOutageRate: number;
+  /** Mean time to repair, hours. */
+  mttrHours: number;
+  maintenanceEnabled: boolean;
+  /** Length of each planned maintenance outage, weeks. */
+  maintenanceWeeks: number;
+  /** Carriers to schedule maintenance for; empty = auto. */
+  maintenanceCarriers: string[];
+}
+
 /** Timestep-weighted ramp-rate limits — bounds how fast each unit's output can
  *  change between consecutive snapshots: |Δp| ≤ ramp% × p_nom × hours per step
  *  (timestep-weighted, unlike PyPSA's native per-snapshot ramp_limit_up/down). */
@@ -1030,6 +1056,49 @@ export interface ElccResult {
   note: string | null;
 }
 
+/** One point on the convergence trace — the running metric estimate and its
+ *  standard error after a given number of Monte-Carlo members. */
+export interface ConvergenceTracePoint {
+  members: number;
+  estimate: number;
+  se: number;
+}
+
+/** One planned-maintenance placement — a unit taken offline for a scheduled
+ *  window chosen to fall in a low-load period. */
+export interface MaintenanceScheduleEntry {
+  unit: string;
+  carrier: string;
+  startLabel: string;
+  weeks: number;
+}
+
+/** Maintenance-placement block folded into the convergence-controlled sampling
+ *  result when maintenance scheduling was enabled. */
+export interface ConvergenceMaintenance {
+  enabled: boolean;
+  schedule: MaintenanceScheduleEntry[];
+  summary: { label: string; value: string; detail?: string }[];
+}
+
+/** Backend result block for the convergence-controlled sampling + maintenance
+ *  placement reliability study. */
+export interface ConvergenceResult {
+  enabled: boolean;
+  targetMetric: string;
+  tolerance: number;
+  achievedMembers: number;
+  converged: boolean;
+  estimate: number;
+  ciLow: number;
+  ciHigh: number;
+  unit: string;
+  trace: ConvergenceTracePoint[];
+  maintenance: ConvergenceMaintenance | null;
+  summary: { label: string; value: string; detail?: string }[];
+  note: string | null;
+}
+
 export interface StochasticScenarioResult {
   name: string;
   weight: number;
@@ -1073,6 +1142,7 @@ export interface ScenarioPreset {
   outageMcConfig: OutageMcConfig;
   correlatedSamplingConfig: CorrelatedSamplingConfig;
   elccConfig: ElccConfig;
+  convergenceConfig: ConvergenceConfig;
   rampConfig: RampConfig;
   powerFlowConfig: PowerFlowConfig;
   marketSimConfig?: MarketSimConfig;
@@ -1619,6 +1689,8 @@ export interface RunResults {
   ramp?: RampResult;
   /** Present only when the run was an ELCC / capacity-credit study. */
   elcc?: ElccResult;
+  /** Present only when the run was a convergence-controlled sampling study. */
+  convergenceSampling?: ConvergenceResult;
   /** PyPSA statistics() table (per-carrier capacity/CF/curtailment/revenue/…). */
   statistics?: StatisticsResult;
   /** MGA near-optimal capacity corridor (present only when MGA was enabled). */

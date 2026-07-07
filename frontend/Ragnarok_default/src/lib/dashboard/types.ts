@@ -56,6 +56,7 @@ export type CardKind =
   | 'correlated-sampling'
   | 'ramp'
   | 'elcc'
+  | 'convergence'
   | 'emissions-breakdown'
   | 'capacity-expansion'
   | 'capacity-by-period'
@@ -297,6 +298,10 @@ export interface ElccCardData extends CardBase {
   kind: 'elcc';
 }
 
+export interface ConvergenceCardData extends CardBase {
+  kind: 'convergence';
+}
+
 export interface EmissionsBreakdownCardData extends CardBase {
   kind: 'emissions-breakdown';
 }
@@ -363,6 +368,7 @@ export type Card =
   | CorrelatedSamplingCardData
   | RampCardData
   | ElccCardData
+  | ConvergenceCardData
   | EmissionsBreakdownCardData
   | CapacityExpansionCardData
   | CapacityByPeriodCardData

@@ -32,6 +32,7 @@ const GROUP_LABELS: Record<string, string> = {
   correlatedSamplingConfig: 'Correlated risk',
   rampConfig: 'Ramp',
   elccConfig: 'ELCC',
+  convergenceConfig: 'Convergence',
   powerFlowConfig: 'Power flow', marketSimConfig: 'Market', contingencyConfig: 'Contingency',
   mgaConfig: 'MGA', merchantConfig: 'Merchant', bidStrategyConfig: 'Bidding',
   assetSwapConfig: 'Asset swap', essConfig: 'Storage', ppaConfig: 'PPA',

@@ -13,6 +13,7 @@ import {
   AppliedConstraint,
   CarbonPriceScheduleEntry,
   CarbonScheduleProfile,
+  ConvergenceConfig,
   CorrelatedSamplingConfig,
   CustomConstraint,
   PathwayConfig,
@@ -56,6 +57,7 @@ import { OutageMcSection } from './SettingsView.sections/OutageMc';
 import { CorrelatedSamplingSection } from './SettingsView.sections/CorrelatedSampling';
 import { RampSection } from './SettingsView.sections/Ramp';
 import { ElccSection } from './SettingsView.sections/Elcc';
+import { ConvergenceSection } from './SettingsView.sections/Convergence';
 import { PowerFlowSection } from './SettingsView.sections/PowerFlow';
 import { MarketSimulationSection } from './SettingsView.sections/MarketSimulation';
 import { ContingencySection } from './SettingsView.sections/Contingency';
@@ -89,6 +91,7 @@ type SectionId =
   | 'correlatedSampling'
   | 'ramp'
   | 'elcc'
+  | 'convergence'
   | 'powerflow'
   | 'marketsim'
   | 'contingency'
@@ -143,6 +146,7 @@ const SECTIONS: Section[] = [
   { id: 'correlatedSampling', label: 'Correlated sampling',    group: 'Solve' },
   { id: 'ramp',       label: 'Ramp-rate limits',               group: 'Solve' },
   { id: 'elcc',       label: 'ELCC / capacity credit',         group: 'Solve' },
+  { id: 'convergence', label: 'Convergence sampling',          group: 'Solve' },
   { id: 'powerflow', label: 'Power flow',                     group: 'Solve' },
   { id: 'marketsim', label: 'Market simulation',               group: 'Solve' },
   { id: 'contingency', label: 'N-1 contingency',              group: 'Solve' },
@@ -213,6 +217,8 @@ export interface SettingsViewProps {
   onRampConfigChange: (config: RampConfig) => void;
   elccConfig: ElccConfig;
   onElccConfigChange: (config: ElccConfig) => void;
+  convergenceConfig: ConvergenceConfig;
+  onConvergenceConfigChange: (config: ConvergenceConfig) => void;
   powerFlowConfig: PowerFlowConfig;
   onPowerFlowConfigChange: (config: PowerFlowConfig) => void;
   marketSimConfig: MarketSimConfig;
@@ -367,6 +373,7 @@ export function SettingsView(props: SettingsViewProps) {
         {section === 'correlatedSampling' && <CorrelatedSamplingSection {...props} />}
         {section === 'ramp'           && <RampSection {...props} />}
         {section === 'elcc'           && <ElccSection {...props} />}
+        {section === 'convergence'    && <ConvergenceSection {...props} />}
         {section === 'powerflow'      && <PowerFlowSection {...props} />}
         {section === 'marketsim'      && <MarketSimulationSection {...props} />}
         {section === 'contingency'    && <ContingencySection {...props} />}

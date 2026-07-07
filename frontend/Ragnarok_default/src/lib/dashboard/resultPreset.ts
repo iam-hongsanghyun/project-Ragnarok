@@ -157,6 +157,7 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   const hasCorrelatedSampling = !!results.correlatedSampling?.enabled;
   const hasRamp = !!results.ramp?.enabled;
   const hasElcc = !!results.elcc?.enabled;
+  const hasConvergence = !!results.convergenceSampling?.enabled;
 
   const rows: Array<ReturnType<typeof row>> = [];
 
@@ -269,6 +270,12 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   if (hasElcc) {
     const elc: Card = { id: id('elcc'), kind: 'elcc' };
     rows.push(row({ cards: [{ card: elc }] }));
+  }
+
+  // 6f. Convergence-controlled sampling + maintenance placement (conditional)
+  if (hasConvergence) {
+    const cvg: Card = { id: id('convergence'), kind: 'convergence' };
+    rows.push(row({ cards: [{ card: cvg }] }));
   }
 
   // (Storage SoC lives in the demand · price · SoC row above.)

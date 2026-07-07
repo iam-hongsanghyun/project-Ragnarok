@@ -63,6 +63,7 @@ import { OutageMcCard } from '../../../features/analytics/cards/OutageMcCard';
 import { CorrelatedSamplingCard } from '../../../features/analytics/cards/CorrelatedSamplingCard';
 import { RampCard } from '../../../features/analytics/cards/RampCard';
 import { ElccCard } from '../../../features/analytics/cards/ElccCard';
+import { ConvergenceCard } from '../../../features/analytics/cards/ConvergenceCard';
 import { EmissionsBreakdownCard } from '../../../features/analytics/cards/EmissionsBreakdownCard';
 import { CapacityExpansionCard } from '../../../features/analytics/cards/CapacityExpansionCard';
 import { CapacityByPeriodCard } from '../../../features/analytics/cards/CapacityByPeriodCard';
@@ -578,6 +579,10 @@ export function AnalyticsDashboard({
           return results.elcc?.enabled
             ? <ElccCard data={results.elcc} />
             : <p className="dashboard-cell-missing">This run was not an ELCC / capacity-credit study.</p>;
+        case 'convergence':
+          return results.convergenceSampling?.enabled
+            ? <ConvergenceCard data={results.convergenceSampling} />
+            : <p className="dashboard-cell-missing">This run was not a convergence-controlled sampling study.</p>;
         case 'emissions-breakdown':
           return results.emissionsBreakdown
             ? <EmissionsBreakdownCard data={results.emissionsBreakdown} />
@@ -664,6 +669,7 @@ export function AnalyticsDashboard({
       case 'correlated-sampling': return 'Correlated sampling (weather-driven stress)';
       case 'ramp': return 'Ramp-rate limits (timestep-weighted)';
       case 'elcc': return 'ELCC / capacity credit';
+      case 'convergence': return 'Convergence sampling (batched Monte Carlo + maintenance)';
       case 'emissions-breakdown': return 'Emissions by generator / carrier';
       case 'capacity-expansion': return 'Capacity expansion';
       case 'capacity-by-period': return 'Capacity by period';
