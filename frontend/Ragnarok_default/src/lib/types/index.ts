@@ -187,6 +187,29 @@ export interface OutageMcConfig {
   includeRenewableEnsemble: boolean;
 }
 
+/** Correlated multi-driver Monte-Carlo reliability run — a common weather-driven
+ *  stress factor pushes demand UP while renewable output and hydro inflow drop
+ *  together (a cold-calm event), so the reliability distribution captures the
+ *  co-movement that independent draws miss. */
+export interface CorrelatedSamplingConfig {
+  enabled: boolean;
+  /** Monte-Carlo samples (synthetic years). */
+  nMembers: number;
+  seed: number;
+  /** Sensitivity of demand to the common stress factor. */
+  loadSensitivity: number;
+  /** Sensitivity of renewable output to the common stress factor. */
+  renewableSensitivity: number;
+  /** Sensitivity of hydro inflow to the common stress factor. */
+  inflowSensitivity: number;
+  /** Idiosyncratic (independent) demand noise, std dev. */
+  loadStd: number;
+  /** Idiosyncratic (independent) renewable noise, std dev. */
+  renewableStd: number;
+  /** Idiosyncratic (independent) hydro inflow noise, std dev. */
+  inflowStd: number;
+}
+
 /** Timestep-weighted ramp-rate limits — bounds how fast each unit's output can
  *  change between consecutive snapshots: |Δp| ≤ ramp% × p_nom × hours per step
  *  (timestep-weighted, unlike PyPSA's native per-snapshot ramp_limit_up/down). */
@@ -939,6 +962,26 @@ export interface OutageMcResult {
   note: string | null;
 }
 
+/** One stress driver's realized effect across the correlated Monte-Carlo ensemble. */
+export interface CorrelatedDriverEntry {
+  driver: string;
+  meanMultiplier: number;
+  p95Multiplier: number;
+}
+
+/** Backend result block for the correlated multi-driver Monte-Carlo reliability run. */
+export interface CorrelatedSamplingResult {
+  enabled: boolean;
+  nMembers: number;
+  seed: number;
+  loleDistribution: OutageMcDistribution;
+  eueDistribution: OutageMcDistribution;
+  driverSummary: CorrelatedDriverEntry[];
+  eueHistogram: { bin: number; count: number }[];
+  summary: { label: string; value: string; detail?: string }[];
+  note: string | null;
+}
+
 /** Backend result block for timestep-weighted ramp-rate limits. */
 export interface RampResult {
   enabled: boolean;
@@ -990,6 +1033,7 @@ export interface ScenarioPreset {
   securityConstrainedConfig: SecurityConstrainedConfig;
   reserveConfig: ReserveConfig;
   outageMcConfig: OutageMcConfig;
+  correlatedSamplingConfig: CorrelatedSamplingConfig;
   rampConfig: RampConfig;
   powerFlowConfig: PowerFlowConfig;
   marketSimConfig?: MarketSimConfig;
@@ -1530,6 +1574,8 @@ export interface RunResults {
   reserve?: ReserveResult;
   /** Present only when the run was a thermal forced-outage Monte-Carlo reliability study. */
   outageMc?: OutageMcResult;
+  /** Present only when the run was a correlated multi-driver Monte-Carlo reliability study. */
+  correlatedSampling?: CorrelatedSamplingResult;
   /** Present only when the run enforced timestep-weighted ramp-rate limits. */
   ramp?: RampResult;
   /** PyPSA statistics() table (per-carrier capacity/CF/curtailment/revenue/…). */

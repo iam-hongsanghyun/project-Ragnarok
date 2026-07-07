@@ -154,6 +154,7 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   const hasPriceElastic = !!(results.priceElastic && results.priceElastic.loads.length > 0);
   const hasReserve = !!results.reserve?.enabled;
   const hasOutageMc = !!results.outageMc?.enabled;
+  const hasCorrelatedSampling = !!results.correlatedSampling?.enabled;
   const hasRamp = !!results.ramp?.enabled;
 
   const rows: Array<ReturnType<typeof row>> = [];
@@ -249,6 +250,12 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   if (hasOutageMc) {
     const omc: Card = { id: id('outage-mc'), kind: 'outage-mc' };
     rows.push(row({ cards: [{ card: omc }] }));
+  }
+
+  // 6c′. Correlated multi-driver Monte Carlo reliability (conditional)
+  if (hasCorrelatedSampling) {
+    const csm: Card = { id: id('correlated-sampling'), kind: 'correlated-sampling' };
+    rows.push(row({ cards: [{ card: csm }] }));
   }
 
   // 6d. Timestep-weighted ramp-rate limits (conditional)

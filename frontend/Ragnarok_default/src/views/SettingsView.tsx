@@ -13,6 +13,7 @@ import {
   AppliedConstraint,
   CarbonPriceScheduleEntry,
   CarbonScheduleProfile,
+  CorrelatedSamplingConfig,
   CustomConstraint,
   PathwayConfig,
   ContingencyConfig,
@@ -51,6 +52,7 @@ import { StochasticSection } from './SettingsView.sections/Stochastic/Stochastic
 import { SclopfSection } from './SettingsView.sections/Sclopf';
 import { ReserveSection } from './SettingsView.sections/Reserve';
 import { OutageMcSection } from './SettingsView.sections/OutageMc';
+import { CorrelatedSamplingSection } from './SettingsView.sections/CorrelatedSampling';
 import { RampSection } from './SettingsView.sections/Ramp';
 import { PowerFlowSection } from './SettingsView.sections/PowerFlow';
 import { MarketSimulationSection } from './SettingsView.sections/MarketSimulation';
@@ -82,6 +84,7 @@ type SectionId =
   | 'sclopf'
   | 'reserve'
   | 'outageMc'
+  | 'correlatedSampling'
   | 'ramp'
   | 'powerflow'
   | 'marketsim'
@@ -134,6 +137,7 @@ const SECTIONS: Section[] = [
   { id: 'sclopf',     label: 'Security-constrained (SCLOPF)',  group: 'Solve' },
   { id: 'reserve',    label: 'Operating reserve',              group: 'Solve' },
   { id: 'outageMc',   label: 'Outage Monte Carlo',             group: 'Solve' },
+  { id: 'correlatedSampling', label: 'Correlated sampling',    group: 'Solve' },
   { id: 'ramp',       label: 'Ramp-rate limits',               group: 'Solve' },
   { id: 'powerflow', label: 'Power flow',                     group: 'Solve' },
   { id: 'marketsim', label: 'Market simulation',               group: 'Solve' },
@@ -199,6 +203,8 @@ export interface SettingsViewProps {
   onReserveConfigChange: (config: ReserveConfig) => void;
   outageMcConfig: OutageMcConfig;
   onOutageMcConfigChange: (config: OutageMcConfig) => void;
+  correlatedSamplingConfig: CorrelatedSamplingConfig;
+  onCorrelatedSamplingConfigChange: (config: CorrelatedSamplingConfig) => void;
   rampConfig: RampConfig;
   onRampConfigChange: (config: RampConfig) => void;
   powerFlowConfig: PowerFlowConfig;
@@ -352,6 +358,7 @@ export function SettingsView(props: SettingsViewProps) {
         {section === 'sclopf'         && <SclopfSection {...props} />}
         {section === 'reserve'        && <ReserveSection {...props} />}
         {section === 'outageMc'       && <OutageMcSection {...props} />}
+        {section === 'correlatedSampling' && <CorrelatedSamplingSection {...props} />}
         {section === 'ramp'           && <RampSection {...props} />}
         {section === 'powerflow'      && <PowerFlowSection {...props} />}
         {section === 'marketsim'      && <MarketSimulationSection {...props} />}

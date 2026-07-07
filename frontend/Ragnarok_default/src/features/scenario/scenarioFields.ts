@@ -29,6 +29,7 @@ const GROUP_LABELS: Record<string, string> = {
   stochasticConfig: 'Stochastic', securityConstrainedConfig: 'Security',
   reserveConfig: 'Reserve',
   outageMcConfig: 'Outage risk',
+  correlatedSamplingConfig: 'Correlated risk',
   rampConfig: 'Ramp',
   powerFlowConfig: 'Power flow', marketSimConfig: 'Market', contingencyConfig: 'Contingency',
   mgaConfig: 'MGA', merchantConfig: 'Merchant', bidStrategyConfig: 'Bidding',

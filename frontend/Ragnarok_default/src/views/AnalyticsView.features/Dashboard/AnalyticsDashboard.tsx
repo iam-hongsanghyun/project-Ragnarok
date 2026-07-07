@@ -60,6 +60,7 @@ import { StrategicBiddingCard } from '../../../features/analytics/cards/Strategi
 import { ContingencyCard } from '../../../features/analytics/cards/ContingencyCard';
 import { ReserveCard } from '../../../features/analytics/cards/ReserveCard';
 import { OutageMcCard } from '../../../features/analytics/cards/OutageMcCard';
+import { CorrelatedSamplingCard } from '../../../features/analytics/cards/CorrelatedSamplingCard';
 import { RampCard } from '../../../features/analytics/cards/RampCard';
 import { EmissionsBreakdownCard } from '../../../features/analytics/cards/EmissionsBreakdownCard';
 import { CapacityExpansionCard } from '../../../features/analytics/cards/CapacityExpansionCard';
@@ -564,6 +565,10 @@ export function AnalyticsDashboard({
           return results.outageMc?.enabled
             ? <OutageMcCard data={results.outageMc} />
             : <p className="dashboard-cell-missing">This run was not a thermal forced-outage Monte Carlo study.</p>;
+        case 'correlated-sampling':
+          return results.correlatedSampling?.enabled
+            ? <CorrelatedSamplingCard data={results.correlatedSampling} />
+            : <p className="dashboard-cell-missing">This run was not a correlated multi-driver Monte Carlo study.</p>;
         case 'ramp':
           return results.ramp?.enabled
             ? <RampCard data={results.ramp} />
@@ -651,6 +656,7 @@ export function AnalyticsDashboard({
       case 'contingency': return 'N-1 contingency (security)';
       case 'reserve': return 'Operating reserve (price & headroom)';
       case 'outage-mc': return 'Outage Monte Carlo (LOLE / EUE distribution)';
+      case 'correlated-sampling': return 'Correlated sampling (weather-driven stress)';
       case 'ramp': return 'Ramp-rate limits (timestep-weighted)';
       case 'emissions-breakdown': return 'Emissions by generator / carrier';
       case 'capacity-expansion': return 'Capacity expansion';

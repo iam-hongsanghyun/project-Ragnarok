@@ -293,35 +293,41 @@ def test_ramp_with_stochastic_is_rejected() -> None:
 # ── 6. No double enforcement with PyPSA's native ramp constraints ──────────
 
 
-def test_no_double_enforcement_with_native_ramp_constraints() -> None:
-    """ramp_limit_up/down are never written onto n.generators, so PyPSA's
-    native ramp constraint builder takes its early-return (all-null columns)
-    and only this module's own constraints appear in the solved model.
-
-    Uses a plain single-generator model (no per-generator ramp override
-    anywhere) so the "no native columns set" precondition is unambiguous.
+def test_no_double_enforcement_even_with_per_generator_override() -> None:
+    """The important case: a generator WITH a native ramp_limit_up/down override
+    (which the loader keeps on n.generators). strip_native_ramp_columns must cache
+    it and blank the columns so PyPSA's own unweighted ramp constraint no-ops and
+    only this module's Δt-weighted one is in the LP.
     """
+    from backend.pypsa.network.ramp import strip_native_ramp_columns
+
     snaps = [f"2025-01-01T{h:02d}:00:00" for h in range(4)]
     model: dict[str, list[dict[str, Any]]] = {
         "buses": [{"name": "b0", "v_nom": 1.0}],
         "carriers": [{"name": "gas"}],
         "snapshots": [{"snapshot": s} for s in snaps],
         "generators": [
-            {"name": "g1", "bus": "b0", "carrier": "gas", "p_nom": 100.0, "marginal_cost": 10.0},
+            # A REAL per-generator override on the model row (the bug trigger).
+            {"name": "g1", "bus": "b0", "carrier": "gas", "p_nom": 100.0,
+             "marginal_cost": 10.0, "ramp_limit_up": 1.0, "ramp_limit_down": 1.0},
         ],
         "loads": [{"name": "load", "bus": "b0", "p_set": 20.0}],
         "loads-p_set": [{"snapshot": s, "load": 20.0} for s in snaps],
     }
     options = {"snapshotStart": 0, "snapshotCount": 4, "snapshotWeight": 1.0}
     n, _ = build_network(model, SCENARIO, options)
-
-    # Confirm the generator table carries no ramp_limit_up/down overrides —
-    # this is the precondition for PyPSA's native constraint to no-op.
-    for col in ("ramp_limit_up", "ramp_limit_down"):
-        if col in n.generators.columns:
-            assert n.generators[col].isna().all() or (n.generators[col] <= 0).all()
+    # Precondition: the loader DID land the override on the network (this is why
+    # the native constraint would otherwise fire).
+    assert float(n.generators.at["g1", "ramp_limit_up"]) == 1.0
 
     ramp_cfg = {"enabled": True, "rampLimitUp": 0.2, "rampLimitDown": 0.2, "appliesTo": "all"}
+    strip_native_ramp_columns(n)
+    # The override is cached on n.meta (NOT the options dict) and the live
+    # columns are blanked. ramp_cfg is left untouched (no leaked internal keys).
+    assert n.meta["_ragnarok_ramp_overrides"]["up"]["g1"] == 1.0
+    assert bool(n.generators["ramp_limit_up"].isna().all())
+    assert "_perGenUp" not in ramp_cfg
+
     notes: list[str] = []
 
     def extra_functionality(net, snapshots):
@@ -403,3 +409,58 @@ def test_extendable_generator_ramp_is_enforced_via_capacity_variable() -> None:
 
     p_nom_opt = {row["name"]: row["p_nom_opt_mw"] for row in result["expansionResults"]}["g1"]
     assert p_nom_opt * 0.5 >= 130.0 - 1e-6
+
+
+def test_per_generator_override_uses_dt_weighting_not_native_cap() -> None:
+    """End-to-end regression for the double-enforcement bug through run_pypsa: a
+    single unit with a per-generator ramp override must ramp by rate*p_nom*Δt,
+    not PyPSA's native unweighted rate*p_nom. 16 raw hourly rows strided by
+    snapshotWeight=4 → 4 modelled snapshots at Δt=4h; the load jumps 20->80 MW
+    (60 MW) at one strided snapshot. Under the bug the native unweighted cap
+    (0.5*100=50 MW) makes that 60 MW step INFEASIBLE with no other supply; with
+    the Δt-weighted allowance (0.5*100*4=200 MW) run_pypsa (which strips the
+    native columns before the solve) solves it and g1 reaches 80."""
+    snaps = [f"2025-01-01T{h:02d}:00:00" for h in range(16)]
+    loads = [80.0 if i == 4 else 20.0 for i in range(16)]
+    model: dict[str, list[dict[str, Any]]] = {
+        "buses": [{"name": "b0", "v_nom": 1.0}],
+        "carriers": [{"name": "gas"}],
+        "snapshots": [{"snapshot": s} for s in snaps],
+        "generators": [
+            {"name": "g1", "bus": "b0", "carrier": "gas", "p_nom": 100.0, "marginal_cost": 10.0,
+             "ramp_limit_up": 0.5, "ramp_limit_down": 0.5},
+        ],
+        "loads": [{"name": "load", "bus": "b0"}],
+        "loads-p_set": [{"snapshot": s, "load": v} for s, v in zip(snaps, loads)],
+    }
+    options = {
+        "snapshotWeight": 4,
+        "rampConfig": {"enabled": True, "rampLimitUp": 0.5, "rampLimitDown": 0.5, "appliesTo": "all"},
+    }
+    result = run_pypsa(model, SCENARIO, options)
+    rows = result["generatorDispatchSeries"]
+    assert max(row["values"].get("g1", 0.0) for row in rows) >= 80.0 - 1e-6
+
+
+def test_strip_blanks_all_native_ramp_columns_including_startup() -> None:
+    """Regression: strip must blank ramp_limit_start_up / ramp_limit_shut_down
+    too, or PyPSA's up/down native early-return (which inspects them) fails and
+    the native unweighted constraint fires for committable units on top of ours."""
+    from backend.pypsa.network.ramp import strip_native_ramp_columns
+    snaps = [f"2025-01-01T{h:02d}:00:00" for h in range(3)]
+    model: dict[str, list[dict[str, Any]]] = {
+        "buses": [{"name": "b0", "v_nom": 1.0}],
+        "carriers": [{"name": "gas"}],
+        "snapshots": [{"snapshot": s} for s in snaps],
+        "generators": [
+            {"name": "g1", "bus": "b0", "carrier": "gas", "p_nom": 100.0, "marginal_cost": 10.0,
+             "committable": True, "ramp_limit_start_up": 0.5, "ramp_limit_shut_down": 0.5},
+        ],
+        "loads": [{"name": "load", "bus": "b0", "p_set": 20.0}],
+        "loads-p_set": [{"snapshot": s, "load": 20.0} for s in snaps],
+    }
+    n, _ = build_network(model, SCENARIO, {"snapshotWeight": 1})
+    strip_native_ramp_columns(n)
+    for col in ("ramp_limit_up", "ramp_limit_down", "ramp_limit_start_up", "ramp_limit_shut_down"):
+        if col in n.generators.columns:
+            assert bool(n.generators[col].isna().all()), f"{col} not blanked"

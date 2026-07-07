@@ -17,6 +17,7 @@ import {
   SecurityConstrainedConfig,
   ReserveConfig,
   OutageMcConfig,
+  CorrelatedSamplingConfig,
   RampConfig,
   MarketSimConfig,
   PowerFlowConfig,
@@ -301,6 +302,7 @@ function AppInner() {
   const [sclopfConfig, setSclopfConfig] = useState<SecurityConstrainedConfig>({ enabled: false });
   const [reserveConfig, setReserveConfig] = useState<ReserveConfig>({ enabled: false, requirementType: 'fraction', fraction: 0.1, providers: 'all', reserveCost: 0 });
   const [outageMcConfig, setOutageMcConfig] = useState<OutageMcConfig>({ enabled: false, nMembers: 200, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, includeRenewableEnsemble: false });
+  const [correlatedSamplingConfig, setCorrelatedSamplingConfig] = useState<CorrelatedSamplingConfig>({ enabled: false, nMembers: 200, seed: 42, loadSensitivity: 0.15, renewableSensitivity: 0.3, inflowSensitivity: 0.2, loadStd: 0.05, renewableStd: 0.1, inflowStd: 0.1 });
   const [rampConfig, setRampConfig] = useState<RampConfig>({ enabled: false, rampLimitUp: 0.5, rampLimitDown: 0.5, appliesTo: 'all' });
   const [powerFlowConfig, setPowerFlowConfig] = useState<PowerFlowConfig>({ enabled: false, linear: false });
   const [marketSimConfig, setMarketSimConfig] = useState<MarketSimConfig>({ enabled: false, pricing: 'uniform' as const, voll: 3000, chargeQuantile: 0.25, dischargeQuantile: 0.75, clearingModel: 'singleSided' as const, demandElasticFraction: 0.2, demandWtp: 120 });
@@ -355,6 +357,7 @@ function AppInner() {
     securityConstrainedConfig: { enabled: false },
     reserveConfig: { enabled: false, requirementType: 'fraction', fraction: 0.1, providers: 'all', reserveCost: 0 },
     outageMcConfig: { enabled: false, nMembers: 200, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, includeRenewableEnsemble: false },
+    correlatedSamplingConfig: { enabled: false, nMembers: 200, seed: 42, loadSensitivity: 0.15, renewableSensitivity: 0.3, inflowSensitivity: 0.2, loadStd: 0.05, renewableStd: 0.1, inflowStd: 0.1 },
     rampConfig: { enabled: false, rampLimitUp: 0.5, rampLimitDown: 0.5, appliesTo: 'all' },
     powerFlowConfig: { enabled: false, linear: false },
     marketSimConfig: { enabled: false, pricing: 'uniform' as const, voll: 3000, chargeQuantile: 0.25, dischargeQuantile: 0.75, clearingModel: 'singleSided' as const, demandElasticFraction: 0.2, demandWtp: 120 },
@@ -527,6 +530,7 @@ function AppInner() {
       securityConstrainedConfig: sclopfConfig,
       reserveConfig,
       outageMcConfig,
+      correlatedSamplingConfig,
       rampConfig,
       powerFlowConfig,
       marketSimConfig,
@@ -562,6 +566,7 @@ function AppInner() {
     sclopfConfig,
     reserveConfig,
     outageMcConfig,
+    correlatedSamplingConfig,
     rampConfig,
     powerFlowConfig,
     marketSimConfig,
@@ -688,6 +693,7 @@ function AppInner() {
       securityConstrainedConfig: sclopfConfig,
       reserveConfig,
       outageMcConfig,
+      correlatedSamplingConfig,
       rampConfig,
       powerFlowConfig,
       marketSimConfig,
@@ -748,6 +754,7 @@ function AppInner() {
     sclopfConfig,
     reserveConfig,
     outageMcConfig,
+    correlatedSamplingConfig,
     rampConfig,
     powerFlowConfig,
     marketSimConfig,
@@ -1217,6 +1224,7 @@ function AppInner() {
     setSclopfConfig(scenario.securityConstrainedConfig ?? { enabled: false });
     setReserveConfig(scenario.reserveConfig ?? { enabled: false, requirementType: 'fraction', fraction: 0.1, providers: 'all', reserveCost: 0 });
     setOutageMcConfig(scenario.outageMcConfig ?? { enabled: false, nMembers: 200, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, includeRenewableEnsemble: false });
+    setCorrelatedSamplingConfig(scenario.correlatedSamplingConfig ?? { enabled: false, nMembers: 200, seed: 42, loadSensitivity: 0.15, renewableSensitivity: 0.3, inflowSensitivity: 0.2, loadStd: 0.05, renewableStd: 0.1, inflowStd: 0.1 });
     setRampConfig(scenario.rampConfig ?? { enabled: false, rampLimitUp: 0.5, rampLimitDown: 0.5, appliesTo: 'all' });
     setPowerFlowConfig(scenario.powerFlowConfig ?? { enabled: false, linear: false });
     setMarketSimConfig(scenario.marketSimConfig ?? { enabled: false, pricing: 'uniform' as const, voll: 3000, chargeQuantile: 0.25, dischargeQuantile: 0.75, clearingModel: 'singleSided' as const, demandElasticFraction: 0.2, demandWtp: 120 });
@@ -2926,6 +2934,8 @@ function AppInner() {
               onReserveConfigChange={setReserveConfig}
               outageMcConfig={outageMcConfig}
               onOutageMcConfigChange={setOutageMcConfig}
+              correlatedSamplingConfig={correlatedSamplingConfig}
+              onCorrelatedSamplingConfigChange={setCorrelatedSamplingConfig}
               rampConfig={rampConfig}
               onRampConfigChange={setRampConfig}
               powerFlowConfig={powerFlowConfig}

@@ -22,11 +22,10 @@ Algorithm:
     both features).
 
     Per-generator hourly rate: the generator's own ``ramp_limit_up`` /
-    ``ramp_limit_down`` column when set (> 0), else the config default.
-    Note this column is read purely as a per-hour RATE parameter here — it is
-    never written back onto ``n.generators``, so PyPSA's own native ramp
-    constraint builder (which reads the same columns) never sees them and
-    never fires; see "No double enforcement" below.
+    ``ramp_limit_down`` value when set (including an explicit 0 = frozen), else
+    the config default. Those native columns are cached and then BLANKED on the
+    network before the solve (see "No double enforcement" below), so the rate is
+    read back from the cache, not the live column.
 
     Constraint, for eligible generator g and snapshot t that is not the first
     snapshot of the current optimisation window (window meaning: the full
@@ -50,17 +49,18 @@ Algorithm:
         ASCII: p[g,t] - p[g,t-1] - rampUp[g]*dt[t]*p_nom_var[g] <= 0
 
 No double enforcement: PyPSA's native ramp constraint builder
-(``define_ramp_limit_constraints``) is a no-op whenever the ``ramp_limit_up``
-/ ``ramp_limit_down`` static columns are either absent from
-``n.generators`` or entirely NaN (it checks
-``{"ramp_limit_up","ramp_limit_down"}.isdisjoint(columns)`` and an
-``all_null`` short-circuit before adding anything). This module never writes
-into those columns on the network — it only *reads* per-generator overrides
-from them as a rate parameter — so the native path always takes its early
-return and this module's own ``ramp_up`` / ``ramp_down`` constraints are the
-only ramp constraints in the LP. This is verified in the test suite by
-asserting ``"Generator-p-ramp_limit_up"`` / ``"Generator-p-ramp_limit_down"``
-are absent from ``n.model.constraints`` after a solve with ramp enabled.
+(``define_ramp_limit_constraints``) is a no-op only when the ``ramp_limit_up``
+/ ``ramp_limit_down`` static columns are absent or entirely NaN. But a
+per-generator override set on a model row lands a real value there (the generic
+loader keeps those native columns), which would make the native UNWEIGHTED
+constraint fire on top of — and dominate — this module's Δt-weighted one. So
+:func:`strip_native_ramp_columns` runs BEFORE the solve: it caches the
+per-generator overrides onto ``n.meta`` and blanks ALL native ramp columns
+(incl. start-up/shut-down), forcing the native builder's early return. This
+module's own ``ramp_up`` / ``ramp_down`` are
+then the only ramp constraints in the LP — verified in the test suite (with
+overrides SET) by asserting ``"Generator-p-ramp_limit_up"`` /
+``"Generator-p-ramp_limit_down"`` are absent from ``n.model.constraints``.
 
 Rolling horizon: each window's ``extra_functionality`` call gets a *fresh*
 ``n.model`` (linopy rebuilds it from scratch per window), so there is no
@@ -115,31 +115,76 @@ def _eligible_generators(
     return supply_gens
 
 
+_RAMP_OVERRIDE_META_KEY = "_ragnarok_ramp_overrides"
+
+
+def strip_native_ramp_columns(n: pypsa.Network) -> None:
+    """Cache per-generator ramp overrides on ``n.meta`` and REMOVE every native
+    ramp-limit column from ``n.generators``.
+
+    PyPSA builds its OWN (unweighted) ramp constraint from those columns during
+    model construction — BEFORE ``extra_functionality`` runs — so if any
+    generator carries a value, the native constraint fires on top of this
+    module's Δt-weighted one and (being unweighted) silently dominates it,
+    defeating the whole point and even turning feasible models infeasible.
+    Reading the overrides then blanking the columns makes PyPSA's native builder
+    take its all-null early return, leaving only the Δt-weighted constraint.
+
+    ALL FOUR native ramp columns are blanked — not just up/down: PyPSA's up/down
+    early-return also inspects ``ramp_limit_start_up`` / ``ramp_limit_shut_down``
+    (a committable unit carrying either would otherwise keep the native
+    unweighted up/down constraint alive). The module supersedes native ramp
+    entirely when enabled.
+
+    The cache is stashed on ``n.meta`` (NOT the caller's ``options`` dict) so no
+    internal keys leak into the stored run's options, and is read back by
+    :func:`_per_generator_rates`. MUST be called BEFORE ``optimize`` (inside
+    ``extra_functionality`` is too late — native constraints already exist).
+    """
+    gens = n.generators
+    overrides: dict[str, dict[str, float]] = {}
+    for col, key in (("ramp_limit_up", "up"), ("ramp_limit_down", "down")):
+        if col in gens.columns:
+            values = pd.to_numeric(gens[col], errors="coerce")
+            overrides[key] = {str(name): float(v) for name, v in values.items() if pd.notna(v)}
+    for col in ("ramp_limit_up", "ramp_limit_down", "ramp_limit_start_up", "ramp_limit_shut_down"):
+        if col in gens.columns:
+            gens[col] = np.nan
+    n.meta[_RAMP_OVERRIDE_META_KEY] = overrides
+
+
 def _per_generator_rates(
     gens: pd.DataFrame,
     eligible: list[str],
     default_up: float,
     default_down: float,
+    overrides: dict[str, dict[str, float]] | None = None,
 ) -> tuple[pd.Series, pd.Series]:
     """Per-hour ramp rate (fraction of p_nom) for each eligible generator.
 
-    A generator's own ``ramp_limit_up`` / ``ramp_limit_down`` column overrides
-    the config default when set and > 0; otherwise the config default
-    applies. These columns are read-only here (never written back), which is
-    what keeps PyPSA's native ramp constraint from also firing — see the
-    module docstring's "No double enforcement" section.
+    A generator's own ``ramp_limit_up`` / ``ramp_limit_down`` value overrides
+    the config default when set (including an explicit 0, which means "frozen");
+    an unset value (NaN) uses the config default. The per-generator values are
+    read from the ``overrides`` cache :func:`strip_native_ramp_columns` stashed
+    on ``n.meta`` (that function blanks the live columns before the solve to stop
+    PyPSA's native ramp constraint from also firing); when no cache is present
+    the live columns are read directly (direct/test callers).
     """
-    if "ramp_limit_up" in gens.columns:
-        up_override = pd.to_numeric(gens["ramp_limit_up"].reindex(eligible), errors="coerce")
-    else:
-        up_override = pd.Series(np.nan, index=eligible)
-    if "ramp_limit_down" in gens.columns:
-        down_override = pd.to_numeric(gens["ramp_limit_down"].reindex(eligible), errors="coerce")
-    else:
-        down_override = pd.Series(np.nan, index=eligible)
+    ov_up = (overrides or {}).get("up")
+    ov_down = (overrides or {}).get("down")
 
-    rate_up = up_override.where(up_override.notna() & (up_override > 0), default_up)
-    rate_down = down_override.where(down_override.notna() & (down_override > 0), default_down)
+    def _override(cache: dict | None, col: str) -> pd.Series:
+        if cache is not None:
+            return pd.to_numeric(pd.Series({g: cache.get(g, np.nan) for g in eligible}), errors="coerce")
+        if col in gens.columns:
+            return pd.to_numeric(gens[col].reindex(eligible), errors="coerce")
+        return pd.Series(np.nan, index=eligible)
+
+    up_override = _override(ov_up, "ramp_limit_up")
+    down_override = _override(ov_down, "ramp_limit_down")
+    # Honor an explicit value (incl. 0 = frozen); only a NaN falls back to default.
+    rate_up = up_override.where(up_override.notna(), default_up)
+    rate_down = down_override.where(down_override.notna(), default_down)
     return rate_up, rate_down
 
 
@@ -199,7 +244,7 @@ def apply_ramp_constraints(
             notes.append("Ramp-rate limits: no eligible generators found — skipped.")
             return
 
-        rate_up, rate_down = _per_generator_rates(n.generators, eligible, default_up, default_down)
+        rate_up, rate_down = _per_generator_rates(n.generators, eligible, default_up, default_down, n.meta.get(_RAMP_OVERRIDE_META_KEY))
         # Nothing to enforce if every eligible generator's rate is zero on
         # both directions (0 would forbid any dispatch change at all, which
         # is a legitimate — if extreme — user configuration, so only skip
@@ -343,7 +388,7 @@ def extract_ramp_results(
         dispatch = p_t.reindex(index=snapshots, columns=eligible).fillna(0.0)
 
         weights = n.snapshot_weightings["generators"].reindex(snapshots).fillna(1.0)
-        rate_up, rate_down = _per_generator_rates(n.generators, eligible, default_up, default_down)
+        rate_up, rate_down = _per_generator_rates(n.generators, eligible, default_up, default_down, n.meta.get(_RAMP_OVERRIDE_META_KEY))
         p_nom = n.generators["p_nom_opt"].reindex(eligible) if "p_nom_opt" in n.generators.columns else n.generators[
             "p_nom"
         ].reindex(eligible)

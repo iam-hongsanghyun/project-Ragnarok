@@ -27,7 +27,7 @@ from ..utils.series import weighted_sum
 from ..network.custom_constraints import apply_custom_constraints
 from ..network.constraint_dsl import apply_constraint_specs, apply_dsl_constraints
 from ..network.reserves import apply_reserve_constraints, extract_reserve_results
-from ..network.ramp import apply_ramp_constraints, extract_ramp_results
+from ..network.ramp import apply_ramp_constraints, extract_ramp_results, strip_native_ramp_columns
 from .dispatch import (
     build_curtailment_series,
     build_dispatch_series,
@@ -43,6 +43,7 @@ from .mga import build_mga
 from .merchant import build_merchant
 from .adequacy import build_adequacy
 from .outage_mc import build_outage_mc
+from .correlated_sampling import build_correlated_sampling
 from .company import build_company_breakdown
 from .company_statement import build_company_statement
 from .finance import build_company_finance
@@ -405,6 +406,11 @@ def run_pypsa(
             status_code=400,
             detail="Ramp-rate limits cannot be combined with stochastic scenarios.",
         )
+    if ramp_enabled:
+        # Cache per-generator ramp overrides and blank the native columns BEFORE
+        # the solve, so PyPSA's own (unweighted) ramp constraint doesn't fire on
+        # top of this module's Δt-weighted one. Must precede optimize.
+        strip_native_ramp_columns(network)
 
     def extra_functionality(n, snapshots):
         # `snapshots` is the window being optimised — for rolling horizon it is a
@@ -1133,6 +1139,19 @@ def _build_solved_payload(
         except Exception as exc:  # noqa: BLE001 — never sink the run over an MC extra
             notes.append(f"Thermal outage Monte Carlo could not be computed: {exc}")
             _log.warning("outage_mc failed: %s", exc)
+    # Correlated multi-driver Monte Carlo (one-factor stress model) — a
+    # complementary post-process reliability study to outage_mc: this one
+    # perturbs weather/load/inflow (demand, renewable CF, hydro inflow) via a
+    # shared stress factor rather than unit availability. Same guard pattern:
+    # never raises into the solve; None when disabled/absent or unsolved.
+    correlated_sampling_cfg = options.get("correlatedSamplingConfig") or {}
+    correlated_sampling: dict[str, Any] | None = None
+    if bool(correlated_sampling_cfg.get("enabled")):
+        try:
+            correlated_sampling = build_correlated_sampling(network, options)
+        except Exception as exc:  # noqa: BLE001 — never sink the run over an MC extra
+            notes.append(f"Correlated multi-driver Monte Carlo could not be computed: {exc}")
+            _log.warning("correlated_sampling failed: %s", exc)
     # Consolidated per-company annual P&L (revenue → carbon/fuel → margin → EBIT
     # → net). Reads only solved dataframes; independent of any config.
     company_statement = build_company_statement(
@@ -1181,6 +1200,7 @@ def _build_solved_payload(
         "companyStatement": company_statement,
         "adequacy": adequacy,
         "outageMc": outage_mc,
+        "correlatedSampling": correlated_sampling,
         "priceFormation": price_formation,
         "commitment": commitment,
         "ppa": ppa,
