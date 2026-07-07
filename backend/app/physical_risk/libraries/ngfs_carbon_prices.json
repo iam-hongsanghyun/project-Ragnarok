@@ -1,0 +1,43 @@
+{
+  "_meta": {
+    "description": "Shadow carbon-price trajectories (real NGFS Phase 5) by scenario and year.",
+    "provenance": "NGFS Phase 5 (Nov 2024), model 'REMIND-MAgPIE 3.3-4.8', region World, variable Price|Carbon, retrieved from the public IIASA NGFS Scenario Explorer via pyam. Frozen snapshot \u2014 re-run scripts/fetch_ngfs.py to refresh.",
+    "units": "US$2010/t CO2",
+    "model": "REMIND-MAgPIE 3.3-4.8",
+    "source": "https://data.ene.iiasa.ac.at/ngfs/"
+  },
+  "prices": {
+    "net_zero_2050": {
+      "2025": 98.38,
+      "2030": 183.3,
+      "2035": 294.95,
+      "2040": 433.77,
+      "2045": 614.37,
+      "2050": 748.8
+    },
+    "below_2c": {
+      "2025": 18.41,
+      "2030": 32.11,
+      "2035": 48.73,
+      "2040": 70.02,
+      "2045": 98.09,
+      "2050": 135.0
+    },
+    "delayed_transition": {
+      "2025": 10.69,
+      "2030": 10.3,
+      "2035": 98.9,
+      "2040": 160.2,
+      "2045": 234.97,
+      "2050": 320.45
+    },
+    "current_policies": {
+      "2025": 10.69,
+      "2030": 10.3,
+      "2035": 10.16,
+      "2040": 10.25,
+      "2045": 10.59,
+      "2050": 11.13
+    }
+  }
+}

@@ -1041,6 +1041,14 @@ def _resolve_payload_model(payload: RunPayload) -> RunPayload:
         model = scenario_overrides.apply_model_overrides(model, overrides)
     data = _payload_to_dict(payload)
     data["model"] = model
+    # Opt-in physical-risk -> forced-outage-rate coupling: if
+    # options.outageMcConfig.physicalRiskUplift is set, look up the
+    # referenced physical-risk session's latest completed run and inject
+    # options.outageMcConfig.forRateUplift before the snapshot is frozen, so
+    # both /api/run and /api/queue (both call this) pick it up. No-op unless
+    # the config opts in; never raises.
+    from . import physical_risk_uplift
+    data["options"] = physical_risk_uplift.apply_physical_risk_uplift(data.get("options"))
     return RunPayload(**data)
 
 

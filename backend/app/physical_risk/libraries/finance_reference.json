@@ -1,0 +1,101 @@
+{
+  "_meta": {
+    "description": "Reference framework for translating climate impact into project economics (NPV/IRR/DSCR) and a Climate Risk Premium (CRP). Every threshold/spread carries a citable source; financing defaults flagged 'model assumption' are starting points the user overrides per project/asset. The CRP is a counterfactual: the increase in credit spread / WACC from the no-climate baseline to the climate-stressed cashflow.",
+    "provenance": "DSCR→rating: selectable methodology (rating_methods) — default Moody's Global Infrastructure Finance (2021) + S&P Project Finance Criteria (2022), with indicative lender-conservative and sponsor-lenient variants and a user 'custom' grid. Rating→spread: Bloomberg US Corporate Bond Index 2020–2024 average (distressed levels for CC/C/D). Aligned with PLANiT crp-core so the two tools price consistently.",
+    "rating_methods_note": "rating_dscr_thresholds is retained as the back-compat default and equals rating_methods.moodys_sp.thresholds."
+  },
+  "rating_scale": ["AAA", "AA", "A", "BBB", "BB", "B", "CCC", "CC", "C", "D"],
+  "investment_grade_min": "BBB",
+  "rating_dscr_thresholds": [
+    {"dscr_min": 2.5, "rating": "AAA", "source": "Moody's Global Infrastructure Finance (2021)"},
+    {"dscr_min": 2.0, "rating": "AA", "source": "Moody's Global Infrastructure Finance (2021)"},
+    {"dscr_min": 1.6, "rating": "A", "source": "S&P Project Finance Criteria (2022)"},
+    {"dscr_min": 1.3, "rating": "BBB", "source": "S&P Project Finance Criteria (2022)"},
+    {"dscr_min": 1.1, "rating": "BB", "source": "S&P Project Finance Criteria (2022)"},
+    {"dscr_min": 1.0, "rating": "B", "source": "S&P Project Finance Criteria (2022)"},
+    {"dscr_min": 0.8, "rating": "CCC", "source": "S&P Project Finance Criteria (2022)"},
+    {"dscr_min": 0.5, "rating": "CC", "source": "S&P Project Finance Criteria (2022)"},
+    {"dscr_min": 0.0, "rating": "C", "source": "S&P Project Finance Criteria (2022)"},
+    {"dscr_min": -999.0, "rating": "D", "source": "S&P Project Finance Criteria (2022)"}
+  ],
+  "default_rating_method": "moodys_sp",
+  "rating_methods": {
+    "moodys_sp": {
+      "label": "Moody's / S&P (infrastructure & project finance)",
+      "short": "Moody's / S&P",
+      "code": "Agency",
+      "source": "Moody's Global Infrastructure Finance (2021) + S&P Project Finance Criteria (2022)",
+      "note": "Default. DSCR bands typical of rated infrastructure / project-finance debt.",
+      "thresholds": [
+        {"dscr_min": 2.5, "rating": "AAA"},
+        {"dscr_min": 2.0, "rating": "AA"},
+        {"dscr_min": 1.6, "rating": "A"},
+        {"dscr_min": 1.3, "rating": "BBB"},
+        {"dscr_min": 1.1, "rating": "BB"},
+        {"dscr_min": 1.0, "rating": "B"},
+        {"dscr_min": 0.8, "rating": "CCC"},
+        {"dscr_min": 0.5, "rating": "CC"},
+        {"dscr_min": 0.0, "rating": "C"},
+        {"dscr_min": -999.0, "rating": "D"}
+      ]
+    },
+    "lender_conservative": {
+      "label": "Lender / banking case (conservative)",
+      "short": "Lender (conservative)",
+      "code": "Lender",
+      "source": "Indicative — stricter DSCR bands typical of project-finance lender base cases",
+      "note": "Higher coverage required for each rating; downgrades climate-stressed cashflows sooner.",
+      "thresholds": [
+        {"dscr_min": 3.0, "rating": "AAA"},
+        {"dscr_min": 2.5, "rating": "AA"},
+        {"dscr_min": 2.0, "rating": "A"},
+        {"dscr_min": 1.5, "rating": "BBB"},
+        {"dscr_min": 1.25, "rating": "BB"},
+        {"dscr_min": 1.1, "rating": "B"},
+        {"dscr_min": 0.9, "rating": "CCC"},
+        {"dscr_min": 0.6, "rating": "CC"},
+        {"dscr_min": 0.0, "rating": "C"},
+        {"dscr_min": -999.0, "rating": "D"}
+      ]
+    },
+    "equity_lenient": {
+      "label": "Sponsor / equity case (lenient)",
+      "short": "Sponsor (lenient)",
+      "code": "Sponsor",
+      "source": "Indicative — lower DSCR bands typical of sponsor base cases",
+      "note": "Lower coverage tolerated for each rating; holds ratings under modest climate stress.",
+      "thresholds": [
+        {"dscr_min": 2.2, "rating": "AAA"},
+        {"dscr_min": 1.8, "rating": "AA"},
+        {"dscr_min": 1.4, "rating": "A"},
+        {"dscr_min": 1.15, "rating": "BBB"},
+        {"dscr_min": 1.05, "rating": "BB"},
+        {"dscr_min": 0.95, "rating": "B"},
+        {"dscr_min": 0.7, "rating": "CCC"},
+        {"dscr_min": 0.4, "rating": "CC"},
+        {"dscr_min": 0.0, "rating": "C"},
+        {"dscr_min": -999.0, "rating": "D"}
+      ]
+    }
+  },
+  "rating_spreads_bps": [
+    {"rating": "AAA", "spread_bps": 50, "source": "Bloomberg US Corp Bond Index 2020–2024 avg"},
+    {"rating": "AA", "spread_bps": 100, "source": "Bloomberg US Corp Bond Index 2020–2024 avg"},
+    {"rating": "A", "spread_bps": 150, "source": "Bloomberg US Corp Bond Index 2020–2024 avg"},
+    {"rating": "BBB", "spread_bps": 250, "source": "Bloomberg US Corp Bond Index 2020–2024 avg"},
+    {"rating": "BB", "spread_bps": 400, "source": "Bloomberg US Corp Bond Index 2020–2024 avg"},
+    {"rating": "B", "spread_bps": 600, "source": "Bloomberg US Corp Bond Index 2020–2024 avg"},
+    {"rating": "CCC", "spread_bps": 900, "source": "Bloomberg US Corp Bond Index 2020–2024 avg (distressed)"},
+    {"rating": "CC", "spread_bps": 1500, "source": "Distressed debt trading levels"},
+    {"rating": "C", "spread_bps": 2500, "source": "Distressed debt (deep distress)"},
+    {"rating": "D", "spread_bps": 5000, "source": "Default / recovery-value pricing"}
+  ],
+  "financing_defaults": {
+    "horizon_years": {"value": 25, "source": "Typical infrastructure project life (model assumption)"},
+    "debt_fraction": {"value": 0.70, "source": "Typical project-finance leverage (model assumption)"},
+    "debt_tenor_years": {"value": 18, "source": "Typical PF debt tenor (model assumption)"},
+    "risk_free_rate": {"value": 0.03, "source": "10Y government bond yield, ~2024 (model assumption)"},
+    "baseline_spread_bps": {"value": 150, "source": "Investment-grade BBB baseline (Bloomberg)"},
+    "baseline_equity_rate": {"value": 0.12, "source": "Infrastructure cost of equity estimate (model assumption)"}
+  }
+}

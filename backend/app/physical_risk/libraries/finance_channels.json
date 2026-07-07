@@ -1,0 +1,75 @@
+{
+  "_meta": {
+    "description": "Operational channel parameters for the power-generation financial model. A power plant's EBITDA is built up from generation (capacity × hours × capacity-factor × price), and climate/policy stress reduces the effective capacity factor through four channels plus a damage (AAI) repair cost. Only the power_gen financial model uses these; generic assets keep the damage(AAI)+carbon EBITDA reduction.",
+    "channel_summary": "CF_eff = CF_baseline × (1 − dispatch_penalty) × (1 − outage_rate) × (1 − capacity_derate) × (1 − efficiency_loss). gen_MWh = capacity_MW × 8760 × CF_eff. EBITDA = gen_MWh × price − opex − carbon; the stressed run also subtracts the physical-damage AAI.",
+    "provenance": "Outage λ: Choobineh & Mohagheghi (2015), Fire Safety Journal, Table 2. Outage duration: KFS Forest Fire Statistics (1991–2004). Efficiency derate: combustion / combined-cycle output ~0.5–0.9 %/°C above design temperature (GE/Siemens derate curves; IEA). Typical capacity factors: IEA/EIA (indicative). Aligned with PLANiT crp-core (outage_params.csv, transition.py).",
+    "integration_note": "Dispatch is a POLICY assumption (national plan / user input) — not derivable from physics. The physical channels (outage, capacity/water derate, efficiency) are scenario inputs here; a future iteration can auto-derive them once the worker emits per-asset hazard intensity (event frequency → outage, heatwave temperature → efficiency, drought → water derate). Damage (AAI) and carbon cost already flow in automatically from the physical run and the transition run. All channel default magnitudes are 0.0 so the model adds no fabricated stress until a scenario value is set."
+  },
+  "generation_defaults": {
+    "capacity_factor_by_fuel": {
+      "coal": 0.55,
+      "lng": 0.40,
+      "nuclear": 0.85,
+      "oil": 0.10,
+      "solar_pv": 0.16,
+      "onshore_wind": 0.30,
+      "offshore_wind": 0.45,
+      "hydro": 0.40,
+      "biomass": 0.60,
+      "_source": "IEA/EIA typical net capacity factors (indicative order-of-magnitude, not plant-specific)"
+    },
+    "opex_per_mwh": {
+      "value": 8.0,
+      "source": "Indicative non-fuel O&M, USD per MWh (model assumption; override per plant)"
+    }
+  },
+  "channels": {
+    "dispatch": {
+      "description": "Policy-driven capacity-factor reduction (merit order, coal phase-out, demand). Not derivable from physics or NGFS sector shares — from a national-plan trajectory or a user assumption.",
+      "default_penalty": 0.0,
+      "trajectories": {
+        "none": {
+          "label": "No policy stress",
+          "penalty": 0.0,
+          "source": "Default — no dispatch reduction unless a plan or value is selected"
+        },
+        "korea_jeongibon": {
+          "label": "Korea 전기본 (전력수급기본계획)",
+          "edition": "10th plan (2023), MOTIE 제10차 전력수급기본계획",
+          "status": "placeholder",
+          "by_fuel": {},
+          "source": "MOTIE 제10차 전력수급기본계획 (2023) — CF/dispatch figures by fuel must be transcribed from the plan with citations (data-sourcing task); empty until populated"
+        }
+      }
+    },
+    "efficiency": {
+      "description": "Thermal efficiency / output derate from high ambient temperature; applied above the design temperature.",
+      "loss_per_degc": {
+        "value": 0.007,
+        "source": "Combustion & combined-cycle net output falls ~0.5–0.9 %/°C above design temp (GE/Siemens gas-turbine derate curves; IEA) — 0.7 %/°C midpoint"
+      },
+      "design_temp_c": {
+        "value": 15.0,
+        "source": "ISO 2314 standard ambient temperature (15 °C)"
+      },
+      "default_loss": 0.0
+    },
+    "outage": {
+      "description": "Forced downtime from wildfire / storm. annual_outage_rate = event_freq_per_yr × (1 − e^(−λ·t_exposure)) × duration_h / 8760.",
+      "by_asset_type": {
+        "power_plant": {"failure_rate_per_hour": 0.20, "exposure_hours": 2.0, "outage_duration_hours": 48.0},
+        "transmission_tower": {"failure_rate_per_hour": 0.30, "exposure_hours": 2.0, "outage_duration_hours": 24.0},
+        "wooden_pole_line": {"failure_rate_per_hour": 0.70, "exposure_hours": 2.0, "outage_duration_hours": 24.0},
+        "substation": {"failure_rate_per_hour": 0.30, "exposure_hours": 2.0, "outage_duration_hours": 36.0}
+      },
+      "source_lambda": "Choobineh & Mohagheghi (2015), Fire Safety Journal, Table 2 (steel tower 0.2–0.4; wooden pole 0.5–1.0; transformer class ~0.2–0.4)",
+      "source_duration": "KFS Forest Fire Statistics (1991–2004)",
+      "default_rate": 0.0
+    },
+    "water_derate": {
+      "description": "Cooling-water constraint under drought / low flow — caps the achievable capacity factor.",
+      "default_derate": 0.0,
+      "source": "Plant- and basin-specific; informed by the drought / low_flow peril (indicative)"
+    }
+  }
+}

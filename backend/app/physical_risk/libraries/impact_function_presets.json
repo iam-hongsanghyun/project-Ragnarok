@@ -1,0 +1,255 @@
+{
+  "_meta": {
+    "description": "Impact-function presets the Vulnerability studio applies with one click. TC sets tc_v_half (Emanuel form, v_thresh=25.7 m/s, Eberenz 2021 regional); flood sets flood_mdr (Huizinga/JRC); earthquake sets eq_mdr (indicative construction-class MMI curves \u2014 CLIMADA ships no earthquake impf).",
+    "flood_depth_m": [
+      0.0,
+      0.5,
+      1.0,
+      2.0,
+      3.0,
+      4.0,
+      5.0,
+      6.0
+    ],
+    "eq_mmi": [
+      5.0,
+      6.0,
+      7.0,
+      8.0,
+      9.0,
+      10.0
+    ],
+    "generator": "scripts/build_impf_presets.py (run in the CLIMADA worker env)"
+  },
+  "presets": [
+    {
+      "id": "tc_eberenz_emanuel_usa",
+      "peril": "tc",
+      "label": "TC \u2014 Emanuel default (USA)",
+      "tc_v_half": 74.7,
+      "provenance": "Emanuel (2011), ImpfTropCyclone.from_emanuel_usa default v_half"
+    },
+    {
+      "id": "tc_eberenz_na1",
+      "peril": "tc",
+      "label": "TC \u2014 Caribbean & Mexico (NA1)",
+      "tc_v_half": 66.3,
+      "provenance": "Eberenz et al. (2021) regional calibration, v_thresh=25.7 m/s"
+    },
+    {
+      "id": "tc_eberenz_na2",
+      "peril": "tc",
+      "label": "TC \u2014 USA & Canada (NA2)",
+      "tc_v_half": 89.2,
+      "provenance": "Eberenz et al. (2021) regional calibration, v_thresh=25.7 m/s"
+    },
+    {
+      "id": "tc_eberenz_ni",
+      "peril": "tc",
+      "label": "TC \u2014 North Indian (NI)",
+      "tc_v_half": 70.8,
+      "provenance": "Eberenz et al. (2021) regional calibration, v_thresh=25.7 m/s"
+    },
+    {
+      "id": "tc_eberenz_oc",
+      "peril": "tc",
+      "label": "TC \u2014 Oceania (AU/NZ/Pacific) (OC)",
+      "tc_v_half": 64.1,
+      "provenance": "Eberenz et al. (2021) regional calibration, v_thresh=25.7 m/s"
+    },
+    {
+      "id": "tc_eberenz_si",
+      "peril": "tc",
+      "label": "TC \u2014 South Indian (SI)",
+      "tc_v_half": 52.4,
+      "provenance": "Eberenz et al. (2021) regional calibration, v_thresh=25.7 m/s"
+    },
+    {
+      "id": "tc_eberenz_wp1",
+      "peril": "tc",
+      "label": "TC \u2014 South East Asia (WP1)",
+      "tc_v_half": 66.4,
+      "provenance": "Eberenz et al. (2021) regional calibration, v_thresh=25.7 m/s"
+    },
+    {
+      "id": "tc_eberenz_wp2",
+      "peril": "tc",
+      "label": "TC \u2014 Philippines (WP2)",
+      "tc_v_half": 188.4,
+      "provenance": "Eberenz et al. (2021) regional calibration, v_thresh=25.7 m/s"
+    },
+    {
+      "id": "tc_eberenz_wp3",
+      "peril": "tc",
+      "label": "TC \u2014 China mainland (WP3)",
+      "tc_v_half": 112.8,
+      "provenance": "Eberenz et al. (2021) regional calibration, v_thresh=25.7 m/s"
+    },
+    {
+      "id": "tc_eberenz_wp4",
+      "peril": "tc",
+      "label": "TC \u2014 North West Pacific (WP4)",
+      "tc_v_half": 190.5,
+      "provenance": "Eberenz et al. (2021) regional calibration, v_thresh=25.7 m/s"
+    },
+    {
+      "id": "tc_eberenz_row",
+      "peril": "tc",
+      "label": "TC \u2014 Rest of the world (ROW)",
+      "tc_v_half": 110.1,
+      "provenance": "Eberenz et al. (2021) regional calibration, v_thresh=25.7 m/s"
+    },
+    {
+      "id": "flood_jrc_africa",
+      "peril": "flood",
+      "label": "Flood \u2014 Africa (JRC residential)",
+      "flood_mdr": [
+        0.0,
+        0.22,
+        0.378,
+        0.636,
+        0.817,
+        0.903,
+        0.957,
+        1.0
+      ],
+      "provenance": "Huizinga et al. (2017) JRC global depth-damage, residential"
+    },
+    {
+      "id": "flood_jrc_asia",
+      "peril": "flood",
+      "label": "Flood \u2014 Asia (JRC residential)",
+      "flood_mdr": [
+        0.0,
+        0.327,
+        0.494,
+        0.721,
+        0.87,
+        0.931,
+        0.984,
+        1.0
+      ],
+      "provenance": "Huizinga et al. (2017) JRC global depth-damage, residential"
+    },
+    {
+      "id": "flood_jrc_europe",
+      "peril": "flood",
+      "label": "Flood \u2014 Europe (JRC residential)",
+      "flood_mdr": [
+        0.0,
+        0.25,
+        0.4,
+        0.6,
+        0.75,
+        0.85,
+        0.95,
+        1.0
+      ],
+      "provenance": "Huizinga et al. (2017) JRC global depth-damage, residential"
+    },
+    {
+      "id": "flood_jrc_northamerica",
+      "peril": "flood",
+      "label": "Flood \u2014 North America (JRC residential)",
+      "flood_mdr": [
+        0.0,
+        0.443,
+        0.583,
+        0.784,
+        0.854,
+        0.924,
+        0.959,
+        1.0
+      ],
+      "provenance": "Huizinga et al. (2017) JRC global depth-damage, residential"
+    },
+    {
+      "id": "flood_jrc_oceania",
+      "peril": "flood",
+      "label": "Flood \u2014 Oceania (JRC residential)",
+      "flood_mdr": [
+        0.0,
+        0.475,
+        0.64,
+        0.788,
+        0.929,
+        0.967,
+        0.983,
+        1.0
+      ],
+      "provenance": "Huizinga et al. (2017) JRC global depth-damage, residential"
+    },
+    {
+      "id": "flood_jrc_southamerica",
+      "peril": "flood",
+      "label": "Flood \u2014 South America (JRC residential)",
+      "flood_mdr": [
+        0.0,
+        0.491,
+        0.711,
+        0.949,
+        0.984,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "provenance": "Huizinga et al. (2017) JRC global depth-damage, residential"
+    },
+    {
+      "id": "eq_urm",
+      "peril": "eq",
+      "label": "EQ \u2014 Unreinforced masonry (high vuln.)",
+      "eq_mdr": [
+        0.0,
+        0.08,
+        0.25,
+        0.55,
+        0.85,
+        1.0
+      ],
+      "provenance": "Indicative MMI damage by construction class (EMS-98/HAZUS ordering)"
+    },
+    {
+      "id": "eq_rc_frame",
+      "peril": "eq",
+      "label": "EQ \u2014 Reinforced-concrete frame (medium)",
+      "eq_mdr": [
+        0.0,
+        0.02,
+        0.08,
+        0.25,
+        0.5,
+        0.8
+      ],
+      "provenance": "Indicative MMI damage by construction class (EMS-98/HAZUS ordering)"
+    },
+    {
+      "id": "eq_wood_frame",
+      "peril": "eq",
+      "label": "EQ \u2014 Wood frame (ductile)",
+      "eq_mdr": [
+        0.0,
+        0.02,
+        0.06,
+        0.18,
+        0.4,
+        0.7
+      ],
+      "provenance": "Indicative MMI damage by construction class (EMS-98/HAZUS ordering)"
+    },
+    {
+      "id": "eq_modern_code",
+      "peril": "eq",
+      "label": "EQ \u2014 Modern seismic code (low vuln.)",
+      "eq_mdr": [
+        0.0,
+        0.01,
+        0.03,
+        0.1,
+        0.25,
+        0.55
+      ],
+      "provenance": "Indicative MMI damage by construction class (EMS-98/HAZUS ordering)"
+    }
+  ]
+}

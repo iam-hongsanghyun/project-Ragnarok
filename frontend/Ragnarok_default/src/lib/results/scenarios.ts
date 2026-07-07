@@ -96,6 +96,8 @@ export function defaultOutageMcConfig(): OutageMcConfig {
     forcedOutageRate: 0.05,
     mttrHours: 48,
     includeRenewableEnsemble: false,
+    physicalRiskUplift: false,
+    physicalRiskSessionId: '',
   };
 }
 

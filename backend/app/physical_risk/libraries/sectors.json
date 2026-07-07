@@ -1,0 +1,38 @@
+{
+  "_meta": {
+    "description": "Sector taxonomy. `default_vulnerability_class` selects the physical vulnerability curve set; `emission_intensity_tco2e_per_musd` is a coarse Scope-1 proxy used only when an asset reports no emissions.",
+    "provenance": "Emission intensities are ORDER-OF-MAGNITUDE HEURISTICS (tCO2e per $M asset value), not a substitute for reported Scope-1. Relative ordering reflects known sector carbon intensity (heavy industry ≫ services); absolute values are indicative pending a grounded derivation (EDGAR 2024 sector emissions ÷ economic output). See docs/METHODOLOGY.md.",
+    "emission_intensity_units": "tCO2e per million USD of asset value (Scope-1 proxy)"
+  },
+  "sectors": [
+    {"id": "steel",             "label": "Steel",                  "default_vulnerability_class": "industrial_heavy", "emission_intensity_tco2e_per_musd": 1800.0},
+    {"id": "petrochemical",     "label": "Petrochemical",          "default_vulnerability_class": "industrial_heavy", "emission_intensity_tco2e_per_musd": 1500.0},
+    {"id": "chemicals",         "label": "Chemicals",              "default_vulnerability_class": "industrial_heavy", "emission_intensity_tco2e_per_musd": 1100.0},
+    {"id": "cement",            "label": "Cement",                 "default_vulnerability_class": "industrial_heavy", "emission_intensity_tco2e_per_musd": 2200.0},
+    {"id": "glass_ceramics",    "label": "Glass & ceramics",       "default_vulnerability_class": "industrial_heavy", "emission_intensity_tco2e_per_musd": 1400.0},
+    {"id": "aluminium",         "label": "Aluminium",              "default_vulnerability_class": "industrial_heavy", "emission_intensity_tco2e_per_musd": 2600.0},
+    {"id": "mining",            "label": "Mining & metals",        "default_vulnerability_class": "industrial_heavy", "emission_intensity_tco2e_per_musd": 1300.0},
+    {"id": "oil_gas",           "label": "Oil & gas",              "default_vulnerability_class": "industrial_heavy", "emission_intensity_tco2e_per_musd": 1200.0},
+    {"id": "utilities",         "label": "Utilities (power)",      "default_vulnerability_class": "infrastructure",   "emission_intensity_tco2e_per_musd": 2500.0},
+    {"id": "water_waste",       "label": "Water & waste",          "default_vulnerability_class": "infrastructure",   "emission_intensity_tco2e_per_musd": 400.0},
+    {"id": "pulp_paper",        "label": "Pulp & paper",           "default_vulnerability_class": "industrial_light", "emission_intensity_tco2e_per_musd": 800.0},
+    {"id": "automotive",        "label": "Automotive",             "default_vulnerability_class": "industrial_light", "emission_intensity_tco2e_per_musd": 400.0},
+    {"id": "electronics",       "label": "Electronics",            "default_vulnerability_class": "industrial_light", "emission_intensity_tco2e_per_musd": 250.0},
+    {"id": "pharmaceuticals",   "label": "Pharmaceuticals",        "default_vulnerability_class": "industrial_light", "emission_intensity_tco2e_per_musd": 200.0},
+    {"id": "food_beverage",     "label": "Food & beverage",        "default_vulnerability_class": "industrial_light", "emission_intensity_tco2e_per_musd": 350.0},
+    {"id": "textiles",          "label": "Textiles & apparel",     "default_vulnerability_class": "industrial_light", "emission_intensity_tco2e_per_musd": 300.0},
+    {"id": "construction",      "label": "Construction",           "default_vulnerability_class": "industrial_light", "emission_intensity_tco2e_per_musd": 500.0},
+    {"id": "agriculture",       "label": "Agriculture",            "default_vulnerability_class": "industrial_light", "emission_intensity_tco2e_per_musd": 1500.0},
+    {"id": "aviation",          "label": "Aviation",               "default_vulnerability_class": "infrastructure",   "emission_intensity_tco2e_per_musd": 1700.0},
+    {"id": "shipping",          "label": "Shipping (maritime)",    "default_vulnerability_class": "infrastructure",   "emission_intensity_tco2e_per_musd": 900.0},
+    {"id": "transport_road",    "label": "Road transport & logistics", "default_vulnerability_class": "infrastructure", "emission_intensity_tco2e_per_musd": 700.0},
+    {"id": "rail",              "label": "Rail",                   "default_vulnerability_class": "infrastructure",   "emission_intensity_tco2e_per_musd": 200.0},
+    {"id": "data_centers",      "label": "Data centres",           "default_vulnerability_class": "infrastructure",   "emission_intensity_tco2e_per_musd": 300.0},
+    {"id": "telecom",           "label": "Telecom",                "default_vulnerability_class": "commercial",       "emission_intensity_tco2e_per_musd": 120.0},
+    {"id": "retail",            "label": "Retail",                 "default_vulnerability_class": "commercial",       "emission_intensity_tco2e_per_musd": 80.0},
+    {"id": "hospitality",       "label": "Hospitality & tourism",  "default_vulnerability_class": "commercial",       "emission_intensity_tco2e_per_musd": 120.0},
+    {"id": "healthcare",        "label": "Healthcare",             "default_vulnerability_class": "commercial",       "emission_intensity_tco2e_per_musd": 150.0},
+    {"id": "financial",         "label": "Financial",              "default_vulnerability_class": "commercial",       "emission_intensity_tco2e_per_musd": 30.0},
+    {"id": "real_estate",       "label": "Real estate",            "default_vulnerability_class": "residential",      "emission_intensity_tco2e_per_musd": 60.0}
+  ]
+}

@@ -40,6 +40,27 @@ Algorithm:
     forced-outage rate, dimensionless in [0, 1); p_repair, p_fail =
     per-step transition probabilities, dimensionless in [0, 1].
 
+**Opt-in physical-risk uplift (damage-ratio-as-availability-loss).** When
+``options["outageMcConfig"]["forRateUplift"]`` is present (injected by the
+app-layer coupling in ``backend/app/physical_risk_uplift.py`` from a Physical
+Risk portfolio's climate-damage run — see that module for the eai/value
+derivation), each matching thermal generator's resolved FOR is raised by its
+uplift fraction before sampling, clipped so the total never reaches certain
+outage:
+    $$ \\text{FOR}'_g = \\operatorname{clip}\\!\\left(\\text{FOR}_g + u_g,\\, 0,\\, 0.95\\right) $$
+    ASCII: FOR'[g] = clip(FOR[g] + u[g], 0, 0.95)
+
+    Symbols: FOR_g = the generator's base forced-outage rate resolved above
+    (per-generator override or fallback), dimensionless in [0, 1); u_g =
+    physical-risk-derived uplift fraction for generator g, dimensionless in
+    [0, 0.5] (capped upstream); FOR'_g = effective FOR used by the sampler,
+    clipped to [0, 0.95] so a generator is never modelled as permanently
+    unavailable. This reinterprets a year of expected climate damage (as a
+    fraction of asset value) as additional forced unavailability — a
+    transparent, order-of-magnitude proxy, not an engineering fragility
+    curve; its provenance (session id, run id, perils) is always surfaced
+    alongside the result rather than silently baked into the FOR.
+
 **Reliability metrics with a distribution.** Given the (M, G, T) availability
 mask and each generator's rated MW, available generation per member/snapshot
 is:
@@ -89,6 +110,12 @@ _DEFAULT_SEED = 42
 _DEFAULT_FOR = 0.05
 _DEFAULT_MTTR_HOURS = 48.0
 _N_HISTOGRAM_BINS = 12
+
+# Ceiling on the *total* (base + physical-risk uplift) forced-outage rate —
+# a generator is never modelled as permanently unavailable, however large the
+# upstream damage-ratio uplift (itself already capped at 0.5 — see
+# backend/app/physical_risk_uplift.py).
+_MAX_TOTAL_FOR = 0.95
 
 
 def _is_variable_renewable(carrier: str) -> bool:
@@ -375,6 +402,27 @@ def build_outage_mc(
     for_rates = np.asarray(thermal_for_list, dtype=float)
     mttr_hours = np.asarray(thermal_mttr_list, dtype=float)
 
+    # Opt-in physical-risk uplift — see module docstring's "Opt-in physical-risk
+    # uplift" section. Only generators present in the uplift map (matched by
+    # name to a Physical Risk portfolio asset) are affected; report exactly
+    # which ones so the provenance is visible in the result payload. Entries
+    # with a non-positive uplift are no-ops and are neither applied nor
+    # reported (they would inflate the "N unit(s)" summary count).
+    uplift_map = cfg.get("forRateUplift")
+    uplift_applied: dict[str, float] = {}
+    if isinstance(uplift_map, dict) and uplift_map:
+        for i, name in enumerate(thermal_names):
+            uplift = uplift_map.get(name)
+            if uplift is None:
+                continue
+            uplift = float(uplift)
+            if uplift <= 0.0:
+                continue
+            base = for_rates[i]
+            for_rates[i] = float(np.clip(base + uplift, 0.0, _MAX_TOTAL_FOR))
+            uplift_applied[name] = uplift
+    for_rate_uplift_note = cfg.get("forRateUpliftNote") if isinstance(cfg.get("forRateUpliftNote"), str) else None
+
     weights = network.snapshot_weightings["generators"].reindex(snapshots).fillna(1.0).to_numpy()
     load = network.get_switchable_as_dense("Load", "p_set").sum(axis=1).reindex(snapshots).fillna(0.0).to_numpy()
 
@@ -445,14 +493,23 @@ def build_outage_mc(
             "detail": f"seed {seed}, {n_members} Monte-Carlo members",
         },
     ]
+    if uplift_applied:
+        summary.append({
+            "label": "Physical-risk FOR uplift",
+            "value": f"{len(uplift_applied)} unit(s)",
+            "detail": for_rate_uplift_note or "uplift applied — see forRateUpliftNote.",
+        })
 
-    note = None
+    notes: list[str] = []
     if include_renewable_ensemble and not renewable_names:
-        note = (
+        notes.append(
             "includeRenewableEnsemble was set but no variable-renewable generator "
             "was found — renewables (if any) were included at their solved "
             "(deterministic) availability."
         )
+    if for_rate_uplift_note:
+        notes.append(for_rate_uplift_note)
+    note = " ".join(notes) if notes else None
 
     _log.info(
         "outage_mc: %d members, %d thermal units, LOLE P50=%.2f P95=%.2f h/yr, "
@@ -472,4 +529,6 @@ def build_outage_mc(
         "eueHistogram": eue_histogram,
         "summary": summary,
         "note": note,
+        "upliftApplied": uplift_applied,
+        "forRateUpliftNote": for_rate_uplift_note,
     }

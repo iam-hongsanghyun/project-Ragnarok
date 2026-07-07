@@ -306,7 +306,7 @@ function AppInner() {
   const [stochasticConfig, setStochasticConfig] = useState<StochasticConfig>({ enabled: false, scenarios: [] });
   const [sclopfConfig, setSclopfConfig] = useState<SecurityConstrainedConfig>({ enabled: false });
   const [reserveConfig, setReserveConfig] = useState<ReserveConfig>({ enabled: false, requirementType: 'fraction', fraction: 0.1, providers: 'all', reserveCost: 0 });
-  const [outageMcConfig, setOutageMcConfig] = useState<OutageMcConfig>({ enabled: false, nMembers: 200, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, includeRenewableEnsemble: false });
+  const [outageMcConfig, setOutageMcConfig] = useState<OutageMcConfig>({ enabled: false, nMembers: 200, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, includeRenewableEnsemble: false, physicalRiskUplift: false, physicalRiskSessionId: '' });
   const [correlatedSamplingConfig, setCorrelatedSamplingConfig] = useState<CorrelatedSamplingConfig>({ enabled: false, nMembers: 200, seed: 42, loadSensitivity: 0.15, renewableSensitivity: 0.3, inflowSensitivity: 0.2, loadStd: 0.05, renewableStd: 0.1, inflowStd: 0.1 });
   const [rampConfig, setRampConfig] = useState<RampConfig>({ enabled: false, rampLimitUp: 0.5, rampLimitDown: 0.5, appliesTo: 'all' });
   const [elccConfig, setElccConfig] = useState<ElccConfig>({ enabled: false, nMembers: 200, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, carriers: [] });
@@ -364,7 +364,7 @@ function AppInner() {
     stochasticConfig: { enabled: false, scenarios: [] },
     securityConstrainedConfig: { enabled: false },
     reserveConfig: { enabled: false, requirementType: 'fraction', fraction: 0.1, providers: 'all', reserveCost: 0 },
-    outageMcConfig: { enabled: false, nMembers: 200, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, includeRenewableEnsemble: false },
+    outageMcConfig: { enabled: false, nMembers: 200, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, includeRenewableEnsemble: false, physicalRiskUplift: false, physicalRiskSessionId: '' },
     correlatedSamplingConfig: { enabled: false, nMembers: 200, seed: 42, loadSensitivity: 0.15, renewableSensitivity: 0.3, inflowSensitivity: 0.2, loadStd: 0.05, renewableStd: 0.1, inflowStd: 0.1 },
     rampConfig: { enabled: false, rampLimitUp: 0.5, rampLimitDown: 0.5, appliesTo: 'all' },
     elccConfig: { enabled: false, nMembers: 200, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, carriers: [] },
@@ -1246,7 +1246,7 @@ function AppInner() {
     setStochasticConfig(scenario.stochasticConfig ?? { enabled: false, scenarios: [] });
     setSclopfConfig(scenario.securityConstrainedConfig ?? { enabled: false });
     setReserveConfig(scenario.reserveConfig ?? { enabled: false, requirementType: 'fraction', fraction: 0.1, providers: 'all', reserveCost: 0 });
-    setOutageMcConfig(scenario.outageMcConfig ?? { enabled: false, nMembers: 200, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, includeRenewableEnsemble: false });
+    setOutageMcConfig(scenario.outageMcConfig ?? { enabled: false, nMembers: 200, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, includeRenewableEnsemble: false, physicalRiskUplift: false, physicalRiskSessionId: '' });
     setCorrelatedSamplingConfig(scenario.correlatedSamplingConfig ?? { enabled: false, nMembers: 200, seed: 42, loadSensitivity: 0.15, renewableSensitivity: 0.3, inflowSensitivity: 0.2, loadStd: 0.05, renewableStd: 0.1, inflowStd: 0.1 });
     setRampConfig(scenario.rampConfig ?? { enabled: false, rampLimitUp: 0.5, rampLimitDown: 0.5, appliesTo: 'all' });
     setElccConfig(scenario.elccConfig ?? { enabled: false, nMembers: 200, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, carriers: [] });

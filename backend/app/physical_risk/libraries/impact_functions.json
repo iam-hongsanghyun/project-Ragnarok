@@ -1,0 +1,15 @@
+{
+  "_meta": {
+    "description": "Peril-agnostic vulnerability classes. Each class carries the parameters every physical engine needs: a tropical-cyclone Emanuel `tc_v_half` (wind speed in m/s at 50% mean damage — lower = more vulnerable) and a flood depth-damage curve (mean damage ratio vs water depth in metres). An asset picks one class; each peril engine reads the matching parameters.",
+    "provenance": "TC: Emanuel (2011) wind-damage form, ImpfTropCyclone.from_emanuel_usa(v_half=…); class v_half values are indicative (heavier structures less vulnerable). Flood: representative depth-damage ratios in the style of Huizinga et al. (2017, JRC global flood depth-damage functions). Earthquake: indicative MMI mean-damage-ratio curves differentiated by construction robustness (MMI 5–10). Indicative MVP values — see docs/METHODOLOGY.md."
+  },
+  "flood_depth_m": [0.0, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+  "eq_mmi": [5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
+  "classes": [
+    {"id": "residential",      "label": "Residential",        "tc_v_half": 70.0,  "wf_max_mdd": 0.40, "flood_mdr": [0.0, 0.25, 0.40, 0.60, 0.75, 0.85, 0.92, 0.95], "eq_mdr": [0.0, 0.03, 0.10, 0.30, 0.55, 0.85]},
+    {"id": "commercial",       "label": "Commercial",         "tc_v_half": 80.0,  "wf_max_mdd": 0.35, "flood_mdr": [0.0, 0.15, 0.30, 0.50, 0.65, 0.75, 0.82, 0.85], "eq_mdr": [0.0, 0.02, 0.08, 0.25, 0.50, 0.80]},
+    {"id": "industrial_light", "label": "Industrial (light)", "tc_v_half": 88.0,  "wf_max_mdd": 0.30, "flood_mdr": [0.0, 0.12, 0.22, 0.40, 0.55, 0.65, 0.72, 0.75], "eq_mdr": [0.0, 0.02, 0.06, 0.20, 0.42, 0.72]},
+    {"id": "industrial_heavy", "label": "Industrial (heavy)", "tc_v_half": 100.0, "wf_max_mdd": 0.25, "flood_mdr": [0.0, 0.10, 0.18, 0.32, 0.45, 0.55, 0.62, 0.65], "eq_mdr": [0.0, 0.01, 0.05, 0.16, 0.35, 0.65]},
+    {"id": "infrastructure",   "label": "Infrastructure",     "tc_v_half": 110.0, "wf_max_mdd": 0.20, "flood_mdr": [0.0, 0.08, 0.15, 0.28, 0.40, 0.50, 0.57, 0.60], "eq_mdr": [0.0, 0.01, 0.04, 0.12, 0.28, 0.55]}
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "_meta": {
+    "description": "Physical (climate forcing) and transition (policy) scenarios offered in the UI.",
+    "provenance": "Climate: IPCC RCP family (SSP aliases noted). Transition: NGFS Phase 5 (Nov 2024). Carbon-price trajectories are frozen snapshots — see assets/libraries/ngfs_carbon_prices.csv (Phase 3) and docs/METHODOLOGY.md."
+  },
+  "climate": [
+    {"id": "rcp26", "label": "RCP2.6 (≈SSP1-2.6, ~1.8°C)", "warming_c": 1.8},
+    {"id": "rcp45", "label": "RCP4.5 (≈SSP2-4.5, ~2.7°C)", "warming_c": 2.7},
+    {"id": "rcp60", "label": "RCP6.0 (≈SSP4-6.0, ~3.0°C)", "warming_c": 3.0},
+    {"id": "rcp85", "label": "RCP8.5 (≈SSP5-8.5, ~4.4°C)", "warming_c": 4.4}
+  ],
+  "transition": [
+    {"id": "net_zero_2050", "label": "Net Zero 2050 (Orderly)", "ngfs_family": "Orderly", "peak_warming_c": 1.5},
+    {"id": "below_2c", "label": "Below 2°C (Orderly)", "ngfs_family": "Orderly", "peak_warming_c": 1.7},
+    {"id": "delayed_transition", "label": "Delayed Transition (Disorderly)", "ngfs_family": "Disorderly", "peak_warming_c": 1.8},
+    {"id": "current_policies", "label": "Current Policies (Hot House)", "ngfs_family": "Hot House World", "peak_warming_c": 3.0}
+  ],
+  "anchor_years": [2030, 2040, 2050, 2060]
+}

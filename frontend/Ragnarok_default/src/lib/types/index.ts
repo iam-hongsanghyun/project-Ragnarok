@@ -185,6 +185,12 @@ export interface OutageMcConfig {
   /** Mean time to repair, hours. */
   mttrHours: number;
   includeRenewableEnsemble: boolean;
+  /** Opt-in: raise each generator's FOR by its Physical Risk portfolio damage
+   *  ratio (expected annual impact / asset value, capped) before sampling.
+   *  Backend-computed from `physicalRiskSessionId`'s latest completed run. */
+  physicalRiskUplift: boolean;
+  /** Physical Risk tab session id to source the damage ratios from. */
+  physicalRiskSessionId: string;
 }
 
 /** Correlated multi-driver Monte-Carlo reliability run — a common weather-driven

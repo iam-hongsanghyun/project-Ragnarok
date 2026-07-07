@@ -95,9 +95,12 @@ export function PhysicalRiskView({ subTab, onSubTabChange }: PhysicalRiskViewPro
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => () => {
-    aliveRef.current = false;
-    if (pollTimer.current) window.clearTimeout(pollTimer.current);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+      if (pollTimer.current) window.clearTimeout(pollTimer.current);
+    };
   }, []);
 
   const pollRun = useCallback((sessionId: string, runId: string) => {
@@ -137,6 +140,10 @@ export function PhysicalRiskView({ subTab, onSubTabChange }: PhysicalRiskViewPro
     }
   }, [portfolio, pollRun, showToast]);
 
+  // Every ported sub-tab gets the same prop set (see PhysicalRiskSectionProps)
+  // so new sections never require view plumbing changes.
+  const sectionProps = { portfolio, onPortfolioChange: setPortfolio, libraries, run };
+
   return (
     <div className="analytics-view">
       <div className="analytics-view-main">
@@ -147,8 +154,8 @@ export function PhysicalRiskView({ subTab, onSubTabChange }: PhysicalRiskViewPro
         {subTab === 'Assets' && (
           <AssetsSection portfolio={portfolio} onPortfolioChange={setPortfolio} libraries={libraries} />
         )}
-        {subTab === 'Scenarios' && <ScenariosSection />}
-        {subTab === 'Vulnerability' && <VulnerabilitySection />}
+        {subTab === 'Scenarios' && <ScenariosSection {...sectionProps} />}
+        {subTab === 'Vulnerability' && <VulnerabilitySection {...sectionProps} />}
         {subTab === 'Results' && (
           <ResultsSection
             portfolio={portfolio}
@@ -158,12 +165,12 @@ export function PhysicalRiskView({ subTab, onSubTabChange }: PhysicalRiskViewPro
             onRun={runAnalysis}
           />
         )}
-        {subTab === 'Map' && <MapSection />}
-        {subTab === 'Adaptation' && <AdaptationSection />}
-        {subTab === 'Finance' && <FinanceSection />}
-        {subTab === 'SupplyChain' && <SupplyChainSection />}
-        {subTab === 'Forecast' && <ForecastSection />}
-        {subTab === 'Method' && <MethodSection />}
+        {subTab === 'Map' && <MapSection {...sectionProps} />}
+        {subTab === 'Adaptation' && <AdaptationSection {...sectionProps} />}
+        {subTab === 'Finance' && <FinanceSection {...sectionProps} />}
+        {subTab === 'SupplyChain' && <SupplyChainSection {...sectionProps} />}
+        {subTab === 'Forecast' && <ForecastSection {...sectionProps} />}
+        {subTab === 'Method' && <MethodSection {...sectionProps} />}
       </div>
     </div>
   );

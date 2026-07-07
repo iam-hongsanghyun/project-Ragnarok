@@ -32,6 +32,8 @@ node_modules/
 .venv/
 .venv-pypsa/
 venv/
+# CLIMADA worker conda prefix env (built by scripts/setup_climada_worker.sh)
+.climada-env/
 
 # Python bytecode + packaging output
 __pycache__/

@@ -1,0 +1,22 @@
+{
+  "_meta": {
+    "description": "Physical climate hazards. `engine_hazard_type` is the CLIMADA hazard tag; `future_source` notes how forward-looking hazard is obtained. Unsupported perils carry a `reason` explaining the data gap and the real path to add them.",
+    "provenance": "Hazard availability verified against the live CLIMADA Data API catalogue (tropical_cyclone, river_flood, wildfire, storm_europe). See docs/METHODOLOGY.md."
+  },
+  "perils": [
+    {"id": "tropical_cyclone", "label": "Tropical cyclone", "engine_hazard_type": "TC", "future_source": "Data API future sets (rcp26/45/60/85 × ref_year 2040/2060/2080) + present 'None'", "supported_mvp": true},
+    {"id": "river_flood", "label": "River flood", "engine_hazard_type": "RF", "future_source": "Data API river-flood depth (rcp26/60/85 × year_range; ISIMIP-derived) + historical baseline", "supported_mvp": true},
+    {"id": "wildfire", "label": "Wildfire", "engine_hazard_type": "WFseason", "future_source": "Data API wildfire brightness-temperature (historical 2001–2020 only — no future set published)", "supported_mvp": true, "historical_only": true},
+    {"id": "european_windstorm", "label": "European windstorm", "engine_hazard_type": "WS", "future_source": "Data API storm_europe CMIP6 winter-windstorm (SSP126/245/370/585) + present 'None'", "supported_mvp": true, "coverage": "Europe only"},
+    {"id": "earthquake", "label": "Earthquake (geophysical)", "engine_hazard_type": "EQ", "future_source": "Data API earthquake observed catalogue (MMI); geophysical — no climate scenario", "supported_mvp": true, "historical_only": true},
+    {"id": "coastal_flood", "label": "Coastal flood / sea-level rise", "engine_hazard_type": "CF", "future_source": "WRI Aqueduct coastal inundation (inuncoast_*; rcp4.5/8.5 × 2030/2050/2080 + historical, with-subsidence) ingested to the local catalog; depth-damage curve", "supported_mvp": true, "requires_ingest": true},
+    {"id": "heatwave", "label": "Heatwave (productivity)", "engine_hazard_type": "HW", "future_source": "Locally-ingested heat (ERA5-HEAT/UTCI) hazard + indicative productivity-loss ramp", "supported_mvp": true, "requires_ingest": true, "result_kind": "productivity"},
+    {"id": "drought", "label": "Drought (productivity)", "engine_hazard_type": "DR", "future_source": "Locally-ingested drought (SPEI) hazard + indicative productivity-loss ramp", "supported_mvp": true, "requires_ingest": true, "result_kind": "productivity"},
+    {"id": "crop_yield", "label": "Crop yield", "engine_hazard_type": "CY", "future_source": "Locally-ingested crop-yield (ISIMIP relative_cropyield) hazard + indicative yield-loss ramp", "supported_mvp": true, "requires_ingest": true, "result_kind": "yield"},
+    {"id": "low_flow", "label": "Low flow", "engine_hazard_type": "LF", "future_source": "Locally-ingested low-flow (GloFAS) hazard + indicative productivity-loss ramp", "supported_mvp": true, "requires_ingest": true, "result_kind": "productivity"},
+    {"id": "hail", "label": "Hail", "engine_hazard_type": "HL", "future_source": "Locally-ingested hail hazard (e.g. MeteoSwiss MESHS) + indicative cm damage ramp", "supported_mvp": true, "requires_ingest": true},
+    {"id": "tc_surge", "label": "TC storm surge", "engine_hazard_type": "TCSurgeBathtub", "future_source": "climada_petals TCSurgeBathtub — bathtub surge from the TC wind hazard (catalog-first) + a Copernicus DEM (manual drop-in, CLIMATERISK_DEM_PATH); depth-damage curve", "supported_mvp": true, "requires_dem": true},
+    {"id": "landslide", "label": "Landslide", "engine_hazard_type": "LS", "future_source": "Locally-ingested landslide hazard (e.g. NASA COOLR via climada_petals) + indicative probability damage ramp", "supported_mvp": true, "requires_ingest": true},
+    {"id": "tc_rain", "label": "TC rainfall", "engine_hazard_type": "TR", "future_source": "Locally-ingested TC-rainfall hazard (climada_petals TCRain from generated tracks) + indicative mm damage ramp", "supported_mvp": true, "requires_ingest": true}
+  ]
+}

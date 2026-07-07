@@ -3,6 +3,12 @@
  */
 import React from 'react';
 import { OutageMcConfig } from 'lib/types';
+import { usePersistedState } from 'shared/hooks/usePersistedState';
+
+// Same localStorage key PhysicalRiskView.tsx persists its live session id
+// under — read-only here (this section never writes it), just so the hint
+// can default to "whatever session the Physical Risk tab currently has open".
+const PHYSICAL_RISK_SESSION_KEY = 'ui:physical-risk-session-id';
 
 export interface OutageMcSectionProps {
   outageMcConfig: OutageMcConfig;
@@ -12,6 +18,7 @@ export interface OutageMcSectionProps {
 export function OutageMcSection(props: OutageMcSectionProps) {
   const cfg = props.outageMcConfig;
   const set = (patch: Partial<OutageMcConfig>) => props.onOutageMcConfigChange({ ...cfg, ...patch });
+  const [physicalRiskTabSessionId] = usePersistedState<string | null>(PHYSICAL_RISK_SESSION_KEY, null);
 
   return (
     <section className="constraints-workspace-section">
@@ -120,6 +127,56 @@ export function OutageMcSection(props: OutageMcSectionProps) {
                 : 'Only thermal forced-outage risk is sampled; renewable output follows the base profile.'}
             </p>
           </div>
+
+          <div className="sg-setting-divider" />
+          <div className="sg-setting-row">
+            <label className="sg-setting-label">Physical-risk uplift</label>
+            <div className="sg-btn-row">
+              <button
+                className={`tb-btn sg-solver-btn${!cfg.physicalRiskUplift ? '' : ' tb-btn--muted'}`}
+                onClick={() => set({ physicalRiskUplift: false })}
+              >
+                Off
+              </button>
+              <button
+                className={`tb-btn sg-solver-btn${!!cfg.physicalRiskUplift ? '' : ' tb-btn--muted'}`}
+                onClick={() => set({ physicalRiskUplift: true })}
+              >
+                On
+              </button>
+            </div>
+            <p className="sg-setting-hint">
+              Opt-in: raises each generator's forced-outage rate by its Physical Risk portfolio's
+              damage ratio (expected annual impact / asset value, capped at 50%) from that
+              session's latest completed run. Provenance is reported alongside the outage-MC result.
+            </p>
+          </div>
+
+          {cfg.physicalRiskUplift && (
+            <div className="sg-setting-row">
+              <label className="sg-setting-label">Physical-risk session</label>
+              <input
+                type="text"
+                className="sg-text-input"
+                placeholder={physicalRiskTabSessionId ?? 'no session open in the Physical Risk tab'}
+                value={cfg.physicalRiskSessionId ?? ''}
+                onChange={(e) => set({ physicalRiskSessionId: e.target.value })}
+              />
+              {!cfg.physicalRiskSessionId && physicalRiskTabSessionId && (
+                <button
+                  type="button"
+                  className="tb-btn sg-solver-btn"
+                  onClick={() => set({ physicalRiskSessionId: physicalRiskTabSessionId })}
+                >
+                  Use current Physical Risk tab session
+                </button>
+              )}
+              <p className="sg-setting-hint">
+                Session id from the Physical Risk tab's current portfolio. Leave blank and click the
+                button to use the tab's currently open session, or paste a session id manually.
+              </p>
+            </div>
+          )}
         </>
       )}
     </section>

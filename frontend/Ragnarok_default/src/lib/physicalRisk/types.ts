@@ -72,3 +72,16 @@ export interface Libraries {
   perils: LibraryEntry[];
   vulnerabilityClasses: LibraryEntry[];
 }
+
+/**
+ * Standard prop set passed by PhysicalRiskView to EVERY sub-tab section, so
+ * porting a section never requires touching the view's plumbing. Sections
+ * that don't need a prop simply ignore it.
+ */
+export interface PhysicalRiskSectionProps {
+  portfolio: Portfolio | null;
+  onPortfolioChange: (portfolio: Portfolio | null) => void;
+  libraries: Libraries | null;
+  /** Latest physical run (any kind routed through the view's poller). */
+  run: Run | null;
+}

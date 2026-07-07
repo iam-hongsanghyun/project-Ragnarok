@@ -105,20 +105,18 @@ def test_get_session_unknown_is_404(_session_dir: Path) -> None:
     assert resp.status_code == 404
 
 
-def test_libraries_lists_the_five_perils(_session_dir: Path) -> None:
+def test_libraries_lists_the_core_perils(_session_dir: Path) -> None:
+    """The vendored perils library supersedes the Phase-0 five: core ids must remain."""
     resp = client.get("/api/physical-risk/libraries")
     assert resp.status_code == 200
     body = resp.json()
     peril_ids = {p["id"] for p in body["perils"]}
-    assert peril_ids == {
-        "tropical_cyclone",
-        "river_flood",
-        "wildfire",
-        "earthquake",
-        "windstorm",
-    }
+    assert {"tropical_cyclone", "river_flood", "wildfire", "earthquake"} <= peril_ids
     assert all(p["label"] for p in body["perils"])  # every peril has a label
     assert body["vulnerabilityClasses"]  # non-empty class list
+    # The Phase-0 energy classes are still offered (with borrowed curve data).
+    class_ids = {c["id"] for c in body["vulnerabilityClasses"]}
+    assert {"thermal", "renewable", "hydro", "grid", "default"} <= class_ids
 
 
 def test_submit_run_polls_to_done_with_output(_session_dir: Path) -> None:
