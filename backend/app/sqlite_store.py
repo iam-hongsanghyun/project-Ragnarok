@@ -504,6 +504,7 @@ def transform_series(
         rows = timeseries.transform_rows(
             rows, index_col, op,  # type: ignore[arg-type]  (validated above)
             columns=params.get("columns"),
+            value=float(params.get("value", 0.0)),
             factor=float(params.get("factor", 1.0)),
             delta=float(params.get("delta", 0.0)),
             shift=int(params.get("shift", 0)),

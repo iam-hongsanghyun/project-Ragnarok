@@ -63,6 +63,8 @@ import { readCarbonLibraryFromModel, writeCarbonLibraryToModel, sameCarbonLibrar
 import { saveSessionControls, loadSessionControls, clearSession, clearSessionModelOnly } from 'lib/storage/sessionStore';
 import { clearSessionModel, putSessionModel, putStaticModel, getSessionFullModel, getSessionMeta, getSheetPage, isSeriesSheet, patchSheet, seriesSheetCounts, DEFAULT_SESSION_ID } from 'lib/api/session';
 import type { ClusterResult } from 'lib/forge/transforms';
+import { forgeQueryApply, forgeQueryPreview } from 'lib/api/forge';
+import type { QueryEditRequest } from 'lib/forge/queryEdit';
 import type { SheetEditOp } from 'lib/api/session';
 import { fetchRunOutputSeriesWindows } from 'lib/api/runs';
 import { loadExample } from 'lib/api/examples';
@@ -84,6 +86,7 @@ import { useModelIssues } from './features/validation/useModelIssues';
 import { useFrontendPlugins } from './features/plugins/frontendPlugins';
 import { ToastProvider, useToast } from './shared/components/Toast';
 import { DialogProvider, useDialog } from './shared/components/Dialog';
+import { ErrorBoundary } from './shared/components/ErrorBoundary';
 
 /**
  * Strip every trailing project/data extension from a filename so export names
@@ -112,6 +115,18 @@ function stripSeriesSheets(model: WorkbookModel): WorkbookModel {
     (out as Record<string, unknown>)[sheet] = isSeriesSheet(sheet) ? [] : rows;
   }
   return out;
+}
+
+/** Total rows across component sheets (ignoring RAGNAROK_* metadata sheets), so
+ *  a workbook that parsed but carried no components can be reported as an empty
+ *  import instead of a silent success. */
+function countComponentRows(model: WorkbookModel): number {
+  let total = 0;
+  for (const [sheet, rows] of Object.entries(model)) {
+    if (sheet.startsWith('RAGNAROK_') || !Array.isArray(rows)) continue;
+    total += rows.length;
+  }
+  return total;
 }
 
 function AppInner() {
@@ -787,6 +802,29 @@ function AppInner() {
     } catch { /* tree just won't list series; they still solve */ }
   }, [resetForNewModel]);
 
+  // Forge → Query & edit. Sync the browser's static edits to the session first
+  // (server-side joins/filters read the full model there), then run the query.
+  const handleQueryEditPreview = useCallback(
+    async (req: QueryEditRequest) => {
+      await putStaticModel(prepareModelForBackend(model));
+      return forgeQueryPreview(req);
+    },
+    [model, prepareModelForBackend],
+  );
+  const handleQueryEditApply = useCallback(
+    async (req: QueryEditRequest) => {
+      await putStaticModel(prepareModelForBackend(model));
+      const result = await forgeQueryApply(req);
+      // The edit is written SERVER-SIDE (patch_sheet / transform_series), so
+      // reload the model FROM the session — never push the stale browser model
+      // back (that would clobber the edit). reloadSessionModel also relearns the
+      // series counts for the temporal path.
+      await reloadSessionModel();
+      return result;
+    },
+    [model, prepareModelForBackend, reloadSessionModel],
+  );
+
   // Forge → T1(a) snapshot-window retarget. Sync static edits, retarget on the
   // server (regenerates snapshots + reindexes all temporal sheets), then reload.
   const handleRetargetSnapshots = useCallback(
@@ -1172,10 +1210,18 @@ function AppInner() {
     if (!file) return;
     try {
       const nextModel = await parseWorkbook(file);
+      // A workbook with no recognizable component rows must NOT look like a
+      // silent success ("import does nothing") — report it as an empty import.
+      if (countComponentRows(nextModel) === 0) {
+        const msg = `${file.name}: no component rows found. Expected sheets like "buses", "generators", "loads".`;
+        setStatus(msg);
+        showToast(msg, 'error');
+        return;
+      }
       normalizeInputDatesToIso(nextModel, settings.dateFormat);
       resetForNewModel(nextModel, file.name || 'ragnarok_case.xlsx');
       setFileHandle(null);
-      setStatus(`Imported workbook: ${file.name}. Analytics will populate after the next run.`);
+      setStatus(`Imported workbook: ${file.name} (${countComponentRows(nextModel)} rows). Analytics will populate after the next run.`);
       showToast(`Opened ${file.name}`, 'success');
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Workbook import failed.';
@@ -1605,10 +1651,16 @@ function AppInner() {
       });
       const file = await handle.getFile();
       const nextModel = await parseWorkbook(file);
+      if (countComponentRows(nextModel) === 0) {
+        const msg = `${file.name}: no component rows found. Expected sheets like "buses", "generators", "loads".`;
+        setStatus(msg);
+        showToast(msg, 'error');
+        return;
+      }
       normalizeInputDatesToIso(nextModel, settings.dateFormat);
       resetForNewModel(nextModel, file.name || 'ragnarok_case.xlsx');
       setFileHandle(handle);
-      setStatus(`Opened workbook: ${file.name}`);
+      setStatus(`Opened workbook: ${file.name} (${countComponentRows(nextModel)} rows)`);
       showToast(`Opened ${file.name}`, 'success');
     } catch (error) {
       if ((error as Error)?.name !== 'AbortError') {
@@ -1796,6 +1848,23 @@ function AppInner() {
       // the series.
       if (!opts?.sessionAlreadyLoaded) {
         void putSessionModel(restoredModel, { filename: entry.label ?? '' }).catch(() => { /* best-effort */ });
+      }
+      // Make the Model tree list the imported temporal sheets. When we pushed the
+      // FULL model (project-file import) its series rows are right here, so count
+      // them directly (race-free). When the session was already promoted
+      // server-side (History "Import project"), `restoredModel` is static-only —
+      // read the counts from the authoritative session meta instead. Without this
+      // the tree showed no `*_t` sheets after a project/history import.
+      if (!opts?.sessionAlreadyLoaded) {
+        const counts: Record<string, number> = {};
+        for (const [sheetName, rows] of Object.entries(restoredModel)) {
+          if (isSeriesSheet(sheetName) && Array.isArray(rows) && rows.length > 0) counts[sheetName] = rows.length;
+        }
+        setSessionSeriesCounts(counts);
+      } else {
+        void getSessionMeta()
+          .then((meta) => setSessionSeriesCounts(seriesSheetCounts(meta)))
+          .catch(() => { /* tree just won't list series */ });
       }
       const snapshotMax = snapshotMaxFromWorkbook(restoredModel.snapshots);
       setMaxSnapshots(snapshotMax);
@@ -2920,6 +2989,8 @@ function AppInner() {
                 setModel((prev) => ({ ...prev, ...partial }));
                 requestStaticResync(); // Forge edits static sheets → sync the session
               }}
+              onQueryEditPreview={handleQueryEditPreview}
+              onQueryEditApply={handleQueryEditApply}
               onClusterPreview={handleClusterPreview}
               onClusterApply={handleClusterApply}
               onAttachRenewableProfiles={handleAttachRenewableProfiles}
@@ -3084,11 +3155,13 @@ function AppInner() {
 
 function App() {
   return (
-    <ToastProvider>
-      <DialogProvider>
-        <AppInner />
-      </DialogProvider>
-    </ToastProvider>
+    <ErrorBoundary>
+      <ToastProvider>
+        <DialogProvider>
+          <AppInner />
+        </DialogProvider>
+      </ToastProvider>
+    </ErrorBoundary>
   );
 }
 

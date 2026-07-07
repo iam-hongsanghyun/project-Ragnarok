@@ -6328,6 +6328,57 @@ th:hover .col-delete-btn {
   font-size: 0.85rem;
   color: var(--brand, #0f766e);
 }
+.forge-preview-table {
+  margin-top: 8px;
+  border-collapse: collapse;
+}
+.forge-preview-table th,
+.forge-preview-table td {
+  padding: 2px 8px;
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+.forge-preview-table th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+/* Top-level error-boundary fallback (see shared/components/ErrorBoundary). */
+.app-crash {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+  background: var(--bg, #0b0f14);
+}
+.app-crash-card {
+  max-width: 560px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px 24px;
+  background: var(--panel);
+  color: var(--text);
+}
+.app-crash-card h2 {
+  margin: 0 0 8px;
+}
+.app-crash-detail {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--bg, rgba(0, 0, 0, 0.25));
+  color: var(--danger, #dc2626);
+  font-size: 0.82rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 180px;
+  overflow: auto;
+}
+.app-crash-actions {
+  display: flex;
+  gap: 8px;
+}
 .forge-validate-btn {
   width: 100%;
   justify-content: center;

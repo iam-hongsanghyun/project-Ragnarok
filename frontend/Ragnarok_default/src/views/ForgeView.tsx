@@ -28,11 +28,17 @@ import {
 import { nonEmptySheets, roundFindings, snapFindings, type ForgeFinding } from 'lib/forge/validate';
 import { AdjustPanel } from './ForgeView.features/AdjustPanel';
 import { CostCurvePanel } from './ForgeView.features/CostCurvePanel';
+import { QueryEditPanel } from './ForgeView.features/QueryEditPanel';
+import type { QueryApplyResult, QueryEditRequest, QueryPreview } from 'lib/forge/queryEdit';
 
 interface Props {
   model: WorkbookModel;
   /** Merge transformed sheets back into the model (keeps everything else). */
   onApplySheets: (partial: Record<string, GridRow[]>) => void;
+  /** Query & edit — server-side bulk edit (filters + one-hop joins, static or
+   *  temporal). Preview is a dry run; apply writes through the session. */
+  onQueryEditPreview?: (req: QueryEditRequest) => Promise<QueryPreview>;
+  onQueryEditApply?: (req: QueryEditRequest) => Promise<QueryApplyResult>;
   /** Reduce the session model to fewer clustered buses; returns the reduced
    *  model for preview (no mutation). Absent ⇒ the cluster tool is read-only.
    *  `groupByColumn` groups buses by a workbook column instead of nClusters;
@@ -88,7 +94,7 @@ export interface AttachProfilesResult {
   sites: number;
 }
 
-type Operation = 'round' | 'adjust' | 'costcurve' | 'snap' | 'cluster' | 'renewable' | 'hydroInflow' | 'retarget' | 'forecast' | 'driverForecast' | 'evDemand';
+type Operation = 'round' | 'adjust' | 'query' | 'costcurve' | 'snap' | 'cluster' | 'renewable' | 'hydroInflow' | 'retarget' | 'forecast' | 'driverForecast' | 'evDemand';
 type OpGroup = 'Numeric' | 'Economics' | 'Geospatial' | 'Topology' | 'Temporal';
 
 /** Catalog of Forge tools, grouped. Add a new tool by adding an entry here
@@ -96,6 +102,7 @@ type OpGroup = 'Numeric' | 'Economics' | 'Geospatial' | 'Topology' | 'Temporal';
 const OPERATIONS: Array<{ id: Operation; label: string; group: OpGroup }> = [
   { id: 'round', label: 'Round / Ceil / Floor', group: 'Numeric' },
   { id: 'adjust', label: 'Adjust values', group: 'Numeric' },
+  { id: 'query', label: 'Query & edit', group: 'Numeric' },
   { id: 'costcurve', label: 'Marginal cost curve', group: 'Economics' },
   { id: 'snap', label: 'Snap to nearest bus', group: 'Geospatial' },
   { id: 'renewable', label: 'Attach renewable profiles', group: 'Geospatial' },
@@ -236,7 +243,7 @@ function SearchableMultiSelect({
   );
 }
 
-export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApply, onAttachRenewableProfiles, onRetargetSnapshots, onForecastSnapshots, onDriverForecast, onEvDemand, onAttachHydroInflow }: Props) {
+export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEditApply, onClusterPreview, onClusterApply, onAttachRenewableProfiles, onRetargetSnapshots, onForecastSnapshots, onDriverForecast, onEvDemand, onAttachHydroInflow }: Props) {
   // Persisted so the chosen tool + validation result survive leaving and
   // returning to the Forge tab (the view unmounts on tab switch). The findings
   // scan the whole model, so these three drivers fully restore the result.
@@ -725,6 +732,18 @@ export function ForgeView({ model, onApplySheets, onClusterPreview, onClusterApp
             onApplySheets={onApplySheets}
             onStatus={setStatus}
           />
+        ) : operation === 'query' ? (
+          onQueryEditPreview && onQueryEditApply ? (
+            <QueryEditPanel
+              model={model}
+              sheetsWithRows={sheetsWithRows}
+              onPreview={onQueryEditPreview}
+              onApply={onQueryEditApply}
+              onStatus={setStatus}
+            />
+          ) : (
+            <div className="view-empty"><p>Query &amp; edit needs a live backend session.</p></div>
+          )
         ) : operation === 'costcurve' ? (
           <CostCurvePanel
             model={model}

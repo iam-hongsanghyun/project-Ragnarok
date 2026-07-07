@@ -924,6 +924,11 @@ app.include_router(_importers_router.router)
 from .routers import transforms as _transforms_router  # noqa: E402
 app.include_router(_transforms_router.router)
 
+# Forge "Query & Edit" — database-query-like bulk edits (filters + one-hop joins,
+# static or temporal attributes). Pure resolver in app/forge_resolver.py.
+from .routers import forge_query as _forge_query_router  # noqa: E402
+app.include_router(_forge_query_router.router)
+
 # Server-side working model ("session"). The backend is the source of truth for
 # the model; the frontend imports once and then fetches pages/windows on demand.
 from .routers import session as _session_router  # noqa: E402

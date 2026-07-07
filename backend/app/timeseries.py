@@ -36,8 +36,8 @@ def df_to_records(df: pd.DataFrame) -> list[dict[str, Any]]:
     return df.replace({np.nan: None}).to_dict(orient="records")
 
 
-TransformOp = Literal["scale", "offset", "shift", "interpolate", "clip", "grow"]
-VALID_TRANSFORMS = ("scale", "offset", "shift", "interpolate", "clip", "grow")
+TransformOp = Literal["set", "scale", "offset", "shift", "interpolate", "clip", "grow"]
+VALID_TRANSFORMS = ("set", "scale", "offset", "shift", "interpolate", "clip", "grow")
 
 
 def transform_rows(
@@ -46,6 +46,7 @@ def transform_rows(
     op: TransformOp,
     *,
     columns: list[str] | None = None,
+    value: float = 0.0,
     factor: float = 1.0,
     delta: float = 0.0,
     shift: int = 0,
@@ -62,6 +63,8 @@ def transform_rows(
     to NaN → ``None``.
 
     Ops:
+        set         ``v → value`` for EVERY cell in the selected columns
+                    (blanks included — a "set" overwrites, unlike scale/offset)
         scale       ``v → v · factor``
         offset      ``v → v + delta``
         shift       roll each column by ``shift`` steps; ``wrap`` cyclically (no
@@ -88,7 +91,12 @@ def transform_rows(
 
     num = df[value_cols].apply(pd.to_numeric, errors="coerce")
 
-    if op == "scale":
+    if op == "set":
+        # Overwrite every selected cell with the constant — blanks included, so a
+        # "set p_set = 7" fills the whole series (a scale/offset can't touch NaN).
+        num = num.copy()
+        num[:] = float(value)
+    elif op == "scale":
         num = num * float(factor)
     elif op == "offset":
         num = num + float(delta)
