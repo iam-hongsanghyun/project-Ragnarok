@@ -88,6 +88,12 @@ const ICONS: Record<WorkspaceTab, React.ReactNode> = {
     <rect x="10.3" y="7" width="2.4" height="7" />
     <rect x="14.1" y="11.5" width="2.4" height="2.5" />
   </>),
+  // Physical Risk — a hazard triangle (climate exposure / physical risk).
+  PhysicalRisk: svg(<>
+    <path d="M10 3.5 17 16H3Z" />
+    <path d="M10 8v4" />
+    <circle cx="10" cy="14.2" r="0.6" fill="currentColor" stroke="none" />
+  </>),
   // Post-analysis — a lightbulb (decisions drawn from the results).
   PostAnalysis: svg(<>
     <path d="M10 3a5 5 0 0 0-3 9v2h6v-2a5 5 0 0 0-3-9Z" />
@@ -114,6 +120,7 @@ const ENTRIES: Entry[] = [
   { id: 'Market',       label: 'Market & Policy', hint: 'Inputs that change the solve', icon: ICONS.Market },
   { id: 'Settings',     label: 'Settings',        hint: 'Run setup & preferences', icon: ICONS.Settings },
   { id: 'Analytics',    label: 'Analytics',       hint: 'Results dashboard', icon: ICONS.Analytics },
+  { id: 'PhysicalRisk', label: 'Physical Risk',   hint: 'Climate exposure & physical risk', icon: ICONS.PhysicalRisk },
   { id: 'PostAnalysis', label: 'Post-analysis',   hint: 'Decisions from results (no re-solve)', icon: ICONS.PostAnalysis },
   { id: 'History',      label: 'History',         hint: 'Past runs', icon: ICONS.History },
   { id: 'Plugins',      label: 'Plugins',         hint: 'Extensions', icon: ICONS.Plugins },

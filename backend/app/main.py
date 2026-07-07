@@ -954,6 +954,11 @@ app.include_router(_pypsa_earth_router.router)
 from .routers import procurement as _procurement_router  # noqa: E402
 app.include_router(_procurement_router.router)
 
+# Native physical-climate-risk capability (Phase 0 scaffold) — portfolio seeded
+# from the model, evaluated by a deterministic stub engine (no CLIMADA/conda yet).
+from .routers import physical_risk as _physical_risk_router  # noqa: E402
+app.include_router(_physical_risk_router.router)
+
 
 @app.get("/api/backends")
 def get_backends() -> dict[str, Any]:

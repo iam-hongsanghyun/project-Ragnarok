@@ -89,6 +89,7 @@ import { DataView } from './views/DataView';
 import { WelcomeView } from './views/WelcomeView';
 import { ForgeView } from './views/ForgeView';
 import { AnalyticsView } from './views/AnalyticsView';
+import { PhysicalRiskView, PhysicalRiskSubTab } from './views/PhysicalRiskView';
 import { ActivityBar } from './layout/ActivityBar';
 import { useModelIssues } from './features/validation/useModelIssues';
 import { useFrontendPlugins } from './features/plugins/frontendPlugins';
@@ -221,6 +222,7 @@ function AppInner() {
   // Persisted so the analytics sub-tab the user last viewed sticks across tab
   // navigation and reloads — never auto-yanked back to a default.
   const [analyticsSubTab, setAnalyticsSubTab] = usePersistedState<AnalyticsSubTab>('ui:analytics-subtab', 'Result');
+  const [physicalRiskSubTab, setPhysicalRiskSubTab] = usePersistedState<PhysicalRiskSubTab>('ui:physical-risk-subtab', 'Assets');
   // History top-tab sub-navigation: the live run Queue, or the persisted run History.
   const [historySubTab, setHistorySubTab] = usePersistedState<'Queue' | 'History'>('ui:history-subtab', 'History');
   const [results, setResults] = useState<RunResults | null>(null);
@@ -3163,6 +3165,13 @@ function AppInner() {
               onNeedSeries={setNeededRunWindows}
               backendRuns={backendRuns}
               activeRunName={activeRunName}
+            />
+          )}
+
+          {tab === 'PhysicalRisk' && (
+            <PhysicalRiskView
+              subTab={physicalRiskSubTab}
+              onSubTabChange={setPhysicalRiskSubTab}
             />
           )}
 
