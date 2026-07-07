@@ -189,6 +189,26 @@ export interface ForecastResult {
   detail?: string | null;
 }
 
+// ── calibration (backend/app/physical_risk/entities.py::CalibrationResult) ───
+// The engine (stub and worker) always calibrates TC v_half against an
+// observed annual loss it derives itself (stub: 90% of modelled AAI; worker:
+// EM-DAT for the portfolio's country) — the run request carries no peril or
+// observed-loss override (see `RunRequest` / `run_calibration` /
+// `compute_calibration`), so this section submits `{ kind: 'calibration' }`
+// only and reads the target back off the result.
+
+export interface CalibrationResult {
+  kind: 'calibration';
+  status: string;
+  peril: string;
+  country: string;
+  param: string;
+  initial: number;
+  calibrated: number;
+  observedAnnualLoss: number;
+  detail?: string | null;
+}
+
 export interface AnalysisRun<T> {
   id: string;
   kind: string;
@@ -198,7 +218,7 @@ export interface AnalysisRun<T> {
 }
 
 export interface SubmitAnalysisRunRequest {
-  kind: 'supply-chain' | 'forecast';
+  kind: 'supply-chain' | 'forecast' | 'calibration';
   perils?: string[];
   scenario?: { rcp: string; horizon: number } | null;
   mriotType?: string;

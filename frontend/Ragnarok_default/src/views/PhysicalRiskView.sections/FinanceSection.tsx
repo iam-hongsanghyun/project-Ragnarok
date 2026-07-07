@@ -21,12 +21,23 @@
  * sub-tab switches via a module-level cache (rehydrated on mount), same as
  * every other in-memory-only Physical Risk sub-tab; an `aliveRef` guards
  * every async `setState` against a mid-flight unmount.
+ *
+ * Methodology comparison: `finance.methodsCompared` is always computed
+ * server-side for every methodology selected on the portfolio's financial
+ * profile (`financialProfile.ratingMethods` — `finance.py::selected_method_ids`).
+ * The methodology multi-select below patches that same profile field (through
+ * the section's existing debounced `patchProfile`/`saveFinancialProfile`
+ * path), so picking methodologies re-computes them server-side on the next
+ * "Compute climate risk premium" click; the table additionally filters the
+ * already-fetched result client-side so narrowing the selection updates the
+ * display immediately without waiting for a re-run.
  */
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useToast } from '../../shared/components/Toast';
 import { TransitionCostChart } from '../../features/physicalRisk/TransitionCostChart';
+import { SearchableMultiSelect } from '../../shared/components/SearchableMultiSelect';
 import { PhysicalRiskSectionProps } from 'lib/physicalRisk/types';
-import { FullPortfolio } from 'lib/physicalRisk/configViews';
+import { FullLibraries, FullPortfolio, getFullLibraries } from 'lib/physicalRisk/configViews';
 import {
   FinanceResult,
   TransitionResult,
@@ -58,6 +69,14 @@ export function FinanceSection({ portfolio, onPortfolioChange, run }: PhysicalRi
   useEffect(() => {
     aliveRef.current = true;
     return () => { aliveRef.current = false; };
+  }, []);
+
+  const [libraries, setLibraries] = useState<FullLibraries | null>(null);
+  useEffect(() => {
+    void getFullLibraries()
+      .then((libs) => { if (aliveRef.current) setLibraries(libs); })
+      .catch((err) => { showToast(err instanceof Error ? err.message : 'Failed to load libraries', 'error'); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const sessionId = portfolio?.sessionId ?? null;
@@ -202,6 +221,24 @@ export function FinanceSection({ portfolio, onPortfolioChange, run }: PhysicalRi
     </div>
   );
 
+  // The full DSCR-to-rating methodology catalog (backend `finance_reference.json::rating_methods`,
+  // served at `financeChannels.reference.ratingMethods` — no client-side catalog). The multi-select
+  // patches `financialProfile.ratingMethods` (drives `finance.methodsCompared` server-side, per
+  // `finance.py::selected_method_ids`); the table also filters the already-fetched result
+  // client-side so narrowing the selection updates the display before the next re-run.
+  const ratingMethodOptions = useMemo(() => {
+    const catalog = libraries?.financeChannels.reference.ratingMethods ?? {};
+    return Object.entries(catalog).map(([id, m]) => ({ value: id, label: m.label }));
+  }, [libraries]);
+  const selectedMethodIds = useMemo(() => profile.ratingMethods ?? [], [profile.ratingMethods]);
+  const visibleMethods = useMemo(() => {
+    if (!finance) return [];
+    if (selectedMethodIds.length === 0) return finance.methodsCompared;
+    const wanted = new Set(selectedMethodIds);
+    const filtered = finance.methodsCompared.filter((m) => wanted.has(m.method));
+    return filtered.length > 0 ? filtered : finance.methodsCompared;
+  }, [finance, selectedMethodIds]);
+
   return (
     <div className="pane">
       <div className="pane-header">
@@ -335,6 +372,20 @@ export function FinanceSection({ portfolio, onPortfolioChange, run }: PhysicalRi
                 <option value="power_gen">Power generation — capacity factor</option>
               </select>
             </div>
+            <div className="sg-setting-row">
+              <label className="sg-setting-label">DSCR-to-rating methodologies</label>
+              <SearchableMultiSelect
+                values={selectedMethodIds}
+                options={ratingMethodOptions}
+                onChange={(next) => patchProfile({ ratingMethods: next.length > 0 ? next : null })}
+                placeholder="All methodologies (library default)"
+              />
+            </div>
+            <p className="sg-setting-hint">
+              Selecting methodologies here re-computes them server-side on the next "Compute climate
+              risk premium" click; the comparison table below also filters the current result to the
+              selection (the full set is always computed server-side).
+            </p>
             {numField(`CAPEX (${currency})`, 'capex', '1000000')}
             {!isPower && numField(`Annual EBITDA (${currency})`, 'annualEbitda', '1000000')}
             {isPower && (
@@ -408,9 +459,9 @@ export function FinanceSection({ portfolio, onPortfolioChange, run }: PhysicalRi
                           </tr>
                         </thead>
                         <tbody>
-                          {finance.methodsCompared.map((m, i) => (
+                          {visibleMethods.map((m) => (
                             <tr key={m.method}>
-                              <td>{m.code}{i === 0 ? ' (primary)' : ''}</td>
+                              <td>{m.code}{m.method === finance.methodsCompared[0].method ? ' (primary)' : ''}</td>
                               <td style={{ color: ratingColor(m.scenario.baseline.rating) }}>{m.scenario.baseline.rating}</td>
                               <td style={{ color: ratingColor(m.scenario.stressed.rating) }}>{m.scenario.stressed.rating}</td>
                               <td>{m.scenario.crpBps >= 0 ? '+' : ''}{m.scenario.crpBps.toFixed(0)}</td>

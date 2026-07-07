@@ -166,6 +166,29 @@ export interface DataSourcesLibrary {
   sources: DataSourceEntry[];
 }
 
+/** One DSCR-to-rating methodology, as vendored in `finance_reference.json::rating_methods`. */
+export interface RatingMethodEntry {
+  label: string;
+  short?: string;
+  code?: string;
+  source?: string;
+  note?: string;
+  thresholds: { dscrMin: number; rating: string }[];
+}
+
+/** The finance reference framework nested at `financeChannels.reference` (rating grids, spreads,
+ * financing defaults) — id-keyed dicts (`ratingMethods`) keep their ids verbatim. Other
+ * `financeChannels` fields (generation defaults, channel magnitudes) stay untyped here since
+ * only the rating-methods catalog is consumed on this side. */
+export interface FinanceChannelsLibrary {
+  reference: {
+    defaultRatingMethod?: string;
+    ratingMethods?: Record<string, RatingMethodEntry>;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
 /** The full `GET /api/physical-risk/libraries` payload (superset of `Libraries`). */
 export interface FullLibraries {
   perils: PerilLibraryEntry[];
@@ -174,7 +197,7 @@ export interface FullLibraries {
   vulnerabilityClasses: VulnerabilityClassEntry[];
   impactFunctions: ImpactFunctionsLibrary;
   ngfsScenarios: NgfsScenariosLibrary;
-  financeChannels: Record<string, unknown>;
+  financeChannels: FinanceChannelsLibrary;
   dataSources: DataSourcesLibrary;
 }
 
