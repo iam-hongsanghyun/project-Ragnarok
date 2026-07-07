@@ -63,12 +63,13 @@ export function CarrierAnalysisCard({ results, model }: Props) {
     ? new Set(Object.keys(model['generators-p_max_pu'][0]))
     : null;
 
-  // Capacity = installed nameplate from the INPUT model (p_nom). Fall back to the
-  // solved p_nom_opt only when an input p_nom isn't available (e.g. the model
-  // sheet is missing), so the total always reconciles with the headline KPI.
+  // Installed capacity = the SOLVED p_nom_opt (== p_nom for non-extendable units,
+  // the built capacity for expanded ones), falling back to the input p_nom only
+  // when no solved value is present — so the total reconciles with the headline
+  // "Generator capacity" KPI, which now also uses p_nom_opt.
   const nameplateOf = (name: string, pNomIn: number): number => {
-    if (pNomIn > 0) return pNomIn;
-    return numberValue(staticGens[name]?.['p_nom_opt'] as string | number | undefined);
+    const opt = numberValue(staticGens[name]?.['p_nom_opt'] as string | number | undefined);
+    return opt > 0 ? opt : pNomIn;
   };
 
   // Per-generator record over the FULL installed fleet (energy 0 ⇒ idle).

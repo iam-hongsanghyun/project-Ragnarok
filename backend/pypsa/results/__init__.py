@@ -65,6 +65,7 @@ from .market import (
     build_co2_shadow,
     build_generator_economics,
     build_merit_order,
+    installed_capacity_series,
 )
 from .summaries import _rolling_window_summaries, _pathway_period_summaries
 from .power_flow import run_power_flow
@@ -710,11 +711,16 @@ def _build_solved_payload(
     generator_weights = network.snapshot_weightings["generators"].reindex(network.snapshots).fillna(1.0)
     store_weights = network.snapshot_weightings["stores"].reindex(network.snapshots).fillna(1.0)
 
-    # Capacity & energy metrics. Generator vs storage capacity are reported as
-    # separate KPIs (installed nameplate p_nom); the combined total still drives
-    # the reserve position.
-    generator_capacity = float(network.generators.p_nom.sum())
-    storage_capacity = float(network.storage_units.p_nom.sum())
+    # Capacity & energy metrics. Installed capacity uses the SOLVED capacity
+    # (p_nom_opt — equal to p_nom for non-extendable units, the built capacity
+    # for expanded ones), NOT the raw input p_nom. The injected load_shedding_
+    # backstop is excluded: it is a modelling artifact, not real generation, and
+    # its optimised p_nom_opt can be large. The combined total drives the
+    # reserve position.
+    _gen_installed = installed_capacity_series(network.generators)
+    _real_gen = ~network.generators.index.str.startswith("load_shedding_")
+    generator_capacity = float(_gen_installed[_real_gen].sum())
+    storage_capacity = float(installed_capacity_series(network.storage_units).sum())
     total_load = float(load_dispatch.max())
     reserve_requirement = total_load  # installed capacity vs peak demand
 
@@ -908,8 +914,8 @@ def _build_solved_payload(
     peak_net_load = round(float(load_dispatch.max()))
 
     summary = [
-        {"label": "Generator capacity", "value": f"{round(generator_capacity):,} MW", "detail": f"{len(network.generators)} generators (installed nameplate)"},
-        {"label": "Storage capacity", "value": f"{round(storage_capacity):,} MW", "detail": f"{len(network.storage_units)} storage units (installed nameplate)"},
+        {"label": "Generator capacity", "value": f"{round(generator_capacity):,} MW", "detail": f"{len(network.generators)} generators (installed, solved p_nom_opt)"},
+        {"label": "Storage capacity", "value": f"{round(storage_capacity):,} MW", "detail": f"{len(network.storage_units)} storage units (installed, solved p_nom_opt)"},
         {"label": "Peak demand", "value": f"{round(total_load):,} MW", "detail": "from workbook load profile"},
         {"label": "Generator reserve", "value": f"{round(generator_capacity - reserve_requirement):,} MW", "detail": "generator capacity vs peak demand"},
         {"label": "Storage reserve", "value": f"{round(storage_capacity - reserve_requirement):,} MW", "detail": "storage capacity vs peak demand"},

@@ -5,16 +5,29 @@ import { carrierColor, numberValue, stringValue } from 'lib/utils/helpers';
 import { ComparisonMatrix, ComparisonScenario, topicNeedsFull } from './ComparisonMatrix';
 
 interface CapacityInfo {
-  /** Installed nameplate (input p_nom) by carrier — the energy-carrierMix analogue. */
+  /** Installed capacity by carrier — the energy-carrierMix analogue. */
   mix: MixItem[];
-  /** Total installed generator nameplate (Σ generators.p_nom). */
+  /** Total installed generator capacity (Σ generators). */
   genCap: number;
-  /** Total installed storage nameplate (Σ storage_units.p_nom). */
+  /** Total installed storage capacity (Σ storage_units). */
   storCap: number;
 }
 
-/** Derive installed nameplate capacity from a run's input model (modelStatic),
- *  so it's available for any stored run without re-solving. */
+/** Installed capacity of one component row: the solved ``p_nom_opt`` when present
+ *  (so an expanded/extendable build shows what the optimiser actually built),
+ *  falling back to the input ``p_nom`` for unsolved rows. For a non-extendable
+ *  component PyPSA sets ``p_nom_opt == p_nom``, so this is a no-op there. */
+function installedMw(r: Record<string, unknown>): number {
+  const opt = r.p_nom_opt;
+  if (opt !== undefined && opt !== null && opt !== '' && Number.isFinite(Number(opt))) {
+    return numberValue(opt as string | number);
+  }
+  return numberValue(r.p_nom as string | number | undefined);
+}
+
+/** Derive installed capacity from a run's model (modelStatic) — solved
+ *  ``p_nom_opt`` where available, so it's correct for capacity-expansion runs
+ *  without re-solving. */
 function capacityInfoFromModel(modelStatic: unknown): CapacityInfo {
   const root = modelStatic as {
     generators?: Array<Record<string, unknown>>;
@@ -25,7 +38,7 @@ function capacityInfoFromModel(modelStatic: unknown): CapacityInfo {
   for (const r of root?.generators ?? []) {
     const name = stringValue(r.name as string | number | undefined);
     if (!name || name.startsWith('load_shedding_')) continue;
-    const p = numberValue(r.p_nom as string | number | undefined);
+    const p = installedMw(r);
     genCap += p;
     const carrier = stringValue(r.carrier as string | number | undefined) || 'Other';
     byCarrier.set(carrier, (byCarrier.get(carrier) ?? 0) + p);
@@ -33,7 +46,7 @@ function capacityInfoFromModel(modelStatic: unknown): CapacityInfo {
   let storCap = 0;
   for (const r of root?.storage_units ?? []) {
     if (!stringValue(r.name as string | number | undefined)) continue;
-    storCap += numberValue(r.p_nom as string | number | undefined);
+    storCap += installedMw(r);
   }
   const mix = Array.from(byCarrier.entries())
     .filter(([, v]) => v > 0)
@@ -54,8 +67,8 @@ function splitCapacitySummary(base: SummaryItem[], info: CapacityInfo | undefine
   const out: SummaryItem[] = [];
   for (const item of base) {
     if (/^installed capacity$/i.test(item.label.trim())) {
-      out.push({ label: 'Generator capacity', value: mw(info.genCap), detail: 'installed nameplate' });
-      out.push({ label: 'Storage capacity', value: mw(info.storCap), detail: 'installed nameplate' });
+      out.push({ label: 'Generator capacity', value: mw(info.genCap), detail: 'installed (solved p_nom_opt)' });
+      out.push({ label: 'Storage capacity', value: mw(info.storCap), detail: 'installed (solved p_nom_opt)' });
     } else if (/^reserve position$/i.test(item.label.trim())) {
       out.push({ label: 'Generator reserve', value: mw(info.genCap - peak), detail: 'generator capacity vs peak demand' });
       out.push({ label: 'Storage reserve', value: mw(info.storCap - peak), detail: 'storage capacity vs peak demand' });
@@ -178,7 +191,7 @@ export function ComparisonPane({ backendRuns, activeRunName, currencySymbol = '$
 
   // Lazy full-results cache, populated only when a FULL topic is active.
   const [fullCache, setFullCache] = useState<Record<string, RunResults | 'loading' | 'error'>>({});
-  // Installed capacity (input p_nom: per-carrier mix + gen/storage totals),
+  // Installed capacity (solved p_nom_opt: per-carrier mix + gen/storage totals),
   // derived from the same fetch.
   const [capacityCache, setCapacityCache] = useState<Record<string, CapacityInfo>>({});
   const needFull = enabled.some(topicNeedsFull);

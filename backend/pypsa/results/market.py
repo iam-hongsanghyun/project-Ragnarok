@@ -267,7 +267,7 @@ def _num(value: Any, default: float = 0.0) -> float:
     return f if f == f else default  # NaN guard (NaN != NaN)
 
 
-def _p_nom_opt_series(df: pd.DataFrame) -> pd.Series:
+def installed_capacity_series(df: pd.DataFrame) -> pd.Series:
     """Resolve the effective installed/optimised capacity per component.
 
     Uses ``p_nom_opt`` where the solve produced one (>0), else falls back to the
@@ -355,7 +355,7 @@ def build_generator_economics(
     gen_p = network.generators_t.p
     if not gen_p.empty and len(network.generators):
         mc_dense = network.get_switchable_as_dense("Generator", "marginal_cost")
-        p_nom_opt_s = _p_nom_opt_series(network.generators)
+        p_nom_opt_s = installed_capacity_series(network.generators)
         for name in network.generators.index:
             if any(str(name).startswith(pfx) for pfx in SYSTEM_GEN_PREFIXES):
                 continue
@@ -410,7 +410,7 @@ def build_generator_economics(
             )
         except Exception:
             mc_dense_su = pd.DataFrame(0.0, index=network.snapshots, columns=su.index)
-        p_nom_opt_su = _p_nom_opt_series(su)
+        p_nom_opt_su = installed_capacity_series(su)
         for name in su.index:
             if name not in su_t.p.columns:
                 continue

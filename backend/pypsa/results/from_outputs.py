@@ -43,6 +43,7 @@ from .market import (
     build_co2_shadow,
     build_generator_economics,
     build_merit_order,
+    installed_capacity_series,
 )
 
 # Fallback discount rate when an imported file omits the setting (build_network
@@ -183,9 +184,13 @@ def derive_imported_result(
     )
     generator_weights = network.snapshot_weightings["generators"].reindex(network.snapshots).fillna(1.0)
 
-    generator_capacity = float(network.generators.p_nom.sum())
-    storage_capacity = float(network.storage_units.p_nom.sum())
-    total_capacity = generator_capacity + storage_capacity
+    # Installed capacity uses the solved p_nom_opt (== p_nom for non-extendable
+    # units); the injected load_shedding_ backstop is excluded. Mirrors the
+    # solve path in results/__init__.py.
+    _gen_installed = installed_capacity_series(network.generators)
+    _real_gen = ~network.generators.index.str.startswith("load_shedding_")
+    generator_capacity = float(_gen_installed[_real_gen].sum())
+    storage_capacity = float(installed_capacity_series(network.storage_units).sum())
     total_load = float(load_dispatch.max()) if len(load_dispatch) else 0.0
     reserve_requirement = total_load
 
