@@ -17,6 +17,7 @@ import {
   SecurityConstrainedConfig,
   ReserveConfig,
   OutageMcConfig,
+  RampConfig,
   MarketSimConfig,
   PowerFlowConfig,
   ContingencyConfig,
@@ -300,6 +301,7 @@ function AppInner() {
   const [sclopfConfig, setSclopfConfig] = useState<SecurityConstrainedConfig>({ enabled: false });
   const [reserveConfig, setReserveConfig] = useState<ReserveConfig>({ enabled: false, requirementType: 'fraction', fraction: 0.1, providers: 'all', reserveCost: 0 });
   const [outageMcConfig, setOutageMcConfig] = useState<OutageMcConfig>({ enabled: false, nMembers: 200, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, includeRenewableEnsemble: false });
+  const [rampConfig, setRampConfig] = useState<RampConfig>({ enabled: false, rampLimitUp: 0.5, rampLimitDown: 0.5, appliesTo: 'all' });
   const [powerFlowConfig, setPowerFlowConfig] = useState<PowerFlowConfig>({ enabled: false, linear: false });
   const [marketSimConfig, setMarketSimConfig] = useState<MarketSimConfig>({ enabled: false, pricing: 'uniform' as const, voll: 3000, chargeQuantile: 0.25, dischargeQuantile: 0.75, clearingModel: 'singleSided' as const, demandElasticFraction: 0.2, demandWtp: 120 });
   const [contingencyConfig, setContingencyConfig] = useState<ContingencyConfig>({ enabled: false });
@@ -353,6 +355,7 @@ function AppInner() {
     securityConstrainedConfig: { enabled: false },
     reserveConfig: { enabled: false, requirementType: 'fraction', fraction: 0.1, providers: 'all', reserveCost: 0 },
     outageMcConfig: { enabled: false, nMembers: 200, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, includeRenewableEnsemble: false },
+    rampConfig: { enabled: false, rampLimitUp: 0.5, rampLimitDown: 0.5, appliesTo: 'all' },
     powerFlowConfig: { enabled: false, linear: false },
     marketSimConfig: { enabled: false, pricing: 'uniform' as const, voll: 3000, chargeQuantile: 0.25, dischargeQuantile: 0.75, clearingModel: 'singleSided' as const, demandElasticFraction: 0.2, demandWtp: 120 },
     contingencyConfig: { enabled: false },
@@ -524,6 +527,7 @@ function AppInner() {
       securityConstrainedConfig: sclopfConfig,
       reserveConfig,
       outageMcConfig,
+      rampConfig,
       powerFlowConfig,
       marketSimConfig,
       contingencyConfig,
@@ -558,6 +562,7 @@ function AppInner() {
     sclopfConfig,
     reserveConfig,
     outageMcConfig,
+    rampConfig,
     powerFlowConfig,
     marketSimConfig,
     contingencyConfig,
@@ -683,6 +688,7 @@ function AppInner() {
       securityConstrainedConfig: sclopfConfig,
       reserveConfig,
       outageMcConfig,
+      rampConfig,
       powerFlowConfig,
       marketSimConfig,
       contingencyConfig,
@@ -742,6 +748,7 @@ function AppInner() {
     sclopfConfig,
     reserveConfig,
     outageMcConfig,
+    rampConfig,
     powerFlowConfig,
     marketSimConfig,
     contingencyConfig,
@@ -1210,6 +1217,7 @@ function AppInner() {
     setSclopfConfig(scenario.securityConstrainedConfig ?? { enabled: false });
     setReserveConfig(scenario.reserveConfig ?? { enabled: false, requirementType: 'fraction', fraction: 0.1, providers: 'all', reserveCost: 0 });
     setOutageMcConfig(scenario.outageMcConfig ?? { enabled: false, nMembers: 200, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, includeRenewableEnsemble: false });
+    setRampConfig(scenario.rampConfig ?? { enabled: false, rampLimitUp: 0.5, rampLimitDown: 0.5, appliesTo: 'all' });
     setPowerFlowConfig(scenario.powerFlowConfig ?? { enabled: false, linear: false });
     setMarketSimConfig(scenario.marketSimConfig ?? { enabled: false, pricing: 'uniform' as const, voll: 3000, chargeQuantile: 0.25, dischargeQuantile: 0.75, clearingModel: 'singleSided' as const, demandElasticFraction: 0.2, demandWtp: 120 });
     setContingencyConfig(scenario.contingencyConfig ?? { enabled: false });
@@ -2918,6 +2926,8 @@ function AppInner() {
               onReserveConfigChange={setReserveConfig}
               outageMcConfig={outageMcConfig}
               onOutageMcConfigChange={setOutageMcConfig}
+              rampConfig={rampConfig}
+              onRampConfigChange={setRampConfig}
               powerFlowConfig={powerFlowConfig}
               onPowerFlowConfigChange={setPowerFlowConfig}
               marketSimConfig={marketSimConfig}

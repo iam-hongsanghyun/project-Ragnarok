@@ -187,6 +187,19 @@ export interface OutageMcConfig {
   includeRenewableEnsemble: boolean;
 }
 
+/** Timestep-weighted ramp-rate limits — bounds how fast each unit's output can
+ *  change between consecutive snapshots: |Δp| ≤ ramp% × p_nom × hours per step
+ *  (timestep-weighted, unlike PyPSA's native per-snapshot ramp_limit_up/down). */
+export interface RampConfig {
+  enabled: boolean;
+  /** Max upward ramp, fraction of p_nom per hour (0.5 = 50%/h). */
+  rampLimitUp: number;
+  /** Max downward ramp, fraction of p_nom per hour. */
+  rampLimitDown: number;
+  /** 'thermal' excludes variable renewables from the ramp limit. */
+  appliesTo: 'all' | 'thermal';
+}
+
 /** Power-flow study mode — solve network physics (pf/lpf) instead of an LP. */
 export interface PowerFlowConfig {
   enabled: boolean;
@@ -926,6 +939,16 @@ export interface OutageMcResult {
   note: string | null;
 }
 
+/** Backend result block for timestep-weighted ramp-rate limits. */
+export interface RampResult {
+  enabled: boolean;
+  /** Snapshots where at least one unit's ramp constraint was binding. */
+  bindingHours: number;
+  byCarrier: { label: string; value: number; color?: string }[];
+  summary: { label: string; value: string; detail?: string }[];
+  note: string | null;
+}
+
 export interface StochasticScenarioResult {
   name: string;
   weight: number;
@@ -967,6 +990,7 @@ export interface ScenarioPreset {
   securityConstrainedConfig: SecurityConstrainedConfig;
   reserveConfig: ReserveConfig;
   outageMcConfig: OutageMcConfig;
+  rampConfig: RampConfig;
   powerFlowConfig: PowerFlowConfig;
   marketSimConfig?: MarketSimConfig;
   contingencyConfig: ContingencyConfig;
@@ -1506,6 +1530,8 @@ export interface RunResults {
   reserve?: ReserveResult;
   /** Present only when the run was a thermal forced-outage Monte-Carlo reliability study. */
   outageMc?: OutageMcResult;
+  /** Present only when the run enforced timestep-weighted ramp-rate limits. */
+  ramp?: RampResult;
   /** PyPSA statistics() table (per-carrier capacity/CF/curtailment/revenue/…). */
   statistics?: StatisticsResult;
   /** MGA near-optimal capacity corridor (present only when MGA was enabled). */

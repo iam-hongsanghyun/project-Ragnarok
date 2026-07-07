@@ -28,6 +28,7 @@ import {
   FinanceConfig,
   OutageMcConfig,
   Primitive,
+  RampConfig,
   ReserveConfig,
   RollingHorizonConfig,
   SamplingConfig,
@@ -50,6 +51,7 @@ import { StochasticSection } from './SettingsView.sections/Stochastic/Stochastic
 import { SclopfSection } from './SettingsView.sections/Sclopf';
 import { ReserveSection } from './SettingsView.sections/Reserve';
 import { OutageMcSection } from './SettingsView.sections/OutageMc';
+import { RampSection } from './SettingsView.sections/Ramp';
 import { PowerFlowSection } from './SettingsView.sections/PowerFlow';
 import { MarketSimulationSection } from './SettingsView.sections/MarketSimulation';
 import { ContingencySection } from './SettingsView.sections/Contingency';
@@ -80,6 +82,7 @@ type SectionId =
   | 'sclopf'
   | 'reserve'
   | 'outageMc'
+  | 'ramp'
   | 'powerflow'
   | 'marketsim'
   | 'contingency'
@@ -131,6 +134,7 @@ const SECTIONS: Section[] = [
   { id: 'sclopf',     label: 'Security-constrained (SCLOPF)',  group: 'Solve' },
   { id: 'reserve',    label: 'Operating reserve',              group: 'Solve' },
   { id: 'outageMc',   label: 'Outage Monte Carlo',             group: 'Solve' },
+  { id: 'ramp',       label: 'Ramp-rate limits',               group: 'Solve' },
   { id: 'powerflow', label: 'Power flow',                     group: 'Solve' },
   { id: 'marketsim', label: 'Market simulation',               group: 'Solve' },
   { id: 'contingency', label: 'N-1 contingency',              group: 'Solve' },
@@ -195,6 +199,8 @@ export interface SettingsViewProps {
   onReserveConfigChange: (config: ReserveConfig) => void;
   outageMcConfig: OutageMcConfig;
   onOutageMcConfigChange: (config: OutageMcConfig) => void;
+  rampConfig: RampConfig;
+  onRampConfigChange: (config: RampConfig) => void;
   powerFlowConfig: PowerFlowConfig;
   onPowerFlowConfigChange: (config: PowerFlowConfig) => void;
   marketSimConfig: MarketSimConfig;
@@ -346,6 +352,7 @@ export function SettingsView(props: SettingsViewProps) {
         {section === 'sclopf'         && <SclopfSection {...props} />}
         {section === 'reserve'        && <ReserveSection {...props} />}
         {section === 'outageMc'       && <OutageMcSection {...props} />}
+        {section === 'ramp'           && <RampSection {...props} />}
         {section === 'powerflow'      && <PowerFlowSection {...props} />}
         {section === 'marketsim'      && <MarketSimulationSection {...props} />}
         {section === 'contingency'    && <ContingencySection {...props} />}

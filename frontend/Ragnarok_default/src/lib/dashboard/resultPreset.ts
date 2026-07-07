@@ -154,6 +154,7 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   const hasPriceElastic = !!(results.priceElastic && results.priceElastic.loads.length > 0);
   const hasReserve = !!results.reserve?.enabled;
   const hasOutageMc = !!results.outageMc?.enabled;
+  const hasRamp = !!results.ramp?.enabled;
 
   const rows: Array<ReturnType<typeof row>> = [];
 
@@ -248,6 +249,12 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   if (hasOutageMc) {
     const omc: Card = { id: id('outage-mc'), kind: 'outage-mc' };
     rows.push(row({ cards: [{ card: omc }] }));
+  }
+
+  // 6d. Timestep-weighted ramp-rate limits (conditional)
+  if (hasRamp) {
+    const rmp: Card = { id: id('ramp'), kind: 'ramp' };
+    rows.push(row({ cards: [{ card: rmp }] }));
   }
 
   // (Storage SoC lives in the demand · price · SoC row above.)

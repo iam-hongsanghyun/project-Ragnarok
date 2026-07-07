@@ -27,6 +27,7 @@ from ..utils.series import weighted_sum
 from ..network.custom_constraints import apply_custom_constraints
 from ..network.constraint_dsl import apply_constraint_specs, apply_dsl_constraints
 from ..network.reserves import apply_reserve_constraints, extract_reserve_results
+from ..network.ramp import apply_ramp_constraints, extract_ramp_results
 from .dispatch import (
     build_curtailment_series,
     build_dispatch_series,
@@ -394,6 +395,16 @@ def run_pypsa(
             status_code=400,
             detail="Operating-reserve co-optimization cannot be combined with stochastic scenarios.",
         )
+    ramp_cfg: dict[str, Any] = options.get("rampConfig") or {}
+    ramp_enabled = bool(ramp_cfg.get("enabled"))
+    if ramp_enabled and stochastic.enabled:
+        # Same reason reserve is guarded: stochastic (set_scenarios) adds a
+        # `scenario` dimension to Generator-p, which the ramp constraint
+        # builder can't key its snapshot-shifted variable selection against.
+        raise HTTPException(
+            status_code=400,
+            detail="Ramp-rate limits cannot be combined with stochastic scenarios.",
+        )
 
     def extra_functionality(n, snapshots):
         # `snapshots` is the window being optimised — for rolling horizon it is a
@@ -410,6 +421,11 @@ def run_pypsa(
         # mutates existing ones, so ordering is not correctness-critical).
         if reserve_enabled:
             apply_reserve_constraints(n, reserve_cfg, snapshots, notes)
+        # Timestep-weighted ramp-rate limits — added last for the same reason:
+        # it only adds new constraints on the existing Generator-p / p_nom
+        # variables, never mutates anything the constraints above built.
+        if ramp_enabled:
+            apply_ramp_constraints(n, ramp_cfg, snapshots, notes)
 
 
     # Currency symbol for formatted output strings
@@ -640,6 +656,7 @@ def _build_solved_payload(
     ess_cfg = options.get("essConfig") or {}
     ess_enabled = bool(ess_cfg.get("enabled", False))
     reserve_cfg = options.get("reserveConfig") or {}
+    ramp_cfg = options.get("rampConfig") or {}
     ppa_cfg = options.get("ppaConfig") or {}
     ppa_enabled = bool(ppa_cfg.get("enabled", False))
 
@@ -1131,6 +1148,10 @@ def _build_solved_payload(
     # off n.model; None-safe when reserves weren't enabled or n.model is
     # unavailable (e.g. the X1 derive-from-outputs path, which never re-solves).
     reserve = extract_reserve_results(network, reserve_cfg)
+    # Timestep-weighted ramp-rate limit results — reads solved dispatch deltas
+    # against the same per-generator rate/Δt used to build the constraint;
+    # None-safe (returns enabled: False) when ramp wasn't configured.
+    ramp = extract_ramp_results(network, ramp_cfg)
 
     return {
         "summary": summary,
@@ -1169,6 +1190,7 @@ def _build_solved_payload(
         "assetSwap": asset_swap,
         "essBusinessCase": ess_business_case,
         "reserve": reserve,
+        "ramp": ramp,
         "emissionsBreakdown": emissions_breakdown,
         "energyBalance": energy_balance,
         "demandResponse": demand_response,

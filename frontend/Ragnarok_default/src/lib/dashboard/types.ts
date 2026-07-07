@@ -53,6 +53,7 @@ export type CardKind =
   | 'contingency'
   | 'reserve'
   | 'outage-mc'
+  | 'ramp'
   | 'emissions-breakdown'
   | 'capacity-expansion'
   | 'capacity-by-period'
@@ -282,6 +283,10 @@ export interface OutageMcCardData extends CardBase {
   kind: 'outage-mc';
 }
 
+export interface RampCardData extends CardBase {
+  kind: 'ramp';
+}
+
 export interface EmissionsBreakdownCardData extends CardBase {
   kind: 'emissions-breakdown';
 }
@@ -345,6 +350,7 @@ export type Card =
   | ContingencyCardData
   | ReserveCardData
   | OutageMcCardData
+  | RampCardData
   | EmissionsBreakdownCardData
   | CapacityExpansionCardData
   | CapacityByPeriodCardData
