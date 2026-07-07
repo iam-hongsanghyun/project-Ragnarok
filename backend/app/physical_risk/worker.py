@@ -100,8 +100,20 @@ def env_dir() -> Path:
 
 
 def worker_python() -> Path:
-    """The worker interpreter inside the prefix env (POSIX layout, as upstream)."""
-    return env_dir() / "bin" / "python"
+    """The worker interpreter inside the prefix env.
+
+    POSIX conda prefix envs put it at ``bin/python`` (upstream layout); Windows
+    conda prefix envs put ``python.exe`` at the env root. Prefer POSIX, fall
+    back to the Windows layout, and return the POSIX path when neither exists
+    (so ``available()`` reports False with the conventional path in any log).
+    """
+    posix = env_dir() / "bin" / "python"
+    if posix.is_file():
+        return posix
+    windows = env_dir() / "python.exe"
+    if windows.is_file():
+        return windows
+    return posix
 
 
 def timeout_seconds() -> float:

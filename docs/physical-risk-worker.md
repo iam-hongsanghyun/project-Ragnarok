@@ -32,13 +32,28 @@ contract (climaterisk `engines/base.py` shapes) lives in
 ## Build the env
 
 Needs conda or mamba (miniforge recommended). Downloads ~2 GB on first build.
+One installer per platform, all building the same prefix env:
 
 ```bash
+# macOS / Linux (terminal)
 scripts/setup_climada_worker.sh
+# macOS (double-click in Finder)
+scripts/setup_climada_worker.command
 # equivalent to:
 #   conda env create -f backend/physical_risk_worker/env_climada.yml --prefix ./.climada-env
 #   ./.climada-env/bin/python -c "import climada; print('ok')"
 ```
+
+```bat
+:: Windows — double-click (bootstraps the .ps1 with ExecutionPolicy Bypass)
+scripts\setup_climada_worker.bat
+:: or directly from PowerShell:
+powershell -ExecutionPolicy Bypass -File scripts\setup_climada_worker.ps1
+```
+
+On Windows the interpreter lives at `.climada-env\python.exe` (conda's prefix
+layout has no `bin/`); `worker_python()` resolves both layouts, POSIX first.
+All installers honour `RAGNAROK_CLIMADA_WORKER_ENV` to build somewhere else.
 
 Restart the backend afterwards — worker selection is `auto` by default, so runs
 switch from the stub to real CLIMADA as soon as the env exists. No solver flag,

@@ -385,3 +385,26 @@ def test_missing_env_when_forced_notes_the_fallback(
     assert result.detail is not None
     assert "Worker fallback" in result.detail
     assert "no worker env" in result.detail
+
+
+def test_worker_python_resolves_windows_layout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows conda prefix envs put python.exe at the env ROOT (no bin/).
+
+    worker_python() must fall back to that layout so the .bat/.ps1 installers
+    produce an env available() actually detects; POSIX bin/python still wins
+    when both exist.
+    """
+    env_dir = tmp_path / "climada-env-win"
+    env_dir.mkdir()
+    (env_dir / "python.exe").write_text("")
+    monkeypatch.setenv("RAGNAROK_CLIMADA_WORKER_ENV", str(env_dir))
+
+    assert pr_worker.worker_python() == env_dir / "python.exe"
+    assert pr_worker.available()
+
+    # POSIX layout takes precedence when present.
+    (env_dir / "bin").mkdir()
+    (env_dir / "bin" / "python").write_text("")
+    assert pr_worker.worker_python() == env_dir / "bin" / "python"
