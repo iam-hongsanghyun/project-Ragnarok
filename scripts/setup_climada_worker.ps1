@@ -51,7 +51,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "sanity check: importing climada in the worker env..."
-& $WorkerPython -c "import climada; print('climada ok:', climada.__version__)"
+& $WorkerPython -c "import climada, importlib.metadata as m; print('climada ok:', m.version('climada'), '| petals:', m.version('climada_petals'))"
 if ($LASTEXITCODE -ne 0) {
     Write-Error "climada import failed in $EnvDir"
     exit $LASTEXITCODE

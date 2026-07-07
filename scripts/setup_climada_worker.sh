@@ -36,7 +36,7 @@ else
 fi
 
 echo "sanity check: importing climada in the worker env..."
-"$ENV_DIR/bin/python" -c "import climada; print('climada ok:', climada.__version__)"
+"$ENV_DIR/bin/python" -c "import climada, importlib.metadata as m; print('climada ok:', m.version('climada'), '| petals:', m.version('climada_petals'))"
 
 echo
 echo "Done. Ragnarok auto-detects the env (RAGNAROK_CLIMADA_WORKER defaults to 'auto');"

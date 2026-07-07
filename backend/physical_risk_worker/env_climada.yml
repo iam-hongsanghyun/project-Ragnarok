@@ -25,10 +25,16 @@ channels:
 dependencies:
   - python=3.11
   - climada>=6.1
-  - climada_petals>=6.1  # coastal flood, TC surge/rain, landslide, supply-chain, forecast, …
   # climada_petals SupplyChain (input-output) optional deps:
   - pymrio
   - country_converter
   - progressbar2
   # To run the engine regression test (tests/test_physical_regression.py) in this env.
   - pytest>=8.0
+  - pip
+  # climada_petals is NOT on conda-forge (pip-only, per the note above) — installing
+  # it as a conda dep makes `conda env create` fail with PackagesNotFound. Its heavy
+  # geo deps are already satisfied by the conda climada above, so pip only adds the
+  # petals layer (coastal flood, TC surge/rain, landslide, supply-chain, forecast, …).
+  - pip:
+      - climada_petals>=6.1
