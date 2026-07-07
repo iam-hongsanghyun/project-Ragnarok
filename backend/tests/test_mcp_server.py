@@ -82,7 +82,7 @@ def _install(monkeypatch, autonomy: str = "guided") -> FakeClient:
 def test_tool_catalog_and_annotations() -> None:
     tools = asyncio.run(mcp.list_tools())
     by_name = {t.name: t for t in tools}
-    assert len(tools) == 36, f"expected 36 tools, got {len(tools)}"
+    assert len(tools) == 46, f"expected 46 tools, got {len(tools)}"
     # low-level builder tools (pypsa-mcp-style) are present
     for t in (
         "add_bus",
@@ -119,6 +119,11 @@ def test_tool_catalog_and_annotations() -> None:
         "describe_component",
         "describe_run_options",
         "list_plugins",
+        "describe_analytics",
+        "physical_risk_libraries",
+        "physical_risk_get_portfolio",
+        "physical_risk_get_run",
+        "physical_risk_report",
     }
 
 

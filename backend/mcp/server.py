@@ -29,7 +29,18 @@ _INSTRUCTIONS = (
     "Read-only tools are safe to call freely. Mutating tools (imports, edits, "
     "transforms, solves) may return a preview asking you to re-call with "
     "confirm=true — that is the human-in-the-loop guard, not an error. All tools "
-    "act on one shared working session, visible live in the Ragnarok web UI."
+    "act on one shared working session, visible live in the Ragnarok web UI.\n\n"
+    "Solve-mode analytics: seven reliability/market studies (reserves, "
+    "forced-outage Monte Carlo, ramping, correlated sampling, ELCC, "
+    "convergence sampling, LMP decomposition) ride the same solve — call "
+    "describe_analytics for their option keys, config fields and where each "
+    "lands in get_analytics(run), then enable them via submit_solve's options.\n\n"
+    "Physical risk: a separate climate-damage subsystem with its OWN "
+    "server-minted session id. Workflow: physical_risk_seed (build a portfolio "
+    "from the current model) -> optional physical_risk_set_scenario (perils, "
+    "climate, horizon) -> physical_risk_run (polls to completion) -> "
+    "physical_risk_transition / physical_risk_finance / physical_risk_report for "
+    "the results. Every physical_risk_* tool defaults to the seeded session."
 )
 
 # ── shared client (created in lifespan; lazily in tests / introspection) ────────
@@ -227,7 +238,7 @@ async def describe_component(component: str) -> Any:
 
 @mcp.tool(
     annotations=_RO,
-    description="All solve knobs available: backend capabilities (carbon price, multi-year pathway, rolling horizon, stochastic, SCLOPF, power flow, market simulation, MGA, …) and the simulation defaults. These are the keys you pass to submit_solve's scenario/options.",
+    description="All solve knobs available: backend capabilities (carbon price, multi-year pathway, rolling horizon, stochastic, SCLOPF, power flow, market simulation, MGA, …) and the simulation defaults. These are the keys you pass to submit_solve's scenario/options. For the seven reliability/market analytics (reserves, outage-MC, ramp, correlated sampling, ELCC, convergence, LMP decomposition) call describe_analytics.",
 )
 async def describe_run_options() -> Any:
     cfg = await get_client().get_config()
@@ -243,6 +254,126 @@ async def describe_run_options() -> Any:
 )
 async def list_plugins() -> Any:
     return await get_client().list_plugins()
+
+
+# ── curated reference for the seven solve-mode reliability/market analytics ────
+# submit_solve already passes arbitrary `options` through unchanged, so these
+# ride the same solve — this tool is pure discovery: it tells an agent the
+# analytics exist, the option key that enables each, its main config fields, and
+# where its result lands in get_analytics(run). Field lists mirror the frontend
+# TS config interfaces (lib/types/index.ts); kept concise, not exhaustive.
+_ANALYTICS_REFERENCE: list[dict[str, Any]] = [
+    {
+        "optionKey": "reserveConfig",
+        "resultKey": "reserve",
+        "purpose": "Operating-reserve co-optimization — units keep headroom to cover a contingency; surfaces a reserve price alongside the energy price.",
+        "config": {
+            "enabled": "bool",
+            "requirementType": "'fraction' | 'largestUnit' | 'both'",
+            "fraction": "share of demand held as spinning reserve (0.1 = 10%)",
+            "providers": "'all' | 'thermal' (thermal excludes variable renewables)",
+            "reserveCost": "currency/MW added to the objective (usually 0)",
+        },
+    },
+    {
+        "optionKey": "outageMcConfig",
+        "resultKey": "outageMc",
+        "purpose": "Thermal forced-outage Monte Carlo — samples random up/down states (EFOR + repair time) across synthetic years; reports the LOLE / EUE distribution.",
+        "config": {
+            "enabled": "bool",
+            "nMembers": "Monte-Carlo samples (synthetic years)",
+            "seed": "int",
+            "forcedOutageRate": "EFOR fallback when a generator has no explicit rate",
+            "mttrHours": "mean time to repair, hours",
+            "includeRenewableEnsemble": "bool",
+            "physicalRiskUplift": "bool — raise each generator's FOR by its Physical Risk portfolio damage ratio before sampling",
+            "physicalRiskSessionId": "Physical Risk session id to source the damage ratios from (see the physical_risk_* tools)",
+        },
+    },
+    {
+        "optionKey": "rampConfig",
+        "resultKey": "ramp",
+        "purpose": "Timestep-weighted ramp-rate limits — bounds how fast each unit's output can change between snapshots (|Δp| ≤ ramp% × p_nom × hours).",
+        "config": {
+            "enabled": "bool",
+            "rampLimitUp": "max upward ramp, fraction of p_nom per hour (0.5 = 50%/h)",
+            "rampLimitDown": "max downward ramp, fraction of p_nom per hour",
+            "appliesTo": "'all' | 'thermal' (thermal excludes variable renewables)",
+        },
+    },
+    {
+        "optionKey": "correlatedSamplingConfig",
+        "resultKey": "correlatedSampling",
+        "purpose": "Correlated multi-driver Monte Carlo — a common weather stress pushes demand up while renewable output and hydro inflow drop together (cold-calm event).",
+        "config": {
+            "enabled": "bool",
+            "nMembers": "Monte-Carlo samples (synthetic years)",
+            "seed": "int",
+            "loadSensitivity": "demand sensitivity to the common stress factor",
+            "renewableSensitivity": "renewable-output sensitivity to the stress factor",
+            "inflowSensitivity": "hydro-inflow sensitivity to the stress factor",
+            "loadStd": "idiosyncratic demand noise, std dev",
+            "renewableStd": "idiosyncratic renewable noise, std dev",
+            "inflowStd": "idiosyncratic hydro-inflow noise, std dev",
+        },
+    },
+    {
+        "optionKey": "elccConfig",
+        "resultKey": "elcc",
+        "purpose": "Effective Load-Carrying Capability (capacity credit) — the firm MW each resource can replace at equal reliability (LOLE), by binary search on the outage-inclusive LOLE.",
+        "config": {
+            "enabled": "bool",
+            "nMembers": "Monte-Carlo samples for the outage-inclusive LOLE",
+            "seed": "int",
+            "forcedOutageRate": "EFOR fallback when a generator has no explicit rate",
+            "mttrHours": "mean time to repair, hours",
+            "carriers": "carriers to evaluate; empty = auto (variable renewables + storage)",
+        },
+    },
+    {
+        "optionKey": "convergenceConfig",
+        "resultKey": "convergenceSampling",
+        "purpose": "Convergence-controlled sampling — draws the forced-outage Monte Carlo in batches until the target metric's standard error falls below a tolerance; optional maintenance placement.",
+        "config": {
+            "enabled": "bool",
+            "targetMetric": "'eue' | 'lole'",
+            "tolerance": "relative standard error at which sampling stops",
+            "batchSize": "samples drawn per batch",
+            "maxMembers": "hard cap on total samples even if not converged",
+            "seed": "int",
+            "forcedOutageRate": "EFOR fallback when a generator has no explicit rate",
+            "mttrHours": "mean time to repair, hours",
+            "maintenanceEnabled": "bool — schedule planned outages into low-load windows",
+            "maintenanceWeeks": "length of each planned maintenance outage, weeks",
+            "maintenanceCarriers": "carriers to schedule maintenance for; empty = auto",
+        },
+    },
+    {
+        "optionKey": "lmpDecompositionConfig",
+        "resultKey": "lmpDecomposition",
+        "purpose": "LMP decomposition — splits each bus's locational marginal price into energy vs congestion components and reports congestion rent per line/link. Post-process only; does not change the solve.",
+        "config": {
+            "enabled": "bool",
+            "referenceMode": "'load-weighted' | 'min' | 'bus'",
+            "referenceBus": "bus used as the energy-price reference (only when referenceMode == 'bus')",
+        },
+    },
+]
+
+
+@mcp.tool(
+    annotations=_RO,
+    description="The seven solve-mode reliability/market analytics (reserves, forced-outage Monte Carlo, ramping, correlated sampling, ELCC, convergence sampling, LMP decomposition): for each, the options.* key that enables it, its purpose, key config fields, and where its result lands in get_analytics(run). Enable them via submit_solve's options; no separate call.",
+)
+async def describe_analytics() -> Any:
+    return {
+        "note": (
+            "Enable any of these by passing options.<optionKey> = {enabled: true, ...} "
+            "to submit_solve, then read get_analytics(run).<resultKey>. submit_solve "
+            "already forwards arbitrary options unchanged, so no extra step is needed."
+        ),
+        "analytics": _ANALYTICS_REFERENCE,
+    }
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -968,3 +1099,217 @@ def _newest_run_name(runs: list[dict[str, Any]]) -> str | None:
             break
     top = runs[0]
     return top.get("name") or top.get("runName") or top.get("label")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Physical risk — climate-damage subsystem with its OWN server-minted session id
+# (distinct from the model session). Seed a portfolio from the current model,
+# tune its scenario, run the CLIMADA-backed (or deterministic-stub) analysis, and
+# read transition / finance / report results. Non-destructive to the model: no
+# tool here edits the working network, so they run without the confirm gate; the
+# run tool is open-world since it may drive the real CLIMADA worker.
+# ══════════════════════════════════════════════════════════════════════════════
+# Side-effecting on the physical-risk store but NOT destructive to the model.
+_PR_WRITE_ANN = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, openWorldHint=False
+)
+# The run may invoke the real CLIMADA worker (external compute) → open-world.
+_PR_RUN_ANN = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, openWorldHint=True
+)
+
+_PR_NO_SESSION = {
+    "error": "no physical-risk session — call physical_risk_seed first.",
+    "hint": "physical_risk_seed builds a portfolio from the current model and caches its session id.",
+}
+
+
+def _pr_session(session_id: str | None) -> str | None:
+    """Resolve a physical-risk session id: the arg, else the client's cached one."""
+    return session_id or get_client().physical_risk_session_id
+
+
+@mcp.tool(
+    annotations=_RO,
+    description="The physical-risk methodology libraries: perils, climate/NGFS scenarios, vulnerability classes, impact functions and finance reference — the ids you pass to physical_risk_set_scenario / physical_risk_run.",
+)
+async def physical_risk_libraries() -> Any:
+    return await get_client().physical_risk_libraries()
+
+
+@mcp.tool(
+    annotations=_PR_WRITE_ANN,
+    description="Seed a physical-risk portfolio from the CURRENT working model (one exposure per generator / storage unit with coordinates). Mints a physical-risk session, caches it for the other physical_risk_* tools, and returns the session id, asset count and a few sample assets. Non-destructive to the model.",
+)
+async def physical_risk_seed(
+    default_value_per_mw: float | None = None, currency: str = "USD"
+) -> Any:
+    client = get_client()
+    portfolio = await client.physical_risk_seed(
+        default_value_per_mw=default_value_per_mw, currency=currency
+    )
+    assets = portfolio.get("assets", []) if isinstance(portfolio, dict) else []
+    return {
+        "sessionId": portfolio.get("sessionId") if isinstance(portfolio, dict) else None,
+        "assetCount": len(assets),
+        "sampleAssets": assets[:5],
+        "notes": (
+            "This physical-risk session is now the default for the other "
+            "physical_risk_* tools. Set a scenario with physical_risk_set_scenario, "
+            "then physical_risk_run."
+        ),
+    }
+
+
+@mcp.tool(
+    annotations=_RO,
+    description="The physical-risk portfolio (assets + scenario config) for a session. Defaults to the seeded session.",
+)
+async def physical_risk_get_portfolio(session_id: str | None = None) -> Any:
+    sid = _pr_session(session_id)
+    if not sid:
+        return _PR_NO_SESSION
+    return await get_client().physical_risk_get_portfolio(sid)
+
+
+@mcp.tool(
+    annotations=_PR_WRITE_ANN,
+    description="Update the portfolio's scenario in place: set any of perils (peril ids), climate (RCP/SSP id), horizon_year, sector. Reads the portfolio, patches only the provided fields, writes it back, and returns the updated scenario. Defaults to the seeded session.",
+)
+async def physical_risk_set_scenario(
+    perils: list[str] | None = None,
+    climate: str | None = None,
+    horizon_year: int | None = None,
+    sector: str | None = None,
+    session_id: str | None = None,
+) -> Any:
+    sid = _pr_session(session_id)
+    if not sid:
+        return _PR_NO_SESSION
+    client = get_client()
+    portfolio = await client.physical_risk_get_portfolio(sid)
+    if not isinstance(portfolio, dict):
+        return {"error": "physical-risk session not found", "sessionId": sid}
+    scenario = dict(portfolio.get("scenario") or {})
+    if perils is not None:
+        scenario["perils"] = perils
+    if climate is not None:
+        scenario["climate"] = climate
+    if horizon_year is not None:
+        scenario["horizonYear"] = horizon_year
+    if sector is not None:
+        scenario["sector"] = sector
+    portfolio["scenario"] = scenario
+    updated = await client.physical_risk_put_portfolio(sid, portfolio)
+    return {
+        "sessionId": sid,
+        "scenario": updated.get("scenario") if isinstance(updated, dict) else scenario,
+    }
+
+
+@mcp.tool(
+    annotations=_PR_RUN_ANN,
+    description="Submit a physical-risk analysis (kind defaults to 'physical') for the seeded portfolio and POLL to completion up to poll_seconds. Uses the portfolio's scenario for climate/horizon; `perils` overrides the scenario perils. Returns the result when done, else {status:'running', runId, ...} to keep polling with physical_risk_get_run. May drive the real CLIMADA worker.",
+)
+async def physical_risk_run(
+    kind: str = "physical",
+    perils: list[str] | None = None,
+    session_id: str | None = None,
+    poll_seconds: float = 90.0,
+) -> Any:
+    sid = _pr_session(session_id)
+    if not sid:
+        return _PR_NO_SESSION
+    client = get_client()
+    portfolio = await client.physical_risk_get_portfolio(sid)
+    if not isinstance(portfolio, dict):
+        return {"error": "physical-risk session not found", "sessionId": sid}
+    scenario_cfg = portfolio.get("scenario") or {}
+    run_perils = perils if perils is not None else list(scenario_cfg.get("perils") or [])
+    scenario = {
+        "rcp": scenario_cfg.get("climate", "rcp45"),
+        "horizon": scenario_cfg.get("horizonYear", 2050),
+    }
+    submitted = await client.physical_risk_submit_run(
+        sid, kind, perils=run_perils, scenario=scenario
+    )
+    run_id = submitted.get("id") if isinstance(submitted, dict) else None
+    if not run_id:
+        return {"status": "error", "sessionId": sid, "detail": submitted}
+
+    deadline = time.monotonic() + max(0.0, poll_seconds)
+    run = submitted
+    while True:
+        status = run.get("status") if isinstance(run, dict) else None
+        if status in ("done", "error"):
+            break
+        if time.monotonic() >= deadline:
+            break
+        await asyncio.sleep(2.0)
+        run = await client.physical_risk_get_run(sid, run_id)
+
+    status = run.get("status") if isinstance(run, dict) else None
+    if status == "done":
+        return {
+            "status": "done",
+            "runId": run_id,
+            "sessionId": sid,
+            "result": run.get("result"),
+        }
+    if status == "error":
+        return {
+            "status": "error",
+            "runId": run_id,
+            "sessionId": sid,
+            "error": run.get("error"),
+        }
+    return {
+        "status": "running",
+        "runId": run_id,
+        "sessionId": sid,
+        "hint": "call physical_risk_get_run to keep polling",
+    }
+
+
+@mcp.tool(
+    annotations=_RO,
+    description="Poll one physical-risk run by id (a pure status read). Defaults to the seeded session. Use after physical_risk_run returns status 'running'.",
+)
+async def physical_risk_get_run(run_id: str, session_id: str | None = None) -> Any:
+    sid = _pr_session(session_id)
+    if not sid:
+        return _PR_NO_SESSION
+    return await get_client().physical_risk_get_run(sid, run_id)
+
+
+@mcp.tool(
+    annotations=_PR_WRITE_ANN,
+    description="Compute the portfolio's transition (NGFS carbon-cost) risk — synchronous, real math. Defaults to the seeded session.",
+)
+async def physical_risk_transition(session_id: str | None = None) -> Any:
+    sid = _pr_session(session_id)
+    if not sid:
+        return _PR_NO_SESSION
+    return await get_client().physical_risk_transition(sid)
+
+
+@mcp.tool(
+    annotations=_PR_WRITE_ANN,
+    description="Compute the Climate Risk Premium (finance) for a DONE physical run — needs a CAPEX-bearing financial profile on the portfolio scenario. Pass the run_id from physical_risk_run. Defaults to the seeded session.",
+)
+async def physical_risk_finance(run_id: str, session_id: str | None = None) -> Any:
+    sid = _pr_session(session_id)
+    if not sid:
+        return _PR_NO_SESSION
+    return await get_client().physical_risk_finance(sid, run_id)
+
+
+@mcp.tool(
+    annotations=_RO,
+    description="The physical-risk report bundle for a session: portfolio, latest result per run kind, transition and (when available) finance. Defaults to the seeded session.",
+)
+async def physical_risk_report(session_id: str | None = None) -> Any:
+    sid = _pr_session(session_id)
+    if not sid:
+        return _PR_NO_SESSION
+    return await get_client().physical_risk_report(sid)

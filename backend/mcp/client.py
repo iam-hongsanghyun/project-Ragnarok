@@ -58,15 +58,26 @@ class Config:
 class RagnarokClient:
     """Async wrapper over the Ragnarok API. One instance per server process."""
 
-    def __init__(self, config: Config | None = None) -> None:
+    def __init__(
+        self,
+        config: Config | None = None,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
         self.config = config or Config.from_env()
         self._config_cache: Any = (
             None  # /api/config bundle (schema is stable per process)
         )
+        # The physical-risk subsystem mints its OWN session id (a server UUID,
+        # separate from the model ``session_id``). Cache the last one a seed
+        # returned so the physical_risk_* tools can default to it, mirroring how
+        # the model session_id is a fixed handle onto the working model.
+        self.physical_risk_session_id: str | None = None
         self._client = httpx.AsyncClient(
             base_url=self.config.api_base,
             timeout=self.config.timeout,
             headers={"User-Agent": "ragnarok-mcp/0.1", "Accept": "application/json"},
+            transport=transport,
         )
 
     @property
@@ -114,6 +125,9 @@ class RagnarokClient:
 
     async def _patch(self, path: str, json: dict[str, Any]) -> Any:
         return await self._request("PATCH", path, json=json)
+
+    async def _put(self, path: str, json: dict[str, Any]) -> Any:
+        return await self._request("PUT", path, json=json)
 
     def _sid_body(self, extra: dict[str, Any] | None = None) -> dict[str, Any]:
         """A POST/PATCH body seeded with this session's ``sessionId``."""
@@ -334,6 +348,67 @@ class RagnarokClient:
         if options is not None:
             body["options"] = options
         return await self._post("/api/queue", body)
+
+    # ── physical-risk — a SEPARATE, server-minted session id (not the model one) ──
+    async def physical_risk_seed(
+        self,
+        default_value_per_mw: float | None = None,
+        currency: str | None = None,
+    ) -> Any:
+        """Seed a physical-risk portfolio from the CURRENT model session.
+
+        Caches the server-minted ``sessionId`` on the client so subsequent
+        physical_risk_* methods can default to it (mirrors ``session_id``).
+        """
+        body: dict[str, Any] = {"sessionId": self.session_id}
+        if default_value_per_mw is not None:
+            body["defaultValuePerMw"] = default_value_per_mw
+        if currency is not None:
+            body["currency"] = currency
+        out = await self._post("/api/physical-risk/seed-from-model", body)
+        sid = out.get("sessionId") if isinstance(out, dict) else None
+        if sid:
+            self.physical_risk_session_id = sid
+        return out
+
+    async def physical_risk_get_portfolio(self, sid: str) -> Any:
+        return await self._get(f"/api/physical-risk/session/{sid}")
+
+    async def physical_risk_put_portfolio(
+        self, sid: str, portfolio: dict[str, Any]
+    ) -> Any:
+        return await self._put(f"/api/physical-risk/session/{sid}", portfolio)
+
+    async def physical_risk_libraries(self) -> Any:
+        return await self._get("/api/physical-risk/libraries")
+
+    async def physical_risk_submit_run(
+        self,
+        sid: str,
+        kind: str,
+        perils: list[str] | None = None,
+        scenario: dict[str, Any] | None = None,
+    ) -> Any:
+        body: dict[str, Any] = {"kind": kind}
+        if perils is not None:
+            body["perils"] = perils
+        if scenario is not None:
+            body["scenario"] = scenario
+        return await self._post(f"/api/physical-risk/session/{sid}/run", body)
+
+    async def physical_risk_get_run(self, sid: str, rid: str) -> Any:
+        return await self._get(f"/api/physical-risk/session/{sid}/run/{rid}")
+
+    async def physical_risk_transition(self, sid: str) -> Any:
+        return await self._post(f"/api/physical-risk/session/{sid}/transition", {})
+
+    async def physical_risk_finance(self, sid: str, run_id: str) -> Any:
+        return await self._post(
+            f"/api/physical-risk/session/{sid}/finance", {"runId": run_id}
+        )
+
+    async def physical_risk_report(self, sid: str) -> Any:
+        return await self._get(f"/api/physical-risk/session/{sid}/report")
 
     # ── apply helpers — persist a build/transform result into the session ──────
     async def save_model(self, model: dict[str, list[dict[str, Any]]]) -> Any:
