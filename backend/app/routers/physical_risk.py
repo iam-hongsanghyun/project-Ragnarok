@@ -13,8 +13,9 @@ Endpoints::
     GET  /api/physical-risk/session/{sid}           -> Portfolio
     PUT  /api/physical-risk/session/{sid}           -> Portfolio (full-model sync)
     GET  /api/physical-risk/libraries               -> Libraries (vendored methodology data)
-    POST /api/physical-risk/session/{sid}/run       -> Run (queued; body.kind selects the analysis)
-    GET  /api/physical-risk/session/{sid}/run/{rid} -> Run (+ result when done)
+    POST /api/physical-risk/session/{sid}/run       -> Run (queued; body.kind selects the analysis;
+                                                        executes async on a background thread)
+    GET  /api/physical-risk/session/{sid}/run/{rid} -> Run (+ result when done; pure status read)
     POST /api/physical-risk/session/{sid}/transition -> TransitionResult (synchronous, REAL)
     POST /api/physical-risk/session/{sid}/finance   -> FinanceResult (synchronous, REAL)
     GET  /api/physical-risk/session/{sid}/report    -> JSON report bundle
@@ -198,7 +199,12 @@ def submit_run(sid: str, body: RunRequest) -> Run:
 
 @router.get("/session/{sid}/run/{rid}", response_model=Run)
 def get_run(sid: str, rid: str) -> Run:
-    """Poll a run; the stub engine finalises it to 'done' on the first poll."""
+    """Poll a run — a pure status read; execution happens on a background thread.
+
+    Stub runs are near-instant (submit grace-joins them), so they are typically
+    already 'done' by the first poll; real CLIMADA runs report queued/running
+    until the worker finishes.
+    """
     run = store.poll_run(rid, session_id=sid)
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")

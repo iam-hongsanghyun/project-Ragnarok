@@ -15,11 +15,13 @@ backend/pypsa/results/outage_mc.py's "Opt-in physical-risk uplift" section):
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pytest
 
+from backend.app.physical_risk import store as physical_risk_store
 from backend.app.physical_risk.entities import Portfolio, Scenario
 from backend.app.physical_risk.entities import Asset as PhysicalRiskAsset
 from backend.app.physical_risk.store import PhysicalRiskStore
@@ -34,6 +36,16 @@ from backend.pypsa.results import run_pypsa
 from backend.pypsa.results.outage_mc import build_outage_mc
 
 SCENARIO = {"discountRate": 0.0, "carbonPrice": 0.0}
+
+
+@pytest.fixture(autouse=True)
+def _stub_engine_and_isolated_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force the deterministic stub engine (a local .climada-env would route runs
+    to real CLIMADA) and keep the store's persistence out of backend/data
+    (freshly constructed ``PhysicalRiskStore()`` instances resolve the
+    module-level ``DATA_DIR``)."""
+    monkeypatch.setenv("RAGNAROK_CLIMADA_WORKER", "0")
+    monkeypatch.setattr(physical_risk_store, "DATA_DIR", tmp_path / "physical_risk")
 
 
 # ── App layer: compute_for_rate_uplift against the real store ──────────────

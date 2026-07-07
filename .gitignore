@@ -63,6 +63,8 @@ backend/data/runs/
 # Server-side working-model session + serial run queue (runtime data)
 backend/data/session/
 backend/data/queue/
+# Physical-risk portfolio sessions + run results (runtime data)
+backend/data/physical_risk/
 # Installed backend plugins (3rd-party, uploaded at runtime — Ragnarok ships none)
 backend/data/plugins/
 # Per-plugin server-side file store (heavy model workbooks uploaded at runtime)

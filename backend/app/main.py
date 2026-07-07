@@ -815,6 +815,11 @@ async def _lifespan(_app: "FastAPI"):
         for w in watchers:
             if not w.done():
                 w.cancel()
+        # Stop the physical-risk run executor without waiting for an in-flight
+        # CLIMADA job, so shutdown/reload during a run returns promptly.
+        from .physical_risk import store as _physical_risk_store
+
+        _physical_risk_store.shutdown_executor()
 
 
 app = FastAPI(title="Ragnarok Backend", version="0.1.0", lifespan=_lifespan)

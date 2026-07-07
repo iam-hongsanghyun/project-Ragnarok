@@ -212,7 +212,8 @@ def apply_physical_risk_uplift(options: dict[str, Any] | None) -> dict[str, Any]
     off or ``options`` is falsy): if
     ``options["outageMcConfig"]["physicalRiskUplift"]`` is truthy and
     ``physicalRiskSessionId`` is a non-empty string, looks up that session's
-    latest completed physical-risk run in the process-local store and injects
+    latest completed physical-risk run in the physical-risk store (disk-backed
+    singleton, so a completed run survives backend restarts) and injects
     ``options["outageMcConfig"]["forRateUplift"]`` (``{generator_name:
     fraction}``) plus a provenance ``forRateUpliftNote`` string. Never raises
     and never blocks the solve — any failure just leaves ``forRateUplift``

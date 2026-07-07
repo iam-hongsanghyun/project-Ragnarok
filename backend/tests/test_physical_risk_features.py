@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 
 from backend.app import session_store
 from backend.app.main import app
+from backend.app.physical_risk import store as physical_risk_store
 
 client = TestClient(app)
 
@@ -30,6 +31,14 @@ client = TestClient(app)
 _TC_AAI_GAS = 3_840.0
 _TC_AAI_BATTERY = 1_260_000.0
 _TC_AAI_TOTAL = _TC_AAI_GAS + _TC_AAI_BATTERY
+
+
+@pytest.fixture(autouse=True)
+def _stub_engine_and_isolated_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force the deterministic stub engine (a local .climada-env would route runs
+    to real CLIMADA) and keep the store's persistence out of backend/data."""
+    monkeypatch.setenv("RAGNAROK_CLIMADA_WORKER", "0")
+    monkeypatch.setattr(physical_risk_store, "DATA_DIR", tmp_path / "physical_risk")
 
 
 @pytest.fixture()
@@ -70,7 +79,8 @@ def _seed() -> str:
 
 
 def _run_to_done(sid: str, body: dict) -> dict:
-    """Submit a run and poll it once (the stub finalises on the first poll)."""
+    """Submit a run and poll it once (submit grace-joins the near-instant stub,
+    so a stub run is already done by the first poll)."""
     submit = client.post(f"/api/physical-risk/session/{sid}/run", json=body)
     assert submit.status_code == 200, submit.text
     rid = submit.json()["id"]

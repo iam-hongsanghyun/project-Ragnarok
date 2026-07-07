@@ -13,8 +13,23 @@ from fastapi.testclient import TestClient
 
 from backend.app import session_store
 from backend.app.main import app
+from backend.app.physical_risk import store as physical_risk_store
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _stub_engine_and_isolated_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force the deterministic stub engine and isolate the physical-risk store.
+
+    A locally installed ``.climada-env`` would otherwise route runs to the REAL
+    CLIMADA worker (minutes per run, non-deterministic numbers). Redirecting
+    ``DATA_DIR`` keeps the store's write-through persistence out of the real
+    ``backend/data/physical_risk`` (the singleton reloads whenever the module
+    attribute changes, so this also isolates tests from each other).
+    """
+    monkeypatch.setenv("RAGNAROK_CLIMADA_WORKER", "0")
+    monkeypatch.setattr(physical_risk_store, "DATA_DIR", tmp_path / "physical_risk")
 
 
 @pytest.fixture()
