@@ -210,6 +210,23 @@ export interface CorrelatedSamplingConfig {
   inflowStd: number;
 }
 
+/** Effective Load-Carrying Capability (ELCC / capacity credit) — the perfectly-
+ *  firm MW each resource (wind/solar/storage) can replace at equal reliability
+ *  (LOLE). Computed by binary-searching firm capacity against the outage-
+ *  inclusive LOLE; reuses the outage-Monte-Carlo backdrop (EFOR + MTTR). */
+export interface ElccConfig {
+  enabled: boolean;
+  /** Monte-Carlo samples (synthetic years) for the outage-inclusive LOLE. */
+  nMembers: number;
+  seed: number;
+  /** EFOR fallback used when a generator has no explicit forced-outage rate. */
+  forcedOutageRate: number;
+  /** Mean time to repair, hours. */
+  mttrHours: number;
+  /** Carriers to evaluate; empty = auto (variable renewables + storage). */
+  carriers: string[];
+}
+
 /** Timestep-weighted ramp-rate limits — bounds how fast each unit's output can
  *  change between consecutive snapshots: |Δp| ≤ ramp% × p_nom × hours per step
  *  (timestep-weighted, unlike PyPSA's native per-snapshot ramp_limit_up/down). */
@@ -992,6 +1009,27 @@ export interface RampResult {
   note: string | null;
 }
 
+/** One resource's ELCC evaluation — nameplate vs the firm capacity it can
+ *  replace at equal reliability (LOLE). */
+export interface ElccCarrierEntry {
+  carrier: string;
+  nameplateMw: number;
+  elccMw: number;
+  elccPct: number;
+  color?: string;
+}
+
+/** Backend result block for the ELCC / capacity-credit study. */
+export interface ElccResult {
+  enabled: boolean;
+  nMembers: number;
+  seed: number;
+  byCarrier: ElccCarrierEntry[];
+  baselineLoleHrs: number;
+  summary: { label: string; value: string; detail?: string }[];
+  note: string | null;
+}
+
 export interface StochasticScenarioResult {
   name: string;
   weight: number;
@@ -1034,6 +1072,7 @@ export interface ScenarioPreset {
   reserveConfig: ReserveConfig;
   outageMcConfig: OutageMcConfig;
   correlatedSamplingConfig: CorrelatedSamplingConfig;
+  elccConfig: ElccConfig;
   rampConfig: RampConfig;
   powerFlowConfig: PowerFlowConfig;
   marketSimConfig?: MarketSimConfig;
@@ -1578,6 +1617,8 @@ export interface RunResults {
   correlatedSampling?: CorrelatedSamplingResult;
   /** Present only when the run enforced timestep-weighted ramp-rate limits. */
   ramp?: RampResult;
+  /** Present only when the run was an ELCC / capacity-credit study. */
+  elcc?: ElccResult;
   /** PyPSA statistics() table (per-carrier capacity/CF/curtailment/revenue/…). */
   statistics?: StatisticsResult;
   /** MGA near-optimal capacity corridor (present only when MGA was enabled). */

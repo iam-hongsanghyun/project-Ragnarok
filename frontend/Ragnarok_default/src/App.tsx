@@ -19,6 +19,7 @@ import {
   OutageMcConfig,
   CorrelatedSamplingConfig,
   RampConfig,
+  ElccConfig,
   MarketSimConfig,
   PowerFlowConfig,
   ContingencyConfig,
@@ -304,6 +305,7 @@ function AppInner() {
   const [outageMcConfig, setOutageMcConfig] = useState<OutageMcConfig>({ enabled: false, nMembers: 200, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, includeRenewableEnsemble: false });
   const [correlatedSamplingConfig, setCorrelatedSamplingConfig] = useState<CorrelatedSamplingConfig>({ enabled: false, nMembers: 200, seed: 42, loadSensitivity: 0.15, renewableSensitivity: 0.3, inflowSensitivity: 0.2, loadStd: 0.05, renewableStd: 0.1, inflowStd: 0.1 });
   const [rampConfig, setRampConfig] = useState<RampConfig>({ enabled: false, rampLimitUp: 0.5, rampLimitDown: 0.5, appliesTo: 'all' });
+  const [elccConfig, setElccConfig] = useState<ElccConfig>({ enabled: false, nMembers: 200, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, carriers: [] });
   const [powerFlowConfig, setPowerFlowConfig] = useState<PowerFlowConfig>({ enabled: false, linear: false });
   const [marketSimConfig, setMarketSimConfig] = useState<MarketSimConfig>({ enabled: false, pricing: 'uniform' as const, voll: 3000, chargeQuantile: 0.25, dischargeQuantile: 0.75, clearingModel: 'singleSided' as const, demandElasticFraction: 0.2, demandWtp: 120 });
   const [contingencyConfig, setContingencyConfig] = useState<ContingencyConfig>({ enabled: false });
@@ -359,6 +361,7 @@ function AppInner() {
     outageMcConfig: { enabled: false, nMembers: 200, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, includeRenewableEnsemble: false },
     correlatedSamplingConfig: { enabled: false, nMembers: 200, seed: 42, loadSensitivity: 0.15, renewableSensitivity: 0.3, inflowSensitivity: 0.2, loadStd: 0.05, renewableStd: 0.1, inflowStd: 0.1 },
     rampConfig: { enabled: false, rampLimitUp: 0.5, rampLimitDown: 0.5, appliesTo: 'all' },
+    elccConfig: { enabled: false, nMembers: 200, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, carriers: [] },
     powerFlowConfig: { enabled: false, linear: false },
     marketSimConfig: { enabled: false, pricing: 'uniform' as const, voll: 3000, chargeQuantile: 0.25, dischargeQuantile: 0.75, clearingModel: 'singleSided' as const, demandElasticFraction: 0.2, demandWtp: 120 },
     contingencyConfig: { enabled: false },
@@ -532,6 +535,7 @@ function AppInner() {
       outageMcConfig,
       correlatedSamplingConfig,
       rampConfig,
+      elccConfig,
       powerFlowConfig,
       marketSimConfig,
       contingencyConfig,
@@ -568,6 +572,7 @@ function AppInner() {
     outageMcConfig,
     correlatedSamplingConfig,
     rampConfig,
+    elccConfig,
     powerFlowConfig,
     marketSimConfig,
     contingencyConfig,
@@ -695,6 +700,7 @@ function AppInner() {
       outageMcConfig,
       correlatedSamplingConfig,
       rampConfig,
+      elccConfig,
       powerFlowConfig,
       marketSimConfig,
       contingencyConfig,
@@ -756,6 +762,7 @@ function AppInner() {
     outageMcConfig,
     correlatedSamplingConfig,
     rampConfig,
+    elccConfig,
     powerFlowConfig,
     marketSimConfig,
     contingencyConfig,
@@ -1226,6 +1233,7 @@ function AppInner() {
     setOutageMcConfig(scenario.outageMcConfig ?? { enabled: false, nMembers: 200, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, includeRenewableEnsemble: false });
     setCorrelatedSamplingConfig(scenario.correlatedSamplingConfig ?? { enabled: false, nMembers: 200, seed: 42, loadSensitivity: 0.15, renewableSensitivity: 0.3, inflowSensitivity: 0.2, loadStd: 0.05, renewableStd: 0.1, inflowStd: 0.1 });
     setRampConfig(scenario.rampConfig ?? { enabled: false, rampLimitUp: 0.5, rampLimitDown: 0.5, appliesTo: 'all' });
+    setElccConfig(scenario.elccConfig ?? { enabled: false, nMembers: 200, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, carriers: [] });
     setPowerFlowConfig(scenario.powerFlowConfig ?? { enabled: false, linear: false });
     setMarketSimConfig(scenario.marketSimConfig ?? { enabled: false, pricing: 'uniform' as const, voll: 3000, chargeQuantile: 0.25, dischargeQuantile: 0.75, clearingModel: 'singleSided' as const, demandElasticFraction: 0.2, demandWtp: 120 });
     setContingencyConfig(scenario.contingencyConfig ?? { enabled: false });
@@ -2938,6 +2946,8 @@ function AppInner() {
               onCorrelatedSamplingConfigChange={setCorrelatedSamplingConfig}
               rampConfig={rampConfig}
               onRampConfigChange={setRampConfig}
+              elccConfig={elccConfig}
+              onElccConfigChange={setElccConfig}
               powerFlowConfig={powerFlowConfig}
               onPowerFlowConfigChange={setPowerFlowConfig}
               marketSimConfig={marketSimConfig}

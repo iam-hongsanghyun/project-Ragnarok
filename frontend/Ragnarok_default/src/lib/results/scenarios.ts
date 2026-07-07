@@ -5,6 +5,7 @@ import {
   BidStrategyConfig,
   CorrelatedSamplingConfig,
   CustomConstraint,
+  ElccConfig,
   EssConfig,
   PpaConfig,
   DemandResponseConfig,
@@ -114,6 +115,17 @@ export function defaultRampConfig(): RampConfig {
   return { enabled: false, rampLimitUp: 0.5, rampLimitDown: 0.5, appliesTo: 'all' };
 }
 
+export function defaultElccConfig(): ElccConfig {
+  return {
+    enabled: false,
+    nMembers: 200,
+    seed: 42,
+    forcedOutageRate: 0.05,
+    mttrHours: 48,
+    carriers: [],
+  };
+}
+
 export function defaultPowerFlowConfig(): PowerFlowConfig {
   return { enabled: false, linear: false };
 }
@@ -193,6 +205,10 @@ function cloneCorrelatedSamplingConfig(config: CorrelatedSamplingConfig): Correl
 
 function cloneRampConfig(config: RampConfig): RampConfig {
   return { ...config };
+}
+
+function cloneElccConfig(config: ElccConfig): ElccConfig {
+  return { ...config, carriers: [...(config.carriers ?? [])] };
 }
 
 function clonePowerFlowConfig(config: PowerFlowConfig): PowerFlowConfig {
@@ -278,6 +294,7 @@ export function buildScenarioPreset(input: {
   outageMcConfig?: OutageMcConfig;
   correlatedSamplingConfig?: CorrelatedSamplingConfig;
   rampConfig?: RampConfig;
+  elccConfig?: ElccConfig;
   powerFlowConfig?: PowerFlowConfig;
   marketSimConfig?: MarketSimConfig;
   contingencyConfig?: ContingencyConfig;
@@ -315,6 +332,7 @@ export function buildScenarioPreset(input: {
     outageMcConfig: cloneOutageMcConfig(input.outageMcConfig ?? defaultOutageMcConfig()),
     correlatedSamplingConfig: cloneCorrelatedSamplingConfig(input.correlatedSamplingConfig ?? defaultCorrelatedSamplingConfig()),
     rampConfig: cloneRampConfig(input.rampConfig ?? defaultRampConfig()),
+    elccConfig: cloneElccConfig(input.elccConfig ?? defaultElccConfig()),
     powerFlowConfig: clonePowerFlowConfig(input.powerFlowConfig ?? defaultPowerFlowConfig()),
     marketSimConfig: cloneMarketSimConfig(input.marketSimConfig ?? defaultMarketSimConfig()),
     contingencyConfig: cloneContingencyConfig(input.contingencyConfig ?? defaultContingencyConfig()),
@@ -369,6 +387,7 @@ function normalizeScenarioCatalog(catalog: ScenarioCatalog): ScenarioCatalog {
       outageMcConfig: cloneOutageMcConfig(scenario.outageMcConfig ?? defaultOutageMcConfig()),
       correlatedSamplingConfig: cloneCorrelatedSamplingConfig(scenario.correlatedSamplingConfig ?? defaultCorrelatedSamplingConfig()),
       rampConfig: cloneRampConfig(scenario.rampConfig ?? defaultRampConfig()),
+      elccConfig: cloneElccConfig(scenario.elccConfig ?? defaultElccConfig()),
       powerFlowConfig: clonePowerFlowConfig(scenario.powerFlowConfig ?? defaultPowerFlowConfig()),
       marketSimConfig: cloneMarketSimConfig(scenario.marketSimConfig ?? defaultMarketSimConfig()),
       contingencyConfig: cloneContingencyConfig(scenario.contingencyConfig ?? defaultContingencyConfig()),
@@ -418,6 +437,7 @@ export function readScenarioCatalogFromModel(model: WorkbookModel): ScenarioCata
         outageMcConfig: payload.outageMcConfig ?? defaultOutageMcConfig(),
         correlatedSamplingConfig: payload.correlatedSamplingConfig ?? defaultCorrelatedSamplingConfig(),
         rampConfig: payload.rampConfig ?? defaultRampConfig(),
+        elccConfig: payload.elccConfig ?? defaultElccConfig(),
         powerFlowConfig: payload.powerFlowConfig ?? defaultPowerFlowConfig(),
         marketSimConfig: payload.marketSimConfig ?? defaultMarketSimConfig(),
         contingencyConfig: payload.contingencyConfig ?? defaultContingencyConfig(),
@@ -476,6 +496,7 @@ export function writeScenarioCatalogToModel(
       outageMcConfig: scenario.outageMcConfig,
       correlatedSamplingConfig: scenario.correlatedSamplingConfig,
       rampConfig: scenario.rampConfig,
+      elccConfig: scenario.elccConfig,
       powerFlowConfig: scenario.powerFlowConfig,
       marketSimConfig: scenario.marketSimConfig,
       contingencyConfig: scenario.contingencyConfig,

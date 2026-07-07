@@ -55,6 +55,7 @@ export type CardKind =
   | 'outage-mc'
   | 'correlated-sampling'
   | 'ramp'
+  | 'elcc'
   | 'emissions-breakdown'
   | 'capacity-expansion'
   | 'capacity-by-period'
@@ -292,6 +293,10 @@ export interface RampCardData extends CardBase {
   kind: 'ramp';
 }
 
+export interface ElccCardData extends CardBase {
+  kind: 'elcc';
+}
+
 export interface EmissionsBreakdownCardData extends CardBase {
   kind: 'emissions-breakdown';
 }
@@ -357,6 +362,7 @@ export type Card =
   | OutageMcCardData
   | CorrelatedSamplingCardData
   | RampCardData
+  | ElccCardData
   | EmissionsBreakdownCardData
   | CapacityExpansionCardData
   | CapacityByPeriodCardData

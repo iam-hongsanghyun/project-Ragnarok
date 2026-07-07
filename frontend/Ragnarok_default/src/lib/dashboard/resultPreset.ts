@@ -156,6 +156,7 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   const hasOutageMc = !!results.outageMc?.enabled;
   const hasCorrelatedSampling = !!results.correlatedSampling?.enabled;
   const hasRamp = !!results.ramp?.enabled;
+  const hasElcc = !!results.elcc?.enabled;
 
   const rows: Array<ReturnType<typeof row>> = [];
 
@@ -262,6 +263,12 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   if (hasRamp) {
     const rmp: Card = { id: id('ramp'), kind: 'ramp' };
     rows.push(row({ cards: [{ card: rmp }] }));
+  }
+
+  // 6e. ELCC / capacity credit (conditional)
+  if (hasElcc) {
+    const elc: Card = { id: id('elcc'), kind: 'elcc' };
+    rows.push(row({ cards: [{ card: elc }] }));
   }
 
   // (Storage SoC lives in the demand · price · SoC row above.)

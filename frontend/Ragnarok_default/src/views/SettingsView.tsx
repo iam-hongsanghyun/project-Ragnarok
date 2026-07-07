@@ -26,6 +26,7 @@ import {
   EssConfig,
   PpaConfig,
   DemandResponseConfig,
+  ElccConfig,
   FinanceConfig,
   OutageMcConfig,
   Primitive,
@@ -54,6 +55,7 @@ import { ReserveSection } from './SettingsView.sections/Reserve';
 import { OutageMcSection } from './SettingsView.sections/OutageMc';
 import { CorrelatedSamplingSection } from './SettingsView.sections/CorrelatedSampling';
 import { RampSection } from './SettingsView.sections/Ramp';
+import { ElccSection } from './SettingsView.sections/Elcc';
 import { PowerFlowSection } from './SettingsView.sections/PowerFlow';
 import { MarketSimulationSection } from './SettingsView.sections/MarketSimulation';
 import { ContingencySection } from './SettingsView.sections/Contingency';
@@ -86,6 +88,7 @@ type SectionId =
   | 'outageMc'
   | 'correlatedSampling'
   | 'ramp'
+  | 'elcc'
   | 'powerflow'
   | 'marketsim'
   | 'contingency'
@@ -139,6 +142,7 @@ const SECTIONS: Section[] = [
   { id: 'outageMc',   label: 'Outage Monte Carlo',             group: 'Solve' },
   { id: 'correlatedSampling', label: 'Correlated sampling',    group: 'Solve' },
   { id: 'ramp',       label: 'Ramp-rate limits',               group: 'Solve' },
+  { id: 'elcc',       label: 'ELCC / capacity credit',         group: 'Solve' },
   { id: 'powerflow', label: 'Power flow',                     group: 'Solve' },
   { id: 'marketsim', label: 'Market simulation',               group: 'Solve' },
   { id: 'contingency', label: 'N-1 contingency',              group: 'Solve' },
@@ -207,6 +211,8 @@ export interface SettingsViewProps {
   onCorrelatedSamplingConfigChange: (config: CorrelatedSamplingConfig) => void;
   rampConfig: RampConfig;
   onRampConfigChange: (config: RampConfig) => void;
+  elccConfig: ElccConfig;
+  onElccConfigChange: (config: ElccConfig) => void;
   powerFlowConfig: PowerFlowConfig;
   onPowerFlowConfigChange: (config: PowerFlowConfig) => void;
   marketSimConfig: MarketSimConfig;
@@ -360,6 +366,7 @@ export function SettingsView(props: SettingsViewProps) {
         {section === 'outageMc'       && <OutageMcSection {...props} />}
         {section === 'correlatedSampling' && <CorrelatedSamplingSection {...props} />}
         {section === 'ramp'           && <RampSection {...props} />}
+        {section === 'elcc'           && <ElccSection {...props} />}
         {section === 'powerflow'      && <PowerFlowSection {...props} />}
         {section === 'marketsim'      && <MarketSimulationSection {...props} />}
         {section === 'contingency'    && <ContingencySection {...props} />}

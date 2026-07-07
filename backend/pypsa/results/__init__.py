@@ -43,6 +43,7 @@ from .mga import build_mga
 from .merchant import build_merchant
 from .adequacy import build_adequacy
 from .outage_mc import build_outage_mc
+from .elcc import build_elcc
 from .correlated_sampling import build_correlated_sampling
 from .company import build_company_breakdown
 from .company_statement import build_company_statement
@@ -1139,6 +1140,20 @@ def _build_solved_payload(
         except Exception as exc:  # noqa: BLE001 — never sink the run over an MC extra
             notes.append(f"Thermal outage Monte Carlo could not be computed: {exc}")
             _log.warning("outage_mc failed: %s", exc)
+    # ELCC / capacity credit (post-process reliability accreditation) — the
+    # firm-MW-equivalent of each target carrier's contribution to system
+    # reliability, found by bisecting on the same outage-inclusive
+    # availability ensemble / LOLE kernel as outage_mc. None when
+    # disabled/absent, unsolved, or no target carrier has nameplate capacity.
+    # Never raises into the solve — any failure degrades to a run note.
+    elcc_cfg = options.get("elccConfig") or {}
+    elcc: dict[str, Any] | None = None
+    if bool(elcc_cfg.get("enabled")):
+        try:
+            elcc = build_elcc(network, options)
+        except Exception as exc:  # noqa: BLE001 — never sink the run over an MC extra
+            notes.append(f"ELCC / capacity credit could not be computed: {exc}")
+            _log.warning("elcc failed: %s", exc)
     # Correlated multi-driver Monte Carlo (one-factor stress model) — a
     # complementary post-process reliability study to outage_mc: this one
     # perturbs weather/load/inflow (demand, renewable CF, hydro inflow) via a
@@ -1200,6 +1215,7 @@ def _build_solved_payload(
         "companyStatement": company_statement,
         "adequacy": adequacy,
         "outageMc": outage_mc,
+        "elcc": elcc,
         "correlatedSampling": correlated_sampling,
         "priceFormation": price_formation,
         "commitment": commitment,

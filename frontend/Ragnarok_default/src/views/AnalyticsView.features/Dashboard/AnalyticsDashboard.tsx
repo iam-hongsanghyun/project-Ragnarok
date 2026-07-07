@@ -62,6 +62,7 @@ import { ReserveCard } from '../../../features/analytics/cards/ReserveCard';
 import { OutageMcCard } from '../../../features/analytics/cards/OutageMcCard';
 import { CorrelatedSamplingCard } from '../../../features/analytics/cards/CorrelatedSamplingCard';
 import { RampCard } from '../../../features/analytics/cards/RampCard';
+import { ElccCard } from '../../../features/analytics/cards/ElccCard';
 import { EmissionsBreakdownCard } from '../../../features/analytics/cards/EmissionsBreakdownCard';
 import { CapacityExpansionCard } from '../../../features/analytics/cards/CapacityExpansionCard';
 import { CapacityByPeriodCard } from '../../../features/analytics/cards/CapacityByPeriodCard';
@@ -573,6 +574,10 @@ export function AnalyticsDashboard({
           return results.ramp?.enabled
             ? <RampCard data={results.ramp} />
             : <p className="dashboard-cell-missing">This run did not enforce ramp-rate limits.</p>;
+        case 'elcc':
+          return results.elcc?.enabled
+            ? <ElccCard data={results.elcc} />
+            : <p className="dashboard-cell-missing">This run was not an ELCC / capacity-credit study.</p>;
         case 'emissions-breakdown':
           return results.emissionsBreakdown
             ? <EmissionsBreakdownCard data={results.emissionsBreakdown} />
@@ -658,6 +663,7 @@ export function AnalyticsDashboard({
       case 'outage-mc': return 'Outage Monte Carlo (LOLE / EUE distribution)';
       case 'correlated-sampling': return 'Correlated sampling (weather-driven stress)';
       case 'ramp': return 'Ramp-rate limits (timestep-weighted)';
+      case 'elcc': return 'ELCC / capacity credit';
       case 'emissions-breakdown': return 'Emissions by generator / carrier';
       case 'capacity-expansion': return 'Capacity expansion';
       case 'capacity-by-period': return 'Capacity by period';
