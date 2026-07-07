@@ -159,6 +159,19 @@ export interface SecurityConstrainedConfig {
   enabled: boolean;
 }
 
+/** Operating-reserve co-optimization — units keep headroom so the system can
+ *  cover a contingency; surfaces a reserve price alongside the energy price. */
+export interface ReserveConfig {
+  enabled: boolean;
+  requirementType: 'fraction' | 'largestUnit' | 'both';
+  /** Share of demand held as spinning reserve (0.1 = 10%). */
+  fraction: number;
+  /** 'thermal' excludes variable renewables from eligible reserve providers. */
+  providers: 'all' | 'thermal';
+  /** Currency/MW added to the objective (usually 0). */
+  reserveCost: number;
+}
+
 /** Power-flow study mode — solve network physics (pf/lpf) instead of an LP. */
 export interface PowerFlowConfig {
   enabled: boolean;
@@ -844,6 +857,36 @@ export interface ContingencyResult {
   currency: string;
 }
 
+/** Mean reserve MW held by one carrier (present only when reserve co-optimization ran). */
+export interface ReserveCarrierEntry {
+  label: string;
+  value: number;
+  color?: string;
+}
+
+/** Per-generator mean reserve holding (present only when reserve co-optimization ran). */
+export interface ReserveGeneratorEntry {
+  name: string;
+  carrier: string;
+  meanReserveMw: number;
+  meanReservePriceRevenue: number;
+}
+
+/** Backend result block for operating-reserve co-optimization. */
+export interface ReserveResult {
+  enabled: boolean;
+  requirementType: string;
+  requirementMwSeries: ValuePoint[];
+  providedMwSeries: ValuePoint[];
+  /** Reserve shadow price ($/MW) per snapshot — empty for MILP runs (no duals). */
+  priceSeries: ValuePoint[];
+  byCarrier: ReserveCarrierEntry[];
+  byGenerator: ReserveGeneratorEntry[];
+  summary: { label: string; value: string; detail?: string }[];
+  scarcityHours: number;
+  note: string | null;
+}
+
 export interface StochasticScenarioResult {
   name: string;
   weight: number;
@@ -883,6 +926,7 @@ export interface ScenarioPreset {
   // RAGNAROK_CustomDSL, not per preset.
   stochasticConfig: StochasticConfig;
   securityConstrainedConfig: SecurityConstrainedConfig;
+  reserveConfig: ReserveConfig;
   powerFlowConfig: PowerFlowConfig;
   marketSimConfig?: MarketSimConfig;
   contingencyConfig: ContingencyConfig;
@@ -1418,6 +1462,8 @@ export interface RunResults {
   strategicBidding?: StrategicBiddingResult | null;
   /** Present only when the run was an N-1 contingency analysis. */
   contingency?: ContingencyResult;
+  /** Present only when the run co-optimized operating reserve. */
+  reserve?: ReserveResult;
   /** PyPSA statistics() table (per-carrier capacity/CF/curtailment/revenue/…). */
   statistics?: StatisticsResult;
   /** MGA near-optimal capacity corridor (present only when MGA was enabled). */

@@ -26,6 +26,7 @@ from ..utils.emissions import per_generator_emission_factor
 from ..utils.series import weighted_sum
 from ..network.custom_constraints import apply_custom_constraints
 from ..network.constraint_dsl import apply_constraint_specs, apply_dsl_constraints
+from ..network.reserves import apply_reserve_constraints, extract_reserve_results
 from .dispatch import (
     build_curtailment_series,
     build_dispatch_series,
@@ -381,6 +382,17 @@ def run_pypsa(
     # both, preferring the JSON spec.
     constraint_specs: list[dict] = scenario.get("constraintSpecs") or []
     custom_dsl_text: str = str(scenario.get("customDsl") or "")
+    reserve_cfg: dict[str, Any] = options.get("reserveConfig") or {}
+    reserve_enabled = bool(reserve_cfg.get("enabled"))
+    if reserve_enabled and stochastic.enabled:
+        # Stochastic (set_scenarios) adds a `scenario` dimension to Generator-p,
+        # which the reserve builder can't key its variable/constraints against.
+        # Reject explicitly (like the other study-mode guards) rather than
+        # silently dropping reserve.
+        raise HTTPException(
+            status_code=400,
+            detail="Operating-reserve co-optimization cannot be combined with stochastic scenarios.",
+        )
 
     def extra_functionality(n, snapshots):
         # `snapshots` is the window being optimised — for rolling horizon it is a
@@ -391,6 +403,12 @@ def run_pypsa(
             apply_constraint_specs(n, constraint_specs, emissions_factors, notes, snapshots)
         elif custom_dsl_text:
             apply_dsl_constraints(n, custom_dsl_text, emissions_factors, notes, snapshots)
+        # Operating-reserve (spinning reserve) co-optimization — added last so
+        # it sees the final dispatch/capacity variables from the custom/DSL
+        # constraints above (it only adds a new variable + constraints, never
+        # mutates existing ones, so ordering is not correctness-critical).
+        if reserve_enabled:
+            apply_reserve_constraints(n, reserve_cfg, snapshots, notes)
 
 
     # Currency symbol for formatted output strings
@@ -620,6 +638,7 @@ def _build_solved_payload(
     swap_enabled = bool(swap_cfg.get("enabled", False))
     ess_cfg = options.get("essConfig") or {}
     ess_enabled = bool(ess_cfg.get("enabled", False))
+    reserve_cfg = options.get("reserveConfig") or {}
     ppa_cfg = options.get("ppaConfig") or {}
     ppa_enabled = bool(ppa_cfg.get("enabled", False))
 
@@ -1093,6 +1112,11 @@ def _build_solved_payload(
         carbon_price=float(scenario.get("carbonPrice", 0.0) or 0.0),
         debt=options.get("financeConfig") or None,
     )
+    # Operating-reserve (spinning reserve) co-optimization results — reads the
+    # in-solve Generator-r variable and the reserve_requirement dual straight
+    # off n.model; None-safe when reserves weren't enabled or n.model is
+    # unavailable (e.g. the X1 derive-from-outputs path, which never re-solves).
+    reserve = extract_reserve_results(network, reserve_cfg)
 
     return {
         "summary": summary,
@@ -1129,6 +1153,7 @@ def _build_solved_payload(
         "optimalBid": optimal_bid,
         "assetSwap": asset_swap,
         "essBusinessCase": ess_business_case,
+        "reserve": reserve,
         "emissionsBreakdown": emissions_breakdown,
         "energyBalance": energy_balance,
         "demandResponse": demand_response,

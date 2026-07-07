@@ -16,6 +16,7 @@ import {
   MarketSimConfig,
   PowerFlowConfig,
   Primitive,
+  ReserveConfig,
   RollingHorizonConfig,
   SamplingConfig,
   ScenarioCatalog,
@@ -75,6 +76,10 @@ export function defaultStochasticConfig(): StochasticConfig {
 
 export function defaultSclopfConfig(): SecurityConstrainedConfig {
   return { enabled: false };
+}
+
+export function defaultReserveConfig(): ReserveConfig {
+  return { enabled: false, requirementType: 'fraction', fraction: 0.1, providers: 'all', reserveCost: 0 };
 }
 
 export function defaultPowerFlowConfig(): PowerFlowConfig {
@@ -139,6 +144,10 @@ function cloneStochasticConfig(config: StochasticConfig): StochasticConfig {
 }
 
 function cloneSclopfConfig(config: SecurityConstrainedConfig): SecurityConstrainedConfig {
+  return { ...config };
+}
+
+function cloneReserveConfig(config: ReserveConfig): ReserveConfig {
   return { ...config };
 }
 
@@ -221,6 +230,7 @@ export function buildScenarioPreset(input: {
   // were captured default to disabled.
   stochasticConfig?: StochasticConfig;
   securityConstrainedConfig?: SecurityConstrainedConfig;
+  reserveConfig?: ReserveConfig;
   powerFlowConfig?: PowerFlowConfig;
   marketSimConfig?: MarketSimConfig;
   contingencyConfig?: ContingencyConfig;
@@ -254,6 +264,7 @@ export function buildScenarioPreset(input: {
     rollingConfig: cloneRollingConfig(input.rollingConfig),
     stochasticConfig: cloneStochasticConfig(input.stochasticConfig ?? defaultStochasticConfig()),
     securityConstrainedConfig: cloneSclopfConfig(input.securityConstrainedConfig ?? defaultSclopfConfig()),
+    reserveConfig: cloneReserveConfig(input.reserveConfig ?? defaultReserveConfig()),
     powerFlowConfig: clonePowerFlowConfig(input.powerFlowConfig ?? defaultPowerFlowConfig()),
     marketSimConfig: cloneMarketSimConfig(input.marketSimConfig ?? defaultMarketSimConfig()),
     contingencyConfig: cloneContingencyConfig(input.contingencyConfig ?? defaultContingencyConfig()),
@@ -304,6 +315,7 @@ function normalizeScenarioCatalog(catalog: ScenarioCatalog): ScenarioCatalog {
       rollingConfig: cloneRollingConfig(scenario.rollingConfig ?? defaultRollingConfig()),
       stochasticConfig: cloneStochasticConfig(scenario.stochasticConfig ?? defaultStochasticConfig()),
       securityConstrainedConfig: cloneSclopfConfig(scenario.securityConstrainedConfig ?? defaultSclopfConfig()),
+      reserveConfig: cloneReserveConfig(scenario.reserveConfig ?? defaultReserveConfig()),
       powerFlowConfig: clonePowerFlowConfig(scenario.powerFlowConfig ?? defaultPowerFlowConfig()),
       marketSimConfig: cloneMarketSimConfig(scenario.marketSimConfig ?? defaultMarketSimConfig()),
       contingencyConfig: cloneContingencyConfig(scenario.contingencyConfig ?? defaultContingencyConfig()),
@@ -349,6 +361,7 @@ export function readScenarioCatalogFromModel(model: WorkbookModel): ScenarioCata
         rollingConfig: payload.rollingConfig ?? defaultRollingConfig(),
         stochasticConfig: payload.stochasticConfig ?? defaultStochasticConfig(),
         securityConstrainedConfig: payload.securityConstrainedConfig ?? defaultSclopfConfig(),
+        reserveConfig: payload.reserveConfig ?? defaultReserveConfig(),
         powerFlowConfig: payload.powerFlowConfig ?? defaultPowerFlowConfig(),
         marketSimConfig: payload.marketSimConfig ?? defaultMarketSimConfig(),
         contingencyConfig: payload.contingencyConfig ?? defaultContingencyConfig(),
@@ -403,6 +416,7 @@ export function writeScenarioCatalogToModel(
       rollingConfig: scenario.rollingConfig,
       stochasticConfig: scenario.stochasticConfig,
       securityConstrainedConfig: scenario.securityConstrainedConfig,
+      reserveConfig: scenario.reserveConfig,
       powerFlowConfig: scenario.powerFlowConfig,
       marketSimConfig: scenario.marketSimConfig,
       contingencyConfig: scenario.contingencyConfig,

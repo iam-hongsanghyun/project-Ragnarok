@@ -51,6 +51,7 @@ export type CardKind =
   | 'auction-book'
   | 'strategic-bidding'
   | 'contingency'
+  | 'reserve'
   | 'emissions-breakdown'
   | 'capacity-expansion'
   | 'capacity-by-period'
@@ -272,6 +273,10 @@ export interface ContingencyCardData extends CardBase {
   kind: 'contingency';
 }
 
+export interface ReserveCardData extends CardBase {
+  kind: 'reserve';
+}
+
 export interface EmissionsBreakdownCardData extends CardBase {
   kind: 'emissions-breakdown';
 }
@@ -333,6 +338,7 @@ export type Card =
   | AuctionBookCardData
   | StrategicBiddingCardData
   | ContingencyCardData
+  | ReserveCardData
   | EmissionsBreakdownCardData
   | CapacityExpansionCardData
   | CapacityByPeriodCardData

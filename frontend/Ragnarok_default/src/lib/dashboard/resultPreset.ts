@@ -152,6 +152,7 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   const hasEnergyBalance = !!(results.energyBalance && results.energyBalance.carriers.length > 0);
   const hasDemandResponse = !!(results.demandResponse && results.demandResponse.loads.length > 0);
   const hasPriceElastic = !!(results.priceElastic && results.priceElastic.loads.length > 0);
+  const hasReserve = !!results.reserve?.enabled;
 
   const rows: Array<ReturnType<typeof row>> = [];
 
@@ -234,6 +235,12 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   if (hasEmissionsBd) {
     const eb: Card = { id: id('em-bd'), kind: 'emissions-breakdown' };
     rows.push(row({ cards: [{ card: eb }] }));
+  }
+
+  // 6b. Operating reserve co-optimization (conditional)
+  if (hasReserve) {
+    const rsv: Card = { id: id('reserve'), kind: 'reserve' };
+    rows.push(row({ cards: [{ card: rsv }] }));
   }
 
   // (Storage SoC lives in the demand · price · SoC row above.)

@@ -27,6 +27,7 @@ const GROUP_LABELS: Record<string, string> = {
   enableLoadShedding: 'Solve', loadSheddingCost: 'Solve', forceLp: 'Solve',
   pathwayConfig: 'Pathway', rollingConfig: 'Rolling', samplingConfig: 'Sampling',
   stochasticConfig: 'Stochastic', securityConstrainedConfig: 'Security',
+  reserveConfig: 'Reserve',
   powerFlowConfig: 'Power flow', marketSimConfig: 'Market', contingencyConfig: 'Contingency',
   mgaConfig: 'MGA', merchantConfig: 'Merchant', bidStrategyConfig: 'Bidding',
   assetSwapConfig: 'Asset swap', essConfig: 'Storage', ppaConfig: 'PPA',

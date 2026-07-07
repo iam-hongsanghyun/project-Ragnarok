@@ -58,6 +58,7 @@ import { MarketParticipantsCard } from '../../../features/analytics/cards/Market
 import { AuctionBookCard } from '../../../features/analytics/cards/AuctionBookCard';
 import { StrategicBiddingCard } from '../../../features/analytics/cards/StrategicBiddingCard';
 import { ContingencyCard } from '../../../features/analytics/cards/ContingencyCard';
+import { ReserveCard } from '../../../features/analytics/cards/ReserveCard';
 import { EmissionsBreakdownCard } from '../../../features/analytics/cards/EmissionsBreakdownCard';
 import { CapacityExpansionCard } from '../../../features/analytics/cards/CapacityExpansionCard';
 import { CapacityByPeriodCard } from '../../../features/analytics/cards/CapacityByPeriodCard';
@@ -553,6 +554,10 @@ export function AnalyticsDashboard({
           return results.contingency
             ? <ContingencyCard data={results.contingency} />
             : <p className="dashboard-cell-missing">This run was not an N-1 contingency analysis.</p>;
+        case 'reserve':
+          return results.reserve?.enabled
+            ? <ReserveCard data={results.reserve} currencySymbol={currencySymbol} />
+            : <p className="dashboard-cell-missing">This run did not co-optimize operating reserve.</p>;
         case 'emissions-breakdown':
           return results.emissionsBreakdown
             ? <EmissionsBreakdownCard data={results.emissionsBreakdown} />
@@ -634,6 +639,7 @@ export function AnalyticsDashboard({
       case 'auction-book': return 'Auction book (bid stack & clearing)';
       case 'strategic-bidding': return 'Strategic bidding (market power best response)';
       case 'contingency': return 'N-1 contingency (security)';
+      case 'reserve': return 'Operating reserve (price & headroom)';
       case 'emissions-breakdown': return 'Emissions by generator / carrier';
       case 'capacity-expansion': return 'Capacity expansion';
       case 'capacity-by-period': return 'Capacity by period';

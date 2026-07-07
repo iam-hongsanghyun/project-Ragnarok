@@ -27,6 +27,7 @@ import {
   DemandResponseConfig,
   FinanceConfig,
   Primitive,
+  ReserveConfig,
   RollingHorizonConfig,
   SamplingConfig,
   ScenarioCatalog,
@@ -46,6 +47,7 @@ import { PlanningSection } from './SettingsView.sections/Planning';
 import { RollingSection } from './SettingsView.sections/Rolling';
 import { StochasticSection } from './SettingsView.sections/Stochastic/Stochastic';
 import { SclopfSection } from './SettingsView.sections/Sclopf';
+import { ReserveSection } from './SettingsView.sections/Reserve';
 import { PowerFlowSection } from './SettingsView.sections/PowerFlow';
 import { MarketSimulationSection } from './SettingsView.sections/MarketSimulation';
 import { ContingencySection } from './SettingsView.sections/Contingency';
@@ -74,6 +76,7 @@ type SectionId =
   | 'demandResponse'
   | 'stochastic'
   | 'sclopf'
+  | 'reserve'
   | 'powerflow'
   | 'marketsim'
   | 'contingency'
@@ -123,6 +126,7 @@ const SECTIONS: Section[] = [
   // Solve — how the optimiser is run
   { id: 'stochastic', label: 'Stochastic',                    group: 'Solve' },
   { id: 'sclopf',     label: 'Security-constrained (SCLOPF)',  group: 'Solve' },
+  { id: 'reserve',    label: 'Operating reserve',              group: 'Solve' },
   { id: 'powerflow', label: 'Power flow',                     group: 'Solve' },
   { id: 'marketsim', label: 'Market simulation',               group: 'Solve' },
   { id: 'contingency', label: 'N-1 contingency',              group: 'Solve' },
@@ -183,6 +187,8 @@ export interface SettingsViewProps {
   onStochasticConfigChange: (config: StochasticConfig) => void;
   sclopfConfig: SecurityConstrainedConfig;
   onSclopfConfigChange: (config: SecurityConstrainedConfig) => void;
+  reserveConfig: ReserveConfig;
+  onReserveConfigChange: (config: ReserveConfig) => void;
   powerFlowConfig: PowerFlowConfig;
   onPowerFlowConfigChange: (config: PowerFlowConfig) => void;
   marketSimConfig: MarketSimConfig;
@@ -332,6 +338,7 @@ export function SettingsView(props: SettingsViewProps) {
         {section === 'rolling'        && <RollingSection {...props} />}
         {section === 'stochastic'     && <StochasticSection {...props} />}
         {section === 'sclopf'         && <SclopfSection {...props} />}
+        {section === 'reserve'        && <ReserveSection {...props} />}
         {section === 'powerflow'      && <PowerFlowSection {...props} />}
         {section === 'marketsim'      && <MarketSimulationSection {...props} />}
         {section === 'contingency'    && <ContingencySection {...props} />}

@@ -15,6 +15,7 @@ import {
   SamplingConfig,
   StochasticConfig,
   SecurityConstrainedConfig,
+  ReserveConfig,
   MarketSimConfig,
   PowerFlowConfig,
   ContingencyConfig,
@@ -296,6 +297,7 @@ function AppInner() {
   const [customDsl, setCustomDsl] = useState<string>('');
   const [stochasticConfig, setStochasticConfig] = useState<StochasticConfig>({ enabled: false, scenarios: [] });
   const [sclopfConfig, setSclopfConfig] = useState<SecurityConstrainedConfig>({ enabled: false });
+  const [reserveConfig, setReserveConfig] = useState<ReserveConfig>({ enabled: false, requirementType: 'fraction', fraction: 0.1, providers: 'all', reserveCost: 0 });
   const [powerFlowConfig, setPowerFlowConfig] = useState<PowerFlowConfig>({ enabled: false, linear: false });
   const [marketSimConfig, setMarketSimConfig] = useState<MarketSimConfig>({ enabled: false, pricing: 'uniform' as const, voll: 3000, chargeQuantile: 0.25, dischargeQuantile: 0.75, clearingModel: 'singleSided' as const, demandElasticFraction: 0.2, demandWtp: 120 });
   const [contingencyConfig, setContingencyConfig] = useState<ContingencyConfig>({ enabled: false });
@@ -347,6 +349,7 @@ function AppInner() {
     samplingConfig: defaultSamplingConfig(),
     stochasticConfig: { enabled: false, scenarios: [] },
     securityConstrainedConfig: { enabled: false },
+    reserveConfig: { enabled: false, requirementType: 'fraction', fraction: 0.1, providers: 'all', reserveCost: 0 },
     powerFlowConfig: { enabled: false, linear: false },
     marketSimConfig: { enabled: false, pricing: 'uniform' as const, voll: 3000, chargeQuantile: 0.25, dischargeQuantile: 0.75, clearingModel: 'singleSided' as const, demandElasticFraction: 0.2, demandWtp: 120 },
     contingencyConfig: { enabled: false },
@@ -516,6 +519,7 @@ function AppInner() {
       samplingConfig: normalizeSamplingConfig(samplingConfig),
       stochasticConfig,
       securityConstrainedConfig: sclopfConfig,
+      reserveConfig,
       powerFlowConfig,
       marketSimConfig,
       contingencyConfig,
@@ -548,6 +552,7 @@ function AppInner() {
     samplingConfig,
     stochasticConfig,
     sclopfConfig,
+    reserveConfig,
     powerFlowConfig,
     marketSimConfig,
     contingencyConfig,
@@ -671,6 +676,7 @@ function AppInner() {
       samplingConfig: fallbackSampling,
       stochasticConfig,
       securityConstrainedConfig: sclopfConfig,
+      reserveConfig,
       powerFlowConfig,
       marketSimConfig,
       contingencyConfig,
@@ -728,6 +734,7 @@ function AppInner() {
     forceLp,
     stochasticConfig,
     sclopfConfig,
+    reserveConfig,
     powerFlowConfig,
     marketSimConfig,
     contingencyConfig,
@@ -1194,6 +1201,7 @@ function AppInner() {
     setSamplingConfig(normalizeSamplingConfig(scenario.samplingConfig ?? defaultSamplingConfig()));
     setStochasticConfig(scenario.stochasticConfig ?? { enabled: false, scenarios: [] });
     setSclopfConfig(scenario.securityConstrainedConfig ?? { enabled: false });
+    setReserveConfig(scenario.reserveConfig ?? { enabled: false, requirementType: 'fraction', fraction: 0.1, providers: 'all', reserveCost: 0 });
     setPowerFlowConfig(scenario.powerFlowConfig ?? { enabled: false, linear: false });
     setMarketSimConfig(scenario.marketSimConfig ?? { enabled: false, pricing: 'uniform' as const, voll: 3000, chargeQuantile: 0.25, dischargeQuantile: 0.75, clearingModel: 'singleSided' as const, demandElasticFraction: 0.2, demandWtp: 120 });
     setContingencyConfig(scenario.contingencyConfig ?? { enabled: false });
@@ -2898,6 +2906,8 @@ function AppInner() {
               onStochasticConfigChange={setStochasticConfig}
               sclopfConfig={sclopfConfig}
               onSclopfConfigChange={setSclopfConfig}
+              reserveConfig={reserveConfig}
+              onReserveConfigChange={setReserveConfig}
               powerFlowConfig={powerFlowConfig}
               onPowerFlowConfigChange={setPowerFlowConfig}
               marketSimConfig={marketSimConfig}

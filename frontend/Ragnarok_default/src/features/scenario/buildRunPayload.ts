@@ -83,6 +83,7 @@ export function buildRunPayload(
     samplingConfig: normalizeSamplingConfig(preset.samplingConfig),
     stochasticConfig: preset.stochasticConfig,
     securityConstrainedConfig: preset.securityConstrainedConfig,
+    reserveConfig: preset.reserveConfig,
     powerFlowConfig: preset.powerFlowConfig,
     marketSimConfig: preset.marketSimConfig,
     contingencyConfig: preset.contingencyConfig,
