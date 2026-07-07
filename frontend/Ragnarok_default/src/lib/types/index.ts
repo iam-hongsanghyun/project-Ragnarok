@@ -898,6 +898,18 @@ export interface ScenarioPreset {
   /** Optional debt assumptions for company finance DSCR (F2). */
   financeConfig: FinanceConfig;
   constraints: CustomConstraint[];
+  /** Per-scenario model cell patches (e.g. generator p_nom) so scenarios can
+   *  differ in capacity/model, not just settings. Applied server-side to the
+   *  run's model snapshot at submit; empty by default. */
+  modelOverrides: ModelOverride[];
+}
+
+/** One model cell patch: set ``sheet[name].column = value`` for a run. */
+export interface ModelOverride {
+  sheet: string;
+  name: string;
+  column: string;
+  value: string | number | boolean;
 }
 
 export interface ScenarioCatalog {

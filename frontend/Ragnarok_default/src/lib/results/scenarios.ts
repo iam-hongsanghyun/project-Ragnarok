@@ -11,6 +11,7 @@ import {
   GridRow,
   MgaConfig,
   MerchantConfig,
+  ModelOverride,
   PathwayConfig,
   MarketSimConfig,
   PowerFlowConfig,
@@ -191,6 +192,12 @@ function cloneSchedule(schedule: CarbonPriceScheduleEntry[]): CarbonPriceSchedul
   return (schedule ?? []).map((row) => ({ ...row }));
 }
 
+function cloneModelOverrides(overrides: ModelOverride[] | undefined): ModelOverride[] {
+  return (overrides ?? [])
+    .filter((o): o is ModelOverride => !!o && !!o.sheet && !!o.name && !!o.column)
+    .map((o) => ({ sheet: o.sheet, name: o.name, column: o.column, value: o.value }));
+}
+
 export function createScenarioId(): string {
   return `scenario-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -228,6 +235,7 @@ export function buildScenarioPreset(input: {
   financeConfig?: FinanceConfig;
   samplingConfig?: SamplingConfig;
   constraints: CustomConstraint[];
+  modelOverrides?: ModelOverride[];
 }): ScenarioPreset {
   return {
     id: input.id ?? createScenarioId(),
@@ -260,10 +268,13 @@ export function buildScenarioPreset(input: {
     financeConfig: cloneFinanceConfig(input.financeConfig ?? defaultFinanceConfig()),
     samplingConfig: cloneSamplingConfig(input.samplingConfig ?? defaultSamplingConfig()),
     constraints: cloneConstraints(input.constraints),
+    modelOverrides: cloneModelOverrides(input.modelOverrides),
   };
 }
 
-export function defaultScenarioCatalog(base: Omit<ScenarioPreset, 'id' | 'label' | 'notes'>): ScenarioCatalog {
+export function defaultScenarioCatalog(
+  base: Omit<ScenarioPreset, 'id' | 'label' | 'notes' | 'modelOverrides'> & { modelOverrides?: ModelOverride[] },
+): ScenarioCatalog {
   const scenario = buildScenarioPreset({
     ...base,
     id: 'scenario-base',
@@ -307,6 +318,7 @@ function normalizeScenarioCatalog(catalog: ScenarioCatalog): ScenarioCatalog {
       financeConfig: cloneFinanceConfig(scenario.financeConfig ?? defaultFinanceConfig()),
       samplingConfig: cloneSamplingConfig(scenario.samplingConfig ?? defaultSamplingConfig()),
       constraints: cloneConstraints(scenario.constraints ?? []),
+      modelOverrides: cloneModelOverrides(scenario.modelOverrides),
     })),
   };
 }
@@ -351,6 +363,7 @@ export function readScenarioCatalogFromModel(model: WorkbookModel): ScenarioCata
         financeConfig: payload.financeConfig ?? defaultFinanceConfig(),
         samplingConfig: payload.samplingConfig ?? defaultSamplingConfig(),
         constraints: Array.isArray(payload.constraints) ? payload.constraints : [],
+        modelOverrides: Array.isArray(payload.modelOverrides) ? payload.modelOverrides : [],
       });
     } catch {
       return null;
@@ -404,6 +417,7 @@ export function writeScenarioCatalogToModel(
       financeConfig: scenario.financeConfig,
       samplingConfig: scenario.samplingConfig,
       constraints: scenario.constraints,
+      modelOverrides: scenario.modelOverrides,
     }),
   }));
   return {

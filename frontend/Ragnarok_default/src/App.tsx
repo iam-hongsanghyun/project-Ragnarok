@@ -59,6 +59,7 @@ import { defaultSamplingConfig, normalizeSamplingConfig, readSamplingConfigFromM
 import { readCustomDslFromModel, writeCustomDslToModel } from 'lib/constraints/custom';
 import { dslToSpecs, parseConstraintDsl } from 'lib/constraints/dsl';
 import { buildScenarioPreset, defaultScenarioCatalog, readScenarioCatalogFromModel, sameScenarioCatalog, writeScenarioCatalogToModel } from 'lib/results/scenarios';
+import { buildRunPayload } from 'features/scenario/buildRunPayload';
 import { readCarbonLibraryFromModel, writeCarbonLibraryToModel, sameCarbonLibrary } from 'lib/results/carbonLibrary';
 import { saveSessionControls, loadSessionControls, clearSession, clearSessionModelOnly } from 'lib/storage/sessionStore';
 import { clearSessionModel, putSessionModel, putStaticModel, getSessionFullModel, getSessionMeta, getSheetPage, isSeriesSheet, patchSheet, seriesSheetCounts, DEFAULT_SESSION_ID } from 'lib/api/session';
@@ -528,6 +529,9 @@ function AppInner() {
       ownerColumn,
       financeConfig,
       constraints,
+      // modelOverrides are per-scenario data, not a live control — carry them
+      // through from the caller (preserve on Update; [] for a fresh capture).
+      modelOverrides: overrides.modelOverrides,
     })
   ), [
     snapshotStart,
@@ -570,6 +574,7 @@ function AppInner() {
       id: activeScenario.id,
       label: activeScenario.label,
       notes: activeScenario.notes,
+      modelOverrides: activeScenario.modelOverrides,
     })) !== JSON.stringify(activeScenario);
   }, [activeScenario, captureCurrentScenario]);
 
@@ -2370,6 +2375,9 @@ function AppInner() {
       id: activeScenario.id,
       label: activeScenario.label,
       notes: activeScenario.notes,
+      // "Update from current" refreshes SETTINGS from live controls but keeps the
+      // scenario's model overrides (capacity, etc.) — they aren't live controls.
+      modelOverrides: activeScenario.modelOverrides,
     });
     setScenarioCatalog((current) => ({
       ...current,
@@ -2494,6 +2502,79 @@ function AppInner() {
     }
   };
 
+  // Add the current run configuration as a named scenario, from the Run console.
+  const handleAddScenarioFromConsole = useCallback(async () => {
+    const nextIndex = scenarioCatalog.scenarios.length + 1;
+    const label = (await promptDialog('Name this scenario', {
+      title: 'Add as scenario', defaultValue: `Scenario ${nextIndex}`, confirmText: 'Add',
+    }))?.trim();
+    if (!label) return;
+    const scenario = captureCurrentScenario({ label, notes: '' });
+    setScenarioCatalog((current) => ({ activeScenarioId: scenario.id, scenarios: [...current.scenarios, scenario] }));
+    setStatus(`Added scenario: ${scenario.label}`);
+    showToast(`Scenario added: ${scenario.label}`, 'success');
+  }, [scenarioCatalog.scenarios.length, promptDialog, captureCurrentScenario, showToast]);
+
+  // Run a batch of scenarios: set the queue concurrency (1 = in order, N =
+  // parallel), sync the model once, then enqueue one run per scenario — each
+  // with its own settings + model overrides baked into the payload. The queue
+  // does the ordering/parallelism; results land in History → Analytics.
+  const [batchBusy, setBatchBusy] = useState(false);
+  const handleRunBatch = useCallback(async (ids: string[], mode: 'sequential' | 'parallel', concurrency: number) => {
+    const presets = ids
+      .map((id) => scenarioCatalog.scenarios.find((s) => s.id === id))
+      .filter((s): s is ScenarioPreset => !!s);
+    if (presets.length === 0) return;
+    setBatchBusy(true);
+    try {
+      // Custom-DSL constraints are shared across all scenarios (per-model).
+      const constraintSpecs = parseConstraintDsl(customDsl)
+        .map((line) => line.spec).filter((s): s is ConstraintSpec => !!s);
+      const modelForRun = prepareModelForBackend(model);
+      setModel(modelForRun);
+      await putStaticModel(modelForRun);
+      await handleSetQueueConcurrency(mode === 'sequential' ? 1 : Math.max(2, concurrency));
+      const uiBase = {
+        filename, dateFormat: settings.dateFormat,
+        solverThreads: settings.solverThreads, solverType: settings.solverType,
+        solveAcceptance: settings.solveAcceptance, objectiveAutoScale: settings.objectiveAutoScale,
+        currencySymbol: settings.currencySymbol,
+      };
+      // Ensure every run in the batch gets a DISTINCT run name. The run name is
+      // derived from runLabel + a 1-second timestamp, so two scenarios that share
+      // a label (nothing enforces uniqueness) would derive the same name and, run
+      // in parallel, could clobber each other's History entry. Disambiguate any
+      // duplicate labels here (the backend also atomically reserves the name).
+      const seenLabels = new Map<string, number>();
+      const runLabelFor = (label: string): string => {
+        const n = (seenLabels.get(label) ?? 0) + 1;
+        seenLabels.set(label, n);
+        return n === 1 ? label : `${label} #${n}`;
+      };
+      let queued = 0;
+      for (const preset of presets) {
+        const { scenario, options } = buildRunPayload(preset, { ...uiBase, scenarioLabel: preset.label }, constraintSpecs);
+        // runLabel leads the run-name derivation, so a distinct runLabel per run
+        // gives distinct History entries.
+        options.runLabel = runLabelFor(preset.label);
+        const resp = await fetch(`${API_BASE}/api/queue`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: DEFAULT_SESSION_ID, scenario, options }),
+        });
+        if (resp.ok) queued += 1;
+      }
+      void refreshQueue();
+      // The queue concurrency is a GLOBAL setting; make its new value explicit so
+      // a later single Run isn't surprised to inherit parallel execution.
+      setStatus(`Queued ${queued}/${presets.length} scenarios. Queue now runs ${mode === 'sequential' ? 'one at a time (in order)' : `up to ${concurrency} at once`} — change it any time in the Queue tab. Results land in History → Analytics → Comparison.`);
+      showToast(`Queued ${queued} scenario${queued === 1 ? '' : 's'}`, queued === presets.length ? 'success' : 'error');
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Batch run failed.', 'error');
+    } finally {
+      setBatchBusy(false);
+    }
+  }, [scenarioCatalog.scenarios, customDsl, model, prepareModelForBackend, handleSetQueueConcurrency, filename, settings.dateFormat, settings.solverThreads, settings.solverType, settings.solveAcceptance, settings.objectiveAutoScale, settings.currencySymbol, refreshQueue, showToast]);
+
   const handleRunModel = async (staged = false) => {
     const snapshotCount = snapshotEnd - snapshotStart;
     // Parse the constraint DSL with per-line errors: invalid lines are NOT
@@ -2509,51 +2590,24 @@ function AppInner() {
         'error',
       );
     }
-    const scenario = {
-      constraints: constraints.filter((c) => c.enabled),
-      constraintSpecs: dslLines.map((line) => line.spec).filter((s): s is ConstraintSpec => !!s),
-      carbonPrice,
-      discountRate: settings.discountRate,
-    };
-    const options = {
-      // Optimisation backend selector (backend registry resolves this; PyPSA
-      // is the only adapter today). Threaded now so a future backend toggle
-      // has a channel without a payload-shape change.
-      backend: 'pypsa',
-      snapshotCount, snapshotStart, snapshotEnd, snapshotWeight, forceLp,
-      // Carried so the backend run store can label the stored run with the
-      // active scenario for Analytics → Comparison's cross-scenario pivot.
-      scenarioLabel: activeScenario?.label ?? null,
-      filename,
-      dateFormat: settings.dateFormat,
-      solverThreads: settings.solverThreads, solverType: settings.solverType,
-      solveAcceptance: settings.solveAcceptance,
-      objectiveAutoScale: settings.objectiveAutoScale,
-      currencySymbol: settings.currencySymbol,
-      enableLoadShedding: settings.enableLoadShedding,
-      loadSheddingCost: settings.loadSheddingCost,
-      pathwayConfig: {
-        ...pathwayConfig,
-        selectedPeriod: getDefaultSelectedPeriod(pathwayConfig),
+    // Build the run body from a preset snapshot of the LIVE controls, via the
+    // same pure builder the batch runner uses (so single + batch runs are
+    // identical). captureCurrentScenario() is the inverse of applyScenarioPreset.
+    const constraintSpecs = dslLines.map((line) => line.spec).filter((s): s is ConstraintSpec => !!s);
+    const { scenario, options } = buildRunPayload(
+      captureCurrentScenario(),
+      {
+        scenarioLabel: activeScenario?.label ?? null,
+        filename,
+        dateFormat: settings.dateFormat,
+        solverThreads: settings.solverThreads,
+        solverType: settings.solverType,
+        solveAcceptance: settings.solveAcceptance,
+        objectiveAutoScale: settings.objectiveAutoScale,
+        currencySymbol: settings.currencySymbol,
       },
-      rollingConfig: normalizeRollingConfig(rollingConfig),
-      samplingConfig: normalizeSamplingConfig(samplingConfig),
-      stochasticConfig,
-      securityConstrainedConfig: sclopfConfig,
-      powerFlowConfig,
-      marketSimConfig,
-      contingencyConfig,
-      mgaConfig,
-      merchantConfig,
-      bidStrategyConfig,
-      assetSwapConfig,
-      essConfig,
-      ppaConfig,
-      demandResponseConfig,
-      ownerColumn,
-      financeConfig,
-      carbonPriceSchedule,
-    };
+      constraintSpecs,
+    );
 
     setRunDialogOpen(false);
 
@@ -2829,6 +2883,11 @@ function AppInner() {
               onDeleteScenario={handleDeleteScenario}
               onRenameScenario={handleRenameScenario}
               onScenarioNotesChange={handleScenarioNotesChange}
+              maxConcurrency={queueCpuCount}
+              batchBusy={batchBusy}
+              onScenarioCatalogChange={setScenarioCatalog}
+              onRunBatch={handleRunBatch}
+              onGoToComparison={() => { setTab('Analytics'); setAnalyticsSubTab('Comparison'); }}
               pathwayConfig={pathwayConfig}
               onPathwayConfigChange={setPathwayConfig}
               rollingConfig={rollingConfig}
@@ -3148,6 +3207,7 @@ function AppInner() {
         onDryRunChange={setDryRun}
         onRun={() => void handleRunModel(false)}
         onQueueNext={() => void handleRunModel(true)}
+        onAddScenario={() => void handleAddScenarioFromConsole()}
       />
     </div>
   );

@@ -32,6 +32,9 @@ export interface RunDialogProps {
   onRun: () => void;
   /** "Queue next Run" — parks the job as staged; the user activates it later. */
   onQueueNext: () => void;
+  /** "Add as Scenario" — save the current run configuration as a named scenario
+   *  (compare + batch-run them from Settings → Scenarios). */
+  onAddScenario: () => void;
 }
 
 export function RunDialog({
@@ -51,6 +54,7 @@ export function RunDialog({
   onDryRunChange,
   onRun,
   onQueueNext,
+  onAddScenario,
 }: RunDialogProps) {
   if (!open) return null;
 
@@ -120,6 +124,11 @@ export function RunDialog({
 
         <div className="modal-actions">
           <button className="secondary-button" onClick={onClose}>Cancel</button>
+          {!dryRun && (
+            <button className="secondary-button" onClick={onAddScenario} title="Save this run configuration as a named scenario — compare and batch-run them in Settings → Scenarios">
+              Add as Scenario
+            </button>
+          )}
           {!dryRun && (
             <button className="secondary-button" onClick={onQueueNext} title="Stage this run; activate it later from the Queue tab">
               Queue next Run

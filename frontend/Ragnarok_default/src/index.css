@@ -6379,6 +6379,92 @@ th:hover .col-delete-btn {
   display: flex;
   gap: 8px;
 }
+
+/* Scenario difference table + batch runner (Settings → Scenarios). */
+.scenario-runbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0 12px;
+}
+.scenario-runbar__conc {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.scenario-runbar__conc input {
+  width: 56px;
+}
+.scenario-runbar__toggle {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.scenario-addoverride {
+  margin: 4px 0 10px;
+}
+.scenario-addoverride.is-open {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.scenario-diff-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.scenario-diff-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+.scenario-diff-table th,
+.scenario-diff-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+.scenario-diff-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  color: var(--muted);
+  font-weight: 600;
+}
+.scenario-diff-th--override,
+.scenario-diff-td--override {
+  background: color-mix(in srgb, var(--brand, #0f766e) 8%, transparent);
+}
+.scenario-diff-table tr.is-active .scenario-diff-td--name {
+  font-weight: 700;
+  color: var(--brand, #0f766e);
+}
+.scenario-diff-cell--diff {
+  color: var(--text);
+  font-weight: 600;
+}
+.scenario-diff-input {
+  width: 92px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg, transparent);
+  color: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.scenario-diff-td--actions {
+  display: flex;
+  gap: 6px;
+}
 .forge-validate-btn {
   width: 100%;
   justify-content: center;

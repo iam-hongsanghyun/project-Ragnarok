@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import secrets
 import sqlite3
@@ -574,6 +575,27 @@ def _unique_name(base: str) -> str:
             return cand
 
 
+def _reserve_name(base: str) -> str:
+    """Atomically claim a free run-name across processes (parallel batch runs).
+
+    ``_unique_name`` is a check-then-use that two concurrent solve processes can
+    both pass for the same base (same scenario label + same-second stamp), after
+    which ``_build_run_db`` would overwrite one run with the other. Create a
+    0-byte placeholder with ``O_EXCL`` so exactly one process wins each name; the
+    loser re-derives. ``_build_run_db`` keeps the placeholder (it only unlinks a
+    real, non-empty db), so the name stays claimed until the real db is written.
+    """
+    name = _unique_name(base)
+    for _ in range(200):
+        try:
+            fd = os.open(str(_db_path(name)), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            os.close(fd)
+            return name
+        except FileExistsError:
+            name = _unique_name(base)
+    return f"{base}-{secrets.token_hex(4)}"
+
+
 @contextmanager
 def _connect(name: str) -> Iterator[sqlite3.Connection]:
     """Open a run db for one operation and ALWAYS close it (see sqlite_store:
@@ -637,7 +659,12 @@ def _build_run_db(name: str, bundle: dict[str, Any], meta: dict[str, Any]) -> No
         "seriesSheets": sorted(str(s) for s in series),
     }
 
-    _db_path(name).unlink(missing_ok=True)
+    # Overwrite only a REAL prior db (a re-run). A 0-byte placeholder left by
+    # _reserve_name is kept so a concurrent sibling can't re-grab the name while
+    # we build — sqlite opens and initialises the empty file in place.
+    p = _db_path(name)
+    if p.exists() and p.stat().st_size > 0:
+        p.unlink()
     with _connect(name) as conn:
         # IF NOT EXISTS: a concurrent reader can recreate the file (sqlite
         # creates on connect) between the unlink and this rebuild — see the
@@ -808,7 +835,7 @@ def store_run(
         scenario = scenario or {}
         RUNS_DIR.mkdir(parents=True, exist_ok=True)
 
-        name = _unique_name(_derive_name(model, scenario, options))
+        name = _reserve_name(_derive_name(model, scenario, options))
         saved_at = datetime.now(timezone.utc).isoformat()
         filename = str(options.get("filename") or "")
         label = _label_for_bundle(scenario, options, filename)

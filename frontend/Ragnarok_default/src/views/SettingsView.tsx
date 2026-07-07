@@ -39,6 +39,7 @@ import { DateFormat, SolveAcceptance, SolverType } from '../features/settings/us
 
 import { snapshotTimestamps } from 'lib/results/snapshotWindow';
 import { ScenariosSection } from './SettingsView.sections/Scenarios';
+import type { BatchMode } from '../features/scenario/ScenarioDiffTable';
 import { WindowSection } from './SettingsView.sections/Window';
 import { CarbonSection } from './SettingsView.sections/Carbon';
 import { PlanningSection } from './SettingsView.sections/Planning';
@@ -164,6 +165,12 @@ export interface SettingsViewProps {
   onDeleteScenario: () => void;
   onRenameScenario: (scenarioId: string, label: string) => void;
   onScenarioNotesChange: (scenarioId: string, notes: string) => void;
+  /** Scenario difference table + batch runner (Run all in order / parallel). */
+  maxConcurrency: number;
+  batchBusy?: boolean;
+  onScenarioCatalogChange: (catalog: ScenarioCatalog) => void;
+  onRunBatch: (ids: string[], mode: BatchMode, concurrency: number) => void;
+  onGoToComparison: () => void;
 
   // Run setup
   pathwayConfig: PathwayConfig;

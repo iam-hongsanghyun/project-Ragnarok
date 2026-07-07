@@ -1,113 +1,41 @@
 /**
- * Scenarios section — preset library + active scenario metadata.
+ * Scenarios section — the scenario difference table + batch runner.
+ *
+ * Scenarios are authored from the Run console ("Add as Scenario"); this surface
+ * shows one row per scenario with only the settings that differ, lets you set a
+ * per-scenario model override (capacity, etc.), and runs them all in order or in
+ * parallel. Thin wrapper — the table lives in features/scenario.
  */
 import React from 'react';
-import { ScenarioCatalog, ScenarioPreset } from 'lib/types';
-import { TextDraftInput } from '../../shared/components/TextDraftInput';
+import { ScenarioCatalog, WorkbookModel } from 'lib/types';
+import { BatchMode, ScenarioDiffTable } from '../../features/scenario/ScenarioDiffTable';
 
 export interface ScenariosSectionProps {
   scenarioCatalog: ScenarioCatalog;
-  activeScenarioLabel: string | null;
-  scenarioDirty: boolean;
+  model: WorkbookModel;
+  maxConcurrency: number;
+  batchBusy?: boolean;
+  /** Apply a scenario's settings to the live run controls. */
   onSelectScenario: (scenarioId: string) => void;
-  onCreateScenarioFromCurrent: () => void;
-  onDuplicateScenario: () => void;
-  onUpdateActiveScenarioFromCurrent: () => void;
-  onDeleteScenario: () => void;
-  onRenameScenario: (scenarioId: string, label: string) => void;
-  onScenarioNotesChange: (scenarioId: string, notes: string) => void;
+  /** Persist a catalog edit (override cell, delete). */
+  onScenarioCatalogChange: (catalog: ScenarioCatalog) => void;
+  /** Queue the given scenarios sequentially (concurrency 1) or in parallel (N). */
+  onRunBatch: (ids: string[], mode: BatchMode, concurrency: number) => void;
+  /** Jump to Analytics → Comparison for results. */
+  onGoToComparison: () => void;
 }
 
 export function ScenariosSection(props: ScenariosSectionProps) {
-  const {
-    scenarioCatalog, activeScenarioLabel, scenarioDirty,
-    onSelectScenario, onCreateScenarioFromCurrent, onDuplicateScenario,
-    onUpdateActiveScenarioFromCurrent, onDeleteScenario,
-    onRenameScenario, onScenarioNotesChange,
-  } = props;
-  const activeScenario: ScenarioPreset | null =
-    scenarioCatalog.scenarios.find((s) => s.id === scenarioCatalog.activeScenarioId) ?? null;
-
   return (
-    <section className="constraints-workspace-section">
-      <header className="constraints-workspace-section-header">
-        <h3>Scenarios</h3>
-        <p>Named <b>run-configuration presets</b>: capture the current constraints, simulation window, carbon price, pathway, rolling and stochastic settings under a name, and switch between them to compare configurations. Presets describe what you <em>plan</em> to run — the record of what you <em>actually ran</em> lives in <b>History</b>.</p>
-      </header>
-      <div className="sg-setting-row">
-        <label className="sg-setting-label">Scenario library</label>
-        <div className="period-pill-row">
-          {scenarioCatalog.scenarios.map((scenario) => (
-            <button
-              key={scenario.id}
-              className={`tb-btn period-pill${scenario.id === scenarioCatalog.activeScenarioId ? '' : ' tb-btn--muted'}`}
-              onClick={() => onSelectScenario(scenario.id)}
-              title={scenario.notes || scenario.label}
-            >
-              {scenario.label}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="sg-setting-row">
-        <div className="sg-btn-row">
-          <button className="tb-btn sg-solver-btn" onClick={onCreateScenarioFromCurrent}>New from current</button>
-          <button
-            className={`tb-btn sg-solver-btn${scenarioDirty ? '' : ' tb-btn--muted'}`}
-            onClick={onUpdateActiveScenarioFromCurrent}
-            disabled={!activeScenario}
-          >
-            Update active
-          </button>
-          <button className="tb-btn sg-solver-btn tb-btn--muted" onClick={onDuplicateScenario} disabled={!activeScenario}>
-            Duplicate
-          </button>
-          <button
-            className="tb-btn sg-solver-btn tb-btn--muted"
-            onClick={onDeleteScenario}
-            disabled={!activeScenario || scenarioCatalog.scenarios.length <= 1}
-          >
-            Delete
-          </button>
-        </div>
-        {activeScenario && (
-          <div className="sg-scenario-status">
-            <span className={`sg-scenario-dot${scenarioDirty ? ' is-dirty' : ''}`} />
-            <span>{scenarioDirty ? 'Current controls differ from the active scenario.' : 'Current controls match the active scenario.'}</span>
-          </div>
-        )}
-      </div>
-      {activeScenario && (
-        <>
-          <div className="sg-setting-divider" />
-          <div className="sg-setting-row">
-            <label className="sg-setting-label" htmlFor="set-scenario-label">Active scenario label</label>
-            <TextDraftInput
-              id="set-scenario-label"
-              className="sg-num-input"
-              value={activeScenario.label}
-              onCommit={(v) => onRenameScenario(activeScenario.id, v)}
-            />
-          </div>
-          <div className="sg-setting-row">
-            <label className="sg-setting-label" htmlFor="set-scenario-notes">Notes</label>
-            <textarea
-              id="set-scenario-notes"
-              className="sg-scenario-notes"
-              rows={3}
-              value={activeScenario.notes}
-              onChange={(e) => onScenarioNotesChange(activeScenario.id, e.target.value)}
-            />
-          </div>
-          {activeScenarioLabel && (
-            <div className="sg-setting-row">
-              <div className="sg-scenario-summary">
-                <span>Active: {activeScenarioLabel}</span>
-              </div>
-            </div>
-          )}
-        </>
-      )}
-    </section>
+    <ScenarioDiffTable
+      catalog={props.scenarioCatalog}
+      model={props.model}
+      maxConcurrency={props.maxConcurrency}
+      busy={props.batchBusy}
+      onCatalogChange={props.onScenarioCatalogChange}
+      onLoadScenario={props.onSelectScenario}
+      onRunBatch={props.onRunBatch}
+      onGoToComparison={props.onGoToComparison}
+    />
   );
 }

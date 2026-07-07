@@ -167,6 +167,17 @@ def test_list_runs_tolerates_corrupt_meta(_runs_dir: Path) -> None:
     assert run_store.list_runs() == []
 
 
+def test_reserve_name_gives_distinct_names_for_same_base(_runs_dir: Path) -> None:
+    """Two reservations of the same base (parallel same-label batch runs) must
+    get DISTINCT names so neither overwrites the other in History."""
+    _runs_dir.mkdir(parents=True, exist_ok=True)
+    a = run_store._reserve_name("Scenario-2_2030-01-01T00-00-00")
+    b = run_store._reserve_name("Scenario-2_2030-01-01T00-00-00")
+    assert a != b
+    # Both names are claimed on disk (placeholder files exist).
+    assert run_store._db_path(a).exists() and run_store._db_path(b).exists()
+
+
 def test_get_run_missing_returns_none(_runs_dir: Path) -> None:
     assert run_store.get_run("2025-01-01T00-00-00") is None
 

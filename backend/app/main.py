@@ -1016,18 +1016,27 @@ def _resolve_payload_model(payload: RunPayload) -> RunPayload:
     so a later edit to the session never mutates an already-submitted or queued
     run. A legacy payload carrying an inline ``model`` is returned unchanged.
     """
-    if payload.model:
-        return payload
-    if payload.sessionId:
+    overrides = (payload.options or {}).get("modelOverrides") or []
+    if payload.model is not None:
+        model = payload.model
+    elif payload.sessionId:
         model = model_store.load_full_model(payload.sessionId)
         if not model:
             raise HTTPException(
                 status_code=400, detail=f"No model loaded in session {payload.sessionId!r}."
             )
-        data = _payload_to_dict(payload)
-        data["model"] = model
-        return RunPayload(**data)
-    raise HTTPException(status_code=400, detail="Run payload must include a model or a sessionId.")
+    else:
+        raise HTTPException(
+            status_code=400, detail="Run payload must include a model or a sessionId."
+        )
+    # Per-scenario model overrides (capacity, etc.) — applied to the snapshot now
+    # so the solved + stored run reflects them (batch scenario runs differ here).
+    if overrides:
+        from . import scenario_overrides
+        model = scenario_overrides.apply_model_overrides(model, overrides)
+    data = _payload_to_dict(payload)
+    data["model"] = model
+    return RunPayload(**data)
 
 
 @app.post("/api/validate")
