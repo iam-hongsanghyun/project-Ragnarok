@@ -46,6 +46,7 @@ from .outage_mc import build_outage_mc
 from .elcc import build_elcc
 from .correlated_sampling import build_correlated_sampling
 from .convergence import build_convergence
+from .lmp_decomposition import build_lmp_decomposition
 from .company import build_company_breakdown
 from .company_statement import build_company_statement
 from .finance import build_company_finance
@@ -1182,6 +1183,19 @@ def _build_solved_payload(
         except Exception as exc:  # noqa: BLE001 — never sink the run over an MC extra
             notes.append(f"Convergence-controlled sampling could not be computed: {exc}")
             _log.warning("convergence failed: %s", exc)
+    # LMP decomposition — post-process split of solved nodal prices
+    # (buses_t.marginal_price) into an energy component + a per-bus congestion
+    # residual, plus congestion rent per line/link derived from price spread x
+    # flow (PyPSA's default LOPF does not attach line flow-limit duals). Same
+    # guard pattern: never raises into the solve; None when disabled/absent.
+    lmp_cfg = options.get("lmpDecompositionConfig") or {}
+    lmp_decomposition: dict[str, Any] | None = None
+    if bool(lmp_cfg.get("enabled")):
+        try:
+            lmp_decomposition = build_lmp_decomposition(network, options)
+        except Exception as exc:  # noqa: BLE001 — never sink the run over a reporting extra
+            notes.append(f"LMP decomposition could not be computed: {exc}")
+            _log.warning("lmp_decomposition failed: %s", exc)
     # Consolidated per-company annual P&L (revenue → carbon/fuel → margin → EBIT
     # → net). Reads only solved dataframes; independent of any config.
     company_statement = build_company_statement(
@@ -1233,6 +1247,7 @@ def _build_solved_payload(
         "elcc": elcc,
         "correlatedSampling": correlated_sampling,
         "convergenceSampling": convergence_sampling,
+        "lmpDecomposition": lmp_decomposition,
         "priceFormation": price_formation,
         "commitment": commitment,
         "ppa": ppa,

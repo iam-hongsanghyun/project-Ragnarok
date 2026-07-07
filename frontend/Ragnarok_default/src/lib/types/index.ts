@@ -253,6 +253,18 @@ export interface ConvergenceConfig {
   maintenanceCarriers: string[];
 }
 
+/** LMP decomposition — splits each bus's locational marginal price into an
+ *  energy component (uniform system/reference price) and a congestion
+ *  premium, and reports congestion rent per line/link. Post-process only;
+ *  does not change the solve. */
+export interface LmpDecompositionConfig {
+  enabled: boolean;
+  referenceMode: 'load-weighted' | 'min' | 'bus';
+  /** Bus name used as the energy-price reference; only meaningful when
+   *  `referenceMode === 'bus'`. */
+  referenceBus: string;
+}
+
 /** Timestep-weighted ramp-rate limits — bounds how fast each unit's output can
  *  change between consecutive snapshots: |Δp| ≤ ramp% × p_nom × hours per step
  *  (timestep-weighted, unlike PyPSA's native per-snapshot ramp_limit_up/down). */
@@ -1099,6 +1111,61 @@ export interface ConvergenceResult {
   note: string | null;
 }
 
+/** One bus's LMP decomposed into an energy component and a congestion
+ *  premium, plus the load-weighted congestion cost at that bus. */
+export interface LmpBusRow {
+  bus: string;
+  meanLmp: number;
+  energy: number;
+  congestion: number;
+  loadMwh: number;
+  congestionCost: number;
+}
+
+/** One congested line/link — congestion rent, hours bound, and utilization. */
+export interface LmpLineRow {
+  name: string;
+  kind: 'line' | 'link';
+  from: string;
+  to: string;
+  congestionRent: number;
+  hoursCongested: number;
+  meanAbsFlow: number;
+  sNom: number;
+  utilizationPct: number;
+}
+
+/** System-level energy price vs mean LMP and total congestion rent, per
+ *  snapshot. */
+export interface LmpSeries {
+  snapshots: string[];
+  energy: number[];
+  meanLmp: number[];
+  congestionRent: number[];
+}
+
+/** Backend result block for LMP decomposition — energy vs congestion split
+ *  per bus, congestion rent per line/link. */
+export interface LmpDecompositionResult {
+  enabled: boolean;
+  referenceMode: string;
+  referenceBus: string | null;
+  currency: string;
+  unit: string;
+  buses: LmpBusRow[];
+  lines: LmpLineRow[];
+  totals: {
+    congestionRent: number;
+    energyPrice: number;
+    meanLmp: number;
+    congestionCharge: number;
+    windowHours: number;
+  };
+  series: LmpSeries | null;
+  summary: { label: string; value: string; detail?: string }[];
+  note: string;
+}
+
 export interface StochasticScenarioResult {
   name: string;
   weight: number;
@@ -1143,6 +1210,7 @@ export interface ScenarioPreset {
   correlatedSamplingConfig: CorrelatedSamplingConfig;
   elccConfig: ElccConfig;
   convergenceConfig: ConvergenceConfig;
+  lmpDecompositionConfig: LmpDecompositionConfig;
   rampConfig: RampConfig;
   powerFlowConfig: PowerFlowConfig;
   marketSimConfig?: MarketSimConfig;
@@ -1691,6 +1759,8 @@ export interface RunResults {
   elcc?: ElccResult;
   /** Present only when the run was a convergence-controlled sampling study. */
   convergenceSampling?: ConvergenceResult;
+  /** Present only when LMP decomposition (energy vs congestion) was enabled. */
+  lmpDecomposition?: LmpDecompositionResult | null;
   /** PyPSA statistics() table (per-carrier capacity/CF/curtailment/revenue/…). */
   statistics?: StatisticsResult;
   /** MGA near-optimal capacity corridor (present only when MGA was enabled). */

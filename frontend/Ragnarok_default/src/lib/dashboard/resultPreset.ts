@@ -158,6 +158,7 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   const hasRamp = !!results.ramp?.enabled;
   const hasElcc = !!results.elcc?.enabled;
   const hasConvergence = !!results.convergenceSampling?.enabled;
+  const hasLmpDecomposition = !!results.lmpDecomposition?.enabled;
 
   const rows: Array<ReturnType<typeof row>> = [];
 
@@ -276,6 +277,12 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   if (hasConvergence) {
     const cvg: Card = { id: id('convergence'), kind: 'convergence' };
     rows.push(row({ cards: [{ card: cvg }] }));
+  }
+
+  // 6g. LMP decomposition — energy vs congestion (conditional)
+  if (hasLmpDecomposition) {
+    const lmp: Card = { id: id('lmp-decomposition'), kind: 'lmp-decomposition' };
+    rows.push(row({ cards: [{ card: lmp }] }));
   }
 
   // (Storage SoC lives in the demand · price · SoC row above.)

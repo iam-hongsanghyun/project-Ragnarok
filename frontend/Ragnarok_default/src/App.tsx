@@ -21,6 +21,7 @@ import {
   RampConfig,
   ElccConfig,
   ConvergenceConfig,
+  LmpDecompositionConfig,
   MarketSimConfig,
   PowerFlowConfig,
   ContingencyConfig,
@@ -308,6 +309,7 @@ function AppInner() {
   const [rampConfig, setRampConfig] = useState<RampConfig>({ enabled: false, rampLimitUp: 0.5, rampLimitDown: 0.5, appliesTo: 'all' });
   const [elccConfig, setElccConfig] = useState<ElccConfig>({ enabled: false, nMembers: 200, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, carriers: [] });
   const [convergenceConfig, setConvergenceConfig] = useState<ConvergenceConfig>({ enabled: false, targetMetric: 'eue', tolerance: 0.05, batchSize: 50, maxMembers: 2000, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, maintenanceEnabled: false, maintenanceWeeks: 3, maintenanceCarriers: [] });
+  const [lmpDecompositionConfig, setLmpDecompositionConfig] = useState<LmpDecompositionConfig>({ enabled: false, referenceMode: 'load-weighted', referenceBus: '' });
   const [powerFlowConfig, setPowerFlowConfig] = useState<PowerFlowConfig>({ enabled: false, linear: false });
   const [marketSimConfig, setMarketSimConfig] = useState<MarketSimConfig>({ enabled: false, pricing: 'uniform' as const, voll: 3000, chargeQuantile: 0.25, dischargeQuantile: 0.75, clearingModel: 'singleSided' as const, demandElasticFraction: 0.2, demandWtp: 120 });
   const [contingencyConfig, setContingencyConfig] = useState<ContingencyConfig>({ enabled: false });
@@ -365,6 +367,7 @@ function AppInner() {
     rampConfig: { enabled: false, rampLimitUp: 0.5, rampLimitDown: 0.5, appliesTo: 'all' },
     elccConfig: { enabled: false, nMembers: 200, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, carriers: [] },
     convergenceConfig: { enabled: false, targetMetric: 'eue', tolerance: 0.05, batchSize: 50, maxMembers: 2000, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, maintenanceEnabled: false, maintenanceWeeks: 3, maintenanceCarriers: [] },
+    lmpDecompositionConfig: { enabled: false, referenceMode: 'load-weighted', referenceBus: '' },
     powerFlowConfig: { enabled: false, linear: false },
     marketSimConfig: { enabled: false, pricing: 'uniform' as const, voll: 3000, chargeQuantile: 0.25, dischargeQuantile: 0.75, clearingModel: 'singleSided' as const, demandElasticFraction: 0.2, demandWtp: 120 },
     contingencyConfig: { enabled: false },
@@ -540,6 +543,7 @@ function AppInner() {
       rampConfig,
       elccConfig,
       convergenceConfig,
+      lmpDecompositionConfig,
       powerFlowConfig,
       marketSimConfig,
       contingencyConfig,
@@ -578,6 +582,7 @@ function AppInner() {
     rampConfig,
     elccConfig,
     convergenceConfig,
+    lmpDecompositionConfig,
     powerFlowConfig,
     marketSimConfig,
     contingencyConfig,
@@ -707,6 +712,7 @@ function AppInner() {
       rampConfig,
       elccConfig,
       convergenceConfig,
+      lmpDecompositionConfig,
       powerFlowConfig,
       marketSimConfig,
       contingencyConfig,
@@ -770,6 +776,7 @@ function AppInner() {
     rampConfig,
     elccConfig,
     convergenceConfig,
+    lmpDecompositionConfig,
     powerFlowConfig,
     marketSimConfig,
     contingencyConfig,
@@ -1242,6 +1249,7 @@ function AppInner() {
     setRampConfig(scenario.rampConfig ?? { enabled: false, rampLimitUp: 0.5, rampLimitDown: 0.5, appliesTo: 'all' });
     setElccConfig(scenario.elccConfig ?? { enabled: false, nMembers: 200, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, carriers: [] });
     setConvergenceConfig(scenario.convergenceConfig ?? { enabled: false, targetMetric: 'eue', tolerance: 0.05, batchSize: 50, maxMembers: 2000, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, maintenanceEnabled: false, maintenanceWeeks: 3, maintenanceCarriers: [] });
+    setLmpDecompositionConfig(scenario.lmpDecompositionConfig ?? { enabled: false, referenceMode: 'load-weighted', referenceBus: '' });
     setPowerFlowConfig(scenario.powerFlowConfig ?? { enabled: false, linear: false });
     setMarketSimConfig(scenario.marketSimConfig ?? { enabled: false, pricing: 'uniform' as const, voll: 3000, chargeQuantile: 0.25, dischargeQuantile: 0.75, clearingModel: 'singleSided' as const, demandElasticFraction: 0.2, demandWtp: 120 });
     setContingencyConfig(scenario.contingencyConfig ?? { enabled: false });
@@ -2958,6 +2966,8 @@ function AppInner() {
               onElccConfigChange={setElccConfig}
               convergenceConfig={convergenceConfig}
               onConvergenceConfigChange={setConvergenceConfig}
+              lmpDecompositionConfig={lmpDecompositionConfig}
+              onLmpDecompositionConfigChange={setLmpDecompositionConfig}
               powerFlowConfig={powerFlowConfig}
               onPowerFlowConfigChange={setPowerFlowConfig}
               marketSimConfig={marketSimConfig}

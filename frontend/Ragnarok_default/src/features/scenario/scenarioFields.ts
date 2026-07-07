@@ -33,6 +33,7 @@ const GROUP_LABELS: Record<string, string> = {
   rampConfig: 'Ramp',
   elccConfig: 'ELCC',
   convergenceConfig: 'Convergence',
+  lmpDecompositionConfig: 'LMP decomposition',
   powerFlowConfig: 'Power flow', marketSimConfig: 'Market', contingencyConfig: 'Contingency',
   mgaConfig: 'MGA', merchantConfig: 'Merchant', bidStrategyConfig: 'Bidding',
   assetSwapConfig: 'Asset swap', essConfig: 'Storage', ppaConfig: 'PPA',

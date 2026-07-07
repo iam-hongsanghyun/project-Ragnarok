@@ -57,6 +57,7 @@ export type CardKind =
   | 'ramp'
   | 'elcc'
   | 'convergence'
+  | 'lmp-decomposition'
   | 'emissions-breakdown'
   | 'capacity-expansion'
   | 'capacity-by-period'
@@ -302,6 +303,10 @@ export interface ConvergenceCardData extends CardBase {
   kind: 'convergence';
 }
 
+export interface LmpDecompositionCardData extends CardBase {
+  kind: 'lmp-decomposition';
+}
+
 export interface EmissionsBreakdownCardData extends CardBase {
   kind: 'emissions-breakdown';
 }
@@ -369,6 +374,7 @@ export type Card =
   | RampCardData
   | ElccCardData
   | ConvergenceCardData
+  | LmpDecompositionCardData
   | EmissionsBreakdownCardData
   | CapacityExpansionCardData
   | CapacityByPeriodCardData

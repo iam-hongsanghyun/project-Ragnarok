@@ -29,6 +29,7 @@ import {
   DemandResponseConfig,
   ElccConfig,
   FinanceConfig,
+  LmpDecompositionConfig,
   OutageMcConfig,
   Primitive,
   RampConfig,
@@ -58,6 +59,7 @@ import { CorrelatedSamplingSection } from './SettingsView.sections/CorrelatedSam
 import { RampSection } from './SettingsView.sections/Ramp';
 import { ElccSection } from './SettingsView.sections/Elcc';
 import { ConvergenceSection } from './SettingsView.sections/Convergence';
+import { LmpDecompositionSection } from './SettingsView.sections/LmpDecomposition';
 import { PowerFlowSection } from './SettingsView.sections/PowerFlow';
 import { MarketSimulationSection } from './SettingsView.sections/MarketSimulation';
 import { ContingencySection } from './SettingsView.sections/Contingency';
@@ -92,6 +94,7 @@ type SectionId =
   | 'ramp'
   | 'elcc'
   | 'convergence'
+  | 'lmpDecomposition'
   | 'powerflow'
   | 'marketsim'
   | 'contingency'
@@ -147,6 +150,7 @@ const SECTIONS: Section[] = [
   { id: 'ramp',       label: 'Ramp-rate limits',               group: 'Solve' },
   { id: 'elcc',       label: 'ELCC / capacity credit',         group: 'Solve' },
   { id: 'convergence', label: 'Convergence sampling',          group: 'Solve' },
+  { id: 'lmpDecomposition', label: 'LMP decomposition',        group: 'Solve' },
   { id: 'powerflow', label: 'Power flow',                     group: 'Solve' },
   { id: 'marketsim', label: 'Market simulation',               group: 'Solve' },
   { id: 'contingency', label: 'N-1 contingency',              group: 'Solve' },
@@ -219,6 +223,8 @@ export interface SettingsViewProps {
   onElccConfigChange: (config: ElccConfig) => void;
   convergenceConfig: ConvergenceConfig;
   onConvergenceConfigChange: (config: ConvergenceConfig) => void;
+  lmpDecompositionConfig: LmpDecompositionConfig;
+  onLmpDecompositionConfigChange: (config: LmpDecompositionConfig) => void;
   powerFlowConfig: PowerFlowConfig;
   onPowerFlowConfigChange: (config: PowerFlowConfig) => void;
   marketSimConfig: MarketSimConfig;
@@ -374,6 +380,7 @@ export function SettingsView(props: SettingsViewProps) {
         {section === 'ramp'           && <RampSection {...props} />}
         {section === 'elcc'           && <ElccSection {...props} />}
         {section === 'convergence'    && <ConvergenceSection {...props} />}
+        {section === 'lmpDecomposition' && <LmpDecompositionSection {...props} />}
         {section === 'powerflow'      && <PowerFlowSection {...props} />}
         {section === 'marketsim'      && <MarketSimulationSection {...props} />}
         {section === 'contingency'    && <ContingencySection {...props} />}

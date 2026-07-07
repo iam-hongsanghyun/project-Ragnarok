@@ -89,6 +89,7 @@ export function buildRunPayload(
     rampConfig: preset.rampConfig,
     elccConfig: preset.elccConfig,
     convergenceConfig: preset.convergenceConfig,
+    lmpDecompositionConfig: preset.lmpDecompositionConfig,
     powerFlowConfig: preset.powerFlowConfig,
     marketSimConfig: preset.marketSimConfig,
     contingencyConfig: preset.contingencyConfig,

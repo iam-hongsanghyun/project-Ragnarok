@@ -12,6 +12,7 @@ import {
   DemandResponseConfig,
   FinanceConfig,
   GridRow,
+  LmpDecompositionConfig,
   MgaConfig,
   MerchantConfig,
   ModelOverride,
@@ -143,6 +144,10 @@ export function defaultConvergenceConfig(): ConvergenceConfig {
   };
 }
 
+export function defaultLmpDecompositionConfig(): LmpDecompositionConfig {
+  return { enabled: false, referenceMode: 'load-weighted', referenceBus: '' };
+}
+
 export function defaultPowerFlowConfig(): PowerFlowConfig {
   return { enabled: false, linear: false };
 }
@@ -232,6 +237,10 @@ function cloneConvergenceConfig(config: ConvergenceConfig): ConvergenceConfig {
   return { ...config, maintenanceCarriers: [...(config.maintenanceCarriers ?? [])] };
 }
 
+function cloneLmpDecompositionConfig(config: LmpDecompositionConfig): LmpDecompositionConfig {
+  return { ...config };
+}
+
 function clonePowerFlowConfig(config: PowerFlowConfig): PowerFlowConfig {
   return { ...config };
 }
@@ -317,6 +326,7 @@ export function buildScenarioPreset(input: {
   rampConfig?: RampConfig;
   elccConfig?: ElccConfig;
   convergenceConfig?: ConvergenceConfig;
+  lmpDecompositionConfig?: LmpDecompositionConfig;
   powerFlowConfig?: PowerFlowConfig;
   marketSimConfig?: MarketSimConfig;
   contingencyConfig?: ContingencyConfig;
@@ -356,6 +366,7 @@ export function buildScenarioPreset(input: {
     rampConfig: cloneRampConfig(input.rampConfig ?? defaultRampConfig()),
     elccConfig: cloneElccConfig(input.elccConfig ?? defaultElccConfig()),
     convergenceConfig: cloneConvergenceConfig(input.convergenceConfig ?? defaultConvergenceConfig()),
+    lmpDecompositionConfig: cloneLmpDecompositionConfig(input.lmpDecompositionConfig ?? defaultLmpDecompositionConfig()),
     powerFlowConfig: clonePowerFlowConfig(input.powerFlowConfig ?? defaultPowerFlowConfig()),
     marketSimConfig: cloneMarketSimConfig(input.marketSimConfig ?? defaultMarketSimConfig()),
     contingencyConfig: cloneContingencyConfig(input.contingencyConfig ?? defaultContingencyConfig()),
@@ -412,6 +423,7 @@ function normalizeScenarioCatalog(catalog: ScenarioCatalog): ScenarioCatalog {
       rampConfig: cloneRampConfig(scenario.rampConfig ?? defaultRampConfig()),
       elccConfig: cloneElccConfig(scenario.elccConfig ?? defaultElccConfig()),
       convergenceConfig: cloneConvergenceConfig(scenario.convergenceConfig ?? defaultConvergenceConfig()),
+      lmpDecompositionConfig: cloneLmpDecompositionConfig(scenario.lmpDecompositionConfig ?? defaultLmpDecompositionConfig()),
       powerFlowConfig: clonePowerFlowConfig(scenario.powerFlowConfig ?? defaultPowerFlowConfig()),
       marketSimConfig: cloneMarketSimConfig(scenario.marketSimConfig ?? defaultMarketSimConfig()),
       contingencyConfig: cloneContingencyConfig(scenario.contingencyConfig ?? defaultContingencyConfig()),
@@ -463,6 +475,7 @@ export function readScenarioCatalogFromModel(model: WorkbookModel): ScenarioCata
         rampConfig: payload.rampConfig ?? defaultRampConfig(),
         elccConfig: payload.elccConfig ?? defaultElccConfig(),
         convergenceConfig: payload.convergenceConfig ?? defaultConvergenceConfig(),
+        lmpDecompositionConfig: payload.lmpDecompositionConfig ?? defaultLmpDecompositionConfig(),
         powerFlowConfig: payload.powerFlowConfig ?? defaultPowerFlowConfig(),
         marketSimConfig: payload.marketSimConfig ?? defaultMarketSimConfig(),
         contingencyConfig: payload.contingencyConfig ?? defaultContingencyConfig(),
@@ -523,6 +536,7 @@ export function writeScenarioCatalogToModel(
       rampConfig: scenario.rampConfig,
       elccConfig: scenario.elccConfig,
       convergenceConfig: scenario.convergenceConfig,
+      lmpDecompositionConfig: scenario.lmpDecompositionConfig,
       powerFlowConfig: scenario.powerFlowConfig,
       marketSimConfig: scenario.marketSimConfig,
       contingencyConfig: scenario.contingencyConfig,
