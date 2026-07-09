@@ -386,6 +386,10 @@ parameters. Supported metrics:
 | `carrier_min_share` | Dispatch share floor for a named carrier (%). |
 | `carrier_max_cf` | Capacity factor cap for a named carrier (fraction 0–1). |
 | `carrier_min_cf` | Capacity factor floor for a named carrier (fraction 0–1). |
+| `carrier_max_cap` | Total capacity cap for a named carrier (MW). Binds only where the carrier has extendable capacity. |
+| `carrier_min_cap` | Total capacity floor for a named carrier (MW). Binds only where the carrier has extendable capacity. |
+| `carrier_max_cap_share` | Capacity share cap for a named carrier (carrier MW / total MW, %). |
+| `carrier_min_cap_share` | Capacity share floor for a named carrier (carrier MW / total MW, %). |
 
 **PyPSA global_constraints sheet** — a table editor for the native PyPSA
 `global_constraints` workbook sheet. Changes here persist directly into the

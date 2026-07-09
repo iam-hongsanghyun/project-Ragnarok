@@ -27,7 +27,9 @@ export type ConstraintMetric =
   | 'co2_cap' | 'max_load_shed'
   | 'carrier_max_gen' | 'carrier_min_gen'
   | 'carrier_max_share' | 'carrier_min_share'
-  | 'carrier_max_cf' | 'carrier_min_cf';
+  | 'carrier_max_cf' | 'carrier_min_cf'
+  | 'carrier_max_cap' | 'carrier_min_cap'
+  | 'carrier_max_cap_share' | 'carrier_min_cap_share';
 
 export type ModuleCapability =
   | 'data-importer'

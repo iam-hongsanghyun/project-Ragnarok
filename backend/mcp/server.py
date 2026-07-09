@@ -551,6 +551,55 @@ async def cluster_network(
     }
 
 
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=True, openWorldHint=False
+    ),
+    description=(
+        "Adjust a carrier's total capacity to a target (MW), distributed across that "
+        "carrier's generators. method: 'proportional' (keep current ratios) | 'equal' | "
+        "'custom' (per-generator MW in `shares`, must sum to target_mw). mode: 'cap' "
+        "writes p_nom_max and marks units extendable — built capacity is bounded AT the "
+        "target; 'fix' writes p_nom and marks units non-extendable — installed capacity "
+        "EQUALS the target. Applied to the session on confirm."
+    ),
+)
+async def adjust_carrier_capacity(
+    carrier: str,
+    target_mw: float,
+    method: str = "proportional",
+    mode: str = "cap",
+    shares: dict[str, float] | None = None,
+    confirm: bool = False,
+) -> Any:
+    client = get_client()
+    args: dict[str, Any] = {
+        "carrier": carrier,
+        "targetMw": target_mw,
+        "method": method,
+        "mode": mode,
+        "shares": shares,
+    }
+    if _needs_confirm(cheap=False) and not confirm:
+        return _preview(
+            f"Set {carrier!r} capacity to {target_mw:g} MW ({method}, mode={mode}).",
+            args,
+        )
+    resp = await client.scale_carrier_capacity(**args)
+    await client.save_model(resp["model"])  # transform returns a full model → replace
+    return {
+        "status": "applied",
+        "carrier": carrier,
+        "targetMw": target_mw,
+        "method": resp.get("method"),
+        "mode": resp.get("mode"),
+        "before": resp.get("before"),
+        "after": resp.get("after"),
+        "perUnit": resp.get("perUnit"),
+        "notes": resp.get("notes"),
+    }
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Build from primitives — GATE (cheap in-session edits). Ergonomic component
 # constructors (pypsa-mcp-style) mapped to the shared Ragnarok session, so a

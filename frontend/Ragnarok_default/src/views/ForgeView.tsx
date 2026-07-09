@@ -28,6 +28,7 @@ import {
 import { nonEmptySheets, roundFindings, snapFindings, type ForgeFinding } from 'lib/forge/validate';
 import { AdjustPanel } from './ForgeView.features/AdjustPanel';
 import { CostCurvePanel } from './ForgeView.features/CostCurvePanel';
+import { CapacityTargetPanel, type ScaleCarrierCapacityResult } from './ForgeView.features/CapacityTargetPanel';
 import { QueryEditPanel } from './ForgeView.features/QueryEditPanel';
 import type { QueryApplyResult, QueryEditRequest, QueryPreview } from 'lib/forge/queryEdit';
 
@@ -53,6 +54,16 @@ interface Props {
   }) => Promise<ClusterResult>;
   /** Replace the working model with a previewed clustered model. */
   onClusterApply?: (model: WorkbookModel) => void;
+  /** Adjust a carrier's total capacity to a target (MW), distributing across
+   *  its generators; applies server-side and replaces the working model.
+   *  Absent ⇒ the capacity-target tool needs a live backend session. */
+  onScaleCarrierCapacity?: (opts: {
+    carrier: string;
+    targetMw: number;
+    method: 'proportional' | 'equal' | 'custom';
+    mode: 'cap' | 'fix';
+    shares?: Record<string, number>;
+  }) => Promise<ScaleCarrierCapacityResult>;
   /** Attach Open-Meteo weather profiles to the existing renewable fleet by
    *  coordinate; applies server-side + merges, returns a summary. */
   onAttachRenewableProfiles?: (opts: {
@@ -94,7 +105,7 @@ export interface AttachProfilesResult {
   sites: number;
 }
 
-type Operation = 'round' | 'adjust' | 'query' | 'costcurve' | 'snap' | 'cluster' | 'renewable' | 'hydroInflow' | 'retarget' | 'forecast' | 'driverForecast' | 'evDemand';
+type Operation = 'round' | 'adjust' | 'query' | 'costcurve' | 'snap' | 'cluster' | 'capacityTarget' | 'renewable' | 'hydroInflow' | 'retarget' | 'forecast' | 'driverForecast' | 'evDemand';
 type OpGroup = 'Numeric' | 'Economics' | 'Geospatial' | 'Topology' | 'Temporal';
 
 /** Catalog of Forge tools, grouped. Add a new tool by adding an entry here
@@ -108,6 +119,7 @@ const OPERATIONS: Array<{ id: Operation; label: string; group: OpGroup }> = [
   { id: 'renewable', label: 'Attach renewable profiles', group: 'Geospatial' },
   { id: 'hydroInflow', label: 'Attach hydro inflow', group: 'Geospatial' },
   { id: 'cluster', label: 'Reduce / cluster network', group: 'Topology' },
+  { id: 'capacityTarget', label: 'Set carrier capacity target', group: 'Topology' },
   { id: 'retarget', label: 'Retarget snapshot window', group: 'Temporal' },
   { id: 'forecast', label: 'Forecast to future year', group: 'Temporal' },
   { id: 'driverForecast', label: 'Driver-based demand forecast', group: 'Temporal' },
@@ -243,7 +255,7 @@ function SearchableMultiSelect({
   );
 }
 
-export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEditApply, onClusterPreview, onClusterApply, onAttachRenewableProfiles, onRetargetSnapshots, onForecastSnapshots, onDriverForecast, onEvDemand, onAttachHydroInflow }: Props) {
+export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEditApply, onClusterPreview, onClusterApply, onScaleCarrierCapacity, onAttachRenewableProfiles, onRetargetSnapshots, onForecastSnapshots, onDriverForecast, onEvDemand, onAttachHydroInflow }: Props) {
   // Persisted so the chosen tool + validation result survive leaving and
   // returning to the Forge tab (the view unmounts on tab switch). The findings
   // scan the whole model, so these three drivers fully restore the result.
@@ -751,6 +763,16 @@ export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEdi
             onApplySheets={onApplySheets}
             onStatus={setStatus}
           />
+        ) : operation === 'capacityTarget' ? (
+          onScaleCarrierCapacity ? (
+            <CapacityTargetPanel
+              model={model}
+              onScaleCarrierCapacity={onScaleCarrierCapacity}
+              onStatus={setStatus}
+            />
+          ) : (
+            <div className="view-empty"><p>Setting a carrier capacity target needs a live backend session.</p></div>
+          )
         ) : operation === 'snap' ? (
           <section className="forge-section">
             <header className="forge-section-header">
