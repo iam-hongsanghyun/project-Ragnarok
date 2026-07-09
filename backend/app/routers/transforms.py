@@ -394,6 +394,143 @@ async def cluster_network(req: ClusterRequest) -> dict[str, Any]:
     )
 
 
+# ── Adjust a carrier's total capacity to a target ────────────────────────────
+_SCALE_METHODS = ("proportional", "equal", "custom")
+_SCALE_MODES = ("cap", "fix")
+
+
+def scale_carrier_capacity(
+    model: dict[str, list[dict[str, Any]]],
+    *,
+    carrier: str,
+    target_mw: float,
+    method: str = "proportional",
+    mode: str = "cap",
+    shares: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    """Distribute a carrier's total capacity to ``target_mw`` across its generators.
+
+    Pure (no I/O) so it is unit-testable; the endpoint is a thin session wrapper.
+    Only rows in the ``generators`` sheet whose ``carrier`` matches are touched;
+    every other sheet is returned unchanged.
+
+    Distribution ``method``:
+      * ``proportional`` — each generator keeps its share of the current total,
+        ``p_nom_i · target / Σ p_nom``. If the carrier currently sums to zero
+        (nothing to scale), falls back to an equal split.
+      * ``equal`` — ``target / n`` to each of the carrier's ``n`` generators.
+      * ``custom`` — explicit per-generator MW from ``shares`` (keyed by
+        generator name); the values must sum to ``target_mw``.
+
+    Target ``mode`` (how the per-unit value is written):
+      * ``cap`` — write ``p_nom_max`` and set ``p_nom_extendable=True``; the
+        optimiser may build each unit *up to* its share, so the carrier's built
+        capacity is bounded **at** the target.
+      * ``fix`` — write ``p_nom`` and set ``p_nom_extendable=False``; the
+        carrier's installed capacity **equals** the target exactly.
+
+    Algorithm (proportional):
+        $$p^{\\mathrm{new}}_i = p^{nom}_i \\cdot \\frac{T}{\\sum_j p^{nom}_j}$$
+        ASCII: p_new[i] = p_nom[i] * T / sum(p_nom)   (T = target_mw, MW)
+
+    Returns ``{model, carrier, targetMw, method, mode, before, after, perUnit,
+    notes}``.
+    """
+    if method not in _SCALE_METHODS:
+        raise HTTPException(status_code=400, detail=f"method must be one of {', '.join(_SCALE_METHODS)}")
+    if mode not in _SCALE_MODES:
+        raise HTTPException(status_code=400, detail=f"mode must be one of {', '.join(_SCALE_MODES)}")
+    if target_mw < 0:
+        raise HTTPException(status_code=400, detail="targetMw must be ≥ 0.")
+
+    gens = model.get("generators") or []
+    cgens = [g for g in gens if str(g.get("carrier", "")) == carrier]
+    if not cgens:
+        raise HTTPException(status_code=400, detail=f"No generators with carrier '{carrier}'.")
+
+    def _p(g: dict[str, Any]) -> float:
+        try:
+            return float(g.get("p_nom") or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    current_total = sum(_p(g) for g in cgens)
+    notes: list[str] = []
+
+    # Resolve each generator's new MW.
+    values: list[float] = [0.0] * len(cgens)
+    if method == "custom":
+        provided = {str(k): float(v) for k, v in (shares or {}).items()}
+        names = {str(g.get("name")) for g in cgens}
+        unknown = [k for k in provided if k not in names]
+        if unknown:
+            raise HTTPException(status_code=400, detail=f"shares reference unknown generators: {', '.join(unknown)}")
+        missing = [n for n in names if n not in provided]
+        if missing:
+            raise HTTPException(status_code=400, detail=f"shares missing generators: {', '.join(missing)}")
+        s = sum(provided.values())
+        if target_mw > 0 and abs(s - target_mw) > 1e-6 * max(1.0, target_mw):
+            raise HTTPException(status_code=400, detail=f"shares sum to {s:g} MW but target is {target_mw:g} MW.")
+        values = [provided[str(g.get("name"))] for g in cgens]
+    elif method == "equal" or current_total <= 0:
+        if method == "proportional":
+            notes.append("Carrier capacity is currently 0 — distributed equally.")
+        share = target_mw / len(cgens)
+        values = [share] * len(cgens)
+    else:  # proportional
+        values = [_p(g) * target_mw / current_total for g in cgens]
+
+    per_unit: list[dict[str, Any]] = []
+    for g, new_i in zip(cgens, values):
+        before_i = _p(g)
+        if mode == "cap":
+            g["p_nom_max"] = new_i
+            g["p_nom_extendable"] = True
+            if before_i > new_i:  # keep the starting capacity ≤ the new ceiling
+                g["p_nom"] = new_i
+        else:  # fix
+            g["p_nom"] = new_i
+            g["p_nom_extendable"] = False
+        per_unit.append({"name": g.get("name"), "before": before_i, "after": new_i})
+
+    return {
+        "model": model,
+        "carrier": carrier,
+        "targetMw": target_mw,
+        "method": method,
+        "mode": mode,
+        "before": current_total,
+        "after": sum(values),
+        "perUnit": per_unit,
+        "notes": notes,
+    }
+
+
+class ScaleCarrierCapacityRequest(BaseModel):
+    sessionId: str
+    carrier: str
+    targetMw: float
+    method: str = "proportional"  # proportional | equal | custom
+    mode: str = "cap"             # cap → p_nom_max (extendable) | fix → p_nom
+    shares: dict[str, float] | None = None
+
+
+@router.post("/scale-carrier-capacity")
+async def scale_carrier_capacity_endpoint(req: ScaleCarrierCapacityRequest) -> dict[str, Any]:
+    """Adjust a carrier's total capacity to a target and return the new model."""
+    model = model_store.load_full_model(req.sessionId)
+    if not model:
+        raise HTTPException(status_code=400, detail="No working model in this session.")
+    return scale_carrier_capacity(
+        model,
+        carrier=req.carrier,
+        target_mw=req.targetMw,
+        method=req.method,
+        mode=req.mode,
+        shares=req.shares,
+    )
+
+
 class RenewableProfilesRequest(BaseModel):
     sessionId: str
     dateFrom: str = "2019-01-01"

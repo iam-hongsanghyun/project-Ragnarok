@@ -65,6 +65,7 @@ Grouped by the phase of a modelling session. Each tool is a thin, typed wrapper 
 | `forecast_demand(...)` / `driver_forecast(...)` | `POST /api/session/snapshots/forecast` \| `/driver-forecast` |
 | `ev_reshape_demand(...)` | `POST /api/session/snapshots/ev-demand` |
 | `cluster_network(n, method)` | `POST /api/transform/cluster` |
+| `adjust_carrier_capacity(carrier, target_mw, method, mode)` | `POST /api/transform/scale-carrier-capacity` |
 
 ### 2.3b Build from primitives (pypsa-mcp-style, native to the session)
 Ergonomic component constructors so an agent can build a network from scratch —

@@ -37,6 +37,10 @@ export const METRIC_DEFS: Record<ConstraintMetric, { label: string; description:
   carrier_min_share:{ label: 'Min Carrier Share',      description: 'Carrier dispatch / total dispatch ≥ value', unit: '%',      needsCarrier: true,  sense: '≥' },
   carrier_max_cf:   { label: 'Max Carrier Capacity Factor', description: 'Weighted generation / (carrier capacity × modeled hours) ≤ value', unit: '%', needsCarrier: true, sense: '≤' },
   carrier_min_cf:   { label: 'Min Carrier Capacity Factor', description: 'Weighted generation / (carrier capacity × modeled hours) ≥ value', unit: '%', needsCarrier: true, sense: '≥' },
+  carrier_max_cap:  { label: 'Max Carrier Capacity', description: 'Total installed/optimised capacity of carrier ≤ value (MW). Needs extendable capacity to bind.', unit: 'MW', needsCarrier: true, sense: '≤' },
+  carrier_min_cap:  { label: 'Min Carrier Capacity', description: 'Total installed/optimised capacity of carrier ≥ value (MW). Needs extendable capacity to bind.', unit: 'MW', needsCarrier: true, sense: '≥' },
+  carrier_max_cap_share: { label: 'Max Carrier Capacity Share', description: 'Carrier capacity / total capacity ≤ value (%)', unit: '%', needsCarrier: true, sense: '≤' },
+  carrier_min_cap_share: { label: 'Min Carrier Capacity Share', description: 'Carrier capacity / total capacity ≥ value (%)', unit: '%', needsCarrier: true, sense: '≥' },
 };
 
 export const DEFAULT_CONSTRAINTS: CustomConstraint[] = [];
