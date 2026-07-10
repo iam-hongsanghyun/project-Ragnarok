@@ -1166,6 +1166,8 @@ One linear constraint per line. `#` starts a comment.
 | `cf("carrier")` | capacity factor of a carrier | fraction 0–1 |
 | `emissions` | total system emissions | tCO2 |
 | `load_shed` | total unserved energy | MWh |
+| `gen("solar" & "wind")` | union over several carriers (also `cap`/`cf`/`emissions`) | MWh |
+| `cap("type", "solar" & "wind")` | union over generators matched on any generator column | MW |
 
 **Operators:** `<=`, `>=`, `==`
 
@@ -1196,7 +1198,9 @@ interface ConstraintSpec {
 interface ConstraintTerm {
   coef: number;
   kind: 'gen' | 'cap' | 'cf' | 'emissions' | 'load_shed' | 'const';
-  carrier?: string;
+  carrier?: string;   // legacy single-carrier selector
+  column?: string;    // column selector: generator column name (default: carrier)
+  values?: string[];  // column selector: match values (union)
 }
 ```
 

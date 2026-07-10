@@ -6,24 +6,32 @@ a comment; blank lines are ignored.
 
 Grammar (flat, linear)::
 
-    line    := linexpr ("<=" | ">=" | "==") linexpr
-    linexpr := term (("+" | "-") term)*
-    term    := [NUMBER "*"] atom
-    atom    := ("gen" | "cap" | "emissions") ["(" CARRIER ")"]
-             | "cf" "(" CARRIER ")"        # only as  cf(C) <op> NUMBER
-             | "load_shed"
-             | NUMBER
+    line     := linexpr ("<=" | ">=" | "==") linexpr
+    linexpr  := term (("+" | "-") term)*
+    term     := [NUMBER "*"] atom
+    atom     := ("gen" | "cap" | "emissions") ["(" selector ")"]
+              | "cf" "(" selector ")"       # only as  cf(S) <op> NUMBER
+              | "load_shed"
+              | NUMBER
+    selector := VALUE ("&" VALUE)*          # carrier ∈ {values}
+              | COLUMN "," VALUE ("&" VALUE)*   # generator column ∈ {values}
 
 Atoms (units), all linear in the dispatch variable ``Generator-p``:
 
-* ``gen[(C)]``      — weighted energy of carrier C, or all supply if bare (MWh)
-* ``cap[(C)]``      — installed/optimised capacity of C, or all supply (MW)
-* ``emissions[(C)]``— Σ co2_factor·dispatch over emitters (tCO₂)
+* ``gen[(S)]``      — weighted energy of selection S, or all supply if bare (MWh)
+* ``cap[(S)]``      — installed/optimised capacity of S, or all supply (MW)
+* ``emissions[(S)]``— Σ co2_factor·dispatch over emitters (tCO₂)
 * ``load_shed``     — Σ load-shedding dispatch (MWh)
-* ``cf(C)``         — capacity factor of C; only ``cf(C) <op> number`` (fraction 0–1),
-                      rewritten to the linear bound ``gen(C) <op> k·cap(C)·hours``.
+* ``cf(S)``         — capacity factor of S; only ``cf(S) <op> number`` (fraction 0–1),
+                      rewritten to the linear bound ``gen(S) <op> k·cap(S)·hours``.
 
-Carriers are bare ``[A-Za-z0-9_]+`` tokens or ``"quoted strings"`` (for names with
+A selector picks generators. ``gen(solar)`` matches carrier ``solar`` (legacy),
+``gen(solar & wind)`` matches carrier ∈ {solar, wind}, and
+``cap(type, solar & wind)`` matches any generator column — here rows whose
+``type`` is ``solar`` or ``wind``. ``&`` unions values (set membership, not
+arithmetic AND).
+
+Values are bare ``[A-Za-z0-9_]+`` tokens or ``"quoted strings"`` (for names with
 spaces). Compilation reuses :func:`build_model_context` so the math matches the
 structured custom-constraint path exactly.
 """
@@ -55,7 +63,11 @@ class DslParseError(ValueError):
 class Term:
     coef: float
     kind: str            # gen | cap | cf | emissions | load_shed | const
-    carrier: str | None  # None ⇒ aggregate over all supply / emitters
+    carrier: str | None  # legacy single-carrier selector; None ⇒ aggregate
+    # Column selector: generators whose `column` value ∈ `values`. When set it
+    # takes precedence over `carrier`; column=None with values ⇒ carrier column.
+    column: str | None = None
+    values: list[str] | None = None
 
 
 @dataclass
@@ -80,6 +92,8 @@ _TOKEN_RE = re.compile(
       | (?P<star>\*)
       | (?P<plus>\+)
       | (?P<minus>-)
+      | (?P<comma>,)
+      | (?P<amp>&)
     )
     """,
     re.VERBOSE,
@@ -124,20 +138,39 @@ def _parse_linexpr(tokens: list[tuple[str, str]], line_no: int) -> list[Term]:
             name = val
             i += 1
             carrier: str | None = None
+            column: str | None = None
+            values: list[str] | None = None
             has_paren = i < n and tokens[i][0] == "lparen"
             if has_paren:
                 i += 1  # (
-                if i >= n or tokens[i][0] not in ("ident", "str"):
-                    raise DslParseError(line_no, f"expected carrier name after '{name}('")
-                carrier = tokens[i][1].strip('"')
-                i += 1
+
+                def _value(what: str) -> str:
+                    nonlocal i
+                    if i >= n or tokens[i][0] not in ("ident", "str"):
+                        raise DslParseError(line_no, f"expected {what} in '{name}(...)'")
+                    v = tokens[i][1].strip('"')
+                    i += 1
+                    return v
+
+                first = _value("carrier or column name")
+                if i < n and tokens[i][0] == "comma":
+                    i += 1  # ,
+                    column = first
+                    values = [_value("value")]
+                elif i < n and tokens[i][0] == "amp":
+                    values = [first]
+                else:
+                    carrier = first
+                while values is not None and i < n and tokens[i][0] == "amp":
+                    i += 1  # &
+                    values.append(_value("value"))
                 if i >= n or tokens[i][0] != "rparen":
-                    raise DslParseError(line_no, f"missing ')' after '{name}({carrier}'")
+                    raise DslParseError(line_no, f"missing ')' in '{name}(...)'")
                 i += 1
-            if carrier is not None:
+            if has_paren:
                 if name not in _FUNC_ATOMS:
                     raise DslParseError(line_no, f"'{name}(...)' is not a valid term")
-                terms.append(Term(coef, name, carrier))
+                terms.append(Term(coef, name, carrier, column, values))
             else:
                 if name not in _BARE_ATOMS:
                     raise DslParseError(
@@ -189,26 +222,41 @@ def parse_dsl(text: str) -> list[ParsedConstraint]:
 
 
 # ── Compilation to linopy ─────────────────────────────────────────────────────
-def _carrier_gens(ctx: ModelContext, carrier: str | None) -> list[str]:
+def _selector_desc(term: Term) -> str:
+    """Human-readable description of a term's generator selection (for notes)."""
+    if term.values is not None:
+        return f"{term.column or 'carrier'} in ({', '.join(term.values)})"
+    if term.carrier is not None:
+        return f"carrier '{term.carrier}'"
+    return "all supply"
+
+
+def _selected_gens(ctx: ModelContext, term: Term) -> list[str]:
     n = ctx.network
-    if carrier is None:
+    if term.values is None and term.carrier is None:
         return ctx.supply_gens
-    return [g for g in n.generators.index[n.generators.carrier == carrier].tolist()
-            if not g.startswith("load_shedding_")]
+    col = term.column or "carrier"
+    if col not in n.generators.columns:
+        raise ValueError(f"generators have no column '{col}'")
+    wanted = term.values if term.values is not None else [term.carrier]
+    matched = n.generators.index[
+        n.generators[col].astype(str).isin([str(v) for v in wanted])
+    ]
+    return [g for g in matched.tolist() if not str(g).startswith("load_shedding_")]
 
 
-def _gen_expr(ctx: ModelContext, carrier: str | None):
-    gens = _carrier_gens(ctx, carrier)
+def _gen_expr(ctx: ModelContext, term: Term):
+    gens = _selected_gens(ctx, term)
     if not gens:
-        raise ValueError(f"no generators with carrier '{carrier}'")
+        raise ValueError(f"no generators with {_selector_desc(term)}")
     return (ctx.gen_p.sel({ctx.dim: gens}) * ctx.weights).sum()
 
 
-def _cap_expr(ctx: ModelContext, carrier: str | None):
+def _cap_expr(ctx: ModelContext, term: Term):
     n = ctx.network
-    gens = _carrier_gens(ctx, carrier)
+    gens = _selected_gens(ctx, term)
     if not gens:
-        raise ValueError(f"no generators with carrier '{carrier}'")
+        raise ValueError(f"no generators with {_selector_desc(term)}")
     extendable = [
         g for g in gens
         if "p_nom_extendable" in n.generators.columns and bool(n.generators.at[g, "p_nom_extendable"])
@@ -222,18 +270,18 @@ def _cap_expr(ctx: ModelContext, carrier: str | None):
     return total
 
 
-def _emissions_expr(ctx: ModelContext, carrier: str | None):
+def _emissions_expr(ctx: ModelContext, term: Term):
     n = ctx.network
-    gens = _carrier_gens(ctx, carrier) if carrier is not None else ctx.supply_gens
+    gens = _selected_gens(ctx, term)
     # tCO₂ per MWh_electrical = carrier co2_emissions / η (thermal basis, M3), so
     # a low-efficiency unit burns — and emits — more per MWh delivered.
     eff_ef = per_generator_emission_factor(n, ctx.emissions_factors)
     emitters = [(g, float(eff_ef.get(g, 0.0))) for g in gens]
     emitters = [(g, co2) for g, co2 in emitters if co2 > 0]
     if not emitters:
-        raise ValueError(
-            f"no CO₂-emitting generators{' for carrier ' + repr(carrier) if carrier else ''}"
-        )
+        sel = _selector_desc(term)
+        suffix = "" if sel == "all supply" else f" for {sel}"
+        raise ValueError(f"no CO₂-emitting generators{suffix}")
     return sum(co2 * (ctx.gen_p.sel({ctx.dim: [g]}) * ctx.weights).sum() for g, co2 in emitters)
 
 
@@ -248,13 +296,13 @@ def _term_expr(ctx: ModelContext, term: Term):
     if term.kind == "const":
         return None, term.coef
     if term.kind == "gen":
-        return term.coef * _gen_expr(ctx, term.carrier), 0.0
+        return term.coef * _gen_expr(ctx, term), 0.0
     if term.kind == "emissions":
-        return term.coef * _emissions_expr(ctx, term.carrier), 0.0
+        return term.coef * _emissions_expr(ctx, term), 0.0
     if term.kind == "load_shed":
         return term.coef * _load_shed_expr(ctx), 0.0
     if term.kind == "cap":
-        cap = _cap_expr(ctx, term.carrier)
+        cap = _cap_expr(ctx, term)
         if isinstance(cap, (int, float)):
             return None, term.coef * float(cap)
         return term.coef * cap, 0.0
@@ -277,21 +325,21 @@ def _is_cf_line(pc: ParsedConstraint) -> bool:
 
 
 def _compile_cf(ctx: ModelContext, pc: ParsedConstraint):
-    """cf(C) <op> number  ⇒  gen(C) <op> number·cap(C)·hours."""
+    """cf(S) <op> number  ⇒  gen(S) <op> number·cap(S)·hours."""
     if (len(pc.lhs) == 1 and pc.lhs[0].kind == "cf" and pc.lhs[0].coef == 1.0
             and len(pc.rhs) == 1 and pc.rhs[0].kind == "const"):
-        carrier = pc.lhs[0].carrier
+        cf_term = pc.lhs[0]
         k = pc.rhs[0].coef
     elif (len(pc.rhs) == 1 and pc.rhs[0].kind == "cf" and pc.rhs[0].coef == 1.0
             and len(pc.lhs) == 1 and pc.lhs[0].kind == "const"):
-        carrier = pc.rhs[0].carrier
+        cf_term = pc.rhs[0]
         k = pc.lhs[0].coef
     else:
-        raise ValueError("cf(carrier) must be used as 'cf(carrier) <=|>=|== number' (fraction 0–1)")
+        raise ValueError("cf(selector) must be used as 'cf(selector) <=|>=|== number' (fraction 0–1)")
     if ctx.modeled_hours <= 0:
         raise ValueError("modeled hours are zero")
-    lhs = _gen_expr(ctx, carrier)
-    rhs = k * _cap_expr(ctx, carrier) * ctx.modeled_hours
+    lhs = _gen_expr(ctx, cf_term)
+    rhs = k * _cap_expr(ctx, cf_term) * ctx.modeled_hours
     return lhs, pc.sense, rhs
 
 
@@ -327,7 +375,7 @@ def _apply_parsed(ctx: ModelContext, pc: ParsedConstraint, model, name: str) -> 
 def _spec_to_parsed(spec: dict, idx: int) -> ParsedConstraint:
     """Convert a JSON constraint spec into a ParsedConstraint.
 
-    Spec shape: ``{lhs: [{coef, kind, carrier?}], sense, rhs: [...]}``.
+    Spec shape: ``{lhs: [{coef, kind, carrier?, column?, values?}], sense, rhs: [...]}``.
     """
     sense = spec.get("sense")
     if sense not in _SENSES:
@@ -339,7 +387,15 @@ def _spec_to_parsed(spec: dict, idx: int) -> ParsedConstraint:
             kind = t.get("kind")
             if kind not in ("gen", "cap", "cf", "emissions", "load_shed", "const"):
                 raise DslParseError(idx, f"unknown term kind '{kind}'")
-            out.append(Term(float(t.get("coef", 1.0)), kind, t.get("carrier")))
+            values = t.get("values")
+            if values is not None:
+                values = [str(v) for v in values]
+                if not values:
+                    raise DslParseError(idx, "'values' must be a non-empty list")
+            column = t.get("column")
+            if column is not None and values is None:
+                raise DslParseError(idx, "term with 'column' must also provide 'values'")
+            out.append(Term(float(t.get("coef", 1.0)), kind, t.get("carrier"), column, values))
         return out
 
     return ParsedConstraint(

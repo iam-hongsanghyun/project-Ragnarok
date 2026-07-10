@@ -43,6 +43,8 @@ export function CustomDslSection({ customDsl, onCustomDslChange, appliedConstrai
           <li><code>emissions(carrier)</code> — CO₂ (tCO₂); bare <code>emissions</code> = total</li>
           <li><code>load_shed</code> — unserved energy (MWh)</li>
           <li><code>cf(carrier) &lt;= 0.8</code> — capacity factor (fraction 0–1)</li>
+          <li>Group carriers with <code>&amp;</code>: <code>cap(solar &amp; wind) &lt;= 100000</code> caps their combined capacity</li>
+          <li>Select by any generator column: <code>cap(type, solar &amp; wind) &lt;= 100000</code> — rows whose <code>type</code> is solar or wind; works in <code>gen</code>/<code>cap</code>/<code>cf</code>/<code>emissions</code></li>
           <li>Combine with <code>+ - *</code> and a constant, e.g. <code>gen(solar) + gen(wind) &gt;= 5000</code></li>
           <li>Intensity cap: <code>emissions &lt;= 0.5 * gen</code> (tCO₂/MWh)</li>
         </ul>

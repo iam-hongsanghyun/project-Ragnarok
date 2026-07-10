@@ -134,6 +134,81 @@ def test_custom_dsl_text_binds_dispatch_end_to_end() -> None:
     assert backup == pytest.approx(250.0, rel=1e-6)
 
 
+def _vre_model(n_snaps: int = 2, load_mw: float = 100.0) -> dict[str, list[dict[str, Any]]]:
+    """1 bus; cheap solar+wind tagged type='vre' + expensive firm backup."""
+    snaps = [f"2030-01-01T{h:02d}:00:00" for h in range(n_snaps)]
+    return {
+        "buses": [{"name": "b"}],
+        "carriers": [{"name": "solar"}, {"name": "wind"}, {"name": "backup"}],
+        "snapshots": [{"snapshot": s} for s in snaps],
+        "loads": [{"name": "L", "bus": "b", "p_set": load_mw}],
+        "loads-p_set": [{"snapshot": s, "L": load_mw} for s in snaps],
+        "generators": [
+            {"name": "G_solar", "bus": "b", "carrier": "solar", "type": "vre", "p_nom": 200.0, "marginal_cost": 1.0},
+            {"name": "G_wind", "bus": "b", "carrier": "wind", "type": "vre", "p_nom": 200.0, "marginal_cost": 2.0},
+            {"name": "G_backup", "bus": "b", "carrier": "backup", "type": "firm", "p_nom": 200.0, "marginal_cost": 100.0},
+        ],
+    }
+
+
+def test_dsl_column_selector_binds_dispatch_across_carriers() -> None:
+    """gen(type, solar & wind)-style caps must bind the union, not one carrier."""
+    n, _ = build_network(_vre_model(2), SCENARIO, {"snapshotStart": 0, "snapshotCount": 2})
+    notes: list[str] = []
+
+    def ef(net, snapshots):
+        apply_dsl_constraints(net, "gen(type, vre) <= 150\n", {}, notes, snapshots)
+
+    n.optimize(solver_name="highs", extra_functionality=ef)
+    vre = float(n.generators_t.p[["G_solar", "G_wind"]].sum().sum())
+    backup = float(n.generators_t.p["G_backup"].sum())
+    assert vre == pytest.approx(150.0, rel=1e-6)  # unconstrained: 200 MWh
+    assert backup == pytest.approx(50.0, rel=1e-6)
+    assert any("added" in note for note in notes)
+
+
+def test_dsl_multi_carrier_sugar_matches_column_form() -> None:
+    """gen(solar & wind) == gen(carrier, solar & wind)."""
+    n, _ = build_network(_vre_model(2), SCENARIO, {"snapshotStart": 0, "snapshotCount": 2})
+    notes: list[str] = []
+
+    def ef(net, snapshots):
+        apply_dsl_constraints(net, "gen(solar & wind) <= 150\n", {}, notes, snapshots)
+
+    n.optimize(solver_name="highs", extra_functionality=ef)
+    assert float(n.generators_t.p[["G_solar", "G_wind"]].sum().sum()) == pytest.approx(150.0, rel=1e-6)
+
+
+def test_dsl_column_selector_caps_joint_optimised_capacity() -> None:
+    """cap(type, vre) <= X must bound the summed p_nom_opt of solar + wind."""
+    model = _vre_model(2)
+    for g in model["generators"]:
+        if g["type"] == "vre":
+            g.update({"p_nom": 0.0, "p_nom_extendable": True, "capital_cost": 10.0})
+    n, _ = build_network(model, SCENARIO, {"snapshotStart": 0, "snapshotCount": 2})
+    notes: list[str] = []
+
+    def ef(net, snapshots):
+        apply_dsl_constraints(net, "cap(type, vre) <= 60\n", {}, notes, snapshots)
+
+    n.optimize(solver_name="highs", extra_functionality=ef)
+    vre_cap = float(n.generators.loc[["G_solar", "G_wind"], "p_nom_opt"].sum())
+    assert vre_cap == pytest.approx(60.0, rel=1e-6)  # unconstrained: 100 MW
+    assert float(n.generators_t.p["G_backup"].sum()) == pytest.approx(80.0, rel=1e-6)
+
+
+def test_dsl_unknown_column_is_skipped_with_note() -> None:
+    n, _ = build_network(_model(2), SCENARIO, {"snapshotStart": 0, "snapshotCount": 2})
+    notes: list[str] = []
+
+    def ef(net, snapshots):
+        apply_dsl_constraints(net, "gen(no_such_column, x) <= 1\n", {}, notes, snapshots)
+
+    n.optimize(solver_name="highs", extra_functionality=ef)
+    assert any("no_such_column" in note for note in notes)
+    assert float(n.generators_t.p["G_gas"].sum()) == pytest.approx(200.0)  # unconstrained
+
+
 def test_custom_dsl_bad_line_is_skipped_with_note_and_good_line_applies() -> None:
     n, _ = build_network(_model(2), SCENARIO, {"snapshotStart": 0, "snapshotCount": 2})
     notes: list[str] = []
