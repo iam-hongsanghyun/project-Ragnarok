@@ -309,6 +309,11 @@ class RagnarokClient:
         body.update({k: v for k, v in kw.items() if v is not None})
         return await self._post("/api/transform/cluster", body)
 
+    async def scale_carrier_capacity(self, **kw: Any) -> Any:
+        body = self._sid_body({})
+        body.update({k: v for k, v in kw.items() if v is not None})
+        return await self._post("/api/transform/scale-carrier-capacity", body)
+
     async def attach_renewable_profiles(self, **kw: Any) -> Any:
         return await self._post("/api/transform/renewable-profiles", self._sid_body(kw))
 

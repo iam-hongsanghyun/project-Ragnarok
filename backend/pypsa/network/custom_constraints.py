@@ -90,6 +90,44 @@ def build_model_context(
     )
 
 
+def _carrier_capacity_expr(
+    n: pypsa.Network,
+    gens: list[str],
+    cap_var: Any | None,
+    cap_dim: str | None,
+) -> Any:
+    """Total nameplate capacity (MW) of ``gens`` as a linopy term or float.
+
+    Fixed generators contribute their static ``p_nom``; extendable ones
+    contribute the optimisation variable ``Generator-p_nom`` when it exists
+    (single-shot expansion), otherwise their static ``p_nom``. Returns a linopy
+    expression when at least one generator is extendable *and* the capacity
+    variable exists, and a plain ``float`` otherwise — capacity is a stock, so
+    (unlike energy) it carries no snapshot weighting. Callers must handle both:
+    a float means the capacity is fully determined by the data, so a constraint
+    on it has no decision variable to bind.
+
+    Algorithm:
+        $$C_\\mathrm{carrier} = \\sum_{g\\in\\mathrm{fixed}} p^{nom}_g
+          + \\sum_{g\\in\\mathrm{ext}} P^{nom}_g$$
+        ASCII: C = sum(p_nom[fixed]) + sum(P_nom_var[extendable])
+        where p_nom is the fixed nameplate (MW) and P_nom_var is the
+        extendable-capacity decision variable (MW).
+    """
+    extendable = [
+        g for g in gens
+        if "p_nom_extendable" in n.generators.columns
+        and bool(n.generators.at[g, "p_nom_extendable"])
+    ]
+    fixed = [g for g in gens if g not in extendable]
+    total: Any = float(n.generators.loc[fixed, "p_nom"].fillna(0.0).sum())
+    if extendable and cap_var is not None and cap_dim is not None:
+        total = total + cap_var.sel({cap_dim: extendable}).sum()
+    elif extendable:
+        total = total + float(n.generators.loc[extendable, "p_nom"].fillna(0.0).sum())
+    return total
+
+
 def apply_custom_constraints(
     n: pypsa.Network,
     constraints: list[dict[str, Any]],
@@ -225,22 +263,7 @@ def apply_custom_constraints(
                     continue
 
                 carrier_total = (gen_p.sel({dim: cgens}) * weights).sum()
-                extendable = [
-                    g for g in cgens
-                    if "p_nom_extendable" in n.generators.columns and bool(n.generators.at[g, "p_nom_extendable"])
-                ]
-                fixed = [g for g in cgens if g not in extendable]
-                fixed_capacity = float(
-                    n.generators.loc[fixed, "p_nom"].fillna(0.0).sum()
-                )
-
-                capacity_total = fixed_capacity
-                if extendable and cap_var is not None and cap_dim is not None:
-                    capacity_total = capacity_total + cap_var.sel({cap_dim: extendable}).sum()
-                elif extendable:
-                    capacity_total = capacity_total + float(
-                        n.generators.loc[extendable, "p_nom"].fillna(0.0).sum()
-                    )
+                capacity_total = _carrier_capacity_expr(n, cgens, cap_var, cap_dim)
 
                 frac = value / 100.0
                 rhs = frac * capacity_total * modeled_hours
@@ -250,6 +273,60 @@ def apply_custom_constraints(
                 else:
                     n.model.add_constraints(carrier_total >= rhs, name=cname)
                     notes.append(f"Constraint '{label}': {carrier} capacity factor ≥ {value}% added.")
+
+            # ── Carrier total capacity cap / floor (MW) ──────────────────────
+            # Constraint on the carrier's total nameplate capacity (fixed p_nom
+            # plus any extendable capacity variable). Capacity is a stock (MW),
+            # so there is no snapshot weighting and no rolling-horizon
+            # apportioning. If the carrier has no extendable capacity the LHS is
+            # a pure constant (no decision variable) and the constraint is
+            # skipped with a note rather than added as an infeasible literal.
+            elif metric in ("carrier_max_cap", "carrier_min_cap"):
+                cgens = n.generators.index[n.generators.carrier == carrier].tolist()
+                if not cgens:
+                    notes.append(f"Constraint '{label}': no generators with carrier '{carrier}' — skipped.")
+                    continue
+                cap = _carrier_capacity_expr(n, cgens, cap_var, cap_dim)
+                if isinstance(cap, (int, float)):
+                    notes.append(
+                        f"Constraint '{label}': carrier '{carrier}' has no extendable capacity "
+                        f"(fixed at {float(cap):.4g} MW) — nothing to optimise, skipped."
+                    )
+                    continue
+                if metric == "carrier_max_cap":
+                    n.model.add_constraints(cap <= value, name=cname)
+                    notes.append(f"Constraint '{label}': {carrier} capacity ≤ {value} MW added.")
+                else:
+                    n.model.add_constraints(cap >= value, name=cname)
+                    notes.append(f"Constraint '{label}': {carrier} capacity ≥ {value} MW added.")
+
+            # ── Carrier capacity share cap / floor (% of total MW) ───────────
+            # Share of the carrier's capacity in the fleet's total capacity:
+            #   carrier_cap − (value/100)·total_cap  {≤,≥}  0
+            # total_cap includes the carrier itself, matching the dispatch-share
+            # convention above. Skipped (no decision variable) if all capacity in
+            # the ratio is fixed.
+            elif metric in ("carrier_max_cap_share", "carrier_min_cap_share"):
+                cgens = n.generators.index[n.generators.carrier == carrier].tolist()
+                if not cgens or not supply_gens:
+                    notes.append(f"Constraint '{label}': carrier '{carrier}' or supply gens missing — skipped.")
+                    continue
+                carrier_cap = _carrier_capacity_expr(n, cgens, cap_var, cap_dim)
+                total_cap = _carrier_capacity_expr(n, supply_gens, cap_var, cap_dim)
+                frac = value / 100.0
+                combined = carrier_cap - frac * total_cap
+                if isinstance(combined, (int, float)):
+                    notes.append(
+                        f"Constraint '{label}': capacity share for '{carrier}' has no extendable "
+                        f"capacity (all fixed) — nothing to optimise, skipped."
+                    )
+                    continue
+                if metric == "carrier_max_cap_share":
+                    n.model.add_constraints(combined <= 0, name=cname)
+                    notes.append(f"Constraint '{label}': {carrier} capacity share ≤ {value}% added.")
+                else:
+                    n.model.add_constraints(combined >= 0, name=cname)
+                    notes.append(f"Constraint '{label}': {carrier} capacity share ≥ {value}% added.")
 
             else:
                 notes.append(f"Constraint '{label}': unknown metric '{metric}' — skipped.")

@@ -847,6 +847,43 @@ function AppInner() {
     [resetForNewModel, showToast],
   );
 
+  // Forge → set a carrier's total capacity to a target. Sync the working model
+  // to the session (same as a run), ask the backend to redistribute the target
+  // across the carrier's generators, then replace the working model with the
+  // returned one.
+  const handleScaleCarrierCapacity = useCallback(
+    async (opts: {
+      carrier: string;
+      targetMw: number;
+      method: 'proportional' | 'equal' | 'custom';
+      mode: 'cap' | 'fix';
+      shares?: Record<string, number>;
+    }) => {
+      await putStaticModel(prepareModelForBackend(model));
+      const resp = await fetch(`${API_BASE}/api/transform/scale-carrier-capacity`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: DEFAULT_SESSION_ID,
+          carrier: opts.carrier,
+          targetMw: opts.targetMw,
+          method: opts.method,
+          mode: opts.mode,
+          shares: opts.shares ?? null,
+        }),
+      });
+      if (!resp.ok) {
+        throw new Error((await resp.text()) || `Capacity adjustment failed (HTTP ${resp.status})`);
+      }
+      const result = await resp.json();
+      resetForNewModel(result.model as WorkbookModel);
+      setActiveRunName(null);
+      showToast(`Carrier capacity updated — ${opts.carrier} set to ${opts.targetMw} MW`, 'success');
+      return result;
+    },
+    [model, prepareModelForBackend, resetForNewModel, showToast],
+  );
+
   // Reload the editor after a server-side session mutation (retarget/forecast):
   // rehydrate static sheets (incl. snapshots) WITHOUT re-pushing (that would
   // clobber the server's series), and relearn the session's temporal sheets.
@@ -3124,6 +3161,7 @@ function AppInner() {
               onQueryEditApply={handleQueryEditApply}
               onClusterPreview={handleClusterPreview}
               onClusterApply={handleClusterApply}
+              onScaleCarrierCapacity={handleScaleCarrierCapacity}
               onAttachRenewableProfiles={handleAttachRenewableProfiles}
               onRetargetSnapshots={handleRetargetSnapshots}
               onForecastSnapshots={handleForecastSnapshots}
