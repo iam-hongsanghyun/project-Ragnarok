@@ -1,41 +1,38 @@
 /**
  * Scenario difference table — the Settings → Scenarios surface.
  *
- * ONE ROW PER SCENARIO. Columns are only the settings that DIFFER across the
- * scenarios (a "show all" toggle reveals the rest). Settings are authored via
- * the Run console ("Add as Scenario") and are read-only here; MODEL OVERRIDE
- * columns (capacity, etc.) are editable inline — that's how a scenario varies
- * the network. "Run all" queues the selected scenarios sequentially (queue
- * concurrency 1) or in parallel (N). Results are compared in Analytics.
+ * ONE ROW PER SCENARIO. This surface is for naming scenarios and running them:
+ * click a name to rename it, add the current run configuration as a new
+ * scenario, pick which ones to run, and run them in order or in parallel.
+ * Columns are only the settings that DIFFER across the scenarios (a "show all"
+ * toggle reveals the rest); settings are authored via the Run console ("Add as
+ * Scenario") and are read-only here. Model values are edited in Model/Forge,
+ * not per scenario. Results are compared in Analytics.
  */
 import React, { useMemo, useState } from 'react';
-import type { ModelOverride, ScenarioCatalog, ScenarioPreset, WorkbookModel } from 'lib/types';
-import { SearchableSelect } from 'shared/components/SearchableSelect';
-import { getComponentSchema } from 'lib/constants/pypsa_schema';
+import type { ScenarioCatalog, ScenarioPreset } from 'lib/types';
 import {
   cellValue,
   flattenScenario,
-  overridePath,
-  parseOverridePath,
   scenarioDiffColumns,
-  setOverride,
 } from './scenarioFields';
 
 export type BatchMode = 'sequential' | 'parallel';
 
 interface Props {
   catalog: ScenarioCatalog;
-  model: WorkbookModel;
   maxConcurrency: number;
   onCatalogChange: (catalog: ScenarioCatalog) => void;
   onLoadScenario: (id: string) => void;
+  /** Save the live run configuration as a new named scenario (prompts for the name). */
+  onAddScenarioFromCurrent: () => void;
   onRunBatch: (ids: string[], mode: BatchMode, concurrency: number) => void;
   onGoToComparison: () => void;
   busy?: boolean;
 }
 
 export function ScenarioDiffTable({
-  catalog, model, maxConcurrency, onCatalogChange, onLoadScenario, onRunBatch, onGoToComparison, busy,
+  catalog, maxConcurrency, onCatalogChange, onLoadScenario, onAddScenarioFromCurrent, onRunBatch, onGoToComparison, busy,
 }: Props) {
   const scenarios = catalog.scenarios;
   const [showAll, setShowAll] = useState(false);
@@ -45,30 +42,19 @@ export function ScenarioDiffTable({
   const parallelMax = Math.max(2, maxConcurrency);
   const [concurrency, setConcurrency] = useState(2);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  // Override columns added via the form but not yet valued on any scenario.
-  const [extraOverrideCols, setExtraOverrideCols] = useState<string[]>([]);
 
-  const diffColumns = useMemo(() => scenarioDiffColumns(scenarios, { includeAll: showAll }), [scenarios, showAll]);
-  // Union the pending (empty) override columns so a just-added one is visible.
-  const columns = useMemo(() => {
-    const seen = new Set(diffColumns.map((c) => c.path));
-    const extras = extraOverrideCols
-      .filter((p) => !seen.has(p))
-      .map((p) => ({ path: p, label: p.split('.').slice(1).join(' · '), group: 'Model', isOverride: true }));
-    return [...diffColumns, ...extras];
-  }, [diffColumns, extraOverrideCols]);
+  const columns = useMemo(() => scenarioDiffColumns(scenarios, { includeAll: showAll }), [scenarios, showAll]);
 
   const runIds = selected.size > 0 ? scenarios.filter((s) => selected.has(s.id)).map((s) => s.id) : scenarios.map((s) => s.id);
 
   const patchScenario = (id: string, next: ScenarioPreset) =>
     onCatalogChange({ ...catalog, scenarios: scenarios.map((s) => (s.id === id ? next : s)) });
 
-  const editOverride = (id: string, path: string, value: string) => {
-    const parsed = parseOverridePath(path);
+  const renameScenario = (id: string, label: string) => {
     const scenario = scenarios.find((s) => s.id === id);
-    if (!parsed || !scenario) return;
-    const nextOverrides: ModelOverride[] = setOverride(scenario.modelOverrides ?? [], parsed.sheet, parsed.name, parsed.column, value);
-    patchScenario(id, { ...scenario, modelOverrides: nextOverrides });
+    const trimmed = label.trim();
+    if (!scenario || !trimmed || trimmed === scenario.label) return;
+    patchScenario(id, { ...scenario, label: trimmed });
   };
 
   const deleteScenario = (id: string) => {
@@ -88,10 +74,10 @@ export function ScenarioDiffTable({
       <header className="constraints-workspace-section-header">
         <h3>Scenarios</h3>
         <p>
-          Each scenario is a saved run configuration — add one from the <b>Run console</b> ("Add as Scenario").
-          This table shows one row per scenario and only the settings that <b>differ</b>. Set a different
-          <b> capacity</b> (or any model value) per scenario with a model override column. The network topology
-          and custom-DSL constraints are shared across all scenarios. Compare <b>results</b> in Analytics → Comparison.
+          Each scenario is a saved run configuration. Add one here from the current settings, or from the
+          <b> Run console</b> ("Add as Scenario"). <b>Click a name to rename it.</b> The table shows one row per
+          scenario and only the settings that <b>differ</b>; the network topology and custom-DSL constraints are
+          shared across all scenarios. Compare <b>results</b> in Analytics → Comparison.
         </p>
       </header>
 
@@ -124,7 +110,15 @@ export function ScenarioDiffTable({
         </label>
       </div>
 
-      <AddOverride model={model} onAdd={(path) => setExtraOverrideCols((prev) => (prev.includes(path) ? prev : [...prev, path]))} />
+      <div className="scenario-addcurrent">
+        <button
+          className="tb-btn tb-btn--muted"
+          title="Save the live run configuration (sidebar + Run console settings) as a new named scenario"
+          onClick={onAddScenarioFromCurrent}
+        >
+          + Add current settings as scenario
+        </button>
+      </div>
 
       <div className="scenario-diff-scroll">
         <table className="scenario-diff-table">
@@ -148,20 +142,21 @@ export function ScenarioDiffTable({
                   <td className="scenario-diff-td--pick">
                     <input type="checkbox" checked={selected.has(s.id)} onChange={() => toggleSelect(s.id)} title="Include in Run all" />
                   </td>
-                  <td className="scenario-diff-td--name">{s.label}</td>
+                  <td className="scenario-diff-td--name">
+                    <input
+                      key={`${s.id}:${s.label}`}
+                      className="scenario-name-input"
+                      defaultValue={s.label}
+                      title="Click to rename"
+                      onBlur={(e) => renameScenario(s.id, e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                    />
+                  </td>
                   {columns.map((c) => (
                     <td key={c.path} className={c.isOverride ? 'scenario-diff-td--override' : ''}>
-                      {c.isOverride ? (
-                        <input
-                          className="scenario-diff-input"
-                          defaultValue={flat[c.path] ?? ''}
-                          placeholder="—"
-                          onBlur={(e) => editOverride(s.id, c.path, e.target.value)}
-                          onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-                        />
-                      ) : (
-                        <span className={cellDiffers(scenarios, c.path) ? 'scenario-diff-cell--diff' : ''}>{cellValue(s, c.path)}</span>
-                      )}
+                      <span className={cellDiffers(scenarios, c.path) ? 'scenario-diff-cell--diff' : ''}>
+                        {c.isOverride ? (flat[c.path] ?? '—') : cellValue(s, c.path)}
+                      </span>
                     </td>
                   ))}
                   <td className="scenario-diff-td--actions">
@@ -175,7 +170,7 @@ export function ScenarioDiffTable({
         </table>
       </div>
       {columns.length === 0 && (
-        <p className="sg-setting-hint">All scenarios have identical settings. Toggle “show all settings”, or add a model override to make them differ.</p>
+        <p className="sg-setting-hint">All scenarios have identical settings — rename one and tweak the run controls, then “Add current settings as scenario”, or toggle “show all settings”.</p>
       )}
     </section>
   );
@@ -184,49 +179,4 @@ export function ScenarioDiffTable({
 function cellDiffers(scenarios: ScenarioPreset[], path: string): boolean {
   const vals = new Set(scenarios.map((s) => flattenScenario(s)[path] ?? ''));
   return vals.size > 1;
-}
-
-// ── add a model-override column (component · name · attribute) ────────────────────
-
-function AddOverride({ model, onAdd }: { model: WorkbookModel; onAdd: (path: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const [sheet, setSheet] = useState('');
-  const [name, setName] = useState('');
-  const [column, setColumn] = useState('');
-
-  const sheetOptions = useMemo(
-    () => Object.keys(model).filter((k) => Array.isArray(model[k]) && (model[k] as unknown[]).length > 0 && !k.startsWith('RAGNAROK_') && !k.includes('-')),
-    [model],
-  );
-  const nameOptions = useMemo(() => {
-    const rows = (model[sheet] as Array<Record<string, unknown>> | undefined) ?? [];
-    return rows.map((r) => String(r.name ?? '')).filter(Boolean);
-  }, [model, sheet]);
-  const columnOptions = useMemo(() => {
-    const comp = getComponentSchema(sheet);
-    return comp ? comp.input_static_attributes.filter((a) => a !== 'name') : [];
-  }, [sheet]);
-
-  if (!open) {
-    return (
-      <div className="scenario-addoverride">
-        <button className="tb-btn tb-btn--muted" onClick={() => setOpen(true)}>+ Add model override (e.g. capacity)</button>
-      </div>
-    );
-  }
-  return (
-    <div className="scenario-addoverride is-open">
-      <SearchableSelect className="forge-adjust-select" value={sheet} placeholder="component" options={sheetOptions} onChange={(v) => { setSheet(v); setName(''); setColumn(''); }} />
-      <SearchableSelect className="forge-adjust-select" value={name} placeholder="which one" options={nameOptions} onChange={setName} />
-      <SearchableSelect className="forge-adjust-select" value={column} placeholder="attribute (e.g. p_nom)" options={columnOptions} onChange={setColumn} />
-      <button
-        className="tb-btn"
-        disabled={!sheet || !name || !column}
-        onClick={() => { onAdd(overridePath(sheet, name, column)); setOpen(false); setSheet(''); setName(''); setColumn(''); }}
-      >
-        Add column
-      </button>
-      <button className="tb-btn tb-btn--muted" onClick={() => setOpen(false)}>Cancel</button>
-    </div>
-  );
 }

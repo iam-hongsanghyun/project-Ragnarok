@@ -2322,6 +2322,20 @@ path.leaflet-interactive:focus {
 .modal-actions {
   justify-content: flex-end;
   margin-top: 18px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+/* Uniform action buttons: one line of text, same height, no giant pills. */
+.modal-actions .secondary-button,
+.modal-actions .primary-button,
+.modal-actions .run-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 14px;
+  font-size: 0.82rem;
+  white-space: nowrap;
 }
 
 /* Checkbox + label on ONE line inside modals. (.sg-setting-row is a column
@@ -6406,14 +6420,32 @@ th:hover .col-delete-btn {
   font-size: 0.85rem;
   color: var(--muted);
 }
-.scenario-addoverride {
+.scenario-addcurrent {
   margin: 4px 0 10px;
 }
-.scenario-addoverride.is-open {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
+/* Inline scenario rename: reads as text until hovered/focused. */
+.scenario-name-input {
+  width: 100%;
+  min-width: 140px;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+}
+.scenario-name-input:hover {
+  border-color: var(--border);
+}
+.scenario-name-input:focus {
+  border-color: var(--border-strong);
+  background: var(--bg, transparent);
+  outline: none;
+}
+.scenario-diff-table tr.is-active .scenario-name-input {
+  font-weight: 700;
+  color: var(--brand, #0f766e);
 }
 .scenario-diff-scroll {
   overflow-x: auto;
