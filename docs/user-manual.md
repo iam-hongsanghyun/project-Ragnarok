@@ -269,22 +269,24 @@ carbon price, pathway configuration, rolling-horizon configuration, constraints,
 discount rate, and load-shedding settings — under a named label. Switching
 between presets instantly applies all saved parameters.
 
+The Scenarios table shows one row per scenario and only the settings that
+**differ** across them (toggle **show all settings** to reveal the rest).
+This surface is for naming and running scenarios; model values are edited in
+Model/Forge.
+
 **Actions:**
 
-| Button | Effect |
+| Control | Effect |
 |---|---|
-| New from current | Create a new preset from the current parameter values. |
-| Update active | Overwrite the active preset with the current values. The button is highlighted when the current controls differ from the saved preset. |
-| Duplicate | Create a copy of the active preset. |
-| Delete | Remove the active preset. Disabled when only one preset remains. |
-| Preset label pill | Click to activate a preset and apply its values. |
+| Scenario name | Click to rename the scenario inline (Enter or click away to save). |
+| + Add current settings as scenario | Save the live run configuration as a new named scenario (prompts for the name). Also available in the Run console as "Add as Scenario". |
+| Load | Apply a scenario's settings to the live run controls. |
+| Delete | Remove a scenario. Disabled when only one remains. |
+| Row checkbox | Include the scenario in "Run all" (none checked = run all). |
+| In order / In parallel + Run | Queue the selected scenarios sequentially or in parallel (up to N at once). |
+| Compare results → | Jump to Analytics → Comparison. |
 
-Each preset also has an editable **label** and a free-text **Notes** field,
-useful for recording the intent of a configuration.
-
-A status indicator next to the action buttons shows whether the current controls
-match the active scenario ("Current controls match the active scenario") or have
-been modified since the last save ("Current controls differ from the active scenario").
+The network topology and custom-DSL constraints are shared across all scenarios.
 
 #### Simulation window
 

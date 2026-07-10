@@ -2436,20 +2436,6 @@ function AppInner() {
     applyScenarioPreset(scenario);
   };
 
-  const handleCreateScenarioFromCurrent = () => {
-    const nextIndex = scenarioCatalog.scenarios.length + 1;
-    const scenario = captureCurrentScenario({
-      label: `Scenario ${nextIndex}`,
-      notes: '',
-    });
-    setScenarioCatalog((current) => ({
-      activeScenarioId: scenario.id,
-      scenarios: [...current.scenarios, scenario],
-    }));
-    setStatus(`Created scenario: ${scenario.label}`);
-    showToast(`Scenario created: ${scenario.label}`, 'success');
-  };
-
   const handleDuplicateScenario = () => {
     if (!activeScenario) return;
     const duplicate = buildScenarioPreset({
@@ -2972,7 +2958,7 @@ function AppInner() {
               activeScenarioLabel={activeScenario?.label ?? null}
               scenarioDirty={scenarioDirty}
               onSelectScenario={handleSelectScenario}
-              onCreateScenarioFromCurrent={handleCreateScenarioFromCurrent}
+              onCreateScenarioFromCurrent={() => void handleAddScenarioFromConsole()}
               onDuplicateScenario={handleDuplicateScenario}
               onUpdateActiveScenarioFromCurrent={handleUpdateActiveScenarioFromCurrent}
               onDeleteScenario={handleDeleteScenario}
