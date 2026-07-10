@@ -1332,10 +1332,12 @@ backend parser in `backend/pypsa/network/constraint_dsl.py`.
 
 **Grammar (one constraint per line; `#` comments; blank lines ignored):**
 ```
-line    := linexpr ("<="|">="|"==") linexpr
-linexpr := term (("+"|"-") term)*
-term    := [NUMBER "*"] atom
-atom    := ("gen"|"cap"|"cf"|"emissions") ["(" CARRIER ")"] | "load_shed" | NUMBER
+line     := linexpr ("<="|">="|"==") linexpr
+linexpr  := term (("+"|"-") term)*
+term     := [NUMBER "*"] atom
+atom     := ("gen"|"cap"|"cf"|"emissions") ["(" selector ")"] | "load_shed" | NUMBER
+selector := VALUE ("&" VALUE)*                  # carrier ∈ {values}
+          | COLUMN "," VALUE ("&" VALUE)*       # generator column ∈ {values}
 ```
 
 | Function | Signature | Effect |
@@ -1344,7 +1346,9 @@ atom    := ("gen"|"cap"|"cf"|"emissions") ["(" CARRIER ")"] | "load_shed" | NUMB
 | `dslToSpecs` | `(text) -> ConstraintSpec[]` | Convenience: valid specs only (drops lines with parse errors) |
 
 `ParsedConstraintLine.spec` is a `ConstraintSpec` with `{id, lhs, sense, rhs}`.
-`ConstraintTerm` has `{coef, kind: ConstraintTermKind, carrier?}`.
+`ConstraintTerm` has `{coef, kind: ConstraintTermKind, carrier?, column?, values?}` —
+`carrier` for the legacy single-carrier form, `column` + `values` for column
+selectors (`column` omitted with `values` set means the carrier column).
 
 ### 7.9 customDsl.ts
 

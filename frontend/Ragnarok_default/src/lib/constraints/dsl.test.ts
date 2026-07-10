@@ -22,6 +22,27 @@ describe('constraintDsl parser (mirrors backend)', () => {
     expect(dslToSpecs('emissions <= 0.5 * gen')[0].rhs[0]).toEqual({ coef: 0.5, kind: 'gen' });
   });
 
+  it('parses multi-value and column selectors', () => {
+    expect(dslToSpecs('gen(solar & wind) <= 5000')[0].lhs).toEqual([
+      { coef: 1, kind: 'gen', values: ['solar', 'wind'] },
+    ]);
+    expect(dslToSpecs('cap(type, solar & wind) <= 100000')[0].lhs).toEqual([
+      { coef: 1, kind: 'cap', column: 'type', values: ['solar', 'wind'] },
+    ]);
+    expect(dslToSpecs('cf("fuel group", vre & "run of river") <= 0.8')[0].lhs).toEqual([
+      { coef: 1, kind: 'cf', column: 'fuel group', values: ['vre', 'run of river'] },
+    ]);
+    // single-carrier form stays on the legacy wire shape
+    expect(dslToSpecs('cap(solar) <= 80')[0].lhs).toEqual([{ coef: 1, kind: 'cap', carrier: 'solar' }]);
+  });
+
+  it('rejects malformed selectors', () => {
+    expect(parseConstraintDsl('gen(type,) <= 1')[0].error).toMatch(/expected value/);
+    expect(parseConstraintDsl('gen(solar &) <= 1')[0].error).toMatch(/expected value/);
+    expect(parseConstraintDsl('gen(type, a, b) <= 1')[0].error).toMatch(/missing '\)'/);
+    expect(parseConstraintDsl('load_shed(x) <= 1')[0].error).toMatch(/not a valid term/);
+  });
+
   it('skips comments/blank lines and reports errors per line', () => {
     expect(dslToSpecs('gen(coal) <= 1000\n# comment\n\nload_shed <= 5')).toHaveLength(2);
     const results = parseConstraintDsl('gen(coal) 1000\nfoo(x) <= 1');

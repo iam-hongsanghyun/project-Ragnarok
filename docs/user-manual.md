@@ -406,6 +406,8 @@ constraint per line; `#` starts a comment.
 | `emissions(carrier)` | Total CO2 emissions (tCO2). Bare `emissions` = system total. |
 | `load_shed` | Unserved energy (MWh). |
 | `cf(carrier)` | Capacity factor for a carrier (fraction 0–1). |
+| `gen(solar & wind)` | Union selector: sums over carrier `solar` *or* `wind`. Works in `gen`/`cap`/`cf`/`emissions`. |
+| `cap(type, solar & wind)` | Column selector: sums over generators whose `type` column is `solar` or `wind` — any generator column works, e.g. a joint 100 GW VRE cap: `cap(type, solar & wind) <= 100000`. |
 
 Combine terms with `+`, `-`, and `*` with a scalar constant, and close with `<=`,
 `>=`, or `=` and a right-hand-side value.

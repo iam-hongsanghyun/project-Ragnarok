@@ -1702,7 +1702,12 @@ export type ConstraintTermKind = 'gen' | 'cap' | 'cf' | 'emissions' | 'load_shed
 export interface ConstraintTerm {
   coef: number;
   kind: ConstraintTermKind;
+  /** Legacy single-carrier selector, e.g. gen(solar). */
   carrier?: string;
+  /** Column selector: generators whose `column` value is in `values`.
+   * Omitted column with `values` set means the carrier column. */
+  column?: string;
+  values?: string[];
 }
 
 /** Structured constraint spec — the wire format the frontend sends to the backend. */

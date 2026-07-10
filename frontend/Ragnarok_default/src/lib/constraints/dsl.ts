@@ -4,10 +4,12 @@
  * parser in backend/pypsa/network/constraint_dsl.py — keep the two in sync.
  *
  * Grammar (one constraint per line; `#` comments; blank lines ignored):
- *   line    := linexpr ("<="|">="|"==") linexpr
- *   linexpr := term (("+"|"-") term)*
- *   term    := [NUMBER "*"] atom
- *   atom    := ("gen"|"cap"|"cf"|"emissions") ["(" CARRIER ")"] | "load_shed" | NUMBER
+ *   line     := linexpr ("<="|">="|"==") linexpr
+ *   linexpr  := term (("+"|"-") term)*
+ *   term     := [NUMBER "*"] atom
+ *   atom     := ("gen"|"cap"|"cf"|"emissions") ["(" selector ")"] | "load_shed" | NUMBER
+ *   selector := VALUE ("&" VALUE)*               // carrier ∈ {values}
+ *             | COLUMN "," VALUE ("&" VALUE)*    // generator column ∈ {values}
  */
 import { ConstraintSpec, ConstraintTerm, ConstraintTermKind } from '../types';
 
@@ -24,7 +26,7 @@ export interface ParsedConstraintLine {
 
 type Token = { kind: string; val: string };
 
-const TOKEN_RE = /\s*(<=|>=|==|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|"[^"]*"|[A-Za-z_][A-Za-z0-9_]*|\(|\)|\*|\+|-)/y;
+const TOKEN_RE = /\s*(<=|>=|==|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|"[^"]*"|[A-Za-z_][A-Za-z0-9_]*|\(|\)|\*|\+|-|,|&)/y;
 
 function tokenize(s: string): Token[] | string {
   const tokens: Token[] = [];
@@ -40,7 +42,7 @@ function tokenize(s: string): Token[] | string {
     else if (/^[0-9]/.test(raw)) kind = 'num';
     else if (raw.startsWith('"')) kind = 'str';
     else if (/^[A-Za-z_]/.test(raw)) kind = 'ident';
-    else kind = { '(': 'lparen', ')': 'rparen', '*': 'star', '+': 'plus', '-': 'minus' }[raw] ?? 'op';
+    else kind = { '(': 'lparen', ')': 'rparen', '*': 'star', '+': 'plus', '-': 'minus', ',': 'comma', '&': 'amp' }[raw] ?? 'op';
     tokens.push({ kind, val: raw });
     pos += m[0].length;
   }
@@ -67,19 +69,46 @@ function parseLinexpr(tokens: Token[]): ConstraintTerm[] | string {
       const name = tok.val;
       i += 1;
       let carrier: string | undefined;
-      if (i < n && tokens[i].kind === 'lparen') {
-        i += 1;
-        if (i >= n || (tokens[i].kind !== 'ident' && tokens[i].kind !== 'str')) {
-          return `expected carrier name after '${name}('`;
+      let column: string | undefined;
+      let values: string[] | undefined;
+      const hasParen = i < n && tokens[i].kind === 'lparen';
+      if (hasParen) {
+        i += 1; // (
+        const readValue = (): string | null => {
+          if (i >= n || (tokens[i].kind !== 'ident' && tokens[i].kind !== 'str')) return null;
+          const v = tokens[i].val.replace(/^"|"$/g, '');
+          i += 1;
+          return v;
+        };
+        const first = readValue();
+        if (first === null) return `expected carrier or column name in '${name}(...)'`;
+        if (i < n && tokens[i].kind === 'comma') {
+          i += 1; // ,
+          column = first;
+          const v = readValue();
+          if (v === null) return `expected value in '${name}(...)'`;
+          values = [v];
+        } else if (i < n && tokens[i].kind === 'amp') {
+          values = [first];
+        } else {
+          carrier = first;
         }
-        carrier = tokens[i].val.replace(/^"|"$/g, '');
-        i += 1;
-        if (i >= n || tokens[i].kind !== 'rparen') return `missing ')' after '${name}(${carrier}'`;
+        while (values !== undefined && i < n && tokens[i].kind === 'amp') {
+          i += 1; // &
+          const v = readValue();
+          if (v === null) return `expected value in '${name}(...)'`;
+          values.push(v);
+        }
+        if (i >= n || tokens[i].kind !== 'rparen') return `missing ')' in '${name}(...)'`;
         i += 1;
       }
-      if (carrier !== undefined) {
+      if (hasParen) {
         if (!FUNC_ATOMS.has(name)) return `'${name}(...)' is not a valid term`;
-        terms.push({ coef, kind: name as ConstraintTermKind, carrier });
+        const term: ConstraintTerm = { coef, kind: name as ConstraintTermKind };
+        if (carrier !== undefined) term.carrier = carrier;
+        if (column !== undefined) term.column = column;
+        if (values !== undefined) term.values = values;
+        terms.push(term);
       } else {
         if (!BARE_ATOMS.has(name)) return `unknown term '${name}'`;
         terms.push({ coef, kind: name as ConstraintTermKind });
