@@ -22,8 +22,8 @@ scalar settings below. Plus scalar settings:
     sheet on the dashboard, so it reaches every selected-carrier plant built by
     the target year — **including plants that already retire before it**
     (``close_year ≤ target_year``), which the target-year loader dropped. Their
-    coal capacity still becomes renewables, dated at the plant's close/forced year
-    (see below), so a coal unit closing in 2030 shows up as 2030-vintage solar/wind.
+    coal capacity still becomes renewables; the plant's close/forced year drives
+    the follow-mode solar:wind mix (see below).
   - **Filter 2 (which are replaceable):** ``replace_build_year`` — only plants
     with ``build_year ≥ replace_build_year`` are replaced. ``0``/blank → no extra
     restriction.
@@ -52,20 +52,21 @@ scalar settings below. Plus scalar settings:
 
 For each selected plant, the plant (if present in the network) is removed and its
 **own capacity** (``p_nom``) is split into a solar unit and/or a wind unit at the
-**same bus and province**.  The renewables come online at the plant's
-**replacement year** ``ry = min(close_year, cap)`` — forced no later than
-``cap = replace_max_close_year`` (default: the target year) and never before the
-plant is built, clamped to the target year. A plant with no close year retires at
-``cap``. So ``cap`` is a forced-retirement deadline: a unit closing in 2040 with
-``cap = 2035`` is replaced in 2035. New units are named ``<plant>_solar_<year>`` /
-``<plant>_wind_<year>`` (year = ``ry``) and carry that ``build_year`` and the
-plant's ``province`` (the province drives the renewable profile).
+**same bus and province**.  The plant's **replacement year**
+``ry = min(close_year, cap)`` — forced no later than
+``cap = replace_max_close_year`` (default: the target year), never before the
+plant is built; a plant with no close year retires at ``cap`` — is the reference
+year for the follow-mode close-year mix. So ``cap`` is a forced-retirement
+deadline: a unit closing in 2040 with ``cap = 2035`` follows the 2035 mix. New
+units are named ``<plant>_solar_<year>`` / ``<plant>_wind_<year>`` (year = the
+plant's own build year) and carry that ``build_year`` and the plant's
+``province`` (the province drives the renewable profile).
 
 New-unit attributes
 -------------------
 * ``carrier`` = ``"solar"`` / ``"wind"``; ``bus`` / ``province`` copied from the
   plant; ``p_nom`` = its split share of the plant's capacity; ``efficiency`` =
-  1.0; ``p_nom_extendable`` = ``False``; ``build_year`` = the replacement year ``ry``.
+  1.0; ``p_nom_extendable`` = ``False``; ``build_year`` = the plant's own build year.
 * ``marginal_cost`` = the mean marginal cost of all existing same-carrier units
   (system-wide), computed before any removals.
 
@@ -195,7 +196,7 @@ def replace_generators(
         v = pd.to_numeric(network.generators.at[name, "p_nom"], errors="coerce")
         return float(v) if pd.notna(v) else 0.0
 
-    # Forced-retirement cap: every replaced plant's renewables come online at
+    # Forced-retirement cap: every replaced plant's replacement year is
     # ``min(close_year, cap)``; a plant with no close_year retires at ``cap``. So
     # a unit closing after the cap is forced to close at the cap (close 2040 +
     # cap 2035 → 2035), and one that never closes retires at the cap too. cap =
@@ -203,17 +204,18 @@ def replace_generators(
     cap = max_close_year
 
     def _repl_year(by: int | None, close: int | None) -> int:
-        """Year the renewable replacement comes online.
+        """Replacement year — the follow-mode close-year mix reference.
 
         The plant's close year, forced no later than the cap; a plant with no
-        close year retires at the cap; never before it was built; and clamped to
-        the target year so the new unit is active in the (single-year) model.
+        close year retires at the cap; never before it was built. NOT clamped
+        to the target year: a raised cap deliberately lets a post-target close
+        year pick that year's mix from the full-model additions.
         """
         ry = close if close is not None else cap
         ry = min(ry, cap)
         if by is not None:
             ry = max(ry, by)
-        return min(ry, target_year)
+        return ry
 
     def _canon_bus(v: object) -> str:
         """Bus id as a string, collapsing float ids (53.0 → "53") so a raw-sheet
@@ -532,9 +534,9 @@ def replace_generators(
                 follow=False,
             )
         # Per-plant trace in the Log tab — the ratio is verifiable against the
-        # reference table, and "online <ry>" shows the retire-and-replace year.
+        # reference table, and "replaced <ry>" shows the retire-and-replace year.
         logger.info(
-            "Generator replacement: %s (build %s → renewables online %s): %.1f MW -> solar %.1f + wind %.1f",
+            "Generator replacement: %s (build %s → replaced %s): %.1f MW -> solar %.1f + wind %.1f",
             name,
             rec["by"],
             ry,
@@ -560,7 +562,7 @@ def replace_generators(
                 province=province,
                 p_nom=cap_mw,
                 marginal_cost=carrier_mc[carrier] or 0.0,
-                build_year=ry,
+                build_year=by,
             )
             added += 1
 
