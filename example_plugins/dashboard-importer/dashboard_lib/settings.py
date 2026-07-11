@@ -39,6 +39,7 @@ class Settings:
     region_column: str = "province"     # "province" | "group1" | "group2" | "group3" | "singlenode"
     aggregate_by_carrier: bool = False  # True → merge generators per (bus, carrier) using rules
     demand_redistribution: bool = False  # True → move annual demand between bus/region groups
+    demand_adjustment: bool = False  # True → scale/add demand for bus/region groups
     replace_generators: bool = False  # True → replace target-year plants with solar/wind
     replace_build_year: int = 0  # filter 2: only plants with build_year ≥ this are replaceable (0 → no filter)
     replace_include_existing: bool = False  # True → ignore filter 2 and replace the whole fleet (existing plants too)
@@ -114,6 +115,9 @@ class Dashboard:
     # Demand redistribution moves (GUI table only — not read from xlsx).
     # Columns: from_resolution, from_value, to_resolution, to_value, amount_mwh.
     demand_redist_rules: pd.DataFrame | None = None
+    # Demand adjustment rules (GUI table only — not read from xlsx).
+    # Columns: resolution, value, mode (multiply|add_mw|add_mwh), amount.
+    demand_adjust_rules: pd.DataFrame | None = None
     # Generator replacements (GUI table only — not read from xlsx).
     # Required column: generator.  None when absent.
     generator_replacements: pd.DataFrame | None = None
