@@ -2227,9 +2227,11 @@ export interface ModuleConfigTableColumn {
 /** Condition under which a config field is visible. */
 export interface ModuleConfigVisibleWhen {
   /** Sibling field key whose current value drives visibility. */
-  field: string;
+  field?: string;
   /** Field is visible iff sibling value strictly equals this. */
-  equals: string | number | boolean;
+  equals?: string | number | boolean;
+  /** OR-composition: visible when ANY sub-gate matches. Takes precedence over field/equals. */
+  anyOf?: Array<{ field: string; equals: string | number | boolean }>;
 }
 
 export interface ModuleConfigField {

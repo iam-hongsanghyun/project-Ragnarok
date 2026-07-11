@@ -135,6 +135,10 @@ function evaluateVisibleWhen(
 ): boolean {
   if (!gate) return true;
   if (!formValues) return true;
+  if (gate.anyOf?.length) {
+    return gate.anyOf.some((sub) => evaluateVisibleWhen(sub, formValues, schema));
+  }
+  if (gate.field === undefined) return true;
   const raw = formValues[gate.field];
   const resolved = raw !== undefined ? raw : schema?.[gate.field]?.default;
   // Strict equality after a tolerant coercion: matches numeric/string parity

@@ -67,6 +67,7 @@ class Settings:
     ess_expansion_mode: str = "proportional"  # "proportional" | "fixed"
     ess_p_nom_min: float = 0.0         # expansion lower bound (MW or %, per mode)
     ess_p_nom_max: float = 0.0         # expansion upper bound (MW or %); 0/blank → unbounded
+    ess_placement: bool = False        # True → add StorageUnits at hand-picked buses/regions
     marginal_cost_multiplier: bool = False  # True → scale generator marginal cost per carrier
     plot_map: bool = True       # True → save a network map PNG before optimisation
     cc_rule: bool = True        # False → skip CC merge
@@ -118,6 +119,9 @@ class Dashboard:
     # Demand adjustment rules (GUI table only — not read from xlsx).
     # Columns: resolution, value, mode (multiply|add_mw|add_mwh), amount.
     demand_adjust_rules: pd.DataFrame | None = None
+    # ESS placement rules (GUI table only — not read from xlsx).
+    # Columns: resolution, value, mode (fixed|extendable), capacity_mw.
+    ess_placement_rules: pd.DataFrame | None = None
     # Generator replacements (GUI table only — not read from xlsx).
     # Required column: generator.  None when absent.
     generator_replacements: pd.DataFrame | None = None
