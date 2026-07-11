@@ -186,13 +186,19 @@
     "grp_demand": {
       "type": "group",
       "column": "left",
-      "label": "Demand redistribution",
-      "description": "Move annual demand between buses/regions (edit moves in the right panel)."
+      "label": "Demand redistribution & adjustment",
+      "description": "Move annual demand between buses/regions, or scale/add demand for a group (edit moves and rules in the right panel)."
     },
     "demand_redistribution": {
       "type": "boolean",
       "label": "Redistribute demand",
       "description": "Move a fixed annual demand (MWh) between groups of buses/regions, proportionally over the existing profile. Runs after load scaling, before region aggregation. Edit moves in the right panel.",
+      "default": false
+    },
+    "demand_adjustment": {
+      "type": "boolean",
+      "label": "Adjust demand (scale / add)",
+      "description": "Grow or shrink demand for selected buses/regions: multiply by a ratio, add a flat MW to every snapshot (split across buses by their demand share), or add an annual MWh (proportional scale). Runs after redistribution, before region aggregation. Edit rules in the right panel.",
       "default": false
     },
     "grp_replace": {
@@ -1217,6 +1223,167 @@
         {
           "key": "amount_mwh",
           "label": "Amount (MWh)",
+          "type": "number",
+          "width": 130
+        }
+      ],
+      "default": []
+    },
+    "demand_adjust_rules": {
+      "type": "table",
+      "label": "Demand adjustments",
+      "description": "Each row is one adjustment applied to the selected group (Resolution + Value, same choices as demand moves). Mode '× ratio' multiplies every demand cell (e.g. 1.1 = +10%). '+ MW (flat)' raises the group total by that MW at every snapshot, split across buses in proportion to each bus's share of the group's annual demand. '+ MWh (annual)' raises the group's annual energy by that amount via a proportional scale. Negative amounts decrease demand in the + modes. Rules apply in table order, after demand moves. Region resolutions need a province_mapping.",
+      "visibleWhen": {
+        "field": "demand_adjustment",
+        "equals": true
+      },
+      "maxHeight": 300,
+      "columns": [
+        {
+          "key": "resolution",
+          "label": "Resolution",
+          "type": "select",
+          "width": 130,
+          "options": [
+            {
+              "value": "bus",
+              "label": "bus"
+            },
+            {
+              "value": "province",
+              "label": "province"
+            },
+            {
+              "value": "group1",
+              "label": "group1"
+            },
+            {
+              "value": "group2",
+              "label": "group2"
+            },
+            {
+              "value": "group3",
+              "label": "group3"
+            },
+            {
+              "value": "singlenode",
+              "label": "singlenode"
+            }
+          ]
+        },
+        {
+          "key": "value",
+          "label": "Value (annual demand)",
+          "type": "select",
+          "width": 200,
+          "optionsFromByColumn": {
+            "switchColumn": "resolution",
+            "cases": {
+              "bus": {
+                "source": "plugin",
+                "column": "value",
+                "labelSuffixColumn": "annual_label",
+                "filter": [
+                  {
+                    "column": "resolution",
+                    "op": "==",
+                    "value": "bus"
+                  }
+                ],
+                "name": "/demand_values"
+              },
+              "province": {
+                "source": "plugin",
+                "column": "value",
+                "labelSuffixColumn": "annual_label",
+                "filter": [
+                  {
+                    "column": "resolution",
+                    "op": "==",
+                    "value": "province"
+                  }
+                ],
+                "name": "/demand_values"
+              },
+              "group1": {
+                "source": "plugin",
+                "column": "value",
+                "labelSuffixColumn": "annual_label",
+                "filter": [
+                  {
+                    "column": "resolution",
+                    "op": "==",
+                    "value": "group1"
+                  }
+                ],
+                "name": "/demand_values"
+              },
+              "group2": {
+                "source": "plugin",
+                "column": "value",
+                "labelSuffixColumn": "annual_label",
+                "filter": [
+                  {
+                    "column": "resolution",
+                    "op": "==",
+                    "value": "group2"
+                  }
+                ],
+                "name": "/demand_values"
+              },
+              "group3": {
+                "source": "plugin",
+                "column": "value",
+                "labelSuffixColumn": "annual_label",
+                "filter": [
+                  {
+                    "column": "resolution",
+                    "op": "==",
+                    "value": "group3"
+                  }
+                ],
+                "name": "/demand_values"
+              },
+              "singlenode": {
+                "source": "plugin",
+                "column": "value",
+                "labelSuffixColumn": "annual_label",
+                "filter": [
+                  {
+                    "column": "resolution",
+                    "op": "==",
+                    "value": "singlenode"
+                  }
+                ],
+                "name": "/demand_values"
+              }
+            }
+          },
+          "options": []
+        },
+        {
+          "key": "mode",
+          "label": "Mode",
+          "type": "select",
+          "width": 140,
+          "options": [
+            {
+              "value": "multiply",
+              "label": "× ratio"
+            },
+            {
+              "value": "add_mw",
+              "label": "+ MW (flat)"
+            },
+            {
+              "value": "add_mwh",
+              "label": "+ MWh (annual)"
+            }
+          ]
+        },
+        {
+          "key": "amount",
+          "label": "Amount",
           "type": "number",
           "width": 130
         }

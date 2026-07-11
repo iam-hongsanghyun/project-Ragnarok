@@ -252,6 +252,7 @@ def _build_dashboard_network(
     merge_cc_mod = _lib("merge_cc")
     p_max_pu_mod = _lib("p_max_pu")
     demand_redist_mod = _lib("demand_redistribution")
+    demand_adjust_mod = _lib("demand_adjustment")
     gen_replace_mod = _lib("generator_replacement")
     ess_mod = _lib("ess")
     marginal_cost_mod = _lib("marginal_cost")
@@ -290,6 +291,9 @@ def _build_dashboard_network(
     # sum performed by aggregation.
     scaling_mod.scale_load(network, settings.target_load_twh, settings.base_year)
     demand_redist_mod.redistribute_demand(network, dashboard)
+    # Grow/shrink demand for selected groups (×ratio, +MW flat, or +MWh/yr) —
+    # same slot as redistribution, applied after it so a rule sees the moves.
+    demand_adjust_mod.adjust_demand(network, dashboard)
     # Replace selected new plants with solar/wind while generators are still
     # individual and carry their province — before p_max_pu so the new units
     # inherit the province's renewable profile via apply_standard_p_max_pu.
@@ -1184,6 +1188,7 @@ def _settings_from_config(settings_mod: Any, cfg: dict[str, Any]) -> Any:
         region_column=_as_str(cfg, "region_column", "province"),
         aggregate_by_carrier=_as_bool(cfg, "aggregate_by_carrier", False),
         demand_redistribution=_as_bool(cfg, "demand_redistribution", False),
+        demand_adjustment=_as_bool(cfg, "demand_adjustment", False),
         replace_generators=_as_bool(cfg, "replace_generators", False),
         replace_build_year=_as_int(cfg, "replace_build_year", 0),
         replace_include_existing=_as_bool(cfg, "replace_include_existing", False),
@@ -1236,6 +1241,7 @@ def _apply_config_to_settings(settings: Any, cfg: dict[str, Any]) -> None:
     _override_bool(settings, cfg, "aggregate_by_region")
     _override_bool(settings, cfg, "aggregate_by_carrier")
     _override_bool(settings, cfg, "demand_redistribution")
+    _override_bool(settings, cfg, "demand_adjustment")
     _override_bool(settings, cfg, "replace_generators")
     _override_int(settings, cfg, "replace_build_year")
     _override_bool(settings, cfg, "replace_include_existing")
@@ -1382,6 +1388,9 @@ def _build_dashboard(
     # GUI-only (no xlsx fallback): demand redistribution moves — one row per
     # move with its own from/to resolution + value (see demand_redistribution).
     demand_redist_rules = _table_to_df(cfg.get("demand_redist_moves"))
+    # GUI-only (no xlsx fallback): demand adjustments — one row per rule with
+    # its own resolution + value + mode + amount (see demand_adjustment).
+    demand_adjust_rules = _table_to_df(cfg.get("demand_adjust_rules"))
     # GUI-only (no xlsx fallback): generator replacements (plant → solar/wind).
     generator_replacements = _table_to_df(cfg.get("generator_replacements"))
     # GUI-only (no xlsx fallback): per-carrier marginal-cost multipliers.
@@ -1419,6 +1428,7 @@ def _build_dashboard(
         carrier_rules_t=carrier_rules_t,
         region_rules=region_rules,
         demand_redist_rules=demand_redist_rules,
+        demand_adjust_rules=demand_adjust_rules,
         generator_replacements=generator_replacements,
         marginal_cost_rules=marginal_cost_rules,
     )
