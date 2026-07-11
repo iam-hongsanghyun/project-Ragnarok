@@ -302,6 +302,9 @@ def _build_dashboard_network(
     # capacity), while buses are still individual — so it rides onto its region
     # bus through aggregation's bus-remap like every other component.
     ess_mod.add_storage_at_replaced_buses(network, dashboard, replaced_by_bus)
+    # Add ESS at hand-picked buses/regions (ess_placement_rules) — same
+    # pre-aggregation slot, independent of whether any replacement happened.
+    ess_mod.add_storage_at_selected_buses(network, dashboard)
     # Scale generator marginal cost per carrier (uniform factor commutes with the
     # capacity-weighted carrier merge, so order vs aggregation is immaterial).
     marginal_cost_mod.apply_marginal_cost_multipliers(network, dashboard)
@@ -1189,6 +1192,7 @@ def _settings_from_config(settings_mod: Any, cfg: dict[str, Any]) -> Any:
         aggregate_by_carrier=_as_bool(cfg, "aggregate_by_carrier", False),
         demand_redistribution=_as_bool(cfg, "demand_redistribution", False),
         demand_adjustment=_as_bool(cfg, "demand_adjustment", False),
+        ess_placement=_as_bool(cfg, "ess_placement", False),
         replace_generators=_as_bool(cfg, "replace_generators", False),
         replace_build_year=_as_int(cfg, "replace_build_year", 0),
         replace_include_existing=_as_bool(cfg, "replace_include_existing", False),
@@ -1242,6 +1246,7 @@ def _apply_config_to_settings(settings: Any, cfg: dict[str, Any]) -> None:
     _override_bool(settings, cfg, "aggregate_by_carrier")
     _override_bool(settings, cfg, "demand_redistribution")
     _override_bool(settings, cfg, "demand_adjustment")
+    _override_bool(settings, cfg, "ess_placement")
     _override_bool(settings, cfg, "replace_generators")
     _override_int(settings, cfg, "replace_build_year")
     _override_bool(settings, cfg, "replace_include_existing")
@@ -1391,6 +1396,9 @@ def _build_dashboard(
     # GUI-only (no xlsx fallback): demand adjustments — one row per rule with
     # its own resolution + value + mode + amount (see demand_adjustment).
     demand_adjust_rules = _table_to_df(cfg.get("demand_adjust_rules"))
+    # GUI-only (no xlsx fallback): ESS placement — one row per rule with its
+    # own resolution + value + mode + capacity (see ess.add_storage_at_selected_buses).
+    ess_placement_rules = _table_to_df(cfg.get("ess_placement_rules"))
     # GUI-only (no xlsx fallback): generator replacements (plant → solar/wind).
     generator_replacements = _table_to_df(cfg.get("generator_replacements"))
     # GUI-only (no xlsx fallback): per-carrier marginal-cost multipliers.
@@ -1429,6 +1437,7 @@ def _build_dashboard(
         region_rules=region_rules,
         demand_redist_rules=demand_redist_rules,
         demand_adjust_rules=demand_adjust_rules,
+        ess_placement_rules=ess_placement_rules,
         generator_replacements=generator_replacements,
         marginal_cost_rules=marginal_cost_rules,
     )

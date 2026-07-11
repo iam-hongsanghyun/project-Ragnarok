@@ -388,7 +388,7 @@
       "type": "group",
       "column": "left",
       "label": "Energy storage (ESS)",
-      "description": "Add a storage unit (ESS) at every bus where a generator was replaced above. Size it as a share of the replaced capacity or a fixed MW, and optionally make it capacity-expandable."
+      "description": "Add storage units (ESS): at every bus where a generator was replaced above (sized from the replaced capacity), and/or at hand-picked buses/regions via the placement table in the right panel. The carrier, duration, efficiency, capital cost, and lifetime below apply to both."
     },
     "add_ess": {
       "type": "boolean",
@@ -396,26 +396,32 @@
       "description": "When on, one StorageUnit is built at each bus where the generator replacement above happened.",
       "default": false
     },
+    "ess_placement": {
+      "type": "boolean",
+      "label": "Add ESS at buses/regions",
+      "description": "When on, one StorageUnit is built at every bus of each group picked in the 'ESS placement' table (right panel) — with a fixed MW (0 makes an editable placeholder) or as capacity expansion sized by the solver.",
+      "default": false
+    },
     "ess_carrier": {
       "type": "string",
       "label": "ESS carrier",
       "description": "Carrier name for the storage units. Added to the model's carriers automatically if it doesn't already exist.",
       "default": "ESS",
-      "visibleWhen": { "field": "add_ess", "equals": true }
+      "visibleWhen": { "anyOf": [{ "field": "add_ess", "equals": true }, { "field": "ess_placement", "equals": true }] }
     },
     "ess_hours": {
       "type": "number",
       "label": "Storage duration (hours)",
       "description": "Energy-to-power ratio (max_hours): energy capacity = power × hours. E.g. 4 = a 4-hour battery.",
       "default": 4,
-      "visibleWhen": { "field": "add_ess", "equals": true }
+      "visibleWhen": { "anyOf": [{ "field": "add_ess", "equals": true }, { "field": "ess_placement", "equals": true }] }
     },
     "ess_efficiency": {
       "type": "number",
       "label": "Round-trip efficiency",
       "description": "Round-trip efficiency (0–1). Split as √ into the charge and discharge efficiencies.",
       "default": 0.9,
-      "visibleWhen": { "field": "add_ess", "equals": true }
+      "visibleWhen": { "anyOf": [{ "field": "add_ess", "equals": true }, { "field": "ess_placement", "equals": true }] }
     },
     "ess_sizing_mode": {
       "type": "select",
@@ -447,14 +453,14 @@
       "label": "Capital cost (overnight, per MW)",
       "description": "Overnight (total) capital cost per MW of ESS power. The backend annuitises it over the lifetime below at the project discount rate. Drives capacity expansion; leave 0 for no cost.",
       "default": 0,
-      "visibleWhen": { "field": "add_ess", "equals": true }
+      "visibleWhen": { "anyOf": [{ "field": "add_ess", "equals": true }, { "field": "ess_placement", "equals": true }] }
     },
     "ess_lifetime": {
       "type": "number",
       "label": "Lifetime (years)",
       "description": "Economic lifetime used to annuitise the capital cost above (annuity factor at the project discount rate). Typical battery ≈ 10–15 years.",
       "default": 15,
-      "visibleWhen": { "field": "add_ess", "equals": true }
+      "visibleWhen": { "anyOf": [{ "field": "add_ess", "equals": true }, { "field": "ess_placement", "equals": true }] }
     },
     "ess_expandable": {
       "type": "boolean",
@@ -1384,6 +1390,163 @@
         {
           "key": "amount",
           "label": "Amount",
+          "type": "number",
+          "width": 130
+        }
+      ],
+      "default": []
+    },
+    "ess_placement_rules": {
+      "type": "table",
+      "label": "ESS placement",
+      "description": "Each row adds one StorageUnit at EVERY bus of the selected group (Resolution + Value, same choices as demand moves). Mode 'Fixed MW' installs the entered capacity at each bus — enter 0 to create editable placeholder units. 'Capacity expansion' starts each unit at 0 MW and lets the solver size it against the ESS capital cost; the entered MW is each unit's ceiling (p_nom_max), 0 = unlimited. Duration, efficiency, carrier, capital cost, and lifetime come from the ESS settings on the left. Region resolutions need a province_mapping. Active when 'Add ESS at buses/regions' is on.",
+      "visibleWhen": {
+        "field": "ess_placement",
+        "equals": true
+      },
+      "maxHeight": 300,
+      "columns": [
+        {
+          "key": "resolution",
+          "label": "Resolution",
+          "type": "select",
+          "width": 130,
+          "options": [
+            {
+              "value": "bus",
+              "label": "bus"
+            },
+            {
+              "value": "province",
+              "label": "province"
+            },
+            {
+              "value": "group1",
+              "label": "group1"
+            },
+            {
+              "value": "group2",
+              "label": "group2"
+            },
+            {
+              "value": "group3",
+              "label": "group3"
+            },
+            {
+              "value": "singlenode",
+              "label": "singlenode"
+            }
+          ]
+        },
+        {
+          "key": "value",
+          "label": "Value (annual demand)",
+          "type": "select",
+          "width": 200,
+          "optionsFromByColumn": {
+            "switchColumn": "resolution",
+            "cases": {
+              "bus": {
+                "source": "plugin",
+                "column": "value",
+                "labelSuffixColumn": "annual_label",
+                "filter": [
+                  {
+                    "column": "resolution",
+                    "op": "==",
+                    "value": "bus"
+                  }
+                ],
+                "name": "/demand_values"
+              },
+              "province": {
+                "source": "plugin",
+                "column": "value",
+                "labelSuffixColumn": "annual_label",
+                "filter": [
+                  {
+                    "column": "resolution",
+                    "op": "==",
+                    "value": "province"
+                  }
+                ],
+                "name": "/demand_values"
+              },
+              "group1": {
+                "source": "plugin",
+                "column": "value",
+                "labelSuffixColumn": "annual_label",
+                "filter": [
+                  {
+                    "column": "resolution",
+                    "op": "==",
+                    "value": "group1"
+                  }
+                ],
+                "name": "/demand_values"
+              },
+              "group2": {
+                "source": "plugin",
+                "column": "value",
+                "labelSuffixColumn": "annual_label",
+                "filter": [
+                  {
+                    "column": "resolution",
+                    "op": "==",
+                    "value": "group2"
+                  }
+                ],
+                "name": "/demand_values"
+              },
+              "group3": {
+                "source": "plugin",
+                "column": "value",
+                "labelSuffixColumn": "annual_label",
+                "filter": [
+                  {
+                    "column": "resolution",
+                    "op": "==",
+                    "value": "group3"
+                  }
+                ],
+                "name": "/demand_values"
+              },
+              "singlenode": {
+                "source": "plugin",
+                "column": "value",
+                "labelSuffixColumn": "annual_label",
+                "filter": [
+                  {
+                    "column": "resolution",
+                    "op": "==",
+                    "value": "singlenode"
+                  }
+                ],
+                "name": "/demand_values"
+              }
+            }
+          },
+          "options": []
+        },
+        {
+          "key": "mode",
+          "label": "Mode",
+          "type": "select",
+          "width": 160,
+          "options": [
+            {
+              "value": "fixed",
+              "label": "Fixed MW"
+            },
+            {
+              "value": "extendable",
+              "label": "Capacity expansion"
+            }
+          ]
+        },
+        {
+          "key": "capacity_mw",
+          "label": "Capacity (MW)",
           "type": "number",
           "width": 130
         }

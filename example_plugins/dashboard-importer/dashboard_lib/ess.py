@@ -1,8 +1,15 @@
-"""Add energy-storage (ESS) units at the buses where generator replacement happened.
+"""Add energy-storage (ESS) units: at replacement buses, or at hand-picked groups.
 
-Runs **immediately after** :func:`~dashboard_lib.generator_replacement.replace_generators`
-and **before** region aggregation — so each ESS sits on the original replacement
-bus and is carried onto its region bus by the aggregation's bus-remap, exactly
+Two entry points share the technical settings (carrier, hours, efficiency,
+capital cost, lifetime):
+
+* :func:`add_storage_at_replaced_buses` — one ESS per generator-replacement
+  bus, sized from the replaced capacity (the original feature).
+* :func:`add_storage_at_selected_buses` — one ESS per bus of each group picked
+  in the ``ess_placement_rules`` table (fixed MW, possibly 0, or extendable).
+
+Both run **before** region aggregation — so each ESS sits on its original bus
+and is carried onto its region bus by the aggregation's bus-remap, exactly
 like any other component.
 
 User input (``dashboard.settings``)
@@ -161,4 +168,151 @@ def add_storage_at_replaced_buses(
         "ESS: added %d storage unit(s) (%.0f MW total) on '%s' carrier "
         "[%s, %g h, round-trip η=%.2f%s]",
         added, total_mw, carrier, sizing, max_hours, rt, exp,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Placement at hand-picked buses/regions (ess_placement_rules table)
+# ---------------------------------------------------------------------------
+
+_PLACEMENT_COLUMNS = ("resolution", "value", "mode", "capacity_mw")
+_PLACEMENT_MODES = ("fixed", "extendable")
+
+
+def add_storage_at_selected_buses(network: pypsa.Network, dashboard: "Dashboard") -> None:
+    """Add one ESS StorageUnit at every bus of each selected group, in place.
+
+    Reads ``dashboard.settings.ess_placement`` (gate) and
+    ``dashboard.ess_placement_rules`` (rules). Each rule selects a group
+    (``resolution`` + ``value``, resolved exactly like the demand tables) and
+    adds one unit **per bus** of the group:
+
+    * ``fixed`` — every unit gets ``capacity_mw`` as its ``p_nom``. Zero is
+      allowed on purpose: it creates editable placeholder units.
+    * ``extendable`` — every unit starts at ``p_nom = 0`` with
+      ``p_nom_extendable = True``; ``capacity_mw`` (> 0) becomes each unit's
+      ``p_nom_max`` ceiling, 0/blank leaves the expansion unbounded.
+
+    Carrier, duration, round-trip efficiency, capital cost, and lifetime come
+    from the shared ESS settings (``ess_carrier`` / ``ess_hours`` /
+    ``ess_efficiency`` / ``ess_capital_cost`` / ``ess_lifetime``).
+
+    Args:
+        network:   PyPSA Network to modify in place (before region aggregation).
+        dashboard: Parsed :class:`~dashboard_lib.settings.Dashboard`.
+
+    Raises:
+        ValueError: On any invalid rule — missing columns, unknown bus/region
+            or mode, or a missing/negative capacity.
+    """
+    s = dashboard.settings
+    if not getattr(s, "ess_placement", False):
+        return
+
+    rules_df = dashboard.ess_placement_rules
+    if rules_df is None or rules_df.empty:
+        print("  ESS placement: enabled but no rules provided — skipping")
+        return
+
+    # Resolution/value → bus set uses the demand tables' resolver. Imported
+    # lazily: this module is also loaded standalone (no package context) by
+    # the replacement-ESS path, which must not require the sibling module.
+    from .demand_redistribution import _cell_str, _parse_amount, _resolve_member
+
+    df = rules_df.copy()
+    df.columns = [str(c).strip().lower() for c in df.columns]
+    missing = [c for c in _PLACEMENT_COLUMNS if c not in df.columns]
+    if missing:
+        raise ValueError(
+            f"ESS placement table missing columns {missing}; found {list(df.columns)}"
+        )
+
+    carrier = str(getattr(s, "ess_carrier", "ESS") or "ESS").strip() or "ESS"
+    if carrier not in network.carriers.index:
+        network.add("Carrier", carrier)
+        logger.info("ESS placement: added missing carrier %r", carrier)
+
+    rt = float(getattr(s, "ess_efficiency", 0.9) or 0.0)
+    rt = min(max(rt, 0.0), 1.0)
+    eff = math.sqrt(rt) if rt > 0 else 1.0
+    max_hours = float(getattr(s, "ess_hours", 4.0) or 0.0)
+    capital_cost = float(getattr(s, "ess_capital_cost", 0.0) or 0.0)
+    lifetime = float(getattr(s, "ess_lifetime", 15.0) or 15.0)
+
+    bus_province = {}
+    if "province" in network.buses.columns:
+        bus_province = {
+            str(b): str(network.buses.at[b, "province"])
+            for b in network.buses.index
+            if pd.notna(network.buses.at[b, "province"])
+        }
+
+    region_cache: dict[str, dict[str, str]] = {}
+    added = 0
+    fixed_mw_total = 0.0
+    for pos, (_, row) in enumerate(df.iterrows(), 1):
+        resolution = _cell_str(row.get("resolution")).lower()
+        value = _cell_str(row.get("value"))
+        mode = _cell_str(row.get("mode")).lower()
+        capacity_cell = _cell_str(row.get("capacity_mw"))
+
+        # Skip wholly blank rows (the SDK can emit trailing empties).
+        if not any((resolution, value, mode, capacity_cell)):
+            continue
+
+        label = f"rule {pos}"
+        if not resolution or not value:
+            raise ValueError(f"ESS placement {label}: resolution and value are required")
+        if mode not in _PLACEMENT_MODES:
+            raise ValueError(
+                f"ESS placement {label}: mode must be one of {_PLACEMENT_MODES}, got {mode!r}"
+            )
+        capacity = _parse_amount(row.get("capacity_mw"))
+        if capacity is None:
+            capacity = 0.0
+        if capacity < 0:
+            raise ValueError(
+                f"ESS placement {label}: capacity_mw must be >= 0, got {capacity}"
+            )
+
+        buses = _resolve_member(
+            network, dashboard, resolution, value, region_cache, label, "group"
+        )
+        for bus in sorted(buses):
+            name = _unique_name(network, f"ESS_{bus}")
+            attrs: dict[str, object] = {
+                "bus": bus,
+                "carrier": carrier,
+                "p_nom": capacity if mode == "fixed" else 0.0,
+                "max_hours": max_hours,
+                "efficiency_store": eff,
+                "efficiency_dispatch": eff,
+                "capital_cost": capital_cost,
+                # Finite lifetime so the backend annuitises the (overnight)
+                # capital cost — PyPSA's default lifetime is +inf (no annuity).
+                "lifetime": lifetime,
+                "p_nom_extendable": mode == "extendable",
+            }
+            if mode == "extendable" and capacity > 0:
+                attrs["p_nom_max"] = capacity
+            network.add("StorageUnit", name, **attrs)
+            if "province" in network.storage_units.columns and bus_province.get(bus):
+                network.storage_units.at[name, "province"] = bus_province[bus]
+            added += 1
+            if mode == "fixed":
+                fixed_mw_total += capacity
+        cap_label = (
+            f"{capacity:g} MW each"
+            if mode == "fixed"
+            else f"extendable [0, {capacity:g} MW]" if capacity > 0 else "extendable [0, inf]"
+        )
+        print(
+            f"  ESS placement {label}: {len(buses)} unit(s) at "
+            f"{resolution}={value!r} ({cap_label})"
+        )
+
+    logger.info(
+        "ESS placement: added %d storage unit(s) (%.0f MW fixed total) on '%s' "
+        "carrier [%g h, round-trip η=%.2f]",
+        added, fixed_mw_total, carrier, max_hours, rt,
     )
