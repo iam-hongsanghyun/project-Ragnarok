@@ -51,13 +51,29 @@ if [ "$REQ_HASH" != "$STORED" ]; then
   echo "$REQ_HASH" > "$VENV/.req_hash"
 fi
 
-# ── Web build (committed at ./build; rebuilt only if missing + npm present) ────
+# ── Web build (committed at ./build; rebuilt on start when missing OR stale) ──
+# Staleness: scripts/frontend_src_hash.sh hashes the frontend sources; the
+# stamp inside the build (.src_hash, written by scripts/refresh_build.sh)
+# records what the build was made from. A mismatch means the checkout moved
+# past the committed build — rebuild so the served GUI matches the code.
 DIST="${RAGNAROK_FRONTEND_DIST:-$ROOT/build}"
+BUILD_STATE="ok"
 if [ ! -d "$DIST" ]; then
+  BUILD_STATE="missing"
+elif [ -d "$FRONTEND/src" ]; then
+  SRC_HASH="$("$ROOT/scripts/frontend_src_hash.sh" 2>/dev/null || true)"
+  if [ -n "$SRC_HASH" ] && [ "$SRC_HASH" != "$(cat "$DIST/.src_hash" 2>/dev/null || true)" ]; then
+    BUILD_STATE="stale"
+  fi
+fi
+if [ "$BUILD_STATE" != "ok" ]; then
   if command -v npm >/dev/null 2>&1; then
-    echo "No web build at $DIST — building it now (one-time)..."
-    (cd "$FRONTEND" && { [ -d node_modules ] || npm install --no-audit --no-fund; } && GENERATE_SOURCEMAP=false npm run build)
-    [ "$DIST" = "$ROOT/build" ] && cp -R "$FRONTEND/build" "$DIST"
+    echo "Web build at $DIST is $BUILD_STATE — building it now..."
+    "$ROOT/scripts/refresh_build.sh"
+    if [ "$DIST" != "$ROOT/build" ]; then rm -rf "$DIST"; cp -R "$ROOT/build" "$DIST"; fi
+  elif [ "$BUILD_STATE" = "stale" ]; then
+    echo "NOTE: web build at $DIST is stale but npm was not found — serving it as-is."
+    echo "      Install Node.js, or refresh ./build on a machine that has npm and pull."
   else
     echo "NOTE: no web build at $DIST and npm not found — starting API-only."
     echo "      Install Node.js and re-run, or fetch a repo with ./build committed."

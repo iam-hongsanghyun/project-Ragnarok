@@ -90,3 +90,4 @@ backend/data/pypsa_earth_run.pid
 # OS junk
 .DS_Store
 **/.DS_Store
+/build.tmp/
