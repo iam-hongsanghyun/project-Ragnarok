@@ -1,21 +1,26 @@
 /**
- * Forge — Query & Edit (database-query-like bulk edit).
+ * Forge — Adjust values (the merged Adjust + Query & Edit tool).
  *
  * Pick a component + attribute (static or temporal), narrow rows with ANDed
- * filters — each on the component itself OR on a one-hop-linked component
- * (e.g. filter `buses` by `province`, edit the `generators` on those buses) —
- * and edit: set / add / multiply, or derive a static value from another
- * attribute (`p_nom_max = 3 × p_nom`). Preview runs a server-side dry run
- * (match count + before/after); Apply writes through the session.
+ * filters, and edit. The filter column dropdown lists the component's own
+ * columns AND the columns of its linked bus(es) — `province (via bus)` — so
+ * filtering loads by a user-defined bus column needs no join wiring; the
+ * one-hop join is built silently. Values are a multi-select of the column's
+ * distinct values (union within a filter, AND across filters).
  *
- * All resolution (filters, joins, temporal series-column selection) happens on
- * the backend, which holds the full model — the thin client can't see series
- * or join across the whole model. This panel only builds the request.
+ * Static edits: set / add / multiply / derive. Temporal edits are series
+ * transforms: multiply, set (constant MW), and add with explicit semantics —
+ * MW at every snapshot or MWh over the period, applied to each matched load
+ * or divided across them (equally / proportionally to current demand).
+ * Preview runs a server-side dry run; temporal previews report period energy
+ * (MWh) before → after per load plus the group total. Apply writes through
+ * the session.
  */
 import React, { useEffect, useMemo, useState } from 'react';
-import type { WorkbookModel } from 'lib/types';
+import type { GridRow, WorkbookModel } from 'lib/types';
 import { usePersistedState } from 'shared/hooks/usePersistedState';
 import { SearchableSelect } from 'shared/components/SearchableSelect';
+import { SearchableMultiSelect } from 'shared/components/SearchableMultiSelect';
 import { NumberDraftInput } from 'shared/components/NumberDraftInput';
 import {
   getComponentSchema,
@@ -24,13 +29,16 @@ import {
 } from 'lib/constants/pypsa_schema';
 import { getSheetDistinct } from 'lib/api/session';
 import {
+  AddScope,
+  AddSplit,
+  AddUnit,
   buildRequest,
   DeriveState,
   EditOp,
-  EQUALITY_OPS,
-  FilterOp,
-  FILTER_OPS,
+  MULTI_OPS,
   NUMERIC_OPS,
+  PANEL_FILTER_OPS,
+  PanelFilterOp,
   QueryApplyResult,
   QueryEditRequest,
   QueryFilterState,
@@ -45,30 +53,55 @@ interface Props {
   onStatus: (msg: string) => void;
 }
 
-const EDIT_OPS: Array<{ value: EditOp; label: string }> = [
+const STATIC_EDIT_OPS: Array<{ value: EditOp; label: string }> = [
   { value: 'set', label: 'Set (=)' },
   { value: 'add', label: 'Add (+)' },
   { value: 'multiply', label: 'Multiply (×%)' },
   { value: 'derive', label: 'Derive (coef × attr + const)' },
 ];
 
+const TEMPORAL_EDIT_OPS: Array<{ value: EditOp; label: string }> = [
+  { value: 'multiply', label: 'Multiply (×%)' },
+  { value: 'add', label: 'Add' },
+  { value: 'set', label: 'Set constant (MW)' },
+];
+
+const ADD_UNITS: Array<{ value: AddUnit; label: string }> = [
+  { value: 'mw', label: 'MW at every snapshot' },
+  { value: 'mwh', label: 'MWh over the period' },
+];
+
+const ADD_SCOPES: Array<{ value: AddScope; label: string }> = [
+  { value: 'each', label: 'to each matched load' },
+  { value: 'total', label: 'in total, divided across matches' },
+];
+
+const ADD_SPLITS: Array<{ value: AddSplit; label: string }> = [
+  { value: 'proportional', label: 'proportionally to current demand' },
+  { value: 'equal', label: 'equally' },
+];
+
 const BUS_REFS = ['bus', 'bus0', 'bus1', 'bus2', 'bus3', 'bus4'];
+/** Encodes a linked-bus filter column option; own columns are the bare name. */
+const VIA_SEP = '::';
 
 let counter = 0;
 const newId = (): string => `qf_${(counter += 1)}`;
+
+const rowsOf = (model: WorkbookModel, sheet: string): GridRow[] => model[sheet] ?? [];
+
+/** Columns actually present on the sheet's rows (data-aware — includes
+ *  user-defined columns like `province` that no schema knows about). */
+function dataColumns(rows: GridRow[]): string[] {
+  const cols = new Set<string>();
+  for (const r of rows.slice(0, 200)) Object.keys(r).forEach((c) => cols.add(c));
+  return Array.from(cols);
+}
 
 /** Attribute names that can be edited on a component (input, static or temporal). */
 function editableAttrs(comp: PypsaComponentSchema | null): string[] {
   if (!comp) return [];
   return Array.from(new Set([...comp.input_static_attributes, ...comp.input_temporal_attributes]));
-}
-
-/** All column-name options for filtering a component: schema input attributes +
- *  `name`. Free text is allowed (SearchableSelect on string options), so custom
- *  columns like `province` that aren't in the schema can still be typed. */
-function filterColumns(comp: PypsaComponentSchema | null): string[] {
-  if (!comp) return ['name'];
-  return Array.from(new Set(['name', ...comp.input_attributes, ...comp.static_attributes]));
 }
 
 interface Spec {
@@ -78,6 +111,9 @@ interface Spec {
   filters: QueryFilterState[];
   op: EditOp;
   amount: string;
+  unit: AddUnit;
+  scope: AddScope;
+  split: AddSplit;
   derive: DeriveState;
 }
 
@@ -88,11 +124,14 @@ const BLANK_SPEC: Spec = {
   filters: [],
   op: 'multiply',
   amount: '100',
+  unit: 'mw',
+  scope: 'each',
+  split: 'proportional',
   derive: { source_attr: '', coefficient: 1, constant: 0 },
 };
 
-export function QueryEditPanel({ sheetsWithRows, onPreview, onApply, onStatus }: Props) {
-  const [spec, setSpec] = usePersistedState<Spec>('ui:forge-query', BLANK_SPEC);
+export function AdjustQueryPanel({ model, sheetsWithRows, onPreview, onApply, onStatus }: Props) {
+  const [spec, setSpec] = usePersistedState<Spec>('ui:forge-adjust-query', BLANK_SPEC);
   const [preview, setPreview] = useState<QueryPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -127,6 +166,27 @@ export function QueryEditPanel({ sheetsWithRows, onPreview, onApply, onStatus }:
   const canTemporal = storage === 'series' || storage === 'static_or_series';
   const both = canStatic && canTemporal;
   const temporal = both ? spec.temporalPref : canTemporal;
+  const seriesSheet = spec.target && spec.attribute ? `${spec.target}-${spec.attribute}` : '';
+  const seriesVisible = !!seriesSheet && sheetsWithRows.includes(seriesSheet);
+
+  // Filter column options: the target's own columns (schema + actual data,
+  // covering user-defined ones), then each linked bus's columns as
+  // `col (via bus)` — picking one silently builds the one-hop join.
+  const filterColumnOptions = useMemo(() => {
+    const own = new Set<string>(['name']);
+    (targetComp?.input_attributes ?? []).forEach((a) => own.add(a));
+    (targetComp?.static_attributes ?? []).forEach((a) => own.add(a));
+    dataColumns(rowsOf(model, spec.target)).forEach((c) => own.add(c));
+    const options = Array.from(own).map((c) => ({ value: c, label: c }));
+    const refsPresent = BUS_REFS.filter((r) => own.has(r));
+    const busCols = dataColumns(rowsOf(model, 'buses'));
+    for (const ref of refsPresent) {
+      for (const col of busCols) {
+        options.push({ value: `${ref}${VIA_SEP}${col}`, label: `${col} (via ${ref})` });
+      }
+    }
+    return options;
+  }, [targetComp, model, spec.target]);
 
   // Numeric static attributes usable as a derive source.
   const deriveSources = useMemo(
@@ -134,8 +194,10 @@ export function QueryEditPanel({ sheetsWithRows, onPreview, onApply, onStatus }:
     [targetComp],
   );
 
-  // Derive isn't supported for temporal targets (backend rejects it) — fall back.
-  const effectiveOp: EditOp = temporal && spec.op === 'derive' ? 'set' : spec.op;
+  // The op list forks on static vs temporal; keep the selection valid across
+  // the switch (temporal has no derive; both share set/add/multiply).
+  const opChoices = temporal ? TEMPORAL_EDIT_OPS : STATIC_EDIT_OPS;
+  const effectiveOp: EditOp = opChoices.some((o) => o.value === spec.op) ? spec.op : 'multiply';
 
   const setFilter = (id: string, p: Partial<QueryFilterState>) =>
     patch({ filters: spec.filters.map((f) => (f.id === id ? { ...f, ...p } : f)) });
@@ -143,7 +205,7 @@ export function QueryEditPanel({ sheetsWithRows, onPreview, onApply, onStatus }:
     patch({
       filters: [
         ...spec.filters,
-        { id: newId(), join: false, joinComponent: '', refColumn: 'bus', column: '', op: 'eq', value: '' },
+        { id: newId(), via: '', column: '', op: 'any', values: [], text: '' },
       ],
     });
   const removeFilter = (id: string) => patch({ filters: spec.filters.filter((f) => f.id !== id) });
@@ -156,6 +218,9 @@ export function QueryEditPanel({ sheetsWithRows, onPreview, onApply, onStatus }:
       filters: spec.filters,
       op: effectiveOp,
       amount: spec.amount,
+      unit: spec.unit,
+      scope: spec.scope,
+      split: spec.split,
       derive: spec.derive,
     });
 
@@ -177,23 +242,27 @@ export function QueryEditPanel({ sheetsWithRows, onPreview, onApply, onStatus }:
     try {
       const r = await onApply(request());
       const where = r.temporal ? r.seriesSheet : r.sheet;
-      onStatus(`Query applied: ${r.changed} ${r.temporal ? 'series column' : 'cell'}${r.changed === 1 ? '' : 's'} changed in ${where} (${r.matched} matched).`);
+      onStatus(`Adjusted ${r.changed} ${r.temporal ? 'series column' : 'cell'}${r.changed === 1 ? '' : 's'} in ${where} (${r.matched} matched).`);
       setPreview(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Apply failed.');
     } finally { setBusy(false); }
   };
 
+  const energySample = preview?.sampleKind === 'energyMwh';
+
   return (
     <section className="forge-section">
       <header className="forge-section-header">
-        <h3>Query &amp; edit</h3>
+        <h3>Adjust values</h3>
         <p>
-          Select a component and attribute, filter rows (on the component itself
-          or a linked one — e.g. filter <code>buses</code> by <code>province</code>,
-          edit the <code>generators</code> on those buses), then set / add / multiply,
-          or derive a value from another attribute. Works on static and temporal
-          data. Preview runs server-side before you apply.
+          Pick a component and attribute, narrow the rows with filters — a
+          filter column can live on the component itself or on its bus
+          (<code>province (via bus)</code>), matching <em>any</em> of the
+          selected values — then edit. Temporal attributes are adjusted as
+          series: multiply, set a constant, or add MW / MWh to each matched
+          load or divided across them. Preview runs server-side before you
+          apply.
         </p>
       </header>
 
@@ -217,7 +286,13 @@ export function QueryEditPanel({ sheetsWithRows, onPreview, onApply, onStatus }:
           placeholder="attribute"
           disabled={!spec.target}
           options={attrOptions.map((a) => ({ value: a, label: a }))}
-          onChange={(v) => { patch({ attribute: v }); setPreview(null); }}
+          onChange={(v) => {
+            // Default to the temporal side when the series sheet is visibly
+            // populated (e.g. loads_t-p_set exists) — the common intent.
+            const series = `${spec.target}-${v}`;
+            patch({ attribute: v, temporalPref: sheetsWithRows.includes(series) });
+            setPreview(null);
+          }}
         />
         {both && (
           <div className="sg-btn-row" style={{ marginLeft: 8 }}>
@@ -227,7 +302,9 @@ export function QueryEditPanel({ sheetsWithRows, onPreview, onApply, onStatus }:
         )}
         {spec.attribute && (
           <span className="sg-setting-hint" style={{ marginLeft: 8 }}>
-            {temporal ? 'temporal (per-snapshot series)' : 'static (single value)'}
+            {temporal
+              ? `temporal (per-snapshot series${seriesVisible ? `, ${seriesSheet} present` : ''})`
+              : 'static (single value)'}
           </span>
         )}
       </div>
@@ -242,7 +319,7 @@ export function QueryEditPanel({ sheetsWithRows, onPreview, onApply, onStatus }:
             index={i}
             filter={f}
             target={spec.target}
-            targetComp={targetComp}
+            columnOptions={filterColumnOptions}
             onChange={(p) => { setFilter(f.id, p); setPreview(null); }}
             onRemove={() => { removeFilter(f.id); setPreview(null); }}
           />
@@ -253,12 +330,12 @@ export function QueryEditPanel({ sheetsWithRows, onPreview, onApply, onStatus }:
       </div>
 
       {/* Edit */}
-      <div className="sg-setting-row">
+      <div className="sg-setting-row" style={{ flexWrap: 'wrap' }}>
         <label className="sg-setting-label">Edit</label>
         <SearchableSelect
           className="forge-adjust-select forge-adjust-action"
           value={effectiveOp}
-          options={EDIT_OPS.filter((o) => o.value !== 'derive' || !temporal)}
+          options={opChoices}
           onChange={(v) => { patch({ op: v as EditOp, amount: v === 'multiply' ? '100' : '0' }); setPreview(null); }}
         />
         {effectiveOp === 'derive' ? (
@@ -283,6 +360,31 @@ export function QueryEditPanel({ sheetsWithRows, onPreview, onApply, onStatus }:
               onCommit={(v) => { patch({ amount: String(v) }); setPreview(null); }}
             />
             {effectiveOp === 'multiply' && <span className="forge-adjust-hint">%</span>}
+            {temporal && effectiveOp === 'set' && <span className="forge-adjust-hint">MW at every snapshot</span>}
+            {temporal && effectiveOp === 'add' && (
+              <>
+                <SearchableSelect
+                  className="forge-adjust-select"
+                  value={spec.unit}
+                  options={ADD_UNITS}
+                  onChange={(v) => { patch({ unit: v as AddUnit }); setPreview(null); }}
+                />
+                <SearchableSelect
+                  className="forge-adjust-select"
+                  value={spec.scope}
+                  options={ADD_SCOPES}
+                  onChange={(v) => { patch({ scope: v as AddScope }); setPreview(null); }}
+                />
+                {spec.scope === 'total' && (
+                  <SearchableSelect
+                    className="forge-adjust-select"
+                    value={spec.split}
+                    options={ADD_SPLITS}
+                    onChange={(v) => { patch({ split: v as AddSplit }); setPreview(null); }}
+                  />
+                )}
+              </>
+            )}
           </>
         )}
       </div>
@@ -302,11 +404,20 @@ export function QueryEditPanel({ sheetsWithRows, onPreview, onApply, onStatus }:
             {preview.temporal && preview.seriesColumnsPresent != null && (
               <> · <b>{preview.seriesColumnsPresent}</b> have a column in <code>{preview.seriesSheet}</code></>
             )}
+            {energySample && preview.energyBeforeMwh != null && preview.energyAfterMwh != null && (
+              <> · total <b>{fmt(preview.energyBeforeMwh)}</b> → <b>{fmt(preview.energyAfterMwh)}</b> MWh</>
+            )}
           </p>
           {preview.warnings.map((w, i) => <p key={i} className="forge-status" style={{ color: 'var(--warn, #b45309)' }}>{w}</p>)}
           {preview.sample.length > 0 && (
             <table className="forge-preview-table" style={{ width: '100%', fontSize: 12 }}>
-              <thead><tr><th style={{ textAlign: 'left' }}>name</th><th style={{ textAlign: 'right' }}>before</th><th style={{ textAlign: 'right' }}>after</th></tr></thead>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: 'left' }}>name</th>
+                  <th style={{ textAlign: 'right' }}>{energySample ? 'MWh before' : 'before'}</th>
+                  <th style={{ textAlign: 'right' }}>{energySample ? 'MWh after' : 'after'}</th>
+                </tr>
+              </thead>
               <tbody>
                 {preview.sample.map((s) => (
                   <tr key={s.name}>
@@ -333,99 +444,67 @@ function fmt(v: unknown): string {
 // ── one filter row ──────────────────────────────────────────────────────────────
 
 function FilterRow({
-  index, filter, target, targetComp, onChange, onRemove,
+  index, filter, target, columnOptions, onChange, onRemove,
 }: {
   index: number;
   filter: QueryFilterState;
   target: string;
-  targetComp: PypsaComponentSchema | null;
+  columnOptions: Array<{ value: string; label: string }>;
   onChange: (p: Partial<QueryFilterState>) => void;
   onRemove: () => void;
 }) {
-  // The sheet the filter's column lives on: the linked component when joining,
-  // else the target. Determines the schema columns + distinct-value lookups.
-  const filterSheet = filter.join ? filter.joinComponent : target;
-  const filterComp = useMemo(() => getComponentSchema(filterSheet), [filterSheet]);
-  const columns = useMemo(() => filterColumns(filterComp), [filterComp]);
+  // The sheet the filter's column lives on: buses when linked, else the target.
+  const filterSheet = filter.via ? 'buses' : target;
 
-  // Bus-reference columns present on the TARGET, for the join's ref column.
-  const refCols = useMemo(() => {
-    const attrs = new Set([...(targetComp?.input_attributes ?? []), ...(targetComp?.static_attributes ?? [])]);
-    const present = BUS_REFS.filter((b) => attrs.has(b));
-    return present.length ? present : BUS_REFS;
-  }, [targetComp]);
-
-  const componentOptions = useMemo(
-    () => PYPSA_COMPONENTS.filter((c) => c.sheet_name !== 'snapshots').map((c) => ({ value: c.sheet_name, label: c.sheet_name })),
-    [],
-  );
-
-  // Distinct values for the value dropdown (equality ops on a real sheet+column).
+  // Distinct values for the multi-select (server-side DISTINCT, on demand).
   const [distinct, setDistinct] = useState<string[]>([]);
+  const wantsValues = MULTI_OPS.includes(filter.op);
   useEffect(() => {
     let live = true;
-    if (!filterSheet || !filter.column || !EQUALITY_OPS.includes(filter.op)) { setDistinct([]); return; }
+    if (!filterSheet || !filter.column || !wantsValues) { setDistinct([]); return; }
     getSheetDistinct(filterSheet, filter.column).then((v) => { if (live) setDistinct(v); }).catch(() => { if (live) setDistinct([]); });
     return () => { live = false; };
-  }, [filterSheet, filter.column, filter.op]);
+  }, [filterSheet, filter.column, wantsValues]);
 
-  const showValueDropdown = EQUALITY_OPS.includes(filter.op) && distinct.length > 0;
+  const encoded = filter.via ? `${filter.via}${VIA_SEP}${filter.column}` : filter.column;
 
   return (
     <div className="forge-adjust-card">
       <div className="forge-adjust-row forge-adjust-filter" style={{ flexWrap: 'wrap', gap: 6 }}>
         <span className="forge-adjust-and">{index === 0 ? 'where' : 'and'}</span>
-        <label className="forge-check" title="Evaluate this filter on a linked component and match through a reference column">
-          <input type="checkbox" checked={filter.join} onChange={(e) => onChange({ join: e.target.checked })} /> linked
-        </label>
-        {filter.join && (
-          <>
-            <SearchableSelect
-              className="forge-adjust-select"
-              value={filter.joinComponent}
-              placeholder="linked component"
-              options={componentOptions}
-              onChange={(v) => onChange({ joinComponent: v, column: '' })}
-            />
-            <span className="forge-adjust-hint">via</span>
-            <SearchableSelect
-              className="forge-adjust-select"
-              value={filter.refColumn}
-              placeholder="ref column"
-              options={refCols.map((c) => ({ value: c, label: c }))}
-              onChange={(v) => onChange({ refColumn: v })}
-            />
-            <span className="forge-adjust-hint">where</span>
-          </>
-        )}
         <SearchableSelect
           className="forge-adjust-select"
-          value={filter.column}
+          value={encoded}
           placeholder="column"
-          options={columns}
-          onChange={(v) => onChange({ column: v, value: '' })}
+          options={columnOptions}
+          onChange={(v) => {
+            const sep = v.indexOf(VIA_SEP);
+            const via = sep > 0 ? v.slice(0, sep) : '';
+            const column = sep > 0 ? v.slice(sep + VIA_SEP.length) : v;
+            onChange({ via, column, values: [], text: '' });
+          }}
         />
         <SearchableSelect
           className="forge-adjust-select forge-adjust-action"
           value={filter.op}
-          options={FILTER_OPS}
-          onChange={(v) => onChange({ op: v as FilterOp, value: '' })}
+          options={PANEL_FILTER_OPS}
+          onChange={(v) => onChange({ op: v as PanelFilterOp, values: [], text: '' })}
         />
-        {showValueDropdown ? (
-          <SearchableSelect
+        {wantsValues ? (
+          <SearchableMultiSelect
             className="forge-adjust-select"
-            value={filter.value}
-            placeholder="value"
+            values={filter.values}
+            placeholder="values"
             options={distinct}
-            onChange={(v) => onChange({ value: v })}
+            onChange={(values) => onChange({ values })}
           />
         ) : (
           <input
             className="forge-number"
             type={NUMERIC_OPS.includes(filter.op) ? 'number' : 'text'}
-            value={filter.value}
-            placeholder={filter.op === 'in' ? 'a, b, c' : 'value'}
-            onChange={(e) => onChange({ value: e.target.value })}
+            value={filter.text}
+            placeholder="value"
+            onChange={(e) => onChange({ text: e.target.value })}
           />
         )}
         <button type="button" className="forge-adjust-remove" onClick={onRemove} aria-label="Remove filter">×</button>

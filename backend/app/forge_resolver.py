@@ -10,14 +10,18 @@ directly against an in-memory ``model: dict[str, list[dict]]`` (the same shape
 ``routers/forge_query.py`` is the thin session-loading wrapper that executes the
 actions this module returns.
 
-Bounds (v1): one target component, one target attribute, ANDed filters, joins are
+Bounds: one target component, one target attribute, ANDed filters, joins are
 one hop only. Static edits: set / add / multiply / derive (``coef·src + const``).
-Temporal edits: set / add / multiply by a constant only — derive is static-only.
+Temporal edits: set (constant) / multiply / add — where **add** carries demand-
+adjustment semantics (unit MW-per-snapshot or MWh-over-period; applied to each
+matched series or split across them, equally or proportionally to current
+energy). Derive is static-only.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from .timeseries import series_index_col
@@ -34,6 +38,11 @@ ORDINAL_OPS = {"gt", "lt", "ge", "le"}
 VALID_OPS = STRING_OPS | ORDINAL_OPS
 
 EDIT_OPS = {"set", "add", "multiply", "derive"}
+
+# Temporal `add` semantics (ignored for every other op / static edits).
+ADD_UNITS = {"mw", "mwh"}
+ADD_SCOPES = {"each", "total"}
+ADD_SPLITS = {"proportional", "equal"}
 
 
 class ForgeQueryError(ValueError):
@@ -71,6 +80,16 @@ class Edit:
     source_attr: str | None = None
     coefficient: float = 1.0
     constant: float = 0.0
+    # temporal `add` semantics (see module docstring):
+    #   unit   'mw'  — amount is MW at every snapshot
+    #          'mwh' — amount is energy over the whole series window
+    #   scope  'each'  — every matched series gets the full amount
+    #          'total' — the amount is the change of the GROUP total, divided
+    #   split  how a 'total' amount divides across the matched series:
+    #          'proportional' (by current period energy) or 'equal'
+    unit: str = "mw"
+    scope: str = "each"
+    split: str = "proportional"
 
 
 @dataclass
@@ -244,33 +263,163 @@ def series_sheet_name(target: str, attribute: str) -> str:
     return f"{target}-{attribute}"
 
 
-def _temporal_after(before: float | None, edit: Edit) -> float | None:
-    """Preview value for one temporal cell (blank stays blank for multiply/add)."""
-    if edit.op == "set":
-        return float(edit.amount or 0.0)
-    if before is None:
-        return None
-    if edit.op == "add":
-        return before + float(edit.amount or 0.0)
-    if edit.op == "multiply":
-        return before * float(edit.amount or 0.0)
-    raise ForgeQueryError("Derive-from-attribute is supported for static attributes only.")
+# ── temporal planning ───────────────────────────────────────────────────────────
+#
+# A temporal edit is planned as one primitive per matched series column —
+# scale (×factor), offset (+delta MW) or set (constant MW) — from the edit's
+# op / unit / scope / split. Planning computes each column's period energy, so
+# preview can show MWh before → after and apply emits exact per-column steps.
+
+_TS_FORMATS = (
+    "%Y-%m-%d %H:%M",
+    "%Y-%m-%d %H:%M:%S",
+    "%Y-%m-%dT%H:%M",
+    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%d",
+)
 
 
-def resolve_temporal(
+def _parse_ts(value: Any) -> datetime | None:
+    s = _s(value)
+    for fmt in _TS_FORMATS:
+        try:
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _step_hours(rows: list[dict], index_col: str) -> float:
+    """Snapshot step Δt [h] from the first two parseable index values (1.0 when
+    the index isn't timestamps — e.g. integer periods — matching the app's
+    hourly-snapshot convention)."""
+    stamps = [t for r in rows[:3] if (t := _parse_ts(r.get(index_col))) is not None]
+    if len(stamps) >= 2 and stamps[1] > stamps[0]:
+        return (stamps[1] - stamps[0]).total_seconds() / 3600.0
+    return 1.0
+
+
+@dataclass
+class ColumnPlan:
+    """The primitive one series column receives, with its period energy.
+
+    Attributes:
+        column:   Series column (component name).
+        kind:     'scale' | 'offset' | 'set' | 'none' (no-op).
+        value:    factor [-] (scale), delta [MW] (offset), constant [MW] (set).
+        e_before: Period energy before the edit [MWh].
+        e_after:  Period energy after the edit [MWh].
+    """
+
+    column: str
+    kind: str
+    value: float
+    e_before: float
+    e_after: float
+
+
+@dataclass
+class TemporalPlan:
+    sheet: str
+    present: list[str]
+    dt_hours: float
+    n_rows: int
+    columns: list[ColumnPlan]
+
+    @property
+    def energy_before(self) -> float:
+        return sum(c.e_before for c in self.columns)
+
+    @property
+    def energy_after(self) -> float:
+        return sum(c.e_after for c in self.columns)
+
+
+def _column_stats(
+    rows: list[dict], columns: list[str]
+) -> dict[str, tuple[float, float, int]]:
+    """Per column: (sum, min, count) over its finite-numeric cells."""
+    stats = {c: [0.0, float("inf"), 0] for c in columns}
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        for c in columns:
+            v = _to_float(r.get(c))
+            if v is None:
+                continue
+            s = stats[c]
+            s[0] += v
+            if v < s[1]:
+                s[1] = v
+            s[2] += 1
+    return {c: (s[0], (s[1] if s[2] else 0.0), s[2]) for c, s in stats.items()}
+
+
+_EPS = 1e-9
+
+
+def _delta_energy(
+    e_by_col: dict[str, float], amount: float, scope: str, split: str
+) -> dict[str, float]:
+    """Target energy change ΔE_i [MWh] per column for a temporal ``add``.
+
+    Algorithm:
+        each               ΔE_i = A
+        total + equal      ΔE_i = A / n
+        total + proportional  ΔE_i = A · E_i / E   (E = Σ E_i > 0)
+
+        $$ \\Delta E_i = A,\\quad \\frac{A}{n},\\quad A\\frac{E_i}{E} $$
+
+    Symbols: A entered amount [MWh]; n matched-series count [-]; E_i column i's
+    period energy [MWh].
+    """
+    n = len(e_by_col)
+    if scope == "each":
+        return {c: amount for c in e_by_col}
+    if split == "equal":
+        return {c: amount / n for c in e_by_col}
+    total = sum(e_by_col.values())
+    if total <= _EPS:
+        raise ForgeQueryError(
+            "The matched series carry no energy to split proportionally — "
+            "use an equal split or 'each'."
+        )
+    return {c: amount * e / total for c, e in e_by_col.items()}
+
+
+def plan_temporal(
     model: dict[str, list[dict]], target: str, attribute: str, names: list[str], edit: Edit
-) -> dict[str, Any]:
-    """A ``transform_seq`` action over the matched component-name columns.
+) -> TemporalPlan:
+    """Plan a temporal edit as per-column primitives with energy accounting.
 
-    Temporal ops map onto the vetted vectorised ``transform_series`` primitive:
-    multiply→``scale``, add→``offset``, set→``set`` (one atomic transform that
-    overwrites every matched cell with the constant, blanks included — so a
-    "set = 7" fills the whole series and preview matches apply). Derive is
-    rejected. Raises when the series sheet is absent (don't invent a snapshot
-    index).
+    Algorithm (add; A = amount, Δt snapshot step [h], k_i numeric-cell count,
+    E_i = Σ_t p_i(t)·Δt the column's period energy [MWh]):
+
+        unit = mw   each column gets a flat adder δ_i [MW]:
+                    each → δ_i = A; total/equal → δ_i = A/n;
+                    total/proportional → δ_i = A·E_i/E
+
+                    $$ p_i(t) \\leftarrow p_i(t) + \\delta_i $$
+
+        unit = mwh  each column's energy target rises by ΔE_i (see
+                    :func:`_delta_energy`), realised shape-preservingly as a
+                    scale when E_i > 0, else as a flat adder:
+
+                    $$ f_i = \\frac{E_i + \\Delta E_i}{E_i} \\quad (E_i > 0);
+                       \\qquad \\delta_i = \\frac{\\Delta E_i}{k_i\\,\\Delta t}
+                       \\quad (E_i = 0) $$
+
+                    f_i = (E_i + dE_i)/E_i  or  delta_i = dE_i/(k_i*dt)
+
+    Negative amounts must not push any cell below zero (offset: min+δ ≥ 0) nor
+    remove more energy than a column has (scale: f_i ≥ 0) — mirroring the
+    dashboard demand-adjustment guards. Raises :class:`ForgeQueryError` on
+    violation, unknown unit/scope/split, a missing series sheet, or derive.
     """
     if edit.op == "derive":
         raise ForgeQueryError("Derive-from-attribute is supported for static attributes only.")
+    if edit.op not in EDIT_OPS:
+        raise ForgeQueryError(f"Unknown edit op {edit.op!r}.")
     sheet = series_sheet_name(target, attribute)
     rows = model.get(sheet)
     if not rows:
@@ -281,16 +430,115 @@ def resolve_temporal(
     index_col = series_index_col(cols)
     value_cols = {c for c in cols if c != index_col}
     present = [n for n in names if n in value_cols]
+    dt = _step_hours(rows, index_col)
+    n_rows = len(rows)
     if not present:
-        return {"kind": "transform_seq", "sheet": sheet, "steps": [], "present": 0}
+        return TemporalPlan(sheet=sheet, present=[], dt_hours=dt, n_rows=n_rows, columns=[])
+
+    stats = _column_stats(rows, present)
+    e_by_col = {c: stats[c][0] * dt for c in present}
     amount = float(edit.amount or 0.0)
+    plans: list[ColumnPlan] = []
+
     if edit.op == "multiply":
-        steps = [("scale", {"columns": present, "factor": amount})]
-    elif edit.op == "add":
-        steps = [("offset", {"columns": present, "delta": amount})]
-    else:  # set: one atomic overwrite of every matched cell with the constant
-        steps = [("set", {"columns": present, "value": amount})]
-    return {"kind": "transform_seq", "sheet": sheet, "steps": steps, "present": len(present)}
+        for c in present:
+            e = e_by_col[c]
+            plans.append(ColumnPlan(c, "scale", amount, e, e * amount))
+    elif edit.op == "set":
+        # `set` overwrites EVERY cell (blanks included) with a constant MW.
+        for c in present:
+            plans.append(ColumnPlan(c, "set", amount, e_by_col[c], amount * n_rows * dt))
+    else:  # add
+        if edit.unit not in ADD_UNITS:
+            raise ForgeQueryError(f"Unknown add unit {edit.unit!r} (expected mw|mwh).")
+        if edit.scope not in ADD_SCOPES:
+            raise ForgeQueryError(f"Unknown add scope {edit.scope!r} (expected each|total).")
+        if edit.split not in ADD_SPLITS:
+            raise ForgeQueryError(
+                f"Unknown add split {edit.split!r} (expected proportional|equal)."
+            )
+        if edit.unit == "mw":
+            if edit.scope == "each":
+                deltas = {c: amount for c in present}
+            elif edit.split == "equal":
+                deltas = {c: amount / len(present) for c in present}
+            else:
+                total = sum(e_by_col.values())
+                if total <= _EPS:
+                    raise ForgeQueryError(
+                        "The matched series carry no energy to split proportionally — "
+                        "use an equal split or 'each'."
+                    )
+                deltas = {c: amount * e_by_col[c] / total for c in present}
+            for c in present:
+                delta = deltas[c]
+                _sum, mn, k = stats[c]
+                if delta < 0 and mn + delta < -_EPS:
+                    raise ForgeQueryError(
+                        f"Adding {delta:.3f} MW would push '{c}' below zero "
+                        f"(min {mn + delta:.3f} MW)."
+                    )
+                plans.append(ColumnPlan(c, "offset", delta, e_by_col[c], e_by_col[c] + delta * k * dt))
+        else:  # mwh over the period
+            d_energy = _delta_energy(e_by_col, amount, edit.scope, edit.split)
+            for c in present:
+                e, de = e_by_col[c], d_energy[c]
+                _sum, _mn, k = stats[c]
+                if abs(de) <= _EPS:
+                    plans.append(ColumnPlan(c, "none", 0.0, e, e))
+                    continue
+                if e > _EPS:
+                    factor = (e + de) / e
+                    if factor < -_EPS:
+                        raise ForgeQueryError(
+                            f"Removing {-de:.1f} MWh exceeds the {e:.1f} MWh "
+                            f"available on '{c}'."
+                        )
+                    plans.append(ColumnPlan(c, "scale", factor, e, e + de))
+                else:
+                    # Zero-energy series can't be scaled into shape — fall back
+                    # to a flat adder achieving the same ΔE over its k cells.
+                    if k == 0:
+                        raise ForgeQueryError(
+                            f"'{c}' has no numeric cells in '{sheet}' to receive energy."
+                        )
+                    if de < 0:
+                        raise ForgeQueryError(
+                            f"Removing {-de:.1f} MWh exceeds the 0.0 MWh available on '{c}'."
+                        )
+                    plans.append(ColumnPlan(c, "offset", de / (k * dt), e, e + de))
+
+    return TemporalPlan(sheet=sheet, present=present, dt_hours=dt, n_rows=n_rows, columns=plans)
+
+
+def resolve_temporal(
+    model: dict[str, list[dict]], target: str, attribute: str, names: list[str], edit: Edit
+) -> dict[str, Any]:
+    """A ``transform_seq`` action over the matched component-name columns.
+
+    The plan's per-column primitives map onto the vetted vectorised
+    ``transform_series`` steps — scale / offset / set — grouped so columns
+    sharing the same value ride one step (a uniform edit stays a single step;
+    a proportional split emits one step per distinct value). Raises when the
+    series sheet is absent (don't invent a snapshot index).
+    """
+    plan = plan_temporal(model, target, attribute, names, edit)
+    grouped: dict[tuple[str, float], list[str]] = {}
+    for cp in plan.columns:
+        if cp.kind == "none":
+            continue
+        grouped.setdefault((cp.kind, cp.value), []).append(cp.column)
+    param_key = {"scale": "factor", "offset": "delta", "set": "value"}
+    steps = [
+        (kind, {"columns": cols, param_key[kind]: value})
+        for (kind, value), cols in grouped.items()
+    ]
+    return {
+        "kind": "transform_seq",
+        "sheet": plan.sheet,
+        "steps": steps,
+        "present": len(plan.present),
+    }
 
 
 # ── preview (pure; no writes) ────────────────────────────────────────────────────
@@ -299,7 +547,13 @@ _SAMPLE = 20
 
 
 def preview(model: dict[str, list[dict]], query: Query) -> dict[str, Any]:
-    """Match count + a before/after sample, without mutating anything."""
+    """Match count + a before/after sample, without mutating anything.
+
+    Temporal previews report PERIOD ENERGY [MWh] per matched series (before →
+    after) plus the group total, so the add/split semantics are visible before
+    apply. A plan that would fail (below-zero push, missing sheet, …) previews
+    as a warning instead of an error.
+    """
     if query.edit is None:
         raise ForgeQueryError("An edit is required.")
     names = match_target_names(model, query.target, query.filters)
@@ -309,20 +563,15 @@ def preview(model: dict[str, list[dict]], query: Query) -> dict[str, Any]:
 
     if query.temporal:
         sheet = series_sheet_name(query.target, query.attribute)
-        rows = model.get(sheet) or []
-        if not rows:
-            warnings.append(f"No series sheet '{sheet}' in the session yet.")
-            present = 0
-        else:
-            cols = list(rows[0].keys())
-            index_col = series_index_col(cols)
-            value_cols = {c for c in cols if c != index_col}
-            present_names = [n for n in names if n in value_cols]
-            present = len(present_names)
-            first = rows[0]
-            for n in present_names[:_SAMPLE]:
-                before = _to_float(first.get(n))
-                sample.append({"name": n, "before": before, "after": _temporal_after(before, query.edit)})
+        plan: TemporalPlan | None = None
+        try:
+            plan = plan_temporal(model, query.target, query.attribute, names, query.edit)
+        except ForgeQueryError as exc:
+            warnings.append(str(exc))
+        present = len(plan.present) if plan else 0
+        if plan:
+            for cp in plan.columns[:_SAMPLE]:
+                sample.append({"name": cp.column, "before": cp.e_before, "after": cp.e_after})
             if present < len(names):
                 warnings.append(
                     f"{len(names)} matched, but {present} have a column in '{sheet}'."
@@ -334,6 +583,9 @@ def preview(model: dict[str, list[dict]], query: Query) -> dict[str, Any]:
             "seriesSheet": sheet,
             "seriesColumnsPresent": present,
             "sample": sample,
+            "sampleKind": "energyMwh",
+            "energyBeforeMwh": plan.energy_before if plan else None,
+            "energyAfterMwh": plan.energy_after if plan else None,
             "warnings": warnings,
         }
 
@@ -355,5 +607,8 @@ def preview(model: dict[str, list[dict]], query: Query) -> dict[str, Any]:
         "seriesSheet": None,
         "seriesColumnsPresent": None,
         "sample": sample,
+        "sampleKind": "value",
+        "energyBeforeMwh": None,
+        "energyAfterMwh": None,
         "warnings": warnings,
     }

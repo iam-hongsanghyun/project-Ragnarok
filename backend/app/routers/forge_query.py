@@ -43,6 +43,11 @@ class EditModel(BaseModel):
     source_attr: str | None = None
     coefficient: float = 1.0
     constant: float = 0.0
+    # Temporal `add` semantics (ignored otherwise): MW-per-snapshot vs
+    # MWh-over-period, applied to each matched series or split across them.
+    unit: Literal["mw", "mwh"] = "mw"
+    scope: Literal["each", "total"] = "each"
+    split: Literal["proportional", "equal"] = "proportional"
 
 
 class QueryEditRequest(BaseModel):
@@ -74,6 +79,9 @@ def _to_query(req: QueryEditRequest) -> fr.Query:
         source_attr=req.edit.source_attr,
         coefficient=req.edit.coefficient,
         constant=req.edit.constant,
+        unit=req.edit.unit,
+        scope=req.edit.scope,
+        split=req.edit.split,
     )
     return fr.Query(
         target=req.target,

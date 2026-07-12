@@ -26,10 +26,9 @@ import {
   type SnapResult,
 } from 'lib/forge/snap';
 import { nonEmptySheets, roundFindings, snapFindings, type ForgeFinding } from 'lib/forge/validate';
-import { AdjustPanel } from './ForgeView.features/AdjustPanel';
 import { CostCurvePanel } from './ForgeView.features/CostCurvePanel';
 import { CapacityTargetPanel, type ScaleCarrierCapacityResult } from './ForgeView.features/CapacityTargetPanel';
-import { QueryEditPanel } from './ForgeView.features/QueryEditPanel';
+import { AdjustQueryPanel } from './ForgeView.features/AdjustQueryPanel';
 import type { QueryApplyResult, QueryEditRequest, QueryPreview } from 'lib/forge/queryEdit';
 
 interface Props {
@@ -105,7 +104,7 @@ export interface AttachProfilesResult {
   sites: number;
 }
 
-type Operation = 'round' | 'adjust' | 'query' | 'costcurve' | 'snap' | 'cluster' | 'capacityTarget' | 'renewable' | 'hydroInflow' | 'retarget' | 'forecast' | 'driverForecast' | 'evDemand';
+type Operation = 'round' | 'adjust' | 'costcurve' | 'snap' | 'cluster' | 'capacityTarget' | 'renewable' | 'hydroInflow' | 'retarget' | 'forecast' | 'driverForecast' | 'evDemand';
 type OpGroup = 'Numeric' | 'Economics' | 'Geospatial' | 'Topology' | 'Temporal';
 
 /** Catalog of Forge tools, grouped. Add a new tool by adding an entry here
@@ -113,7 +112,6 @@ type OpGroup = 'Numeric' | 'Economics' | 'Geospatial' | 'Topology' | 'Temporal';
 const OPERATIONS: Array<{ id: Operation; label: string; group: OpGroup }> = [
   { id: 'round', label: 'Round / Ceil / Floor', group: 'Numeric' },
   { id: 'adjust', label: 'Adjust values', group: 'Numeric' },
-  { id: 'query', label: 'Query & edit', group: 'Numeric' },
   { id: 'costcurve', label: 'Marginal cost curve', group: 'Economics' },
   { id: 'snap', label: 'Snap to nearest bus', group: 'Geospatial' },
   { id: 'renewable', label: 'Attach renewable profiles', group: 'Geospatial' },
@@ -259,7 +257,9 @@ export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEdi
   // Persisted so the chosen tool + validation result survive leaving and
   // returning to the Forge tab (the view unmounts on tab switch). The findings
   // scan the whole model, so these three drivers fully restore the result.
-  const [operation, setOperation] = usePersistedState<Operation>('ui:forge-operation', 'round');
+  // A stored 'query' (the pre-merge Query & edit tool) maps onto 'adjust'.
+  const [operationRaw, setOperation] = usePersistedState<Operation | 'query'>('ui:forge-operation', 'round');
+  const operation: Operation = operationRaw === 'query' ? 'adjust' : operationRaw;
   const [validated, setValidated] = usePersistedState<boolean>('ui:forge-validated', false);
   const [status, setStatus] = useState<string | null>(null);
 
@@ -738,15 +738,8 @@ export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEdi
             </div>
           </section>
         ) : operation === 'adjust' ? (
-          <AdjustPanel
-            model={model}
-            sheetsWithRows={sheetsWithRows}
-            onApplySheets={onApplySheets}
-            onStatus={setStatus}
-          />
-        ) : operation === 'query' ? (
           onQueryEditPreview && onQueryEditApply ? (
-            <QueryEditPanel
+            <AdjustQueryPanel
               model={model}
               sheetsWithRows={sheetsWithRows}
               onPreview={onQueryEditPreview}
@@ -754,7 +747,7 @@ export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEdi
               onStatus={setStatus}
             />
           ) : (
-            <div className="view-empty"><p>Query &amp; edit needs a live backend session.</p></div>
+            <div className="view-empty"><p>Adjust values needs a live backend session.</p></div>
           )
         ) : operation === 'costcurve' ? (
           <CostCurvePanel

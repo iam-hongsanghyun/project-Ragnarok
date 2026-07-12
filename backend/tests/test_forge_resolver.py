@@ -170,18 +170,20 @@ def test_temporal_set_is_single_atomic_step() -> None:
     assert action["steps"] == [("set", {"columns": ["L1"], "value": 7.0})]
 
 
-def test_temporal_set_preview_matches_apply_on_blank_cell() -> None:
-    # A blank series cell: preview must promise what apply delivers. A 'set'
-    # fills blanks (amount), while multiply/add leave a blank blank.
+def test_temporal_set_preview_energy_counts_blanks() -> None:
+    # Preview reports PERIOD ENERGY. A 'set' overwrites blanks too, so its
+    # after-energy is amount × n_snapshots × Δt; multiply leaves blanks blank,
+    # so its energies only count numeric cells.
     model = _model()
-    model["loads-p_set"][0]["L1"] = None
+    model["loads-p_set"][0]["L1"] = None  # E_before = 12 MWh (one numeric cell)
     out = fr.preview(
         model,
         fr.Query(target="loads", attribute="p_set", temporal=True,
                  filters=[fr.Filter(column="name", op="eq", value="L1")],
                  edit=fr.Edit(op="set", amount=7)),
     )
-    assert out["sample"][0] == {"name": "L1", "before": None, "after": 7.0}
+    assert out["sample"][0] == {"name": "L1", "before": 12.0, "after": 14.0}
+    assert out["sampleKind"] == "energyMwh"
 
     out_mul = fr.preview(
         model,
@@ -189,7 +191,7 @@ def test_temporal_set_preview_matches_apply_on_blank_cell() -> None:
                  filters=[fr.Filter(column="name", op="eq", value="L1")],
                  edit=fr.Edit(op="multiply", amount=2)),
     )
-    assert out_mul["sample"][0] == {"name": "L1", "before": None, "after": None}
+    assert out_mul["sample"][0] == {"name": "L1", "before": 12.0, "after": 24.0}
 
 
 def test_temporal_derive_rejected() -> None:
@@ -228,7 +230,9 @@ def test_preview_static_before_after() -> None:
     assert {s["name"]: s["after"] for s in out["sample"]} == {"g1": 50.0, "g2": 100.0}
 
 
-def test_preview_temporal_warns_on_missing_columns() -> None:
+def test_preview_temporal_reports_energies() -> None:
+    # E over the 2 hourly snapshots: L1 = 22 MWh, L3 = 66 MWh. Adding 1 MW at
+    # every snapshot (default unit/scope) adds 2 MWh to each.
     out = fr.preview(
         _model(),
         fr.Query(target="loads", attribute="p_set", temporal=True,
@@ -240,4 +244,143 @@ def test_preview_temporal_warns_on_missing_columns() -> None:
     assert out["seriesSheet"] == "loads-p_set"
     assert out["matched"] == 2  # L1, L3 (Seoul)
     assert out["seriesColumnsPresent"] == 2
-    assert {s["name"]: s["after"] for s in out["sample"]} == {"L1": 11.0, "L3": 31.0}
+    assert {s["name"]: (s["before"], s["after"]) for s in out["sample"]} == {
+        "L1": (22.0, 24.0), "L3": (66.0, 68.0),
+    }
+    assert out["energyBeforeMwh"] == pytest.approx(88.0)
+    assert out["energyAfterMwh"] == pytest.approx(92.0)
+
+
+def test_preview_surfaces_plan_error_as_warning() -> None:
+    # A plan that would fail on apply (below-zero push) previews as a warning
+    # with the match count intact, not as an HTTP-level error.
+    out = fr.preview(
+        _model(),
+        fr.Query(target="loads", attribute="p_set", temporal=True,
+                 filters=[fr.Filter(column="name", op="eq", value="L1")],
+                 edit=fr.Edit(op="add", amount=-11)),  # L1 min is 10 MW
+    )
+    assert out["matched"] == 1
+    assert out["seriesColumnsPresent"] == 0
+    assert out["sample"] == []
+    assert any("below zero" in w for w in out["warnings"])
+
+
+# ── temporal add matrix (unit × scope × split) ──────────────────────────────────
+# Fixture energies over the 2 hourly snapshots: L1 = 22, L2 = 44, L3 = 66 MWh
+# (E = 132 MWh).
+
+ALL = ["L1", "L2", "L3"]
+
+
+def _steps_by_column(action: dict) -> dict[str, tuple[str, float]]:
+    """Flatten grouped steps to {column: (kind, value)} for easy assertions."""
+    out: dict[str, tuple[str, float]] = {}
+    for kind, params in action["steps"]:
+        value = params.get("factor", params.get("delta", params.get("value")))
+        for c in params["columns"]:
+            out[c] = (kind, value)
+    return out
+
+
+def test_add_mw_total_proportional_splits_by_energy() -> None:
+    action = fr.resolve_temporal(
+        _model(), "loads", "p_set", ALL,
+        fr.Edit(op="add", amount=30, unit="mw", scope="total", split="proportional"),
+    )
+    assert _steps_by_column(action) == {
+        "L1": ("offset", pytest.approx(5.0)),   # 30 × 22/132
+        "L2": ("offset", pytest.approx(10.0)),  # 30 × 44/132
+        "L3": ("offset", pytest.approx(15.0)),  # 30 × 66/132
+    }
+
+
+def test_add_mw_total_equal_is_one_grouped_step() -> None:
+    action = fr.resolve_temporal(
+        _model(), "loads", "p_set", ALL,
+        fr.Edit(op="add", amount=30, unit="mw", scope="total", split="equal"),
+    )
+    assert action["steps"] == [("offset", {"columns": ALL, "delta": pytest.approx(10.0)})]
+
+
+def test_add_mwh_each_scales_each_column() -> None:
+    action = fr.resolve_temporal(
+        _model(), "loads", "p_set", ALL,
+        fr.Edit(op="add", amount=22, unit="mwh", scope="each"),
+    )
+    assert _steps_by_column(action) == {
+        "L1": ("scale", pytest.approx(2.0)),        # (22+22)/22
+        "L2": ("scale", pytest.approx(1.5)),        # (44+22)/44
+        "L3": ("scale", pytest.approx(4.0 / 3.0)),  # (66+22)/66
+    }
+
+
+def test_add_mwh_total_proportional_is_uniform_factor() -> None:
+    # ΔE_i = A·E_i/E ⇒ factor 1 + A/E is identical for every column, so the
+    # grouped action is ONE scale step (the dashboard add_mwh math).
+    action = fr.resolve_temporal(
+        _model(), "loads", "p_set", ALL,
+        fr.Edit(op="add", amount=66, unit="mwh", scope="total", split="proportional"),
+    )
+    assert action["steps"] == [("scale", {"columns": ALL, "factor": pytest.approx(1.5)})]
+
+
+def test_add_mwh_total_equal_scales_by_share() -> None:
+    action = fr.resolve_temporal(
+        _model(), "loads", "p_set", ALL,
+        fr.Edit(op="add", amount=66, unit="mwh", scope="total", split="equal"),
+    )
+    assert _steps_by_column(action) == {
+        "L1": ("scale", pytest.approx(2.0)),        # (22+22)/22
+        "L2": ("scale", pytest.approx(1.5)),        # (44+22)/44
+        "L3": ("scale", pytest.approx(4.0 / 3.0)),  # (66+22)/66
+    }
+
+
+def test_add_mwh_zero_energy_column_falls_back_to_offset() -> None:
+    model = _model()
+    for row in model["loads-p_set"]:
+        row["L1"] = 0.0
+    action = fr.resolve_temporal(
+        model, "loads", "p_set", ["L1"],
+        fr.Edit(op="add", amount=10, unit="mwh", scope="each"),
+    )
+    # 10 MWh over 2 numeric cells × 1 h → flat +5 MW.
+    assert action["steps"] == [("offset", {"columns": ["L1"], "delta": pytest.approx(5.0)})]
+
+
+def test_add_mw_negative_below_zero_raises() -> None:
+    with pytest.raises(fr.ForgeQueryError, match="below zero"):
+        fr.resolve_temporal(
+            _model(), "loads", "p_set", ["L1"],
+            fr.Edit(op="add", amount=-11, unit="mw", scope="each"),  # min(L1)=10
+        )
+
+
+def test_add_mwh_removing_more_than_available_raises() -> None:
+    with pytest.raises(fr.ForgeQueryError, match="exceeds"):
+        fr.resolve_temporal(
+            _model(), "loads", "p_set", ["L1"],
+            fr.Edit(op="add", amount=-30, unit="mwh", scope="each"),  # E(L1)=22
+        )
+
+
+def test_add_proportional_on_zero_energy_group_raises() -> None:
+    model = _model()
+    for row in model["loads-p_set"]:
+        row["L1"] = 0.0
+    with pytest.raises(fr.ForgeQueryError, match="proportionally"):
+        fr.resolve_temporal(
+            model, "loads", "p_set", ["L1"],
+            fr.Edit(op="add", amount=10, unit="mw", scope="total", split="proportional"),
+        )
+
+
+def test_add_unknown_unit_scope_split_rejected() -> None:
+    for bad in (
+        fr.Edit(op="add", amount=1, unit="kw"),
+        fr.Edit(op="add", amount=1, scope="some"),
+        fr.Edit(op="add", amount=1, scope="total", split="fibonacci"),
+    ):
+        with pytest.raises(fr.ForgeQueryError):
+            fr.resolve_temporal(_model(), "loads", "p_set", ["L1"], bad)
