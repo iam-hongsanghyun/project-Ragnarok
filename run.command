@@ -98,6 +98,23 @@ else
   echo "Frontend build cache is up to date."
 fi
 
+# ── Keep the committed web build (./build) fresh ──────────────────────────────
+# serve.command and npm-less machines serve the committed ./build. When the
+# frontend sources changed since ./build was last refreshed, rebuild it in the
+# background — the dev server below compiles from source either way, so this
+# never blocks the dev launch, and a later commit ships the new GUI.
+SRC_HASH="$(scripts/frontend_src_hash.sh 2>/dev/null || true)"
+if [ -n "$SRC_HASH" ] && [ "$SRC_HASH" != "$(cat build/.src_hash 2>/dev/null || true)" ]; then
+  echo "Committed web build (./build) is stale — refreshing it in the background..."
+  (
+    if bash scripts/refresh_build.sh >/dev/null 2>&1; then
+      echo "[build] ./build refreshed — commit it to ship the new GUI."
+    else
+      echo "[build] WARNING: ./build refresh failed — run scripts/refresh_build.sh manually."
+    fi
+  ) &
+fi
+
 # ── Free ports 3000 + 8000 (kill stale frontend / backend) ────────────────────
 
 free_port() {
