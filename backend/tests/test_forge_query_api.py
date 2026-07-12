@@ -150,10 +150,70 @@ def test_temporal_set_fills_blank_cells(_session_dir: Path) -> None:
         "filters": [], "edit": {"op": "set", "amount": 7.0},
     }
     prev = client.post("/api/forge/query/preview", json=body).json()
-    assert prev["sample"][0] == {"name": "L1", "before": None, "after": 7.0}
+    # Preview reports period energy: before 12 MWh (one numeric cell), after
+    # 7 MW × 2 snapshots × 1 h = 14 MWh — the blank cell counts once set.
+    assert prev["sampleKind"] == "energyMwh"
+    assert prev["sample"][0] == {"name": "L1", "before": 12.0, "after": 14.0}
     assert client.post("/api/forge/query/apply", json=body).status_code == 200
     rows = _load_series()
     assert [r["L1"] for r in rows] == [7.0, 7.0]  # the blank cell was filled
+
+
+def test_temporal_add_mwh_total_proportional(_session_dir: Path) -> None:
+    # E(L1)=22, E(L2)=44 MWh over the 2 hourly snapshots. +33 MWh on the group
+    # total, proportional split → uniform factor (66+33)/66 = 1.5.
+    _load()
+    body = {
+        "sessionId": "default",
+        "target": "loads",
+        "attribute": "p_set",
+        "temporal": True,
+        "filters": [],
+        "edit": {"op": "add", "amount": 33.0, "unit": "mwh",
+                 "scope": "total", "split": "proportional"},
+    }
+    prev = client.post("/api/forge/query/preview", json=body).json()
+    assert prev["energyBeforeMwh"] == pytest.approx(66.0)
+    assert prev["energyAfterMwh"] == pytest.approx(99.0)
+
+    assert client.post("/api/forge/query/apply", json=body).status_code == 200
+    rows = _load_series()
+    assert [r["L1"] for r in rows] == [15.0, 18.0]
+    assert [r["L2"] for r in rows] == [30.0, 36.0]
+
+
+def test_temporal_add_mw_total_equal(_session_dir: Path) -> None:
+    _load()
+    body = {
+        "sessionId": "default",
+        "target": "loads",
+        "attribute": "p_set",
+        "temporal": True,
+        "filters": [],
+        "edit": {"op": "add", "amount": 10.0, "unit": "mw",
+                 "scope": "total", "split": "equal"},
+    }
+    assert client.post("/api/forge/query/apply", json=body).status_code == 200
+    rows = _load_series()
+    assert [r["L1"] for r in rows] == [15.0, 17.0]  # +10/2 MW each
+    assert [r["L2"] for r in rows] == [25.0, 29.0]
+
+
+def test_temporal_add_below_zero_rejected(_session_dir: Path) -> None:
+    _load()
+    body = {
+        "sessionId": "default",
+        "target": "loads",
+        "attribute": "p_set",
+        "temporal": True,
+        "filters": [{"column": "name", "op": "eq", "value": "L1"}],
+        "edit": {"op": "add", "amount": -11.0, "unit": "mw", "scope": "each"},
+    }
+    resp = client.post("/api/forge/query/apply", json=body)
+    assert resp.status_code == 400
+    assert "below zero" in resp.json()["detail"]
+    rows = _load_series()
+    assert [r["L1"] for r in rows] == [10.0, 12.0]  # untouched
 
 
 def test_temporal_derive_rejected(_session_dir: Path) -> None:
