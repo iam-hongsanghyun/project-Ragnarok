@@ -1,7 +1,7 @@
 fastapi>=0.115
 uvicorn[standard]>=0.30
 python-multipart>=0.0.9
-pypsa @ git+https://github.com/PyPSA/PyPSA.git  # Process component not yet in stable release
+pypsa @ git+https://github.com/PyPSA/PyPSA.git@1eb9db03ad5751aea0ac9eed740479c92923a3f2  # Process component not yet in stable release; pinned to the installed 1.2.4.dev commit for reproducible installs
 pandas>=2.2
 pyarrow>=17  # columnar Parquet engine for the server-side session store (time-series)
 numpy>=2.1
