@@ -1,12 +1,47 @@
 from __future__ import annotations
 
-from typing import Any
+import re
+from typing import Any, Iterable
 
 import pandas as pd
 import pypsa
 
 from ..pypsa_schema import bus_reference_attributes
 from ..utils.coerce import number
+
+# PyPSA multi-port Links: ``bus2``/``efficiency2`` … ``busN``/``efficiencyN``
+# are legitimate per-port attributes (CHP heat co-products, CO₂ tracking, …)
+# even though the static schema CSV only declares ``bus0``/``bus1``/
+# ``efficiency``. PyPSA registers the extra ports dynamically the moment a
+# ``bus{N}`` column exists, so the builder must let these columns through its
+# schema filter rather than strip them.
+_RE_EXTRA_PORT = re.compile(r"^(?:bus|efficiency)[2-9]\d*$")
+
+
+def _is_extra_port_attr(sheet: str, attr: str) -> bool:
+    """True for a multi-port Link attribute (``bus2``, ``efficiency3``, …)."""
+    return sheet == "links" and bool(_RE_EXTRA_PORT.match(str(attr)))
+
+
+def _extra_port_columns(sheet: str, columns: Iterable[Any]) -> set[str]:
+    """Multi-port Link columns present in ``columns`` (empty for other sheets)."""
+    return {str(c) for c in columns if _is_extra_port_attr(sheet, str(c))}
+
+
+def _normalize_extra_port_columns(df: pd.DataFrame, sheet: str) -> pd.DataFrame:
+    """Make multi-port Link columns safe for ``network.add``.
+
+    ``bus{N}`` must be strings — a row that doesn't use the port carries NaN
+    after the DataFrame build, and PyPSA only treats the *empty string* as
+    "port unused". ``efficiency{N}`` must be numeric; blanks coerce to NaN so
+    PyPSA fills its own per-port default (1.0) at add time.
+    """
+    for col in _extra_port_columns(sheet, df.columns):
+        if col.startswith("bus"):
+            df[col] = df[col].fillna("").astype(str).str.strip()
+        else:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df
 
 
 def _has_name(row: dict[str, Any]) -> bool:
@@ -58,7 +93,10 @@ def _drop_broken_bus_refs(
     absent ``bus`` column on those sheets must not delete every row.
     """
     bus_cols = _bus_ref_columns_for_list(network, sheet)
-    if not bus_cols:
+    extra_bus_cols = sorted(
+        c for c in _extra_port_columns(sheet, df.columns) if c.startswith("bus")
+    )
+    if not bus_cols and not extra_bus_cols:
         return df
     schema_required = {
         attr["attribute"]
@@ -66,7 +104,7 @@ def _drop_broken_bus_refs(
         if attr.get("required")
     }
     required = [c for c in bus_cols if c in ("bus", "bus0", "bus1") and c in schema_required]
-    if not required:
+    if not required and not extra_bus_cols:
         return df
     valid_buses = set(network.buses.index)
     keep_mask = pd.Series(True, index=df.index)
@@ -77,6 +115,16 @@ def _drop_broken_bus_refs(
             return df.iloc[0:0]
         for name, bus in df[col].items():
             if pd.isna(bus) or str(bus).strip() == "" or str(bus) not in valid_buses:
+                keep_mask[name] = False
+                skipped.append(f"{name} ({col}='{bus}')")
+    # Multi-port refs (bus2+) are optional: blank means "port unused" and is
+    # fine, but a non-blank ref to a missing bus would fail PyPSA's consistency
+    # check at solve time — drop the row loudly instead.
+    for col in extra_bus_cols:
+        for name, bus in df[col].items():
+            if pd.isna(bus) or str(bus).strip() == "":
+                continue
+            if str(bus) not in valid_buses:
                 keep_mask[name] = False
                 skipped.append(f"{name} ({col}='{bus}')")
     dropped = (~keep_mask).sum()
