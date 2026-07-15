@@ -51,6 +51,9 @@ from .components import (
     _drop_broken_bus_refs,
     _ensure_carriers,
     _apply_ts_sheet,
+    _extra_port_columns,
+    _is_extra_port_attr,
+    _normalize_extra_port_columns,
 )
 from .network_sheet import _apply_network_sheet, _peak_load_per_bus
 
@@ -182,8 +185,16 @@ def build_network(
         df = _strip_blank_columns(df)
         allowed_static = input_static_attributes(sheet_name)
         if allowed_static:
-            keep = [col for col in df.columns if col in allowed_static or col == "name"]
+            # Multi-port Link columns (bus2+/efficiency2+) are not in the
+            # static schema — PyPSA registers them dynamically — but they are
+            # real model inputs; keep them alongside the schema columns.
+            extra_ports = _extra_port_columns(sheet_name, df.columns)
+            keep = [
+                col for col in df.columns
+                if col in allowed_static or col == "name" or col in extra_ports
+            ]
             df = df.loc[:, keep]
+        df = _normalize_extra_port_columns(df, sheet_name)
         # Note: zero columns is fine — we still add the components using all
         # PyPSA defaults. Skip only if there are no rows at all.
         if len(df.index) == 0:
@@ -220,7 +231,14 @@ def build_network(
         if list_name not in network.components.keys():
             continue
         allowed_temporal = input_temporal_attributes(list_name)
-        if allowed_temporal and attr not in allowed_temporal:
+        if (
+            allowed_temporal
+            and attr not in allowed_temporal
+            and not _is_extra_port_attr(list_name, attr)
+        ):
+            # Multi-port attrs (efficiency2+) aren't in the static schema but
+            # ARE varying once PyPSA registers the port; the defaults check
+            # below still gates on the port actually existing on the network.
             continue
         comp = network.components[list_name]
         if attr not in comp.defaults.index:

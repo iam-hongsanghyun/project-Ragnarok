@@ -16,10 +16,11 @@ This builder answers that per bus-carrier, reading the solved flows:
 
 So a gas→power CCGT shows as a *sink* on the gas balance (fuel consumed) and a
 *source* on the electricity balance (power produced) — the two sides of the
-conversion. Only built when the model has more than one bus carrier; returns
-``None`` for electricity-only runs. Energy is snapshot-weighted MWh over the
-modelled window. Link ``bus2+`` outputs (CHP heat, CO₂ tracking) are not split
-out in this view.
+conversion. Multi-port Links count every output port the same way: a CHP's
+heat co-product (``bus2`` / ``p2``) shows as a source on the heat balance.
+Only built when the model has more than one bus carrier; returns ``None`` for
+electricity-only runs. Energy is snapshot-weighted MWh over the modelled
+window.
 """
 from __future__ import annotations
 
@@ -95,19 +96,33 @@ def build_energy_balance(network: pypsa.Network) -> dict[str, Any] | None:
         c = bus_carrier.get(str(network.loads.at[load, "bus"]), "AC")
         add_sink(c, "Demand", weighted_sum(lp[load].clip(lower=0.0), weights), "load")
 
-    # ── Links → sink on bus0's carrier, source on bus1's carrier ─────────────
+    # ── Links → sink on bus0's carrier, source on each output port's carrier ─
     if len(network.links.index):
-        p0 = network.links_t.p0
-        p1 = network.links_t.p1
-        has_lc = "carrier" in network.links.columns
-        for lk in network.links.index:
-            c0 = bus_carrier.get(str(network.links.at[lk, "bus0"]), "AC")
-            c1 = bus_carrier.get(str(network.links.at[lk, "bus1"]), "AC")
-            lcarr = (str(network.links.at[lk, "carrier"]) if has_lc else "") or ""
+        links = network.links
+        dyn = network.links_t
+        p0 = dyn.p0
+        has_lc = "carrier" in links.columns
+        # Output ports: bus1 plus any multi-port columns (bus2, bus3, … — CHP
+        # heat co-products and the like). A blank port cell = port unused.
+        ports = ["1"] + sorted(
+            c[3:] for c in links.columns
+            if c.startswith("bus") and c[3:].isdigit() and c not in ("bus0", "bus1")
+        )
+        for lk in links.index:
+            c0 = bus_carrier.get(str(links.at[lk, "bus0"]), "AC")
+            c1 = bus_carrier.get(str(links.at[lk, "bus1"]), "AC")
+            lcarr = (str(links.at[lk, "carrier"]) if has_lc else "") or ""
             if lk in p0.columns:
                 add_sink(c0, lcarr or f"→ {c1}", weighted_sum(p0[lk].clip(lower=0.0), weights), "conversion")
-            if lk in p1.columns:
-                add_source(c1, lcarr or f"{c0} →", weighted_sum((-p1[lk]).clip(lower=0.0), weights), "conversion")
+            for port in ports:
+                pi = dyn[f"p{port}"] if f"p{port}" in dyn else None
+                if pi is None or lk not in pi.columns:
+                    continue
+                bus = str(links.at[lk, f"bus{port}"]).strip()
+                if not bus or bus.lower() == "nan":
+                    continue
+                ci = bus_carrier.get(bus, "AC")
+                add_source(ci, lcarr or f"{c0} →", weighted_sum((-pi[lk]).clip(lower=0.0), weights), "conversion")
 
     # ── Storage units + Stores → discharge source / charge sink ─────────────
     for comp, frame in (("storage_units", "storage_units_t"), ("stores", "stores_t")):
