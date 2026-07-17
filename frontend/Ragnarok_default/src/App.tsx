@@ -90,6 +90,7 @@ import { WelcomeView } from './views/WelcomeView';
 import { ForgeView } from './views/ForgeView';
 import { AnalyticsView } from './views/AnalyticsView';
 import { PhysicalRiskView, PhysicalRiskSubTab } from './views/PhysicalRiskView';
+import { SitingView } from './views/SitingView';
 import { ActivityBar } from './layout/ActivityBar';
 import { useModelIssues } from './features/validation/useModelIssues';
 import { useFrontendPlugins } from './features/plugins/frontendPlugins';
@@ -3196,6 +3197,16 @@ function AppInner() {
             <PhysicalRiskView
               subTab={physicalRiskSubTab}
               onSubTabChange={setPhysicalRiskSubTab}
+            />
+          )}
+
+          {tab === 'Siting' && (
+            <SitingView
+              model={model}
+              bounds={bounds}
+              onApplyFragment={handleApplyImportedFragment}
+              expansionResults={displayResults?.expansionResults ?? null}
+              currencySymbol={settings.currencySymbol}
             />
           )}
 

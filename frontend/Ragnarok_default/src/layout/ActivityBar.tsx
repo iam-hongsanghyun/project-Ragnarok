@@ -94,6 +94,11 @@ const ICONS: Record<WorkspaceTab, React.ReactNode> = {
     <path d="M10 8v4" />
     <circle cx="10" cy="14.2" r="0.6" fill="currentColor" stroke="none" />
   </>),
+  // Siting — a map pin (where to build).
+  Siting: svg(<>
+    <path d="M10 17s-5-4.6-5-8.2a5 5 0 0 1 10 0C15 12.4 10 17 10 17Z" />
+    <circle cx="10" cy="8.6" r="1.8" />
+  </>),
   // Post-analysis — a lightbulb (decisions drawn from the results).
   PostAnalysis: svg(<>
     <path d="M10 3a5 5 0 0 0-3 9v2h6v-2a5 5 0 0 0-3-9Z" />
@@ -121,6 +126,7 @@ const ENTRIES: Entry[] = [
   { id: 'Settings',     label: 'Settings',        hint: 'Run setup & preferences', icon: ICONS.Settings },
   { id: 'Analytics',    label: 'Analytics',       hint: 'Results dashboard', icon: ICONS.Analytics },
   { id: 'PhysicalRisk', label: 'Physical Risk',   hint: 'Climate exposure & physical risk', icon: ICONS.PhysicalRisk },
+  { id: 'Siting',       label: 'Siting',          hint: 'Where to build (location optimisation)', icon: ICONS.Siting },
   { id: 'PostAnalysis', label: 'Post-analysis',   hint: 'Decisions from results (no re-solve)', icon: ICONS.PostAnalysis },
   { id: 'History',      label: 'History',         hint: 'Past runs', icon: ICONS.History },
   { id: 'Plugins',      label: 'Plugins',         hint: 'Extensions', icon: ICONS.Plugins },

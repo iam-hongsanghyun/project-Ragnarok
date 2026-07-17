@@ -964,6 +964,12 @@ app.include_router(_procurement_router.router)
 from .routers import physical_risk as _physical_risk_router  # noqa: E402
 app.include_router(_physical_risk_router.router)
 
+# Siting (location optimisation) — samples a candidate grid over a bounding
+# box, fetches keyless weather per point, and returns extendable candidate
+# assets for the ordinary capacity-expansion solve to pick winners from.
+from .routers import siting as _siting_router  # noqa: E402
+app.include_router(_siting_router.router)
+
 
 @app.get("/api/backends")
 def get_backends() -> dict[str, Any]:
