@@ -227,14 +227,16 @@ def patch_sheet(name: str, payload: SheetPatch) -> dict:
 class SeriesTransform(BaseModel):
     """Body for ``POST /api/session/series/{name}/transform`` (T1 bulk edit).
 
-    ``op`` ∈ scale | offset | shift | interpolate | clip. Params: ``factor``
-    (scale), ``delta`` (offset), ``shift`` + ``wrap`` (shift), ``minValue`` /
-    ``maxValue`` (clip), and optional ``columns`` to restrict to a subset of
-    assets. Operates server-side on the stored series.
+    ``op`` ∈ set | scale | offset | shift | interpolate | clip | grow. Params:
+    ``value`` (set), ``factor`` (scale), ``delta`` (offset), ``shift`` +
+    ``wrap`` (shift), ``minValue`` / ``maxValue`` (clip), ``growthPct`` (grow),
+    and optional ``columns`` to restrict to a subset of assets. Operates
+    server-side on the stored series.
     """
 
     op: str
     columns: list[str] | None = None
+    value: float = 0.0
     factor: float = 1.0
     delta: float = 0.0
     shift: int = 0
@@ -249,7 +251,8 @@ class SeriesTransform(BaseModel):
 def transform_series(name: str, payload: SeriesTransform) -> dict:
     """Apply a bulk transform (scale/shift/interpolate/…) to a series sheet."""
     params = {
-        "columns": payload.columns, "factor": payload.factor, "delta": payload.delta,
+        "columns": payload.columns, "value": payload.value,
+        "factor": payload.factor, "delta": payload.delta,
         "shift": payload.shift, "wrap": payload.wrap,
         "minValue": payload.minValue, "maxValue": payload.maxValue,
         "growthPct": payload.growthPct,

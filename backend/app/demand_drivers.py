@@ -133,8 +133,10 @@ def driver_demand_forecast(
 
     new_rows: list[dict[str, Any]] = []
     for i, r in enumerate(rows):
-        heat_mw = heat_mwh * heat_w[i] / (heat_norm * max(snapshot_weight, 1e-9)) if heat_mwh > 0 else 0.0
-        ev_mw = ev_mwh * ev_w[i] / (ev_norm * max(snapshot_weight, 1e-9)) if ev_mwh > 0 else 0.0
+        # heat_norm/ev_norm already carry snapshot_weight (MWh per unit shape
+        # weight), so dividing by them alone yields MW that integrate to the MWh.
+        heat_mw = heat_mwh * heat_w[i] / heat_norm if heat_mwh > 0 else 0.0
+        ev_mw = ev_mwh * ev_w[i] / ev_norm if ev_mwh > 0 else 0.0
         nr: dict[str, Any] = {index_col: shift_snapshot_year(stamps[i], delta)}
         for c in cols:
             try:
