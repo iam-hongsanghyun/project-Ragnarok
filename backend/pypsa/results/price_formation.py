@@ -70,12 +70,16 @@ def build_price_formation(network: pypsa.Network, *, currency: str) -> dict[str,
 
     rows: list[dict[str, Any]] = []
     marginal_hours: dict[str, float] = {}
+    price_wsum: dict[str, float] = {}  # Σ w·price while the carrier is marginal
     for ts in network.snapshots:
         g = marg_gen.get(ts)
         marg_carrier = str(carrier.get(g, "")) if isinstance(g, str) else ""
         w = float(weights.get(ts, 1.0))
         if marg_carrier:
             marginal_hours[marg_carrier] = marginal_hours.get(marg_carrier, 0.0) + w
+            price_wsum[marg_carrier] = (
+                price_wsum.get(marg_carrier, 0.0) + w * float(price.get(ts, 0.0))
+            )
         rows.append({
             "snapshot": str(ts),
             "price": round(float(price.get(ts, 0.0)), 2),
@@ -85,23 +89,16 @@ def build_price_formation(network: pypsa.Network, *, currency: str) -> dict[str,
             "marginalCarrier": marg_carrier,
         })
 
-    # Summary per price-setting carrier: hours marginal + average price then.
-    price_sum: dict[str, float] = {}
-    for r in rows:
-        c = r["marginalCarrier"]
-        if c:
-            price_sum[c] = price_sum.get(c, 0.0) + r["price"]
-    counts: dict[str, int] = {}
-    for r in rows:
-        if r["marginalCarrier"]:
-            counts[r["marginalCarrier"]] = counts.get(r["marginalCarrier"], 0) + 1
+    # Summary per price-setting carrier: hours marginal + the average price
+    # then. Both are on the represented-hours basis (a snapshot counts its
+    # weight), so avgPrice is the weight-weighted mean: Σ w·price / Σ w.
     total_w = sum(marginal_hours.values()) or 1.0
     summary = [
         {
             "carrier": c,
             "hours": round(h, 1),
             "shareOfHours": round(h / total_w, 4),
-            "avgPrice": round(price_sum.get(c, 0.0) / counts.get(c, 1), 2),
+            "avgPrice": round(price_wsum.get(c, 0.0) / h, 2) if h > 0 else 0.0,
         }
         for c, h in sorted(marginal_hours.items(), key=lambda kv: kv[1], reverse=True)
     ]

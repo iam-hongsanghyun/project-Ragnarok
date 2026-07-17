@@ -128,6 +128,42 @@ export function resolvedColor(explicitColor: Primitive | undefined, carrier?: Pr
   return carrierColor(String(carrier ?? ''));
 }
 
+// Carrier names to treat as non-renewable even though they carry a zero
+// emission factor (`co2_emissions <= 0`). Nuclear is zero-carbon but not
+// renewable, and has no schema signal distinguishing it from wind/solar/hydro
+// besides its name — the one explicit exclusion this needs. Storage carriers
+// (batteries, pumped hydro, …) are excluded separately in `isRenewableCarrier`,
+// derived from the model itself rather than hardcoded.
+const NON_RENEWABLE_ZERO_EF_CARRIERS = new Set(['nuclear']);
+
+/** Carrier names used by any storage component (storage_units / stores) in the
+ *  model. A storage carrier merely re-dispatches energy generated elsewhere,
+ *  so even a zero-emission one (e.g. a battery) isn't "renewable" generation. */
+export function storageCarrierSet(model: WorkbookModel): Set<string> {
+  const out = new Set<string>();
+  for (const row of model.storage_units ?? []) {
+    const c = stringValue(row.carrier);
+    if (c) out.add(c);
+  }
+  for (const row of model.stores ?? []) {
+    const c = stringValue(row.carrier);
+    if (c) out.add(c);
+  }
+  return out;
+}
+
+/** Whether a carrier counts as "renewable" for a KPI/share tally: zero (or
+ *  negative) emission factor, excluding storage carriers (they move energy,
+ *  not generate it — see `storageCarrierSet`) and the small explicit
+ *  non-renewable-but-zero-EF set above (nuclear). */
+export function isRenewableCarrier(
+  carrier: string, co2Emissions: number, storageCarriers: Set<string>,
+): boolean {
+  if (co2Emissions > 0) return false;
+  if (storageCarriers.has(carrier)) return false;
+  return !NON_RENEWABLE_ZERO_EF_CARRIERS.has(carrier.trim().toLowerCase());
+}
+
 export function orderByCarrierRows(carrierRows: GridRow[], keys: string[]): string[] {
   const ordered = carrierRows
     .map((row) => stringValue(row.name).trim())

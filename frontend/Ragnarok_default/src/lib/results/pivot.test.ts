@@ -74,6 +74,31 @@ describe('pivot engine', () => {
     expect(rows[1].solar).toBe(100);
   });
 
+  test('unit stays MW for an hourly (unbucketed) sum — components combine, time does not integrate', () => {
+    const { unit } = buildPivotSeries(base, results, model, 1); // base: timeframe 'hourly', aggregate 'sum'
+    expect(unit).toBe('MW');
+  });
+
+  test('unit stays MW for a bucketed MEAN — only `sum` integrates over time', () => {
+    const { unit } = buildPivotSeries({ ...base, timeframe: 'aggregated', aggregate: 'mean' }, results, model, 1);
+    expect(unit).toBe('MW');
+  });
+
+  test('unit becomes MWh for a bucketed (time-integrated) SUM — MW power integrates to energy', () => {
+    const { unit, rows } = buildPivotSeries({ ...base, timeframe: 'aggregated' }, results, model, 2);
+    expect(unit).toBe('MWh');
+    // sum across snapshots × snapshot weight: wind (30+60)*2=180, solar (5+100)*2=210.
+    expect(rows[0].wind).toBe(180);
+    expect(rows[0].solar).toBe(210);
+  });
+
+  test('donut / category unit becomes MWh — they always integrate a series sum (no time axis to bucket)', () => {
+    const mix = buildPivotMix({ ...base, chartType: 'donut' }, results, model, 1);
+    const cat = buildPivotCategory({ ...base, chartType: 'grouped-bar' }, results, model, 1);
+    expect(mix.unit).toBe('MWh');
+    expect(cat.unit).toBe('MWh');
+  });
+
   test('component numeric filter (p_nom > 100) drops generators', () => {
     const cfg: PivotChartConfig = { ...base, filters: [{ scope: 'component', field: 'p_nom', op: '>', value: 100 }] };
     const { rows, series } = buildPivotSeries(cfg, results, model, 1);
@@ -140,10 +165,14 @@ describe('pivot engine', () => {
     expect(points).toEqual([]);
   });
 
-  test('duration curve: flattened series values sorted descending', () => {
-    const { values } = buildPivotDurationCurve({ ...base, chartType: 'duration' }, results, model, 1);
+  test('duration curve: one curve per group, each sorted independently (not pooled)', () => {
+    const { series } = buildPivotDurationCurve({ ...base, chartType: 'duration' }, results, model, 1);
     // per-snapshot carrier sums: t0 wind=30 solar=5, t1 wind=60 solar=100.
-    expect(values).toEqual([100, 60, 30, 5]);
+    // Pooling both groups into one ranking would give [100, 60, 30, 5] — wrong,
+    // since t0's wind and t1's solar have nothing to do with each other's rank.
+    const byKey = Object.fromEntries(series.map((s) => [s.key, s.values]));
+    expect(byKey.wind).toEqual([60, 30]);
+    expect(byKey.solar).toEqual([100, 5]);
   });
 
   test('daily profile: mean by hour-of-day', () => {

@@ -65,7 +65,7 @@ interface TopicDef {
 
 export const TOPICS: TopicDef[] = [
   { id: 'kpi', title: 'Key metrics', chartTypes: [], hasStacked: false, needsFull: false, defaults: { chartType: 'donut', stacked: false } },
-  { id: 'generation-mix', title: 'Annual generation mix', chartTypes: ['donut', 'bar'], hasStacked: false, needsFull: false, defaults: { chartType: 'donut', stacked: false } },
+  { id: 'generation-mix', title: 'Generation mix (modelled window)', chartTypes: ['donut', 'bar'], hasStacked: false, needsFull: false, defaults: { chartType: 'donut', stacked: false } },
   { id: 'installed-capacity', title: 'Installed capacity by carrier', chartTypes: ['donut', 'bar'], hasStacked: false, needsFull: true, defaults: { chartType: 'bar', stacked: false } },
   { id: 'generation-time', title: 'Generation over time', chartTypes: ['area', 'line', 'bar'], hasStacked: true, needsFull: true, defaults: { chartType: 'area', stacked: true } },
   { id: 'cost', title: 'Cost breakdown', chartTypes: ['donut', 'bar'], hasStacked: false, needsFull: true, defaults: { chartType: 'donut', stacked: false } },

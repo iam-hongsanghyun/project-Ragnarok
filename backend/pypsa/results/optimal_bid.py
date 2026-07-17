@@ -16,7 +16,7 @@ from typing import Any
 
 import pypsa
 
-from .bid_strategy import _owner_generators, _profit
+from .bid_strategy import _apply_offer, _owner_generators, _profit, _true_marginal_cost
 
 _log = logging.getLogger("pypsa.solver")
 
@@ -60,7 +60,7 @@ def build_optimal_bid(
     if not gens:
         return None
 
-    mc_true = {g: float(network.generators.at[g, "marginal_cost"]) for g in gens}
+    mc_true = _true_marginal_cost(network, gens)
     n_steps = max(1, min(int(steps or 8), _MAX_STEPS))
     max_markup = max(0.0, float(max_markup))
 
@@ -83,11 +83,7 @@ def build_optimal_bid(
         markup = max_markup * i / n_steps
         try:
             work = network.copy()
-            for g in gens:
-                base_mc = mc_true[g]
-                work.generators.at[g, "marginal_cost"] = (
-                    base_mc * (1.0 + markup) if markup_type == "percent" else base_mc + markup
-                )
+            _apply_offer(work, gens, mc_true, markup_type, markup)
             result = work.optimize(
                 solver_name="highs",
                 solver_options=solver_options or {},

@@ -206,19 +206,40 @@ export function buildDonutOption({ data, unit, theme }: DonutOptionInput): EChar
 
 // ── Duration curve ────────────────────────────────────────────────────────────
 
+export interface DurationCurveSeriesInput {
+  key: string;
+  label: string;
+  color: string;
+  /** Values in rank order (already sorted descending by the caller) — this
+   *  group's OWN curve, independent of every other group's ranking. */
+  values: number[];
+}
+
 export interface DurationCurveOptionInput {
-  /** Values in rank order (already sorted descending by the caller). */
-  data: number[];
+  series: DurationCurveSeriesInput[];
   title: string;
   unit: string;
-  color: string;
   theme: ChartTheme;
+  /** Show the per-group legend. Only meaningful with more than one series;
+   *  a single curve never shows a legend. */
+  showLegend?: boolean;
 }
 
 export function buildDurationCurveOption(input: DurationCurveOptionInput): EChartsCoreOption {
-  const { data, title, unit, color, theme } = input;
-  const n = Math.max(data.length - 1, 1);
-  const points = data.map((v, i) => [(i / n) * 100, v]);
+  const { series, title, unit, theme, showLegend } = input;
+  const multi = series.length > 1;
+  const echartsSeries = series.map((s) => {
+    const n = Math.max(s.values.length - 1, 1);
+    const points = s.values.map((v, i) => [(i / n) * 100, v]);
+    return {
+      name: s.label,
+      type: 'line' as const,
+      data: points,
+      showSymbol: false,
+      lineStyle: { width: 2, color: s.color },
+      areaStyle: multi ? undefined : { opacity: 0.15, color: s.color },
+    };
+  });
   return {
     animation: false,
     title: {
@@ -227,14 +248,19 @@ export function buildDurationCurveOption(input: DurationCurveOptionInput): EChar
       top: 2,
       textStyle: axisName(theme),
     },
+    legend: multi && showLegend
+      ? { top: 2, right: 8, textStyle: tickLabel(theme), itemWidth: 12, itemHeight: 8 }
+      : undefined,
     grid: { left: 8, right: 16, top: 30, bottom: 4, containLabel: true },
     tooltip: {
       ...darkTooltip(theme),
       trigger: 'axis',
       axisPointer: { type: 'line', lineStyle: { color: 'rgba(15, 23, 42, 0.28)', type: [4, 3] } },
-      formatter: (params: Array<{ data: [number, number] }>) => {
-        const [pct, v] = params[0].data;
-        return `Exceedance ${pct.toFixed(1)}%<br/><b>${fmtNum(v)} ${unit}</b>`;
+      formatter: (params: Array<{ seriesName: string; data: [number, number] }>) => {
+        if (!params.length) return '';
+        const pct = params[0].data[0];
+        const lines = params.map((p) => `${multi ? `${p.seriesName}: ` : ''}<b>${fmtNum(p.data[1])} ${unit}</b>`);
+        return `Exceedance ${pct.toFixed(1)}%<br/>${lines.join('<br/>')}`;
       },
     },
     xAxis: {
@@ -253,13 +279,7 @@ export function buildDurationCurveOption(input: DurationCurveOptionInput): EChar
       splitLine: dashedSplitLine(theme),
       axisLabel: { ...tickLabel(theme), formatter: fmtNum },
     },
-    series: [{
-      type: 'line',
-      data: points,
-      showSymbol: false,
-      lineStyle: { width: 2, color },
-      areaStyle: { opacity: 0.15, color },
-    }],
+    series: echartsSeries,
   };
 }
 

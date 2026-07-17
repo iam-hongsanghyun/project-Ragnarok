@@ -136,6 +136,16 @@ function reduce(values: number[], agg: Aggregate): number {
   return Math.min(...values);
 }
 
+/** The unit label for an aggregated value. Summing a rate series over time
+ *  (or over a window with no time axis, e.g. a donut/category total)
+ *  integrates power into energy — `MW` becomes `MWh`. `mean` / `max` / `min` /
+ *  `count` stay the instantaneous rate. Only literal `MW` is rewritten (the
+ *  one rate unit these pivots expose); every other unit (currency, tCO2e, …)
+ *  passes through unchanged. */
+function integratedUnit(rawUnit: string, integrates: boolean): string {
+  return integrates && rawUnit === 'MW' ? 'MWh' : rawUnit;
+}
+
 // ── Filters ─────────────────────────────────────────────────────────────────
 
 function passComponentFilters(dim: GridRow, filters: PivotFilter[]): boolean {
@@ -212,11 +222,13 @@ export function buildPivotSeries(
   snapshotWeight = 1,
 ): PivotSeriesResult {
   const kind = pivotValueKind(config.sheet, config.valueAttribute);
-  const unit = getAttributeSchema(config.sheet, config.valueAttribute)?.unit ?? '';
+  const rawUnit = getAttributeSchema(config.sheet, config.valueAttribute)?.unit ?? '';
   const dims = indexByName(model[config.sheet] ?? []);
   const compList = getComponentSchema(config.sheet)?.list_name ?? config.sheet;
 
-  // Static / input attributes have no time axis → a single "Total" row.
+  // Static / input attributes have no time axis → a single "Total" row. No
+  // integration happens here (there's no snapshot weight to apply), so the
+  // unit never changes regardless of `aggregate`.
   if (kind !== 'series') {
     const groups = new Map<string, number[]>();
     const staticVals = results?.outputs?.static?.[compList] ?? {};
@@ -234,7 +246,7 @@ export function buildPivotSeries(
     return {
       rows: [row],
       series: keys.map((k) => ({ key: k, label: k, color: colorFor(k, config.groupBy) })),
-      unit,
+      unit: rawUnit,
       loading: false,
     };
   }
@@ -242,7 +254,7 @@ export function buildPivotSeries(
   const sheetKey = `${compList}-${config.valueAttribute}`;
   const seriesRows = results?.outputs?.series?.[sheetKey];
   if (!seriesRows || !seriesRows.length) {
-    return { rows: [], series: [], unit, loading: true };
+    return { rows: [], series: [], unit: rawUnit, loading: true };
   }
 
   const start = Math.max(0, config.startIndex);
@@ -273,9 +285,16 @@ export function buildPivotSeries(
   const keys = orderKeys(Array.from(allKeys), config.groupBy, model);
   const series: TimeSeriesSeries[] = keys.map((k) => ({ key: k, label: k, color: colorFor(k, config.groupBy) }));
 
-  const rows = config.timeframe === 'hourly'
-    ? perRow
-    : bucketRows(perRow, keys, config.timeframe, config.aggregate, snapshotWeight);
+  // `bucketRows` (via `bucketReduce`) is what actually integrates a `sum`
+  // aggregate over the snapshot weight — only when snapshots are bucketed
+  // (anything but 'hourly'); an hourly view stays one row per snapshot, so a
+  // per-group `sum` there only combines components at the same instant and
+  // is still a rate.
+  const bucketed = config.timeframe !== 'hourly';
+  const rows = bucketed
+    ? bucketRows(perRow, keys, config.timeframe, config.aggregate, snapshotWeight)
+    : perRow;
+  const unit = integratedUnit(rawUnit, bucketed && config.aggregate === 'sum');
 
   return { rows, series, unit, loading: false };
 }
@@ -402,7 +421,8 @@ export function buildPivotMix(
   snapshotWeight = 1,
 ): PivotMixResult {
   const kind = pivotValueKind(config.sheet, config.valueAttribute);
-  const unit = getAttributeSchema(config.sheet, config.valueAttribute)?.unit ?? '';
+  const rawUnit = getAttributeSchema(config.sheet, config.valueAttribute)?.unit ?? '';
+  const unit = integratedUnit(rawUnit, kind === 'series' && config.aggregate === 'sum');
   const dims = indexByName(model[config.sheet] ?? []);
   const compList = getComponentSchema(config.sheet)?.list_name ?? config.sheet;
   const groups = new Map<string, number[]>();
@@ -472,7 +492,8 @@ export function buildPivotCategory(
   snapshotWeight = 1,
 ): PivotCategoryResult {
   const kind = pivotValueKind(config.sheet, config.valueAttribute);
-  const unit = getAttributeSchema(config.sheet, config.valueAttribute)?.unit ?? '';
+  const rawUnit = getAttributeSchema(config.sheet, config.valueAttribute)?.unit ?? '';
+  const unit = integratedUnit(rawUnit, kind === 'series' && config.aggregate === 'sum');
   const dims = indexByName(model[config.sheet] ?? []);
   const compList = getComponentSchema(config.sheet)?.list_name ?? config.sheet;
 
@@ -612,10 +633,15 @@ export function buildPivotScatter(
   return { points, xUnit, yUnit, loading: false };
 }
 
-// ── Build: duration curve (series values ranked descending) ──────────────────
+// ── Build: duration curve (series values ranked descending, PER GROUP) ───────
 
-export interface PivotDurationResult { values: number[]; color: string; unit: string; loading: boolean }
+export interface PivotDurationSeries { key: string; label: string; color: string; values: number[] }
+export interface PivotDurationResult { series: PivotDurationSeries[]; unit: string; loading: boolean }
 
+/** One duration curve per group (carrier, bus, …) — each group's own
+ *  per-snapshot values sorted descending independently, not pooled into a
+ *  single ranking across groups (that would mix e.g. wind and solar hours
+ *  into one meaningless curve). */
 export function buildPivotDurationCurve(
   config: PivotChartConfig,
   results: RunResults | null,
@@ -623,11 +649,14 @@ export function buildPivotDurationCurve(
   snapshotWeight = 1,
 ): PivotDurationResult {
   const res = buildPivotSeries({ ...config, timeframe: 'hourly' }, results, model, snapshotWeight);
-  if (res.loading) return { values: [], color: '#0f766e', unit: res.unit, loading: true };
-  const values: number[] = [];
-  for (const row of res.rows) for (const s of res.series) values.push(numberValue(row[s.key]));
-  values.sort((a, b) => b - a);
-  return { values, color: res.series[0]?.color ?? '#0f766e', unit: res.unit, loading: false };
+  if (res.loading) return { series: [], unit: res.unit, loading: true };
+  const series: PivotDurationSeries[] = res.series.map((s) => ({
+    key: s.key,
+    label: s.label,
+    color: s.color,
+    values: res.rows.map((row) => numberValue(row[s.key])).sort((a, b) => b - a),
+  }));
+  return { series, unit: res.unit, loading: false };
 }
 
 // ── Build: daily profile (mean by hour-of-day) ───────────────────────────────

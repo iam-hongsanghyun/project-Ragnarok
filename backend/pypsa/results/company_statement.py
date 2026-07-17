@@ -21,14 +21,24 @@ backed out of ``marginal_cost`` the same way the system cost-breakdown does it
 carbon never double-count.
 
 Algorithm (per company, summed over its assets and snapshots t with weights w):
-    $$\\text{rev} = \\sum_t w_t\\, \\pi_{b(a),t}\\, p_{a,t}, \\quad
-      \\text{carbon} = \\sum_t w_t\\, p_{a,t}\\, e_a\\, P_{CO_2}, \\quad
-      \\text{fuelVom} = \\text{opex} - \\text{carbon}$$
-    ASCII: rev = Σ w·π·p ; carbon = Σ w·p·ef·co2price ; fuelVom = opex − carbon.
+    $$\\text{rev} = \\frac{8760}{H} \\sum_t w_t\\, \\pi_{b(a),t}\\, p_{a,t}, \\quad
+      \\text{carbon} = \\frac{8760}{H} \\sum_t w_t\\, p_{a,t}\\, e_a\\, P_{CO_2},
+      \\quad \\text{fuelVom} = \\text{opex} - \\text{carbon}$$
+    ASCII: rev = (8760/H)·Σ w·π·p ; carbon = (8760/H)·Σ w·p·ef·co2price ;
+    fuelVom = opex − carbon ; interest = gearing·(capex_annual/CRF(i,tenor))·i.
 
     Symbols: π = nodal price [currency/MWh], p = dispatch [MW], e_a = electrical
     emission factor [tCO2/MWh] (co2/η), P_CO2 = carbon price [currency/tCO2],
-    opex = Σ w·mc·p [currency], capex_annual = capital_cost × p_nom_opt.
+    opex = (8760/H)·Σ w·mc·p [currency/yr], capex_annual = capital_cost ×
+    p_nom_opt [currency/yr], H = Σ w [h], i = interest rate [-].
+
+Basis: the solve covers a window of H represented hours, not a year, so every
+flow line (revenue, carbon, fuel/VOM, energy, emissions) is annualised by
+× 8760/H to sit on the same **annual** basis as ``capexAnnual`` — the statement
+is a genuine annual P&L as titled. Interest is charged on the outstanding debt
+principal (gearing × overnight capex ≈ gearing × capexAnnual / CRF(i, tenor)),
+not on the annuity itself; it needs ``tenorYears`` > 0 to reconstruct the
+principal and is otherwise omitted (0).
 """
 from __future__ import annotations
 
@@ -40,6 +50,8 @@ import pandas as pd
 import pypsa
 
 from ..utils.emissions import per_generator_emission_factor
+from .finance import _crf
+from .market import HOURS_PER_YEAR
 
 _log = logging.getLogger("pypsa.solver")
 
@@ -88,6 +100,12 @@ def build_company_statement(
     if mp is None or mp.empty:
         return None
     weights = network.snapshot_weightings["objective"].to_numpy()
+    # Modelled window (represented hours): window flows × 8760/H = annual, the
+    # basis capexAnnual is already on.
+    H = float(weights.sum())
+    if H <= 0:
+        return None
+    annualize = HOURS_PER_YEAR / H
     eff_ef = per_generator_emission_factor(network, emissions_factors)
     # Per-snapshot carbon price array (a schedule varies over snapshots); the
     # reported/logged scalar is its mean. Matches the adder the solve applied.
@@ -102,6 +120,7 @@ def build_company_statement(
 
     gearing = float((debt or {}).get("gearing", 0.0) or 0.0)
     interest = float((debt or {}).get("interestRate", 0.0) or 0.0)
+    tenor = float((debt or {}).get("tenorYears", 0.0) or 0.0)
 
     gen_owner = _owner_map(model, "generators", column)
     sto_owner = _owner_map(model, "storage_units", column)
@@ -168,13 +187,26 @@ def build_company_statement(
     if not acc:
         return None
 
+    # Annualise the window flow lines onto capexAnnual's basis (× 8760/H).
+    for v in acc.values():
+        for key in ("revenue", "energyMWh", "carbonCost", "fuelVomCost", "emissionsTonnes"):
+            v[key] *= annualize
+
     companies: list[dict[str, Any]] = []
     for company, v in acc.items():
         variable_cost = v["carbonCost"] + v["fuelVomCost"]
         gross_margin = v["revenue"] - variable_cost
         ebit = gross_margin - v["capexAnnual"]
-        # Interest on the debt share of the annual capex charge (year-1 proxy).
-        interest_annual = gearing * v["capexAnnual"] * interest if gearing > 0 else 0.0
+        # Interest is rate × outstanding principal, not rate × annuity. The
+        # debt principal is reconstructed from the annualised capex via the
+        # inverse capital recovery factor over the loan tenor (year-1 proxy,
+        # mirroring finance.py's DSCR); without a tenor the principal is
+        # unknowable, so the line is omitted.
+        if gearing > 0 and tenor > 0:
+            principal = gearing * v["capexAnnual"] / _crf(interest, tenor)
+            interest_annual = principal * interest
+        else:
+            interest_annual = 0.0
         net = ebit - interest_annual
         companies.append({
             "company": company,

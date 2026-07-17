@@ -233,13 +233,31 @@ def per_scenario_summaries(
     emissions_factors: dict[str, float],
     currency_symbol: str,
 ) -> list[dict[str, Any]]:
-    """Compute one summary row per scenario from a solved stochastic network."""
+    """Compute one summary row per scenario from a solved stochastic network.
+
+    ``totalOperatingCost`` prices dispatch at the **dense** marginal cost
+    (``get_switchable_as_dense``): a workbook ``generators-marginal_cost``
+    series or a varying carbon-price adder lives only in the time-varying
+    frame, so the static column alone would misprice it. Falls back to the
+    static column when the dense read is unavailable.
+
+    Algorithm (per scenario s, generators g, snapshots t, weights w):
+        $$C_s = \\sum_{g,t} w_t \\, c_{g,t} \\, \\max(p^s_{g,t}, 0)$$
+        ASCII: cost = sum_gt w * mc_dense[g,t] * max(p[g,t], 0).
+
+        Symbols: c = marginal cost [currency/MWh], p = dispatch [MW],
+        w = snapshot weight [h].
+    """
     if not config.enabled:
         return []
     rows: list[dict[str, Any]] = []
     weights = network.snapshot_weightings["generators"].reindex(network.snapshots).fillna(1.0)
     gen_p = network.generators_t.p
     generators_static = network.generators
+    try:
+        mc_dense_all = network.get_switchable_as_dense("Generator", "marginal_cost")
+    except Exception:
+        mc_dense_all = None
 
     for scenario in config.scenarios:
         # Time-series: `gen_p` columns are a MultiIndex (scenario, generator_name).
@@ -250,6 +268,17 @@ def per_scenario_summaries(
                 scenario_dispatch = pd.DataFrame(index=network.snapshots)
         else:
             scenario_dispatch = gen_p
+
+        # Dense marginal cost sliced to this scenario (columns mirror gen_p's).
+        mc_scenario: pd.DataFrame | None = None
+        if mc_dense_all is not None:
+            if isinstance(mc_dense_all.columns, pd.MultiIndex):
+                try:
+                    mc_scenario = mc_dense_all.xs(scenario.name, level="scenario", axis=1)
+                except KeyError:
+                    mc_scenario = None
+            else:
+                mc_scenario = mc_dense_all
 
         # Static rows: filter by scenario level
         if isinstance(generators_static.index, pd.MultiIndex):
@@ -270,10 +299,19 @@ def per_scenario_summaries(
         ef_per_gen = ef_per_gen / eta
         marginal_cost_static = scenario_static.get("marginal_cost", pd.Series(dtype=float)).fillna(0.0)
 
-        energy_per_gen = scenario_dispatch.clip(lower=0.0).multiply(weights, axis=0).sum()
+        dispatch_pos = scenario_dispatch.clip(lower=0.0)
+        energy_per_gen = dispatch_pos.multiply(weights, axis=0).sum()
         total_energy = float(energy_per_gen.sum())
         total_emissions = float((energy_per_gen * ef_per_gen.reindex(energy_per_gen.index).fillna(0.0)).sum())
-        total_operating_cost = float((energy_per_gen * marginal_cost_static.reindex(energy_per_gen.index).fillna(0.0)).sum())
+        if mc_scenario is not None:
+            mc = mc_scenario.reindex(
+                index=dispatch_pos.index, columns=dispatch_pos.columns
+            ).fillna(0.0)
+            total_operating_cost = float(
+                (dispatch_pos * mc).multiply(weights, axis=0).sum().sum()
+            )
+        else:
+            total_operating_cost = float((energy_per_gen * marginal_cost_static.reindex(energy_per_gen.index).fillna(0.0)).sum())
 
         shed = [c for c in scenario_dispatch.columns if str(c).startswith("load_shedding_")]
         load_shed_energy = (

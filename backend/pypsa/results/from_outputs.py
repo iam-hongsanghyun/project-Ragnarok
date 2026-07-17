@@ -24,6 +24,7 @@ from typing import Any
 
 import pandas as pd
 
+from ..carbon_price import build_price_series, parse_carbon_price_config
 from ..constants import carrier_color
 from ..network import build_network
 from ..utils.emissions import per_generator_emission_factor
@@ -112,6 +113,7 @@ def _inject_outputs(network: Any, outputs: dict[str, Any]) -> None:
         ("stores", "e_nom_opt"),
         ("links", "p_nom_opt"),
         ("lines", "s_nom_opt"),
+        ("transformers", "s_nom_opt"),
     ):
         sheet_static = static.get(comp) or {}
         df = getattr(network, comp)
@@ -268,7 +270,15 @@ def derive_imported_result(
     storage_soc_s = build_storage_soc_series(network)
     expansion_results = build_expansion_results(network)
     merit_order = build_merit_order(network)
-    carbon_price = float((scenario or {}).get("carbonPrice", 0.0))
+    # Schedule-aware carbon price, mirroring the solve path: a stored
+    # ``carbonPrice: null`` coerces to 0.0 and a ``carbonPriceSchedule``
+    # supersedes the scalar, so the shadow price matches what was solved.
+    carbon_cfg = parse_carbon_price_config(
+        (scenario or {}).get("carbonPrice") or 0.0,
+        (options or {}).get("carbonPriceSchedule"),
+    )
+    carbon_price_series = build_price_series(network, carbon_cfg)
+    carbon_price = float(carbon_price_series.mean()) if len(carbon_price_series) else 0.0
     co2_shadow = build_co2_shadow(network, carbon_price, currency)
     applied_constraints = build_applied_constraints(network)
     generator_economics = build_generator_economics(network, currency)
@@ -290,13 +300,27 @@ def derive_imported_result(
         nodal_balance.append({"label": bus, "load": load_val, "generation": gen_val})
     nodal_balance.sort(key=lambda x: x["load"], reverse=True)
 
+    # Loading is against the SOLVED rating (p_nom_opt / s_nom_opt) when the
+    # stored outputs carry one > 0, falling back to the input nameplate —
+    # mirrors the solve path in results/__init__.py.
+    def _rating(static_df: pd.DataFrame, name: str, nominal_attr: str) -> float:
+        opt_attr = f"{nominal_attr}_opt"
+        if opt_attr in static_df.columns:
+            opt = pd.to_numeric(static_df.at[name, opt_attr], errors="coerce")
+            if pd.notna(opt) and float(opt) > 0.0:
+                return float(opt)
+        return float(static_df.at[name, nominal_attr])
+
     line_loading = []
     for link in (network.links.index if not network.links_t.p0.empty else []):
-        peak = float((network.links_t.p0[link].abs() / max(float(network.links.at[link, "p_nom"]), 1.0) * 100.0).max())
+        peak = float((network.links_t.p0[link].abs() / max(_rating(network.links, link, "p_nom"), 1.0) * 100.0).max())
         line_loading.append({"label": link, "value": peak})
     for line in (network.lines.index if not network.lines_t.p0.empty else []):
-        peak = float((network.lines_t.p0[line].abs() / max(float(network.lines.at[line, "s_nom"]), 1.0) * 100.0).max())
+        peak = float((network.lines_t.p0[line].abs() / max(_rating(network.lines, line, "s_nom"), 1.0) * 100.0).max())
         line_loading.append({"label": line, "value": peak})
+    for transformer in (network.transformers.index if not network.transformers_t.p0.empty else []):
+        peak = float((network.transformers_t.p0[transformer].abs() / max(_rating(network.transformers, transformer, "s_nom"), 1.0) * 100.0).max())
+        line_loading.append({"label": transformer, "value": peak})
 
     total_emissions = sum(emission_totals.values()) / 1000.0
     average_price = float(price_series.mean()) if len(price_series) else 0.0
@@ -315,7 +339,11 @@ def derive_imported_result(
          "detail": "storage capacity vs peak demand"},
         {"label": "Peak price", "value": f"{round(peak_price):,} {currency}/MWh", "detail": f"{peak_net_load:,} MW peak load"},
         {"label": "System emissions", "value": f"{round(total_emissions):,} ktCO2e",
-         "detail": f"Carbon price {carbon_price:.0f} {currency}/t"},
+         "detail": (
+             f"Carbon price {float(carbon_price_series.min()):.0f}–{float(carbon_price_series.max()):.0f} {currency}/t (schedule)"
+             if len(carbon_price_series) and carbon_price_series.nunique(dropna=False) > 1
+             else f"Carbon price {carbon_price:.0f} {currency}/t"
+         )},
         {"label": "Transmission stress",
          "value": f"{round(sum(x['value'] for x in line_loading) / len(line_loading) if line_loading else 0):,}%",
          "detail": f"{sum(1 for x in line_loading if x['value'] > 80.0)} corridors above 80%"},

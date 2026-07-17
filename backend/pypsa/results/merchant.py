@@ -28,6 +28,8 @@ from typing import Any
 
 import pypsa
 
+from .market import HOURS_PER_YEAR
+
 _log = logging.getLogger("pypsa.solver")
 
 # The market node must be able to absorb / supply any owner volume at π(t).
@@ -127,6 +129,19 @@ def build_merchant(
         ``{owner, priceSource, currency, priceStats, assets, totals, notes}`` or
         ``None`` when there is nothing to analyse (owner has no assets, network
         unsolved, or LMPs requested but unavailable).
+
+    Basis: the reported economics are a **window P&L** over the modelled
+    ``H = Σ_t w_t`` represented hours. Revenue and operating cost are window
+    totals; the annualised capital charge (``capital_cost · p_nom_opt``,
+    currency/yr) is pro-rated onto the window by ``× H / 8760`` so ``profit``
+    subtracts like from like:
+
+    $$\\text{profit} = R_H - O_H - K \\cdot H / 8760$$
+    ASCII: profit = revenue_H - opex_H - capital_cost*p_nom_opt*H/8760.
+
+    Note the merchant LP's *build* decision itself still weighs window revenue
+    against PyPSA's full annual capex in the objective (a known bias on
+    sub-annual windows); only the reported P&L is corrected here.
     """
     if not getattr(network, "is_solved", False):
         return None
@@ -150,6 +165,11 @@ def build_merchant(
         return None
 
     weights = network.snapshot_weightings["objective"].to_numpy()
+    # Modelled window (represented hours); annual capex × H/8760 = window share.
+    H = float(weights.sum())
+    if H <= 0:
+        return None
+    window_years = H / HOURS_PER_YEAR
 
     # ``copy()`` refuses with a solver model attached; the app reads every number
     # from solved dataframes, so detaching is side-effect-free downstream.
@@ -201,11 +221,22 @@ def build_merchant(
     tot_rev = tot_cost = tot_capex = tot_energy = 0.0
 
     def _capex(comp: str, name: str) -> float:
+        """Window share of the annualised capital charge (× H/8760)."""
         df = work.generators if comp == "Generator" else work.storage_units
         ext_col = "p_nom_extendable"
         if ext_col in df.columns and bool(df.at[name, ext_col]):
-            return float(df.at[name, "capital_cost"]) * float(df.at[name, "p_nom_opt"])
+            annual = float(df.at[name, "capital_cost"]) * float(df.at[name, "p_nom_opt"])
+            return annual * window_years
         return 0.0
+
+    # Dense marginal cost — the LP dispatched on the time-varying cost (series
+    # workbook column or varying carbon adder), so the report must price the
+    # same way; the static column alone would overstate profit.
+    mc_dense_gen = work.get_switchable_as_dense("Generator", "marginal_cost")
+    try:
+        mc_dense_su = work.get_switchable_as_dense("StorageUnit", "marginal_cost")
+    except Exception:  # noqa: BLE001 — no storage marginal_cost registered
+        mc_dense_su = None
 
     for g in own_gens:
         bus = str(work.generators.at[g, "bus"])
@@ -213,7 +244,7 @@ def build_merchant(
         pi = price[bus]
         energy = float((p * weights).sum())
         revenue = float((p * pi * weights).sum())
-        mc = float(work.generators.at[g, "marginal_cost"])
+        mc = mc_dense_gen[g].to_numpy(dtype=float)
         op_cost = float((mc * p * weights).sum())
         capex = _capex("Generator", g)
         cap = float(work.generators.at[g, "p_nom_opt"])
@@ -241,7 +272,10 @@ def build_merchant(
         net = pd_ - pc
         energy = float((pd_ * weights).sum())  # energy sold
         revenue = float((net * pi * weights).sum())
-        mc = float(work.storage_units.at[s, "marginal_cost"]) if "marginal_cost" in work.storage_units.columns else 0.0
+        if mc_dense_su is not None and s in mc_dense_su.columns:
+            mc = mc_dense_su[s].to_numpy(dtype=float)
+        else:
+            mc = float(work.storage_units.at[s, "marginal_cost"]) if "marginal_cost" in work.storage_units.columns else 0.0
         op_cost = float((mc * pd_ * weights).sum())
         capex = _capex("StorageUnit", s)
         cap = float(work.storage_units.at[s, "p_nom_opt"])

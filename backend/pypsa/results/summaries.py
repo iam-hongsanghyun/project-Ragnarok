@@ -59,15 +59,24 @@ def _pathway_period_summaries(
         return []
     summaries: list[dict[str, Any]] = []
     dispatch_only = dispatch_frame.clip(lower=0.0)
+    # The injected load_shedding_ backstop is a modelling artifact, not real
+    # generation — exclude it from the period energy total, matching the
+    # carrier_energy / generator_energy exclusion in the same payload.
+    real_cols = [c for c in dispatch_only.columns if not str(c).startswith("load_shedding_")]
     # Per-generator co2_emissions / η (thermal basis, M3).
     eff_ef = per_generator_emission_factor(network, emissions_factors)
     for period in network.snapshots.get_level_values("period").unique():
         period_index = network.snapshots[network.snapshots.get_level_values("period") == period]
-        weight = network.snapshot_weightings["objective"].reindex(period_index).fillna(1.0)
+        # Energy totals use the `generators` snapshot weighting — the same basis
+        # as every other energy total in the payload (carrier_energy,
+        # generator_energy). `modeledHours` reports the sum of that same
+        # weighting, so totalDispatch / modeledHours is the period's average
+        # supplied MW.
+        weight = network.snapshot_weightings["generators"].reindex(period_index).fillna(1.0)
         dispatch_period = dispatch_only.loc[period_index]
-        total_dispatch = float((dispatch_period.sum(axis=1) * weight).sum())
+        total_dispatch = float((dispatch_period[real_cols].sum(axis=1) * weight).sum())
         total_emissions = 0.0
-        for name in dispatch_period.columns:
+        for name in real_cols:
             if name not in network.generators.index:
                 continue
             total_emissions += float((dispatch_period[name] * float(eff_ef.get(name, 0.0)) * weight).sum())

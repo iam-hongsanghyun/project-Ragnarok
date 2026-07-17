@@ -5,7 +5,7 @@
  */
 import React from 'react';
 import { RunResults, WorkbookModel } from 'lib/types';
-import { numberValue } from 'lib/utils/helpers';
+import { isRenewableCarrier, numberValue, storageCarrierSet } from 'lib/utils/helpers';
 
 interface KpiCardProps {
   label: string;
@@ -71,11 +71,14 @@ export function KpiStripCard({ results, model, currencySymbol = '$' }: Props) {
     : undefined;
   const loadFactor = peakLoad && avgLoad ? avgLoad / peakLoad : undefined;
 
-  // Renewable share — carriers with co2_emissions === 0
+  // Renewable share — zero-emission carriers, excluding nuclear (zero-carbon
+  // but not renewable) and storage carriers (they re-dispatch energy rather
+  // than generate it). See `isRenewableCarrier`.
   const carriersBySheet = new Map(model.carriers.map((c) => [String(c.name ?? ''), c]));
+  const storageCarriers = storageCarrierSet(model);
   const renewableMwh = results.carrierMix.reduce((s, m) => {
     const co2 = numberValue(carriersBySheet.get(m.label)?.co2_emissions);
-    return co2 <= 0 ? s + m.value : s;
+    return isRenewableCarrier(m.label, co2, storageCarriers) ? s + m.value : s;
   }, 0);
   const renewableShare = totalDispatch > 0 ? (renewableMwh / totalDispatch) * 100 : 0;
 

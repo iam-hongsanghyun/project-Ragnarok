@@ -1,30 +1,36 @@
 import React, { useMemo } from 'react';
-import { buildDurationCurveOption } from 'lib/charts/options';
+import { buildDurationCurveOption, DurationCurveSeriesInput } from 'lib/charts/options';
 import { readChartTheme } from 'lib/charts/theme';
 import { useEChart } from '../../../shared/echarts/useEChart';
 
 interface Props {
   title: string;
-  /** Values in rank order (sorted descending by the caller). */
-  data: number[];
+  /** One curve per group — each already sorted descending by the caller,
+   *  independently of every other group's own ranking. A single-series caller
+   *  (e.g. system price/load) passes an array of one. */
+  data: DurationCurveSeriesInput[];
   unit: string;
-  color: string;
+  showLegend?: boolean;
 }
 
-export function DurationCurveCard({ title, data, unit, color }: Props) {
+export function DurationCurveCard({ title, data, unit, showLegend = true }: Props) {
+  const hasData = data.some((s) => s.values.length > 0);
   const option = useMemo(() => {
-    if (!data.length) return null;
+    if (!hasData) return null;
     // CSS variables (e.g. 'var(--warm)') come through from the dashboard
     // config; resolve them since ECharts SVG attributes need literal colours.
-    const resolved = color.startsWith('var(')
-      ? getComputedStyle(document.documentElement)
-          .getPropertyValue(color.slice(4, -1)).trim() || '#0f766e'
-      : color;
-    return buildDurationCurveOption({ data, title, unit, color: resolved, theme: readChartTheme() });
-  }, [data, title, unit, color]);
+    const resolveColor = (color: string): string =>
+      color.startsWith('var(')
+        ? getComputedStyle(document.documentElement)
+            .getPropertyValue(color.slice(4, -1)).trim() || '#0f766e'
+        : color;
+    const series = data.map((s) => ({ ...s, color: resolveColor(s.color) }));
+    return buildDurationCurveOption({ series, title, unit, theme: readChartTheme(), showLegend });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, title, unit, showLegend, hasData]);
   const hostRef = useEChart<HTMLDivElement>(option);
 
-  if (!data.length) {
+  if (!hasData) {
     return (
       <div className="duration-curve-card">
         <p className="empty-text">No data available.</p>

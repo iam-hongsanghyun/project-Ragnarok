@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import pandas as pd
 import pypsa
 
 _log = logging.getLogger("pypsa.solver")
@@ -30,8 +31,43 @@ def _owner_generators(model: dict[str, list[dict[str, Any]]], owner: str, column
     ]
 
 
-def _profit(network: pypsa.Network, gens: list[str], mc_true: dict[str, float]) -> dict[str, float]:
-    """Owner profit / energy / revenue at the network's clearing prices."""
+def _true_marginal_cost(network: pypsa.Network, gens: list[str]) -> pd.DataFrame:
+    """Per-snapshot TRUE marginal cost (currency/MWh) for ``gens``.
+
+    Dense frame: the time-varying ``generators_t.marginal_cost`` (fuel-price
+    series, carbon-price schedules) where present, else the static column —
+    exactly the cost PyPSA itself dispatches against.
+    """
+    return network.get_switchable_as_dense("Generator", "marginal_cost")[gens]
+
+
+def _apply_offer(
+    work: pypsa.Network,
+    gens: list[str],
+    mc_true: pd.DataFrame,
+    markup_type: str,
+    markup: float,
+) -> None:
+    """Write the marked-up offers into ``work``'s time-varying cost frame.
+
+    PyPSA prefers ``generators_t.marginal_cost`` over the static column when
+    both exist, so the offer must land in the time-varying frame — a static
+    write is silently ignored for any generator that already carries a cost
+    series (e.g. under a carbon-price schedule), making the markup a no-op.
+    """
+    mc_t = work.generators_t.marginal_cost
+    for g in gens:
+        base = mc_true[g].reindex(work.snapshots).fillna(0.0)
+        mc_t[g] = base * (1.0 + markup) if markup_type == "percent" else base + markup
+
+
+def _profit(network: pypsa.Network, gens: list[str], mc_true: pd.DataFrame) -> dict[str, float]:
+    """Owner profit / energy / revenue at the network's clearing prices.
+
+    ``mc_true`` is the dense per-snapshot TRUE marginal cost (see
+    ``_true_marginal_cost``): profit is measured snapshot by snapshot against
+    the true cost — a marked-up offer changes the price, never the cost.
+    """
     mp = network.buses_t.marginal_price
     w = network.snapshot_weightings["objective"]
     energy = revenue = cost = 0.0
@@ -42,7 +78,8 @@ def _profit(network: pypsa.Network, gens: list[str], mc_true: dict[str, float]) 
         p = network.generators_t.p[g]
         e = float((p * w).sum())
         energy += e
-        cost += float(mc_true.get(g, 0.0) * (p * w).sum())
+        mc = mc_true[g].reindex(p.index).fillna(0.0)
+        cost += float((mc * p * w).sum())
         if bus in mp.columns:
             revenue += float((p * mp[bus] * w).sum())
     return {
@@ -81,7 +118,7 @@ def build_bid_strategy(
         return None
 
     w = network.snapshot_weightings["objective"]
-    mc_true = {g: float(network.generators.at[g, "marginal_cost"]) for g in gens}
+    mc_true = _true_marginal_cost(network, gens)
     baseline = _profit(network, gens, mc_true)
     sys_price_base = round(float((mp.mean(axis=1) * w).sum() / w.sum()), 2)
 
@@ -93,10 +130,7 @@ def build_bid_strategy(
         pass
     try:
         work = network.copy()
-        for g in gens:
-            base_mc = mc_true[g]
-            offer = base_mc * (1.0 + markup) if markup_type == "percent" else base_mc + markup
-            work.generators.at[g, "marginal_cost"] = offer
+        _apply_offer(work, gens, mc_true, markup_type, markup)
         result = work.optimize(
             solver_name="highs",
             solver_options=solver_options or {},

@@ -420,9 +420,14 @@ export function AnalyticsDashboard({
           return (
             <DurationCurveCard
               title={card.source === 'price' ? `Marginal price (${currencySymbol}/MWh)` : 'Load (MW)'}
-              data={card.source === 'price' ? sortedPrice : sortedLoad}
+              data={[{
+                key: card.source,
+                label: card.source === 'price' ? 'Marginal price' : 'Load',
+                color: card.source === 'price' ? 'var(--text)' : 'var(--warm)',
+                values: card.source === 'price' ? sortedPrice : sortedLoad,
+              }]}
               unit={card.source === 'price' ? `${currencySymbol}/MWh` : 'MW'}
-              color={card.source === 'price' ? 'var(--text)' : 'var(--warm)'}
+              showLegend={false}
             />
           );
         case 'merit-order':

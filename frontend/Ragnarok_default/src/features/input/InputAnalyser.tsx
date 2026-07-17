@@ -248,7 +248,7 @@ function DurationCurve({ values, label, color }: { values: number[]; label: stri
   const sorted = [...values].sort((a, b) => b - a);
   if (!sorted.length) return <NoData />;
   const option = buildDurationCurveOption({
-    data: sorted, title: label, unit: '', color, theme: readChartTheme(),
+    series: [{ key: label, label, color, values: sorted }], title: label, unit: '', theme: readChartTheme(),
   });
   return <MiniChart option={option} height={200} maxWidth={480} />;
 }

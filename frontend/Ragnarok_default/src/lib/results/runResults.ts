@@ -27,7 +27,12 @@ import {
   WorkbookModel,
 } from '../types';
 import { carrierColor, numberValue, resolvedColor, stringValue } from 'lib/utils/helpers';
-import { deriveAssetDetails } from 'lib/results/assetDetails';
+import {
+  deriveAssetDetails,
+  generatorEmissionFactor,
+  indexInputByTimestamp,
+  inputSeriesValueAtStamp,
+} from 'lib/results/assetDetails';
 
 export interface DeriveRunResultsOptions {
   carbonPrice?: number;
@@ -108,56 +113,11 @@ function staticOutValue(
   return numberValue(v as Primitive);
 }
 
-// PyPSA's canonical time-index column. All temporal data is canonicalised to
-// this single column name + ISO-`T` values on entry (see
-// `canonicalizeTemporalSheets` in workbook.ts), so matching here is exact —
-// no format-tolerance band-aid.
-const SNAPSHOT_COL = 'snapshot';
-
-interface InputTemporalIndex {
-  /** Rows keyed by canonical ISO snapshot timestamp. */
-  byStamp: Record<string, GridRow>;
-  /** Component names that have a column in the temporal sheet. */
-  columns: Set<string>;
-}
-
-/**
- * Build a timestamp → row lookup from an input temporal sheet so values can be
- * read by snapshot timestamp instead of by position. Positional indexing breaks
- * once outputs are filtered to a non-first investment period, because the input
- * sheet still holds every period's rows in order. Also records which component
- * columns are present so the temporal series can win over the static scalar.
- */
-function indexInputByTimestamp(rows: GridRow[] | undefined): InputTemporalIndex {
-  const byStamp: Record<string, GridRow> = {};
-  const columns = new Set<string>();
-  if (!rows || rows.length === 0 || !(SNAPSHOT_COL in rows[0])) return { byStamp, columns };
-  for (const key of Object.keys(rows[0])) {
-    if (key !== SNAPSHOT_COL && key !== 'period') columns.add(key);
-  }
-  for (const row of rows) {
-    const stamp = stringValue(row[SNAPSHOT_COL]);
-    if (stamp) byStamp[stamp] = row;
-  }
-  return { byStamp, columns };
-}
-
-/**
- * Resolve a component's value at a snapshot. The temporal series wins over the
- * static scalar whenever the component has a column in the time-series sheet —
- * matching PyPSA's convention that `loads_t.p_set` overrides `loads.p_set`.
- * The static `fallback` is used only for components absent from the temporal
- * sheet entirely. Timestamps match exactly (both sides are canonical ISO-`T`).
- */
-function inputSeriesValueAtStamp(
-  idx: InputTemporalIndex, stamp: string, col: string, fallback: number,
-): number {
-  if (!idx.columns.has(col)) return fallback;
-  const row = idx.byStamp[stamp];
-  const cell = row?.[col];
-  if (cell === undefined || cell === null || cell === '') return 0;
-  return numberValue(cell);
-}
+// Input-sheet timestamp indexing (`indexInputByTimestamp` /
+// `inputSeriesValueAtStamp`) lives in assetDetails.ts — single source of
+// truth, imported above, so both derivers hit the identical fix for reading
+// input time series by snapshot timestamp instead of row position (breaks
+// once outputs are filtered to a non-first investment period).
 
 function fmt(n: number, digits = 0): string {
   return n.toLocaleString(undefined, { maximumFractionDigits: digits });
@@ -239,7 +199,11 @@ export function deriveRunResults(
     genCarrier[name] = carrier;
     genBus[name] = stringValue(row.bus);
     genMc[name] = numberValue(row.marginal_cost);
-    genEf[name] = numberValue(carrierStatic[carrier]?.co2_emissions);
+    // Thermal-basis (fuel) emission factor: carrier co2_emissions / efficiency
+    // (M3) — matches the backend Emissions Breakdown card and per-asset
+    // detail (assetDetails.ts) so the same run reports the same emissions
+    // everywhere in the dashboard, regardless of how the result arrived.
+    genEf[name] = generatorEmissionFactor(row, carrierStatic);
   }
 
   // ── Dispatch by carrier and load profile per snapshot ─────────────────────
@@ -255,6 +219,13 @@ export function deriveRunResults(
   const elecBuses = new Set(buses.filter((b) => isElec(busStatic[b]?.carrier)));
 
   const carrierDispatch: Record<string, number[]> = {};
+  // Backend `electricity_dispatch_by_carrier` (the carrierMix source) is
+  // generators + conversion-Link injections only — storage discharge is
+  // NOT part of the mix (it shows via its own storage series/band).
+  // `carrierDispatch` (above) also feeds the dispatch STACK chart, which
+  // does show a storage band, so track the mix-only accumulation
+  // separately rather than filtering storage back out of carrierDispatch.
+  const carrierMixDispatch: Record<string, number[]> = {};
   const generatorDispatch: Record<string, number[]> = {};
   const loadPerSnapshot: number[] = new Array(snapshots.length).fill(0);
   const emissionsPerSnapshot: number[] = new Array(snapshots.length).fill(0);
@@ -265,18 +236,26 @@ export function deriveRunResults(
     const onElec = elecBuses.has(genBus[name]);
     const arr: number[] = new Array(snapshots.length).fill(0);
     generatorDispatch[name] = arr;
-    if (onElec && !carrierDispatch[carrier]) carrierDispatch[carrier] = new Array(snapshots.length).fill(0);
+    if (onElec && !carrierDispatch[carrier]) {
+      carrierDispatch[carrier] = new Array(snapshots.length).fill(0);
+      carrierMixDispatch[carrier] = new Array(snapshots.length).fill(0);
+    }
     for (let i = 0; i < snapshots.length; i++) {
       const v = seriesValueAt(pGen, i, name);
       arr[i] = v;
       const pos = Math.max(v, 0);
       // Fuel-supply generators on non-electricity buses (e.g. gas) are not part
       // of the electricity mix — but they still emit (counted below).
-      if (onElec) carrierDispatch[carrier][i] += pos;
+      if (onElec) {
+        carrierDispatch[carrier][i] += pos;
+        carrierMixDispatch[carrier][i] += pos;
+      }
       emissionsPerSnapshot[i] += pos * ef;
     }
   }
-  // Add storage discharge contribution to dispatch series under its carrier
+  // Add storage discharge contribution to the dispatch STACK only (its own
+  // band) — excluded from carrierMixDispatch/carrierMix, matching the
+  // backend mix.
   for (const name of storageUnits) {
     const row = storageStatic[name];
     const carrier = stringValue(row.carrier) || 'Storage';
@@ -290,8 +269,11 @@ export function deriveRunResults(
   }
   // Conversion-Link electricity output (e.g. CCGT gas→elec) under the Link's
   // carrier, using p0 × efficiency. Only links whose input bus is NOT
-  // electricity count as supply, so transmission links stay out.
-  const pLink = (outputs.series ?? {})['links-p0'];
+  // electricity count as supply, so transmission links stay out. Period-
+  // filtered like every other series read in this deriver — the unfiltered
+  // `outputs.series` here showed period-1 flows regardless of the selected
+  // pathway period.
+  const pLink = visibleOutputs.series['links-p0'];
   if (pLink) {
     const ports: [string, string][] = [['bus1', 'efficiency'], ['bus2', 'efficiency2'], ['bus3', 'efficiency3']];
     for (const name of Object.keys(linksStatic)) {
@@ -305,8 +287,11 @@ export function deriveRunResults(
         const eff = raw !== undefined && raw !== null && raw !== '' ? numberValue(raw) : (busCol === 'bus1' ? 1 : 0);
         if (!eff) continue;
         if (!carrierDispatch[carrier]) carrierDispatch[carrier] = new Array(snapshots.length).fill(0);
+        if (!carrierMixDispatch[carrier]) carrierMixDispatch[carrier] = new Array(snapshots.length).fill(0);
         for (let i = 0; i < snapshots.length; i++) {
-          carrierDispatch[carrier][i] += Math.max(seriesValueAt(pLink, i, name), 0) * eff;
+          const injected = Math.max(seriesValueAt(pLink, i, name), 0) * eff;
+          carrierDispatch[carrier][i] += injected;
+          carrierMixDispatch[carrier][i] += injected;
         }
       }
     }
@@ -394,8 +379,12 @@ export function deriveRunResults(
   }
 
   // ── Carrier mix (weighted energy) ─────────────────────────────────────────
+  // Built from carrierMixDispatch (generators + conversion-Link injections),
+  // NOT carrierDispatch — the backend carrierMix excludes storage discharge
+  // (backend/pypsa/results/__init__.py electricity_dispatch_by_carrier), so
+  // the derived tile must mean the same thing as the backend one.
   const carrierEnergy: Record<string, number> = {};
-  for (const [c, arr] of Object.entries(carrierDispatch)) {
+  for (const [c, arr] of Object.entries(carrierMixDispatch)) {
     let sum = 0;
     for (let i = 0; i < snapshots.length; i++) sum += arr[i] * W;
     if (sum > 0) carrierEnergy[c] = sum;
@@ -523,7 +512,11 @@ export function deriveRunResults(
     rows: Record<string, GridRow>, capAttr: 's_nom' | 'p_nom', p0Sheet: string,
     staticSheet: string,
   ) {
-    const p0 = (outputs.series ?? {})[p0Sheet];
+    // Period-filtered like every other series read here — the unfiltered
+    // `outputs.series` showed period-1 flows regardless of the selected
+    // pathway period, so line loading / transmission stress / map colouring
+    // never reflected the selected period.
+    const p0 = visibleOutputs.series[p0Sheet];
     if (!p0) return;
     for (const name of Object.keys(rows)) {
       // Use optimised capacity when available (extendable lines after solve),
@@ -618,9 +611,10 @@ export function deriveRunResults(
   const avgPrice = systemPriceSeries.length
     ? systemPriceSeries.reduce((s, p) => s + p.value, 0) / systemPriceSeries.length
     : 0;
-  const peakPrice = systemPriceSeries.length
-    ? systemPriceSeries.reduce((m, p) => (p.value > m ? p.value : m), -Infinity)
-    : 0;
+  const peakPriceEntry = systemPriceSeries.length
+    ? systemPriceSeries.reduce((best, p) => (p.value > best.value ? p : best))
+    : null;
+  const peakPrice = peakPriceEntry?.value ?? 0;
   const totalEmissionsKt =
     Object.values(carrierEmissionsMap).reduce((a, b) => a + b, 0) / 1000;
   const avgLoading = lineLoading.length
@@ -638,7 +632,7 @@ export function deriveRunResults(
     { label: 'Storage reserve', value: `${fmt(storCap - peakLoad)} MW`,
       detail: 'storage capacity vs peak demand' },
     { label: 'Peak price', value: `${fmt(peakPrice)} ${currencySymbol}/MWh`,
-      detail: `${fmt(peakLoad)} MW peak load` },
+      detail: peakPriceEntry ? `at ${peakPriceEntry.label}` : 'no price series' },
     { label: 'System emissions', value: `${fmt(totalEmissionsKt)} ktCO2e`,
       detail: `Carbon price ${fmt(carbonPrice)} ${currencySymbol}/t` },
     { label: 'Transmission stress', value: `${fmt(avgLoading)}%`,

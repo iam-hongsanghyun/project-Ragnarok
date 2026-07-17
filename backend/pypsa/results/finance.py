@@ -10,14 +10,25 @@ with F0). We reconstruct the overnight capex from it via the inverse capital
 recovery factor — ``C = a · (1 − (1+r)^−L) / r`` — so the year-0 outflow is
 explicit and standard IRR / payback fall out of the cashflow.
 
+Basis: dispatch and prices cover only the modelled window of
+``H = Σ_t w_t`` represented hours (the build path scales snapshot weightings
+to the window, not to 8760 h). Every recurring cashflow here is **annual**, so
+the window operating margin is annualised by ``× 8760 / H`` before it enters
+the cashflow, NPV, IRR, payback and DSCR. The overnight capex is already on a
+true annual→present basis and is not rescaled.
+
 Algorithm:
-    $$\\mathrm{NPV} = \\sum_{t=0}^{T} \\frac{CF_t}{(1+r)^t}, \\quad
-      CF_0 = -C,\\; CF_{1..L} = M = \\text{revenue} - \\text{opex}$$
-    ASCII: NPV = sum_t CF_t / (1+r)^t ; CF_0 = -C ; CF_t = revenue - opex.
+    $$M = \\left(\\text{revenue}_H - \\text{opex}_H\\right) \\cdot
+      \\frac{8760}{H}, \\quad
+      \\mathrm{NPV} = \\sum_{t=0}^{T} \\frac{CF_t}{(1+r)^t}, \\quad
+      CF_0 = -C,\\; CF_{1..L} = M$$
+    ASCII: M = (revenue_H - opex_H) * 8760/H ; NPV = sum_t CF_t / (1+r)^t ;
+    CF_0 = -C ; CF_t = M.
 
     Symbols: r = discount rate [-], L = asset lifetime [yr], C = overnight
-    capex [currency], M = annual operating margin [currency/yr], a = annualised
-    capital cost [currency/yr], IRR = rate solving NPV(IRR)=0 [-].
+    capex [currency], H = modelled window [h], revenue_H / opex_H = window
+    totals [currency], M = annual operating margin [currency/yr], a =
+    annualised capital cost [currency/yr], IRR = rate solving NPV(IRR)=0 [-].
 """
 from __future__ import annotations
 
@@ -25,6 +36,8 @@ import logging
 from typing import Any
 
 import pypsa
+
+from .market import HOURS_PER_YEAR
 
 _log = logging.getLogger("pypsa.solver")
 
@@ -56,6 +69,11 @@ def _irr(cashflows: list[float]) -> float | None:
         return None
     lo, hi = -0.9, 10.0
     f_lo, f_hi = _npv(lo, cashflows), _npv(hi, cashflows)
+    # Very profitable projects (tiny capex vs an annualised margin) can carry
+    # an IRR beyond the initial bracket — expand it geometrically first.
+    while f_lo * f_hi > 0 and hi < 1e9:
+        hi *= 10.0
+        f_hi = _npv(hi, cashflows)
     if f_lo * f_hi > 0:
         return None  # no root bracketed in the search range
     for _ in range(100):
@@ -120,6 +138,9 @@ def build_company_finance(
     Returns:
         ``{ownerColumn, currency, discountRate, companies: [...]}`` or ``None``
         when no owner-tagged asset has both capex and revenue to finance.
+        Each company's ``annualMargin`` (and hence the cashflow, NPV, IRR,
+        payback and DSCR) is the modelled-window margin annualised by
+        ``× 8760 / H`` (H = Σ snapshot weights, the represented hours).
     """
     if not getattr(network, "is_solved", False):
         return None
@@ -128,6 +149,11 @@ def build_company_finance(
     if mp is None or mp.empty:
         return None  # no price signal ⇒ no revenue ⇒ no finance
     weights = network.snapshot_weightings["objective"].to_numpy()
+    # Modelled window (represented hours). Window money × 8760/H = annual.
+    H = float(weights.sum())
+    if H <= 0:
+        return None
+    annualize = HOURS_PER_YEAR / H
     r = float(discount_rate or 0.0)
 
     gearing = float((debt or {}).get("gearing", 0.0) or 0.0)
@@ -156,6 +182,11 @@ def build_company_finance(
         c = annualised_capex / _crf(r, life) if annualised_capex > 0 else 0.0
         assets.setdefault(company, []).append((c, margin, life))
 
+    # Dense marginal cost: a time-varying series (workbook `generators-
+    # marginal_cost`, or a varying carbon-price schedule writing its adder to
+    # generators_t only) is invisible in the static column.
+    mc_dense = network.get_switchable_as_dense("Generator", "marginal_cost")
+
     for g in network.generators.index:
         company = gen_owner.get(str(g))
         if not company:
@@ -168,10 +199,11 @@ def build_company_finance(
             continue
         pi = mp[bus].to_numpy()
         revenue = float((p * pi * weights).sum())
-        opex = float((float(network.generators.at[g, "marginal_cost"]) * p * weights).sum())
+        mc = mc_dense[g].to_numpy(dtype=float)
+        opex = float((mc * p * weights).sum())
         ext = bool(network.generators.at[g, "p_nom_extendable"]) if "p_nom_extendable" in network.generators.columns else False
         a = float(network.generators.at[g, "capital_cost"]) * float(network.generators.at[g, "p_nom_opt"]) if ext else 0.0
-        _add(company, a, revenue - opex, _lifetime(network.generators, g))
+        _add(company, a, (revenue - opex) * annualize, _lifetime(network.generators, g))
 
     for s in network.storage_units.index:
         company = sto_owner.get(str(s))
@@ -190,7 +222,7 @@ def build_company_finance(
         opex = float((mc * pd_ * weights).sum())
         ext = bool(network.storage_units.at[s, "p_nom_extendable"]) if "p_nom_extendable" in network.storage_units.columns else False
         a = float(network.storage_units.at[s, "capital_cost"]) * float(network.storage_units.at[s, "p_nom_opt"]) if ext else 0.0
-        _add(company, a, revenue - opex, _lifetime(network.storage_units, s))
+        _add(company, a, (revenue - opex) * annualize, _lifetime(network.storage_units, s))
 
     companies: list[dict[str, Any]] = []
     for company, rows in assets.items():

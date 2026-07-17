@@ -34,6 +34,39 @@ from ...app.config import load_system_defaults
 
 _BIG = 1e12  # placeholder threshold: values at/above this read as "unbounded"
 
+# Per-column PyPSA defaults for the suspect-coefficient scan: bound columns
+# default to ±inf (Generator/StorageUnit p_nom_max, Store e_nom_max and
+# Generator e_sum_max default +inf; Generator e_sum_min defaults -inf), so an
+# inf of the DEFAULT sign is normal and must never be flagged — only an inf of
+# the opposite sign, or a finite >= _BIG placeholder standing in for inf, is
+# suspect. Cost columns default to 0.0, so any inf (and any |v| >= _BIG, since
+# a huge NEGATIVE cost unbounds the objective just as surely) is suspect.
+_POS_INF_DEFAULT_COLS = ("p_nom_max", "e_nom_max", "e_sum_max")
+_NEG_INF_DEFAULT_COLS = ("e_sum_min",)
+_COST_COLS = ("capital_cost", "marginal_cost")
+
+
+def _is_suspect_value(col: str, v: float) -> bool:
+    """True when ``v`` in column ``col`` reads as a placeholder/extreme value.
+
+    Flags only NON-DEFAULT extremes: ``inf`` where inf is not that column's
+    PyPSA default (see the column groups above), plus any finite magnitude at
+    or above ``_BIG`` (for bound columns only a huge POSITIVE value — a
+    finite stand-in for +inf, or an ``e_sum_min`` that forces impossible
+    throughput; a huge negative bound just mimics its unbounded default).
+    """
+    if np.isnan(v):
+        return False
+    if np.isinf(v):
+        if col in _POS_INF_DEFAULT_COLS:
+            return v < 0  # +inf IS the default; -inf is a pathological bound
+        if col in _NEG_INF_DEFAULT_COLS:
+            return v > 0  # -inf IS the default; +inf forces impossible throughput
+        return True  # inf is never a default in cost columns
+    if col in _COST_COLS:
+        return abs(v) >= _BIG
+    return v >= _BIG
+
 # A window-scaled e_sum_max below this fraction of BOTH the window's load
 # energy and the generator's own capacity-bound energy reads as "starved":
 # the budget, not capacity, is what pins the generator.
@@ -93,8 +126,12 @@ def diagnose_infeasibility(network: pypsa.Network, *, currency: str = "$") -> di
     gens = network.generators
 
     # ── 1. Suspect placeholder coefficients ─────────────────────────────────
+    # e_sum_min at a huge positive value forces impossible throughput;
+    # p_nom_max/e_nom_max/cost at (non-default) inf or >= 1e12 make the LP
+    # unbounded or ill-conditioned. Per-column default awareness lives in
+    # _is_suspect_value — PyPSA's own ±inf defaults are never flagged.
     scan = [
-        ("generators", gens, ["p_nom_max", "capital_cost", "marginal_cost"]),
+        ("generators", gens, ["p_nom_max", "e_sum_min", "e_sum_max", "capital_cost", "marginal_cost"]),
         ("storage_units", network.storage_units, ["p_nom_max", "e_sum_min", "e_sum_max", "capital_cost"]),
         ("stores", network.stores, ["e_nom_max", "e_sum_min", "e_sum_max"]),
     ]
@@ -107,20 +144,8 @@ def diagnose_infeasibility(network: pypsa.Network, *, currency: str = "$") -> di
                     v = float(val)
                 except (TypeError, ValueError):
                     continue
-                # e_sum_min at a huge positive value forces impossible throughput;
-                # p_nom_max/cost at inf/1e12 make the LP unbounded/ill-conditioned.
-                if np.isinf(v) or abs(v) >= _BIG:
-                    if col in ("e_sum_min",) and v > 0:
-                        suspects.append({"sheet": sheet, "name": str(name), "attr": col, "value": v})
-
-    # inf/1e12 in cost columns is the classic unbounded/ill-conditioned trigger.
-    for name, val in gens.get("marginal_cost", pd.Series(dtype=float)).items():
-        try:
-            v = float(val)
-        except (TypeError, ValueError):
-            continue
-        if np.isinf(v) or abs(v) >= _BIG:
-            suspects.append({"sheet": "generators", "name": str(name), "attr": "marginal_cost", "value": v})
+                if _is_suspect_value(col, v):
+                    suspects.append({"sheet": sheet, "name": str(name), "attr": col, "value": v})
 
     if suspects:
         lines.append(
