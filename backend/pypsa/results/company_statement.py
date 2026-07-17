@@ -35,6 +35,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import numpy as np
+import pandas as pd
 import pypsa
 
 from ..utils.emissions import per_generator_emission_factor
@@ -59,7 +61,7 @@ def build_company_statement(
     owner_column: str,
     currency: str,
     emissions_factors: dict[str, float],
-    carbon_price: float,
+    carbon_price: float | pd.Series,
     debt: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Per-company annual P&L from the solved network.
@@ -70,7 +72,9 @@ def build_company_statement(
         owner_column: Which model column holds the owner tag.
         currency: Currency symbol (passthrough).
         emissions_factors: carrier → tCO2/MWh (fuel basis; divided by η per M3).
-        carbon_price: Carbon price [currency/tCO2] used to split the carbon line.
+        carbon_price: Carbon price [currency/tCO2] used to split the carbon
+            line — a scalar, or a per-snapshot Series when a schedule was
+            applied to the solve.
         debt: Optional ``{gearing, interestRate, tenorYears}`` for the interest line.
 
     Returns:
@@ -85,7 +89,16 @@ def build_company_statement(
         return None
     weights = network.snapshot_weightings["objective"].to_numpy()
     eff_ef = per_generator_emission_factor(network, emissions_factors)
-    co2_price = float(carbon_price or 0.0)
+    # Per-snapshot carbon price array (a schedule varies over snapshots); the
+    # reported/logged scalar is its mean. Matches the adder the solve applied.
+    if isinstance(carbon_price, pd.Series):
+        co2_arr = carbon_price.reindex(network.snapshots).fillna(0.0).to_numpy(dtype=float)
+    else:
+        co2_arr = np.full(len(network.snapshots), float(carbon_price or 0.0))
+    co2_price = float(co2_arr.mean()) if len(co2_arr) else 0.0
+    # Dense marginal cost: a varying schedule writes its adder to the
+    # time-varying frame only, so the static column alone would miss it.
+    mc_dense = network.get_switchable_as_dense("Generator", "marginal_cost")
 
     gearing = float((debt or {}).get("gearing", 0.0) or 0.0)
     interest = float((debt or {}).get("interestRate", 0.0) or 0.0)
@@ -116,11 +129,11 @@ def build_company_statement(
         p = network.generators_t.p[g].to_numpy()
         p_pos = p.clip(min=0.0)
         pi = mp[bus].to_numpy()
-        mc = float(network.generators.at[g, "marginal_cost"])
+        mc = mc_dense[g].to_numpy(dtype=float)
         ef = float(eff_ef.get(str(g), 0.0))
         energy = float((p * weights).sum())
         opex = float((mc * p_pos * weights).sum())
-        carbon = float((p_pos * ef * co2_price * weights).sum())
+        carbon = float((p_pos * ef * co2_arr * weights).sum())
         capacity = float(network.generators.at[g, "p_nom_opt"])
         cap_cost = float(network.generators.at[g, "capital_cost"]) if "capital_cost" in network.generators.columns else 0.0
         b["revenue"] += float((p * pi * weights).sum())

@@ -69,3 +69,16 @@ def test_endpoint_via_session() -> None:
     assert r.status_code == 200
     assert r.json()["addedMwh"] == pytest.approx(350.0)
     c.post(f"/api/session/clear?session_id={sid}")
+
+
+def test_non_unit_snapshot_weight_delivers_exact_energy() -> None:
+    """Regression: 3-hourly rows must still integrate (MW × weight) to the
+    fleet's daily energy — the weight used to be divided out twice."""
+    rows = [r for r in _day_rows({"L": 100.0}) if int(r["snapshot"][11:13]) % 3 == 0]
+    out, meta = ev_demand_adjustment(
+        rows, fleet_size=100_000, kwh_per_vehicle_day=7.0, snapshot_weight=3.0,
+    )
+    # 8 rows × 3 h = one full day → 100k vehicles × 7 kWh = 700 MWh.
+    assert meta["addedMwh"] == pytest.approx(700.0)
+    added_energy = sum((o["L"] - 100.0) * 3.0 for o in out)
+    assert added_energy == pytest.approx(700.0, rel=1e-6)

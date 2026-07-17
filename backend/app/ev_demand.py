@@ -111,8 +111,10 @@ def ev_demand_adjustment(
 
     new_rows: list[dict[str, Any]] = []
     for i, r in enumerate(rows):
-        night_mw = energy_mwh * alpha * night_w[i] / (night_norm * max(snapshot_weight, 1e-9))
-        day_mw = energy_mwh * (1.0 - alpha) * day_w[i] / (day_norm * max(snapshot_weight, 1e-9))
+        # night_norm/day_norm already carry snapshot_weight (MWh per unit shape
+        # weight), so dividing by them alone yields MW that integrate to energy_mwh.
+        night_mw = energy_mwh * alpha * night_w[i] / night_norm
+        day_mw = energy_mwh * (1.0 - alpha) * day_w[i] / day_norm
         nr: dict[str, Any] = {index_col: r.get(index_col)}
         for c in cols:
             try:

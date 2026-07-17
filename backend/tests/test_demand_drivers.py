@@ -114,3 +114,21 @@ def test_endpoint_via_session() -> None:
     page = c.get(f"/api/session/sheet/loads-p_set?session_id={sid}&limit=5").json()
     assert page["rows"][0]["snapshot"].startswith("2035-")
     c.post(f"/api/session/clear?session_id={sid}")
+
+
+def test_non_unit_snapshot_weight_delivers_exact_energy() -> None:
+    """Regression: at 3-hourly resolution the added MW must integrate
+    (MW × snapshot_weight) to the window-scaled MWh — the weight used to be
+    divided out twice, under-delivering by exactly that factor."""
+    rows = [r for r in _year_rows()[: 24 * 14] if int(r["snapshot"][11:13]) % 3 == 0]
+    out, meta = driver_demand_forecast(
+        rows, from_year=2023, to_year=2023,
+        heat_added_gwh=87.6, ev_added_gwh=43.8, snapshot_weight=3.0,
+    )
+    window_hours = len(rows) * 3.0  # 14 days = 336 h
+    expected_heat = 87_600.0 * window_hours / 8760.0
+    expected_ev = 43_800.0 * window_hours / 8760.0
+    assert meta["heatAddedMwh"] == pytest.approx(expected_heat, rel=1e-6)
+    assert meta["evAddedMwh"] == pytest.approx(expected_ev, rel=1e-6)
+    added_energy = sum((o["L"] - r["L"]) * 3.0 for o, r in zip(out, rows))
+    assert added_energy == pytest.approx(expected_heat + expected_ev, rel=1e-6)

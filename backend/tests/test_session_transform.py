@@ -120,3 +120,18 @@ def test_static_or_missing_sheet_is_404(_session_dir: Path) -> None:
         "/api/session/series/no_such_sheet/transform",
         json={"sessionId": "default", "op": "scale", "factor": 2.0},
     ).status_code == 404
+
+
+def test_set_endpoint_writes_the_requested_value(_session_dir: Path) -> None:
+    """Regression: the router used to drop ``value`` from the body, so
+    ``op: set`` always wrote the 0.0 default and zeroed the series."""
+    _load([
+        {"snapshot": "2030-01-01T00:00:00", "L": 10.0},
+        {"snapshot": "2030-01-01T01:00:00", "L": 20.0},
+    ])
+    resp = client.post(
+        "/api/session/series/loads-p_set/transform",
+        json={"op": "set", "value": 7.5},
+    )
+    assert resp.status_code == 200, resp.text
+    assert _values() == [7.5, 7.5]

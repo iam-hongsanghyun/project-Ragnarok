@@ -154,3 +154,28 @@ def test_empty_schedule_falls_back_to_scalar() -> None:
     note_text = " ".join(result["narrative"])
     assert "carbon price 50" in note_text.lower()
     assert "schedule" not in note_text.lower()
+
+
+def test_schedule_cost_split_backs_out_scheduled_price() -> None:
+    """Regression: the fuel/carbon breakdown must back the adder out with the
+    per-snapshot schedule actually applied to the solve — the scalar (0 here)
+    used to zero the carbon line and lump the adder into fuel.
+
+    Analytical: dispatch 80 MW both periods, ef 0.4, base mc 20.
+    carbon = w·80·0.4·(30+120) = 4800·w ; fuel = w·80·20·2 = 3200·w → ratio 1.5.
+    """
+    options = {
+        **_pathway_options(),
+        "carbonPriceSchedule": [
+            {"year": 2025, "price": 30.0},
+            {"year": 2030, "price": 120.0},
+        ],
+    }
+    result = run_pypsa(
+        _two_year_pathway(),
+        {"discountRate": 0.05, "carbonPrice": 0.0},
+        options,
+    )
+    costs = {row["label"]: row["value"] for row in result["costBreakdown"]}
+    assert costs["Carbon cost"] > 0
+    assert costs["Carbon cost"] / costs["Fuel cost"] == pytest.approx(1.5, rel=1e-3)

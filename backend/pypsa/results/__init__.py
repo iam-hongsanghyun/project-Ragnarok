@@ -22,6 +22,7 @@ from ..stochastic import (
     parse_stochastic_config,
     per_scenario_summaries,
 )
+from ..carbon_price import build_price_series, parse_carbon_price_config
 from ..utils.emissions import per_generator_emission_factor
 from ..utils.series import weighted_sum
 from ..network.custom_constraints import apply_custom_constraints
@@ -700,7 +701,10 @@ def _build_solved_payload(
         dispatch_frame = generator_dispatch_frame
 
     by_carrier = electricity_dispatch_by_carrier(network, generator_dispatch_frame)
-    load_dispatch = network.loads_t.p_set.sum(axis=1)
+    # Dense p_set covers loads defined only statically (no loads-p_set column) —
+    # loads_t.p_set alone would silently drop them from demand metrics.
+    load_p_set = network.get_switchable_as_dense("Load", "p_set")
+    load_dispatch = load_p_set.sum(axis=1)
     price_series = (
         network.buses_t.marginal_price.mean(axis=1)
         if not network.buses_t.marginal_price.empty
@@ -817,7 +821,13 @@ def _build_solved_payload(
     fuel_cost = 0.0
     carbon_cost = 0.0
     shed_cost = 0.0
-    carbon_c = float(scenario.get("carbonPrice", 0.0))
+    # Back the carbon adder out with the SAME per-snapshot price the solve
+    # folded into marginal_cost — a schedule fully supersedes the scalar there,
+    # so splitting with the scalar alone misreports fuel vs carbon.
+    carbon_cfg = parse_carbon_price_config(
+        scenario.get("carbonPrice") or 0.0, options.get("carbonPriceSchedule")
+    )
+    carbon_price_series = build_price_series(network, carbon_cfg)
     mc_dense = network.get_switchable_as_dense("Generator", "marginal_cost")
     for name in network.generators.index:
         if name not in generator_dispatch_frame.columns:
@@ -831,8 +841,8 @@ def _build_solved_payload(
         if name.startswith("load_shedding_"):
             shed_cost += weighted_sum(dispatch_pos * mc_s, generator_weights)
         else:
-            carbon_cost += weighted_sum(dispatch_pos * ef * carbon_c, generator_weights)
-            fuel_cost += weighted_sum(dispatch_pos * (mc_s - ef * carbon_c).clip(lower=0.0), generator_weights)
+            carbon_cost += weighted_sum(dispatch_pos * ef * carbon_price_series, generator_weights)
+            fuel_cost += weighted_sum(dispatch_pos * (mc_s - ef * carbon_price_series).clip(lower=0.0), generator_weights)
 
     # Expansion CAPEX (annualised)
     expansion_results = build_expansion_results(network)
@@ -840,7 +850,7 @@ def _build_solved_payload(
 
     # Market analysis — merit order + CO₂ shadow price (pure post-processing)
     merit_order = build_merit_order(network)
-    co2_shadow = build_co2_shadow(network, float(scenario.get("carbonPrice", 0.0)), currency)
+    co2_shadow = build_co2_shadow(network, float(carbon_price_series.mean()), currency)
     applied_constraints = build_applied_constraints(network)
     generator_economics = build_generator_economics(network, currency)
     statistics = build_statistics(network)
@@ -890,7 +900,9 @@ def _build_solved_payload(
     nodal_balance = []
     for bus in network.buses.index:
         bus_loads = network.loads.index[network.loads.bus == bus]
-        load_val = float(network.loads_t.p_set.loc[:, bus_loads].sum(axis=1).mean()) if len(bus_loads) else 0.0
+        # load_p_set (dense) includes static-only loads; strict .loc on
+        # loads_t.p_set raised KeyError for them and killed the whole run.
+        load_val = float(load_p_set.loc[:, bus_loads].sum(axis=1).mean()) if len(bus_loads) else 0.0
         gen_names = list(network.generators.index[network.generators.bus == bus])
         gen_val = float(dispatch_frame.reindex(columns=gen_names, fill_value=0.0).sum(axis=1).mean()) if gen_names else 0.0
         nodal_balance.append({"label": bus, "load": load_val, "generation": gen_val})
@@ -920,7 +932,11 @@ def _build_solved_payload(
         {"label": "Generator reserve", "value": f"{round(generator_capacity - reserve_requirement):,} MW", "detail": "generator capacity vs peak demand"},
         {"label": "Storage reserve", "value": f"{round(storage_capacity - reserve_requirement):,} MW", "detail": "storage capacity vs peak demand"},
         {"label": "Peak price", "value": f"{round(float(price_series.max())):,} {currency}/MWh", "detail": f"{peak_net_load:,} MW peak load"},
-        {"label": "System emissions", "value": f"{round(total_emissions):,} ktCO2e", "detail": f"Carbon price {float(scenario.get('carbonPrice', 0.0)):.0f} {currency}/t"},
+        {"label": "System emissions", "value": f"{round(total_emissions):,} ktCO2e", "detail": (
+            f"Carbon price {float(carbon_price_series.min()):.0f}–{float(carbon_price_series.max()):.0f} {currency}/t (schedule)"
+            if carbon_price_series.nunique(dropna=False) > 1
+            else f"Carbon price {float(carbon_price_series.iloc[0]):.0f} {currency}/t"
+        )},
         {"label": "Transmission stress", "value": f"{round(np.mean([x['value'] for x in line_loading]) if line_loading else 0):,}%", "detail": f"{sum(1 for x in line_loading if x['value'] > 80.0)} corridors above 80%"},
     ]
 
@@ -1209,7 +1225,7 @@ def _build_solved_payload(
         owner_column=owner_column,
         currency=currency,
         emissions_factors=emissions_factors,
-        carbon_price=float(scenario.get("carbonPrice", 0.0) or 0.0),
+        carbon_price=carbon_price_series,
         debt=options.get("financeConfig") or None,
     )
     # Operating-reserve (spinning reserve) co-optimization results — reads the
