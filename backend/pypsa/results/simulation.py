@@ -206,6 +206,12 @@ def run_market_simulation(network: pypsa.Network, config: dict[str, Any] | None 
         bids           — {generator_name: bid €/MWh} overriding marginal_cost
         withheldMw     — {generator_name: MW withheld from every hour} (B4)
         chargeQuantile / dischargeQuantile — storage thresholds (0.25 / 0.75)
+
+    Basis: every energy (MWh) and currency total is snapshot-weight weighted —
+    a snapshot represents ``snapshot_weightings['objective']`` hours, so e.g.
+    ``energyMWh = Σ_t w_t · p_t`` and ``revenue = Σ_t w_t · p_t · π_t``. This
+    matches ``runMeta.modeledHours``; per-snapshot MW/price series and prices
+    stay instantaneous, and ``avgPrice`` is the time-weighted mean price.
     """
     cfg = config or {}
     pricing = str(cfg.get("pricing") or "uniform")
@@ -237,6 +243,13 @@ def run_market_simulation(network: pypsa.Network, config: dict[str, Any] | None 
 
     snapshots = network.snapshots
     T = len(snapshots)
+    # Represented hours per snapshot: energy/currency totals below are on the
+    # weighted basis (a 3-hour-stride run counts 3 h per snapshot), matching
+    # the study's runMeta.modeledHours convention.
+    weights = (
+        network.snapshot_weightings["objective"].reindex(snapshots).fillna(1.0).to_numpy(dtype=float)
+    )
+    hours_total = float(weights.sum())
     gens = network.generators
     names = [str(g) for g in gens.index]
     G = len(names)
@@ -281,13 +294,13 @@ def run_market_simulation(network: pypsa.Network, config: dict[str, Any] | None 
                                       q_charge, q_discharge)
             extra_load += np.clip(-sched, 0.0, None)
             extra_supply += np.clip(sched, 0.0, None)
-            charged = float(np.clip(-sched, 0, None).sum())
-            discharged = float(np.clip(sched, 0, None).sum())
+            charged = float((np.clip(-sched, 0, None) * weights).sum())
+            discharged = float((np.clip(sched, 0, None) * weights).sum())
             storage_rows.append({
                 "name": str(s), "energyChargedMWh": round(charged, 3),
                 "energyDischargedMWh": round(discharged, 3),
-                "arbitrageRevenue": round(float((np.clip(sched, 0, None) * price).sum()
-                                                - (np.clip(-sched, 0, None) * price).sum()), 2),
+                "arbitrageRevenue": round(float((np.clip(sched, 0, None) * price * weights).sum()
+                                                - (np.clip(-sched, 0, None) * price * weights).sum()), 2),
             })
         if extra_load.any() or extra_supply.any():
             net_load = np.clip(load + extra_load - extra_supply, 0.0, None)
@@ -325,15 +338,19 @@ def run_market_simulation(network: pypsa.Network, config: dict[str, Any] | None 
 
     units = []
     for i, n in enumerate(names):
-        energy = float(dispatch[:, i].sum())
+        energy = float((dispatch[:, i] * weights).sum())
+        revenue = float((revenue_per_unit[:, i] * weights).sum())
+        cost = float((cost_per_unit[:, i] * weights).sum())
         units.append({
             "name": n, "carrier": carriers[i],
             "bid": round(float(bids[i]), 4), "marginalCost": round(float(mc[i]), 4),
             "energyMWh": round(energy, 3),
-            "revenue": round(float(revenue_per_unit[:, i].sum()), 2),
-            "cost": round(float(cost_per_unit[:, i].sum()), 2),
-            "profit": round(float(revenue_per_unit[:, i].sum() - cost_per_unit[:, i].sum()), 2),
-            "capacityFactor": round(energy / (float(p_nom[i]) * T), 4) if p_nom[i] > _EPS and T else 0.0,
+            "revenue": round(revenue, 2),
+            "cost": round(cost, 2),
+            "profit": round(revenue - cost, 2),
+            # Weighted energy over weighted hours: invariant to the weighting.
+            "capacityFactor": round(energy / (float(p_nom[i]) * hours_total), 4)
+            if p_nom[i] > _EPS and hours_total > _EPS else 0.0,
             "priceSettingHours": int((marginal == i).sum()),
         })
 
@@ -372,7 +389,11 @@ def run_market_simulation(network: pypsa.Network, config: dict[str, Any] | None 
         }
 
     served = load - unserved - curtailed
-    total_cost = float((served * price).sum()) if pricing == "uniform" else float(revenue_per_unit.sum())
+    total_cost = (
+        float((served * price * weights).sum())
+        if pricing == "uniform"
+        else float((revenue_per_unit * weights[:, None]).sum())
+    )
     return {
         "pricing": pricing,
         "voll": voll,
@@ -380,13 +401,14 @@ def run_market_simulation(network: pypsa.Network, config: dict[str, Any] | None 
         "demandWtp": demand_wtp if two_sided else None,
         "elasticFraction": elastic_fraction if two_sided else 0.0,
         "summary": {
-            "avgPrice": round(float(price.mean()), 4) if T else 0.0,
+            "avgPrice": round(float((price * weights).sum() / hours_total), 4)
+            if T and hours_total > _EPS else 0.0,
             "peakPrice": round(float(price.max()), 4) if T else 0.0,
-            "totalLoadMWh": round(float(load.sum()), 3),
+            "totalLoadMWh": round(float((load * weights).sum()), 3),
             "totalCost": round(total_cost, 2),
-            "unservedMWh": round(float(unserved.sum()), 3),
+            "unservedMWh": round(float((unserved * weights).sum()), 3),
             "unservedHours": int((unserved > _EPS).sum()),
-            "curtailedMWh": round(float(curtailed.sum()), 3),
+            "curtailedMWh": round(float((curtailed * weights).sum()), 3),
         },
         "priceSeries": price_series,
         "dispatchSeries": dispatch_series,

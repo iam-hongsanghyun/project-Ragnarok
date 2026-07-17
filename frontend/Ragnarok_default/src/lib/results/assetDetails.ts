@@ -98,29 +98,85 @@ function staticOrInput(
   return numberValue(v as never);
 }
 
+// PyPSA's canonical time-index column. All temporal data is canonicalised to
+// this single column name + ISO-`T` values on entry (see
+// `canonicalizeTemporalSheets` in workbook.ts), so matching here is exact —
+// no format-tolerance band-aid.
+const SNAPSHOT_COL = 'snapshot';
+
+export interface InputTemporalIndex {
+  /** Rows keyed by canonical ISO snapshot timestamp. */
+  byStamp: Record<string, GridRow>;
+  /** Component names that have a column in the temporal sheet. */
+  columns: Set<string>;
+}
+
 /**
- * Look up an input time-series value at a given snapshot row index.
- * The input ts sheet stores rows aligned with the snapshots sheet; we trust
- * the row order matches the solved snapshot order (PyPSA's invariant).
- *
- * The temporal series wins over the static scalar whenever the component has a
- * column in the time-series sheet — matching PyPSA's convention that
- * `loads_t.p_set` overrides `loads.p_set`. The static `fallback` is used only
- * for components absent from the temporal sheet entirely; otherwise a non-zero
- * static value would shadow the profile and flatten it.
+ * Build a timestamp -> row lookup from an input temporal sheet so values can
+ * be read by snapshot timestamp instead of by position. Positional indexing
+ * breaks once outputs are filtered to a non-first investment period (or any
+ * other snapshot subset), because the input sheet still holds every period's
+ * rows in order. Also records which component columns are present so the
+ * temporal series can win over the static scalar. Single source of truth,
+ * shared with runResults.ts (which derives the whole `RunResults` and hits
+ * the exact same positional-index failure mode on its own period-filtered
+ * outputs).
  */
-function inputSeriesValue(
-  inputTs: GridRow[] | undefined,
-  rowIndex: number,
-  column: string,
-  fallback: number,
+export function indexInputByTimestamp(rows: GridRow[] | undefined): InputTemporalIndex {
+  const byStamp: Record<string, GridRow> = {};
+  const columns = new Set<string>();
+  if (!rows || rows.length === 0 || !(SNAPSHOT_COL in rows[0])) return { byStamp, columns };
+  for (const key of Object.keys(rows[0])) {
+    if (key !== SNAPSHOT_COL && key !== 'period') columns.add(key);
+  }
+  for (const row of rows) {
+    const stamp = stringValue(row[SNAPSHOT_COL]);
+    if (stamp) byStamp[stamp] = row;
+  }
+  return { byStamp, columns };
+}
+
+/**
+ * Resolve a component's value at a snapshot. The temporal series wins over the
+ * static scalar whenever the component has a column in the time-series sheet —
+ * matching PyPSA's convention that `loads_t.p_set` overrides `loads.p_set`.
+ * The static `fallback` is used only for components absent from the temporal
+ * sheet entirely. Timestamps match exactly (both sides are canonical ISO-`T`).
+ */
+export function inputSeriesValueAtStamp(
+  idx: InputTemporalIndex, stamp: string, col: string, fallback: number,
 ): number {
-  const hasTemporalColumn = !!inputTs && inputTs.length > 0 && column in inputTs[0];
-  if (!hasTemporalColumn) return fallback;
-  if (rowIndex >= inputTs!.length) return 0;
-  const cell = inputTs![rowIndex]?.[column];
+  if (!idx.columns.has(col)) return fallback;
+  const row = idx.byStamp[stamp];
+  const cell = row?.[col];
   if (cell === undefined || cell === null || cell === '') return 0;
   return numberValue(cell);
+}
+
+// ── Efficiency-aware (thermal-basis) emission factor — M3 ─────────────────
+// PyPSA stores `carrier.co2_emissions` on the primary-energy (fuel) basis:
+// tCO2 per MWh of fuel burned. A thermal generator with efficiency eta turns
+// one MWh of fuel into eta MWh of electricity, so emissions per MWh
+// *electrical* are co2_emissions / eta. Mirrors backend
+// `per_generator_emission_factor` / `generator_efficiencies`
+// (backend/pypsa/utils/emissions.py) so every dashboard — per-asset detail,
+// bus aggregation, and the system Emissions Breakdown card — agrees.
+const MIN_EFFICIENCY = 1e-6;
+
+/** Per-generator efficiency (eta): defaults to 1 when absent, blank, or <=0. */
+export function generatorEfficiency(row: GridRow): number {
+  const eta = numberValue(row.efficiency as never);
+  return eta > MIN_EFFICIENCY ? eta : 1;
+}
+
+/** Thermal-basis emission factor (tCO2 / MWh_elec) for a generator row. */
+export function generatorEmissionFactor(
+  row: GridRow,
+  carrierStatic: Record<string, GridRow>,
+): number {
+  const carrier = stringValue(row.carrier) || 'Other';
+  const ef = numberValue(carrierStatic[carrier]?.co2_emissions);
+  return ef / generatorEfficiency(row);
 }
 
 function fmt(n: number, digits = 0): string {
@@ -138,6 +194,7 @@ function buildGenerators(input: DeriveInput, snapshots: string[]): Record<string
 
   const pSeries = series['generators-p'];
   const inputPMaxPu = model['generators-p_max_pu'];
+  const pMaxPuIdx = indexInputByTimestamp(inputPMaxPu);
   const labels = snapshots.map(isoToLabel);
 
   const details: Record<string, GeneratorDetail> = {};
@@ -152,7 +209,16 @@ function buildGenerators(input: DeriveInput, snapshots: string[]): Record<string
     const pMaxPuStatic = row.p_max_pu === null || row.p_max_pu === undefined || row.p_max_pu === ''
       ? 1
       : numberValue(row.p_max_pu);
-    const ef = numberValue(carrierStatic[carrier]?.co2_emissions);
+    // Thermal-basis (fuel) emission factor: carrier co2_emissions / efficiency
+    // (M3) — matches the backend Emissions Breakdown card so the same run
+    // reports the same per-generator emissions everywhere.
+    const efficiency = generatorEfficiency(row);
+    const ef = generatorEmissionFactor(row, carrierStatic);
+    // A generator is "curtailable" only if it has a time-varying availability
+    // profile in the input p_max_pu sheet; a thermal unit dispatched below a
+    // static rating is part-loaded, not curtailed (mirrors
+    // buildCurtailmentRowsFromGeneratorDetails / CarrierAnalysisCard).
+    const hasTimeVaryingAvailability = pMaxPuIdx.columns.has(name);
 
     const outputSeries: GeneratorDetail['outputSeries'] = [];
     const emissionsSeries: GeneratorDetail['emissionsSeries'] = [];
@@ -164,7 +230,7 @@ function buildGenerators(input: DeriveInput, snapshots: string[]): Record<string
     for (let i = 0; i < snapshots.length; i++) {
       const out = seriesValue(pSeries, i, name);
       const pos = Math.max(out, 0);
-      const ratio = inputSeriesValue(inputPMaxPu, i, name, pMaxPuStatic);
+      const ratio = inputSeriesValueAtStamp(pMaxPuIdx, snapshots[i], name, pMaxPuStatic);
       const avail = Math.max(ratio * pNom, pos); // observed dispatch can't exceed availability
       const emissions = pos * ef;
       energy += pos * snapshotWeight;
@@ -174,13 +240,16 @@ function buildGenerators(input: DeriveInput, snapshots: string[]): Record<string
       outputSeries.push({ label, timestamp: stamp, output: out });
       emissionsSeries.push({ label, timestamp: stamp, emissions });
       availableSeries.push({ label, timestamp: stamp, available: avail });
-      curtailmentSeries.push({ label, timestamp: stamp, curtailment: Math.max(avail - pos, 0) });
+      if (hasTimeVaryingAvailability) {
+        curtailmentSeries.push({ label, timestamp: stamp, curtailment: Math.max(avail - pos, 0) });
+      }
     }
 
     const summary: SummaryItem[] = [
       { label: 'Energy', value: `${fmt(energy)} MWh`, detail: `${snapshotWeight} h weighting applied` },
       { label: 'Operating cost', value: `${fmt(energy * mc)} ${currencySymbol}`, detail: `${mc.toFixed(1)} ${currencySymbol}/MWh marginal cost` },
-      { label: 'Emissions', value: `${fmt(totalEmissions)} tCO2e`, detail: `${ef.toFixed(2)} t/MWh carrier factor` },
+      { label: 'Emissions', value: `${fmt(totalEmissions)} tCO2e`,
+        detail: `${ef.toFixed(2)} t/MWh thermal-basis factor (eta ${efficiency.toFixed(2)})` },
     ];
 
     details[name] = {
@@ -208,6 +277,7 @@ function buildBuses(input: DeriveInput, snapshots: string[]): Record<string, Bus
   const vMagSeries = series['buses-v_mag_pu'];
   const vAngSeries = series['buses-v_ang'];
   const loadInputTs = model['loads-p_set'];
+  const loadInputIdx = indexInputByTimestamp(loadInputTs);
 
   // Index generators / loads by bus once
   const genByBus: Record<string, string[]> = {};
@@ -240,8 +310,8 @@ function buildBuses(input: DeriveInput, snapshots: string[]): Record<string, Bus
     for (let i = 0; i < snapshots.length; i++) {
       let loadAtT = 0;
       for (const ln of loads) {
-        loadAtT += inputSeriesValue(
-          loadInputTs, i, ln, numberValue(loadStatic[ln]?.p_set),
+        loadAtT += inputSeriesValueAtStamp(
+          loadInputIdx, snapshots[i], ln, numberValue(loadStatic[ln]?.p_set),
         );
       }
       let genAtT = 0;
@@ -251,7 +321,8 @@ function buildBuses(input: DeriveInput, snapshots: string[]): Record<string, Bus
         const pos = Math.max(out, 0);
         genAtT += pos;
         const carrier = stringValue(genStatic[gn]?.carrier) || 'Other';
-        const ef = numberValue(carrierStatic[carrier]?.co2_emissions);
+        // Thermal-basis factor (M3) — same rule as buildGenerators.
+        const ef = genStatic[gn] ? generatorEmissionFactor(genStatic[gn], carrierStatic) : 0;
         emissionsAtT += pos * ef;
         carrierMix[carrier] = (carrierMix[carrier] ?? 0) + pos * snapshotWeight;
       }
@@ -402,6 +473,7 @@ function buildBranchGroup(
   unit: 'MVA' | 'MW',
   p0Sheet: string,
   p1Sheet: string,
+  staticSheet: string,
   outputs: DeriveInput['outputs'],
   snapshots: string[],
 ): Record<string, BranchDetail> {
@@ -413,7 +485,13 @@ function buildBranchGroup(
   for (const row of rows ?? []) {
     const name = stringValue(row.name);
     if (!name) continue;
-    const capacity = Math.max(numberValue(row[capacityAttr]), 1);
+    // Use the solved capacity (`_opt`) when available — an extendable
+    // branch's loading is relative to what got BUILT, not the input rating
+    // (which is 0 for a from-scratch expansion candidate).
+    const inputCap = numberValue(row[capacityAttr]);
+    const capacity = Math.max(
+      staticOrInput(outputs.static, staticSheet, name, `${capacityAttr}_opt`, inputCap), 1,
+    );
     const bus0 = stringValue(row.bus0);
     const bus1 = stringValue(row.bus1);
 
@@ -452,9 +530,9 @@ function buildBranchGroup(
 
 function buildBranches(input: DeriveInput, snapshots: string[]): Record<string, BranchDetail> {
   return {
-    ...buildBranchGroup(input.model.lines, 'line', 's_nom', 'MVA', 'lines-p0', 'lines-p1', input.outputs, snapshots),
-    ...buildBranchGroup(input.model.links, 'link', 'p_nom', 'MW', 'links-p0', 'links-p1', input.outputs, snapshots),
-    ...buildBranchGroup(input.model.transformers, 'transformer', 's_nom', 'MVA', 'transformers-p0', 'transformers-p1', input.outputs, snapshots),
+    ...buildBranchGroup(input.model.lines, 'line', 's_nom', 'MVA', 'lines-p0', 'lines-p1', 'lines', input.outputs, snapshots),
+    ...buildBranchGroup(input.model.links, 'link', 'p_nom', 'MW', 'links-p0', 'links-p1', 'links', input.outputs, snapshots),
+    ...buildBranchGroup(input.model.transformers, 'transformer', 's_nom', 'MVA', 'transformers-p0', 'transformers-p1', 'transformers', input.outputs, snapshots),
   };
 }
 

@@ -35,6 +35,7 @@ from .dispatch import (
     build_price_emissions_series,
     build_storage_series,
     build_storage_soc_series,
+    electricity_bus_scope,
     electricity_dispatch_by_carrier,
 )
 from .emissions import build_emissions_breakdown
@@ -62,6 +63,7 @@ from .ppa_explorer import build_ppa_explorer
 from .expansion import build_expansion_results
 from .full_outputs import build_full_outputs
 from .market import (
+    HOURS_PER_YEAR,
     build_applied_constraints,
     build_co2_shadow,
     build_generator_economics,
@@ -111,6 +113,45 @@ def _solve_rejected(status: str, condition: str, *, strict: bool) -> bool:
     if condition in ("infeasible", "unbounded", "infeasible_or_unbounded"):
         return True
     return status.lower() not in ("ok", "warning")
+
+
+def _rolling_suspect_note(network: Any) -> str | None:
+    """Describe snapshots a rolling-horizon window likely failed on, or None.
+
+    ``optimize_with_rolling_horizon`` returns no status: when a window's LP
+    fails it only logs a warning and leaves that window's results zero/stale.
+    Flag snapshots where total supply (generator dispatch + storage/store
+    discharge) is ~0 while total load is positive — served load with no
+    recorded supply is impossible in a solved window, so those snapshots almost
+    certainly belong to a failed window.
+    """
+    try:
+        load = network.get_switchable_as_dense("Load", "p_set").clip(lower=0.0).sum(axis=1)
+    except Exception:
+        return None
+    if load.empty:
+        return None
+    supply = pd.Series(0.0, index=network.snapshots)
+    if not network.generators_t.p.empty:
+        supply = supply.add(network.generators_t.p.clip(lower=0.0).sum(axis=1), fill_value=0.0)
+    if hasattr(network, "storage_units_t") and not network.storage_units_t.p.empty:
+        supply = supply.add(network.storage_units_t.p.clip(lower=0.0).sum(axis=1), fill_value=0.0)
+    if hasattr(network, "stores_t") and not network.stores_t.p.empty:
+        supply = supply.add(network.stores_t.p.clip(lower=0.0).sum(axis=1), fill_value=0.0)
+    tol = 1e-6
+    suspect = (supply.reindex(load.index).fillna(0.0) <= tol) & (load > tol)
+    count = int(suspect.sum())
+    if count == 0:
+        return None
+    idx = load.index[suspect]
+    return (
+        f"Rolling horizon: {count} snapshot(s) between {idx[0]} and {idx[-1]} "
+        "have positive load but zero recorded supply — at least one rolling "
+        "window likely failed to solve (PyPSA only logs a warning and leaves a "
+        "failed window's results empty). Treat results in that range as "
+        "unreliable; try a longer horizon/overlap or check that every window "
+        "is individually feasible."
+    )
 
 
 # HiGHS LP methods the user may pin. Anything else (incl. "auto"/"choose"/
@@ -448,6 +489,7 @@ def run_pypsa(
     solver_options = _build_solver_options(options)
 
     rolling_windows: list[dict[str, Any]] = []
+    rolling_suspect: str | None = None
     solve_status: str = "unknown"
     solve_condition: str = "unknown"
     _t_solve = time.perf_counter()
@@ -485,10 +527,19 @@ def run_pypsa(
                 io_api=_SOLVER_IO_API,
                 include_objective_constant=False,  # see note on the single-period call
             )
-            # PyPSA's rolling-horizon helper does not return a status; it
-            # only logs a warning on bad windows. Treat the run as optimal
-            # only if no window violated its bounds in an obvious way.
-            solve_status, solve_condition = "ok", "optimal"
+            # PyPSA's rolling-horizon helper does not return a status; it only
+            # logs a warning on a failed window and leaves that window's
+            # results zero/stale. Detect such stretches (positive load, zero
+            # recorded supply) and report the run honestly: status stays "ok"
+            # (linopy accepted every window it did solve) but the condition
+            # drops to "warning" so Strict acceptance rejects the truncated
+            # run while Lenient keeps it with an explicit note.
+            rolling_suspect = _rolling_suspect_note(network)
+            if rolling_suspect:
+                notes.append(rolling_suspect)
+                solve_status, solve_condition = "ok", "warning"
+            else:
+                solve_status, solve_condition = "ok", "optimal"
         elif sclopf_enabled:
             # SCLOPF: every dispatch decision must remain feasible under the
             # outage of any single passive branch. PyPSA enforces this by
@@ -545,7 +596,9 @@ def run_pypsa(
             )
             # Q2 — explain WHY (capacity shortfall, extreme coefficients, binding
             # constraints) with concrete fixes, instead of a raw solver string.
-            if solve_condition in ("infeasible", "unbounded", "infeasible_or_unbounded"):
+            if rolling_suspect:
+                detail = f"{base_msg} {rolling_suspect}{strict_hint}"
+            elif solve_condition in ("infeasible", "unbounded", "infeasible_or_unbounded"):
                 try:
                     from .diagnostics import diagnose_infeasibility, diagnosis_text
 
@@ -560,7 +613,9 @@ def run_pypsa(
                     "e_sum_max, lifetime, or for conflicting constraints." + strict_hint
                 )
             raise HTTPException(status_code=500, detail=detail)
-        if solve_condition != "optimal":
+        # The interior-point explanation below does not apply to the rolling
+        # "warning" condition — that one already carries its own specific note.
+        if solve_condition != "optimal" and not rolling_suspect:
             notes.append(
                 f"Solver finished with condition='{solve_condition}' but linopy "
                 f"accepted the solution (status='{solve_status}'). This is normal "
@@ -701,15 +756,31 @@ def _build_solved_payload(
         dispatch_frame = generator_dispatch_frame
 
     by_carrier = electricity_dispatch_by_carrier(network, generator_dispatch_frame)
+    # Sector-coupled models: the dispatch stack above is electricity-only, so
+    # the system aggregates it is read against (demand overlay, peak demand,
+    # average/peak price, generator capacity) must be scoped to the SAME
+    # electricity buses — otherwise gas/heat/H₂ loads inflate demand, fuel-bus
+    # marginal prices skew the price series, and fuel-supply pseudo-generators
+    # inflate capacity. None for single-carrier models, which stay identical.
+    elec_scope = electricity_bus_scope(network)
     # Dense p_set covers loads defined only statically (no loads-p_set column) —
     # loads_t.p_set alone would silently drop them from demand metrics.
     load_p_set = network.get_switchable_as_dense("Load", "p_set")
-    load_dispatch = load_p_set.sum(axis=1)
-    price_series = (
-        network.buses_t.marginal_price.mean(axis=1)
-        if not network.buses_t.marginal_price.empty
-        else pd.Series(0.0, index=network.snapshots)
-    )
+    if elec_scope is not None and "bus" in network.loads.columns:
+        _elec_loads = network.loads.index[network.loads["bus"].astype(str).isin(elec_scope)]
+        load_dispatch = load_p_set.reindex(columns=_elec_loads, fill_value=0.0).sum(axis=1)
+    else:
+        load_dispatch = load_p_set.sum(axis=1)
+    _mp = network.buses_t.marginal_price
+    if _mp.empty:
+        price_series = pd.Series(0.0, index=network.snapshots)
+    else:
+        _mp_cols = (
+            [b for b in _mp.columns if str(b) in elec_scope]
+            if elec_scope is not None
+            else list(_mp.columns)
+        )
+        price_series = _mp[_mp_cols].mean(axis=1) if _mp_cols else _mp.mean(axis=1)
     shed_cols = [n for n in network.generators.index if n.startswith("load_shedding_")]
     load_shed = dispatch_frame.reindex(columns=shed_cols, fill_value=0.0).sum(axis=1)
     generator_weights = network.snapshot_weightings["generators"].reindex(network.snapshots).fillna(1.0)
@@ -723,6 +794,10 @@ def _build_solved_payload(
     # reserve position.
     _gen_installed = installed_capacity_series(network.generators)
     _real_gen = ~network.generators.index.str.startswith("load_shedding_")
+    if elec_scope is not None and "bus" in network.generators.columns:
+        # Sector-coupled: fuel-supply pseudo-generators on gas/heat/H₂ buses are
+        # not electric capacity — count electricity-bus generators only.
+        _real_gen = _real_gen & network.generators["bus"].astype(str).isin(elec_scope).to_numpy()
     generator_capacity = float(_gen_installed[_real_gen].sum())
     storage_capacity = float(installed_capacity_series(network.storage_units).sum())
     total_load = float(load_dispatch.max())
@@ -844,9 +919,18 @@ def _build_solved_payload(
             carbon_cost += weighted_sum(dispatch_pos * ef * carbon_price_series, generator_weights)
             fuel_cost += weighted_sum(dispatch_pos * (mc_s - ef * carbon_price_series).clip(lower=0.0), generator_weights)
 
-    # Expansion CAPEX (annualised)
+    # Expansion CAPEX. `capex_annual` is the full annual annuity
+    # (capital_cost × p_nom_opt, per year); the fuel/carbon/shedding components
+    # above are snapshot-weighted totals over the modelled window of
+    # H = Σ_t w_obj(t) hours. Pro-rate the annuity onto the same window
+    # (× H/8760) so every cost-breakdown component shares one basis — the same
+    # convention as market.py's fixedCostHorizon.
     expansion_results = build_expansion_results(network)
     total_capex_annual = sum(r["capex_annual"] for r in expansion_results)
+    _H_window = float(network.snapshot_weightings["objective"].sum())
+    total_capex_window = (
+        total_capex_annual * (_H_window / HOURS_PER_YEAR) if _H_window > 0 else total_capex_annual
+    )
 
     # Market analysis — merit order + CO₂ shadow price (pure post-processing)
     merit_order = build_merit_order(network)
@@ -865,7 +949,12 @@ def _build_solved_payload(
         {"label": "Load shedding", "value": round(shed_cost)},
     ]
     if total_capex_annual > 0:
-        cost_breakdown.append({"label": "Capital cost", "value": round(total_capex_annual)})
+        # Annual annuity pro-rated to the modelled window (× H/8760) so it is
+        # comparable with the window-total fuel/carbon/shedding components.
+        cost_breakdown.append({
+            "label": "Capital cost (annuity, pro-rated to window)",
+            "value": round(total_capex_window),
+        })
 
     # Per-bus LMP (nodal marginal prices) — one value series per snapshot.
     # Vectorised: the naive per-(snapshot, bus) `mp.at[...]` scalar lookup is
@@ -908,27 +997,52 @@ def _build_solved_payload(
         nodal_balance.append({"label": bus, "load": load_val, "generation": gen_val})
     nodal_balance = sorted(nodal_balance, key=lambda x: x["load"], reverse=True)
 
-    # Line loading
+    # Line loading. Loading is judged against the SOLVED capacity
+    # (s_nom_opt/p_nom_opt where > 0 — equal to the nameplate for
+    # non-extendable branches), not the input nameplate: an expanded corridor
+    # would otherwise report >100% loading it does not have. Same convention as
+    # installed_capacity_series / the LMP decomposition.
+    def _branch_capacity(static: pd.DataFrame, name: str, nom_attr: str) -> float:
+        opt_attr = f"{nom_attr}_opt"
+        if opt_attr in static.columns:
+            opt = static.at[name, opt_attr]
+            if pd.notna(opt) and float(opt) > 0.0:
+                return max(float(opt), 1.0)
+        nom = static.at[name, nom_attr]
+        return max(float(nom) if pd.notna(nom) else 0.0, 1.0)
+
     line_loading = []
     for line in network.lines.index if not network.lines_t.p0.empty else []:
-        peak = float((network.lines_t.p0[line].abs() / max(float(network.lines.at[line, "s_nom"]), 1.0) * 100.0).max())
+        peak = float((network.lines_t.p0[line].abs() / _branch_capacity(network.lines, line, "s_nom") * 100.0).max())
         line_loading.append({"label": line, "value": peak})
     for link in network.links.index if not network.links_t.p0.empty else []:
-        peak = float((network.links_t.p0[link].abs() / max(float(network.links.at[link, "p_nom"]), 1.0) * 100.0).max())
+        peak = float((network.links_t.p0[link].abs() / _branch_capacity(network.links, link, "p_nom") * 100.0).max())
         line_loading.append({"label": link, "value": peak})
     for transformer in network.transformers.index:
         if not network.transformers_t.p0.empty:
-            peak = float((network.transformers_t.p0[transformer].abs() / max(float(network.transformers.at[transformer, "s_nom"]), 1.0) * 100.0).max())
+            peak = float((network.transformers_t.p0[transformer].abs() / _branch_capacity(network.transformers, transformer, "s_nom") * 100.0).max())
             line_loading.append({"label": transformer, "value": peak})
 
     total_emissions = sum(emission_totals.values()) / 1000.0
     average_price = float(price_series.mean())
     peak_net_load = round(float(load_dispatch.max()))
 
+    # Electricity-only phrasing when the aggregates are scoped to the
+    # electricity buses of a sector-coupled model (see elec_scope above).
+    _gen_cap_detail = (
+        f"{int(_real_gen.sum())} generators on electricity buses (installed, solved p_nom_opt)"
+        if elec_scope is not None
+        else f"{len(network.generators)} generators (installed, solved p_nom_opt)"
+    )
+    _peak_demand_detail = (
+        "electricity buses only, from workbook load profile"
+        if elec_scope is not None
+        else "from workbook load profile"
+    )
     summary = [
-        {"label": "Generator capacity", "value": f"{round(generator_capacity):,} MW", "detail": f"{len(network.generators)} generators (installed, solved p_nom_opt)"},
+        {"label": "Generator capacity", "value": f"{round(generator_capacity):,} MW", "detail": _gen_cap_detail},
         {"label": "Storage capacity", "value": f"{round(storage_capacity):,} MW", "detail": f"{len(network.storage_units)} storage units (installed, solved p_nom_opt)"},
-        {"label": "Peak demand", "value": f"{round(total_load):,} MW", "detail": "from workbook load profile"},
+        {"label": "Peak demand", "value": f"{round(total_load):,} MW", "detail": _peak_demand_detail},
         {"label": "Generator reserve", "value": f"{round(generator_capacity - reserve_requirement):,} MW", "detail": "generator capacity vs peak demand"},
         {"label": "Storage reserve", "value": f"{round(storage_capacity - reserve_requirement):,} MW", "detail": "storage capacity vs peak demand"},
         {"label": "Peak price", "value": f"{round(float(price_series.max())):,} {currency}/MWh", "detail": f"{peak_net_load:,} MW peak load"},

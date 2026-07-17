@@ -37,20 +37,20 @@ def build_merit_order(network: pypsa.Network) -> list[dict[str, Any]]:
         carrier       – carrier string
         bus           – bus name
         marginal_cost – $/MWh
-        p_nom         – installed capacity (MW); uses p_nom_opt for extendable
+        p_nom         – capacity (MW); p_nom_opt where a solve produced one
+                        (>0), else the installed p_nom — an extendable unit on
+                        a never-optimised network (market-sim study) keeps its
+                        installed capacity instead of vanishing from the stack
         cumulative_mw – left edge of this generator's block on the x-axis
         color         – hex colour for the carrier
     """
+    capacity = installed_capacity_series(network.generators)
     rows: list[dict[str, Any]] = []
     for name in network.generators.index:
         if any(name.startswith(pfx) for pfx in SYSTEM_GEN_PREFIXES):
             continue
         gen = network.generators.loc[name]
-        # Use optimised capacity for extendable assets, installed otherwise
-        extendable = bool(gen.get("p_nom_extendable", False))
-        p_nom = float(
-            gen.get("p_nom_opt", 0.0) if extendable else gen.get("p_nom", 0.0)
-        )
+        p_nom = float(capacity.get(name, 0.0))
         if p_nom <= 0:
             continue
         carrier = str(gen.get("carrier", ""))

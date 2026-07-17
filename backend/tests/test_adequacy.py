@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
+import pypsa
 import pytest
 
 from backend.pypsa.results.adequacy import (
+    build_adequacy,
     compute_adequacy,
     ensemble_stats,
     generate_renewable_ensemble,
@@ -77,3 +80,45 @@ def test_adequacy_partial_lolp_across_members() -> None:
     avail = np.vstack([np.full((5, 4), 90.0), np.full((5, 4), 110.0)])
     m = compute_adequacy(avail, load, np.ones(4), modeled_hours=4)
     assert m["loloProbability"][0] == pytest.approx(0.5)
+
+
+def _tight_network(with_shedding: bool) -> pypsa.Network:
+    """A deliberately capacity-short system: 100 MW flat load against 60 MW firm
+    plus 50 MW wind whose CF dips to ~0.1 — shortfall is guaranteed. Optionally
+    add the injected load-shedding backstop (peak-sized, time-varying
+    p_max_pu = 1.0) exactly as ``add_load_shedding`` does."""
+    n = pypsa.Network()
+    snaps = pd.date_range("2030-01-01", periods=24, freq="h")
+    n.set_snapshots(snaps)
+    n.add("Bus", "b")
+    n.add("Load", "L", bus="b", p_set=100.0)
+    n.add("Generator", "firm", bus="b", p_nom=60.0)
+    cf = np.clip(0.5 + 0.4 * np.sin(np.linspace(0, 2 * np.pi, 24)), 0.0, 1.0)
+    n.add("Generator", "wind", bus="b", p_nom=50.0, p_max_pu=pd.Series(cf, index=snaps))
+    if with_shedding:
+        n.add("Generator", "load_shedding_b", bus="b", p_nom=100.0, marginal_cost=10000.0)
+        n.generators_t.p_max_pu.loc[:, "load_shedding_b"] = 1.0
+    n._objective = 0.0  # mark solved (build_adequacy gates on is_solved)
+    n.generators["p_nom_opt"] = n.generators["p_nom"]  # as a real solve fills it
+    return n
+
+
+def test_build_adequacy_ignores_load_shedding_backstop() -> None:
+    """The VOLL backstop must be excluded entirely: it carries a time-varying
+    p_max_pu column, so counting it as a stochastic renewable adds ~peak-load
+    fake capacity and collapses LOLE/EENS to 0 exactly when shedding is on."""
+    base = build_adequacy(_tight_network(False), members=50, seed=11)
+    shed = build_adequacy(_tight_network(True), members=50, seed=11)
+    assert base is not None and shed is not None
+    # The system is genuinely short — the backstop must not hide that.
+    assert base["eens"] > 0.0
+    assert base["lole"] > 0.0
+    # Identical metrics with and without the backstop present.
+    np.testing.assert_allclose(shed["lole"], base["lole"], rtol=1e-9, atol=0.0)
+    np.testing.assert_allclose(shed["eens"], base["eens"], rtol=1e-9, atol=0.0)
+    np.testing.assert_allclose(
+        shed["firmCapacityMW"], base["firmCapacityMW"], rtol=1e-9, atol=0.0
+    )
+    np.testing.assert_allclose(
+        shed["renewableCapacityMW"], base["renewableCapacityMW"], rtol=1e-9, atol=0.0
+    )

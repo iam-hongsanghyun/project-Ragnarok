@@ -28,18 +28,37 @@ from .ppa import build_ppa
 def _peak_block(
     network: pypsa.Network, flat_mw: float, strike: float, quantile: float = 0.75
 ) -> dict[str, Any] | None:
-    """A flat block delivered only in the top-``(1-quantile)`` price hours."""
+    """A flat block delivered only in the top-``(1-quantile)`` price hours.
+
+    "Top hours" is on the represented-hours basis: snapshots are taken in
+    descending price order until they cover ``(1-quantile)`` of the total
+    snapshot weight, so a weighted (stride/segment) run still delivers into
+    25% of the modeled hours rather than 25% of the snapshot count.
+
+    Algorithm:
+        $$ S^* = \\min k : \\sum_{j \\le k} w_{(j)} \\ge (1 - q) \\sum_t w_t $$
+        ASCII: sort snapshots by price descending; accumulate weights until
+        cum >= (1-q) * W; deliver only in those snapshots.
+        Symbols: w_t snapshot weight (h), q the quantile (-), W = Σ w_t (h),
+        (j) the j-th snapshot in descending price order.
+    """
     mp = network.buses_t.marginal_price
     if mp is None or mp.empty:
         return None
     vol = max(0.0, float(flat_mw or 0.0))
     if vol <= 0:
         return None
-    w = network.snapshot_weightings["objective"].to_numpy()
+    w = network.snapshot_weightings["objective"].to_numpy(dtype=float)
     price = mp.mean(axis=1).to_numpy()
     if price.size == 0:
         return None
-    mask = (price >= float(np.quantile(price, quantile))).astype(float)
+    # Weighted quantile: top price hours until 25% of the total weight is covered.
+    order = np.argsort(-price, kind="stable")
+    target = (1.0 - float(quantile)) * float(w.sum())
+    cum = np.cumsum(w[order])
+    k = int(np.searchsorted(cum, target - 1e-9)) + 1
+    mask = np.zeros(price.size)
+    mask[order[:k]] = 1.0
     energy = float((vol * w * mask).sum())
     if energy <= 1e-9:
         return None

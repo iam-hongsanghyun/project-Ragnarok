@@ -11,48 +11,71 @@ interface CapacityInfo {
   genCap: number;
   /** Total installed storage capacity (Σ storage_units). */
   storCap: number;
+  /** Whether ``genCap`` actually came from the run's SOLVED ``outputs.static``
+   *  (``p_nom_opt``) rather than falling back to the input ``p_nom`` — so the
+   *  summary label can say "solved" only when it's true. */
+  genSolved: boolean;
+  /** Same, for ``storCap``. */
+  storSolved: boolean;
 }
 
-/** Installed capacity of one component row: the solved ``p_nom_opt`` when present
- *  (so an expanded/extendable build shows what the optimiser actually built),
- *  falling back to the input ``p_nom`` for unsolved rows. For a non-extendable
- *  component PyPSA sets ``p_nom_opt == p_nom``, so this is a no-op there. */
-function installedMw(r: Record<string, unknown>): number {
-  const opt = r.p_nom_opt;
+/** Installed capacity of one component row: the solved ``p_nom_opt`` when
+ *  present (so an expanded/extendable build shows what the optimiser
+ *  actually built), falling back to the input ``p_nom`` when the run's
+ *  outputs carry no solved value for this row. For a non-extendable
+ *  component PyPSA sets ``p_nom_opt == p_nom``, so the fallback is a no-op
+ *  there. */
+function installedMw(
+  solvedRow: Record<string, unknown> | undefined, inputRow: Record<string, unknown>,
+): { mw: number; solved: boolean } {
+  const opt = solvedRow?.p_nom_opt;
   if (opt !== undefined && opt !== null && opt !== '' && Number.isFinite(Number(opt))) {
-    return numberValue(opt as string | number);
+    return { mw: numberValue(opt as string | number), solved: true };
   }
-  return numberValue(r.p_nom as string | number | undefined);
+  return { mw: numberValue(inputRow.p_nom as string | number | undefined), solved: false };
 }
 
-/** Derive installed capacity from a run's model (modelStatic) — solved
- *  ``p_nom_opt`` where available, so it's correct for capacity-expansion runs
- *  without re-solving. */
-function capacityInfoFromModel(modelStatic: unknown): CapacityInfo {
+/** Derive installed capacity from a run's input topology (``modelStatic`` —
+ *  names, carriers) paired with its SOLVED ``outputs.static`` (``p_nom_opt``),
+ *  so it's correct for capacity-expansion runs without re-solving.
+ *  ``modelStatic`` alone never carries ``p_nom_opt`` (it's the input-workbook
+ *  snapshot); the solved scalar lives on the fetched run's ``outputs.static``
+ *  instead — pass it in once the full analytics bundle has loaded. */
+function capacityInfoFromModel(
+  modelStatic: unknown, outputsStatic: RunResults['outputs'] | undefined,
+): CapacityInfo {
   const root = modelStatic as {
     generators?: Array<Record<string, unknown>>;
     storage_units?: Array<Record<string, unknown>>;
   } | null;
+  const solvedGenerators = outputsStatic?.static?.generators as Record<string, Record<string, unknown>> | undefined;
+  const solvedStorage = outputsStatic?.static?.storage_units as Record<string, Record<string, unknown>> | undefined;
   const byCarrier = new Map<string, number>();
   let genCap = 0;
+  let genSolved = true;
   for (const r of root?.generators ?? []) {
     const name = stringValue(r.name as string | number | undefined);
     if (!name || name.startsWith('load_shedding_')) continue;
-    const p = installedMw(r);
-    genCap += p;
+    const { mw, solved } = installedMw(solvedGenerators?.[name], r);
+    if (!solved) genSolved = false;
+    genCap += mw;
     const carrier = stringValue(r.carrier as string | number | undefined) || 'Other';
-    byCarrier.set(carrier, (byCarrier.get(carrier) ?? 0) + p);
+    byCarrier.set(carrier, (byCarrier.get(carrier) ?? 0) + mw);
   }
   let storCap = 0;
+  let storSolved = true;
   for (const r of root?.storage_units ?? []) {
-    if (!stringValue(r.name as string | number | undefined)) continue;
-    storCap += installedMw(r);
+    const name = stringValue(r.name as string | number | undefined);
+    if (!name) continue;
+    const { mw, solved } = installedMw(solvedStorage?.[name], r);
+    if (!solved) storSolved = false;
+    storCap += mw;
   }
   const mix = Array.from(byCarrier.entries())
     .filter(([, v]) => v > 0)
     .sort((a, b) => b[1] - a[1])
     .map(([label, value]) => ({ label, value, color: carrierColor(label) }));
-  return { mix, genCap, storCap };
+  return { mix, genCap, storCap, genSolved, storSolved };
 }
 
 /** Replace the stored single "Installed capacity" / "Reserve position" KPIs with
@@ -67,8 +90,14 @@ function splitCapacitySummary(base: SummaryItem[], info: CapacityInfo | undefine
   const out: SummaryItem[] = [];
   for (const item of base) {
     if (/^installed capacity$/i.test(item.label.trim())) {
-      out.push({ label: 'Generator capacity', value: mw(info.genCap), detail: 'installed (solved p_nom_opt)' });
-      out.push({ label: 'Storage capacity', value: mw(info.storCap), detail: 'installed (solved p_nom_opt)' });
+      out.push({
+        label: 'Generator capacity', value: mw(info.genCap),
+        detail: info.genSolved ? 'installed (solved p_nom_opt)' : 'installed (input p_nom — solved capacity unavailable)',
+      });
+      out.push({
+        label: 'Storage capacity', value: mw(info.storCap),
+        detail: info.storSolved ? 'installed (solved p_nom_opt)' : 'installed (input p_nom — solved capacity unavailable)',
+      });
     } else if (/^reserve position$/i.test(item.label.trim())) {
       out.push({ label: 'Generator reserve', value: mw(info.genCap - peak), detail: 'generator capacity vs peak demand' });
       out.push({ label: 'Storage reserve', value: mw(info.storCap - peak), detail: 'storage capacity vs peak demand' });
@@ -203,8 +232,9 @@ export function ComparisonPane({ backendRuns, activeRunName, currencySymbol = '$
         const resp = await fetch(`${API_BASE}/api/runs/${encodeURIComponent(name)}/analytics`);
         if (!resp.ok) throw new Error('fetch failed');
         const bundle = await resp.json();
-        setFullCache((c) => ({ ...c, [name]: (bundle.result ?? {}) as RunResults }));
-        setCapacityCache((c) => ({ ...c, [name]: capacityInfoFromModel(bundle.modelStatic) }));
+        const runResults = (bundle.result ?? {}) as RunResults;
+        setFullCache((c) => ({ ...c, [name]: runResults }));
+        setCapacityCache((c) => ({ ...c, [name]: capacityInfoFromModel(bundle.modelStatic, runResults.outputs) }));
       } catch {
         setFullCache((c) => ({ ...c, [name]: 'error' }));
       }

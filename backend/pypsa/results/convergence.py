@@ -539,14 +539,20 @@ def build_convergence(
                 planned_mask[i, :] = eligible_mask[row, :]
 
             labels = [_snapshot_label(s) for s in snapshots]
+            # ``schedule`` comes back in PLACEMENT order (largest capacity
+            # first), NOT eligible-list order, so the carrier must be looked
+            # up by unit name — indexing thermal_carrier_list by the row's
+            # position would attribute another unit's carrier whenever the
+            # fleet isn't already sorted by descending capacity.
+            carrier_by_unit = {thermal_names[i]: thermal_carrier_list[i] for i in eligible_idx}
             schedule_rows = [
                 {
                     "unit": name,
-                    "carrier": thermal_carrier_list[eligible_idx[row]],
+                    "carrier": carrier_by_unit[name],
                     "startLabel": labels[start],
                     "weeks": round(maintenance_weeks, 3),
                 }
-                for row, (name, start, _length) in enumerate(schedule)
+                for name, start, _length in schedule
             ]
 
             # Before/after planning-reserve-margin summary: peak(net_load) vs

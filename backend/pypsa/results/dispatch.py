@@ -53,6 +53,31 @@ def _electricity_bus_names(network: pypsa.Network) -> set[str]:
     return {str(b) for b, c in buses["carrier"].items() if _is_electricity(c)}
 
 
+def electricity_bus_scope(network: pypsa.Network) -> set[str] | None:
+    """Electricity buses to scope system-level aggregates to, or ``None``.
+
+    Sector-coupled models carry non-electricity buses (gas, heat, H₂ …) whose
+    loads, marginal prices and fuel-supply pseudo-generators must not be lumped
+    into the electricity-only system aggregates (demand overlay, peak demand,
+    average/peak price, generator capacity). This returns the same bus set the
+    electricity dispatch mix (``electricity_dispatch_by_carrier``) is built
+    from, and ``None`` when no restriction applies — a single-vector model
+    (every bus electricity) or a model with no identifiable electricity bus at
+    all (restricting to an empty set would zero every aggregate). Callers must
+    treat ``None`` as "use every bus", which keeps single-carrier models
+    byte-identical to the unscoped behaviour.
+    """
+    buses = network.buses
+    if buses.empty or "carrier" not in buses.columns:
+        return None
+    if all(_is_electricity(c) for c in buses["carrier"]):
+        return None  # single-vector model — nothing to restrict
+    elec = _electricity_bus_names(network)
+    if not elec:
+        return None  # no electricity vector at all — leave aggregates whole-model
+    return elec
+
+
 def electricity_dispatch_by_carrier(
     network: pypsa.Network,
     generator_dispatch_frame: pd.DataFrame,
@@ -78,6 +103,33 @@ def electricity_dispatch_by_carrier(
     return result
 
 
+def _link_port_efficiency(
+    network: pypsa.Network,
+    link: str,
+    port: str,
+    snapshots: pd.Index,
+) -> pd.Series:
+    """Per-snapshot efficiency of a Link output port (``"1"``, ``"2"``, …).
+
+    Resolved dense (``get_switchable_as_dense``) so a ``links-efficiency{N}``
+    time series — which the solve honours — overrides the static column. Falls
+    back to the static value, then to the historical default (1.0 for ``bus1``,
+    0.0 for extra ports, matching the previous static-only behaviour).
+    """
+    attr = "efficiency" if port == "1" else f"efficiency{port}"
+    default = 1.0 if port == "1" else 0.0
+    try:
+        dense = network.get_switchable_as_dense("Link", attr)
+        if link in dense.columns:
+            return dense[link].reindex(snapshots).astype(float).fillna(default)
+    except Exception:
+        pass  # attribute not registered on this network — use the static column
+    links = network.links
+    if attr in links.columns and pd.notna(links.at[link, attr]):
+        return pd.Series(float(links.at[link, attr]), index=snapshots)
+    return pd.Series(default, index=snapshots)
+
+
 def _add_conversion_link_injections(
     network: pypsa.Network,
     elec_buses: set[str],
@@ -86,17 +138,30 @@ def _add_conversion_link_injections(
     """Fold each conversion Link's electricity output into ``result`` under the
     Link's carrier.
 
-    A Link injects ``efficiency`` × its (positive) input flow ``p0`` into an
-    output bus; only Links whose input (bus0) is NOT electricity count as supply
-    (transmission links stay out). Uses ``p0`` × efficiency rather than ``p1`` so
-    it works on the light stored-run path too, which injects ``p0`` only.
+    Output ports are discovered dynamically — ``bus1`` plus every ``bus{N}``
+    column PyPSA registered (CHP heat/power co-products and the like), the same
+    discovery ``energy_balance.py`` uses — so a co-product on ``bus4``+ is not
+    silently dropped. Only Links whose input (bus0) is NOT electricity count as
+    supply (transmission links stay out).
+
+    The injection prefers the actual solved output flow ``p{N}``
+    (injection = max(-p{N}, 0)), which honours time-varying ``efficiency{N}``
+    series exactly and agrees with ``energy_balance.py``. When the port flow is
+    absent (the light stored-run path injects ``p0`` only), it falls back to
+    ``p0`` × the dense per-snapshot ``efficiency{N}``.
     """
     links = network.links
     if len(links) == 0 or network.links_t.p0.empty:
         return
-    p0 = network.links_t.p0
+    dyn = network.links_t
+    p0 = dyn.p0
     snapshots = network.snapshots
-    ports = [("bus1", "efficiency"), ("bus2", "efficiency2"), ("bus3", "efficiency3")]
+    # Output ports: bus1 plus any multi-port columns (bus2, bus3, … — a blank
+    # port cell = port unused). Mirrors energy_balance.py's discovery.
+    ports = ["1"] + sorted(
+        c[3:] for c in links.columns
+        if c.startswith("bus") and c[3:].isdigit() and c not in ("bus0", "bus1")
+    )
     for link in links.index:
         if link not in p0.columns:
             continue
@@ -106,19 +171,21 @@ def _add_conversion_link_injections(
         inflow = p0[link].reindex(snapshots).fillna(0.0).clip(lower=0.0)
         carrier = str(links.at[link, "carrier"]) if "carrier" in links.columns else ""
         key = carrier or str(link)
-        for bus_col, eff_col in ports:
+        for port in ports:
+            bus_col = f"bus{port}"
             if bus_col not in links.columns:
                 continue
             out_bus = links.at[link, bus_col]
             if not isinstance(out_bus, str) or out_bus not in elec_buses:
                 continue
-            if eff_col in links.columns and pd.notna(links.at[link, eff_col]):
-                eff = float(links.at[link, eff_col])
+            pn = dyn[f"p{port}"] if f"p{port}" in dyn else None
+            if pn is not None and link in pn.columns:
+                # Solved flow: -p{N} is the injection into bus{N}.
+                inj = (-pn[link].reindex(snapshots).fillna(0.0)).clip(lower=0.0)
             else:
-                eff = 1.0 if bus_col == "bus1" else 0.0
-            if eff == 0.0:
+                inj = inflow * _link_port_efficiency(network, link, port, snapshots)
+            if not (inj.abs() > 1e-12).any():
                 continue
-            inj = inflow * eff
             result[key] = result[key].add(inj, fill_value=0.0) if key in result else inj
 
 

@@ -41,13 +41,23 @@ Algorithm:
     dispatch shape: renewables scaled by the member's cf multiplier, thermal
     ("firm") at its solved (deterministic) availability, hydro storage output
     scaled by the member's inflow multiplier (see the v1 simplification note
-    below), load scaled by the member's load multiplier:
+    below), inflow-less storage (e.g. batteries) at its solved discharge
+    unscaled (not weather-driven, so no stress multiplier applies), load
+    scaled by the member's load multiplier:
         $$ \\text{avail}_{m,t} = \\text{firm}_t + \\text{cf\\_mult}_m \\sum_r p_{nom,r}\\, pmax_{r,t}
-           + \\text{inflow\\_mult}_m \\sum_h \\text{hydro\\_out}_{h,t} $$
+           + \\text{inflow\\_mult}_m \\sum_h \\text{hydro\\_out}_{h,t}
+           + \\sum_b \\text{storage\\_out}_{b,t} $$
         $$ \\text{load}_{m,t} = \\text{load\\_mult}_m \\cdot \\text{load}_t $$
         ASCII: avail[m,t] = firm[t] + cf_mult[m]*sum_r(p_nom[r]*pmax[r,t])
                             + inflow_mult[m]*sum_h(hydro_out[h,t])
+                            + sum_b(storage_out[b,t])
                load[m,t]  = load_mult[m] * load[t]
+
+    hydro_out and storage_out are the solved storage-unit dispatch clipped at
+    zero from below (max(p, 0), MW): only discharge counts as available
+    generation. A net-charging snapshot contributes ZERO to availability — a
+    charging unit is not supplying — rather than subtracting the charging
+    draw (charging is discretionary and would be curtailed under scarcity).
 
     Reliability metrics reuse ``adequacy.compute_adequacy`` for the ensemble
     aggregate and ``outage_mc``'s per-member LOLE/EUE + quantile machinery for
@@ -79,8 +89,14 @@ capacity; pmax (dimensionless, 0-1) solved availability signal; hydro_out
    for systems with large storage relative to inflow variability) and
    ignores the inflow's own re-optimisation of the dispatch schedule. A
    storage unit whose solved dispatch is net-charging (negative) at a
-   snapshot is left at its solved value (charging is not "available
-   generation" and is not scaled by a drop in inflow).
+   snapshot contributes ZERO to available generation at that snapshot (the
+   dispatch is clipped at 0 before scaling): charging is not "available
+   generation", and treating the charging draw as an obligation would
+   overstate scarcity — under stress the unit would simply stop charging.
+   Storage units with no inflow signal (e.g. batteries) are not
+   weather-driven, so their solved discharge (same clip at 0) enters
+   availability UNSCALED — no stress multiplier applies, but their firm
+   contribution must not be dropped.
 2. **Fuel-price correlation -> cost distribution.** A cold-snap event
    typically also spikes fuel/gas prices, which would shift the *cost*
    distribution — but that requires a per-sample re-solve (each member's
@@ -280,30 +296,40 @@ def build_correlated_sampling(
     # mask another's shortfall.
 
     # Hydro inflow (v1 simplification — see module docstring, point 1): scale
-    # each storage unit's SOLVED positive (discharging) dispatch by the
-    # member's inflow multiplier, as a proxy for less/more inflow => less/more
-    # hydro output available. Storage units with no inflow signal (e.g. a
-    # battery, inflow always 0) are left out of this driver entirely — they
-    # are not weather-driven and stay at their solved dispatch regardless of
-    # the stress draw.
+    # each inflow-driven storage unit's SOLVED discharge (dispatch clipped at
+    # 0 — net-charging snapshots contribute zero availability) by the
+    # member's inflow multiplier, as a proxy for less/more inflow =>
+    # less/more hydro output available. Storage units with no inflow signal
+    # (e.g. a battery) are not weather-driven, so their solved discharge
+    # (same clip at 0) enters availability UNSCALED — a battery covering a
+    # scarcity snapshot must still count as supply under the stress draw.
     hydro_base = np.zeros(T)
+    storage_base = np.zeros(T)  # inflow-less storage discharge, deterministic
     hydro_names: list[str] = []
-    if len(network.storage_units) and hasattr(network.storage_units_t, "inflow"):
-        inflow_frame = network.storage_units_t.inflow
+    storage_names: list[str] = []
+    if len(network.storage_units):
+        inflow_frame = (
+            network.storage_units_t.inflow
+            if hasattr(network.storage_units_t, "inflow")
+            else pd.DataFrame()
+        )
         dispatch_frame = network.storage_units_t.p if hasattr(network.storage_units_t, "p") else pd.DataFrame()
         for s in network.storage_units.index:
             name = str(s)
-            if name not in inflow_frame.columns:
-                continue
-            inflow_series = inflow_frame[name].reindex(snapshots).fillna(0.0).to_numpy()
-            if not np.any(inflow_series > _EPS):
-                continue  # not an inflow-driven (hydro) unit
-            hydro_names.append(name)
             if name in dispatch_frame.columns:
                 dispatch = dispatch_frame[name].reindex(snapshots).fillna(0.0).to_numpy()
             else:
                 dispatch = np.zeros(T)
-            hydro_base += np.clip(dispatch, 0.0, None)
+            is_hydro = False
+            if name in inflow_frame.columns:
+                inflow_series = inflow_frame[name].reindex(snapshots).fillna(0.0).to_numpy()
+                is_hydro = bool(np.any(inflow_series > _EPS))
+            if is_hydro:
+                hydro_names.append(name)
+                hydro_base += np.clip(dispatch, 0.0, None)
+            else:
+                storage_names.append(name)
+                storage_base += np.clip(dispatch, 0.0, None)
 
     multipliers = sample_driver_multipliers(cfg, seed, n_members)
     load_mult = multipliers["load_mult"]
@@ -318,11 +344,13 @@ def build_correlated_sampling(
         renewable_avail += cap * np.minimum(1.0, cf_mult[:, None] * base[None, :])
 
     # Available generation per member/snapshot: firm (deterministic) + stressed
-    # renewables (nameplate-capped) + stressed hydro. Load: stressed demand.
+    # renewables (nameplate-capped) + stressed hydro + inflow-less storage
+    # discharge (deterministic, unscaled). Load: stressed demand.
     available = (
         firm[None, :]
         + renewable_avail
         + inflow_mult[:, None] * hydro_base[None, :]
+        + storage_base[None, :]
     )
     member_load = load_mult[:, None] * load[None, :]
 
@@ -387,8 +415,9 @@ def build_correlated_sampling(
 
     _log.info(
         "correlated_sampling: %d members, %d renewables, %d hydro units, "
+        "%d inflow-less storage units, "
         "LOLE P50=%.2f P95=%.2f h/yr, EUE P50=%.1f P95=%.1f MWh/yr",
-        n_members, len(renewable_names), len(hydro_names),
+        n_members, len(renewable_names), len(hydro_names), len(storage_names),
         lole_dist["p50"], lole_dist["p95"], eue_dist["p50"], eue_dist["p95"],
     )
 

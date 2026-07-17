@@ -22,6 +22,7 @@ import pypsa
 
 from ..utils.emissions import per_generator_emission_factor
 from .finance import _crf
+from .market import HOURS_PER_YEAR
 
 _log = logging.getLogger("pypsa.solver")
 
@@ -224,8 +225,14 @@ def build_asset_swap(
     annualised_capex = cap_cost * added_capacity + storage_capex
     r = float(scenario.get("discountRate", 0.0) or 0.0)
     overnight_capex = annualised_capex / _crf(r, _DEFAULT_LIFETIME) if annualised_capex > 0 else 0.0
+    # ``statistics.opex()`` integrates over the modelled window of H represented
+    # hours, so the saving is a window total; a payback in YEARS needs the
+    # annual saving: × 8760/H.
+    #   paybackYears = overnight_capex / (opex_savings_window · 8760/H)
     opex_savings = before["operatingCost"] - after_m["operatingCost"]
-    payback = round(overnight_capex / opex_savings, 2) if opex_savings > 1e-9 and overnight_capex > 0 else None
+    H = float(base_network.snapshot_weightings["objective"].sum())
+    annual_savings = opex_savings * (HOURS_PER_YEAR / H) if H > 0 else 0.0
+    payback = round(overnight_capex / annual_savings, 2) if annual_savings > 1e-9 and overnight_capex > 0 else None
 
     remove_summary = " · ".join(f"{f['field']} ∈ {{{', '.join(f['values'])}}}" for f in filters)
     _log.info("asset-swap [%s]→%s ×%.2f +%.0fMW ess: Δcost=%.1f Δemissions=%.1f",

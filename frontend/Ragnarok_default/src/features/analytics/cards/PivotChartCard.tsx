@@ -140,12 +140,11 @@ export function PivotChartCard({
     const label = `${active.sheet} · ${active.valueAttribute}`;
     let promise: Promise<void>;
     if (active.chartType === 'donut') {
-      const { data } = buildPivotMix(buildCfg, results, model, snapshotWeight);
-      const donutUnit = unit === 'MW' ? 'MWh' : unit;
+      const { data, unit: mixUnit } = buildPivotMix(buildCfg, results, model, snapshotWeight);
       promise = exportChartToExcel(
         label, ['label', 'value'], data.map((d) => ({ label: d.label, value: d.value })),
         chartContainerRef.current, undefined,
-        { title: label, unit: donutUnit, legend: data.map((d) => ({ label: d.label, color: d.color })) },
+        { title: label, unit: mixUnit, legend: data.map((d) => ({ label: d.label, color: d.color })) },
       );
     } else if (active.chartType === 'scatter') {
       const { points } = buildPivotScatter(buildCfg, results, model, snapshotWeight);
@@ -155,7 +154,7 @@ export function PivotChartCard({
         chartContainerRef.current, undefined, { title: label, unit },
       );
     } else if (active.chartType === 'hbar' || active.chartType === 'grouped-bar') {
-      const { labels, series } = buildPivotCategory(buildCfg, results, model, snapshotWeight);
+      const { labels, series, unit: catUnit } = buildPivotCategory(buildCfg, results, model, snapshotWeight);
       const keys = series.map((s) => s.key);
       const exportRows = labels.map((lbl, i) => {
         const o: Record<string, unknown> = { category: lbl };
@@ -164,16 +163,22 @@ export function PivotChartCard({
       });
       promise = exportChartToExcel(
         label, ['category', ...series.map((s) => s.label)], exportRows, chartContainerRef.current, undefined,
-        { title: label, unit, legend: series.map((s) => ({ label: s.label, color: s.color })) },
+        { title: label, unit: catUnit, legend: series.map((s) => ({ label: s.label, color: s.color })) },
       );
     } else if (active.chartType === 'duration') {
-      const { values } = buildPivotDurationCurve(buildCfg, results, model, snapshotWeight);
+      const { series, unit: durationUnit } = buildPivotDurationCurve(buildCfg, results, model, snapshotWeight);
+      const rankCount = series.reduce((m, s) => Math.max(m, s.values.length), 0);
+      const exportRows = Array.from({ length: rankCount }, (_, i) => {
+        const o: Record<string, unknown> = { rank: i + 1 };
+        series.forEach((s) => { o[s.label] = s.values[i] ?? ''; });
+        return o;
+      });
       promise = exportChartToExcel(
-        label, ['rank', 'value'], values.map((v, i) => ({ rank: i + 1, value: v })),
-        chartContainerRef.current, undefined, { title: label, unit },
+        label, ['rank', ...series.map((s) => s.label)], exportRows, chartContainerRef.current, undefined,
+        { title: label, unit: durationUnit, legend: series.map((s) => ({ label: s.label, color: s.color })) },
       );
     } else {
-      const { rows, series } = active.chartType === 'daily-profile'
+      const { rows, series, unit: seriesUnit } = active.chartType === 'daily-profile'
         ? buildPivotDailyProfile(buildCfg, results, model, snapshotWeight)
         : buildPivotSeries(buildCfg, results, model, snapshotWeight);
       const keys = series.map((s) => s.key);
@@ -184,7 +189,7 @@ export function PivotChartCard({
       });
       promise = exportChartToExcel(
         label, ['timestamp', ...keys], exportRows, chartContainerRef.current, undefined,
-        { title: label, unit, legend: series.map((s) => ({ label: s.label, color: s.color })) },
+        { title: label, unit: seriesUnit || unit, legend: series.map((s) => ({ label: s.label, color: s.color })) },
       );
     }
     promise.then(() => showToast(`Exported ${label}`, 'success')).catch(() => showToast('Export failed', 'error'));
@@ -212,9 +217,9 @@ export function PivotChartCard({
     }
     const ct = active.chartType;
     if (ct === 'donut') {
-      const { data, loading } = buildPivotMix(buildCfg, results, model, snapshotWeight);
+      const { data, unit: mixUnit, loading } = buildPivotMix(buildCfg, results, model, snapshotWeight);
       if (loading) return loadingBody;
-      return data.length ? <DonutChart data={data} unit={unit === 'MW' ? 'MWh' : unit} /> : emptyBody('No data for current selection.');
+      return data.length ? <DonutChart data={data} unit={mixUnit} /> : emptyBody('No data for current selection.');
     }
     if (ct === 'scatter') {
       const sc = buildPivotScatter(buildCfg, results, model, snapshotWeight);
@@ -231,38 +236,47 @@ export function PivotChartCard({
     if (ct === 'hbar' || ct === 'grouped-bar') {
       const data = buildPivotCategoryMulti(buildCfg, valueList, results, model, snapshotWeight);
       if (data.loading) return loadingBody;
+      const catUnit = data.unit || unit;
       return data.labels.length
         ? (
           <CategoryBarCard
-            data={data} mode={ct} stacked={active.stacked} unit={unit}
-            title={compact ? '' : active.valueAttribute} description={compact ? '' : unit}
+            data={data} mode={ct} stacked={active.stacked} unit={catUnit}
+            title={compact ? '' : active.valueAttribute} description={compact ? '' : catUnit}
             showLegend={active.showLegend ?? true} showAxisLabels={active.showAxisLabels ?? true}
-            xAxisTitle={active.xAxisTitle} yAxisTitle={active.yAxisTitle || unit} xLabelAngle={active.xLabelAngle ?? 0}
+            xAxisTitle={active.xAxisTitle} yAxisTitle={active.yAxisTitle || catUnit} xLabelAngle={active.xLabelAngle ?? 0}
           />
         )
         : emptyBody('No data for current selection.');
     }
     if (ct === 'duration') {
-      const { values, color, unit: u, loading } = buildPivotDurationCurve(buildCfg, results, model, snapshotWeight);
+      const { series, unit: durationUnit, loading } = buildPivotDurationCurve(buildCfg, results, model, snapshotWeight);
       if (loading) return loadingBody;
-      return values.length ? <DurationCurveCard title={compact ? '' : active.valueAttribute} data={values} unit={u} color={color} /> : emptyBody('No data for current selection.');
+      return series.some((s) => s.values.length)
+        ? (
+          <DurationCurveCard
+            title={compact ? '' : active.valueAttribute} data={series} unit={durationUnit}
+            showLegend={active.showLegend ?? true}
+          />
+        )
+        : emptyBody('No data for current selection.');
     }
     // line / area / bar (time axis) and daily-profile all feed InteractiveTimeSeriesCard.
     // Multiple value columns become additional series (daily-profile stays single).
-    const { rows, series, loading } = ct === 'daily-profile'
+    const { rows, series, unit: seriesUnit, loading } = ct === 'daily-profile'
       ? buildPivotDailyProfile(buildCfg, results, model, snapshotWeight)
       : buildPivotSeriesMulti(buildCfg, valueList, results, model, snapshotWeight);
     if (loading) return loadingBody;
+    const displayUnit = seriesUnit || unit;
     return (
       <InteractiveTimeSeriesCard
         title={compact ? '' : active.valueAttribute}
-        description={compact ? '' : (ct === 'daily-profile' ? `${unit} · by hour-of-day` : unit)}
+        description={compact ? '' : (ct === 'daily-profile' ? `${displayUnit} · by hour-of-day` : displayUnit)}
         data={rows}
         series={series}
         mode={ct === 'daily-profile' ? 'bar' : (ct as ChartMode)}
         stacked={active.stacked}
         xAxisTitle={active.xAxisTitle}
-        yAxisTitle={active.yAxisTitle || unit}
+        yAxisTitle={active.yAxisTitle || displayUnit}
         showLegend={active.showLegend ?? true}
         showAxisLabels={active.showAxisLabels ?? true}
         xLabelAngle={active.xLabelAngle ?? 0}

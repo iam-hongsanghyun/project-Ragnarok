@@ -37,6 +37,21 @@ _DEF_MAX_ADDER = 100.0
 _DEF_MAX_WITHHOLD = 0.5
 _DEF_ROUNDS = 4
 
+# The B2 simulation-config keys carried into the strategic baseline — the full
+# market design (demand curve, storage thresholds, bid/withhold overrides) must
+# survive, or a configured two-sided market is silently evaluated single-sided.
+_SIM_KEYS = (
+    "voll",
+    "bids",
+    "withheldMw",
+    "chargeQuantile",
+    "dischargeQuantile",
+    "clearingModel",
+    "demandElasticFraction",
+    "demandWtp",
+    "demandBids",
+)
+
 
 def _owner_units(
     model: dict[str, list[dict[str, Any]]], network: pypsa.Network, owner: str, column: str
@@ -60,11 +75,15 @@ def _strategy_config(
     p_nom: dict[str, float],
     other: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Simulation config with ``units`` playing ``strategy`` at ``level`` (merged
-    over ``other`` — the rival's current strategy — for equilibrium rounds)."""
+    """Simulation config with ``units`` playing ``strategy`` at ``level``.
+
+    Overrides are layered: the user's base config (which may carry its own
+    ``bids`` / ``withheldMw``), then ``other`` — the rival's current strategy
+    in equilibrium rounds — then the owner's units at ``level``.
+    """
     cfg = dict(base)
-    bids = dict((other or {}).get("bids") or {})
-    withheld = dict((other or {}).get("withheldMw") or {})
+    bids = {**(base.get("bids") or {}), **((other or {}).get("bids") or {})}
+    withheld = {**(base.get("withheldMw") or {}), **((other or {}).get("withheldMw") or {})}
     if strategy == "withhold":
         withheld.update({u: p_nom[u] * level for u in units})
     else:
@@ -129,14 +148,11 @@ def build_strategic_bidding(
     ) if strategy == "withhold" else float(config.get("maxAdder") or _DEF_MAX_ADDER)
     levels = np.linspace(0.0, max_level, steps + 1)
 
-    # The simulated-market baseline the strategy is measured against — uniform
-    # settlement (strategic markup under pay-as-bid is a different game).
-    base = {
-        "pricing": "uniform",
-        "voll": sim_config.get("voll"),
-        "chargeQuantile": sim_config.get("chargeQuantile"),
-        "dischargeQuantile": sim_config.get("dischargeQuantile"),
-    }
+    # The simulated-market baseline the strategy is measured against: the user's
+    # full B2 config with ONE deliberate override — uniform settlement
+    # (strategic markup under pay-as-bid is a different game).
+    base = {k: sim_config[k] for k in _SIM_KEYS if sim_config.get(k) is not None}
+    base["pricing"] = "uniform"
     gens = network.generators
     mc = {str(g): float(gens.at[g, "marginal_cost"]) for g in gens.index}
     p_nom = {str(g): float(gens.at[g, "p_nom"]) for g in gens.index}

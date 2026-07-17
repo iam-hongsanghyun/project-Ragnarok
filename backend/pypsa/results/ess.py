@@ -8,6 +8,16 @@ NPV-maximising size.
 Arbitrage is priced against the *base* run's LMP, i.e. the battery is a price
 taker — a standard business-case screen. Only the energy-arbitrage revenue
 stream is modelled here; capacity value and ancillary/reserve are not.
+
+Basis: the study covers the modelled window of ``H = Σ_t w_t`` represented
+hours, so the arbitrage revenue is a window total. The annual cashflow that
+feeds NPV / IRR / payback is annualised by ``× 8760 / H``:
+
+    $$M = R_H \\cdot 8760 / H, \\qquad CF_0 = -C,\\; CF_{1..L} = M$$
+    ASCII: M = revenue_H * 8760/H ; CF_0 = -overnight ; CF_t = M.
+
+``arbitrageRevenue`` and ``energyMWh`` in the per-size rows stay on the
+window basis (what the sweep actually simulated).
 """
 from __future__ import annotations
 
@@ -18,6 +28,7 @@ from typing import Any
 import pypsa
 
 from .finance import _crf, _irr, _npv, _payback
+from .market import HOURS_PER_YEAR
 
 _log = logging.getLogger("pypsa.solver")
 
@@ -67,6 +78,11 @@ def build_ess_business_case(
     life = _DEFAULT_LIFETIME
     price = mp[bus]
     w = base_network.snapshot_weightings["objective"]
+    # Modelled window (represented hours): window revenue × 8760/H = annual.
+    H = float(w.sum())
+    if H <= 0:
+        return None
+    annualize = HOURS_PER_YEAR / H
 
     # One reduced network: the chosen bus, a price-taker market node, and the
     # battery. We resize the battery and re-solve per step.
@@ -121,11 +137,15 @@ def build_ess_business_case(
         revenue = float(((pd_ - pc) * price.to_numpy() * w.to_numpy()).sum())
         annualised_capex = capital_cost_per_mw * size
         overnight = annualised_capex / _crf(r, life) if annualised_capex > 0 else 0.0
-        margin = revenue  # opex ~0 for a battery
+        # Window revenue annualised (× 8760/H) — the yearly cashflow; opex ~0
+        # for a battery.
+        margin = revenue * annualize
         cashflows = [-overnight] + [margin] * int(round(life))
         npv = _npv(r, cashflows)
         irr = _irr(cashflows)
         sizes.append({
+            # energyMWh / arbitrageRevenue are WINDOW totals (H represented
+            # hours), not annual figures.
             "sizeMW": round(size, 2),
             "energyMWh": round(float((pd_ * w.to_numpy()).sum()), 1),
             "arbitrageRevenue": round(revenue, 2),

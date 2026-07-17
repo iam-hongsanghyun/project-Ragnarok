@@ -124,9 +124,24 @@ describe('buildDonutOption', () => {
 describe('buildDurationCurveOption', () => {
   test('spreads ranks over 0–100% exceedance', () => {
     const opt = buildDurationCurveOption({
-      data: [30, 20, 10], title: 'Load (MW)', unit: 'MW', color: '#f97316', theme,
+      series: [{ key: 'load', label: 'Load', color: '#f97316', values: [30, 20, 10] }],
+      title: 'Load (MW)', unit: 'MW', theme,
     }) as { series: Array<{ data: Array<[number, number]> }> };
     expect(opt.series[0].data).toEqual([[0, 30], [50, 20], [100, 10]]);
+  });
+
+  test('each group keeps its own independent ranking (no pooled sort)', () => {
+    const opt = buildDurationCurveOption({
+      series: [
+        { key: 'wind', label: 'Wind', color: '#1', values: [60, 30] },
+        { key: 'solar', label: 'Solar', color: '#2', values: [100, 5] },
+      ],
+      title: 'Generation', unit: 'MW', theme, showLegend: true,
+    }) as { series: Array<{ name: string; data: Array<[number, number]> }>; legend?: unknown };
+    expect(opt.series.map((s) => s.name)).toEqual(['Wind', 'Solar']);
+    expect(opt.series[0].data).toEqual([[0, 60], [100, 30]]);
+    expect(opt.series[1].data).toEqual([[0, 100], [100, 5]]);
+    expect(opt.legend).toBeDefined();
   });
 });
 

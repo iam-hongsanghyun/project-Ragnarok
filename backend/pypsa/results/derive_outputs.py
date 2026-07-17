@@ -122,12 +122,15 @@ def derive_results_from_outputs(
     options = dict(options or {})
     # A derivation never re-solves: strip every mode/config that would trigger
     # extra optimisation passes (MGA, merchant, asset swap, ESS, …) or gate the
-    # payload into a study mode.
+    # payload into a study mode. Build-time model options stay — in particular
+    # ``enableLoadShedding`` only injects the ``load_shedding_*`` generators at
+    # build time (no extra solve); stripping it made ``_attach_outputs`` drop
+    # their stored dispatch columns and report a run's shed energy as zero.
     for key in (
         "mgaConfig", "merchantConfig", "bidStrategyConfig", "assetSwapConfig",
         "essConfig", "marketSimConfig", "powerFlowConfig", "contingencyConfig",
         "rollingConfig", "stochasticConfig", "pathwayConfig", "samplingConfig",
-        "securityConstrainedConfig", "enableLoadShedding",
+        "securityConstrainedConfig",
     ):
         options.pop(key, None)
 

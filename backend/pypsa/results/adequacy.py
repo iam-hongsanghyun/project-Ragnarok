@@ -186,11 +186,17 @@ def build_adequacy(
     firm = np.zeros(T)
     renewables: list[tuple[str, float, np.ndarray]] = []  # (name, capacity, base CF)
     for g in gens.index:
+        name = str(g)
+        if name.startswith("load_shedding_"):
+            # Injected VOLL backstop, not a physical resource: counting it as a
+            # stochastic renewable (it carries a time-varying p_max_pu column)
+            # adds ~peak-load fake capacity per bus and zeroes LOLE/EENS.
+            continue
         cap = float(gens.at[g, "p_nom_opt"]) if "p_nom_opt" in gens.columns else float(gens.at[g, "p_nom"])
         if cap <= 0:
             continue
-        if str(g) in tv_cols:  # time-varying availability → stochastic renewable
-            renewables.append((str(g), cap, pmax[g].to_numpy()))
+        if name in tv_cols:  # time-varying availability → stochastic renewable
+            renewables.append((name, cap, pmax[g].to_numpy()))
         else:  # firm/dispatchable: available at its (static) rated availability
             firm += cap * pmax[g].to_numpy()
 
