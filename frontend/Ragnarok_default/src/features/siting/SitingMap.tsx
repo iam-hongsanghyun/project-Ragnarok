@@ -130,16 +130,32 @@ export function SitingMap({
           />
         )}
 
-        {busPoints.map((b) => (
-          <CircleMarker
-            key={`bus-${b.name}`}
-            center={[b.lat, b.lon]}
-            radius={3.5}
-            pathOptions={{ color: '#475569', fillColor: '#475569', fillOpacity: 0.85, weight: 1 }}
-          >
-            <Tooltip>{b.name}</Tooltip>
-          </CircleMarker>
-        ))}
+        {busPoints.map((b) => {
+          // Candidate-site buses live in the model after "Add to model", so
+          // built capacity draws from the model itself and survives tab
+          // switches (the scan-state candidate markers are transient).
+          const built = builtMwBySiteBus[b.name] ?? 0;
+          return (
+            <React.Fragment key={`bus-${b.name}`}>
+              {built > 0 && (
+                <CircleMarker
+                  center={[b.lat, b.lon]}
+                  radius={8 + 10 * Math.sqrt(built / maxBuilt)}
+                  pathOptions={{ color: '#b45309', weight: 2, fillOpacity: 0 }}
+                >
+                  <Tooltip>{b.name} · built {built.toFixed(1)} MW</Tooltip>
+                </CircleMarker>
+              )}
+              <CircleMarker
+                center={[b.lat, b.lon]}
+                radius={3.5}
+                pathOptions={{ color: '#475569', fillColor: '#475569', fillOpacity: 0.85, weight: 1 }}
+              >
+                <Tooltip>{b.name}</Tooltip>
+              </CircleMarker>
+            </React.Fragment>
+          );
+        })}
 
         {(candidates ?? []).map((c) => {
           const grid = busByName[c.gridBus];
@@ -159,13 +175,6 @@ export function SitingMap({
                     opacity: built > 0 ? 0.9 : 0.5,
                     dashArray: built > 0 ? undefined : '4 5',
                   }}
-                />
-              )}
-              {built > 0 && (
-                <CircleMarker
-                  center={[c.lat, c.lon]}
-                  radius={8 + 10 * Math.sqrt(built / maxBuilt)}
-                  pathOptions={{ color: '#b45309', weight: 2, fillOpacity: 0, dashArray: undefined }}
                 />
               )}
               <CircleMarker
