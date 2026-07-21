@@ -7,6 +7,7 @@
  */
 import React from 'react';
 import { AppliedConstraint, CustomConstraint, GridRow, PathwayConfig, Primitive, WorkbookModel } from 'lib/types';
+import { generatorCarriers } from 'lib/constraints/custom';
 import { GlobalConstraintsSection as CustomConstraintsEditor } from '../../features/constraints/GlobalConstraintsSection';
 import { GlobalConstraintsTableEditor } from './Constraints/GlobalConstraintsTableEditor';
 import { CustomDslSection } from '../../features/constraints/CustomDslSection';
@@ -33,6 +34,8 @@ export function StandardConstraintsSection(props: ConstraintsSectionProps) {
   const carriers = Array.from(
     new Set(props.model.carriers.map((c) => String(c.name ?? '')).filter(Boolean)),
   );
+  // Only these can bind a custom carrier constraint (see generatorCarriers).
+  const genCarriers = generatorCarriers(props.model);
   // Numeric columns on the carriers sheet (co2_emissions, max_growth, …)
   // are the valid `carrier_attribute` choices for `primary_energy` rows.
   const carrierAttributes = Array.from(
@@ -58,7 +61,10 @@ export function StandardConstraintsSection(props: ConstraintsSectionProps) {
         </header>
         <CustomConstraintsEditor
           constraints={props.constraints}
-          carriers={carriers}
+          // Generator carriers, NOT the carriers sheet: the solver resolves a
+          // carrier constraint against `generators.carrier`, so offering sheet-only
+          // carriers (e.g. "AC") would silently produce constraints it drops.
+          carriers={genCarriers}
           onChange={props.onConstraintsChange}
         />
       </section>

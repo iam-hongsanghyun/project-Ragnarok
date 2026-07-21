@@ -5454,6 +5454,18 @@ th:hover .col-delete-btn {
 .constraints-cell-placeholder {
   color: var(--muted);
 }
+/* A carrier no generator uses — the solver would drop this constraint, so it
+   is flagged here and blocks the run. */
+.constraints-cell-input--invalid,
+.constraints-cell-input--invalid input {
+  border-color: var(--danger, #dc2626) !important;
+}
+.constraints-row-warning {
+  padding: 2px 6px 8px;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--danger, #dc2626);
+}
 .constraints-dsl-input {
   width: 100%;
   box-sizing: border-box;
