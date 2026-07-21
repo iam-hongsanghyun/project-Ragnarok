@@ -66,6 +66,7 @@ import { defaultSamplingConfig, normalizeSamplingConfig, readSamplingConfigFromM
 import {
   generatorCarriers,
   readCustomDslFromModel,
+  sameConstraintSet,
   unresolvedCarrierConstraints,
   writeCustomDslToModel,
 } from 'lib/constraints/custom';
@@ -2285,13 +2286,30 @@ function AppInner() {
           { loadIntoEditor: true, sessionAlreadyLoaded: true },
         );
         setActiveRunName(name);
+        // handleRestoreRun swaps the MODEL but — unlike every other load path —
+        // never runs resetForNewModel, so the model-derived state below would
+        // keep describing the PREVIOUS project: the topbar kept the old filename
+        // and the DSL box / scenario list / carrier library stayed stale. Adopt
+        // them from the imported project here.
+        const importedStatic = (light.modelStatic ?? {}) as WorkbookModel;
+        setFilename(promoted.filename || name);
+        setCustomDsl(readCustomDslFromModel(importedStatic));
+        setCarbonLibrary(readCarbonLibraryFromModel(importedStatic));
+        const importedCatalog = readScenarioCatalogFromModel(importedStatic);
+        if (importedCatalog.scenarios.length > 0) setScenarioCatalog(importedCatalog);
+        // Constraints LAST: this is the run's own record of what it solved, so it
+        // wins over the catalog's copy that setScenarioCatalog may imply.
+        const importedConstraints = promoted.scenario?.constraints;
+        if (Array.isArray(importedConstraints)) setConstraints(importedConstraints);
+        // Replace the "Importing …" notice; it used to sit there forever on
+        // success, which reads as a hung import.
+        setStatus(`Imported ${promoted.filename || name} — loaded into the editor.`);
         // List the session's temporal sheets in the Model tree (they're not in
         // the static model; selecting one pages its rows from the session).
+        // Kept last — it awaits, and nothing above should wait on the network.
         try {
           setSessionSeriesCounts(seriesSheetCounts(await getSessionMeta()));
         } catch { /* tree just won't list series */ }
-        const importedConstraints = promoted.scenario?.constraints;
-        if (Array.isArray(importedConstraints)) setConstraints(importedConstraints);
         return;
       }
 
@@ -2612,6 +2630,21 @@ function AppInner() {
       .map((id) => scenarioCatalog.scenarios.find((s) => s.id === id))
       .filter((s): s is ScenarioPreset => !!s);
     if (presets.length === 0) return;
+    // A scenario run takes its constraints from each SAVED preset, never from
+    // the live table — so edits made in Market & Policy that were not saved back
+    // into the active scenario would be dropped without a trace (the run's
+    // narrative would simply not mention them). Refuse rather than solve a
+    // scenario the user did not configure. The DSL box IS read live below, which
+    // makes the silent half of this even easier to miss.
+    if (activeScenario && !sameConstraintSet(constraints, activeScenario.constraints)) {
+      showToast(
+        `Run blocked — the constraints table has edits that are not saved into scenario “${activeScenario.label}”, `
+        + 'and a scenario run uses each scenario\'s SAVED constraints. Click “Update scenario from current” in '
+        + 'Settings → Scenarios to save them, or use the top-bar Run button to run the live settings.',
+        'error',
+      );
+      return;
+    }
     setBatchBusy(true);
     try {
       // Custom-DSL constraints are shared across all scenarios (per-model).
@@ -2660,7 +2693,7 @@ function AppInner() {
     } finally {
       setBatchBusy(false);
     }
-  }, [scenarioCatalog.scenarios, customDsl, model, prepareModelForBackend, handleSetQueueConcurrency, filename, settings.dateFormat, settings.solverThreads, settings.solverType, settings.solveAcceptance, settings.objectiveAutoScale, settings.currencySymbol, refreshQueue, showToast]);
+  }, [scenarioCatalog.scenarios, activeScenario, constraints, customDsl, model, prepareModelForBackend, handleSetQueueConcurrency, filename, settings.dateFormat, settings.solverThreads, settings.solverType, settings.solveAcceptance, settings.objectiveAutoScale, settings.currencySymbol, refreshQueue, showToast]);
 
   const handleRunModel = async (staged = false) => {
     const snapshotCount = snapshotEnd - snapshotStart;
