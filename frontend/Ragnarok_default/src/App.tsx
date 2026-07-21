@@ -84,6 +84,8 @@ import { fetchRunOutputSeriesWindows } from 'lib/api/runs';
 import { loadExample } from 'lib/api/examples';
 import { buildStarterPack } from 'lib/api/starterPacks';
 import { RunDialog } from './features/run/RunDialog';
+import { MasterModelDialog } from './views/ModelView.features/MasterModelDialog';
+import type { DeriveReport } from 'lib/api/master';
 import { SettingsView } from './views/SettingsView';
 import { PluginsView } from './views/PluginsView';
 import { ModelView } from './views/ModelView';
@@ -258,6 +260,9 @@ function AppInner() {
   const [analyticsFocus, setAnalyticsFocus] = usePersistedState<AnalyticsFocus>('ui:analytics-focus', { type: 'system' });
   const [chartSections, setChartSections] = useState<ChartSectionConfig[]>([]);
   const [runDialogOpen, setRunDialogOpen] = useState(false);
+  // Master-model dialog (Model toolbar → Master…): import a multi-year master
+  // and derive a filtered working model from it.
+  const [masterDialogOpen, setMasterDialogOpen] = useState(false);
   const [dryRun, setDryRun] = useState(false);
   const [backendRuns, setBackendRuns] = useState<BackendRunMeta[]>([]);
   // Temporal sheet name → row count in the backend session. Time-series sheets
@@ -2210,6 +2215,23 @@ function AppInner() {
     }
   }, [resetForNewModel, setTab, showToast]);
 
+  // Master dialog → "Derive working model": the backend has already filtered the
+  // master into the session (source of truth); rehydrate the editor from there,
+  // exactly like loading an example (static sheets only — series page on demand).
+  const handleMasterDerived = useCallback(async (report: DeriveReport, filename?: string) => {
+    const savedModel = await getSessionFullModel({ staticOnly: true });
+    if (!savedModel) throw new Error('Derived model could not be read back from the session.');
+    resetForNewModel(savedModel, filename, { pushToSession: false });
+    try { setSessionSeriesCounts(seriesSheetCounts(await getSessionMeta())); } catch { /* tree just won't list series */ }
+    const excluded = Object.values(report.excluded ?? {}).reduce((a, b) => a + b, 0);
+    const summary = `Derived working model — ${report.snapshots} snapshots`
+      + (report.years?.length ? ` (years ${report.years.join(', ')})` : '')
+      + (excluded > 0 ? `, ${excluded} components set inactive` : '');
+    setStatus(summary);
+    showToast(summary, 'success');
+    setTab('Model');
+  }, [resetForNewModel, setTab, showToast]);
+
   // Welcome → "Country starter pack" (W2): assemble a runnable workbook from a
   // recipe (importers run server-side) and merge the fragment into the editor.
   const handleLoadStarterPack = useCallback(async (iso3: string, year: string | number) => {
@@ -3174,6 +3196,7 @@ function AppInner() {
               onSaveAs={saveAsWorkbook}
               onImportProject={() => projectImportInputRef.current?.click()}
               onExportProject={handleExportProject}
+              onOpenMasterModel={() => setMasterDialogOpen(true)}
               onImportCsvFolder={() => csvFolderImportInputRef.current?.click()}
               onExportCsvFolder={handleExportCsvFolder}
               onImportNetcdf={() => netcdfImportInputRef.current?.click()}
@@ -3379,6 +3402,14 @@ function AppInner() {
         onRun={() => void handleRunModel(false)}
         onQueueNext={() => void handleRunModel(true)}
         onAddScenario={() => void handleAddScenarioFromConsole()}
+      />
+
+      {/* ── Master model dialog (import multi-year master → derive by filter) ── */}
+      <MasterModelDialog
+        open={masterDialogOpen}
+        onClose={() => setMasterDialogOpen(false)}
+        onDerived={handleMasterDerived}
+        showToast={showToast}
       />
     </div>
   );

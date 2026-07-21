@@ -12,6 +12,7 @@ export interface FileToolbarProps {
   onSaveAs: () => void;
   onImportProject: () => void;
   onExportProject: () => void;
+  onOpenMasterModel: () => void;
   onImportCsvFolder: () => void;
   onExportCsvFolder: () => void;
   onImportNetcdf: () => void;
@@ -38,6 +39,14 @@ export function FileToolbar(props: FileToolbarProps) {
           : 'Export the project workbook (inputs only — no run yet)'}
       >
         Export Project
+      </button>
+      <div className="view-toolbar-sep" />
+      <button
+        className="tb-btn"
+        onClick={props.onOpenMasterModel}
+        title="Import a multi-year master model and derive a filtered working model from it (years, carriers, buses, …)"
+      >
+        Master…
       </button>
       <div className="view-toolbar-sep" />
       <details className="view-toolbar-more">

@@ -2312,6 +2312,48 @@ path.leaflet-interactive:focus {
   box-shadow: 0 4px 16px rgba(15, 23, 42, 0.1);
 }
 
+/* Master-model dialog (Model view → toolbar → Master…) — wider than the base
+   modal (filter rows are three selects side by side) and scrollable for masters
+   with many years/filters. */
+.modal-card.master-model-dialog {
+  width: min(720px, 100%);
+  max-height: min(80vh, 720px);
+  overflow-y: auto;
+}
+
+.master-dialog-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.master-dialog-years {
+  gap: 6px;
+}
+
+/* Filter rows are a fixed grid (not flex) so the three pickers and the Remove
+   button can never overlap, whatever the pill/placeholder widths do. */
+.master-dialog-filter {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.4fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.master-dialog-select {
+  min-width: 0;
+  width: 100%;
+}
+
+.master-dialog-note {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .run-settings-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

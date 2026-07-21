@@ -939,6 +939,11 @@ app.include_router(_forge_query_router.router)
 from .routers import session as _session_router  # noqa: E402
 app.include_router(_session_router.router)
 
+# Master model + derive-by-filter: a multi-year model imported once, from which
+# year/attribute-filtered working models are carved (Model view → Master…).
+from .routers import master as _master_router  # noqa: E402
+app.include_router(_master_router.router)
+
 # Bundled starter projects ("Start with Examples" on the welcome screen).
 from .routers import examples as _examples_router  # noqa: E402
 app.include_router(_examples_router.router)
