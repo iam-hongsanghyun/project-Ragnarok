@@ -10,6 +10,9 @@ Methods:
     no extra dependency, no bus coordinates needed). The robust default.
   • ``kmeans`` — spatial k-means on bus x/y (needs scikit-learn and distinct
     coordinates); degrades to a clear error when unavailable.
+  • ``single`` — collapse the whole network onto one bus. Topology- and
+    coordinate-free, so it always reaches a single node where modularity (which
+    floors out at the connected-component count) or k-means may not.
 """
 
 from __future__ import annotations
@@ -254,10 +257,10 @@ def cluster_model(
     unit-testable; the endpoint is a thin session-loading wrapper.
 
     Buses are grouped either by ``group_by_column`` (merge buses sharing a
-    workbook value, e.g. "province") or, when that is unset, by ``n_clusters``
-    using the ``method`` (modularity/kmeans). When ``aggregate_components`` is
-    given, the named one-port components are additionally collapsed by carrier
-    on each merged bus.
+    workbook value, e.g. "province"), all onto one bus (``method="single"``), or
+    by ``n_clusters`` using the ``method`` (modularity/kmeans). When
+    ``aggregate_components`` is given, the named one-port components are
+    additionally collapsed by carrier on each merged bus.
 
     Returns ``{model, busmap, method, before, after}`` where ``model`` is the
     reduced workbook model and ``busmap`` maps each original bus to its cluster.
@@ -273,17 +276,27 @@ def cluster_model(
             detail="Network has fewer than 2 buses — nothing to cluster.",
         )
 
-    by_column = bool(group_by_column and str(group_by_column).strip())
-    if not by_column and (n_clusters < 1 or n_clusters >= n_buses):
+    method = method.lower()
+    single = method == "single"
+    by_column = (not single) and bool(group_by_column and str(group_by_column).strip())
+    # "single" always targets one bus; column groups by a value — neither needs a
+    # cluster count. The count is only validated for modularity/k-means.
+    if not single and not by_column and (n_clusters < 1 or n_clusters >= n_buses):
         raise HTTPException(
             status_code=400,
             detail=f"Target clusters must be between 1 and {n_buses - 1} (network has {n_buses} buses).",
         )
 
-    method = method.lower()
     agg = {c for c in (aggregate_components or []) if c in _ONEPORT_ATTRS}
     try:
-        if by_column:
+        if single:
+            # Collapse the ENTIRE network onto one bus, independent of topology or
+            # coordinates. Every bus maps to the first bus's name. Unlike
+            # modularity (which floors out at the connected-component count) or
+            # k-means (which needs distinct coordinates), this always reaches a
+            # single node — the robust "1-bus" reduction.
+            busmap = pd.Series(str(network.buses.index[0]), index=network.buses.index)
+        elif by_column:
             column = str(group_by_column).strip()
             busmap = _busmap_by_column(model, column)
             method = f"column:{column}"
@@ -304,7 +317,7 @@ def cluster_model(
         else:
             raise HTTPException(
                 status_code=400,
-                detail=f"Unknown clustering method '{method}'. Use 'modularity' or 'kmeans'.",
+                detail=f"Unknown clustering method '{method}'. Use 'modularity', 'kmeans' or 'single'.",
             )
 
         # Bus attributes that disagree within a cluster and have no PyPSA default
