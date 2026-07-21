@@ -75,6 +75,71 @@ def test_modularity_clustering_reduces_buses() -> None:
     assert len(net.buses) == 2
 
 
+def _islands_model() -> dict[str, list[dict[str, Any]]]:
+    """Two disconnected islands (A-B and C-D, no line between) — the shape where
+    a single-node reduction must still reach one bus."""
+    m = _path_model(4)
+    # Drop the B-C line so {A,B} and {C,D} are separate connected components.
+    m["lines"] = [ln for ln in m["lines"] if ln["name"] != "BC"]
+    return m
+
+
+def test_single_node_collapses_everything_onto_one_bus() -> None:
+    res = cluster_model(_islands_model(), n_clusters=1, method="single", scenario=SCENARIO)
+    assert res["method"] == "single"
+    assert res["before"]["buses"] == 4
+    assert res["after"]["buses"] == 1
+    assert res["after"]["lines"] == 0  # every line becomes intra-cluster and drops
+    # every original bus maps to the one surviving bus
+    assert len(set(res["busmap"].values())) == 1
+    net, _ = build_network(res["model"], SCENARIO, {})
+    assert len(net.buses) == 1
+
+
+def test_single_node_ignores_cluster_count_bounds() -> None:
+    # n_clusters is irrelevant for "single" — an out-of-range value must not raise.
+    res = cluster_model(_path_model(4), n_clusters=999, method="single", scenario=SCENARIO)
+    assert res["after"]["buses"] == 1
+
+
+def _two_load_model() -> dict[str, list[dict[str, Any]]]:
+    """Path model with a second load, so merging loads is observable (2 → 1)."""
+    m = _path_model(4)
+    snaps = [r["snapshot"] for r in m["snapshots"]]
+    m["loads"] = [
+        {"name": "L1", "bus": "B", "p_set": 300.0},
+        {"name": "L2", "bus": "D", "p_set": 200.0},
+    ]
+    m["loads-p_set"] = [{"snapshot": s, "L1": 300.0, "L2": 200.0} for s in snaps]
+    return m
+
+
+def test_single_node_merges_loads_into_one() -> None:
+    # The "merge loads into a single load" option: aggregating the Load one-port
+    # on the single bus collapses both loads to one row (demand summed: 500 MW).
+    res = cluster_model(
+        _two_load_model(),
+        n_clusters=1,
+        method="single",
+        aggregate_components=["Load"],
+        scenario=SCENARIO,
+    )
+    assert res["after"]["buses"] == 1
+    assert res["after"]["loads"] == 1
+    net, _ = build_network(res["model"], SCENARIO, {})
+    assert len(net.loads) == 1
+    # Total demand is preserved through the merge (300 + 200 = 500 MW).
+    total = float(net.loads_t.p_set.sum(axis=1).iloc[0]) or float(net.loads.p_set.iloc[0])
+    assert total == pytest.approx(500.0)
+
+
+def test_single_node_without_aggregation_keeps_loads_split() -> None:
+    # Default (no aggregate_components): loads are only reassigned to the one bus.
+    res = cluster_model(_two_load_model(), n_clusters=1, method="single", scenario=SCENARIO)
+    assert res["after"]["buses"] == 1
+    assert res["after"]["loads"] == 2
+
+
 def test_serialized_model_is_json_safe_with_subnetworks() -> None:
     """Regression: sub_networks carry a live SubNetwork object; the serialized
     model must drop it (and any non-scalar) so the HTTP response serialises."""

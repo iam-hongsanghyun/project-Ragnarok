@@ -334,7 +334,7 @@ export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEdi
   const busCount = rowsOf(model, 'buses').length;
   const defaultClusterN = Math.max(1, Math.min(Math.max(busCount - 1, 1), Math.round(busCount / 2)));
   const [clusterN, setClusterN] = useState<number | null>(null);
-  const [clusterMethod, setClusterMethod] = useState<'modularity' | 'kmeans' | 'column'>('modularity');
+  const [clusterMethod, setClusterMethod] = useState<'modularity' | 'kmeans' | 'column' | 'single'>('modularity');
   const [clusterResolveConflicts, setClusterResolveConflicts] = useState(true);
   const [clusterConflictStrategy, setClusterConflictStrategy] = useState<'mean' | 'max' | 'min' | 'zero' | 'default'>('mean');
   const [clusterBusy, setClusterBusy] = useState(false);
@@ -1161,13 +1161,23 @@ export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEdi
                 >
                   By column
                 </button>
+                <button
+                  className={`tb-btn sg-solver-btn${clusterMethod === 'single' ? '' : ' tb-btn--muted'}`}
+                  // Single-node is maximal simplification — default component
+                  // aggregation on so loads (and generators by carrier) collapse too.
+                  onClick={() => { setClusterMethod('single'); setAggComponents(true); }}
+                >
+                  Single node
+                </button>
               </div>
               <p className="sg-setting-hint">
                 {clusterMethod === 'modularity'
                   ? 'Groups electrically-connected regions by network topology — no coordinates needed.'
                   : clusterMethod === 'kmeans'
                     ? 'Groups geographically-near buses — needs bus x/y and scikit-learn on the server.'
-                    : 'Merges buses that share a value in the chosen column (e.g. province, country). Blank-valued buses stay on their own.'}
+                    : clusterMethod === 'single'
+                      ? 'Collapses the entire network onto one bus. Always reaches a single node — even when Modularity or k-means can’t.'
+                      : 'Merges buses that share a value in the chosen column (e.g. province, country). Blank-valued buses stay on their own.'}
               </p>
             </div>
 
@@ -1187,6 +1197,13 @@ export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEdi
                   ))}
                 </select>
                 <p className="sg-setting-hint">Buses sharing the same {effClusterColumn || 'column'} value merge into one.</p>
+              </div>
+            ) : clusterMethod === 'single' ? (
+              <div className="sg-setting-row">
+                <label className="sg-setting-label">Target buses</label>
+                <p className="sg-setting-hint" style={{ marginTop: 4 }}>
+                  {busCount} bus{busCount === 1 ? '' : 'es'} now → <b>1 bus</b>. Nothing to pick — every bus merges into one.
+                </p>
               </div>
             ) : (
               <div className="sg-setting-row">
@@ -1214,7 +1231,9 @@ export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEdi
               </label>
               <p className="sg-setting-hint">
                 {aggComponents
-                  ? 'On each merged bus, collapse the selected components so there is one row per carrier (capacities summed, costs capacity-weighted).'
+                  ? clusterMethod === 'single'
+                    ? 'On the single bus, collapse the selected components to one row per carrier — e.g. all loads merge into a single load (demand summed), generators into one per carrier (capacities summed, costs capacity-weighted).'
+                    : 'On each merged bus, collapse the selected components so there is one row per carrier (capacities summed, costs capacity-weighted).'
                   : 'Leave components as individual rows, just reassigned to their merged bus (default).'}
               </p>
               {aggComponents && (
