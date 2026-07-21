@@ -20,6 +20,8 @@ export interface ScenariosSectionProps {
   onScenarioCatalogChange: (catalog: ScenarioCatalog) => void;
   /** Save the live run configuration as a new named scenario (prompts for the name). */
   onCreateScenarioFromCurrent: () => void;
+  /** Overwrite the active scenario with the live settings (incl. constraints). */
+  onUpdateActiveScenarioFromCurrent: () => void;
   /** Queue the given scenarios sequentially (concurrency 1) or in parallel (N). */
   onRunBatch: (ids: string[], mode: BatchMode, concurrency: number) => void;
   /** Jump to Analytics → Comparison for results. */
@@ -35,6 +37,7 @@ export function ScenariosSection(props: ScenariosSectionProps) {
       onCatalogChange={props.onScenarioCatalogChange}
       onLoadScenario={props.onSelectScenario}
       onAddScenarioFromCurrent={props.onCreateScenarioFromCurrent}
+      onUpdateActiveScenarioFromCurrent={props.onUpdateActiveScenarioFromCurrent}
       onRunBatch={props.onRunBatch}
       onGoToComparison={props.onGoToComparison}
     />
