@@ -26,15 +26,21 @@ interface Props {
   onLoadScenario: (id: string) => void;
   /** Save the live run configuration as a new named scenario (prompts for the name). */
   onAddScenarioFromCurrent: () => void;
+  /** Overwrite the ACTIVE scenario's settings with the live controls. Without
+   *  this a constraint edited in Market & Policy could never reach a scenario
+   *  run, which builds its payload from the saved preset. */
+  onUpdateActiveScenarioFromCurrent: () => void;
   onRunBatch: (ids: string[], mode: BatchMode, concurrency: number) => void;
   onGoToComparison: () => void;
   busy?: boolean;
 }
 
 export function ScenarioDiffTable({
-  catalog, maxConcurrency, onCatalogChange, onLoadScenario, onAddScenarioFromCurrent, onRunBatch, onGoToComparison, busy,
+  catalog, maxConcurrency, onCatalogChange, onLoadScenario, onAddScenarioFromCurrent,
+  onUpdateActiveScenarioFromCurrent, onRunBatch, onGoToComparison, busy,
 }: Props) {
   const scenarios = catalog.scenarios;
+  const activeScenario = scenarios.find((s) => s.id === catalog.activeScenarioId) ?? null;
   const [showAll, setShowAll] = useState(false);
   const [mode, setMode] = useState<BatchMode>('sequential');
   // The backend clamps to the real core count; keep the UI max at least 2 so the
@@ -117,6 +123,16 @@ export function ScenarioDiffTable({
           onClick={onAddScenarioFromCurrent}
         >
           + Add current settings as scenario
+        </button>
+        <button
+          className="tb-btn tb-btn--muted"
+          disabled={!activeScenario}
+          title={activeScenario
+            ? `Overwrite “${activeScenario.label}” with the live settings — including the constraints table, which a scenario run otherwise takes from the saved scenario`
+            : 'No active scenario to update'}
+          onClick={onUpdateActiveScenarioFromCurrent}
+        >
+          {activeScenario ? `Update “${activeScenario.label}” from current` : 'Update scenario from current'}
         </button>
       </div>
 
