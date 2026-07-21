@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@jest/globals';
-import { generatorCarriers, unresolvedCarrierConstraints } from './custom';
+import { generatorCarriers, sameConstraintSet, unresolvedCarrierConstraints } from './custom';
 import { CustomConstraint, WorkbookModel } from '../types';
 
 /**
@@ -33,6 +33,42 @@ describe('generatorCarriers', () => {
   it('ignores blank carriers and a missing generators sheet', () => {
     expect(generatorCarriers({ generators: [] } as unknown as WorkbookModel)).toEqual([]);
     expect(generatorCarriers({} as unknown as WorkbookModel)).toEqual([]);
+  });
+});
+
+/**
+ * A scenario ("Run … in order") run takes constraints from the SAVED preset,
+ * never from the live table. Regression: a gas cap added in Market & Policy but
+ * not saved into the active scenario was dropped silently — the solved run's
+ * narrative listed only the preset's nuclear/coal caps.
+ */
+describe('sameConstraintSet', () => {
+  const nuclear = constraint({ id: 'a', carrier: 'nuclear', value: 85 });
+  const coal = constraint({ id: 'b', carrier: 'coal', value: 50 });
+  const gas = constraint({ id: 'c', carrier: 'gas', value: 15 });
+
+  it('detects a constraint added to the live table but not to the preset', () => {
+    expect(sameConstraintSet([nuclear, coal, gas], [nuclear, coal])).toBe(false);
+  });
+
+  it('treats identical sets as equal regardless of order', () => {
+    expect(sameConstraintSet([nuclear, coal], [coal, nuclear])).toBe(true);
+  });
+
+  it('ignores label and id — only solver-visible fields count', () => {
+    const relabelled = constraint({ id: 'zzz', label: 'renamed', carrier: 'nuclear', value: 85 });
+    expect(sameConstraintSet([nuclear], [relabelled])).toBe(true);
+  });
+
+  it('detects a changed value, carrier, metric or enabled flag', () => {
+    expect(sameConstraintSet([nuclear], [constraint({ carrier: 'nuclear', value: 80 })])).toBe(false);
+    expect(sameConstraintSet([nuclear], [constraint({ carrier: 'coal', value: 85 })])).toBe(false);
+    expect(sameConstraintSet([nuclear], [constraint({ carrier: 'nuclear', value: 85, enabled: false })])).toBe(false);
+    expect(sameConstraintSet([nuclear], [constraint({ metric: 'carrier_max_gen', carrier: 'nuclear', value: 85 })])).toBe(false);
+  });
+
+  it('treats two empty tables as equal', () => {
+    expect(sameConstraintSet([], [])).toBe(true);
   });
 });
 

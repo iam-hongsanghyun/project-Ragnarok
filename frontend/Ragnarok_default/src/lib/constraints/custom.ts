@@ -26,6 +26,29 @@ export function generatorCarriers(model: WorkbookModel): string[] {
   return Array.from(seen).sort((a, b) => a.localeCompare(b));
 }
 
+/** Identity of a constraint for comparison — everything that changes the LP. */
+function constraintKey(c: CustomConstraint): string {
+  return JSON.stringify([c.enabled, c.metric, c.carrier, c.value]);
+}
+
+/**
+ * Do two constraint tables express the same set of constraints?
+ *
+ * Order- and label-insensitive: only the fields that reach the solver count.
+ * Used to catch edits made in the constraints table that a SCENARIO run would
+ * silently ignore — the batch runner builds its payload from each saved preset,
+ * never from the live controls, so unsaved edits vanish without a trace.
+ */
+export function sameConstraintSet(
+  a: CustomConstraint[],
+  b: CustomConstraint[],
+): boolean {
+  if (a.length !== b.length) return false;
+  const ka = a.map(constraintKey).sort();
+  const kb = b.map(constraintKey).sort();
+  return ka.every((k, i) => k === kb[i]);
+}
+
 /**
  * Enabled constraints whose carrier matches no generator — the solver would
  * skip each of these with only a note, so the run silently ignores them.
