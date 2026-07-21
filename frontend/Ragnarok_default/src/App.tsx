@@ -63,7 +63,12 @@ import { deriveRunResults } from 'lib/results/runResults';
 import { defaultPathwayConfig, getDefaultSelectedPeriod, readPathwayConfigFromModel, samePathwayConfig, writePathwayConfigToModel } from 'lib/results/pathway';
 import { defaultRollingConfig, normalizeRollingConfig, readRollingConfigFromModel, sameRollingConfig, writeRollingConfigToModel } from 'lib/results/rolling';
 import { defaultSamplingConfig, normalizeSamplingConfig, readSamplingConfigFromModel, sameSamplingConfig, writeSamplingConfigToModel } from 'lib/results/sampling';
-import { readCustomDslFromModel, writeCustomDslToModel } from 'lib/constraints/custom';
+import {
+  generatorCarriers,
+  readCustomDslFromModel,
+  unresolvedCarrierConstraints,
+  writeCustomDslToModel,
+} from 'lib/constraints/custom';
 import { dslToSpecs, parseConstraintDsl } from 'lib/constraints/dsl';
 import { buildScenarioPreset, defaultScenarioCatalog, readScenarioCatalogFromModel, sameScenarioCatalog, writeScenarioCatalogToModel } from 'lib/results/scenarios';
 import { buildRunPayload } from 'features/scenario/buildRunPayload';
@@ -2671,6 +2676,25 @@ function AppInner() {
         + `(line ${first.lineNo}: ${first.error}). Fix them in Settings → Constraints → Advanced.`,
         'error',
       );
+    }
+    // A carrier constraint only binds when its carrier matches a GENERATOR's
+    // carrier — the solver resolves `generators.carrier` and silently skips the
+    // rest with a note nobody reads. Block the run instead: an ignored cap that
+    // returns a clean-looking result is worse than no result (same reasoning as
+    // the DSL syntax guard above).
+    const unresolved = unresolvedCarrierConstraints(constraints, generatorCarriers(model));
+    if (unresolved.length > 0) {
+      const names = unresolved.map((c) => `“${c.label || c.metric}”`).join(', ');
+      const known = generatorCarriers(model);
+      showToast(
+        `Run blocked — ${unresolved.length} enabled constraint(s) reference a carrier no generator uses: ${names}. `
+        + (known.length > 0
+          ? `This model's generator carriers are: ${known.join(', ')}. `
+          : 'This model has no generator carriers. ')
+        + 'Fix or disable them in Market & Policy → Standard Constraints.',
+        'error',
+      );
+      return;
     }
     // Build the run body from a preset snapshot of the LIVE controls, via the
     // same pure builder the batch runner uses (so single + batch runs are

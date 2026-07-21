@@ -22,9 +22,17 @@ export function GlobalConstraintsSection({
   onChange,
 }: {
   constraints: CustomConstraint[];
+  /** Carriers at least one GENERATOR uses — the only ones a carrier constraint
+   *  can bind to (the solver matches `generators.carrier`, not the carriers
+   *  sheet). Driving the picker from these stops the user from choosing a
+   *  carrier the solve would silently skip. */
   carriers: string[];
   onChange: (next: CustomConstraint[]) => void;
 }) {
+  const validCarriers = new Set(carriers);
+  /** A carrier row that no generator carries — the solver drops it. */
+  const isUnresolved = (c: CustomConstraint) =>
+    METRIC_DEFS[c.metric]?.needsCarrier && !validCarriers.has(c.carrier);
   const update = (id: string, patch: Partial<CustomConstraint>) =>
     onChange(
       constraints.map((c) => {
@@ -106,8 +114,10 @@ export function GlobalConstraintsSection({
         <tbody>
           {constraints.map((c) => {
             const def = METRIC_DEFS[c.metric];
+            const unresolved = isUnresolved(c);
             return (
-              <tr key={c.id}>
+              <React.Fragment key={c.id}>
+              <tr>
                 <td>
                   <input
                     type="checkbox"
@@ -137,7 +147,7 @@ export function GlobalConstraintsSection({
                 <td>
                   {def?.needsCarrier ? (
                     <SearchableSelect
-                      className="constraints-cell-input"
+                      className={`constraints-cell-input${unresolved ? ' constraints-cell-input--invalid' : ''}`}
                       value={c.carrier}
                       options={carriers}
                       onChange={(v) => update(c.id, { carrier: v })}
@@ -164,6 +174,17 @@ export function GlobalConstraintsSection({
                   </button>
                 </td>
               </tr>
+              {unresolved && (
+                <tr>
+                  <td />
+                  <td colSpan={7} className="constraints-row-warning">
+                    {c.carrier
+                      ? <>No generator uses the carrier <b>{c.carrier}</b>, so this constraint would be ignored by the solver. Pick a carrier below{carriers.length > 0 ? <> — this model has {carriers.join(', ')}</> : ' (this model has no generator carriers)'}.</>
+                      : <>Pick a carrier — this constraint needs one to bind.</>}
+                  </td>
+                </tr>
+              )}
+              </React.Fragment>
             );
           })}
         </tbody>
