@@ -13,7 +13,8 @@
  * capacity/model. Everything else is authored via the Run console (capture) and
  * shown read-only here.
  */
-import type { ModelOverride, ScenarioPreset } from 'lib/types';
+import type { ConstraintMetric, CustomConstraint, ModelOverride, ScenarioPreset } from 'lib/types';
+import { METRIC_DEFS } from 'lib/constants';
 
 /** Top-level preset keys that are identity/metadata, not comparable settings. */
 const SKIP_TOP = new Set(['id', 'label', 'notes', 'modelOverrides']);
@@ -42,6 +43,30 @@ const GROUP_LABELS: Record<string, string> = {
   [OVERRIDE_PREFIX]: 'Model',
 };
 
+/**
+ * A constraints table as one readable line, e.g.
+ *   "Max Carrier Capacity Factor (nuclear) ≤ 85 %; … (coal) ≤ 50 %"
+ *
+ * Built from the SOLVER-VISIBLE fields (metric/carrier/value/enabled) rather
+ * than the free-text label, so it stays faithful as a diff key: two scenarios
+ * compare equal here exactly when they express the same constraints. Without
+ * this the diff cell rendered the raw JSON array.
+ */
+export function formatConstraintList(list: CustomConstraint[]): string {
+  if (!list.length) return 'none';
+  return list
+    .map((c) => {
+      const def = METRIC_DEFS[c.metric as ConstraintMetric];
+      const name = def?.label ?? c.metric;
+      const carrier = def?.needsCarrier && c.carrier ? ` (${c.carrier})` : '';
+      const sense = def?.sense ?? '';
+      const unit = c.unit ?? def?.unit ?? '';
+      const off = c.enabled ? '' : ' [off]';
+      return `${name}${carrier} ${sense} ${c.value} ${unit}${off}`.replace(/\s+/g, ' ').trim();
+    })
+    .join('; ');
+}
+
 export function stringifyLeaf(v: unknown): string {
   if (v === null || v === undefined) return '';
   if (typeof v === 'boolean') return v ? 'on' : 'off';
@@ -67,7 +92,10 @@ export function flattenScenario(preset: ScenarioPreset): Record<string, string> 
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(preset)) {
     if (SKIP_TOP.has(k)) continue;
-    if (v && typeof v === 'object' && !Array.isArray(v)) {
+    if (k === 'constraints' && Array.isArray(v)) {
+      // Readable summary instead of the raw JSON array (still a faithful key).
+      out[k] = formatConstraintList(v as CustomConstraint[]);
+    } else if (v && typeof v === 'object' && !Array.isArray(v)) {
       flattenInto(v as Record<string, unknown>, k, out);
     } else {
       out[k] = stringifyLeaf(v);

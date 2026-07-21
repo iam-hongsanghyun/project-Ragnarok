@@ -38,6 +38,53 @@ describe('flattenScenario', () => {
   });
 });
 
+/**
+ * Regression: the constraints array fell through stringifyLeaf's JSON.stringify,
+ * so the diff cell showed the raw `[{"id":"cc_...","enabled":true,...}]` blob.
+ */
+describe('constraints column formatting', () => {
+  // The exact payload a user saw rendered raw in the scenario table.
+  const reported = [
+    { id: 'cc_1781793221370', enabled: true, label: 'Max Carrier Capacity Factor (nuclear) ≤ 85 %', metric: 'carrier_max_cf', carrier: 'nuclear', value: 85, unit: '%' },
+    { id: 'cc_1781793222769', enabled: true, label: 'Max Carrier Capacity Factor (coal) ≤ 50 %', metric: 'carrier_max_cf', carrier: 'coal', value: 50, unit: '%' },
+  ];
+
+  it('renders a readable summary, not raw JSON', () => {
+    const flat = flattenScenario(preset({ constraints: reported }));
+    expect(flat.constraints).toBe(
+      'Max Carrier Capacity Factor (nuclear) ≤ 85 %; Max Carrier Capacity Factor (coal) ≤ 50 %',
+    );
+    expect(flat.constraints).not.toContain('cc_1781793221370');
+    expect(flat.constraints).not.toContain('{');
+  });
+
+  it('says "none" for an empty table', () => {
+    expect(flattenScenario(preset({ constraints: [] })).constraints).toBe('none');
+  });
+
+  it('marks a disabled row so it cannot look active', () => {
+    const flat = flattenScenario(preset({ constraints: [{ ...reported[0], enabled: false }] }));
+    expect(flat.constraints).toContain('[off]');
+  });
+
+  it('still distinguishes scenarios whose constraints differ', () => {
+    const cols = scenarioDiffColumns([
+      preset({ constraints: reported }),
+      preset({ constraints: [reported[0]] }),
+    ]);
+    expect(cols.map((c) => c.path)).toContain('constraints');
+  });
+
+  it('treats identical constraint sets as equal despite different ids/labels', () => {
+    const renamed = [{ ...reported[0], id: 'zzz', label: 'my nuclear cap' }];
+    const cols = scenarioDiffColumns([
+      preset({ constraints: [reported[0]] }),
+      preset({ constraints: renamed }),
+    ]);
+    expect(cols.map((c) => c.path)).not.toContain('constraints');
+  });
+});
+
 describe('scenarioDiffColumns', () => {
   it('returns only paths that differ across scenarios', () => {
     const cols = scenarioDiffColumns([preset({ carbonPrice: 50 }), preset({ carbonPrice: 90 })]);
