@@ -115,15 +115,15 @@ def _solve_rejected(status: str, condition: str, *, strict: bool) -> bool:
     return status.lower() not in ("ok", "warning")
 
 
-def _rolling_suspect_note(network: Any) -> str | None:
-    """Describe snapshots a rolling-horizon window likely failed on, or None.
+def _supply_gap(network: Any) -> tuple[int, int, Any, Any] | None:
+    """Snapshots with positive load but ~zero recorded supply, or None.
 
-    ``optimize_with_rolling_horizon`` returns no status: when a window's LP
-    fails it only logs a warning and leaves that window's results zero/stale.
-    Flag snapshots where total supply (generator dispatch + storage/store
-    discharge) is ~0 while total load is positive — served load with no
-    recorded supply is impossible in a solved window, so those snapshots almost
-    certainly belong to a failed window.
+    Served load with no supply behind it violates the energy balance, so it can
+    never be a real solution — it means the reported dispatch is not actually a
+    solved point. Returns ``(count, total_snapshots, first, last)``.
+
+    Supply counts generator dispatch plus storage/store discharge, so a system
+    that leans on storage is not mistaken for a failed solve.
     """
     try:
         load = network.get_switchable_as_dense("Load", "p_set").clip(lower=0.0).sum(axis=1)
@@ -144,8 +144,24 @@ def _rolling_suspect_note(network: Any) -> str | None:
     if count == 0:
         return None
     idx = load.index[suspect]
+    return count, int(len(load)), idx[0], idx[-1]
+
+
+def _rolling_suspect_note(network: Any) -> str | None:
+    """Describe snapshots a rolling-horizon window likely failed on, or None.
+
+    ``optimize_with_rolling_horizon`` returns no status: when a window's LP
+    fails it only logs a warning and leaves that window's results zero/stale.
+    A supply gap (see ``_supply_gap``) marks those windows. Unlike the
+    single-shot modes this only downgrades the run — the windows that DID solve
+    are still usable — so it is reported rather than raised.
+    """
+    gap = _supply_gap(network)
+    if gap is None:
+        return None
+    count, _total, first, last = gap
     return (
-        f"Rolling horizon: {count} snapshot(s) between {idx[0]} and {idx[-1]} "
+        f"Rolling horizon: {count} snapshot(s) between {first} and {last} "
         "have positive load but zero recorded supply — at least one rolling "
         "window likely failed to solve (PyPSA only logs a warning and leaves a "
         "failed window's results empty). Treat results in that range as "
@@ -576,6 +592,37 @@ def run_pypsa(
             solve_status,
             solve_condition,
         )
+        # ENERGY BALANCE GATE — a reported run must actually supply its load.
+        #
+        # HiGHS' interior-point path (IPM/HiPO/PDLP, no crossover) can hand back
+        # a point linopy accepts — status='ok', condition='unknown' — in which
+        # every dispatch variable is zero while load is positive. Lenient
+        # acceptance then passes it through and the run looks successful while
+        # every KPI is zero: no dispatch, no emissions, zero price, and
+        # extendable capacity "optimised" to 0. That is not a solution, and a
+        # silently wrong answer is worse than no answer, so fail outright.
+        #
+        # Rolling horizon is exempt: it screens the same way via
+        # `_rolling_suspect_note`, but its windows solve independently, so the
+        # ones that did solve remain usable and it degrades instead of raising.
+        if not rolling.enabled:
+            gap = _supply_gap(network)
+            if gap is not None:
+                count, total, first, last = gap
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Solver returned an infeasible result: {count} of {total} snapshot(s) "
+                        f"have positive load but zero supply (between {first} and {last}). "
+                        "Load must be met in every snapshot, so this is not a valid solution — "
+                        f"the solver reported status='{solve_status}', condition='{solve_condition}', "
+                        "which is typical of an interior-point run that skipped crossover. "
+                        "Re-run with Settings → Solver → Method = 'simplex' (or Solution "
+                        "acceptance = 'Strict'), and if it is then reported infeasible, the model "
+                        "genuinely cannot serve its load — check capacity, p_nom_max and any "
+                        "binding constraints."
+                    ),
+                )
         # Gate the result per the user's "Solution acceptance" solver setting
         # (see _solve_rejected): Strict demands condition='optimal'; Lenient
         # (default) also accepts linopy-validated solves whose condition is
