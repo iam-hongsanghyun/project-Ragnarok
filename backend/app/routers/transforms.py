@@ -292,19 +292,31 @@ def _merge_parallel_links(network: pypsa.Network) -> int:
             else pd.Series(1.0 / len(sub), index=sub.index)
         )
 
+        # NaN means "unset" for many link attributes (p_nom_set, p_set, ramp
+        # limits…) — a merged value must stay NaN when every member is NaN,
+        # never become 0.0 (a zero p_nom_set/ramp limit would freeze the link).
         merged: dict[str, Any] = {}
         for col in sub.columns:
             vals = sub[col]
             if col in ("bus0", "bus1"):
                 merged[col] = vals.iloc[0]
-            elif col in _LINK_SUM_ATTRS:
-                merged[col] = float(vals.astype(float).sum())
             elif pd.api.types.is_bool_dtype(vals) or not pd.api.types.is_numeric_dtype(
                 vals
             ):
                 merged[col] = _majority(vals)
+            elif vals.astype(float).isna().all():
+                merged[col] = float("nan")
+            elif col in _LINK_SUM_ATTRS:
+                merged[col] = float(vals.astype(float).sum())
             else:
-                merged[col] = float((vals.astype(float) * w).sum())
+                # Weighted mean over the members that carry a value, weights
+                # renormalised (equal split when they sum to zero).
+                v = vals.astype(float)
+                ww = w.where(v.notna(), 0.0)
+                if ww.sum() <= 0:
+                    ww = v.notna().astype(float)
+                ww = ww / ww.sum()
+                merged[col] = float((v.fillna(0.0) * ww).sum())
 
         # Time-varying inputs: merge like the statics, a member's static value
         # standing in where it carries no series. Output frames (p0, p1…) have
@@ -314,20 +326,28 @@ def _merge_parallel_links(network: pypsa.Network) -> int:
             present = [n for n in names if n in df.columns]
             if not present or attr not in sub.columns:
                 continue
-            frame = pd.DataFrame(
-                {
-                    n: (
-                        df[n]
-                        if n in df.columns
-                        else pd.Series(float(sub.at[n, attr]), index=df.index)
-                    )
-                    for n in names
-                }
-            )
+            cols: dict[str, pd.Series] = {}
+            for n in names:
+                if n in df.columns:
+                    cols[n] = df[n].astype(float)
+                else:
+                    static_value = sub.at[n, attr]
+                    # A NaN static fallback means the member has the attribute
+                    # unset — it contributes nothing to the blend.
+                    if pd.isna(static_value):
+                        continue
+                    cols[n] = pd.Series(float(static_value), index=df.index)
+            frame = pd.DataFrame(cols)
             if attr in _LINK_SUM_ATTRS:
                 dynamic[attr] = frame.sum(axis=1)
             else:
-                dynamic[attr] = (frame * w).sum(axis=1)
+                ws = w[list(cols)]
+                ws = (
+                    ws / ws.sum()
+                    if ws.sum() > 0
+                    else pd.Series(1.0 / len(cols), index=list(cols))
+                )
+                dynamic[attr] = (frame * ws).sum(axis=1)
 
         network.remove("Link", names)
         base = f"{bus0} - {bus1}" + (f" {carrier}" if carrier else "")
