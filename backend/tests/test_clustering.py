@@ -451,6 +451,28 @@ def test_link_aggregation_merges_parallel_dc_links() -> None:
     json.dumps(res)
 
 
+def test_link_aggregation_keeps_unset_attributes_unset() -> None:
+    # Regression: NaN-default link attributes (p_nom_set, p_set, ramp limits…)
+    # must survive the merge as "unset", not collapse to 0.0 — a zero
+    # p_nom_set breaks the solve and a zero ramp limit freezes dispatch.
+    res = cluster_model(
+        _dc_links_model(),
+        n_clusters=99,
+        group_by_column="region",
+        aggregate_components=["Link"],
+        scenario=SCENARIO,
+    )
+    (row,) = res["model"]["links"]
+    for attr in ("p_nom_set", "p_set", "ramp_limit_up", "ramp_limit_down"):
+        value = row.get(attr)
+        assert value is None or value != value, f"{attr} became {value!r}"
+    # The rebuilt merged network must actually solve (this is what a fixed
+    # p_nom_set of 0.0 broke).
+    net, _ = build_network(res["model"], SCENARIO, {})
+    status, _cond = net.optimize(solver_name="highs")
+    assert status == "ok"
+
+
 def test_link_aggregation_off_keeps_links_split() -> None:
     res = cluster_model(
         _dc_links_model(),
