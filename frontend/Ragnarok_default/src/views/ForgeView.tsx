@@ -133,14 +133,17 @@ const ROUND_OPS: Array<{ value: RoundOp; label: string }> = [
 
 const rowsOf = (model: WorkbookModel, sheet: string): GridRow[] => model[sheet] ?? [];
 
-/** One-port components the reduction can collapse by carrier per merged bus.
- *  `id` is the PyPSA component name the backend expects. */
+/** Components the reduction can collapse per merged bus. `id` is the PyPSA
+ *  component name the backend expects. One-ports merge by carrier; Links merge
+ *  parallel transmission corridors (same bus0→bus1 + carrier, e.g. DC links):
+ *  capacity summed, loss capacity-weighted. */
 const AGGREGATABLE_COMPONENTS: Array<{ id: string; label: string }> = [
   { id: 'Generator', label: 'Generators' },
   { id: 'StorageUnit', label: 'Storage units' },
   { id: 'Store', label: 'Stores' },
   { id: 'Load', label: 'Loads' },
   { id: 'ShuntImpedance', label: 'Shunt impedances' },
+  { id: 'Link', label: 'Links (DC)' },
 ];
 
 const CLUSTER_PALETTE = [
@@ -1232,8 +1235,8 @@ export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEdi
               <p className="sg-setting-hint">
                 {aggComponents
                   ? clusterMethod === 'single'
-                    ? 'On the single bus, collapse the selected components to one row per carrier — e.g. all loads merge into a single load (demand summed), generators into one per carrier (capacities summed, costs capacity-weighted).'
-                    : 'On each merged bus, collapse the selected components so there is one row per carrier (capacities summed, costs capacity-weighted).'
+                    ? 'On the single bus, collapse the selected components to one row per carrier — e.g. all loads merge into a single load (demand summed), generators into one per carrier (capacities summed, costs capacity-weighted). Links: parallel transmission links (e.g. DC) between the same pair of buses merge into one corridor — capacity summed, loss (efficiency) capacity-weighted; conversion links are never touched.'
+                    : 'On each merged bus, collapse the selected components so there is one row per carrier (capacities summed, costs capacity-weighted). Links: parallel transmission links (e.g. DC) between the same pair of merged buses merge into one corridor — capacity summed, loss (efficiency) capacity-weighted; conversion links are never touched.'
                   : 'Leave components as individual rows, just reassigned to their merged bus (default).'}
               </p>
               {aggComponents && (
@@ -1309,6 +1312,7 @@ export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEdi
                 <p className="forge-report-line">
                   Reduced <b>{clusterResult.before.buses} → {clusterResult.after.buses}</b> buses
                   {' · '}lines {clusterResult.before.lines} → {clusterResult.after.lines}
+                  {' · '}links {clusterResult.before.links} → {clusterResult.after.links}
                   {' · '}generators {clusterResult.before.generators} → {clusterResult.after.generators}
                   {' · '}storage {clusterResult.before.storageUnits} → {clusterResult.after.storageUnits}
                   {' · '}loads {clusterResult.before.loads} → {clusterResult.after.loads}
