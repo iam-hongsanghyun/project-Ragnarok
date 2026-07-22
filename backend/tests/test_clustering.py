@@ -389,6 +389,118 @@ def test_component_aggregation_off_by_default_leaves_components_split() -> None:
     assert res["aggregatedComponents"] == []
 
 
+# ── Aggregate parallel transmission links (DC corridors) ────────────────────
+def _dc_links_model() -> dict[str, list[dict[str, Any]]]:
+    """Region model (north {A,B} / south {C,D}) with two parallel DC links
+    A→C and B→D that become the same north→south corridor after clustering.
+    dc1 additionally carries a p_max_pu series so dynamic merging is
+    observable (dc2 falls back to its static 1.0)."""
+    m = _region_model()
+    snaps = [r["snapshot"] for r in m["snapshots"]]
+    m["carriers"] = [{"name": "gas"}, {"name": "DC"}]
+    m["links"] = [
+        {
+            "name": "dc1",
+            "bus0": "A",
+            "bus1": "C",
+            "carrier": "DC",
+            "p_nom": 100.0,
+            "efficiency": 0.95,
+            "marginal_cost": 2.0,
+        },
+        {
+            "name": "dc2",
+            "bus0": "B",
+            "bus1": "D",
+            "carrier": "DC",
+            "p_nom": 300.0,
+            "efficiency": 0.90,
+            "marginal_cost": 4.0,
+        },
+    ]
+    m["links-p_max_pu"] = [
+        {"snapshot": snaps[0], "dc1": 0.8},
+        {"snapshot": snaps[1], "dc1": 0.6},
+    ]
+    return m
+
+
+def test_link_aggregation_merges_parallel_dc_links() -> None:
+    res = cluster_model(
+        _dc_links_model(),
+        n_clusters=99,
+        group_by_column="region",
+        aggregate_components=["Link"],
+        scenario=SCENARIO,
+    )
+    assert res["aggregatedComponents"] == ["Link"]
+    assert res["before"]["links"] == 2
+    assert res["after"]["links"] == 1
+    net, _ = build_network(res["model"], SCENARIO, {})
+    link = net.links.iloc[0]
+    # Capacity sums; loss (efficiency) and marginal cost are capacity-weighted:
+    # η = 0.25·0.95 + 0.75·0.90 = 0.9125, mc = 0.25·2 + 0.75·4 = 3.5.
+    assert float(link["p_nom"]) == pytest.approx(400.0)
+    assert float(link["efficiency"]) == pytest.approx(0.9125)
+    assert float(link["marginal_cost"]) == pytest.approx(3.5)
+    # Dynamic p_max_pu: dc1's series blends with dc2's static 1.0 →
+    # 0.25·0.8 + 0.75·1 = 0.95 and 0.25·0.6 + 0.75·1 = 0.90.
+    pmax = net.links_t.p_max_pu[net.links.index[0]]
+    assert float(pmax.iloc[0]) == pytest.approx(0.95)
+    assert float(pmax.iloc[1]) == pytest.approx(0.90)
+    json.dumps(res)
+
+
+def test_link_aggregation_off_keeps_links_split() -> None:
+    res = cluster_model(
+        _dc_links_model(),
+        n_clusters=99,
+        group_by_column="region",
+        scenario=SCENARIO,
+    )
+    assert res["after"]["links"] == 2
+
+
+def test_link_aggregation_keeps_opposite_directions_apart() -> None:
+    # Reverse dc2 (D→B): efficiency applies to bus0→bus1 flow, so a
+    # south→north link must not merge with the north→south one.
+    m = _dc_links_model()
+    m["links"][1]["bus0"], m["links"][1]["bus1"] = "D", "B"
+    res = cluster_model(
+        m,
+        n_clusters=99,
+        group_by_column="region",
+        aggregate_components=["Link"],
+        scenario=SCENARIO,
+    )
+    assert res["after"]["links"] == 2
+
+
+def test_link_aggregation_leaves_conversion_links_alone() -> None:
+    # Two parallel electrolysis links to a hydrogen bus connect buses of
+    # DIFFERENT carriers → not transport, never merged. The DC pair still is.
+    m = _dc_links_model()
+    m["carriers"] += [{"name": "hydrogen"}, {"name": "electrolysis"}]
+    m["buses"].append(
+        {"name": "E", "v_nom": 380.0, "x": 4.0, "y": 0.0, "carrier": "hydrogen"}
+    )
+    m["links"] += [
+        {"name": "el1", "bus0": "A", "bus1": "E", "carrier": "electrolysis", "p_nom": 50.0, "efficiency": 0.7},
+        {"name": "el2", "bus0": "B", "bus1": "E", "carrier": "electrolysis", "p_nom": 60.0, "efficiency": 0.7},
+    ]
+    res = cluster_model(
+        m,
+        n_clusters=99,
+        group_by_column="region",
+        aggregate_components=["Link"],
+        scenario=SCENARIO,
+    )
+    # DC pair merges to 1; both electrolysis links survive untouched.
+    assert res["after"]["links"] == 3
+    names = {row["name"] for row in res["model"]["links"]}
+    assert {"el1", "el2"} <= names
+
+
 def test_component_aggregation_all_oneports_json_serialisable() -> None:
     res = cluster_model(
         _two_gas_model(),

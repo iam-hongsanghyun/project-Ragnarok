@@ -79,7 +79,8 @@ _NUMERIC_STRATEGIES = ("mean", "max", "min", "zero", "default")
 
 # One-port components the aggregation can collapse by carrier, mapped to their
 # Network static-frame attribute. "Generator" is aggregated via the dedicated
-# weighted path; the rest via ``aggregate_one_ports``.
+# weighted path; the rest via ``aggregate_one_ports``. "Link" (a branch, not a
+# one-port) is additionally accepted and handled by ``_merge_parallel_links``.
 _ONEPORT_ATTRS = {
     "Generator": "generators",
     "StorageUnit": "storage_units",
@@ -87,6 +88,10 @@ _ONEPORT_ATTRS = {
     "Load": "loads",
     "ShuntImpedance": "shunt_impedances",
 }
+
+# Link attributes that are MW quantities and therefore SUM when parallel links
+# merge; every other numeric attribute takes the capacity-weighted mean.
+_LINK_SUM_ATTRS = {"p_nom", "p_nom_max", "p_nom_min", "p_nom_opt", "p_set"}
 
 
 def _majority(x: "pd.Series") -> Any:
@@ -227,6 +232,113 @@ def _component_strategies(
     return generator_strategies, one_port_strategies
 
 
+def _merge_parallel_links(network: pypsa.Network) -> int:
+    """Merge parallel transmission-style links into one per corridor, in place.
+
+    Links merge when they share the same direction (``bus0 → bus1``), the same
+    link ``carrier`` and the same ``p_nom_extendable`` flag — i.e. parallel DC
+    interconnectors between two clustered buses. Only pure *transport* links
+    qualify: both endpoint buses must share a bus carrier and the link must use
+    no extra ports (``bus2``…). Conversion links (electrolysis, heat pumps,
+    chargers) are never touched, and opposite-direction links are kept apart
+    because ``efficiency`` applies to the bus0→bus1 flow.
+
+    Algorithm (per merged corridor with members $i$, weights $w_i$):
+        $$P^{nom} = \\sum_i P^{nom}_i, \\qquad
+          \\eta = \\sum_i w_i\\,\\eta_i, \\quad
+          w_i = P^{nom}_i / \\sum_j P^{nom}_j$$
+        ASCII: p_nom = sum(p_nom_i); efficiency/costs/pu-limits =
+        capacity-weighted mean (equal weights when total p_nom = 0).
+        p_nom / p_nom_min / p_nom_max / p_set sum; every other numeric
+        attribute (efficiency, marginal_cost, capital_cost, p_max_pu, length…)
+        is capacity-weighted; text attributes keep the most common value.
+        Time-varying attributes merge the same way, with a member's static
+        value standing in where it has no series.
+
+    Returns the number of link rows removed by merging.
+    """
+    links = network.links
+    if links.empty:
+        return 0
+
+    bus_carrier = network.buses["carrier"]
+    transport = links["bus0"].map(bus_carrier).eq(links["bus1"].map(bus_carrier))
+    extra_ports = [
+        c for c in links.columns if c.startswith("bus") and c not in ("bus0", "bus1")
+    ]
+    for col in extra_ports:
+        transport &= links[col].fillna("").astype(str).str.strip().eq("")
+
+    groups: dict[tuple[str, str, str, bool], list[str]] = {}
+    for name in links.index[transport]:
+        row = links.loc[name]
+        key = (
+            str(row["bus0"]),
+            str(row["bus1"]),
+            str(row.get("carrier", "")),
+            bool(row.get("p_nom_extendable", False)),
+        )
+        groups.setdefault(key, []).append(str(name))
+
+    removed = 0
+    for (bus0, bus1, carrier, _ext), names in groups.items():
+        if len(names) < 2:
+            continue
+        sub = network.links.loc[names]
+        p_nom = sub["p_nom"].astype(float).clip(lower=0.0)
+        w = (
+            p_nom / p_nom.sum()
+            if p_nom.sum() > 0
+            else pd.Series(1.0 / len(sub), index=sub.index)
+        )
+
+        merged: dict[str, Any] = {}
+        for col in sub.columns:
+            vals = sub[col]
+            if col in ("bus0", "bus1"):
+                merged[col] = vals.iloc[0]
+            elif col in _LINK_SUM_ATTRS:
+                merged[col] = float(vals.astype(float).sum())
+            elif pd.api.types.is_bool_dtype(vals) or not pd.api.types.is_numeric_dtype(
+                vals
+            ):
+                merged[col] = _majority(vals)
+            else:
+                merged[col] = float((vals.astype(float) * w).sum())
+
+        # Time-varying inputs: merge like the statics, a member's static value
+        # standing in where it carries no series. Output frames (p0, p1…) have
+        # no static column and are skipped.
+        dynamic: dict[str, pd.Series] = {}
+        for attr, df in network.links_t.items():
+            present = [n for n in names if n in df.columns]
+            if not present or attr not in sub.columns:
+                continue
+            frame = pd.DataFrame(
+                {
+                    n: (
+                        df[n]
+                        if n in df.columns
+                        else pd.Series(float(sub.at[n, attr]), index=df.index)
+                    )
+                    for n in names
+                }
+            )
+            if attr in _LINK_SUM_ATTRS:
+                dynamic[attr] = frame.sum(axis=1)
+            else:
+                dynamic[attr] = (frame * w).sum(axis=1)
+
+        network.remove("Link", names)
+        base = f"{bus0} - {bus1}" + (f" {carrier}" if carrier else "")
+        new_name, i = base, 2
+        while new_name in network.links.index:
+            new_name, i = f"{base} ({i})", i + 1
+        network.add("Link", new_name, **{**merged, **dynamic})
+        removed += len(names) - 1
+    return removed
+
+
 def _counts(network: pypsa.Network) -> dict[str, int]:
     return {
         "buses": len(network.buses),
@@ -260,7 +372,9 @@ def cluster_model(
     workbook value, e.g. "province"), all onto one bus (``method="single"``), or
     by ``n_clusters`` using the ``method`` (modularity/kmeans). When
     ``aggregate_components`` is given, the named one-port components are
-    additionally collapsed by carrier on each merged bus.
+    additionally collapsed by carrier on each merged bus; ``"Link"`` merges
+    parallel transmission-style links per corridor (capacity summed, loss
+    capacity-weighted — see ``_merge_parallel_links``).
 
     Returns ``{model, busmap, method, before, after}`` where ``model`` is the
     reduced workbook model and ``busmap`` maps each original bus to its cluster.
@@ -287,7 +401,10 @@ def cluster_model(
             detail=f"Target clusters must be between 1 and {n_buses - 1} (network has {n_buses} buses).",
         )
 
-    agg = {c for c in (aggregate_components or []) if c in _ONEPORT_ATTRS}
+    agg = {
+        c for c in (aggregate_components or []) if c in _ONEPORT_ATTRS or c == "Link"
+    }
+    oneport_agg = agg & set(_ONEPORT_ATTRS)
     try:
         if single:
             # Collapse the ENTIRE network onto one bus, independent of topology or
@@ -350,18 +467,25 @@ def cluster_model(
         # Optionally collapse one-port components by carrier on each merged bus.
         # Generators use the dedicated weighted path; the rest go through
         # aggregate_one_ports. Custom-column strategies avoid "no default" raises.
-        if agg:
-            gen_strat, oneport_strat = _component_strategies(network, agg, kind)
-            if "Generator" in agg:
+        if oneport_agg:
+            gen_strat, oneport_strat = _component_strategies(
+                network, oneport_agg, kind
+            )
+            if "Generator" in oneport_agg:
                 strategies["aggregate_generators_weighted"] = True
                 strategies["generator_strategies"] = gen_strat
-            other = agg - {"Generator"}
+            other = oneport_agg - {"Generator"}
             if other:
                 strategies["aggregate_one_ports"] = other
                 strategies["one_port_strategies"] = oneport_strat
 
         clustered = network.cluster.spatial.cluster_by_busmap(busmap, **strategies)
         clustered = getattr(clustered, "n", clustered)  # Clustering wrapper vs Network
+
+        # Clustering only re-attaches links (dropping intra-cluster loops);
+        # merging parallel corridors is our own post-step.
+        if "Link" in agg:
+            _merge_parallel_links(clustered)
     except HTTPException:
         raise
     except ModuleNotFoundError as exc:
