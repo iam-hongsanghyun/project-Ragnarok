@@ -237,9 +237,11 @@ HTTP 404 when the job ID is not found (already delivered or never existed).
 | `POST` | `/api/import/netcdf` | `UploadFile` (.nc) | `{"model": {sheet: rows[]}}` |
 | `POST` | `/api/import/hdf5` | `UploadFile` (.h5) | `{"model": {sheet: rows[]}}` |
 
-Export endpoints build the network without solving. Import endpoints use
-PyPSA's native `import_from_netcdf` / `import_from_hdf5` and convert the
-result back to the workbook JSON shape via `_network_to_model_json`.
+Export endpoints build the network without solving, from the posted `model` with
+its time-series re-attached from `sessionId` (see `_model_with_session_series` —
+the browser holds no series). Import endpoints use PyPSA's native
+`import_from_netcdf` / `import_from_hdf5` and convert the result back to the
+workbook JSON shape via `_network_to_model_json`.
 
 ### 2.3 Job lifecycle
 
@@ -1241,8 +1243,19 @@ These live in `backend/app/main.py` (not a router).
 | `POST` | `/api/exports` | Start a background export build. Body `{name, kind: 'xlsx'\|'package', parts?}`. Returns `{jobId, ...}`. |
 | `GET` | `/api/exports/{job_id}` | Poll export status (`pending` / `running` / `ready` / `error`) |
 | `GET` | `/api/exports/{job_id}/download` | Stream the finished file, then delete artefact + job |
-| `POST` | `/api/export/project` | Package an *unsaved* live model: body `{model, result}` → project `.zip` (stored runs use `/api/runs/{name}/package`) |
+| `POST` | `/api/export/project` | Package an *unsaved* live model: body `{model, result, scenario, options, sessionId}` → project `.zip` (stored runs use `/api/runs/{name}/package`) |
+| `POST` | `/api/export/workbook` | Build the INPUT workbook for Save / Save As: same body, `include_result=False` → `.xlsx` bytes |
 | `POST` | `/api/import/project` | Upload a project `.zip` or bare `.xlsx`; parsed to a bundle and stored via `store_run` — the import becomes a History entry. Returns `{meta, name}`. |
+
+Every export whose payload comes from the editor is **hydrated from the session
+first** (`_model_with_session_series`): the browser holds only the static sheets,
+so `model` arrives with each `<component>-<attr>` sheet empty and the server
+re-attaches the session's copy. Without it an export ships the topology and no
+profiles. Static sheets and any series the client did send always win, so
+unsaved edits are preserved. `scenario` / `options` are written to the
+`RAGNAROK_Constraints` / `_Settings` / `_RunState` sheets and are where a
+re-import reads the run window back from — omit them and the re-imported project
+opens with a 0-snapshot window.
 
 Async exports exist because a full-year workbook build is CPU-bound (minutes):
 `POST /api/exports` runs the build off-thread, the client polls, and a TTL
