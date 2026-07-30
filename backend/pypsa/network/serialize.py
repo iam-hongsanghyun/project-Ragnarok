@@ -46,6 +46,39 @@ def _scalar(val: Any) -> tuple[bool, Any]:
     return False, None
 
 
+def _snapshot_cells(ts: Any) -> dict[str, Any]:
+    """Workbook cells addressing one snapshot: ``{snapshot}`` or ``{period, snapshot}``.
+
+    A multi-investment-period network indexes snapshots by a ``(period,
+    timestep)`` MultiIndex, so ``pandas`` hands each entry over as a tuple.
+    ``str(tuple)`` would write the Python repr — ``"(2030, Timestamp('2030-01-01
+    00:00:00'))"`` — into the sheet, which no longer parses as a date and takes
+    the run back to single-period. Split the tuple into the ``period`` /
+    ``snapshot`` column pair the ``snapshots`` sheet and
+    ``_snapshots_index`` both expect instead.
+    """
+    if isinstance(ts, tuple):
+        if len(ts) == 2:
+            period, timestep = ts
+            return {"period": _period_cell(period), "snapshot": str(timestep)}
+        # Deeper index than PyPSA's (period, timestep) — keep the last level as
+        # the timestamp and the first as the period rather than guess.
+        return {"period": _period_cell(ts[0]), "snapshot": str(ts[-1])}
+    return {"snapshot": str(ts)}
+
+
+def _period_cell(period: Any) -> Any:
+    """A period label as an int when it is one (PyPSA periods are years)."""
+    keep, val = _scalar(period)
+    if not keep:
+        return str(period)
+    if isinstance(val, bool):
+        return int(val)
+    if isinstance(val, float) and val.is_integer():
+        return int(val)
+    return val
+
+
 def network_to_model(network: pypsa.Network) -> dict[str, list[dict[str, Any]]]:
     """Round-trip a built network into the in-memory model shape.
 
@@ -53,9 +86,13 @@ def network_to_model(network: pypsa.Network) -> dict[str, list[dict[str, Any]]]:
     columns) and turn any non-empty ``*_t`` dynamic frame into a
     ``<list_name>-<attr>`` sheet with one row per snapshot. Columns are filtered
     to the schema's input attributes so only user-facing fields are emitted.
+
+    Multi-period networks keep their ``(period, timestep)`` index as the
+    ``period`` + ``snapshot`` column pair on every temporal sheet, so a
+    pathway model survives the round-trip (see :func:`_snapshot_cells`).
     """
     model: dict[str, list[dict[str, Any]]] = {}
-    model["snapshots"] = [{"snapshot": str(ts)} for ts in list(network.snapshots)]
+    model["snapshots"] = [_snapshot_cells(ts) for ts in list(network.snapshots)]
     if network.name:
         model["network"] = [{"name": str(network.name)}]
     for sheet in component_sheets():
@@ -91,7 +128,7 @@ def network_to_model(network: pypsa.Network) -> dict[str, list[dict[str, Any]]]:
                 continue
             ts_rows: list[dict[str, Any]] = []
             for ts, ser in df.iterrows():
-                row_d: dict[str, Any] = {"snapshot": str(ts)}
+                row_d: dict[str, Any] = _snapshot_cells(ts)
                 for col, val in ser.items():
                     keep, sval = _scalar(val)
                     if keep:

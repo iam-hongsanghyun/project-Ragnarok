@@ -43,6 +43,7 @@ from ..importers.databases.openmeteo_renewable.fetch import fetch_point
 from ..importers.http import AsyncClientWrapper
 from ...pypsa.network import build_network
 from ...pypsa.network.serialize import network_to_model
+from ...pypsa.pypsa_schema import component_sheets
 
 router = APIRouter(prefix="/api/transform", tags=["transform"])
 
@@ -142,7 +143,16 @@ def _conflict_strategies(
     )
     out: dict[str, Any] = {}
     for col in gap:
-        if pd.api.types.is_numeric_dtype(df[col]):
+        # Booleans FIRST: pandas reports bool dtype as numeric, so without this
+        # the flags PyPSA has no one-port default for — p_nom_extendable,
+        # e_nom_extendable, committable, active — would merge through the
+        # numeric strategy: "mean" turns a mixed cluster into 0.5, and
+        # zero/min/default silently clear extendability for the whole cluster,
+        # so the reduced model can no longer expand capacity. Use "any", which
+        # is what PyPSA itself uses for `s_nom_extendable` on lines.
+        if pd.api.types.is_bool_dtype(df[col]):
+            out[col] = "any"
+        elif pd.api.types.is_numeric_dtype(df[col]):
             dv = (
                 float(schema_defaults[col])
                 if (schema_defaults is not None and col in schema_defaults.index)
@@ -359,6 +369,42 @@ def _merge_parallel_links(network: pypsa.Network) -> int:
     return removed
 
 
+def _preserved_config_sheets(
+    model: dict[str, list[dict[str, Any]]],
+) -> dict[str, list[dict[str, Any]]]:
+    """Non-PyPSA sheets a reduction must carry over untouched.
+
+    ``network_to_model`` emits only ``snapshots``, ``network`` and schema-known
+    component sheets, so every Ragnarok config sheet (``RAGNAROK_Pathway``,
+    ``RAGNAROK_PathwayPeriods``, ``RAGNAROK_Sampling``, ``RAGNAROK_Rolling``,
+    ``RAGNAROK_Scenarios``, ``RAGNAROK_CustomDSL``,
+    ``RAGNAROK_CarbonSchedules``, …) would vanish from the reduced model — and
+    the frontend applies that model over the session, so the loss is permanent.
+    Dropping them takes a multi-period plan back to single period, discards
+    representative-snapshot weighting and custom-DSL expansion constraints, and
+    replaces the scenario catalogue with a synthetic base case.
+
+    Component sheets and their ``<component>-<attr>`` time-series are NOT
+    preserved — the reduction owns those. A carried-over config sheet may still
+    reference a component the reduction merged away (e.g. a scenario override on
+    a bus that no longer exists); those references are resolved by name at run
+    time and simply no longer match, which is strictly better than losing the
+    whole configuration.
+    """
+    known = set(component_sheets())
+    out: dict[str, list[dict[str, Any]]] = {}
+    for sheet, rows in model.items():
+        if not isinstance(rows, list) or not rows:
+            continue
+        if sheet in known:
+            continue
+        component, _, attribute = sheet.partition("-")
+        if attribute and component in known:
+            continue
+        out[sheet] = rows
+    return out
+
+
 def _counts(network: pypsa.Network) -> dict[str, int]:
     return {
         "buses": len(network.buses),
@@ -401,7 +447,13 @@ def cluster_model(
     """
     scenario = dict(scenario or {})
     scenario.setdefault("discountRate", _DEFAULT_DISCOUNT_RATE)
-    network, _notes = build_network(model, scenario, options or {})
+    # The reduced network is serialised straight back to a workbook, so build it
+    # WITHOUT the cost transformations a run applies on top of workbook values —
+    # otherwise the reduced workbook stores an annuitised `capital_cost` that the
+    # next run annuitises again (extendable CAPEX ≈ AF² of its real value, so
+    # capacity expansion builds almost for free).
+    build_options = {**(options or {}), "skipCapexAnnuitisation": True}
+    network, _notes = build_network(model, scenario, build_options)
 
     n_buses = len(network.buses)
     if n_buses < 2:
@@ -518,8 +570,16 @@ def cluster_model(
             status_code=400, detail=f"Clustering failed: {exc}"
         ) from exc
 
+    reduced = network_to_model(clustered)
+    # Carry the Ragnarok config sheets (pathway, sampling, rolling, scenarios,
+    # custom DSL, carbon schedules) across the network round-trip — the
+    # serialiser only knows PyPSA components. `setdefault` so anything the
+    # serialiser did produce still wins.
+    for sheet, rows in _preserved_config_sheets(model).items():
+        reduced.setdefault(sheet, rows)
+
     return {
-        "model": network_to_model(clustered),
+        "model": reduced,
         "busmap": {str(k): str(v) for k, v in busmap.to_dict().items()},
         "method": method,
         "groupByColumn": group_by_column if by_column else None,
