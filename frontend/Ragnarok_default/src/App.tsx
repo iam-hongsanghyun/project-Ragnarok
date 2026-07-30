@@ -930,16 +930,30 @@ function AppInner() {
     [model, prepareModelForBackend, resetForNewModel, showToast],
   );
 
+  /**
+   * Re-read which temporal sheets the SESSION holds, and how many rows each has.
+   *
+   * The browser keeps no series, so the sheet tree's temporal row counts come
+   * from the session meta — and any path that rehydrates the editor static-only,
+   * or writes a series sheet server-side, has to call this or the tree reports 0
+   * rows for data that is really there (which is how a queue-imported model
+   * looked like it had lost its profiles). One helper, so the next such path is
+   * one call rather than a re-derivation someone can forget.
+   */
+  const refreshSeriesCounts = useCallback(async () => {
+    try {
+      setSessionSeriesCounts(seriesSheetCounts(await getSessionMeta()));
+    } catch { /* tree just won't list series; they still solve */ }
+  }, []);
+
   // Reload the editor after a server-side session mutation (retarget/forecast):
   // rehydrate static sheets (incl. snapshots) WITHOUT re-pushing (that would
   // clobber the server's series), and relearn the session's temporal sheets.
   const reloadSessionModel = useCallback(async () => {
     const saved = await getSessionFullModel({ staticOnly: true }).catch(() => null);
     if (saved) resetForNewModel(saved, undefined, { pushToSession: false });
-    try {
-      setSessionSeriesCounts(seriesSheetCounts(await getSessionMeta()));
-    } catch { /* tree just won't list series; they still solve */ }
-  }, [resetForNewModel]);
+    await refreshSeriesCounts();
+  }, [resetForNewModel, refreshSeriesCounts]);
 
   // Forge → Query & edit. Sync the browser's static edits to the session first
   // (server-side joins/filters read the full model there), then run the query.
@@ -2286,13 +2300,13 @@ function AppInner() {
       const savedModel = await getSessionFullModel({ staticOnly: true });
       if (!savedModel) throw new Error('Example could not be read back from the session.');
       resetForNewModel(savedModel, label, { pushToSession: false });
-      try { setSessionSeriesCounts(seriesSheetCounts(await getSessionMeta())); } catch { /* tree just won't list series */ }
+      await refreshSeriesCounts();
       setTab('Build');
       showToast(`Loaded "${label}"`, 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to load example.', 'error');
     }
-  }, [resetForNewModel, setTab, showToast]);
+  }, [resetForNewModel, setTab, showToast, refreshSeriesCounts]);
 
   // Master dialog → "Derive working model": the backend has already filtered the
   // master into the session (source of truth); rehydrate the editor from there,
@@ -2301,7 +2315,7 @@ function AppInner() {
     const savedModel = await getSessionFullModel({ staticOnly: true });
     if (!savedModel) throw new Error('Derived model could not be read back from the session.');
     resetForNewModel(savedModel, filename, { pushToSession: false });
-    try { setSessionSeriesCounts(seriesSheetCounts(await getSessionMeta())); } catch { /* tree just won't list series */ }
+    await refreshSeriesCounts();
     const excluded = Object.values(report.excluded ?? {}).reduce((a, b) => a + b, 0);
     const summary = `Derived working model — ${report.snapshots} snapshots`
       + (report.years?.length ? ` (years ${report.years.join(', ')})` : '')
@@ -2309,7 +2323,7 @@ function AppInner() {
     setStatus(summary);
     showToast(summary, 'success');
     setTab('Model');
-  }, [resetForNewModel, setTab, showToast]);
+  }, [resetForNewModel, setTab, showToast, refreshSeriesCounts]);
 
   // Welcome → "Country starter pack" (W2): assemble a runnable workbook from a
   // recipe (importers run server-side) and merge the fragment into the editor.
@@ -2355,9 +2369,7 @@ function AppInner() {
       // The rehydrated model is static-only, so resetForNewModel counted zero
       // series rows — relearn them from the session meta or the Model tree lists
       // no temporal sheets at all (every sibling import path does this).
-      try {
-        setSessionSeriesCounts(seriesSheetCounts(await getSessionMeta()));
-      } catch { /* tree just won't list series; they still solve */ }
+      await refreshSeriesCounts();
       // Restore the queued run's controls. The queue payload is the only place
       // they survive, and resetForNewModel has just reset the window to the
       // model's full range — so apply them after it, not before.
@@ -2375,7 +2387,7 @@ function AppInner() {
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to import queued model.', 'error');
     }
-  }, [resetForNewModel, setTab, showToast, updateSettings]);
+  }, [resetForNewModel, setTab, showToast, updateSettings, refreshSeriesCounts]);
 
   const handleOpenBackendRun = async (
     name: string,
@@ -2442,9 +2454,7 @@ function AppInner() {
         // List the session's temporal sheets in the Model tree (they're not in
         // the static model; selecting one pages its rows from the session).
         // Kept last — it awaits, and nothing above should wait on the network.
-        try {
-          setSessionSeriesCounts(seriesSheetCounts(await getSessionMeta()));
-        } catch { /* tree just won't list series */ }
+        await refreshSeriesCounts();
         return;
       }
 
@@ -2678,15 +2688,32 @@ function AppInner() {
     // Time-series live in the backend session (static merges skip them) —
     // replace the sheet there too, like the Model tab's CSV import does. The
     // current row count comes from the BACKEND (the mirror strips series).
+    // A sheet the session has never held is CREATED by this patch (the store
+    // creates a series sheet on first write), which is how an empty profile gets
+    // its first rows. The write must not be silent either way: the session is
+    // what a run and every export read, so an unpersisted profile would simply
+    // not be in the solve — the exact kind of quiet loss this app has been bitten
+    // by. Report the failure and reconcile the tree's counts with the server.
     void (async () => {
-      const previous = await getSheetPage(String(sheet), { offset: 0, limit: 0 })
-        .then((page) => page.total)
-        .catch(() => 0);
-      await patchSheet(String(sheet), [
-        ...(previous ? [{ op: 'deleteRows' as const, rows: Array.from({ length: previous }, (_, i) => i) }] : []),
-        ...canonical.map((r) => ({ op: 'addRow' as const, values: r as Record<string, unknown> })),
-      ]);
-    })().catch(() => { /* best-effort */ });
+      try {
+        const previous = await getSheetPage(String(sheet), { offset: 0, limit: 0 })
+          .then((page) => page.total)
+          .catch(() => 0);
+        await patchSheet(String(sheet), [
+          ...(previous ? [{ op: 'deleteRows' as const, rows: Array.from({ length: previous }, (_, i) => i) }] : []),
+          ...canonical.map((r) => ({ op: 'addRow' as const, values: r as Record<string, unknown> })),
+        ]);
+        await refreshSeriesCounts();
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : 'unknown error';
+        setStatus(`${sheet} was NOT saved to the session: ${msg}`);
+        showToast(
+          `${sheet} could not be saved to the backend session (${msg}) — a run or export will not see it. `
+          + 'Load or create a model first, then re-import.',
+          'error',
+        );
+      }
+    })();
     if (canonical.length > 0) {
       showToast(`Imported ${canonical.length} rows into ${sheet}`, 'success');
       setStatus(`Imported ${canonical.length} rows into ${sheet}.`);
@@ -3350,6 +3377,7 @@ function AppInner() {
               onRenameColumn={renameColumn}
               onClearTable={clearSheet}
               onImportTsSheet={handleImportTsSheet}
+              onTsSheetChanged={refreshSeriesCounts}
               onBulkPaste={bulkPaste}
               modelIssues={modelIssues}
               jumpTo={jumpTo}
@@ -3519,9 +3547,7 @@ function AppInner() {
                   // The static rehydrate carries no series, so learn the session's
                   // temporal sheets from its meta — otherwise the Model tree would
                   // hide them and they'd look "missing" (they're solved either way).
-                  try {
-                    setSessionSeriesCounts(seriesSheetCounts(await getSessionMeta()));
-                  } catch { /* tree just won't list series; they still solve */ }
+                  await refreshSeriesCounts();
                   setTab('Model');
                 } catch {
                   showToast('Built, but the editor could not reload from the session.', 'error');
