@@ -35,12 +35,25 @@ class SessionModelPayload(BaseModel):
 
 
 class ExportProjectPayload(BaseModel):
-    """Body for ``POST /api/export/project``.
+    """Body for ``POST /api/export/project`` and ``POST /api/export/workbook``.
 
     Carries the in-memory workbook (``model``) and the solved result bundle
     (``result``). The server builds the full input + output xlsx so the heavy
     SheetJS workbook build no longer runs in (and OOMs) the browser tab.
+
+    ``sessionId`` lets the server re-attach the time-series sheets the browser
+    does not hold (they live in the session db and page into the grid), so an
+    export is complete rather than input-static-only.
+
+    ``scenario`` / ``options`` are the same dicts a run submits. They are what
+    the exported workbook's ``RAGNAROK_Constraints`` / ``RAGNAROK_Settings`` /
+    ``RAGNAROK_RunState`` sheets are written from, and what a re-import reads the
+    run window (``snapshotStart`` / ``snapshotEnd`` / ``snapshotWeight``) back
+    out of — omit them and a re-imported project opens with a 0-snapshot window.
     """
 
     model: dict[str, list[dict[str, Any]]]
-    result: dict[str, Any]
+    result: dict[str, Any] = {}
+    scenario: dict[str, Any] = {}
+    options: dict[str, Any] = {}
+    sessionId: str | None = None

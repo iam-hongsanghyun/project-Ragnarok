@@ -117,6 +117,32 @@ def test_import_queue_item_loads_model_into_session(_session_dir) -> None:
     assert model_store.get_meta("default") is not None
 
 
+def test_import_queue_item_returns_the_run_controls(_session_dir) -> None:
+    """The queued payload is the ONLY place the run controls survive.
+
+    Handing back the session meta alone left the editor to fall back to its
+    defaults, so importing a queued run silently reset the window, resolution,
+    carbon price, discount rate and constraints.
+    """
+    model_store.save_model("default", _session_model(), filename="case.xlsx", scenario_name="ref")
+    constraints = [{"id": "c1", "enabled": True, "metric": "co2_cap", "value": 1000.0}]
+    payload = RunPayload(
+        scenario={"label": "ref", "carbonPrice": 42.0, "discountRate": 0.07, "constraints": constraints},
+        options={"snapshotStart": 2, "snapshotEnd": 5, "snapshotWeight": 3, "filename": "queued.xlsx"},
+        sessionId="default",
+    )
+    r = asyncio.run(main.enqueue_run(payload))
+    meta = asyncio.run(main.import_queue_item(r["id"]))
+
+    assert (meta["snapshotStart"], meta["snapshotEnd"], meta["snapshotWeight"]) == (2, 5, 3)
+    assert meta["scenario"]["carbonPrice"] == 42.0
+    assert meta["scenario"]["discountRate"] == 0.07
+    assert meta["scenario"]["constraints"] == constraints
+    assert meta["filename"] == "queued.xlsx"
+    # The full model (series included) still lands in the session.
+    assert "generators-p_max_pu" in (model_store.load_full_model("default") or {})
+
+
 def test_delete_queue_item_removes_payload_files() -> None:
     r = asyncio.run(main.enqueue_run(_payload("A")))
     payload_path = main._queue_payload_path(r["id"])

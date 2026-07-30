@@ -364,7 +364,19 @@ def build_network(
     # ── Annuitise CAPEX for extendable assets ─────────────────────────────────
     # The extendable flag column name varies by component (p_nom_extendable,
     # s_nom_extendable, e_nom_extendable). Find it via PyPSA's defaults.
-    for list_name in ("generators", "storage_units", "stores", "lines", "links"):
+    #
+    # A workbook `capital_cost` is an OVERNIGHT cost; the network carries the
+    # annuitised one. So a caller that builds a network only to serialise it
+    # BACK to a workbook (`network_to_model` — the Forge reduce/cluster
+    # transform) must opt out: otherwise the reduced workbook stores an
+    # already-annuitised cost, the next run annuitises it a second time, and
+    # extendable CAPEX collapses to ~AF² of its real value (≈0.6% at r=5%,
+    # 20 y), which makes capacity expansion effectively free.
+    annuitisable: tuple[str, ...] = (
+        () if bool(options.get("skipCapexAnnuitisation", False))
+        else ("generators", "storage_units", "stores", "lines", "links")
+    )
+    for list_name in annuitisable:
         comp = network.components[list_name]
         frame = comp.static
         ext_cols = [c for c in frame.columns if c.endswith("_nom_extendable")]

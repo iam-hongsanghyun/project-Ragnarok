@@ -1029,6 +1029,42 @@ def clear_log() -> dict[str, Any]:
     return {"entries": [], "cursor": cursor, "capacity": capacity}
 
 
+def _model_with_session_series(
+    model: dict[str, list[dict[str, Any]]] | None,
+    session_id: str | None,
+) -> dict[str, list[dict[str, Any]]]:
+    """Fill a client-posted model's MISSING time-series sheets from the session.
+
+    The browser deliberately holds no time-series: the working model's series
+    live in the session db and page into the grid on demand (see
+    ``stripSeriesSheets`` in ``App.tsx``). So a model POSTed from the editor
+    arrives with every ``<component>-<attr>`` sheet absent or empty, and an
+    export built from it alone silently drops ``loads-p_set``,
+    ``generators-p_max_pu``, ``storage_units-inflow`` … — the whole temporal
+    input. Re-attach them here from the session, which IS the source of truth.
+
+    Static sheets are left exactly as posted, so unsaved edits held only in the
+    browser still win; a series sheet the client did send (a plugin hand-off, a
+    legacy full-model client) is likewise never overwritten.
+    """
+    out = dict(model or {})
+    if not session_id:
+        return out
+    try:
+        stored = model_store.load_full_model(session_id) or {}
+    except Exception:  # noqa: BLE001 — an export must not fail over hydration
+        logging.getLogger("pypsa_gui.exports").exception(
+            "Could not read session %s while hydrating export series", session_id
+        )
+        return out
+    for sheet, rows in stored.items():
+        if not model_store.is_series_sheet(sheet):
+            continue
+        if not out.get(sheet):
+            out[sheet] = rows
+    return out
+
+
 def _resolve_payload_model(payload: RunPayload) -> RunPayload:
     """Materialise the model a run will solve.
 
@@ -1291,11 +1327,17 @@ async def rerun_queued(item_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/queue/{item_id}/import")
-async def import_queue_item(item_id: str) -> dict[str, Any]:
+async def import_queue_item(item_id: str, session_id: str = "default") -> dict[str, Any]:
     """Load a queue item's model snapshot into the current working session.
 
     Lets the user pull a queued/finished run back into the editor to tweak and
     re-run as a NEW entry (the original card is untouched).
+
+    Returns the session meta **plus the item's scenario and options**, the same
+    way :func:`promote_run_to_session` does: the queued payload is the only place
+    the run window (``snapshotStart`` / ``snapshotEnd`` / ``snapshotWeight``),
+    carbon price, discount rate and constraints survive, so handing back the meta
+    alone silently reset every run control to its default.
     """
     item = _find_queue_item(item_id)
     if item is None or not item.payload_path.exists():
@@ -1303,13 +1345,24 @@ async def import_queue_item(item_id: str) -> dict[str, Any]:
     payload = _read_queue_payload(item.payload_path)
     if not payload.model:
         raise HTTPException(status_code=400, detail="Queue item has no model to import.")
+    options = payload.options or {}
+    scenario = payload.scenario or {}
+    filename = str(options.get("filename") or item.label)
     meta = model_store.save_model(
-        "default",
+        session_id,
         payload.model,
-        filename=str((payload.options or {}).get("filename") or item.label),
-        scenario_name=str((payload.scenario or {}).get("label") or ""),
+        filename=filename,
+        scenario_name=str(scenario.get("label") or ""),
     )
-    return meta
+    return {
+        **meta,
+        "scenario": scenario,
+        "options": options,
+        "snapshotStart": options.get("snapshotStart"),
+        "snapshotEnd": options.get("snapshotEnd"),
+        "snapshotWeight": options.get("snapshotWeight"),
+        "filename": filename,
+    }
 
 
 @app.delete("/api/queue/{item_id}")
@@ -1707,14 +1760,20 @@ def export_project(payload: ExportProjectPayload) -> Response:
     """Build a Ragnarok Project package (.zip of canonical JSON + readable xlsx).
 
     For an *unsaved* live model with no stored run. The frontend POSTs
-    ``{model, result}``; the server packs it into a lossless project zip
-    (re-importable) and streams it back. (Stored runs use the richer
-    ``GET /api/runs/{name}/package``, which has the full bundle.)
+    ``{model, result, scenario, options, sessionId}``; the server re-attaches the
+    session's time-series sheets (the browser holds none), packs the lot into a
+    lossless project zip (re-importable) and streams it back. (Stored runs use
+    the richer ``GET /api/runs/{name}/package``, which has the full bundle.)
     """
     from . import project_workbook
 
     try:
-        bundle = {"model": payload.model, "result": payload.result}
+        bundle = {
+            "model": _model_with_session_series(payload.model, payload.sessionId),
+            "scenario": payload.scenario or {},
+            "options": payload.options or {},
+            "result": payload.result or {},
+        }
         meta = run_store.build_run_meta("ragnarok_project", bundle)
         data = project_workbook.bundle_to_package(bundle, "ragnarok_project", meta=meta)
     except Exception as exc:  # noqa: BLE001
@@ -1723,6 +1782,35 @@ def export_project(payload: ExportProjectPayload) -> Response:
         content=data,
         media_type=_ZIP_MEDIA_TYPE,
         headers={"Content-Disposition": 'attachment; filename="ragnarok_project.zip"'},
+    )
+
+
+@app.post("/api/export/workbook")
+def export_workbook(payload: ExportProjectPayload) -> Response:
+    """Build the INPUT workbook (.xlsx) for Save / Save As — server-side.
+
+    Same reason the project zip is built here: the browser holds only the static
+    sheets, so a client-side SheetJS build would write a workbook with every
+    time-series sheet missing. The session supplies the series and
+    ``bundle_to_workbook`` writes the input sheets plus the Ragnarok config
+    sheets, with no result sheets.
+    """
+    from . import project_workbook
+
+    try:
+        bundle = {
+            "model": _model_with_session_series(payload.model, payload.sessionId),
+            "scenario": payload.scenario or {},
+            "options": payload.options or {},
+            "result": {},
+        }
+        data = project_workbook.bundle_to_workbook(bundle, include_result=False)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Workbook export failed: {exc}") from exc
+    return Response(
+        content=data,
+        media_type=_XLSX_MEDIA_TYPE,
+        headers={"Content-Disposition": 'attachment; filename="ragnarok_case.xlsx"'},
     )
 
 
@@ -1943,8 +2031,13 @@ def _model_payload_to_network(payload: RunPayload):
     rolling-horizon flags in `options` are ignored here — the resulting
     network is the deterministic case the user authored, suitable for
     sharing with downstream PyPSA tooling.
+
+    The model's time-series sheets are re-attached from the session first — the
+    editor posts static sheets only, so without this the exported .nc / .h5
+    carries the topology and no profiles at all.
     """
-    network, _notes = build_network(payload.model, payload.scenario, payload.options or {})
+    model = _model_with_session_series(payload.model, payload.sessionId)
+    network, _notes = build_network(model, payload.scenario, payload.options or {})
     return network
 
 

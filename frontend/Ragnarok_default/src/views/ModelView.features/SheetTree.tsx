@@ -106,8 +106,18 @@ export function SheetTree({ model, issues, sel, onSelChange, seriesSheetCounts }
           const open = !collapsed.has(g.sheet);
           const staticActive = sel.kind === 'static' && sel.sheet === g.sheet;
 
-          // Only temporal sheets that exist in the session (or carry in-memory rows).
-          const tsEntries = g.temporalSheets.filter((ts) => tsCount(ts.sheet) > 0);
+          // Temporal sheets that hold rows — PLUS, once the component itself
+          // exists, the ones that are still empty.
+          //
+          // An empty profile has to be reachable: the CSV importer for a
+          // temporal sheet lives on that sheet's own pane, so hiding it until it
+          // had rows made it impossible to create — you needed rows to reach the
+          // UI that adds rows (Build's Temporal panel was the only way in).
+          // With no static row there is nothing to profile, so those stay hidden.
+          const tsEntries = g.temporalSheets.filter((ts) => tsCount(ts.sheet) > 0 || hasStatic);
+          // The header badge stays a count of sheets that actually hold data —
+          // the empty placeholders above are affordances, not content.
+          const tsWithRows = tsEntries.filter((ts) => tsCount(ts.sheet) > 0);
 
           return (
             <div key={g.sheet} className="sheet-tree-group">
@@ -118,7 +128,7 @@ export function SheetTree({ model, issues, sel, onSelChange, seriesSheetCounts }
               >
                 <span className={`sheet-tree-chevron${open ? ' is-open' : ''}`}>›</span>
                 <span className="sheet-tree-group-label">{g.label}</span>
-                <span className="sheet-tree-count">{staticRows.length + tsEntries.length}</span>
+                <span className="sheet-tree-count">{staticRows.length + tsWithRows.length}</span>
               </button>
               {open && (
                 <div className="sheet-tree-items">
@@ -140,15 +150,19 @@ export function SheetTree({ model, issues, sel, onSelChange, seriesSheetCounts }
                   )}
                   {tsEntries.map((ts) => {
                     const tsActive = sel.kind === 'ts' && sel.sheet === ts.sheet;
+                    const tsRows = tsCount(ts.sheet);
                     return (
                       <button
                         key={ts.sheet}
-                        className={`sheet-tree-item is-ts${tsActive ? ' is-active' : ''}`}
+                        className={`sheet-tree-item is-ts${tsActive ? ' is-active' : ''}${tsRows === 0 ? ' is-empty' : ''}`}
                         onClick={() => onSelChange({ kind: 'ts', sheet: ts.sheet })}
+                        title={tsRows === 0
+                          ? `No ${ts.attribute} profile yet — open it to import a CSV`
+                          : `${ts.attribute}: ${tsRows} rows`}
                       >
                         <span className="sheet-tree-item-icon">t</span>
                         <span className="sheet-tree-item-label">{ts.attribute}</span>
-                        <span className="sheet-tree-count">{tsCount(ts.sheet)}</span>
+                        <span className="sheet-tree-count">{tsRows}</span>
                       </button>
                     );
                   })}

@@ -50,7 +50,7 @@ import {
   QueueJob,
 } from 'lib/types';
 import { API_BASE, DEFAULT_CONSTRAINTS, getDefaultRowForSheet, getNewRowDefaults, RUN_WINDOW, SHEETS } from 'lib/constants';
-import { canonicalizeOutputSeries, canonicalizeTemporalRows, createEmptyWorkbook, exportWorkbook, normalizeInputDatesToIso, parseWorkbook, workbookToArrayBuffer } from 'lib/workbook/workbook';
+import { canonicalizeOutputSeries, canonicalizeTemporalRows, createEmptyWorkbook, normalizeInputDatesToIso, parseWorkbook } from 'lib/workbook/workbook';
 import { mergeWorkbookFragment } from 'lib/workbook/mergeFragment';
 import type { WorkbookFragment } from 'lib/api/databases';
 import { getBounds, getBusIndex, carrierColor, numberValue, orderByCarrierRows, setCarrierColorOverrides, snapshotMaxFromWorkbook, stringValue } from 'lib/utils/helpers';
@@ -133,6 +133,40 @@ function stripSeriesSheets(model: WorkbookModel): WorkbookModel {
     (out as Record<string, unknown>)[sheet] = isSeriesSheet(sheet) ? [] : rows;
   }
   return out;
+}
+
+const XLSX_MEDIA_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+/**
+ * Fill a browser model's MISSING time-series sheets from the session's copy.
+ *
+ * The mirror of the backend's `_model_with_session_series`, for the one export
+ * that has to be assembled client-side (the PyPSA CSV folder). Static sheets
+ * and any series the browser DOES hold are left untouched, so unsaved edits win.
+ */
+function withSessionSeries(model: WorkbookModel, stored: WorkbookModel | null): WorkbookModel {
+  if (!stored) return model;
+  const out: WorkbookModel = { ...model };
+  for (const [sheet, rows] of Object.entries(stored)) {
+    if (!isSeriesSheet(sheet) || !Array.isArray(rows) || rows.length === 0) continue;
+    const held = (out as Record<string, unknown>)[sheet];
+    if (!Array.isArray(held) || held.length === 0) {
+      (out as Record<string, unknown>)[sheet] = rows;
+    }
+  }
+  return out;
+}
+
+/** Hand bytes to the browser as a download (the no-File-System-Access path). */
+function downloadBytes(bytes: ArrayBuffer, filename: string, mediaType: string): void {
+  const url = URL.createObjectURL(new Blob([bytes], { type: mediaType }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 /** Total rows across component sheets (ignoring RAGNAROK_* metadata sheets), so
@@ -896,16 +930,30 @@ function AppInner() {
     [model, prepareModelForBackend, resetForNewModel, showToast],
   );
 
+  /**
+   * Re-read which temporal sheets the SESSION holds, and how many rows each has.
+   *
+   * The browser keeps no series, so the sheet tree's temporal row counts come
+   * from the session meta — and any path that rehydrates the editor static-only,
+   * or writes a series sheet server-side, has to call this or the tree reports 0
+   * rows for data that is really there (which is how a queue-imported model
+   * looked like it had lost its profiles). One helper, so the next such path is
+   * one call rather than a re-derivation someone can forget.
+   */
+  const refreshSeriesCounts = useCallback(async () => {
+    try {
+      setSessionSeriesCounts(seriesSheetCounts(await getSessionMeta()));
+    } catch { /* tree just won't list series; they still solve */ }
+  }, []);
+
   // Reload the editor after a server-side session mutation (retarget/forecast):
   // rehydrate static sheets (incl. snapshots) WITHOUT re-pushing (that would
   // clobber the server's series), and relearn the session's temporal sheets.
   const reloadSessionModel = useCallback(async () => {
     const saved = await getSessionFullModel({ staticOnly: true }).catch(() => null);
     if (saved) resetForNewModel(saved, undefined, { pushToSession: false });
-    try {
-      setSessionSeriesCounts(seriesSheetCounts(await getSessionMeta()));
-    } catch { /* tree just won't list series; they still solve */ }
-  }, [resetForNewModel]);
+    await refreshSeriesCounts();
+  }, [resetForNewModel, refreshSeriesCounts]);
 
   // Forge → Query & edit. Sync the browser's static edits to the session first
   // (server-side joins/filters read the full model there), then run the query.
@@ -1035,6 +1083,26 @@ function AppInner() {
     if (!label) return;
     setFilename((current) => (filenameMatchesScenario(current, label) ? current : scenarioFilename(label)));
   }, [activeScenario?.label]);
+  // The `{scenario, options}` an export carries — built by the SAME pure builder
+  // a run uses, from a snapshot of the live controls. The exported workbook's
+  // RAGNAROK_Constraints / _Settings / _RunState sheets are written from these,
+  // and a re-import reads the run window back out of `options`, so an export
+  // that omits them re-opens with no constraints and a 0-snapshot window.
+  const buildExportBody = useCallback(() => buildRunPayload(
+    captureCurrentScenario(),
+    {
+      scenarioLabel: activeScenario?.label ?? null,
+      filename,
+      dateFormat: settings.dateFormat,
+      solverThreads: settings.solverThreads,
+      solverType: settings.solverType,
+      solveAcceptance: settings.solveAcceptance,
+      objectiveAutoScale: settings.objectiveAutoScale,
+      currencySymbol: settings.currencySymbol,
+    },
+    dslToSpecs(customDsl),
+  ), [captureCurrentScenario, customDsl, activeScenario, filename, settings]);
+
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const projectImportInputRef = useRef<HTMLInputElement | null>(null);
   const resultImportInputRef = useRef<HTMLInputElement | null>(null);
@@ -1481,10 +1549,20 @@ function AppInner() {
     }
     const out = `${projectBaseName(filename)}_project.zip`;
     try {
+      // `sessionId` matters: the browser holds only the static sheets, so the
+      // server re-attaches this session's time-series (loads-p_set,
+      // generators-p_max_pu, …) before packing — without it the zip carried the
+      // topology and no profiles. scenario/options make the config sheets and
+      // the run window round-trip.
       const resp = await fetch(`${API_BASE}/api/export/project`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: analyticsModel, result: displayResults ?? {} }),
+        body: JSON.stringify({
+          sessionId: DEFAULT_SESSION_ID,
+          model: analyticsModel,
+          result: displayResults ?? {},
+          ...buildExportBody(),
+        }),
       });
       if (!resp.ok) {
         const detail = await resp.text();
@@ -1524,10 +1602,20 @@ function AppInner() {
     };
     const modelForBackend = prepareModelForBackend(model);
     try {
+      // `sessionId`: the posted model has no time-series (the browser holds
+      // none), so the backend re-attaches this session's series before building
+      // the network — otherwise the .nc / .h5 exports topology with no profiles.
+      // `options` stays empty on purpose: a PyPSA-native export is the whole
+      // authored case, not the windowed run.
       const resp = await fetch(`${API_BASE}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: modelForBackend, scenario: scenarioForExport, options: {} }),
+        body: JSON.stringify({
+          sessionId: DEFAULT_SESSION_ID,
+          model: modelForBackend,
+          scenario: scenarioForExport,
+          options: {},
+        }),
       });
       if (!resp.ok) {
         const detail = await resp.text();
@@ -1592,7 +1680,12 @@ function AppInner() {
     const archive = `${projectBaseName(filename)}_csv_folder`;
     try {
       const { exportModelAsCsvFolderZip } = await import('lib/workbook/csvFolder');
-      const blob = exportModelAsCsvFolderZip(model, archive);
+      // The CSV folder is assembled in the browser, and the browser's model has
+      // no time-series — pull the FULL model (series included) from the session
+      // first, or the zip ships component CSVs with no profile CSVs at all.
+      // Static edits held only in React still win over the stored copy.
+      const stored = await getSessionFullModel().catch(() => null);
+      const blob = exportModelAsCsvFolderZip(withSessionSeries(model, stored), archive);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -2207,13 +2300,13 @@ function AppInner() {
       const savedModel = await getSessionFullModel({ staticOnly: true });
       if (!savedModel) throw new Error('Example could not be read back from the session.');
       resetForNewModel(savedModel, label, { pushToSession: false });
-      try { setSessionSeriesCounts(seriesSheetCounts(await getSessionMeta())); } catch { /* tree just won't list series */ }
+      await refreshSeriesCounts();
       setTab('Build');
       showToast(`Loaded "${label}"`, 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to load example.', 'error');
     }
-  }, [resetForNewModel, setTab, showToast]);
+  }, [resetForNewModel, setTab, showToast, refreshSeriesCounts]);
 
   // Master dialog → "Derive working model": the backend has already filtered the
   // master into the session (source of truth); rehydrate the editor from there,
@@ -2222,7 +2315,7 @@ function AppInner() {
     const savedModel = await getSessionFullModel({ staticOnly: true });
     if (!savedModel) throw new Error('Derived model could not be read back from the session.');
     resetForNewModel(savedModel, filename, { pushToSession: false });
-    try { setSessionSeriesCounts(seriesSheetCounts(await getSessionMeta())); } catch { /* tree just won't list series */ }
+    await refreshSeriesCounts();
     const excluded = Object.values(report.excluded ?? {}).reduce((a, b) => a + b, 0);
     const summary = `Derived working model — ${report.snapshots} snapshots`
       + (report.years?.length ? ` (years ${report.years.join(', ')})` : '')
@@ -2230,7 +2323,7 @@ function AppInner() {
     setStatus(summary);
     showToast(summary, 'success');
     setTab('Model');
-  }, [resetForNewModel, setTab, showToast]);
+  }, [resetForNewModel, setTab, showToast, refreshSeriesCounts]);
 
   // Welcome → "Country starter pack" (W2): assemble a runnable workbook from a
   // recipe (importers run server-side) and merge the fragment into the editor.
@@ -2251,18 +2344,50 @@ function AppInner() {
   // makes a NEW entry, so the original queue card is left untouched.
   const handleImportQueueItem = useCallback(async (id: string) => {
     try {
-      const resp = await fetch(`${API_BASE}/api/queue/${encodeURIComponent(id)}/import`, { method: 'POST' });
+      // Name the target session explicitly rather than leaning on the server's
+      // default — the editor's session is the one that must receive the model.
+      const resp = await fetch(
+        `${API_BASE}/api/queue/${encodeURIComponent(id)}/import`
+        + `?session_id=${encodeURIComponent(DEFAULT_SESSION_ID)}`,
+        { method: 'POST' },
+      );
       if (!resp.ok) throw new Error((await resp.text()) || 'Import failed.');
-      const meta = (await resp.json()) as { filename?: string };
+      const meta = (await resp.json()) as {
+        filename?: string;
+        snapshotStart?: number | null;
+        snapshotEnd?: number | null;
+        snapshotWeight?: number | null;
+        scenario?: {
+          carbonPrice?: number;
+          discountRate?: number;
+          constraints?: CustomConstraint[];
+        };
+      };
       const savedModel = await getSessionFullModel({ staticOnly: true });
       if (!savedModel) throw new Error('Imported model could not be read back from the session.');
       resetForNewModel(savedModel, meta.filename, { pushToSession: false });
+      // The rehydrated model is static-only, so resetForNewModel counted zero
+      // series rows — relearn them from the session meta or the Model tree lists
+      // no temporal sheets at all (every sibling import path does this).
+      await refreshSeriesCounts();
+      // Restore the queued run's controls. The queue payload is the only place
+      // they survive, and resetForNewModel has just reset the window to the
+      // model's full range — so apply them after it, not before.
+      if (typeof meta.snapshotStart === 'number') setSnapshotStart(meta.snapshotStart);
+      if (typeof meta.snapshotEnd === 'number') setSnapshotEnd(meta.snapshotEnd);
+      if (typeof meta.snapshotWeight === 'number') setSnapshotWeight(meta.snapshotWeight);
+      const queuedScenario = meta.scenario ?? {};
+      if (typeof queuedScenario.carbonPrice === 'number') setCarbonPrice(queuedScenario.carbonPrice);
+      if (typeof queuedScenario.discountRate === 'number') {
+        updateSettings({ discountRate: queuedScenario.discountRate });
+      }
+      if (Array.isArray(queuedScenario.constraints)) setConstraints(queuedScenario.constraints);
       setTab('Model');
       showToast('Imported queued model into the editor', 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to import queued model.', 'error');
     }
-  }, [resetForNewModel, setTab, showToast]);
+  }, [resetForNewModel, setTab, showToast, updateSettings, refreshSeriesCounts]);
 
   const handleOpenBackendRun = async (
     name: string,
@@ -2329,9 +2454,7 @@ function AppInner() {
         // List the session's temporal sheets in the Model tree (they're not in
         // the static model; selecting one pages its rows from the session).
         // Kept last — it awaits, and nothing above should wait on the network.
-        try {
-          setSessionSeriesCounts(seriesSheetCounts(await getSessionMeta()));
-        } catch { /* tree just won't list series */ }
+        await refreshSeriesCounts();
         return;
       }
 
@@ -2565,15 +2688,32 @@ function AppInner() {
     // Time-series live in the backend session (static merges skip them) —
     // replace the sheet there too, like the Model tab's CSV import does. The
     // current row count comes from the BACKEND (the mirror strips series).
+    // A sheet the session has never held is CREATED by this patch (the store
+    // creates a series sheet on first write), which is how an empty profile gets
+    // its first rows. The write must not be silent either way: the session is
+    // what a run and every export read, so an unpersisted profile would simply
+    // not be in the solve — the exact kind of quiet loss this app has been bitten
+    // by. Report the failure and reconcile the tree's counts with the server.
     void (async () => {
-      const previous = await getSheetPage(String(sheet), { offset: 0, limit: 0 })
-        .then((page) => page.total)
-        .catch(() => 0);
-      await patchSheet(String(sheet), [
-        ...(previous ? [{ op: 'deleteRows' as const, rows: Array.from({ length: previous }, (_, i) => i) }] : []),
-        ...canonical.map((r) => ({ op: 'addRow' as const, values: r as Record<string, unknown> })),
-      ]);
-    })().catch(() => { /* best-effort */ });
+      try {
+        const previous = await getSheetPage(String(sheet), { offset: 0, limit: 0 })
+          .then((page) => page.total)
+          .catch(() => 0);
+        await patchSheet(String(sheet), [
+          ...(previous ? [{ op: 'deleteRows' as const, rows: Array.from({ length: previous }, (_, i) => i) }] : []),
+          ...canonical.map((r) => ({ op: 'addRow' as const, values: r as Record<string, unknown> })),
+        ]);
+        await refreshSeriesCounts();
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : 'unknown error';
+        setStatus(`${sheet} was NOT saved to the session: ${msg}`);
+        showToast(
+          `${sheet} could not be saved to the backend session (${msg}) — a run or export will not see it. `
+          + 'Load or create a model first, then re-import.',
+          'error',
+        );
+      }
+    })();
     if (canonical.length > 0) {
       showToast(`Imported ${canonical.length} rows into ${sheet}`, 'success');
       setStatus(`Imported ${canonical.length} rows into ${sheet}.`);
@@ -2583,24 +2723,62 @@ function AppInner() {
     }
   };
 
+  /**
+   * The input workbook's bytes, built by the BACKEND from the session.
+   *
+   * Save used to serialise the React model with SheetJS, but the browser holds
+   * no time-series (they live in the session db and page into the grid), so
+   * every saved file came out with `loads-p_set`, `generators-p_max_pu`, … and
+   * the rest of the temporal input missing. The server has the whole model, so
+   * it writes the workbook (and a full-year build never touches the tab's heap).
+   * Static edits still win: they travel in the posted `model`.
+   */
+  const inputWorkbookBytes = useCallback(async (): Promise<ArrayBuffer> => {
+    const resp = await fetch(`${API_BASE}/api/export/workbook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: DEFAULT_SESSION_ID,
+        model: prepareModelForBackend(model),
+        result: {},
+        ...buildExportBody(),
+      }),
+    });
+    if (!resp.ok) {
+      throw new Error((await resp.text()) || `Save failed (HTTP ${resp.status})`);
+    }
+    return await resp.arrayBuffer();
+  }, [buildExportBody, model, prepareModelForBackend]);
+
   const saveAsWorkbook = async () => {
     const saver = (window as any).showSaveFilePicker;
     const suggestedName = filename || 'ragnarok_case.xlsx';
     if (!saver) {
       const requested = (await promptDialog('Save workbook as', { title: 'Save workbook', defaultValue: suggestedName, confirmText: 'Save' })) || suggestedName;
-      exportWorkbook(model, requested, settings.dateFormat);
+      try {
+        const bytes = await inputWorkbookBytes();
+        downloadBytes(bytes, requested, XLSX_MEDIA_TYPE);
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : 'Save failed.';
+        setStatus(msg);
+        showToast(msg, 'error');
+        return;
+      }
       setFilename(requested);
       setStatus(`Saved workbook as ${requested}.`);
       showToast(`Saved as ${requested}`, 'success');
       return;
     }
     try {
+      // Pick FIRST, build after: showSaveFilePicker needs the click's transient
+      // user activation, which awaiting the build would spend.
       const handle = await saver({
         suggestedName,
         types: [{ description: 'Excel Workbook', accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] } }],
       });
+      const bytes = await inputWorkbookBytes();
       const writable = await handle.createWritable();
-      await writable.write(workbookToArrayBuffer(model, settings.dateFormat));
+      await writable.write(bytes);
       await writable.close();
       setFileHandle(handle);
       setFilename(handle.name || suggestedName);
@@ -2608,8 +2786,11 @@ function AppInner() {
       showToast(`Saved as ${handle.name || suggestedName}`, 'success');
     } catch (error) {
       if ((error as Error)?.name !== 'AbortError') {
-        setStatus('Save As failed.');
-        showToast('Save failed.', 'error');
+        // Surface the server's reason — the workbook is built there now, so
+        // "Save failed." on its own leaves the user nothing to act on.
+        const msg = error instanceof Error && error.message ? error.message : 'Save failed.';
+        setStatus(`Save As failed: ${msg}`);
+        showToast(msg, 'error');
       }
     }
   };
@@ -2619,9 +2800,21 @@ function AppInner() {
       await saveAsWorkbook();
       return;
     }
+    let bytes: ArrayBuffer;
+    try {
+      bytes = await inputWorkbookBytes();
+    } catch (error) {
+      // The workbook is built server-side (it's the only place the full model
+      // lives) — a build failure must surface, never fall through to Save As
+      // with a half-written file.
+      const msg = error instanceof Error ? error.message : 'Save failed.';
+      setStatus(msg);
+      showToast(msg, 'error');
+      return;
+    }
     try {
       const writable = await fileHandle.createWritable();
-      await writable.write(workbookToArrayBuffer(model, settings.dateFormat));
+      await writable.write(bytes);
       await writable.close();
       setStatus(`Saved workbook ${filename}.`);
     } catch {
@@ -3184,6 +3377,7 @@ function AppInner() {
               onRenameColumn={renameColumn}
               onClearTable={clearSheet}
               onImportTsSheet={handleImportTsSheet}
+              onTsSheetChanged={refreshSeriesCounts}
               onBulkPaste={bulkPaste}
               modelIssues={modelIssues}
               jumpTo={jumpTo}
@@ -3353,9 +3547,7 @@ function AppInner() {
                   // The static rehydrate carries no series, so learn the session's
                   // temporal sheets from its meta — otherwise the Model tree would
                   // hide them and they'd look "missing" (they're solved either way).
-                  try {
-                    setSessionSeriesCounts(seriesSheetCounts(await getSessionMeta()));
-                  } catch { /* tree just won't list series; they still solve */ }
+                  await refreshSeriesCounts();
                   setTab('Model');
                 } catch {
                   showToast('Built, but the editor could not reload from the session.', 'error');

@@ -42,6 +42,9 @@ export interface ModelViewProps extends FileToolbarProps {
   onRenameColumn: (sheet: SheetName, oldCol: string, newCol: string) => void;
   onClearTable: (sheet: SheetName) => void;
   onImportTsSheet: (sheet: TsSheetName, rows: GridRow[]) => void;
+  /** A temporal sheet was written straight to the session from the table pane —
+   *  re-read the session meta so the tree's row counts stay truthful. */
+  onTsSheetChanged?: (sheet: string) => void;
   onBulkPaste: (
     sheet: SheetName,
     edits: { rowIndex: number; col: string; val: Primitive }[],
@@ -84,6 +87,7 @@ export function ModelView(props: ModelViewProps) {
             onRenameColumn={props.onRenameColumn}
             onClearTable={props.onClearTable}
             onImportTsSheet={props.onImportTsSheet}
+            onTsSheetChanged={props.onTsSheetChanged}
             onBulkPaste={props.onBulkPaste}
             issues={props.modelIssues}
             jumpTo={props.jumpTo}

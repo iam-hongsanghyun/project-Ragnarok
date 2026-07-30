@@ -7507,6 +7507,11 @@ th:hover .col-delete-btn {
   color: var(--brand);
   font-weight: 600;
 }
+/* A temporal profile the component supports but has no rows for yet. Listed so
+   it can be opened and imported into; muted so it reads as an empty slot rather
+   than data. */
+.sheet-tree-item.is-empty { color: var(--muted); }
+.sheet-tree-item.is-empty.is-active { color: var(--brand); }
 
 .sheet-tree-item-icon {
   display: inline-block;

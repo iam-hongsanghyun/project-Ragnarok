@@ -273,6 +273,11 @@ interface TablesPaneProps {
   onRenameColumn: (sheet: SheetName, oldCol: string, newCol: string) => void;
   onClearTable: (sheet: SheetName) => void;
   onImportTsSheet: (sheet: TsSheetName, rows: GridRow[]) => void;
+  /** A temporal sheet's row count changed server-side (CSV import into this
+   *  pane patches the session directly). The host re-reads the session meta so
+   *  the sheet tree's counts match reality — a sheet that was empty and has just
+   *  been imported into would otherwise still read 0 and look like it failed. */
+  onTsSheetChanged?: (sheet: string) => void;
   issues?: ModelIssue[];
   jumpTo?: { sheet: string; rowIndex: number } | null;
   currencySymbol?: string;
@@ -308,6 +313,7 @@ export function TablesPane({
   onRenameColumn,
   onClearTable,
   onImportTsSheet,
+  onTsSheetChanged,
   issues = [],
   jumpTo,
   currencySymbol = '$',
@@ -398,6 +404,9 @@ export function TablesPane({
       ];
       setTsRows(imported);
       await patchSheet(String(sel.sheet), ops);
+      // This may have CREATED the sheet (the store makes a series sheet on first
+      // write) — tell the host so the tree's count stops reading 0.
+      onTsSheetChanged?.(String(sel.sheet));
     } catch (err) {
       void alertDialog(`${err instanceof Error ? err.message : String(err)}`, { title: 'CSV import failed' });
     } finally {
@@ -458,7 +467,9 @@ export function TablesPane({
     void patchSheet(
       String(sel.sheet),
       [{ op: 'deleteRows', rows: Array.from({ length: count }, (_, i) => i) }],
-    ).catch(() => { /* best-effort */ });
+    )
+      .then(() => onTsSheetChanged?.(String(sel.sheet)))
+      .catch(() => { /* best-effort */ });
   };
 
   // ── Bulk series transform (T1): scale / shift / interpolate / clip ──────────

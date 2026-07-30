@@ -540,3 +540,106 @@ def test_component_aggregation_all_oneports_json_serialisable() -> None:
     json.dumps(res)
     net, _ = build_network(res["model"], SCENARIO, {})
     assert len(net.buses) == 2
+
+
+# ── Reduction must not break capacity expansion ─────────────────────────────
+#
+# The reduced model REPLACES the working model (the frontend applies it over the
+# session), so anything the round-trip mangles is a permanent change to the case
+# the user then solves.
+
+_EXPANSION_SCENARIO = {"discountRate": 0.05}
+
+
+def _extendable_model() -> dict[str, list[dict[str, Any]]]:
+    """Region model whose two gas generators are extendable greenfield capacity."""
+    m = _two_gas_model()
+    for row in m["generators"]:
+        row.update(
+            {
+                "p_nom": 0.0,
+                "p_nom_extendable": True,
+                "p_nom_max": 500.0,
+                "capital_cost": 1_000_000.0,
+                "lifetime": 20.0,
+            }
+        )
+    return m
+
+
+def test_reduction_keeps_capital_cost_as_an_overnight_cost() -> None:
+    """CAPEX must survive the round-trip un-annuitised.
+
+    ``build_network`` annuitises ``capital_cost`` for extendable assets, so a
+    reduction that serialises the built network back to a workbook used to store
+    the ANNUITISED value — and the next run annuitised it again, leaving
+    extendable CAPEX at ~AF² (≈0.6% at r=5%, 20 y) of its real value, i.e.
+    capacity expansion for free.
+    """
+    res = cluster_model(
+        _extendable_model(),
+        n_clusters=99,
+        group_by_column="region",
+        scenario=_EXPANSION_SCENARIO,
+    )
+    costs = [float(row["capital_cost"]) for row in res["model"]["generators"]]
+    assert costs, "reduced model has no generators"
+    for cost in costs:
+        assert cost == pytest.approx(1_000_000.0)
+
+
+def test_reduction_keeps_extendability_when_aggregating_generators() -> None:
+    """``p_nom_extendable`` is a bool, and pandas calls bool dtype numeric.
+
+    Merging it through the numeric conflict strategy turned a mixed cluster into
+    0.5 and let "zero"/"min"/"default" clear it outright, so the reduced model
+    could no longer build anything. PyPSA's own choice for an extendable flag is
+    "any" — assert that, for every numeric strategy.
+    """
+    for strategy in ("mean", "zero", "min", "max", "default"):
+        m = _extendable_model()
+        # One extendable + one fixed generator on the SAME merged bus and carrier.
+        m["generators"][1].update({"p_nom_extendable": False, "p_nom": 200.0})
+        res = cluster_model(
+            m,
+            n_clusters=99,
+            group_by_column="region",
+            aggregate_components=["Generator"],
+            conflict_strategy=strategy,
+            scenario=_EXPANSION_SCENARIO,
+        )
+        merged = res["model"]["generators"]
+        assert len(merged) == 1, strategy
+        assert merged[0]["p_nom_extendable"] is True, strategy
+        # And it still reads back as extendable through the network builder.
+        net, _ = build_network(res["model"], _EXPANSION_SCENARIO, {})
+        assert bool(net.generators["p_nom_extendable"].iloc[0]) is True, strategy
+
+
+def test_reduction_preserves_ragnarok_config_sheets() -> None:
+    """Pathway / sampling / rolling / scenario / DSL sheets must survive.
+
+    ``network_to_model`` emits only PyPSA components, so these used to vanish —
+    and because the reduced model is pushed to the session, a reduce silently
+    took a multi-period plan back to single-period and dropped the custom-DSL
+    expansion constraints.
+    """
+    m = _extendable_model()
+    m["RAGNAROK_Pathway"] = [{"enabled": True, "snapshotMappingMode": "explicit_period_column"}]
+    m["RAGNAROK_PathwayPeriods"] = [
+        {"period": 2030, "objective_weight": 1.0, "years_weight": 5.0},
+        {"period": 2035, "objective_weight": 1.0, "years_weight": 5.0},
+    ]
+    m["RAGNAROK_Sampling"] = [{"enabled": True, "blockSize": 24}]
+    m["RAGNAROK_Rolling"] = [{"enabled": False}]
+    m["RAGNAROK_Scenarios"] = [{"id": "s1", "label": "Base case"}]
+    m["RAGNAROK_CustomDSL"] = [{"line": "cap co2 <= 100 Mt"}]
+    m["RAGNAROK_CarbonSchedules"] = [{"year": 2030, "price": 50.0}]
+
+    res = cluster_model(
+        m, n_clusters=99, group_by_column="region", scenario=_EXPANSION_SCENARIO
+    )
+    for sheet, rows in m.items():
+        if not sheet.startswith("RAGNAROK_"):
+            continue
+        assert res["model"].get(sheet) == rows, sheet
