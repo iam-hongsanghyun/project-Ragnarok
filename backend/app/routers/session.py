@@ -75,8 +75,20 @@ def merge_static(payload: SessionModelPayload) -> dict:
 
 @router.get("/meta")
 def get_meta(session_id: str = Query("default", alias="session_id")) -> dict:
-    """Return the session meta, or ``{}`` when no model is loaded."""
-    return model_store.get_meta(session_id) or {}
+    """Return the session meta, or ``{}`` when no model is loaded.
+
+    A loaded session's meta carries the journal's monotonic ``version`` so a
+    client can cheaply detect out-of-band mutations — an agent editing the model
+    is exactly that. The SSE stream is the push path; this is the poll/reconnect
+    fallback. The empty-session shape stays ``{}``: "is anything loaded?" checks
+    depend on it.
+    """
+    from .. import journal
+
+    meta = model_store.get_meta(session_id)
+    if meta is None:
+        return {}
+    return {**meta, "version": journal.current_version(session_id)}
 
 
 @router.get("/model/full")
