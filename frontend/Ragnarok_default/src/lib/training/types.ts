@@ -55,15 +55,56 @@ export interface RunAction {
   expect: string;
 }
 
+/**
+ * One stop on a step's guided walkthrough: a real element in the running app,
+ * ringed and annotated so the learner looks at the thing itself rather than at
+ * a description of it.
+ *
+ * The overlay never blocks input — the highlighted control stays clickable
+ * throughout, because "click it and see" is the point.
+ */
+export interface Spotlight {
+  /**
+   * CSS selector for the element to ring. Resolved against the live document,
+   * so it must match a class or attribute the app actually renders. A selector
+   * that matches nothing is reported in the overlay rather than skipped
+   * silently.
+   */
+  selector: string;
+  /** Short name of what is being pointed at. */
+  title: string;
+  /** What to notice, or what to click and watch happen. */
+  note?: string;
+  /** View to switch to before this stop, when the target lives inside one. */
+  tab?: WorkspaceTab;
+}
+
 export interface TutorialStep {
   id: string;
   title: string;
+  /**
+   * Module heading this step belongs to, for a long course that groups its
+   * steps ("2 · Economic dispatch"). Consecutive steps sharing a section render
+   * under one heading in the rail. Omit on short tutorials.
+   */
+  section?: string;
   /** The view this step happens in. Drives the "Open <view>" button. */
   tab: WorkspaceTab;
   /** Precise location inside the view, e.g. "Build → Buses step". */
   where: string;
-  /** The detailed explanation, one string per paragraph. */
+  /**
+   * The modelling idea, independent of Ragnarok — what the concept is and why
+   * it matters. Rendered ahead of the mechanics so a learner can read the
+   * theory without the tool, and the tool without re-deriving the theory.
+   */
+  concept?: string[];
+  /** The detailed explanation of what to do here, one string per paragraph. */
   explain: string[];
+  /**
+   * Guided walkthrough of the real UI for this step: each stop rings an element
+   * and says what to notice. Shown behind a "Show me" button, never automatic.
+   */
+  spotlights?: Spotlight[];
   /** Values the user types at this step. */
   entries?: FieldEntry[];
   /** Files the user imports at this step. */

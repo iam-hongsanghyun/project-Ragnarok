@@ -80,8 +80,7 @@
 .training-rail-steps {
   list-style: none;
   margin: 0;
-  padding: 6px 0;
-  counter-reset: none;
+  padding: 0;
 }
 
 .training-rail-step {
@@ -359,6 +358,23 @@
 
 .training-step { max-width: 78ch; }
 
+.training-step__section {
+  margin-bottom: 4px;
+  color: var(--text-faint);
+  font-size: var(--fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* "The idea" — the modelling theory, set apart from the mechanics so it reads
+   as something you could learn without the tool in front of you. */
+.training-concept {
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-hover);
+}
+
 .training-step__title {
   display: flex;
   align-items: baseline;
@@ -402,6 +418,193 @@
 }
 
 .training-where__value { font-size: var(--fs-sm); }
+
+.training-where__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+/* ── Snapshot builder (Build → Snapshots step) ──
+   Not a training component, but it lives here because the course is what
+   surfaced the need. Move it out if it grows. */
+
+.snapshot-builder {
+  padding: 10px 14px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.snapshot-builder__fields {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.snapshot-builder__field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.snapshot-builder__field > span {
+  color: var(--text-faint);
+  font-size: var(--fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.snapshot-builder__field input,
+.snapshot-builder__field select {
+  height: 28px;
+  min-width: 150px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel-strong);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+
+.snapshot-builder__field--narrow input { min-width: 90px; }
+
+.snapshot-builder__summary,
+.snapshot-builder__problem,
+.snapshot-builder__warn {
+  margin: 8px 0 0;
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+.snapshot-builder__summary { color: var(--text-secondary); }
+.snapshot-builder__replacing { color: var(--warn); }
+.snapshot-builder__problem { color: var(--danger-strong); }
+
+.snapshot-builder__warn {
+  padding: 7px 10px;
+  border-left: 2px solid var(--warn);
+  border-radius: var(--radius-sm);
+  background: var(--warn-soft);
+  color: var(--text);
+}
+
+.snapshot-builder__weight {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  cursor: pointer;
+}
+
+/* ── Spotlight walkthrough ──
+   Pointer-transparent by design: the ring dims the page via an outsized
+   box-shadow rather than an interactive scrim, so the control being explained
+   stays clickable. Only the callout opts back into pointer events. */
+
+.spotlight-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 4000;
+  pointer-events: none;
+}
+
+/* No transition on position or size. The ring is re-measured every frame, so a
+   transition is restarted before it can finish and the ring settles short of
+   the target — visibly ringing empty space. It must snap. */
+.spotlight-ring {
+  position: fixed;
+  border: 2px solid var(--brand);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 0 0 9999px rgba(16, 20, 28, 0.55);
+  pointer-events: none;
+}
+
+/* A soft pulse so the ring reads as "look here" without animating position. */
+.spotlight-ring::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border: 2px solid var(--brand-ring);
+  border-radius: var(--radius);
+  animation: spotlight-pulse 1.6s ease-out infinite;
+}
+
+@keyframes spotlight-pulse {
+  0%   { opacity: 0.9; transform: scale(1); }
+  70%  { opacity: 0; transform: scale(1.06); }
+  100% { opacity: 0; transform: scale(1.06); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spotlight-ring::after { animation: none; opacity: 0.6; }
+}
+
+.spotlight-callout {
+  position: fixed;
+  width: 320px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--panel-strong);
+  box-shadow: 0 8px 28px rgba(16, 20, 28, 0.28);
+  pointer-events: auto;
+}
+
+.spotlight-callout__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.spotlight-callout__count {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+}
+
+.spotlight-callout__close {
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-2xs);
+}
+
+.spotlight-callout__close:hover { color: var(--text); text-decoration: underline; }
+
+.spotlight-callout__title {
+  margin: 0 0 6px;
+  font-size: var(--fs-md);
+  line-height: 1.35;
+}
+
+.spotlight-callout__note {
+  margin: 0;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.spotlight-callout__missing {
+  margin: 0;
+  line-height: 1.5;
+  color: var(--danger-strong);
+  font-size: var(--fs-sm);
+}
+
+.spotlight-callout__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
 
 .training-block { margin-bottom: 20px; }
 

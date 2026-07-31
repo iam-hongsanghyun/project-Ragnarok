@@ -783,7 +783,8 @@ export function TablesPane({
             grid, and curate which columns are shown (40+ on some sheets). */}
         {!isTs && (
           <div className="section-toolbar">
-            <button className="ghost-button sm" onClick={handleAddComponent}>
+            {/* `data-tour` is the stable hook the Training walkthrough rings. */}
+            <button className="ghost-button sm" data-tour="add-row" onClick={handleAddComponent}>
               + Add {componentNoun}
             </button>
             <button

@@ -10,7 +10,7 @@
  */
 import React, { useCallback, useState } from 'react';
 import { WorkspaceTab } from 'lib/types';
-import { Tutorial, TutorialProgress, TutorialStep } from 'lib/training/types';
+import { Spotlight, Tutorial, TutorialProgress, TutorialStep } from 'lib/training/types';
 import {
   completeAndAdvance,
   isStepComplete,
@@ -29,6 +29,8 @@ interface Props {
   onProgressChange: (next: TutorialProgress) => void;
   /** Switch the workspace to a view. The only app mutation a tutorial may do. */
   onNavigate: (tab: WorkspaceTab) => void;
+  /** Start this step's spotlight walkthrough of the real UI. */
+  onStartGuide: (stops: Spotlight[]) => void;
   /** Return to the tutorial picker. */
   onExit: () => void;
   onReset: () => void;
@@ -70,17 +72,40 @@ function CopyValue({ value }: { value: string }) {
   );
 }
 
-function StepBody({ step, onNavigate }: { step: TutorialStep; onNavigate: (t: WorkspaceTab) => void }) {
+function StepBody({ step, onNavigate, onStartGuide }: {
+  step: TutorialStep;
+  onNavigate: (t: WorkspaceTab) => void;
+  onStartGuide: (stops: Spotlight[]) => void;
+}) {
   return (
     <>
+      {step.concept && step.concept.length > 0 && (
+        // The modelling idea comes first and reads as its own thing: the theory
+        // has to survive being read without the tool in front of you.
+        <section className="training-concept">
+          <h4 className="training-block__title">The idea</h4>
+          {step.concept.map((paragraph, i) => (
+            // eslint-disable-next-line react/no-array-index-key
+            <p key={i} className="training-explain">{paragraph}</p>
+          ))}
+        </section>
+      )}
+
       <div className="training-where">
         <div>
           <span className="training-where__label">Where</span>
           <span className="training-where__value">{step.where}</span>
         </div>
-        <button type="button" className="tb-btn" onClick={() => onNavigate(step.tab)}>
-          Open {TAB_LABEL[step.tab] ?? step.tab}
-        </button>
+        <div className="training-where__actions">
+          {step.spotlights && step.spotlights.length > 0 && (
+            <button type="button" className="primary-button" onClick={() => onStartGuide(step.spotlights!)}>
+              Show me ({step.spotlights.length})
+            </button>
+          )}
+          <button type="button" className="tb-btn" onClick={() => onNavigate(step.tab)}>
+            Open {TAB_LABEL[step.tab] ?? step.tab}
+          </button>
+        </div>
       </div>
 
       <section className="training-block">
@@ -177,7 +202,7 @@ function StepBody({ step, onNavigate }: { step: TutorialStep; onNavigate: (t: Wo
   );
 }
 
-export function TutorialRunner({ tutorial, progress, onProgressChange, onNavigate, onExit, onReset }: Props) {
+export function TutorialRunner({ tutorial, progress, onProgressChange, onNavigate, onStartGuide, onExit, onReset }: Props) {
   const currentId = resolveCurrentStepId(tutorial, progress);
   const index = stepIndex(tutorial, currentId);
   const step = index >= 0 ? tutorial.steps[index] : null;
@@ -216,11 +241,12 @@ export function TutorialRunner({ tutorial, progress, onProgressChange, onNavigat
 
         {step ? (
           <article className="training-step">
+            {step.section && <div className="training-step__section">{step.section}</div>}
             <h3 className="training-step__title">
               <span className="training-step__number">{index + 1}</span>
               {step.title}
             </h3>
-            <StepBody step={step} onNavigate={onNavigate} />
+            <StepBody step={step} onNavigate={onNavigate} onStartGuide={onStartGuide} />
           </article>
         ) : (
           <div className="view-empty"><p>This tutorial has no steps yet.</p></div>

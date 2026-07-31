@@ -100,6 +100,8 @@ import { AnalyticsView } from './views/AnalyticsView';
 import { PhysicalRiskView, PhysicalRiskSubTab } from './views/PhysicalRiskView';
 import { SitingView } from './views/SitingView';
 import { TrainingView } from './views/TrainingView';
+import { SpotlightOverlay } from './features/training/SpotlightOverlay';
+import type { Spotlight } from 'lib/training/types';
 import { ActivityBar } from './layout/ActivityBar';
 import { useModelIssues } from './features/validation/useModelIssues';
 import { useFrontendPlugins } from './features/plugins/frontendPlugins';
@@ -236,6 +238,16 @@ function AppInner() {
   // Always open on the Welcome / intro screen — the workspace tab is NOT
   // persisted across reloads (was restoring the last view, e.g. Comparison).
   const [tab, setTab] = useState<WorkspaceTab>('Welcome');
+  // Training walkthrough. Lives here, not in TrainingView, so a walkthrough can
+  // switch views and keep running — TrainingView unmounts the moment it does.
+  const [guide, setGuide] = useState<{ stops: Spotlight[]; index: number } | null>(null);
+  const startGuide = useCallback((stops: Spotlight[]) => {
+    if (stops.length > 0) setGuide({ stops, index: 0 });
+  }, []);
+  useEffect(() => {
+    const dest = guide?.stops[guide.index]?.tab;
+    if (dest) setTab(dest);
+  }, [guide]);
   // Cross-tab navigation from the Decisions launcher: the launcher lives in the
   // Post-analysis tab but some workflows (asset swap, ESS) live in Market & Policy.
   // Seed the destination tab's persisted section, then switch tab — SettingsView
@@ -3395,6 +3407,14 @@ function AppInner() {
               dateFormat={settings.dateFormat}
               onOpenRunSetup={() => { setDryRun(false); setRunDialogOpen(true); }}
               onApplyConversion={handleApplyConversion}
+              snapshotWeight={snapshotWeight}
+              onSnapshotWeightChange={setSnapshotWeight}
+              onGenerateSnapshots={(labels) => {
+                // Replace the axis wholesale — the builder has already confirmed
+                // the discard, and a merged axis would misalign every profile.
+                setModel((prev) => ({ ...prev, snapshots: labels.map((snapshot) => ({ snapshot })) }));
+                requestStaticResync();
+              }}
             />
           )}
 
@@ -3607,7 +3627,7 @@ function AppInner() {
             />
           )}
 
-          {tab === 'Training' && <TrainingView onNavigate={setTab} />}
+          {tab === 'Training' && <TrainingView onNavigate={setTab} onStartGuide={startGuide} />}
         </div>
       </div>
 
@@ -3631,6 +3651,18 @@ function AppInner() {
         onQueueNext={() => void handleRunModel(true)}
         onAddScenario={() => void handleAddScenarioFromConsole()}
       />
+
+      {/* ── Training walkthrough overlay ──
+        Root-level so it outlives a view switch, and pointer-transparent so the
+        control it rings stays clickable while it is being explained. */}
+      {guide && (
+        <SpotlightOverlay
+          stops={guide.stops}
+          index={guide.index}
+          onIndexChange={(i) => setGuide((g) => (g ? { ...g, index: i } : g))}
+          onClose={() => setGuide(null)}
+        />
+      )}
 
       {/* ── Master model dialog (import multi-year master → derive by filter) ── */}
       <MasterModelDialog

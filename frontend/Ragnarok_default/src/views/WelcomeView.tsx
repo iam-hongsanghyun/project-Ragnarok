@@ -135,7 +135,8 @@ function StartChooser({ onStartScratch, onLoadExample, onLoadStarterPack }: {
       <h2>Get started</h2>
       {picking === null ? (
         <div className="welcome-start-choices">
-          <button type="button" className="welcome-start-card" onClick={onStartScratch}>
+          {/* `data-tour` is the stable hook the Training walkthrough rings. */}
+          <button type="button" data-tour="start-scratch" className="welcome-start-card" onClick={onStartScratch}>
             <span className="welcome-start-card__title">Start from scratch</span>
             <span className="welcome-start-card__blurb">Start with an empty model and build it out in the guided builder.</span>
           </button>

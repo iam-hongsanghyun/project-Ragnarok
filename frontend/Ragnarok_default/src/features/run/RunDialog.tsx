@@ -109,7 +109,9 @@ export function RunDialog({
               >
                 Force LP
               </button>
+              {/* `data-tour` is the stable hook the Training walkthrough rings. */}
               <button
+                data-tour="dry-run"
                 className={`tb-btn${dryRun ? '' : ' tb-btn--muted'}`}
                 onClick={() => onDryRunChange(!dryRun)}
               >

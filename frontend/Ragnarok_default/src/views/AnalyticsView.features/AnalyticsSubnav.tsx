@@ -31,6 +31,8 @@ export function AnalyticsSubnav({ subTab, onChange, validateResult, modelIssues 
       {SUB_TABS.map((s) => (
         <button
           key={s}
+          // `data-subtab` is the stable hook the Training walkthrough rings.
+          data-subtab={s}
           className={`subnav-btn${subTab === s ? ' subnav-btn--active' : ''}${
             s === 'Validation' && validateResult && !validateResult.valid ? ' subnav-btn--error' : ''}${
             s === 'Validation' && validateResult?.valid ? ' subnav-btn--ok' : ''}`}

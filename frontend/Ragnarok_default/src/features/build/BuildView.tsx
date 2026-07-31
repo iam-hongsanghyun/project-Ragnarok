@@ -30,6 +30,7 @@ import { BuildDetailPane } from './BuildDetailPane';
 import { BuildNetworkMap, BRANCH_SHEETS, isGeoSheet, LinkMode } from './BuildNetworkMap';
 import { BuildAttributeForm } from './BuildAttributeForm';
 import { ConversionPicker } from './ConversionPicker';
+import { SnapshotBuilder } from './SnapshotBuilder';
 import type { WorkbookFragment } from 'lib/api/databases';
 import { ResizablePanels } from '../../layout/ResizablePanels';
 import { ViewPaneHeader } from '../../shared/components/primitives';
@@ -56,6 +57,11 @@ export interface BuildViewProps {
   dateFormat: DateFormat;
   onOpenConstraintsWorkspace?: () => void;
   onOpenRunSetup?: () => void;
+  /** Replace the `snapshots` sheet with a generated axis (Snapshots step). */
+  onGenerateSnapshots?: (labels: string[]) => void;
+  /** Global run resolution in hours per snapshot, so the builder can match it. */
+  snapshotWeight?: number;
+  onSnapshotWeightChange?: (hours: number) => void;
   /** Merge a conversion-technology fragment (Link + carrier bus + carriers +
    *  fuel supply) into the working model. */
   onApplyConversion?: (fragment: WorkbookFragment, label: string) => void;
@@ -398,7 +404,9 @@ export function BuildView(props: BuildViewProps) {
             .filter(Boolean)
             .join(' ');
           return (
-            <button key={s.id} className={cls} onClick={() => goStep(i)} type="button">
+            // `data-build-step` is the stable hook the Training walkthrough
+            // rings — step labels and positions may change, ids do not.
+            <button key={s.id} data-build-step={s.id} className={cls} onClick={() => goStep(i)} type="button">
               <span className="build-step-num">{complete && errorCount === 0 ? '✓' : i + 1}</span>
               <span className="build-step-label">{s.label}</span>
               {errorCount > 0 && <span className="tab-badge tab-badge--error">{errorCount}</span>}
@@ -438,6 +446,28 @@ export function BuildView(props: BuildViewProps) {
             />
           </section>
           <BuildDetailPane step={step} model={props.model} issues={props.modelIssues} focusedRowIndex={focusedRowIndex} />
+        </ResizablePanels>
+      ) : !geo ? (
+        // Non-geo steps (network, snapshots, carriers, processes) get no map:
+        // these sheets have no coordinates, so a map is dead space that pushes
+        // the table below the fold. Table left, step-specific panel right.
+        //
+        // Snapshots additionally swap the attribute form for the axis builder —
+        // a snapshot has one field and is never authored one row at a time.
+        <ResizablePanels id="build" direction="horizontal" className="build-body" initialSizes={[62, 38]} minSize={260}>
+          <section className="build-body-main">
+            {buildTable}
+          </section>
+          <div className="build-top-right">
+            {step.id === 'snapshots' && props.onGenerateSnapshots ? (
+              <SnapshotBuilder
+                existingCount={props.model.snapshots?.length ?? 0}
+                onGenerate={props.onGenerateSnapshots}
+                snapshotWeight={props.snapshotWeight ?? 1}
+                onSnapshotWeightChange={props.onSnapshotWeightChange ?? (() => { /* not wired */ })}
+              />
+            ) : rightColumn}
+          </div>
         </ResizablePanels>
       ) : (
         <ResizablePanels id="build-v" direction="vertical" className="build-body" initialSizes={[52, 48]} minSize={120}>

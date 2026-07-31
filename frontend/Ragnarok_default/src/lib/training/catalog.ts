@@ -27,9 +27,10 @@
  * Add a tutorial by defining it as a `const` above `TUTORIALS` and appending it
  * to that array, in the order it should be taught.
  */
-import { Tutorial, TrainingLevel } from './types';
+import { Tutorial, TrainingLevel, TutorialStep } from './types';
+import { POWER_MARKET_COURSE } from './course';
 
-export const TUTORIALS: Tutorial[] = [];
+export const TUTORIALS: Tutorial[] = [POWER_MARKET_COURSE];
 
 /** Levels in teaching order — drives the grouping in the training rail. */
 export const LEVEL_ORDER: TrainingLevel[] = ['Beginner', 'Intermediate', 'Advanced'];
@@ -44,4 +45,30 @@ export function tutorialsByLevel(tutorials: Tutorial[] = TUTORIALS): Array<{ lev
   return LEVEL_ORDER
     .map((level) => ({ level, items: tutorials.filter((t) => t.level === level) }))
     .filter((group) => group.items.length > 0);
+}
+
+export interface StepGroup {
+  /** Section heading, or null for steps that declare none. */
+  section: string | null;
+  /** Steps in this run, paired with their 1-based position in the tutorial. */
+  items: Array<{ step: TutorialStep; number: number }>;
+}
+
+/**
+ * Steps grouped into consecutive runs that share a `section`, preserving order.
+ *
+ * Runs rather than a keyed map: a course is read front to back, so a section
+ * that reappears later is a second heading, not an append to the first — which
+ * also makes an accidentally out-of-order step visible instead of silently
+ * absorbed.
+ */
+export function stepsBySection(steps: TutorialStep[]): StepGroup[] {
+  const groups: StepGroup[] = [];
+  steps.forEach((step, i) => {
+    const section = step.section ?? null;
+    const last = groups[groups.length - 1];
+    if (last && last.section === section) last.items.push({ step, number: i + 1 });
+    else groups.push({ section, items: [{ step, number: i + 1 }] });
+  });
+  return groups;
 }

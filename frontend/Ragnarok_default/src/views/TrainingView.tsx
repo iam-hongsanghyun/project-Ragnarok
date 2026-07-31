@@ -12,8 +12,8 @@
  */
 import React, { useCallback } from 'react';
 import { WorkspaceTab } from 'lib/types';
-import { TutorialProgress } from 'lib/training/types';
-import { TUTORIALS, findTutorial, tutorialsByLevel } from 'lib/training/catalog';
+import { Spotlight, TutorialProgress } from 'lib/training/types';
+import { TUTORIALS, findTutorial, stepsBySection, tutorialsByLevel } from 'lib/training/catalog';
 import {
   emptyProgress,
   isStepComplete,
@@ -32,9 +32,11 @@ const PROGRESS_KEY = 'ragnarok:training:progress';
 interface Props {
   /** Switch the workspace to a view, so a step can put the user in the right place. */
   onNavigate: (tab: WorkspaceTab) => void;
+  /** Start a spotlight walkthrough. Owned by App so it survives a view switch. */
+  onStartGuide: (stops: Spotlight[]) => void;
 }
 
-export function TrainingView({ onNavigate }: Props) {
+export function TrainingView({ onNavigate, onStartGuide }: Props) {
   // One record for every tutorial rather than a key per tutorial, so the picker
   // can show a completion badge on each card without a hook per row.
   const [progressById, setProgressById] = usePersistedState<Record<string, TutorialProgress>>(PROGRESS_KEY, {});
@@ -60,25 +62,32 @@ export function TrainingView({ onNavigate }: Props) {
         </button>
       }
     >
-      <ol className="training-rail-steps">
-        {active.steps.map((step, i) => {
-          const done = isStepComplete(progressFor(active.id), step.id);
-          const current = resolveCurrentStepId(active, progressFor(active.id)) === step.id;
-          return (
-            <li key={step.id}>
-              <button
-                type="button"
-                className={`training-rail-step${current ? ' is-current' : ''}${done ? ' is-done' : ''}`}
-                onClick={() => setProgressFor(active.id, { ...progressFor(active.id), currentStepId: step.id })}
-                aria-current={current ? 'step' : undefined}
-              >
-                <span className="training-rail-step__num">{done ? '✓' : i + 1}</span>
-                <span className="training-rail-step__label">{step.title}</span>
-              </button>
-            </li>
-          );
-        })}
-      </ol>
+      {stepsBySection(active.steps).map((group, gi) => (
+        // Section runs are positional, so the index is the stable identity.
+        // eslint-disable-next-line react/no-array-index-key
+        <div key={`${group.section ?? 'ungrouped'}-${gi}`} className="training-rail-group">
+          {group.section && <div className="training-rail-group__title">{group.section}</div>}
+          <ol className="training-rail-steps">
+            {group.items.map(({ step, number }) => {
+              const done = isStepComplete(progressFor(active.id), step.id);
+              const current = resolveCurrentStepId(active, progressFor(active.id)) === step.id;
+              return (
+                <li key={step.id}>
+                  <button
+                    type="button"
+                    className={`training-rail-step${current ? ' is-current' : ''}${done ? ' is-done' : ''}`}
+                    onClick={() => setProgressFor(active.id, { ...progressFor(active.id), currentStepId: step.id })}
+                    aria-current={current ? 'step' : undefined}
+                  >
+                    <span className="training-rail-step__num">{done ? '✓' : number}</span>
+                    <span className="training-rail-step__label">{step.title}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+      ))}
     </LeftRail>
   ) : (
     <LeftRail title="Training" ariaLabel="Tutorials">
@@ -121,6 +130,7 @@ export function TrainingView({ onNavigate }: Props) {
               progress={progressFor(active.id)}
               onProgressChange={(next) => setProgressFor(active.id, next)}
               onNavigate={onNavigate}
+              onStartGuide={onStartGuide}
               onExit={() => setActiveId(null)}
               onReset={() => setProgressFor(active.id, emptyProgress())}
             />
