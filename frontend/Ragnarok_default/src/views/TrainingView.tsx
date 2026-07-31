@@ -30,7 +30,7 @@ interface Props {
   /** Switch the workspace to a view, so a step can put the user in the right place. */
   onNavigate: (tab: WorkspaceTab) => void;
   /** Start a spotlight walkthrough. Owned by App so it survives a view switch. */
-  onStartGuide: (stops: Spotlight[]) => void;
+  onStartGuide: (stops: Spotlight[], stepId?: string, startIndex?: number) => void;
   /**
    * Which tutorial is running, and how far through each one the learner is.
    *
@@ -64,6 +64,25 @@ export function TrainingView({
   const setProgressFor = useCallback((id: string, next: TutorialProgress) => {
     setProgressById({ ...progressById, [id]: next });
   }, [progressById, setProgressById]);
+
+  /**
+   * Open a tutorial and RECORD which step it is on.
+   *
+   * Without the record, `currentStepId` stays null until the learner presses
+   * Next, and resuming falls back to inferring the step from what is ticked. A
+   * learner who read step 1, went off to Build, and came back would be inferred
+   * back to step 1 correctly — but anyone who ticked steps out of order would
+   * not. Storing it makes "where was I" a fact rather than a guess.
+   */
+  const openTutorial = useCallback((id: string) => {
+    setActiveId(id);
+    const tutorial = findTutorial(id);
+    const current = progressById[id] ?? emptyProgress();
+    if (tutorial && !current.currentStepId) {
+      const resolved = resolveCurrentStepId(tutorial, current);
+      if (resolved) setProgressById({ ...progressById, [id]: { ...current, currentStepId: resolved } });
+    }
+  }, [setActiveId, progressById, setProgressById]);
 
   const rail = active ? (
     <LeftRail
@@ -117,7 +136,7 @@ export function TrainingView({
                   key={t.id}
                   type="button"
                   className="training-rail-item"
-                  onClick={() => setActiveId(t.id)}
+                  onClick={() => openTutorial(t.id)}
                 >
                   <span className="training-rail-item__label">{t.title}</span>
                   <span className="training-rail-item__meta">
@@ -154,7 +173,7 @@ export function TrainingView({
             <TutorialCatalog
               tutorials={TUTORIALS}
               progressById={progressFor}
-              onStart={setActiveId}
+              onStart={openTutorial}
             />
           )}
         </main>

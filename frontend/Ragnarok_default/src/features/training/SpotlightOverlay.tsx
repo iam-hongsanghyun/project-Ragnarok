@@ -23,6 +23,8 @@ interface Props {
   index: number;
   onIndexChange: (i: number) => void;
   onClose: () => void;
+  /** Done pressed on the LAST stop — the walkthrough was finished, not abandoned. */
+  onComplete?: () => void;
 }
 
 interface Rect { top: number; left: number; width: number; height: number }
@@ -37,7 +39,7 @@ const sameRect = (a: Rect | null, b: Rect | null): boolean => {
     && Math.abs(a.width - b.width) < 0.5 && Math.abs(a.height - b.height) < 0.5;
 };
 
-export function SpotlightOverlay({ stops, index, onIndexChange, onClose }: Props) {
+export function SpotlightOverlay({ stops, index, onIndexChange, onClose, onComplete }: Props) {
   const stop = stops[index];
   const [rect, setRect] = useState<Rect | null>(null);
   const [missing, setMissing] = useState(false);
@@ -79,8 +81,8 @@ export function SpotlightOverlay({ stops, index, onIndexChange, onClose }: Props
 
   const next = useCallback(() => {
     if (index + 1 < stops.length) onIndexChange(index + 1);
-    else onClose();
-  }, [index, stops.length, onIndexChange, onClose]);
+    else (onComplete ?? onClose)();
+  }, [index, stops.length, onIndexChange, onClose, onComplete]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

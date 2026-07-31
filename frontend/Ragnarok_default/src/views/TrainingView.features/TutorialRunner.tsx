@@ -8,17 +8,21 @@
  * never submits a run — a learner who watches values appear has not learnt
  * where those values live.
  */
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { WorkspaceTab } from 'lib/types';
 import { Spotlight, Tutorial, TutorialProgress, TutorialStep } from 'lib/training/types';
 import {
   completeAndAdvance,
   isStepComplete,
   isTutorialComplete,
+  entriesDoneFor,
+  guideStopFor,
+  isEntryDone,
   moveBy,
   percentComplete,
   resolveCurrentStepId,
   stepIndex,
+  toggleEntry,
   toggleStep,
 } from 'lib/training/progress';
 import { ViewPaneHeader } from 'shared/components/primitives';
@@ -31,7 +35,7 @@ interface Props {
   /** Switch the workspace to a view. The only app mutation a tutorial may do. */
   onNavigate: (tab: WorkspaceTab) => void;
   /** Start this step's spotlight walkthrough of the real UI. */
-  onStartGuide: (stops: Spotlight[]) => void;
+  onStartGuide: (stops: Spotlight[], stepId?: string, startIndex?: number) => void;
   /** Return to the tutorial picker. */
   onExit: () => void;
   onReset: () => void;
@@ -77,11 +81,18 @@ function CopyValue({ value }: { value: string }) {
   );
 }
 
-function StepBody({ step, onNavigate, onStartGuide }: {
+function StepBody({ step, onNavigate, onStartGuide, guideStop, isDone, onToggleEntry }: {
   step: TutorialStep;
   onNavigate: (t: WorkspaceTab) => void;
-  onStartGuide: (stops: Spotlight[]) => void;
+  onStartGuide: (stops: Spotlight[], stepId?: string, startIndex?: number) => void;
+  /** Walkthrough stop previously reached on this step (0 = untouched). */
+  guideStop: number;
+  /** Has this value already been entered? */
+  isDone: (field: string) => boolean;
+  onToggleEntry: (field: string) => void;
 }) {
+  const entries = step.entries ?? [];
+  const doneCount = entries.filter((e) => isDone(e.field)).length;
   return (
     <>
       {step.concept && step.concept.length > 0 && (
@@ -103,8 +114,16 @@ function StepBody({ step, onNavigate, onStartGuide }: {
         </div>
         <div className="training-where__actions">
           {step.spotlights && step.spotlights.length > 0 && (
-            <button type="button" className="primary-button" onClick={() => onStartGuide(step.spotlights!)}>
-              Show me ({step.spotlights.length})
+            // A walkthrough closed mid-way resumes at the stage it was on, so
+            // going off to do the work does not cost the stops already seen.
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => onStartGuide(step.spotlights!, step.id, guideStop)}
+            >
+              {guideStop > 0 && guideStop < step.spotlights.length
+                ? `Resume tour (${guideStop + 1}/${step.spotlights.length})`
+                : `Show me (${step.spotlights.length})`}
             </button>
           )}
           <button type="button" className="tb-btn" onClick={() => onNavigate(step.tab)}>
@@ -123,13 +142,19 @@ function StepBody({ step, onNavigate, onStartGuide }: {
 
       {step.entries && step.entries.length > 0 && (
         <section className="training-block">
-          <h4 className="training-block__title">Values to enter</h4>
+          <h4 className="training-block__title">
+            Values to enter
+            <span className="training-block__count">{doneCount} of {entries.length} entered</span>
+          </h4>
           <p className="training-block__note">
             Ragnarok does not enter these for you — type them in yourself so you learn where they live.
+            Tick each one off as you go; leaving this view and coming back returns you to the first you
+            have not ticked.
           </p>
           <table className="training-table">
             <thead>
               <tr>
+                <th aria-label="Entered" />
                 <th>Field</th>
                 <th>Value</th>
                 <th>Why</th>
@@ -137,8 +162,23 @@ function StepBody({ step, onNavigate, onStartGuide }: {
             </thead>
             <tbody>
               {step.entries.map((entry) => (
-                <tr key={`${entry.field}|${entry.value}`}>
-                  <td><code className="training-field">{entry.field}</code></td>
+                <tr
+                  key={`${entry.field}|${entry.value}`}
+                  className={isDone(entry.field) ? 'is-entered' : ''}
+                  data-entry-pending={isDone(entry.field) ? undefined : '1'}
+                >
+                  <td className="training-entry-check">
+                    <input
+                      type="checkbox"
+                      checked={isDone(entry.field)}
+                      onChange={() => onToggleEntry(entry.field)}
+                      aria-label={`Entered ${entry.field}`}
+                    />
+                  </td>
+                  <td>
+                    <code className="training-field">{entry.field}</code>
+                    {entry.label && <span className="training-field-label">{entry.label}</span>}
+                  </td>
                   <td className="training-value-cell">
                     <span className="training-value">{entry.value}</span>
                     {entry.unit && <span className="training-unit">{entry.unit}</span>}
@@ -218,6 +258,31 @@ export function TutorialRunner({
   const finished = isTutorialComplete(tutorial, progress);
   const done = step ? isStepComplete(progress, step.id) : false;
 
+  // Where to start reading when the shown step changes.
+  //
+  // A step is ALWAYS opened at the top — that is where the idea and the "where"
+  // strip are, and a learner arriving at a step needs to read them. Only once
+  // they have ticked at least one value does this become a resume: then, and only
+  // then, jump to the first value still outstanding so a twenty-row step does not
+  // have to be re-found. Scrolling an untouched step into its middle just hides
+  // the explanation.
+  //
+  // Keyed on the shown step, not on every tick, so ticking a box does not move
+  // the page under the cursor.
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const shownStepId = step?.id ?? null;
+  const resumeCount = shownStepId ? entriesDoneFor(progress, shownStepId).length : 0;
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body || !shownStepId) return;
+    const pending = resumeCount > 0 ? body.querySelector('[data-entry-pending="1"]') : null;
+    if (pending) pending.scrollIntoView({ block: 'center' });
+    else body.scrollTop = 0;
+    // resumeCount is read at step-change time only — adding it as a dependency
+    // would re-scroll on every tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shownStepId]);
+
   return (
     <div className="training-runner">
       <ViewPaneHeader>
@@ -239,7 +304,7 @@ export function TutorialRunner({
         </div>
       </ViewPaneHeader>
 
-      <div className="training-runner__body">
+      <div className="training-runner__body" ref={bodyRef}>
         {finished && (
           <div className="training-done" role="status">
             <b>Tutorial complete.</b> Every step is ticked. Reset progress to run through it again,
@@ -264,7 +329,14 @@ export function TutorialRunner({
               <span className="training-step__number">{index + 1}</span>
               {step.title}
             </h3>
-            <StepBody step={step} onNavigate={onNavigate} onStartGuide={onStartGuide} />
+            <StepBody
+              step={step}
+              onNavigate={onNavigate}
+              onStartGuide={onStartGuide}
+              guideStop={guideStopFor(progress, step.id)}
+              isDone={(field) => isEntryDone(progress, step.id, field)}
+              onToggleEntry={(field) => onProgressChange(toggleEntry(progress, step.id, field))}
+            />
           </article>
         ) : (
           <div className="view-empty"><p>This tutorial has no steps yet.</p></div>

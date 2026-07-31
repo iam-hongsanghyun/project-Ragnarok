@@ -25,11 +25,21 @@ export type TrainingLevel = 'Beginner' | 'Intermediate' | 'Advanced';
 export interface FieldEntry {
   /** Where the value goes: `sheet.column`, or `View → Section → Control`. */
   field: string;
+  /**
+   * Plain-English name for the field — `p_nom` is meaningless until you are told
+   * it is installed capacity. Always supply this for a PyPSA attribute; a learner
+   * who only ever sees the symbol has not been taught anything.
+   */
+  label?: string;
   /** Exactly what to type. Shown verbatim and copyable; never auto-applied. */
   value: string;
   /** Unit of the value, when it carries one (MW, EUR/MWh, h, tCO2/MWh). */
   unit?: string;
-  /** Why this value — the modelling reason, not the mechanics of typing it. */
+  /**
+   * What the field controls and why THIS value. Not a restatement of the label:
+   * it should say what changes in the answer if the number were different, so the
+   * learner could choose their own value next time.
+   */
   why: string;
 }
 
@@ -182,4 +192,22 @@ export interface TutorialProgress {
   completed: string[];
   /** The step the runner is showing. Null → resolve to first incomplete. */
   currentStepId: string | null;
+  /**
+   * Progress WITHIN a step: step id → the `field` of each value already entered.
+   *
+   * A step can carry twenty values, and a learner enters them a few at a time,
+   * leaving for Build in between. Without this, returning to the step means
+   * re-finding your place in a long list — so the runner ticks them off and
+   * scrolls back to the first one still outstanding.
+   */
+  entriesDone?: Record<string, string[]>;
+  /**
+   * Walkthrough position within a step: step id → last spotlight stop reached.
+   *
+   * A learner is at step 5, stop 5 of 7, and leaves to do the work. Without this
+   * they come back to stop 1 and have to click through five stops again — the
+   * walkthrough is the part they were actually in the middle of, so it is the part
+   * that most needs remembering.
+   */
+  guideStop?: Record<string, number>;
 }

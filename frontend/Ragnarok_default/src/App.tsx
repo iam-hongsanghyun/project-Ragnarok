@@ -103,7 +103,14 @@ import { TrainingView } from './views/TrainingView';
 import { SpotlightOverlay } from './features/training/SpotlightOverlay';
 import type { Spotlight, TutorialProgress } from 'lib/training/types';
 import { findTutorial } from 'lib/training/catalog';
-import { emptyProgress, resolveCurrentStepId, stepIndex as trainingStepIndex } from 'lib/training/progress';
+import {
+  clearGuideStop,
+  emptyProgress,
+  guideStopFor,
+  resolveCurrentStepId,
+  setGuideStop,
+  stepIndex as trainingStepIndex,
+} from 'lib/training/progress';
 import { ActivityBar } from './layout/ActivityBar';
 import { useModelIssues } from './features/validation/useModelIssues';
 import { useFrontendPlugins } from './features/plugins/frontendPlugins';
@@ -242,9 +249,12 @@ function AppInner() {
   const [tab, setTab] = useState<WorkspaceTab>('Welcome');
   // Training walkthrough. Lives here, not in TrainingView, so a walkthrough can
   // switch views and keep running — TrainingView unmounts the moment it does.
-  const [guide, setGuide] = useState<{ stops: Spotlight[]; index: number } | null>(null);
-  const startGuide = useCallback((stops: Spotlight[]) => {
-    if (stops.length > 0) setGuide({ stops, index: 0 });
+  // `stepId` ties the walkthrough to the tutorial step it belongs to, so the
+  // stop reached can be persisted and resumed after the learner closes it to do
+  // the work.
+  const [guide, setGuide] = useState<{ stops: Spotlight[]; index: number; stepId?: string } | null>(null);
+  const startGuide = useCallback((stops: Spotlight[], stepId?: string, startIndex = 0) => {
+    if (stops.length > 0) setGuide({ stops, index: Math.min(Math.max(startIndex, 0), stops.length - 1), stepId });
   }, []);
   // Put the app where the current walkthrough stop needs it. Navigation only —
   // switching a view and opening a dialog. Values and runs stay the learner's.
@@ -262,12 +272,38 @@ function AppInner() {
   const [trainingActiveId, setTrainingActiveId] = usePersistedState<string | null>('ragnarok:training:active', null);
   const [trainingProgress, setTrainingProgress] = usePersistedState<Record<string, TutorialProgress>>('ragnarok:training:progress', {});
   const activeTutorial = findTutorial(trainingActiveId);
+  // A stored id the catalog no longer defines would strand the learner: no chip,
+  // and the Training view falls back to the picker with no explanation. Clear it.
+  useEffect(() => {
+    if (trainingActiveId && !findTutorial(trainingActiveId)) setTrainingActiveId(null);
+  }, [trainingActiveId, setTrainingActiveId]);
   const activeTutorialStep = activeTutorial
     ? trainingStepIndex(
       activeTutorial,
       resolveCurrentStepId(activeTutorial, trainingProgress[activeTutorial.id] ?? emptyProgress()),
     )
     : -1;
+  // Persist the stop a tutorial walkthrough reaches, so closing it to do the
+  // work does not lose the stage — "Back to tutorial" resumes right there.
+  useEffect(() => {
+    if (!guide?.stepId || !activeTutorial) return;
+    const current = trainingProgress[activeTutorial.id] ?? emptyProgress();
+    if (guideStopFor(current, guide.stepId) === guide.index) return;
+    setTrainingProgress({
+      ...trainingProgress,
+      [activeTutorial.id]: setGuideStop(current, guide.stepId, guide.index),
+    });
+    // trainingProgress is read, not a trigger — only the walkthrough moving matters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guide]);
+  // A finished walkthrough should not "resume" — completion forgets the stage.
+  const completeGuide = useCallback(() => {
+    if (guide?.stepId && activeTutorial) {
+      const current = trainingProgress[activeTutorial.id] ?? emptyProgress();
+      setTrainingProgress({ ...trainingProgress, [activeTutorial.id]: clearGuideStop(current, guide.stepId) });
+    }
+    setGuide(null);
+  }, [guide, activeTutorial, trainingProgress, setTrainingProgress]);
   // Cross-tab navigation from the Decisions launcher: the launcher lives in the
   // Post-analysis tab but some workflows (asset swap, ESS) live in Market & Policy.
   // Seed the destination tab's persisted section, then switch tab — SettingsView
@@ -3273,7 +3309,23 @@ function AppInner() {
             <button
               type="button"
               className="topbar-training"
-              onClick={() => setTab('Training')}
+              onClick={() => {
+                // "Back to tutorial" means back to WHERE THE LEARNER WAS. If a
+                // walkthrough was closed mid-way on the current step, resume it at
+                // that stage — the overlay itself navigates to the right view.
+                // Only when there is no stage to resume does the chip open the
+                // Training view.
+                if (guide) { setGuide(null); setTab('Training'); return; }
+                const progress = trainingProgress[activeTutorial.id] ?? emptyProgress();
+                const stepId = resolveCurrentStepId(activeTutorial, progress);
+                const step = activeTutorial.steps.find((s) => s.id === stepId);
+                const stop = stepId ? guideStopFor(progress, stepId) : 0;
+                if (step?.spotlights && stop > 0 && stop < step.spotlights.length) {
+                  startGuide(step.spotlights, step.id, stop);
+                } else {
+                  setTab('Training');
+                }
+              }}
               title={`Back to "${activeTutorial.title}"`}
             >
               Back to tutorial
@@ -3725,6 +3777,7 @@ function AppInner() {
           index={guide.index}
           onIndexChange={(i) => setGuide((g) => (g ? { ...g, index: i } : g))}
           onClose={() => setGuide(null)}
+          onComplete={completeGuide}
         />
       )}
 

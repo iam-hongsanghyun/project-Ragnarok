@@ -1,15 +1,22 @@
 import { describe, test, expect } from '@jest/globals';
 import {
+  clearEntries,
+  clearGuideStop,
   completeAndAdvance,
   completedCount,
   emptyProgress,
+  entriesDoneFor,
   firstIncompleteStepId,
+  guideStopFor,
+  isEntryDone,
   isTutorialComplete,
   liveCompleted,
   moveBy,
   percentComplete,
   resolveCurrentStepId,
+  setGuideStop,
   stepIndex,
+  toggleEntry,
   toggleStep,
 } from './progress';
 import { Tutorial, TutorialStep } from './types';
@@ -126,5 +133,78 @@ describe('mutations', () => {
     expect(stepIndex(T, 'c')).toBe(2);
     expect(stepIndex(T, 'gone')).toBe(-1);
     expect(stepIndex(T, null)).toBe(-1);
+  });
+});
+
+describe('within-step entry progress', () => {
+  // A step can list twenty values entered a few at a time. Without this, a
+  // learner returning mid-step has to re-find their place in the list.
+  test('an untouched step has no entries done', () => {
+    expect(entriesDoneFor(emptyProgress(), 'a')).toEqual([]);
+    expect(isEntryDone(emptyProgress(), 'a', 'generators.p_nom')).toBe(false);
+  });
+
+  test('toggling an entry records and clears it', () => {
+    const once = toggleEntry(emptyProgress(), 'a', 'generators.p_nom');
+    expect(isEntryDone(once, 'a', 'generators.p_nom')).toBe(true);
+    expect(isEntryDone(toggleEntry(once, 'a', 'generators.p_nom'), 'a', 'generators.p_nom')).toBe(false);
+  });
+
+  test('entries are scoped per step', () => {
+    const p = toggleEntry(emptyProgress(), 'a', 'buses.name');
+    expect(isEntryDone(p, 'a', 'buses.name')).toBe(true);
+    expect(isEntryDone(p, 'b', 'buses.name')).toBe(false);
+  });
+
+  test('toggling an entry leaves step completion and cursor alone', () => {
+    const base = { completed: ['a'], currentStepId: 'b' };
+    const next = toggleEntry(base, 'b', 'loads.p_set');
+    expect(next.completed).toEqual(['a']);
+    expect(next.currentStepId).toBe('b');
+  });
+
+  test('clearEntries drops one step without touching others', () => {
+    let p = toggleEntry(emptyProgress(), 'a', 'x');
+    p = toggleEntry(p, 'b', 'y');
+    const cleared = clearEntries(p, 'a');
+    expect(entriesDoneFor(cleared, 'a')).toEqual([]);
+    expect(entriesDoneFor(cleared, 'b')).toEqual(['y']);
+  });
+
+  test('clearEntries on progress that has none is a no-op', () => {
+    expect(clearEntries(emptyProgress(), 'a')).toEqual(emptyProgress());
+  });
+});
+
+describe('walkthrough stage', () => {
+  // Closing a walkthrough to do the work must not lose the stage — "Back to
+  // tutorial" resumes at the stop the learner was on.
+  test('an untouched step has stage 0', () => {
+    expect(guideStopFor(emptyProgress(), 'a')).toBe(0);
+  });
+
+  test('setGuideStop records per step and does not disturb the rest', () => {
+    const base = { completed: ['a'], currentStepId: 'b' };
+    const p = setGuideStop(base, 'b', 4);
+    expect(guideStopFor(p, 'b')).toBe(4);
+    expect(guideStopFor(p, 'a')).toBe(0);
+    expect(p.completed).toEqual(['a']);
+    expect(p.currentStepId).toBe('b');
+  });
+
+  test('negative stops clamp to 0', () => {
+    expect(guideStopFor(setGuideStop(emptyProgress(), 'a', -3), 'a')).toBe(0);
+  });
+
+  test('clearGuideStop forgets one step only', () => {
+    let p = setGuideStop(emptyProgress(), 'a', 2);
+    p = setGuideStop(p, 'b', 5);
+    const cleared = clearGuideStop(p, 'a');
+    expect(guideStopFor(cleared, 'a')).toBe(0);
+    expect(guideStopFor(cleared, 'b')).toBe(5);
+  });
+
+  test('clearGuideStop without a record is a no-op', () => {
+    expect(clearGuideStop(emptyProgress(), 'a')).toEqual(emptyProgress());
   });
 });

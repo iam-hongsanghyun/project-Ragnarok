@@ -52,6 +52,35 @@ describe('catalog integrity', () => {
     }
   });
 
+  // The failure mode this guards against is pointing instead of teaching: a stop
+  // that says "check the bus cell" and moves on, or a `p_nom` the learner is
+  // never told means capacity. Length is a crude proxy, but it catches the thin
+  // one-liners that slip in when authoring at speed.
+  test('a PyPSA attribute is always given a plain-English name', () => {
+    for (const t of TUTORIALS) {
+      for (const s of t.steps) {
+        for (const e of s.entries ?? []) {
+          // `sheet.column` addresses a PyPSA attribute; `View → Control` does not.
+          if (!/^[a-z_]+(-[a-z_]+)?\.[a-z_]+/.test(e.field)) continue;
+          expect(e.label?.trim() || '').not.toBe('');
+        }
+      }
+    }
+  });
+
+  test('explanations say enough to be useful', () => {
+    for (const t of TUTORIALS) {
+      for (const s of t.steps) {
+        for (const e of s.entries ?? []) {
+          expect(e.why.length).toBeGreaterThan(40);
+        }
+        for (const sp of s.spotlights ?? []) {
+          if (sp.note !== undefined) expect(sp.note.length).toBeGreaterThan(40);
+        }
+      }
+    }
+  });
+
   test('every file the user must import names the control and the required shape', () => {
     for (const t of TUTORIALS) {
       for (const s of t.steps) {

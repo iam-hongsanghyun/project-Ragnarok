@@ -184,15 +184,17 @@ export const MODULE_1_FOUNDATIONS: TutorialStep[] = [
         buildStep: 'generators',
         title: 'Generators — injection',
         tab: 'Build',
-        note: 'Note the `bus` column in the table: that text must match a bus name exactly. This '
-          + 'is the reference-by-name mechanic, and the single commonest source of a broken model.',
+        note: 'Look at the columns: `bus` (which node it injects at), `p_nom` (installed capacity, MW), '
+          + '`marginal_cost` (cost per extra MWh), `carrier` (fuel), `efficiency`. The `bus` value must match '
+          + 'a bus name exactly — reference by name, and the commonest source of a broken model.',
       },
       {
         selector: '[data-build-step="loads"]',
         buildStep: 'loads',
         title: 'Loads — withdrawal',
         tab: 'Build',
-        note: 'Same shape as generators, opposite sign. `p_set` is the demand in MW.',
+        note: 'Same shape as a generator, opposite sign: a load withdraws instead of injecting. `p_set` is '
+          + 'the demand in MW that must be served at its bus in every snapshot.',
       },
       {
         selector: '.build-step-guide',
@@ -386,8 +388,11 @@ export const MODULE_1_FOUNDATIONS: TutorialStep[] = [
     entries: [
       {
         field: 'network.name',
+        label: 'project name',
         value: 'my-first-model',
-        why: 'Names the project in exports, reports and run history. An unnamed project produces output files you cannot tell apart.',
+        why: 'Names the project wherever it is referred to later — exported filenames, report headers, run '
+          + 'history entries. It has no effect on the solve, but three runs in, an unnamed project is '
+          + 'indistinguishable from the other two.',
       },
     ],
     verify: [
@@ -454,62 +459,222 @@ export const MODULE_1_FOUNDATIONS: TutorialStep[] = [
         buildStep: 'carriers',
         title: 'Then carriers',
         tab: 'Build',
-        note: 'Two rows — AC and gas. The gas row carries the emission factor you will use in module 7.',
+        note: 'Two rows. `name` is the text other sheets point at; `co2_emissions` is tonnes of CO2 per MWh '
+          + 'of FUEL burnt, not per MWh of electricity. Row 1: AC, 0 — electricity carries no emissions '
+          + 'itself. Row 2: gas, 0.2 — the fuel does.',
       },
       {
         selector: '[data-build-step="buses"]',
         buildStep: 'buses',
         title: 'Then the bus',
         tab: 'Build',
-        note: 'One row. You can also click the map to drop it, which fills x and y for you — you still set '
-          + 'name, v_nom and carrier.',
+        note: 'One row: `name` = bus_1 (the text the generator and load will both point at), `v_nom` = 380 '
+          + 'kV (nominal voltage — unused by this solve, but a blank warns), `carrier` = AC. Clicking the '
+          + 'map drops a bus and fills x/y for you; you still type the other three.',
       },
       {
         selector: '[data-build-step="generators"]',
         buildStep: 'generators',
         title: 'Then the generator',
         tab: 'Build',
-        note: 'One row. Check the `bus` cell matches your bus name exactly — this is the reference-by-name '
-          + 'mechanic from step 2.',
+        note: 'The row that carries the economics. `p_nom` is installed capacity in MW — the most it can '
+          + 'produce at any instant (100). `marginal_cost` is the cost of one more MWh (50) and is what the '
+          + 'optimiser sorts on. `efficiency` is MWh electricity per MWh fuel (0.5). And `bus` must match '
+          + 'bus_1 exactly — a typo there silently detaches the unit.',
       },
       {
         selector: '[data-build-step="loads"]',
         buildStep: 'loads',
         title: 'Then the load',
         tab: 'Build',
-        note: 'One row, 80 MW against the generator\'s 100 MW. Deliberately under capacity, so the model is '
-          + 'feasible in every hour.',
+        note: '`p_set` is demand in MW that MUST be met in every snapshot — a constraint, not a target. '
+          + '80 MW against the generator\'s 100 MW leaves 20 MW of headroom, so the model is feasible in '
+          + 'every hour. Push it above 100 and the solve returns INFEASIBLE instead of a number.',
       },
       {
         selector: '.build-step-strip',
         title: 'Check the ticks',
         tab: 'Build',
-        note: 'Network, Snapshots, Carriers, Buses, Generators and Loads should each show a tick. Storage, '
-          + 'Lines and the rest stay blank — that is correct.',
+        note: 'Network, Snapshots, Carriers, Buses, Generators and Loads should each show a tick — the strip '
+          + 'ticks a step once its sheet has enough rows to be usable. Storage, Lines, Links, Processes and '
+          + 'Constraints stay blank, and that is correct: they are optional, and an empty optional sheet is '
+          + 'not an error.',
       },
     ],
     entries: [
-      { field: 'Snapshots → builder → Start', value: '2030-01-01 00:00', why: 'The first snapshot. Everything temporal is indexed from here.' },
-      { field: 'Snapshots → builder → Resolution', value: '1 hour', why: 'Spacing between snapshots. One hour makes the arithmetic in the next step trivial.' },
-      { field: 'Snapshots → builder → Horizon', value: 'Custom count', why: 'None of the presets is 3 snapshots — the custom option lets you say exactly how many.' },
-      { field: 'Snapshots → builder → Count', value: '3', why: 'Three hours: enough for the model to be a time series, small enough to check the objective by hand.' },
-      { field: 'Snapshots → builder → run resolution checkbox', value: 'ticked', why: 'Keeps the snapshot weight at 1 h, matching the resolution. The weight scales every energy and cost total.' },
-      { field: 'carriers.name (row 1)', value: 'AC', why: 'The electrical carrier the bus uses.' },
-      { field: 'carriers.co2_emissions (row 1)', value: '0', unit: 'tCO2/MWh', why: 'Electricity carries no emissions itself — they are attributed to the fuel.' },
-      { field: 'carriers.name (row 2)', value: 'gas', why: 'The fuel carrier for the generator.' },
-      { field: 'carriers.co2_emissions (row 2)', value: '0.2', unit: 'tCO2/MWh thermal', why: 'Per MWh of fuel burnt, not per MWh of electricity. Unused until module 7, but set it now.' },
-      { field: 'buses.name', value: 'bus_1', why: 'The single node. Every other component points at this exact text.' },
-      { field: 'buses.v_nom', value: '380', unit: 'kV', why: 'Nominal voltage. Not used by this solve, but a blank raises validation warnings.' },
-      { field: 'buses.carrier', value: 'AC', why: 'Must match a name in `carriers`.' },
-      { field: 'generators.name', value: 'gas_1', why: 'The single generator.' },
-      { field: 'generators.bus', value: 'bus_1', why: 'Must match the bus name exactly. A typo here detaches the generator silently.' },
-      { field: 'generators.carrier', value: 'gas', why: 'Must match a name in `carriers`.' },
-      { field: 'generators.p_nom', value: '100', unit: 'MW', why: 'Installed capacity — above the 80 MW load, so the model is feasible in every hour.' },
-      { field: 'generators.marginal_cost', value: '50', unit: 'currency/MWh', why: 'Cost of the next MWh. With one generator it does not change what runs, but it sets the objective value you will check by hand.' },
-      { field: 'loads.name', value: 'load_1', why: 'The single demand.' },
-      { field: 'loads.bus', value: 'bus_1', why: 'Must match the bus name exactly.' },
-      { field: 'loads.carrier', value: 'AC', why: 'Electrical demand.' },
-      { field: 'loads.p_set', value: '80', unit: 'MW', why: 'Constant demand in every snapshot. Under the generator\'s 100 MW on purpose.' },
+      {
+        field: 'Snapshots → builder → Start',
+        label: 'first snapshot',
+        value: '2030-01-01 00:00',
+        why: 'The instant the model begins. Everything temporal is indexed from here, so a profile you '
+          + 'import later must line up with this. The year is arbitrary for this exercise — 2030 is a '
+          + 'convention for "a future planning year".',
+      },
+      {
+        field: 'Snapshots → builder → Resolution',
+        label: 'spacing between snapshots',
+        value: '1 hour',
+        why: 'How finely time is cut. One hour means each snapshot represents one hour, which makes the '
+          + 'cost arithmetic in step 6 trivial to check. Coarser resolution means fewer rows and a faster '
+          + 'solve, at the cost of hiding within-hour variation.',
+      },
+      {
+        field: 'Snapshots → builder → Horizon',
+        label: 'total time covered',
+        value: 'Custom count',
+        why: 'None of the presets is 3 snapshots — they start at one full day (24). Custom lets you state '
+          + 'the row count directly.',
+      },
+      {
+        field: 'Snapshots → builder → Count',
+        label: 'number of snapshots',
+        value: '3',
+        why: 'Three hours. Enough that the model is a time series rather than a single instant, small '
+          + 'enough that you can multiply the answer out on paper. Real studies use 8760.',
+      },
+      {
+        field: 'Snapshots → builder → run resolution checkbox',
+        label: 'snapshot weight = resolution',
+        value: 'ticked',
+        why: 'Sets the weight to 1 hour per snapshot. Weight is how many real hours each snapshot stands '
+          + 'for, and every energy and cost total is multiplied by it. Leave it unticked and the objective '
+          + 'in step 6 will not be 12,000 even though nothing else changed.',
+      },
+
+      {
+        field: 'carriers.name (row 1)',
+        label: 'carrier name',
+        value: 'AC',
+        why: 'A carrier is the KIND of energy a component deals in. `AC` is alternating-current '
+          + 'electricity. The bus will point at this exact text, so the spelling is load-bearing.',
+      },
+      {
+        field: 'carriers.co2_emissions (row 1)',
+        label: 'emission factor',
+        value: '0',
+        unit: 'tCO2 per MWh of fuel',
+        why: 'Electricity carries no emissions itself — emissions are attributed to the fuel that made it, '
+          + 'so double-counting is avoided. Leave it 0.',
+      },
+      {
+        field: 'carriers.name (row 2)',
+        label: 'carrier name',
+        value: 'gas',
+        why: 'The fuel the generator burns. Separating fuel from electricity is what lets one emission '
+          + 'factor serve every gas plant in the model.',
+      },
+      {
+        field: 'carriers.co2_emissions (row 2)',
+        label: 'emission factor',
+        value: '0.2',
+        unit: 'tCO2 per MWh of fuel burnt',
+        why: 'Per MWh of FUEL, not per MWh of electricity. The generator\'s efficiency converts between '
+          + 'them: at 50% efficient, 0.2 per MWh of gas becomes 0.4 per MWh of electricity. Unused until '
+          + 'module 7, but set it now so the model is complete.',
+      },
+
+      {
+        field: 'buses.name',
+        label: 'bus name',
+        value: 'bus_1',
+        why: 'A bus is a place where power balances. This text is the key every other component uses to '
+          + 'say "I am here", so it must be typed identically in the generator and load rows.',
+      },
+      {
+        field: 'buses.v_nom',
+        label: 'nominal voltage',
+        value: '380',
+        unit: 'kV',
+        why: 'The voltage level this node operates at. It does not affect THIS solve — a linear dispatch '
+          + 'ignores voltage — but power-flow calculations and per-unit conversions need it, and a blank '
+          + 'raises validation warnings. 380 kV is a typical transmission level.',
+      },
+      {
+        field: 'buses.carrier',
+        label: 'carrier',
+        value: 'AC',
+        why: 'Which kind of energy balances at this node. Must match a `carriers.name` exactly.',
+      },
+
+      {
+        field: 'generators.name',
+        label: 'generator name',
+        value: 'gas_1',
+        why: 'Identifies the unit in results — per-asset dispatch, revenue and emissions are all reported '
+          + 'under this name.',
+      },
+      {
+        field: 'generators.bus',
+        label: 'which bus it connects to',
+        value: 'bus_1',
+        why: 'Must match `buses.name` exactly. This is the single commonest way to break a model: a typo '
+          + 'here does not error, it silently detaches the generator, and the solve then reports INFEASIBLE '
+          + 'because nothing is left to serve the load.',
+      },
+      {
+        field: 'generators.carrier',
+        label: 'fuel / technology',
+        value: 'gas',
+        why: 'Links the unit to its emission factor and groups it in per-carrier results. Must match a '
+          + '`carriers.name`.',
+      },
+      {
+        field: 'generators.p_nom',
+        label: 'installed capacity',
+        value: '100',
+        unit: 'MW',
+        why: 'The maximum power this unit can produce at any instant — its nameplate rating. The solver '
+          + 'may dispatch anywhere from 0 to 100 MW in each hour. It must exceed the 80 MW load or the '
+          + 'model has no feasible answer; the 20 MW of headroom is deliberate slack.',
+      },
+      {
+        field: 'generators.marginal_cost',
+        label: 'cost per extra MWh',
+        value: '50',
+        unit: 'currency per MWh',
+        why: 'What it costs to produce one more MWh — fuel plus variable O&M. This is what the optimiser '
+          + 'sorts on: with several generators, cheapest runs first (the merit order, module 2). With only '
+          + 'one it changes nothing about WHAT runs, but it sets the objective value and the market price '
+          + 'you will check in step 6.',
+      },
+      {
+        field: 'generators.efficiency',
+        label: 'fuel-to-electricity conversion',
+        value: '0.5',
+        why: 'MWh of electricity out per MWh of fuel in. 0.5 is typical of an older gas plant. Combined '
+          + 'with the carrier factor it gives 0.4 tCO2 per MWh generated. It also means the unit burns 2 '
+          + 'MWh of gas for every 1 MWh it sells.',
+      },
+
+      {
+        field: 'loads.name',
+        label: 'load name',
+        value: 'load_1',
+        why: 'Identifies this demand in results. With one load it hardly matters; in a national model you '
+          + 'read served energy and unserved energy per load, so the name is how you find a region.',
+      },
+      {
+        field: 'loads.bus',
+        label: 'which bus it draws from',
+        value: 'bus_1',
+        why: 'Must match `buses.name` exactly. Demand must balance at the node it is attached to.',
+      },
+      {
+        field: 'loads.carrier',
+        label: 'carrier',
+        value: 'AC',
+        why: 'The kind of energy demanded — electricity here. It matters once a model couples sectors, '
+          + 'where a load might draw hydrogen or heat instead. Must match a `carriers.name`.',
+      },
+      {
+        field: 'loads.p_set',
+        label: 'demand',
+        value: '80',
+        unit: 'MW',
+        why: 'How much power must be delivered in EVERY snapshot — this is a constraint, not a target: the '
+          + 'model must serve it or fail. Constant here; the `loads-p_set` sheet takes an hour-by-hour '
+          + 'profile instead, which is what you would use for real demand.',
+      },
     ],
     verify: [
       '`snapshots` has 3 rows, `carriers` 2, and `buses`, `generators`, `loads` 1 each',

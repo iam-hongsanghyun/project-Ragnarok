@@ -79,6 +79,53 @@ export function completeAndAdvance(tutorial: Tutorial, progress: TutorialProgres
   return { completed: Array.from(done), currentStepId: nextId };
 }
 
+// ── Progress within a step ───────────────────────────────────────────────────
+// A step can list twenty values. These track which are already entered so a
+// learner who leaves for Build mid-step comes back to the right place rather
+// than the top of the list.
+
+/** Fields already entered on `stepId`. */
+export function entriesDoneFor(progress: TutorialProgress, stepId: string): string[] {
+  return progress.entriesDone?.[stepId] ?? [];
+}
+
+export function isEntryDone(progress: TutorialProgress, stepId: string, field: string): boolean {
+  return entriesDoneFor(progress, stepId).includes(field);
+}
+
+export function toggleEntry(progress: TutorialProgress, stepId: string, field: string): TutorialProgress {
+  const done = new Set(entriesDoneFor(progress, stepId));
+  if (done.has(field)) done.delete(field);
+  else done.add(field);
+  return { ...progress, entriesDone: { ...(progress.entriesDone ?? {}), [stepId]: Array.from(done) } };
+}
+
+/** Clear a step's entry ticks — used when the step itself is un-ticked. */
+export function clearEntries(progress: TutorialProgress, stepId: string): TutorialProgress {
+  if (!progress.entriesDone) return progress;
+  const next = { ...progress.entriesDone };
+  delete next[stepId];
+  return { ...progress, entriesDone: next };
+}
+
+/** Last walkthrough stop reached on `stepId`, or 0. */
+export function guideStopFor(progress: TutorialProgress, stepId: string): number {
+  return progress.guideStop?.[stepId] ?? 0;
+}
+
+/** Record the walkthrough stop the learner reached on `stepId`. */
+export function setGuideStop(progress: TutorialProgress, stepId: string, stop: number): TutorialProgress {
+  return { ...progress, guideStop: { ...(progress.guideStop ?? {}), [stepId]: Math.max(0, stop) } };
+}
+
+/** Forget a step's walkthrough position — used when the walkthrough finishes. */
+export function clearGuideStop(progress: TutorialProgress, stepId: string): TutorialProgress {
+  if (!progress.guideStop || !(stepId in progress.guideStop)) return progress;
+  const next = { ...progress.guideStop };
+  delete next[stepId];
+  return { ...progress, guideStop: next };
+}
+
 /** Move `delta` steps from the current position, clamped to the tutorial. */
 export function moveBy(tutorial: Tutorial, progress: TutorialProgress, delta: number): TutorialProgress {
   const current = resolveCurrentStepId(tutorial, progress);

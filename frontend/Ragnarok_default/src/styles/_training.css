@@ -754,6 +754,15 @@
   white-space: nowrap;
 }
 
+/* Plain-English name under the PyPSA attribute — `p_nom` means nothing until
+   the learner is told it is installed capacity. */
+.training-field-label {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-secondary);
+  font-size: var(--fs-2xs);
+}
+
 .training-value-cell {
   display: flex;
   align-items: baseline;
@@ -862,4 +871,32 @@
   gap: 6px;
   font-size: var(--fs-sm);
   cursor: pointer;
+}
+
+/* ── Per-value ticks (within-step progress) ──
+   A step can list twenty values entered a few at a time, so each is tickable and
+   the runner returns to the first one still outstanding. */
+
+.training-block__count {
+  margin-left: 8px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.training-entry-check {
+  width: 24px;
+  padding-right: 0 !important;
+  vertical-align: top;
+}
+
+.training-table tr.is-entered .training-field,
+.training-table tr.is-entered .training-why {
+  opacity: 0.5;
+}
+
+.training-table tr.is-entered .training-value {
+  opacity: 0.6;
 }
