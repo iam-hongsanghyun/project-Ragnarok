@@ -900,3 +900,18 @@
 .training-table tr.is-entered .training-value {
   opacity: 0.6;
 }
+
+/* ── "Start with prebuilt data" checkbox ── */
+
+.training-start-state__prebuilt {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.training-start-state__prebuilt input { margin-top: 2px; }
+.training-start-state__prebuilt em { color: var(--muted); font-style: normal; }

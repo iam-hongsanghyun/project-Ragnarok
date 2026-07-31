@@ -164,7 +164,12 @@ export interface TutorialStartState {
    * bundled example, named by `exampleId`.
    */
   kind: 'empty' | 'checkpoint';
-  /** Bundled example to load, for `'checkpoint'`. Matches an `/api/examples` id. */
+  /**
+   * Bundled example holding this tutorial's data, matching an `/api/examples`
+   * id. For `'checkpoint'` it is the mandatory starting point; for `'empty'` it
+   * is the optional shortcut — a "start with prebuilt data" checkbox that loads
+   * everything the tutorial would otherwise have the learner type.
+   */
   exampleId?: string;
   /** What the learner should be looking at once the start state is in place. */
   note: string;
@@ -210,4 +215,10 @@ export interface TutorialProgress {
    * that most needs remembering.
    */
   guideStop?: Record<string, number>;
+  /**
+   * Whether the learner loaded this tutorial's prebuilt data ("start with
+   * prebuilt data" checkbox). Persisted here because loading rehydrates the
+   * model and remounts views — component-local state forgets the tick.
+   */
+  prebuiltLoaded?: boolean;
 }

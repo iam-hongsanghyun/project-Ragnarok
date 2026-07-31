@@ -319,6 +319,8 @@ export function TutorialRunner({
             model={modelSummary}
             onClearModel={onClearModel}
             onLoadExample={onLoadExample}
+            prebuiltLoaded={progress.prebuiltLoaded ?? false}
+            onPrebuiltLoadedChange={(v) => onProgressChange({ ...progress, prebuiltLoaded: v })}
           />
         )}
 

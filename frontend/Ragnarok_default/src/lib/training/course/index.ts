@@ -42,6 +42,9 @@ export const POWER_MARKET_COURSE: Tutorial = {
   // left deliberately, so the runner offers the clear rather than doing it.
   startState: {
     kind: 'empty',
+    // The module-1 model, prebuilt (backend/data/examples/training_m1) — the
+    // "start with prebuilt data" checkbox loads it in one action.
+    exampleId: 'training_m1',
     note:
       'This course builds a model from nothing, so it starts with an empty session. If you have work '
       + 'loaded that you want to keep, export it first (Model → Export project) — clearing keeps your '
