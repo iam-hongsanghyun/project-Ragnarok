@@ -487,10 +487,13 @@ def test_sources_lists_server_secret_names_not_values(monkeypatch) -> None:
 def test_server_recorded_secrets_roundtrip(tmp_path, monkeypatch) -> None:
     from fastapi.testclient import TestClient
 
+    from backend.app import secrets_store
     from backend.app.main import app
     from backend.app.routers import importers as imp
 
-    monkeypatch.setattr(imp, "SECRETS_PATH", tmp_path / "secrets.json")
+    # The store moved to backend/app/secrets_store.py (shared with the agent);
+    # the importer router re-exports its helpers, so patch the real location.
+    monkeypatch.setattr(secrets_store, "SECRETS_PATH", tmp_path / "secrets.json")
     client = TestClient(app)
 
     # Record a key → it lands in the merged server secrets and lists by NAME.

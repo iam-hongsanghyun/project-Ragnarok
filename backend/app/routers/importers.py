@@ -50,43 +50,22 @@ router = APIRouter(prefix="/api/import", tags=["import"])
 #    backend in ``backend/data/secrets.json`` (gitignored, 0600) via the
 #    endpoints below, and win over env. A key sent in a request body (BYOK)
 #    overrides both for that one request.
-_SERVER_SECRET_PREFIX = "RAGNAROK_SECRET_"
-_SECRET_NAME_RE = re.compile(r"^[a-z0-9_]{1,64}$")
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-SECRETS_PATH = _REPO_ROOT / "backend" / "data" / "secrets.json"
-
-
-def _env_secrets() -> dict[str, str]:
-    out: dict[str, str] = {}
-    for key, value in os.environ.items():
-        if key.startswith(_SERVER_SECRET_PREFIX) and value.strip():
-            out[key[len(_SERVER_SECRET_PREFIX):].lower()] = value.strip()
-    return out
-
-
-def _stored_secrets() -> dict[str, str]:
-    try:
-        if not SECRETS_PATH.exists():
-            return {}
-        data = json.loads(SECRETS_PATH.read_text(encoding="utf-8"))
-        return {str(k): str(v) for k, v in data.items() if str(v).strip()} if isinstance(data, dict) else {}
-    except Exception:  # noqa: BLE001 — a corrupt file must not break imports
-        return {}
-
-
-def _write_stored_secrets(secrets: dict[str, str]) -> None:
-    SECRETS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SECRETS_PATH.write_text(json.dumps(secrets, indent=2), encoding="utf-8")
-    try:
-        os.chmod(SECRETS_PATH, 0o600)  # owner-only — these are credentials
-    except OSError:
-        pass
-
-
-def _server_secrets() -> dict[str, str]:
-    """All importer secrets the server provides: env, overridden by stored."""
-    return {**_env_secrets(), **_stored_secrets()}
-
+# Server-side API keys (env + stored layers) live in the shared secrets store
+# (backend/app/secrets_store.py), which the MCP surface and any agent auth read
+# too. This router used to carry its own copy of the same logic against the same
+# file — two implementations of one store, so a key written through one path was
+# only coincidentally visible to the other. Re-exported under the historical
+# local names so the call sites below are unchanged. A key sent in a request body
+# (BYOK) still overrides both for that one request.
+from ..secrets_store import (  # noqa: E402 — keep the historical local names
+    SECRET_NAME_RE as _SECRET_NAME_RE,
+    SECRETS_PATH,
+    _SERVER_SECRET_PREFIX,
+    env_secrets as _env_secrets,
+    server_secrets as _server_secrets,
+    stored_secrets as _stored_secrets,
+    write_stored_secrets as _write_stored_secrets,
+)
 
 class BuildSecretsPayload(BaseModel):
     """Optional BYOK secrets for the one-click builders (location-model,

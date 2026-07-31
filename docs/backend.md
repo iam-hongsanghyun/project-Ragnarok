@@ -457,6 +457,17 @@ Returns:
 }
 ```
 
+**Snapshot-axis alignment.** `snapshots` is the ONE time axis every temporal sheet is
+read against: `_apply_ts_sheet` reindexes each series onto it, which DROPS rows whose
+label is not on the axis and leaves the uncovered snapshots undefined. The solve reports
+neither — a `loads-p_set` covering 2 of 4 snapshots returns "Optimal" with the missing
+hours dispatched as ZERO demand, so the run produces a plausible wrong answer. Both
+conditions are therefore **errors**, not warnings. A row-count comparison cannot catch
+it, because a sheet can have exactly the right number of rows and still be for the wrong
+year; labels are compared as normalised timestamps, so `2030-01-01T00:00:00` and
+`2030-01-01 00:00:00` are the same snapshot. Non-datetime axes (`now`, integer steps)
+fall back to the row-count check.
+
 Checks performed (non-exhaustive):
 
 - Unrecognised or output-only sheet names.
@@ -1156,7 +1167,7 @@ browser only receives what it draws.
 |---|---|---|---|
 | `POST` | `/api/session/model` | `SessionModelPayload` `{model, filename, scenarioName, sessionId}` | meta (ingest a full model, replacing any current one; 400 on unsafe id) |
 | `POST` | `/api/session/model/static` | `SessionModelPayload` | meta (merge static sheets, keep series; 400 when no session exists) |
-| `GET` | `/api/session/meta` | `?session_id` | meta, or `{}` when nothing is loaded |
+| `GET` | `/api/session/meta` | `?session_id` | meta + the journal's monotonic `version`, or `{}` when nothing is loaded |
 | `GET` | `/api/session/model/full` | `?session_id&staticOnly` | `{"model": {sheet: rows} \| null}` — `staticOnly=true` omits series (editor rehydration on boot) |
 | `GET` | `/api/session/sheet/{name}` | `?offset&limit` | one page `{name, kind, total, offset, limit, columns, rows}` (404 if absent) |
 | `GET` | `/api/session/sheet/{name}/distinct` | `?column` | `{sheet, column, values}` (404 if absent) |
@@ -1176,6 +1187,54 @@ Backend plugins write into the same session via their own router (see
 [docs/plugin.md §16](plugin.md#16-backend-server-side-plugins)).
 
 ---
+
+## 11.6 Agent-safe mutation — actor context, journal, event stream
+
+Three pieces that exist so a mutation can come from something other than a human at
+a keyboard and still be accountable. An agent driving the model is only acceptable if
+every edit is attributable, inspectable and reversible.
+
+### `actor_context.py`
+
+`ActorContextMiddleware` stamps each request with who is editing — `user` (a browser
+with no actor header), `mcp` (a tool call over the MCP server) or `agent`. The value
+rides in a context var, so the journal can record it without every endpoint having to
+pass it down.
+
+### `journal.py` + `routers/journal.py`
+
+`wrap_model_store()` wraps the **store facade** (not the endpoints), so every session
+mutation is journalled wherever it originates — a browser edit, an importer, an MCP
+tool. It is installed in `main.py` before any request can reach a mutating endpoint;
+order matters. Each entry records the actor, the sheets touched, a monotonic
+`version`, and an undo snapshot of what changed.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/journal` | Mutation timeline for a session, newest last |
+| `GET` | `/api/journal/{entry_id}/diff` | What that entry changed |
+| `POST` | `/api/journal/{entry_id}/undo` | Revert one entry |
+| `POST` | `/api/journal/revert` | Revert to a version |
+
+Journal data lands under `backend/data/journal/` and is **gitignored** — it is runtime
+state. Tests must not write there: `conftest.py` has an autouse fixture pointing
+`RAGNAROK_JOURNAL_DIR` at the test's tmp dir, because the journal wraps the facade at
+app import and would otherwise append to the repo from any test that touches a session.
+
+### `events_bus.py` + `routers/events.py`
+
+An SSE stream (`GET /api/events`) carrying `session.version` events, so a client sees
+an out-of-band change without polling — which is what a second actor editing the same
+session looks like. `GET /api/session/meta` also returns the current `version` as the
+poll/reconnect fallback.
+
+### MCP surface
+
+`backend/mcp/server.py` exposes the backend as MCP tools, and `backend/mcp/client.py`
+reaches the app purely over HTTP (`RAGNAROK_API_BASE`) — nothing in the tool surface
+requires being in-process, so an external IDE can drive the same contract the GUI uses.
+Coverage is the point: a capability reachable in the GUI but not as a tool is a gap, and
+`backend/tests/test_mcp_server.py` is where that is held.
 
 ## 12. Run store (History)
 
