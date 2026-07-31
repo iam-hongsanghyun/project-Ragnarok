@@ -99,6 +99,7 @@ import { ForgeView } from './views/ForgeView';
 import { AnalyticsView } from './views/AnalyticsView';
 import { PhysicalRiskView, PhysicalRiskSubTab } from './views/PhysicalRiskView';
 import { SitingView } from './views/SitingView';
+import { TrainingView } from './views/TrainingView';
 import { ActivityBar } from './layout/ActivityBar';
 import { useModelIssues } from './features/validation/useModelIssues';
 import { useFrontendPlugins } from './features/plugins/frontendPlugins';
@@ -3605,6 +3606,8 @@ function AppInner() {
               results={displayResults}
             />
           )}
+
+          {tab === 'Training' && <TrainingView onNavigate={setTab} />}
         </div>
       </div>
 

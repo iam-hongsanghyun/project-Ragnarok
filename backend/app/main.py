@@ -1067,10 +1067,26 @@ def _model_with_session_series(
     Static sheets are left exactly as posted, so unsaved edits held only in the
     browser still win; a series sheet the client did send (a plugin hand-off, a
     legacy full-model client) is likewise never overwritten.
+
+    A client that posts NO model at all gets the session's model whole. Hydration
+    alone cannot serve that case: filling series into an absent model yields a
+    model of series and nothing else — no buses, no generators, no snapshots —
+    which exports as a package that imports back as almost nothing. That is what a
+    thin client looks like (Bifrost posts `{sessionId, scenario, options}` and holds
+    no model of its own), and it is indistinguishable from the browser case until
+    you notice the static sheets are gone.
     """
     out = dict(model or {})
     if not session_id:
         return out
+    if not out:
+        try:
+            return model_store.load_full_model(session_id) or {}
+        except Exception:  # noqa: BLE001 — an export must not fail over this
+            logging.getLogger("pypsa_gui.exports").exception(
+                "Could not read session %s for a model-less export", session_id
+            )
+            return out
     try:
         stored = model_store.load_full_model(session_id) or {}
     except Exception:  # noqa: BLE001 — an export must not fail over hydration

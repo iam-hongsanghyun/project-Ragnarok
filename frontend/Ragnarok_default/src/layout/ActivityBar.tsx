@@ -114,6 +114,11 @@ const ICONS: Record<WorkspaceTab, React.ReactNode> = {
   Plugins: svg(<>
     <path d="M8 4h4v2.2a1.4 1.4 0 1 0 2.8 0V4H16v4h-1.8a1.4 1.4 0 1 0 0 2.8H16v5h-4v-1.8a1.4 1.4 0 1 0-2.8 0V16H5v-5h1.8a1.4 1.4 0 1 0 0-2.8H5V4h3Z" />
   </>),
+  // Training — an open book (guided, step-by-step walkthroughs).
+  Training: svg(<>
+    <path d="M10 6.2C8.6 5 6.8 4.5 4 4.5v9.6c2.8 0 4.6.5 6 1.7 1.4-1.2 3.2-1.7 6-1.7V4.5c-2.8 0-4.6.5-6 1.7Z" />
+    <path d="M10 6.2v9.6" />
+  </>),
   Welcome: null,
 };
 
@@ -130,6 +135,7 @@ const ENTRIES: Entry[] = [
   { id: 'PostAnalysis', label: 'Post-analysis',   hint: 'Decisions from results (no re-solve)', icon: ICONS.PostAnalysis },
   { id: 'History',      label: 'History',         hint: 'Past runs', icon: ICONS.History },
   { id: 'Plugins',      label: 'Plugins',         hint: 'Extensions', icon: ICONS.Plugins },
+  { id: 'Training',     label: 'Training',        hint: 'Guided step-by-step tutorials', icon: ICONS.Training },
 ];
 
 export function ActivityBar({ tab, onTabChange, validateResult, pluginCount }: Props) {

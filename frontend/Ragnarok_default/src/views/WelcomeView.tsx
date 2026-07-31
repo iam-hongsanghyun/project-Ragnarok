@@ -69,6 +69,13 @@ const TILES: Tile[] = [
       'Validation, results, comparison across scenarios, per-asset drill-downs, custom charts, run history, solver logs.',
   },
   {
+    id: 'Training',
+    title: 'Training',
+    blurb:
+      'Guided step-by-step tutorials. Each step says where to be, explains what it is for, and lists the '
+      + 'exact values to type, files to import, and runs to start — you do the work, so it sticks.',
+  },
+  {
     id: 'Plugins',
     title: 'Plugins',
     blurb:

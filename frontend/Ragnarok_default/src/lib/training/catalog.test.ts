@@ -1,0 +1,85 @@
+import { describe, test, expect } from '@jest/globals';
+import { TUTORIALS, LEVEL_ORDER, findTutorial, tutorialsByLevel } from './catalog';
+
+/**
+ * Integrity gate on the catalog. Tutorials are authored one at a time, so these
+ * pass vacuously today and start biting the moment content lands — which is the
+ * point: the authoring rules in `catalog.ts` are checked here, not just stated.
+ */
+describe('catalog integrity', () => {
+  test('tutorial ids are unique', () => {
+    const ids = TUTORIALS.map((t) => t.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  test('step ids are unique within each tutorial', () => {
+    for (const t of TUTORIALS) {
+      const ids = t.steps.map((s) => s.id);
+      expect(new Set(ids).size).toBe(ids.length);
+    }
+  });
+
+  test('every tutorial declares a known level and has at least one step', () => {
+    for (const t of TUTORIALS) {
+      expect(LEVEL_ORDER).toContain(t.level);
+      expect(t.steps.length).toBeGreaterThan(0);
+    }
+  });
+
+  test('every step explains itself and says how to verify it', () => {
+    // A step with no `verify` leaves the learner unable to tell a working step
+    // from one that silently did nothing — the failure mode this whole feature
+    // exists to avoid.
+    for (const t of TUTORIALS) {
+      for (const s of t.steps) {
+        expect(s.explain.length).toBeGreaterThan(0);
+        expect(s.verify.length).toBeGreaterThan(0);
+        expect(s.title.trim()).not.toBe('');
+        expect(s.where.trim()).not.toBe('');
+      }
+    }
+  });
+
+  test('every value the user must type carries a reason', () => {
+    for (const t of TUTORIALS) {
+      for (const s of t.steps) {
+        for (const e of s.entries ?? []) {
+          expect(e.field.trim()).not.toBe('');
+          expect(e.value.trim()).not.toBe('');
+          expect(e.why.trim()).not.toBe('');
+        }
+      }
+    }
+  });
+
+  test('every file the user must import names the control and the required shape', () => {
+    for (const t of TUTORIALS) {
+      for (const s of t.steps) {
+        for (const f of s.files ?? []) {
+          expect(f.what.trim()).not.toBe('');
+          expect(f.via.trim()).not.toBe('');
+          expect(f.requires.trim()).not.toBe('');
+        }
+      }
+    }
+  });
+});
+
+describe('lookup helpers', () => {
+  test('findTutorial returns null for unknown and null ids', () => {
+    expect(findTutorial(null)).toBeNull();
+    expect(findTutorial('no-such-tutorial')).toBeNull();
+  });
+
+  test('findTutorial round-trips every catalog entry', () => {
+    for (const t of TUTORIALS) expect(findTutorial(t.id)).toBe(t);
+  });
+
+  test('tutorialsByLevel drops empty levels and keeps teaching order', () => {
+    const groups = tutorialsByLevel();
+    const levels = groups.map((g) => g.level);
+    expect(levels).toEqual(LEVEL_ORDER.filter((l) => levels.includes(l)));
+    for (const g of groups) expect(g.items.length).toBeGreaterThan(0);
+    expect(groups.reduce((n, g) => n + g.items.length, 0)).toBe(TUTORIALS.length);
+  });
+});
