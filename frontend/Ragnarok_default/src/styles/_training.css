@@ -426,6 +426,35 @@
   flex: 0 0 auto;
 }
 
+/* ── Top-bar "Back to tutorial" ──
+   Present in every view except Training while a tutorial is open, because the
+   learner spends most of a tutorial elsewhere doing the actual work. */
+
+.topbar-training {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border: 1px solid var(--brand-tint);
+  border-radius: 999px;
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--fs-2xs);
+  white-space: nowrap;
+}
+
+.topbar-training:hover {
+  border-color: var(--brand);
+  background: var(--brand-tint);
+}
+
+.topbar-training__step {
+  font-family: var(--font-mono);
+  opacity: 0.8;
+}
+
 /* ── Snapshot builder (Build → Snapshots step) ──
    Not a training component, but it lives here because the course is what
    surfaced the need. Move it out if it grows. */

@@ -101,7 +101,9 @@ import { PhysicalRiskView, PhysicalRiskSubTab } from './views/PhysicalRiskView';
 import { SitingView } from './views/SitingView';
 import { TrainingView } from './views/TrainingView';
 import { SpotlightOverlay } from './features/training/SpotlightOverlay';
-import type { Spotlight } from 'lib/training/types';
+import type { Spotlight, TutorialProgress } from 'lib/training/types';
+import { findTutorial } from 'lib/training/catalog';
+import { emptyProgress, resolveCurrentStepId, stepIndex as trainingStepIndex } from 'lib/training/progress';
 import { ActivityBar } from './layout/ActivityBar';
 import { useModelIssues } from './features/validation/useModelIssues';
 import { useFrontendPlugins } from './features/plugins/frontendPlugins';
@@ -248,6 +250,18 @@ function AppInner() {
     const dest = guide?.stops[guide.index]?.tab;
     if (dest) setTab(dest);
   }, [guide]);
+  // Training state lives here, not in TrainingView: a learner spends most of a
+  // tutorial in OTHER views doing the work, and the top bar has to offer a way
+  // back the whole time. TrainingView is unmounted for most of that.
+  const [trainingActiveId, setTrainingActiveId] = usePersistedState<string | null>('ragnarok:training:active', null);
+  const [trainingProgress, setTrainingProgress] = usePersistedState<Record<string, TutorialProgress>>('ragnarok:training:progress', {});
+  const activeTutorial = findTutorial(trainingActiveId);
+  const activeTutorialStep = activeTutorial
+    ? trainingStepIndex(
+      activeTutorial,
+      resolveCurrentStepId(activeTutorial, trainingProgress[activeTutorial.id] ?? emptyProgress()),
+    )
+    : -1;
   // Cross-tab navigation from the Decisions launcher: the launcher lives in the
   // Post-analysis tab but some workflows (asset swap, ESS) live in Market & Policy.
   // Seed the destination tab's persisted section, then switch tab — SettingsView
@@ -3247,6 +3261,23 @@ function AppInner() {
           )}
         </div>
         <div className="topbar-right">
+          {/* Resume the open tutorial. A learner leaves Training to do the work
+              and would otherwise have no way back to the step they were on. */}
+          {activeTutorial && tab !== 'Training' && (
+            <button
+              type="button"
+              className="topbar-training"
+              onClick={() => setTab('Training')}
+              title={`Back to "${activeTutorial.title}"`}
+            >
+              Back to tutorial
+              {activeTutorialStep >= 0 && (
+                <span className="topbar-training__step">
+                  {activeTutorialStep + 1}/{activeTutorial.steps.length}
+                </span>
+              )}
+            </button>
+          )}
           <span className="topbar-file" title={filename}>{filename}</span>
           {displayResults && (
             <span className="topbar-run-meta">{displayResults.runMeta.snapshotCount} snaps · {Number(displayResults.runMeta.snapshotWeight.toFixed(2))}h</span>
@@ -3407,6 +3438,7 @@ function AppInner() {
               dateFormat={settings.dateFormat}
               onOpenRunSetup={() => { setDryRun(false); setRunDialogOpen(true); }}
               onApplyConversion={handleApplyConversion}
+              requestedStep={guide?.stops[guide.index]?.buildStep ?? null}
               snapshotWeight={snapshotWeight}
               onSnapshotWeightChange={setSnapshotWeight}
               onGenerateSnapshots={(labels) => {
@@ -3627,7 +3659,16 @@ function AppInner() {
             />
           )}
 
-          {tab === 'Training' && <TrainingView onNavigate={setTab} onStartGuide={startGuide} />}
+          {tab === 'Training' && (
+            <TrainingView
+              onNavigate={setTab}
+              onStartGuide={startGuide}
+              activeId={trainingActiveId}
+              onActiveIdChange={setTrainingActiveId}
+              progressById={trainingProgress}
+              onProgressByIdChange={setTrainingProgress}
+            />
+          )}
         </div>
       </div>
 

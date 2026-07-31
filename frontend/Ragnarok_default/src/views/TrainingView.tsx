@@ -20,27 +20,34 @@ import {
   percentComplete,
   resolveCurrentStepId,
 } from 'lib/training/progress';
-import { usePersistedState } from 'shared/hooks/usePersistedState';
 import { LeftRail, ViewPanel } from 'shared/components/primitives';
 import { ResizablePanels } from '../layout/ResizablePanels';
 import { TutorialCatalog } from './TrainingView.features/TutorialCatalog';
 import { TutorialRunner } from './TrainingView.features/TutorialRunner';
-
-const ACTIVE_KEY = 'ragnarok:training:active';
-const PROGRESS_KEY = 'ragnarok:training:progress';
 
 interface Props {
   /** Switch the workspace to a view, so a step can put the user in the right place. */
   onNavigate: (tab: WorkspaceTab) => void;
   /** Start a spotlight walkthrough. Owned by App so it survives a view switch. */
   onStartGuide: (stops: Spotlight[]) => void;
+  /**
+   * Which tutorial is running, and how far through each one the learner is.
+   *
+   * Owned by App, not this view: the top bar shows a "resume tutorial" affordance
+   * while a tutorial is open, and this view is unmounted for most of the time a
+   * learner spends actually doing the steps.
+   */
+  activeId: string | null;
+  onActiveIdChange: (id: string | null) => void;
+  progressById: Record<string, TutorialProgress>;
+  onProgressByIdChange: (next: Record<string, TutorialProgress>) => void;
 }
 
-export function TrainingView({ onNavigate, onStartGuide }: Props) {
-  // One record for every tutorial rather than a key per tutorial, so the picker
-  // can show a completion badge on each card without a hook per row.
-  const [progressById, setProgressById] = usePersistedState<Record<string, TutorialProgress>>(PROGRESS_KEY, {});
-  const [activeId, setActiveId] = usePersistedState<string | null>(ACTIVE_KEY, null);
+export function TrainingView({
+  onNavigate, onStartGuide, activeId, onActiveIdChange, progressById, onProgressByIdChange,
+}: Props) {
+  const setActiveId = onActiveIdChange;
+  const setProgressById = onProgressByIdChange;
 
   const active = findTutorial(activeId);
   const progressFor = useCallback(

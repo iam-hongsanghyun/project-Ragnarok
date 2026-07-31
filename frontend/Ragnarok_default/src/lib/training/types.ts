@@ -77,6 +77,16 @@ export interface Spotlight {
   note?: string;
   /** View to switch to before this stop, when the target lives inside one. */
   tab?: WorkspaceTab;
+  /**
+   * Build wizard step id to open before this stop (`'snapshots'`, `'buses'`, …).
+   *
+   * Needed because most Build targets only exist on one step, so without this
+   * the walkthrough would depend on the learner clicking the right step first —
+   * and report its own target as missing when they did not. Opening a step is
+   * navigation, in the same category as switching `tab`; it enters no values and
+   * starts no runs.
+   */
+  buildStep?: string;
 }
 
 export interface TutorialStep {

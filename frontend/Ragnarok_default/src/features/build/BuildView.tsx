@@ -57,6 +57,12 @@ export interface BuildViewProps {
   dateFormat: DateFormat;
   onOpenConstraintsWorkspace?: () => void;
   onOpenRunSetup?: () => void;
+  /**
+   * Step id to open, driven from outside (the Training walkthrough). Applied
+   * when the value CHANGES, so a learner who navigates by hand afterwards is
+   * not yanked back to it.
+   */
+  requestedStep?: string | null;
   /** Replace the `snapshots` sheet with a generated axis (Snapshots step). */
   onGenerateSnapshots?: (labels: string[]) => void;
   /** Global run resolution in hours per snapshot, so the builder can match it. */
@@ -188,6 +194,16 @@ export function BuildView(props: BuildViewProps) {
   const [linkMode, setLinkMode] = useState<LinkMode | null>(null);
   const step: BuildStep = BUILD_STEPS[stepIndex];
   const geo = isGeoSheet(step.primarySheet);
+
+  // Open a step requested from outside (the Training walkthrough). Depends on
+  // `requestedStep` alone, so it fires on change only — manual navigation
+  // afterwards sticks.
+  const { requestedStep } = props;
+  useEffect(() => {
+    if (!requestedStep) return;
+    const i = BUILD_STEPS.findIndex((s) => s.id === requestedStep);
+    if (i >= 0) setStepIndex(i);
+  }, [requestedStep]);
 
   const busNames = useMemo(
     () => props.model.buses.map((b) => stringValue(b.name)).filter(Boolean),

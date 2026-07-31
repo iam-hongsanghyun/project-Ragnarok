@@ -146,6 +146,12 @@ export const MODULE_1_FOUNDATIONS: TutorialStep[] = [
 
       'Build and Model edit the same workbook — no draft copy. Build is the guided path; Model shows '
       + 'every sheet at once. Switch freely.',
+
+      'The step layout changes with the sheet, and the change is informative. Steps whose components '
+      + 'have coordinates — buses, lines, links — show the network map. Steps whose sheets have no '
+      + 'geography — network, snapshots, carriers, processes — show no map at all: the table sits on the '
+      + 'left and a panel on the right. If you are looking for a map and there is none, that is the '
+      + 'application telling you this sheet has nothing to place.',
     ],
     spotlights: [
       {
@@ -157,27 +163,33 @@ export const MODULE_1_FOUNDATIONS: TutorialStep[] = [
       },
       {
         selector: '[data-build-step="carriers"]',
+        buildStep: 'carriers',
         title: 'Carriers — first of the five nouns',
         tab: 'Build',
-        note: 'Click it. The panel below scopes to the `carriers` sheet. Carriers come before buses because '
-          + 'buses point at them by name.',
+        note: 'The table on the left scopes to the `carriers` sheet — and note there is no map: '
+          + 'a carrier is a kind of energy, not a place. Carriers come before buses because buses point at '
+          + 'them by name.',
       },
       {
         selector: '[data-build-step="buses"]',
+        buildStep: 'buses',
         title: 'Buses — the nodes',
         tab: 'Build',
-        note: 'Click it and look at the map in the middle. Buses are the only component with a position; '
-          + 'everything else inherits its location from the bus it attaches to.',
+        note: 'The map appears here, because a bus is the one component with a position. Everything '
+          + 'else inherits its location from the bus it attaches to. Compare with the Carriers step you just '
+          + 'left, which had none.',
       },
       {
         selector: '[data-build-step="generators"]',
+        buildStep: 'generators',
         title: 'Generators — injection',
         tab: 'Build',
-        note: 'Click it. Note the `bus` column in the table: that text must match a bus name exactly. This '
+        note: 'Note the `bus` column in the table: that text must match a bus name exactly. This '
           + 'is the reference-by-name mechanic, and the single commonest source of a broken model.',
       },
       {
         selector: '[data-build-step="loads"]',
+        buildStep: 'loads',
         title: 'Loads — withdrawal',
         tab: 'Build',
         note: 'Same shape as generators, opposite sign. `p_set` is the demand in MW.',
@@ -193,6 +205,7 @@ export const MODULE_1_FOUNDATIONS: TutorialStep[] = [
       'You can say what a bus is without using the word "bus"',
       'You can say how a generator declares which bus it sits on',
       'You can say why carriers come before buses in the strip',
+      'You can predict, for any step, whether it will show a map',
     ],
     pitfalls: [
       'A reference typo does not raise an error — it silently detaches the component. Analytics → '
@@ -247,25 +260,30 @@ export const MODULE_1_FOUNDATIONS: TutorialStep[] = [
     spotlights: [
       {
         selector: '[data-build-step="snapshots"]',
+        buildStep: 'snapshots',
         title: 'The Snapshots step',
         tab: 'Build',
-        note: 'Click it. Second in the strip, ahead of every component — that ordering is the lesson. '
-          + 'Note there is no map here: a time axis has no geography.',
+        note: 'Second in the strip, ahead of every component — that ordering is the lesson. Note there is '
+          + 'no map here, and no per-row form: a time axis has no geography, and you never author snapshots '
+          + 'one at a time.',
       },
       {
         selector: '.snapshot-builder',
+        buildStep: 'snapshots',
         title: 'The snapshot builder',
         tab: 'Build',
         note: 'The axis is specified here, not typed into the table on the left.',
       },
       {
         selector: '[data-tour="snap-start"]',
+        buildStep: 'snapshots',
         title: 'Start',
         tab: 'Build',
         note: 'The first snapshot. A date alone gives you midnight; add a time to start elsewhere.',
       },
       {
         selector: '[data-tour="snap-resolution"]',
+        buildStep: 'snapshots',
         title: 'Resolution',
         tab: 'Build',
         note: 'The spacing between snapshots — this decides how many rows you get. Try switching it and '
@@ -273,6 +291,7 @@ export const MODULE_1_FOUNDATIONS: TutorialStep[] = [
       },
       {
         selector: '[data-tour="snap-horizon"]',
+        buildStep: 'snapshots',
         title: 'Horizon',
         tab: 'Build',
         note: 'How much time to cover. Pick "1 year" and read the summary: 8760 snapshots, with a warning '
@@ -280,6 +299,7 @@ export const MODULE_1_FOUNDATIONS: TutorialStep[] = [
       },
       {
         selector: '[data-tour="snap-weight"]',
+        buildStep: 'snapshots',
         title: 'Run resolution',
         tab: 'Build',
         note: 'Weight is not the same as resolution. It is how many real hours each snapshot stands for, '
@@ -325,9 +345,13 @@ export const MODULE_1_FOUNDATIONS: TutorialStep[] = [
       + 'called `untitled.xlsx` and opens Build. If something is already loaded, use Clear in the top '
       + 'bar first — it drops the model and unsaved edits but keeps settings, history and plugins.',
 
-      'Go to the Network step. The sheet is empty, so add a row with "+ Add Network", then type the name '
-      + 'into the `name` cell. Adding a row and filling it are two separate actions — that pattern holds '
-      + 'for every sheet in the course.',
+      'Go to the Network step. It shows no map — `network` has no coordinates — so the table sits on the '
+      + 'left and the attribute form on the right.',
+
+      'The sheet is empty, so add a row with "+ Add Network", then type the name into the `name` cell. '
+      + 'Adding a row and filling it are two separate actions, and that pattern holds for every sheet in '
+      + 'the course. You can type into the table cell or into the attribute form on the right — they are '
+      + 'two views of the same row.',
     ],
     spotlights: [
       {
@@ -339,9 +363,11 @@ export const MODULE_1_FOUNDATIONS: TutorialStep[] = [
       },
       {
         selector: '[data-build-step="network"]',
+        buildStep: 'network',
         title: 'The Network step',
         tab: 'Build',
-        note: 'First in the strip. Click it if it is not already selected.',
+        note: 'First in the strip, opened for you. No map — `network` has no coordinates — so the table is '
+          + 'on the left and the attribute form on the right.',
       },
       {
         selector: '[data-tour="add-row"]',
@@ -408,20 +434,31 @@ export const MODULE_1_FOUNDATIONS: TutorialStep[] = [
     ],
     spotlights: [
       {
-        selector: '[data-tour="snap-horizon"]',
-        title: 'Start here — generate 3 snapshots',
+        selector: '[data-build-step="snapshots"]',
+        buildStep: 'snapshots',
+        title: 'Start here — the Snapshots step',
         tab: 'Build',
-        note: 'On the Snapshots step, set Horizon to "Custom count" and enter 3, with Start 2030-01-01 '
-          + '00:00 and Resolution 1 hour. Press Generate. Do not type rows into the table.',
+        note: 'Opened for you. The axis comes first because every profile in the model is indexed by it.',
+      },
+      {
+        selector: '[data-tour="snap-horizon"]',
+        buildStep: 'snapshots',
+        title: 'Generate 3 snapshots',
+        tab: 'Build',
+        note: 'Set Horizon to "Custom count" and enter 3, with Start 2030-01-01 00:00 and Resolution '
+          + '1 hour. Check the summary reads 3 snapshots, then press Generate. Do not type rows into the '
+          + 'table.',
       },
       {
         selector: '[data-build-step="carriers"]',
+        buildStep: 'carriers',
         title: 'Then carriers',
         tab: 'Build',
         note: 'Two rows — AC and gas. The gas row carries the emission factor you will use in module 7.',
       },
       {
         selector: '[data-build-step="buses"]',
+        buildStep: 'buses',
         title: 'Then the bus',
         tab: 'Build',
         note: 'One row. You can also click the map to drop it, which fills x and y for you — you still set '
@@ -429,6 +466,7 @@ export const MODULE_1_FOUNDATIONS: TutorialStep[] = [
       },
       {
         selector: '[data-build-step="generators"]',
+        buildStep: 'generators',
         title: 'Then the generator',
         tab: 'Build',
         note: 'One row. Check the `bus` cell matches your bus name exactly — this is the reference-by-name '
@@ -436,6 +474,7 @@ export const MODULE_1_FOUNDATIONS: TutorialStep[] = [
       },
       {
         selector: '[data-build-step="loads"]',
+        buildStep: 'loads',
         title: 'Then the load',
         tab: 'Build',
         note: 'One row, 80 MW against the generator\'s 100 MW. Deliberately under capacity, so the model is '
@@ -495,8 +534,9 @@ export const MODULE_1_FOUNDATIONS: TutorialStep[] = [
       + 'asks "what is the cheapest feasible operation?" and costs real time. Always validate first.',
 
       'The objective value is the number the optimiser minimised: total system cost over the modelled '
-      + 'period. Here you can derive it yourself. The load is 80 MW in each of 3 hourly snapshots, so 240 '
-      + 'MWh must be served. Only gas_1 can serve it, at 50 per MWh. Total cost = 240 × 50 = 12,000.',
+      + 'period. Here you can derive it yourself. The load is 80 MW in each of 3 snapshots, and the '
+      + 'builder set the snapshot weight to 1 h, so each snapshot really is one hour and 240 MWh must be '
+      + 'served. Only gas_1 can serve it, at 50 per MWh. Total cost = 240 × 50 = 12,000.',
 
       'Checking a solver against arithmetic is a habit worth forming now, while it is still possible. On '
       + 'a real model you cannot do this — which is exactly why you should know what the number is made '
@@ -518,9 +558,10 @@ export const MODULE_1_FOUNDATIONS: TutorialStep[] = [
       'Then press Run with Dry run off and Run model. Three snapshots solve instantly. Read the objective '
       + 'in Analytics → Result and reconcile it against 12,000.',
 
-      'If your number differs, the likeliest cause is the snapshot weighting — each snapshot standing for '
+      'If your number differs, the likeliest cause is the snapshot weight — each snapshot standing for '
       + 'more or fewer than one hour rescales the whole objective. The Run dialog\'s summary reports the '
-      + 'resolution it used.',
+      + 'resolution it used; it should say 1h. If it does not, the weight checkbox in the snapshot builder '
+      + 'was unticked, and Settings → Simulation window is where to put it right.',
     ],
     spotlights: [
       {
