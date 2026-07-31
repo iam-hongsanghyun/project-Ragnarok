@@ -246,9 +246,15 @@ function AppInner() {
   const startGuide = useCallback((stops: Spotlight[]) => {
     if (stops.length > 0) setGuide({ stops, index: 0 });
   }, []);
+  // Put the app where the current walkthrough stop needs it. Navigation only —
+  // switching a view and opening a dialog. Values and runs stay the learner's.
+  // `dryRun` is deliberately untouched: a step may be telling them to toggle it.
   useEffect(() => {
-    const dest = guide?.stops[guide.index]?.tab;
-    if (dest) setTab(dest);
+    const stop = guide?.stops[guide.index];
+    if (!stop) return;
+    if (stop.tab) setTab(stop.tab);
+    if (stop.runDialog === 'open') setRunDialogOpen(true);
+    else if (stop.runDialog === 'closed') setRunDialogOpen(false);
   }, [guide]);
   // Training state lives here, not in TrainingView: a learner spends most of a
   // tutorial in OTHER views doing the work, and the top bar has to offer a way
@@ -3667,6 +3673,23 @@ function AppInner() {
               onActiveIdChange={setTrainingActiveId}
               progressById={trainingProgress}
               onProgressByIdChange={setTrainingProgress}
+              modelSummary={{
+                filename,
+                buses: model.buses?.length ?? 0,
+                generators: model.generators?.length ?? 0,
+                loads: model.loads?.length ?? 0,
+                snapshots: model.snapshots?.length ?? 0,
+              }}
+              onClearModel={async () => {
+                // Same effect as the top-bar Clear: drop the model on both sides,
+                // keep settings, history and plugins. The banner confirms first.
+                resetForNewModel(createEmptyWorkbook(), 'untitled.xlsx');
+                setFileHandle(null);
+                void clearSessionModel();
+                await clearSessionModelOnly();
+                setStatus('Model cleared. Settings kept.');
+              }}
+              onLoadExample={handleLoadExample}
             />
           )}
         </div>

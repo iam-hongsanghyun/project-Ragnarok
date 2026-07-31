@@ -24,6 +24,7 @@ import { LeftRail, ViewPanel } from 'shared/components/primitives';
 import { ResizablePanels } from '../layout/ResizablePanels';
 import { TutorialCatalog } from './TrainingView.features/TutorialCatalog';
 import { TutorialRunner } from './TrainingView.features/TutorialRunner';
+import type { ModelSummary } from './TrainingView.features/StartStateBanner';
 
 interface Props {
   /** Switch the workspace to a view, so a step can put the user in the right place. */
@@ -41,10 +42,15 @@ interface Props {
   onActiveIdChange: (id: string | null) => void;
   progressById: Record<string, TutorialProgress>;
   onProgressByIdChange: (next: Record<string, TutorialProgress>) => void;
+  /** What the session holds, and the actions to change it — for the start-state banner. */
+  modelSummary: ModelSummary;
+  onClearModel: () => void | Promise<void>;
+  onLoadExample: (id: string) => void | Promise<void>;
 }
 
 export function TrainingView({
   onNavigate, onStartGuide, activeId, onActiveIdChange, progressById, onProgressByIdChange,
+  modelSummary, onClearModel, onLoadExample,
 }: Props) {
   const setActiveId = onActiveIdChange;
   const setProgressById = onProgressByIdChange;
@@ -138,6 +144,9 @@ export function TrainingView({
               onProgressChange={(next) => setProgressFor(active.id, next)}
               onNavigate={onNavigate}
               onStartGuide={onStartGuide}
+              modelSummary={modelSummary}
+              onClearModel={onClearModel}
+              onLoadExample={onLoadExample}
               onExit={() => setActiveId(null)}
               onReset={() => setProgressFor(active.id, emptyProgress())}
             />

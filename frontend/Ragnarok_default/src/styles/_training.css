@@ -356,6 +356,61 @@
   line-height: 1.55;
 }
 
+/* ── Start-state banner (first step of a tutorial) ── */
+
+.training-start-state {
+  max-width: 78ch;
+  margin: 0 0 18px;
+  padding: 11px 14px;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-sm);
+  background: var(--warn-soft);
+}
+
+.training-start-state.is-ready {
+  border-color: var(--border);
+  background: var(--panel);
+}
+
+.training-start-state__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.training-start-state__label {
+  color: var(--text-faint);
+  font-size: var(--fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.training-start-state__now {
+  color: var(--text-secondary);
+  font-size: var(--fs-2xs);
+}
+
+.training-start-state__note {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.training-start-state__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.training-start-state__alt {
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+}
+
 .training-step { max-width: 78ch; }
 
 .training-step__section {

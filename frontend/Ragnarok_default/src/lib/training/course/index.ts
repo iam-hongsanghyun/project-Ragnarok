@@ -37,6 +37,16 @@ export const POWER_MARKET_COURSE: Tutorial = {
   title: 'Power market modelling with Ragnarok',
   level: 'Beginner',
   minutes: 12 * 60,
+  // Module 1 authors a model from an empty sheet, so a leftover model would
+  // collide with it. Declared, not enforced: a learner may be resuming work they
+  // left deliberately, so the runner offers the clear rather than doing it.
+  startState: {
+    kind: 'empty',
+    note:
+      'This course builds a model from nothing, so it starts with an empty session. If you have work '
+      + 'loaded that you want to keep, export it first (Model → Export project) — clearing keeps your '
+      + 'settings, run history and plugins, but not the model.',
+  },
   summary:
     'A 48-step course in eight modules. Build one power-system model from an empty sheet to a '
     + 'policy-tested investment case, learning the modelling theory and the Ragnarok mechanics '

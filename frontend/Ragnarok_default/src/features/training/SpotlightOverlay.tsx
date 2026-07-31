@@ -137,9 +137,9 @@ export function SpotlightOverlay({ stops, index, onIndexChange, onClose }: Props
           // does not open it. Say what is missing either way; a genuinely stale
           // selector then looks like what it is.
           <p className="spotlight-callout__missing">
-            Not on screen right now (<code>{stop.selector}</code>). If this stop points inside a
-            dialog or panel, open it first — the walkthrough never clicks for you — and the ring
-            will appear.
+            Not on screen right now (<code>{stop.selector}</code>). The walkthrough opens the view,
+            Build step and Run dialog a stop declares, so this is most likely a tutorial pointing at
+            something this build no longer renders — worth reporting.
           </p>
         )}
         <div className="spotlight-callout__foot">

@@ -87,6 +87,18 @@ export interface Spotlight {
    * starts no runs.
    */
   buildStep?: string;
+  /**
+   * Whether the Run dialog must be open for this stop.
+   *
+   * `'open'` ensures it is, `'closed'` ensures it is not, omitted leaves it
+   * alone. Needed for the same reason as `buildStep`: the planning summary and
+   * the Dry-run toggle only exist while the dialog is up, and a walkthrough that
+   * cannot open it reports its own targets as missing.
+   *
+   * Opening a dialog is navigation. It does not enter values and does not submit
+   * the run — the learner still presses Validate or Run model themselves.
+   */
+  runDialog?: 'open' | 'closed';
 }
 
 export interface TutorialStep {
@@ -127,9 +139,32 @@ export interface TutorialStep {
   pitfalls?: string[];
 }
 
+/**
+ * The session state a tutorial expects before its first step.
+ *
+ * Declared rather than enforced. A learner may be resuming work they left half
+ * done, so the runner reports what the tutorial wants against what the session
+ * actually holds and offers the actions to close the gap — it never silently
+ * clears a model or loads one.
+ */
+export interface TutorialStartState {
+  /**
+   * `'empty'` — the tutorial authors a model from scratch, so a leftover model
+   * would collide with it. `'checkpoint'` — the tutorial continues from a
+   * bundled example, named by `exampleId`.
+   */
+  kind: 'empty' | 'checkpoint';
+  /** Bundled example to load, for `'checkpoint'`. Matches an `/api/examples` id. */
+  exampleId?: string;
+  /** What the learner should be looking at once the start state is in place. */
+  note: string;
+}
+
 export interface Tutorial {
   id: string;
   title: string;
+  /** Session state expected before step 1. Omit when the tutorial does not care. */
+  startState?: TutorialStartState;
   level: TrainingLevel;
   /** Rough wall-clock time, excluding solve time on large models. */
   minutes: number;

@@ -566,32 +566,38 @@ export const MODULE_1_FOUNDATIONS: TutorialStep[] = [
     spotlights: [
       {
         selector: '.run-button',
-        title: 'Open the Run dialog',
-        note: 'Press it now — the walkthrough never clicks for you. The dialog opens over this callout; '
-          + 'then press Next.',
+        title: 'The Run button',
+        runDialog: 'closed',
+        note: 'Everything you solve starts here. It opens the Run dialog — the next stop opens it for you '
+          + 'so you can see inside.',
       },
       {
         selector: '.sg-scenario-summary',
         title: 'The planning summary',
+        runDialog: 'open',
         note: 'Read it before every run: scenario, solve mode, snapshot window, resolution, active '
-          + 'constraints. This is the cheapest check in the whole application.',
+          + 'constraints. This is the cheapest check in the whole application, and most surprising results '
+          + 'are a run that used a different window than you assumed.',
       },
       {
         selector: '[data-tour="dry-run"]',
         title: 'Dry run',
-        note: 'Turn it on. The action button on the right relabels itself to Validate — it sends the model '
-          + 'to the validation endpoint instead of the solver.',
+        runDialog: 'open',
+        note: 'Turn it on yourself. Watch the action button on the right relabel to Validate — that is the '
+          + 'model going to the validation endpoint instead of the solver.',
       },
       {
         selector: '.modal-actions .run-button',
         title: 'Validate, then run',
-        note: 'Press it to validate. Afterwards reopen the dialog, turn Dry run off, and press it again to '
-          + 'solve for real.',
+        runDialog: 'open',
+        note: 'Press it to validate. Then reopen the dialog, turn Dry run off, and press it again to solve '
+          + 'for real. Both presses are yours — the walkthrough never submits a run.',
       },
       {
         selector: '[data-subtab="Validation"]',
         title: 'Validation results',
         tab: 'Analytics',
+        runDialog: 'closed',
         note: 'Where structural problems land. Warnings are worth reading even when the model is valid — '
           + 'they usually name a component contributing nothing.',
       },
@@ -599,6 +605,7 @@ export const MODULE_1_FOUNDATIONS: TutorialStep[] = [
         selector: '[data-subtab="Result"]',
         title: 'The objective value',
         tab: 'Analytics',
+        runDialog: 'closed',
         note: 'Your answer. Find the objective and reconcile it against 240 MWh × 50 = 12,000 before you go '
           + 'to module 2.',
       },

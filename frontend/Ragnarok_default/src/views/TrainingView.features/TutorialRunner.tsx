@@ -22,6 +22,7 @@ import {
   toggleStep,
 } from 'lib/training/progress';
 import { ViewPaneHeader } from 'shared/components/primitives';
+import { ModelSummary, StartStateBanner } from './StartStateBanner';
 
 interface Props {
   tutorial: Tutorial;
@@ -34,6 +35,10 @@ interface Props {
   /** Return to the tutorial picker. */
   onExit: () => void;
   onReset: () => void;
+  /** What the session currently holds, for the start-state banner. */
+  modelSummary: ModelSummary;
+  onClearModel: () => void | Promise<void>;
+  onLoadExample: (id: string) => void | Promise<void>;
 }
 
 /** Human label for a workspace tab, matching the activity-bar wording. */
@@ -202,7 +207,10 @@ function StepBody({ step, onNavigate, onStartGuide }: {
   );
 }
 
-export function TutorialRunner({ tutorial, progress, onProgressChange, onNavigate, onStartGuide, onExit, onReset }: Props) {
+export function TutorialRunner({
+  tutorial, progress, onProgressChange, onNavigate, onStartGuide, onExit, onReset,
+  modelSummary, onClearModel, onLoadExample,
+}: Props) {
   const currentId = resolveCurrentStepId(tutorial, progress);
   const index = stepIndex(tutorial, currentId);
   const step = index >= 0 ? tutorial.steps[index] : null;
@@ -237,6 +245,16 @@ export function TutorialRunner({ tutorial, progress, onProgressChange, onNavigat
             <b>Tutorial complete.</b> Every step is ticked. Reset progress to run through it again,
             or go back to the list for the next one.
           </div>
+        )}
+
+        {/* Starting state matters on the first step only. */}
+        {step && index === 0 && tutorial.startState && (
+          <StartStateBanner
+            startState={tutorial.startState}
+            model={modelSummary}
+            onClearModel={onClearModel}
+            onLoadExample={onLoadExample}
+          />
         )}
 
         {step ? (

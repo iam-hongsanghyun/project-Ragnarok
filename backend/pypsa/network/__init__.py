@@ -153,7 +153,14 @@ def build_network(
         from fastapi import HTTPException
         raise HTTPException(
             status_code=400,
-            detail="discountRate is required (set it in Settings).",
+            detail=(
+                "discountRate is required, and it belongs in `scenario`, not "
+                "`options` — e.g. scenario={\"discountRate\": 0.05}. (In the GUI it "
+                "is Settings -> Discount rate.) It annuitises capital cost, so it "
+                "affects any run with extendable capacity; for a pure dispatch run "
+                "over a short window it changes nothing, but a value still has to be "
+                "stated rather than assumed."
+            ),
         )
     discount_rate = number(scenario.get("discountRate"))
     carbon_price = number(scenario.get("carbonPrice"), 0.0)
