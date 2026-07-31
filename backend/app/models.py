@@ -35,24 +35,29 @@ class SessionModelPayload(BaseModel):
 
 
 class ExportProjectPayload(BaseModel):
-    """Body for ``POST /api/export/project`` and ``POST /api/export/workbook``.
+    """Body for ``POST /api/export/project``.
 
-    Carries the in-memory workbook (``model``) and the solved result bundle
-    (``result``). The server builds the full input + output xlsx so the heavy
-    SheetJS workbook build no longer runs in (and OOMs) the browser tab.
+    Carries the solved result bundle (``result``) plus the scenario and run
+    options that produced it, so the exported package round-trips the run window
+    and settings — not just the topology. The server builds the full input +
+    output xlsx so the heavy SheetJS workbook build no longer runs in (and OOMs)
+    the browser tab.
 
-    ``sessionId`` lets the server re-attach the time-series sheets the browser
-    does not hold (they live in the session db and page into the grid), so an
-    export is complete rather than input-static-only.
+    ``model`` is OPTIONAL and exists only for API clients holding a complete
+    workbook. The Ragnarok frontend sends ``sessionId`` instead and the server
+    loads the full model (time-series included) from the session store: the
+    browser keeps static sheets only, so an inline ``model`` from the UI would
+    export a project with no time-series data at all.
 
-    ``scenario`` / ``options`` are the same dicts a run submits. They are what
-    the exported workbook's ``RAGNAROK_Constraints`` / ``RAGNAROK_Settings`` /
-    ``RAGNAROK_RunState`` sheets are written from, and what a re-import reads the
-    run window (``snapshotStart`` / ``snapshotEnd`` / ``snapshotWeight``) back
-    out of — omit them and a re-imported project opens with a 0-snapshot window.
+    ``sessionId`` also tells the server to embed that session's current Bifrost
+    conversation into the package, so importing the project resumes the chat
+    where it left off.
     """
 
-    model: dict[str, list[dict[str, Any]]]
+    # `model` optional: a thin client sends `sessionId` and the server hydrates the
+    # session's series into it. `result` defaults to empty — a model-only export
+    # legitimately has no result, and requiring it (as Bifrost did) rejects that.
+    model: dict[str, list[dict[str, Any]]] | None = None
     result: dict[str, Any] = {}
     scenario: dict[str, Any] = {}
     options: dict[str, Any] = {}

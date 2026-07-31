@@ -162,6 +162,10 @@ function generationTimeOption(r: RunResults, colorOf: Map<string, string>, setti
     series: keys.map((k) => ({ key: k, label: k, color: colorOf.get(k)! })),
     mode: settings.chartType === 'line' ? 'line' : settings.chartType === 'bar' ? 'bar' : 'area',
     stacked: settings.stacked, showAxisLabels: true, xLabelAngle: 0, theme: readChartTheme(),
+    // The matrix renders one shared legend for the whole scenario row (see
+    // `cmp-legend-cell`); a per-cell legend would duplicate it and crowd the
+    // small multiple. Same reason expansion cells force `legend.show: false`.
+    showLegend: false,
   });
 }
 

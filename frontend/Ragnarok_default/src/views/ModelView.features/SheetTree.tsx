@@ -7,14 +7,20 @@
  * presence + row count come from `seriesSheetCounts` — the session's series
  * sheets. Selecting a temporal leaf flips the central table to it, which then
  * lazy-loads its rows from the session.
+ *
+ * A component's temporal sheets are listed once the component itself exists,
+ * INCLUDING the ones with no rows yet. Hiding those was a chicken-and-egg trap:
+ * the CSV importer for a profile lives on that sheet's own pane, so you needed
+ * rows to reach the UI that adds rows — and with no temporal sheet in the session
+ * there was no way in from the Model tab at all. The backend already creates a
+ * series sheet on first write (`patch_sheet`), so reachability was the whole bug.
+ * Matches upstream Ragnarok `e6a7241`.
  */
 import React, { useMemo, useState } from 'react';
 import { GridRow, SheetName, TableSel, WorkbookModel } from 'lib/types';
 import { ModelIssue } from '../../features/validation/useModelIssues';
 import { TABLE_GROUPS } from 'lib/constants';
-
-/** The shared time axis every temporal sheet is indexed by. */
-const SNAPSHOTS_SHEET = 'snapshots';
+import { temporalLeaves } from './sheetTreeLeaves';
 
 interface Props {
   model: WorkbookModel;
@@ -55,14 +61,10 @@ export function SheetTree({ model, issues, sel, onSelChange, seriesSheetCounts }
   const matchesSearch = (haystack: string) =>
     !navSearch || haystack.toLowerCase().includes(navSearch.toLowerCase());
 
-  // Only groups whose static sheet OR any temporal sheet has data — plus
-  // `snapshots`, which is ALWAYS listed. Snapshots are the one shared time axis
-  // every temporal sheet is indexed by, so an empty one has to be reachable or a
-  // from-scratch model can never get a time axis (and then no profile can be
-  // written or imported either).
+  // Only groups whose static sheet OR any temporal sheet has data.
   const visibleGroups = TABLE_GROUPS.filter((g) => {
     const staticRows = (model[g.sheet] ?? []) as GridRow[];
-    const hasStatic = staticRows.length > 0 || g.sheet === SNAPSHOTS_SHEET;
+    const hasStatic = staticRows.length > 0;
     const hasAnyTs = g.temporalSheets.some((ts) => tsCount(ts.sheet) > 0);
     if (!hasStatic && !hasAnyTs) return false;
     if (!navSearch) return true;
@@ -109,24 +111,15 @@ export function SheetTree({ model, issues, sel, onSelChange, seriesSheetCounts }
         )}
         {visibleGroups.map((g) => {
           const staticRows = (model[g.sheet] ?? []) as GridRow[];
-          // `snapshots` keeps its leaf even at zero rows — that empty sheet is
-          // where the time axis gets authored (see `visibleGroups`).
-          const hasStatic = staticRows.length > 0 || g.sheet === SNAPSHOTS_SHEET;
+          const hasStatic = staticRows.length > 0;
           const open = !collapsed.has(g.sheet);
           const staticActive = sel.kind === 'static' && sel.sheet === g.sheet;
 
-          // Temporal sheets that hold rows — PLUS, once the component itself
-          // exists, the ones that are still empty.
-          //
-          // An empty profile has to be reachable: the CSV importer for a
-          // temporal sheet lives on that sheet's own pane, so hiding it until it
-          // had rows made it impossible to create — you needed rows to reach the
-          // UI that adds rows (Build's Temporal panel was the only way in).
-          // With no static row there is nothing to profile, so those stay hidden.
-          const tsEntries = g.temporalSheets.filter((ts) => tsCount(ts.sheet) > 0 || hasStatic);
-          // The header badge stays a count of sheets that actually hold data —
-          // the empty placeholders above are affordances, not content.
-          const tsWithRows = tsEntries.filter((ts) => tsCount(ts.sheet) > 0);
+          // Temporal sheets that hold data, PLUS — once the component itself
+          // exists — the ones that are still empty, so an absent profile can be
+          // opened and imported into. See `temporalLeaves`.
+          const { populated: populatedTs, shown: tsEntries } =
+            temporalLeaves(g.temporalSheets, tsCount, hasStatic);
 
           return (
             <div key={g.sheet} className="sheet-tree-group">
@@ -137,7 +130,9 @@ export function SheetTree({ model, issues, sel, onSelChange, seriesSheetCounts }
               >
                 <span className={`sheet-tree-chevron${open ? ' is-open' : ''}`}>›</span>
                 <span className="sheet-tree-group-label">{g.label}</span>
-                <span className="sheet-tree-count">{staticRows.length + tsWithRows.length}</span>
+                {/* A count of sheets that actually hold data — the empty
+                    placeholders are affordances, not content. */}
+                <span className="sheet-tree-count">{staticRows.length + populatedTs.length}</span>
               </button>
               {open && (
                 <div className="sheet-tree-items">
@@ -159,19 +154,19 @@ export function SheetTree({ model, issues, sel, onSelChange, seriesSheetCounts }
                   )}
                   {tsEntries.map((ts) => {
                     const tsActive = sel.kind === 'ts' && sel.sheet === ts.sheet;
-                    const tsRows = tsCount(ts.sheet);
+                    const count = tsCount(ts.sheet);
                     return (
                       <button
                         key={ts.sheet}
-                        className={`sheet-tree-item is-ts${tsActive ? ' is-active' : ''}${tsRows === 0 ? ' is-empty' : ''}`}
+                        className={`sheet-tree-item is-ts${tsActive ? ' is-active' : ''}${count === 0 ? ' is-empty' : ''}`}
                         onClick={() => onSelChange({ kind: 'ts', sheet: ts.sheet })}
-                        title={tsRows === 0
+                        title={count === 0
                           ? `No ${ts.attribute} profile yet — open it to import a CSV`
-                          : `${ts.attribute}: ${tsRows} rows`}
+                          : `${ts.attribute}: ${count} rows`}
                       >
                         <span className="sheet-tree-item-icon">t</span>
                         <span className="sheet-tree-item-label">{ts.attribute}</span>
-                        <span className="sheet-tree-count">{tsRows}</span>
+                        <span className="sheet-tree-count">{count}</span>
                       </button>
                     );
                   })}

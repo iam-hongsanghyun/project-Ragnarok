@@ -35,9 +35,9 @@ interface Props {
 function EmptyAnalytics() {
   return (
     <div className="analytics-empty">
-      <h3>Analytics is empty until you run the model</h3>
+      <h3>No run loaded</h3>
       <p>
-        Open the run dialog, set the number of snapshots and snapshot weight, then execute the case. The dashboard will populate after a successful backend run.
+        Results, scenario comparisons, and per-asset drill-downs appear here after a solve completes. Run the case from the top-bar, or open a stored run from History.
       </p>
     </div>
   );

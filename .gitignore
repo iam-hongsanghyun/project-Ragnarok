@@ -91,3 +91,20 @@ backend/data/pypsa_earth_run.pid
 .DS_Store
 **/.DS_Store
 /build.tmp/
+
+# Session mutation journal + undo snapshots — runtime data written by
+# `journal.wrap_model_store()` on every session mutation. It was tracked before
+# the journal moved here, so the 30 files it held are untracked by this commit;
+# they are regenerated as the app is used.
+backend/data/journal/
+
+# SQLite runtime sidecars. A tracked project.db is a shipped example session, but
+# its write-ahead log and shared-memory files are per-process state — a committed
+# copy is a stale mid-transaction snapshot of whoever ran the app last.
+*.db-wal
+*.db-shm
+*.db-journal
+
+# FUSE leaves these behind when a file is deleted while still held open
+# (network/synced mounts). Never source.
+.fuse_hidden*

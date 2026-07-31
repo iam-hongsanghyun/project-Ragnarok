@@ -49,7 +49,9 @@ const num = (v: unknown): number => {
 };
 
 export function CapacityTargetPanel({ model, onScaleCarrierCapacity, onStatus }: Props) {
-  const generators = model.generators ?? [];
+  // `?? []` would mint a new array every render on a model with no generators
+  // sheet, invalidating every downstream memo; memoise so the identity is stable.
+  const generators = useMemo(() => model.generators ?? [], [model.generators]);
   const carriers = useMemo(
     () =>
       Array.from(new Set(generators.map((g) => String(g.carrier ?? '')).filter(Boolean))).sort(),

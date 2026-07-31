@@ -55,11 +55,24 @@ function parseLinexpr(tokens: Token[]): ConstraintTerm[] | string {
   let sign = 1;
   const n = tokens.length;
   if (n === 0) return 'empty expression';
+  /** Read one selector value at the cursor and advance past it. Declared once
+   *  here rather than per-iteration: the cursor `i` is shared parser state, and
+   *  a closure over it re-created inside the loop trips `no-loop-func`. */
+  const readValue = (): string | null => {
+    if (i >= n || (tokens[i].kind !== 'ident' && tokens[i].kind !== 'str')) return null;
+    const v = tokens[i].val.replace(/^"|"$/g, '');
+    i += 1;
+    return v;
+  };
   while (i < n) {
     let coef = sign;
     if (tokens[i].kind === 'num' && i + 1 < n && tokens[i + 1].kind === 'star') {
       coef = sign * parseFloat(tokens[i].val);
       i += 2;
+      // `2 *` with nothing after it ran off the end: without this guard the
+      // `tokens[i]` below is undefined and reading `.kind` throws, surfacing as
+      // a crash rather than a parse error in the constraint editor.
+      if (i >= n) return `expected a term after '${tokens[i - 2].val} *'`;
     }
     const tok = tokens[i];
     if (tok.kind === 'num') {
@@ -74,12 +87,6 @@ function parseLinexpr(tokens: Token[]): ConstraintTerm[] | string {
       const hasParen = i < n && tokens[i].kind === 'lparen';
       if (hasParen) {
         i += 1; // (
-        const readValue = (): string | null => {
-          if (i >= n || (tokens[i].kind !== 'ident' && tokens[i].kind !== 'str')) return null;
-          const v = tokens[i].val.replace(/^"|"$/g, '');
-          i += 1;
-          return v;
-        };
         const first = readValue();
         if (first === null) return `expected carrier or column name in '${name}(...)'`;
         if (i < n && tokens[i].kind === 'comma') {

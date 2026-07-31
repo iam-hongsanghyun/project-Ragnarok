@@ -91,6 +91,65 @@ def test_asset_swap_ratio_and_paired_storage() -> None:
     assert sw["replacementCapex"] > 0
 
 
+def test_asset_swap_fixed_replacement_is_not_extendable() -> None:
+    """Default (fixed) mode: added MW is exactly retired MW × ratio, pre-solve."""
+    res = run_pypsa(
+        _model(), SCENARIO,
+        {"assetSwapConfig": {
+            "enabled": True, "addCarrier": "solar",
+            "removeFilters": [{"field": "carrier", "values": ["gas"]}],
+            "replaceRatio": 3.0,
+        }},
+    )
+    sw = res["assetSwap"]
+    assert sw["sizedReplacement"] is False
+    # 200 MW gas × 3 = 600 MW solar, whatever the LP would have preferred.
+    assert sw["addedCapacityMW"] == round(sw["removedCapacityMW"] * 3.0, 2)
+    assert sw["addedCapacityMW"] == sw["replacementCapMW"]
+
+
+def test_asset_swap_sized_replacement_is_solved_not_copied() -> None:
+    """Sizing mode: the ratio is a ceiling and the LP picks the build.
+
+    Solar at 90 % peak availability cannot cover the 160 MW evening peak, so the
+    optimiser builds strictly less than the 3× ceiling but more than nothing —
+    a number no pre-solve arithmetic produces.
+    """
+    res = run_pypsa(
+        _model(), SCENARIO,
+        {"assetSwapConfig": {
+            "enabled": True, "addCarrier": "solar",
+            "removeFilters": [{"field": "carrier", "values": ["gas"]}],
+            "replaceRatio": 3.0, "sizeReplacement": True,
+        }},
+    )
+    sw = res["assetSwap"]
+    assert sw["sizedReplacement"] is True
+    assert sw["replacementCapMW"] == round(sw["removedCapacityMW"] * 3.0, 2)
+    # Built capacity is a solve output, bounded by the ceiling.
+    assert 0.0 < sw["addedCapacityMW"] <= sw["replacementCapMW"]
+    # Capex tracks what was BUILT, not the ceiling.
+    assert sw["replacementCapex"] > 0
+
+
+def test_asset_swap_sized_ceiling_binds_when_solar_is_free() -> None:
+    """A zero-capex replacement builds out to the ceiling — the bound holds."""
+    model = _model()
+    for g in model["generators"]:
+        if g["name"] == "solar0":
+            g["capital_cost"] = 0.0
+    res = run_pypsa(
+        model, SCENARIO,
+        {"assetSwapConfig": {
+            "enabled": True, "addCarrier": "solar",
+            "removeFilters": [{"field": "carrier", "values": ["gas"]}],
+            "replaceRatio": 2.0, "sizeReplacement": True,
+        }},
+    )
+    sw = res["assetSwap"]
+    assert sw["addedCapacityMW"] == sw["replacementCapMW"] == round(sw["removedCapacityMW"] * 2.0, 2)
+
+
 def test_asset_swap_legacy_remove_carrier() -> None:
     # Back-compat: the old removeCarrier field still works.
     res = run_pypsa(_model(), SCENARIO, {"assetSwapConfig": {"enabled": True, "removeCarrier": "gas", "addCarrier": "solar"}})

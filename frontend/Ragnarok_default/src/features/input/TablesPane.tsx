@@ -7,6 +7,7 @@ import { getAttributeSchema, PypsaAttribute, TableGroup } from 'lib/constants/py
 import { ResizablePanels } from '../../layout/ResizablePanels';
 import { getColumns, getTsFirstCol, stringValue } from 'lib/utils/helpers';
 import { parseCsvToGridRows } from 'lib/workbook/workbook';
+import { seedTemporalRows } from 'lib/workbook/temporalSeed';
 import { normalizeDateToIso } from 'lib/utils/helpers';
 import type { DateFormat } from '../settings/useSettings';
 import { PYPSA_STANDARD_LINE_TYPES, PYPSA_STANDARD_TRANSFORMER_TYPES } from 'lib/constants/pypsa_standard_types';
@@ -482,11 +483,13 @@ export function TablesPane({
     const componentNames = (((model as unknown as Record<string, GridRow[]>)[parentGroup?.sheet ?? ''] ?? [])
       .map((r) => stringValue(r.name))
       .filter((n) => n !== ''));
-    const seeded: GridRow[] = snapshotRows.map((s) => {
-      const row: GridRow = { snapshot: stringValue(s.snapshot ?? s.name ?? '') };
-      componentNames.forEach((name) => { row[name] = ''; });
-      return row;
-    });
+    // Row building lives in `seedTemporalRows`: it reads the label from any of the
+    // five columns a workbook may carry it in (not just `snapshot`/`name`), drops
+    // rows with no label, and dedupes repeated labels — a pathway workbook lists
+    // each timestep once per period, and a duplicated index cannot be reindexed
+    // onto the snapshot axis. Extracted and unit-tested because it is easy to get
+    // subtly wrong and impossible to see when it is.
+    const seeded: GridRow[] = seedTemporalRows(snapshotRows, componentNames);
     try {
       const current = tsRows?.length ?? 0;
       setTsRows(seeded);

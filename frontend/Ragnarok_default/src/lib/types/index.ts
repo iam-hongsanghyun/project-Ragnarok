@@ -12,7 +12,7 @@ export type BrowserFileHandle = any;
 
 // ── UI state ──────────────────────────────────────────────────────────────────
 
-export type WorkspaceTab = 'Welcome' | 'Build' | 'Data' | 'Forge' | 'Model' | 'Market' | 'PostAnalysis' | 'Settings' | 'Analytics' | 'PhysicalRisk' | 'Siting' | 'History' | 'Plugins';
+export type WorkspaceTab = 'Welcome' | 'Journal' | 'Build' | 'Data' | 'Forge' | 'Model' | 'Market' | 'PostAnalysis' | 'Settings' | 'Analytics' | 'PhysicalRisk' | 'Siting' | 'History' | 'Plugins' | 'Assistant';
 export type ModelSubTab = 'Map' | 'Table';
 export type AnalyticsSubTab = 'Validation' | 'Result' | 'Analytics' | 'Comparison' | 'Log';
 export type ChartMode = 'line' | 'area' | 'bar';
@@ -693,8 +693,12 @@ export interface AssetSwapConfig {
   /** Replacement cost when the target carrier isn't already in the model. */
   addCapitalCost: number;
   addMarginalCost: number;
-  /** Replacement MW = retired MW × this ratio (renewables often need >1). */
+  /** Replacement MW = retired MW × this ratio (renewables often need >1).
+   *  With `sizeReplacement`, it is the ceiling rather than the built size. */
   replaceRatio: number;
+  /** Let the optimiser size the replacement (extendable, capped at the ratio)
+   *  instead of fixing it at retired MW × ratio. */
+  sizeReplacement: boolean;
   /** Optional paired battery co-located with the replacement (0 = none). */
   addStorageMW: number;
   addStorageHours: number;
@@ -716,10 +720,15 @@ export interface AssetSwapResult {
   removedCount: number;
   addCarrier: string;
   replaceRatio: number;
+  /** True when the LP sized the replacement (`addedCapacityMW` is an output). */
+  sizedReplacement: boolean;
   addedStorageMW: number;
   currency: string;
   removedCapacityMW: number;
+  /** Built MW — retired × ratio when fixed, the solved `p_nom_opt` when sized. */
   addedCapacityMW: number;
+  /** retired MW × ratio: the fixed size, or the ceiling in sizing mode. */
+  replacementCapMW: number;
   replacementCapex: number;
   replacementFirm: boolean;
   before: AssetSwapSide;

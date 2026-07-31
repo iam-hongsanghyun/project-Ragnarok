@@ -36,6 +36,14 @@ describe('constraintDsl parser (mirrors backend)', () => {
     expect(dslToSpecs('cap(solar) <= 80')[0].lhs).toEqual([{ coef: 1, kind: 'cap', carrier: 'solar' }]);
   });
 
+  it('reports a dangling coefficient instead of throwing', () => {
+    // `NUMBER *` at the end of an expression used to run the cursor past the
+    // last token, so the parser threw a TypeError out of the editor.
+    expect(() => parseConstraintDsl('gen(a) <= 2 *')).not.toThrow();
+    expect(parseConstraintDsl('gen(a) <= 2 *')[0].error).toMatch(/expected a term after/);
+    expect(parseConstraintDsl('2 * <= 1')[0].error).toMatch(/expected a term after/);
+  });
+
   it('rejects malformed selectors', () => {
     expect(parseConstraintDsl('gen(type,) <= 1')[0].error).toMatch(/expected value/);
     expect(parseConstraintDsl('gen(solar &) <= 1')[0].error).toMatch(/expected value/);

@@ -8,7 +8,7 @@
   flex: 1 1 auto;
   min-height: 0;
   font-family: var(--font-mono);
-  font-size: 0.78rem;
+  font-size: var(--fs-sm);
 }
 .log-pane-toolbar {
   display: flex;
@@ -21,7 +21,7 @@
 .log-pane-status {
   flex: 1;
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: var(--fs-xs);
 }
 .log-pane-body {
   flex: 1 1 auto;
@@ -45,7 +45,7 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
-.log-line-ts    { color: var(--muted); font-size: 0.72rem; }
+.log-line-ts    { color: var(--muted); font-size: var(--fs-xs); }
 .log-line-level { font-weight: 600; }
 .log-line-logger { color: var(--muted); }
 .log-line-msg    { color: var(--text); }

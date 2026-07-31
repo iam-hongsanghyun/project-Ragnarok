@@ -366,7 +366,7 @@ function AppInner() {
   const [ownerColumn, setOwnerColumn] = useState<string>('owner');
   const [financeConfig, setFinanceConfig] = useState<FinanceConfig>({ gearing: 0, interestRate: 0.05, tenorYears: 15 });
   const [bidStrategyConfig, setBidStrategyConfig] = useState<BidStrategyConfig>({ enabled: false, mode: 'fixed', owner: '', markupType: 'percent', markup: 0.2, maxMarkup: 2.0, steps: 8 });
-  const [assetSwapConfig, setAssetSwapConfig] = useState<AssetSwapConfig>({ enabled: false, removeFilters: [], addCarrier: '', addCapitalCost: 0, addMarginalCost: 0, replaceRatio: 1, addStorageMW: 0, addStorageHours: 4, addStorageCapexPerMW: 20000 });
+  const [assetSwapConfig, setAssetSwapConfig] = useState<AssetSwapConfig>({ enabled: false, removeFilters: [], addCarrier: '', addCapitalCost: 0, addMarginalCost: 0, replaceRatio: 1, sizeReplacement: false, addStorageMW: 0, addStorageHours: 4, addStorageCapexPerMW: 20000 });
   const [essConfig, setEssConfig] = useState<EssConfig>({ enabled: false, bus: '', maxHours: 4, capitalCostPerMW: 30000, minSizeMW: 10, maxSizeMW: 100, steps: 6, roundTripEfficiency: 0.9 });
   const [ppaConfig, setPpaConfig] = useState<PpaConfig>({ enabled: false, owner: '', volumeType: 'generation', flatMW: 0, strikePrice: 0 });
   const [demandResponseConfig, setDemandResponseConfig] = useState<DemandResponseConfig>({ enabled: false, loads: [], shiftFraction: 0.2, maxShiftHours: 4, elasticEnabled: false, elasticFraction: 0.2, wtpMax: 200 });
@@ -422,7 +422,7 @@ function AppInner() {
     mgaConfig: { enabled: false, slack: 0.05, carriers: [] },
     merchantConfig: { enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 },
     bidStrategyConfig: { enabled: false, mode: 'fixed', owner: '', markupType: 'percent', markup: 0.2, maxMarkup: 2.0, steps: 8 },
-    assetSwapConfig: { enabled: false, removeFilters: [], addCarrier: '', addCapitalCost: 0, addMarginalCost: 0, replaceRatio: 1, addStorageMW: 0, addStorageHours: 4, addStorageCapexPerMW: 20000 },
+    assetSwapConfig: { enabled: false, removeFilters: [], addCarrier: '', addCapitalCost: 0, addMarginalCost: 0, replaceRatio: 1, sizeReplacement: false, addStorageMW: 0, addStorageHours: 4, addStorageCapexPerMW: 20000 },
     essConfig: { enabled: false, bus: '', maxHours: 4, capitalCostPerMW: 30000, minSizeMW: 10, maxSizeMW: 100, steps: 6, roundTripEfficiency: 0.9 },
     ppaConfig: { enabled: false, owner: '', volumeType: 'generation', flatMW: 0, strikePrice: 0 },
     demandResponseConfig: { enabled: false, loads: [], shiftFraction: 0.2, maxShiftHours: 4, elasticEnabled: false, elasticFraction: 0.2, wtpMax: 200 },
@@ -1375,7 +1375,7 @@ function AppInner() {
     setMgaConfig(scenario.mgaConfig ?? { enabled: false, slack: 0.05, carriers: [] });
     setMerchantConfig(scenario.merchantConfig ?? { enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 });
     setBidStrategyConfig(scenario.bidStrategyConfig ?? { enabled: false, mode: 'fixed', owner: '', markupType: 'percent', markup: 0.2, maxMarkup: 2.0, steps: 8 });
-    setAssetSwapConfig(scenario.assetSwapConfig ?? { enabled: false, removeFilters: [], addCarrier: '', addCapitalCost: 0, addMarginalCost: 0, replaceRatio: 1, addStorageMW: 0, addStorageHours: 4, addStorageCapexPerMW: 20000 });
+    setAssetSwapConfig(scenario.assetSwapConfig ?? { enabled: false, removeFilters: [], addCarrier: '', addCapitalCost: 0, addMarginalCost: 0, replaceRatio: 1, sizeReplacement: false, addStorageMW: 0, addStorageHours: 4, addStorageCapexPerMW: 20000 });
     setEssConfig(scenario.essConfig ?? { enabled: false, bus: '', maxHours: 4, capitalCostPerMW: 30000, minSizeMW: 10, maxSizeMW: 100, steps: 6, roundTripEfficiency: 0.9 });
     setPpaConfig(scenario.ppaConfig ?? { enabled: false, owner: '', volumeType: 'generation', flatMW: 0, strikePrice: 0 });
     setDemandResponseConfig(scenario.demandResponseConfig ?? { enabled: false, loads: [], shiftFraction: 0.2, maxShiftHours: 4, elasticEnabled: false, elasticFraction: 0.2, wtpMax: 200 });
@@ -2215,7 +2215,13 @@ function AppInner() {
 
   // Set how many solves run at once (1 = serial queue). The backend clamps to
   // the core count and persists the choice; running jobs are never interrupted.
-  const handleSetQueueConcurrency = useCallback(async (value: number): Promise<void> => {
+  /** Set the queue's concurrency; resolves to the value the SERVER applied.
+   *
+   *  The backend clamps to the CPU count, so the requested number and the
+   *  effective one can differ — a caller reporting the mode to the user must quote
+   *  what came back. Resolves to null when the update failed, so a caller can avoid
+   *  claiming a mode change that never happened. */
+  const handleSetQueueConcurrency = useCallback(async (value: number): Promise<number | null> => {
     try {
       const resp = await fetch(`${API_BASE}/api/queue/concurrency`, {
         method: 'POST',
@@ -2224,17 +2230,20 @@ function AppInner() {
       });
       if (!resp.ok) throw new Error((await resp.text()) || 'Failed to update concurrency.');
       const data = await resp.json();
-      if (typeof data.concurrency === 'number') setQueueConcurrency(data.concurrency);
+      const applied = typeof data.concurrency === 'number' ? data.concurrency : null;
+      if (applied !== null) setQueueConcurrency(applied);
       if (typeof data.cpuCount === 'number') setQueueCpuCount(data.cpuCount);
       showToast(
-        data.concurrency > 1
-          ? `Running up to ${data.concurrency} solves at once`
+        applied !== null && applied > 1
+          ? `Running up to ${applied} solves at once`
           : 'Queue mode — one solve at a time',
         'info',
       );
       void refreshQueue();
+      return applied;
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to update concurrency.', 'error');
+      return null;
     }
   }, [showToast, refreshQueue]);
 
@@ -2851,9 +2860,15 @@ function AppInner() {
     // narrative would simply not mention them). Refuse rather than solve a
     // scenario the user did not configure. The DSL box IS read live below, which
     // makes the silent half of this even easier to miss.
-    if (activeScenario && !sameConstraintSet(constraints, activeScenario.constraints)) {
+    // Scoped to a batch that actually CONTAINS the active scenario. The run bar
+    // runs the selected rows (or all of them when nothing is selected), so
+    // guarding on the active scenario unconditionally blocked the whole batch over
+    // unsaved edits belonging to a scenario that was not even being run — and
+    // nothing queued.
+    const activeInBatch = !!activeScenario && presets.some((p) => p.id === activeScenario.id);
+    if (activeInBatch && !sameConstraintSet(constraints, activeScenario!.constraints)) {
       showToast(
-        `Run blocked — the constraints table has edits that are not saved into scenario “${activeScenario.label}”, `
+        `Run blocked — the constraints table has edits that are not saved into scenario “${activeScenario!.label}”, `
         + 'and a scenario run uses each scenario\'s SAVED constraints. Click “Update scenario from current” in '
         + 'Settings → Scenarios to save them, or use the top-bar Run button to run the live settings.',
         'error',
@@ -2868,7 +2883,25 @@ function AppInner() {
       const modelForRun = prepareModelForBackend(model);
       setModel(modelForRun);
       await putStaticModel(modelForRun);
-      await handleSetQueueConcurrency(mode === 'sequential' ? 1 : Math.max(2, concurrency));
+      const requestedConcurrency = mode === 'sequential' ? 1 : Math.max(2, concurrency);
+      // The server clamps to the CPU count — report what it APPLIED, not what we
+      // asked for, so the status line cannot promise a parallelism that is not
+      // running.
+      const appliedConcurrency = await handleSetQueueConcurrency(requestedConcurrency);
+      const slots = appliedConcurrency ?? requestedConcurrency;
+      // An EXPLICIT solver-thread count is handed to every solve verbatim
+      // (`_resolve_cores` only splits the machine when threads are Auto/0). Run N
+      // of those at once and the batch oversubscribes the CPU and thrashes — often
+      // slower than running in order. Warn; do not silently override the setting.
+      if (slots > 1 && settings.solverThreads > 0 && slots * settings.solverThreads > queueCpuCount) {
+        showToast(
+          `${slots} parallel solves × ${settings.solverThreads} solver threads = `
+          + `${slots * settings.solverThreads} threads on ${queueCpuCount} cores. `
+          + 'Set solver threads to Auto in Settings so each solve gets an equal share, '
+          + 'or lower the parallelism.',
+          'error',
+        );
+      }
       const uiBase = {
         filename, dateFormat: settings.dateFormat,
         solverThreads: settings.solverThreads, solverType: settings.solverType,
@@ -2908,7 +2941,7 @@ function AppInner() {
     } finally {
       setBatchBusy(false);
     }
-  }, [scenarioCatalog.scenarios, activeScenario, constraints, customDsl, model, prepareModelForBackend, handleSetQueueConcurrency, filename, settings.dateFormat, settings.solverThreads, settings.solverType, settings.solveAcceptance, settings.objectiveAutoScale, settings.currencySymbol, refreshQueue, showToast]);
+  }, [scenarioCatalog.scenarios, activeScenario, constraints, customDsl, model, prepareModelForBackend, handleSetQueueConcurrency, queueCpuCount, filename, settings.dateFormat, settings.solverThreads, settings.solverType, settings.solveAcceptance, settings.objectiveAutoScale, settings.currencySymbol, refreshQueue, showToast]);
 
   const handleRunModel = async (staged = false) => {
     const snapshotCount = snapshotEnd - snapshotStart;

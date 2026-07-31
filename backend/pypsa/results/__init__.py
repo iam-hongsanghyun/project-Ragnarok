@@ -1216,7 +1216,8 @@ def _build_solved_payload(
     )
 
     # Asset-swap / repowering what-if (DW2) — retire a carrier, add a
-    # replacement 1:1, re-solve, and report the before-vs-after delta.
+    # replacement (fixed 1:1, or LP-sized up to the ratio when sizeReplacement
+    # is set), re-solve, and report the before-vs-after delta.
     asset_swap = (
         build_asset_swap(
             network,
@@ -1230,6 +1231,7 @@ def _build_solved_payload(
             add_capital_cost=float(swap_cfg.get("addCapitalCost", 0.0) or 0.0),
             add_marginal_cost=float(swap_cfg.get("addMarginalCost", 0.0) or 0.0),
             replace_ratio=float(swap_cfg.get("replaceRatio", 1.0) or 1.0),
+            size_replacement=bool(swap_cfg.get("sizeReplacement", False)),
             add_storage_mw=float(swap_cfg.get("addStorageMW", 0.0) or 0.0),
             add_storage_hours=float(swap_cfg.get("addStorageHours", 4.0) or 4.0),
             add_storage_capex_per_mw=float(swap_cfg.get("addStorageCapexPerMW", 0.0) or 0.0),

@@ -32,18 +32,17 @@ export function CategoryBarCard({
       yAxisTitle,
       showAxisLabels,
       xLabelAngle,
+      title,
+      showLegend,
       theme: readChartTheme(),
     };
     return mode === 'hbar' ? buildHorizontalBarOption(input) : buildGroupedBarOption(input);
-  }, [data, mode, stacked, unit, xAxisTitle, yAxisTitle, showAxisLabels, xLabelAngle]);
+  }, [data, mode, stacked, unit, xAxisTitle, yAxisTitle, showAxisLabels, xLabelAngle, title, showLegend]);
 
   // The host is rendered unconditionally so useEChart's one-time mount effect
   // always attaches (a host that only appears on a later render would never
   // initialise). The empty hint overlays it.
   const hostRef = useEChart<HTMLDivElement>(option);
-  // A side legend is meaningful only when there are multiple stacked/clustered
-  // series; the single-series "by category" bar colours each bar individually.
-  const multi = data.series.length > 1;
 
   return (
     <section className="chart-card chart-card-wide">
@@ -59,17 +58,9 @@ export function CategoryBarCard({
             </p>
           )}
         </div>
-        {showLegend && multi && (
-          <div className="chart-legend chart-legend-side">
-            <div className="map-legend-title" style={{ marginBottom: 4 }}>Series</div>
-            {data.series.map((s) => (
-              <div key={s.key} className="legend-item-inline">
-                <span className="legend-swatch" style={{ backgroundColor: s.color }} />
-                <span>{s.label}</span>
-              </div>
-            ))}
-          </div>
-        )}
+        {/* No HTML side legend: the chart now carries a real ECharts legend
+            (click a series to toggle it), so a static swatch list would only
+            duplicate it. `showLegend` is forwarded to the builder instead. */}
       </div>
     </section>
   );

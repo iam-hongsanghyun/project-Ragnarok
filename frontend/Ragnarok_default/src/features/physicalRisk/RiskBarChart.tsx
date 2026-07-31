@@ -2,55 +2,44 @@
  * RiskBarChart — horizontal labeled bar chart for a "name -> value" breakdown
  * (supply-chain indirect impact by sector, forecast near-term impact series).
  *
- * Dependency-free SVG, matching `FreqCurveChart`'s visual language (same
- * design tokens, same axis/gridline treatment) rather than pulling in a
- * charting library or a second option-builder — this is the same
- * one-off-shape case FreqCurveChart already carved out for the physical-risk
- * sub-tabs. Ported in spirit from the standalone climaterisk app's
- * `components/BarsChart.tsx` (there Recharts-based; here plain SVG so no new
- * npm dependency is introduced).
+ * Ported to ECharts (lib/charts/options.ts's `buildRiskBarOption`) from the
+ * standalone climaterisk app's dependency-free SVG chart. Same shape and
+ * value formatting as before; the chart now gains a real tooltip and hover
+ * emphasis instead of being a one-off static drawing.
  */
-import React from 'react';
+import React, { useMemo } from 'react';
+import { buildRiskBarOption, RiskBarDatum } from 'lib/charts/options';
+import { readChartTheme } from 'lib/charts/theme';
+import { useEChart } from '../../shared/echarts/useEChart';
 
-export interface RiskBarDatum {
-  name: string;
-  value: number;
-}
+export type { RiskBarDatum };
 
 interface Props {
   data: RiskBarDatum[];
   formatValue: (v: number) => string;
 }
 
-export function RiskBarChart({ data, formatValue }: Props) {
-  if (data.length === 0) return null;
+const ROW_HEIGHT = 28;
 
-  const rowHeight = 28;
-  const W = 460;
-  const m = { l: 140, r: 56, t: 8, b: 8 };
-  const iw = W - m.l - m.r;
-  const H = data.length * rowHeight + m.t + m.b;
-  const vMax = Math.max(...data.map((d) => d.value), 1);
-  const barW = (v: number) => (v / vMax) * iw;
+export function RiskBarChart({ data, formatValue }: Props) {
+  const option = useMemo(() => {
+    if (data.length === 0) return null;
+    return buildRiskBarOption({ data, formatValue, theme: readChartTheme() });
+  }, [data, formatValue]);
+  // The host is rendered unconditionally so useEChart's one-time mount effect
+  // always attaches (a host that only appears on a later render would never
+  // initialise). The empty hint overlays it.
+  const hostRef = useEChart<HTMLDivElement>(option);
+  const height = Math.max(data.length * ROW_HEIGHT + 16, 90);
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Bar chart">
-      {data.map((d, i) => {
-        const y = m.t + i * rowHeight;
-        const w = Math.max(0, barW(d.value));
-        return (
-          <g key={d.name}>
-            <text x={m.l - 8} y={y + rowHeight / 2 + 4} textAnchor="end" fontSize="11" fill="var(--muted)">
-              {d.name}
-            </text>
-            <rect x={m.l} y={y + 4} width={iw} height={rowHeight - 12} fill="var(--border)" opacity={0.4} />
-            <rect x={m.l} y={y + 4} width={w} height={rowHeight - 12} fill="var(--brand)" />
-            <text x={m.l + w + 6} y={y + rowHeight / 2 + 4} fontSize="11" fill="var(--muted)">
-              {formatValue(d.value)}
-            </text>
-          </g>
-        );
-      })}
-    </svg>
+    <div style={{ position: 'relative', height }}>
+      <div ref={hostRef} className="echart-host" role="img" aria-label="Bar chart" />
+      {!option && (
+        <p className="empty-text" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          No data for this breakdown.
+        </p>
+      )}
+    </div>
   );
 }

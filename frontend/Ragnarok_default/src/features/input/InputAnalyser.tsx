@@ -223,7 +223,7 @@ function LineArea({ xLabels, series, stacked }: {
       data: xLabels,
       axisLine: { lineStyle: { color: theme.border } },
       axisTick: { show: false },
-      axisLabel: { ...tickLabel(theme), fontSize: 10, hideOverlap: true },
+      axisLabel: { ...tickLabel(theme), fontSize: 11, hideOverlap: true },
     },
     yAxis: bareValueAxis(theme),
     series: series.map((s) => ({
@@ -296,7 +296,7 @@ function DailyProfile({ xLabels, series }: {
       nameTextStyle: axisName(theme),
       axisLine: { lineStyle: { color: theme.border } },
       axisTick: { show: false },
-      axisLabel: { ...tickLabel(theme), fontSize: 10, interval: 5 },
+      axisLabel: { ...tickLabel(theme), fontSize: 11, interval: 5 },
     },
     yAxis: bareValueAxis(theme),
     series: [{

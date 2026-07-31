@@ -45,6 +45,23 @@ const PROVIDERS: ApiKeyProvider[] = [
     signupUrl:
       'https://transparencyplatform.zendesk.com/hc/en-us/articles/12845911031188-How-to-get-security-token',
   },
+  {
+    name: 'claude_code_oauth_token',
+    label: 'Claude subscription token (Bifrost assistant)',
+    help:
+      'Powers the embedded AI assistant with your Claude subscription. ' +
+      'Run `claude setup-token` in a terminal (needs Claude Code) and paste ' +
+      'the token here. Stored server-side; never sent to the model.',
+    signupUrl: 'https://docs.anthropic.com/en/docs/claude-code/setup',
+  },
+  {
+    name: 'anthropic_api_key',
+    label: 'Anthropic API key (Bifrost assistant, alternative)',
+    help:
+      'Alternative to the subscription token — usage-billed via the Anthropic ' +
+      'Console. Used only if no subscription token is set.',
+    signupUrl: 'https://console.anthropic.com/settings/keys',
+  },
 ];
 
 function ApiKeyRow({ provider }: { provider: ApiKeyProvider }) {

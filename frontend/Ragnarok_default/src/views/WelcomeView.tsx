@@ -36,7 +36,7 @@ const TILES: Tile[] = [
     id: 'Data',
     title: 'Data',
     blurb:
-      'Country-first importers: pick a region on the map, pull the network, plants, demand, and renewable profiles from open databases (OSM, WRI GPPD, OPSD, World Bank).',
+      'Country-first import: select a region on the map to pull network, plant, demand, and renewable-profile data from open databases (OSM, WRI GPPD, OPSD, World Bank).',
   },
   {
     id: 'Build',
@@ -48,7 +48,7 @@ const TILES: Tile[] = [
     id: 'Model',
     title: 'Model',
     blurb:
-      'The full workbook view: every sheet, every column, every snapshot. Edit cells directly, paste from spreadsheets, manage time-series.',
+      'Full workbook view — every sheet, column, and snapshot; edit cells directly, paste from spreadsheets, manage time series.',
   },
   {
     id: 'Forge',
@@ -72,7 +72,7 @@ const TILES: Tile[] = [
     id: 'Plugins',
     title: 'Plugins',
     blurb:
-      'Local plugins for data import, custom analytics, and workbook transforms. Drop a folder under your plugins root and Ragnarok picks it up.',
+      'Local plugins for data import, custom analytics, and workbook transforms — drop a folder under your plugins root and Ragnarok loads it.',
   },
 ];
 
@@ -130,22 +130,22 @@ function StartChooser({ onStartScratch, onLoadExample, onLoadStarterPack }: {
         <div className="welcome-start-choices">
           <button type="button" className="welcome-start-card" onClick={onStartScratch}>
             <span className="welcome-start-card__title">Start from scratch</span>
-            <span className="welcome-start-card__blurb">Begin with an empty model and build it up step by step in the guided builder.</span>
+            <span className="welcome-start-card__blurb">Start with an empty model and build it out in the guided builder.</span>
           </button>
           <button type="button" className="welcome-start-card" onClick={() => setPicking('example')}>
             <span className="welcome-start-card__title">Start with an example</span>
-            <span className="welcome-start-card__blurb">Open a ready-made network that already solves — the fastest way to learn the workflow.</span>
+            <span className="welcome-start-card__blurb">Open a ready-made network that already solves, as a reference or a starting point.</span>
           </button>
           {onLoadStarterPack && (
             <button type="button" className="welcome-start-card" onClick={() => setPicking('starter')}>
               <span className="welcome-start-card__title">Start with a country pack</span>
-              <span className="welcome-start-card__blurb">Pick a country + year — Ragnarok assembles a runnable model from open data (network, demand, renewables).</span>
+              <span className="welcome-start-card__blurb">Select a country and year — Ragnarok assembles a runnable model from open data (network, demand, renewables).</span>
             </button>
           )}
         </div>
       ) : picking === 'example' ? (
         <div className="welcome-examples">
-          <button type="button" className="welcome-back" onClick={() => setPicking(null)}>← Back</button>
+          <button type="button" className="welcome-back" onClick={() => setPicking(null)}>Back</button>
           {loading && <p className="welcome-examples-note">Loading examples…</p>}
           {error && <p className="welcome-examples-note welcome-examples-note--error">{error}</p>}
           {!loading && !error && examples && examples.length === 0 && (
@@ -163,7 +163,7 @@ function StartChooser({ onStartScratch, onLoadExample, onLoadStarterPack }: {
         </div>
       ) : (
         <div className="welcome-examples">
-          <button type="button" className="welcome-back" onClick={() => setPicking(null)}>← Back</button>
+          <button type="button" className="welcome-back" onClick={() => setPicking(null)}>Back</button>
           {loading && <p className="welcome-examples-note">Loading country packs…</p>}
           {error && <p className="welcome-examples-note welcome-examples-note--error">{error}</p>}
           {!loading && !error && packs && packs.length === 0 && (
@@ -197,9 +197,9 @@ export function WelcomeView({ onNavigate, onStartScratch, onLoadExample, onLoadS
           <RagnarokLogo size={68} title="" className="welcome-logo" />
           <h1>Ragnarok</h1>
           <p className="welcome-tagline">
-            Open-source energy-system modelling for the rest of us.
-            Build a PyPSA model from public data, run it, analyse it, share it —
-            no Python required.
+            Browser-based PyPSA modelling. Build a network from public data,
+            solve capacity-expansion and dispatch cases, analyse results, and
+            share the project.
           </p>
         </header>
 
@@ -211,25 +211,25 @@ export function WelcomeView({ onNavigate, onStartScratch, onLoadExample, onLoadS
           <h2>Quick start</h2>
           <ol className="welcome-steps">
             <li>
-              Pick <b>Start with an example</b> above to open a ready-made network,
-              or <b>Start from scratch</b> for an empty model. You can also import
-              your own data from <b>Data</b> (pick a country on the map).
+              Select <b>Start with an example</b> to open a ready-made network,
+              or <b>Start from scratch</b> for an empty model. Import your own
+              data from <b>Data</b> by selecting a country on the map.
             </li>
             <li>
               Refine the network in <b>Build</b> (map-driven) or <b>Model</b>
               (edit any sheet / cell / snapshot directly).
             </li>
             <li>
-              In <b>Settings</b>, pick the run mode (single-period, pathway,
+              In <b>Settings</b>, select the run mode (single-period, pathway,
               rolling-horizon, stochastic, N-1) and any scenario presets.
             </li>
             <li>
-              Hit <b>Run</b> in the top-bar. Watch progress in the live
-              solver log; results land in <b>Analytics</b>.
+              Run the case from the top-bar. Track progress in the solver
+              log; results land in <b>Analytics</b>.
             </li>
             <li>
-              Export the project (`.xlsx`) or the run results to share. Import
-              the same file later to restore the full state.
+              Export the project (`.xlsx`) or the run results to share.
+              Re-import the same file later to restore full state.
             </li>
           </ol>
         </section>
