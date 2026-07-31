@@ -10607,56 +10607,6 @@ section.data-import-filters__group {
   line-height: 1.4;
 }
 
-/* ── Assistant view (Bifrost): chat pane + change timeline ─────────────────── */
-
-.assistant-view { flex: 1; min-height: 0; display: flex; }
-.assistant-columns { flex: 1; min-height: 0; }
-
-.assistant-chat-pane {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  height: 100%;
-  overflow: auto;
-  background: var(--bg);
-  border-right: 1px solid var(--border);
-}
-.assistant-chat-placeholder {
-  margin: auto;
-  max-width: 34rem;
-  padding: 2rem;
-  color: var(--muted);
-  font-size: var(--fs-md);
-  line-height: 1.55;
-}
-.assistant-chat-placeholder h3 { color: var(--text); margin: 0 0 0.6rem; font-size: var(--fs-lg); }
-.assistant-chat-placeholder code {
-  font-family: var(--font-mono);
-  background: var(--bg-hover);
-  padding: 0.05rem 0.3rem;
-}
-.assistant-chat-hint { font-size: var(--fs-sm); }
-
-.assistant-timeline-pane {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  height: 100%;
-  overflow: hidden;
-  background: var(--panel);
-}
-.assistant-live-dot {
-  position: absolute;
-  top: 0.85rem;
-  right: 0.9rem;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--border-strong);
-}
-.assistant-live-dot--on { background: var(--ok, var(--brand)); }
-
 .timeline-pane { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 .timeline-pane-header {
   display: flex;

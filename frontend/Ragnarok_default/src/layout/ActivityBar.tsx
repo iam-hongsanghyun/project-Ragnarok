@@ -114,14 +114,7 @@ const ICONS: Record<WorkspaceTab, React.ReactNode> = {
   Plugins: svg(<>
     <path d="M8 4h4v2.2a1.4 1.4 0 1 0 2.8 0V4H16v4h-1.8a1.4 1.4 0 1 0 0 2.8H16v5h-4v-1.8a1.4 1.4 0 1 0-2.8 0V16H5v-5h1.8a1.4 1.4 0 1 0 0-2.8H5V4h3Z" />
   </>),
-  // Assistant — a chat bubble with a plus (the Bifrost agent + audit timeline).
-  Assistant: svg(<>
-    <rect x="3.5" y="3.5" width="13" height="9.5" rx="2" />
-    <path d="M7 13v3.2L10.4 13" />
-    <path d="M10 6.2v4M8 8.2h4" />
-  </>),
   Welcome: null,
-  Journal: null, // Intent Desk home — owned by the global header nav, not this rail.
 };
 
 const ENTRIES: Entry[] = [
@@ -135,7 +128,6 @@ const ENTRIES: Entry[] = [
   { id: 'PhysicalRisk', label: 'Physical Risk',   hint: 'Climate exposure & physical risk', icon: ICONS.PhysicalRisk },
   { id: 'Siting',       label: 'Siting',          hint: 'Where to build (location optimisation)', icon: ICONS.Siting },
   { id: 'PostAnalysis', label: 'Post-analysis',   hint: 'Decisions from results (no re-solve)', icon: ICONS.PostAnalysis },
-  { id: 'Assistant',    label: 'Assistant',       hint: 'AI agent & change timeline', icon: ICONS.Assistant },
   { id: 'History',      label: 'History',         hint: 'Past runs', icon: ICONS.History },
   { id: 'Plugins',      label: 'Plugins',         hint: 'Extensions', icon: ICONS.Plugins },
 ];
