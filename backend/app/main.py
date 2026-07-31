@@ -831,6 +831,18 @@ app.add_middleware(
 )
 
 
+# Actor context (who is editing: user / mcp / agent) + the mutation journal.
+# The middleware stamps each request; wrap_model_store() installs the journal
+# on the store facade so every session mutation is recorded and published as a
+# session.version event (see backend/app/journal.py). Order matters: wrap
+# before any request can reach a mutating endpoint.
+from . import journal as _journal  # noqa: E402
+from .actor_context import ActorContextMiddleware  # noqa: E402
+
+app.add_middleware(ActorContextMiddleware)
+_journal.wrap_model_store()
+
+
 @app.get("/api/health")
 def health() -> dict[str, Any]:
     """Comprehensive health report — every subsystem in one structured probe.
@@ -938,6 +950,15 @@ app.include_router(_forge_query_router.router)
 # the model; the frontend imports once and then fetches pages/windows on demand.
 from .routers import session as _session_router  # noqa: E402
 app.include_router(_session_router.router)
+
+# Mutation journal (timeline / diffs / undo) + the live SSE event stream that
+# replaces model polling in the GUI. Both are what lets an AGENT edit the model
+# safely: every mutation is attributed, diffable and undoable, and any client
+# watching the stream sees the change without polling.
+from .routers import events as _events_router  # noqa: E402
+from .routers import journal as _journal_router  # noqa: E402
+app.include_router(_journal_router.router)
+app.include_router(_events_router.router)
 
 # Master model + derive-by-filter: a multi-year model imported once, from which
 # year/attribute-filtered working models are carved (Model view → Master…).

@@ -16,6 +16,7 @@ import asyncio
 import os
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -68,6 +69,11 @@ async def _lifespan(_server: FastMCP):
 mcp = FastMCP("ragnarok", instructions=_INSTRUCTIONS, lifespan=_lifespan)
 
 _RO = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
+# Shared annotation for in-session mutating tools (edits, transforms, model
+# swaps). Live-network and physical-risk tools keep their own inline annotations.
+_MUT = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False
+)
 
 
 # ── autonomy guard ──────────────────────────────────────────────────────────────
@@ -88,6 +94,21 @@ def _needs_confirm(cheap: bool) -> bool:
     if lvl == "manual":
         return True
     return not cheap  # guided
+
+
+def _fragment_sheets(resp: dict[str, Any]) -> dict[str, Any]:
+    """A build/transform response's sheets, INCLUDING its snapshot axis.
+
+    The renewable-profile / hydro-inflow endpoints return ``snapshots`` (a list
+    of labels) alongside ``sheets``; the GUI applies both. Dropping it leaves the
+    new 8760-row profile spanning a window the ``snapshots`` sheet doesn't cover
+    — a silent index mismatch at solve time.
+    """
+    sheets = dict(resp.get("sheets") or {})
+    snapshots = resp.get("snapshots")
+    if isinstance(snapshots, list) and snapshots:
+        sheets["snapshots"] = [{"snapshot": s} for s in snapshots]
+    return sheets
 
 
 def _preview(effect: str, would_send: dict[str, Any]) -> dict[str, Any]:
@@ -250,7 +271,7 @@ async def describe_run_options() -> Any:
 
 @mcp.tool(
     annotations=_RO,
-    description="List installed analysis plugins and their ids/config — pass an id to run_plugin_analysis.",
+    description="List installed plugins and their ids/config. Run one with run_plugin_analysis (read-only analyze), run_plugin_transform (rewrite the model) or run_plugin_contribute (merge sheets/constraints).",
 )
 async def list_plugins() -> Any:
     return await get_client().list_plugins()
@@ -457,7 +478,7 @@ async def forecast_demand(
     annotations=ToolAnnotations(
         readOnlyHint=False, destructiveHint=True, openWorldHint=False
     ),
-    description="Driver-based demand forecast — evolves the hourly SHAPE, not just the level, from population/GDP growth + electrified heat/EV additions.",
+    description="Driver-based demand forecast — evolves the hourly SHAPE, not just the level, from population/GDP growth + electrified heat/EV additions. grow_sheets lists the demand series sheets to evolve (default ['loads-p_set'] only — pass more for a multi-sheet demand model). snapshot_weight is hours per snapshot; set it on 3-hourly / typical-day models or the added heat/EV GWh is mis-scaled.",
 )
 async def driver_forecast(
     from_year: int,
@@ -467,6 +488,8 @@ async def driver_forecast(
     gdp_elasticity: float = 0.5,
     heat_added_gwh: float = 0.0,
     ev_added_gwh: float = 0.0,
+    grow_sheets: list[str] | None = None,
+    snapshot_weight: float | None = None,
     confirm: bool = False,
 ) -> Any:
     client = get_client()
@@ -476,6 +499,8 @@ async def driver_forecast(
         "gdpElasticity": gdp_elasticity,
         "heatAddedGWh": heat_added_gwh,
         "evAddedGWh": ev_added_gwh,
+        "growSheets": grow_sheets,
+        "snapshotWeight": snapshot_weight,
     }
     if _needs_confirm(cheap=False) and not confirm:
         return _preview(
@@ -489,12 +514,15 @@ async def driver_forecast(
     annotations=ToolAnnotations(
         readOnlyHint=False, destructiveHint=True, openWorldHint=False
     ),
-    description="Reshape per-region demand from an EV fleet's daily movement (home overnight, work daytime). Applies to the demand series sheet.",
+    description="Reshape per-region demand from an EV fleet's daily movement (home overnight, work daytime). home_shares / work_shares are {load_column: share} maps giving where the fleet sleeps vs works — that inter-region shift is the point of the tool, so pass them to move energy between regions (omit and the reshape only redistributes within each region by time of day). snapshot_weight is hours per snapshot (set it on 3-hourly / typical-day models, else the added GWh is mis-scaled). Applies to the demand series sheet.",
 )
 async def ev_reshape_demand(
     fleet_size: float,
     kwh_per_vehicle_day: float = 7.0,
     home_charging_share: float = 0.7,
+    home_shares: dict[str, float] | None = None,
+    work_shares: dict[str, float] | None = None,
+    snapshot_weight: float | None = None,
     sheet: str = "loads-p_set",
     confirm: bool = False,
 ) -> Any:
@@ -502,6 +530,9 @@ async def ev_reshape_demand(
     args = {
         "kwhPerVehicleDay": kwh_per_vehicle_day,
         "homeChargingShare": home_charging_share,
+        "homeShares": home_shares,
+        "workShares": work_shares,
+        "snapshotWeight": snapshot_weight,
         "sheet": sheet,
     }
     if _needs_confirm(cheap=False) and not confirm:
@@ -516,13 +547,15 @@ async def ev_reshape_demand(
     annotations=ToolAnnotations(
         readOnlyHint=False, destructiveHint=True, openWorldHint=False
     ),
-    description="Cluster/reduce the network to fewer buses (method: modularity|kmeans) or merge buses sharing a column value (group_by_column, e.g. 'country'). Applied to the session on confirm.",
+    description="Cluster/reduce the network to fewer buses (method: modularity|kmeans) or merge buses sharing a column value (group_by_column, e.g. 'country'). aggregate_components additionally merges one-port components by carrier per merged bus (e.g. ['Generator','StorageUnit','Load']). When buses/lines in a cluster disagree on an attribute, resolve_conflicts=true (default) merges them using conflict_strategy (mean|max|min|zero|default); set resolve_conflicts=false to fail instead and surface the disagreement. Applied to the session on confirm.",
 )
 async def cluster_network(
     n_clusters: int = 0,
     method: str = "modularity",
     group_by_column: str | None = None,
     aggregate_components: list[str] | None = None,
+    resolve_conflicts: bool | None = None,
+    conflict_strategy: str | None = None,
     confirm: bool = False,
 ) -> Any:
     client = get_client()
@@ -530,6 +563,8 @@ async def cluster_network(
         "method": method,
         "groupByColumn": group_by_column,
         "aggregateComponents": aggregate_components,
+        "resolveConflicts": resolve_conflicts,
+        "conflictStrategy": conflict_strategy,
     }
     if _needs_confirm(cheap=False) and not confirm:
         eff = (
@@ -845,11 +880,12 @@ async def remove_component(
 
 @mcp.tool(
     annotations=_BUILD_ANN,
-    description="Bulk-transform a time-series sheet (e.g. loads-p_set, generators-p_max_pu). op = scale (factor) | offset (delta) | shift (shift, wrap) | clip (min_value, max_value) | grow (growth_pct). Optional columns restricts to some assets.",
+    description="Bulk-transform a time-series sheet (e.g. loads-p_set, generators-p_max_pu). op = set (value — overwrites every selected cell, blanks included) | scale (factor) | offset (delta) | shift (shift, wrap) | clip (min_value, max_value) | interpolate (fills gaps) | grow (growth_pct). Optional columns restricts to some assets.",
 )
 async def transform_series(
     sheet: str,
     op: str,
+    value: float | None = None,
     factor: float | None = None,
     delta: float | None = None,
     shift: int | None = None,
@@ -860,7 +896,12 @@ async def transform_series(
     columns: list[str] | None = None,
     confirm: bool = False,
 ) -> Any:
+    if op == "set" and value is None:
+        # The endpoint defaults value=0.0, so a missing value would silently
+        # zero the whole series instead of erroring.
+        return {"error": "op='set' requires 'value' (the constant to write)."}
     args = {
+        "value": value,
         "factor": factor,
         "delta": delta,
         "shift": shift,
@@ -901,7 +942,7 @@ async def clear_session(confirm: bool = False) -> Any:
     annotations=ToolAnnotations(
         readOnlyHint=False, destructiveHint=False, openWorldHint=True
     ),
-    description="Fetch weather-derived capacity-factor profiles for the model's existing solar/wind fleet (keyless Open-Meteo) and attach them. Applied to the session on confirm.",
+    description="Fetch weather-derived capacity-factor profiles for the model's existing solar/wind fleet and attach them, aligning the snapshot axis to the window. source ∈ open-meteo (default) | pvgis | nasa-power — all keyless; re-run with a second source to cross-validate a profile. Applied to the session on confirm.",
 )
 async def attach_renewable_profiles(
     date_from: str = "2019-01-01",
@@ -910,6 +951,7 @@ async def attach_renewable_profiles(
     utc_offset: int = 0,
     solar_carriers: list[str] | None = None,
     wind_carriers: list[str] | None = None,
+    source: str | None = None,
     confirm: bool = False,
 ) -> Any:
     client = get_client()
@@ -920,6 +962,7 @@ async def attach_renewable_profiles(
         "utcOffset": utc_offset,
         "solarCarriers": solar_carriers,
         "windCarriers": wind_carriers,
+        "source": source,
     }
     if _needs_confirm(cheap=False) and not confirm:
         return _preview(
@@ -927,13 +970,14 @@ async def attach_renewable_profiles(
             args,
         )
     resp = await client.attach_renewable_profiles(**args)
-    await client.merge_sheets(resp["sheets"])
+    await client.merge_sheets(_fragment_sheets(resp))
     return {
         "status": "applied",
         "attached": resp.get("attached"),
         "skipped": resp.get("skipped"),
         "sites": resp.get("sites"),
         "failedSites": resp.get("failedSites"),
+        "snapshotCount": len(resp.get("snapshots") or []),
     }
 
 
@@ -965,7 +1009,7 @@ async def attach_hydro_inflow(
             args,
         )
     resp = await client.attach_hydro_inflow(**args)
-    await client.merge_sheets(resp["sheets"])
+    await client.merge_sheets(_fragment_sheets(resp))
     return {
         "status": "applied",
         "attached": resp.get("attached"),
@@ -973,6 +1017,7 @@ async def attach_hydro_inflow(
         "sites": resp.get("sites"),
         "failedSites": resp.get("failedSites"),
         "notes": resp.get("notes"),
+        "snapshotCount": len(resp.get("snapshots") or []),
     }
 
 
@@ -1148,6 +1193,465 @@ def _newest_run_name(runs: list[dict[str, Any]]) -> str | None:
             break
     top = runs[0]
     return top.get("name") or top.get("runName") or top.get("label")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Pre-flight, deep reads, bulk edit, run/queue control, journal, plugins, master,
+# procurement — the capabilities a human has in the GUI that the tool catalog was
+# missing. Read tools flow freely; mutating ones gate like their peers.
+# ══════════════════════════════════════════════════════════════════════════════
+@mcp.tool(
+    annotations=_RO,
+    description="Validate the working model WITHOUT solving — a cheap structural check (missing buses, dangling references, bad snapshots). Run this before submit_solve to catch errors in one call instead of waiting minutes for a solve to fail.",
+)
+async def validate_model() -> Any:
+    return await get_client().validate_case()
+
+
+@mcp.tool(
+    annotations=_RO,
+    description="Per-column statistics for an input sheet (count, nulls, min/max/mean/median/std/quartiles/histogram; top values for categoricals). Characterise a sheet without paging its raw rows into context. Optional comma-separated 'columns' to restrict.",
+)
+async def get_sheet_stats(name: str, columns: str | None = None) -> Any:
+    return await get_client().get_sheet_stats(name, columns)
+
+
+@mcp.tool(
+    annotations=_RO,
+    description="A windowed, downsampled slice of an INPUT time-series sheet in the working session (e.g. one asset's year of a demand or p_max_pu sheet). columns is comma-separated (omit for all); max_points caps returned points so an 8760-row sheet never enters context whole; agg is mean|min|max|sum. Prefer this over get_sheet_page for time-series.",
+)
+async def get_series_window(
+    name: str,
+    start: int = 0,
+    end: int | None = None,
+    columns: str | None = None,
+    max_points: int | None = None,
+    agg: str = "mean",
+) -> Any:
+    return await get_client().get_series_window(name, start, end, columns, max_points, agg)
+
+
+@mcp.tool(
+    annotations=_RO,
+    description="A windowed, downsampled slice of a stored run's OUTPUT time-series sheet — per-generator dispatch, line loading, storage state-of-charge, per-bus LMPs, anything get_analytics/get_derived only aggregate. Use for asset-level questions after a solve ('was the battery ever empty?', 'which line was congested in week 3?'). columns comma-separated; max_points caps size; agg mean|min|max|sum.",
+)
+async def get_run_series(
+    run_name: str,
+    sheet: str,
+    start: int = 0,
+    end: int | None = None,
+    columns: str | None = None,
+    max_points: int | None = None,
+    agg: str = "mean",
+) -> Any:
+    return await get_client().get_run_series(run_name, sheet, start, end, columns, max_points, agg)
+
+
+@mcp.tool(
+    annotations=_RO,
+    description="The mutation journal — newest-first entries of every edit made to the session (by you or the user), with actor, kind and a summary. Read it to see what you changed. limit caps rows; before pages to older entries (id < before). Fetch a single entry's detailed diff with get_journal_diff.",
+)
+async def get_journal(limit: int = 50, before: int | None = None) -> Any:
+    return await get_client().get_journal(limit, before)
+
+
+@mcp.tool(
+    annotations=_RO,
+    description="The detailed before/after diff for one journal entry (cell-level or sheet-level). Use it to verify an edit landed as intended or to show the user exactly what changed.",
+)
+async def get_journal_diff(entry_id: int) -> Any:
+    return await get_client().get_journal_diff(entry_id)
+
+
+@mcp.tool(
+    annotations=_RO,
+    description="Metadata for the multi-year MASTER model stored in this session (its sheets and the calendar 'years' it spans), or {} if none is stored. The master is the multi-year superset a pathway solve derives each year's working model from. Pair with derive_from_master.",
+)
+async def get_master_meta() -> Any:
+    return await get_client().get_master_meta()
+
+
+@mcp.tool(
+    annotations=_RO,
+    description="Run an installed plugin's read-only analyze(result, config) hook and return its output — custom analyses, scenario comparisons. Pass 'runs' (stored-run names, max 12) for a cross-run/multiRun plugin. Enumerate plugins and their ids/config with list_plugins first. Does not change the model.",
+)
+async def run_plugin_analysis(
+    plugin_id: str,
+    config: dict[str, Any] | None = None,
+    result: dict[str, Any] | None = None,
+    runs: list[str] | None = None,
+) -> Any:
+    return await get_client().run_plugin_analyze(plugin_id, config, result, runs)
+
+
+@mcp.tool(
+    annotations=_RO,
+    description="Optimise a power-procurement hedging mix: CVaR-constrained least-cost blend of PPA / forward / retail instruments over a price series, plus the cost-vs-risk efficient frontier. Stateless — supply prices (hourly currency/MWh; e.g. from get_run_series on a system-price sheet) and loadMw (flat MW or hourly series). Each instrument is a dict, e.g. ppa={'enabled':true,'strike':60,'maxMw':100}. alpha is the CVaR tail level in [0.5,1). Set cvar_budget to solve the actual CVaR-CONSTRAINED optimum (least expected cost subject to tail risk ≤ budget); omit it and you get the min-CVaR portfolio plus the frontier. bootstrap/block_hours control the block-bootstrap scenario generator (sample count and block length).",
+)
+async def optimize_procurement(
+    prices: list[float],
+    load_mw: float | list[float],
+    ppa: dict[str, Any] | None = None,
+    forward: dict[str, Any] | None = None,
+    retail: dict[str, Any] | None = None,
+    alpha: float = 0.95,
+    cvar_budget: float | None = None,
+    bootstrap: int | None = None,
+    block_hours: int | None = None,
+    stress: list[dict[str, Any]] | None = None,
+    frontier_points: int = 8,
+    currency: str = "€",
+) -> Any:
+    req: dict[str, Any] = {
+        "prices": prices,
+        "loadMw": load_mw,
+        "alpha": alpha,
+        "frontierPoints": frontier_points,
+        "currency": currency,
+    }
+    for key, val in (
+        ("cvarBudget", cvar_budget),
+        ("bootstrap", bootstrap),
+        ("blockHours", block_hours),
+    ):
+        if val is not None:
+            req[key] = val
+    for key, val in (("ppa", ppa), ("forward", forward), ("retail", retail), ("stress", stress)):
+        if val is not None:
+            req[key] = val
+    return await get_client().optimize_procurement(req)
+
+
+# ── mutating: bulk edit, model swaps, run/queue control (gated like peers) ─────
+@mcp.tool(
+    annotations=_MUT,
+    description=(
+        "Bulk conditional edit — Ragnarok's Forge Query & Edit. Select a component "
+        "'target' sheet (e.g. 'generators') and an 'attribute' column; narrow rows "
+        "with ANDed 'filters' (each {column, op in eq|ne|contains|in|gt|lt|ge|le, "
+        "value or values, optional join {component, ref_column} for a one-hop link "
+        "e.g. filter generators by their bus's country); then 'edit' "
+        "{op in set|add|multiply|derive, amount, source_attr (derive), ...}. "
+        "temporal=true edits the '{target}-{attribute}' time-series sheet instead. "
+        "This is the ONLY way to do 'raise marginal_cost 20% on every coal generator' "
+        "in one call. Without confirm=true it returns a real preview (match count + "
+        "before/after sample + warnings); a non-empty 'warnings' means apply would fail. "
+        "confirm=true applies it."
+    ),
+)
+async def forge_query(
+    target: str,
+    attribute: str,
+    edit: dict[str, Any],
+    filters: list[dict[str, Any]] | None = None,
+    temporal: bool = False,
+    confirm: bool = False,
+) -> Any:
+    client = get_client()
+    req = {"target": target, "attribute": attribute, "edit": edit,
+           "filters": filters or [], "temporal": temporal}
+    # The forge /preview endpoint IS the human-readable confirmation (real match
+    # count + sample), so a gated call returns that instead of the generic stub.
+    if _needs_confirm(cheap=False) and not confirm:
+        preview = await client.forge_query(apply=False, req=req)
+        return {"status": "preview", "autonomy": _autonomy(),
+                "confirmHint": "Re-invoke with confirm=true to apply.", **preview}
+    return await client.forge_query(apply=True, req=req)
+
+
+@mcp.tool(
+    annotations=_MUT,
+    description="Load a stored run's input model back into the working session as the editable model — the History 'Import project' fast path. Use it to iterate on a past run ('take last month's run and add 2 GW of storage'). REPLACES the current working model. Guarded (it discards the current model).",
+)
+async def promote_run(run_name: str, confirm: bool = False) -> Any:
+    client = get_client()
+    if _needs_confirm(cheap=False) and not confirm:
+        return _preview(f"Replace the working model with stored run {run_name!r}.", {"run": run_name})
+    return await client.promote_run(run_name)
+
+
+@mcp.tool(
+    annotations=_MUT,
+    description="Derive this session's working model from its stored multi-year MASTER by keeping only selected 'years' and applying attribute 'filters' ([{sheet, column, values}]). mode 'deactivate' (default) marks excluded components inactive; 'remove' hard-deletes them. REPLACES the working model (get_master_meta first). This is the pathway-model assembly step.",
+)
+async def derive_from_master(
+    years: list[int] | None = None,
+    filters: list[dict[str, Any]] | None = None,
+    mode: str = "deactivate",
+    confirm: bool = False,
+) -> Any:
+    client = get_client()
+    if _needs_confirm(cheap=False) and not confirm:
+        return _preview(
+            f"Derive the working model from the master (years={years}, mode={mode}).",
+            {"years": years, "filters": filters, "mode": mode},
+        )
+    return await client.derive_from_master(years, filters, mode)
+
+
+@mcp.tool(
+    annotations=_MUT,
+    description="Run an installed plugin's transform(model, config) hook, which rewrites the working model and persists it. A first-class model-edit path for site-specific plugins. Use run_plugin_analysis for the read-only analyze hook; run_plugin_contribute to MERGE a plugin's sheets/constraints instead of replacing.",
+)
+async def run_plugin_transform(
+    plugin_id: str, config: dict[str, Any] | None = None, confirm: bool = False
+) -> Any:
+    client = get_client()
+    if _needs_confirm(cheap=False) and not confirm:
+        return _preview(f"Run plugin transform {plugin_id!r} on the working model.", {"plugin": plugin_id, "config": config or {}})
+    return await client.run_plugin_transform(plugin_id, config)
+
+
+@mcp.tool(
+    annotations=_MUT,
+    description="Run an installed plugin's contribute(model, config) hook and MERGE its produced sheets + DSL constraints into the working model (additive, unlike transform which replaces).",
+)
+async def run_plugin_contribute(
+    plugin_id: str, config: dict[str, Any] | None = None, confirm: bool = False
+) -> Any:
+    client = get_client()
+    if _needs_confirm(cheap=False) and not confirm:
+        return _preview(f"Merge plugin contribution {plugin_id!r} into the model.", {"plugin": plugin_id, "config": config or {}})
+    return await client.run_plugin_contribute(plugin_id, config)
+
+
+@mcp.tool(
+    annotations=_MUT,
+    description="Undo a single journal entry by id (self-correct a bad edit). Blocked with a conflict if a LATER entry overlaps the same cells — undo the newer one first, or use revert_session. Find entry ids with get_journal.",
+)
+async def undo_journal_entry(entry_id: int, confirm: bool = False) -> Any:
+    client = get_client()
+    if _needs_confirm(cheap=True) and not confirm:
+        return _preview(f"Undo journal entry {entry_id}.", {"entryId": entry_id})
+    return await client.undo_journal_entry(entry_id)
+
+
+@mcp.tool(
+    annotations=_MUT,
+    description="Revert the session to a past version by undoing EVERY entry newer than to_version (newest first). A bulk rollback — use get_journal to pick the target version. Heavier than undo_journal_entry.",
+)
+async def revert_session(to_version: int, confirm: bool = False) -> Any:
+    client = get_client()
+    if _needs_confirm(cheap=False) and not confirm:
+        return _preview(f"Revert the session to version {to_version} (undo everything newer).", {"toVersion": to_version})
+    return await client.revert_session(to_version)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False),
+    description="Cancel a queued solve, or kill it if already running — a SAFETY action, never gated, so you can always stop a job you started. The queue row is kept (rerun_queue_item re-runs it); use delete_queue_item to remove it. item_id comes from get_queue.",
+)
+async def cancel_solve(item_id: str) -> Any:
+    return await get_client().cancel_queue_item(item_id)
+
+
+@mcp.tool(
+    annotations=_MUT,
+    description="Re-run a staged, finished or cancelled queue item in place — the SAME card flips back to queued and its retained model re-solves (no duplicate). Starts minutes of compute, so it is guarded. item_id from get_queue.",
+)
+async def rerun_queue_item(item_id: str, confirm: bool = False) -> Any:
+    client = get_client()
+    if _needs_confirm(cheap=False) and not confirm:
+        return _preview(f"Re-run queue item {item_id} (starts a solve).", {"itemId": item_id})
+    return await client.rerun_queue_item(item_id)
+
+
+@mcp.tool(
+    annotations=_MUT,
+    description="Delete a queue item and its retained model payload (prune the queue). Does NOT delete History entries from completed runs — use delete_run for those. item_id from get_queue.",
+)
+async def delete_queue_item(item_id: str, confirm: bool = False) -> Any:
+    client = get_client()
+    if _needs_confirm(cheap=True) and not confirm:
+        return _preview(f"Delete queue item {item_id} and its payload.", {"itemId": item_id})
+    return await client.delete_queue_item(item_id)
+
+
+@mcp.tool(
+    annotations=_MUT,
+    description="Set the maximum number of concurrent solves (1 = serial). Clamped to the machine's CPU count. Lowering it never kills running jobs. Raise it to push your own queued work through faster.",
+)
+async def set_queue_concurrency(value: int, confirm: bool = False) -> Any:
+    client = get_client()
+    if _needs_confirm(cheap=True) and not confirm:
+        return _preview(f"Set solve concurrency to {value}.", {"value": value})
+    return await client.set_queue_concurrency(value)
+
+
+@mcp.tool(
+    annotations=_MUT,
+    description="Rename a stored run (its file, identity and display labels together) — tidy the machine-named runs your solves produce. 409 if the new name is taken.",
+)
+async def rename_run(name: str, new_name: str, confirm: bool = False) -> Any:
+    client = get_client()
+    if _needs_confirm(cheap=True) and not confirm:
+        return _preview(f"Rename run {name!r} to {new_name!r}.", {"name": name, "newName": new_name})
+    return await client.rename_run(name, new_name)
+
+
+@mcp.tool(
+    annotations=_MUT,
+    description="Delete a stored run from History (bundle + meta). Destructive and always gated — prune failed experiments only when you are sure. Use get_run_series / get_analytics to inspect a run before deleting.",
+)
+async def delete_run(name: str, confirm: bool = False) -> Any:
+    client = get_client()
+    # Always gate a permanent deletion, even at auto (mirrors ALWAYS_GATED intent).
+    if not confirm:
+        return _preview(f"Permanently delete stored run {name!r}.", {"name": name})
+    return await client.delete_run(name)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# File export / import — the workbook I/O family (xlsx · package · netCDF · HDF5 ·
+# project). The GUI's Save/Export/Import buttons; the tool catalog previously had
+# no way to get a file OUT of Ragnarok or load a PyPSA-native / project file IN.
+# Files land on / are read from the MCP server process's filesystem (the embedded
+# agent's sandboxed workdir; for a stdio client, the client machine). Set
+# RAGNAROK_MCP_FILE_DIR to redirect the default directory.
+# ══════════════════════════════════════════════════════════════════════════════
+_FILE_DIR = Path(os.environ.get("RAGNAROK_MCP_FILE_DIR", ".")).expanduser()
+# Exports write a local artefact but leave the Ragnarok model untouched — safe to
+# run freely (classified read-only in the agent's approval policy).
+_EXPORT_ANN = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False
+)
+
+
+def _resolve_out(dest: str | None, default_name: str) -> Path:
+    """Resolve an export destination path (relative → under _FILE_DIR); a
+    directory (or trailing-slash) target gets default_name appended."""
+    p = Path(dest).expanduser() if dest else _FILE_DIR / default_name
+    if not p.is_absolute():
+        p = _FILE_DIR / p
+    if p.is_dir() or (dest is not None and dest.endswith(("/", os.sep))):
+        p = p / default_name
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _resolve_in(path: str) -> Path:
+    """Resolve an import source path (relative → under _FILE_DIR)."""
+    p = Path(path).expanduser()
+    return p if p.is_absolute() else _FILE_DIR / p
+
+
+@mcp.tool(
+    annotations=_EXPORT_ANN,
+    description="Export a STORED run to a file on disk. kind='package' writes a re-importable Ragnarok Project .zip (canonical bundle + readable xlsx + this session's chat); kind='xlsx' writes just the workbook, with 'parts' a comma-separated subset of metadata,model,result. 'dest' overrides the output path (a directory or trailing / gets a default filename). Returns the written path and byte size. Does not change the model.",
+)
+async def export_run(
+    run_name: str,
+    kind: str = "package",
+    parts: str = "metadata,model,result",
+    dest: str | None = None,
+) -> Any:
+    kind = kind.lower()
+    if kind not in ("xlsx", "package"):
+        return {"error": "kind must be 'xlsx' or 'package'."}
+    data, suggested = await get_client().download_run(
+        run_name, kind=kind, parts=parts if kind == "xlsx" else None
+    )
+    default = suggested or f"{run_name}.{'zip' if kind == 'package' else 'xlsx'}"
+    out = _resolve_out(dest, default)
+    out.write_bytes(data)
+    return {"status": "exported", "path": str(out), "bytes": len(data), "kind": kind, "run": run_name}
+
+
+@mcp.tool(
+    annotations=_EXPORT_ANN,
+    description="Export the CURRENT working model to a file: format ∈ netcdf | hdf5 | project. netcdf/hdf5 write a PyPSA-native binary (shareable with any PyPSA tooling); project writes a re-importable Ragnarok Project .zip (pass the solved 'result' bundle to embed outputs, else inputs only). 'dest' overrides the path. netcdf/hdf5 build a pypsa.Network first, so they take the same scenario knobs a solve does: discount_rate (default 0.05) and carbon_price feed the derived capital/marginal costs baked into the file; 'options' passes any further solve option through. Returns the written path and byte size. Does not change the model.",
+)
+async def export_model(
+    format: str = "netcdf",
+    dest: str | None = None,
+    result: dict[str, Any] | None = None,
+    discount_rate: float | None = None,
+    carbon_price: float | None = None,
+    options: dict[str, Any] | None = None,
+) -> Any:
+    aliases = {
+        "nc": "netcdf", "netcdf": "netcdf", "cdf": "netcdf",
+        "h5": "hdf5", "hdf5": "hdf5",
+        "project": "project", "zip": "project",
+    }
+    fmt = aliases.get(format.lower())
+    if fmt is None:
+        return {"error": "format must be netcdf | hdf5 | project."}
+    scenario: dict[str, Any] = {}
+    if discount_rate is not None:
+        scenario["discountRate"] = discount_rate
+    if carbon_price is not None:
+        scenario["carbonPrice"] = carbon_price
+    data, suggested = await get_client().export_model_file(
+        fmt, result=result, scenario=scenario, options=options
+    )
+    default = {
+        "netcdf": "ragnarok_network.nc",
+        "hdf5": "ragnarok_network.h5",
+        "project": "ragnarok_project.zip",
+    }[fmt]
+    out = _resolve_out(dest, suggested or default)
+    out.write_bytes(data)
+    return {"status": "exported", "path": str(out), "bytes": len(data), "format": fmt}
+
+
+@mcp.tool(
+    annotations=_MUT,
+    description="Import a PyPSA-native netCDF (.nc) or HDF5 (.h5) file from disk INTO the working model (format inferred from the extension). replace=true swaps the whole working model; replace=false merges the imported sheets over it. This overwrites session state, so it gates like a model swap — re-call with confirm=true to apply.",
+)
+async def import_network(path: str, replace: bool = True, confirm: bool = False) -> Any:
+    src = _resolve_in(path)
+    suffix = src.suffix.lower()
+    fmt = (
+        "netcdf" if suffix in (".nc", ".netcdf", ".cdf")
+        else "hdf5" if suffix in (".h5", ".hdf5", ".he5")
+        else None
+    )
+    if fmt is None:
+        return {"error": f"unrecognised extension {suffix!r}; expected .nc/.netcdf or .h5/.hdf5."}
+    if not src.exists():
+        return {"error": f"file not found: {src}"}
+    if _needs_confirm(cheap=False) and not confirm:
+        return _preview(
+            f"Import {src.name} into the working model ({'replace' if replace else 'merge'}).",
+            {"path": str(src), "format": fmt, "replace": replace},
+        )
+    client = get_client()
+    model = await client.import_network_file(fmt, src.read_bytes(), src.name)
+    if replace:
+        await client.save_model(model)
+    else:
+        await client.merge_sheets(model)
+    return {
+        "status": "applied",
+        "mode": "replace" if replace else "merge",
+        "sheets": sorted(model),
+        "source": src.name,
+    }
+
+
+@mcp.tool(
+    annotations=_MUT,
+    description="Import a Ragnarok Project .zip (or workbook .xlsx) from disk. persist=false loads it as the working model (like File→Open — no History entry, overwrites the current model); persist=true stores it as a History run instead (leaves the working model untouched, openable with full analytics). Gates like a model swap — re-call with confirm=true to apply.",
+)
+async def import_project(path: str, persist: bool = False, confirm: bool = False) -> Any:
+    src = _resolve_in(path)
+    if not src.exists():
+        return {"error": f"file not found: {src}"}
+    if _needs_confirm(cheap=False) and not confirm:
+        effect = (
+            f"Store {src.name} as a History run."
+            if persist
+            else f"Load {src.name} as the working model (overwrites the current model)."
+        )
+        return _preview(effect, {"path": str(src), "persist": persist})
+    client = get_client()
+    out = await client.import_project_file(src.read_bytes(), src.name, persist=persist)
+    if persist:
+        return {"status": "stored", "run": out.get("name"), "meta": out.get("meta")}
+    model = out.get("model") or {}
+    await client.save_model(model)
+    return {"status": "loaded", "sheets": sorted(model), "filename": out.get("filename")}
 
 
 # ══════════════════════════════════════════════════════════════════════════════

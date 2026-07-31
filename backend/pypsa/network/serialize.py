@@ -8,6 +8,7 @@ network from a transform — is handed back in that same shape.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import pypsa
@@ -29,8 +30,14 @@ _JSON_SCALARS = (str, bool, int, float)
 def _scalar(val: Any) -> tuple[bool, Any]:
     """``(keep, value)`` — coerce a cell to a JSON-safe scalar or drop it.
 
-    Drops ``None``, NaN, and any non-scalar object (e.g. a ``SubNetwork`` or
-    other component reference) so the payload always serialises.
+    Drops ``None``, any non-scalar object (e.g. a ``SubNetwork`` or other
+    component reference), and every NON-FINITE float so the payload always
+    serialises. ``NaN``/``±inf`` are dropped rather than emitted: PyPSA defaults
+    ``p_nom_max``/``lifetime`` to ``inf`` and ``_sanitize_placeholder_bounds``
+    deliberately restores ``±inf``, but ``Infinity`` is not valid JSON — Starlette
+    renders responses with ``allow_nan=False``, so the endpoint 500s. Omitting the
+    cell is lossless: ``build_network`` re-applies the same PyPSA default on the
+    way back in.
     """
     if val is None:
         return False, None
@@ -39,7 +46,7 @@ def _scalar(val: Any) -> tuple[bool, Any]:
             val = val.item()
         except Exception:  # noqa: BLE001
             return False, None
-    if isinstance(val, float) and val != val:  # NaN
+    if isinstance(val, float) and not math.isfinite(val):  # NaN / ±inf
         return False, None
     if isinstance(val, _JSON_SCALARS):
         return True, val
