@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pandas as pd
+
 from ...app.models import RunPayload
 from ..pathway import parse_pathway_config
 from ..pypsa_schema import (
@@ -60,6 +62,38 @@ def _snapshot_label(row: dict[str, Any]) -> str:
         or row.get("index")
         or ""
     ).strip()
+
+
+def _norm_snapshot(label: str) -> str:
+    """A snapshot label in a comparable form.
+
+    The `snapshots` sheet and a hand-made CSV routinely spell the same instant
+    differently ("2030-01-01T00:00:00" vs "2030-01-01 00:00:00"), and comparing
+    the raw strings would report every well-aligned sheet as broken. Parse to a
+    timestamp where possible; fall back to the trimmed string for non-datetime
+    axes ("now", integer steps).
+    """
+    if not label:
+        return ""
+    try:
+        return pd.Timestamp(label).isoformat()
+    except (ValueError, TypeError):
+        return label.strip()
+
+
+def _sample_labels(labels: set[str], limit: int = 3) -> str:
+    """A few labels, sorted, for an actionable message. Never the whole set: a
+    year-long mismatch would otherwise print 8,760 timestamps."""
+    ordered = sorted(labels)
+    shown = ", ".join(ordered[:limit])
+    return shown if len(ordered) <= limit else f"{shown}, … (+{len(ordered) - limit} more)"
+
+
+def _snapshot_axis(snapshot_rows: list[dict[str, Any]]) -> set[str]:
+    """The model's shared time axis, normalised. Empty when there is none."""
+    axis = {_norm_snapshot(_snapshot_label(row)) for row in snapshot_rows}
+    axis.discard("")
+    return axis
 
 
 def _effective_snapshot_count(snapshot_rows: list[dict[str, Any]], pathway_enabled: bool) -> tuple[int, int]:
@@ -176,6 +210,7 @@ def _check_output_columns(sheet: str, rows: list[dict[str, Any]], notes: list[st
 def _check_ts_sheets(
     model: dict[str, list[dict[str, Any]]],
     snapshot_count: int,
+    snapshot_axis: set[str],
     pathway_enabled: bool,
     notes: list[str],
     warnings: list[str],
@@ -200,7 +235,39 @@ def _check_ts_sheets(
         if not label_candidates:
             errors.append(f"{sheet}: time-series sheet is missing a snapshot label column.")
             continue
-        if snapshot_count > 0 and len(rows) != snapshot_count:
+        # ALIGNMENT TO THE SHARED TIME AXIS.
+        #
+        # `snapshots` is the one time axis every temporal sheet is read against:
+        # `_apply_ts_sheet` reindexes each series onto it, which DROPS rows whose
+        # label is not on the axis and leaves NaN for snapshots the sheet does not
+        # cover. Neither is reported by the solve — a half-covered `loads-p_set`
+        # solves "Optimal" with the uncovered hours dispatched as ZERO demand, so
+        # the run returns a plausible, wrong answer. A row-count comparison alone
+        # cannot see it: a sheet can have exactly the right number of rows and
+        # still be for the wrong year.
+        if snapshot_axis:
+            sheet_axis = {
+                _norm_snapshot(_snapshot_label(row)) for row in rows
+            }
+            sheet_axis.discard("")
+            off_axis = sheet_axis - snapshot_axis
+            uncovered = snapshot_axis - sheet_axis
+            if off_axis:
+                errors.append(
+                    f"{sheet}: {len(off_axis)} snapshot label(s) are not in the `snapshots` "
+                    f"sheet and WILL BE DROPPED on run (e.g. {_sample_labels(off_axis)}). "
+                    "Every temporal sheet is read against the model's one shared time axis."
+                )
+            if uncovered:
+                errors.append(
+                    f"{sheet}: {len(uncovered)} of {len(snapshot_axis)} snapshots have no row "
+                    f"here (e.g. {_sample_labels(uncovered)}). Those hours are left undefined, "
+                    "and the run still reports Optimal — a partial demand profile silently "
+                    "solves as ZERO demand for the missing hours. Cover every snapshot, or "
+                    "shorten the `snapshots` sheet."
+                )
+        elif snapshot_count > 0 and len(rows) != snapshot_count:
+            # No comparable axis (non-datetime labels) — fall back to the count.
             warnings.append(f"{sheet}: row count {len(rows)} differs from snapshot count {snapshot_count}.")
         seen_labels: set[str] = set()
         duplicates = 0
@@ -362,7 +429,10 @@ def validate_model(payload: RunPayload) -> dict[str, Any]:
         _check_carrier_refs(sheet, rows, carrier_names, warnings)
         _check_output_columns(sheet, rows, notes)
 
-    _check_ts_sheets(model, raw_snapshot_count, pathway.enabled, notes, warnings, errors)
+    _check_ts_sheets(
+        model, raw_snapshot_count, _snapshot_axis(snapshot_rows),
+        pathway.enabled, notes, warnings, errors,
+    )
 
     network_summary = {
         sheet: len(workbook_rows(model, sheet))

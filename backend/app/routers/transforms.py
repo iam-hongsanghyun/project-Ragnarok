@@ -384,7 +384,11 @@ def _preserved_config_sheets(
     representative-snapshot weighting and custom-DSL expansion constraints, and
     replaces the scenario catalogue with a synthetic base case.
 
-    Component sheets and their ``<component>-<attr>`` time-series are NOT
+``network`` and ``snapshots`` are handled by
+    :func:`_restore_workbook_only_columns` instead — the serialiser always emits
+    both, so a ``setdefault`` here could never take the source version.
+
+    Other component sheets and their ``<component>-<attr>`` time-series are NOT
     preserved — the reduction owns those. A carried-over config sheet may still
     reference a component the reduction merged away (e.g. a scenario override on
     a bus that no longer exists); those references are resolved by name at run
@@ -402,6 +406,119 @@ def _preserved_config_sheets(
         if attribute and component in known:
             continue
         out[sheet] = rows
+    return out
+
+
+def _restore_workbook_only_columns(
+    reduced: dict[str, list[dict[str, Any]]],
+    source: dict[str, list[dict[str, Any]]],
+) -> None:
+    """Re-attach the columns of ``network`` / ``snapshots`` the network cannot hold.
+
+    Both sheets are always re-emitted by the serialiser, so they cannot be carried
+    by ``setdefault`` — they need merging:
+
+    * ``network`` — the object round-trips only ``name``; the sheet also carries
+      ``srid`` / ``crs`` / ``now``. Source columns are kept and the derived name
+      wins (the reduction may have renamed the network).
+    * ``snapshots`` — the pathway ``period`` column is only re-emitted when the
+      network was built multi-period, so a transform run with the pathway off would
+      drop it. A transform never changes the time axis, so the source sheet is
+      preferred whenever it still covers every snapshot the reduction carries.
+    """
+    src_network = source.get("network")
+    if isinstance(src_network, list) and src_network:
+        merged = [dict(row) for row in src_network if isinstance(row, dict)]
+        if merged:
+            derived = ((reduced.get("network") or [{}])[0] or {}).get("name")
+            if derived:
+                merged[0]["name"] = derived
+            reduced["network"] = merged
+
+    src_snapshots = source.get("snapshots")
+    if isinstance(src_snapshots, list) and src_snapshots:
+        derived_axis = _snapshot_label_set(reduced.get("snapshots") or [])
+        if derived_axis and derived_axis <= _snapshot_label_set(src_snapshots):
+            reduced["snapshots"] = [dict(r) for r in src_snapshots if isinstance(r, dict)]
+
+
+def _snapshot_label_set(rows: list[dict[str, Any]]) -> set[str]:
+    """Normalised snapshot labels, so ``…T00:00:00`` and ``… 00:00:00`` compare equal."""
+    out: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        for key in ("snapshot", "name", "datetime", "timestep", "index"):
+            value = row.get(key)
+            if value in (None, ""):
+                continue
+            try:
+                out.add(pd.Timestamp(value).isoformat())
+            except (ValueError, TypeError):
+                out.add(str(value).strip())
+            break
+    return out
+
+
+def _restore_shapes(
+    reduced: dict[str, list[dict[str, Any]]],
+    source: dict[str, list[dict[str, Any]]],
+    busmap: "pd.Series",
+) -> None:
+    """Put the workbook's ``shapes`` sheet back after clustering, in place.
+
+    PyPSA's ``cluster_by_busmap`` drops the ``Shape`` component outright — the
+    clustered network comes back with zero shape rows — so the user's region
+    geometry, which nothing else in the model can reconstruct, disappeared on every
+    reduction. ``_preserved_config_sheets`` cannot cover it either: ``shapes`` IS a
+    schema component, so it is excluded there by design. Rows are copied back
+    verbatim with a bus-referencing ``idx`` remapped through the busmap, so it names
+    the cluster the bus merged into instead of a bus that no longer exists.
+    """
+    rows = source.get("shapes")
+    if not isinstance(rows, list) or not rows:
+        return
+    if reduced.get("shapes"):
+        return  # a future PyPSA that does cluster shapes wins over this fallback
+    mapping = {str(k): str(v) for k, v in busmap.to_dict().items()}
+    restored: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        new_row = dict(row)
+        if str(new_row.get("component", "")).strip().lower() in ("bus", "buses"):
+            idx = new_row.get("idx")
+            if idx is not None and str(idx) in mapping:
+                new_row["idx"] = mapping[str(idx)]
+        restored.append(new_row)
+    if restored:
+        reduced["shapes"] = restored
+
+
+def _transform_build_options(options: dict[str, Any] | None) -> dict[str, Any]:
+    """Run options for a build whose network is serialised straight back to a workbook.
+
+    Two corrections, both because a transform's output becomes the user's model
+    rather than a solve:
+
+    * ``skipCapexAnnuitisation`` — otherwise the reduced workbook stores an
+      annuitised ``capital_cost`` that the next run annuitises AGAIN (extendable
+      CAPEX ≈ AF² of its real value, so capacity expansion builds almost for free).
+    * the snapshot window, the ``snapshotWeight`` stride and representative
+      ``samplingConfig`` are NEUTRALISED. ``build_network`` applies all three to
+      ``network.snapshots``, and serialising that back would rewrite the user's
+      model with a truncated, downsampled time axis. A transform rewrites the whole
+      model, so it has to see the whole time axis.
+
+    ``pathwayConfig`` is kept: it decides whether the network is built with an
+    investment-period MultiIndex, and dropping it collapses per-period profiles
+    into one shared profile.
+    """
+    out = {**(options or {}), "skipCapexAnnuitisation": True}
+    for key in ("snapshotStart", "snapshotEnd", "snapshotCount"):
+        out.pop(key, None)
+    out["snapshotWeight"] = 1
+    out["samplingConfig"] = {"enabled": False}
     return out
 
 
@@ -447,13 +564,10 @@ def cluster_model(
     """
     scenario = dict(scenario or {})
     scenario.setdefault("discountRate", _DEFAULT_DISCOUNT_RATE)
-    # The reduced network is serialised straight back to a workbook, so build it
-    # WITHOUT the cost transformations a run applies on top of workbook values —
-    # otherwise the reduced workbook stores an annuitised `capital_cost` that the
-    # next run annuitises again (extendable CAPEX ≈ AF² of its real value, so
-    # capacity expansion builds almost for free).
-    build_options = {**(options or {}), "skipCapexAnnuitisation": True}
-    network, _notes = build_network(model, scenario, build_options)
+    # See `_transform_build_options`: no CAPEX annuitisation (the reduced workbook
+    # would be annuitised twice) and no run window / sampling (it would truncate
+    # the user's time axis).
+    network, _notes = build_network(model, scenario, _transform_build_options(options))
 
     n_buses = len(network.buses)
     if n_buses < 2:
@@ -577,6 +691,8 @@ def cluster_model(
     # serialiser did produce still wins.
     for sheet, rows in _preserved_config_sheets(model).items():
         reduced.setdefault(sheet, rows)
+    _restore_shapes(reduced, model, busmap)
+    _restore_workbook_only_columns(reduced, model)
 
     return {
         "model": reduced,

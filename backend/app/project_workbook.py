@@ -55,6 +55,13 @@ CONSTRAINTS_SHEET = "RAGNAROK_Constraints"
 RUN_STATE_SHEET = "RAGNAROK_RunState"
 RUN_HISTORY_SHEET = "RAGNAROK_RunHistory"
 PROVENANCE_SHEET = "RAGNAROK_Provenance"
+# ``{sheet, original}`` for every sheet whose name did not fit Excel's 31-char
+# limit. Six real PyPSA time-series sheets are longer than that
+# (``storage_units-state_of_charge_set``, ``storage_units-efficiency_dispatch``,
+# ``generators-marginal_cost_quadratic``, …), and a truncated name matches no
+# schema attribute — so without this map the sheet-reconstruction importer
+# silently DROPPED them. Written only when a rename actually happened.
+SHEET_NAMES_SHEET = "RAGNAROK_SheetNames"
 # Human-readable landing sheet (KPIs, constraints, run settings). Display-only —
 # carries no data the importer needs, so it's in _META_SHEETS (skipped on read).
 SUMMARY_SHEET = "RAGNAROK_Summary"
@@ -79,6 +86,7 @@ _META_SHEETS = {
     PROVENANCE_SHEET,
     BUNDLE_SHEET,
     SUMMARY_SHEET,
+    SHEET_NAMES_SHEET,
 }
 
 # JSON metadata is chunked at this many chars/row (Excel cell limit is 32 767).
@@ -132,11 +140,15 @@ def _write_rows(
     name: str,
     rows: list[dict[str, Any]] | None,
     used: set[str],
+    renames: dict[str, str] | None = None,
 ) -> bool:
     """Write ``rows`` as a sheet ``name``; return True if a sheet was written.
 
     Skips empty input. Truncates the name to Excel's 31-char limit and dedupes
-    collisions (output series names are <= 29 chars, so this is a safety net).
+    collisions. Any rename is recorded in ``renames`` (``sheet → original``) so
+    :func:`workbook_to_bundle` can restore the real name — a truncated
+    ``<component>-<attr>`` matches no schema attribute, so an unrecorded rename
+    means the sheet is silently dropped on re-import.
     """
     if not rows:
         return False
@@ -147,7 +159,12 @@ def _write_rows(
         sheet = name[: _EXCEL_SHEET_LIMIT - len(tail)] + tail
         suffix += 1
     if sheet != name:
-        logger.warning("Sheet name %r truncated/deduped to %r", name, sheet)
+        if renames is None:
+            # Unrecorded — the real name is unrecoverable on re-import.
+            logger.warning("Sheet name %r truncated/deduped to %r (NOT recorded)", name, sheet)
+        else:
+            renames[sheet] = name
+            logger.info("Sheet name %r written as %r (recorded in %s)", name, sheet, SHEET_NAMES_SHEET)
     used.add(sheet)
     df = pd.DataFrame(rows, columns=_ordered_columns(rows))
     df.to_excel(writer, sheet_name=sheet, index=False)
@@ -422,6 +439,9 @@ def bundle_to_workbook(
 
     buffer = BytesIO()
     used: set[str] = set()
+    # sheet-as-written → real name, for every name Excel's 31-char limit forced us
+    # to shorten (see SHEET_NAMES_SHEET).
+    renames: dict[str, str] = {}
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
         wrote_any = False
         series_keys = set(series.keys())
@@ -439,7 +459,7 @@ def bundle_to_workbook(
                     continue
                 if ps.component_schema(sheet) is not None:
                     rows = _merge_static_outputs(sheet, rows, static.get(sheet) or {})
-                wrote_any |= _write_rows(writer, str(sheet), rows, used)
+                wrote_any |= _write_rows(writer, str(sheet), rows, used, renames)
 
         # 2) Static outputs for components with no input rows in the workbook
         #    (also the home for ALL static outputs when the model is excluded).
@@ -449,13 +469,13 @@ def bundle_to_workbook(
                 if not isinstance(comp_map, dict) or already_written:
                     continue
                 rows = [{"name": name, **attrs} for name, attrs in comp_map.items()]
-                wrote_any |= _write_rows(writer, str(sheet), rows, used)
+                wrote_any |= _write_rows(writer, str(sheet), rows, used, renames)
 
         # 3) Output time-series sheets (`<list>-<attr>`).
         if isinstance(series, dict):
             for key, rows in series.items():
                 if isinstance(rows, list):
-                    wrote_any |= _write_rows(writer, str(key), rows, used)
+                    wrote_any |= _write_rows(writer, str(key), rows, used, renames)
 
         # 4) Result meta + plugin analytics (Result part).
         if include_result:
@@ -499,6 +519,18 @@ def bundle_to_workbook(
                 for part, chunk in enumerate(_chunks(json.dumps(bundle, default=str)))
             ]
             wrote_any |= _write_rows(writer, BUNDLE_SHEET, bundle_rows, used)
+
+        # The truncated → real sheet-name map. MUST be written after every data
+        # sheet (that is when `renames` is complete) and is read back before any
+        # sheet is classified, so a name Excel could not hold still re-imports
+        # under its real name instead of being dropped.
+        if renames:
+            _write_rows(
+                writer,
+                SHEET_NAMES_SHEET,
+                [{"sheet": k, "original": v} for k, v in sorted(renames.items())],
+                used,
+            )
 
         if not wrote_any:
             pd.DataFrame([{"info": "No data in this project."}]).to_excel(
@@ -640,8 +672,20 @@ def workbook_to_bundle(data: bytes, filename: str = "") -> dict[str, Any]:
     scenario: dict[str, Any] = {}
     options: dict[str, Any] = {}
 
-    for sheet in excel.sheet_names:
-        rows = _df_rows(excel.parse(sheet))
+    # Restore names Excel's 31-char limit forced the writer to shorten, BEFORE
+    # anything is classified: a truncated `<component>-<attr>` matches no schema
+    # attribute, so an unmapped sheet lands in `rawSheets` (or worse, in the model
+    # under a name build_network ignores) instead of round-tripping.
+    real_names: dict[str, str] = {}
+    if SHEET_NAMES_SHEET in excel.sheet_names:
+        for row in _df_rows(excel.parse(SHEET_NAMES_SHEET)):
+            written, original = row.get("sheet"), row.get("original")
+            if isinstance(written, str) and isinstance(original, str) and original.strip():
+                real_names[written] = original
+
+    for written_name in excel.sheet_names:
+        rows = _df_rows(excel.parse(written_name))
+        sheet = real_names.get(written_name, written_name)
 
         if sheet == RESULT_META_SHEET:
             result.update(_reassemble_meta(rows))
@@ -737,12 +781,17 @@ _LABEL_EXTENSIONS = (".xlsx", ".xls", ".nc", ".h5", ".hdf5", ".zip")
 
 
 def bundle_to_package(
-    bundle: dict[str, Any], base_name: str, meta: dict[str, Any] | None = None
+    bundle: dict[str, Any],
+    base_name: str,
+    meta: dict[str, Any] | None = None,
+    conversation: dict[str, Any] | None = None,
 ) -> bytes:
-    """Pack a bundle into a Ragnarok Project ``.zip`` — all three files.
+    """Pack a bundle into a Ragnarok Project ``.zip``.
 
     ``<stem>.json`` (canonical bundle), ``<stem>.meta.json`` (light sidecar, when
-    provided), and ``<stem>.xlsx`` (readable workbook).
+    provided), ``<stem>.conversation.json`` (the Bifrost chat — events + model +
+    autonomy — when provided, so importing the project resumes the
+    conversation), and ``<stem>.xlsx`` (readable workbook).
     """
     import zipfile
 
@@ -752,6 +801,8 @@ def bundle_to_package(
         zf.writestr(f"{stem}.json", json.dumps(bundle, default=str))
         if meta is not None:
             zf.writestr(f"{stem}.meta.json", json.dumps(meta, default=str))
+        if conversation is not None:
+            zf.writestr(f"{stem}.conversation.json", json.dumps(conversation, default=str))
         zf.writestr(f"{stem}.xlsx", bundle_to_workbook(bundle))
     return buffer.getvalue()
 
@@ -766,15 +817,29 @@ def package_to_bundle(data: bytes, filename: str = "") -> dict[str, Any]:
 
     with zipfile.ZipFile(BytesIO(data)) as zf:
         names = zf.namelist()
-        # The canonical bundle is `<name>.json` — NOT the `<name>.meta.json`
-        # sidecar (which is a different, lightweight file in the same package).
+        # The canonical bundle is `<name>.json` — NOT the `<name>.meta.json` or
+        # `<name>.conversation.json` sidecars (different files in the package).
         json_name = next(
-            (n for n in names if n.lower().endswith(".json") and not n.lower().endswith(".meta.json")),
+            (
+                n for n in names
+                if n.lower().endswith(".json")
+                and not n.lower().endswith((".meta.json", ".conversation.json"))
+            ),
             None,
         )
         if json_name is not None:
             bundle = json.loads(zf.read(json_name).decode("utf-8"))
             bundle.setdefault("options", {}).setdefault("filename", filename)
+            conversation_name = next(
+                (n for n in names if n.lower().endswith(".conversation.json")), None
+            )
+            if conversation_name is not None:
+                try:
+                    bundle["conversation"] = json.loads(
+                        zf.read(conversation_name).decode("utf-8")
+                    )
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    logger.warning("import: unreadable conversation sidecar — skipped")
             return bundle
         xlsx_name = next((n for n in names if n.lower().endswith(".xlsx")), None)
         if xlsx_name is not None:

@@ -21,6 +21,42 @@ export type { ModelIssue } from 'lib/validation/issue';
 type Row = Record<string, Primitive>;
 
 const TS_INDEX_KEYS = new Set(['snapshot', 'name', 'datetime', 'timestamp', 'time', 'timestep', 'index', 'period', '']);
+
+/** Column names a temporal or snapshots row may carry the label in, in priority
+ *  order. Mirrors the backend's `_snapshot_label`. */
+const SNAPSHOT_LABEL_KEYS = ['snapshot', 'name', 'datetime', 'timestep', 'index'] as const;
+
+function snapshotLabelOf(row: Row): string {
+  for (const key of SNAPSHOT_LABEL_KEYS) {
+    const value = (row as Record<string, unknown>)[key];
+    if (value !== undefined && value !== null && String(value).trim() !== '') return String(value).trim();
+  }
+  return '';
+}
+
+/** A label in comparable form. The snapshots sheet and a hand-made CSV routinely
+ *  spell the same instant differently ("…T00:00:00" vs "… 00:00:00"), so comparing
+ *  raw strings would flag every well-aligned sheet. Non-datetime axes ("now",
+ *  integer steps) fall through to the trimmed string. */
+function normSnapshot(label: string): string {
+  if (!label) return '';
+  const ms = Date.parse(label);
+  return Number.isNaN(ms) ? label : new Date(ms).toISOString();
+}
+
+function snapshotAxis(snapshotRows: Row[] | undefined): Set<string> {
+  const axis = new Set((snapshotRows ?? []).map((r) => normSnapshot(snapshotLabelOf(r))));
+  axis.delete('');
+  return axis;
+}
+
+/** A few labels for an actionable message — never the whole set, or a year-long
+ *  mismatch prints 8,760 timestamps. */
+function sampleLabels(labels: string[], limit = 3): string {
+  const ordered = Array.from(labels).sort();
+  const shown = ordered.slice(0, limit).join(', ');
+  return ordered.length <= limit ? shown : `${shown}, … (+${ordered.length - limit} more)`;
+}
 const NON_NEGATIVE_ATTRS = new Set([
   'p_nom', 'p_nom_min', 'p_nom_max',
   's_nom', 's_nom_min', 's_nom_max',
@@ -179,8 +215,42 @@ function addTemporalSheetIssues(
   const knownNames = new Set(componentRows.map((row) => stringValue(row.name).trim()).filter(Boolean));
   if (rows.length === 0) return;
 
+  // ALIGNMENT TO THE SHARED TIME AXIS.
+  //
+  // `snapshots` is the one axis every temporal sheet is read against: the backend
+  // reindexes each series onto it, DROPPING rows whose label is off the axis and
+  // leaving the uncovered snapshots undefined. The solve reports neither — a
+  // half-covered `loads-p_set` returns "Optimal" with the missing hours dispatched
+  // as ZERO demand. A row-count check cannot see it, because a sheet can have
+  // exactly the right number of rows and still be for the wrong year.
+  const axis = snapshotAxis(model.snapshots);
   const snapshotCount = model.snapshots.length;
-  if (snapshotCount > 0 && rows.length !== snapshotCount) {
+  if (axis.size > 0) {
+    const sheetAxis = new Set(
+      rows.map((row) => normSnapshot(snapshotLabelOf(row))).filter(Boolean),
+    );
+    const offAxis = Array.from(sheetAxis).filter((label) => !axis.has(label));
+    const uncovered = Array.from(axis).filter((label) => !sheetAxis.has(label));
+    if (offAxis.length > 0) {
+      issues.push({
+        sheet,
+        rowIndex: 0,
+        severity: 'error',
+        message: `${offAxis.length} snapshot label(s) are not in the snapshots sheet and will be `
+          + `DROPPED on run (e.g. ${sampleLabels(offAxis)})`,
+      });
+    }
+    if (uncovered.length > 0) {
+      issues.push({
+        sheet,
+        rowIndex: 0,
+        severity: 'error',
+        message: `${uncovered.length} of ${axis.size} snapshots have no row here `
+          + `(e.g. ${sampleLabels(uncovered)}) — those hours solve as ZERO, not as the static value`,
+      });
+    }
+  } else if (snapshotCount > 0 && rows.length !== snapshotCount) {
+    // No comparable axis (non-datetime labels) — fall back to the count.
     issues.push({
       sheet,
       rowIndex: 0,

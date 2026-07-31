@@ -1234,6 +1234,13 @@ def run_to_xlsx(
             include_meta=include_meta,
             include_model=include_model,
             include_result=include_result,
+            # A COMPLETE standalone xlsx is meant to be a faithful copy of the run,
+            # and unlike the project package it ships no canonical JSON alongside —
+            # so embed the bundle and it re-imports verbatim instead of being
+            # rebuilt (lossily) from the readable sheets. A partial export must NOT
+            # carry it: the embedded bundle would smuggle back exactly the parts the
+            # user deselected.
+            include_bundle=include_meta and include_model and include_result,
         )
     except Exception:  # noqa: BLE001
         logger.exception("Failed to build xlsx for backend run %s", name)

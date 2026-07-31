@@ -92,6 +92,42 @@ def test_patch_parity(_dir) -> None:
     assert legacy.get_meta("leg")["componentCounts"] == sq.get_meta("sql")["componentCounts"] or True  # counts not re-derived on patch
 
 
+def test_patch_creates_an_absent_series_sheet(_dir) -> None:
+    """Writing to a temporal sheet the session does not have must CREATE it.
+
+    This is what makes an empty profile fillable from the UI: the sheet tree lets
+    an empty temporal leaf be selected, and the first paste / CSV import arrives
+    as ``addRow`` ops against a sheet that does not exist yet. If that no-ops
+    there is no way to author a profile by hand at all.
+    """
+    model = _model()
+    del model["loads-p_set"]  # a model with no temporal data whatsoever
+    legacy.save_model("leg", model)
+    sq.save_model("sql", model)
+    assert "loads-p_set" not in (legacy.load_full_model("leg") or {})
+    assert "loads-p_set" not in (sq.load_full_model("sql") or {})
+
+    ops = [
+        {"op": "addRow", "values": {"snapshot": "2030-01-01T00:00:00", "L0": 1.0}},
+        {"op": "addRow", "values": {"snapshot": "2030-01-01T01:00:00", "L0": 2.0}},
+    ]
+    leg_desc = legacy.patch_sheet("leg", "loads-p_set", ops)
+    sq_desc = sq.patch_sheet("sql", "loads-p_set", ops)
+
+    assert leg_desc is not None and sq_desc is not None
+    assert leg_desc["total"] == sq_desc["total"] == 2
+    assert leg_desc["kind"] == sq_desc["kind"] == "series"
+    rows_leg = legacy.get_sheet_page("leg", "loads-p_set")["rows"]
+    rows_sq = sq.get_sheet_page("sql", "loads-p_set")["rows"]
+    assert rows_leg == rows_sq
+    assert [r["L0"] for r in rows_sq] == [1.0, 2.0]
+    # And it is now visible to the tree, which reads the session meta.
+    assert any(
+        s["name"] == "loads-p_set" and s["kind"] == "series" and s["rowCount"] == 2
+        for s in sq.get_meta("sql")["sheets"]
+    )
+
+
 def test_merge_static_parity(_dir) -> None:
     legacy.save_model("leg", _model())
     sq.save_model("sql", _model())

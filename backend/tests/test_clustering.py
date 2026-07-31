@@ -643,3 +643,74 @@ def test_reduction_preserves_ragnarok_config_sheets() -> None:
         if not sheet.startswith("RAGNAROK_"):
             continue
         assert res["model"].get(sheet) == rows, sheet
+
+def test_reduction_keeps_the_full_time_axis_despite_a_run_window() -> None:
+    """A run window or sampling must never truncate a TRANSFORM's output.
+
+    `build_network` applies `snapshotStart`/`snapshotEnd`/`snapshotWeight` and
+    `samplingConfig` to `network.snapshots`; serialising that back would rewrite the
+    user's model with a truncated, downsampled time axis.
+    """
+    model = _path_model(3)
+    full = len(model["snapshots"])
+    res = cluster_model(
+        model,
+        n_clusters=2,
+        method="modularity",
+        scenario=SCENARIO,
+        options={
+            "snapshotStart": 0,
+            "snapshotEnd": 1,
+            "snapshotCount": 1,
+            "snapshotWeight": 2,
+            "samplingConfig": {"enabled": True, "mode": "blocks", "blockSize": 1},
+        },
+    )
+    assert len(res["model"]["snapshots"]) == full
+    assert len(res["model"]["loads-p_set"]) == full
+
+
+def test_reduction_restores_shape_geometry_with_a_remapped_bus() -> None:
+    """PyPSA's clustering drops the `Shape` component; put it back, remapped.
+
+    `shapes` IS a schema component, so `_preserved_config_sheets` excludes it by
+    design — the geometry needs its own restoration.
+    """
+    model = _path_model(4)
+    model["shapes"] = [
+        {"name": "region-a", "component": "Bus", "idx": "A", "geometry": "POINT (0 0)"}
+    ]
+    res = cluster_model(model, n_clusters=2, method="modularity", scenario=SCENARIO)
+    shapes = res["model"].get("shapes")
+    assert shapes and shapes[0]["geometry"] == "POINT (0 0)"
+    assert shapes[0]["idx"] == res["busmap"]["A"]
+
+
+def test_reduction_keeps_the_network_sheets_crs_and_the_snapshot_period() -> None:
+    """`network` and `snapshots` are components, so the exclusion skips them.
+
+    The network object round-trips only `name`, and the pathway `period` column is
+    only re-emitted when the build was multi-period — so both are preserved by name.
+    """
+    model = _path_model(3)
+    model["network"] = [{"name": "orig", "srid": 4326, "crs": "EPSG:4326"}]
+    model["snapshots"] = [{**row, "period": 2030} for row in model["snapshots"]]
+    res = cluster_model(model, n_clusters=2, method="modularity", scenario=SCENARIO)
+    assert res["model"]["network"][0].get("srid") == 4326
+    assert all("period" in row for row in res["model"]["snapshots"])
+
+
+def test_serialized_model_has_no_non_finite_numbers() -> None:
+    """`inf` defaults (p_nom_max, lifetime) must not reach the JSON.
+
+    Starlette renders responses with `allow_nan=False`, so a bare `Infinity` 500s
+    the endpoint. Dropping the cell is lossless — `build_network` re-applies the
+    same PyPSA default.
+    """
+    net, _ = build_network(_path_model(3), SCENARIO, {})
+    assert net.generators["p_nom_max"].iloc[0] == float("inf")  # precondition
+    model = network_to_model(net)
+    json.dumps(model, allow_nan=False)
+    assert "p_nom_max" not in model["generators"][0]
+    rebuilt, _ = build_network(model, SCENARIO, {})
+    assert rebuilt.generators["p_nom_max"].iloc[0] == float("inf")

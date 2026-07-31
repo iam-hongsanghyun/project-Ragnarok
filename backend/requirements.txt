@@ -1,7 +1,7 @@
 fastapi>=0.115
 uvicorn[standard]>=0.30
 python-multipart>=0.0.9
-pypsa @ git+https://github.com/PyPSA/PyPSA.git@1eb9db03ad5751aea0ac9eed740479c92923a3f2  # Process component not yet in stable release; pinned to the installed 1.2.4.dev commit for reproducible installs
+pypsa==1.2.4  # 1.2.4 is released, so the Process component no longer needs the git pin this used to carry
 pandas>=2.2
 pyarrow>=17  # columnar Parquet engine for the server-side session store (time-series)
 numpy>=2.1
@@ -22,3 +22,8 @@ tables>=3.10  # PyPSA-native binary export (.h5)
 # keys (BYOK) are all handled in Python.
 httpx>=0.27          # upstream fetches (Overpass, GitHub, World Bank, …)
 shapely>=2.0         # point-in-polygon clipping + region geometry
+
+# MCP server (backend/mcp/server.py). Was undeclared, so a fresh install resolved
+# to mcp 2.x, where `mcp.server.fastmcp` was renamed to `mcp.server.mcpserver` —
+# the server then failed at import.
+mcp>=1.2,<2

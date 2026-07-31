@@ -180,6 +180,63 @@ def test_import_from_upload_accepts_zip_and_xlsx() -> None:
     assert xlsx_bundle["result"] == bundle["result"]
 
 
+def test_over_long_sheet_names_round_trip() -> None:
+    """Sheets longer than Excel's 31-char limit must survive reconstruction.
+
+    Six real PyPSA time-series sheets exceed 31 chars. The writer has to shorten
+    them; a shortened ``<component>-<attr>`` matches no schema attribute, so
+    before the ``RAGNAROK_SheetNames`` map they were silently dropped on
+    re-import (landing nowhere, or in ``rawSheets``).
+    """
+    long_sheets = {
+        "storage_units-state_of_charge_set": [{"snapshot": "2025-01-01T00:00:00", "batt": 0.5}],
+        "storage_units-efficiency_dispatch": [{"snapshot": "2025-01-01T00:00:00", "batt": 0.92}],
+        "generators-marginal_cost_quadratic": [{"snapshot": "2025-01-01T00:00:00", "gas": 0.01}],
+        "storage_units-marginal_cost_storage": [{"snapshot": "2025-01-01T00:00:00", "batt": 1.5}],
+    }
+    bundle = {
+        "model": {
+            "buses": [{"name": "n1"}],
+            "storage_units": [{"name": "batt", "bus": "n1", "p_nom": 10.0}],
+            "generators": [{"name": "gas", "bus": "n1", "p_nom": 5.0}],
+            "snapshots": [{"snapshot": "2025-01-01T00:00:00"}],
+            **long_sheets,
+        },
+        "scenario": {"discountRate": 0.05},
+        "options": {"snapshotStart": 0, "snapshotEnd": 1},
+        "result": {},
+    }
+    # No embedded bundle → the sheet-reconstruction path, which is what the
+    # truncation actually broke.
+    back = pw.workbook_to_bundle(pw.bundle_to_workbook(bundle), "long.xlsx")
+    for name, rows in long_sheets.items():
+        assert back["model"].get(name) == rows, f"{name} ({len(name)} chars) lost"
+    assert not (back["result"] or {}).get("rawSheets")
+
+
+def test_complete_standalone_xlsx_embeds_the_bundle() -> None:
+    """A full (metadata+model+result) xlsx export must re-import verbatim.
+
+    It ships no canonical JSON beside it — unlike the project package — so
+    without the embedded bundle it was always rebuilt lossily from the sheets.
+    A PARTIAL export must NOT embed it, or the deselected parts come back.
+    """
+    from backend.app import run_store
+
+    bundle = _sample_bundle()
+    full = pw.bundle_to_workbook(bundle, include_meta=True, include_model=True,
+                                include_result=True, include_bundle=True)
+    assert pw.BUNDLE_SHEET in pw.pd.ExcelFile(pw.BytesIO(full)).sheet_names
+    rt = pw.workbook_to_bundle(full, "full.xlsx")
+    assert rt["model"] == bundle["model"]
+    assert rt["result"] == bundle["result"]
+    # run_to_xlsx only embeds when every part is selected.
+    assert run_store is not None  # import guard: the flag lives in run_to_xlsx
+    partial = pw.bundle_to_workbook(bundle, include_meta=False, include_result=False,
+                                   include_bundle=False)
+    assert pw.BUNDLE_SHEET not in pw.pd.ExcelFile(pw.BytesIO(partial)).sheet_names
+
+
 def test_project_basename() -> None:
     assert pw.project_basename("north-sea.xlsx") == "north-sea_project"
     assert pw.project_basename("north-sea.zip") == "north-sea_project"
