@@ -1574,6 +1574,13 @@
 
 .leaflet-container {
   font-family: var(--font-sans);
+  /* Confine Leaflet's stacking to the map. It assigns its panes z-index 400 and
+     its controls 1000 — raw values that, left in the page's root stacking
+     context, compete with app chrome and with any popover that lands there.
+     `isolation` makes the map its own context WITHOUT lifting it above anything
+     (a z-index here would). This is the ceiling --z-map documents in
+     _tokens.css; no map container needs to out-rank an overlay. */
+  isolation: isolate;
 }
 
 .map-footer-grid {
@@ -4266,11 +4273,20 @@ th:hover .col-delete-btn {
 
 /* Right-click cell context menu — Radix DropdownMenu.Content + .Item.
    Radix (Floating UI) owns positioning via a popper wrapper, so the content
-   itself carries no `position`/coords; we only style it. */
+   itself carries no `position`/coords; we only style it.
+
+   The z-index MUST live on the content, not just the wrapper: Radix reads the
+   CONTENT's computed z-index and copies it onto the popper wrapper as an INLINE
+   style (react-popper: `zIndex: contentZIndex`), and an inline value beats the
+   rule below. With no z-index on `.grid-ctxmenu` that inline value was `auto`,
+   so the menu sat in the root stacking context and any Leaflet map painted over
+   it — the map is on top of the right-click menu in Model / Build. The wrapper
+   rule stays as the fallback for any popper whose content sets none. */
 [data-radix-popper-content-wrapper] {
   z-index: var(--z-popover);
 }
 .grid-ctxmenu {
+  z-index: var(--z-popover);
   min-width: 150px;
   background: var(--surface);
   border: 1px solid var(--border, #e2e8f0);

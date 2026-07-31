@@ -460,6 +460,47 @@ export function TablesPane({
     ];
     void patchSheet(String(sel.sheet), ops).catch(() => { /* best-effort */ });
   };
+  /**
+   * Seed an EMPTY temporal sheet from the model's snapshot index, so a profile
+   * can be written from scratch instead of only imported.
+   *
+   * A time series is indexed BY the snapshots — hand-adding arbitrary rows would
+   * just desynchronise it from the run's time axis (which is why the snapshot
+   * column is locked for editing). So "from scratch" means: one row per
+   * snapshot, one blank column per component on the parent sheet, then type the
+   * values in (or paste a column in from a spreadsheet).
+   */
+  const seedTsFromSnapshots = async () => {
+    const snapshotRows = ((model as unknown as Record<string, GridRow[]>).snapshots ?? []);
+    if (snapshotRows.length === 0) {
+      void alertDialog(
+        'This model has no snapshots yet. Add the time index on the Snapshots sheet first — a profile is indexed by it.',
+        { title: 'No snapshots' },
+      );
+      return;
+    }
+    const componentNames = (((model as unknown as Record<string, GridRow[]>)[parentGroup?.sheet ?? ''] ?? [])
+      .map((r) => stringValue(r.name))
+      .filter((n) => n !== ''));
+    const seeded: GridRow[] = snapshotRows.map((s) => {
+      const row: GridRow = { snapshot: stringValue(s.snapshot ?? s.name ?? '') };
+      componentNames.forEach((name) => { row[name] = ''; });
+      return row;
+    });
+    try {
+      const current = tsRows?.length ?? 0;
+      setTsRows(seeded);
+      await patchSheet(String(sel.sheet), [
+        ...(current ? [{ op: 'deleteRows' as const, rows: Array.from({ length: current }, (_, i) => i) }] : []),
+        ...seeded.map((r) => ({ op: 'addRow' as const, values: r as Record<string, unknown> })),
+      ]);
+      onTsSheetChanged?.(String(sel.sheet));
+    } catch (err) {
+      setTsRows([]);
+      void alertDialog(err instanceof Error ? err.message : String(err), { title: 'Could not create the profile' });
+    }
+  };
+
   const patchTsClear = () => {
     const count = tsRows?.length ?? 0;
     if (count === 0) return;
@@ -597,7 +638,9 @@ export function TablesPane({
   // Temporal data is loaded by CSV import (right-hand Temporal panel in Build);
   // value cells are editable inline, but the snapshot/time index column stays
   // locked so the imported time axis can't be corrupted.
-  const lockSnapshotCol = isTs && editableTs;
+  // The snapshot / time-index column is ALWAYS locked on a temporal sheet: the
+  // values are the user's to write, the time axis is the model's.
+  const lockSnapshotCol = isTs;
 
   const protectedCols = isTs
     ? (lockSnapshotCol && frozenCol ? [frozenCol] : [])
@@ -653,6 +696,15 @@ export function TablesPane({
                   Import CSV
                 </button>
               </>
+            )}
+            {rows.length === 0 && (
+              <button
+                className="ghost-button sm"
+                title={`Create one row per snapshot with a blank column per ${componentNoun}, then type or paste the values`}
+                onClick={() => { void seedTsFromSnapshots(); }}
+              >
+                Write from scratch
+              </button>
             )}
             <button
               className="ghost-button sm"
@@ -795,8 +847,8 @@ export function TablesPane({
               {tsLoading
                 ? 'Loading time-series from the backend…'
                 : editableTs
-                  ? 'No temporal data — use "Import CSV" in the Temporal panel on the right, then edit values here.'
-                  : 'No temporal data — use "Import CSV" above to load a profile.'}
+                  ? 'No temporal data yet — "Write from scratch" above seeds a row per snapshot to type into, or import a CSV from the Temporal panel on the right.'
+                  : 'No temporal data yet — "Write from scratch" above seeds a row per snapshot to type into, or "Import CSV" loads one.'}
             </div>
           ) : (
             <DataGrid
@@ -805,15 +857,20 @@ export function TablesPane({
               frozenCol={frozenCol}
               storageKey={`${sel.kind}:${String(sel.sheet)}`}
               getColumnHeaderLabel={getColumnHeaderLabel}
-              readOnly={isTs && !editableTs}
+              // Temporal VALUES are editable wherever the sheet is shown — a
+              // profile has to be writable by hand, not import-only (the Model
+              // tab used to force these read-only, which left "write from
+              // scratch" with nowhere to type). The snapshot column stays locked
+              // via `readOnlyCols` so the time index can't drift from the run's.
+              readOnly={false}
               onUpdate={
                 isTs
-                  ? (editableTs ? patchTsCell : undefined)
+                  ? patchTsCell
                   : (ri, col, val) => onUpdate(sel.sheet as SheetName, ri, col, val)
               }
               onPasteEdits={
                 isTs
-                  ? (editableTs ? patchTsPaste : undefined)
+                  ? patchTsPaste
                   : (!onBulkPaste ? undefined : (edits, extraRows) => onBulkPaste(sel.sheet as SheetName, edits, extraRows))
               }
               onAppendRow={isTs ? undefined : () => onAddRow(sel.sheet as SheetName)}
@@ -828,7 +885,7 @@ export function TablesPane({
               onAnalyse={(col) => { setAnalyseFocusCol(col); setShowAnalyser(true); }}
               onClearTable={
                 isTs
-                  ? (editableTs ? patchTsClear : undefined)
+                  ? patchTsClear
                   : () => onClearTable(sel.sheet as SheetName)
               }
               protectedCols={protectedCols}
