@@ -172,11 +172,30 @@ export function AssetSwapSection(props: AssetSwapSectionProps) {
           )}
 
           <div className="sg-setting-row">
-            <label className="sg-setting-label" htmlFor="rs-swap-ratio">Replacement ratio (×)</label>
+            <label className="sg-setting-label">Replacement size</label>
+            <div className="sg-btn-row">
+              <button className={`tb-btn sg-solver-btn${!cfg.sizeReplacement ? '' : ' tb-btn--muted'}`} onClick={() => set({ sizeReplacement: false })}>Fixed</button>
+              <button className={`tb-btn sg-solver-btn${cfg.sizeReplacement ? '' : ' tb-btn--muted'}`} onClick={() => set({ sizeReplacement: true })}>Let the optimiser size it</button>
+            </div>
+            <p className="sg-setting-hint">
+              {cfg.sizeReplacement
+                ? 'The replacement is extendable up to the ratio below and the solve picks the build — so p_nom_opt is a result, not a copy of the retired capacity.'
+                : 'The replacement is built at exactly the ratio below and only redispatched, so its optimised capacity always equals its input capacity.'}
+            </p>
+          </div>
+
+          <div className="sg-setting-row">
+            <label className="sg-setting-label" htmlFor="rs-swap-ratio">
+              {cfg.sizeReplacement ? 'Maximum build (×)' : 'Replacement ratio (×)'}
+            </label>
             <input id="rs-swap-ratio" type="number" min={0} step={0.25} className="sg-num-input"
               value={cfg.replaceRatio}
               onChange={(e) => { const v = parseFloat(e.target.value); if (Number.isFinite(v)) set({ replaceRatio: Math.max(0, v) }); }} />
-            <p className="sg-setting-hint">Replacement MW = retired MW × this. Renewables often need &gt;1 (e.g. 2–3× to match a firm plant’s energy).</p>
+            <p className="sg-setting-hint">
+              {cfg.sizeReplacement
+                ? 'Ceiling: the optimiser may build up to retired MW × this. Leave it at 1 and it can never exceed the retired capacity.'
+                : 'Replacement MW = retired MW × this. Renewables often need >1 (e.g. 2–3× to match a firm plant’s energy).'}
+            </p>
           </div>
 
           <div className="sg-setting-divider" />

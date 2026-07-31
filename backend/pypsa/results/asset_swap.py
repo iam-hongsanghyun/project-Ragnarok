@@ -1,10 +1,19 @@
 """Asset-swap / repowering what-if (DW2) — "profit of gas → solar?"
 
-Retire a carrier and replace it, capacity-for-capacity, with another carrier at
-the same buses; re-solve; and report the before-vs-after delta: system cost,
-operating (fuel + carbon) cost, emissions, the replacement's capex, and a simple
-payback. Answers the repowering decision as a number, with the assumptions
-exposed.
+Retire a carrier and replace it with another carrier at the same buses;
+re-solve; and report the before-vs-after delta: system cost, operating (fuel +
+carbon) cost, emissions, the replacement's capex, and a simple payback. Answers
+the repowering decision as a number, with the assumptions exposed.
+
+Two sizing modes:
+
+* **Fixed** (default) — the replacement is built capacity-for-capacity at
+  ``retired MW × replace_ratio`` and is *not* extendable, so the re-solve only
+  redispatches it. ``p_nom_opt == p_nom`` by construction.
+* **Sized** (``size_replacement=True``) — the replacement is extendable with
+  ``p_nom_max = retired MW × replace_ratio``, so the ratio becomes a ceiling and
+  the LP picks the build against the availability profile and CAPEX. This is the
+  mode that answers "how much wind does it take to replace this coal?"
 
 The replacement inherits the target carrier's cost and (for a weather-driven
 carrier) its availability profile from an existing generator of that carrier, so
@@ -20,6 +29,7 @@ from typing import Any
 
 import pypsa
 
+from ..utils.annuity import annuity_factor
 from ..utils.emissions import per_generator_emission_factor
 from .finance import _crf
 from .market import HOURS_PER_YEAR
@@ -27,6 +37,15 @@ from .market import HOURS_PER_YEAR
 _log = logging.getLogger("pypsa.solver")
 
 _DEFAULT_LIFETIME = 25.0
+
+
+def _truthy(value: Any) -> bool:
+    """Sheet-cell truth test (``True`` / ``"TRUE"`` / ``1`` all count)."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value or "").strip().lower() in ("true", "1", "yes")
 
 
 def _system_cost(net: pypsa.Network) -> float:
@@ -92,6 +111,7 @@ def build_asset_swap(
     add_capital_cost: float,
     add_marginal_cost: float,
     replace_ratio: float = 1.0,
+    size_replacement: bool = False,
     add_storage_mw: float = 0.0,
     add_storage_hours: float = 4.0,
     add_storage_capex_per_mw: float = 0.0,
@@ -101,7 +121,12 @@ def build_asset_swap(
     io_api: str = "direct",
 ) -> dict[str, Any] | None:
     """Retire the generators matching ``remove_filters`` (carrier/company/…),
-    add ``add_carrier`` 1:1, re-solve, and return the delta."""
+    add ``add_carrier`` in their place, re-solve, and return the delta.
+
+    With ``size_replacement`` the replacement is extendable up to
+    ``retired MW × replace_ratio`` and the LP chooses the build; otherwise it is
+    fixed at that capacity.
+    """
     if not getattr(base_network, "is_solved", False):
         return None
     add_carrier = (add_carrier or "").strip()
@@ -125,29 +150,68 @@ def build_asset_swap(
     marg_cost = float(existing_add.get("marginal_cost", add_marginal_cost)) if existing_add else add_marginal_cost
     profile_ref = _profile_ref(model, add_carrier)
 
+    # CAPEX convention. ``build_network`` annuitises ``capital_cost`` for
+    # EXTENDABLE rows only, so the same sheet number means overnight $/MW on an
+    # extendable row and annual $/MW/yr on a fixed one. Keep the LP seeing an
+    # annual cost in both modes:
+    #   fixed  → write the annual value (never annuitised);
+    #   sized  → write annual/AF with an explicit lifetime, which build_network
+    #            multiplies back by AF.
+    # When the cost was inherited from an extendable unit the sheet value is
+    # already overnight, so it passes through untouched and the *reported*
+    # annual figure is value × AF instead.
+    discount_rate = float(scenario.get("discountRate", 0.0) or 0.0)
+    af = annuity_factor(discount_rate, _DEFAULT_LIFETIME)
+    inherited_overnight = size_replacement and existing_add is not None and _truthy(
+        existing_add.get("p_nom_extendable")
+    )
+    if inherited_overnight:
+        row_capital_cost = cap_cost
+        cap_cost_annual = cap_cost * af
+    elif size_replacement:
+        row_capital_cost = cap_cost / af if af > 0 else cap_cost
+        cap_cost_annual = cap_cost
+    else:
+        row_capital_cost = cap_cost
+        cap_cost_annual = cap_cost
+
     # Build the "after" model: drop the matched gens, add replacements sized at
     # `replace_ratio` × the retired capacity (renewables often need oversizing).
+    # In sizing mode that product is the extendable unit's p_nom_max instead.
     ratio = max(0.0, float(replace_ratio or 1.0))
     after = copy.deepcopy(model)
     after["generators"] = [r for r in after.get("generators", []) if str(r.get("name", "")) not in removed_names]
     replacements: list[dict[str, Any]] = []
     removed_capacity = 0.0
     added_capacity = 0.0
+    replacement_cap_mw = 0.0
     bus_capacity: dict[str, float] = {}
     for r in removed:
         p_nom = float(r.get("p_nom", 0.0) or 0.0)
         removed_capacity += p_nom
         new_p = p_nom * ratio
-        added_capacity += new_p
+        replacement_cap_mw += new_p
         bus_capacity[str(r.get("bus"))] = bus_capacity.get(str(r.get("bus")), 0.0) + p_nom
-        replacements.append({
+        row: dict[str, Any] = {
             "name": f"{r.get('name')}_repl",
             "bus": r.get("bus"),
             "carrier": add_carrier,
             "p_nom": new_p,
-            "capital_cost": cap_cost,
+            "capital_cost": row_capital_cost,
             "marginal_cost": marg_cost,
-        })
+        }
+        if size_replacement:
+            # The LP sizes it: start at zero, build up to the ratio ceiling.
+            row.update({
+                "p_nom": 0.0,
+                "p_nom_extendable": True,
+                "p_nom_min": 0.0,
+                "p_nom_max": new_p,
+                "lifetime": _DEFAULT_LIFETIME,
+            })
+        else:
+            added_capacity += new_p
+        replacements.append(row)
     after["generators"].extend(replacements)
 
     # Ensure the target carrier exists (zero-emission unless already declared).
@@ -206,6 +270,13 @@ def build_asset_swap(
     if not getattr(after_net, "is_solved", False):
         return None
 
+    # Sized mode: the built MW is a solve OUTPUT — read p_nom_opt back (a unit
+    # the LP declined to build contributes 0, and PyPSA can return -0.0).
+    if size_replacement:
+        repl_names = [r["name"] for r in replacements]
+        opt = after_net.generators["p_nom_opt"].reindex(repl_names).fillna(0.0)
+        added_capacity = float(opt.clip(lower=0.0).sum())
+
     before = {
         "systemCost": round(_system_cost(base_network), 2),
         "operatingCost": round(_operating_cost(base_network), 2),
@@ -222,9 +293,10 @@ def build_asset_swap(
         "emissionsTonnes": round(after_m["emissionsTonnes"] - before["emissionsTonnes"], 2),
     }
 
-    annualised_capex = cap_cost * added_capacity + storage_capex
-    r = float(scenario.get("discountRate", 0.0) or 0.0)
-    overnight_capex = annualised_capex / _crf(r, _DEFAULT_LIFETIME) if annualised_capex > 0 else 0.0
+    annualised_capex = cap_cost_annual * added_capacity + storage_capex
+    overnight_capex = (
+        annualised_capex / _crf(discount_rate, _DEFAULT_LIFETIME) if annualised_capex > 0 else 0.0
+    )
     # ``statistics.opex()`` integrates over the modelled window of H represented
     # hours, so the saving is a window total; a payback in YEARS needs the
     # annual saving: × 8760/H.
@@ -235,18 +307,21 @@ def build_asset_swap(
     payback = round(overnight_capex / annual_savings, 2) if annual_savings > 1e-9 and overnight_capex > 0 else None
 
     remove_summary = " · ".join(f"{f['field']} ∈ {{{', '.join(f['values'])}}}" for f in filters)
-    _log.info("asset-swap [%s]→%s ×%.2f +%.0fMW ess: Δcost=%.1f Δemissions=%.1f",
-              remove_summary, add_carrier, ratio, added_storage_mw, delta["systemCost"], delta["emissionsTonnes"])
+    _log.info("asset-swap [%s]→%s %s×%.2f (%.0f MW built) +%.0fMW ess: Δcost=%.1f Δemissions=%.1f",
+              remove_summary, add_carrier, "≤" if size_replacement else "", ratio, added_capacity,
+              added_storage_mw, delta["systemCost"], delta["emissionsTonnes"])
     return {
         "removeSummary": remove_summary,
         "removeFilters": filters,
         "removedCount": len(removed),
         "addCarrier": add_carrier,
         "replaceRatio": round(ratio, 3),
+        "sizedReplacement": bool(size_replacement),
         "addedStorageMW": round(added_storage_mw, 2),
         "currency": currency,
         "removedCapacityMW": round(removed_capacity, 2),
         "addedCapacityMW": round(added_capacity, 2),
+        "replacementCapMW": round(replacement_cap_mw, 2),
         "replacementCapex": round(annualised_capex, 2),
         "replacementFirm": replacement_firm,
         "before": before,

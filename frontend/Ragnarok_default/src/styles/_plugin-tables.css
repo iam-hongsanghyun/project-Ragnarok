@@ -11,7 +11,7 @@
   width: 100%;
   border-collapse: collapse;
   font-family: var(--font-mono);
-  font-size: 0.78rem;
+  font-size: var(--fs-sm);
 }
 
 /* Label-value pair table (one row per metric) */
@@ -33,7 +33,7 @@
 .plugin-result-unit {
   color: var(--muted);
   font-weight: 400;
-  font-size: 0.72rem;
+  font-size: var(--fs-xs);
 }
 
 /* Multi-column subtable with thead */
@@ -42,7 +42,7 @@
   padding: 6px 10px;
   background: var(--bg-hover);
   border-bottom: 1px solid var(--border);
-  font-size: 0.72rem;
+  font-size: var(--fs-xs);
   font-weight: 600;
   color: var(--muted);
   text-transform: uppercase;
@@ -66,7 +66,7 @@
   align-items: center;
   gap: 4px;
   padding: 0 12px;
-  font-size: 0.78rem;
+  font-size: var(--fs-sm);
   font-weight: 500;
   color: var(--muted);
   background: transparent;

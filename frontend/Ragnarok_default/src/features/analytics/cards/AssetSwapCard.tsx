@@ -38,7 +38,10 @@ export function AssetSwapCard({ data }: Props) {
             <span className="carrier-dot" style={{ backgroundColor: carrierColor(addCarrier) }} />{addCarrier}
           </div>
           <div className="econ-kpi-unit">
-            {data.removedCount} unit{data.removedCount === 1 ? '' : 's'}, {Math.round(data.removedCapacityMW).toLocaleString()} → {Math.round(data.addedCapacityMW).toLocaleString()} MW ({data.replaceRatio}×)
+            {data.removedCount} unit{data.removedCount === 1 ? '' : 's'}, {Math.round(data.removedCapacityMW).toLocaleString()} → {Math.round(data.addedCapacityMW).toLocaleString()} MW{' '}
+            {data.sizedReplacement
+              ? `(built, ≤${data.replaceRatio}× = ${Math.round(data.replacementCapMW).toLocaleString()} MW)`
+              : `(${data.replaceRatio}×)`}
             {data.addedStorageMW > 0 ? ` + ${Math.round(data.addedStorageMW).toLocaleString()} MW storage` : ''}
             {data.replacementFirm ? ' · firm (no profile)' : ''}
           </div>
@@ -109,7 +112,10 @@ export function AssetSwapCard({ data }: Props) {
       </div>
 
       <p className="econ-note">
-        Retire generators matching [{removeSummary}] and replace them 1:1 with “{addCarrier}”, then re-solve.
+        Retire generators matching [{removeSummary}] and replace them with “{addCarrier}”, then re-solve.
+        {data.sizedReplacement
+          ? ' The replacement was extendable, so the capacity above is what the solve built against the ceiling.'
+          : ' The replacement was fixed at the ratio above, so the solve only redispatched it.'}
         {data.replacementFirm && ' The replacement carrier has no availability profile in the model, so it is treated as firm — its output may be overstated.'}
         {' '}Payback = the replacement's overnight capex ÷ annual operating (fuel + carbon) saving; it ignores the
         retired asset's avoided capex. A repowering screen, not a full project appraisal.

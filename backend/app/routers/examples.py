@@ -66,18 +66,26 @@ def load_example(example_id: str, session_id: str = Query("default", alias="sess
     if not src.exists():
         raise HTTPException(status_code=404, detail="Example not found.")
 
-    dest_dir = session_store.SESSION_DIR / session_id
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    # The copied project.db is authoritative — drop any legacy JSON/Parquet
-    # session files so the SQLite store doesn't see a split-brain session.
-    for legacy in ("static", "series"):
-        legacy_dir = dest_dir / legacy
-        if legacy_dir.is_dir():
-            shutil.rmtree(legacy_dir, ignore_errors=True)
-    tmp = dest_dir / "project.db.tmp"
-    shutil.copy2(src, tmp)
-    tmp.replace(dest_dir / "project.db")
+    def _copy_db() -> dict:
+        dest_dir = session_store.SESSION_DIR / session_id
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        # The copied project.db is authoritative — drop any legacy JSON/Parquet
+        # session files so the SQLite store doesn't see a split-brain session.
+        for legacy in ("static", "series"):
+            legacy_dir = dest_dir / legacy
+            if legacy_dir.is_dir():
+                shutil.rmtree(legacy_dir, ignore_errors=True)
+        tmp = dest_dir / "project.db.tmp"
+        shutil.copy2(src, tmp)
+        tmp.replace(dest_dir / "project.db")
+        return model_store.get_meta(session_id) or {}
 
-    meta = model_store.get_meta(session_id) or {}
+    # This copy bypasses the model_store facade, so journal it explicitly —
+    # otherwise loading an example would be an invisible, un-undoable mutation.
+    from .. import journal
+
+    meta = journal.record_external_replace(
+        session_id, f"load example {example_id!r}", _copy_db
+    ) or {}
     logger.info("Loaded example %s into session %s", example_id, session_id)
     return {"loaded": True, "id": example_id, "label": str(_read_meta(example_id).get("label") or example_id), "meta": meta}

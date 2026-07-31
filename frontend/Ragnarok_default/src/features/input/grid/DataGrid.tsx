@@ -22,6 +22,25 @@ import { resolvePaste } from 'lib/input/range';
 import { useDialog } from '../../../shared/components/Dialog';
 import { FilterDropdown } from './FilterDropdown';
 
+/** The canvas-rendered Glide grid cannot read CSS variables — this mirrors the
+ *  design tokens in styles/_tokens.css (keep in sync on palette changes). */
+const GRID_THEME: Partial<Theme> = {
+  accentColor: '#104281',
+  accentLight: '#eaf1fb',
+  textDark: '#1c1b17',
+  textMedium: '#52514e',
+  textLight: '#898781',
+  textHeader: '#52514e',
+  bgCell: '#fcfcfb',
+  bgHeader: '#f4f3ef',
+  bgHeaderHasFocus: '#eceae3',
+  bgHeaderHovered: '#eceae3',
+  borderColor: '#e4e2da',
+  fontFamily: '"IBM Plex Sans", "Inter", "Segoe UI", system-ui, sans-serif',
+  baseFontStyle: '12.5px',
+  headerFontStyle: '600 11.5px',
+};
+
 type Row = GridRow & { __i: number };
 
 function inferInputValue(raw: string, current: Primitive): Primitive {
@@ -330,8 +349,8 @@ export function DataGrid({
       const issue = orig != null ? cellIssues?.get(`${orig}|${col}`) : undefined;
       if (issue) {
         themeOverride = issue.severity === 'error'
-          ? { bgCell: '#fee2e2', textDark: '#b91c1c' }
-          : { bgCell: '#fef3c7', textDark: '#b45309' };
+          ? { bgCell: '#fbe7e7', textDark: '#b02f2f' }
+          : { bgCell: '#fdf1d4', textDark: '#7a5200' };
       }
     }
     const cellReadOnly = readOnly || (readOnlyCols?.includes(col) ?? false);
@@ -499,8 +518,8 @@ export function DataGrid({
     const orig = displayToOrig[row];
     if (orig == null) return undefined;
     const sev = rowIssues?.get(orig);
-    if (sev === 'error') return { bgCell: '#fef2f2', accentColor: '#dc2626' };
-    if (sev === 'warning') return { bgCell: '#fffbeb', accentColor: '#d97706' };
+    if (sev === 'error') return { bgCell: '#fbe7e7', accentColor: '#d03b3b' };
+    if (sev === 'warning') return { bgCell: '#fdf1d4', accentColor: '#fab219' };
     return undefined;
   }, [displayToOrig, rowIssues]);
 
@@ -569,6 +588,7 @@ export function DataGrid({
       <div className="rdg-grid-host" ref={hostRef}>
         <DataEditor
           ref={gridRef}
+          theme={GRID_THEME}
           columns={displayColumns}
           rows={gridRows.length}
           getCellContent={getCellContent}

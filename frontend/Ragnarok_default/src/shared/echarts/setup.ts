@@ -19,10 +19,12 @@ import {
   ScatterChart,
 } from 'echarts/charts';
 import {
+  DataZoomComponent,
   GridComponent,
   LegendComponent,
   MarkLineComponent,
   TitleComponent,
+  ToolboxComponent,
   TooltipComponent,
 } from 'echarts/components';
 import { SVGRenderer } from 'echarts/renderers';
@@ -33,10 +35,12 @@ echarts.use([
   LineChart,
   PieChart,
   ScatterChart,
+  DataZoomComponent, // inside (wheel/drag) + slider zoom on time/category axes
   GridComponent,
   LegendComponent,
   MarkLineComponent,
   TitleComponent,
+  ToolboxComponent, // dataZoom toggle, restore, saveAsImage
   TooltipComponent,
   SVGRenderer,
 ]);

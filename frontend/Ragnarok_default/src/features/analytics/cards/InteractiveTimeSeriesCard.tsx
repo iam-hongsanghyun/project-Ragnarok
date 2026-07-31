@@ -70,8 +70,10 @@ export function InteractiveTimeSeriesCard({
       showAxisLabels,
       xLabelAngle: Number.isFinite(xLabelAngle) ? xLabelAngle : 0,
       theme: readChartTheme(),
+      title,
+      showLegend,
     });
-  }, [data, visibleSeries, mode, stacked, xAxisTitle, yAxisTitle, showAxisLabels, xLabelAngle]);
+  }, [data, visibleSeries, mode, stacked, xAxisTitle, yAxisTitle, showAxisLabels, xLabelAngle, title, showLegend]);
 
   const hostRef = useEChart<HTMLDivElement>(option);
 
@@ -81,7 +83,7 @@ export function InteractiveTimeSeriesCard({
         <div className="chart-card-header">
           <div><h3>{title}</h3><p>{description}</p></div>
         </div>
-        <p className="empty-text">No chart series are available for this selection.</p>
+        <p className="empty-text">No series match the current selection.</p>
       </section>
     );
   }
@@ -92,7 +94,7 @@ export function InteractiveTimeSeriesCard({
         <div className="chart-card-header">
           <div><h3>{title}</h3><p>{description}</p></div>
         </div>
-        <p className="empty-text">No series available for this selection.</p>
+        <p className="empty-text">No data points in range for the current selection.</p>
       </section>
     );
   }
@@ -106,17 +108,6 @@ export function InteractiveTimeSeriesCard({
         <div className="chart-main">
           <div ref={hostRef} className="echart-host" role="img" />
         </div>
-        {showLegend && (
-        <div className="chart-legend chart-legend-side">
-          <div className="map-legend-title" style={{ marginBottom: 4 }}>Series</div>
-          {visibleSeries.map((item) => (
-            <div key={item.key} className="legend-item-inline">
-              <span className="legend-swatch" style={{ backgroundColor: item.color }} />
-              <span>{item.label}</span>
-            </div>
-          ))}
-        </div>
-        )}
       </div>
     </section>
   );

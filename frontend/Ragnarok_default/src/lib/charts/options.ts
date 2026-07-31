@@ -3,18 +3,40 @@
  * shapes can be unit-tested directly (options.test.ts); components pass the
  * resolved ChartTheme in and hand the returned option to useEChart.
  *
- * Conventions shared by all builders (the "Ragnarok look"):
- *   - dashed slate grid lines, 11px muted sans tick labels, no axis ticks
- *   - dark slate tooltip (matches the old hand-rolled rgba(15,23,42,.88))
- *   - square corners, no animations (dense dashboard; resize stays snappy)
+ * Conventions shared by all builders (the "Ragnarok look", 2026-07 redesign):
+ *   - hairline grid lines (--chart-grid) and axis lines (--chart-axis) —
+ *     recessive chrome that never competes with data
+ *   - near-black tooltip (--chart-tooltip-bg / --chart-tooltip-text), 8px
+ *     radius, 12.5px type; every tooltip leads with the (bold) value and
+ *     follows with the (secondary) series/point name
+ *   - animations on (250ms in, 200ms on update) — this is a dashboard people
+ *     interact with, not a print plate
+ *   - real interactivity: dataZoom (inside + slider) on every zoomable
+ *     time/category axis, a compact top-right toolbox (zoom toggle, restore,
+ *     save-as-image) on the chart families that benefit from it, and a
+ *     functional scroll legend whenever a chart carries >= 2 series
  *   - numbers formatted with toLocaleString, units in axis names / tooltips
+ *   - generic series (no domain colour of their own) are assigned the
+ *     validated --series-1..8 palette in order; charts coloured by a domain
+ *     dimension (energy carrier, etc.) always keep the colour the caller
+ *     already supplied
  */
 import type { EChartsCoreOption } from 'echarts/core';
 import { ChartMode, MeritOrderEntry, MixItem, TimeSeriesRow, TimeSeriesSeries } from 'lib/types';
+import type { FreqCurve } from 'lib/physicalRisk/types';
 import { numberValue } from 'lib/utils/helpers';
 import type { ChartTheme } from './theme';
 
 const CHAR_PX = 6.6; // approximate glyph width of the 11px tick font
+
+/** Page/panel surface — used behind exported PNGs and dataZoom chrome so
+ *  charts stay legible against the app's paper background rather than a
+ *  transparent (browser-default-white) one. */
+const SURFACE = '#fcfcfb';
+
+/** A soft "lifted" hover shadow — reuses the same ink tone as `--shadow` in
+ *  _tokens.css rather than inventing a new hue. */
+const HOVER_SHADOW = { shadowBlur: 6, shadowColor: 'rgba(28, 27, 23, 0.18)' };
 
 /**
  * Max over an array WITHOUT spreading into `Math.max`. Spreading a large array
@@ -37,14 +59,19 @@ export function fmtNum(v: number | string): string {
   return Math.round(n).toLocaleString();
 }
 
+/** Slug a chart title into a filesystem-safe `saveAsImage` file name. */
+function slug(title: string): string {
+  return title.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'chart';
+}
+
 /** Shared dark tooltip chrome. */
 export function darkTooltip(theme: ChartTheme): Record<string, unknown> {
   return {
     backgroundColor: theme.tooltipBg,
     borderWidth: 0,
     confine: true,
-    textStyle: { color: '#ffffff', fontSize: 11, fontFamily: theme.fontSans },
-    extraCssText: 'border-radius: 4px; box-shadow: none;',
+    textStyle: { color: theme.tooltipText, fontSize: 12.5, fontFamily: theme.fontSans },
+    extraCssText: 'border-radius: 8px; box-shadow: none; padding: 8px 10px;',
   };
 }
 
@@ -59,7 +86,96 @@ export function axisName(theme: ChartTheme): Record<string, unknown> {
 }
 
 function dashedSplitLine(theme: ChartTheme): Record<string, unknown> {
-  return { show: true, lineStyle: { color: theme.gridLine, type: [4, 6] } };
+  return { show: true, lineStyle: { color: theme.grid, type: [4, 6] } };
+}
+
+/** Recessive axis line — `--chart-axis`, one step darker than the grid. */
+function axisLine(theme: ChartTheme): Record<string, unknown> {
+  return { lineStyle: { color: theme.axis } };
+}
+
+/** One line of a restyled tooltip: the value leads (bold, tooltip-text
+ *  colour), the series/point name follows in a muted secondary tone. `value`
+ *  is the already-formatted display string (number + unit baked in). */
+function tooltipValueRow(theme: ChartTheme, marker: string | undefined, value: string, name: string): string {
+  return `<div style="display:flex;align-items:baseline;gap:6px;white-space:nowrap;">`
+    + `<span style="font-weight:600;color:${theme.tooltipText};">${value}</span>`
+    + `<span style="opacity:.68;">${marker ?? ''}${name}</span>`
+    + `</div>`;
+}
+
+/** Muted header row for a multi-series axis tooltip (the hovered X value). */
+function tooltipHeader(label: string): string {
+  return `<div style="opacity:.6;margin-bottom:4px;">${label}</div>`;
+}
+
+interface AxisTooltipParam {
+  axisValueLabel?: string;
+  name?: string;
+  seriesName?: string;
+  value: number | string | (number | string)[];
+  marker?: string;
+}
+
+/** Compact top-right toolbox — dataZoom toggle, restore, save-as-image —
+ *  shared by every chart family that benefits from export/zoom. */
+function chartToolbox(theme: ChartTheme, title: string): Record<string, unknown> {
+  return {
+    show: true,
+    top: 0,
+    right: 4,
+    itemSize: 13,
+    itemGap: 8,
+    iconStyle: { borderColor: theme.muted },
+    emphasis: { iconStyle: { borderColor: theme.text } },
+    feature: {
+      dataZoom: { show: true, title: { zoom: 'Zoom', back: 'Reset zoom' } },
+      restore: { show: true, title: 'Restore' },
+      saveAsImage: { show: true, name: slug(title), backgroundColor: SURFACE, title: 'Save as image' },
+    },
+  };
+}
+
+/** Inside (wheel/drag) + slider dataZoom pair on one axis, styled to match
+ *  the recessive grid/axis chrome tokens. */
+function axisDataZoom(theme: ChartTheme, axis: 'x' | 'y'): Record<string, unknown>[] {
+  const key = axis === 'x' ? 'xAxisIndex' : 'yAxisIndex';
+  const sliderChrome = {
+    borderColor: theme.grid,
+    backgroundColor: SURFACE,
+    fillerColor: theme.grid,
+    handleStyle: { color: SURFACE, borderColor: theme.axis },
+    moveHandleStyle: { color: theme.axis },
+    dataBackground: { lineStyle: { color: theme.axis }, areaStyle: { color: theme.grid } },
+    selectedDataBackground: { lineStyle: { color: theme.axis }, areaStyle: { color: theme.grid } },
+    textStyle: { color: theme.muted, fontSize: 10, fontFamily: theme.fontSans },
+  };
+  if (axis === 'x') {
+    return [
+      { type: 'inside', [key]: 0 },
+      { type: 'slider', [key]: 0, height: 16, bottom: 4, ...sliderChrome },
+    ];
+  }
+  return [
+    { type: 'inside', [key]: 0 },
+    { type: 'slider', [key]: 0, orient: 'vertical', width: 16, right: 4, ...sliderChrome },
+  ];
+}
+
+/** Functional, togglable scroll legend — only ever used when a chart carries
+ *  >= 2 series (single-series charts get no legend). */
+function scrollLegend(theme: ChartTheme, pos: { top?: number | string; left?: number | string; right?: number | string; bottom?: number | string }): Record<string, unknown> {
+  return {
+    type: 'scroll',
+    icon: 'roundRect',
+    itemWidth: 12,
+    itemHeight: 8,
+    textStyle: tickLabel(theme),
+    pageIconColor: theme.axis,
+    pageIconInactiveColor: theme.grid,
+    pageTextStyle: { color: theme.muted, fontSize: 10, fontFamily: theme.fontSans },
+    ...pos,
+  };
 }
 
 // ── Time series (line / area / bar, stacked or not) ──────────────────────────
@@ -77,15 +193,21 @@ export interface TimeSeriesOptionInput {
   /** Degrees, 0 / -30 / -45 / -90 as stored in ChartSectionConfig. */
   xLabelAngle: number;
   theme: ChartTheme;
+  /** Chart title, used only to name the toolbox's saveAsImage export. */
+  title?: string;
+  /** Suppress the functional legend even when there are >= 2 series (default
+   *  true — shown). Never used to force a legend onto a single series. */
+  showLegend?: boolean;
 }
 
 export function buildTimeSeriesOption(input: TimeSeriesOptionInput): EChartsCoreOption {
   const {
     xLabels, rows, series, mode, stacked,
-    xAxisTitle, yAxisTitle, showAxisLabels, xLabelAngle, theme,
+    xAxisTitle, yAxisTitle, showAxisLabels, xLabelAngle, theme, title, showLegend = true,
   } = input;
 
   const values = series.map((s) => rows.map((r) => numberValue(r[s.key] as string | number | undefined)));
+  const multi = series.length > 1;
 
   // Budget the y-axis name gap from the widest plausible tick label so the
   // rotated name clears the tick column (containLabel only covers the ticks).
@@ -100,37 +222,55 @@ export function buildTimeSeriesOption(input: TimeSeriesOptionInput): EChartsCore
       name: s.label,
       data: values[i],
       stack: stacked ? 'total' : undefined,
-      itemStyle: { color: s.color },
-      emphasis: { focus: series.length > 1 ? ('series' as const) : ('none' as const) },
+      // Rounds every segment's value-end corners; on a stacked bar the inner
+      // seams get a barely-visible 4px round too — cheaper than tracking
+      // which series is topmost per category, and visually negligible.
+      itemStyle: { color: s.color, borderRadius: [4, 4, 0, 0] as number[] },
+      emphasis: { focus: multi ? ('series' as const) : ('none' as const), itemStyle: HOVER_SHADOW },
     };
     if (mode === 'bar') {
-      return { ...base, type: 'bar' as const, barMaxWidth: 40 };
+      return { ...base, type: 'bar' as const, barMaxWidth: 40, barGap: '30%' };
     }
     return {
       ...base,
       type: 'line' as const,
       showSymbol: false,
-      lineStyle: { width: mode === 'area' ? 1.8 : 2.2, color: s.color },
+      symbolSize: 8,
+      lineStyle: { width: 2, color: s.color },
       areaStyle: mode === 'area' ? { opacity: stacked ? 0.72 : 0.24 } : undefined,
     };
   });
 
   return {
-    animation: false,
+    animation: true,
+    animationDuration: 250,
+    animationDurationUpdate: 200,
     grid: {
       left: yAxisTitle ? 22 : 8,
       right: 16,
-      top: 24,
-      bottom: xAxisTitle ? 24 : 6,
+      top: 36,
+      bottom: xAxisTitle ? 46 : 28,
       containLabel: true,
     },
+    toolbox: chartToolbox(theme, title ?? xAxisTitle ?? 'time-series'),
+    dataZoom: axisDataZoom(theme, 'x'),
+    legend: multi && showLegend ? scrollLegend(theme, { top: 0, left: 0, right: 74 }) : undefined,
     tooltip: {
       ...darkTooltip(theme),
       trigger: 'axis',
       axisPointer: mode === 'bar'
         ? { type: 'shadow' }
-        : { type: 'line', lineStyle: { color: 'rgba(15, 23, 42, 0.28)', type: [4, 3] } },
-      valueFormatter: fmtNum,
+        : { type: 'line', lineStyle: { color: theme.axis, type: [4, 3] } },
+      formatter: (params: AxisTooltipParam[]) => {
+        if (!params.length) return '';
+        const header = tooltipHeader(String(params[0].axisValueLabel ?? params[0].name ?? ''));
+        const rows2 = params.map((p) => tooltipValueRow(
+          theme, p.marker,
+          `${fmtNum(p.value as number)}${yAxisTitle ? ` ${yAxisTitle}` : ''}`,
+          p.seriesName ?? '',
+        ));
+        return header + rows2.join('');
+      },
     },
     xAxis: {
       type: 'category',
@@ -140,7 +280,7 @@ export function buildTimeSeriesOption(input: TimeSeriesOptionInput): EChartsCore
       nameLocation: 'middle',
       nameGap: (showAxisLabels ? Math.ceil(Math.sin(rad) * maxXLabelPx) + 24 : 14),
       nameTextStyle: axisName(theme),
-      axisLine: { lineStyle: { color: theme.border } },
+      axisLine: axisLine(theme),
       axisTick: { show: false },
       axisLabel: {
         ...tickLabel(theme),
@@ -177,6 +317,7 @@ export function buildDonutOption({ data, unit, theme }: DonutOptionInput): EChar
   return {
     animation: true,
     animationDuration: 250,
+    animationDurationUpdate: 200,
     title: {
       text: unit ? `Total (${unit})` : 'Total',
       subtext: fmtNum(total),
@@ -190,15 +331,15 @@ export function buildDonutOption({ data, unit, theme }: DonutOptionInput): EChar
       ...darkTooltip(theme),
       trigger: 'item',
       formatter: (params: { name: string; value: number; percent: number }) =>
-        `${params.name}: <b>${fmtNum(params.value)}${unit ? ` ${unit}` : ''}</b> (${params.percent.toFixed(1)}%)`,
+        tooltipValueRow(theme, undefined, `${fmtNum(params.value)}${unit ? ` ${unit}` : ''} (${params.percent.toFixed(1)}%)`, params.name),
     },
     series: [{
       type: 'pie',
       radius: ['54%', '88%'],
       center: ['50%', '50%'],
       label: { show: false },
-      itemStyle: { borderColor: '#ffffff', borderWidth: 2 },
-      emphasis: { scale: true, scaleSize: 4 },
+      itemStyle: { borderColor: SURFACE, borderWidth: 2 },
+      emphasis: { scale: true, scaleSize: 4, itemStyle: HOVER_SHADOW },
       data: data.map((d) => ({ name: d.label, value: d.value, itemStyle: { color: d.color } })),
     }],
   };
@@ -236,31 +377,40 @@ export function buildDurationCurveOption(input: DurationCurveOptionInput): EChar
       type: 'line' as const,
       data: points,
       showSymbol: false,
+      symbolSize: 8,
       lineStyle: { width: 2, color: s.color },
       areaStyle: multi ? undefined : { opacity: 0.15, color: s.color },
+      emphasis: { focus: multi ? ('series' as const) : ('none' as const), itemStyle: HOVER_SHADOW },
     };
   });
   return {
-    animation: false,
+    animation: true,
+    animationDuration: 250,
+    animationDurationUpdate: 200,
     title: {
       text: title,
       left: 4,
       top: 2,
       textStyle: axisName(theme),
     },
+    toolbox: chartToolbox(theme, title),
+    dataZoom: axisDataZoom(theme, 'x'),
     legend: multi && showLegend
-      ? { top: 2, right: 8, textStyle: tickLabel(theme), itemWidth: 12, itemHeight: 8 }
+      ? scrollLegend(theme, { top: 2, right: 74 })
       : undefined,
-    grid: { left: 8, right: 16, top: 30, bottom: 4, containLabel: true },
+    grid: { left: 8, right: 16, top: 34, bottom: 26, containLabel: true },
     tooltip: {
       ...darkTooltip(theme),
       trigger: 'axis',
-      axisPointer: { type: 'line', lineStyle: { color: 'rgba(15, 23, 42, 0.28)', type: [4, 3] } },
-      formatter: (params: Array<{ seriesName: string; data: [number, number] }>) => {
+      axisPointer: { type: 'line', lineStyle: { color: theme.axis, type: [4, 3] } },
+      formatter: (params: AxisTooltipParam[]) => {
         if (!params.length) return '';
-        const pct = params[0].data[0];
-        const lines = params.map((p) => `${multi ? `${p.seriesName}: ` : ''}<b>${fmtNum(p.data[1])} ${unit}</b>`);
-        return `Exceedance ${pct.toFixed(1)}%<br/>${lines.join('<br/>')}`;
+        const pct = (params[0].value as [number, number])[0];
+        const header = tooltipHeader(`Exceedance ${pct.toFixed(1)}%`);
+        const rows2 = params.map((p) => tooltipValueRow(
+          theme, p.marker, `${fmtNum((p.value as [number, number])[1])} ${unit}`, multi ? (p.seriesName ?? '') : '',
+        ));
+        return header + rows2.join('');
       },
     },
     xAxis: {
@@ -315,19 +465,17 @@ export function buildMeritOrderOption(input: MeritOrderOptionInput): EChartsCore
   }));
 
   return {
-    animation: false,
+    animation: true,
+    animationDuration: 250,
+    animationDurationUpdate: 200,
     grid: { left: 26, right: 16, top: 16, bottom: 30, containLabel: true },
     tooltip: {
       ...darkTooltip(theme),
       trigger: 'item',
       formatter: (params: { data: MeritDatum }) => {
         const d = params.data;
-        return [
-          `<b>${d.name}</b>`,
-          `${d.carrier} · ${d.bus}`,
-          `Cost: <b>${currencySymbol}${d.value[2].toLocaleString()}/MWh</b>`,
-          `Capacity: <b>${fmtNum(d.value[1])} MW</b>`,
-        ].join('<br/>');
+        return tooltipValueRow(theme, undefined, `${currencySymbol}${fmtNum(d.value[2])}/MWh`, d.name)
+          + `<div style="opacity:.66;margin-top:2px;">${d.carrier} · ${d.bus} · ${fmtNum(d.value[1])} MW</div>`;
       },
     },
     xAxis: {
@@ -338,7 +486,7 @@ export function buildMeritOrderOption(input: MeritOrderOptionInput): EChartsCore
       nameLocation: 'middle',
       nameGap: 26,
       nameTextStyle: axisName(theme),
-      axisLine: { lineStyle: { color: theme.borderStrong } },
+      axisLine: axisLine(theme),
       axisTick: { show: false },
       splitLine: { show: false },
       axisLabel: { ...tickLabel(theme), formatter: fmtNum },
@@ -353,7 +501,7 @@ export function buildMeritOrderOption(input: MeritOrderOptionInput): EChartsCore
       nameTextStyle: axisName(theme),
       axisLine: { show: false },
       axisTick: { show: false },
-      splitLine: { show: true, lineStyle: { color: 'rgba(15, 23, 42, 0.07)' } },
+      splitLine: dashedSplitLine(theme),
       axisLabel: { ...tickLabel(theme), formatter: fmtNum },
     },
     series: [{
@@ -380,7 +528,8 @@ export function buildMeritOrderOption(input: MeritOrderOptionInput): EChartsCore
             height: Math.max(bottomRight[1] - topLeft[1], 2),
           },
           // Literal style: api.style() is deprecated in ECharts 5.
-          style: { fill: entry?.color ?? '#94a3b8', opacity: 0.78 },
+          style: { fill: entry?.color ?? theme.muted, opacity: 0.78 },
+          emphasis: { style: { opacity: 1, stroke: theme.text, lineWidth: 1 } },
         };
       },
       encode: { x: 0, y: 2 },
@@ -412,23 +561,30 @@ export interface ExpansionRow {
   color: string;
 }
 
-export function buildExpansionOption(rows: ExpansionRow[], theme: ChartTheme): EChartsCoreOption {
+/** Rows beyond this get a vertical dataZoom (inside + slider) on the category
+ *  axis — a handful of assets read fine without one. */
+const MANY_EXPANSION_ROWS = 12;
+
+export function buildExpansionOption(rows: ExpansionRow[], theme: ChartTheme, title?: string): EChartsCoreOption {
+  const manyRows = rows.length > MANY_EXPANSION_ROWS;
   return {
-    animation: false,
-    grid: { left: 4, right: 60, top: 4, bottom: 24, containLabel: true },
-    legend: {
-      bottom: 0,
-      left: 0,
-      icon: 'rect',
-      itemWidth: 12,
-      itemHeight: 8,
-      textStyle: { ...tickLabel(theme), fontSize: 10 },
-    },
+    animation: true,
+    animationDuration: 250,
+    animationDurationUpdate: 200,
+    grid: { left: 4, right: manyRows ? 80 : 60, top: 28, bottom: 24, containLabel: true },
+    toolbox: chartToolbox(theme, title ?? 'capacity-expansion'),
+    dataZoom: manyRows ? axisDataZoom(theme, 'y') : undefined,
+    legend: scrollLegend(theme, { bottom: 0, left: 0 }),
     tooltip: {
       ...darkTooltip(theme),
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
-      valueFormatter: (v: number | string) => `${fmtNum(v)} MW`,
+      formatter: (params: AxisTooltipParam[]) => {
+        if (!params.length) return '';
+        const header = tooltipHeader(String(params[0].name ?? ''));
+        const rows2 = params.map((p) => tooltipValueRow(theme, p.marker, `${fmtNum(p.value as number)} MW`, p.seriesName ?? ''));
+        return header + rows2.join('');
+      },
     },
     xAxis: {
       type: 'value',
@@ -450,7 +606,8 @@ export function buildExpansionOption(rows: ExpansionRow[], theme: ChartTheme): E
         name: 'Installed',
         type: 'bar',
         barWidth: 8,
-        itemStyle: { color: theme.borderStrong },
+        itemStyle: { color: theme.borderStrong, borderRadius: [0, 4, 4, 0] },
+        emphasis: { itemStyle: HOVER_SHADOW },
         data: rows.map((r) => r.installed),
       },
       {
@@ -467,7 +624,8 @@ export function buildExpansionOption(rows: ExpansionRow[], theme: ChartTheme): E
           fontWeight: 700,
           fontFamily: theme.fontSans,
         },
-        data: rows.map((r) => ({ value: r.optimised, itemStyle: { color: r.color, opacity: 0.85 } })),
+        emphasis: { itemStyle: HOVER_SHADOW },
+        data: rows.map((r) => ({ value: r.optimised, itemStyle: { color: r.color, opacity: 0.85, borderRadius: [0, 4, 4, 0] } })),
       },
     ],
   };
@@ -490,29 +648,59 @@ export interface CategorySeriesInput {
   showAxisLabels: boolean;
   xLabelAngle?: number;
   theme: ChartTheme;
+  /** Chart title, used only to name the toolbox's saveAsImage export
+   *  (grouped-bar only — see `buildGroupedBarOption`). */
+  title?: string;
+  /** Emit the interactive (series-toggling) legend when multi-series. Set
+   *  false where the host already supplies one — e.g. a shared legend across
+   *  small multiples — so the card does not render two. Default true. */
+  showLegend?: boolean;
 }
 
-function categoryBarSeries(input: CategorySeriesInput) {
+function categoryBarSeries(input: CategorySeriesInput, orientation: 'vertical' | 'horizontal') {
   const single = input.series.length === 1 && input.barColors;
+  const radius = orientation === 'vertical' ? [4, 4, 0, 0] : [0, 4, 4, 0];
   return input.series.map((s) => ({
     name: s.label,
     type: 'bar' as const,
     stack: input.stacked ? 'total' : undefined,
     barMaxWidth: 36,
-    itemStyle: single ? undefined : { color: s.color },
+    barGap: '30%',
+    itemStyle: single ? { borderRadius: radius } : { color: s.color, borderRadius: radius },
     data: single
-      ? s.values.map((v, i) => ({ value: v, itemStyle: { color: input.barColors![i] ?? s.color } }))
+      ? s.values.map((v, i) => ({ value: v, itemStyle: { color: input.barColors![i] ?? s.color, borderRadius: radius } }))
       : s.values,
-    emphasis: { focus: input.series.length > 1 ? ('series' as const) : ('none' as const) },
+    emphasis: {
+      focus: input.series.length > 1 ? ('series' as const) : ('none' as const),
+      itemStyle: HOVER_SHADOW,
+    },
   }));
 }
 
-export function buildHorizontalBarOption(input: CategorySeriesInput): EChartsCoreOption {
-  const { labels, theme, showAxisLabels } = input;
+/** Item-trigger tooltip for the category-bar family: the hovered mark IS the
+ *  hit target (a bar, not "everything at this X"), value leading. */
+function categoryBarTooltip(theme: ChartTheme, unit: string | undefined, multi: boolean) {
   return {
-    animation: false,
-    grid: { left: 4, right: 16, top: 8, bottom: 4, containLabel: true },
-    tooltip: { ...darkTooltip(theme), trigger: 'axis', axisPointer: { type: 'shadow' }, valueFormatter: fmtNum },
+    ...darkTooltip(theme),
+    trigger: 'item' as const,
+    formatter: (p: { name?: string; seriesName?: string; value: number; marker?: string }) => {
+      const label = multi && p.seriesName ? `${p.name ?? ''} · ${p.seriesName}` : (p.name ?? p.seriesName ?? '');
+      return tooltipValueRow(theme, p.marker, `${fmtNum(p.value)}${unit ? ` ${unit}` : ''}`, label);
+    },
+  };
+}
+
+export function buildHorizontalBarOption(input: CategorySeriesInput): EChartsCoreOption {
+  const { labels, theme, showAxisLabels, showLegend = true } = input;
+  const multi = input.series.length > 1;
+  const withLegend = multi && showLegend;
+  return {
+    animation: true,
+    animationDuration: 250,
+    animationDurationUpdate: 200,
+    grid: { left: 4, right: 16, top: withLegend ? 28 : 8, bottom: 4, containLabel: true },
+    legend: withLegend ? scrollLegend(theme, { top: 0, left: 0 }) : undefined,
+    tooltip: categoryBarTooltip(theme, input.unit, multi),
     xAxis: {
       type: 'value',
       name: input.xAxisTitle,
@@ -532,17 +720,23 @@ export function buildHorizontalBarOption(input: CategorySeriesInput): EChartsCor
       axisTick: { show: false },
       axisLabel: { show: showAxisLabels, ...tickLabel(theme), width: 130, overflow: 'truncate' as const },
     },
-    series: categoryBarSeries(input),
+    series: categoryBarSeries(input, 'horizontal'),
   };
 }
 
 export function buildGroupedBarOption(input: CategorySeriesInput): EChartsCoreOption {
-  const { labels, theme, showAxisLabels } = input;
+  const { labels, theme, showAxisLabels, title, showLegend = true } = input;
+  const multi = input.series.length > 1;
+  const withLegend = multi && showLegend;
   const maxLabel = maxOf(labels.map((l) => l.length)) * CHAR_PX;
   return {
-    animation: false,
-    grid: { left: 8, right: 12, top: 10, bottom: 4, containLabel: true },
-    tooltip: { ...darkTooltip(theme), trigger: 'axis', axisPointer: { type: 'shadow' }, valueFormatter: fmtNum },
+    animation: true,
+    animationDuration: 250,
+    animationDurationUpdate: 200,
+    grid: { left: 8, right: 12, top: withLegend ? 34 : 26, bottom: 4, containLabel: true },
+    toolbox: chartToolbox(theme, title ?? input.xAxisTitle ?? 'grouped-bar'),
+    legend: withLegend ? scrollLegend(theme, { top: 0, left: 0, right: 74 }) : undefined,
+    tooltip: categoryBarTooltip(theme, input.unit, multi),
     xAxis: {
       type: 'category',
       boundaryGap: true,
@@ -551,7 +745,7 @@ export function buildGroupedBarOption(input: CategorySeriesInput): EChartsCoreOp
       nameLocation: 'middle',
       nameGap: maxLabel > 40 ? 52 : 26,
       nameTextStyle: axisName(theme),
-      axisLine: { lineStyle: { color: theme.border } },
+      axisLine: axisLine(theme),
       axisTick: { show: false },
       axisLabel: { show: showAxisLabels, ...tickLabel(theme), rotate: input.xLabelAngle ? Math.abs(input.xLabelAngle) : 0, hideOverlap: true },
     },
@@ -564,7 +758,7 @@ export function buildGroupedBarOption(input: CategorySeriesInput): EChartsCoreOp
       splitLine: dashedSplitLine(theme),
       axisLabel: { show: showAxisLabels, ...tickLabel(theme), formatter: fmtNum },
     },
-    series: categoryBarSeries(input).map((s) => ({ ...s, barGap: '20%' })),
+    series: categoryBarSeries(input, 'vertical'),
   };
 }
 
@@ -576,18 +770,25 @@ export interface ScatterOptionInput {
   yName: string;
   showAxisLabels: boolean;
   theme: ChartTheme;
+  /** Chart title, used only to name the toolbox's saveAsImage export. */
+  title?: string;
 }
 
 export function buildScatterOption(input: ScatterOptionInput): EChartsCoreOption {
-  const { points, xName, yName, showAxisLabels, theme } = input;
+  const { points, xName, yName, showAxisLabels, theme, title } = input;
   return {
-    animation: false,
-    grid: { left: 16, right: 20, top: 12, bottom: 22, containLabel: true },
+    animation: true,
+    animationDuration: 250,
+    animationDurationUpdate: 200,
+    grid: { left: 16, right: 20, top: 34, bottom: 22, containLabel: true },
+    toolbox: chartToolbox(theme, title ?? `${xName}-vs-${yName}`),
     tooltip: {
       ...darkTooltip(theme),
       trigger: 'item',
       formatter: (p: { data: { value: [number, number]; name: string } }) =>
-        `<b>${p.data.name}</b><br/>${xName}: ${fmtNum(p.data.value[0])}<br/>${yName}: ${fmtNum(p.data.value[1])}`,
+        `<div style="font-weight:600;color:${theme.tooltipText};margin-bottom:2px;">${p.data.name}</div>`
+        + tooltipValueRow(theme, undefined, fmtNum(p.data.value[0]), xName)
+        + tooltipValueRow(theme, undefined, fmtNum(p.data.value[1]), yName),
     },
     xAxis: {
       type: 'value',
@@ -616,8 +817,204 @@ export function buildScatterOption(input: ScatterOptionInput): EChartsCoreOption
     series: [{
       type: 'scatter',
       symbolSize: 10,
-      emphasis: { scale: 1.4 },
+      emphasis: { scale: 1.4, itemStyle: HOVER_SHADOW },
       data: points.map((p) => ({ value: [p.x, p.y], name: p.label, itemStyle: { color: p.color } })),
+    }],
+  };
+}
+
+// ── Physical-risk charts (ported from hand-rolled SVG) ───────────────────────
+
+export interface FreqCurveOptionInput {
+  curve: FreqCurve;
+  currencySymbol: string;
+  theme: ChartTheme;
+}
+
+/** Return-period (exceedance) loss curve — a true log-x axis (matches the
+ *  original hand-rolled SVG's log10 mapping), single series. */
+export function buildFreqCurveOption({ curve, currencySymbol, theme }: FreqCurveOptionInput): EChartsCoreOption {
+  const { returnPeriods, losses } = curve;
+  const color = theme.seriesPalette[0];
+  const data = returnPeriods.map((rp, i) => [rp, losses[i]]);
+  const money = (v: number) => `${currencySymbol}${fmtNum(v)}`;
+  return {
+    animation: true,
+    animationDuration: 250,
+    animationDurationUpdate: 200,
+    grid: { left: 12, right: 20, top: 34, bottom: 30, containLabel: true },
+    toolbox: chartToolbox(theme, 'return-period-losses'),
+    dataZoom: axisDataZoom(theme, 'x'),
+    tooltip: {
+      ...darkTooltip(theme),
+      trigger: 'axis',
+      axisPointer: { type: 'line', lineStyle: { color: theme.axis, type: [4, 3] } },
+      formatter: (params: AxisTooltipParam[]) => {
+        if (!params.length) return '';
+        const [rp, loss] = params[0].value as [number, number];
+        return tooltipHeader(`${rp}-year return period`) + tooltipValueRow(theme, undefined, money(loss), 'Loss');
+      },
+    },
+    xAxis: {
+      type: 'log',
+      logBase: 10,
+      min: Math.min(...returnPeriods),
+      max: Math.max(...returnPeriods),
+      name: 'Return period (years)',
+      nameLocation: 'middle',
+      nameGap: 26,
+      nameTextStyle: axisName(theme),
+      axisLine: axisLine(theme),
+      axisTick: { show: false },
+      splitLine: { show: false },
+      axisLabel: { ...tickLabel(theme), formatter: (v: number) => fmtNum(v) },
+    },
+    yAxis: {
+      type: 'value',
+      name: `Loss (${currencySymbol})`,
+      nameLocation: 'middle',
+      nameGap: (money(maxOf(losses)).length + 1) * CHAR_PX,
+      nameTextStyle: axisName(theme),
+      axisLine: { show: false },
+      axisTick: { show: false },
+      splitLine: dashedSplitLine(theme),
+      axisLabel: { ...tickLabel(theme), formatter: (v: number) => money(v) },
+    },
+    series: [{
+      type: 'line',
+      data,
+      showSymbol: false,
+      symbolSize: 8,
+      lineStyle: { width: 2, color },
+      itemStyle: { color },
+      areaStyle: { opacity: 0.12, color },
+      emphasis: { focus: 'none', itemStyle: HOVER_SHADOW },
+    }],
+  };
+}
+
+export interface RiskBarDatum {
+  name: string;
+  value: number;
+}
+
+export interface RiskBarOptionInput {
+  data: RiskBarDatum[];
+  formatValue: (v: number) => string;
+  theme: ChartTheme;
+}
+
+/** Horizontal "name -> value" breakdown bar — single generic series, so it
+ *  gets the item-trigger + hover-emphasis treatment (matches donut/scatter). */
+export function buildRiskBarOption({ data, formatValue, theme }: RiskBarOptionInput): EChartsCoreOption {
+  const color = theme.seriesPalette[0];
+  return {
+    animation: true,
+    animationDuration: 250,
+    animationDurationUpdate: 200,
+    grid: { left: 4, right: 56, top: 8, bottom: 8, containLabel: true },
+    tooltip: {
+      ...darkTooltip(theme),
+      trigger: 'item',
+      formatter: (p: { name: string; value: number }) => tooltipValueRow(theme, undefined, formatValue(p.value), p.name),
+    },
+    xAxis: {
+      type: 'value',
+      axisLine: { show: false },
+      axisTick: { show: false },
+      splitLine: { show: false },
+      axisLabel: { show: false },
+    },
+    yAxis: {
+      type: 'category',
+      inverse: true,
+      data: data.map((d) => d.name),
+      axisLine: { show: false },
+      axisTick: { show: false },
+      axisLabel: { ...tickLabel(theme), width: 130, overflow: 'truncate' as const },
+    },
+    series: [{
+      type: 'bar',
+      barMaxWidth: 16,
+      barCategoryGap: '38%',
+      showBackground: true,
+      backgroundStyle: { color: theme.grid },
+      itemStyle: { color, borderRadius: [0, 4, 4, 0] },
+      emphasis: { itemStyle: HOVER_SHADOW },
+      label: {
+        show: true,
+        position: 'right',
+        formatter: (p: { value: number }) => formatValue(p.value),
+        color: theme.text,
+        fontSize: 11,
+        fontFamily: theme.fontSans,
+      },
+      data: data.map((d) => d.value),
+    }],
+  };
+}
+
+export interface TransitionCostOptionInput {
+  years: number[];
+  values: number[];
+  formatValue: (v: number) => string;
+  theme: ChartTheme;
+}
+
+/** Annual carbon-cost trajectory (year -> cost) — single generic line series. */
+export function buildTransitionCostOption({ years, values, formatValue, theme }: TransitionCostOptionInput): EChartsCoreOption {
+  const color = theme.seriesPalette[0];
+  const data = years.map((y, i) => [y, values[i]]);
+  return {
+    animation: true,
+    animationDuration: 250,
+    animationDurationUpdate: 200,
+    grid: { left: 12, right: 20, top: 34, bottom: 30, containLabel: true },
+    toolbox: chartToolbox(theme, 'carbon-cost-trajectory'),
+    dataZoom: axisDataZoom(theme, 'x'),
+    tooltip: {
+      ...darkTooltip(theme),
+      trigger: 'axis',
+      axisPointer: { type: 'line', lineStyle: { color: theme.axis, type: [4, 3] } },
+      formatter: (params: AxisTooltipParam[]) => {
+        if (!params.length) return '';
+        const [yr, v] = params[0].value as [number, number];
+        return tooltipHeader(`Year ${yr}`) + tooltipValueRow(theme, undefined, formatValue(v), 'Carbon cost');
+      },
+    },
+    xAxis: {
+      type: 'value',
+      min: years.length ? Math.min(...years) : undefined,
+      max: years.length ? Math.max(...years) : undefined,
+      name: 'Year',
+      nameLocation: 'middle',
+      nameGap: 26,
+      nameTextStyle: axisName(theme),
+      axisLine: axisLine(theme),
+      axisTick: { show: false },
+      splitLine: { show: false },
+      axisLabel: { ...tickLabel(theme), formatter: (v: number) => String(Math.round(v)) },
+    },
+    yAxis: {
+      type: 'value',
+      name: 'Annual carbon cost',
+      nameLocation: 'middle',
+      nameGap: 48,
+      nameTextStyle: axisName(theme),
+      axisLine: { show: false },
+      axisTick: { show: false },
+      splitLine: dashedSplitLine(theme),
+      axisLabel: { ...tickLabel(theme), formatter: (v: number) => formatValue(v) },
+    },
+    series: [{
+      type: 'line',
+      data,
+      showSymbol: false,
+      symbolSize: 8,
+      lineStyle: { width: 2, color },
+      itemStyle: { color },
+      areaStyle: { opacity: 0.12, color },
+      emphasis: { focus: 'none', itemStyle: HOVER_SHADOW },
     }],
   };
 }

@@ -1,15 +1,22 @@
 /**
  * Shape tests for the pure ECharts option builders. These guard the
- * data→option mapping (series values, stacking, axis titles, totals) — the
- * rendering itself belongs to ECharts.
+ * data→option mapping (series values, stacking, axis titles, totals) and the
+ * interactivity contract (legend/dataZoom/toolbox/animation) — the rendering
+ * itself belongs to ECharts.
  */
 import { describe, test, expect } from '@jest/globals';
 import {
   buildDonutOption,
   buildDurationCurveOption,
   buildExpansionOption,
+  buildFreqCurveOption,
+  buildGroupedBarOption,
+  buildHorizontalBarOption,
   buildMeritOrderOption,
+  buildRiskBarOption,
+  buildScatterOption,
   buildTimeSeriesOption,
+  buildTransitionCostOption,
   fmtNum,
 } from './options';
 import { FALLBACK_CHART_THEME } from './theme';
@@ -26,6 +33,23 @@ const series = [
   { key: 'a', label: 'Alpha', color: '#111111' },
   { key: 'b', label: 'Beta', color: '#222222' },
 ];
+
+type AnyOption = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+/** Every zoomable/exportable builder shares this shape — assert it once. */
+function expectToolbox(opt: AnyOption, expectedName: string) {
+  expect(opt.toolbox).toBeDefined();
+  expect(opt.toolbox.feature.dataZoom).toBeDefined();
+  expect(opt.toolbox.feature.restore).toBeDefined();
+  expect(opt.toolbox.feature.saveAsImage.name).toBe(expectedName);
+}
+
+function expectDataZoom(opt: AnyOption, axisKey: 'xAxisIndex' | 'yAxisIndex') {
+  expect(Array.isArray(opt.dataZoom)).toBe(true);
+  const types = opt.dataZoom.map((z: AnyOption) => z.type);
+  expect(types).toEqual(expect.arrayContaining(['inside', 'slider']));
+  for (const z of opt.dataZoom) expect(z[axisKey]).toBe(0);
+}
 
 describe('fmtNum', () => {
   test('rounds and localises', () => {
@@ -104,6 +128,42 @@ describe('buildTimeSeriesOption', () => {
     expect(opt.xAxis.axisLabel.show).toBe(false);
     expect(opt.xAxis.axisLabel.rotate).toBe(45);
   });
+
+  test('is animated, axis-triggered, dataZoom + toolbox everywhere, legend only with >= 2 series', () => {
+    const multi = buildTimeSeriesOption({
+      xLabels: rows.map((r) => r.label), rows, series,
+      mode: 'line', stacked: false, showAxisLabels: true, xLabelAngle: 0, theme, title: 'Dispatch',
+    }) as AnyOption;
+    expect(multi.animation).toBe(true);
+    expect(multi.animationDuration).toBe(250);
+    expect(multi.animationDurationUpdate).toBe(200);
+    expect(multi.tooltip.trigger).toBe('axis');
+    expectDataZoom(multi, 'xAxisIndex');
+    expectToolbox(multi, 'dispatch');
+    expect(multi.legend).toBeDefined();
+    expect(multi.legend.type).toBe('scroll');
+
+    const single = buildTimeSeriesOption({
+      xLabels: rows.map((r) => r.label), rows, series: [series[0]],
+      mode: 'line', stacked: false, showAxisLabels: true, xLabelAngle: 0, theme,
+    }) as AnyOption;
+    expect(single.legend).toBeUndefined();
+
+    const noLegend = buildTimeSeriesOption({
+      xLabels: rows.map((r) => r.label), rows, series,
+      mode: 'line', stacked: false, showAxisLabels: true, xLabelAngle: 0, theme, showLegend: false,
+    }) as AnyOption;
+    expect(noLegend.legend).toBeUndefined();
+  });
+
+  test('bar-mode bars round only the value-side corners and leave a bar gap', () => {
+    const opt = buildTimeSeriesOption({
+      xLabels: rows.map((r) => r.label), rows, series,
+      mode: 'bar', stacked: false, showAxisLabels: true, xLabelAngle: 0, theme,
+    }) as AnyOption;
+    expect(opt.series[0].itemStyle.borderRadius).toEqual([4, 4, 0, 0]);
+    expect(opt.series[0].barGap).toBe('30%');
+  });
 });
 
 describe('buildDonutOption', () => {
@@ -118,6 +178,19 @@ describe('buildDonutOption', () => {
     expect(opt.title.text).toBe('Total (MW)');
     expect(opt.title.subtext).toBe((100).toLocaleString());
     expect(opt.series[0].data.map((d) => d.name)).toEqual(['wind', 'solar']);
+  });
+
+  test('is item-triggered, animated, has no legend, and a surface-coloured border between slices', () => {
+    const opt = buildDonutOption({
+      data: [{ label: 'wind', value: 60, color: '#1' }, { label: 'solar', value: 40, color: '#2' }],
+      unit: 'MW', theme,
+    }) as AnyOption;
+    expect(opt.animation).toBe(true);
+    expect(opt.tooltip.trigger).toBe('item');
+    expect(opt.legend).toBeUndefined();
+    expect(opt.toolbox).toBeUndefined();
+    expect(opt.dataZoom).toBeUndefined();
+    expect(opt.series[0].itemStyle.borderWidth).toBe(2);
   });
 });
 
@@ -142,6 +215,17 @@ describe('buildDurationCurveOption', () => {
     expect(opt.series[0].data).toEqual([[0, 60], [100, 30]]);
     expect(opt.series[1].data).toEqual([[0, 100], [100, 5]]);
     expect(opt.legend).toBeDefined();
+  });
+
+  test('is animated, axis-triggered, zoomable and exportable under its own title', () => {
+    const opt = buildDurationCurveOption({
+      series: [{ key: 'load', label: 'Load', color: '#f97316', values: [30, 20, 10] }],
+      title: 'System load duration', unit: 'MW', theme,
+    }) as AnyOption;
+    expect(opt.animation).toBe(true);
+    expect(opt.tooltip.trigger).toBe('axis');
+    expectDataZoom(opt, 'xAxisIndex');
+    expectToolbox(opt, 'system-load-duration');
   });
 });
 
@@ -171,6 +255,14 @@ describe('buildMeritOrderOption', () => {
     };
     expect(none.series[0].markLine).toBeUndefined();
   });
+
+  test('is animated and keeps the carrier-driven colours (never the categorical palette)', () => {
+    const opt = buildMeritOrderOption({ entries, currencySymbol: '$', theme }) as AnyOption;
+    expect(opt.animation).toBe(true);
+    expect(opt.tooltip.trigger).toBe('item');
+    expect(opt.series[0].data[0].itemStyle.color).toBe('#1');
+    expect(opt.series[0].data[1].itemStyle.color).toBe('#2');
+  });
 });
 
 describe('buildExpansionOption', () => {
@@ -189,5 +281,180 @@ describe('buildExpansionOption', () => {
     expect(opt.yAxis.inverse).toBe(true);
     expect(opt.series.map((s) => s.name)).toEqual(['Installed', 'Optimised']);
     expect(opt.series[0].data).toEqual([100, 50]);
+  });
+
+  test('is animated, axis-triggered, always exportable, and only zooms with many rows', () => {
+    const fewRows = [{ name: 'wind-1', installed: 100, optimised: 250, color: '#1' }];
+    const few = buildExpansionOption(fewRows, theme, 'Capacity expansion') as AnyOption;
+    expect(few.animation).toBe(true);
+    expect(few.tooltip.trigger).toBe('axis');
+    expectToolbox(few, 'capacity-expansion');
+    expect(few.dataZoom).toBeUndefined();
+
+    const manyRows = Array.from({ length: 20 }, (_, i) => ({ name: `unit-${i}`, installed: 10, optimised: 20, color: '#1' }));
+    const many = buildExpansionOption(manyRows, theme) as AnyOption;
+    expectDataZoom(many, 'yAxisIndex');
+  });
+
+  test('bars round only the value-side (right) corners', () => {
+    const opt = buildExpansionOption(
+      [{ name: 'wind-1', installed: 100, optimised: 250, color: '#1' }],
+      theme,
+    ) as AnyOption;
+    expect(opt.series[0].itemStyle.borderRadius).toEqual([0, 4, 4, 0]);
+    expect(opt.series[1].data[0].itemStyle.borderRadius).toEqual([0, 4, 4, 0]);
+  });
+});
+
+describe('buildGroupedBarOption / buildHorizontalBarOption', () => {
+  const input = {
+    labels: ['bus-a', 'bus-b'],
+    series: [
+      { key: 'energy', label: 'Energy', color: '#1', values: [10, 20] },
+      { key: 'congestion', label: 'Congestion', color: '#2', values: [1, 2] },
+    ],
+    stacked: true,
+    unit: '$/MWh',
+    showAxisLabels: true,
+    theme,
+  };
+
+  test('item-triggered with hover emphasis; legend only with >= 2 series', () => {
+    const grouped = buildGroupedBarOption(input) as AnyOption;
+    expect(grouped.tooltip.trigger).toBe('item');
+    expect(grouped.legend).toBeDefined();
+    expect(grouped.legend.type).toBe('scroll');
+    expect(grouped.series[0].emphasis.itemStyle.shadowBlur).toBeGreaterThan(0);
+
+    const singleSeries = { ...input, series: [input.series[0]] };
+    const single = buildGroupedBarOption(singleSeries) as AnyOption;
+    expect(single.legend).toBeUndefined();
+  });
+
+  test('showLegend: false suppresses the native legend so a host-supplied one is not duplicated', () => {
+    const grouped = buildGroupedBarOption({ ...input, showLegend: false }) as AnyOption;
+    expect(grouped.legend).toBeUndefined();
+    const hbar = buildHorizontalBarOption({ ...input, showLegend: false }) as AnyOption;
+    expect(hbar.legend).toBeUndefined();
+    // Suppressing the legend also reclaims the space reserved for it.
+    expect(grouped.grid.top).toBeLessThan((buildGroupedBarOption(input) as AnyOption).grid.top);
+  });
+
+  test('grouped-bar gets a toolbox named after its title; horizontal-bar does not', () => {
+    const grouped = buildGroupedBarOption({ ...input, title: 'LMP by bus' }) as AnyOption;
+    expectToolbox(grouped, 'lmp-by-bus');
+
+    const hbar = buildHorizontalBarOption(input) as AnyOption;
+    expect(hbar.toolbox).toBeUndefined();
+    expect(hbar.dataZoom).toBeUndefined();
+  });
+
+  test('vertical bars round the top corners; horizontal bars round the right corners', () => {
+    const grouped = buildGroupedBarOption(input) as AnyOption;
+    expect(grouped.series[0].itemStyle.borderRadius).toEqual([4, 4, 0, 0]);
+    const hbar = buildHorizontalBarOption(input) as AnyOption;
+    expect(hbar.series[0].itemStyle.borderRadius).toEqual([0, 4, 4, 0]);
+  });
+
+  test('a single series with per-bar colours (barColors) still gets rounded corners', () => {
+    const singleWithColors = {
+      labels: ['a', 'b'],
+      series: [{ key: 'v', label: 'Value', color: '#1', values: [5, 9] }],
+      barColors: ['#111', '#222'],
+      stacked: false,
+      showAxisLabels: true,
+      theme,
+    };
+    const opt = buildHorizontalBarOption(singleWithColors) as AnyOption;
+    expect(opt.series[0].data[0].itemStyle.color).toBe('#111');
+    expect(opt.series[0].data[0].itemStyle.borderRadius).toEqual([0, 4, 4, 0]);
+    expect(opt.legend).toBeUndefined();
+  });
+});
+
+describe('buildScatterOption', () => {
+  const points = [
+    { x: 1, y: 2, label: 'g1', color: '#1' },
+    { x: 3, y: 4, label: 'g2', color: '#2' },
+  ];
+
+  test('maps points into a single scatter series with per-point colour', () => {
+    const opt = buildScatterOption({ points, xName: 'X', yName: 'Y', showAxisLabels: true, theme }) as {
+      series: Array<{ data: Array<{ value: [number, number]; name: string }> }>;
+    };
+    expect(opt.series[0].data.map((d) => d.value)).toEqual([[1, 2], [3, 4]]);
+  });
+
+  test('is item-triggered, animated, exportable, and never gets a legend', () => {
+    const opt = buildScatterOption({ points, xName: 'X', yName: 'Y', showAxisLabels: true, theme, title: 'Cost vs size' }) as AnyOption;
+    expect(opt.animation).toBe(true);
+    expect(opt.tooltip.trigger).toBe('item');
+    expect(opt.legend).toBeUndefined();
+    expectToolbox(opt, 'cost-vs-size');
+    expect(opt.series[0].symbolSize).toBeGreaterThanOrEqual(8);
+  });
+});
+
+describe('buildFreqCurveOption', () => {
+  const curve = { returnPeriods: [10, 50, 100, 250], losses: [1000, 5000, 9000, 15000] };
+
+  test('keeps a true log-x axis spanning exactly the data range', () => {
+    const opt = buildFreqCurveOption({ curve, currencySymbol: '$', theme }) as AnyOption;
+    expect(opt.xAxis.type).toBe('log');
+    expect(opt.xAxis.min).toBe(10);
+    expect(opt.xAxis.max).toBe(250);
+    expect(opt.series[0].data).toEqual([[10, 1000], [50, 5000], [100, 9000], [250, 15000]]);
+  });
+
+  test('is animated, axis-triggered, zoomable and exportable, single series (no legend)', () => {
+    const opt = buildFreqCurveOption({ curve, currencySymbol: '$', theme }) as AnyOption;
+    expect(opt.animation).toBe(true);
+    expect(opt.tooltip.trigger).toBe('axis');
+    expectDataZoom(opt, 'xAxisIndex');
+    expectToolbox(opt, 'return-period-losses');
+    expect(opt.legend).toBeUndefined();
+    expect(opt.series[0].lineStyle.width).toBe(2);
+  });
+});
+
+describe('buildRiskBarOption', () => {
+  const data = [{ name: 'Sector A', value: 1200 }, { name: 'Sector B', value: 800 }];
+  const formatValue = (v: number) => `$${v.toLocaleString()}`;
+
+  test('one bar per row, ordered as given', () => {
+    const opt = buildRiskBarOption({ data, formatValue, theme }) as AnyOption;
+    expect(opt.yAxis.data).toEqual(['Sector A', 'Sector B']);
+    expect(opt.series[0].data).toEqual([1200, 800]);
+  });
+
+  test('is item-triggered, animated, and formats the tooltip/labels with the caller-supplied formatter', () => {
+    const opt = buildRiskBarOption({ data, formatValue, theme }) as AnyOption;
+    expect(opt.animation).toBe(true);
+    expect(opt.tooltip.trigger).toBe('item');
+    expect(opt.tooltip.formatter({ name: 'Sector A', value: 1200 })).toContain('$1,200');
+    expect(opt.series[0].label.formatter({ value: 1200 })).toBe('$1,200');
+    expect(opt.series[0].itemStyle.borderRadius).toEqual([0, 4, 4, 0]);
+  });
+});
+
+describe('buildTransitionCostOption', () => {
+  const years = [2025, 2030, 2035];
+  const values = [100, 200, 400];
+  const formatValue = (v: number) => `$${v}`;
+
+  test('maps years/values into a single line series', () => {
+    const opt = buildTransitionCostOption({ years, values, formatValue, theme }) as AnyOption;
+    expect(opt.series[0].data).toEqual([[2025, 100], [2030, 200], [2035, 400]]);
+    expect(opt.xAxis.min).toBe(2025);
+    expect(opt.xAxis.max).toBe(2035);
+  });
+
+  test('is animated, axis-triggered, zoomable and exportable, single series (no legend)', () => {
+    const opt = buildTransitionCostOption({ years, values, formatValue, theme }) as AnyOption;
+    expect(opt.animation).toBe(true);
+    expect(opt.tooltip.trigger).toBe('axis');
+    expectDataZoom(opt, 'xAxisIndex');
+    expectToolbox(opt, 'carbon-cost-trajectory');
+    expect(opt.legend).toBeUndefined();
   });
 });

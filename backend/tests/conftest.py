@@ -30,3 +30,14 @@ def _pin_climada_worker_off(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     if not os.environ.get("RAGNAROK_CLIMADA_WORKER_TEST_REAL"):
         monkeypatch.setenv("RAGNAROK_CLIMADA_WORKER", "off")
+
+@pytest.fixture(autouse=True)
+def _isolated_journal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the session mutation journal out of the repo during tests.
+
+    The journal wraps the ``model_store`` facade at app import (main.py), so ANY
+    test that saves or patches a session would otherwise append entries and undo
+    snapshots under ``backend/data/journal/``. Point it at the test's tmp dir;
+    journal-specific tests override with their own env as needed.
+    """
+    monkeypatch.setenv("RAGNAROK_JOURNAL_DIR", str(tmp_path / "_journal"))

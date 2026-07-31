@@ -88,6 +88,10 @@ export function ModelView(props: ModelViewProps) {
             onClearTable={props.onClearTable}
             onImportTsSheet={props.onImportTsSheet}
             onTsSheetChanged={props.onTsSheetChanged}
+            // Temporal sheets are editable in the Model tab too: a profile
+            // seeded or imported here has to be fillable where the user is
+            // already editing sheets. The snapshot column stays locked.
+            editableTs
             onBulkPaste={props.onBulkPaste}
             issues={props.modelIssues}
             jumpTo={props.jumpTo}

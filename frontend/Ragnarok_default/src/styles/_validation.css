@@ -33,7 +33,7 @@
 
 .validation-report-header h2 {
   margin: 4px 0 0;
-  font-size: 1.1rem;
+  font-size: var(--fs-xl);
   font-weight: 600;
 }
 
@@ -43,7 +43,7 @@
 .validation-section {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 0;
+  border-radius: var(--radius);
   padding: 16px 20px;
 }
 
@@ -59,7 +59,7 @@
 
 .validation-section-title {
   margin: 0 0 10px;
-  font-size: 0.78rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -78,14 +78,14 @@
 }
 
 .validation-list li {
-  font-size: 0.88rem;
+  font-size: var(--fs-base);
   line-height: 1.45;
 }
 
 .validation-section--error .validation-list li { color: var(--danger-strong); }
 .validation-section--warn .validation-list li { color: var(--warn-text); }
 
-.validation-list--notes li { color: var(--muted); font-size: 0.82rem; }
+.validation-list--notes li { color: var(--muted); font-size: var(--fs-md); }
 
 .validation-summary-grid {
   display: grid;
