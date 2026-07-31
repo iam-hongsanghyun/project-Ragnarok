@@ -13,6 +13,9 @@ import { GridRow, SheetName, TableSel, WorkbookModel } from 'lib/types';
 import { ModelIssue } from '../../features/validation/useModelIssues';
 import { TABLE_GROUPS } from 'lib/constants';
 
+/** The shared time axis every temporal sheet is indexed by. */
+const SNAPSHOTS_SHEET = 'snapshots';
+
 interface Props {
   model: WorkbookModel;
   issues: ModelIssue[];
@@ -52,10 +55,14 @@ export function SheetTree({ model, issues, sel, onSelChange, seriesSheetCounts }
   const matchesSearch = (haystack: string) =>
     !navSearch || haystack.toLowerCase().includes(navSearch.toLowerCase());
 
-  // Only groups whose static sheet OR any temporal sheet has data.
+  // Only groups whose static sheet OR any temporal sheet has data — plus
+  // `snapshots`, which is ALWAYS listed. Snapshots are the one shared time axis
+  // every temporal sheet is indexed by, so an empty one has to be reachable or a
+  // from-scratch model can never get a time axis (and then no profile can be
+  // written or imported either).
   const visibleGroups = TABLE_GROUPS.filter((g) => {
     const staticRows = (model[g.sheet] ?? []) as GridRow[];
-    const hasStatic = staticRows.length > 0;
+    const hasStatic = staticRows.length > 0 || g.sheet === SNAPSHOTS_SHEET;
     const hasAnyTs = g.temporalSheets.some((ts) => tsCount(ts.sheet) > 0);
     if (!hasStatic && !hasAnyTs) return false;
     if (!navSearch) return true;
@@ -102,7 +109,9 @@ export function SheetTree({ model, issues, sel, onSelChange, seriesSheetCounts }
         )}
         {visibleGroups.map((g) => {
           const staticRows = (model[g.sheet] ?? []) as GridRow[];
-          const hasStatic = staticRows.length > 0;
+          // `snapshots` keeps its leaf even at zero rows — that empty sheet is
+          // where the time axis gets authored (see `visibleGroups`).
+          const hasStatic = staticRows.length > 0 || g.sheet === SNAPSHOTS_SHEET;
           const open = !collapsed.has(g.sheet);
           const staticActive = sel.kind === 'static' && sel.sheet === g.sheet;
 

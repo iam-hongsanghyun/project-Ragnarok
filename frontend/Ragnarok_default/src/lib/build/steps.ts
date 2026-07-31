@@ -38,6 +38,20 @@ export const BUILD_STEPS: BuildStep[] = [
     isComplete: (m) => hasRows(m, 'network'),
   },
   {
+    id: 'snapshots',
+    label: 'Snapshots',
+    primarySheet: 'snapshots',
+    extraSheets: [],
+    // Deliberately early: this is the ONE time axis every temporal sheet is
+    // indexed by (`loads-p_set`, `generators-p_max_pu`, …), so a profile cannot
+    // be written — by hand or by import — before it exists. Without a step here
+    // the builder had no way to author it at all.
+    description:
+      'The time axis. Every profile in the model is indexed by these snapshots, '
+      + 'so set them before writing or importing any temporal data.',
+    isComplete: (m) => hasRows(m, 'snapshots'),
+  },
+  {
     id: 'carriers',
     label: 'Carriers',
     primarySheet: 'carriers',
