@@ -137,7 +137,10 @@ def build_network(
 
     Args:
         model:      ``{sheet_name: [row_dict, ...]}`` — the GUI workbook.
-        scenario:   ``{carbonPrice, discountRate, constraints, ...}``
+        scenario:   ``{carbonPrice, discountRate, constraints, ...}``.
+                    ``discountRate`` is required only when the run has extendable
+                    capacity carrying a capital cost — it annuitises that cost, and
+                    nothing else reads it. Dispatch-only runs may omit it.
         options:    ``{snapshotStart, snapshotCount, snapshotWeight, forceLp,
                     enableLoadShedding, loadSheddingCost, currencySymbol, …}``
 
@@ -149,20 +152,12 @@ def build_network(
     pathway = parse_pathway_config(options.get("pathwayConfig"))
     sampling = parse_sampling_config(options.get("samplingConfig"))
 
-    if "discountRate" not in scenario:
-        from fastapi import HTTPException
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "discountRate is required, and it belongs in `scenario`, not "
-                "`options` — e.g. scenario={\"discountRate\": 0.05}. (In the GUI it "
-                "is Settings -> Discount rate.) It annuitises capital cost, so it "
-                "affects any run with extendable capacity; for a pure dispatch run "
-                "over a short window it changes nothing, but a value still has to be "
-                "stated rather than assumed."
-            ),
-        )
-    discount_rate = number(scenario.get("discountRate"))
+    # `discountRate` is consumed by exactly one thing: CAPEX annuitisation below.
+    # So it is REQUIRED THERE, when there is CAPEX to annuitise, and not here —
+    # a dispatch run cannot be affected by it, and demanding it anyway teaches
+    # callers to supply a placeholder that then looks like a study input.
+    raw_rate = scenario.get("discountRate")
+    discount_rate = None if raw_rate is None or raw_rate == "" else number(raw_rate)
     carbon_price = number(scenario.get("carbonPrice"), 0.0)
     currency = str(options.get("currencySymbol", "$"))
 
@@ -392,6 +387,27 @@ def build_network(
         ext = frame[ext_cols[0]].astype(bool)
         if not ext.any():
             continue
+        # 0 × AF is 0 at every rate, so free extendable capacity needs no rate.
+        costs = pd.to_numeric(frame.loc[ext, "capital_cost"], errors="coerce").fillna(0.0)
+        if not bool(costs.abs().gt(0).any()):
+            continue
+        if discount_rate is None:
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"discountRate is required for THIS run: {int(ext.sum())} "
+                    f"extendable {comp.name}(s) carry a capital cost, and the "
+                    "discount rate is what turns that overnight cost into the "
+                    "annual one the objective compares against fuel. It belongs in "
+                    "`scenario`, not `options` — e.g. "
+                    "scenario={\"discountRate\": 0.05}. (In the GUI: Settings -> "
+                    "Discount rate.) No default is applied on purpose: a low rate "
+                    "makes new capacity look cheap and a high one makes it look "
+                    "expensive, so how much gets built depends on this number. "
+                    "A run with no expandable capacity needs no rate at all."
+                ),
+            )
         if "lifetime" in frame.columns:
             # PyPSA DEFAULTS lifetime to +inf, which has no finite annuity factor
             # (annuity_factor(rate, inf) → NaN). Without this guard the extendable

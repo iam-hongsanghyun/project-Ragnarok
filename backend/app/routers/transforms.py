@@ -47,8 +47,6 @@ from ...pypsa.pypsa_schema import component_sheets
 
 router = APIRouter(prefix="/api/transform", tags=["transform"])
 
-_DEFAULT_DISCOUNT_RATE = 0.05
-
 
 class ClusterRequest(BaseModel):
     sessionId: str
@@ -563,7 +561,9 @@ def cluster_model(
     reduced workbook model and ``busmap`` maps each original bus to its cluster.
     """
     scenario = dict(scenario or {})
-    scenario.setdefault("discountRate", _DEFAULT_DISCOUNT_RATE)
+    # No discountRate is invented here: `skipCapexAnnuitisation` means nothing reads
+    # one, and a fabricated 0.05 was only ever satisfying a guard that no longer
+    # demands a rate the run cannot use.
     # See `_transform_build_options`: no CAPEX annuitisation (the reduced workbook
     # would be annuitised twice) and no run window / sampling (it would truncate
     # the user's time axis).

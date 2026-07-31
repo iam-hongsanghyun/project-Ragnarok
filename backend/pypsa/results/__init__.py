@@ -1463,6 +1463,20 @@ def _build_solved_payload(
                 "windowCount": len(rolling_windows),
             } if rolling.enabled else None,
             "sampling": sampling_meta,
+            # What was actually in the network. This used to be emitted only by the
+            # imported-result fallback in `from_outputs`, so a real solve stored
+            # empty counts and "how big was that run?" had no answer in the run
+            # history. Same key set as that path, so the two agree.
+            "componentCounts": {
+                "buses": len(network.buses),
+                "generators": len(network.generators),
+                "loads": len(network.loads),
+                "lines": len(network.lines),
+                "links": len(network.links),
+                "storage_units": len(network.storage_units),
+                "transformers": len(network.transformers),
+                "stores": len(network.stores),
+            },
         },
         "pathway": {
             "enabled": pathway.enabled,

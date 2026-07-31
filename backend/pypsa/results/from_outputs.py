@@ -142,14 +142,25 @@ def derive_imported_result(
     outputs. Returns only the derived analytics — the caller merges them into
     the bundle's ``result`` (which already holds ``outputs`` itself).
     """
-    # build_network requires discountRate (Ragnarok files carry it in their
-    # settings sheet). It only annualises capex for *extendable* assets — an
-    # already-solved import has fixed capacities — so a default is harmless when
-    # an external file omits it; the file's own setting always wins.
-    scenario = dict(scenario or {})
-    scenario.setdefault("discountRate", _DEFAULT_DISCOUNT_RATE)
+    from fastapi import HTTPException
 
-    network, notes = build_network(model, scenario, options or {})
+    # `build_network` needs a discountRate only where extendable capacity carries a
+    # capital cost to annuitise, and an already-solved import normally has fixed
+    # capacities — so no rate is invented up front. Where the imported model DOES
+    # still carry extendable assets and the file omits one (Ragnarok's own files
+    # carry it in their settings sheet), fall back rather than refuse an otherwise
+    # complete result — but SAY SO in the narrative, because the rate then shapes a
+    # reported capital cost and an invented number must not pass as the file's own.
+    scenario = dict(scenario or {})
+    rate_defaulted = False
+    try:
+        network, _build_notes = build_network(model, scenario, options or {})
+    except HTTPException as exc:
+        if "discountRate" not in str(exc.detail):
+            raise
+        scenario["discountRate"] = _DEFAULT_DISCOUNT_RATE
+        rate_defaulted = True
+        network, _build_notes = build_network(model, scenario, options or {})
     _inject_outputs(network, outputs or {})
 
     currency = str((options or {}).get("currencySymbol", "$"))
@@ -354,6 +365,12 @@ def derive_imported_result(
         f"Derived over {snapshot_count} snapshots at {snapshot_weight:g}h weight; "
         f"average price {average_price:.1f} {currency}/MWh, peak {peak_price:.1f} {currency}/MWh.",
     ]
+    if rate_defaulted:
+        notes.append(
+            f"The imported file carried no discount rate, so {_DEFAULT_DISCOUNT_RATE:.0%} was "
+            "assumed to annuitise the capital cost of its extendable assets. Any capital "
+            "figure below depends on that assumption, not on the file."
+        )
 
     return {
         "summary": summary,
