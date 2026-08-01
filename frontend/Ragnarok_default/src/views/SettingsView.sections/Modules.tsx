@@ -15,7 +15,7 @@ import React, { useRef, useState } from 'react';
 import { TAB_MODULES, parseEnabledModules, serializeEnabledModules } from '../../modules/registry';
 import type { TabModuleId } from '../../modules/types';
 import type { ExternalModulesApi } from '../../modules/external/useExternalModules';
-import { MANIFEST_NAME } from '../../modules/external/store';
+import { MANIFEST_NAME } from '../../modules/external/api';
 
 export interface ModulesSectionProps {
   /** The csv persisted in AppSettings.enabledModules. */
@@ -37,13 +37,27 @@ export function ModulesSection({ enabledModules, onEnabledModulesChange, externa
     onEnabledModulesChange(serializeEnabledModules(next));
   };
 
+  const [busy, setBusy] = useState(false);
+
   const handlePicked = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     setInstallError(null);
+    setBusy(true);
     try {
       await externalModules.install(Array.from(files));
     } catch (err) {
       setInstallError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRemove = async (id: string, label: string) => {
+    setInstallError(null);
+    try {
+      await externalModules.remove(id);
+    } catch (err) {
+      setInstallError(`Could not remove ${label}: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
@@ -88,6 +102,8 @@ export function ModulesSection({ enabledModules, onEnabledModulesChange, externa
           exporting <code>mount(el, ctx)</code> — <code>ctx</code> carries the backend API
           base and session id, which is the same reach a native tab has: read the working
           model, submit runs, read analytics. Re-adding the same id updates it in place.
+          Installed modules are stored on the <b>server</b> (<code>backend/data/modules/</code>),
+          so they survive a &quot;Clear cache&quot;, an app update and a different browser.
         </p>
       </header>
 
@@ -109,17 +125,19 @@ export function ModulesSection({ enabledModules, onEnabledModulesChange, externa
           hidden
           onChange={(e) => { void handlePicked(e.target.files); e.target.value = ''; }}
         />
-        <button className="ghost-button sm" onClick={() => dirInputRef.current?.click()}>
-          Add module from folder
+        <button className="ghost-button sm" disabled={busy} onClick={() => dirInputRef.current?.click()}>
+          {busy ? 'Installing…' : 'Add module from folder'}
         </button>
-        <button className="ghost-button sm" onClick={() => zipInputRef.current?.click()}>
+        <button className="ghost-button sm" disabled={busy} onClick={() => zipInputRef.current?.click()}>
           Add module from .zip
         </button>
       </div>
       {installError && <p className="settings-modules-error">{installError}</p>}
 
       {externalModules.installed.length === 0 ? (
-        <p className="settings-modules-empty">No external modules installed.</p>
+        <p className="settings-modules-empty">
+          {externalModules.loading ? 'Loading installed modules…' : 'No external modules installed.'}
+        </p>
       ) : (
         <div className="settings-modules-list">
           {externalModules.installed.map((m) => (
@@ -127,7 +145,7 @@ export function ModulesSection({ enabledModules, onEnabledModulesChange, externa
               <input
                 type="checkbox"
                 checked={m.enabled}
-                onChange={(e) => externalModules.setEnabled(m.manifest.id, e.target.checked)}
+                onChange={(e) => { void externalModules.setEnabled(m.manifest.id, e.target.checked); }}
                 aria-label={`Enable the ${m.manifest.label} tab`}
               />
               <span className="settings-modules-text">
@@ -141,7 +159,7 @@ export function ModulesSection({ enabledModules, onEnabledModulesChange, externa
               </span>
               <button
                 className="ghost-button sm"
-                onClick={() => externalModules.remove(m.manifest.id)}
+                onClick={() => { void handleRemove(m.manifest.id, m.manifest.label); }}
                 title="Uninstall this module (its tab disappears; nothing else changes)"
               >
                 Remove

@@ -101,9 +101,11 @@ backend/
     project_workbook.py  Lossless project-workbook (.xlsx) read/write for sessions
     log_capture.py       In-process log capture (Analytics → Log tab)
     startup_status.py    Startup progress reporting (GET /api/status)
+    tab_modules.py       Third-party TAB-MODULE store (a whole tab; see docs/module.md)
     routers/
       session.py         /api/session/* — server-side working model (source of truth)
       plugins.py         /api/plugins/* — backend-plugin lifecycle + hooks
+      tab_modules.py     /api/modules/* — tab-module install/list/enable/remove
       importers.py       /api/import/* — external-data importer subsystem (Data view)
       config.py          /api/config — the boot bundle the frontend fetches at startup
     importers/           importer implementations used by routers/importers.py
@@ -1425,3 +1427,48 @@ from the live backend registry — and memoised for the life of the process.
 | `capabilities` | Solver-backend capability list from the backend registry |
 | `simulation_defaults` | `{maxSnapshots, defaultSnapshotCount, defaultSnapshotWeight}` from `system_defaults.json` → `simulation` |
 | `build_id` / `backend_version` | The frontend's cache key |
+
+---
+
+## 16. Tab-modules — `/api/modules/*`
+
+A **tab-module** is a whole Ragnarok tab (see [module.md](./module.md)); a
+**plugin** (`/api/plugins/*`) is a small extension. Third-party modules are
+stored on the server by `app/tab_modules.py`:
+
+```
+backend/data/modules/<id>/tabmodule.json   manifest (id, label, hint, description, order, entry)
+backend/data/modules/<id>/index.js         CommonJS entry exporting mount(el, ctx)
+backend/data/modules/.state.json           {"<id>": {"enabled": true}}
+```
+
+Server-side on purpose: a module is project content, and the frontend's
+`localStorage` is wiped both by the "Clear cache" button and by the build-id
+reset that runs on every app update — a module kept there would be uninstalled
+by the next deploy. `RAGNAROK_TAB_MODULES_DIR` overrides the location.
+
+| Method | Path | Returns |
+|---|---|---|
+| `GET` | `/api/modules` | `{modules: [{manifest, files, enabled, installedAt}]}`, ordered by bar position then id |
+| `POST` | `/api/modules/install` | install/update from an uploaded `.zip` → the installed module |
+| `POST` | `/api/modules/install-path` | install/update from a server-side directory (`{path}`) — the agent/CLI form |
+| `POST` | `/api/modules/{id}/enabled` | `{enabled}` → show/hide the tab (persisted server-side) |
+| `DELETE` | `/api/modules/{id}` | `{id, removed}` — deletes the package directory and its flag |
+
+Rules the store enforces (all surfaced as HTTP 400):
+
+- ids must match `^[A-Za-z][A-Za-z0-9_-]*$` and must not collide with a core tab
+  (`Welcome`, `Build`, `Model`, `Market`, `Settings`, `Analytics`, `History`,
+  `Plugins`) or a built-in module (`Data`, `Forge`, `PhysicalRisk`, `Siting`,
+  `PostAnalysis`, `Training`);
+- the manifest's `entry` file must exist in the package;
+- zip entries with absolute or `..` paths are refused (zip-slip), and archive +
+  unpacked sizes are capped (`RAGNAROK_MAX_MODULE_ZIP_MB`,
+  `RAGNAROK_MAX_MODULE_UNZIPPED_MB`);
+- re-installing an id replaces the directory but KEEPS its enabled flag;
+- discovery never raises — a malformed module on disk is logged and skipped, so a
+  broken package can't stop the backend from starting.
+
+The same four operations are exposed over MCP (`list_tab_modules`,
+`install_tab_module`, `set_tab_module_enabled`, `remove_tab_module`), with the
+mutating three behind the autonomy guard.

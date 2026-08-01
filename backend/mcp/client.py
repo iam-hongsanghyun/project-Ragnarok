@@ -469,6 +469,20 @@ class RagnarokClient:
     async def list_plugins(self) -> Any:
         return await self._get("/api/plugins")
 
+    # ── tab-modules (a whole tab; NOT a plugin — see docs/module.md) ───────────
+
+    async def list_tab_modules(self) -> Any:
+        return await self._get("/api/modules")
+
+    async def install_tab_module(self, path: str) -> Any:
+        return await self._post("/api/modules/install-path", {"path": path})
+
+    async def set_tab_module_enabled(self, module_id: str, enabled: bool) -> Any:
+        return await self._post(f"/api/modules/{module_id}/enabled", {"enabled": enabled})
+
+    async def remove_tab_module(self, module_id: str) -> Any:
+        return await self._request("DELETE", f"/api/modules/{module_id}")
+
     async def retarget_snapshots(
         self, start: str, end: str, step_hours: float = 1.0, fill: str = "tile"
     ) -> Any:

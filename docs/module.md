@@ -19,8 +19,10 @@ workspace shows, and for writing your own module.
 4. [Writing an external module](#4-writing-an-external-module)
 5. [The module context (what a module can do)](#5-the-module-context-what-a-module-can-do)
 6. [Installing, updating, removing](#6-installing-updating-removing)
-7. [Adding a first-party module](#7-adding-a-first-party-module)
-8. [Limits and roadmap](#8-limits-and-roadmap)
+7. [Where modules are stored (and why it survives a cache clear)](#7-where-modules-are-stored-and-why-it-survives-a-cache-clear)
+8. [Managing modules over MCP](#8-managing-modules-over-mcp)
+9. [Adding a first-party module](#9-adding-a-first-party-module)
+10. [Limits and roadmap](#10-limits-and-roadmap)
 
 ---
 
@@ -95,9 +97,10 @@ Semantics:
 | `"Data,Forge"` | exactly those two |
 | unknown ids | silently dropped (a renamed module, or a file from a newer version) |
 
-Defaults live in `src/config/app_config.json` under `settings.defaults`.
-Per-install state is `localStorage` (`project_ragnarok_settings`); external
-module packages are stored separately under `ragnarok:tab-modules:installed`.
+Defaults live in `src/config/app_config.json` under `settings.defaults`; the
+per-install value is in `localStorage` (`project_ragnarok_settings`, which
+neither cache reset clears). **External module packages are not stored in the
+browser at all** — they live on the server, with their own enabled flag; see §7.
 
 ## 4. Writing an external module
 
@@ -201,11 +204,72 @@ entry file.
 - **Disable** — uncheck it. The tab disappears; the package stays installed.
 - **Remove** — uninstalls the package. Nothing else in the app changes.
 
-Packages live in `localStorage`, so they survive reloads without a backend. A
-very large module may exceed the quota; keep the entry lean and fetch heavy
-assets at runtime.
+Packages live on the **server** — see the next section.
 
-## 7. Adding a first-party module
+## 7. Where modules are stored (and why it survives a cache clear)
+
+An installed module is **project content, not browser cache**, so the backend
+owns it:
+
+```
+backend/data/modules/
+  <id>/
+    tabmodule.json
+    index.js
+    …
+  .state.json          {"<id>": {"enabled": true}}
+```
+
+Both the package and its shown/hidden flag live there (gitignored; overridable
+with `RAGNAROK_TAB_MODULES_DIR`). That is deliberate. Two separate wipes clear
+`localStorage`:
+
+| Wipe | When | What it clears |
+|---|---|---|
+| build-id reset ([`index.tsx`](../frontend/Ragnarok_default/src/index.tsx)) | **every app update / dev-server restart** | all `pypsa.*`, `ragnarok:*`, `ui:*` keys |
+| "Clear cache" button | on demand | the same set |
+
+A module kept in `localStorage` would therefore be uninstalled by the next
+update. On the server it survives an update, a "Clear cache", and opening the app
+in a different browser. Nothing module-related is written to `localStorage`.
+
+The HTTP surface (also what the UI uses):
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/modules` | list installed modules (manifest, files, enabled) |
+| `POST` | `/api/modules/install` | install/update from an uploaded `.zip` |
+| `POST` | `/api/modules/install-path` | install/update from a server-side directory |
+| `POST` | `/api/modules/{id}/enabled` | show/hide the tab |
+| `DELETE` | `/api/modules/{id}` | uninstall |
+
+Built-in module enablement is separate: it stays in `AppSettings.enabledModules`
+(§3), which is not wiped by either reset and rides along in a project export.
+
+Guards on install: ids must be alphanumeric and may not collide with a core tab
+or built-in module; zip entries with `..`/absolute paths are refused; there are
+size limits on the archive and its unpacked contents
+(`RAGNAROK_MAX_MODULE_ZIP_MB`, `RAGNAROK_MAX_MODULE_UNZIPPED_MB`); a malformed
+module already on disk is logged and skipped rather than breaking startup.
+
+## 8. Managing modules over MCP
+
+The MCP server exposes the same operations, so an agent can scaffold a module in
+a directory and register it without touching the UI:
+
+| Tool | Effect |
+|---|---|
+| `list_tab_modules` | inventory (read-only): id, label, order, enabled, file names |
+| `install_tab_module(path)` | install/update from a directory on this machine |
+| `set_tab_module_enabled(id, enabled)` | show/hide the tab |
+| `remove_tab_module(id)` | uninstall (flagged destructive) |
+
+The three mutating tools respect the autonomy guard
+(`RAGNAROK_MCP_AUTONOMY`): under the default `guided` they return a preview and
+need `confirm=true` to apply. `list_plugins` remains the separate, unrelated
+plugin inventory.
+
+## 9. Adding a first-party module
 
 To ship a module in the app itself:
 
@@ -219,7 +283,7 @@ To ship a module in the app itself:
 `src/modules/registry.test.ts` pins the core/module split — add the id there
 too, which is what stops a tab silently changing sides.
 
-## 8. Limits and roadmap
+## 10. Limits and roadmap
 
 Today:
 
@@ -229,4 +293,7 @@ Today:
   step, after which a first-party module folder owns its own state.
 - External modules render into a plain DOM element. They may use any technique
   that works on a DOM node; no React version is imposed or shared.
-- There is no module marketplace and no signing. Add only modules you trust.
+- Only TEXT files in a package are handed to the browser host; binary assets are
+  stored but not inlined, so fetch them at runtime if you need them.
+- There is no module marketplace and no signing. A module runs with the app's
+  privileges — add only modules you trust.

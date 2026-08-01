@@ -69,6 +69,10 @@ backend/data/physical_risk/
 backend/data/plugins/
 # Per-plugin server-side file store (heavy model workbooks uploaded at runtime)
 backend/data/plugin_files/
+# Installed third-party tab-modules (a whole tab; added at runtime — see
+# docs/module.md). Server-side on purpose: a module must survive a browser cache
+# clear and an app update, so it can't live in localStorage.
+backend/data/modules/
 # Server-recorded importer API keys (credentials — never commit)
 backend/data/secrets.json
 # PyPSA-Earth (I9): the workflow checkout installed by scripts/setup_pypsa_earth.sh

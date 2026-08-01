@@ -974,6 +974,12 @@ app.include_router(_examples_router.router)
 from .routers import plugins as _plugins_router  # noqa: E402
 app.include_router(_plugins_router.router)
 
+# Third-party TAB-MODULES (a whole tab, not a plugin). Installed under
+# backend/data/modules/ so a module belongs to the project and survives a
+# browser cache clear or an app update — see docs/module.md.
+from .routers import tab_modules as _tab_modules_router  # noqa: E402
+app.include_router(_tab_modules_router.router)
+
 # PyPSA-Earth network builder (I9) — an async, queued build job (own conda env +
 # CDS key). Gated behind RAGNAROK_PYPSA_EARTH_DIR; reports availability so the UI
 # can guide setup.

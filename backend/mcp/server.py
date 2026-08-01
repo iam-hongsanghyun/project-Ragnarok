@@ -277,6 +277,104 @@ async def list_plugins() -> Any:
     return await get_client().list_plugins()
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Tab-modules — a whole Ragnarok TAB, not a plugin (docs/module.md).
+#
+# A plugin is a small extension (importer / panel / analytics hook). A MODULE is
+# big: its own tab, with the same reach a native tab has (read the model, submit
+# solves, read analytics). Built-in modules (Data, Forge, Physical Risk, Siting,
+# Post-analysis, Training) are compiled into the app and toggled in Settings →
+# Modules; these tools manage the THIRD-PARTY ones, which live on the server
+# under backend/data/modules/ so they belong to the project.
+# ══════════════════════════════════════════════════════════════════════════════
+@mcp.tool(
+    annotations=_RO,
+    description="List third-party tab-modules installed on the server: id, label, activity-bar order, whether the tab is shown, and the package's files. A tab-module is a whole tab (see install_tab_module); plugins are separate — use list_plugins.",
+)
+async def list_tab_modules() -> Any:
+    modules = await get_client().list_tab_modules()
+    # Drop file BODIES from the listing — a module's source can be large and an
+    # agent listing modules wants the inventory, not the code.
+    out = []
+    for m in (modules or {}).get("modules", []):
+        manifest = m.get("manifest") or {}
+        out.append({
+            "id": manifest.get("id"),
+            "label": manifest.get("label"),
+            "description": manifest.get("description"),
+            "order": manifest.get("order"),
+            "entry": manifest.get("entry"),
+            "enabled": m.get("enabled"),
+            "files": sorted((m.get("files") or {}).keys()),
+            "installedAt": m.get("installedAt"),
+        })
+    return {"modules": out}
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=False,
+    ),
+    description=(
+        "Install a third-party tab-module from a DIRECTORY on this machine — it becomes a new tab in the web UI. "
+        "The directory needs `tabmodule.json` ({id, label, hint?, description?, order?, entry?}) and a CommonJS entry "
+        "file exporting `mount(el, ctx)`; ctx gives {apiBase, sessionId}, i.e. the whole Ragnarok HTTP API, so the "
+        "module can read the model, submit solves and read analytics like a native tab. Installing the same id again "
+        "updates it in place and keeps its shown/hidden state. Ids that collide with a core tab or a built-in module "
+        "are refused."
+    ),
+)
+async def install_tab_module(path: str, confirm: bool = False) -> Any:
+    if _needs_confirm(cheap=False) and not confirm:
+        return _preview(f"Install the tab-module at {path} (adds a tab to the web UI).", {"path": path})
+    installed = await get_client().install_tab_module(path)
+    manifest = (installed or {}).get("manifest") or {}
+    return {
+        "status": "installed",
+        "id": manifest.get("id"),
+        "label": manifest.get("label"),
+        "enabled": (installed or {}).get("enabled"),
+        "files": sorted(((installed or {}).get("files") or {}).keys()),
+        "hint": "The tab appears on the activity bar; reload the browser tab if it is already open.",
+    }
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=False,
+    ),
+    description="Show or hide an installed tab-module's tab. Persisted on the server, so it survives a browser cache clear or an app update. Does not uninstall anything.",
+)
+async def set_tab_module_enabled(module_id: str, enabled: bool, confirm: bool = False) -> Any:
+    if _needs_confirm(cheap=True) and not confirm:
+        return _preview(
+            f"{'Show' if enabled else 'Hide'} the {module_id!r} tab.",
+            {"module_id": module_id, "enabled": enabled},
+        )
+    return await get_client().set_tab_module_enabled(module_id, enabled)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=False,
+        destructiveHint=True,
+        idempotentHint=True,
+        openWorldHint=False,
+    ),
+    description="Uninstall a third-party tab-module: deletes its package directory on the server and removes its tab. The model, settings, run history and results are untouched.",
+)
+async def remove_tab_module(module_id: str, confirm: bool = False) -> Any:
+    if _needs_confirm(cheap=False) and not confirm:
+        return _preview(f"Uninstall the tab-module {module_id!r} (deletes its files).", {"module_id": module_id})
+    return await get_client().remove_tab_module(module_id)
+
+
 # ── curated reference for the seven solve-mode reliability/market analytics ────
 # submit_solve already passes arbitrary `options` through unchanged, so these
 # ride the same solve — this tool is pure discovery: it tells an agent the

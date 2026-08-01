@@ -237,7 +237,7 @@ def _install(monkeypatch, autonomy: str = "guided") -> FakeClient:
 def test_tool_catalog_and_annotations() -> None:
     tools = asyncio.run(mcp.list_tools())
     by_name = {t.name: t for t in tools}
-    assert len(tools) == 73, f"expected 73 tools, got {len(tools)}"
+    assert len(tools) == 77, f"expected 77 tools, got {len(tools)}"
     # adjust_carrier_capacity is a gated (destructive) transform tool
     assert "adjust_carrier_capacity" in by_name
     assert by_name["adjust_carrier_capacity"].annotations.readOnlyHint is False
@@ -293,7 +293,22 @@ def test_tool_catalog_and_annotations() -> None:
         "get_master_meta",
         "run_plugin_analysis",
         "optimize_procurement",
+        # Tab-modules (a whole tab, not a plugin — docs/module.md). Only the
+        # listing is read-only; install/enable/remove are gated writes.
+        "list_tab_modules",
     }
+
+
+def test_tab_module_tools_are_registered_and_gated() -> None:
+    """A module adds a TAB, so the mutating tools must not be read-only, and
+    uninstalling must be flagged destructive (it deletes the package)."""
+    by_name = {t.name: t for t in asyncio.run(mcp.list_tools())}
+    for name in ("list_tab_modules", "install_tab_module", "set_tab_module_enabled", "remove_tab_module"):
+        assert name in by_name, f"missing tab-module tool {name}"
+    assert by_name["list_tab_modules"].annotations.readOnlyHint is True
+    assert by_name["install_tab_module"].annotations.readOnlyHint is False
+    assert by_name["set_tab_module_enabled"].annotations.readOnlyHint is False
+    assert by_name["remove_tab_module"].annotations.destructiveHint is True
 
 
 # ── read-only tools return data ────────────────────────────────────────────────
