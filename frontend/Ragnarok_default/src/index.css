@@ -6971,6 +6971,33 @@ th:hover .col-delete-btn {
   background: var(--surface);
 }
 
+/* Settings → Modules — the workspace composer (module tabs on/off). */
+.settings-modules-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 640px;
+}
+.settings-modules-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  cursor: pointer;
+}
+.settings-modules-item:hover { background: rgba(15, 118, 110, 0.04); }
+.settings-modules-item input[type="checkbox"] { margin-top: 3px; }
+.settings-modules-icon {
+  color: var(--muted);
+  display: inline-flex;
+  margin-top: 1px;
+}
+.settings-modules-text { display: flex; flex-direction: column; gap: 2px; }
+.settings-modules-name { font-weight: 600; font-size: 0.85rem; }
+.settings-modules-desc { font-size: 0.78rem; color: var(--muted); line-height: 1.45; }
+
 /* Plugins view shares .view-rail / .view-main */
 .plugins-view { /* inherits .view */ }
 

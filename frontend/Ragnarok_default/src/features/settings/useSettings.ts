@@ -40,6 +40,12 @@ function loadSettings(): AppSettings {
         loadSheddingCost: parsed.loadSheddingCost ?? SETTINGS_DEFAULTS.loadSheddingCost,
         discountRate: parsed.discountRate ?? SETTINGS_DEFAULTS.discountRate,
         queuePollSeconds: parsed.queuePollSeconds ?? SETTINGS_DEFAULTS.queuePollSeconds,
+        // Settings saved before tab-modules existed lack the key — default to
+        // every module, the pre-modules behaviour ('' is a deliberate "none").
+        enabledModules:
+          typeof parsed.enabledModules === 'string'
+            ? parsed.enabledModules
+            : SETTINGS_DEFAULTS.enabledModules,
       };
       // Persist only when the migration actually changed the value, so the
       // run payload (which reads from here) sends 'auto' even if the user

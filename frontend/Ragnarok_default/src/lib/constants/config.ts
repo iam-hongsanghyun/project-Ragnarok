@@ -22,6 +22,8 @@ export interface SettingsDefaultsConfig {
   loadSheddingCost: number;
   discountRate: number;
   queuePollSeconds: number;
+  /** Comma-separated TabModuleIds (see src/modules/registry). */
+  enabledModules: string;
 }
 
 export const APP_CONFIG: AppConfig = appConfigJson;

@@ -36,9 +36,10 @@ detail, see the plugin guide.
    - 7.14 [Security-constrained (SCLOPF)](#714-security-constrained-sclopf)
 8. [Constraints](#8-constraints)
 9. [Plugin runtime](#9-plugin-runtime)
-10. [UI design philosophy](#10-ui-design-philosophy)
-11. [Current scope and limitations](#11-current-scope-and-limitations)
-12. [Server-side deployment & frontend/backend separation](#12-server-side-deployment--frontendbackend-separation)
+10. [Tab modules — core vs module](#10-tab-modules--core-vs-module)
+11. [UI design philosophy](#11-ui-design-philosophy)
+12. [Current scope and limitations](#12-current-scope-and-limitations)
+13. [Server-side deployment & frontend/backend separation](#13-server-side-deployment--frontendbackend-separation)
 
 ---
 
@@ -853,7 +854,61 @@ or remote deployment must gate install behind auth/sandboxing.
 
 ---
 
-## 10. UI design philosophy
+## 10. Tab modules — core vs module
+
+Every activity-bar tab is classified as CORE or MODULE (decided 2026-08-01).
+
+**Core** is anything the modelling loop itself needs — the workbook you edit, the run
+you submit, the results you read, and the app chrome. Core tabs are always present and
+can never be switched off:
+
+| Core tab | Role |
+|---|---|
+| Welcome | shell / entry |
+| Build | model authoring (map-driven) |
+| Model | model authoring (sheet-level) |
+| Market & Policy | inputs that change the solve (constraints state is core) |
+| Settings | run configuration, scenarios, solver, preferences |
+| Analytics | the native results surface |
+| History | run lifecycle: queue → stored runs → comparison |
+| Plugins | third-party extension manager |
+
+**Modules** are built-in tools that *consume* the core through its APIs — remove one
+and the loop still works end-to-end. Each has a manifest under
+`src/modules/<id>/manifest.tsx` (id, label, hint, description, icon, bar order),
+aggregated by `src/modules/registry.ts`:
+
+| Module tab | id |
+|---|---|
+| Data | `Data` |
+| Forge | `Forge` |
+| Physical Risk | `PhysicalRisk` |
+| Siting | `Siting` |
+| Post-analysis | `PostAnalysis` |
+| Training | `Training` |
+
+Users compose the workspace in **Settings → Modules**: toggling a module adds/removes
+its tab from the activity bar. The set persists in `AppSettings.enabledModules` as a
+comma-separated id string (a primitive, so it round-trips through the project export's
+`RAGNAROK_Settings` sheet — a shared file reopens with the same tabs). An absent value
+means "all modules" (pre-modules behaviour); the shell bounces any programmatic
+navigation to a disabled tab back to Welcome.
+
+**Module ≠ plugin.** A plugin (§9) is a small extension — a panel, an importer, an
+analytics card — loaded through the plugin host. A module is something big: a whole
+tab. Modules can be first-party (compiled in, the table above) or third-party
+(an external directory added by the user and loaded at runtime); both kinds register
+through the same tab-module registry and are managed from Settings → Modules. The two
+vocabularies stay disjoint on purpose.
+
+Direction of travel: tabs consume App state today (prop-drilled); the plan is to move
+module tabs onto a typed ModuleContext so each module folder owns its state and API
+calls — the same context an external module receives — with core tabs staying as they
+are.
+
+---
+
+## 11. UI design philosophy
 
 The aesthetic is simple and monochromatic: an engineering tool, not a consumer app.
 Flat surfaces, square corners, a monospace voice for anything that reads like data, one
@@ -906,7 +961,7 @@ nothing happened" bugs. New visual constants go in the `:root` token block.
 
 ---
 
-## 11. Current scope and limitations
+## 12. Current scope and limitations
 
 For the authoritative, code-checked list see [CAPABILITIES.md](user-manual.md). The
 headline limitations are:
@@ -931,7 +986,7 @@ headline limitations are:
 
 ---
 
-## 12. Server-side deployment & frontend/backend separation
+## 13. Server-side deployment & frontend/backend separation
 
 Ragnarok is built so the **backend is the single source of truth** and the
 frontend is a thin terminal — the shape a server-side (and eventually iPad)

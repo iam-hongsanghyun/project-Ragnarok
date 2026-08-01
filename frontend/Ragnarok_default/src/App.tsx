@@ -112,6 +112,7 @@ import {
   stepIndex as trainingStepIndex,
 } from 'lib/training/progress';
 import { ActivityBar } from './layout/ActivityBar';
+import { isTabModule, parseEnabledModules } from './modules/registry';
 import { useModelIssues } from './features/validation/useModelIssues';
 import { useFrontendPlugins } from './features/plugins/frontendPlugins';
 import { ToastProvider, useToast } from './shared/components/Toast';
@@ -463,6 +464,20 @@ function AppInner() {
   const queueStatusRef = useRef<Map<string, QueueJob['status']>>(new Map());
 
   const [settings, updateSettings] = useSettings();
+
+  // ── Tab modules (Settings → Modules) ────────────────────────────────────
+  // Which MODULE tabs are on the activity bar; core tabs ignore this. Module
+  // ≠ plugin — plugins live on their own (core) tab.
+  const enabledModules = useMemo(
+    () => parseEnabledModules(settings.enabledModules),
+    [settings.enabledModules],
+  );
+  // A disabled module's tab must be unreachable even when something navigates
+  // there programmatically (a resumed walkthrough, a cross-tab link): bounce
+  // to Welcome rather than render a tab the bar doesn't show.
+  useEffect(() => {
+    if (isTabModule(tab) && !enabledModules.has(tab)) setTab('Welcome');
+  }, [tab, enabledModules]);
   const [scenarioCatalog, setScenarioCatalog] = useState<ScenarioCatalog>(() => defaultScenarioCatalog({
     snapshotStart: RUN_WINDOW.initialSnapshotStart,
     snapshotEnd: RUN_WINDOW.defaultSnapshotEnd,
@@ -3350,11 +3365,12 @@ function AppInner() {
           onTabChange={setTab}
           validateResult={validateResult}
           pluginCount={frontendPlugins.installed.length}
+          enabledModules={enabledModules}
         />
         <div className="workspace-main">
 
           {/* ── Settings tab ── */}
-          {(tab === 'Settings' || tab === 'Market' || tab === 'PostAnalysis') && (
+          {(tab === 'Settings' || tab === 'Market' || (tab === 'PostAnalysis' && enabledModules.has('PostAnalysis'))) && (
             <SettingsView
               key={tab === 'Market' ? 'market' : tab === 'PostAnalysis' ? 'analysis' : 'settings'}
               variant={tab === 'Market' ? 'market' : tab === 'PostAnalysis' ? 'analysis' : 'settings'}
@@ -3471,6 +3487,8 @@ function AppInner() {
               onSolveAcceptanceChange={(v) => updateSettings({ solveAcceptance: v })}
               onObjectiveAutoScaleChange={(v) => updateSettings({ objectiveAutoScale: v })}
               onQueuePollSecondsChange={(v) => updateSettings({ queuePollSeconds: v })}
+              enabledModules={settings.enabledModules}
+              onEnabledModulesChange={(csv) => updateSettings({ enabledModules: csv })}
               onCarrierColorChange={(rowIndex, color) => updateRowValue('carriers', rowIndex, 'color', color)}
               onCarrierReorder={(fromIndex, toIndex) => reorderRow('carriers', fromIndex, toIndex)}
               lineCount={model.lines.length}
@@ -3553,9 +3571,9 @@ function AppInner() {
             />
           )}
 
-          {tab === 'Data' && <DataView onApplyFragment={handleApplyImportedFragment} />}
+          {tab === 'Data' && enabledModules.has('Data') && <DataView onApplyFragment={handleApplyImportedFragment} />}
 
-          {tab === 'Forge' && (
+          {tab === 'Forge' && enabledModules.has('Forge') && (
             <ForgeView
               model={model}
               onApplySheets={(partial) => {
@@ -3611,14 +3629,14 @@ function AppInner() {
             />
           )}
 
-          {tab === 'PhysicalRisk' && (
+          {tab === 'PhysicalRisk' && enabledModules.has('PhysicalRisk') && (
             <PhysicalRiskView
               subTab={physicalRiskSubTab}
               onSubTabChange={setPhysicalRiskSubTab}
             />
           )}
 
-          {tab === 'Siting' && (
+          {tab === 'Siting' && enabledModules.has('Siting') && (
             <SitingView
               model={model}
               bounds={bounds}
@@ -3717,7 +3735,7 @@ function AppInner() {
             />
           )}
 
-          {tab === 'Training' && (
+          {tab === 'Training' && enabledModules.has('Training') && (
             <TrainingView
               onNavigate={setTab}
               onStartGuide={startGuide}

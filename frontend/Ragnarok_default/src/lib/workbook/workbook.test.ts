@@ -118,6 +118,9 @@ describe('workbook project round-trip', () => {
       loadSheddingCost: 9000,
       discountRate: 0.07,
       queuePollSeconds: 2.5,
+      // A partial module set — must round-trip as the exact csv string, so a
+      // shared project reopens with the same tabs on the bar.
+      enabledModules: 'Data,Forge',
     };
     const metadata: ProjectMetadata = { settings };
 
@@ -138,6 +141,7 @@ describe('workbook project round-trip', () => {
     expect(parsed?.loadSheddingCost).toBe(9000);
     expect(typeof parsed?.discountRate).toBe('number');
     expect(parsed?.discountRate).toBe(0.07);
+    expect(parsed?.enabledModules).toBe('Data,Forge');
 
     // Booleans must stay booleans, not the string "true".
     expect(typeof parsed?.enableLoadShedding).toBe('boolean');

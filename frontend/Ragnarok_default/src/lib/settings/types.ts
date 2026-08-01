@@ -33,4 +33,9 @@ export interface AppSettings {
   loadSheddingCost: number; // VOLL in the currently-selected currency, per MWh
   discountRate: number; // Used to annualise CAPEX for extendable assets
   queuePollSeconds: number; // How often the Queue tab polls while a run is active
+  /** Comma-separated TabModuleIds shown on the activity bar (Settings →
+   *  Modules). A plain string — not an array — so the value survives the
+   *  key/value RAGNAROK_Settings sheet of a project export. Parse with
+   *  `parseEnabledModules` (src/modules/registry). Core tabs are unaffected. */
+  enabledModules: string;
 }

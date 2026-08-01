@@ -78,6 +78,7 @@ import { AppearanceSection } from './SettingsView.sections/Appearance';
 import { ProjectDefaultsSection } from './SettingsView.sections/ProjectDefaults';
 import { SolverSection } from './SettingsView.sections/Solver';
 import { ApiKeysSection } from './SettingsView.sections/ApiKeys';
+import { ModulesSection } from './SettingsView.sections/Modules';
 
 type SectionId =
   | 'scenarios'
@@ -112,6 +113,7 @@ type SectionId =
   | 'appearance'
   | 'projectDefaults'
   | 'apiKeys'
+  | 'modules'
   | 'solver';
 
 type SectionGroup = 'Setup' | 'Solve' | 'Data' | 'App' | 'Market' | 'Policy' | 'Analysis';
@@ -172,6 +174,7 @@ const SECTIONS: Section[] = [
   // App — workspace preferences
   { id: 'appearance',      label: 'Appearance',       group: 'App' },
   { id: 'projectDefaults', label: 'Project defaults', group: 'App' },
+  { id: 'modules',         label: 'Modules',          group: 'App' },
 ];
 
 export interface SettingsViewProps {
@@ -307,6 +310,10 @@ export interface SettingsViewProps {
   onQueuePollSecondsChange: (v: number) => void;
   onCarrierColorChange: (rowIndex: number, color: string) => void;
   onCarrierReorder: (fromIndex: number, toIndex: number) => void;
+  /** Settings → Modules: which module tabs are on the activity bar (csv of
+   *  TabModuleIds — see src/modules/registry). Core tabs are not listed. */
+  enabledModules: string;
+  onEnabledModulesChange: (csv: string) => void;
 }
 
 export function SettingsView(props: SettingsViewProps) {
@@ -399,6 +406,7 @@ export function SettingsView(props: SettingsViewProps) {
         {section === 'appearance'     && <AppearanceSection {...props} />}
         {section === 'projectDefaults' && <ProjectDefaultsSection {...props} />}
         {section === 'apiKeys'        && <ApiKeysSection />}
+        {section === 'modules'        && <ModulesSection {...props} />}
         {section === 'solver'         && <SolverSection {...props} />}
       </main>
     </ResizablePanels>

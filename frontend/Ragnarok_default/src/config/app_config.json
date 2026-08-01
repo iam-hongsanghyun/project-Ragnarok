@@ -51,7 +51,8 @@
       "loadSheddingCost": 2000,
       "discountRate": 0.05,
       "queuePollSeconds": 30,
-      "solveAcceptance": "lenient"
+      "solveAcceptance": "lenient",
+      "enabledModules": "Data,Forge,PhysicalRisk,Siting,PostAnalysis,Training"
     },
     "ranges": {
       "carbonPrice": {
