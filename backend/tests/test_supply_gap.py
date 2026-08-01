@@ -34,8 +34,9 @@ def test_flags_load_served_by_nothing() -> None:
     # The reported failure: positive load, zero dispatch everywhere.
     gap = _supply_gap(_network(0.0))
     assert gap is not None
-    count, total, _first, _last = gap
+    count, total, _first, _last, served = gap
     assert (count, total) == (4, 4)
+    assert served == 0.0
 
 
 def test_healthy_solve_has_no_gap() -> None:
@@ -56,7 +57,7 @@ def test_partial_gap_reports_only_the_bad_snapshots() -> None:
     n.generators_t.p = pd.DataFrame({"g": [100.0, 0.0, 0.0, 100.0]}, index=SNAPS)
     gap = _supply_gap(n)
     assert gap is not None
-    count, total, first, last = gap
+    count, total, first, last, _served = gap
     assert (count, total) == (2, 4)
     assert (first, last) == (SNAPS[1], SNAPS[3 - 1])
 
@@ -72,10 +73,42 @@ def test_rolling_note_degrades_rather_than_raising() -> None:
     # still describe the bad stretch.
     note = _rolling_suspect_note(_network(0.0))
     assert note is not None
-    assert "zero recorded supply" in note
+    assert "of their load" in note
     assert _rolling_suspect_note(_network(100.0)) is None
 
 
 @pytest.mark.parametrize("dispatch", [1e-9, 0.0])
 def test_numerically_zero_dispatch_still_counts_as_a_gap(dispatch: float) -> None:
     assert _supply_gap(_network(dispatch)) is not None
+
+
+# ── The gate must be a BALANCE check, not a zero-check ───────────────────────
+#
+# Regression (Forge-reduced 5-bus full-year model, lenient acceptance): the
+# interior-point path handed back a not-actually-solved point in which the
+# cheapest carrier dispatched 0.1–1% of demand in every snapshot. Because
+# supply was positive everywhere, the old `supply <= 1e-6` test waved it
+# through and the run reported success with nuclear at 0.5% of load.
+
+@pytest.mark.parametrize("fraction", [0.001, 0.005, 0.01, 0.5, 0.95])
+def test_materially_undersupplied_load_is_a_gap(fraction: float) -> None:
+    gap = _supply_gap(_network(100.0 * fraction))
+    assert gap is not None, f"{fraction:.1%} of load served must not pass the gate"
+    count, total, _first, _last, served = gap
+    assert (count, total) == (4, 4)
+    assert served == pytest.approx(fraction, rel=1e-6)
+
+
+@pytest.mark.parametrize("fraction", [0.999, 1.0, 1.1])
+def test_solver_tolerance_shortfalls_still_pass(fraction: float) -> None:
+    # A genuine solution sits at >= 100% minus solver tolerance; the gate must
+    # leave room for that (and for supply above load — losses, charging).
+    assert _supply_gap(_network(100.0 * fraction)) is None
+
+
+def test_tiny_absolute_loads_are_left_to_the_solver() -> None:
+    # Sub-MW loads live inside solver noise; the absolute floor keeps the gate
+    # from flagging toy systems over rounding.
+    n = _network(0.0)
+    n.loads_t.p_set = pd.DataFrame({"L": [0.5] * len(SNAPS)}, index=SNAPS)
+    assert _supply_gap(n) is None

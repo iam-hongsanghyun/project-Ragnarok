@@ -115,15 +115,34 @@ def _solve_rejected(status: str, condition: str, *, strict: bool) -> bool:
     return status.lower() not in ("ok", "warning")
 
 
-def _supply_gap(network: Any) -> tuple[int, int, Any, Any] | None:
-    """Snapshots with positive load but ~zero recorded supply, or None.
+# A snapshot is under-supplied when total supply covers less than this share of
+# its load (plus a 1 MW absolute floor for tiny test systems). A valid LP point
+# always has generation + discharge >= load in every snapshot — the balance is
+# gen + discharge = load + link losses + charging — so a true solution never
+# sits below 100% minus solver tolerance. 1% keeps a huge margin above HiGHS'
+# feasibility tolerances while catching the failure this gate exists for: an
+# interior-point run without crossover handing back a not-actually-solved point
+# where dispatch is a fraction of load (0.1–1% of demand "served" was observed
+# on a reduced 5-bus full-year model) yet linopy reports status='ok'.
+_SUPPLY_GAP_REL_TOL = 0.01
+_SUPPLY_GAP_ABS_TOL_MW = 1.0
 
-    Served load with no supply behind it violates the energy balance, so it can
-    never be a real solution — it means the reported dispatch is not actually a
-    solved point. Returns ``(count, total_snapshots, first, last)``.
+
+def _supply_gap(network: Any) -> tuple[int, int, Any, Any, float] | None:
+    """Snapshots whose recorded supply falls materially short of load, or None.
+
+    Under-supplied load violates the energy balance, so it can never be a real
+    solution — it means the reported dispatch is not actually a solved point.
+    This must be a RELATIVE check, not a zero-check: the failure mode it guards
+    against (an unconverged interior-point run accepted by lenient mode) often
+    returns small positive dispatch everywhere — e.g. the cheapest carrier at
+    0.5% of demand — which a "supply == 0" test waves through.
+    Returns ``(count, total_snapshots, first, last, worst_served_share)``.
 
     Supply counts generator dispatch plus storage/store discharge, so a system
-    that leans on storage is not mistaken for a failed solve.
+    that leans on storage is not mistaken for a failed solve. Link losses and
+    charging only ever ADD to the generation a valid point needs, so requiring
+    supply >= load never rejects a genuine solution.
     """
     try:
         load = network.get_switchable_as_dense("Load", "p_set").clip(lower=0.0).sum(axis=1)
@@ -138,13 +157,15 @@ def _supply_gap(network: Any) -> tuple[int, int, Any, Any] | None:
         supply = supply.add(network.storage_units_t.p.clip(lower=0.0).sum(axis=1), fill_value=0.0)
     if hasattr(network, "stores_t") and not network.stores_t.p.empty:
         supply = supply.add(network.stores_t.p.clip(lower=0.0).sum(axis=1), fill_value=0.0)
-    tol = 1e-6
-    suspect = (supply.reindex(load.index).fillna(0.0) <= tol) & (load > tol)
+    supply = supply.reindex(load.index).fillna(0.0)
+    required = (load * (1.0 - _SUPPLY_GAP_REL_TOL) - _SUPPLY_GAP_ABS_TOL_MW).clip(lower=0.0)
+    suspect = (supply < required) & (load > _SUPPLY_GAP_ABS_TOL_MW)
     count = int(suspect.sum())
     if count == 0:
         return None
     idx = load.index[suspect]
-    return count, int(len(load)), idx[0], idx[-1]
+    served = float((supply[suspect] / load[suspect]).min())
+    return count, int(len(load)), idx[0], idx[-1], served
 
 
 def _rolling_suspect_note(network: Any) -> str | None:
@@ -159,14 +180,14 @@ def _rolling_suspect_note(network: Any) -> str | None:
     gap = _supply_gap(network)
     if gap is None:
         return None
-    count, _total, first, last = gap
+    count, _total, first, last, served = gap
     return (
         f"Rolling horizon: {count} snapshot(s) between {first} and {last} "
-        "have positive load but zero recorded supply — at least one rolling "
-        "window likely failed to solve (PyPSA only logs a warning and leaves a "
-        "failed window's results empty). Treat results in that range as "
-        "unreliable; try a longer horizon/overlap or check that every window "
-        "is individually feasible."
+        f"cover as little as {served:.1%} of their load with recorded supply — "
+        "at least one rolling window likely failed to solve (PyPSA only logs a "
+        "warning and leaves a failed window's results empty). Treat results in "
+        "that range as unreliable; try a longer horizon/overlap or check that "
+        "every window is individually feasible."
     )
 
 
@@ -608,12 +629,13 @@ def run_pypsa(
         if not rolling.enabled:
             gap = _supply_gap(network)
             if gap is not None:
-                count, total, first, last = gap
+                count, total, first, last, served = gap
                 raise HTTPException(
                     status_code=400,
                     detail=(
                         f"Solver returned an infeasible result: {count} of {total} snapshot(s) "
-                        f"have positive load but zero supply (between {first} and {last}). "
+                        f"cover as little as {served:.1%} of their load with supply "
+                        f"(between {first} and {last}). "
                         "Load must be met in every snapshot, so this is not a valid solution — "
                         f"the solver reported status='{solve_status}', condition='{solve_condition}', "
                         "which is typical of an interior-point run that skipped crossover. "

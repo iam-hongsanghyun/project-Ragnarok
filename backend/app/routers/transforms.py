@@ -520,6 +520,29 @@ def _transform_build_options(options: dict[str, Any] | None) -> dict[str, Any]:
     return out
 
 
+def _require_cluster_count(busmap: "pd.Series", n_clusters: int) -> None:
+    """Fail loudly when clustering could not reach the requested cluster count.
+
+    Greedy modularity communities cannot always merge down to ``n_clusters``
+    (observed: an edgeless graph — a link-only model — returns one singleton
+    community per bus, i.e. NO reduction at all). Returning that as success is
+    how a "reduced" model silently comes back unchanged; the achieved count must
+    match what the user asked for or the transform is not the one they ordered.
+    """
+    achieved = int(busmap.nunique())
+    if achieved > n_clusters:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Modularity clustering could only reach {achieved} clusters, not the "
+                f"requested {n_clusters} — greedy modularity merges along the LINE graph "
+                "and cannot always reach a target below its community structure. "
+                f"Reduce to at least {achieved} clusters, or use 'kmeans' "
+                "(clusters by coordinates, ignoring topology)."
+            ),
+        )
+
+
 def _counts(network: pypsa.Network) -> dict[str, int]:
     return {
         "buses": len(network.buses),
@@ -614,9 +637,26 @@ def cluster_model(
                 bus_weightings=weightings, n_clusters=n_clusters
             )
         elif method == "modularity":
+            # Greedy modularity communities are built over the LINE graph only —
+            # PyPSA never adds links as edges. On a link-only network (HVDC /
+            # transport-model workbooks, e.g. a Korean grid modelled entirely as
+            # links) the graph is edgeless, every bus is its own community, and
+            # the "reduction" silently returns the network unchanged. Refuse
+            # up-front with the actual reason rather than no-op.
+            if network.lines.empty:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Modularity clustering groups buses over the LINE graph, and this "
+                        "model has no lines (its grid is modelled as links) — the result "
+                        "would be no reduction at all. Use the 'kmeans' method (groups by "
+                        "bus coordinates), group by a bus column, or 'single'."
+                    ),
+                )
             busmap = network.cluster.spatial.busmap_by_greedy_modularity(
                 n_clusters=n_clusters
             )
+            _require_cluster_count(busmap, n_clusters)
         else:
             raise HTTPException(
                 status_code=400,

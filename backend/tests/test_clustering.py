@@ -714,3 +714,52 @@ def test_serialized_model_has_no_non_finite_numbers() -> None:
     assert "p_nom_max" not in model["generators"][0]
     rebuilt, _ = build_network(model, SCENARIO, {})
     assert rebuilt.generators["p_nom_max"].iloc[0] == float("inf")
+
+
+# ── Modularity must refuse rather than silently no-op ────────────────────────
+#
+# Greedy modularity communities are built over the LINE graph only; PyPSA never
+# adds links as edges. Regression: a 216-bus Korean grid workbook modelled
+# entirely as links "reduced" to 216 singleton clusters — the model came back
+# unchanged and the app reported success.
+
+def _link_only_model(n_buses: int = 4) -> dict[str, list[dict[str, Any]]]:
+    m = _path_model(n_buses)
+    lines = m.pop("lines")
+    m["links"] = [
+        {"name": f"L{r['name']}", "bus0": r["bus0"], "bus1": r["bus1"],
+         "p_nom": 500.0, "efficiency": 0.95}
+        for r in lines
+    ]
+    return m
+
+
+def test_modularity_refuses_link_only_networks() -> None:
+    with pytest.raises(HTTPException) as exc:
+        cluster_model(_link_only_model(), n_clusters=2, method="modularity", scenario=SCENARIO)
+    assert exc.value.status_code == 400
+    assert "no lines" in exc.value.detail
+    assert "kmeans" in exc.value.detail
+
+
+def test_cluster_count_guard_rejects_a_partial_reduction() -> None:
+    # The R11-observed failure shape: greedy modularity hands back one singleton
+    # community per bus (216 "clusters" for a requested 5). The guard must turn
+    # that silent no-op into an explicit 400.
+    import pandas as pd
+    from backend.app.routers.transforms import _require_cluster_count
+    singletons = pd.Series({f"b{i}": str(i) for i in range(216)})
+    with pytest.raises(HTTPException) as exc:
+        _require_cluster_count(singletons, 5)
+    assert exc.value.status_code == 400
+    assert "216" in exc.value.detail and "5" in exc.value.detail
+    # Reaching the target (or better) is not an error.
+    _require_cluster_count(pd.Series({"a": "x", "b": "x", "c": "y"}), 2)
+    _require_cluster_count(pd.Series({"a": "x", "b": "x"}), 2)
+
+
+def test_kmeans_still_reduces_link_only_networks() -> None:
+    # The error message points link-only models at kmeans — kmeans must in fact
+    # work there (it clusters coordinates and ignores topology).
+    res = cluster_model(_link_only_model(4), n_clusters=2, method="kmeans", scenario=SCENARIO)
+    assert res["after"]["buses"] == 2
