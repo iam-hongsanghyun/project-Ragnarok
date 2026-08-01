@@ -234,6 +234,10 @@ class RagnarokClient:
         (missing buses, dangling refs, bad snapshots)."""
         return await self._post("/api/validate", {"sessionId": self.session_id})
 
+    async def model_check(self) -> Any:
+        """Back-brief + trap findings, read from the model (no solve, no mutation)."""
+        return await self._post("/api/model-check", {"sessionId": self.session_id})
+
     # ── forge query & edit (bulk conditional edit) ─────────────────────────────
     async def forge_query(self, apply: bool, req: dict[str, Any]) -> Any:
         """Preview or apply a Forge Query & Edit. ``req`` is the full

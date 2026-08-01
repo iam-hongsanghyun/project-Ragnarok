@@ -49,6 +49,7 @@ import {
   AnalyticsSubTab,
   QueueJob,
 } from 'lib/types';
+import { isEmbedded, listenForShowRequests } from 'lib/embedHost';
 import { API_BASE, DEFAULT_CONSTRAINTS, getDefaultRowForSheet, getNewRowDefaults, RUN_WINDOW, SHEETS } from 'lib/constants';
 import { canonicalizeOutputSeries, canonicalizeTemporalRows, createEmptyWorkbook, normalizeInputDatesToIso, parseWorkbook } from 'lib/workbook/workbook';
 import { mergeWorkbookFragment } from 'lib/workbook/mergeFragment';
@@ -323,6 +324,25 @@ function AppInner() {
     try { window.localStorage.setItem(key, JSON.stringify(section)); } catch { /* ignore */ }
     setTab(dest);
   }, []);
+  // An embedding host (Bifrost's Ragnarok tab) asking us to show something. The
+  // agent can then point at the map instead of describing where to look. The
+  // listener validates origin and whitelists the tab; `select` is data the view
+  // interprets, never a selector or a URL. See lib/embedHost.
+  useEffect(() => {
+    if (!isEmbedded()) return undefined;
+    return listenForShowRequests(({ tab: dest, select, view }) => {
+      if (select) {
+        // Seeded the same way handleSettingsNavigate seeds a section: the
+        // destination view reads it on mount rather than us reaching into it.
+        try { window.localStorage.setItem('ui:embed-select', JSON.stringify(select)); } catch { /* ignore */ }
+      }
+      if (view && dest === 'Model') {
+        try { window.localStorage.setItem('ui:model-subtab', JSON.stringify(view)); } catch { /* ignore */ }
+      }
+      setTab(dest);
+    });
+  }, []);
+
   // Ctrl/Cmd+Z / Ctrl+Y (or Shift+Z) undo-redo for model edits, only on the
   // Model/Build tabs and never while a text field is focused (so it doesn't
   // hijack native input undo).

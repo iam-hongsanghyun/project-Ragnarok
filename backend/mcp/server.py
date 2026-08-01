@@ -1308,6 +1308,26 @@ async def validate_model() -> Any:
 
 @mcp.tool(
     annotations=_RO,
+    description=(
+        "Answer 'is this the model I asked for?' by READING the model back. Returns a "
+        "back-brief (component counts, load peak and energy, each generator's capacity "
+        "and marginal cost, what is extendable, the snapshot span) plus findings for the "
+        "traps that read as fine and are not: a temporal sheet misaligned to `snapshots` "
+        "(uncovered hours solve as ZERO while the run reports Optimal), p_set pinning a "
+        "generator, p_min_pu without unit commitment, extendable capacity with no capital "
+        "cost, a non-finite lifetime, isolated buses, no load, load shedding present. "
+        "Use it after building or changing a model and BEFORE reporting results — and "
+        "quote the back-brief to the user rather than your own account of what you did, "
+        "because the whole value is that this can disagree with your intent. Findings are "
+        "observations, not errors: several are legitimate when deliberate."
+    ),
+)
+async def check_model() -> Any:
+    return await get_client().model_check()
+
+
+@mcp.tool(
+    annotations=_RO,
     description="Per-column statistics for an input sheet (count, nulls, min/max/mean/median/std/quartiles/histogram; top values for categoricals). Characterise a sheet without paging its raw rows into context. Optional comma-separated 'columns' to restrict.",
 )
 async def get_sheet_stats(name: str, columns: str | None = None) -> Any:

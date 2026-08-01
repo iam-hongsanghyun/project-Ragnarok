@@ -1152,6 +1152,18 @@ def validate_case(payload: RunPayload) -> dict[str, Any]:
     return validate_model(_resolve_payload_model(payload))
 
 
+@app.post("/api/model-check")
+def model_check_case(payload: RunPayload) -> dict[str, Any]:
+    """Back-brief + trap findings, read from the model. Changes nothing.
+
+    Answers "did I build what I meant?" from the workbook rather than from anyone's
+    account of it — see :mod:`backend.pypsa.model_check`.
+    """
+    from ..pypsa.model_check import check_model
+
+    return check_model(_resolve_payload_model(payload))
+
+
 @app.post("/api/run")
 async def start_run(payload: RunPayload) -> dict[str, Any]:
     """

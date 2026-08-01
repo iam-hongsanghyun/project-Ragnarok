@@ -237,7 +237,11 @@ def _install(monkeypatch, autonomy: str = "guided") -> FakeClient:
 def test_tool_catalog_and_annotations() -> None:
     tools = asyncio.run(mcp.list_tools())
     by_name = {t.name: t for t in tools}
-    assert len(tools) == 77, f"expected 77 tools, got {len(tools)}"
+    assert len(tools) == 78, f"expected 78 tools, got {len(tools)}"
+    # check_model: reads the model back so "is this what I asked for?" can be
+    # answered against the model rather than against the agent's account of it.
+    assert "check_model" in by_name
+    assert by_name["check_model"].annotations.readOnlyHint is True
     # adjust_carrier_capacity is a gated (destructive) transform tool
     assert "adjust_carrier_capacity" in by_name
     assert by_name["adjust_carrier_capacity"].annotations.readOnlyHint is False
@@ -265,6 +269,7 @@ def test_tool_catalog_and_annotations() -> None:
 
     ro = {t.name for t in tools if t.annotations and t.annotations.readOnlyHint}
     assert ro == {
+        "check_model",
         "list_importers",
         "source_health",
         "get_world_state",
