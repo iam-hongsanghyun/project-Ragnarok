@@ -114,9 +114,27 @@ def test_asset_swap_sized_replacement_is_solved_not_copied() -> None:
     Solar at 90 % peak availability cannot cover the 160 MW evening peak, so the
     optimiser builds strictly less than the 3× ceiling but more than nothing —
     a number no pre-solve arithmetic produces.
+
+    The fixture's own 90,000/MW cannot produce that, and the reason is a units
+    mismatch rather than a bug. `_replacement_row` treats the inherited
+    `capital_cost` as an ANNUAL cost (it writes cap_cost/AF precisely so that
+    build_network's annuitisation returns it), while 1 MW of solar displaces only
+    2.6 MWh of 300/MWh backup across this SIX-HOUR window — worth 780. Against
+    90,000/year, building nothing is the correct answer, so the interior solution
+    this test describes cannot exist at that price.
+
+    Capex is annual and the window is not a year. Rather than scale the window and
+    change what is under test, the capex is set to a figure commensurate with it.
+    Marginal value per MW falls 780 → 570 → 300 → 120 as saturation bites against
+    load/pu, so at 300/MW/year the build stops around 200 MW: strictly inside the
+    600 MW ceiling, and a number no pre-solve arithmetic produces.
     """
+    model = _model()
+    for gen in model["generators"]:
+        if gen["name"] == "solar0":
+            gen["capital_cost"] = 300.0
     res = run_pypsa(
-        _model(), SCENARIO,
+        model, SCENARIO,
         {"assetSwapConfig": {
             "enabled": True, "addCarrier": "solar",
             "removeFilters": [{"field": "carrier", "values": ["gas"]}],

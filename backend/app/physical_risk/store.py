@@ -133,10 +133,14 @@ class _DaemonThreadPoolExecutor(ThreadPoolExecutor):
     exit, so a Ctrl-C / ``uvicorn --reload`` / SIGTERM taken during a real run
     would hang shutdown for up to the worker timeout (default 900s). Daemon
     threads are not joined, so shutdown is immediate; the killed run's ``queued``
-    doc resurfaces as an error on the next start. Overrides ``_adjust_thread_count``
-    (CPython 3.11–3.13 internals: ``_worker(executor_reference, work_queue,
-    initializer, initargs)`` + ``_threads_queues``), falling back to the default
-    non-daemon behaviour if those internals ever change.
+    doc resurfaces as an error on the next start.
+
+    This overrides ``_adjust_thread_count`` and therefore tracks CPython internals:
+    ``_worker(ref, work_queue, initializer, initargs)`` up to 3.13, and
+    ``_worker(ref, ctx, work_queue)`` from 3.14. Both are handled; anything else
+    falls back to the stdlib's non-daemon behaviour rather than breaking the pool.
+    ``test_pool_threads_are_daemon`` is what catches the next signature change —
+    the fallback is silent by design, so only the test reveals it.
     """
 
     def _adjust_thread_count(self) -> None:
@@ -151,13 +155,18 @@ class _DaemonThreadPoolExecutor(ThreadPoolExecutor):
             if num >= self._max_workers:
                 return
             name = f"{self._thread_name_prefix or self}_{num}"
-            t = threading.Thread(
-                name=name,
-                target=_cf_thread._worker,
-                args=(weakref.ref(self, _weakref_cb), self._work_queue,
-                      self._initializer, self._initargs),
-                daemon=True,
-            )
+            ref = weakref.ref(self, _weakref_cb)
+            # CPython 3.14 replaced `_worker(ref, queue, initializer, initargs)`
+            # with `_worker(ref, ctx, queue)`, where ctx comes from
+            # `_create_worker_context()`. The old call raised TypeError, the except
+            # below swallowed it, and the pool silently reverted to NON-daemon
+            # threads — losing the shutdown guarantee this class exists to provide,
+            # with nothing failing loudly to say so.
+            if hasattr(self, "_create_worker_context"):
+                args: tuple[Any, ...] = (ref, self._create_worker_context(), self._work_queue)
+            else:
+                args = (ref, self._work_queue, self._initializer, self._initargs)
+            t = threading.Thread(name=name, target=_cf_thread._worker, args=args, daemon=True)
             t.start()
             self._threads.add(t)
             _cf_thread._threads_queues[t] = self._work_queue

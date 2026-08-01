@@ -161,3 +161,40 @@ def test_end_to_end_starved_budget_explains_annual_convention() -> None:
     assert "ANNUAL budget" in detail
     assert "8000" in detail and "21.9" in detail  # annual figure + scaled figure
     assert "8760" in detail  # the suggested fix explains the convention
+
+
+def test_capacity_shortfall_does_not_blame_the_solver_method() -> None:
+    """The misdirection this gate used to produce.
+
+    The energy-balance gate exists for one cause — an interior-point run that
+    skipped crossover and returned an all-zeros point — and it stated that cause as
+    the explanation. A model that is simply short of capacity trips the same gate,
+    and was then told to switch to simplex: a setting that cannot possibly help,
+    because the shortfall is in the model. The diagnosis must lead, and the
+    crossover hypothesis must only appear when the solver claimed success.
+    """
+    from fastapi import HTTPException
+
+    from backend.pypsa.results import run_pypsa
+
+    snaps = ["2030-01-01T00:00:00", "2030-01-01T01:00:00"]
+    model = {
+        "buses": [{"name": "b"}],
+        "carriers": [{"name": "gas"}],
+        "snapshots": [{"snapshot": s} for s in snaps],
+        "loads": [{"name": "L", "bus": "b", "p_set": 100}],
+        "loads-p_set": [{"snapshot": s, "L": 200.0} for s in snaps],
+        "generators": [{"name": "gas1", "bus": "b", "carrier": "gas",
+                        "p_nom": 120, "marginal_cost": 50}],
+    }
+    with pytest.raises(HTTPException) as ei:
+        run_pypsa(model, {"discountRate": 0.0, "carbonPrice": 0.0}, {})
+    detail = str(ei.value.detail)
+
+    # It says what is actually wrong, and how much.
+    assert "Capacity shortfall" in detail
+    assert "120" in detail  # the capacity that fell short
+
+    # And it does NOT send the user to a solver setting that cannot help.
+    assert "simplex" not in detail.lower()
+    assert "crossover" not in detail.lower()

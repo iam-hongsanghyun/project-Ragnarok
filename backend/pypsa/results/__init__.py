@@ -630,19 +630,49 @@ def run_pypsa(
             gap = _supply_gap(network)
             if gap is not None:
                 count, total, first, last, served = gap
+                # WHY the load is unserved comes before HOW the solver reported it.
+                #
+                # This gate was written for one cause — an interior-point run that
+                # skipped crossover and handed back an all-zeros point — and it
+                # presented that cause as the explanation. But a model that is
+                # simply short of capacity trips the same gate, and then the
+                # message sent that user to Settings → Solver → simplex, which
+                # cannot help: the shortfall is in their model, not the solver.
+                # `diagnose_infeasibility` already knows how to name the deficit,
+                # the starved budget and the component responsible, so lead with it.
+                diagnosis = ""
+                try:
+                    from .diagnostics import diagnose_infeasibility, diagnosis_text
+
+                    diag = diagnose_infeasibility(network, currency=currency)
+                    diagnosis = f" {diag['headline']}.\n{diagnosis_text(diag)}\n"
+                except Exception:  # diagnostics must never mask the real error
+                    _log.exception("Infeasibility diagnosis failed for the supply-gap gate")
+                # The crossover hypothesis is only worth raising when the solver
+                # CLAIMED success. If it said infeasible, it meant it, and
+                # suggesting a different method would be misdirection.
+                claimed_success = (
+                    solve_status.lower() in ("ok", "warning")
+                    and solve_condition not in ("infeasible", "unbounded", "infeasible_or_unbounded")
+                )
+                solver_note = (
+                    f"The solver reported status='{solve_status}', "
+                    f"condition='{solve_condition}', which is typical of an "
+                    "interior-point run that skipped crossover — if the model looks "
+                    "sound, re-run with Settings → Solver → Method = 'simplex' (or "
+                    "Solution acceptance = 'Strict') to confirm."
+                    if claimed_success
+                    else f"The solver reported status='{solve_status}', "
+                         f"condition='{solve_condition}'."
+                )
                 raise HTTPException(
                     status_code=400,
                     detail=(
                         f"Solver returned an infeasible result: {count} of {total} snapshot(s) "
                         f"cover as little as {served:.1%} of their load with supply "
                         f"(between {first} and {last}). "
-                        "Load must be met in every snapshot, so this is not a valid solution — "
-                        f"the solver reported status='{solve_status}', condition='{solve_condition}', "
-                        "which is typical of an interior-point run that skipped crossover. "
-                        "Re-run with Settings → Solver → Method = 'simplex' (or Solution "
-                        "acceptance = 'Strict'), and if it is then reported infeasible, the model "
-                        "genuinely cannot serve its load — check capacity, p_nom_max and any "
-                        "binding constraints."
+                        "Load must be met in every snapshot, so this is not a valid "
+                        f"solution.{diagnosis} {solver_note}"
                     ),
                 )
         # Gate the result per the user's "Solution acceptance" solver setting
