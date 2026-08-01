@@ -113,6 +113,8 @@ import {
 } from 'lib/training/progress';
 import { ActivityBar } from './layout/ActivityBar';
 import { isTabModule, parseEnabledModules } from './modules/registry';
+import { useExternalModules } from './modules/external/useExternalModules';
+import { ExternalModuleHost } from './modules/external/ExternalModuleHost';
 import { useModelIssues } from './features/validation/useModelIssues';
 import { useFrontendPlugins } from './features/plugins/frontendPlugins';
 import { ToastProvider, useToast } from './shared/components/Toast';
@@ -149,6 +151,11 @@ function stripSeriesSheets(model: WorkbookModel): WorkbookModel {
 }
 
 const XLSX_MEDIA_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+/** Tabs that are neither built-in modules nor external ones — always valid. */
+const KNOWN_CORE_TABS: ReadonlySet<string> = new Set([
+  'Welcome', 'Build', 'Model', 'Market', 'Settings', 'Analytics', 'History', 'Plugins',
+]);
 
 /**
  * Fill a browser model's MISSING time-series sheets from the session's copy.
@@ -472,12 +479,23 @@ function AppInner() {
     () => parseEnabledModules(settings.enabledModules),
     [settings.enabledModules],
   );
+  // External tab-modules (Settings → Modules → Add): third-party MODULES — a
+  // whole tab from a user-picked directory or .zip. Distinct from plugins.
+  const externalModules = useExternalModules();
+  const activeExternalModule = externalModules.installed.find(
+    (m) => m.enabled && m.manifest.id === tab,
+  ) ?? null;
   // A disabled module's tab must be unreachable even when something navigates
   // there programmatically (a resumed walkthrough, a cross-tab link): bounce
-  // to Welcome rather than render a tab the bar doesn't show.
+  // to Welcome rather than render a tab the bar doesn't show. Same for an
+  // external module that was removed or disabled.
   useEffect(() => {
+    const knownExternal = externalModules.installed.some(
+      (m) => m.enabled && m.manifest.id === tab,
+    );
     if (isTabModule(tab) && !enabledModules.has(tab)) setTab('Welcome');
-  }, [tab, enabledModules]);
+    else if (!isTabModule(tab) && !KNOWN_CORE_TABS.has(tab) && !knownExternal) setTab('Welcome');
+  }, [tab, enabledModules, externalModules.installed]);
   const [scenarioCatalog, setScenarioCatalog] = useState<ScenarioCatalog>(() => defaultScenarioCatalog({
     snapshotStart: RUN_WINDOW.initialSnapshotStart,
     snapshotEnd: RUN_WINDOW.defaultSnapshotEnd,
@@ -1794,6 +1812,20 @@ function AppInner() {
       const { importCsvFolderZip } = await import('lib/workbook/csvFolder');
       const { model: nextModel, unknownFiles, importedSheets } = await importCsvFolderZip(file);
       normalizeInputDatesToIso(nextModel, settings.dateFormat);
+      // Refuse an import that produced no components — the same guard Open and
+      // Import Project already have. A .zip that isn't a PyPSA CSV folder
+      // otherwise parsed to nothing and REPLACED the working model (and the
+      // backend session) with an empty one: a silent, unrecoverable wipe.
+      if (countComponentRows(nextModel) === 0) {
+        const detail = unknownFiles.length
+          ? ` It contains ${unknownFiles.length} file(s) that are not PyPSA component CSVs.`
+          : '';
+        throw new Error(
+          `${file.name} has no PyPSA component data, so it was not imported —`
+          + ` the current model is untouched.${detail}`
+          + ' A CSV folder export contains one .csv per component sheet (buses.csv, generators.csv, …).',
+        );
+      }
       resetForNewModel(nextModel, file.name.replace(/\.zip$/i, '.xlsx'));
       const note = unknownFiles.length
         ? ` (${unknownFiles.length} unknown file${unknownFiles.length === 1 ? '' : 's'} skipped)`
@@ -3352,8 +3384,11 @@ function AppInner() {
             </button>
           )}
           <span className="topbar-file" title={filename}>{filename}</span>
-          {displayResults && (
-            <span className="topbar-run-meta">{displayResults.runMeta.snapshotCount} snaps · {Number(displayResults.runMeta.snapshotWeight.toFixed(2))}h</span>
+          {/* runMeta is absent on reconstructed bundles (imported projects /
+              light restored runs) — an unguarded read here crashed the whole
+              app at boot when such a run was the restored one. */}
+          {displayResults?.runMeta && (
+            <span className="topbar-run-meta">{displayResults.runMeta.snapshotCount} snaps · {Number((displayResults.runMeta.snapshotWeight ?? 1).toFixed(2))}h</span>
           )}
           <span className="topbar-status" title={status}>{status}</span>
         </div>
@@ -3366,6 +3401,14 @@ function AppInner() {
           validateResult={validateResult}
           pluginCount={frontendPlugins.installed.length}
           enabledModules={enabledModules}
+          externalEntries={externalModules.installed
+            .filter((m) => m.enabled)
+            .map((m) => ({
+              id: m.manifest.id,
+              label: m.manifest.label,
+              hint: m.manifest.hint ?? m.manifest.label,
+              order: m.manifest.order ?? 200,
+            }))}
         />
         <div className="workspace-main">
 
@@ -3489,6 +3532,7 @@ function AppInner() {
               onQueuePollSecondsChange={(v) => updateSettings({ queuePollSeconds: v })}
               enabledModules={settings.enabledModules}
               onEnabledModulesChange={(csv) => updateSettings({ enabledModules: csv })}
+              externalModules={externalModules}
               onCarrierColorChange={(rowIndex, color) => updateRowValue('carriers', rowIndex, 'color', color)}
               onCarrierReorder={(fromIndex, toIndex) => reorderRow('carriers', fromIndex, toIndex)}
               lineCount={model.lines.length}
@@ -3733,6 +3777,10 @@ function AppInner() {
               onCustomDslChange={setCustomDsl}
               results={displayResults}
             />
+          )}
+
+          {activeExternalModule && (
+            <ExternalModuleHost key={activeExternalModule.manifest.id} module={activeExternalModule} />
           )}
 
           {tab === 'Training' && enabledModules.has('Training') && (

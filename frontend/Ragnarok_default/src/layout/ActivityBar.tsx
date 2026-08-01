@@ -30,6 +30,9 @@ interface Props {
   pluginCount: number;
   /** Module tabs to show (Settings → Modules). Core tabs ignore this. */
   enabledModules: ReadonlySet<TabModuleId>;
+  /** Enabled EXTERNAL tab-modules (Settings → Modules → Add module). They get
+   *  a shared generic glyph — their code ships no icon by design. */
+  externalEntries: ReadonlyArray<{ id: string; label: string; hint: string; order: number }>;
 }
 
 interface Entry {
@@ -105,11 +108,21 @@ const CORE_ENTRIES: Entry[] = [
   },
 ];
 
-export function ActivityBar({ tab, onTabChange, validateResult, pluginCount, enabledModules }: Props) {
+// Generic glyph for external tab-modules — a hexagonal node (a unit that
+// docks into the app). Shared by all of them; module code carries no icon.
+const EXTERNAL_ICON = lineIcon(<>
+  <path d="M10 3 15.6 6.3v6.6L10 16.2 4.4 12.9V6.3Z" />
+  <circle cx="10" cy="9.8" r="1.7" />
+</>);
+
+export function ActivityBar({ tab, onTabChange, validateResult, pluginCount, enabledModules, externalEntries }: Props) {
   const entries: Entry[] = [
     ...CORE_ENTRIES,
     ...TAB_MODULES.filter((m) => enabledModules.has(m.id)).map((m) => ({
       id: m.id, label: m.label, hint: m.hint, icon: m.icon, order: m.order,
+    })),
+    ...externalEntries.map((m) => ({
+      id: m.id as WorkspaceTab, label: m.label, hint: m.hint, icon: EXTERNAL_ICON, order: m.order,
     })),
   ].sort((a, b) => a.order - b.order);
 

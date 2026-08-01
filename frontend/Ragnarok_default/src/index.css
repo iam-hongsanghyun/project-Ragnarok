@@ -6994,9 +6994,25 @@ th:hover .col-delete-btn {
   display: inline-flex;
   margin-top: 1px;
 }
-.settings-modules-text { display: flex; flex-direction: column; gap: 2px; }
+.settings-modules-text { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; }
 .settings-modules-name { font-weight: 600; font-size: 0.85rem; }
+.settings-modules-id { font-weight: 400; color: var(--muted); font-family: var(--font-mono); font-size: 0.75rem; }
 .settings-modules-desc { font-size: 0.78rem; color: var(--muted); line-height: 1.45; }
+.settings-modules-empty { font-size: 0.8rem; color: var(--muted); }
+.settings-modules-error { font-size: 0.8rem; color: #b91c1c; }
+
+/* External tab-module host — the module owns everything inside the mount. */
+.external-module-view { height: 100%; overflow: auto; }
+.external-module-mount { height: 100%; }
+.external-module-error {
+  margin: 20px 28px;
+  padding: 14px 18px;
+  border: 1px solid #fca5a5;
+  background: #fef2f2;
+  max-width: 640px;
+}
+.external-module-error h3 { margin: 0 0 6px; font-size: 0.9rem; }
+.external-module-error p { margin: 4px 0; font-size: 0.8rem; color: var(--muted); }
 
 /* Plugins view shares .view-rail / .view-main */
 .plugins-view { /* inherits .view */ }

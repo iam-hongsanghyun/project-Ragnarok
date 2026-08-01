@@ -1,0 +1,8 @@
+{
+  "id": "hello-tab",
+  "label": "Hello Module",
+  "hint": "Example external tab-module",
+  "description": "Minimal external tab-module: reads the working session and run history through the backend API, and shows how a module submits a solve — the same reach a native tab has.",
+  "order": 130,
+  "entry": "index.js"
+}

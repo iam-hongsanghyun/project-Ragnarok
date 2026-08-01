@@ -314,6 +314,9 @@ export interface SettingsViewProps {
    *  TabModuleIds — see src/modules/registry). Core tabs are not listed. */
   enabledModules: string;
   onEnabledModulesChange: (csv: string) => void;
+  /** External tab-modules (installed from a directory/.zip) — see
+   *  src/modules/external. */
+  externalModules: import('../modules/external/useExternalModules').ExternalModulesApi;
 }
 
 export function SettingsView(props: SettingsViewProps) {

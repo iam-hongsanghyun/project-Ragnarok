@@ -3,7 +3,7 @@
 Ragnarok is a local browser-based GUI for building and solving PyPSA power-system
 models (React + TypeScript frontend, FastAPI + PyPSA + linopy backend, HiGHS solver).
 
-The manual is five documents:
+The manual is six documents:
 
 | # | Document | For |
 |---|---|---|
@@ -12,6 +12,7 @@ The manual is five documents:
 | 3 | [backend.md](./backend.md) | Backend details: HTTP API, solve pipeline, network build, results, modes, constraints, utils |
 | 4 | [frontend.md](./frontend.md) | Frontend details: App state, views, features, the plugin host, shared utils and types |
 | 5 | [plugin.md](./plugin.md) | Building a plugin (frontend JS or backend Python): manifest, GUI schema, hooks, own local server, constraint flow, examples |
+| 6 | [module.md](./module.md) | Modules: core vs module tabs, configuring them in Settings → Modules, and authoring a module (a whole tab, first- or third-party) |
 
 Supporting material:
 

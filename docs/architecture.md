@@ -901,6 +901,13 @@ tab. Modules can be first-party (compiled in, the table above) or third-party
 through the same tab-module registry and are managed from Settings → Modules. The two
 vocabularies stay disjoint on purpose.
 
+External modules are added by the user from a directory or `.zip`: a
+`tabmodule.json` manifest plus a CommonJS entry exporting `mount(el, ctx)`, where
+`ctx` carries the backend API base and session id — the same reach a native tab has
+(read the model, submit runs, read analytics). See
+[module.md](./module.md) for the full contract, and `src/modules/external/` for the
+store, host and manager.
+
 Direction of travel: tabs consume App state today (prop-drilled); the plan is to move
 module tabs onto a typed ModuleContext so each module folder owns its state and API
 calls — the same context an external module receives — with core tabs staying as they

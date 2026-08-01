@@ -30,6 +30,7 @@ All documentation lives in [docs/](./docs/) (start at the [docs index](./docs/RE
 | [docs/backend.md](./docs/backend.md) | Backend details: HTTP API, solve pipeline, network build, results, modes, constraints |
 | [docs/frontend.md](./docs/frontend.md) | Frontend details: App state, views, features, plugin host, shared utils/types |
 | [docs/plugin.md](./docs/plugin.md) | Building a plugin (frontend JS or backend Python): manifest, GUI schema, hooks, own server, examples |
+| [docs/module.md](./docs/module.md) | Modules: core vs module tabs, Settings → Modules, and authoring a module (a whole tab, first- or third-party) |
 | [docs/SUPPORT_MATRIX.md](./docs/SUPPORT_MATRIX.md) | Generated feature support matrix |
 | [docs/TODO.md](./docs/TODO.md) | Living project task log and roadmap |
 
