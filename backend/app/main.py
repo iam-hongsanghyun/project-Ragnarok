@@ -1152,6 +1152,24 @@ def validate_case(payload: RunPayload) -> dict[str, Any]:
     return validate_model(_resolve_payload_model(payload))
 
 
+@app.get("/api/identity")
+def identity() -> dict[str, Any]:
+    """Which Ragnarok checkout is this, so a client can refuse the wrong one.
+
+    A host that finds *something* answering on the conventional port cannot tell
+    whether it is the checkout it was configured for. Bifrost adopted a second
+    clone of this repo that way — same API, different code, different data
+    directory — and the mismatch surfaced as "my model is not there" rather than
+    as a connection error. Reporting the served root makes that checkable.
+    """
+    return {
+        "app": "ragnarok",
+        "root": str(_REPO_ROOT),
+        "dataDir": str(_REPO_ROOT / "backend" / "data"),
+        "frontendDist": str(_FRONTEND_DIST),
+    }
+
+
 @app.post("/api/model-check")
 def model_check_case(payload: RunPayload) -> dict[str, Any]:
     """Back-brief + trap findings, read from the model. Changes nothing.
