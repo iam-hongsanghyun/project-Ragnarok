@@ -50,6 +50,7 @@ import {
   QueueJob,
 } from 'lib/types';
 import { isEmbedded, listenForShowRequests } from 'lib/embedHost';
+import { useSessionSync } from 'shared/hooks/useSessionSync';
 import { API_BASE, DEFAULT_CONSTRAINTS, getDefaultRowForSheet, getNewRowDefaults, RUN_WINDOW, SHEETS } from 'lib/constants';
 import { canonicalizeOutputSeries, canonicalizeTemporalRows, createEmptyWorkbook, normalizeInputDatesToIso, parseWorkbook } from 'lib/workbook/workbook';
 import { mergeWorkbookFragment } from 'lib/workbook/mergeFragment';
@@ -1076,6 +1077,36 @@ function AppInner() {
     if (saved) resetForNewModel(saved, undefined, { pushToSession: false });
     await refreshSeriesCounts();
   }, [resetForNewModel, refreshSeriesCounts]);
+
+  // Mount with an EMPTY editor while the session already holds a model — the tab
+  // was opened after the agent built it, or Bifrost activated a conversation
+  // before this frame existed. Strictly additive: it only fires when there is
+  // nothing in the editor to lose.
+  const hydratedOnce = useRef(false);
+  useEffect(() => {
+    if (hydratedOnce.current) return;
+    hydratedOnce.current = true;
+    void (async () => {
+      if ((model.buses?.length ?? 0) > 0) return;
+      const meta = await getSessionMeta().catch(() => null);
+      const rows = meta?.sheets?.reduce((n, sheet) => n + (sheet.rowCount ?? 0), 0) ?? 0;
+      if (rows > 0) await reloadSessionModel();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Someone ELSE changed the session — an agent over MCP, or Bifrost loading a
+  // conversation's project. The browser's static workbook is a mirror, and until
+  // now nothing refreshed it, so the agent's five buses sat in the session while
+  // the Bus grid read 0 rows. Temporal sheets hid the problem by being fetched
+  // live, which made it look like a partial write rather than a stale mirror.
+  useSessionSync((event) => {
+    void (async () => {
+      await reloadSessionModel();
+      const what = event.summary || event.kind || 'the model';
+      showToast(`Reloaded — ${event.actor === 'agent' ? 'the agent' : 'another client'} changed ${what}`, 'info');
+    })();
+  });
 
   // Forge → Query & edit. Sync the browser's static edits to the session first
   // (server-side joins/filters read the full model there), then run the query.
