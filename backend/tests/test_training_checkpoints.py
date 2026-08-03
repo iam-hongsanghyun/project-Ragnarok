@@ -306,12 +306,105 @@ def test_module_4_step_8_placement_is_worth_more_than_the_battery(tmp_path: Path
     assert float(n.objective - at_demand.objective) == pytest.approx(1_043.2, abs=1e-2)
 
 
+# ── Module 5 — sector coupling and fuel supply ───────────────────────────────
+
+def test_module_5_checkpoint_solves_to_7099(tmp_path: Path) -> None:
+    """Gas on its own bus, a CCGT Link, a gas store, run-of-river and pumped hydro."""
+    n = _solved("training_m5", tmp_path)
+    assert float(n.objective) == pytest.approx(7_099.59, abs=0.01)
+
+
+def test_module_5_gas_plant_is_a_link_not_a_generator(tmp_path: Path) -> None:
+    """The rewire: gas_1 is gone, and a Link converts fuel into power at 50%.
+
+    p_nom is measured on the fuel side, so 200 MW of gas is a 100 MW station —
+    the step-4 trap the course warns about.
+    """
+    model = _model_from_example("training_m5", tmp_path)
+    assert not any(g["name"] == "gas_1" for g in model["generators"])
+    link = model["links"][0]
+    assert (link["bus0"], link["bus1"]) == ("bus_gas", "bus_2")
+    assert link["efficiency"] == 0.5 and link["p_nom"] == 200.0
+
+
+def test_module_5_rewire_reproduces_module_4s_answer(tmp_path: Path) -> None:
+    """The module's keystone: 25/MWh of gas through a 50% converter IS 50/MWh of
+    electricity, so an uncapped, store-free rewire must return module 4's 7,730.
+
+    A refactor that changes the answer changed the model — that is the whole
+    point of step 5, so it is worth a test rather than a promise.
+    """
+    model = _model_from_example("training_m5", tmp_path)
+    model = {k: v for k, v in model.items() if k != "stores"}
+    model["generators"] = [
+        {**g, "p_nom": 10_000.0} if g["name"] == "gas_supply" else g
+        for g in model["generators"] if g["name"] != "ror_1"
+    ]
+    model["storage_units"] = [s for s in model["storage_units"] if s["name"] != "phs_1"]
+    model["generators-p_max_pu"] = [
+        {k: v for k, v in row.items() if k != "ror_1"} for row in model["generators-p_max_pu"]
+    ]
+    n = _solve_model(model)
+    assert float(n.objective) == pytest.approx(7_730.0, rel=1e-6)
+
+
+def test_module_5_capped_import_brings_the_peaker_back(tmp_path: Path) -> None:
+    """Step 7: a fuel shortage is an adequacy problem a power-only model cannot see.
+
+    Without the gas store, the 150 MW import binds in the peak hour, the CCGT can
+    only make 75 MW, and oil covers the rest at 120.
+    """
+    model = _model_from_example("training_m5", tmp_path)
+    model = {k: v for k, v in model.items() if k != "stores"}
+    model["generators"] = [g for g in model["generators"] if g["name"] != "ror_1"]
+    model["storage_units"] = [s for s in model["storage_units"] if s["name"] != "phs_1"]
+    model["generators-p_max_pu"] = [
+        {k: v for k, v in row.items() if k != "ror_1"} for row in model["generators-p_max_pu"]
+    ]
+    n = _solve_model(model)
+    assert float(n.objective) == pytest.approx(9_221.11, abs=0.01)
+    assert float(n.generators_t.p["oil_1"].sum()) > 0.0
+    # Scarcity, not a price rise: the fuel still costs 25, but gas is worth more.
+    gas_price = [float(v) for v in n.buses_t.marginal_price["bus_gas"]]
+    assert gas_price[-1] == pytest.approx(60.0, abs=1e-6)
+    assert gas_price[0] == pytest.approx(25.0, abs=1e-6)
+
+
+def test_module_5_gas_store_neutralises_the_import_cap(tmp_path: Path) -> None:
+    """Step 8: buy fuel in the quiet hour, burn it in the peak — 7,730 recovered."""
+    model = _model_from_example("training_m5", tmp_path)
+    model["generators"] = [g for g in model["generators"] if g["name"] != "ror_1"]
+    model["storage_units"] = [s for s in model["storage_units"] if s["name"] != "phs_1"]
+    model["generators-p_max_pu"] = [
+        {k: v for k, v in row.items() if k != "ror_1"} for row in model["generators-p_max_pu"]
+    ]
+    n = _solve_model(model)
+    assert float(n.objective) == pytest.approx(7_730.0, rel=1e-6)
+    assert float(n.generators_t.p["oil_1"].sum()) == pytest.approx(0.0, abs=1e-6)
+
+
+def test_module_5_pumped_hydro_behind_the_constraint_is_nearly_worthless(tmp_path: Path) -> None:
+    """The module's sharpest result, and the reason it is worth a test.
+
+    180 MWh of pumped hydro at bus_1 adds about 45. Module 4's 20 MWh battery at
+    the demand end added 1,670 — nine times the energy, a fraction of the value,
+    because pumped hydro is where the mountains are.
+    """
+    with_phs = _solved("training_m5", tmp_path)
+    model = _model_from_example("training_m5", tmp_path)
+    model["storage_units"] = [s for s in model["storage_units"] if s["name"] != "phs_1"]
+    without = _solve_model(model)
+    added = float(without.objective - with_phs.objective)
+    assert added == pytest.approx(45.41, abs=0.5)
+    assert added < 100.0, "180 MWh behind the constraint should be worth very little"
+
+
 # ── The checkpoints the course references must exist and be loadable ─────────
 
 def test_every_course_checkpoint_is_a_listable_example() -> None:
     """A checkpoint id the tutorial names but ``/api/examples`` cannot serve gives
     the learner a dead button, which is worse than no button."""
-    for example_id in ("training_m1", "training_m2", "training_m3", "training_m4"):
+    for example_id in ("training_m1", "training_m2", "training_m3", "training_m4", "training_m5"):
         db = EXAMPLES / example_id / "project.db"
         assert db.exists(), f"{example_id}: no project.db"
         con = sqlite3.connect(db)

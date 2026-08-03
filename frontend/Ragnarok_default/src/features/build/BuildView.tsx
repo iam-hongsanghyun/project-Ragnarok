@@ -281,6 +281,13 @@ export function BuildView(props: BuildViewProps) {
     [step.primarySheet],
   );
 
+  // Companion static sheets for this step — everything in extraSheets that is a
+  // component sheet rather than a temporal profile (which the panel below owns).
+  const staticExtraSheets = useMemo(
+    () => (step.extraSheets ?? []).filter((sheet) => !sheet.includes('-')),
+    [step],
+  );
+
   const completionByIndex = useMemo(
     () => BUILD_STEPS.map((s) => s.isComplete(props.model)),
     [props.model],
@@ -359,6 +366,36 @@ export function BuildView(props: BuildViewProps) {
           busNames={busNames}
           onApply={props.onApplyConversion}
         />
+      )}
+      {/* Companion STATIC sheets for this step (`stores` on Storage). Declared in
+          BUILD_STEPS.extraSheets and, until now, never rendered — so the sheet
+          was reachable only from the Model tab and the Build step quietly
+          pretended it did not exist. Same switcher idea as the temporal panel,
+          minus the import: these are ordinary component sheets. */}
+      {staticExtraSheets.length > 0 && (
+        <div className="build-ts-panel" data-tour="companion-sheets">
+          <div className="build-ts-panel-head" aria-hidden>
+            <span className="eyebrow">{step.label} · sheets</span>
+          </div>
+          <div className="build-ts-panel-list">
+            {[step.primarySheet, ...staticExtraSheets].map((sheet) => {
+              const rowCount = ((props.model as Record<string, GridRow[]>)[sheet] ?? []).length;
+              const active = tableSel.kind === 'static' && tableSel.sheet === sheet;
+              return (
+                <div key={sheet} className={`build-ts-panel-row${active ? ' is-active' : ''}`}>
+                  <button
+                    type="button"
+                    className="build-ts-panel-select"
+                    onClick={() => setTableSel({ kind: 'static', sheet: sheet as SheetName })}
+                  >
+                    <span className="build-ts-panel-name">{sheet}</span>
+                    <span className="build-ts-panel-meta">{rowCount > 0 ? `${rowCount} rows` : 'empty'}</span>
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
       {temporalSheets.length > 0 && (
         <TemporalProfilesPanel

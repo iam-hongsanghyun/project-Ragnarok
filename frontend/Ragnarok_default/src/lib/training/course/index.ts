@@ -35,12 +35,14 @@ import { MODULE_1_FOUNDATIONS } from './module1Foundations';
 import { MODULE_2_DISPATCH } from './module2Dispatch';
 import { MODULE_3_NETWORKS } from './module3Networks';
 import { MODULE_4_STORAGE } from './module4Storage';
+import { MODULE_5_SECTOR_COUPLING } from './module5SectorCoupling';
 
 const STEPS = [
   ...MODULE_1_FOUNDATIONS,
   ...MODULE_2_DISPATCH,
   ...MODULE_3_NETWORKS,
   ...MODULE_4_STORAGE,
+  ...MODULE_5_SECTOR_COUPLING,
 ];
 
 /**
@@ -84,6 +86,15 @@ const MODULES: CourseModule[] = [
     summary: 'The first component that links one hour to the next: a battery that charges on the cheap '
       + 'hour, removes the peaker from the answer entirely, and is worth three times as much on one side '
       + 'of the constraint as the other.',
+  },
+  {
+    section: '5 · Sector coupling and fuel supply',
+    title: 'Sector coupling and fuel supply',
+    level: 'Intermediate',
+    minutes: 120,
+    summary: 'Gas gets its own bus, its own price and its own store, and the gas plant becomes what it '
+      + 'is — a CCGT converting fuel into power. Adds run-of-river hydro and a pumped-hydro scheme worth '
+      + 'a fraction of a battery a tenth its size.',
   },
 ];
 
