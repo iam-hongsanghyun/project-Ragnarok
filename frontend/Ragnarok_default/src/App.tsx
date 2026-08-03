@@ -1349,16 +1349,29 @@ function AppInner() {
           // Static rehydrate drops series; learn them from the session meta so
           // the Model tree lists the temporal sheets (paged into the grid on
           // demand) instead of hiding them.
+          let sessionFilename: string | undefined;
           try {
             const sessionMeta = await getSessionMeta();
+            sessionFilename = sessionMeta?.filename;
             if (!cancelled) setSessionSeriesCounts(seriesSheetCounts(sessionMeta));
           } catch { /* tree just won't list series until next load */ }
           if (controls) {
             setCarbonPrice(controls.carbonPrice);
             setCarbonPriceSchedule((controls.carbonPriceSchedule ?? []).map((r) => ({ ...r })));
             setSnapshotWeight(controls.snapshotWeight);
-            setSnapshotStart(controls.snapshotStart);
-            setSnapshotEnd(controls.snapshotEnd);
+            // The run window belongs to the model it was set on. When the
+            // session holds a DIFFERENT model — an example loaded from another
+            // tab, an agent replacing the project — restoring the old window
+            // silently solves a prefix of the new one: loading a six-hour
+            // example after a three-hour one ran three hours and reported it as
+            // a complete answer. resetForNewModel has already opened the window
+            // to the new model's full range, so in that case leave it alone.
+            const windowIsForThisModel =
+              !sessionFilename || !controls.filename || sessionFilename === controls.filename;
+            if (windowIsForThisModel) {
+              setSnapshotStart(controls.snapshotStart);
+              setSnapshotEnd(controls.snapshotEnd);
+            }
             setForceLp(controls.forceLp);
             if (controls.constraints) setConstraints(controls.constraints);
             // Re-apply the last live rolling/pathway AFTER resetForNewModel, so a
