@@ -579,13 +579,158 @@ def test_module_8_a_cap_and_a_price_are_duals(tmp_path: Path) -> None:
         assert a == pytest.approx(b, rel=1e-3), asset
 
 
+# ── Module 10 — meshed networks and power flow ───────────────────────────────
+#
+# Three buses in a ring, equal reactance everywhere. The module's arithmetic:
+# the direct bus_1 → bus_3 path is one line, the way round is two, so the
+# indirect path has twice the reactance and carries half as much. 90 MW divides
+# 60 / 30. Every figure below is quoted in the module prose.
+
+def _capped(model: dict, s_nom: float = 50.0) -> dict:
+    """Module 10's step 5: the same ring with line_13 rated at 50 MW."""
+    out = {k: [dict(r) for r in v] for k, v in model.items()}
+    for row in out["lines"]:
+        if row.get("name") == "line_13":
+            row["s_nom"] = s_nom
+    return out
+
+
+def test_module_10_ring_solves_to_5400(tmp_path: Path) -> None:
+    """90 MW of demand met entirely by 20/MWh coal: 90 × 20 × 3 hours."""
+    n = _solved("training_m10", tmp_path)
+    assert float(n.objective) == pytest.approx(5_400.0, rel=1e-6)
+
+
+def test_module_10_flow_divides_two_thirds_one_third(tmp_path: Path) -> None:
+    """The module's central hand-check, and the reason a loop is not a pipe.
+
+    Nobody chose this split and no constraint produced it — it is Kirchhoff's
+    voltage law, which the LP enforces on AC lines as a cycle constraint.
+    """
+    n = _solved("training_m10", tmp_path)
+    flow = {name: [abs(float(v)) for v in n.lines_t.p0[name]] for name in
+            ("line_12", "line_23", "line_13")}
+    assert flow["line_13"] == pytest.approx([60.0] * 3, abs=1e-6)
+    assert flow["line_12"] == pytest.approx([30.0] * 3, abs=1e-6)
+    assert flow["line_23"] == pytest.approx([30.0] * 3, abs=1e-6)
+
+
+def test_module_10_uncongested_ring_prices_one_price(tmp_path: Path) -> None:
+    """No binding line, so every bus prices at the marginal unit: coal at 20."""
+    n = _solved("training_m10", tmp_path)
+    for bus in ("bus_1", "bus_2", "bus_3"):
+        assert [float(v) for v in n.buses_t.marginal_price[bus]] == pytest.approx(
+            [20.0] * 3, abs=1e-6
+        ), bus
+
+
+def test_module_10_capping_line_13_costs_2700(tmp_path: Path) -> None:
+    """Cap the direct line at 50 MW and the answer moves 5,400 → 8,100.
+
+    Nothing about cost or demand changed. The only way to unload a line in a
+    meshed network is to change WHERE power is injected, so 30 MW of coal is
+    replaced by 30 MW of gas at three times the price.
+    """
+    model = _capped(_model_from_example("training_m10", tmp_path))
+    n = _solve_model(model)
+    assert float(n.objective) == pytest.approx(8_100.0, rel=1e-6)
+    assert float(n.generators_t.p["coal_1"].sum()) == pytest.approx(180.0, abs=1e-6)
+    assert float(n.generators_t.p["gas_2"].sum()) == pytest.approx(90.0, abs=1e-6)
+
+
+def test_module_10_capped_ring_loads_lines_50_40_10(tmp_path: Path) -> None:
+    """60 MW of coal and 30 MW of gas superpose to exactly fill the capped line.
+
+    Hand-check: coal's 60 MW splits 40 direct / 20 round; gas's 30 MW splits 20
+    on line_23 / 10 counter-flowing through line_12 and on down line_13.
+    """
+    model = _capped(_model_from_example("training_m10", tmp_path))
+    n = _solve_model(model)
+    flow = {name: abs(float(n.lines_t.p0[name].iloc[0])) for name in
+            ("line_12", "line_23", "line_13")}
+    assert flow["line_13"] == pytest.approx(50.0, abs=1e-6)
+    assert flow["line_23"] == pytest.approx(40.0, abs=1e-6)
+    assert flow["line_12"] == pytest.approx(10.0, abs=1e-6)
+
+
+def test_module_10_capped_ring_prices_20_50_80(tmp_path: Path) -> None:
+    """The finding of the module: 80 at bus_3, above every generator in the model.
+
+    Serving one more MW at bus_3 cannot simply run more coal — that would push
+    the capped line further over. It takes 1 MW more gas and 1 MW less coal per
+    ... the algebra gives dCost/dD = 80 exactly, and the solver agrees.
+    """
+    model = _capped(_model_from_example("training_m10", tmp_path))
+    n = _solve_model(model)
+    prices = {bus: float(n.buses_t.marginal_price[bus].iloc[0])
+              for bus in ("bus_1", "bus_2", "bus_3")}
+    assert prices["bus_1"] == pytest.approx(20.0, abs=1e-6)
+    assert prices["bus_2"] == pytest.approx(50.0, abs=1e-6)
+    assert prices["bus_3"] == pytest.approx(80.0, abs=1e-6)
+
+
+def test_module_10_ac_power_flow_reports_losses_and_voltage_sag(tmp_path: Path) -> None:
+    """The study mode the LP never runs: real impedance, so a real voltage drop.
+
+    Values are quoted in the module's AC step — a sag to 0.9987 pu at the far
+    bus and losses the optimisation reported as exactly zero.
+    """
+    from backend.pypsa.results import run_pypsa
+
+    model = _model_from_example("training_m10", tmp_path)
+    res = run_pypsa(model, SCENARIO, {"powerFlowConfig": {"enabled": True}})
+    pf = res["powerFlow"]
+    assert pf["converged"] is True
+    assert pf["error"] is None
+    assert pf["lossesMwh"] > 0.0
+    volts = {v["bus"]: v["mean"] for v in pf["voltageProfile"]}
+    assert volts["bus_1"] == pytest.approx(1.0, abs=1e-4)
+    assert volts["bus_3"] < volts["bus_2"] < volts["bus_1"]
+    # The card a learner actually reads must not round a real loss down to "0 MWh"
+    # — the module's verify item says losses are greater than zero.
+    losses = next(row for row in res["summary"] if row["label"] == "Losses")
+    assert losses["value"] != "0 MWh"
+
+
+def test_module_10_linear_power_flow_is_lossless(tmp_path: Path) -> None:
+    """DC power flow agrees on the flows and reports no losses at all — which is
+    what "linear" costs you, and why the module runs both."""
+    from backend.pypsa.results import run_pypsa
+
+    model = _model_from_example("training_m10", tmp_path)
+    res = run_pypsa(model, SCENARIO, {"powerFlowConfig": {"enabled": True, "linear": True}})
+    assert res["powerFlow"]["lossesMwh"] == 0.0
+    loading = {row["label"]: row["value"] for row in res["lineLoading"]}
+    assert loading["line_13"] == pytest.approx(30.0, abs=0.1)
+    assert loading["line_12"] == pytest.approx(15.0, abs=0.1)
+
+
+def test_module_10_n_minus_1_finds_two_insecure_outages(tmp_path: Path) -> None:
+    """N-1 on the capped ring: losing either leg of the long path overloads the
+    direct line to 180%, while losing the direct line is survivable at 45%."""
+    from backend.pypsa.results import run_pypsa
+
+    model = _capped(_model_from_example("training_m10", tmp_path))
+    res = run_pypsa(model, SCENARIO, {"contingencyConfig": {"enabled": True}})
+    cont = res["contingency"]
+    assert cont["error"] is None
+    assert cont["secure"] is False
+    assert cont["outagesTested"] == 3
+    assert cont["insecureCount"] == 2
+    worst = {row["outage"]: row["worstLoadingPct"] for row in cont["contingencies"]}
+    assert worst["line_12"] == pytest.approx(180.0, abs=0.1)
+    assert worst["line_23"] == pytest.approx(180.0, abs=0.1)
+    assert worst["line_13"] == pytest.approx(45.0, abs=0.1)
+
+
 # ── The checkpoints the course references must exist and be loadable ─────────
 
 def test_every_course_checkpoint_is_a_listable_example() -> None:
     """A checkpoint id the tutorial names but ``/api/examples`` cannot serve gives
     the learner a dead button, which is worse than no button."""
     for example_id in ("training_m1", "training_m2", "training_m3", "training_m4",
-                       "training_m5", "training_m6", "training_m7_year", "training_m7"):
+                       "training_m5", "training_m6", "training_m7_year", "training_m7",
+                       "training_m10"):
         db = EXAMPLES / example_id / "project.db"
         assert db.exists(), f"{example_id}: no project.db"
         con = sqlite3.connect(db)
