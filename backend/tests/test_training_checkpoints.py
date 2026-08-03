@@ -17,6 +17,7 @@ format.
 """
 from __future__ import annotations
 
+import itertools
 import json
 import shutil
 import sqlite3
@@ -811,7 +812,7 @@ def test_module_11_ramp_limit_costs_1000_in_the_hours_beside_the_dip(tmp_path: P
     assert coal == pytest.approx([90.0, 80.0, 50.0, 50.0, 80.0, 90.0], abs=1e-6)
     assert gas == pytest.approx([0.0, 10.0, 0.0, 0.0, 10.0, 0.0], abs=1e-6)
     # No step exceeds 30 MW — the constraint the module says is binding.
-    assert max(abs(b - a) for a, b in zip(coal, coal[1:])) <= 30.0 + 1e-6
+    assert max(abs(b - a) for a, b in itertools.pairwise(coal)) <= 30.0 + 1e-6
 
 
 def test_module_11_force_lp_is_a_bound_and_the_only_run_that_prices(tmp_path: Path) -> None:
@@ -844,6 +845,107 @@ def test_module_11_p_min_pu_without_commitment_is_flagged(tmp_path: Path) -> Non
     _coal(model).pop("committable")
     codes = {f["code"] for f in check_model(model)["findings"]}
     assert "min_pu_without_commitment" in codes
+
+
+# ── Module 12 — adequacy and uncertainty ─────────────────────────────────────
+#
+# The same two checkpoints module 7 uses, put through the reliability studies at
+# the panels' own defaults. The module's arc is the comparison: the system
+# module 7 started from against the one its least-cost expansion built.
+
+_M12_MC = {
+    "enabled": True, "nMembers": 200, "seed": 42,
+    "forcedOutageRate": 0.05, "mttrHours": 48.0,
+}
+
+
+def _reliability(example_id: str, tmp_path: Path, options: dict) -> dict:
+    from backend.pypsa.results import run_pypsa
+
+    model = _model_from_example(example_id, tmp_path)
+    return run_pypsa(model, {"carbonPrice": 0.0, "discountRate": 0.05},
+                     {**OPTIONS, **options})
+
+
+def test_module_12_brownfield_year_misses_the_reliability_standard(tmp_path: Path) -> None:
+    """The system module 7 started from, sampled for forced outages.
+
+    Nothing in its deterministic run suggested a problem — it sheds no load at
+    all. Against the 2.4 h/yr "one day in ten years" yardstick its mean LOLE is
+    seven times over.
+    """
+    res = _reliability("training_m7_year", tmp_path, {"outageMcConfig": _M12_MC})
+    lole = res["outageMc"]["loleDistribution"]
+    eue = res["outageMc"]["eueDistribution"]
+    assert lole["p50"] == pytest.approx(8.0, abs=0.5)
+    assert lole["p95"] == pytest.approx(58.25, rel=0.02)
+    assert lole["mean"] == pytest.approx(17.78, rel=0.02)
+    assert eue["p50"] == pytest.approx(67.6, rel=0.02)
+    assert eue["p95"] == pytest.approx(1_021.9, rel=0.02)
+    assert lole["mean"] > 2.4 * 5, "the module's point is that this misses the standard badly"
+
+
+def test_module_12_expansion_improves_adequacy_it_never_asked_about(tmp_path: Path) -> None:
+    """Module 7 optimised cost. Reliability was not in the objective or a constraint.
+
+    The mean LOLE still falls twenty-nine-fold — and the P95 still breaches the
+    standard, which is the caveat the module refuses to drop.
+    """
+    res = _reliability("training_m7", tmp_path, {"outageMcConfig": _M12_MC})
+    lole = res["outageMc"]["loleDistribution"]
+    assert lole["p50"] == pytest.approx(0.0, abs=1e-6)
+    assert lole["p95"] == pytest.approx(3.0, abs=0.5)
+    assert lole["mean"] == pytest.approx(0.61, rel=0.05)
+    assert res["outageMc"]["eueDistribution"]["p50"] == pytest.approx(0.0, abs=1e-6)
+    assert lole["mean"] < 2.4, "the expanded system meets the standard on the mean"
+    assert lole["p95"] > 2.4, "and still breaches it one year in twenty"
+
+
+def test_module_12_capacity_credit_ranks_by_when_the_system_is_short(tmp_path: Path) -> None:
+    """Wind about 46% of nameplate, solar about 16% — because the tight hours are
+    winter evenings. The module makes the point that this is a property of the
+    pairing rather than of the technology."""
+    res = _reliability("training_m7", tmp_path,
+                       {"elccConfig": {**_M12_MC, "carriers": []}})
+    by_carrier = {c["carrier"]: c for c in res["elcc"]["byCarrier"]}
+    assert by_carrier["wind"]["elccPct"] == pytest.approx(46.25, rel=0.03)
+    assert by_carrier["solar"]["elccPct"] == pytest.approx(15.92, rel=0.05)
+    assert by_carrier["wind"]["elccPct"] > by_carrier["solar"]["elccPct"] * 2
+
+
+def test_module_12_elcc_baseline_matches_the_monte_carlo_mean(tmp_path: Path) -> None:
+    """Step 7 asks the learner to check this, so it had better hold.
+
+    The two studies must measure the same system for their numbers to be
+    comparable — they did not until storage got one shared definition.
+    """
+    mc = _reliability("training_m7", tmp_path, {"outageMcConfig": _M12_MC})
+    elcc = _reliability("training_m7", tmp_path, {"elccConfig": {**_M12_MC, "carriers": []}})
+    assert elcc["elcc"]["baselineLoleHrs"] == pytest.approx(
+        mc["outageMc"]["loleDistribution"]["mean"], rel=1e-3
+    )
+
+
+def test_module_12_convergence_reports_that_it_did_not_converge(tmp_path: Path) -> None:
+    """A rare-event estimate at a 5% tolerance does not settle in 1,000 members.
+
+    The module teaches the trace rather than the headline: the estimate is
+    stable from 50 members and the standard error is still ~10% at 1,000.
+    """
+    res = _reliability("training_m7_year", tmp_path, {"convergenceConfig": {
+        "enabled": True, "targetMetric": "eue", "tolerance": 0.05,
+        "batchSize": 50, "maxMembers": 1000, "seed": 42,
+        "forcedOutageRate": 0.05, "mttrHours": 48.0, "maintenanceEnabled": False,
+    }})
+    cv = res["convergenceSampling"]
+    assert cv["converged"] is False
+    assert cv["achievedMembers"] == 1000
+    assert cv["estimate"] == pytest.approx(191.87, rel=0.02)
+    assert cv["ciLow"] == pytest.approx(172.45, rel=0.02)
+    assert cv["ciHigh"] == pytest.approx(211.30, rel=0.02)
+    # The estimate settles long before the error does — the step's whole point.
+    trace = cv["trace"]
+    assert trace[0]["se"] > 2 * trace[-1]["se"]
 
 
 # ── The checkpoints the course references must exist and be loadable ─────────

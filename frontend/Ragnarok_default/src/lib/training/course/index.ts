@@ -1,7 +1,7 @@
 /**
- * The power-market modelling course — 11 modules, complete.
+ * The power-market modelling course — 12 modules, complete.
  *
- * All eleven are written. The tutorial's summary, `minutes` and `outcomes`
+ * All twelve are written. The tutorial's summary, `minutes` and `outcomes`
  * describe what is actually there: a learner reading the catalog card should be
  * told the truth about what they are starting, and progress is a percentage of
  * real steps.
@@ -42,6 +42,7 @@ import { MODULE_8_POLICY } from './module8Policy';
 import { MODULE_9_DECISION } from './module9Decision';
 import { MODULE_10_POWER_FLOW } from './module10PowerFlow';
 import { MODULE_11_COMMITMENT } from './module11Commitment';
+import { MODULE_12_ADEQUACY } from './module12Adequacy';
 
 const STEPS = [
   ...MODULE_1_FOUNDATIONS,
@@ -55,6 +56,7 @@ const STEPS = [
   ...MODULE_9_DECISION,
   ...MODULE_10_POWER_FLOW,
   ...MODULE_11_COMMITMENT,
+  ...MODULE_12_ADEQUACY,
 ];
 
 /**
@@ -162,6 +164,15 @@ const MODULES: CourseModule[] = [
       + 'and ramp limits — and a coal unit that holds on through a windy dip, spilling free wind to '
       + 'avoid a start-up charge, until one number is changed and it does the opposite.',
   },
+  {
+    section: '12 · Adequacy and uncertainty',
+    title: 'Adequacy and uncertainty',
+    level: 'Expert',
+    minutes: 110,
+    summary: 'The closing module: plant breaks. Samples forced outages across the year module 7 started '
+      + 'from and finds a system seven times outside the reliability standard nothing had measured — '
+      + 'then asks what module 7\'s least-cost expansion did to that, by accident.',
+  },
 ];
 
 export const POWER_MARKET_COURSE: Tutorial = {
@@ -169,19 +180,19 @@ export const POWER_MARKET_COURSE: Tutorial = {
   title: 'Power market modelling with Ragnarok',
   modules: MODULES,
   level: 'Beginner',
-  // The eleven modules as written, at the pace of someone typing every value and
+  // The twelve modules as written, at the pace of someone typing every value and
   // reading the concept blocks rather than skimming them. Modules 7 to 9 solve a
   // full year, so their runs take about a minute each, which is included; module
   // 10 goes back to three snapshots and is instant again.
-  minutes: 21 * 60,
+  minutes: 23 * 60,
   summary:
     'Build one power-system model from an empty sheet to a policy-tested investment case, learning the '
-    + 'modelling theory and the Ragnarok mechanics together at every step. Ten modules: foundations, '
+    + 'modelling theory and the Ragnarok mechanics together at every step. Twelve modules: foundations, '
     + 'economic dispatch, networks and congestion, storage, sector coupling, time and horizon, '
-    + 'investment, policy instruments, turning a result into a decision, and two closing modules on '
-    + 'meshed networks and power flow and on unit commitment. Assumes no prior knowledge of power '
-    + 'systems or optimisation, and every answer up to module 5 — and all of modules 10 and 11 — is '
-    + 'small enough to check by hand.',
+    + 'investment, policy instruments and turning a result into a decision — then three closing modules '
+    + 'on meshed networks and power flow, on unit commitment, and on what any of it is worth once plant '
+    + 'starts breaking. Assumes no prior knowledge of power systems or optimisation, and every answer '
+    + 'up to module 5 — and all of modules 10 and 11 — is small enough to check by hand.',
   outcomes: [
     'Explain what a power-system optimisation model is: objective, decision variables, constraints',
     'Build a working network from scratch — carriers, buses, generators, loads, snapshots, profiles',
@@ -196,11 +207,12 @@ export const POWER_MARKET_COURSE: Tutorial = {
     'Read a meshed network: why flows divide by reactance, and why a nodal price can exceed every offer',
     'Choose between an optimisation, a DC power flow, an AC power flow and an N-1 study, and say why',
     'Model a plant that cannot switch on and off freely, and say what commitment costs to solve',
+    'Measure adequacy as a distribution — LOLE, EUE and capacity credit — against a stated standard',
   ],
   prerequisites: [
     'Ragnarok is running and the top bar shows a status other than a connection error',
     'No prior power-systems or optimisation knowledge — the course starts from the beginning',
-    'About 21 hours across eleven modules; each opens from a checkpoint, so it need not be one sitting',
+    'About 23 hours across twelve modules; each opens from a checkpoint, so it need not be one sitting',
     'Modules 7 to 9 solve a full year, so expect roughly a minute per run from there on',
   ],
   steps: STEPS,
