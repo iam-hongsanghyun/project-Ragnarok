@@ -3621,6 +3621,33 @@ function AppInner() {
                 // Replace the axis wholesale — the builder has already confirmed
                 // the discard, and a merged axis would misalign every profile.
                 setModel((prev) => ({ ...prev, snapshots: labels.map((snapshot) => ({ snapshot })) }));
+                // Widen the run window to the axis just generated when it was
+                // covering everything beforehand. Loading a model already does
+                // this; the builder did not, so generating 3 snapshots into an
+                // empty project left the window at 0→1 and the run solved one
+                // hour of a three-hour model — a wrong answer with nothing on
+                // screen to explain it. A window the user has deliberately
+                // narrowed is left alone.
+                const wasFullWindow = snapshotStart === 0 && snapshotEnd >= Math.max(1, model.snapshots.length);
+                if (labels.length > 0) {
+                  setMaxSnapshots(labels.length);
+                  if (wasFullWindow) {
+                    setSnapshotEnd(labels.length);
+                    // The active scenario carries its own window and is re-applied
+                    // on every load, so leaving its stale end behind would collapse
+                    // the window back to one hour the next time the project opens.
+                    setScenarioCatalog((current) => ({
+                      ...current,
+                      scenarios: current.scenarios.map((scenario) => (
+                        scenario.id === current.activeScenarioId
+                          && scenario.snapshotStart === 0
+                          && scenario.snapshotEnd >= Math.max(1, model.snapshots.length)
+                          ? { ...scenario, snapshotEnd: labels.length }
+                          : scenario
+                      )),
+                    }));
+                  }
+                }
                 requestStaticResync();
               }}
             />

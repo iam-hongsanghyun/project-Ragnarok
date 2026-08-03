@@ -194,6 +194,7 @@ export function HistoryView({
         </label>
         <button
           className="tb-btn tb-btn--primary"
+          data-tour="view-result"
           onClick={() => onViewSelected(visibleSelected)}
           disabled={n === 0}
           title={n > 1 ? 'Compare the selected runs side by side' : 'View this run’s results'}
