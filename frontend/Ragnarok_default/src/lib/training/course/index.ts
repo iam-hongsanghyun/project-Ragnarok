@@ -38,6 +38,7 @@ import { MODULE_4_STORAGE } from './module4Storage';
 import { MODULE_5_SECTOR_COUPLING } from './module5SectorCoupling';
 import { MODULE_6_TIME } from './module6Time';
 import { MODULE_7_INVESTMENT } from './module7Investment';
+import { MODULE_8_POLICY } from './module8Policy';
 
 const STEPS = [
   ...MODULE_1_FOUNDATIONS,
@@ -47,6 +48,7 @@ const STEPS = [
   ...MODULE_5_SECTOR_COUPLING,
   ...MODULE_6_TIME,
   ...MODULE_7_INVESTMENT,
+  ...MODULE_8_POLICY,
 ];
 
 /**
@@ -117,6 +119,15 @@ const MODULES: CourseModule[] = [
     summary: 'Capacity becomes a decision on a full year. Four assets compete, three get built, and '
       + 'solar wins a place despite losing on levelised cost. Ends by showing what a brownfield run '
       + 'hides and how two points on the discount rate reweight the whole portfolio.',
+  },
+  {
+    section: '8 · Policy instruments',
+    title: 'Policy instruments',
+    level: 'Expert',
+    minutes: 140,
+    summary: 'The carbon factors typed in module 1 finally matter. A price and a cap turn out to be the '
+      + 'same instrument — verified by setting the price to the cap\'s shadow price and getting the same '
+      + 'system back — and a carbon price is what finally makes storage worth building.',
   },
 ];
 

@@ -519,6 +519,66 @@ def test_module_7_starting_model_has_nothing_extendable(tmp_path: Path) -> None:
     assert not model["lines"][0].get("s_nom_extendable", False)
 
 
+# ── Module 8 — policy instruments ────────────────────────────────────────────
+# These are full-year expansion solves and each takes about a minute, so the
+# module is covered by two tests that assert several things each rather than one
+# test per figure. `emissions` is recomputed here rather than read from results
+# so the assertion does not depend on the reporting layer.
+
+def _emissions(n) -> float:
+    """Tonnes CO2: fuel burnt x the carrier factor, counting gas once."""
+    total = 0.0
+    for g in n.generators.index:
+        carrier = n.generators.at[g, "carrier"]
+        if carrier == "gas":
+            continue          # the import; charged via the CCGT's fuel draw below
+        factor = float(n.carriers.at[carrier, "co2_emissions"]) if carrier in n.carriers.index else 0.0
+        if factor:
+            total += float(n.generators_t.p[g].sum()) / float(n.generators.at[g, "efficiency"]) * factor
+    return total + float(n.links_t.p0["ccgt_1"].sum()) * float(n.carriers.at["gas", "co2_emissions"])
+
+
+def test_module_8_a_carbon_price_removes_coal_and_builds_storage(tmp_path: Path) -> None:
+    """At 100/tCO2 emissions fall 98% and the battery is finally worth building.
+
+    Module 7 offered the identical battery at the identical cost and the model
+    declined it. Pricing coal out is what changes the value of flexibility, which
+    is the module's second lesson.
+    """
+    model = _model_from_example("training_m7", tmp_path)
+    n = _solve_model(model, {"carbonPrice": 100.0, "discountRate": 0.05})
+    assert _emissions(n) == pytest.approx(4_376, rel=0.02)
+    assert float(n.generators_t.p["coal_1"].sum()) == pytest.approx(0.0, abs=1.0)
+    assert float(n.storage_units.at["batt_1", "p_nom_opt"]) == pytest.approx(82.3, abs=1.0)
+    assert float(n.generators.at["solar_1", "p_nom_opt"]) == pytest.approx(133.2, abs=1.0)
+
+
+def test_module_8_a_cap_and_a_price_are_duals(tmp_path: Path) -> None:
+    """The module's centrepiece, and the reason it is worth a slow test.
+
+    A 150,000 t cap has a shadow price of 3.46. Setting a carbon price to 3.46
+    with no cap reproduces the capped system: the same capacities, the same coal
+    output, the same emissions to three significant figures.
+    """
+    model = _model_from_example("training_m7", tmp_path)
+    capped = _solve_model(
+        {**model, "global_constraints": [{
+            "name": "co2_cap", "type": "primary_energy",
+            "carrier_attribute": "co2_emissions", "sense": "<=", "constant": 150_000.0}]},
+        {"carbonPrice": 0.0, "discountRate": 0.05},
+    )
+    assert _emissions(capped) == pytest.approx(150_000, rel=1e-3)
+    # A <= constraint carries a negative dual; the course teaches the magnitude.
+    assert abs(float(capped.global_constraints.at["co2_cap", "mu"])) == pytest.approx(3.46, abs=0.05)
+
+    priced = _solve_model(model, {"carbonPrice": 3.46, "discountRate": 0.05})
+    assert _emissions(priced) == pytest.approx(_emissions(capped), rel=1e-3)
+    for asset, frame in (("wind_1", "generators"), ("solar_1", "generators")):
+        a = float(getattr(capped, frame).at[asset, "p_nom_opt"])
+        b = float(getattr(priced, frame).at[asset, "p_nom_opt"])
+        assert a == pytest.approx(b, rel=1e-3), asset
+
+
 # ── The checkpoints the course references must exist and be loadable ─────────
 
 def test_every_course_checkpoint_is_a_listable_example() -> None:

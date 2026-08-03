@@ -69,7 +69,10 @@ export function CustomDslSection({ customDsl, onCustomDslChange, appliedConstrai
         </ul>
       )}
 
-      <div className="sg-setting-row">
+      {/* `data-tour` is the stable hook the Training walkthrough rings: this list
+          is the only place a constraint's SHADOW PRICE is reported, and module 8
+          is built on reading it. */}
+      <div className="sg-setting-row" data-tour="applied-constraints">
         <label className="sg-setting-label">Applied constraints (last run)</label>
         {applied.length === 0 ? (
           <div className="constraints-cell-placeholder">No custom, DSL, or plugin constraints in the last run.</div>
