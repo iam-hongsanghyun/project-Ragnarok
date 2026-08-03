@@ -1,10 +1,10 @@
 /**
- * The power-market modelling course — 9 modules, published as they are written.
+ * The power-market modelling course — 9 modules, complete.
  *
- * Modules 1–2 (16 steps) are live. The tutorial's own summary, `minutes` and
- * `outcomes` describe what is WRITTEN, not what is planned: a learner reading
- * the catalog card should be told the truth about what they are starting, and
- * progress is a percentage of real steps. Extend all three as each module lands.
+ * All nine are written. The tutorial's summary, `minutes` and `outcomes`
+ * describe what is actually there: a learner reading the catalog card should be
+ * told the truth about what they are starting, and progress is a percentage of
+ * real steps.
  *
  * One tutorial, not eight, because the course is cumulative: the model built in
  * module 1 is the model policy instruments are applied to in module 8. Modules
@@ -39,6 +39,7 @@ import { MODULE_5_SECTOR_COUPLING } from './module5SectorCoupling';
 import { MODULE_6_TIME } from './module6Time';
 import { MODULE_7_INVESTMENT } from './module7Investment';
 import { MODULE_8_POLICY } from './module8Policy';
+import { MODULE_9_DECISION } from './module9Decision';
 
 const STEPS = [
   ...MODULE_1_FOUNDATIONS,
@@ -49,6 +50,7 @@ const STEPS = [
   ...MODULE_6_TIME,
   ...MODULE_7_INVESTMENT,
   ...MODULE_8_POLICY,
+  ...MODULE_9_DECISION,
 ];
 
 /**
@@ -129,6 +131,15 @@ const MODULES: CourseModule[] = [
       + 'same instrument — verified by setting the price to the cap\'s shadow price and getting the same '
       + 'system back — and a carbon price is what finally makes storage worth building.',
   },
+  {
+    section: '9 · From result to decision',
+    title: 'From result to decision',
+    level: 'Expert',
+    minutes: 90,
+    summary: 'The capstone, and the only module that adds no modelling capability. Turns the runs you '
+      + 'already have into a range with its conditions, a sensitivity ranking, a provenance trail and an '
+      + 'honest statement of what the model cannot see.',
+  },
 ];
 
 export const POWER_MARKET_COURSE: Tutorial = {
@@ -136,29 +147,33 @@ export const POWER_MARKET_COURSE: Tutorial = {
   title: 'Power market modelling with Ragnarok',
   modules: MODULES,
   level: 'Beginner',
-  // Modules 1–2 as written, at the pace of someone typing every value and
-  // reading the concept blocks rather than skimming them.
-  minutes: 3 * 60,
+  // The nine modules as written, at the pace of someone typing every value and
+  // reading the concept blocks rather than skimming them. From module 7 the runs
+  // themselves take about a minute each, which is included.
+  minutes: 17 * 60,
   summary:
-    'Build one power-system model from an empty sheet, learning the modelling theory and the Ragnarok '
-    + 'mechanics together at every step, with every answer small enough to check by hand. Assumes no '
-    + 'prior knowledge of power systems or optimisation. Modules 1–2 are written — foundations, then '
-    + 'economic dispatch. The remaining seven (networks and congestion, storage, sector coupling, '
-    + 'investment, time resolution and rolling horizon, policy instruments, and result to decision) are '
-    + 'published as they land, and your progress carries across.',
+    'Build one power-system model from an empty sheet to a policy-tested investment case, learning the '
+    + 'modelling theory and the Ragnarok mechanics together at every step. Nine modules: foundations, '
+    + 'economic dispatch, networks and congestion, storage, sector coupling, time and horizon, '
+    + 'investment, policy instruments, and turning a result into a decision. Assumes no prior knowledge '
+    + 'of power systems or optimisation, and every answer up to module 5 is small enough to check by hand.',
   outcomes: [
     'Explain what a power-system optimisation model is: objective, decision variables, constraints',
-    'Build a working network from scratch — carriers, buses, generators, loads, snapshots',
-    'Run the change → validate → run → read loop, and reconcile an objective value by hand',
-    'Explain the merit order, and say which unit sets the price in any given hour and why',
-    'Distinguish price from average cost, and say what inframarginal rent pays for',
-    'Model variable generation with p_max_pu, and read curtailment and zero prices correctly',
-    'Say what a fixed-capacity dispatch model can and cannot answer',
+    'Build a working network from scratch — carriers, buses, generators, loads, snapshots, profiles',
+    'Explain the merit order, and say which unit sets the price in any hour and why',
+    'Read congestion, locational prices and congestion rent, and say what a constraint costs',
+    'Model storage and say why the same asset is worth three times more in one place than another',
+    'Give a fuel its own bus, price it, store it, and convert it with a Link',
+    'Choose a time resolution and horizon you can defend, and say what each shortcut breaks',
+    'Turn a dispatch model into an investment model on an annuitised, window-matched cost basis',
+    'Apply a carbon price or an emissions cap, and explain why they are the same instrument',
+    'Produce a range with its conditions, a sensitivity ranking and an honest statement of limits',
   ],
   prerequisites: [
     'Ragnarok is running and the top bar shows a status other than a connection error',
     'No prior power-systems or optimisation knowledge — the course starts from the beginning',
-    'About 3 hours for the two written modules; each module opens from a checkpoint, so it need not be one sitting',
+    'About 17 hours across nine modules; each opens from a checkpoint, so it need not be one sitting',
+    'Modules 7 to 9 solve a full year, so expect roughly a minute per run from there on',
   ],
   steps: STEPS,
 };
