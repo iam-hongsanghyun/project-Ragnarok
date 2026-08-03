@@ -23,6 +23,43 @@ SYSTEM_GEN_PREFIXES = ("load_shedding_", "system_bess")
 HOURS_PER_YEAR = 8760.0
 
 
+# ── Counterfactual re-solves ──────────────────────────────────────────────────
+
+def freeze_expansion(network: pypsa.Network) -> None:
+    """Fix every extendable asset at the capacity the system solve gave it.
+
+    Several studies answer a "what if" by copying the solved network, changing
+    one thing and re-optimising — the merchant price-taker, the strategic-bidding
+    counterfactual. A copy keeps ``p_nom_extendable``, so those re-solves would
+    also re-make the INVESTMENT decision, which is never the question being
+    asked and quietly changes the fleet under the answer.
+
+    For the merchant study the consequence was severe: an unconstrained
+    price-taker builds until the marginal MW breaks even, so profit came out
+    exactly zero by construction and the reported capacity was the break-even
+    one rather than the fleet's.
+
+    Mutates ``network`` in place; call it on the copy, never on the solved
+    original.
+    """
+    for attr in ("generators", "storage_units", "links", "lines", "stores"):
+        df = getattr(network, attr, None)
+        if df is None or not len(df) or "p_nom_extendable" not in df.columns:
+            continue
+        ext = df.index[df["p_nom_extendable"].astype(bool)]
+        if not len(ext) or "p_nom_opt" not in df.columns:
+            continue
+        df.loc[ext, "p_nom"] = df.loc[ext, "p_nom_opt"].astype(float)
+        df.loc[ext, "p_nom_extendable"] = False
+    # Lines carry their rating as s_nom rather than p_nom.
+    lines = getattr(network, "lines", None)
+    if lines is not None and len(lines) and "s_nom_extendable" in lines.columns:
+        ext = lines.index[lines["s_nom_extendable"].astype(bool)]
+        if len(ext) and "s_nom_opt" in lines.columns:
+            lines.loc[ext, "s_nom"] = lines.loc[ext, "s_nom_opt"].astype(float)
+            lines.loc[ext, "s_nom_extendable"] = False
+
+
 # ── Commitment costs ──────────────────────────────────────────────────────────
 
 def build_commitment_cost(network: pypsa.Network) -> float:

@@ -19,6 +19,8 @@ from typing import Any
 import pandas as pd
 import pypsa
 
+from .market import freeze_expansion
+
 _log = logging.getLogger("pypsa.solver")
 
 
@@ -130,6 +132,10 @@ def build_bid_strategy(
         pass
     try:
         work = network.copy()
+        # The counterfactual is "the same fleet offers differently", so capacity
+        # must not be re-decided by the strategic re-solve — see
+        # market.freeze_expansion.
+        freeze_expansion(work)
         _apply_offer(work, gens, mc_true, markup_type, markup)
         result = work.optimize(
             solver_name="highs",

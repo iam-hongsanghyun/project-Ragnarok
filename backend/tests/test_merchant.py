@@ -112,3 +112,51 @@ def test_merchant_rejects_incompatible_mode() -> None:
             {"merchantConfig": {"enabled": True, "owner": "Acme"}, "contingencyConfig": {"enabled": True}},
         )
     assert exc.value.status_code == 400
+
+
+# ── The owner's assets are the ones the system actually has ─────────────────
+
+
+def _extendable_model() -> dict[str, list[Any]]:
+    """The Acme fleet, but with the wind farm offered to the optimiser."""
+    model = _model()
+    for gen in model["generators"]:
+        if gen["name"] == "wind1":
+            gen["p_nom_extendable"] = True
+            gen["p_nom_max"] = 400.0
+            # PyPSA charges the full ANNUAL capex in the objective, so over a
+            # six-hour window the rate has to be small for anything to be built.
+            gen["capital_cost"] = 5.0
+    return model
+
+
+def test_merchant_reports_the_capacity_the_system_built() -> None:
+    """The study copies the solved network and re-solves it. Left extendable, that
+    re-solve re-made the INVESTMENT decision — an unconstrained price-taker builds
+    to break-even, so it reported a capacity the fleet does not have and a profit
+    that was zero by construction.
+
+    Capacity is an input to this question, not an output: it must equal what the
+    system solve built. (Energy need not — where the owner's asset is marginal,
+    the price-taker LP is indifferent about volume and may pick a different point
+    on the same flat optimum.)
+    """
+    res = run_pypsa(_extendable_model(), SCENARIO,
+                    {"merchantConfig": {"enabled": True, "owner": "Acme", "priceSource": "lmp"}})
+    merchant = res["merchant"]
+    assert merchant is not None
+    wind = next(a for a in merchant["assets"] if a["name"] == "wind1")
+    built = {e["name"]: e["p_nom_opt_mw"] for e in res["expansionResults"]}
+    assert wind["capacityMW"] == pytest.approx(built["wind1"], rel=1e-6)
+    assert wind["capacityMW"] > 80.0, "the system expanded it beyond its brownfield 80 MW"
+    # Volume has to sit inside what that capacity could physically produce.
+    assert 0.0 < wind["energyMWh"] <= built["wind1"] * len(res["dispatchSeries"]) + 1e-6
+
+
+def test_merchant_still_charges_capital_for_a_built_asset() -> None:
+    """Freezing the assets clears p_nom_extendable, which is the flag the capital
+    charge keyed off — so the charge is read from the system network first."""
+    res = run_pypsa(_extendable_model(), SCENARIO,
+                    {"merchantConfig": {"enabled": True, "owner": "Acme", "priceSource": "lmp"}})
+    wind = next(a for a in res["merchant"]["assets"] if a["name"] == "wind1")
+    assert wind["capex"] > 0.0

@@ -28,7 +28,7 @@ from typing import Any
 
 import pypsa
 
-from .market import HOURS_PER_YEAR
+from .market import HOURS_PER_YEAR, freeze_expansion
 
 _log = logging.getLogger("pypsa.solver")
 
@@ -179,6 +179,19 @@ def build_merchant(
     except Exception:  # noqa: BLE001
         pass
 
+    # Annualised capital charge, read from the SOLVED system network before the
+    # freeze below clears p_nom_extendable — that flag is what marks an asset as
+    # carrying a capital charge at all, so the reading has to happen first.
+    capex_annual: dict[tuple[str, str], float] = {}
+    for comp, attr in (("Generator", "generators"), ("StorageUnit", "storage_units")):
+        df = getattr(network, attr)
+        if not len(df) or "p_nom_extendable" not in df.columns or "capital_cost" not in df.columns:
+            continue
+        for name in df.index[df["p_nom_extendable"].astype(bool)]:
+            capex_annual[(comp, str(name))] = (
+                float(df.at[name, "capital_cost"]) * float(df.at[name, "p_nom_opt"])
+            )
+
     work = network.copy()
     # Strip everything that is not the owner's assets: the owner trades only with
     # the price-taker market node, not with the rest of the system.
@@ -193,6 +206,12 @@ def build_merchant(
         idx = list(getattr(work, attr).index)
         if idx:
             work.remove(comp, idx)
+
+    # Freeze the owner's assets at the capacity the SYSTEM solve gave them.
+    # Without this the copied assets are still extendable and the re-solve below
+    # sizes them itself, which drives profit to exactly zero by construction —
+    # see market.freeze_expansion.
+    freeze_expansion(work)
 
     # One price-taker market node per owner bus: a generator priced at π(t) that
     # can supply (owner buys) or absorb (owner sells, p < 0) any volume.
@@ -221,13 +240,13 @@ def build_merchant(
     tot_rev = tot_cost = tot_capex = tot_energy = 0.0
 
     def _capex(comp: str, name: str) -> float:
-        """Window share of the annualised capital charge (× H/8760)."""
-        df = work.generators if comp == "Generator" else work.storage_units
-        ext_col = "p_nom_extendable"
-        if ext_col in df.columns and bool(df.at[name, ext_col]):
-            annual = float(df.at[name, "capital_cost"]) * float(df.at[name, "p_nom_opt"])
-            return annual * window_years
-        return 0.0
+        """Window share of the annualised capital charge (× H/8760).
+
+        Sourced from ``capex_annual``, captured off the system network before
+        the assets were frozen — a brownfield asset the system did not build
+        carries no charge and is simply absent from the map.
+        """
+        return capex_annual.get((comp, str(name)), 0.0) * window_years
 
     # Dense marginal cost — the LP dispatched on the time-varying cost (series
     # workbook column or varying carbon adder), so the report must price the
