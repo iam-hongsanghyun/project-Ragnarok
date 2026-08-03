@@ -78,3 +78,42 @@ def test_mga_rejects_incompatible_mode() -> None:
             {"mgaConfig": {"enabled": True}, "powerFlowConfig": {"enabled": True}},
         )
     assert exc.value.status_code == 400
+
+
+# ── Brownfield capacity is what broke it ────────────────────────────────────
+
+
+def _brownfield_model() -> dict[str, list[dict[str, Any]]]:
+    """The same system, but the gas unit is already built and expandable.
+
+    Every generator above starts at zero, so ``installed_capex`` is zero and the
+    budget constraint balances however the objective constant is handled. Give
+    one unit a starting capacity and it stops balancing — which is the case every
+    real model is.
+    """
+    model = _model()
+    for gen in model["generators"]:
+        if gen["name"] == "g_gas":
+            gen["p_nom"] = 60.0
+    return model
+
+
+def test_mga_works_when_capacity_is_already_installed() -> None:
+    """PyPSA's budget constraint is ``objective + installed_capex <= (1+slack) *
+    (capex + opex)``, which pairs with the objective constant INCLUDED.
+
+    Overriding it off — to match the main solve — added the installed capex to
+    the left-hand side twice, so every direction came back infeasible and the
+    study returned None. The greenfield test above could not catch it because
+    its installed capex is zero.
+    """
+    res = run_pypsa(
+        _brownfield_model(), SCENARIO,
+        {"mgaConfig": {"enabled": True, "slack": 0.15, "carriers": ["wind", "solar"]}},
+    )
+    mga = res["nearOptimal"]
+    assert mga is not None, "a brownfield fleet must not make the whole study vanish"
+    assert mga["alternatives"], "at least one direction has to solve"
+    for alt in mga["alternatives"]:
+        assert alt["status"] == "ok"
+        assert alt["costRatio"] <= 1.0 + mga["slack"] + 1e-6

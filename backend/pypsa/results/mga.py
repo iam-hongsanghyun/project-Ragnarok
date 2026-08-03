@@ -134,10 +134,18 @@ def build_mga(
                     sense=sense,
                     slack=slack,
                     multi_investment_periods=multi_investment_periods,
-                    # Match the main solve: keep the objective constant out of the
-                    # LP (a fixed offset that changes no reported number, only
-                    # improves conditioning) and pin to the PyPSA v2.0 default.
-                    model_kwargs={"include_objective_constant": False},
+                    # Do NOT override include_objective_constant here, however
+                    # tempting it is to match the main solve. PyPSA's budget
+                    # constraint is written to pair with the constant INCLUDED:
+                    #
+                    #     objective + installed_capex <= (1 + slack) * (capex + opex)
+                    #
+                    # With the constant in, the objective is (capex + opex) minus
+                    # the installed capex, so the two sides balance. Take it out
+                    # and the left-hand side gains that installed capex twice —
+                    # on this course's expanded year, 25.6M + 7.5M against a
+                    # budget of 26.9M — so EVERY direction came back infeasible
+                    # and the whole study returned nothing at all.
                     solver_name="highs",
                     solver_options=solver_options,
                     io_api=io_api,
