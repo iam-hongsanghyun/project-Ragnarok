@@ -332,11 +332,115 @@ TRAINING_M5: dict = {
     },
 }
 
+# ── Module 6 — the model at the end of "6 · Investment and capacity expansion" ─
+# Module 5's model with wind and the line made extendable and given capital costs
+# scaled to the three hours actually modelled. The optimiser widens the line from
+# 60 to 87.55 MW and builds no wind at all — the wire was the binding constraint.
+# Solves to 6,187.27.
+#
+# Ragnarok treats a workbook `capital_cost` as an OVERNIGHT cost and annualises
+# it itself, using `lifetime` and Settings -> Discount rate. It does NOT scale
+# that annual figure to the modelled window, so on a three-hour model the
+# overnight cost must be pre-scaled by 3/8760 by hand — which is the trap module
+# 6 is built around, and another reason module 7 exists.
+#
+#   wind  1,200,000/MW x 3/8760 = 410.9589,  lifetime 25 y
+#   line    600,000/MW x 3/8760 = 205.4795,  lifetime 40 y
+# Ragnarok then applies CRF(7%, life), giving 35.26 and 15.41 per MW.
+TRAINING_M6: dict = {
+    "filename": "Training module 6 — investment and capacity expansion",
+    "example": {
+        "label": "Training: module 6 model (end of module)",
+        "description": (
+            "The model the \"Power market modelling\" course has built by the end of module 6 — module 5's "
+            "system with wind and the transmission line made extendable, and capital costs annualised and "
+            "scaled to the modelled window. The optimiser widens the line from 60 to 87.55 MW and builds "
+            "30 MW of new wind alongside it, because the wire is what makes the wind reachable. Solves "
+            "to 5,995.48 at the default 0.05 discount rate."
+        ),
+        "order": 95,
+    },
+    "sheets": [
+        ("snapshots", "static", [{"snapshot": s} for s in SNAPSHOTS]),
+        ("network", "static", [{"name": "my-first-model"}]),
+        ("carriers", "static", [
+            {"name": "AC", "co2_emissions": 0.0},
+            {"name": "gas", "co2_emissions": 0.2},
+            {"name": "coal", "co2_emissions": 0.34},
+            {"name": "oil", "co2_emissions": 0.27},
+            {"name": "wind", "co2_emissions": 0.0},
+            {"name": "hydro", "co2_emissions": 0.0},
+        ]),
+        ("buses", "static", [
+            {"name": "bus_1", "v_nom": 380.0, "x": 127.0, "y": 37.5, "carrier": "AC"},
+            {"name": "bus_2", "v_nom": 380.0, "x": 129.0, "y": 35.2, "carrier": "AC"},
+            {"name": "bus_gas", "v_nom": 0.0, "x": 128.0, "y": 36.4, "carrier": "gas"},
+        ]),
+        # wind_1 is extendable with p_nom_min at its existing 60 MW — brownfield:
+        # the model may build more but may not un-build what is already there.
+        ("generators", "static", [
+            {"name": "coal_1", "bus": "bus_1", "carrier": "coal",
+             "p_nom": 50.0, "marginal_cost": 20.0, "efficiency": 0.4},
+            {"name": "oil_1", "bus": "bus_2", "carrier": "oil",
+             "p_nom": 40.0, "marginal_cost": 120.0, "efficiency": 0.35},
+            {"name": "wind_1", "bus": "bus_1", "carrier": "wind",
+             "p_nom": 60.0, "marginal_cost": 0.0, "efficiency": 1.0,
+             "p_nom_extendable": True, "p_nom_min": 60.0, "p_nom_max": 300.0,
+             "capital_cost": 410.9589, "lifetime": 25.0},
+            {"name": "ror_1", "bus": "bus_1", "carrier": "hydro",
+             "p_nom": 15.0, "marginal_cost": 0.0, "efficiency": 1.0},
+            {"name": "gas_supply", "bus": "bus_gas", "carrier": "gas",
+             "p_nom": 150.0, "marginal_cost": 25.0, "efficiency": 1.0},
+        ]),
+        ("loads", "static", [
+            {"name": "load_1", "bus": "bus_2", "carrier": "AC", "p_set": 80.0},
+        ]),
+        ("lines", "static", [
+            {"name": "line_1", "bus0": "bus_1", "bus1": "bus_2",
+             "s_nom": 60.0, "x": 0.1, "r": 0.01, "length": 200.0,
+             "s_nom_extendable": True, "s_nom_min": 60.0, "s_nom_max": 300.0,
+             "capital_cost": 205.4795, "lifetime": 40.0},
+        ]),
+        ("links", "static", [
+            {"name": "ccgt_1", "bus0": "bus_gas", "bus1": "bus_2",
+             "efficiency": 0.5, "p_nom": 200.0},
+        ]),
+        ("stores", "static", [
+            {"name": "gas_store", "bus": "bus_gas", "e_nom": 200.0, "e_cyclic": True},
+        ]),
+        ("storage_units", "static", [
+            {"name": "batt_1", "bus": "bus_2", "carrier": "AC",
+             "p_nom": 20.0, "max_hours": 1.0,
+             "efficiency_store": 0.9, "efficiency_dispatch": 0.9,
+             "cyclic_state_of_charge": True},
+            {"name": "phs_1", "bus": "bus_1", "carrier": "hydro",
+             "p_nom": 30.0, "max_hours": 6.0,
+             "efficiency_store": 0.87, "efficiency_dispatch": 0.87,
+             "cyclic_state_of_charge": True},
+        ]),
+        ("loads-p_set", "series", [
+            {"snapshot": SNAPSHOTS[0], "load_1": 40.0},
+            {"snapshot": SNAPSHOTS[1], "load_1": 80.0},
+            {"snapshot": SNAPSHOTS[2], "load_1": 170.0},
+        ]),
+        ("generators-p_max_pu", "series", [
+            {"snapshot": SNAPSHOTS[0], "wind_1": 0.9, "ror_1": 0.6},
+            {"snapshot": SNAPSHOTS[1], "wind_1": 0.4, "ror_1": 0.6},
+            {"snapshot": SNAPSHOTS[2], "wind_1": 0.1, "ror_1": 0.55},
+        ]),
+    ],
+    "componentCounts": {
+        "buses": 3, "generators": 5, "loads": 1, "carriers": 6,
+        "lines": 1, "links": 1, "storage_units": 2, "stores": 1,
+    },
+}
+
 CHECKPOINTS = {
     "training_m2": TRAINING_M2,
     "training_m3": TRAINING_M3,
     "training_m4": TRAINING_M4,
     "training_m5": TRAINING_M5,
+    "training_m6": TRAINING_M6,
 }
 
 

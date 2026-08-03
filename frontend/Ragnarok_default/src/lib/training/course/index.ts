@@ -36,6 +36,7 @@ import { MODULE_2_DISPATCH } from './module2Dispatch';
 import { MODULE_3_NETWORKS } from './module3Networks';
 import { MODULE_4_STORAGE } from './module4Storage';
 import { MODULE_5_SECTOR_COUPLING } from './module5SectorCoupling';
+import { MODULE_6_INVESTMENT } from './module6Investment';
 
 const STEPS = [
   ...MODULE_1_FOUNDATIONS,
@@ -43,6 +44,7 @@ const STEPS = [
   ...MODULE_3_NETWORKS,
   ...MODULE_4_STORAGE,
   ...MODULE_5_SECTOR_COUPLING,
+  ...MODULE_6_INVESTMENT,
 ];
 
 /**
@@ -95,6 +97,15 @@ const MODULES: CourseModule[] = [
     summary: 'Gas gets its own bus, its own price and its own store, and the gas plant becomes what it '
       + 'is — a CCGT converting fuel into power. Adds run-of-river hydro and a pumped-hydro scheme worth '
       + 'a fraction of a battery a tenth its size.',
+  },
+  {
+    section: '6 · Investment and capacity expansion',
+    title: 'Investment and capacity expansion',
+    level: 'Advanced',
+    minutes: 120,
+    summary: 'Capacity becomes a decision: annuitised capital costs, the discount rate the app refuses '
+      + 'to guess, and the window-scaling trap that makes a first expansion model build nothing. Ends by '
+      + 'building the wire rather than the wind farm.',
   },
 ];
 

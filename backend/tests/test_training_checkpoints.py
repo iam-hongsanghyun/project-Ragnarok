@@ -50,9 +50,9 @@ def _model_from_example(example_id: str, tmp_path: Path) -> dict:
     return model
 
 
-def _solved(example_id: str, tmp_path: Path):
+def _solved(example_id: str, tmp_path: Path, scenario: dict | None = None):
     model = _model_from_example(example_id, tmp_path)
-    n, _notes = build_network(model, SCENARIO, OPTIONS)
+    n, _notes = build_network(model, scenario or SCENARIO, OPTIONS)
     n.optimize(solver_name="highs")
     return n
 
@@ -119,8 +119,8 @@ def _without(model: dict, *, generators: tuple[str, ...], sheets: tuple[str, ...
     return trimmed
 
 
-def _solve_model(model: dict):
-    n, _notes = build_network(model, SCENARIO, OPTIONS)
+def _solve_model(model: dict, scenario: dict | None = None):
+    n, _notes = build_network(model, scenario or SCENARIO, OPTIONS)
     n.optimize(solver_name="highs")
     return n
 
@@ -399,12 +399,100 @@ def test_module_5_pumped_hydro_behind_the_constraint_is_nearly_worthless(tmp_pat
     assert added < 100.0, "180 MWh behind the constraint should be worth very little"
 
 
+# ── Module 6 — investment and capacity expansion ─────────────────────────────
+# The first checkpoint whose answer depends on the discount rate: Ragnarok
+# annuitises a workbook `capital_cost` (an OVERNIGHT figure) using `lifetime` and
+# this rate, so the run is meaningless without it.
+# The GUI default. Every module-6 figure assumes it, so a learner who never
+# opens Settings matches the course.
+EXPANSION = {"carbonPrice": 0.0, "discountRate": 0.05}
+
+
+def test_module_6_checkpoint_solves_to_6187(tmp_path: Path) -> None:
+    """Wind and the line both extendable; the model builds 27.55 MW of wire."""
+    n = _solved("training_m6", tmp_path, EXPANSION)
+    assert float(n.objective) == pytest.approx(5_995.48, abs=0.01)
+    assert float(n.lines.at["line_1", "s_nom_opt"]) == pytest.approx(97.25, abs=0.01)
+
+
+def test_module_6_the_wire_unlocks_the_wind_farm(tmp_path: Path) -> None:
+    """Complements, not substitutes — the module's closing argument.
+
+    Offered alone (see the next test) the wind farm is worth nothing. Offered
+    alongside an extendable line it is worth 30 MW, because the wire is what
+    makes its output reachable.
+    """
+    n = _solved("training_m6", tmp_path, EXPANSION)
+    assert float(n.generators.at["wind_1", "p_nom_opt"]) == pytest.approx(90.0, abs=1e-6)
+    assert float(n.lines.at["line_1", "s_nom_opt"]) == pytest.approx(97.25, abs=0.01)
+
+
+def test_module_6_a_higher_discount_rate_reverses_the_wind_investment(tmp_path: Path) -> None:
+    """Step 9: two percentage points removes a 30 MW generation investment.
+
+    Nothing physical changes. Capital-heavy, fuel-free technologies are the ones
+    a discount rate bites hardest, so the wind farm goes while the line — with
+    its 40-year life — survives.
+    """
+    n = _solved("training_m6", tmp_path, {"carbonPrice": 0.0, "discountRate": 0.07})
+    assert float(n.objective) == pytest.approx(6_187.27, abs=0.01)
+    assert float(n.generators.at["wind_1", "p_nom_opt"]) == pytest.approx(60.0, abs=1e-6)
+    assert float(n.lines.at["line_1", "s_nom_opt"]) == pytest.approx(87.55, abs=0.01)
+
+
+def test_module_6_wind_alone_builds_nothing(tmp_path: Path) -> None:
+    """Step 6: offered on its own, at a correctly scaled cost, wind is declined
+    and the objective is module 5's 7,099.59 unchanged."""
+    model = _model_from_example("training_m6", tmp_path)
+    model["lines"] = [{k: v for k, v in model["lines"][0].items()
+                       if k not in ("s_nom_extendable", "s_nom_min", "s_nom_max",
+                                    "capital_cost", "lifetime")}]
+    n = _solve_model(model, EXPANSION)
+    assert float(n.objective) == pytest.approx(7_099.59, abs=0.01)
+    assert float(n.generators.at["wind_1", "p_nom_opt"]) == pytest.approx(60.0, abs=1e-6)
+
+
+def test_module_6_capital_cost_is_an_overnight_cost(tmp_path: Path) -> None:
+    """Ragnarok annuitises what the sheet holds, so the sheet holds OVERNIGHT.
+
+    The course tells the learner to type 410.96 (1.2m/MW scaled by 3/8760) and
+    let the app apply CRF. If that convention ever flipped, every capital figure
+    in module 6 would be twelve times wrong — so pin it.
+    """
+    model = _model_from_example("training_m6", tmp_path)
+    wind = next(g for g in model["generators"] if g["name"] == "wind_1")
+    assert wind["capital_cost"] == pytest.approx(410.9589, abs=1e-3)
+    assert wind["lifetime"] == 25.0
+    n = _solved("training_m6", tmp_path, EXPANSION)
+    # 410.9589 x CRF(5%, 25y) = 29.16 per MW in the objective.
+    assert float(n.generators.at["wind_1", "capital_cost"]) == pytest.approx(29.1637, abs=0.01)
+
+
+def test_module_6_unscaled_annual_cost_builds_nothing(tmp_path: Path) -> None:
+    """The 2,920x trap the module is built around.
+
+    An annual capital cost in a three-hour objective asks the model to recover a
+    year of capital from three hours of fuel saving, so it declines everything
+    and the answer looks like a considered no.
+    """
+    model = _model_from_example("training_m6", tmp_path)
+    model["lines"] = [{**model["lines"][0], "capital_cost": 600_000.0}]
+    model["generators"] = [
+        {**g, "capital_cost": 1_200_000.0} if g["name"] == "wind_1" else g
+        for g in model["generators"]
+    ]
+    n = _solve_model(model, EXPANSION)
+    assert float(n.lines.at["line_1", "s_nom_opt"]) == pytest.approx(60.0, abs=1e-6)
+    assert float(n.generators.at["wind_1", "p_nom_opt"]) == pytest.approx(60.0, abs=1e-6)
+
+
 # ── The checkpoints the course references must exist and be loadable ─────────
 
 def test_every_course_checkpoint_is_a_listable_example() -> None:
     """A checkpoint id the tutorial names but ``/api/examples`` cannot serve gives
     the learner a dead button, which is worse than no button."""
-    for example_id in ("training_m1", "training_m2", "training_m3", "training_m4", "training_m5"):
+    for example_id in ("training_m1", "training_m2", "training_m3", "training_m4",
+                       "training_m5", "training_m6"):
         db = EXAMPLES / example_id / "project.db"
         assert db.exists(), f"{example_id}: no project.db"
         con = sqlite3.connect(db)
