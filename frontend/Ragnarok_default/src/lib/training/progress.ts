@@ -5,7 +5,7 @@
  * that reordering or inserting a step in the catalog does not silently mark
  * unrelated steps as done: an id that no longer exists is simply ignored.
  */
-import { Tutorial, TutorialProgress } from './types';
+import { Tutorial, TutorialProgress, TutorialStartChoice } from './types';
 
 export const emptyProgress = (): TutorialProgress => ({ completed: [], currentStepId: null });
 
@@ -97,17 +97,17 @@ export function clearGuideStop(progress: TutorialProgress, stepId: string): Tuto
   return { ...progress, guideStop: next };
 }
 
-/** Whether a module's prebuilt starting model is loaded, per module opener. */
-export function isCheckpointLoaded(progress: TutorialProgress, stepId: string): boolean {
-  return progress.checkpointLoaded?.[stepId] ?? false;
+/** Which start the learner chose for a module. Defaults to building it themselves. */
+export function startChoiceFor(progress: TutorialProgress, stepId: string): TutorialStartChoice {
+  return progress.startChoice?.[stepId] ?? 'empty';
 }
 
-export function setCheckpointLoaded(
-  progress: TutorialProgress, stepId: string, loaded: boolean,
+export function setStartChoice(
+  progress: TutorialProgress, stepId: string, choice: TutorialStartChoice,
 ): TutorialProgress {
   return {
     ...progress,
-    checkpointLoaded: { ...(progress.checkpointLoaded ?? {}), [stepId]: loaded },
+    startChoice: { ...(progress.startChoice ?? {}), [stepId]: choice },
   };
 }
 

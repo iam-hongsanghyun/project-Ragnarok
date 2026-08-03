@@ -136,6 +136,7 @@
 .training-level--beginner     { background: var(--brand-soft); color: var(--brand-strong); }
 .training-level--intermediate { background: var(--warn-soft); color: #7a5600; }
 .training-level--advanced     { background: var(--danger-soft); color: var(--danger-strong); }
+.training-level--expert       { background: var(--bg-hover); color: var(--text); }
 
 .training-list {
   margin: 0;
@@ -873,9 +874,84 @@
   cursor: pointer;
 }
 
-/* ── "Start with prebuilt data" checkbox ──
-   The one control a learner meets at the top of every module: ticked loads that
-   module's starting model, unticked means they are building it themselves. */
+/* ── Module start choice ──
+   Three exclusive ways into a module — empty, prebuilt, complete — shown at the
+   top of every module opener. */
+
+.training-start-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.training-start-choice {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.training-start-choice:hover { border-color: var(--brand); }
+
+.training-start-choice.is-active {
+  border-color: var(--brand);
+  background: rgba(15, 118, 110, 0.06);
+}
+
+.training-start-choice input { margin-top: 3px; }
+
+.training-start-choice__detail {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+}
+
+/* ── Rail items ──
+   The Training rail IS the Settings rail (.settings-section-nav /
+   .settings-nav-group / .settings-nav-item). These only add the second line and
+   the step number that a plain settings item does not carry. */
+
+.training-module-item,
+.training-step-item {
+  white-space: normal;
+}
+
+.training-module-item__name {
+  display: block;
+  font-weight: 600;
+}
+
+.training-module-item__meta {
+  display: block;
+  margin-top: 1px;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+.training-step-item {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.training-step-item__num {
+  flex: 0 0 auto;
+  min-width: 14px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
+
+.training-step-item.is-done .training-step-item__num { color: var(--brand); }
+.training-step-item.is-done .training-step-item__label { color: var(--muted); }
+
+/* ── Legacy prebuilt checkbox ── */
 
 .training-start-state__prebuilt {
   display: flex;

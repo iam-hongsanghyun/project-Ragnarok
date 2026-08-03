@@ -13,19 +13,19 @@ import { WorkspaceTab } from 'lib/types';
 import { Spotlight, Tutorial, TutorialProgress, TutorialStep } from 'lib/training/types';
 import {
   completeAndAdvance,
-  isCheckpointLoaded,
   isStepComplete,
   isTutorialComplete,
   guideStopFor,
   moveBy,
   percentComplete,
   resolveCurrentStepId,
-  setCheckpointLoaded,
+  setStartChoice,
+  startChoiceFor,
   stepIndex,
   toggleStep,
 } from 'lib/training/progress';
 import { ViewPaneHeader } from 'shared/components/primitives';
-import { CheckpointBanner, ModelSummary, StartStateBanner } from './StartStateBanner';
+import { ModelSummary, StartOptionsBanner } from './StartStateBanner';
 
 interface Props {
   tutorial: Tutorial;
@@ -61,24 +61,6 @@ const TAB_LABEL: Partial<Record<WorkspaceTab, string>> = {
   Plugins: 'Plugins',
   Training: 'Training',
 };
-
-/** Copy-to-clipboard button. Copying is not entering — the user still pastes. */
-function CopyValue({ value }: { value: string }) {
-  const [copied, setCopied] = useState(false);
-  const copy = useCallback(() => {
-    void navigator.clipboard?.writeText(value)
-      .then(() => {
-        setCopied(true);
-        window.setTimeout(() => setCopied(false), 1200);
-      })
-      .catch(() => { /* clipboard blocked — the value is on screen to type anyway */ });
-  }, [value]);
-  return (
-    <button type="button" className="training-copy" onClick={copy} title="Copy the value — you still paste it yourself">
-      {copied ? 'Copied' : 'Copy'}
-    </button>
-  );
-}
 
 function StepBody({ step, onNavigate, onStartGuide, guideStop }: {
   step: TutorialStep;
@@ -134,39 +116,6 @@ function StepBody({ step, onNavigate, onStartGuide, guideStop }: {
         ))}
       </section>
 
-      {step.entries && step.entries.length > 0 && (
-        <section className="training-block">
-          <h4 className="training-block__title">Values to enter</h4>
-          <p className="training-block__note">
-            Ragnarok does not enter these for you — type them in yourself so you learn where they live.
-          </p>
-          <table className="training-table">
-            <thead>
-              <tr>
-                <th>Field</th>
-                <th>Value</th>
-                <th>Why</th>
-              </tr>
-            </thead>
-            <tbody>
-              {step.entries.map((entry) => (
-                <tr key={`${entry.field}|${entry.value}`}>
-                  <td>
-                    <code className="training-field">{entry.field}</code>
-                    {entry.label && <span className="training-field-label">{entry.label}</span>}
-                  </td>
-                  <td className="training-value-cell">
-                    <span className="training-value">{entry.value}</span>
-                    {entry.unit && <span className="training-unit">{entry.unit}</span>}
-                    <CopyValue value={entry.value} />
-                  </td>
-                  <td className="training-why">{entry.why}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-      )}
 
       {step.files && step.files.length > 0 && (
         <section className="training-block">
@@ -217,6 +166,40 @@ function StepBody({ step, onNavigate, onStartGuide, guideStop }: {
           <ul className="training-list training-list--pitfall">
             {step.pitfalls.map((item) => <li key={item}>{item}</li>)}
           </ul>
+        </section>
+      )}
+
+      {step.entries && step.entries.length > 0 && (
+        <section className="training-block">
+          <h4 className="training-block__title">What each value means</h4>
+          <p className="training-block__note">
+            Every value this step uses, what it controls, and why it is set to this. Read it after doing
+            the step — it is the reference you come back to, not a list to work through.
+          </p>
+          <table className="training-table">
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Value</th>
+                <th>Why</th>
+              </tr>
+            </thead>
+            <tbody>
+              {step.entries.map((entry) => (
+                <tr key={`${entry.field}|${entry.value}`}>
+                  <td>
+                    <code className="training-field">{entry.field}</code>
+                    {entry.label && <span className="training-field-label">{entry.label}</span>}
+                  </td>
+                  <td className="training-value-cell">
+                    <span className="training-value">{entry.value}</span>
+                    {entry.unit && <span className="training-unit">{entry.unit}</span>}
+                  </td>
+                  <td className="training-why">{entry.why}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </section>
       )}
     </>
@@ -272,28 +255,15 @@ export function TutorialRunner({
           </div>
         )}
 
-        {/* Starting state matters on the first step only. */}
-        {step && index === 0 && tutorial.startState && (
-          <StartStateBanner
-            startState={tutorial.startState}
+        {/* Every module opens with the same three-way choice of starting model. */}
+        {step?.startOptions && (
+          <StartOptionsBanner
+            options={step.startOptions}
             model={modelSummary}
+            choice={startChoiceFor(progress, step.id)}
+            onChoiceChange={(c) => onProgressChange(setStartChoice(progress, step.id, c))}
             onClearModel={onClearModel}
             onLoadExample={onLoadExample}
-            prebuiltLoaded={progress.prebuiltLoaded ?? false}
-            onPrebuiltLoadedChange={(v) => onProgressChange({ ...progress, prebuiltLoaded: v })}
-          />
-        )}
-
-        {/* Every module after the first opens from a named checkpoint, so a
-            learner can join at any module. Offered, never loaded on its own. */}
-        {step?.checkpoint && (
-          <CheckpointBanner
-            checkpoint={step.checkpoint}
-            model={modelSummary}
-            onClearModel={onClearModel}
-            onLoadExample={onLoadExample}
-            loaded={isCheckpointLoaded(progress, step.id)}
-            onLoadedChange={(v) => onProgressChange(setCheckpointLoaded(progress, step.id, v))}
           />
         )}
 

@@ -20,6 +20,15 @@ export const MODULE_1_FOUNDATIONS: TutorialStep[] = [
     title: 'What a power-system model is',
     tab: 'Welcome',
     where: 'Welcome view',
+    startOptions: {
+      // Nothing precedes module 1, so there is no prebuilt start — only the
+      // empty sheet the course assumes, or the model it ends with.
+      completeExampleId: 'training_m1',
+      note:
+        'Module 1 builds a model from nothing, so Empty is the choice that teaches it — watching the '
+        + 'first model appear one sheet at a time is most of the lesson. Complete data loads the finished '
+        + 'module-1 model instead, for reading and running rather than building.',
+    },
     concept: [
       'The grid stores almost nothing. What is consumed now is generated now — across the whole '
       + 'network, at every instant. Miss the balance and frequency drifts, protection trips, and the '

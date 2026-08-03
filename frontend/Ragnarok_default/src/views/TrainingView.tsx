@@ -10,10 +10,10 @@
  * app itself is switch the active view so they are looking at the right place.
  * See `lib/training/catalog.ts` for the authoring rules that keep it that way.
  */
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import { WorkspaceTab } from 'lib/types';
 import { Spotlight, TutorialProgress } from 'lib/training/types';
-import { TUTORIALS, findTutorial, stepsBySection, tutorialsByLevel } from 'lib/training/catalog';
+import { TUTORIALS, findTutorial, modulesByLevel, modulesWithSteps } from 'lib/training/catalog';
 import {
   emptyProgress,
   isStepComplete,
@@ -53,6 +53,9 @@ export function TrainingView({
   modelSummary, onClearModel, onLoadExample,
 }: Props) {
   const setActiveId = onActiveIdChange;
+  // The module the learner is in, by its `section` string. Null means the rail
+  // is showing the level → module picker rather than a module's steps.
+  const [openSection, setOpenSection] = useState<string | null>(null);
   const setProgressById = onProgressByIdChange;
 
   const active = findTutorial(activeId);
@@ -84,69 +87,107 @@ export function TrainingView({
     }
   }, [setActiveId, progressById, setProgressById]);
 
-  const rail = active ? (
+  const modules = active ? modulesWithSteps(active) : [];
+  const openModule = modules.find((m) => m.module.section === openSection) ?? null;
+
+  // Rail, in the Settings idiom: a group title with plain items under it, no
+  // nesting and nothing collapsible. Two states — pick a module, or work
+  // through one — because a nine-module course does not fit as one list.
+  const rail = active && openModule ? (
     <LeftRail
-      title="Steps"
-      ariaLabel={`${active.title} steps`}
+      title={openModule.module.title}
+      ariaLabel={`${openModule.module.title} steps`}
+      className="settings-section-nav"
+      headerAction={
+        <button type="button" className="training-rail-back" onClick={() => setOpenSection(null)}>
+          Modules
+        </button>
+      }
+    >
+      <div className="settings-nav-group">
+        <div className="settings-nav-group-title">{openModule.module.section}</div>
+        {/* Numbered within the module, matching the runner's "Step N of M" —
+            the module is the unit a learner navigates, so a rail counting
+            7…16 against a body counting 1…10 would just be two answers to the
+            same question. */}
+        {openModule.items.map(({ step }, i) => {
+          const number = i + 1;
+          const done = isStepComplete(progressFor(active.id), step.id);
+          const current = resolveCurrentStepId(active, progressFor(active.id)) === step.id;
+          return (
+            <button
+              key={step.id}
+              type="button"
+              className={`settings-nav-item training-step-item${current ? ' settings-nav-item--active' : ''}${done ? ' is-done' : ''}`}
+              onClick={() => setProgressFor(active.id, { ...progressFor(active.id), currentStepId: step.id })}
+              aria-current={current ? 'step' : undefined}
+            >
+              <span className="training-step-item__num">{done ? '✓' : number}</span>
+              <span className="training-step-item__label">{step.title}</span>
+            </button>
+          );
+        })}
+      </div>
+    </LeftRail>
+  ) : active ? (
+    <LeftRail
+      title="Modules"
+      ariaLabel={`${active.title} modules`}
+      className="settings-section-nav"
       headerAction={
         <button type="button" className="training-rail-back" onClick={() => setActiveId(null)}>
           All
         </button>
       }
     >
-      {stepsBySection(active.steps).map((group, gi) => (
-        // Section runs are positional, so the index is the stable identity.
-        // eslint-disable-next-line react/no-array-index-key
-        <div key={`${group.section ?? 'ungrouped'}-${gi}`} className="training-rail-group">
-          {group.section && <div className="training-rail-group__title">{group.section}</div>}
-          <ol className="training-rail-steps">
-            {group.items.map(({ step, number }) => {
-              const done = isStepComplete(progressFor(active.id), step.id);
-              const current = resolveCurrentStepId(active, progressFor(active.id)) === step.id;
-              return (
-                <li key={step.id}>
-                  <button
-                    type="button"
-                    className={`training-rail-step${current ? ' is-current' : ''}${done ? ' is-done' : ''}`}
-                    onClick={() => setProgressFor(active.id, { ...progressFor(active.id), currentStepId: step.id })}
-                    aria-current={current ? 'step' : undefined}
-                  >
-                    <span className="training-rail-step__num">{done ? '✓' : number}</span>
-                    <span className="training-rail-step__label">{step.title}</span>
-                  </button>
-                </li>
-              );
-            })}
-          </ol>
+      {modulesByLevel(active).map((group) => (
+        <div key={group.level} className="settings-nav-group">
+          <div className="settings-nav-group-title">{group.level}</div>
+          {group.items.map(({ module, items }) => {
+            const done = items.filter(({ step }) => isStepComplete(progressFor(active.id), step.id)).length;
+            return (
+              <button
+                key={module.section}
+                type="button"
+                className="settings-nav-item training-module-item"
+                onClick={() => {
+                  setOpenSection(module.section);
+                  // Land on the module's first step rather than wherever the
+                  // learner last was elsewhere in the course.
+                  setProgressFor(active.id, { ...progressFor(active.id), currentStepId: items[0].step.id });
+                }}
+              >
+                <span className="training-module-item__name">{module.section}</span>
+                <span className="training-module-item__meta">
+                  {items.length} steps · {module.minutes} min{done > 0 ? ` · ${done}/${items.length} done` : ''}
+                </span>
+              </button>
+            );
+          })}
         </div>
       ))}
     </LeftRail>
   ) : (
-    <LeftRail title="Training" ariaLabel="Tutorials">
+    <LeftRail title="Training" ariaLabel="Tutorials" className="settings-section-nav">
       {TUTORIALS.length === 0 ? (
         <p className="training-rail-empty">No tutorials yet.</p>
       ) : (
-        tutorialsByLevel(TUTORIALS).map((group) => (
-          <div key={group.level} className="training-rail-group">
-            <div className="training-rail-group__title">{group.level}</div>
-            {group.items.map((t) => {
-              const percent = percentComplete(t, progressFor(t.id));
-              return (
-                <button
-                  key={t.id}
-                  type="button"
-                  className="training-rail-item"
-                  onClick={() => openTutorial(t.id)}
-                >
-                  <span className="training-rail-item__label">{t.title}</span>
-                  <span className="training-rail-item__meta">
-                    {t.minutes} min{percent > 0 ? ` · ${percent}%` : ''}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        ))
+        <div className="settings-nav-group">
+          <div className="settings-nav-group-title">Courses</div>
+          {TUTORIALS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              className="settings-nav-item training-module-item"
+              onClick={() => openTutorial(t.id)}
+            >
+              <span className="training-module-item__name">{t.title}</span>
+              <span className="training-module-item__meta">
+                {modulesWithSteps(t).length} modules · {percentComplete(t, progressFor(t.id))}%
+              </span>
+            </button>
+          ))}
+        </div>
       )}
     </LeftRail>
   );
@@ -156,9 +197,12 @@ export function TrainingView({
       <ResizablePanels id="training" direction="horizontal" initialSizes={[24, 76]} minSize={200}>
         {rail}
         <main className="view-main training-main">
-          {active ? (
+          {active && openModule ? (
+            // The runner is scoped to ONE module: its step count, its Previous
+            // and Next, its completion panel. Progress stays keyed by step id,
+            // so finishing a module leaves the rest of the course untouched.
             <TutorialRunner
-              tutorial={active}
+              tutorial={{ ...active, title: `${active.title} — ${openModule.module.title}`, steps: openModule.items.map((i) => i.step) }}
               progress={progressFor(active.id)}
               onProgressChange={(next) => setProgressFor(active.id, next)}
               onNavigate={onNavigate}
@@ -166,7 +210,7 @@ export function TrainingView({
               modelSummary={modelSummary}
               onClearModel={onClearModel}
               onLoadExample={onLoadExample}
-              onExit={() => setActiveId(null)}
+              onExit={() => setOpenSection(null)}
               onReset={() => setProgressFor(active.id, emptyProgress())}
             />
           ) : (

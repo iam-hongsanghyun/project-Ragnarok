@@ -30,7 +30,7 @@
  * Steps live one module per file so each stays reviewable. Add a module by
  * appending its array to `STEPS` below.
  */
-import { Tutorial } from '../types';
+import { CourseModule, Tutorial } from '../types';
 import { MODULE_1_FOUNDATIONS } from './module1Foundations';
 import { MODULE_2_DISPATCH } from './module2Dispatch';
 
@@ -39,26 +39,41 @@ const STEPS = [
   ...MODULE_2_DISPATCH,
 ];
 
+/**
+ * The modules a learner picks from, in teaching order.
+ *
+ * `section` matches the string on the module's steps — the join between the two
+ * — so a module with no steps written yet simply has none to show, and a step
+ * whose section is not listed here would be unreachable rather than silently
+ * mis-grouped. `catalog.test.ts` checks both directions.
+ */
+const MODULES: CourseModule[] = [
+  {
+    section: '1 · Foundations',
+    title: 'Foundations',
+    level: 'Beginner',
+    minutes: 60,
+    summary: 'What a power-system model is, what a network is made of, and one full '
+      + 'change → validate → run → read loop on a model small enough to check by hand.',
+  },
+  {
+    section: '2 · Economic dispatch',
+    title: 'Economic dispatch',
+    level: 'Beginner',
+    minutes: 120,
+    summary: 'The merit order, the marginal unit that sets the price, demand that varies '
+      + 'by the hour, and variable generation with its curtailment and zero prices.',
+  },
+];
+
 export const POWER_MARKET_COURSE: Tutorial = {
   id: 'power-market-modelling',
   title: 'Power market modelling with Ragnarok',
+  modules: MODULES,
   level: 'Beginner',
   // Modules 1–2 as written, at the pace of someone typing every value and
   // reading the concept blocks rather than skimming them.
   minutes: 3 * 60,
-  // Module 1 authors a model from an empty sheet, so a leftover model would
-  // collide with it. Declared, not enforced: a learner may be resuming work they
-  // left deliberately, so the runner offers the clear rather than doing it.
-  startState: {
-    kind: 'empty',
-    // The module-1 model, prebuilt (backend/data/examples/training_m1) — the
-    // "start with prebuilt data" checkbox loads it in one action.
-    exampleId: 'training_m1',
-    note:
-      'This course builds a model from nothing, so it starts with an empty session. If you have work '
-      + 'loaded that you want to keep, export it first (Model → Export project) — clearing keeps your '
-      + 'settings, run history and plugins, but not the model.',
-  },
   summary:
     'Build one power-system model from an empty sheet, learning the modelling theory and the Ragnarok '
     + 'mechanics together at every step, with every answer small enough to check by hand. Assumes no '

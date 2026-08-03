@@ -6,13 +6,13 @@ import {
   emptyProgress,
   firstIncompleteStepId,
   guideStopFor,
-  isCheckpointLoaded,
+  startChoiceFor,
   isTutorialComplete,
   liveCompleted,
   moveBy,
   percentComplete,
   resolveCurrentStepId,
-  setCheckpointLoaded,
+  setStartChoice,
   setGuideStop,
   stepIndex,
   toggleStep,
@@ -167,26 +167,26 @@ describe('walkthrough stage', () => {
   });
 });
 
-describe('module prebuilt-data tick', () => {
-  // One checkbox per module, and it has to survive the remount that loading an
-  // example causes — which is why it lives in progress, not component state.
-  test('an untouched module opener is unticked', () => {
-    expect(isCheckpointLoaded(emptyProgress(), 'm2-merit-order')).toBe(false);
+describe('module start choice', () => {
+  // Loading an example remounts the view that owns the control, so the choice
+  // has to live in progress or it silently resets itself.
+  test('an untouched module defaults to building it yourself', () => {
+    expect(startChoiceFor(emptyProgress(), 'm2-merit-order')).toBe('empty');
   });
 
-  test('the tick is recorded and cleared per module', () => {
-    const on = setCheckpointLoaded(emptyProgress(), 'm2-merit-order', true);
-    expect(isCheckpointLoaded(on, 'm2-merit-order')).toBe(true);
-    expect(isCheckpointLoaded(setCheckpointLoaded(on, 'm2-merit-order', false), 'm2-merit-order')).toBe(false);
+  test('the choice round-trips', () => {
+    const p = setStartChoice(emptyProgress(), 'm2-merit-order', 'prebuilt');
+    expect(startChoiceFor(p, 'm2-merit-order')).toBe('prebuilt');
+    expect(startChoiceFor(setStartChoice(p, 'm2-merit-order', 'complete'), 'm2-merit-order')).toBe('complete');
   });
 
-  test('modules do not share a tick', () => {
-    const on = setCheckpointLoaded(emptyProgress(), 'm2-merit-order', true);
-    expect(isCheckpointLoaded(on, 'm3-two-buses')).toBe(false);
+  test('modules do not share a choice', () => {
+    const p = setStartChoice(emptyProgress(), 'm2-merit-order', 'complete');
+    expect(startChoiceFor(p, 'm1-what-is-a-model')).toBe('empty');
   });
 
-  test('ticking leaves step completion and the cursor alone', () => {
-    const next = setCheckpointLoaded({ completed: ['a'], currentStepId: 'b' }, 'b', true);
+  test('choosing leaves step completion and the cursor alone', () => {
+    const next = setStartChoice({ completed: ['a'], currentStepId: 'b' }, 'b', 'prebuilt');
     expect(next.completed).toEqual(['a']);
     expect(next.currentStepId).toBe('b');
   });

@@ -27,13 +27,13 @@
  * Add a tutorial by defining it as a `const` above `TUTORIALS` and appending it
  * to that array, in the order it should be taught.
  */
-import { Tutorial, TrainingLevel, TutorialStep } from './types';
+import { CourseModule, Tutorial, TrainingLevel, TutorialStep } from './types';
 import { POWER_MARKET_COURSE } from './course';
 
 export const TUTORIALS: Tutorial[] = [POWER_MARKET_COURSE];
 
 /** Levels in teaching order — drives the grouping in the training rail. */
-export const LEVEL_ORDER: TrainingLevel[] = ['Beginner', 'Intermediate', 'Advanced'];
+export const LEVEL_ORDER: TrainingLevel[] = ['Beginner', 'Intermediate', 'Advanced', 'Expert'];
 
 export function findTutorial(id: string | null): Tutorial | null {
   if (!id) return null;
@@ -44,6 +44,39 @@ export function findTutorial(id: string | null): Tutorial | null {
 export function tutorialsByLevel(tutorials: Tutorial[] = TUTORIALS): Array<{ level: TrainingLevel; items: Tutorial[] }> {
   return LEVEL_ORDER
     .map((level) => ({ level, items: tutorials.filter((t) => t.level === level) }))
+    .filter((group) => group.items.length > 0);
+}
+
+/** A module paired with the steps that declare it, and their global positions. */
+export interface ModuleWithSteps {
+  module: CourseModule;
+  /** This module's steps, each with its 1-based position in the whole course. */
+  items: Array<{ step: TutorialStep; number: number }>;
+}
+
+/**
+ * The tutorial's modules, each with its steps, in teaching order.
+ *
+ * Modules with nothing written yet are dropped rather than shown empty — a rail
+ * entry that opens onto no steps is worse than no entry. A tutorial that
+ * declares no modules at all yields none, and the caller falls back to a flat
+ * step list.
+ */
+export function modulesWithSteps(tutorial: Tutorial): ModuleWithSteps[] {
+  const numbered = tutorial.steps.map((step, i) => ({ step, number: i + 1 }));
+  return (tutorial.modules ?? [])
+    .map((module) => ({
+      module,
+      items: numbered.filter(({ step }) => step.section === module.section),
+    }))
+    .filter((m) => m.items.length > 0);
+}
+
+/** Modules grouped by level, levels in teaching order, empty levels dropped. */
+export function modulesByLevel(tutorial: Tutorial): Array<{ level: TrainingLevel; items: ModuleWithSteps[] }> {
+  const all = modulesWithSteps(tutorial);
+  return LEVEL_ORDER
+    .map((level) => ({ level, items: all.filter((m) => m.module.level === level) }))
     .filter((group) => group.items.length > 0);
 }
 

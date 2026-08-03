@@ -1,17 +1,12 @@
 /**
- * StartStateBanner — reconciles the session against what a tutorial expects.
+ * The banner every module opens with: how the learner wants to start it.
  *
- * Shown on a tutorial's first step only, because that is when starting state
- * matters. It states what the tutorial wants, reports what the session actually
- * holds, and offers the actions to close the gap.
- *
- * It does not act on its own. A learner may be resuming work they deliberately
- * left half finished, and silently clearing that would be the worst thing this
- * feature could do — so clearing and loading are both explicit button presses,
- * and clearing confirms first.
+ * One control, one meaning, wherever it is met in the course — module 1 offers
+ * empty or the finished module-1 model; every later module also offers the
+ * model it starts from.
  */
 import React, { useState } from 'react';
-import { StepCheckpoint, TutorialStartState } from 'lib/training/types';
+import { StepStartOptions, TutorialStartChoice } from 'lib/training/types';
 import { useDialog } from '../../shared/components/Dialog';
 
 export interface ModelSummary {
@@ -23,176 +18,97 @@ export interface ModelSummary {
   snapshots: number;
 }
 
-interface Props {
-  startState: TutorialStartState;
-  model: ModelSummary;
-  /** Drop the loaded model, keeping settings. */
-  onClearModel: () => void | Promise<void>;
-  /** Load a bundled example by id. */
-  onLoadExample: (id: string) => void | Promise<void>;
-  /** Persisted "prebuilt data loaded" tick — survives the remount loading causes. */
-  prebuiltLoaded: boolean;
-  onPrebuiltLoadedChange: (v: boolean) => void;
-}
-
 /** True when the session holds no model worth worrying about. */
 export function isSessionEmpty(m: ModelSummary): boolean {
   return m.buses === 0 && m.generators === 0 && m.loads === 0 && m.snapshots === 0;
 }
 
-export function StartStateBanner({ startState, model, onClearModel, onLoadExample, prebuiltLoaded, onPrebuiltLoadedChange }: Props) {
-  const { confirm } = useDialog();
-  const [busy, setBusy] = useState(false);
-  const empty = isSessionEmpty(model);
-  const wantsEmpty = startState.kind === 'empty';
-  // The only combination that needs action: the tutorial builds from scratch and
-  // something is already loaded. A checkpoint tutorial always offers its load.
-  const satisfied = wantsEmpty ? empty : false;
-
-  /** Clear the model, confirm-first. Returns whether it actually happened. */
-  const clear = async (): Promise<boolean> => {
-    const ok = await confirm(
-      `This removes the loaded model (${model.filename}) and every unsaved edit, on both the `
-      + 'frontend and the backend session.\n\nYour settings, run history and installed plugins are kept.',
-      { title: 'Clear the model?', confirmText: 'Clear model', danger: true },
-    );
-    if (!ok) return false;
-    setBusy(true);
-    try { await onClearModel(); return true; } finally { setBusy(false); }
-  };
-
-  const load = async () => {
-    if (!startState.exampleId) return;
-    if (!empty) {
-      const ok = await confirm(
-        `Loading the prebuilt data replaces the current model (${model.filename}) and every unsaved edit.`,
-        { title: 'Replace with prebuilt data?', confirmText: 'Load prebuilt', danger: true },
-      );
-      if (!ok) return;
-    }
-    setBusy(true);
-    try { await onLoadExample(startState.exampleId); onPrebuiltLoadedChange(true); } finally { setBusy(false); }
-  };
-
-  // Unticking undoes the shortcut: back to the empty session the tutorial
-  // assumes. Same confirm as any other model clear; stays ticked if declined.
-  const unload = async () => {
-    if (await clear()) onPrebuiltLoadedChange(false);
-  };
-
-  return (
-    <section className={`training-start-state${satisfied ? ' is-ready' : ''}`}>
-      <div className="training-start-state__head">
-        <span className="training-start-state__label">
-          {satisfied ? 'Ready to start' : 'Before you start'}
-        </span>
-        <span className="training-start-state__now">
-          Session holds <b>{model.filename}</b>
-          {empty ? ' — no model loaded' : ` — ${model.buses} buses, ${model.generators} generators, `
-            + `${model.loads} loads, ${model.snapshots} snapshots`}
-        </span>
-      </div>
-
-      <p className="training-start-state__note">{startState.note}</p>
-
-      {/* One checkbox: ticked loads everything the tutorial would otherwise
-          have the learner type; unticking clears back to an empty session
-          (confirm-first). Present whenever the tutorial ships its data. */}
-      {startState.exampleId && (
-        <label className="training-start-state__prebuilt">
-          <input
-            type="checkbox"
-            checked={prebuiltLoaded}
-            disabled={busy}
-            onChange={(e) => { if (e.target.checked) void load(); else void unload(); }}
-          />
-          <span>
-            <b>Start with prebuilt data</b> — load the complete model this tutorial builds, and skip
-            the typing. Leave unticked to build it yourself, which is how it sticks.
-            {busy && <em> Working…</em>}
-          </span>
-        </label>
-      )}
-
-      {!satisfied && !startState.exampleId && (
-        <div className="training-start-state__actions">
-          <button type="button" className="primary-button" disabled={busy} onClick={() => void clear()}>
-            Clear the model
-          </button>
-          <span className="training-start-state__alt">
-            — or keep what you have and read along without building.
-          </span>
-        </div>
-      )}
-      {!satisfied && startState.exampleId && !prebuiltLoaded && wantsEmpty && (
-        <div className="training-start-state__actions">
-          <button type="button" className="tb-btn" disabled={busy} onClick={() => void clear()}>
-            Clear the model
-          </button>
-          <span className="training-start-state__alt">
-            — to build from scratch as the tutorial assumes.
-          </span>
-        </div>
-      )}
-    </section>
-  );
-}
-
 /**
- * CheckpointBanner — the model a module starts from.
+ * StartOptionsBanner — how a learner opens a module.
  *
- * Shown on the first step of every module after the first, and deliberately the
- * SAME single "start with prebuilt data" checkbox as the tutorial's start state:
- * one control with one meaning, wherever a learner meets it in the course. Tick
- * it and the module's starting model loads in one action; untick it and the
- * model is cleared, both confirm-first and both the learner's own action.
+ * Three mutually exclusive ways in, shown on the first step of every module:
  *
- * A learner arriving from the previous module already holds this model and can
- * leave the box alone. One joining the course here, or one whose model went
- * wrong, ticks it and skips straight to the modelling.
+ *   empty     build it yourself, from nothing
+ *   prebuilt  the model this module STARTS from — what the previous module
+ *             finished with, so you carry on rather than rebuild
+ *   complete  the model this module ENDS with, for reading and running rather
+ *             than building, or for checking your own work against
+ *
+ * A radio group rather than a checkbox because the three are exclusive and the
+ * learner is choosing a starting state, not toggling a feature. Nothing loads
+ * on its own and every choice confirms first: someone may be resuming work they
+ * deliberately left half done, and silently replacing it would be the worst
+ * thing this could do.
  */
-export function CheckpointBanner({ checkpoint, model, onClearModel, onLoadExample, loaded, onLoadedChange }: {
-  checkpoint: StepCheckpoint;
+export function StartOptionsBanner({ options, model, choice, onChoiceChange, onClearModel, onLoadExample }: {
+  options: StepStartOptions;
   model: ModelSummary;
+  choice: TutorialStartChoice;
+  onChoiceChange: (c: TutorialStartChoice) => void;
   onClearModel: () => void | Promise<void>;
   onLoadExample: (id: string) => void | Promise<void>;
-  /** Persisted tick — survives the remount that loading an example causes. */
-  loaded: boolean;
-  onLoadedChange: (v: boolean) => void;
 }) {
   const { confirm } = useDialog();
   const [busy, setBusy] = useState(false);
   const empty = isSessionEmpty(model);
 
-  const load = async () => {
-    if (!empty) {
-      const ok = await confirm(
-        `Loading the prebuilt data replaces the current model (${model.filename}) and every unsaved edit.`
-        + '\n\nIf you have just finished the previous module you already have this, and can leave the '
-        + 'box unticked to carry on with your own model.',
-        { title: 'Replace with prebuilt data?', confirmText: 'Load prebuilt', danger: true },
-      );
-      if (!ok) return;
-    }
-    setBusy(true);
-    try { await onLoadExample(checkpoint.exampleId); onLoadedChange(true); } finally { setBusy(false); }
+  /** Replacing whatever is loaded needs saying out loud, once, in one place. */
+  const confirmReplace = async (what: string): Promise<boolean> => {
+    if (empty) return true;
+    return confirm(
+      `Loading ${what} replaces the current model (${model.filename}) and every unsaved edit.`,
+      { title: 'Replace the current model?', confirmText: 'Load it', danger: true },
+    );
   };
 
-  const unload = async () => {
-    const ok = await confirm(
-      `This removes the loaded model (${model.filename}) and every unsaved edit, on both the frontend `
-      + 'and the backend session.\n\nYour settings, run history and installed plugins are kept.',
-      { title: 'Clear the model?', confirmText: 'Clear model', danger: true },
-    );
-    if (!ok) return;
+  const choose = async (next: TutorialStartChoice) => {
+    if (next === choice) return;
     setBusy(true);
-    try { await onClearModel(); onLoadedChange(false); } finally { setBusy(false); }
+    try {
+      if (next === 'empty') {
+        const ok = empty || await confirm(
+          `This removes the loaded model (${model.filename}) and every unsaved edit, on both the `
+          + 'frontend and the backend session.\n\nYour settings, run history and installed plugins are kept.',
+          { title: 'Clear the model?', confirmText: 'Clear model', danger: true },
+        );
+        if (!ok) return;
+        await onClearModel();
+      } else {
+        const id = next === 'prebuilt' ? options.prebuiltExampleId : options.completeExampleId;
+        if (!id) return;
+        if (!await confirmReplace(next === 'prebuilt' ? 'this module\'s starting model' : 'the finished model')) return;
+        await onLoadExample(id);
+      }
+      onChoiceChange(next);
+    } finally {
+      setBusy(false);
+    }
   };
+
+  const choices: Array<{ value: TutorialStartChoice; label: string; detail: string }> = [
+    {
+      value: 'empty',
+      label: 'Empty',
+      detail: 'Nothing loaded — build this module\'s model yourself, which is how it sticks.',
+    },
+    ...(options.prebuiltExampleId ? [{
+      value: 'prebuilt' as const,
+      label: 'Prebuilt data',
+      detail: 'The model this module starts from, exactly as the previous module left it. '
+        + 'Carry on from there instead of rebuilding everything before it.',
+    }] : []),
+    ...(options.completeExampleId ? [{
+      value: 'complete' as const,
+      label: 'Complete data',
+      detail: 'The model this module ends with. For reading and running rather than building — '
+        + 'or for checking your own against the finished article.',
+    }] : []),
+  ];
 
   return (
     <section className="training-start-state">
       <div className="training-start-state__head">
-        <span className="training-start-state__label">Module starting point</span>
+        <span className="training-start-state__label">Start this module with</span>
         <span className="training-start-state__now">
           Session holds <b>{model.filename}</b>
           {empty ? ' — no model loaded' : ` — ${model.buses} buses, ${model.generators} generators, `
@@ -200,21 +116,26 @@ export function CheckpointBanner({ checkpoint, model, onClearModel, onLoadExampl
         </span>
       </div>
 
-      <p className="training-start-state__note">{checkpoint.note}</p>
+      <p className="training-start-state__note">{options.note}</p>
 
-      <label className="training-start-state__prebuilt">
-        <input
-          type="checkbox"
-          checked={loaded}
-          disabled={busy}
-          onChange={(e) => { if (e.target.checked) void load(); else void unload(); }}
-        />
-        <span>
-          <b>Start with prebuilt data</b> — load the model this module starts from, and skip rebuilding
-          the earlier ones. Leave it unticked to carry on with the model you built yourself.
-          {busy && <em> Working…</em>}
-        </span>
-      </label>
+      <div className="training-start-choices">
+        {choices.map((c) => (
+          <label key={c.value} className={`training-start-choice${choice === c.value ? ' is-active' : ''}`}>
+            <input
+              type="radio"
+              name="training-start-choice"
+              checked={choice === c.value}
+              disabled={busy}
+              onChange={() => void choose(c.value)}
+            />
+            <span>
+              <b>{c.label}</b>
+              <span className="training-start-choice__detail">{c.detail}</span>
+            </span>
+          </label>
+        ))}
+        {busy && <p className="training-start-state__alt">Working…</p>}
+      </div>
     </section>
   );
 }

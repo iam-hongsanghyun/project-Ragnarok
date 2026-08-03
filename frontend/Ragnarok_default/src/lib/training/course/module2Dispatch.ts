@@ -31,13 +31,13 @@ export const MODULE_2_DISPATCH: TutorialStep[] = [
     title: 'Cheapest first — the merit order',
     tab: 'Build',
     where: 'Build → Carriers, then Build → Generators',
-    checkpoint: {
-      exampleId: 'training_m1',
+    startOptions: {
+      prebuiltExampleId: 'training_m1',
+      completeExampleId: 'training_m2',
       note:
-        'Module 2 continues the model from module 1 — one bus, one 100 MW gas unit at 50 per MWh, one '
-        + '80 MW load, three hourly snapshots. If you built it yourself and it solved to 12,000, you '
-        + 'already have this and should carry on with your own. Load the checkpoint only if you are '
-        + 'joining the course here, or if your model went wrong and you would rather start module 2 clean.',
+        'Module 2 grows the module-1 model — one bus, one 100 MW gas unit at 50 per MWh, one 80 MW load, '
+        + 'three hourly snapshots — into a four-unit fleet with a demand profile and a wind availability '
+        + 'profile. If you finished module 1 yourself, leave this on Empty and carry on with your own model.',
     },
     concept: [
       'With one generator there was no decision to make. Add a second and the model has to choose, and '

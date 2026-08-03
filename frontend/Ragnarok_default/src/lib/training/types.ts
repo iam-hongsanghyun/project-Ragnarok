@@ -13,7 +13,7 @@
  */
 import { WorkspaceTab } from 'lib/types';
 
-export type TrainingLevel = 'Beginner' | 'Intermediate' | 'Advanced';
+export type TrainingLevel = 'Beginner' | 'Intermediate' | 'Advanced' | 'Expert';
 
 /**
  * One value the USER types. Never written by Ragnarok.
@@ -111,23 +111,35 @@ export interface Spotlight {
   runDialog?: 'open' | 'closed';
 }
 
+/** The three ways a learner may open a module. */
+export type TutorialStartChoice = 'empty' | 'prebuilt' | 'complete';
+
 /**
- * A module's starting point — the bundled example holding the model as it stood
- * at the END of the previous module.
+ * How a learner may start a module: with nothing, with the model this module
+ * begins from, or with the model it ends with.
  *
- * Declared on the first step of every module after the first, so a learner can
- * join the course at any module and a mistake made in module 2 does not poison
- * module 7. Loading it is a button press, never automatic: a learner arriving
- * here from the previous module already HAS this model, and silently replacing
- * their own work with a bundled copy is the worst thing this could do.
+ * Declared on the first step of every module, and offered as one three-way
+ * choice. Nothing loads on its own — a learner arriving from the previous
+ * module already holds the prebuilt model, and silently replacing their own
+ * work with a bundled copy is the worst thing this could do.
  *
- * `exampleId` names the state at the end of a module, so module N loads the
- * checkpoint written by module N-1 (`training_m1` starts module 2).
+ * Both ids name bundled `/api/examples` entries, and each names the state at
+ * the END of a module — so module N's `prebuilt` is module N-1's `complete`
+ * (`training_m1` is module 2's prebuilt and module 1's complete).
  */
-export interface StepCheckpoint {
-  /** Bundled example id, matching an `/api/examples` id. */
-  exampleId: string;
-  /** What the checkpoint holds, so a learner can tell whether they need it. */
+export interface StepStartOptions {
+  /**
+   * The model as it stands at the START of this module — what the previous
+   * module finished with. Omitted on module 1, which starts from nothing.
+   */
+  prebuiltExampleId?: string;
+  /**
+   * The model as it stands at the END of this module, for a learner who wants
+   * to read and run rather than build, or who wants to check their own work
+   * against the finished article.
+   */
+  completeExampleId?: string;
+  /** What these models hold, so a learner can tell which one they want. */
   note: string;
 }
 
@@ -135,10 +147,10 @@ export interface TutorialStep {
   id: string;
   title: string;
   /**
-   * The model this step starts from, when it opens a module. Rendered as a
-   * banner offering the load; see `StepCheckpoint`.
+   * The models a learner may start this module from, when this step opens one.
+   * Rendered as a three-way choice; see `StepStartOptions`.
    */
-  checkpoint?: StepCheckpoint;
+  startOptions?: StepStartOptions;
   /**
    * Module heading this step belongs to, for a long course that groups its
    * steps ("2 · Economic dispatch"). Consecutive steps sharing a section render
@@ -175,36 +187,31 @@ export interface TutorialStep {
 }
 
 /**
- * The session state a tutorial expects before its first step.
+ * One module of a course — the unit a learner picks from the rail.
  *
- * Declared rather than enforced. A learner may be resuming work they left half
- * done, so the runner reports what the tutorial wants against what the session
- * actually holds and offers the actions to close the gap — it never silently
- * clears a model or loads one.
+ * Steps declare which module they belong to with `section`; this is the module
+ * itself, carrying the things a step cannot: its level and how long it takes.
+ * Kept as its own table rather than repeated on every step so the two cannot
+ * disagree.
  */
-export interface TutorialStartState {
-  /**
-   * `'empty'` — the tutorial authors a model from scratch, so a leftover model
-   * would collide with it. `'checkpoint'` — the tutorial continues from a
-   * bundled example, named by `exampleId`.
-   */
-  kind: 'empty' | 'checkpoint';
-  /**
-   * Bundled example holding this tutorial's data, matching an `/api/examples`
-   * id. For `'checkpoint'` it is the mandatory starting point; for `'empty'` it
-   * is the optional shortcut — a "start with prebuilt data" checkbox that loads
-   * everything the tutorial would otherwise have the learner type.
-   */
-  exampleId?: string;
-  /** What the learner should be looking at once the start state is in place. */
-  note: string;
+export interface CourseModule {
+  /** Matches the `section` string on this module's steps. */
+  section: string;
+  /** Module name without its number, for the rail. */
+  title: string;
+  /** How hard it is, which is how the rail groups modules. */
+  level: TrainingLevel;
+  /** Rough wall-clock minutes, excluding solve time. */
+  minutes: number;
+  /** One line on what the module teaches, shown under its name. */
+  summary: string;
 }
 
 export interface Tutorial {
   id: string;
   title: string;
-  /** Session state expected before step 1. Omit when the tutorial does not care. */
-  startState?: TutorialStartState;
+  /** The modules its steps are grouped into, in teaching order. */
+  modules?: CourseModule[];
   level: TrainingLevel;
   /** Rough wall-clock time, excluding solve time on large models. */
   minutes: number;
@@ -232,20 +239,12 @@ export interface TutorialProgress {
    */
   guideStop?: Record<string, number>;
   /**
-   * Whether the learner loaded this tutorial's prebuilt data ("start with
-   * prebuilt data" checkbox). Persisted here because loading rehydrates the
-   * model and remounts views — component-local state forgets the tick.
-   */
-  prebuiltLoaded?: boolean;
-  /**
-   * The same tick, per module: step id of a module opener → whether its
-   * prebuilt starting model is loaded.
+   * Which start a learner chose for each module: step id of a module opener →
+   * `'empty'`, `'prebuilt'` or `'complete'`.
    *
-   * Every module offers the identical "start with prebuilt data" checkbox, so
-   * a learner can skip the typing at any point in the course rather than only
-   * at the very beginning. Keyed by step because each module has its own
-   * checkpoint, and persisted for the same reason as `prebuiltLoaded`: loading
-   * an example remounts the view that owns the checkbox.
+   * Persisted rather than held in the component because loading an example
+   * rehydrates the model and remounts the view that owns the control, so local
+   * state would silently forget the choice.
    */
-  checkpointLoaded?: Record<string, boolean>;
+  startChoice?: Record<string, TutorialStartChoice>;
 }
