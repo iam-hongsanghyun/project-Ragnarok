@@ -34,11 +34,13 @@ import { CourseModule, Tutorial } from '../types';
 import { MODULE_1_FOUNDATIONS } from './module1Foundations';
 import { MODULE_2_DISPATCH } from './module2Dispatch';
 import { MODULE_3_NETWORKS } from './module3Networks';
+import { MODULE_4_STORAGE } from './module4Storage';
 
 const STEPS = [
   ...MODULE_1_FOUNDATIONS,
   ...MODULE_2_DISPATCH,
   ...MODULE_3_NETWORKS,
+  ...MODULE_4_STORAGE,
 ];
 
 /**
@@ -73,6 +75,15 @@ const MODULES: CourseModule[] = [
     minutes: 110,
     summary: 'Split the fleet across two buses joined by one line: a cheap generator that cannot reach '
       + 'the demand, two prices instead of one, congestion rent, and what the constraint costs.',
+  },
+  {
+    section: '4 · Storage and time coupling',
+    title: 'Storage and time coupling',
+    level: 'Intermediate',
+    minutes: 100,
+    summary: 'The first component that links one hour to the next: a battery that charges on the cheap '
+      + 'hour, removes the peaker from the answer entirely, and is worth three times as much on one side '
+      + 'of the constraint as the other.',
   },
 ];
 

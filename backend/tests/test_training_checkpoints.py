@@ -225,12 +225,93 @@ def test_module_3_uprating_the_line_returns_module_2s_answer(tmp_path: Path) -> 
     assert float(congested.objective - n.objective) == pytest.approx(420.0, abs=1e-6)
 
 
+# ── Module 4 — storage and time coupling ─────────────────────────────────────
+
+def _with_storage(model: dict, **overrides) -> dict:
+    return {**model, "storage_units": [{**model["storage_units"][0], **overrides}]}
+
+
+def test_module_4_checkpoint_solves_to_7730(tmp_path: Path) -> None:
+    """Module 3's congested network plus a 20 MW / 1 h battery at 90% each way."""
+    n = _solved("training_m4", tmp_path)
+    assert float(n.objective) == pytest.approx(7_730.0, rel=1e-6)
+
+
+def test_module_4_battery_removes_the_peaker_entirely(tmp_path: Path) -> None:
+    """The headline of the module: 20 MWh of storage displaces a 40 MW oil unit,
+    and the peak price falls from 120 to 50 because it is no longer marginal."""
+    n = _solved("training_m4", tmp_path)
+    assert float(n.generators_t.p["oil_1"].sum()) == pytest.approx(0.0, abs=1e-6)
+    prices = [float(v) for v in n.buses_t.marginal_price["bus_2"]]
+    assert prices == pytest.approx([20.0, 50.0, 50.0], abs=1e-6)
+
+
+def test_module_4_state_of_charge_closes_the_loop(tmp_path: Path) -> None:
+    """Cyclic operation: what comes out went in, and the ends match.
+
+    At 90% charging efficiency 20 MW for an hour puts 18 MWh in the store, which
+    is the step-6 arithmetic the course asks the learner to check.
+    """
+    n = _solved("training_m4", tmp_path)
+    soc = [float(v) for v in n.storage_units_t.state_of_charge["batt_1"]]
+    assert soc[0] == pytest.approx(18.0, abs=1e-6)
+    assert soc[-1] == pytest.approx(0.0, abs=1e-6)
+    assert max(soc) <= 20.0 + 1e-6      # never above p_nom x max_hours
+    assert min(soc) >= -1e-6            # and never negative
+
+
+def test_module_4_step_4_lossless_battery_solves_to_7540(tmp_path: Path) -> None:
+    """The hand-checkable first run: 120 + 1,720 + 5,700, with no losses."""
+    model = _with_storage(
+        _model_from_example("training_m4", tmp_path),
+        efficiency_store=1.0, efficiency_dispatch=1.0,
+    )
+    n = _solve_model(model)
+    assert float(n.objective) == pytest.approx(7_540.0, rel=1e-6)
+    # Only the robust facts. With no losses, hours 2 and 3 both price at 50, so
+    # WHEN the battery discharges between them is a degenerate choice — several
+    # schedules cost exactly 7,540 and the solver may return any of them. It
+    # fills in the cheap hour and ends empty in all of them; the middle value is
+    # not determined, and the course says so rather than asserting one.
+    soc = [float(v) for v in n.storage_units_t.state_of_charge["batt_1"]]
+    assert soc[0] == pytest.approx(20.0, abs=1e-6)
+    assert soc[-1] == pytest.approx(0.0, abs=1e-6)
+    assert max(soc) <= 20.0 + 1e-6
+
+
+def test_module_4_step_7_halving_the_energy_costs_more_than_the_losses(tmp_path: Path) -> None:
+    """Energy and power are different limits, and duration was the valuable half.
+
+    Halving max_hours costs 590; the round-trip losses cost 190. The course makes
+    a point of that ordering because it is not most people's intuition.
+    """
+    model = _with_storage(_model_from_example("training_m4", tmp_path), max_hours=0.5)
+    n = _solve_model(model)
+    assert float(n.objective) == pytest.approx(8_320.0, rel=1e-6)
+    # The peaker is back, which is why the peak price returns to 120.
+    assert float(n.generators_t.p["oil_1"].sum()) > 0.0
+    assert float(n.buses_t.marginal_price["bus_2"].iloc[-1]) == pytest.approx(120.0, abs=1e-6)
+
+
+def test_module_4_step_8_placement_is_worth_more_than_the_battery(tmp_path: Path) -> None:
+    """The same battery behind the constraint is worth about a third as much.
+
+    7,730 at the demand end against 8,773.20 at the generation end — 1,043 of
+    difference from one cell, which is the module's closing argument.
+    """
+    model = _with_storage(_model_from_example("training_m4", tmp_path), bus="bus_1")
+    n = _solve_model(model)
+    assert float(n.objective) == pytest.approx(8_773.2, rel=1e-6)
+    at_demand = _solved("training_m4", tmp_path)
+    assert float(n.objective - at_demand.objective) == pytest.approx(1_043.2, abs=1e-2)
+
+
 # ── The checkpoints the course references must exist and be loadable ─────────
 
 def test_every_course_checkpoint_is_a_listable_example() -> None:
     """A checkpoint id the tutorial names but ``/api/examples`` cannot serve gives
     the learner a dead button, which is worse than no button."""
-    for example_id in ("training_m1", "training_m2", "training_m3"):
+    for example_id in ("training_m1", "training_m2", "training_m3", "training_m4"):
         db = EXAMPLES / example_id / "project.db"
         assert db.exists(), f"{example_id}: no project.db"
         con = sqlite3.connect(db)

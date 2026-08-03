@@ -165,7 +165,84 @@ TRAINING_M3: dict = {
     "componentCounts": {"buses": 2, "generators": 4, "loads": 1, "carriers": 5, "lines": 1},
 }
 
-CHECKPOINTS = {"training_m2": TRAINING_M2, "training_m3": TRAINING_M3}
+# ── Module 4 — the model at the end of "4 · Storage and time coupling" ───────
+# Module 3's congested network plus one 20 MW / 1 h battery at the demand end,
+# with a realistic 90% each way. It charges on the cheap hour, discharges on the
+# expensive one, and the oil peaker never runs again: 7,730 against module 3's
+# 9,400, with the peak price down from 120 to 50 and no wind curtailed at all.
+TRAINING_M4: dict = {
+    "filename": "Training module 4 — storage and time coupling",
+    "example": {
+        "label": "Training: module 4 model (end of module)",
+        "description": (
+            "The model the \"Power market modelling\" course has built by the end of module 4 — module 3's "
+            "two-bus congested network with a 20 MW / 1 h battery at the demand end. It shifts energy from "
+            "the cheap hour to the expensive one, so the oil peaker never runs and the peak price falls "
+            "from 120 to 50. Solves to 7,730."
+        ),
+        "order": 93,
+    },
+    "sheets": [
+        ("snapshots", "static", [{"snapshot": s} for s in SNAPSHOTS]),
+        ("network", "static", [{"name": "my-first-model"}]),
+        ("carriers", "static", [
+            {"name": "AC", "co2_emissions": 0.0},
+            {"name": "gas", "co2_emissions": 0.2},
+            {"name": "coal", "co2_emissions": 0.34},
+            {"name": "oil", "co2_emissions": 0.27},
+            {"name": "wind", "co2_emissions": 0.0},
+        ]),
+        ("buses", "static", [
+            {"name": "bus_1", "v_nom": 380.0, "x": 127.0, "y": 37.5, "carrier": "AC"},
+            {"name": "bus_2", "v_nom": 380.0, "x": 129.0, "y": 35.2, "carrier": "AC"},
+        ]),
+        ("generators", "static", [
+            {"name": "gas_1", "bus": "bus_2", "carrier": "gas",
+             "p_nom": 100.0, "marginal_cost": 50.0, "efficiency": 0.5},
+            {"name": "coal_1", "bus": "bus_1", "carrier": "coal",
+             "p_nom": 50.0, "marginal_cost": 20.0, "efficiency": 0.4},
+            {"name": "oil_1", "bus": "bus_2", "carrier": "oil",
+             "p_nom": 40.0, "marginal_cost": 120.0, "efficiency": 0.35},
+            {"name": "wind_1", "bus": "bus_1", "carrier": "wind",
+             "p_nom": 60.0, "marginal_cost": 0.0, "efficiency": 1.0},
+        ]),
+        ("loads", "static", [
+            {"name": "load_1", "bus": "bus_2", "carrier": "AC", "p_set": 80.0},
+        ]),
+        ("lines", "static", [
+            {"name": "line_1", "bus0": "bus_1", "bus1": "bus_2",
+             "s_nom": 60.0, "x": 0.1, "r": 0.01, "length": 200.0},
+        ]),
+        # At bus_2, the demand end — module 4 proves this placement is worth
+        # roughly 1,000 more than the same battery behind the constraint.
+        ("storage_units", "static", [
+            {"name": "batt_1", "bus": "bus_2", "carrier": "AC",
+             "p_nom": 20.0, "max_hours": 1.0,
+             "efficiency_store": 0.9, "efficiency_dispatch": 0.9,
+             "cyclic_state_of_charge": True},
+        ]),
+        ("loads-p_set", "series", [
+            {"snapshot": SNAPSHOTS[0], "load_1": 40.0},
+            {"snapshot": SNAPSHOTS[1], "load_1": 80.0},
+            {"snapshot": SNAPSHOTS[2], "load_1": 170.0},
+        ]),
+        ("generators-p_max_pu", "series", [
+            {"snapshot": SNAPSHOTS[0], "wind_1": 0.9},
+            {"snapshot": SNAPSHOTS[1], "wind_1": 0.4},
+            {"snapshot": SNAPSHOTS[2], "wind_1": 0.1},
+        ]),
+    ],
+    "componentCounts": {
+        "buses": 2, "generators": 4, "loads": 1, "carriers": 5,
+        "lines": 1, "storage_units": 1,
+    },
+}
+
+CHECKPOINTS = {
+    "training_m2": TRAINING_M2,
+    "training_m3": TRAINING_M3,
+    "training_m4": TRAINING_M4,
+}
 
 
 def write_checkpoint(example_id: str, spec: dict) -> Path:
