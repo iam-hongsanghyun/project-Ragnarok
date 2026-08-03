@@ -466,91 +466,57 @@ def test_module_6_coarsening_error_is_not_monotonic(tmp_path: Path) -> None:
     assert two > 0 > four and six > 0
 
 
-# ── Module 7 — investment and capacity expansion ─────────────────────────────
-# The first checkpoint whose answer depends on the discount rate: Ragnarok
-# annuitises a workbook `capital_cost` (an OVERNIGHT figure) using `lifetime` and
-# this rate, so the run is meaningless without it.
-# The GUI default. Every module-6 figure assumes it, so a learner who never
-# opens Settings matches the course.
+# ── Module 7 — investment and capacity expansion, on a full year ─────────────
+# A year is what makes the capital arithmetic honest: Ragnarok annuitises the
+# workbook's OVERNIGHT cost and the results layer pro-rates the annual figure by
+# modelled_hours/8760, so only at 8760 do the objective and the reported total
+# agree. These solves take ~a minute each, so the module is covered by three
+# tests rather than one per figure.
 EXPANSION = {"carbonPrice": 0.0, "discountRate": 0.05}
 
 
-def test_module_7_checkpoint_solves_to_6187(tmp_path: Path) -> None:
-    """Module 7. Wind and the line both extendable; the model builds 27.55 MW of wire."""
-    n = _solved("training_m7", tmp_path, EXPANSION)
-    assert float(n.objective) == pytest.approx(5_995.48, abs=0.01)
-    assert float(n.lines.at["line_1", "s_nom_opt"]) == pytest.approx(97.25, abs=0.01)
+def test_module_7_year_checkpoint_builds_three_of_four(tmp_path: Path) -> None:
+    """Wind, solar, the line and the battery are all offered; three get built.
 
-
-def test_module_7_the_wire_unlocks_the_wind_farm(tmp_path: Path) -> None:
-    """Complements, not substitutes — the module's closing argument.
-
-    Offered alone (see the next test) the wind farm is worth nothing. Offered
-    alongside an extendable line it is worth 30 MW, because the wire is what
-    makes its output reachable.
+    Solar wins a place despite a capacity factor a third of wind's, because it
+    sits at the demand end rather than behind the congested line. The battery is
+    declined, which keeps the module's "the model says no" lesson intact.
     """
     n = _solved("training_m7", tmp_path, EXPANSION)
-    assert float(n.generators.at["wind_1", "p_nom_opt"]) == pytest.approx(90.0, abs=1e-6)
-    assert float(n.lines.at["line_1", "s_nom_opt"]) == pytest.approx(97.25, abs=0.01)
+    assert len(n.snapshots) == 8760
+    assert float(n.objective) == pytest.approx(18_115_684, rel=1e-4)
+    assert float(n.generators.at["wind_1", "p_nom_opt"]) == pytest.approx(150.15, abs=0.5)
+    assert float(n.generators.at["solar_1", "p_nom_opt"]) == pytest.approx(24.12, abs=0.5)
+    assert float(n.lines.at["line_1", "s_nom_opt"]) == pytest.approx(141.04, abs=0.5)
+    assert float(n.storage_units.at["batt_1", "p_nom_opt"]) == pytest.approx(20.0, abs=1e-6)
 
 
-def test_module_7_a_higher_discount_rate_reverses_the_wind_investment(tmp_path: Path) -> None:
-    """Step 9: two percentage points removes a 30 MW generation investment.
+def test_module_7_capital_costs_are_overnight_and_unscaled(tmp_path: Path) -> None:
+    """A full year is the only window where the overnight cost needs no fudge.
 
-    Nothing physical changes. Capital-heavy, fuel-free technologies are the ones
-    a discount rate bites hardest, so the wind farm goes while the line — with
-    its 40-year life — survives.
-    """
-    n = _solved("training_m7", tmp_path, {"carbonPrice": 0.0, "discountRate": 0.07})
-    assert float(n.objective) == pytest.approx(6_187.27, abs=0.01)
-    assert float(n.generators.at["wind_1", "p_nom_opt"]) == pytest.approx(60.0, abs=1e-6)
-    assert float(n.lines.at["line_1", "s_nom_opt"]) == pytest.approx(87.55, abs=0.01)
-
-
-def test_module_7_wind_alone_builds_nothing(tmp_path: Path) -> None:
-    """Step 6: offered on its own, at a correctly scaled cost, wind is declined
-    and the objective is module 5's 7,099.59 unchanged."""
-    model = _model_from_example("training_m7", tmp_path)
-    model["lines"] = [{k: v for k, v in model["lines"][0].items()
-                       if k not in ("s_nom_extendable", "s_nom_min", "s_nom_max",
-                                    "capital_cost", "lifetime")}]
-    n = _solve_model(model, EXPANSION)
-    assert float(n.objective) == pytest.approx(7_099.59, abs=0.01)
-    assert float(n.generators.at["wind_1", "p_nom_opt"]) == pytest.approx(60.0, abs=1e-6)
-
-
-def test_module_7_capital_cost_is_an_overnight_cost(tmp_path: Path) -> None:
-    """Ragnarok annuitises what the sheet holds, so the sheet holds OVERNIGHT.
-
-    The course tells the learner to type 410.96 (1.2m/MW scaled by 3/8760) and
-    let the app apply CRF. If that convention ever flipped, every capital figure
-    in module 6 would be twelve times wrong — so pin it.
+    Module 6 (time) exists partly for this: on a shorter horizon the optimiser
+    needs capital pre-scaled and the display pro-rates it a second time. Here the
+    sheet holds exactly what a cost database quotes.
     """
     model = _model_from_example("training_m7", tmp_path)
     wind = next(g for g in model["generators"] if g["name"] == "wind_1")
-    assert wind["capital_cost"] == pytest.approx(410.9589, abs=1e-3)
-    assert wind["lifetime"] == 25.0
-    n = _solved("training_m7", tmp_path, EXPANSION)
-    # 410.9589 x CRF(5%, 25y) = 29.16 per MW in the objective.
-    assert float(n.generators.at["wind_1", "capital_cost"]) == pytest.approx(29.1637, abs=0.01)
+    solar = next(g for g in model["generators"] if g["name"] == "solar_1")
+    assert wind["capital_cost"] == 1_200_000.0 and wind["lifetime"] == 25.0
+    assert solar["capital_cost"] == 500_000.0 and solar["lifetime"] == 25.0
+    assert model["lines"][0]["capital_cost"] == 600_000.0
+    assert len(model["snapshots"]) == 8760
 
 
-def test_module_7_unscaled_annual_cost_builds_nothing(tmp_path: Path) -> None:
-    """The 2,920x trap the module is built around.
-
-    An annual capital cost in a three-hour objective asks the model to recover a
-    year of capital from three hours of fuel saving, so it declines everything
-    and the answer looks like a considered no.
-    """
-    model = _model_from_example("training_m7", tmp_path)
-    model["lines"] = [{**model["lines"][0], "capital_cost": 600_000.0}]
-    model["generators"] = [
-        {**g, "capital_cost": 1_200_000.0} if g["name"] == "wind_1" else g
-        for g in model["generators"]
-    ]
-    n = _solve_model(model, EXPANSION)
-    assert float(n.lines.at["line_1", "s_nom_opt"]) == pytest.approx(60.0, abs=1e-6)
-    assert float(n.generators.at["wind_1", "p_nom_opt"]) == pytest.approx(60.0, abs=1e-6)
+def test_module_7_starting_model_has_nothing_extendable(tmp_path: Path) -> None:
+    """The prebuilt start is the year WITHOUT the investment attributes, so the
+    learner adds them — which is the module."""
+    model = _model_from_example("training_m7_year", tmp_path)
+    assert len(model["snapshots"]) == 8760
+    assert len(model["loads-p_set"]) == 8760
+    assert len(model["generators-p_max_pu"]) == 8760
+    for g in model["generators"]:
+        assert not g.get("p_nom_extendable", False), g["name"]
+    assert not model["lines"][0].get("s_nom_extendable", False)
 
 
 # ── The checkpoints the course references must exist and be loadable ─────────
@@ -559,7 +525,7 @@ def test_every_course_checkpoint_is_a_listable_example() -> None:
     """A checkpoint id the tutorial names but ``/api/examples`` cannot serve gives
     the learner a dead button, which is worse than no button."""
     for example_id in ("training_m1", "training_m2", "training_m3", "training_m4",
-                       "training_m5", "training_m6", "training_m7"):
+                       "training_m5", "training_m6", "training_m7_year", "training_m7"):
         db = EXAMPLES / example_id / "project.db"
         assert db.exists(), f"{example_id}: no project.db"
         con = sqlite3.connect(db)
