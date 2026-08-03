@@ -269,11 +269,10 @@ export function TutorialRunner({
 
         {step ? (
           <article className="training-step">
-            {step.section && <div className="training-step__section">{step.section}</div>}
-            <h3 className="training-step__title">
-              <span className="training-step__number">{index + 1}</span>
-              {step.title}
-            </h3>
+            {/* No section line and no step number: the rail header already names
+                the module, and the steps are a sequence you walk rather than a
+                numbered list to cross-reference. */}
+            <h3 className="training-step__title">{step.title}</h3>
             <StepBody
               step={step}
               onNavigate={onNavigate}
