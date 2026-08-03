@@ -1,7 +1,7 @@
 /**
- * The power-market modelling course — 13 modules, complete.
+ * The power-market modelling course — 14 modules, complete.
  *
- * All thirteen are written. The tutorial's summary, `minutes` and `outcomes`
+ * All fourteen are written. The tutorial's summary, `minutes` and `outcomes`
  * describe what is actually there: a learner reading the catalog card should be
  * told the truth about what they are starting, and progress is a percentage of
  * real steps.
@@ -44,6 +44,7 @@ import { MODULE_10_POWER_FLOW } from './module10PowerFlow';
 import { MODULE_11_COMMITMENT } from './module11Commitment';
 import { MODULE_12_ADEQUACY } from './module12Adequacy';
 import { MODULE_13_DEMAND } from './module13Demand';
+import { MODULE_14_PARTICIPANT } from './module14Participant';
 
 const STEPS = [
   ...MODULE_1_FOUNDATIONS,
@@ -59,6 +60,7 @@ const STEPS = [
   ...MODULE_11_COMMITMENT,
   ...MODULE_12_ADEQUACY,
   ...MODULE_13_DEMAND,
+  ...MODULE_14_PARTICIPANT,
 ];
 
 /**
@@ -184,6 +186,15 @@ const MODULES: CourseModule[] = [
       + 'that agree on annual energy to within a fraction of a per cent — and finds a 3.5% higher peak '
       + 'and thirty megawatts less solar in the build programme.',
   },
+  {
+    section: '14 · The other side of the market',
+    title: 'The other side of the market',
+    level: 'Expert',
+    minutes: 110,
+    summary: 'Thirteen modules asked the planner\'s question. This one gives the same solved year to '
+      + 'two owners and asks what their assets earn — capture price, a zero profit that is the right '
+      + 'answer, a peaker paid nothing, a PPA, and what one markup does to everybody\'s bill.',
+  },
 ];
 
 export const POWER_MARKET_COURSE: Tutorial = {
@@ -191,11 +202,11 @@ export const POWER_MARKET_COURSE: Tutorial = {
   title: 'Power market modelling with Ragnarok',
   modules: MODULES,
   level: 'Beginner',
-  // The thirteen modules as written, at the pace of someone typing every value and
+  // The fourteen modules as written, at the pace of someone typing every value and
   // reading the concept blocks rather than skimming them. Modules 7 to 9 solve a
   // full year, so their runs take about a minute each, which is included; module
   // 10 goes back to three snapshots and is instant again.
-  minutes: 25 * 60,
+  minutes: 27 * 60,
   summary:
     'Build one power-system model from an empty sheet to a policy-tested investment case, learning the '
     + 'modelling theory and the Ragnarok mechanics together at every step. Twelve modules: foundations, '
@@ -221,11 +232,12 @@ export const POWER_MARKET_COURSE: Tutorial = {
     'Model a plant that cannot switch on and off freely, and say what commitment costs to solve',
     'Measure adequacy as a distribution — LOLE, EUE and capacity credit — against a stated standard',
     'Project demand two ways and say what the composition of growth, not just its rate, changes',
+    'Read a result from a participant\'s books: capture price, contract settlement and market power',
   ],
   prerequisites: [
     'Ragnarok is running and the top bar shows a status other than a connection error',
     'No prior power-systems or optimisation knowledge — the course starts from the beginning',
-    'About 25 hours across thirteen modules; each opens from a checkpoint, so it need not be one sitting',
+    'About 27 hours across fourteen modules; each opens from a checkpoint, so it need not be one sitting',
     'Modules 7 to 9 solve a full year, so expect roughly a minute per run from there on',
   ],
   steps: STEPS,

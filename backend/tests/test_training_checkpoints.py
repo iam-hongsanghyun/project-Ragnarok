@@ -1070,6 +1070,125 @@ def test_module_13_shape_changes_what_gets_built(tmp_path: Path) -> None:
     assert cagr["solar_1"] - driven["solar_1"] > 25.0, "the module claims ~30 MW of solar moves"
 
 
+# ── Module 14 — the other side of the market ─────────────────────────────────
+#
+# Module 7's expanded year, with ownership assigned, read from the participant's
+# books instead of the planner's. Nordwind owns what the expansion BUILT (so it
+# carries a capital charge); Altkraft owns the incumbent thermal (sunk).
+
+_M14_SCENARIO = {"carbonPrice": 0.0, "discountRate": 0.05}
+_M14_OWNERS = {"wind_1": "Nordwind", "solar_1": "Nordwind",
+               "coal_1": "Altkraft", "oil_1": "Altkraft"}
+
+
+def _owned(tmp_path: Path) -> dict:
+    model = {k: [dict(r) for r in v] for k, v
+             in _model_from_example("training_m7", tmp_path).items()}
+    for gen in model["generators"]:
+        if gen["name"] in _M14_OWNERS:
+            gen["owner"] = _M14_OWNERS[gen["name"]]
+    return model
+
+
+def _participant(tmp_path: Path, options: dict) -> dict:
+    from backend.pypsa.results import run_pypsa
+
+    return run_pypsa(_owned(tmp_path), _M14_SCENARIO, {**OPTIONS, **options})
+
+
+def _merchant(tmp_path: Path, owner: str) -> dict:
+    res = _participant(tmp_path, {"merchantConfig": {
+        "enabled": True, "owner": owner, "priceSource": "lmp"}})
+    return res["merchant"]
+
+
+def test_module_14_capture_price_differs_by_technology(tmp_path: Path) -> None:
+    """Wind below the system average, solar and coal above it.
+
+    Cannibalisation: there is 150 MW of wind in a system peaking at 175, so it
+    depresses the price in exactly the hours it sells.
+    """
+    nordwind = _merchant(tmp_path, "Nordwind")
+    altkraft = _merchant(tmp_path, "Altkraft")
+    mean_price = nordwind["priceStats"]["mean"]
+    assert mean_price == pytest.approx(23.92, abs=0.05)
+    by_name = {a["name"]: a for a in nordwind["assets"]}
+    assert by_name["wind_1"]["capturePrice"] == pytest.approx(21.18, abs=0.05)
+    assert by_name["solar_1"]["capturePrice"] == pytest.approx(24.59, abs=0.05)
+    coal = next(a for a in altkraft["assets"] if a["name"] == "coal_1")
+    assert coal["capturePrice"] == pytest.approx(28.25, abs=0.05)
+    assert by_name["wind_1"]["capturePrice"] < mean_price < coal["capturePrice"]
+
+
+def test_module_14_built_assets_earn_exactly_their_capital_cost(tmp_path: Path) -> None:
+    """The long-run equilibrium, and the "missing money" argument in one number.
+
+    At a capacity-expansion optimum the marginal prices pay an asset the
+    optimiser chose to build exactly what it cost — no more.
+    """
+    assets = {a["name"]: a for a in _merchant(tmp_path, "Nordwind")["assets"]}
+    for name in ("wind_1", "solar_1"):
+        asset = assets[name]
+        assert asset["capex"] > 0.0
+        assert asset["revenue"] == pytest.approx(asset["capex"], rel=1e-4)
+        assert asset["profit"] == pytest.approx(0.0, abs=1.0)
+
+
+def test_module_14_sunk_capital_makes_the_incumbent_profitable(tmp_path: Path) -> None:
+    """Same market, other books: no capital charge, so coal clears 902,548.
+
+    Its merchant volume is also below the system dispatch — a price-taker sells
+    only when the price beats its own cost, and the hours it drops contributed
+    nothing, which is why the profit is unchanged by dropping them.
+    """
+    altkraft = _merchant(tmp_path, "Altkraft")
+    coal = next(a for a in altkraft["assets"] if a["name"] == "coal_1")
+    assert coal["capex"] == pytest.approx(0.0)
+    assert coal["profit"] == pytest.approx(902_548.0, rel=0.01)
+    assert coal["energyMWh"] == pytest.approx(109_400.0, rel=0.01)
+    assert coal["energyMWh"] < 316_353.0, "below what the system dispatched"
+
+
+def test_module_14_the_peaker_earns_nothing(tmp_path: Path) -> None:
+    """Module 12 counted this unit toward adequacy. The energy market pays it nothing."""
+    altkraft = _merchant(tmp_path, "Altkraft")
+    oil = next(a for a in altkraft["assets"] if a["name"] == "oil_1")
+    assert oil["energyMWh"] == pytest.approx(0.0, abs=1e-6)
+    assert oil["revenue"] == pytest.approx(0.0, abs=1e-6)
+    assert oil["capturePrice"] is None
+
+
+def test_module_14_ppa_is_zero_sum_and_settles_on_capture(tmp_path: Path) -> None:
+    """A hedge moves money between two parties and changes nothing physical.
+
+    And it settles on the SELLER's capture price (21.36), not the system average
+    (23.92) — the point the module makes about pricing a wind PPA.
+    """
+    res = _participant(tmp_path, {"ppaConfig": {
+        "enabled": True, "owner": "Nordwind",
+        "volumeType": "generation", "strikePrice": 25.0}})
+    ppa = res["ppa"]
+    assert ppa["energyMWh"] == pytest.approx(638_440.0, rel=0.01)
+    assert ppa["avgSpotPrice"] == pytest.approx(21.36, abs=0.05)
+    assert ppa["sellerNet"] == pytest.approx(2_320_908.0, rel=0.01)
+    assert ppa["buyerNet"] == pytest.approx(-ppa["sellerNet"], rel=1e-6)
+    assert ppa["sellerNet"] == pytest.approx(
+        ppa["energyMWh"] * (ppa["strikePrice"] - ppa["avgSpotPrice"]), rel=1e-2)
+
+
+def test_module_14_a_pivotal_unit_raises_the_price_without_losing_volume(tmp_path: Path) -> None:
+    """Market power: coal offers 50% above cost, sells exactly as much, and the
+    whole system pays 26% more."""
+    res = _participant(tmp_path, {"bidStrategyConfig": {
+        "enabled": True, "owner": "Altkraft", "markupType": "percent", "markup": 0.5}})
+    bid = res["bidStrategy"]
+    assert bid["baseline"]["profit"] == pytest.approx(902_548.0, rel=0.01)
+    assert bid["strategic"]["profit"] == pytest.approx(4_269_487.0, rel=0.01)
+    assert bid["baseline"]["energyMWh"] == pytest.approx(bid["strategic"]["energyMWh"], rel=1e-6)
+    assert bid["systemAvgPrice"]["baseline"] == pytest.approx(24.28, abs=0.05)
+    assert bid["systemAvgPrice"]["strategic"] == pytest.approx(30.71, abs=0.05)
+
+
 # ── The checkpoints the course references must exist and be loadable ─────────
 
 def test_every_course_checkpoint_is_a_listable_example() -> None:
