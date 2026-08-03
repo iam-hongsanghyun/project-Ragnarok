@@ -580,7 +580,7 @@ export const MODULE_13_DEMAND: TutorialStep[] = [
       + 'write-up with a source or a reason, exactly as module 9 required of every other figure.',
     ],
     explain: [
-      'Write down the five questions to ask of a projection: what growth rate, what composition, what '
+      'Write down the five things to demand of any projection you are handed: what growth rate, what composition, what '
       + 'elasticity, what shape was assumed for new load, and which base year and weather year it '
       + 'started from.',
 
@@ -596,7 +596,7 @@ export const MODULE_13_DEMAND: TutorialStep[] = [
       + 'and the wind is 2030, silently, with no error anywhere.',
     ],
     verify: [
-      'You have the five questions written down',
+      'You have those five demands written down',
       'You can say which two differ between this module\'s two projections',
       'You can say what breaks if only the demand column is re-dated',
       'You can name the assumptions in your own projection that need a source',
@@ -609,14 +609,14 @@ export const MODULE_13_DEMAND: TutorialStep[] = [
   },
 
   {
-    id: 'm13-the-course-ends-here',
+    id: 'm13-five-questions',
     section: SECTION,
-    title: 'What the whole course was about',
+    title: 'Five questions, and what is still missing',
     tab: 'Analytics',
     where: 'Everything you have built',
     concept: [
-      'Thirteen modules, one model, and the same move in every one of them: work out what the answer '
-      + 'should be, then find out which of you is wrong.',
+      'Thirteen modules so far, one model, and the same move in every one of them: work out what the '
+      + 'answer should be, then find out which of you is wrong.',
 
       'That habit found things. The merit order made 12,000 into 7,500. A line rating made one price '
       + 'into two. A battery was worth twenty-three times more on a day than on three hours. Two points '
@@ -630,8 +630,9 @@ export const MODULE_13_DEMAND: TutorialStep[] = [
       + 'without checking.',
     ],
     explain: [
-      'There is nothing left to build. What is left is the practice, and it is four questions you can '
-      + 'ask of any model, including one you did not write.',
+      'Nothing after this module adds to the model itself. What the last two add is perspective, and '
+      + 'the running list of questions this course keeps arriving at grows by one in each of them. Four '
+      + 'of them you can already ask of any model, including one you did not write.',
 
       'What is the objective actually minimising, and what is missing from it? What is the time axis, '
       + 'and what does its resolution and horizon hide? Which constraints are binding, and what would '
@@ -642,8 +643,11 @@ export const MODULE_13_DEMAND: TutorialStep[] = [
       + 'about what is growing?',
 
       'Take your own model and answer those five. Where you cannot, you have found the next thing to '
-      + 'work on — which is the same method this course used to find every one of its own findings, '
-      + 'and the only part of it that does not go out of date.',
+      + 'work on — which is the same method this course used to find every one of its own findings.',
+
+      'Two questions are still missing, and neither is about the model. Module 14 asks whose books the '
+      + 'answer belongs to, and module 15 asks what market design it assumes. Both change conclusions '
+      + 'you have already drawn.',
     ],
     verify: [
       'You can state the five questions without looking them up',

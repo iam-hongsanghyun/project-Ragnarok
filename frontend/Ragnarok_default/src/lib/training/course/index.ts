@@ -213,11 +213,12 @@ export const POWER_MARKET_COURSE: Tutorial = {
   title: 'Power market modelling with Ragnarok',
   modules: MODULES,
   level: 'Beginner',
-  // The fifteen modules as written, at the pace of someone typing every value and
-  // reading the concept blocks rather than skimming them. Modules 7 to 9 solve a
-  // full year, so their runs take about a minute each, which is included; module
-  // 10 goes back to three snapshots and is instant again.
-  minutes: 29 * 60,
+  // Summed from the modules rather than stated, because a hand-written total
+  // drifts every time one is added — it read 29 hours against modules totalling
+  // 27 before this was derived. Each module's own figure is the pace of someone
+  // typing every value and reading the concept blocks rather than skimming, with
+  // solve time included where a module runs a full year.
+  minutes: MODULES.reduce((total, m) => total + m.minutes, 0),
   summary:
     'Build one power-system model from an empty sheet to a policy-tested investment case, learning the '
     + 'modelling theory and the Ragnarok mechanics together at every step. Twelve modules: foundations, '
@@ -249,7 +250,7 @@ export const POWER_MARKET_COURSE: Tutorial = {
   prerequisites: [
     'Ragnarok is running and the top bar shows a status other than a connection error',
     'No prior power-systems or optimisation knowledge — the course starts from the beginning',
-    'About 29 hours across fifteen modules; each opens from a checkpoint, so it need not be one sitting',
+    'About 27 hours across fifteen modules; each opens from a checkpoint, so it need not be one sitting',
     'Modules 7 to 9 solve a full year, so expect roughly a minute per run from there on',
   ],
   steps: STEPS,

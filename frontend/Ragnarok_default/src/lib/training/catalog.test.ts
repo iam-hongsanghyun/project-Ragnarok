@@ -1,5 +1,6 @@
 import { describe, test, expect } from '@jest/globals';
 import { TUTORIALS, LEVEL_ORDER, findTutorial, tutorialsByLevel } from './catalog';
+import { POWER_MARKET_COURSE } from './course';
 
 /**
  * Integrity gate on the catalog. Tutorials are authored one at a time, so these
@@ -141,4 +142,11 @@ describe('lookup helpers', () => {
     for (const g of groups) expect(g.items.length).toBeGreaterThan(0);
     expect(groups.reduce((n, g) => n + g.items.length, 0)).toBe(TUTORIALS.length);
   });
+});
+
+test('the course total is the sum of its modules', () => {
+  // A hand-written total drifts every time a module is added — it read 29 hours
+  // against modules totalling 27 before this was derived from them.
+  const summed = (POWER_MARKET_COURSE.modules ?? []).reduce((t, m) => t + m.minutes, 0);
+  expect(POWER_MARKET_COURSE.minutes).toBe(summed);
 });

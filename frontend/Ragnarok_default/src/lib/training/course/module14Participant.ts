@@ -642,7 +642,7 @@ export const MODULE_14_PARTICIPANT: TutorialStep[] = [
     tab: 'Analytics',
     where: 'Everything you have built',
     concept: [
-      'Fourteen modules, one model, and a last idea that only arrives at the end: almost every question '
+      'Fourteen modules, one model, and an idea that only arrives this late: almost every question '
       + 'in this field has two correct answers, and which one you get depends on whose books you keep.',
 
       'A congested line is a constraint to a planner and a revenue stream to whoever owns the cheap side '
@@ -652,11 +652,10 @@ export const MODULE_14_PARTICIPANT: TutorialStep[] = [
 
       'The models in this course can answer either version. What they cannot do is tell you which one '
       + 'you were asked — and getting that wrong is a bigger error than any of the modelling mistakes '
-      + 'the previous thirteen modules taught you to avoid.',
+      + 'the previous modules taught you to avoid.',
     ],
     explain: [
-      'The course ends here, so take the five questions from module 13 and add the sixth this module '
-      + 'contributed.',
+      'Take the five questions from module 13 and add the sixth this module contributed.',
 
       'What is the objective actually minimising? What is the time axis, and what does it hide? Which '
       + 'constraints are binding, and what would relaxing them cost? What is the range around the '
@@ -666,6 +665,9 @@ export const MODULE_14_PARTICIPANT: TutorialStep[] = [
       'Take a model you did not write and answer all six about it. Where you cannot, you have found '
       + 'either something to go and read or something the study never established — and telling those '
       + 'two apart is most of what expertise in this field consists of.',
+
+      'One question is still missing, and module 15 is about it: every price in this module assumed a '
+      + 'particular market design, and changing it changes every number you just read.',
     ],
     verify: [
       'You can state all six questions without looking them up',
