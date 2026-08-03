@@ -54,6 +54,18 @@ EMPTY_OPTIMISE_FIELDS: dict[str, Any] = {
 }
 
 
+def _loss_str(value: float) -> str:
+    """Format a loss figure without rounding a real one away to zero.
+
+    Losses on a small or lightly-loaded network are a fraction of a MWh, and
+    whole-number rounding turned every one of them into "0 MWh" — indistinguishable
+    from the linear method, which genuinely has none.
+    """
+    if value and abs(value) < 10.0:
+        return f"{value:,.1f}"
+    return f"{round(value):,}"
+
+
 def _branch_loading(network: pypsa.Network) -> list[dict[str, Any]]:
     """Peak |flow| / rating (%) for every passive branch and link, post-flow."""
     out: list[dict[str, Any]] = []
@@ -271,8 +283,13 @@ def run_power_flow(
         summary.append(
             {
                 "label": "Losses",
-                "value": f"{round(losses_mwh):,} MWh",
-                "detail": f"peak {round(peak_loss_mw):,} MW",
+                # Rounding to whole MWh reported "0 MWh" for every small or
+                # lightly-loaded network — which reads as "the AC flow found no
+                # losses" when it found some, the one thing this study mode
+                # exists to show. Keep a decimal until the figure is big enough
+                # not to need one.
+                "value": f"{_loss_str(losses_mwh)} MWh",
+                "detail": f"peak {_loss_str(peak_loss_mw)} MW",
             }
         )
 
