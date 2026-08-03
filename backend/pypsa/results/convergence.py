@@ -107,6 +107,7 @@ import numpy as np
 import pandas as pd
 import pypsa
 
+from .adequacy import storage_discharge_availability
 from .outage_mc import _is_variable_renewable, _per_member_metrics, _snapshot_label, sample_outage_masks
 
 _log = logging.getLogger("pypsa.solver")
@@ -609,8 +610,16 @@ def build_convergence(
     else:
         maintenance_payload = None
 
+    # Storage discharge counts toward AVAILABILITY on the one shared convention
+    # (see adequacy.storage_discharge_availability) — omitting it made this
+    # study's EUE an order of magnitude above the outage Monte Carlo's for the
+    # same system and the same forced-outage parameters. It is deliberately not
+    # folded into `renewable_floor`, which also drives the maintenance
+    # placement's net-load heuristic and is left as it was.
+    availability_floor = renewable_floor + storage_discharge_availability(network, T)
+
     result = run_convergence_sampling(
-        for_rates, mttr_hours, weights, load, thermal_cap, thermal_pmax, renewable_floor,
+        for_rates, mttr_hours, weights, load, thermal_cap, thermal_pmax, availability_floor,
         target_metric=target_metric, tolerance=tolerance, batch_size=batch_size,
         max_members=max_members, seed=seed, modeled_hours=modeled_hours,
         planned_mask=planned_mask,
