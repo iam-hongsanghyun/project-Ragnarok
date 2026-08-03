@@ -66,6 +66,7 @@ from .market import (
     HOURS_PER_YEAR,
     build_applied_constraints,
     build_co2_shadow,
+    build_commitment_cost,
     build_generator_economics,
     build_merit_order,
     installed_capacity_series,
@@ -1042,11 +1043,22 @@ def _build_solved_payload(
     demand_response = build_demand_response(network)  # shiftable-load outcome; None if no DR
     price_elastic = build_price_elastic(network)  # elastic-demand outcome; None if none
 
+    # Commitment costs (start-up / shut-down). These are real objective terms —
+    # deciding whether to stop a plant for two cheap hours is the whole point of
+    # unit commitment — but they are not proportional to energy, so nothing in
+    # the fuel/carbon/shedding maths above picks them up. Omitting them made two
+    # runs that differ only in start-up cost report an identical breakdown.
+    commitment_cost = build_commitment_cost(network)
+
     cost_breakdown = [
         {"label": "Fuel cost", "value": round(fuel_cost)},
         {"label": "Carbon cost", "value": round(carbon_cost)},
         {"label": "Load shedding", "value": round(shed_cost)},
     ]
+    if commitment_cost > 0:
+        cost_breakdown.append(
+            {"label": "Start-up / shut-down cost", "value": round(commitment_cost)}
+        )
     if total_capex_annual > 0:
         # Annual annuity pro-rated to the modelled window (× H/8760) so it is
         # comparable with the window-total fuel/carbon/shedding components.
@@ -1161,6 +1173,17 @@ def _build_solved_payload(
             f"MIP unit commitment enabled for {len(committable_gens)} generator(s): {', '.join(committable_gens[:5])}"
             + (" …" if len(committable_gens) > 5 else "") + "."
         )
+        if not bool(options.get("forceLp", False)):
+            # A MILP has no duals. PyPSA still populates buses_t.marginal_price,
+            # but the values come from whatever the solver left behind and are
+            # routinely a flat zero — which reads as "power was free" rather
+            # than "this run cannot price". Say so, once, next to the numbers.
+            notes.append(
+                "Prices from a unit-commitment run are NOT shadow prices — a mixed-integer "
+                "problem has no duals, so the marginal prices, capture prices and revenues "
+                "below are unreliable (often flat zero). For prices, re-run with Force LP, "
+                "or fix the commitment schedule and solve it as an LP."
+            )
         if sampling.enabled and sampling.mode != "average":
             # An averaged profile is one contiguous block — no seams to warn about.
             notes.append(

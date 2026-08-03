@@ -23,6 +23,34 @@ SYSTEM_GEN_PREFIXES = ("load_shedding_", "system_bess")
 HOURS_PER_YEAR = 8760.0
 
 
+# ── Commitment costs ──────────────────────────────────────────────────────────
+
+def build_commitment_cost(network: pypsa.Network) -> float:
+    """Total start-up + shut-down cost actually incurred over the window.
+
+    PyPSA's unit-commitment formulation carries ``start_up`` / ``shut_down``
+    status series alongside ``status``; each transition is charged the
+    generator's ``start_up_cost`` / ``shut_down_cost``. Those are objective
+    terms, but they are per-EVENT rather than per-MWh, so nothing in the
+    energy-weighted cost maths sees them.
+
+    Returns 0.0 when nothing is committable, when the run relaxed the integers
+    (``forceLp``), or when no unit ever changed state.
+    """
+    total = 0.0
+    for status_attr, cost_col in (("start_up", "start_up_cost"), ("shut_down", "shut_down_cost")):
+        events = getattr(network.generators_t, status_attr, None)
+        if events is None or getattr(events, "empty", True):
+            continue
+        if cost_col not in network.generators.columns:
+            continue
+        costs = network.generators[cost_col].reindex(events.columns).fillna(0.0)
+        # Transitions are 0/1 per snapshot; a start-up is charged once, whatever
+        # the snapshot weighting (it is an event, not an hourly rate).
+        total += float((events.astype(float) * costs).to_numpy().sum())
+    return total
+
+
 # ── Merit order ───────────────────────────────────────────────────────────────
 
 
