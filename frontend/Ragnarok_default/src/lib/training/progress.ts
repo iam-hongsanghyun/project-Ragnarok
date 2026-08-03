@@ -79,35 +79,6 @@ export function completeAndAdvance(tutorial: Tutorial, progress: TutorialProgres
   return { completed: Array.from(done), currentStepId: nextId };
 }
 
-// ── Progress within a step ───────────────────────────────────────────────────
-// A step can list twenty values. These track which are already entered so a
-// learner who leaves for Build mid-step comes back to the right place rather
-// than the top of the list.
-
-/** Fields already entered on `stepId`. */
-export function entriesDoneFor(progress: TutorialProgress, stepId: string): string[] {
-  return progress.entriesDone?.[stepId] ?? [];
-}
-
-export function isEntryDone(progress: TutorialProgress, stepId: string, field: string): boolean {
-  return entriesDoneFor(progress, stepId).includes(field);
-}
-
-export function toggleEntry(progress: TutorialProgress, stepId: string, field: string): TutorialProgress {
-  const done = new Set(entriesDoneFor(progress, stepId));
-  if (done.has(field)) done.delete(field);
-  else done.add(field);
-  return { ...progress, entriesDone: { ...(progress.entriesDone ?? {}), [stepId]: Array.from(done) } };
-}
-
-/** Clear a step's entry ticks — used when the step itself is un-ticked. */
-export function clearEntries(progress: TutorialProgress, stepId: string): TutorialProgress {
-  if (!progress.entriesDone) return progress;
-  const next = { ...progress.entriesDone };
-  delete next[stepId];
-  return { ...progress, entriesDone: next };
-}
-
 /** Last walkthrough stop reached on `stepId`, or 0. */
 export function guideStopFor(progress: TutorialProgress, stepId: string): number {
   return progress.guideStop?.[stepId] ?? 0;
@@ -124,6 +95,20 @@ export function clearGuideStop(progress: TutorialProgress, stepId: string): Tuto
   const next = { ...progress.guideStop };
   delete next[stepId];
   return { ...progress, guideStop: next };
+}
+
+/** Whether a module's prebuilt starting model is loaded, per module opener. */
+export function isCheckpointLoaded(progress: TutorialProgress, stepId: string): boolean {
+  return progress.checkpointLoaded?.[stepId] ?? false;
+}
+
+export function setCheckpointLoaded(
+  progress: TutorialProgress, stepId: string, loaded: boolean,
+): TutorialProgress {
+  return {
+    ...progress,
+    checkpointLoaded: { ...(progress.checkpointLoaded ?? {}), [stepId]: loaded },
+  };
 }
 
 /** Move `delta` steps from the current position, clamped to the tutorial. */

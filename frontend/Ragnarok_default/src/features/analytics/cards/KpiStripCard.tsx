@@ -41,9 +41,20 @@ export function KpiStripCard({ results, model, currencySymbol = '$' }: Props) {
   const emissionsSummary = results.summary.find((s) => s.label === 'System emissions');
   const emissionsDisplay = emissionsSummary ? emissionsSummary.value : '—';
 
+  // Total cost — the objective value, and the first number anyone looks for.
+  //
+  // The backend summary has never carried a 'Total cost' entry, so this tile
+  // read '—' on every run while `costBreakdown` held the answer all along. Sum
+  // that instead: fuel + carbon + load shedding IS the objective, and it is what
+  // the training course has the learner reconcile by hand.
   const totalCostSummary = results.summary.find((s) => s.label === 'Total cost')
     ?? results.summary.find((s) => s.label === 'System cost');
-  const totalCostDisplay = totalCostSummary ? totalCostSummary.value : '—';
+  const costParts = (results.costBreakdown ?? []).map((c) => c.value).filter((v) => Number.isFinite(v));
+  const totalCostDisplay = totalCostSummary
+    ? totalCostSummary.value
+    : costParts.length > 0
+      ? `${currencySymbol}${Math.round(costParts.reduce((s, v) => s + v, 0)).toLocaleString()}`
+      : '—';
 
   // Reconstruct sorted-load to derive peak and load-factor without taking
   // the row-shaped systemLoadRows that App.tsx computes — keep this card
@@ -65,10 +76,25 @@ export function KpiStripCard({ results, model, currencySymbol = '$' }: Props) {
     for (const detail of busDetails) sum += detail.netSeries[i]?.load ?? 0;
     if (sum > 0) systemLoadPerSnap.push(sum);
   }
-  const peakLoad = systemLoadPerSnap.length > 0 ? Math.max(...systemLoadPerSnap) : undefined;
-  const avgLoad = systemLoadPerSnap.length > 0
-    ? systemLoadPerSnap.reduce((s, v) => s + v, 0) / systemLoadPerSnap.length
-    : undefined;
+  // `nodalBalance` carries a per-bus AVERAGE, not a per-snapshot series, so the
+  // walk above yields one averaged figure and reports it as the peak — 80 MW on a
+  // model whose demand peaks at 170. The backend already computes the real peak;
+  // prefer it, and keep the derivation only as a fallback.
+  const derivedPeak = systemLoadPerSnap.length > 0 ? Math.max(...systemLoadPerSnap) : undefined;
+  const peakDemandSummary = results.summary.find((s) => s.label === 'Peak demand');
+  const peakFromSummary = peakDemandSummary ? Number.parseFloat(peakDemandSummary.value) : NaN;
+  const peakLoad = Number.isFinite(peakFromSummary) ? peakFromSummary : derivedPeak;
+  // Average load comes from the same averaged `nodalBalance` walk as the peak
+  // did, so pairing it with the corrected peak would report a load factor built
+  // from two different quantities. Energy served over hours modelled is the
+  // definition anyway, and it is exactly right whenever generation equals load
+  // (no storage or losses); the derivation stays as the fallback.
+  const modeledHours = results.runMeta.snapshotCount * results.runMeta.snapshotWeight;
+  const avgLoad = modeledHours > 0
+    ? totalDispatch / modeledHours
+    : systemLoadPerSnap.length > 0
+      ? systemLoadPerSnap.reduce((s, v) => s + v, 0) / systemLoadPerSnap.length
+      : undefined;
   const loadFactor = peakLoad && avgLoad ? avgLoad / peakLoad : undefined;
 
   // Renewable share — zero-emission carriers, excluding nuclear (zero-carbon

@@ -1,22 +1,20 @@
 import { describe, test, expect } from '@jest/globals';
 import {
-  clearEntries,
   clearGuideStop,
   completeAndAdvance,
   completedCount,
   emptyProgress,
-  entriesDoneFor,
   firstIncompleteStepId,
   guideStopFor,
-  isEntryDone,
+  isCheckpointLoaded,
   isTutorialComplete,
   liveCompleted,
   moveBy,
   percentComplete,
   resolveCurrentStepId,
+  setCheckpointLoaded,
   setGuideStop,
   stepIndex,
-  toggleEntry,
   toggleStep,
 } from './progress';
 import { Tutorial, TutorialStep } from './types';
@@ -136,46 +134,6 @@ describe('mutations', () => {
   });
 });
 
-describe('within-step entry progress', () => {
-  // A step can list twenty values entered a few at a time. Without this, a
-  // learner returning mid-step has to re-find their place in the list.
-  test('an untouched step has no entries done', () => {
-    expect(entriesDoneFor(emptyProgress(), 'a')).toEqual([]);
-    expect(isEntryDone(emptyProgress(), 'a', 'generators.p_nom')).toBe(false);
-  });
-
-  test('toggling an entry records and clears it', () => {
-    const once = toggleEntry(emptyProgress(), 'a', 'generators.p_nom');
-    expect(isEntryDone(once, 'a', 'generators.p_nom')).toBe(true);
-    expect(isEntryDone(toggleEntry(once, 'a', 'generators.p_nom'), 'a', 'generators.p_nom')).toBe(false);
-  });
-
-  test('entries are scoped per step', () => {
-    const p = toggleEntry(emptyProgress(), 'a', 'buses.name');
-    expect(isEntryDone(p, 'a', 'buses.name')).toBe(true);
-    expect(isEntryDone(p, 'b', 'buses.name')).toBe(false);
-  });
-
-  test('toggling an entry leaves step completion and cursor alone', () => {
-    const base = { completed: ['a'], currentStepId: 'b' };
-    const next = toggleEntry(base, 'b', 'loads.p_set');
-    expect(next.completed).toEqual(['a']);
-    expect(next.currentStepId).toBe('b');
-  });
-
-  test('clearEntries drops one step without touching others', () => {
-    let p = toggleEntry(emptyProgress(), 'a', 'x');
-    p = toggleEntry(p, 'b', 'y');
-    const cleared = clearEntries(p, 'a');
-    expect(entriesDoneFor(cleared, 'a')).toEqual([]);
-    expect(entriesDoneFor(cleared, 'b')).toEqual(['y']);
-  });
-
-  test('clearEntries on progress that has none is a no-op', () => {
-    expect(clearEntries(emptyProgress(), 'a')).toEqual(emptyProgress());
-  });
-});
-
 describe('walkthrough stage', () => {
   // Closing a walkthrough to do the work must not lose the stage — "Back to
   // tutorial" resumes at the stop the learner was on.
@@ -206,5 +164,30 @@ describe('walkthrough stage', () => {
 
   test('clearGuideStop without a record is a no-op', () => {
     expect(clearGuideStop(emptyProgress(), 'a')).toEqual(emptyProgress());
+  });
+});
+
+describe('module prebuilt-data tick', () => {
+  // One checkbox per module, and it has to survive the remount that loading an
+  // example causes — which is why it lives in progress, not component state.
+  test('an untouched module opener is unticked', () => {
+    expect(isCheckpointLoaded(emptyProgress(), 'm2-merit-order')).toBe(false);
+  });
+
+  test('the tick is recorded and cleared per module', () => {
+    const on = setCheckpointLoaded(emptyProgress(), 'm2-merit-order', true);
+    expect(isCheckpointLoaded(on, 'm2-merit-order')).toBe(true);
+    expect(isCheckpointLoaded(setCheckpointLoaded(on, 'm2-merit-order', false), 'm2-merit-order')).toBe(false);
+  });
+
+  test('modules do not share a tick', () => {
+    const on = setCheckpointLoaded(emptyProgress(), 'm2-merit-order', true);
+    expect(isCheckpointLoaded(on, 'm3-two-buses')).toBe(false);
+  });
+
+  test('ticking leaves step completion and the cursor alone', () => {
+    const next = setCheckpointLoaded({ completed: ['a'], currentStepId: 'b' }, 'b', true);
+    expect(next.completed).toEqual(['a']);
+    expect(next.currentStepId).toBe('b');
   });
 });

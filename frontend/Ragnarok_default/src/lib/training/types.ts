@@ -111,9 +111,34 @@ export interface Spotlight {
   runDialog?: 'open' | 'closed';
 }
 
+/**
+ * A module's starting point — the bundled example holding the model as it stood
+ * at the END of the previous module.
+ *
+ * Declared on the first step of every module after the first, so a learner can
+ * join the course at any module and a mistake made in module 2 does not poison
+ * module 7. Loading it is a button press, never automatic: a learner arriving
+ * here from the previous module already HAS this model, and silently replacing
+ * their own work with a bundled copy is the worst thing this could do.
+ *
+ * `exampleId` names the state at the end of a module, so module N loads the
+ * checkpoint written by module N-1 (`training_m1` starts module 2).
+ */
+export interface StepCheckpoint {
+  /** Bundled example id, matching an `/api/examples` id. */
+  exampleId: string;
+  /** What the checkpoint holds, so a learner can tell whether they need it. */
+  note: string;
+}
+
 export interface TutorialStep {
   id: string;
   title: string;
+  /**
+   * The model this step starts from, when it opens a module. Rendered as a
+   * banner offering the load; see `StepCheckpoint`.
+   */
+  checkpoint?: StepCheckpoint;
   /**
    * Module heading this step belongs to, for a long course that groups its
    * steps ("2 · Economic dispatch"). Consecutive steps sharing a section render
@@ -198,15 +223,6 @@ export interface TutorialProgress {
   /** The step the runner is showing. Null → resolve to first incomplete. */
   currentStepId: string | null;
   /**
-   * Progress WITHIN a step: step id → the `field` of each value already entered.
-   *
-   * A step can carry twenty values, and a learner enters them a few at a time,
-   * leaving for Build in between. Without this, returning to the step means
-   * re-finding your place in a long list — so the runner ticks them off and
-   * scrolls back to the first one still outstanding.
-   */
-  entriesDone?: Record<string, string[]>;
-  /**
    * Walkthrough position within a step: step id → last spotlight stop reached.
    *
    * A learner is at step 5, stop 5 of 7, and leaves to do the work. Without this
@@ -221,4 +237,15 @@ export interface TutorialProgress {
    * model and remounts views — component-local state forgets the tick.
    */
   prebuiltLoaded?: boolean;
+  /**
+   * The same tick, per module: step id of a module opener → whether its
+   * prebuilt starting model is loaded.
+   *
+   * Every module offers the identical "start with prebuilt data" checkbox, so
+   * a learner can skip the typing at any point in the course rather than only
+   * at the very beginning. Keyed by step because each module has its own
+   * checkpoint, and persisted for the same reason as `prebuiltLoaded`: loading
+   * an example remounts the view that owns the checkbox.
+   */
+  checkpointLoaded?: Record<string, boolean>;
 }

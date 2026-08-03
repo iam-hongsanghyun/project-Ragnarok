@@ -570,7 +570,7 @@ export const MODULE_1_FOUNDATIONS: TutorialStep[] = [
         unit: 'tCO2 per MWh of fuel burnt',
         why: 'Per MWh of FUEL, not per MWh of electricity. The generator\'s efficiency converts between '
           + 'them: at 50% efficient, 0.2 per MWh of gas becomes 0.4 per MWh of electricity. Unused until '
-          + 'module 7, but set it now so the model is complete.',
+          + 'module 8, but set it now so the model is complete.',
       },
 
       {

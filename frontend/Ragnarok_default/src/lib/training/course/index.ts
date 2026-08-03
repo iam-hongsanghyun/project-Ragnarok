@@ -1,8 +1,13 @@
 /**
- * The power-market modelling course — 48 steps in 8 modules.
+ * The power-market modelling course — 9 modules, published as they are written.
+ *
+ * Modules 1–2 (16 steps) are live. The tutorial's own summary, `minutes` and
+ * `outcomes` describe what is WRITTEN, not what is planned: a learner reading
+ * the catalog card should be told the truth about what they are starting, and
+ * progress is a percentage of real steps. Extend all three as each module lands.
  *
  * One tutorial, not eight, because the course is cumulative: the model built in
- * module 1 is the model policy instruments are applied to in module 6. Modules
+ * module 1 is the model policy instruments are applied to in module 8. Modules
  * are `section` headings on the steps, so the rail groups them while progress
  * stays a single track.
  *
@@ -15,7 +20,7 @@
  *   One model, checkpointed — every module grows the SAME model, so the learner
  *   ends with something they built and understand end to end. Each module after
  *   the first opens by naming the bundled example to load as its starting
- *   point, so a mistake in module 2 does not poison module 7 and a learner can
+ *   point, so a mistake in module 2 does not poison module 8 and a learner can
  *   join at any module.
  *
  *   Theory and tool together — each step carries a `concept` block (the
@@ -27,16 +32,20 @@
  */
 import { Tutorial } from '../types';
 import { MODULE_1_FOUNDATIONS } from './module1Foundations';
+import { MODULE_2_DISPATCH } from './module2Dispatch';
 
 const STEPS = [
   ...MODULE_1_FOUNDATIONS,
+  ...MODULE_2_DISPATCH,
 ];
 
 export const POWER_MARKET_COURSE: Tutorial = {
   id: 'power-market-modelling',
   title: 'Power market modelling with Ragnarok',
   level: 'Beginner',
-  minutes: 12 * 60,
+  // Modules 1–2 as written, at the pace of someone typing every value and
+  // reading the concept blocks rather than skimming them.
+  minutes: 3 * 60,
   // Module 1 authors a model from an empty sheet, so a leftover model would
   // collide with it. Declared, not enforced: a learner may be resuming work they
   // left deliberately, so the runner offers the clear rather than doing it.
@@ -51,21 +60,25 @@ export const POWER_MARKET_COURSE: Tutorial = {
       + 'settings, run history and plugins, but not the model.',
   },
   summary:
-    'A 48-step course in eight modules. Build one power-system model from an empty sheet to a '
-    + 'policy-tested investment case, learning the modelling theory and the Ragnarok mechanics '
-    + 'together at every step. Assumes no prior knowledge of power systems or optimisation.',
+    'Build one power-system model from an empty sheet, learning the modelling theory and the Ragnarok '
+    + 'mechanics together at every step, with every answer small enough to check by hand. Assumes no '
+    + 'prior knowledge of power systems or optimisation. Modules 1–2 are written — foundations, then '
+    + 'economic dispatch. The remaining seven (networks and congestion, storage, sector coupling, '
+    + 'investment, time resolution and rolling horizon, policy instruments, and result to decision) are '
+    + 'published as they land, and your progress carries across.',
   outcomes: [
     'Explain what a power-system optimisation model is: objective, decision variables, constraints',
-    'Build a network from scratch — buses, generators, loads, lines, snapshots, profiles',
-    'Read dispatch, prices and congestion, and say why the model produced them',
-    'Turn a dispatch model into a capacity-expansion model on a defensible cost basis',
-    'Test carbon prices, emissions caps and renewable targets, and compare them honestly',
-    'Take a result to a decision, with provenance that survives review',
+    'Build a working network from scratch — carriers, buses, generators, loads, snapshots',
+    'Run the change → validate → run → read loop, and reconcile an objective value by hand',
+    'Explain the merit order, and say which unit sets the price in any given hour and why',
+    'Distinguish price from average cost, and say what inframarginal rent pays for',
+    'Model variable generation with p_max_pu, and read curtailment and zero prices correctly',
+    'Say what a fixed-capacity dispatch model can and cannot answer',
   ],
   prerequisites: [
     'Ragnarok is running and the top bar shows a status other than a connection error',
     'No prior power-systems or optimisation knowledge — the course starts from the beginning',
-    'About 12 hours in total; each module stands alone from its checkpoint, so it need not be one sitting',
+    'About 3 hours for the two written modules; each module opens from a checkpoint, so it need not be one sitting',
   ],
   steps: STEPS,
 };

@@ -81,6 +81,27 @@ describe('catalog integrity', () => {
     }
   });
 
+  // A checkpoint whose example id is wrong loads the wrong model, or nothing,
+  // and the learner has no way to tell — so the shape is checked here and the id
+  // itself is checked against `/api/examples` by the backend example test.
+  test('every module checkpoint names an example and says what it holds', () => {
+    for (const t of TUTORIALS) {
+      for (const s of t.steps) {
+        if (!s.checkpoint) continue;
+        expect(s.checkpoint.exampleId.trim()).not.toBe('');
+        expect(s.checkpoint.note.length).toBeGreaterThan(40);
+      }
+    }
+  });
+
+  // The first step of a tutorial has the start-state banner; a checkpoint there
+  // too would stack two banners saying different things about the same session.
+  test('no checkpoint sits on a step that already carries the start state', () => {
+    for (const t of TUTORIALS) {
+      if (t.startState) expect(t.steps[0].checkpoint).toBeUndefined();
+    }
+  });
+
   test('every file the user must import names the control and the required shape', () => {
     for (const t of TUTORIALS) {
       for (const s of t.steps) {

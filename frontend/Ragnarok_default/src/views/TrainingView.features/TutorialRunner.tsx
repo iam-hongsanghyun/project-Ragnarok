@@ -13,20 +13,19 @@ import { WorkspaceTab } from 'lib/types';
 import { Spotlight, Tutorial, TutorialProgress, TutorialStep } from 'lib/training/types';
 import {
   completeAndAdvance,
+  isCheckpointLoaded,
   isStepComplete,
   isTutorialComplete,
-  entriesDoneFor,
   guideStopFor,
-  isEntryDone,
   moveBy,
   percentComplete,
   resolveCurrentStepId,
+  setCheckpointLoaded,
   stepIndex,
-  toggleEntry,
   toggleStep,
 } from 'lib/training/progress';
 import { ViewPaneHeader } from 'shared/components/primitives';
-import { ModelSummary, StartStateBanner } from './StartStateBanner';
+import { CheckpointBanner, ModelSummary, StartStateBanner } from './StartStateBanner';
 
 interface Props {
   tutorial: Tutorial;
@@ -81,18 +80,13 @@ function CopyValue({ value }: { value: string }) {
   );
 }
 
-function StepBody({ step, onNavigate, onStartGuide, guideStop, isDone, onToggleEntry }: {
+function StepBody({ step, onNavigate, onStartGuide, guideStop }: {
   step: TutorialStep;
   onNavigate: (t: WorkspaceTab) => void;
   onStartGuide: (stops: Spotlight[], stepId?: string, startIndex?: number) => void;
   /** Walkthrough stop previously reached on this step (0 = untouched). */
   guideStop: number;
-  /** Has this value already been entered? */
-  isDone: (field: string) => boolean;
-  onToggleEntry: (field: string) => void;
 }) {
-  const entries = step.entries ?? [];
-  const doneCount = entries.filter((e) => isDone(e.field)).length;
   return (
     <>
       {step.concept && step.concept.length > 0 && (
@@ -142,19 +136,13 @@ function StepBody({ step, onNavigate, onStartGuide, guideStop, isDone, onToggleE
 
       {step.entries && step.entries.length > 0 && (
         <section className="training-block">
-          <h4 className="training-block__title">
-            Values to enter
-            <span className="training-block__count">{doneCount} of {entries.length} entered</span>
-          </h4>
+          <h4 className="training-block__title">Values to enter</h4>
           <p className="training-block__note">
             Ragnarok does not enter these for you — type them in yourself so you learn where they live.
-            Tick each one off as you go; leaving this view and coming back returns you to the first you
-            have not ticked.
           </p>
           <table className="training-table">
             <thead>
               <tr>
-                <th aria-label="Entered" />
                 <th>Field</th>
                 <th>Value</th>
                 <th>Why</th>
@@ -162,19 +150,7 @@ function StepBody({ step, onNavigate, onStartGuide, guideStop, isDone, onToggleE
             </thead>
             <tbody>
               {step.entries.map((entry) => (
-                <tr
-                  key={`${entry.field}|${entry.value}`}
-                  className={isDone(entry.field) ? 'is-entered' : ''}
-                  data-entry-pending={isDone(entry.field) ? undefined : '1'}
-                >
-                  <td className="training-entry-check">
-                    <input
-                      type="checkbox"
-                      checked={isDone(entry.field)}
-                      onChange={() => onToggleEntry(entry.field)}
-                      aria-label={`Entered ${entry.field}`}
-                    />
-                  </td>
+                <tr key={`${entry.field}|${entry.value}`}>
                   <td>
                     <code className="training-field">{entry.field}</code>
                     {entry.label && <span className="training-field-label">{entry.label}</span>}
@@ -258,29 +234,13 @@ export function TutorialRunner({
   const finished = isTutorialComplete(tutorial, progress);
   const done = step ? isStepComplete(progress, step.id) : false;
 
-  // Where to start reading when the shown step changes.
-  //
-  // A step is ALWAYS opened at the top — that is where the idea and the "where"
-  // strip are, and a learner arriving at a step needs to read them. Only once
-  // they have ticked at least one value does this become a resume: then, and only
-  // then, jump to the first value still outstanding so a twenty-row step does not
-  // have to be re-found. Scrolling an untouched step into its middle just hides
-  // the explanation.
-  //
-  // Keyed on the shown step, not on every tick, so ticking a box does not move
-  // the page under the cursor.
+  // A step ALWAYS opens at the top — that is where the idea and the "where"
+  // strip are, and a learner arriving at a step needs to read them before the
+  // table of values.
   const bodyRef = useRef<HTMLDivElement>(null);
   const shownStepId = step?.id ?? null;
-  const resumeCount = shownStepId ? entriesDoneFor(progress, shownStepId).length : 0;
   useEffect(() => {
-    const body = bodyRef.current;
-    if (!body || !shownStepId) return;
-    const pending = resumeCount > 0 ? body.querySelector('[data-entry-pending="1"]') : null;
-    if (pending) pending.scrollIntoView({ block: 'center' });
-    else body.scrollTop = 0;
-    // resumeCount is read at step-change time only — adding it as a dependency
-    // would re-scroll on every tick.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (bodyRef.current) bodyRef.current.scrollTop = 0;
   }, [shownStepId]);
 
   return (
@@ -324,6 +284,19 @@ export function TutorialRunner({
           />
         )}
 
+        {/* Every module after the first opens from a named checkpoint, so a
+            learner can join at any module. Offered, never loaded on its own. */}
+        {step?.checkpoint && (
+          <CheckpointBanner
+            checkpoint={step.checkpoint}
+            model={modelSummary}
+            onClearModel={onClearModel}
+            onLoadExample={onLoadExample}
+            loaded={isCheckpointLoaded(progress, step.id)}
+            onLoadedChange={(v) => onProgressChange(setCheckpointLoaded(progress, step.id, v))}
+          />
+        )}
+
         {step ? (
           <article className="training-step">
             {step.section && <div className="training-step__section">{step.section}</div>}
@@ -336,8 +309,6 @@ export function TutorialRunner({
               onNavigate={onNavigate}
               onStartGuide={onStartGuide}
               guideStop={guideStopFor(progress, step.id)}
-              isDone={(field) => isEntryDone(progress, step.id, field)}
-              onToggleEntry={(field) => onProgressChange(toggleEntry(progress, step.id, field))}
             />
           </article>
         ) : (

@@ -11,7 +11,7 @@
  * and clearing confirms first.
  */
 import React, { useState } from 'react';
-import { TutorialStartState } from 'lib/training/types';
+import { StepCheckpoint, TutorialStartState } from 'lib/training/types';
 import { useDialog } from '../../shared/components/Dialog';
 
 export interface ModelSummary {
@@ -134,6 +134,87 @@ export function StartStateBanner({ startState, model, onClearModel, onLoadExampl
           </span>
         </div>
       )}
+    </section>
+  );
+}
+
+/**
+ * CheckpointBanner — the model a module starts from.
+ *
+ * Shown on the first step of every module after the first, and deliberately the
+ * SAME single "start with prebuilt data" checkbox as the tutorial's start state:
+ * one control with one meaning, wherever a learner meets it in the course. Tick
+ * it and the module's starting model loads in one action; untick it and the
+ * model is cleared, both confirm-first and both the learner's own action.
+ *
+ * A learner arriving from the previous module already holds this model and can
+ * leave the box alone. One joining the course here, or one whose model went
+ * wrong, ticks it and skips straight to the modelling.
+ */
+export function CheckpointBanner({ checkpoint, model, onClearModel, onLoadExample, loaded, onLoadedChange }: {
+  checkpoint: StepCheckpoint;
+  model: ModelSummary;
+  onClearModel: () => void | Promise<void>;
+  onLoadExample: (id: string) => void | Promise<void>;
+  /** Persisted tick — survives the remount that loading an example causes. */
+  loaded: boolean;
+  onLoadedChange: (v: boolean) => void;
+}) {
+  const { confirm } = useDialog();
+  const [busy, setBusy] = useState(false);
+  const empty = isSessionEmpty(model);
+
+  const load = async () => {
+    if (!empty) {
+      const ok = await confirm(
+        `Loading the prebuilt data replaces the current model (${model.filename}) and every unsaved edit.`
+        + '\n\nIf you have just finished the previous module you already have this, and can leave the '
+        + 'box unticked to carry on with your own model.',
+        { title: 'Replace with prebuilt data?', confirmText: 'Load prebuilt', danger: true },
+      );
+      if (!ok) return;
+    }
+    setBusy(true);
+    try { await onLoadExample(checkpoint.exampleId); onLoadedChange(true); } finally { setBusy(false); }
+  };
+
+  const unload = async () => {
+    const ok = await confirm(
+      `This removes the loaded model (${model.filename}) and every unsaved edit, on both the frontend `
+      + 'and the backend session.\n\nYour settings, run history and installed plugins are kept.',
+      { title: 'Clear the model?', confirmText: 'Clear model', danger: true },
+    );
+    if (!ok) return;
+    setBusy(true);
+    try { await onClearModel(); onLoadedChange(false); } finally { setBusy(false); }
+  };
+
+  return (
+    <section className="training-start-state">
+      <div className="training-start-state__head">
+        <span className="training-start-state__label">Module starting point</span>
+        <span className="training-start-state__now">
+          Session holds <b>{model.filename}</b>
+          {empty ? ' — no model loaded' : ` — ${model.buses} buses, ${model.generators} generators, `
+            + `${model.loads} loads, ${model.snapshots} snapshots`}
+        </span>
+      </div>
+
+      <p className="training-start-state__note">{checkpoint.note}</p>
+
+      <label className="training-start-state__prebuilt">
+        <input
+          type="checkbox"
+          checked={loaded}
+          disabled={busy}
+          onChange={(e) => { if (e.target.checked) void load(); else void unload(); }}
+        />
+        <span>
+          <b>Start with prebuilt data</b> — load the model this module starts from, and skip rebuilding
+          the earlier ones. Leave it unticked to carry on with the model you built yourself.
+          {busy && <em> Working…</em>}
+        </span>
+      </label>
     </section>
   );
 }

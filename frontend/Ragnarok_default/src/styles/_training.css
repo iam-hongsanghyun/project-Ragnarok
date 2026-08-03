@@ -873,35 +873,9 @@
   cursor: pointer;
 }
 
-/* ── Per-value ticks (within-step progress) ──
-   A step can list twenty values entered a few at a time, so each is tickable and
-   the runner returns to the first one still outstanding. */
-
-.training-block__count {
-  margin-left: 8px;
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: var(--fs-2xs);
-  text-transform: none;
-  letter-spacing: 0;
-}
-
-.training-entry-check {
-  width: 24px;
-  padding-right: 0 !important;
-  vertical-align: top;
-}
-
-.training-table tr.is-entered .training-field,
-.training-table tr.is-entered .training-why {
-  opacity: 0.5;
-}
-
-.training-table tr.is-entered .training-value {
-  opacity: 0.6;
-}
-
-/* ── "Start with prebuilt data" checkbox ── */
+/* ── "Start with prebuilt data" checkbox ──
+   The one control a learner meets at the top of every module: ticked loads that
+   module's starting model, unticked means they are building it themselves. */
 
 .training-start-state__prebuilt {
   display: flex;

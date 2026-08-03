@@ -334,6 +334,14 @@ export function Dashboard({ layout, onLayoutChange, editing, renderCard, cardTit
                 )}
                 <div
                   className={`dashboard-cell${!card ? ' is-placeholder' : ''}`}
+                  // `data-card` is the stable hook the Training walkthrough rings
+                  // — a card is addressable by WHAT it shows, which survives the
+                  // layout moving it, unlike a position or a styling class.
+                  // `data-card-source` disambiguates the kinds that appear more
+                  // than once in a layout (load vs price duration curve), so a
+                  // walkthrough can ring the one it is actually talking about.
+                  data-card={card ? card.kind : undefined}
+                  data-card-source={card && 'source' in card ? String(card.source) : undefined}
                   style={{ flexGrow: cell.flex, flexBasis: 0, minWidth: 0 }}
                 >
                   {card ? (

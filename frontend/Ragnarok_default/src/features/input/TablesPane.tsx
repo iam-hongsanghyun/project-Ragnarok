@@ -703,6 +703,10 @@ export function TablesPane({
             {rows.length === 0 && (
               <button
                 className="ghost-button sm"
+                // Stable hook for the Training walkthrough — authoring a profile
+                // by hand is a step in the course, and it is the one control a
+                // learner cannot guess from the empty grid.
+                data-tour="ts-seed"
                 title={`Create one row per snapshot with a blank column per ${componentNoun}, then type or paste the values`}
                 onClick={() => { void seedTsFromSnapshots(); }}
               >

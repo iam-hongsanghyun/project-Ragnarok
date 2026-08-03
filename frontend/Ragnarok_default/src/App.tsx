@@ -2470,14 +2470,19 @@ function AppInner() {
   // Welcome → "Start with an example": the backend copies the example's
   // project.db into the session; we rehydrate the editor from there (same path
   // as Import project) and open the guided builder.
-  const handleLoadExample = useCallback(async (id: string) => {
+  //
+  // `stayOnTab` keeps the caller's view. Training loads a module checkpoint or
+  // the prebuilt-data shortcut from inside the tutorial, and being thrown into
+  // Build mid-course loses the learner's place — the whole point of the load is
+  // to carry on reading the step that offered it.
+  const handleLoadExample = useCallback(async (id: string, opts?: { stayOnTab?: boolean }) => {
     try {
       const { label } = await loadExample(id);
       const savedModel = await getSessionFullModel({ staticOnly: true });
       if (!savedModel) throw new Error('Example could not be read back from the session.');
       resetForNewModel(savedModel, label, { pushToSession: false });
       await refreshSeriesCounts();
-      setTab('Build');
+      if (!opts?.stayOnTab) setTab('Build');
       showToast(`Loaded "${label}"`, 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to load example.', 'error');
@@ -3858,7 +3863,7 @@ function AppInner() {
                 await clearSessionModelOnly();
                 setStatus('Model cleared. Settings kept.');
               }}
-              onLoadExample={handleLoadExample}
+              onLoadExample={(id) => handleLoadExample(id, { stayOnTab: true })}
             />
           )}
         </div>
