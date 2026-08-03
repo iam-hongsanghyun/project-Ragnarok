@@ -102,6 +102,41 @@ def ensemble_stats(base: np.ndarray, ensemble: np.ndarray) -> dict[str, Any]:
     }
 
 
+def storage_discharge_availability(network: pypsa.Network, n_snapshots: int) -> np.ndarray:
+    """Storage discharge capacity (MW) per snapshot, as adequacy counts it.
+
+    Storage units contribute to adequacy exactly like a generator in these
+    post-processes: perfectly firm (mechanical availability is far higher than a
+    thermal forced-outage rate) at their solved ``p_max_pu``. State-of-charge
+    limits are a re-solve concern and out of scope, so this is an optimistic
+    upper bound on what a duration-limited unit can really do at a long peak.
+
+    This is the single definition of the convention. It exists because the
+    outage Monte Carlo used to omit storage entirely while the ELCC study
+    counted it, so the two reported loss-of-load expectations for the SAME
+    system that differed by a factor of ten.
+
+    Returns:
+        (T,) MW available from storage discharge; all zeros when there is none.
+    """
+    zeros = np.zeros(n_snapshots)
+    storage = network.storage_units
+    if len(storage) == 0:
+        return zeros
+    cap_col = "p_nom_opt" if "p_nom_opt" in storage.columns else "p_nom"
+    if cap_col not in storage.columns:
+        return zeros
+    pmax = network.get_switchable_as_dense("StorageUnit", "p_max_pu")
+    total = zeros.copy()
+    for s in storage.index:
+        cap = float(storage.at[s, cap_col])
+        if cap <= 0:
+            continue
+        profile = pmax[s].to_numpy() if s in pmax.columns else np.ones(n_snapshots)
+        total = total + cap * profile
+    return total
+
+
 def compute_adequacy(
     available: np.ndarray,   # (M, T) available generation (MW) per member/snapshot
     load: np.ndarray,        # (T,) demand (MW)

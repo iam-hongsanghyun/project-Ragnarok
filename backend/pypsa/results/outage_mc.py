@@ -93,7 +93,11 @@ import pandas as pd
 import pypsa
 
 from ..constants import carrier_color
-from .adequacy import compute_adequacy, generate_renewable_ensemble
+from .adequacy import (
+    compute_adequacy,
+    generate_renewable_ensemble,
+    storage_discharge_availability,
+)
 
 _log = logging.getLogger("pypsa.solver")
 
@@ -440,6 +444,12 @@ def build_outage_mc(
             available += cap * ens
     else:
         available += renewable_deterministic[None, :]
+
+    # Storage discharge, on the same convention the ELCC study uses. Omitting it
+    # made this study report a LOLE ten times the ELCC card's baseline for the
+    # same storage-carrying system — two numbers on one dashboard that could not
+    # both be true.
+    available += storage_discharge_availability(network, len(snapshots))[None, :]
 
     modeled_hours = float(weights.sum())
     metrics = compute_adequacy(available, load, weights, modeled_hours=modeled_hours)

@@ -330,3 +330,58 @@ def test_build_outage_mc_returns_none_when_unsolved() -> None:
         {"snapshotStart": 0, "snapshotCount": 4, "snapshotWeight": 1.0},
     )
     assert build_outage_mc(n, _outage_options()) is None
+
+
+# ── Storage counts toward adequacy, on one shared convention ─────────────────
+
+
+def _thermal_plus_storage_model(
+    *, n_snaps: int = 48, load_mw: float = 150.0, storage_mw: float = 60.0
+) -> dict[str, list[dict[str, Any]]]:
+    """The tight fleet plus a storage unit big enough to matter at the peak."""
+    model = _thermal_model(n_snaps=n_snaps, load_mw=load_mw, gen_cap=100.0, n_gens=2)
+    model["carriers"].append({"name": "battery", "co2_emissions": 0.0})
+    model["storage_units"] = [{
+        "name": "bess", "bus": "b0", "carrier": "battery",
+        "p_nom": storage_mw, "max_hours": 4.0,
+        "efficiency_store": 0.95, "efficiency_dispatch": 0.95,
+    }]
+    return model
+
+
+def test_storage_lowers_loss_of_load_expectation() -> None:
+    """Storage discharge is firm capacity for adequacy purposes.
+
+    The Monte Carlo used to build its availability from thermal and renewables
+    only, so a battery that plainly helps at the peak changed nothing at all.
+    """
+    from backend.pypsa.results import run_pypsa
+
+    without = run_pypsa(_thermal_model(load_mw=150.0), SCENARIO, _outage_options())
+    with_bess = run_pypsa(_thermal_plus_storage_model(), SCENARIO, _outage_options())
+    lole_without = without["outageMc"]["loleDistribution"]["mean"]
+    lole_with = with_bess["outageMc"]["loleDistribution"]["mean"]
+    assert lole_without > 0.0, "the fleet has to be tight enough to lose load"
+    assert lole_with < lole_without
+
+
+def test_outage_mc_and_elcc_agree_on_the_same_system() -> None:
+    """One system, two studies, one baseline reliability figure.
+
+    The ELCC study counted storage and the outage Monte Carlo did not, so the
+    two cards on a single dashboard reported loss-of-load expectations an order
+    of magnitude apart. They share ``storage_discharge_availability`` now, and
+    the MC's ensemble mean IS the ELCC baseline by construction.
+    """
+    from backend.pypsa.results import run_pypsa
+
+    model = _thermal_plus_storage_model()
+    mc = run_pypsa(model, SCENARIO, _outage_options())["outageMc"]
+    elcc = run_pypsa(model, SCENARIO, {"elccConfig": {
+        "enabled": True, "nMembers": 300, "seed": 42,
+        "forcedOutageRate": 0.1, "mttrHours": 24.0, "carriers": [],
+    }})["elcc"]
+    assert elcc is not None and mc is not None
+    assert mc["loleDistribution"]["mean"] == pytest.approx(
+        elcc["baselineLoleHrs"], rel=1e-3
+    )
