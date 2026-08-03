@@ -342,6 +342,13 @@ export function Dashboard({ layout, onLayoutChange, editing, renderCard, cardTit
                   // walkthrough can ring the one it is actually talking about.
                   data-card={card ? card.kind : undefined}
                   data-card-source={card && 'source' in card ? String(card.source) : undefined}
+                  // A layout can hold several chart cards, so the metric is what
+                  // actually identifies one — `[data-card="chart"][data-card-metric="smp"]`
+                  // rings the nodal price chart rather than whichever chart happens
+                  // to come first.
+                  data-card-metric={
+                    card && card.kind === 'chart' && card.config ? String(card.config.metricKey) : undefined
+                  }
                   style={{ flexGrow: cell.flex, flexBasis: 0, minWidth: 0 }}
                 >
                   {card ? (

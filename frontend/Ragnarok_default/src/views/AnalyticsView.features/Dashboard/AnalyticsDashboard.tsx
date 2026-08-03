@@ -712,7 +712,15 @@ export function AnalyticsDashboard({
           <>
             <div className="dashboard-toolbar-sep" />
             <div className="dashboard-toolbar-menu" ref={presetsMenuRef}>
-              <button className="tb-btn" onClick={() => setOpenMenu(openMenu === 'presets' ? null : 'presets')}>
+              <button
+                className="tb-btn"
+                // Stable hook for the Training walkthrough. The default layout
+                // reports ONE system price, which on a networked model is an
+                // average across buses — the Nodal view preset behind this menu
+                // is the only place the per-bus prices appear.
+                data-tour="dashboard-presets"
+                onClick={() => setOpenMenu(openMenu === 'presets' ? null : 'presets')}
+              >
                 Presets ▾
               </button>
               {openMenu === 'presets' && (

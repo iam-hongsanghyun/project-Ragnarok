@@ -101,7 +101,71 @@ TRAINING_M2: dict = {
     "componentCounts": {"buses": 1, "generators": 4, "loads": 1, "carriers": 5},
 }
 
-CHECKPOINTS = {"training_m2": TRAINING_M2}
+# ── Module 3 — the model at the end of "3 · Networks and congestion" ─────────
+# Module 2's fleet split across two buses joined by one 60 MW line: the cheap
+# plant and the wind at bus_1, the demand and the expensive plant at bus_2.
+# Solves to 9,400 with two different prices in the congested hour (20 and 50)
+# and 1,800 of congestion rent. Uprating the line to 100 MW gives module 2's
+# 8,980 straight back — a big enough line IS a single bus.
+TRAINING_M3: dict = {
+    "filename": "Training module 3 — networks and congestion",
+    "example": {
+        "label": "Training: module 3 model (end of module)",
+        "description": (
+            "The model the \"Power market modelling\" course has built by the end of module 3 — two buses "
+            "joined by a 60 MW line, with cheap coal and wind at one end and the demand plus expensive gas "
+            "and oil at the other. Solves to 9,400, with the line congested in the middle hour and two "
+            "different prices (20 and 50) either side of it."
+        ),
+        "order": 92,
+    },
+    "sheets": [
+        ("snapshots", "static", [{"snapshot": s} for s in SNAPSHOTS]),
+        ("network", "static", [{"name": "my-first-model"}]),
+        ("carriers", "static", [
+            {"name": "AC", "co2_emissions": 0.0},
+            {"name": "gas", "co2_emissions": 0.2},
+            {"name": "coal", "co2_emissions": 0.34},
+            {"name": "oil", "co2_emissions": 0.27},
+            {"name": "wind", "co2_emissions": 0.0},
+        ]),
+        ("buses", "static", [
+            {"name": "bus_1", "v_nom": 380.0, "x": 127.0, "y": 37.5, "carrier": "AC"},
+            {"name": "bus_2", "v_nom": 380.0, "x": 129.0, "y": 35.2, "carrier": "AC"},
+        ]),
+        # Same four units as module 2 — only the `bus` cell moved on two of them.
+        ("generators", "static", [
+            {"name": "gas_1", "bus": "bus_2", "carrier": "gas",
+             "p_nom": 100.0, "marginal_cost": 50.0, "efficiency": 0.5},
+            {"name": "coal_1", "bus": "bus_1", "carrier": "coal",
+             "p_nom": 50.0, "marginal_cost": 20.0, "efficiency": 0.4},
+            {"name": "oil_1", "bus": "bus_2", "carrier": "oil",
+             "p_nom": 40.0, "marginal_cost": 120.0, "efficiency": 0.35},
+            {"name": "wind_1", "bus": "bus_1", "carrier": "wind",
+             "p_nom": 60.0, "marginal_cost": 0.0, "efficiency": 1.0},
+        ]),
+        ("loads", "static", [
+            {"name": "load_1", "bus": "bus_2", "carrier": "AC", "p_set": 80.0},
+        ]),
+        ("lines", "static", [
+            {"name": "line_1", "bus0": "bus_1", "bus1": "bus_2",
+             "s_nom": 60.0, "x": 0.1, "r": 0.01, "length": 200.0},
+        ]),
+        ("loads-p_set", "series", [
+            {"snapshot": SNAPSHOTS[0], "load_1": 40.0},
+            {"snapshot": SNAPSHOTS[1], "load_1": 80.0},
+            {"snapshot": SNAPSHOTS[2], "load_1": 170.0},
+        ]),
+        ("generators-p_max_pu", "series", [
+            {"snapshot": SNAPSHOTS[0], "wind_1": 0.9},
+            {"snapshot": SNAPSHOTS[1], "wind_1": 0.4},
+            {"snapshot": SNAPSHOTS[2], "wind_1": 0.1},
+        ]),
+    ],
+    "componentCounts": {"buses": 2, "generators": 4, "loads": 1, "carriers": 5, "lines": 1},
+}
+
+CHECKPOINTS = {"training_m2": TRAINING_M2, "training_m3": TRAINING_M3}
 
 
 def write_checkpoint(example_id: str, spec: dict) -> Path:

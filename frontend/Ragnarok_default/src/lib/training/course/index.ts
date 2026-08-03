@@ -33,10 +33,12 @@
 import { CourseModule, Tutorial } from '../types';
 import { MODULE_1_FOUNDATIONS } from './module1Foundations';
 import { MODULE_2_DISPATCH } from './module2Dispatch';
+import { MODULE_3_NETWORKS } from './module3Networks';
 
 const STEPS = [
   ...MODULE_1_FOUNDATIONS,
   ...MODULE_2_DISPATCH,
+  ...MODULE_3_NETWORKS,
 ];
 
 /**
@@ -63,6 +65,14 @@ const MODULES: CourseModule[] = [
     minutes: 120,
     summary: 'The merit order, the marginal unit that sets the price, demand that varies '
       + 'by the hour, and variable generation with its curtailment and zero prices.',
+  },
+  {
+    section: '3 · Networks and congestion',
+    title: 'Networks and congestion',
+    level: 'Intermediate',
+    minutes: 110,
+    summary: 'Split the fleet across two buses joined by one line: a cheap generator that cannot reach '
+      + 'the demand, two prices instead of one, congestion rent, and what the constraint costs.',
   },
 ];
 

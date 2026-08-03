@@ -169,12 +169,68 @@ def test_module_2_step_12_solves_to_11700(tmp_path: Path) -> None:
     assert prices == pytest.approx([20.0, 50.0, 120.0], abs=1e-6)
 
 
+# ── Module 3 — networks and congestion ───────────────────────────────────────
+
+def test_module_3_checkpoint_solves_to_9400(tmp_path: Path) -> None:
+    """Two buses, one 60 MW line. The same fleet and demand as module 2, which
+    answered 8,980 — the 420 difference is the network."""
+    n = _solved("training_m3", tmp_path)
+    assert float(n.objective) == pytest.approx(9_400.0, rel=1e-6)
+
+
+def test_module_3_congested_hour_has_two_prices(tmp_path: Path) -> None:
+    """The whole module: a binding line lets the two buses price differently.
+
+    Hours 1 and 3 agree (the line is not binding); hour 2 splits 20 / 50 because
+    the line is full and nothing more can cross.
+    """
+    n = _solved("training_m3", tmp_path)
+    bus_1 = [float(v) for v in n.buses_t.marginal_price["bus_1"]]
+    bus_2 = [float(v) for v in n.buses_t.marginal_price["bus_2"]]
+    assert bus_1 == pytest.approx([0.0, 20.0, 120.0], abs=1e-6)
+    assert bus_2 == pytest.approx([0.0, 50.0, 120.0], abs=1e-6)
+
+
+def test_module_3_line_is_full_only_in_the_middle_hour(tmp_path: Path) -> None:
+    """40 / 60 / 56 against a 60 MW rating — congested once, nearly-full once.
+
+    The step-7 lesson is exactly this distinction: hour 3 at 56 MW is 93% loaded
+    and NOT congested, which is why its prices agree.
+    """
+    n = _solved("training_m3", tmp_path)
+    flow = [abs(float(v)) for v in n.lines_t.p0["line_1"]]
+    assert flow == pytest.approx([40.0, 60.0, 56.0], abs=1e-6)
+
+
+def test_module_3_congestion_rent_is_1800(tmp_path: Path) -> None:
+    """Flow across the line times the price difference across it, summed."""
+    n = _solved("training_m3", tmp_path)
+    gap = n.buses_t.marginal_price["bus_2"] - n.buses_t.marginal_price["bus_1"]
+    rent = float((gap * n.lines_t.p0["line_1"].abs()).sum())
+    assert rent == pytest.approx(1_800.0, abs=1e-6)
+
+
+def test_module_3_uprating_the_line_returns_module_2s_answer(tmp_path: Path) -> None:
+    """The closing move of the module, and its whole point.
+
+    A line big enough never to bind IS a single bus, so widening it recovers the
+    copper-plate answer exactly — and the difference is what the constraint costs.
+    """
+    model = _model_from_example("training_m3", tmp_path)
+    model["lines"] = [{**model["lines"][0], "s_nom": 100.0}]
+    n = _solve_model(model)
+    assert float(n.objective) == pytest.approx(8_980.0, rel=1e-6)
+
+    congested = _solved("training_m3", tmp_path)
+    assert float(congested.objective - n.objective) == pytest.approx(420.0, abs=1e-6)
+
+
 # ── The checkpoints the course references must exist and be loadable ─────────
 
 def test_every_course_checkpoint_is_a_listable_example() -> None:
     """A checkpoint id the tutorial names but ``/api/examples`` cannot serve gives
     the learner a dead button, which is worse than no button."""
-    for example_id in ("training_m1", "training_m2"):
+    for example_id in ("training_m1", "training_m2", "training_m3"):
         db = EXAMPLES / example_id / "project.db"
         assert db.exists(), f"{example_id}: no project.db"
         con = sqlite3.connect(db)
