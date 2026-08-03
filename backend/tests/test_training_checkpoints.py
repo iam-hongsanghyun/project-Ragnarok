@@ -1189,6 +1189,125 @@ def test_module_14_a_pivotal_unit_raises_the_price_without_losing_volume(tmp_pat
     assert bid["systemAvgPrice"]["strategic"] == pytest.approx(30.71, abs=0.05)
 
 
+# ── Module 15 — market design ────────────────────────────────────────────────
+#
+# The market-simulation study mode: explicit clearing rules instead of an LP.
+# It runs on the BROWNFIELD year, and that is load-bearing — the study never
+# solves, so it clears the capacity in the workbook. On an expansion model that
+# is the pre-expansion fleet, which the module teaches as a trap in step 8.
+
+_M15_SIM = {
+    "enabled": True, "voll": 3000.0, "chargeQuantile": 0.25,
+    "dischargeQuantile": 0.75, "clearingModel": "singleSided",
+}
+
+
+def _sim(tmp_path: Path, pricing: str, *, gas_p_nom: float | None = None) -> dict:
+    from backend.pypsa.results import run_pypsa
+
+    model = {k: [dict(r) for r in v] for k, v
+             in _model_from_example("training_m7_year", tmp_path).items()}
+    if gas_p_nom is not None:
+        for gen in model["generators"]:
+            if gen["name"] == "gas_supply":
+                gen["p_nom"] = gas_p_nom
+    res = run_pypsa(model, {"carbonPrice": 0.0, "discountRate": 0.05},
+                    {**OPTIONS, "marketSimConfig": {**_M15_SIM, "pricing": pricing}})
+    return res["marketSimulation"]
+
+
+def test_module_15_uniform_pricing_baseline(tmp_path: Path) -> None:
+    """The design every earlier module assumed, priced explicitly for once."""
+    sim = _sim(tmp_path, "uniform")
+    summary = sim["summary"]
+    assert summary["avgPrice"] == pytest.approx(24.50, abs=0.02)
+    assert summary["totalCost"] == pytest.approx(25_394_711.0, rel=0.001)
+    assert summary["unservedMWh"] == pytest.approx(0.0, abs=1e-6)
+    units = {u["name"]: u for u in sim["units"]}
+    assert units["coal_1"]["profit"] == pytest.approx(1_972_000.0, rel=0.001)
+    assert units["wind_1"]["revenue"] == pytest.approx(5_905_943.0, rel=0.001)
+    # The marginal unit is paid its own cost, by construction.
+    assert units["gas_supply"]["profit"] == pytest.approx(0.0, abs=1.0)
+
+
+def test_module_15_gas_sets_the_price_nine_hours_in_ten(tmp_path: Path) -> None:
+    """The most useful single summary of a market: who is marginal, and how often."""
+    units = {u["name"]: u for u in _sim(tmp_path, "uniform")["units"]}
+    assert units["gas_supply"]["priceSettingHours"] == 7888
+    assert units["coal_1"]["priceSettingHours"] == 872
+    assert units["wind_1"]["priceSettingHours"] == 0
+    assert sum(u["priceSettingHours"] for u in units.values()) == 8760
+
+
+def test_module_15_pay_as_bid_same_dispatch_much_smaller_bill(tmp_path: Path) -> None:
+    """The settlement rule moves the money and not one megawatt-hour.
+
+    And the truthful zero-cost bidders are paid nothing — the reason nobody bids
+    truthfully under pay-as-bid, which is why the 38% saving is imaginary.
+    """
+    uniform = _sim(tmp_path, "uniform")
+    pab = _sim(tmp_path, "payAsBid")
+    u_units = {u["name"]: u for u in uniform["units"]}
+    p_units = {u["name"]: u for u in pab["units"]}
+    for name in ("coal_1", "gas_supply", "wind_1", "ror_1"):
+        assert p_units[name]["energyMWh"] == pytest.approx(u_units[name]["energyMWh"], rel=1e-9)
+    assert pab["summary"]["totalCost"] == pytest.approx(15_622_897.0, rel=0.001)
+    assert pab["summary"]["totalCost"] < uniform["summary"]["totalCost"] * 0.65
+    for name in ("wind_1", "ror_1"):
+        assert p_units[name]["revenue"] == pytest.approx(0.0, abs=1e-6)
+    for name in ("coal_1", "gas_supply", "wind_1", "ror_1"):
+        assert p_units[name]["profit"] == pytest.approx(0.0, abs=1.0)
+
+
+def test_module_15_rule_based_storage_finds_no_spread(tmp_path: Path) -> None:
+    """A threshold rule needs price variance, and the base market has almost none."""
+    for unit in _sim(tmp_path, "uniform")["storage"]:
+        assert unit["energyDischargedMWh"] == pytest.approx(0.0, abs=1e-6)
+        assert unit["energyChargedMWh"] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_module_15_scarcity_pays_the_peaker_that_earned_nothing(tmp_path: Path) -> None:
+    """0.27% of the year unserved, the bill up 8.5 times — and module 14's idle
+    peaker clears 54 million. This is how an energy-only market pays capacity.
+
+    The storage that found no spread in the base market trades here, because the
+    variance it needed finally exists.
+    """
+    scarce = _sim(tmp_path, "uniform", gas_p_nom=40.0)
+    summary = scarce["summary"]
+    assert summary["unservedMWh"] == pytest.approx(2_779.5, rel=0.01)
+    assert summary["unservedHours"] == 470
+    assert summary["peakPrice"] == pytest.approx(3_000.0, rel=1e-6)
+    assert summary["avgPrice"] == pytest.approx(209.94, rel=0.01)
+    assert summary["totalCost"] == pytest.approx(214_758_788.0, rel=0.001)
+    oil = next(u for u in scarce["units"] if u["name"] == "oil_1")
+    assert oil["energyMWh"] == pytest.approx(63_065.0, rel=0.01)
+    assert oil["profit"] == pytest.approx(54_144_000.0, rel=0.01)
+    assert oil["priceSettingHours"] == 2374
+    assert any(s["energyDischargedMWh"] > 0 for s in scarce["storage"]), "storage wakes up"
+
+
+def test_module_15_the_study_clears_workbook_capacity(tmp_path: Path) -> None:
+    """Step 8's trap, asserted so it cannot quietly stop being true.
+
+    The study never solves, so it reads p_nom. On the expanded checkpoint that
+    is the PRE-expansion wind farm — the same 241,212 MWh as the brownfield
+    year, not the 603,645 that fleet really generates.
+    """
+    from backend.pypsa.results import run_pypsa
+
+    expanded = run_pypsa(
+        _model_from_example("training_m7", tmp_path),
+        {"carbonPrice": 0.0, "discountRate": 0.05},
+        {**OPTIONS, "marketSimConfig": {**_M15_SIM, "pricing": "uniform"}},
+    )["marketSimulation"]
+    brownfield = _sim(tmp_path, "uniform")
+    wind_expanded = next(u for u in expanded["units"] if u["name"] == "wind_1")
+    wind_brownfield = next(u for u in brownfield["units"] if u["name"] == "wind_1")
+    assert wind_expanded["energyMWh"] == pytest.approx(wind_brownfield["energyMWh"], rel=1e-6)
+    assert wind_expanded["energyMWh"] < 300_000.0, "not the expanded fleet's 603,645 MWh"
+
+
 # ── The checkpoints the course references must exist and be loadable ─────────
 
 def test_every_course_checkpoint_is_a_listable_example() -> None:
