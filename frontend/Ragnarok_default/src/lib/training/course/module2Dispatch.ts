@@ -16,7 +16,7 @@
  *   after step 15 — wind at p_max_pu .9 / .4 / .1 → 8,980,  price  0 / 50 / 120
  *
  * Capacity is fixed throughout: the model chooses how hard to run what exists,
- * never what to build. That is module 6, and step 16 says so explicitly rather
+ * never what to build. That is module 7, and step 16 says so explicitly rather
  * than letting a learner conclude that a dispatch model has an opinion about
  * investment.
  */
@@ -66,7 +66,7 @@ export const MODULE_2_DISPATCH: TutorialStep[] = [
       + 'reason as module 1: the generator points at the carrier by name, and a name that does not exist '
       + 'yet is a dangling reference.',
 
-      'Then Build → Generators, "+ Add Generator", and fill the row below. Coal at 20 per MWh against '
+      'Then Build → Generators, "+ Add generator", and fill the row below. Coal at 20 per MWh against '
       + 'gas at 50 sits BELOW gas in the merit order, so it should displace gas the moment you re-run.',
 
       'Do not delete gas_1. The point of this module is a fleet with a choice in it — one unit that is '
@@ -214,7 +214,9 @@ export const MODULE_2_DISPATCH: TutorialStep[] = [
       'Validate first, as always — Run → Dry run on → Validate. A second generator is exactly the kind of '
       + 'change that introduces a dangling `bus` or `carrier` reference, and validation catches both in seconds.',
 
-      'Then run for real: Dry run off, Run model. Three snapshots and two generators solve instantly.',
+      'Then run for real: Dry run off, Run model. Three snapshots and two generators solve instantly. As '
+      + 'in module 1, the finished run waits in History → History until you tick it and press View result '
+      + '— that is what puts it on the Analytics tabs. Every run in this course goes through that hop.',
 
       'Read Analytics → Result for the objective and reconcile it against 7,500 before you look at '
       + 'anything else. If it reads 12,000, coal is not in the answer at all — its `bus` or `carrier` '
@@ -402,7 +404,7 @@ export const MODULE_2_DISPATCH: TutorialStep[] = [
       'Note what that implies, because it is a real limitation and not a quirk: in a dispatch model, '
       + 'capacity you do not use is free. There is no fixed cost, no capital charge, nothing to pay for '
       + 'having built it. Which means this model can never tell you whether the peaker is worth keeping. '
-      + 'That question needs capital costs and the freedom to choose capacity — module 6.',
+      + 'That question needs capital costs and the freedom to choose capacity — module 7.',
 
       'It becomes the most valuable unit in the fleet in step 12, when demand goes above what coal and '
       + 'gas can serve between them. Adding it now means that step changes one thing only.',
@@ -523,7 +525,7 @@ export const MODULE_2_DISPATCH: TutorialStep[] = [
       'An objective that moved means something other than the peaker changed. Compare the generator rows '
       + 'against the values above before assuming the model is wrong.',
       'Expecting an unused unit to cost something. It does not, and that is a property of dispatch models '
-      + 'worth remembering rather than a bug — it is precisely the gap module 6 fills.',
+      + 'worth remembering rather than a bug — it is precisely the gap module 7 fills.',
     ],
   },
 
@@ -1209,7 +1211,7 @@ export const MODULE_2_DISPATCH: TutorialStep[] = [
       + 'model. What transfers to a real study is the mechanism, not the numbers.',
       'Concluding wind is worth 2,720. That is its value against THIS fleet, in THESE three hours, with '
       + 'no capital cost counted anywhere. Value is always relative to the alternative, which is why '
-      + 'module 6 compares scenarios rather than reading one.',
+      + 'module 7 compares scenarios rather than reading one.',
     ],
   },
 ];

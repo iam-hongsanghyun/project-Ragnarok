@@ -844,7 +844,10 @@ export const MODULE_6_TIME: TutorialStep[] = [
       + 'including the still cold evening this day does not contain. And a day cannot show seasonal '
       + 'storage or the seasonal variability of run-of-river at all.',
 
-      'Export the project. Module 7 finally asks what to build, on an axis that can support the question.',
+      'Export the project. Module 7 finally asks what to build — and it needs a FULL year rather than this '
+      + 'day, because an annual capital cost can only be weighed against an annual fuel bill. It ships one '
+      + 'prebuilt, since 8,760 rows of profile are not something anyone types; what you take forward from '
+      + 'here is the technique for making one and the judgement about when a shortcut is safe.',
     ],
     spotlights: [
       {
@@ -852,14 +855,15 @@ export const MODULE_6_TIME: TutorialStep[] = [
         title: 'A day, properly',
         tab: 'Analytics',
         note: '52,663.98 over 24 hours, with a real demand shape, real storage cycles and no peaker. The '
-          + 'first model in this course that could support an investment decision — which is what module 7 '
-          + 'goes on to make.',
+          + 'first axis in this course with a cycle in it — and the technique that gets you from here to '
+          + 'the full year module 7 needs.',
       },
       {
         selector: '.topbar-file',
         title: 'Export before you leave',
-        note: 'Model → Export project. This is the axis module 7 builds on, and the first one in the '
-          + 'course worth keeping for reasons other than convenience.',
+        note: 'Model → Export project. Module 7 needs a FULL year rather than this day — 8,760 rows, '
+          + 'which nobody types by hand, so it ships one prebuilt. What you take forward is the technique '
+          + 'rather than the file, and this day is worth keeping as the one you built yourself.',
       },
     ],
     verify: [

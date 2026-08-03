@@ -352,14 +352,14 @@ export const MODULE_1_FOUNDATIONS: TutorialStep[] = [
       + 'runs later a project called "untitled" is indistinguishable from the other two.',
     ],
     explain: [
-      'Press "Start from scratch" on the Welcome page. Ragnarok resets the session to an empty workbook '
-      + 'called `untitled.xlsx` and opens Build. If something is already loaded, use Clear in the top '
+      'Press "Start from scratch" on the Welcome page. Ragnarok resets the session to an empty workbook — '
+      + 'named `untitled_` and a timestamp, so two scratch projects never collide — and opens Build. If something is already loaded, use Clear in the top '
       + 'bar first — it drops the model and unsaved edits but keeps settings, history and plugins.',
 
       'Go to the Network step. It shows no map — `network` has no coordinates — so the table sits on the '
       + 'left and the attribute form on the right.',
 
-      'The sheet is empty, so add a row with "+ Add Network", then type the name into the `name` cell. '
+      'The sheet is empty, so add a row with "+ Add Networks", then type the name into the `name` cell. '
       + 'Adding a row and filling it are two separate actions, and that pattern holds for every sheet in '
       + 'the course. You can type into the table cell or into the attribute form on the right — they are '
       + 'two views of the same row.',
@@ -390,8 +390,8 @@ export const MODULE_1_FOUNDATIONS: TutorialStep[] = [
       {
         selector: '.topbar-file',
         title: 'Confirm the reset',
-        note: 'Should now read "untitled.xlsx". If it still shows an old project, the reset did not happen — '
-          + 'press Clear in the top bar and start again.',
+        note: 'Should now start with "untitled_" followed by a timestamp. If it still shows an old project '
+          + 'name, the reset did not happen — press Clear in the top bar and start again.',
       },
     ],
     entries: [
@@ -405,7 +405,7 @@ export const MODULE_1_FOUNDATIONS: TutorialStep[] = [
       },
     ],
     verify: [
-      'The top-bar filename reads "untitled.xlsx"',
+      'The top-bar filename starts with "untitled_" and carries today\'s timestamp',
       'The `network` sheet has exactly one row and its `name` cell reads my-first-model',
       'The Network step in the strip shows a tick',
     ],
@@ -729,8 +729,13 @@ export const MODULE_1_FOUNDATIONS: TutorialStep[] = [
       + 'constraint count. Most surprising results are a run that used a different window than you '
       + 'assumed.',
 
-      'Then press Run with Dry run off and Run model. Three snapshots solve instantly. Read the objective '
-      + 'in Analytics → Result and reconcile it against 12,000.',
+      'Then press Run with Dry run off and Run model. The run does not block the screen — it is queued on '
+      + 'the server, and the status line says so. Three snapshots solve in about a second.',
+
+      'A finished run does not open itself. Go to History → History, tick the run at the top of the list, '
+      + 'and press View result — that is what loads it into Analytics. This is the loop for every run in '
+      + 'the rest of the course: run, then open it from History. Then read the objective in Analytics → '
+      + 'Result and reconcile it against 12,000.',
 
       'If your number differs, the likeliest cause is the snapshot weight — each snapshot standing for '
       + 'more or fewer than one hour rescales the whole objective. The Run dialog\'s summary reports the '
@@ -776,6 +781,23 @@ export const MODULE_1_FOUNDATIONS: TutorialStep[] = [
           + 'they usually name a component contributing nothing.',
       },
       {
+        selector: '.history-list',
+        title: 'The finished run',
+        tab: 'History',
+        runDialog: 'closed',
+        note: 'Runs are queued on the server and land here, newest first — yours reads "Base case", a few '
+          + 'seconds ago, 1h res, 80 MWh demand. Tick its checkbox.',
+      },
+      {
+        selector: '[data-tour="view-result"]',
+        title: 'View result',
+        tab: 'History',
+        runDialog: 'closed',
+        note: 'This is the step people miss. Nothing appears in Analytics until you press it — a solved '
+          + 'run sitting in History is not a loaded run. With two or more ticked it relabels to Compare '
+          + 'results, which is module 9\'s tool.',
+      },
+      {
         selector: '[data-subtab="Result"]',
         title: 'The objective value',
         tab: 'Analytics',
@@ -795,13 +817,14 @@ export const MODULE_1_FOUNDATIONS: TutorialStep[] = [
         'Validation builds the network and stops — a second or two, and no history entry.',
         'The solve optimises 3 snapshots. Effectively instant.',
       ],
-      expect: 'A finished run in History, and an objective value of 12,000 in Analytics → Result.',
+      expect: 'A finished run in History which, once ticked and opened with View result, shows an '
+        + 'objective value of 12,000 in Analytics → Result.',
     },
     verify: [
       'Analytics → Validation reports the model valid, with no errors',
-      'Analytics → Result shows an objective value of 12,000 — and you can say where that number comes from',
-      'The marginal price is 50 in every snapshot',
-      'History → History lists the run',
+      'History → History lists the run, and View result loads it into Analytics',
+      'Analytics → Result shows a total cost of 12,000 — and you can say where that number comes from',
+      'Dispatch reads 240 MWh, average price 50, min · max 50 · 50, snapshots 3 × 1h',
     ],
     pitfalls: [
       'INFEASIBLE means no answer satisfies the constraints — here, almost certainly a mistyped `bus` '

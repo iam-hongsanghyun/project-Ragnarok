@@ -496,9 +496,9 @@ export const MODULE_7_INVESTMENT: TutorialStep[] = [
         field: 'lines.s_nom_extendable (line_1)',
         label: 'the wire is a decision too',
         value: 'true',
-        why: 'The transmission business case module 3 sketched and module 6 could not price properly. '
-          + 'Offering it alongside generation rather than separately is what lets the model see that they '
-          + 'are complements.',
+        why: 'The transmission business case module 3 sketched but could not price — weighing an annual '
+          + 'capital cost needs a year, which is what module 6 went and built. Offering the wire alongside '
+          + 'generation rather than separately is what lets the model see that they are complements.',
       },
       {
         field: 'lines.s_nom_min (line_1)',

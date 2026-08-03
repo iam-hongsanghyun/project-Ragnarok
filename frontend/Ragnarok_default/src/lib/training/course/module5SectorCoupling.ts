@@ -147,7 +147,7 @@ export const MODULE_5_SECTOR_COUPLING: TutorialStep[] = [
       + 'carrier-specific.',
     ],
     explain: [
-      'Build → Buses, "+ Add Bus", and fill the row. The name is `bus_gas`, the carrier is `gas` — the '
+      'Build → Buses, "+ Add bus", and fill the row. The name is `bus_gas`, the carrier is `gas` — the '
       + 'carrier you have had in the sheet since module 1 and have only ever used as a label on a '
       + 'generator.',
 
@@ -262,7 +262,7 @@ export const MODULE_5_SECTOR_COUPLING: TutorialStep[] = [
       + 'hour — pipeline capacity, terminal throughput, contract volume. Step 7 makes it bind.',
     ],
     explain: [
-      'Build → Generators, "+ Add Generator", and fill the row. It goes on bus_gas, which means it '
+      'Build → Generators, "+ Add generator", and fill the row. It goes on bus_gas, which means it '
       + 'injects gas rather than power.',
 
       'Leave `p_nom` generous for now — 10000 is fine, or any number far above what the model could use. '
@@ -389,7 +389,7 @@ export const MODULE_5_SECTOR_COUPLING: TutorialStep[] = [
       + 'efficiency.',
     ],
     explain: [
-      'Build → Links, "+ Add Link", and fill the row. `bus0` is bus_gas, `bus1` is bus_2. Direction '
+      'Build → Links, "+ Add link", and fill the row. `bus0` is bus_gas, `bus1` is bus_2. Direction '
       + 'matters here in a way it did not for a Line: a Link is one-way by default, from bus0 to bus1.',
 
       'Set `p_nom` to 200. That is 200 MW of gas input, which at 50% efficiency is the same 100 MW of '
@@ -1232,7 +1232,7 @@ export const MODULE_5_SECTOR_COUPLING: TutorialStep[] = [
 
       'Three hours is still not a horizon, and it is now doing real damage. A gas store that cycles daily '
       + 'is being represented over three hours; a seasonal store could not be represented at all; and '
-      + 'run-of-river\'s variability is seasonal, so this model literally cannot see it. Module 7 is about '
+      + 'run-of-river\'s variability is seasonal, so this model literally cannot see it. Module 6 is about '
       + 'time — resolution, representative periods and rolling horizon — and it is the module that makes '
       + 'the rest of them credible.',
 

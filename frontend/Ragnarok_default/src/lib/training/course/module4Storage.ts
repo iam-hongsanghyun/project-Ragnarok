@@ -869,11 +869,11 @@ export const MODULE_4_STORAGE: TutorialStep[] = [
 
       'Three hours is not a storage horizon. A daily cycle needs a day, a weekly pattern needs a week, '
       + 'and a seasonal store needs the whole year — and the cyclic constraint that is a reasonable '
-      + 'assumption over 8,760 hours is doing a lot of work over three. Module 7 is about time itself: '
+      + 'assumption over 8,760 hours is doing a lot of work over three. Module 6 is about time itself: '
       + 'resolution, representative periods, and how to run a year without waiting all afternoon.',
 
       'The battery is still free. It cost nothing to have, so the model will always use it and can never '
-      + 'tell you whether it was worth building — the same gap module 2 found with the peaker. Module 6 '
+      + 'tell you whether it was worth building — the same gap module 2 found with the peaker. Module 7 '
       + 'adds capital costs and lets the model choose the size and the site itself, which is the proper '
       + 'answer to the question this module answered by hand.',
 
@@ -921,7 +921,7 @@ export const MODULE_4_STORAGE: TutorialStep[] = [
       + 'be worth very little across 8,760 real ones, and the cyclic constraint is doing far more work '
       + 'on a short horizon than a long one.',
       'Reading 1,670 as the value of storage. It is the value of THIS battery, in THIS network, over '
-      + 'three hours, with no capital cost anywhere. Every one of those qualifiers matters, and module 6 '
+      + 'three hours, with no capital cost anywhere. Every one of those qualifiers matters, and module 7 '
       + 'removes the last of them.',
     ],
   },

@@ -131,7 +131,7 @@ export const MODULE_3_NETWORKS: TutorialStep[] = [
       + 'have to be far enough apart to look like two places.',
     ],
     explain: [
-      'Build → Buses, "+ Add Bus", and fill the row. You can also click the map to drop the bus, which '
+      'Build → Buses, "+ Add bus", and fill the row. You can also click the map to drop the bus, which '
       + 'fills x and y for you — then type the name, voltage and carrier into the table as usual.',
 
       'Give it the same 380 kV and the same AC carrier as bus_1. Two buses at different voltages would '
@@ -365,7 +365,7 @@ export const MODULE_3_NETWORKS: TutorialStep[] = [
       + '60 MW it will fill up in the middle hour, which is the hour worth studying.',
     ],
     explain: [
-      'Build → Lines, "+ Add Line", and fill the row. `bus0` and `bus1` are the two ends; the order does '
+      'Build → Lines, "+ Add line", and fill the row. `bus0` and `bus1` are the two ends; the order does '
       + 'not matter, but it does set the sign convention for the reported flow — positive means power '
       + 'flowing from bus0 to bus1.',
 
@@ -471,7 +471,7 @@ export const MODULE_3_NETWORKS: TutorialStep[] = [
         value: '200',
         unit: 'km',
         why: 'How long the corridor is. Purely descriptive in this solve, but it is what per-km capital '
-          + 'costs multiply in module 6, and it is a useful sanity check: a 200 km line between two points '
+          + 'costs multiply in module 7, and it is a useful sanity check: a 200 km line between two points '
           + '250 km apart on the map would be suspicious.',
       },
     ],
@@ -487,7 +487,7 @@ export const MODULE_3_NETWORKS: TutorialStep[] = [
       'Setting `s_nom` below 30. Peak demand is 170 MW against 140 MW of local plant, so anything under '
       + '30 MW leaves the peak hour infeasible no matter what else is right.',
       'Confusing `s_nom` with `length`. The rating is the limit that binds; the length is decoration '
-      + 'until module 6 puts a cost on it.',
+      + 'until module 7 puts a cost on it.',
     ],
   },
 
@@ -883,7 +883,7 @@ export const MODULE_3_NETWORKS: TutorialStep[] = [
 
       'Then decide what you have learnt. 420 over three hours is the value of the upgrade in this tiny '
       + 'model. Scale that to a year and compare it against what the line costs to build, and you have '
-      + 'the beginnings of a transmission business case — which is module 6\'s machinery, applied to wires '
+      + 'the beginnings of a transmission business case — which is module 7\'s machinery, applied to wires '
       + 'instead of generators.',
 
       'Set `s_nom` back to 60 before you finish, so the model you carry into module 4 is the congested '
