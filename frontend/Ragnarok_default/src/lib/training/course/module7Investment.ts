@@ -1,41 +1,41 @@
 /**
- * Module 7 — Investment and capacity expansion (10 steps).
+ * Module 7 — Investment and capacity expansion (13 steps).
  *
- * Every module so far has ended by saying the model cannot tell you whether
- * something was worth building. This is where that stops being true: capacity
- * becomes a decision variable, capital cost enters the objective, and the
- * optimiser chooses what to build as well as how hard to run it.
+ * Every module so far has ended by admitting the model could not say whether
+ * something was worth building. Capacity was given, so unused capacity was free,
+ * so the answer was always "how should this fleet run" and never "what should
+ * this fleet be".
  *
- * Built on module 5's model (7,099.59). Verified against real HiGHS solves:
+ * Built on a full year — 8,760 hourly snapshots — and that is not only realism.
+ * Ragnarok annuitises a workbook `capital_cost` and the results layer pro-rates
+ * that annual figure by modelled_hours/8760 for display. On any shorter window
+ * the optimiser needs the cost pre-scaled and the display then scales it again,
+ * so the pre-scaled cost is scaled twice and the displayed capital is nonsense.
+ * At 8,760 the factor is 1, the overnight cost goes in exactly as a cost
+ * database quotes it, and the capital reported is the capital charged. Module 6
+ * is what makes this module honest.
  *
- *   step 6   wind extendable, line fixed     7,099.59  builds NOTHING
- *   step 8   line extendable too              5,995.48  line 97.25 MW, wind 90 MW
- *   step 9   discount rate 0.05 -> 0.07       6,187.27  the wind farm disappears
-
- * All at Ragnarok's default discount rate of 0.05 unless stated, so a learner who
- * never opens Settings still matches every number.
+ * One difference survives, and step 9 teaches it rather than hiding it: the KPI
+ * reports 25,611,302 (fuel plus the annuity on the WHOLE fleet) while the solver
+ * minimised 18,115,684 (fuel plus the annuity on what it BUILDS). Sunk capital
+ * cannot be changed by a decision, so it belongs in a tariff and not in a
+ * comparison between decisions. Both numbers are right for different questions.
  *
- * Two things make this module worth its length.
+ * Four assets compete. Every figure verified against a real HiGHS solve through
+ * the app's own build path, at the default 5% discount rate:
  *
- * The first is a trap. Ragnarok treats a workbook `capital_cost` as an OVERNIGHT
- * cost and annualises it for you, using `lifetime` and the discount rate — but it
- * does NOT scale that annual figure to the window actually modelled. On a
- * three-hour model an annual cost is 2,920 times too large, the optimiser builds
- * nothing, and a learner concludes that nothing is worth building. The fix is to
- * pre-scale the overnight cost by 3/8760, and the real fix is module 7.
+ *   fixed capacity          29,980,642   7.82 GWh of oil burnt
+ *   expansion at 5%         18,115,684   wind 150.15, solar 24.12, line 141.04
+ *                                        battery declined at its 20 MW floor
+ *   expansion at 7%         20,419,029   wind 120.17, solar 41.67, line 130.85
+ *   greenfield at 5%        18,045,470   battery falls to 4.00 MW
  *
- * The second is the answer itself. Wind offered on its own is worth nothing,
- * because it sits behind a line that is already full. Offer the LINE as well and
- * the model builds 37.25 MW of wire AND 30 MW of wind — the wire is what makes
- * the wind farm worth building, which is the third time this course has found
- * that assets behind a constraint are worth a fraction of the same assets in
- * front of it.
- *
- * Then step 9 moves the discount rate from 0.05 to 0.07 and the wind farm
- * disappears while the wire survives. One financing assumption, no change to any
- * technology, and a generation investment flips — which is why the application
- * puts that number in front of you and why a study that does not state it has
- * not stated its most important input.
+ * Three results carry the module. Expansion saves 11.9m a year — 40% of system
+ * cost — and removes the oil peaker entirely. The discount rate does not merely
+ * build less, it builds DIFFERENTLY: two points less wind and nearly twice the
+ * solar. And greenfield exposes what brownfield hides — a fresh build would put
+ * in 4 MW of battery where 20 MW already stands, which is a stranded asset that
+ * no brownfield run can show you.
  */
 import { TutorialStep } from '../types';
 
@@ -49,117 +49,192 @@ export const MODULE_7_INVESTMENT: TutorialStep[] = [
     tab: 'Build',
     where: 'Build → Generators step',
     startOptions: {
-      prebuiltExampleId: 'training_m6',
+      prebuiltExampleId: 'training_m7_year',
       completeExampleId: 'training_m7',
       note:
-        'Module 6 continues module 5\'s model — two electrical buses and a gas bus, a CCGT, a gas store, '
-        + 'wind, run-of-river, a battery and a pumped-hydro scheme — which answered 7,099.59. Nothing is '
-        + 'added here. Two existing components simply become decisions instead of givens.',
+        'Module 7 needs a full year, so the prebuilt option is the course\'s system on 8,760 hourly '
+        + 'snapshots with demand, wind, run-of-river and solar profiles already in place — module 6 '
+        + 'taught how to get there and typing 8,760 rows is not a lesson. Nothing is extendable yet; '
+        + 'that is what this module adds.',
     },
     concept: [
-      'Five modules have asked one question: given this equipment, how should it run? The answer has '
-      + 'always been a dispatch. Capacity was fixed, so unused capacity was free, so the model could '
-      + 'never say whether a plant was worth having — only what it was worth running.',
+      'Six modules have asked one question: given this equipment, how should it run? Capacity was a '
+      + 'number you typed, so unused capacity cost nothing, so the model could never say whether a plant '
+      + 'was worth having — only what it was worth running. Every module has ended by saying so.',
 
-      'Capacity expansion turns capacity into a decision variable. Instead of `p_nom` being a number you '
-      + 'typed, it becomes something the optimiser chooses, bounded by a minimum and a maximum, with a '
-      + 'cost attached to whatever it chooses. The objective stops being "cheapest way to run this fleet" '
-      + 'and becomes "cheapest way to serve this demand, counting what the fleet costs to own".',
+      'Capacity expansion makes capacity a decision variable. `p_nom` stops being an input and becomes '
+      + 'something the optimiser chooses between a floor and a ceiling, with a cost attached to whatever '
+      + 'it picks. The objective changes from "cheapest way to run this fleet" to "cheapest way to serve '
+      + 'this demand, counting what the fleet costs to own".',
 
-      'That is a genuinely different question, and it needs a genuinely different number: capital cost. '
-      + 'Everything you have priced so far has been marginal — the cost of one more MWh. Capital cost is '
-      + 'the cost of one more MW of existing, whether or not it ever runs, and the two are not comparable '
-      + 'until the capital cost has been spread over time.',
+      'That needs a kind of number you have not used yet. Everything priced so far has been marginal — '
+      + 'the cost of one more MWh. Capital cost is the cost of one more MW existing, whether or not it '
+      + 'ever runs, and the two cannot be added until the capital cost is spread across time.',
 
-      'That spreading is where nearly every capacity-expansion model goes wrong, and this module spends '
-      + 'three steps on it before building anything. The arithmetic is not hard; the units are, and a '
-      + 'capital cost in the wrong units produces an answer that looks plausible and is out by three '
-      + 'orders of magnitude.',
+      'The spreading is where expansion models go wrong, and the next three steps are about it before '
+      + 'anything gets built. The arithmetic is simple. The units are not, and a capital cost in the '
+      + 'wrong units gives a confident answer that is out by orders of magnitude.',
     ],
     explain: [
-      'Nothing to change in this step. It is worth knowing what is coming, because the order matters.',
+      'Load the prebuilt year. It is module 5\'s system — three buses, a CCGT, a gas store, wind, '
+      + 'run-of-river, a battery, a pumped-hydro scheme — on 8,760 hourly snapshots, plus one addition: '
+      + 'a solar site at bus_2, the demand end, with a capacity of zero.',
 
-      'Steps 2 to 4 are about the cost: what `capital_cost` means in Ragnarok, what the discount rate '
-      + 'does to it, and why a three-hour model needs the number scaled before it means anything.',
+      'A zero-capacity generator with a profile is how you offer the model a site it has not built yet. '
+      + 'It contributes nothing until step 7 makes it extendable, and then it is a real option.',
 
-      'Steps 5 and 6 make wind extendable and run it — and the model builds nothing, which is a result '
-      + 'rather than a failure, and the reason takes a moment to see.',
+      'Run it as it stands, before changing anything. The objective is 29,980,642 and the oil peaker '
+      + 'burns 7.82 GWh across the year. That is the fixed-capacity baseline everything else is measured '
+      + 'against, and it is the last time in this course you will see the peaker run.',
 
-      'Steps 7 and 8 make the LINE extendable too and finish the business case module 3 sketched. Now '
-      + 'the model builds — and it builds the wire AND the wind farm, because the wire is what makes the '
-      + 'wind farm reachable.',
-
-      'Then step 9 changes one financing assumption, the discount rate, and watches the wind farm '
-      + 'disappear while the wire survives.',
+      'A word on the year. The profiles are synthetic — a shaped day modulated seasonally, wind with '
+      + 'winter maximum and realistic persistence, solar with a summer maximum and nothing at night. They '
+      + 'are not measurements, and a real study would import them (Ragnarok\'s Data view does exactly '
+      + 'that). They are structured enough for every lesson here to hold, and saying so is part of the '
+      + 'lesson: a model is only as defensible as the provenance of its inputs.',
     ],
     spotlights: [
       {
         selector: '[data-build-step="generators"]',
         buildStep: 'generators',
-        title: 'p_nom, about to become a decision',
+        title: 'Six generators now',
         tab: 'Build',
-        note: 'Every generator has carried a p_nom you typed. Scroll the columns and you will find '
-          + 'p_nom_extendable, p_nom_min, p_nom_max, capital_cost and lifetime sitting unused beside it — '
-          + 'the whole of capacity expansion, already in the sheet.',
+        note: 'coal, oil, wind, run-of-river, the gas import — and solar_1 at p_nom 0. Scroll right and '
+          + 'you will find p_nom_extendable, p_nom_min, p_nom_max, capital_cost and lifetime, sitting '
+          + 'unused since module 1. That is the whole of capacity expansion, already in the sheet.',
       },
       {
-        selector: '.build-step-strip',
-        title: 'No new components',
+        selector: '[data-build-step="snapshots"]',
+        buildStep: 'snapshots',
+        title: '8,760 rows',
         tab: 'Build',
-        note: 'Nothing is added in this module. Investment is not a new kind of thing in the model — it is '
-          + 'a handful of extra attributes on components you already have.',
+        note: 'A full year at hourly resolution, which module 6 warned would be 8,760 rows and would take '
+          + 'real time to solve. Expect about a minute per run from here on — that is what an honest '
+          + 'investment question costs.',
       },
     ],
     verify: [
-      'The session holds module 5\'s model and answers 7,099.59',
+      'The session holds 8,760 snapshots and the fixed-capacity run answers 29,980,642',
+      'oil_1 burns about 7.82 GWh across the year',
+      'solar_1 exists with p_nom 0 and a profile',
       'You can say why a dispatch model cannot value a plant, only its output',
-      'You can say what changes about `p_nom` when an asset becomes extendable',
-      'You can say why capital cost and marginal cost are not directly comparable',
     ],
     pitfalls: [
-      'Expecting expansion to be a different kind of model. It is the same LP with a few more decision '
-      + 'variables and a few more terms in the objective — which is also why it can be so much slower.',
+      'Expecting expansion to be a different kind of model. It is the same linear program with a few '
+      + 'more variables and a few more objective terms — which is also why it is so much slower.',
+      'Treating synthetic profiles as data. They are shaped to teach; every conclusion here is about the '
+      + 'mechanism, not about any real system.',
     ],
   },
 
   {
-    id: 'm7-capital-cost',
+    id: 'm7-a-year',
     section: SECTION,
-    title: 'Overnight, annual, and who does the arithmetic',
+    title: 'Why this module needs a whole year',
+    tab: 'Settings',
+    where: 'Settings → Simulation window',
+    concept: [
+      'Module 6 showed that a horizon decides which questions a model can answer. For investment there '
+      + 'is a second, sharper reason, and it is about units rather than physics.',
+
+      'An annuitised capital cost is a cost per YEAR. If the objective covers a year, the two match and '
+      + 'nothing needs adjusting. If it covers three hours, the capital charge is 2,920 times too large '
+      + 'against the fuel bill, the optimiser builds nothing, and the "no" looks considered rather than '
+      + 'dimensionally wrong.',
+
+      'You can compensate by scaling the overnight cost down by the fraction of the year modelled — and '
+      + 'that works for the OPTIMISER. But Ragnarok also pro-rates capital by modelled_hours/8760 when it '
+      + 'reports cost, so a pre-scaled cost gets scaled a second time and the reported total no longer '
+      + 'equals the objective the solver minimised. There is no setting where both are right.',
+
+      'At 8,760 hours the factor is 1 and the problem evaporates. The overnight cost goes into the sheet '
+      + 'exactly as a cost database quotes it, the objective and the reported total agree, and nothing '
+      + 'needs explaining in a footnote. That is why this module comes after module 6 rather than before.',
+    ],
+    explain: [
+      'Nothing to change. Open Settings → Simulation window and confirm the window covers all 8,760 '
+      + 'snapshots at 1h resolution, because everything from here depends on it.',
+
+      'Resist the temptation to narrow it for speed. A shorter window is not a faster version of this '
+      + 'study — it is a different study whose capital arithmetic no longer lines up, and the numbers it '
+      + 'produces cannot be compared with the ones in this module.',
+
+      'If you do want a faster preview, module 6 gave you the honest tools: coarsen the resolution or '
+      + 'sample blocks, and report that you did. Both change the answer, and both change it less than '
+      + 'silently mismatching your capital units.',
+
+      'One practical consequence: every run in this module takes about a minute. That is the cost of '
+      + 'asking a question that needs a year, and it is worth feeling once.',
+    ],
+    spotlights: [
+      {
+        selector: '.sg-scenario-summary',
+        title: 'The window, checked one last time',
+        runDialog: 'open',
+        note: 'It should read 8,760 snapshots at 1h. The habit of checking this line before every run '
+          + 'started in module 1 as good practice; here it is what keeps the capital costs meaningful.',
+      },
+      {
+        selector: '.activity-bar-btn[aria-label="Settings"]',
+        title: 'Leave the window alone',
+        note: 'Simulation window and Sampling both change what the solver sees. Either would make this '
+          + 'module\'s capital arithmetic wrong in a way nothing on screen would flag.',
+      },
+    ],
+    verify: [
+      'The simulation window covers all 8,760 snapshots at 1h',
+      'You can say why an annualised capital cost and a three-hour objective cannot be compared',
+      'You can say why pre-scaling the cost fixes the optimiser and breaks the reported total',
+      'You can say why a full year makes both correct at once',
+    ],
+    pitfalls: [
+      'Narrowing the window to save time and keeping the same capital costs. The optimiser then sees a '
+      + 'year of capital against a fraction of a year of fuel and builds nothing.',
+      'Assuming the app will warn you. It cannot: on a model with weighted representative periods a short '
+      + 'window is entirely correct, so there is no rule it could apply.',
+    ],
+  },
+
+  {
+    id: 'm7-overnight-and-crf',
+    section: SECTION,
+    title: 'Overnight cost, annuity, and who does the arithmetic',
     tab: 'Build',
     where: 'Build → Generators step',
     concept: [
-      'A wind farm costs something like 1,200,000 per MW to build. That is the OVERNIGHT cost — what it '
-      + 'would cost if you could build it instantly, with no financing. It is the number cost databases '
-      + 'publish and the number engineers quote.',
+      'A wind farm costs about 1,200,000 per MW to build. That is the OVERNIGHT cost — what it would '
+      + 'cost if it appeared instantly with no financing — and it is the number cost databases publish '
+      + 'and engineers quote.',
 
-      'It cannot go into the objective as it stands, because the objective is a cost over a period of '
-      + 'operation and the overnight cost is a lump sum. Spreading it is annuitisation: the capital '
-      + 'recovery factor turns a lump sum into the equal annual payment that repays it over the asset\'s '
-      + 'life at a given discount rate.',
+      'It cannot enter the objective as a lump sum, because the objective is a cost over a period of '
+      + 'operation. Annuitisation converts it: the capital recovery factor gives the equal annual payment '
+      + 'that repays the lump sum over the asset\'s life at a given discount rate.',
 
       'CRF = r(1+r)^n / ((1+r)^n − 1). At 5% over 25 years that is 0.0710, so 1,200,000 per MW becomes '
-      + 'about 85,150 per MW per year. That annual figure is what belongs beside fuel costs.',
+      + '85,150 per MW per year — the figure that belongs beside a fuel bill.',
 
       'Ragnarok does this for you, and knowing that is the point of this step. The `capital_cost` column '
-      + 'holds the OVERNIGHT cost; the app multiplies it by CRF using the row\'s `lifetime` and the '
-      + 'discount rate from Settings. Many tools — including PyPSA used directly — expect you to have '
-      + 'annuitised already, so a cost that is right in one tool is 12 times too large in the other. '
-      + 'Always check which convention you are in.',
+      + 'holds the OVERNIGHT cost; the app multiplies by CRF using the row\'s `lifetime` and the discount '
+      + 'rate from Settings. PyPSA used directly expects the annuitised figure instead, so a cost that is '
+      + 'right in one is twelve times wrong in the other. Always establish which convention you are in '
+      + 'before trusting a number.',
     ],
     explain: [
-      'Nothing to enter yet. Find the columns first: on the Generators step, scroll right past '
-      + '`efficiency` and you will reach `p_nom_extendable`, `p_nom_min`, `p_nom_max`, `capital_cost`, '
-      + '`lifetime` and `overnight_cost`. They have been there since module 1.',
+      'Nothing to enter yet — find the columns. On the Generators step, scroll right past `efficiency` '
+      + 'and you reach `p_nom_extendable`, `p_nom_min`, `p_nom_max`, `capital_cost` and `lifetime`. Use '
+      + 'the Columns button if scrolling is awkward.',
 
-      'The `lifetime` column matters more than it looks. If it is blank, PyPSA defaults it to infinity, '
-      + 'which has no finite annuity — so Ragnarok substitutes 20 years rather than letting the cost '
-      + 'silently annuitise to nothing. A blank lifetime is not a neutral choice; it is a 20-year '
-      + 'assumption you did not make deliberately.',
+      '`lifetime` matters more than it looks. Left blank, PyPSA defaults it to infinity, which has no '
+      + 'finite annuity — so Ragnarok substitutes 20 years rather than letting the cost annuitise to '
+      + 'nothing. A blank lifetime is not neutral; it is a 20-year assumption you did not make.',
 
-      'Two numbers to hold on to for the next steps: a wind farm at 1,200,000 per MW over 25 years, and '
-      + 'a transmission line at 600,000 per MW of capacity over 40 years. Both are plausible round '
-      + 'figures rather than quotations, and both are about to be scaled.',
+      'The four figures this module uses, all overnight and all plausible for 2030: wind 1,200,000 per MW '
+      + 'over 25 years, solar 500,000 over 25, transmission 600,000 per MW over 40, and a two-hour '
+      + 'battery 150,000 per MW over 15.',
+
+      'Note the lifetimes as much as the costs. Transmission at 40 years carries a CRF of 0.058 against '
+      + 'wind\'s 0.071 — the same capital costs 18% less per year — which is a real and underappreciated '
+      + 'reason networks are often the cheapest fix.',
     ],
     spotlights: [
       {
@@ -167,24 +242,21 @@ export const MODULE_7_INVESTMENT: TutorialStep[] = [
         buildStep: 'generators',
         title: 'The columns that have been waiting',
         tab: 'Build',
-        note: 'Scroll right, or use the Columns button, and find p_nom_extendable, p_nom_min, p_nom_max, '
-          + 'capital_cost and lifetime. Every model you have built has carried them empty — expansion is '
-          + 'attributes, not new components.',
+        note: 'p_nom_extendable, p_nom_min, p_nom_max, capital_cost, lifetime. Every model in this course '
+          + 'has carried them empty — expansion adds attributes, not components.',
       },
     ],
     verify: [
-      'You can state the capital recovery factor formula and say what each symbol is',
+      'You can state the CRF formula and say what each symbol means',
       'You can compute the annual cost of a 1,200,000/MW asset over 25 years at 5%',
-      'You can say which convention Ragnarok uses for `capital_cost`, and why that matters',
-      'You can say what happens if `lifetime` is left blank',
+      'You can say which convention Ragnarok uses for `capital_cost`, and why it matters',
+      'You can say what happens when `lifetime` is left blank',
     ],
     pitfalls: [
-      'Entering an already-annuitised cost. Ragnarok annuitises what you give it, so an annual figure '
-      + 'gets annuitised twice and comes out roughly twelve times too small — which makes new capacity '
-      + 'look nearly free.',
-      'Leaving `lifetime` blank and assuming it does not matter. It becomes 20 years, which is wrong for '
-      + 'almost everything: wind is 25, transmission is 40 or more, and the difference moves the annual '
-      + 'cost by a third.',
+      'Entering an already-annuitised cost. Ragnarok annuitises what you give it, so it gets annuitised '
+      + 'twice and comes out about twelve times too small — which makes new capacity look nearly free.',
+      'Leaving `lifetime` blank. It becomes 20 years, which is wrong for almost everything and moves the '
+      + 'annual cost by a third.',
     ],
   },
 
@@ -195,200 +267,186 @@ export const MODULE_7_INVESTMENT: TutorialStep[] = [
     tab: 'Settings',
     where: 'Settings → Project defaults → Discount rate',
     concept: [
-      'The discount rate decides how heavily a future cost counts today, and in a capacity-expansion '
-      + 'model it decides how much capital gets built. A low rate makes capital-heavy, fuel-free '
-      + 'technologies — wind, solar, nuclear, transmission — look cheap. A high rate favours '
-      + 'cheap-to-build, expensive-to-run plant, which is gas.',
+      'The discount rate decides how heavily a future cost counts today, and in an expansion model it '
+      + 'decides how much capital is worth committing. A low rate favours capital-heavy, fuel-free '
+      + 'technologies — wind, solar, nuclear, transmission. A high rate favours cheap-to-build, '
+      + 'expensive-to-run plant, which means gas.',
 
-      'The effect is large. Moving from 5% to 10% raises the annual cost of a 25-year asset by about '
-      + '45%, with no change to the technology at all. Two studies that disagree about renewable build-out '
-      + 'often disagree about nothing except this number.',
+      'The effect is large and it is not uniform. Step 13 moves the rate from 5% to 7% and the answer '
+      + 'does not merely shrink: wind falls by 30 MW while solar nearly doubles. The rate changes the '
+      + 'MIX, not just the total, which is why two studies can disagree about which technology to build '
+      + 'while agreeing about everything physical.',
 
-      'Ragnarok puts the number in front of you rather than burying it: Settings → Project defaults → '
-      + 'Discount rate, with the app\'s own note underneath saying what it is for. It ships at 0.05, and '
-      + 'that default is worth taking seriously as a hazard — an assumption you inherit silently is more '
-      + 'dangerous than one you are forced to supply, because nothing prompts you to defend it.',
+      'Ragnarok puts the number in front of you — Settings → Project defaults → Discount rate, with the '
+      + 'app\'s own note explaining what it does — and ships it at 0.05. Treat that default as a hazard '
+      + 'rather than a convenience: an assumption you inherit silently is more dangerous than one you are '
+      + 'forced to supply, because nothing prompts you to defend it.',
 
-      'The API is stricter than the GUI here. A run submitted without a discount rate, while extendable '
-      + 'assets carry capital costs, is refused outright with a message explaining why — so an agent or a '
-      + 'script cannot accidentally author this assumption. The GUI gives you 0.05 instead, and expects '
-      + 'you to look at it.',
-
-      'This course uses the 0.05 default so every number matches what you see out of the box. Step 9 '
-      + 'changes it to 0.07 and watches an investment decision reverse, which is the most direct '
-      + 'demonstration of why it matters that this course can offer.',
+      'The API is stricter. A run submitted without a rate, while extendable assets carry capital costs, '
+      + 'is refused outright with a message naming them — so an agent or a script cannot author this '
+      + 'assumption by omission. The GUI gives you 0.05 and expects you to look at it.',
     ],
     explain: [
-      'Open Settings → Project defaults and find Discount rate. Confirm it reads 0.05 and leave it there '
-      + 'for now — the rest of the module assumes it.',
+      'Settings → Project defaults. Confirm Discount rate reads 0.05 and leave it — every figure in this '
+      + 'module assumes it, so a learner who never opens Settings still matches the course.',
 
-      'It sits with the project defaults rather than on any component, because it applies to every capital '
-      + 'cost in the model at once: one financing assumption for the whole study.',
+      'Read the app\'s note under the field: "used to annualise capital costs for extendable assets, 0.05 '
+      + '= 5% WACC". That is the whole mechanism, and it explains why the setting did nothing for six '
+      + 'modules — until something is extendable, there is no capital to annualise.',
 
-      'Read the app\'s own note under the field — "used to annualise capital costs for extendable assets, '
-      + '0.05 = 5% WACC". That is the whole mechanism in one line, and it is worth knowing the setting '
-      + 'does nothing at all until something is extendable, which is why five modules never needed it.',
-
-      'Nothing to run yet. But make a note that you have looked at this number and accepted it, because '
-      + 'in a real study that is the difference between an assumption and an accident.',
+      'Make a deliberate note that you have looked at this number and accepted it. In a real study that '
+      + 'is the difference between an assumption and an accident, and it is the first thing a reviewer '
+      + 'will ask about.',
     ],
     spotlights: [
       {
         selector: '.activity-bar-btn[aria-label="Settings"]',
-        title: 'Settings',
-        note: 'Project defaults holds it, because it is a scenario-level assumption rather than a '
-          + 'component attribute — one number applied to every capital cost in the model. It ships at 0.05 '
-          + 'and the note under the field tells you exactly what it does.',
+        title: 'Project defaults',
+        note: 'The rate lives with the project defaults because it is a scenario-level assumption rather '
+          + 'than a component attribute — one number applied to every capital cost in the model.',
       },
     ],
     entries: [
       {
         field: 'Settings → Project defaults → Discount rate',
         value: '0.05',
-        why: 'The app\'s default, kept deliberately so every figure in this module matches what you see '
-          + 'without changing anything. Five per cent is a plausible weighted average cost of capital for '
-          + 'a regulated utility. It sets the capital recovery factor for every extendable asset, so it '
-          + 'decides how much capital the model is willing to build — step 9 moves it to 0.07 and an '
-          + 'investment decision reverses.',
+        why: 'The app default, kept so every figure here matches what you see out of the box. Five per '
+          + 'cent is a plausible weighted average cost of capital for a regulated utility. It sets the '
+          + 'capital recovery factor for every extendable asset, so it decides not only how much capital '
+          + 'the model commits but which technologies it commits it to — step 13 measures exactly that.',
       },
     ],
     verify: [
       'Settings → Project defaults → Discount rate reads 0.05',
-      'You can say which technologies a low discount rate favours, and why',
+      'You can say which technologies a low rate favours, and why',
       'You can say what the GUI does about a missing rate and what the API does instead',
-      'You can say roughly how much a 25-year asset\'s annual cost changes between 5% and 10%',
+      'You can say why the setting did nothing in modules 1 to 6',
     ],
     pitfalls: [
-      'Accepting the 0.05 default without deciding it is right. An inherited assumption is still your '
-      + 'assumption once you publish the answer, and this is the one most likely to be challenged.',
-      'Confusing it with inflation or with a project IRR. Here it is the rate at which the model '
-      + 'annuitises capital, and it should reflect the cost of capital for the entity doing the building.',
+      'Accepting the default without deciding it is right. It is still your assumption once you publish '
+      + 'the answer, and it is the one most likely to be challenged.',
+      'Confusing it with inflation or a project IRR. Here it is the rate at which capital is annuitised, '
+      + 'and it should reflect the cost of capital of whoever is doing the building.',
     ],
   },
 
   {
-    id: 'm7-window-scaling',
+    id: 'm7-lcoe',
     section: SECTION,
-    title: 'Three hours against a year — the 2,920× trap',
+    title: 'Comparing technologies honestly — capacity factor beats headline cost',
     tab: 'Build',
     where: 'Build → Generators step',
     concept: [
-      'Here is the trap, and it catches nearly everyone building their first expansion model.',
+      'Before offering the model anything, work out what each option costs per unit of ENERGY. Cost per '
+      + 'MW is what gets quoted and it is not what matters: a MW that runs 46% of the time is worth far '
+      + 'more than a MW that runs 16% of the time.',
 
-      'The annuitised capital cost is a cost per YEAR. The objective in this model covers three hours. '
-      + 'Put an annual cost into a three-hour objective and you are asking the model to recover a whole '
-      + 'year of capital from three hours of fuel savings — so it builds nothing, and the answer looks '
-      + 'like a considered "no" rather than a unit error.',
+      'The levelised cost is the annuitised capital divided by the energy that capacity actually '
+      + 'delivers: overnight × CRF / (capacity factor × 8760).',
 
-      'The mismatch is 8760/3 = 2,920 times. Ragnarok does not correct it: the app annuitises for you but '
-      + 'does not know that your three snapshots are meant to stand for a year, because on a model with '
-      + 'weighted representative periods they might not be.',
+      'On this year, at 5%: wind has a capacity factor of 0.46, so 1,200,000 × 0.0710 / (0.46 × 8760) is '
+      + 'about 21 per MWh. Solar has a capacity factor of 0.165, so 500,000 × 0.0710 / (0.165 × 8760) is '
+      + 'about 25 per MWh. Solar is less than half the price per MW and dearer per MWh, because it runs '
+      + 'less than half as often.',
 
-      'There are two honest fixes. Model a full year, which is module 7. Or scale the overnight cost by '
-      + 'the fraction of the year you actually model — 3/8760 — so the capital charge covers the same '
-      + 'period as the fuel bill. This module does the second, because it is the one that fits in three '
-      + 'snapshots, and it flags loudly that it is a workaround rather than a technique.',
-
-      'So the numbers you will type are 1,200,000 × 3/8760 = 410.96 for wind and 600,000 × 3/8760 = '
-      + '205.48 for the line. Ragnarok then applies CRF and the objective sees about 29.16 and 11.98 per '
-      + 'MW at the default 5% — the cost of owning that MW for three hours.',
+      'That is the arithmetic that makes energy debates confusing when only one of the two numbers is '
+      + 'quoted. And it is still not sufficient — a levelised cost ignores WHEN the energy arrives and '
+      + 'WHERE, and this module is about to show both mattering more than the 4 per MWh between these '
+      + 'two.',
     ],
     explain: [
-      'Nothing to enter yet — this step is the arithmetic you need before the next one makes sense.',
+      'Nothing to enter. Work the two numbers out yourself before running anything, because the point of '
+      + 'the exercise is to have a prediction the model can contradict.',
 
-      'Work it through once. A wind farm at 1,200,000 per MW, 25 years, 5%: annuitised that is 85,150 '
-      + 'per MW per year. Three hours is 3/8760 of a year, so the share of the annual charge attributable '
-      + 'to this window is 29.16 per MW. That is what the objective should see.',
+      'On levelised cost alone, wind wins: 21 against 25 per MWh. A study that ranked options by LCOE and '
+      + 'stopped there would build wind and no solar.',
 
-      'Since Ragnarok multiplies by CRF itself, you type the SCALED OVERNIGHT cost — 410.96 — and let it '
-      + 'do the annuitisation. Scale first, then let the app annuitise; doing both yourself makes it '
-      + 'annuitise a second time.',
+      'Hold that prediction. Step 9 builds both, and step 11 explains why — the wind is behind a '
+      + 'congested line and the solar is not, and that difference is worth more than the 4 per MWh gap '
+      + 'between them.',
 
-      'And write down what you did. A capital cost of 410.96 in a sheet is meaningless to anyone who does '
-      + 'not know it has been scaled by 3/8760, and this is exactly the sort of undocumented adjustment '
-      + 'that makes a model impossible to review. Module 9 has more to say about that.',
+      'For the storage and the line there is no meaningful levelised cost at all, because neither '
+      + 'produces energy. They are valued entirely by what they let the rest of the system avoid, which '
+      + 'is precisely why they cannot be assessed outside a model.',
     ],
     spotlights: [
       {
-        selector: '.sg-scenario-summary',
-        title: 'Three snapshots at 1h',
-        runDialog: 'open',
-        note: 'The line you have checked before every run since module 1, now load-bearing for a different '
-          + 'reason: it is the window your capital cost has to match. Three snapshots at 1h is 3 hours of '
-          + 'a 8,760-hour year.',
+        selector: '[data-card="statistics"]',
+        title: 'Capacity factors from the baseline run',
+        tab: 'Analytics',
+        note: 'The per-carrier statistics table reports what each technology actually delivered against '
+          + 'its capacity. Those are the capacity factors the levelised arithmetic needs — take them from '
+          + 'the run rather than from a brochure.',
       },
     ],
     verify: [
-      'You can say why an annual capital cost in a three-hour objective builds nothing',
-      'You can compute the scaling factor for this model and get 3/8760',
-      'You can compute the scaled overnight cost for wind and get about 411',
-      'You can say why you scale the overnight cost rather than the annuitised one in Ragnarok',
+      'You can write down the levelised cost formula from memory',
+      'You can compute roughly 21 per MWh for wind and 25 for solar at 5%',
+      'You can say why cost per MW is a misleading way to rank generation',
+      'You can say why a levelised cost cannot value a battery or a line at all',
+      'You have a written prediction of what the model will build',
     ],
     pitfalls: [
-      'Concluding "nothing is worth building" from an unscaled run. That is a unit error wearing the '
-      + 'costume of a result, and it is the single commonest mistake in first expansion models.',
-      'Scaling AND annuitising by hand, then letting Ragnarok annuitise again. Scale only; the app does '
-      + 'the CRF.',
-      'Leaving the scaling undocumented. A reviewer seeing 410.96 per MW for a wind farm will assume the '
-      + 'model is broken, and they will be right to.',
+      'Ranking technologies by levelised cost and stopping. It ignores when the energy arrives, where it '
+      + 'arrives, and what else has to be built to use it — all three of which this module shows mattering.',
+      'Using a brochure capacity factor. Use the one your own profiles produce, or the arithmetic '
+      + 'describes a different site.',
     ],
   },
 
   {
-    id: 'm7-extendable-wind',
+    id: 'm7-extendable',
     section: SECTION,
-    title: 'Make wind a decision',
+    title: 'Make wind and the line decisions',
     tab: 'Build',
-    where: 'Build → Generators step',
+    where: 'Build → Generators, then Build → Lines',
     concept: [
-      'Four attributes turn a fixed generator into a decision.',
+      'Four attributes turn a fixed component into an investment question, and they work identically on '
+      + 'generators, lines, links and storage.',
 
       '`p_nom_extendable` says the optimiser may choose the capacity. `p_nom_min` and `p_nom_max` bound '
-      + 'what it may choose. `capital_cost` is what each MW costs — here the scaled overnight figure. And '
-      + '`lifetime` feeds the annuitisation.',
+      + 'the choice. `capital_cost` prices it. On a line the names are `s_nom_*`, because a line is rated '
+      + 'in apparent power, and nothing else differs.',
 
-      '`p_nom_min` is where brownfield modelling lives. Set it to the capacity that already exists and '
-      + 'the model may build more but may not un-build what is there — which is right, because a wind '
-      + 'farm that is already standing is a sunk cost and demolishing it saves nothing. Set it to zero '
-      + 'and you are asking a greenfield question: what would you build if nothing existed?',
+      '`p_nom_min` is where brownfield modelling lives, and it is the most consequential of the four. Set '
+      + 'it to what already exists and the model may add but never remove — correct, because a standing '
+      + 'asset is a sunk cost and demolishing it saves nothing. Set it to zero and you ask a greenfield '
+      + 'question: what would you build if nothing were here?',
 
-      'Those two questions have very different answers and are constantly confused. This module asks the '
-      + 'brownfield one, because it is the one an operator or a regulator actually faces.',
+      'Those are different studies with different answers, and confusing them is common. Step 12 runs '
+      + 'both and finds something the brownfield version cannot show.',
     ],
     explain: [
-      'Build → Generators, on the wind_1 row. Tick `p_nom_extendable`, set `p_nom_min` to 60 — the '
-      + 'capacity that already exists — `p_nom_max` to 300, `capital_cost` to 410.96 and `lifetime` to 25.',
+      'Build → Generators, on wind_1: tick `p_nom_extendable`, set `p_nom_min` to 60 — what already '
+      + 'stands — `p_nom_max` to 300, `capital_cost` to 1200000 and `lifetime` to 25.',
 
-      'The columns are to the right of the ones you have used so far, so scroll or use the Columns '
-      + 'button. The attribute form on the right is easier for a row with this many fields.',
+      'Then Build → Lines, on line_1: tick `s_nom_extendable`, `s_nom_min` 60, `s_nom_max` 300, '
+      + '`capital_cost` 600000, `lifetime` 40.',
 
-      '`p_nom_max` of 300 is a siting limit: how much wind this location could physically host. Real '
-      + 'studies get it from land area, grid connection capacity or planning constraints, and leaving it '
-      + 'unbounded is usually a mistake — an unbounded model will build implausible amounts of the '
-      + 'cheapest thing.',
+      'The maxima are siting limits, not modelling conveniences. 300 MW of wind is what the site could '
+      + 'physically host; 300 MW is what the transmission corridor could carry given its right of way. An '
+      + 'unbounded model will build implausible quantities of whatever is cheapest, and a reviewer will '
+      + 'ask where the limit came from.',
 
-      'Do not run yet. Predict first: wind is free to run, so more of it displaces fuel. Does that make '
-      + 'it worth 29.16 per MW for these three hours? The next step is the answer, and it is worth having '
-      + 'a guess on record.',
+      'Do not run yet. Two more options to offer first, and the interesting result is what happens when '
+      + 'all four compete at once rather than in sequence.',
     ],
     spotlights: [
       {
         selector: '[data-build-step="generators"]',
         buildStep: 'generators',
-        title: 'One row, five cells',
+        title: 'wind_1 becomes a decision',
         tab: 'Build',
-        note: 'Only wind_1 changes. Everything else in the fleet stays fixed, so whatever the model does '
-          + 'is attributable to this one decision — the same controlled-experiment discipline as every '
-          + 'other module.',
+        note: 'Five cells on one row. Everything else in the fleet stays fixed, so whatever the model does '
+          + 'with wind is attributable to this change alone.',
       },
       {
-        selector: '.tables-grid-wrap',
-        buildStep: 'generators',
-        title: 'Scroll right',
+        selector: '[data-build-step="lines"]',
+        buildStep: 'lines',
+        title: 'And the line',
         tab: 'Build',
-        note: 'p_nom_extendable is a checkbox, and p_nom_min / p_nom_max / capital_cost / lifetime are '
-          + 'numbers beside it. They are past the columns you have used so far — the Columns button lists '
-          + 'them all if scrolling is awkward.',
+        note: 's_nom_extendable rather than p_nom_extendable — a line is rated in apparent power. The '
+          + 'meaning of all five attributes is identical.',
       },
     ],
     entries: [
@@ -396,540 +454,771 @@ export const MODULE_7_INVESTMENT: TutorialStep[] = [
         field: 'generators.p_nom_extendable (wind_1)',
         label: 'capacity is a decision',
         value: 'true',
-        why: 'Turns p_nom from a number you typed into a variable the optimiser chooses. This one '
+        why: 'Turns p_nom from a number you typed into a variable the optimiser chooses. This single '
           + 'checkbox is the difference between a dispatch model and an expansion model.',
       },
       {
         field: 'generators.p_nom_min (wind_1)',
-        label: 'capacity that already exists',
+        label: 'what already stands',
         value: '60',
         unit: 'MW',
-        why: 'The existing farm. Setting the floor here makes this a brownfield question — build more if '
-          + 'it pays, but never pretend you could unbuild what is standing. Set it to 0 instead and you '
-          + 'are asking what you would build from nothing, which is a different study.',
+        why: 'The existing farm. A floor here makes this a brownfield study — build more if it pays, but '
+          + 'never pretend you could unbuild what is there. Step 12 sets it to zero and the difference is '
+          + 'the whole point of that step.',
       },
       {
         field: 'generators.p_nom_max (wind_1)',
         label: 'siting limit',
         value: '300',
         unit: 'MW',
-        why: 'The most this site could physically host — land, connection capacity, planning. An '
-          + 'unbounded maximum lets the model build implausible quantities of whatever is cheapest, so '
-          + 'a real limit is part of describing the world honestly rather than a modelling convenience.',
+        why: 'What the site could physically host — land, connection capacity, consent. Not a modelling '
+          + 'convenience: an unbounded maximum invites the model to solve everything with one technology, '
+          + 'and the limit is part of describing the world honestly.',
       },
       {
         field: 'generators.capital_cost (wind_1)',
-        label: 'overnight cost, scaled to the window',
-        value: '410.96',
+        label: 'overnight cost',
+        value: '1200000',
         unit: 'currency per MW',
-        why: '1,200,000 per MW scaled by 3/8760 for the three hours this model covers. Ragnarok multiplies '
-          + 'it by CRF(5%, 25 y) itself, giving about 29.16 per MW in the objective — the cost of owning '
-          + 'a MW of wind for three hours.',
+        why: 'The overnight cost exactly as a database quotes it, with no scaling — which is only correct '
+          + 'because the model covers a whole year. Ragnarok applies CRF(5%, 25 y) itself, giving about '
+          + '85,150 per MW per year in the objective.',
       },
       {
         field: 'generators.lifetime (wind_1)',
         label: 'economic life',
         value: '25',
         unit: 'years',
-        why: 'How long the asset repays its capital over, which sets the annuity factor. Leave it blank '
-          + 'and Ragnarok assumes 20 years — a 15% higher annual cost than 25, applied silently.',
+        why: 'How long the capital is repaid over, which sets the annuity factor. Blank would mean 20 '
+          + 'years and a 15% higher annual charge, applied without telling you.',
       },
-    ],
-    verify: [
-      'wind_1 has `p_nom_extendable` ticked, `p_nom_min` 60, `p_nom_max` 300',
-      '`capital_cost` is 410.96 and `lifetime` is 25',
-      'Every other generator is unchanged',
-      'You have written down a prediction for how much wind gets built',
-    ],
-    pitfalls: [
-      'Leaving `p_nom_min` at 0. The model may then choose LESS wind than exists, which is not a decision '
-      + 'anybody can act on — you cannot un-build a wind farm to save its capital cost.',
-      'Typing the unscaled 1,200,000. The model will build nothing, and the "no" will look considered.',
-    ],
-  },
-
-  {
-    id: 'm7-run-wind',
-    section: SECTION,
-    title: 'Run: it builds nothing, and that is a result',
-    tab: 'Analytics',
-    where: 'Run dialog, then Analytics → Result',
-    concept: [
-      'The objective comes back at 7,099.59 — module 5\'s answer, unchanged — and `p_nom_opt` for wind_1 '
-      + 'is 60. The model declined to build a single MW.',
-
-      'That is not the scaling error. The cost is right this time, and the reason is more interesting: '
-      + 'extra wind at bus_1 has nowhere to go. The line to the demand is full in the first two hours '
-      + 'already, and in the third hour — when the system is stretched — wind availability is 0.1, so a '
-      + 'new MW contributes 0.1 MW exactly when it would be worth something.',
-
-      'Work it through. One more MW of wind yields 0.9 + 0.4 + 0.1 = 1.4 MWh over the window. Most of it '
-      + 'arrives in hours when the line is already full, so it would be curtailed. Against a capital '
-      + 'charge of 29.16, the answer is comfortably no.',
-
-      'This is what a constrained network does to a generation business case, and it is why "the resource '
-      + 'is good here" is not sufficient reason to build. It is also the mirror image of module 5\'s '
-      + 'pumped-hydro result: the same constraint that made storage worthless at bus_1 makes generation '
-      + 'worthless there too.',
-    ],
-    explain: [
-      'Run it — validate first, since you have changed a row\'s structure rather than just a number.',
-
-      'The GUI supplies 0.05 so the run will not stop to ask you for it. If you are driving Ragnarok '
-      + 'through the API or an agent instead, an omitted rate is refused outright — the message names the '
-      + 'extendable assets carrying a cost and says where the setting lives.',
-
-      'Read the objective — 7,099.59, unchanged — and then find `p_nom_opt` for wind_1. It reads 60, '
-      + 'which is `p_nom_min`: the model built exactly nothing and could not go lower.',
-
-      'Resist the urge to lower the capital cost until something gets built. The model is telling you '
-      + 'something true about this network, and the fix is not a cheaper wind farm — it is the next step.',
-    ],
-    spotlights: [
-      {
-        selector: '[data-subtab="Result"]',
-        title: '7,099.59, unchanged',
-        tab: 'Analytics',
-        runDialog: 'closed',
-        note: 'The same answer as module 5. An expansion run that builds nothing is a real result, and the '
-          + 'question to ask is WHY — which is nearly always about what the new capacity could reach.',
-      },
-      {
-        selector: '[data-card="statistics"]',
-        title: 'Optimal capacity',
-        tab: 'Analytics',
-        note: 'The per-carrier statistics table carries the solved capacities. wind_1 sits at 60 MW — its '
-          + 'floor — so the optimiser chose the smallest wind fleet it was allowed.',
-      },
-      {
-        selector: '[data-card="chart"][data-card-metric="curtailment"]',
-        title: 'Why not',
-        tab: 'Analytics',
-        note: 'Curtailment is the clue. Wind that cannot reach the demand is wind nobody should pay to '
-          + 'build, and on this network more wind at bus_1 means more curtailment rather than more energy.',
-      },
-    ],
-    run: {
-      label: 'Run dialog → Validate, then Run model',
-      detail: [
-        'The problem now has a capacity variable in it as well as dispatch, so it is a slightly larger LP. Still instant.',
-        'If the discount rate is unset, the run fails with a message rather than guessing.',
-      ],
-      expect: 'An objective of 7,099.59 and p_nom_opt of 60 for wind_1 — nothing built.',
-    },
-    verify: [
-      'The objective is 7,099.59, unchanged from module 5',
-      '`p_nom_opt` for wind_1 is 60, which is its minimum',
-      'You can explain why, in terms of what a new MW of wind could actually deliver',
-      'You can connect this result to module 5\'s pumped-hydro finding',
-    ],
-    pitfalls: [
-      'Lowering the capital cost until the model builds something. That is fitting the assumption to the '
-      + 'desired answer, and it is how expansion studies lose their credibility.',
-      'Concluding wind is uneconomic in general. It is uneconomic BEHIND THIS LINE, which is a statement '
-      + 'about the network rather than the technology.',
-    ],
-  },
-
-  {
-    id: 'm7-extendable-line',
-    section: SECTION,
-    title: 'Make the line a decision — module 3\'s business case, finished',
-    tab: 'Build',
-    where: 'Build → Lines step',
-    concept: [
-      'Module 3 measured what the 60 MW line constraint cost — 420 over three hours — and said that was '
-      + 'the upper bound on what you should pay to relieve it. This is where that becomes a decision '
-      + 'rather than an observation.',
-
-      'A Line expands exactly like a generator, with `s_nom` in place of `p_nom`: `s_nom_extendable`, '
-      + '`s_nom_min`, `s_nom_max`, `capital_cost` and `lifetime`. The naming difference is only that a '
-      + 'line is rated in apparent power.',
-
-      'Transmission capital costs are usually quoted per MW-km, which is one reason `length` has been '
-      + 'sitting in the sheet since module 3 doing nothing. Here the cost is expressed per MW for a line '
-      + 'of this length, which keeps the arithmetic visible — 600,000 per MW, over 40 years, because '
-      + 'transmission assets outlive generation by a wide margin.',
-
-      'That long life matters. At 5%, CRF over 40 years is 0.058 against 0.071 over 25 — so transmission '
-      + 'carries a lower annual charge per unit of capital than a wind farm, which is part of why '
-      + 'networks are so often the cheapest way to fix a problem.',
-    ],
-    explain: [
-      'Build → Lines, on the line_1 row. Tick `s_nom_extendable`, set `s_nom_min` to 60 — the existing '
-      + 'circuit — `s_nom_max` to 300, `capital_cost` to 205.48 and `lifetime` to 40.',
-
-      '205.48 is 600,000 scaled by the same 3/8760 as the wind. Use exactly the same scaling for every '
-      + 'capital cost in a model; mixing scaled and unscaled figures is the fastest way to produce an '
-      + 'answer nobody can reconstruct.',
-
-      'Leave wind extendable as it is. Step 9 depends on both being available at once, and it is worth '
-      + 'seeing the line result on its own first.',
-
-      'Predict again before running. Module 3 said the constraint was worth 420 over three hours at a '
-      + '40 MW uprate. The wire now costs about 11.98 per MW for the window. Does that pay?',
-    ],
-    spotlights: [
-      {
-        selector: '[data-build-step="lines"]',
-        buildStep: 'lines',
-        title: 'The same five attributes',
-        tab: 'Build',
-        note: 's_nom_extendable, s_nom_min, s_nom_max, capital_cost, lifetime — identical in meaning to '
-          + 'the generator ones, named for apparent power. Expansion is one mechanism applied to every '
-          + 'component type.',
-      },
-      {
-        selector: '.tables-grid-wrap',
-        buildStep: 'lines',
-        title: 'Scaled the same way',
-        tab: 'Build',
-        note: '205.48 is 600,000 per MW scaled by 3/8760, exactly as the wind cost was. Every capital cost '
-          + 'in a model must share one scaling convention or the comparison between them is meaningless.',
-      },
-    ],
-    entries: [
       {
         field: 'lines.s_nom_extendable (line_1)',
-        label: 'capacity is a decision',
+        label: 'the wire is a decision too',
         value: 'true',
-        why: 'Lets the optimiser choose the line rating. This is the cell that turns module 3\'s '
-          + 'observation — the constraint costs 420 — into a question the model can answer for itself.',
+        why: 'The transmission business case module 3 sketched and module 6 could not price properly. '
+          + 'Offering it alongside generation rather than separately is what lets the model see that they '
+          + 'are complements.',
       },
       {
         field: 'lines.s_nom_min (line_1)',
         label: 'existing circuit',
         value: '60',
         unit: 'MW',
-        why: 'The wire that is already strung. Brownfield again: the model may add capacity but may not '
-          + 'remove what exists, because taking a line down does not refund the money spent building it.',
+        why: 'The wire already strung. Brownfield for the same reason as the wind farm: taking a line down '
+          + 'does not refund what it cost to build.',
       },
       {
         field: 'lines.s_nom_max (line_1)',
         label: 'corridor limit',
         value: '300',
         unit: 'MW',
-        why: 'The most this route could carry — right of way, tower design, planning consent. As with the '
-          + 'wind siting limit, an unbounded corridor invites the model to solve every problem with wire.',
+        why: 'What the route could carry — right of way, tower design, consent. Without it the model will '
+          + 'happily solve congestion with unlimited wire.',
       },
       {
         field: 'lines.capital_cost (line_1)',
-        label: 'overnight cost, scaled to the window',
-        value: '205.48',
+        label: 'overnight cost',
+        value: '600000',
         unit: 'currency per MW',
-        why: '600,000 per MW for a line of this length, scaled by 3/8760. Ragnarok applies CRF(5%, 40 y), '
-          + 'giving about 11.98 per MW in the objective — less than half the wind figure, because the '
-          + 'same capital is spread over 40 years instead of 25.',
+        why: 'Half the wind figure per MW, and cheaper still per year because it is repaid over 40 years '
+          + 'rather than 25 — CRF 0.058 against 0.071. Long asset life is a real and underrated advantage '
+          + 'of network investment.',
       },
       {
         field: 'lines.lifetime (line_1)',
         label: 'economic life',
         value: '40',
         unit: 'years',
-        why: 'Transmission outlives generation, and the difference is not cosmetic: 40 years gives a CRF '
-          + 'of 0.058 against 25 years\' 0.071, so every unit of capital costs 18% less per year. Long '
-          + 'life is a real part of why networks are often the cheapest fix.',
+        why: 'Transmission outlives generation by a wide margin. The 20-year default would overstate its '
+          + 'annual cost by about a quarter and could flip the decision.',
       },
     ],
     verify: [
-      'line_1 has `s_nom_extendable` ticked, `s_nom_min` 60, `s_nom_max` 300',
-      '`capital_cost` is 205.48 and `lifetime` is 40',
-      'wind_1 is still extendable from the previous step',
-      'You have a prediction on record for how much wire gets built',
+      'wind_1 has p_nom_extendable ticked, min 60, max 300, capital_cost 1200000, lifetime 25',
+      'line_1 has s_nom_extendable ticked, min 60, max 300, capital_cost 600000, lifetime 40',
+      'No capital cost has been scaled by anything',
+      'You can say what p_nom_min would mean if it were 0',
     ],
     pitfalls: [
-      'Scaling the line cost differently from the wind cost. Every capital figure must share one '
-      + 'convention, or the model is comparing quantities in different units.',
-      'Forgetting `lifetime` on the line. The 20-year default would overstate its annual cost by about a '
-      + 'quarter and could flip the decision.',
+      'Scaling the capital costs. That was a workaround for a short horizon and it is wrong here — a full '
+      + 'year needs the raw overnight figure.',
+      'Leaving p_nom_min at 0 by accident. The model may then choose LESS wind than exists, which is not '
+      + 'a decision anyone can act on.',
     ],
   },
 
   {
-    id: 'm7-run-line',
+    id: 'm7-solar',
     section: SECTION,
-    title: 'Run: the wire, and the wind farm it unlocks',
+    title: 'Offer solar — at the demand end',
+    tab: 'Build',
+    where: 'Build → Generators step',
+    concept: [
+      'The solar site is already in the sheet with a capacity of zero and a full-year profile. Making it '
+      + 'extendable turns it from a placeholder into a real option.',
+
+      'Two things make it interesting rather than a fifth variable. Its capacity factor is 0.165 against '
+      + 'wind\'s 0.46, so on levelised cost it loses — 25 per MWh against 21. And it sits at bus_2, the '
+      + 'demand end, so unlike the wind it is not behind the congested line.',
+
+      'Its output shape is also completely different. Solar produces nothing at night and peaks at '
+      + 'midday, with a strong summer maximum; the wind on this year is windiest in winter and at night. '
+      + 'Two zero-carbon, zero-marginal-cost technologies whose output barely overlaps.',
+
+      'That combination — worse on paper, better placed, differently shaped — is exactly the situation a '
+      + 'model is for. No amount of comparing levelised costs will tell you what to do with it.',
+    ],
+    explain: [
+      'Build → Generators, on solar_1. Tick `p_nom_extendable`, set `p_nom_min` to 0, `p_nom_max` to 400, '
+      + '`capital_cost` to 500000 and `lifetime` to 25.',
+
+      'The minimum is 0 rather than 60 because nothing is built yet — this is a greenfield option inside '
+      + 'an otherwise brownfield study, which is the normal situation. Brownfield and greenfield are '
+      + 'properties of each ASSET, not of the study.',
+
+      'The maximum of 400 MW is deliberately generous. Solar needs a lot of land per MW, and giving it '
+      + 'plenty of headroom means whatever the model chooses is an economic answer rather than a '
+      + 'constraint you imposed.',
+
+      'Still do not run. One more option.',
+    ],
+    spotlights: [
+      {
+        selector: '[data-build-step="generators"]',
+        buildStep: 'generators',
+        title: 'A zero-capacity site becomes an option',
+        tab: 'Build',
+        note: 'solar_1 has had a profile and no capacity since you loaded the year. Ticking extendable is '
+          + 'what turns "a site we could develop" into something the optimiser can choose.',
+      },
+    ],
+    entries: [
+      {
+        field: 'generators.p_nom_extendable (solar_1)',
+        label: 'capacity is a decision',
+        value: 'true',
+        why: 'Offers the site to the optimiser. Until now it has contributed nothing at all, because a '
+          + 'generator with p_nom 0 produces nothing however good its profile.',
+      },
+      {
+        field: 'generators.p_nom_min (solar_1)',
+        label: 'nothing built yet',
+        value: '0',
+        unit: 'MW',
+        why: 'Zero, because there is no existing array — this option is greenfield even though the study '
+          + 'as a whole is brownfield. That combination is the normal case, and it is why brownfield is a '
+          + 'property of each asset rather than of the run.',
+      },
+      {
+        field: 'generators.p_nom_max (solar_1)',
+        label: 'siting limit',
+        value: '400',
+        unit: 'MW',
+        why: 'Generous on purpose. Solar needs roughly five times the land per MW that wind does, so a '
+          + 'real limit would come from a land study — leaving headroom here means the answer is economics '
+          + 'rather than a ceiling you chose.',
+      },
+      {
+        field: 'generators.capital_cost (solar_1)',
+        label: 'overnight cost',
+        value: '500000',
+        unit: 'currency per MW',
+        why: 'Under half the wind cost per MW and still dearer per MWh, because the capacity factor is '
+          + 'about a third. This one pair of numbers is the clearest illustration in the course of why '
+          + 'cost per MW is the wrong comparison.',
+      },
+      {
+        field: 'generators.lifetime (solar_1)',
+        label: 'economic life',
+        value: '25',
+        unit: 'years',
+        why: 'Same as wind, so the two are compared on equal financing terms and any difference in the '
+          + 'answer is about resource and location rather than about the annuity.',
+      },
+    ],
+    verify: [
+      'solar_1 is extendable with min 0, max 400, capital_cost 500000, lifetime 25',
+      'You can say why its minimum is 0 while wind\'s is 60',
+      'You can say how its output shape differs from wind on this year',
+      'Your prediction from step 5 still says wind wins on levelised cost',
+    ],
+    pitfalls: [
+      'Giving solar a p_nom_min above 0. It would force capacity the model may not want and quietly '
+      + 'guarantee the answer you were hoping to test.',
+      'Assuming the lower cost per MW makes it the cheaper option. It is dearer per MWh, and step 5 has '
+      + 'the arithmetic.',
+    ],
+  },
+
+  {
+    id: 'm7-battery',
+    section: SECTION,
+    title: 'Offer more battery',
+    tab: 'Build',
+    where: 'Build → Storage step',
+    concept: [
+      'Storage expands exactly like everything else, and the attributes sit on the storage unit rather '
+      + 'than needing a new component.',
+
+      'One subtlety worth knowing: `capital_cost` on a StorageUnit is per MW of POWER, while its energy '
+      + 'capacity comes from `max_hours`. So a 2-hour battery at 150,000 per MW is really 75,000 per MWh, '
+      + 'and doubling `max_hours` without changing the capital cost gives you twice the energy for '
+      + 'nothing. That is a modelling error, not a bargain — a real longer-duration battery costs more '
+      + 'per MW, and if you want to expand power and energy independently you need a Store and two Links, '
+      + 'exactly as module 4 said.',
+
+      'The battery is at bus_2, the demand end, where module 4 showed storage is worth roughly three '
+      + 'times what it is worth behind the constraint. So this is storage in the best place the model '
+      + 'offers, given every chance to prove itself.',
+
+      'Watch what happens to it anyway.',
+    ],
+    explain: [
+      'Build → Storage, on batt_1 in the `storage_units` sheet. Tick `p_nom_extendable`, set `p_nom_min` '
+      + 'to 20 — what exists — `p_nom_max` to 300, `capital_cost` to 150000 and `lifetime` to 15.',
+
+      'Leave `max_hours` at 2 and both efficiencies where they are. You are asking whether to build more '
+      + 'of the same battery, not a different one.',
+
+      'Fifteen years is right for lithium-ion and shorter than everything else here, which raises its '
+      + 'annual charge: CRF(5%, 15 y) is 0.0963 against wind\'s 0.0710. Short-lived assets carry their '
+      + 'capital heavily, and that is part of why storage has to be genuinely useful to be worth building.',
+
+      'Now run it. About a minute.',
+    ],
+    spotlights: [
+      {
+        selector: '[data-build-step="storage"]',
+        buildStep: 'storage',
+        title: 'The same four attributes again',
+        tab: 'Build',
+        note: 'p_nom_extendable, min, max, capital_cost — identical in meaning to the generator and line '
+          + 'versions. Expansion is one mechanism applied uniformly, which is worth noticing.',
+      },
+      {
+        selector: '[data-tour="companion-sheets"]',
+        buildStep: 'storage',
+        title: 'storage_units, not stores',
+        tab: 'Build',
+        note: 'The battery is a StorageUnit; the gas tank on the other sheet is a Store. Module 4 drew the '
+          + 'distinction and module 5 used it — here you want the first one.',
+      },
+    ],
+    entries: [
+      {
+        field: 'storage_units.p_nom_extendable (batt_1)',
+        label: 'capacity is a decision',
+        value: 'true',
+        why: 'Offers more battery at the demand end — the best location the model has, by module 4\'s own '
+          + 'measurement. If storage cannot justify itself here it cannot justify itself anywhere in this '
+          + 'system.',
+      },
+      {
+        field: 'storage_units.p_nom_min (batt_1)',
+        label: 'what already stands',
+        value: '20',
+        unit: 'MW',
+        why: 'The existing 20 MW battery, which the model may add to but not remove. Step 12 relaxes this '
+          + 'to zero and finds something uncomfortable.',
+      },
+      {
+        field: 'storage_units.p_nom_max (batt_1)',
+        label: 'upper bound',
+        value: '300',
+        unit: 'MW',
+        why: 'Generous — batteries need little land and siting is rarely the binding limit. As with solar, '
+          + 'plenty of headroom means the answer is economics rather than a ceiling.',
+      },
+      {
+        field: 'storage_units.capital_cost (batt_1)',
+        label: 'overnight cost, per MW of power',
+        value: '150000',
+        unit: 'currency per MW',
+        why: 'Per MW of POWER, with energy following from max_hours — so at 2 hours this is 75,000 per '
+          + 'MWh. Raising max_hours without raising this cost would give free energy capacity, which is a '
+          + 'modelling error rather than a cheap battery.',
+      },
+      {
+        field: 'storage_units.lifetime (batt_1)',
+        label: 'economic life',
+        value: '15',
+        unit: 'years',
+        why: 'Shorter than everything else here, which matters: CRF(5%, 15 y) is 0.0963 against wind\'s '
+          + '0.0710, so the same capital costs 36% more per year. Short-lived assets have to earn faster.',
+      },
+    ],
+    verify: [
+      'batt_1 is extendable with min 20, max 300, capital_cost 150000, lifetime 15',
+      'max_hours is still 2 and the efficiencies are unchanged',
+      'All four options — wind, solar, line, battery — are now extendable',
+      'You can say why a 2-hour battery at 150,000 per MW is 75,000 per MWh',
+    ],
+    pitfalls: [
+      'Raising max_hours to make the battery look better. Energy capacity would become free and the '
+      + 'result meaningless.',
+      'Using a 25-year lifetime for lithium-ion. It would understate the annual cost by a third and is '
+      + 'not what the technology does.',
+    ],
+  },
+
+  {
+    id: 'm7-run',
+    section: SECTION,
+    title: 'Run: three of four, and 11.9 million saved',
     tab: 'Analytics',
     where: 'Run dialog, then Analytics → Result',
     concept: [
-      'The objective falls from 7,099.59 to 5,995.48. `s_nom_opt` for line_1 comes back at 97.25 MW, so '
-      + 'the model built 37.25 MW of new transmission — and `p_nom_opt` for wind_1 comes back at 90 MW, '
-      + 'so it built 30 MW of new wind as well.',
+      'The objective falls from 29,980,642 to 18,115,684 — a saving of 11,864,958 a year, NET of the '
+      + 'capital because the capital sits in the objective alongside the fuel. Decomposed: the fuel bill '
+      + 'drops from 29,980,642 to 6,750,551, a saving of 23.2 million, bought with 11.4 million a year of '
+      + 'new capital charges.',
 
-      'That is the result worth stopping on. In the previous step, offered on its own, the wind farm was '
-      + 'not worth a single MW. Nothing about the wind farm has changed — same cost, same site, same '
-      + 'profile. What changed is that there is now somewhere for its output to go.',
+      'Two different totals appear on screen and it is worth knowing which is which. The objective is '
+      + 'fuel plus the annuity on what you BUILD, because capital already spent cannot be changed by a '
+      + 'decision and so does not belong in a comparison between decisions. The KPI strip reports '
+      + '25,611,302 instead — fuel plus the annuity on the ENTIRE fleet, existing assets included. That '
+      + 'is the total cost of owning and running the system: the right number for a tariff, the wrong one '
+      + 'for choosing what to build next.',
 
-      'So the wire did not compete with the wind farm; it created it. Generation and transmission are '
-      + 'complements here, and evaluating either alone gets the wrong answer — which is the case for '
-      + 'co-optimising them in one model rather than running two studies.',
+      'What got built: wind from 60 to 150.15 MW, solar from 0 to 24.12 MW, the line from 60 to 141.04 '
+      + 'MW. What did not: the battery, which sits at 20 MW — its floor. Three of four.',
 
-      'The 1,104.11 saving is NET of both capital costs, since the capital charges are in the objective '
-      + 'alongside the fuel. And note where the model stopped: not at the 300 MW corridor limit and not '
-      + 'where congestion vanishes, but where the marginal MW of each asset costs exactly what it saves. '
-      + 'That is what an optimum looks like, and it is why "eliminate congestion" is not a sensible '
-      + 'planning objective.',
+      'And the oil peaker stops running entirely. It burned 7.82 GWh in the baseline year and burns '
+      + 'nothing now. Nobody retired it and nothing forbade it; enough cheap capacity arrived, in the '
+      + 'right places, that it was never the cheapest way to serve an hour.',
+
+      'The result that should surprise you is solar. Your step-5 arithmetic said it loses to wind on '
+      + 'levelised cost — 25 per MWh against 21 — and the model built it anyway. Step 11 is why.',
     ],
     explain: [
-      'Run it. Reconcile the objective against 5,995.48, then find `s_nom_opt` on the line and '
-      + '`p_nom_opt` on wind_1.',
+      'Validate, then run. It takes about a minute; the planning summary should confirm 8,760 snapshots '
+      + 'at 1h before you commit to the wait.',
 
-      'Compare against the previous step deliberately: same wind farm, same capital cost, same discount '
-      + 'rate, and it went from zero MW built to thirty. The only difference is that the line was allowed '
-      + 'to grow at the same time.',
+      'Read the cost breakdown rather than only the headline. Fuel 6,750,551 and capital 18,860,751 sum '
+      + 'to the 25,611,302 the KPI shows. Subtract the annuity on capacity that already existed and you '
+      + 'are back to the 18,115,684 the solver minimised. Both are correct; they answer different '
+      + 'questions, and confusing them is how a cost saving gets reported that nobody can find in a budget.',
 
-      'Then compare against module 3, which measured the 60 MW constraint at 420 over three hours for a '
-      + '40 MW uprate. The model has now chosen its own uprate and the benefit is far larger, because the '
-      + 'system around it has changed — a battery, a gas store, run-of-river hydro, and now a bigger wind '
-      + 'farm that only exists because the wire does.',
+      'Then find the built capacities — the expansion card reports each asset\'s starting capacity, its '
+      + 'optimal capacity and the delta, which is the most direct answer to "what should we build" this '
+      + 'course has produced.',
 
-      'This is the transmission business case module 3 promised, done properly: costs on both sides, one '
-      + 'objective, and capacities the model chose rather than ones you guessed.',
+      'Check the oil unit too. Zero generation across 8,760 hours is a strong statement about the fleet, '
+      + 'and it is the kind of result that only appears once capacity can move.',
+
+      'Do not read the battery result as "storage is uneconomic". Read it as "more storage, at these '
+      + 'costs, in a system that is about to gain 90 MW of wind and 24 MW of solar and a much bigger '
+      + 'wire, is not the next thing to build". Those are very different claims and step 12 shows why the '
+      + 'distinction matters.',
     ],
     spotlights: [
       {
         selector: '[data-subtab="Result"]',
-        title: '5,995.48',
+        title: 'Two totals, both correct',
         tab: 'Analytics',
         runDialog: 'closed',
-        note: '1,104.11 better than module 5, NET of both capital costs. The first genuinely '
-          + 'investment-aware answer in the course, and the first that builds two things at once.',
+        note: 'The KPI reports 25,611,302 — fuel plus the annuity on the whole fleet. The solver '
+          + 'minimised 18,115,684 — fuel plus the annuity on what it BUILDS, because sunk capital cannot '
+          + 'be changed by a decision. Know which one you are quoting.',
+      },
+      {
+        selector: '[data-card="capacity-expansion"]',
+        title: 'What to build',
+        tab: 'Analytics',
+        note: 'Starting capacity, optimal capacity and the delta for every extendable asset. Wind +90, '
+          + 'solar +24, line +81, battery +0 — the most direct answer to the question this whole course '
+          + 'has been building towards.',
+      },
+      {
+        selector: '[data-card="kpi-strip"]',
+        title: 'And no oil',
+        tab: 'Analytics',
+        note: '7.82 GWh in the baseline year, zero now. A peaking unit that never runs across 8,760 hours '
+          + 'is worth noticing — module 8 will ask whether it should still be kept.',
       },
       {
         selector: '[data-card="statistics"]',
-        title: '97.25 MW of wire, 90 MW of wind',
+        title: 'The new fleet',
         tab: 'Analytics',
-        note: '37.25 MW of new transmission and 30 MW of new wind. The wind farm was worth nothing one '
-          + 'step ago and is worth building now — the wire is what changed, not the turbine.',
-      },
-      {
-        selector: '[data-card="price-formation"]',
-        title: 'Prices, once the constraint eases',
-        tab: 'Analytics',
-        note: 'The congested hour no longer clears at a generator\'s marginal cost. Numbers with no '
-          + 'round-figure explanation are what prices look like when a partially-relieved constraint is '
-          + 'setting them, which is most of the time in a real system.',
+        note: 'Per-carrier capacities and generation after expansion. Compare the renewable share against '
+          + 'the baseline: nothing was mandated, and it moved a long way on cost alone.',
       },
     ],
     run: {
-      label: 'Run dialog → Run model',
+      label: 'Run dialog → Validate, then Run model',
       detail: [
-        'Two capacity variables now — the wind farm and the line — plus the dispatch. Still instant on three snapshots.',
+        'Four capacity variables and 8,760 snapshots of dispatch. About a minute — the cost of an honest investment question.',
+        'If the run is refused for a missing discount rate, step 4 is where that is set.',
       ],
-      expect: 'An objective of 5,995.48, with s_nom_opt 97.25 MW on line_1 and p_nom_opt 90 MW on wind_1.',
+      expect: 'An objective of 18,115,684, with wind at 150.15 MW, solar at 24.12, the line at 141.04, and the battery unchanged at 20.',
     },
     verify: [
-      'The objective is 5,995.48',
-      '`s_nom_opt` for line_1 is 97.25 MW and `p_nom_opt` for wind_1 is 90 MW',
-      'You can say why the wind farm is worth building now and was not one step ago',
-      'You can say why the saving is net rather than gross',
-      'You can say why the model did not eliminate congestion entirely',
+      'The cost breakdown reads fuel 6,750,551 and capital 18,860,751',
+      'You can say which total the solver minimised and why it differs from the KPI',
+      'wind_1 is about 150 MW, solar_1 about 24, line_1 about 141, and batt_1 unchanged at 20',
+      'oil_1 generates nothing across the whole year',
+      'You can say why the 11.9m saving is net rather than gross',
+      'You noticed that solar was built despite losing on levelised cost',
     ],
     pitfalls: [
-      'Reading 1,104.11 as the value of transmission. It is the value of this uprate AND the wind farm it '
-      + 'enabled, on this system, over three hours, at this discount rate — and it depends on the battery '
-      + 'and the gas store being there too.',
-      'Expecting an optimum to remove the constraint. An optimum leaves congestion in exactly the hours '
-      + 'where relieving it would cost more than it saves.',
+      'Reading the battery result as a verdict on storage. It is a verdict on MORE storage, at these '
+      + 'costs, in this system, next — which is a much narrower claim.',
+      'Quoting 11.9m without its assumptions. It depends on the discount rate, the synthetic profiles, '
+      + 'the siting limits and the fuel price, and step 14 is about saying so.',
     ],
   },
 
   {
-    id: 'm7-complements',
+    id: 'm7-why-solar',
     section: SECTION,
-    title: 'Change one assumption, lose the wind farm',
+    title: 'Why solar beat its own levelised cost',
     tab: 'Analytics',
-    where: 'Settings → Project defaults, then run again',
+    where: 'Analytics → Result',
     concept: [
-      'Everything about the model is now settled: the technologies, their costs, their lifetimes, the '
-      + 'demand, the network. One number is not a fact about any of them — the discount rate — and this '
-      + 'step changes it from 0.05 to 0.07 and runs again.',
+      'Solar costs about 25 per MWh on this year and wind about 21. The model built 90 MW of wind and '
+      + '24 MW of solar. Both facts are true and the second is not a contradiction of the first.',
 
-      'The wind farm disappears. `p_nom_opt` goes back to 60 MW, its floor, and the line settles at 87.55 '
-      + 'instead of 97.25. The objective is 6,187.27.',
+      'The first reason is location. The wind is at bus_1, behind a line that has been the binding '
+      + 'constraint since module 3. Every extra MW of wind needs wire to be useful, and the model is '
+      + 'paying for 81 MW of new wire alongside 90 MW of new wind. The solar is at bus_2, in front of the '
+      + 'constraint, so its cost is its whole cost.',
 
-      'Nothing physical changed. No technology got worse, no resource got scarcer, no demand moved. A '
-      + 'financing assumption moved two percentage points and a 30 MW generation investment stopped being '
-      + 'worth making.',
+      'The second is timing. Wind on this year is windiest in winter and at night; solar peaks at midday '
+      + 'in summer. Adding wind to a system that already has wind produces more energy in hours that are '
+      + 'already cheap — and increasingly, hours where it is curtailed. The first MW of a technology you '
+      + 'do not yet have is worth more than the hundredth MW of one you do. That is diminishing marginal '
+      + 'value, and no levelised cost can express it because LCOE prices a technology in isolation.',
 
-      'The reason is that capital-heavy, fuel-free technologies are the ones a discount rate bites '
-      + 'hardest. Wind is entirely capital; its whole case rests on spreading that capital over 25 years, '
-      + 'and a higher rate makes those distant years count for less. Gas, which is mostly fuel, barely '
-      + 'notices. That asymmetry is why the discount rate is not a neutral technical parameter but an '
-      + 'input that systematically favours one kind of system over another.',
-
-      'Note too what did NOT flip. The line stayed, and stayed large. Transmission survives a higher rate '
-      + 'better than generation does here, partly because its 40-year life spreads the capital further — '
-      + 'so a study run at the wrong rate does not just get the quantities wrong, it gets the RANKING '
-      + 'wrong, which is worse.',
+      'This is the single most important limitation of levelised cost, and it is why capacity-expansion '
+      + 'models exist at all. LCOE answers "what does a MWh from this technology cost". A system model '
+      + 'answers "what is a MWh from this technology, in this place, at these hours, given everything '
+      + 'else, actually worth". Only the second is a basis for a decision.',
     ],
     explain: [
-      'Settings → Project defaults → Discount rate. Change 0.05 to 0.07 and run again. One number.',
+      'Nothing to run. Read the answer you have.',
 
-      'Read the objective — 6,187.27 — and then the two capacities: line 87.55, wind back to 60. Compare '
-      + 'against the previous run side by side in Analytics → Comparison rather than from memory; both '
-      + 'runs are in History and this is exactly the comparison the feature exists for.',
+      'Look at the dispatch by carrier across the year, and at the curtailment chart. Wind curtailment '
+      + 'rises with wind capacity — the model built up to the point where the next MW would be spilled '
+      + 'too often to pay for itself, and stopped there.',
 
-      'Then think about what you would report. "The model builds 30 MW of wind" and "the model builds no '
-      + 'wind" are both true statements about this system, and which one you publish depends entirely on '
-      + 'a number you could reasonably have picked either way. A result that flips inside a plausible '
-      + 'range of an assumption is not a finding — it is a sensitivity, and it has to be reported as one.',
+      'Then look at when solar generates against when wind does not. The two barely overlap, which is '
+      + 'exactly why a system wants some of each rather than more of the cheaper one. Complementarity is '
+      + 'worth real money and it is invisible to any per-technology cost comparison.',
 
-      'This is the honest answer to "what should we build?" on this model: it depends, here is what it '
-      + 'depends on, and here is how much. Module 9 is about turning that into something a decision-maker '
-      + 'can act on.',
-
-      'Set the rate back to 0.05 before you finish, so the model matches the checkpoint module 7 starts '
-      + 'from.',
+      'The practical lesson: never rank generation options by levelised cost and build the top of the '
+      + 'list. The right question is always marginal — what is the next MW worth, given what is already '
+      + 'there — and the answer changes as you build.',
     ],
     spotlights: [
       {
-        selector: '[data-subtab="Result"]',
-        title: '6,187.27, and no wind farm',
+        selector: '[data-card="chart"][data-card-metric="curtailment"]',
+        title: 'Where wind stopped being worth it',
         tab: 'Analytics',
-        runDialog: 'closed',
-        note: 'Two percentage points on the discount rate removed a 30 MW generation investment. Nothing '
-          + 'physical changed — which is why this number belongs in the summary of any expansion study, '
-          + 'not in an appendix.',
+        note: 'Curtailment rises as wind capacity does. The model built up to the point where the next MW '
+          + 'would be spilled often enough not to pay, then stopped — which is what diminishing marginal '
+          + 'value looks like in a result.',
       },
       {
         selector: '[data-card="statistics"]',
-        title: 'Wind back to its floor',
+        title: 'Two resources, barely overlapping',
         tab: 'Analytics',
-        note: 'p_nom_opt 60 — the minimum it was allowed. The line meanwhile only fell from 97.25 to '
-          + '87.55, so the network investment survived what the generation investment did not.',
+        note: 'Compare the capacity factors and the generation by carrier. Solar delivers a third as much '
+          + 'per MW as wind and delivers it in hours wind does not — which is worth more than the 4 per '
+          + 'MWh between their levelised costs.',
       },
+    ],
+    verify: [
+      'You can give two reasons solar was built despite a higher levelised cost',
+      'You can explain diminishing marginal value in terms of curtailment',
+      'You can say what LCOE prices and what it cannot',
+      'You can say why the first MW of a new technology is worth more than the hundredth of an existing one',
+    ],
+    pitfalls: [
+      'Concluding solar is better than wind. The model built four times as much wind — it built SOME '
+      + 'solar because a mix is worth more than either alone.',
+      'Using levelised cost to rank options in a system study. It is a useful screening number and it '
+      + 'cannot see location, timing or what is already built.',
+    ],
+  },
+
+  {
+    id: 'm7-greenfield',
+    section: SECTION,
+    title: 'Greenfield — what brownfield was hiding',
+    tab: 'Analytics',
+    where: 'Build → the three minima, then run again',
+    concept: [
+      'Every floor you set in steps 6 to 8 said "this already exists and cannot be unbuilt". That is the '
+      + 'right assumption for a decision about what to do NEXT. It is the wrong one for asking whether '
+      + 'the system you have is the system you would choose.',
+
+      'Set every minimum to zero and re-run and the answer barely moves — 18,045,470 against 18,115,684, '
+      + 'and wind, solar and the line land within a MW of where they were. The existing wind farm and the '
+      + 'existing wire are things a fresh build would have chosen anyway.',
+
+      'The battery is not. It falls from 20 MW to 4.00 MW. A greenfield system would put in a fifth of '
+      + 'the storage that actually stands there.',
+
+      'That is a stranded asset, and no brownfield run could have shown it. With the floor at 20, "build '
+      + 'no more" and "this is the right amount" produce exactly the same output — the model cannot '
+      + 'distinguish an asset that is correctly sized from one that is oversized, because it is not '
+      + 'allowed to consider removing it.',
+    ],
+    explain: [
+      'Set three cells to zero: `p_nom_min` on wind_1, `s_nom_min` on line_1 and `p_nom_min` on batt_1. '
+      + 'Solar is already 0. Then run — about a minute and a half, since the model has more freedom.',
+
+      'Read the four capacities against the brownfield run. Three barely move; the battery collapses.',
+
+      'Then be careful about what that means. It is NOT a recommendation to remove 16 MW of battery — the '
+      + 'capital is spent and removing it recovers nothing, so the brownfield answer of "build no more" '
+      + 'remains the right decision. What the greenfield run tells you is that the money spent on the '
+      + 'last 16 MW is not earning, which is a lesson for the NEXT procurement rather than this one.',
+
+      'Set the three minima back before you finish. The module ends brownfield, and the checkpoint '
+      + 'assumes it.',
+    ],
+    spotlights: [
       {
         selector: '[data-subtab="Comparison"]',
-        title: 'The two runs, side by side',
+        title: 'Brownfield against greenfield',
         tab: 'Analytics',
         runDialog: 'closed',
-        note: 'Both are in History. Comparing them here is the point of the step — a result that moves '
-          + 'this much across a plausible range of one input is a sensitivity, and reporting it as a '
-          + 'single answer would be misleading.',
+        note: 'Both runs are in History. Three capacities agree within a MW and one does not — and the one '
+          + 'that does not is the finding.',
+      },
+      {
+        selector: '[data-card="capacity-expansion"]',
+        title: 'The battery at 4 MW',
+        tab: 'Analytics',
+        note: 'A fifth of what stands. The existing 20 MW is not wrong to keep — the capital is sunk — but '
+          + 'it is not what anyone would build today, and only the greenfield run can say so.',
+      },
+    ],
+    entries: [
+      {
+        field: 'generators.p_nom_min (wind_1, greenfield)',
+        label: 'pretend nothing is built',
+        value: '0',
+        unit: 'MW',
+        why: 'Lets the model choose less wind than exists. It does not — it lands within a tenth of a MW '
+          + 'of the brownfield answer, which is a strong signal that the existing farm is correctly sized.',
+      },
+      {
+        field: 'lines.s_nom_min (line_1, greenfield)',
+        label: 'pretend the wire is not there',
+        value: '0',
+        unit: 'MW',
+        why: 'Same test for transmission, and the same result: 141.89 against 141.04. The corridor is '
+          + 'about the right size for the system that is being built around it.',
+      },
+      {
+        field: 'storage_units.p_nom_min (batt_1, greenfield)',
+        label: 'pretend the battery is not there',
+        value: '0',
+        unit: 'MW',
+        why: 'The one that moves. The model chooses 4.00 MW where 20 stands — so 16 MW of installed '
+          + 'storage is not earning its keep, which the brownfield run reported identically to a battery '
+          + 'that was exactly right.',
+      },
+      {
+        field: 'the three minima (restore)',
+        label: 'back to brownfield',
+        value: '60, 60 and 20',
+        why: 'Returns the study to the question that can actually be acted on — what to build next, given '
+          + 'what exists. The greenfield run is a diagnostic, not a plan.',
+      },
+    ],
+    verify: [
+      'The greenfield objective is 18,045,470',
+      'Wind, solar and the line land within about a MW of the brownfield answer',
+      'The battery falls to 4.00 MW',
+      'You can say why this is not a recommendation to remove any battery',
+      'The three minima are back to 60, 60 and 20',
+    ],
+    pitfalls: [
+      'Reading greenfield as a plan. Sunk capital is sunk; the actionable question is always brownfield, '
+      + 'and greenfield is how you find out what your brownfield answer cannot tell you.',
+      'Running only brownfield and concluding the fleet is well sized. "Build no more" and "correctly '
+      + 'sized" are indistinguishable in a brownfield result.',
+    ],
+  },
+
+  {
+    id: 'm7-discount-sensitivity',
+    section: SECTION,
+    title: 'Two points on the discount rate changes what you build',
+    tab: 'Analytics',
+    where: 'Settings → Project defaults, then run again',
+    concept: [
+      'Everything physical is now settled — the technologies, their costs, their lifetimes, the demand, '
+      + 'the network. One number is not a fact about any of them, and this step moves it from 0.05 to '
+      + '0.07.',
+
+      'The objective rises from 18,115,684 to 20,419,029, which is expected: capital is dearer, so the '
+      + 'system costs more. What is not obvious is the mix. Wind falls from 150.15 to 120.17 MW — and '
+      + 'solar RISES from 24.12 to 41.67.',
+
+      'Less wind and more solar, from a change that made all capital more expensive. The reason is that '
+      + 'wind on this system comes bundled with transmission: every extra MW behind the constraint needs '
+      + 'wire to be useful, so raising the cost of capital raises the cost of wind-plus-wire more than it '
+      + 'raises the cost of solar, which needs no wire at all.',
+
+      'So the discount rate does not simply scale ambition down. It reweights the whole portfolio, and it '
+      + 'does so through second-order effects that no per-technology cost comparison could predict. Two '
+      + 'studies disagreeing about the future generation mix are, very often, disagreeing about nothing '
+      + 'except this number.',
+    ],
+    explain: [
+      'Settings → Project defaults → Discount rate. Change 0.05 to 0.07 and run.',
+
+      'Read the four capacities and compare against the 5% run in Analytics → Comparison. Both are in '
+      + 'History; do not do this from memory, because the interesting part is a 30 MW fall alongside a '
+      + '17 MW rise and that is exactly the sort of thing memory smooths over.',
+
+      'Then think about reporting. "The model builds 150 MW of wind and 24 of solar" and "the model '
+      + 'builds 120 of wind and 42 of solar" are both true statements about this system, and which one '
+      + 'you publish depends on a number you could defend either way. A result that moves this much '
+      + 'inside a plausible range is a sensitivity, and presenting it as an answer is misleading even if '
+      + 'every figure is correct.',
+
+      'Set the rate back to 0.05 before finishing.',
+    ],
+    spotlights: [
+      {
+        selector: '[data-subtab="Comparison"]',
+        title: '5% against 7%',
+        tab: 'Analytics',
+        runDialog: 'closed',
+        note: 'Wind down 30 MW, solar up 17 MW, from one number that describes financing rather than '
+          + 'physics. Comparing the two runs properly is the point — this is not a difference memory '
+          + 'reconstructs accurately.',
+      },
+      {
+        selector: '[data-card="capacity-expansion"]',
+        title: 'The mix, reweighted',
+        tab: 'Analytics',
+        note: 'Not a uniform scaling down. Wind falls and solar rises, because wind on this system comes '
+          + 'bundled with the transmission it needs and solar does not.',
       },
     ],
     entries: [
       {
         field: 'Settings → Project defaults → Discount rate (the experiment)',
         value: '0.07',
-        why: 'Two percentage points higher — well inside the range reasonable people choose. It raises '
-          + 'the annual cost of every capital asset, and it does so hardest for the ones whose case rests '
-          + 'entirely on capital: the 30 MW wind investment stops paying while the transmission, with its '
-          + '40-year life, survives.',
+        why: 'Two points higher, well inside the range reasonable people choose. It raises the annual cost '
+          + 'of all capital — and because wind here needs wire to be useful while solar does not, it '
+          + 'raises the effective cost of wind by more, shifting 30 MW of the answer from one technology '
+          + 'to another.',
       },
       {
         field: 'Settings → Project defaults → Discount rate (restore)',
         value: '0.05',
-        why: 'Back to the app default, which is the state the checkpoint and module 7 assume. Leaving it '
-          + 'at 0.07 would quietly change every figure in the next module.',
+        why: 'Back to the app default and the state the checkpoint assumes. The discount rate is not '
+          + 'stored in the model — it lives in your settings — so leaving it at 0.07 would silently change '
+          + 'every figure in module 8.',
       },
     ],
-    run: {
-      label: 'Run dialog → Run model, twice',
-      detail: [
-        'Once at 0.07 to see the decision reverse, then once more at 0.05 to restore the model.',
-        'Both solve instantly and both land in History, so they can be compared properly.',
-      ],
-      expect: 'An objective of 6,187.27 with wind back at 60 MW, then 5,995.48 again once the rate is restored.',
-    },
     verify: [
-      'At 0.07 the objective is 6,187.27, wind_1 is 60 MW and line_1 is 87.55 MW',
-      'You can say why a higher discount rate hurts wind more than gas',
-      'You can say why it hurt the wind farm more than the transmission line',
-      'You can explain why this result should be reported as a sensitivity rather than an answer',
-      'The discount rate is back to 0.05 before you move on',
+      'At 7% the objective is 20,419,029',
+      'Wind is 120.17 MW and solar is 41.67 MW',
+      'You can explain why solar rose when all capital got more expensive',
+      'You can say why this belongs in a report as a sensitivity rather than an answer',
+      'The discount rate is back to 0.05',
     ],
     pitfalls: [
-      'Picking the rate that gives the answer you wanted. It is the easiest number in the model to '
-      + 'justify either way, which is exactly why it needs to be chosen and stated before the runs, not '
-      + 'after.',
-      'Reporting the 0.05 result alone. A conclusion that reverses within a plausible range of one '
-      + 'assumption has to be presented with that range attached.',
-      'Forgetting to restore 0.05. Module 7 assumes it, and the discount rate is not stored in the '
-      + 'checkpoint — it lives in your settings.',
+      'Choosing the rate that gives the answer you wanted. It is the easiest number in the model to '
+      + 'justify either way, which is why it must be chosen and stated before the runs.',
+      'Assuming a higher rate just means less of everything. It reweights the mix, and the reweighting is '
+      + 'often the more important result.',
     ],
   },
 
   {
     id: 'm7-what-changed',
     section: SECTION,
-    title: 'What module 6 settled, and what it cannot answer',
+    title: 'What module 7 settled, and what it cannot answer',
     tab: 'Analytics',
     where: 'Analytics, then Model → Export project',
     concept: [
-      'Four things are now yours.',
+      'Five things are now yours.',
 
-      'Capacity can be a decision. Four attributes — extendable, min, max, capital cost — turn any '
-      + 'component into an investment question, and the same mechanism works for generators, lines, '
-      + 'links and storage alike.',
+      'Capacity can be a decision. Four attributes — extendable, min, max, capital cost, plus a lifetime '
+      + '— turn any component into an investment question, and the same mechanism works identically on '
+      + 'generators, lines, links and storage.',
 
-      'Capital costs must be annuitised and matched to the modelled window. Ragnarok annuitises for you '
-      + 'from the overnight cost, the lifetime and the discount rate; matching the window is still yours '
-      + 'to do, and getting it wrong produces a confident "build nothing" that is really a unit error.',
+      'Capital costs must be annuitised and matched to the modelled window. Ragnarok annuitises the '
+      + 'overnight cost using the lifetime and the discount rate; matching the window is why this module '
+      + 'needs a year, and getting it wrong produces a confident "build nothing" that is a unit error.',
 
-      'The discount rate is the most consequential assumption in an expansion study. Two percentage '
-      + 'points removed a 30 MW wind investment while leaving the transmission untouched — so it changes '
-      + 'not just how much gets built but WHAT, and a study that does not state its rate has not stated '
-      + 'its most important input.',
+      'Levelised cost is a screening tool, not a decision rule. Solar lost on LCOE and got built, because '
+      + 'LCOE cannot see location, timing, or what is already there. The right question is always what '
+      + 'the NEXT MW is worth given everything else.',
 
-      'And investments interact. Offered alone the wind farm was worth nothing; offered alongside the '
-      + 'line it was worth 30 MW. The wire did not compete with it, the wire created it — which is the '
-      + 'case for co-optimising generation and network rather than studying them separately, and the '
-      + 'third time this course has found that assets behind a constraint are worth a fraction of the '
-      + 'same assets in front of it.',
+      'Brownfield answers what to do next; greenfield tells you what your brownfield answer is hiding. '
+      + 'Running only the first would have reported a correctly-sized battery and a 16 MW stranded asset '
+      + 'identically.',
+
+      'And the discount rate reweights the portfolio rather than scaling it. Two points moved 30 MW from '
+      + 'one technology to another, through a mechanism no per-technology comparison could predict.',
     ],
     explain: [
-      'Three limits, and the first is severe enough to change how you should read everything above.',
+      'Three limits, and they are the remaining course.',
 
-      'Three hours is not a basis for an investment decision. You have been scaling an annual capital '
-      + 'cost onto a three-hour window, which is arithmetically defensible and physically absurd: these '
-      + 'three hours are not a representative sample of a year, they were chosen to teach dispatch. A '
-      + 'real expansion study needs a full year or a carefully chosen set of representative periods, and '
-      + 'that is module 7 — which is now the most important remaining module rather than a technicality.',
+      'There is one investment period. Everything is built at once, at one set of prices, with one '
+      + 'demand year. A real plan builds over decades against falling technology costs and rising demand, '
+      + 'and PyPSA supports multi-period pathways that Ragnarok exposes — but the ideas need the time '
+      + 'foundation module 6 laid and the policy layer module 8 adds.',
 
-      'There is one investment period. Everything is built at once, at the same prices, and there is no '
-      + 'sense in which the model can build wind now and a battery in ten years. PyPSA supports '
-      + 'multi-period pathways and Ragnarok exposes them, but the ideas belong after module 7 has fixed '
-      + 'the time axis.',
+      'There is no policy. The carbon numbers you typed in modules 1 and 2 have sat unused for seven '
+      + 'modules; the gas carrier carries 0.2 tCO2 per MWh and it has never once changed an answer. A '
+      + 'carbon price would change every decision here — it raises the cost of the gas that new wind and '
+      + 'solar displace, so it makes both worth more. Module 8 turns them on, and this is the model it '
+      + 'turns them on for.',
 
-      'And there is still no policy. A carbon price would change every one of these decisions — it raises '
-      + 'the cost of the gas the wire lets you avoid, which makes both the wire and the wind farm worth '
-      + 'more. Module 8 turns the carbon numbers on, and it will be the second time an expansion answer '
-      + 'moves for a reason that is not physical. The first was the discount rate.',
+      'And there is one future. One demand year, one weather year, one fuel price, one set of capital '
+      + 'costs — and a single optimal answer that is optimal only for that combination. The honest '
+      + 'version of everything in this module is a range, and module 9 is about producing one.',
 
       'Export the project before you go.',
     ],
     spotlights: [
       {
         selector: '[data-card="kpi-strip"]',
-        title: 'Six modules on',
+        title: 'Seven modules on',
         tab: 'Analytics',
-        note: '5,995.48 against module 1\'s 12,000, for exactly the same 290 MWh of demand. Nothing was '
-          + 'asked of the consumer at any point; every saving came from describing the system better and '
-          + 'letting the optimiser use the description.',
+        note: 'The fuel bill fell from 30.0m to 6.75m, bought with 11.4m a year of new capital — a net '
+          + '11.9m saving for the same demand, with no policy and no mandate. Pure cost minimisation, '
+          + 'given a better description of the system and the freedom to change it.',
+      },
+      {
+        selector: '[data-card="capacity-expansion"]',
+        title: 'The answer, such as it is',
+        tab: 'Analytics',
+        note: '+90 MW wind, +24 solar, +81 line, +0 battery. Defensible as a direction and not as a plan '
+          + '— one weather year, one demand year, one discount rate, synthetic profiles.',
       },
       {
         selector: '.topbar-file',
         title: 'Export before you leave',
-        note: 'Model → Export project. Module 7 ships this model as a checkpoint, and it is about to do '
-          + 'something drastic to the time axis — so a copy of the three-hour version is worth keeping.',
+        note: 'Model → Export project. Module 8 applies policy to this model, and it is the first one in '
+          + 'the course whose answer anyone might act on.',
       },
     ],
     verify: [
-      'You can name the four attributes that make a component extendable',
+      'You can name the attributes that make a component extendable, and say which one encodes brownfield',
       'You can say what Ragnarok does with `capital_cost` and what it leaves to you',
-      'You can explain the window-scaling trap to someone about to fall into it',
-      'You can say why the wind farm was worth nothing alone and 30 MW alongside the line',
-      'You can say why this model is not a basis for a real investment decision',
-      'The discount rate is 0.05, the model reads 5,995.48, and you have exported it',
+      'You can explain why levelised cost got solar wrong',
+      'You can say what a greenfield run tells you that a brownfield run cannot',
+      'You can list three assumptions this answer depends on that were never tested',
+      'The model reads 18,115,684 at 5%, brownfield, and you have exported it',
     ],
     pitfalls: [
-      'Quoting any number from this module as an investment result. The time horizon makes them '
-      + 'illustrative, and the honest version of this study starts in module 7.',
-      'Assuming the window scaling generalises. It works because these three hours are treated as a '
-      + 'literal 3/8760 of the year; the moment snapshots are weighted to represent more time than they '
-      + 'occupy, the arithmetic changes and the weights do the work instead.',
+      'Quoting a capacity from this module as a recommendation. It is one scenario on synthetic profiles '
+      + 'with one discount rate — a direction of travel, not a plan.',
+      'Assuming more modelling would remove the uncertainty. It would not: the range in module 9 is the '
+      + 'honest output, and a single number was never available.',
     ],
   },
 ];

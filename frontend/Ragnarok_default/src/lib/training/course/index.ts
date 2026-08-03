@@ -46,6 +46,7 @@ const STEPS = [
   ...MODULE_4_STORAGE,
   ...MODULE_5_SECTOR_COUPLING,
   ...MODULE_6_TIME,
+  ...MODULE_7_INVESTMENT,
 ];
 
 /**
@@ -107,6 +108,15 @@ const MODULES: CourseModule[] = [
     summary: 'Replace three snapshots with a real day and find out how much of what you concluded was '
       + 'about the axis: the pumped hydro written off in module 5 turns out to be worth twenty-three '
       + 'times more. Then resolution, representative periods and rolling horizon, and what each breaks.',
+  },
+  {
+    section: '7 · Investment and capacity expansion',
+    title: 'Investment and capacity expansion',
+    level: 'Advanced',
+    minutes: 150,
+    summary: 'Capacity becomes a decision on a full year. Four assets compete, three get built, and '
+      + 'solar wins a place despite losing on levelised cost. Ends by showing what a brownfield run '
+      + 'hides and how two points on the discount rate reweight the whole portfolio.',
   },
 ];
 
