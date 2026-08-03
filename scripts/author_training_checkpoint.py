@@ -610,6 +610,78 @@ TRAINING_M7: dict = {
     "componentCounts": _M7_COUNTS,
 }
 
+# ── Module 10 — the ring "10 · Meshed networks and power flow" studies ───────
+# Deliberately NOT a continuation of module 7's year. Module 10 teaches a
+# mechanism — how power divides between parallel paths — and a mechanism is only
+# visible in a model small enough to compute by hand. Three 380 kV buses in a
+# ring, equal reactance on every line, cheap coal at bus_1, dear gas at bus_2,
+# all the demand at bus_3.
+#
+# Uncongested, it solves to 5,400 and the 90 MW divides 60 / 30: two thirds down
+# the direct line_13 and one third the long way round, because the indirect path
+# has twice the reactance. Cap line_13 at 50 MW and the answer becomes 8,100 with
+# nodal prices of 20 / 50 / 80 — a price at bus_3 above every generator in the
+# model. Both figures are pinned in ``backend/tests/test_training_checkpoints.py``.
+#
+# Impedances are per-km-realistic for a 380 kV overhead circuit (r ≈ 0.03 Ω/km,
+# x ≈ 0.3 Ω/km over 100 km) rather than the token 0.1 the earlier modules carry:
+# module 10 runs an AC power flow, and only real impedances produce a voltage
+# drop and a loss figure worth reading.
+_M10_LINE_X = 30.0
+_M10_LINE_R = 3.0
+
+TRAINING_M10: dict = {
+    "filename": "Training module 10 — meshed network",
+    "example": {
+        "label": "Training: module 10 ring network (start of module)",
+        "description": (
+            "Three 380 kV buses in a ring with equal reactance on every line — the network the \"Power "
+            "market modelling\" course uses in module 10 to show how power divides between parallel "
+            "paths. Cheap coal at bus_1, dear gas at bus_2, 90 MW of demand at bus_3. Solves to 5,400 "
+            "with 60 MW on the direct line and 30 MW the long way round."
+        ),
+        "order": 100,
+    },
+    "sheets": [
+        ("snapshots", "static", [{"snapshot": s} for s in SNAPSHOTS]),
+        ("network", "static", [{"name": "ring-network"}]),
+        ("carriers", "static", [
+            {"name": "AC", "co2_emissions": 0.0},
+            {"name": "gas", "co2_emissions": 0.2},
+            {"name": "coal", "co2_emissions": 0.34},
+        ]),
+        ("buses", "static", [
+            {"name": "bus_1", "v_nom": 380.0, "x": 127.0, "y": 37.5, "carrier": "AC"},
+            {"name": "bus_2", "v_nom": 380.0, "x": 129.0, "y": 35.2, "carrier": "AC"},
+            {"name": "bus_3", "v_nom": 380.0, "x": 126.8, "y": 35.1, "carrier": "AC"},
+        ]),
+        ("generators", "static", [
+            {"name": "coal_1", "bus": "bus_1", "carrier": "coal",
+             "p_nom": 200.0, "marginal_cost": 20.0, "efficiency": 0.4},
+            {"name": "gas_2", "bus": "bus_2", "carrier": "gas",
+             "p_nom": 100.0, "marginal_cost": 50.0, "efficiency": 0.5},
+        ]),
+        ("loads", "static", [
+            {"name": "load_3", "bus": "bus_3", "carrier": "AC", "p_set": 90.0},
+        ]),
+        # Every line the same reactance, so the split is set by how many lines a
+        # path has rather than by anything else — which is what makes the two
+        # thirds / one third arithmetic doable in your head.
+        ("lines", "static", [
+            {"name": "line_12", "bus0": "bus_1", "bus1": "bus_2",
+             "s_nom": 200.0, "x": _M10_LINE_X, "r": _M10_LINE_R, "length": 100.0},
+            {"name": "line_23", "bus0": "bus_2", "bus1": "bus_3",
+             "s_nom": 200.0, "x": _M10_LINE_X, "r": _M10_LINE_R, "length": 100.0},
+            {"name": "line_13", "bus0": "bus_1", "bus1": "bus_3",
+             "s_nom": 200.0, "x": _M10_LINE_X, "r": _M10_LINE_R, "length": 100.0},
+        ]),
+        ("loads-p_set", "series", [
+            {"snapshot": s, "load_3": 90.0} for s in SNAPSHOTS
+        ]),
+    ],
+    "componentCounts": {"buses": 3, "generators": 2, "loads": 1, "carriers": 3, "lines": 3},
+}
+
 CHECKPOINTS = {
     "training_m2": TRAINING_M2,
     "training_m3": TRAINING_M3,
@@ -618,6 +690,7 @@ CHECKPOINTS = {
     "training_m6": TRAINING_M6,
     "training_m7_year": TRAINING_M7_YEAR,
     "training_m7": TRAINING_M7,
+    "training_m10": TRAINING_M10,
 }
 
 

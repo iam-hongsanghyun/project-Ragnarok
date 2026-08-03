@@ -366,6 +366,7 @@ export function SettingsView(props: SettingsViewProps) {
             {SECTIONS.filter((s) => s.group === g).map((s) => (
               <button
                 key={s.id}
+                data-settings-section={s.id}
                 className={`settings-nav-item${section === s.id ? ' settings-nav-item--active' : ''}`}
                 onClick={() => setSection(s.id)}
               >
