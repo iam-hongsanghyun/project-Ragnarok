@@ -682,6 +682,74 @@ TRAINING_M10: dict = {
     "componentCounts": {"buses": 3, "generators": 2, "loads": 1, "carriers": 3, "lines": 3},
 }
 
+# ── Module 11 — the fleet "11 · Commitment and operating constraints" runs ───
+# Six hours with a windy midday dip: demand 90 / 90 / 50 / 50 / 90 / 90 against
+# a wind profile that is zero except in the two dip hours, where it is full.
+# That is the whole design. It puts a committable coal unit in front of a real
+# decision — hold minimum stable output through the dip and push out free wind,
+# or shut down for two hours and pay to restart — and the start-up cost decides
+# which, so one number flips the answer.
+#
+#   as shipped (start_up_cost 3000)   8,800 · coal holds 40 MW · 70 MW of wind spilt an hour
+#   start_up_cost 1000                7,200 + 1,000 start-up = 8,200 · coal stops
+#   committable cleared               7,200 · what the plant would do if physics let it
+#   Force LP                          7,200 · the relaxation, and the only run that prices
+#
+# Pinned in ``backend/tests/test_training_checkpoints.py``.
+_M11_SNAPS = [f"2030-01-01T{h:02d}:00:00" for h in range(6)]
+_M11_DEMAND = [90.0, 90.0, 50.0, 50.0, 90.0, 90.0]
+_M11_WIND = [0.0, 0.0, 1.0, 1.0, 0.0, 0.0]
+
+TRAINING_M11: dict = {
+    "filename": "Training module 11 — commitment",
+    "example": {
+        "label": "Training: module 11 committable fleet (start of module)",
+        "description": (
+            "One bus, six hours and a windy midday dip — the model the \"Power market modelling\" "
+            "course uses in module 11 to show what a plant that cannot switch on and off freely does "
+            "to a dispatch. A committable coal unit with a 40 MW minimum stable output and a 3,000 "
+            "start-up cost, a gas unit and wind. Solves to 8,800 with the coal held on through the dip."
+        ),
+        "order": 101,
+    },
+    "sheets": [
+        ("snapshots", "static", [{"snapshot": s} for s in _M11_SNAPS]),
+        ("network", "static", [{"name": "commitment-fleet"}]),
+        ("carriers", "static", [
+            {"name": "AC", "co2_emissions": 0.0},
+            {"name": "gas", "co2_emissions": 0.2},
+            {"name": "coal", "co2_emissions": 0.34},
+            {"name": "wind", "co2_emissions": 0.0},
+        ]),
+        ("buses", "static", [
+            {"name": "bus_1", "v_nom": 380.0, "x": 127.0, "y": 37.5, "carrier": "AC"},
+        ]),
+        # coal_1 carries every commitment attribute the module teaches, in the
+        # order the learner meets them: the flag, the floor, the price of a
+        # start, and how long it must stay off once it stops.
+        ("generators", "static", [
+            {"name": "coal_1", "bus": "bus_1", "carrier": "coal",
+             "p_nom": 100.0, "marginal_cost": 20.0, "efficiency": 0.4,
+             "committable": True, "p_min_pu": 0.4,
+             "start_up_cost": 3000.0, "min_down_time": 2},
+            {"name": "gas_1", "bus": "bus_1", "carrier": "gas",
+             "p_nom": 100.0, "marginal_cost": 50.0, "efficiency": 0.5},
+            {"name": "wind_1", "bus": "bus_1", "carrier": "wind",
+             "p_nom": 80.0, "marginal_cost": 0.0, "efficiency": 1.0},
+        ]),
+        ("loads", "static", [
+            {"name": "load_1", "bus": "bus_1", "carrier": "AC", "p_set": 90.0},
+        ]),
+        ("loads-p_set", "series", [
+            {"snapshot": s, "load_1": d} for s, d in zip(_M11_SNAPS, _M11_DEMAND)
+        ]),
+        ("generators-p_max_pu", "series", [
+            {"snapshot": s, "wind_1": w} for s, w in zip(_M11_SNAPS, _M11_WIND)
+        ]),
+    ],
+    "componentCounts": {"buses": 1, "generators": 3, "loads": 1, "carriers": 4},
+}
+
 CHECKPOINTS = {
     "training_m2": TRAINING_M2,
     "training_m3": TRAINING_M3,
@@ -691,6 +759,7 @@ CHECKPOINTS = {
     "training_m7_year": TRAINING_M7_YEAR,
     "training_m7": TRAINING_M7,
     "training_m10": TRAINING_M10,
+    "training_m11": TRAINING_M11,
 }
 
 

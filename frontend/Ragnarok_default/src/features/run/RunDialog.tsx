@@ -103,13 +103,14 @@ export function RunDialog({
           <div className="validation-section">
             <p className="validation-section-title">Optimisation settings</p>
             <div className="sg-btn-row">
+              {/* `data-tour` is the stable hook the Training walkthrough rings. */}
               <button
+                data-tour="force-lp"
                 className={`tb-btn${forceLp ? '' : ' tb-btn--muted'}`}
                 onClick={() => onForceLpChange(!forceLp)}
               >
                 Force LP
               </button>
-              {/* `data-tour` is the stable hook the Training walkthrough rings. */}
               <button
                 data-tour="dry-run"
                 className={`tb-btn${dryRun ? '' : ' tb-btn--muted'}`}

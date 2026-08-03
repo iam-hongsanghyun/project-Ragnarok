@@ -723,6 +723,129 @@ def test_module_10_n_minus_1_finds_two_insecure_outages(tmp_path: Path) -> None:
     assert worst["line_13"] == pytest.approx(45.0, abs=0.1)
 
 
+# ── Module 11 — commitment and operating constraints ─────────────────────────
+#
+# Six hours, demand 90/90/50/50/90/90, wind available only in the two dip hours.
+# A committable coal unit with a 40 MW floor must either hold that floor through
+# the dip (spilling free wind) or stop and pay to restart. Every figure the
+# module quotes is one of the five runs below.
+
+def _coal(model: dict) -> dict:
+    return next(g for g in model["generators"] if g["name"] == "coal_1")
+
+
+def _m11(tmp_path: Path, **patch) -> dict:
+    """The module 11 checkpoint with coal_1 attributes overridden."""
+    model = {k: [dict(r) for r in v] for k, v in
+             _model_from_example("training_m11", tmp_path).items()}
+    if patch:
+        _coal(model).update(patch)
+    return model
+
+
+def _run(model: dict, options: dict | None = None) -> dict:
+    from backend.pypsa.results import run_pypsa
+
+    return run_pypsa(model, SCENARIO, {**OPTIONS, **(options or {})})
+
+
+def _cost(res: dict, label: str) -> float:
+    return next((c["value"] for c in res["costBreakdown"] if c["label"] == label), 0.0)
+
+
+def test_module_11_committed_unit_holds_through_the_dip(tmp_path: Path) -> None:
+    """As shipped: a 3,000 start-up beats 1,600 of minimum-stable coal, so it stays on.
+
+    7,200 for the four busy hours plus 40 MW x 20 x 2 hours through the dip.
+    """
+    res = _run(_m11(tmp_path))
+    assert _cost(res, "Fuel cost") == pytest.approx(8_800.0, rel=1e-6)
+    assert _cost(res, "Start-up / shut-down cost") == pytest.approx(0.0)
+    assert res["commitment"]["totals"]["starts"] == 0
+
+
+def test_module_11_dip_holds_coal_at_its_floor_and_spills_wind(tmp_path: Path) -> None:
+    """The picture the module asks the learner to predict: a 40 MW shelf, 70 MW spilt."""
+    model = _m11(tmp_path)
+    n = _solve_model(model)
+    coal = [float(v) for v in n.generators_t.p["coal_1"]]
+    assert coal == pytest.approx([90.0, 90.0, 40.0, 40.0, 90.0, 90.0], abs=1e-6)
+    available = n.generators.at["wind_1", "p_nom"] * n.generators_t.p_max_pu["wind_1"]
+    spilt = (available - n.generators_t.p["wind_1"]).round(6)
+    assert [float(v) for v in spilt] == pytest.approx([0.0, 0.0, 70.0, 70.0, 0.0, 0.0], abs=1e-6)
+
+
+def test_module_11_cheaper_start_flips_the_decision(tmp_path: Path) -> None:
+    """One cell — 3000 to 1000 — and the unit stops instead. 7,200 + 1,000 = 8,200."""
+    res = _run(_m11(tmp_path, start_up_cost=1000.0))
+    assert _cost(res, "Fuel cost") == pytest.approx(7_200.0, rel=1e-6)
+    assert _cost(res, "Start-up / shut-down cost") == pytest.approx(1_000.0, rel=1e-6)
+    totals = res["commitment"]["totals"]
+    assert totals["starts"] == 1
+    assert totals["startUpCostTotal"] == pytest.approx(1_000.0, rel=1e-6)
+
+
+def test_module_11_min_down_time_forbids_the_shutdown(tmp_path: Path) -> None:
+    """Three hours off is longer than the dip, so the cheap shutdown is unavailable.
+
+    Same 8,800 as the shipped run, reached for the opposite reason — economics
+    said stop and the operating constraint said no.
+    """
+    res = _run(_m11(tmp_path, start_up_cost=1000.0, min_down_time=3))
+    assert _cost(res, "Fuel cost") == pytest.approx(8_800.0, rel=1e-6)
+    assert res["commitment"]["totals"]["starts"] == 0
+
+
+def test_module_11_ramp_limit_costs_1000_in_the_hours_beside_the_dip(tmp_path: Path) -> None:
+    """30 MW/h cannot make the 50 MW step, so the unit moves early and gas fills in.
+
+    The module's point is WHERE the cost lands: gas runs 10 MW in two hours that
+    have no scarcity of their own.
+    """
+    model = _m11(tmp_path, ramp_limit_up=0.3, ramp_limit_down=0.3)
+    res = _run(model)
+    assert _cost(res, "Fuel cost") == pytest.approx(9_800.0, rel=1e-6)
+    n = _solve_model(model)
+    coal = [float(v) for v in n.generators_t.p["coal_1"]]
+    gas = [float(v) for v in n.generators_t.p["gas_1"]]
+    assert coal == pytest.approx([90.0, 80.0, 50.0, 50.0, 80.0, 90.0], abs=1e-6)
+    assert gas == pytest.approx([0.0, 10.0, 0.0, 0.0, 10.0, 0.0], abs=1e-6)
+    # No step exceeds 30 MW — the constraint the module says is binding.
+    assert max(abs(b - a) for a, b in zip(coal, coal[1:])) <= 30.0 + 1e-6
+
+
+def test_module_11_force_lp_is_a_bound_and_the_only_run_that_prices(tmp_path: Path) -> None:
+    """The relaxation: 7,200, below both committed answers, with usable duals.
+
+    It is also the regression test for the p_min_pu trap — if Force LP left the
+    0.4 floor behind, the "relaxation" would come back at 8,800, ABOVE the MILP
+    it is supposed to bound.
+    """
+    res = _run(_m11(tmp_path), {"forceLp": True})
+    assert _cost(res, "Fuel cost") == pytest.approx(7_200.0, rel=1e-6)
+    assert res["commitment"] is None
+    prices = [p["value"] for p in res["systemPriceSeries"]]
+    assert prices == pytest.approx([20.0, 20.0, 0.0, 0.0, 20.0, 20.0], abs=1e-6)
+
+
+def test_module_11_commitment_run_warns_that_its_prices_are_not_prices(tmp_path: Path) -> None:
+    """A MILP has no duals, and the flat zero it reports is worse than no number."""
+    res = _run(_m11(tmp_path))
+    assert [p["value"] for p in res["systemPriceSeries"]] == pytest.approx([0.0] * 6, abs=1e-6)
+    warning = [n for n in res["narrative"] if "NOT shadow prices" in n]
+    assert warning, "a commitment run must say its prices are unusable"
+
+
+def test_module_11_p_min_pu_without_commitment_is_flagged(tmp_path: Path) -> None:
+    """The trap the module ends on: clearing the flag welds the unit on at 40 MW."""
+    from backend.pypsa.model_check import check_model
+
+    model = _m11(tmp_path)
+    _coal(model).pop("committable")
+    codes = {f["code"] for f in check_model(model)["findings"]}
+    assert "min_pu_without_commitment" in codes
+
+
 # ── The checkpoints the course references must exist and be loadable ─────────
 
 def test_every_course_checkpoint_is_a_listable_example() -> None:
@@ -730,7 +853,7 @@ def test_every_course_checkpoint_is_a_listable_example() -> None:
     the learner a dead button, which is worse than no button."""
     for example_id in ("training_m1", "training_m2", "training_m3", "training_m4",
                        "training_m5", "training_m6", "training_m7_year", "training_m7",
-                       "training_m10"):
+                       "training_m10", "training_m11"):
         db = EXAMPLES / example_id / "project.db"
         assert db.exists(), f"{example_id}: no project.db"
         con = sqlite3.connect(db)
