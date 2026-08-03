@@ -948,6 +948,128 @@ def test_module_12_convergence_reports_that_it_did_not_converge(tmp_path: Path) 
     assert trace[0]["se"] > 2 * trace[-1]["se"]
 
 
+# ── Module 13 — where the demand comes from ──────────────────────────────────
+#
+# The module projects module 7's year to 2040 two ways that agree on annual
+# energy and disagree on shape, then asks the optimiser to build for each. The
+# transforms are the ones behind Forge's Temporal tools, called directly here so
+# the figures are pinned without a session.
+
+_M13_SCENARIO = {"carbonPrice": 0.0, "discountRate": 0.05}
+
+
+def _demand_stats(model: dict) -> tuple[float, float]:
+    """(peak MW, annual energy GWh) of the model's demand series."""
+    hourly = [sum(v for k, v in row.items() if k != "snapshot")
+              for row in model["loads-p_set"]]
+    return max(hourly), sum(hourly) / 1000.0
+
+
+def _projected(example_id: str, tmp_path: Path, kind: str) -> dict:
+    """Run one of Forge's Temporal transforms over a checkpoint, via the router.
+
+    The transforms live in the session router and operate on a stored session,
+    which is exactly how Forge reaches them — so drive them the same way rather
+    than reimplementing the maths the assertions are meant to check.
+    """
+    from backend.app import model_store, session_store
+    from backend.app.routers import session as session_router
+
+    session_id = f"m13_{kind}"
+    original = session_store.SESSION_DIR
+    original_sqlite = sqlite_store.ss.SESSION_DIR
+    session_store.SESSION_DIR = tmp_path
+    sqlite_store.ss.SESSION_DIR = tmp_path
+    try:
+        model_store.save_model(session_id, _model_from_example(example_id, tmp_path))
+        if kind == "cagr":
+            session_router.forecast_snapshots(session_router.SnapshotForecast(
+                fromYear=2030, toYear=2040, growthPct=2.0, method="cagr",
+                sessionId=session_id))
+        else:
+            session_router.driver_forecast_snapshots(session_router.DriverForecast(
+                fromYear=2030, toYear=2040, popGrowthPct=0.0, gdpGrowthPct=0.0,
+                gdpElasticity=0.5, heatAddedGWh=120.0, evAddedGWh=106.0,
+                sessionId=session_id))
+        out = model_store.load_full_model(session_id)
+    finally:
+        session_store.SESSION_DIR = original
+        sqlite_store.ss.SESSION_DIR = original_sqlite
+    assert out is not None
+    return out
+
+
+def test_module_13_base_year_is_the_profile_the_module_measures(tmp_path: Path) -> None:
+    """Step 1's two numbers. Everything later is a comparison against these."""
+    peak, energy = _demand_stats(_model_from_example("training_m7_year", tmp_path))
+    assert peak == pytest.approx(174.7, abs=0.1)
+    assert energy == pytest.approx(1_030.5, abs=0.1)
+
+
+def test_module_13_cagr_grows_every_hour_by_the_same_factor(tmp_path: Path) -> None:
+    """2% for ten years is 1.219, applied uniformly — so the shape is untouched.
+
+    Asserted as a ratio per hour, because "the shape does not change" is the
+    module's claim and the totals alone would not catch a reshaping that
+    happened to preserve them.
+    """
+    before = [sum(v for k, v in r.items() if k != "snapshot")
+              for r in _model_from_example("training_m7_year", tmp_path)["loads-p_set"]]
+    after = [sum(v for k, v in r.items() if k != "snapshot")
+             for r in _projected("training_m7_year", tmp_path, "cagr")["loads-p_set"]]
+    assert len(after) == len(before)
+    ratios = [b / a for a, b in zip(before, after, strict=True) if a > 0]
+    assert max(ratios) == pytest.approx(min(ratios), rel=1e-6), "growth must be uniform"
+    assert ratios[0] == pytest.approx(1.219, rel=1e-3)
+    assert max(after) == pytest.approx(212.9, abs=0.2)
+    assert sum(after) / 1000.0 == pytest.approx(1_256.2, abs=0.5)
+
+
+def test_module_13_electrification_lifts_the_peak_at_the_same_energy(tmp_path: Path) -> None:
+    """The module's finding: identical annual energy, 3.5% more peak.
+
+    Heat and EV load is added on its own winter/evening signature rather than in
+    proportion to what is already there, so it piles onto the busiest hours.
+    """
+    peak, energy = _demand_stats(_projected("training_m7_year", tmp_path, "driver"))
+    assert energy == pytest.approx(1_256.5, abs=0.5)
+    assert peak == pytest.approx(220.4, abs=0.3)
+    assert peak > 212.9, "the whole point: same energy, higher peak"
+
+
+def test_module_13_brownfield_fleet_cannot_serve_the_projection(tmp_path: Path) -> None:
+    """Step 4: a demand projection can invalidate a model outright."""
+    from fastapi import HTTPException
+
+    from backend.pypsa.results import run_pypsa
+
+    model = _projected("training_m7_year", tmp_path, "cagr")
+    with pytest.raises(HTTPException) as excinfo:
+        run_pypsa(model, _M13_SCENARIO, OPTIONS)
+    assert "infeasible" in str(excinfo.value.detail).lower()
+
+
+def test_module_13_shape_changes_what_gets_built(tmp_path: Path) -> None:
+    """Steps 6 and 9 together, and the reason the module exists.
+
+    Same fleet, same capital costs, same annual energy — and thirty megawatts of
+    solar moves out of the plan because the new load lands in winter evenings.
+    """
+    from backend.pypsa.results import run_pypsa
+
+    def built(model: dict) -> dict:
+        res = run_pypsa(model, _M13_SCENARIO, OPTIONS)
+        return {r["name"]: r["p_nom_opt_mw"] for r in res["expansionResults"]}
+
+    cagr = built(_projected("training_m7", tmp_path, "cagr"))
+    driven = built(_projected("training_m7", tmp_path, "driver"))
+    assert cagr["wind_1"] == pytest.approx(202.8, abs=1.0)
+    assert cagr["solar_1"] == pytest.approx(50.0, abs=1.0)
+    assert driven["wind_1"] == pytest.approx(208.3, abs=1.0)
+    assert driven["solar_1"] == pytest.approx(20.2, abs=1.0)
+    assert cagr["solar_1"] - driven["solar_1"] > 25.0, "the module claims ~30 MW of solar moves"
+
+
 # ── The checkpoints the course references must exist and be loadable ─────────
 
 def test_every_course_checkpoint_is_a_listable_example() -> None:

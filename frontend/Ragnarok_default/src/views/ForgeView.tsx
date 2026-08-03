@@ -626,6 +626,7 @@ export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEdi
             {OPERATIONS.filter((op) => op.group === group).map((op) => (
               <button
                 key={op.id}
+                data-forge-op={op.id}
                 className={`settings-nav-item${operation === op.id ? ' settings-nav-item--active' : ''}`}
                 onClick={() => setOperation(op.id)}
               >
