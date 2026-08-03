@@ -429,7 +429,23 @@ def build_network(
     if bool(options.get("forceLp", False)) and "committable" in network.generators.columns:
         n_committable = int(network.generators["committable"].astype(bool).sum())
         if n_committable > 0:
+            was_committable = network.generators["committable"].astype(bool)
             network.generators["committable"] = False
+            # `p_min_pu` means "minimum output WHILE RUNNING" only for a
+            # committable unit. On a plain LP generator it is an unconditional
+            # floor in every snapshot, so leaving it behind would not relax the
+            # MILP — it would replace it with a TIGHTER problem the unit can
+            # never switch off, one that can cost more than the MILP it was
+            # meant to bound, or be infeasible where the MILP was fine.
+            if "p_min_pu" in network.generators.columns:
+                floored = was_committable & (network.generators["p_min_pu"].fillna(0.0) > 0.0)
+                if floored.any():
+                    network.generators.loc[floored, "p_min_pu"] = 0.0
+                    notes.append(
+                        f"Force-LP: also cleared p_min_pu on {int(floored.sum())} de-committed "
+                        "generator(s) — without commitment it is an always-on floor, not a "
+                        "minimum-when-running."
+                    )
             notes.append(
                 f"Force-LP enabled: overrode committable=True on {n_committable} generator(s)."
             )
