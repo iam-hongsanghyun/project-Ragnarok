@@ -1,5 +1,5 @@
 /**
- * Module 6 — Investment and capacity expansion (10 steps).
+ * Module 7 — Investment and capacity expansion (10 steps).
  *
  * Every module so far has ended by saying the model cannot tell you whether
  * something was worth building. This is where that stops being true: capacity
@@ -39,18 +39,18 @@
  */
 import { TutorialStep } from '../types';
 
-const SECTION = '6 · Investment and capacity expansion';
+const SECTION = '7 · Investment and capacity expansion';
 
-export const MODULE_6_INVESTMENT: TutorialStep[] = [
+export const MODULE_7_INVESTMENT: TutorialStep[] = [
   {
-    id: 'm6-what-to-build',
+    id: 'm7-what-to-build',
     section: SECTION,
     title: 'From how hard to run, to what to build',
     tab: 'Build',
     where: 'Build → Generators step',
     startOptions: {
-      prebuiltExampleId: 'training_m5',
-      completeExampleId: 'training_m6',
+      prebuiltExampleId: 'training_m6',
+      completeExampleId: 'training_m7',
       note:
         'Module 6 continues module 5\'s model — two electrical buses and a gas bus, a CCGT, a gas store, '
         + 'wind, run-of-river, a battery and a pumped-hydro scheme — which answered 7,099.59. Nothing is '
@@ -123,7 +123,7 @@ export const MODULE_6_INVESTMENT: TutorialStep[] = [
   },
 
   {
-    id: 'm6-capital-cost',
+    id: 'm7-capital-cost',
     section: SECTION,
     title: 'Overnight, annual, and who does the arithmetic',
     tab: 'Build',
@@ -189,7 +189,7 @@ export const MODULE_6_INVESTMENT: TutorialStep[] = [
   },
 
   {
-    id: 'm6-discount-rate',
+    id: 'm7-discount-rate',
     section: SECTION,
     title: 'The discount rate — the assumption you inherit',
     tab: 'Settings',
@@ -267,7 +267,7 @@ export const MODULE_6_INVESTMENT: TutorialStep[] = [
   },
 
   {
-    id: 'm6-window-scaling',
+    id: 'm7-window-scaling',
     section: SECTION,
     title: 'Three hours against a year — the 2,920× trap',
     tab: 'Build',
@@ -335,7 +335,7 @@ export const MODULE_6_INVESTMENT: TutorialStep[] = [
   },
 
   {
-    id: 'm6-extendable-wind',
+    id: 'm7-extendable-wind',
     section: SECTION,
     title: 'Make wind a decision',
     tab: 'Build',
@@ -449,7 +449,7 @@ export const MODULE_6_INVESTMENT: TutorialStep[] = [
   },
 
   {
-    id: 'm6-run-wind',
+    id: 'm7-run-wind',
     section: SECTION,
     title: 'Run: it builds nothing, and that is a result',
     tab: 'Analytics',
@@ -532,7 +532,7 @@ export const MODULE_6_INVESTMENT: TutorialStep[] = [
   },
 
   {
-    id: 'm6-extendable-line',
+    id: 'm7-extendable-line',
     section: SECTION,
     title: 'Make the line a decision — module 3\'s business case, finished',
     tab: 'Build',
@@ -646,7 +646,7 @@ export const MODULE_6_INVESTMENT: TutorialStep[] = [
   },
 
   {
-    id: 'm6-run-line',
+    id: 'm7-run-line',
     section: SECTION,
     title: 'Run: the wire, and the wind farm it unlocks',
     tab: 'Analytics',
@@ -735,7 +735,7 @@ export const MODULE_6_INVESTMENT: TutorialStep[] = [
   },
 
   {
-    id: 'm6-complements',
+    id: 'm7-complements',
     section: SECTION,
     title: 'Change one assumption, lose the wind farm',
     tab: 'Analytics',
@@ -852,7 +852,7 @@ export const MODULE_6_INVESTMENT: TutorialStep[] = [
   },
 
   {
-    id: 'm6-what-changed',
+    id: 'm7-what-changed',
     section: SECTION,
     title: 'What module 6 settled, and what it cannot answer',
     tab: 'Analytics',
