@@ -186,9 +186,12 @@ def test_statement_interest_zero_without_tenor() -> None:
 
 def test_merchant_profit_prorates_annual_capex_onto_window() -> None:
     """Own1's extendable unit (mc 10, annual capex 100k/MW·yr, max 60 MW)
-    against a flat 50 price on a half-year window: the merchant LP builds the
-    full 60 MW (window-weighted margin 40·4380 = 175,200 > 100,000/MW), and
-    the reported profit must charge only the window share of the capex."""
+    against a system price of 50 on a half-year window: the SYSTEM solve makes
+    the investment (window-weighted saving 40·4380 = 175,200 > 100,000/MW →
+    builds the full 60 MW), the merchant re-solve freezes that capacity rather
+    than re-making the investment (market.freeze_expansion), dispatches it
+    against a flat 50 price, and the reported profit must charge only the
+    window share of the annual capex."""
     n = pypsa.Network()
     n.set_snapshots(pd.date_range("2030-01-01", periods=2, freq="h"))
     n.snapshot_weightings.loc[:, :] = 2190.0
@@ -196,7 +199,7 @@ def test_merchant_profit_prorates_annual_capex_onto_window() -> None:
     n.add("Carrier", "gas")
     n.add("Carrier", "own")
     n.add("Load", "L", bus="b", p_set=100.0)
-    n.add("Generator", "sys", bus="b", carrier="gas", p_nom=200.0, marginal_cost=30.0)
+    n.add("Generator", "sys", bus="b", carrier="gas", p_nom=200.0, marginal_cost=50.0)
     n.add("Generator", "m_own", bus="b", carrier="own", p_nom=0.0,
           p_nom_extendable=True, p_nom_max=60.0,
           capital_cost=100_000.0, marginal_cost=10.0)
