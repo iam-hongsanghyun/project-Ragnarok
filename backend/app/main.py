@@ -1002,6 +1002,12 @@ app.include_router(_physical_risk_router.router)
 from .routers import siting as _siting_router  # noqa: E402
 app.include_router(_siting_router.router)
 
+# Reports — perspective-based report documents (policy maker, investor, PPA
+# buyer, …) assembled from stored run analytics. Pure selection and framing of
+# what the run already carries; deterministic given the run, no AI involved.
+from .routers import reports as _reports_router  # noqa: E402
+app.include_router(_reports_router.router)
+
 
 @app.get("/api/backends")
 def get_backends() -> dict[str, Any]:

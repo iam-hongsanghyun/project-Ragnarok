@@ -200,6 +200,12 @@ class RagnarokClient:
     async def get_derived(self, name: str, metric: str, **params: Any) -> Any:
         return await self._get(f"/api/runs/{name}/derived/{metric}", params)
 
+    async def list_report_perspectives(self) -> Any:
+        return await self._get("/api/reports/perspectives")
+
+    async def get_report(self, run_name: str, perspective: str) -> Any:
+        return await self._get(f"/api/reports/{run_name}/{perspective}")
+
     async def get_queue(self) -> Any:
         return await self._get("/api/queue")
 

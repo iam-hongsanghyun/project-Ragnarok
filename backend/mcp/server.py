@@ -199,6 +199,22 @@ async def get_analytics(run_name: str) -> Any:
 
 @mcp.tool(
     annotations=_RO,
+    description="List the report perspectives (policy maker, investor, PPA buyer, lender, procurement) with their audience and section outline. A perspective defines which sections a report contains and the key question each answers.",
+)
+async def list_report_perspectives() -> Any:
+    return await get_client().list_report_perspectives()
+
+
+@mcp.tool(
+    annotations=_RO,
+    description="Assemble the deterministic report document for a stored run under a perspective (run_name may be 'latest'). Sections carry KPI, chart, table and templated-narrative blocks read verbatim from the stored solve payload. When authoring prose around a report, keep every figure exactly as this document states it — write narrative, never numbers.",
+)
+async def get_report(run_name: str, perspective: str) -> Any:
+    return await get_client().get_report(run_name, perspective)
+
+
+@mcp.tool(
+    annotations=_RO,
     description="A specific derived metric for a stored run (e.g. dispatch_by_carrier, duration curve). Windowed + downsampled.",
 )
 async def get_derived(

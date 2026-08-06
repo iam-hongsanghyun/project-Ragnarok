@@ -32,6 +32,14 @@ class FakeClient:
         self.calls.append(("patch_sheet", name, ops))
         return {"rows": 3}
 
+    async def list_report_perspectives(self) -> dict:
+        self.calls.append(("list_report_perspectives",))
+        return {"perspectives": [{"id": "policy-maker", "sections": []}]}
+
+    async def get_report(self, run_name: str, perspective: str) -> dict:
+        self.calls.append(("get_report", run_name, perspective))
+        return {"runName": run_name, "perspective": perspective, "sections": []}
+
     async def import_dataset(
         self, country_iso: str, dataset_ids: list[str], filters: dict | None = None
     ) -> dict:
@@ -237,7 +245,7 @@ def _install(monkeypatch, autonomy: str = "guided") -> FakeClient:
 def test_tool_catalog_and_annotations() -> None:
     tools = asyncio.run(mcp.list_tools())
     by_name = {t.name: t for t in tools}
-    assert len(tools) == 78, f"expected 78 tools, got {len(tools)}"
+    assert len(tools) == 80, f"expected 80 tools, got {len(tools)}"
     # check_model: reads the model back so "is this what I asked for?" can be
     # answered against the model rather than against the agent's account of it.
     assert "check_model" in by_name
@@ -279,6 +287,10 @@ def test_tool_catalog_and_annotations() -> None:
         "get_analytics",
         "get_derived",
         "get_queue",
+        # Report documents (perspective-based, deterministic) — the surface the
+        # Bifrost authoring layer writes prose around.
+        "list_report_perspectives",
+        "get_report",
         "list_components",
         "describe_component",
         "describe_run_options",
@@ -446,6 +458,15 @@ def test_new_read_tools_pass_through(monkeypatch) -> None:
                  "get_sheet_stats", "get_journal", "get_master_meta",
                  "run_plugin_analyze", "optimize_procurement"):
         assert fake.called(name), f"{name} not reached"
+
+
+def test_report_tools_pass_through(monkeypatch) -> None:
+    fake = _install(monkeypatch, "manual")  # reads never gate
+    perspectives = asyncio.run(server.list_report_perspectives())
+    assert perspectives["perspectives"][0]["id"] == "policy-maker"
+    doc = asyncio.run(server.get_report("latest", "investor"))
+    assert doc["perspective"] == "investor"
+    assert fake.calls[-1] == ("get_report", "latest", "investor")
 
 
 def test_forge_query_previews_then_applies(monkeypatch) -> None:

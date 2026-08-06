@@ -22,6 +22,7 @@ export type TabModuleId =
   | 'PhysicalRisk'
   | 'Siting'
   | 'PostAnalysis'
+  | 'Reporting'
   | 'Training';
 
 export interface TabModuleDefinition {

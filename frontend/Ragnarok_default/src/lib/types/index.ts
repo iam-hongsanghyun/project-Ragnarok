@@ -16,7 +16,7 @@ export type BrowserFileHandle = any;
  *  under their own manifest id, so any string is a valid workspace tab; the
  *  `KnownWorkspaceTab | (string & {})` shape keeps literal autocompletion for
  *  the built-ins while admitting external ids. */
-export type KnownWorkspaceTab = 'Welcome' | 'Build' | 'Data' | 'Forge' | 'Model' | 'Market' | 'PostAnalysis' | 'Settings' | 'Analytics' | 'PhysicalRisk' | 'Siting' | 'History' | 'Plugins' | 'Training';
+export type KnownWorkspaceTab = 'Welcome' | 'Build' | 'Data' | 'Forge' | 'Model' | 'Market' | 'PostAnalysis' | 'Settings' | 'Analytics' | 'PhysicalRisk' | 'Siting' | 'Reporting' | 'History' | 'Plugins' | 'Training';
 export type WorkspaceTab = KnownWorkspaceTab | (string & {});
 export type ModelSubTab = 'Map' | 'Table';
 export type AnalyticsSubTab = 'Validation' | 'Result' | 'Analytics' | 'Comparison' | 'Log';

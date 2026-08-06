@@ -18,6 +18,7 @@ import { forgeModule } from './forge/manifest';
 import { physicalRiskModule } from './physical-risk/manifest';
 import { sitingModule } from './siting/manifest';
 import { postAnalysisModule } from './post-analysis/manifest';
+import { reportingModule } from './reporting/manifest';
 import { trainingModule } from './training/manifest';
 
 /** Every registered module, in activity-bar order. */
@@ -27,6 +28,7 @@ export const TAB_MODULES: readonly TabModuleDefinition[] = [
   physicalRiskModule,
   sitingModule,
   postAnalysisModule,
+  reportingModule,
   trainingModule,
 ].sort((a, b) => a.order - b.order);
 

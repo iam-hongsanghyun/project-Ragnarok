@@ -102,12 +102,14 @@ backend/
     log_capture.py       In-process log capture (Analytics → Log tab)
     startup_status.py    Startup progress reporting (GET /api/status)
     tab_modules.py       Third-party TAB-MODULE store (a whole tab; see docs/module.md)
+    reporting.py         Perspective-based report documents assembled from stored runs
     routers/
       session.py         /api/session/* — server-side working model (source of truth)
       plugins.py         /api/plugins/* — backend-plugin lifecycle + hooks
       tab_modules.py     /api/modules/* — tab-module install/list/enable/remove
       importers.py       /api/import/* — external-data importer subsystem (Data view)
       config.py          /api/config — the boot bundle the frontend fetches at startup
+      reports.py         /api/reports/* — report documents (policy maker, investor, …)
     importers/           importer implementations used by routers/importers.py
     backends/
       base.py            Backend Protocol + BackendError

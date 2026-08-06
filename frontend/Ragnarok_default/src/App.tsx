@@ -101,6 +101,7 @@ import { ForgeView } from './views/ForgeView';
 import { AnalyticsView } from './views/AnalyticsView';
 import { PhysicalRiskView, PhysicalRiskSubTab } from './views/PhysicalRiskView';
 import { SitingView } from './views/SitingView';
+import { ReportingView } from './views/ReportingView';
 import { TrainingView } from './views/TrainingView';
 import { SpotlightOverlay } from './features/training/SpotlightOverlay';
 import type { Spotlight, TutorialProgress } from 'lib/training/types';
@@ -3878,6 +3879,8 @@ function AppInner() {
           {activeExternalModule && (
             <ExternalModuleHost key={activeExternalModule.manifest.id} module={activeExternalModule} />
           )}
+
+          {tab === 'Reporting' && enabledModules.has('Reporting') && <ReportingView />}
 
           {tab === 'Training' && enabledModules.has('Training') && (
             <TrainingView

@@ -52,7 +52,7 @@
       "discountRate": 0.05,
       "queuePollSeconds": 30,
       "solveAcceptance": "lenient",
-      "enabledModules": "Data,Forge,PhysicalRisk,Siting,PostAnalysis,Training"
+      "enabledModules": "Data,Forge,PhysicalRisk,Siting,PostAnalysis,Reporting,Training"
     },
     "ranges": {
       "carbonPrice": {
