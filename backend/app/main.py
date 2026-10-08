@@ -1185,7 +1185,11 @@ def model_check_case(payload: RunPayload) -> dict[str, Any]:
     """
     from ..pypsa.model_check import check_model
 
-    return check_model(_resolve_payload_model(payload))
+    # The resolved payload, not the payload itself: check_model reads the workbook's sheets.
+    model = _resolve_payload_model(payload).model
+    if not isinstance(model, dict):
+        raise HTTPException(status_code=400, detail="The model to check is not a workbook of sheets.")
+    return check_model(model)
 
 
 @app.post("/api/run")

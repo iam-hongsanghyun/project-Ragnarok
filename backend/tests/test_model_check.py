@@ -123,3 +123,25 @@ def test_the_check_never_mutates_the_model() -> None:
     before = copy.deepcopy(model)
     check_model(model)
     assert model == before
+
+
+def test_the_endpoint_checks_the_model_a_session_holds_and_an_inline_one() -> None:
+    """Q3: /api/model-check passed the request itself to the check, not its workbook — HTTP 500
+    on every call. Both ways a model reaches it are answered with the back-brief."""
+    from fastapi.testclient import TestClient
+
+    from backend.app import model_store
+    from backend.app.main import app
+
+    c = TestClient(app)
+    inline = c.post("/api/model-check", json={"model": _base()})
+    assert inline.status_code == 200 and inline.json()["backBrief"]["counts"]["generators"] == 1
+    sid = "test-q3-model-check"
+    model_store.save_model(sid, _base())
+    try:
+        held = c.post("/api/model-check", json={"sessionId": sid})
+        assert held.status_code == 200 and held.json()["backBrief"]["load"]["peakMW"] == 100.0
+    finally:
+        model_store.clear(sid)
+    gone = c.post("/api/model-check", json={"sessionId": "test-q3-no-such-session"})
+    assert gone.status_code == 400 and "No model loaded" in gone.json()["detail"]
