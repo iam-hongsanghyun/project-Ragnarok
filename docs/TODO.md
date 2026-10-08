@@ -105,12 +105,13 @@ Cross-cutting platform direction (not single features). Assumes a dedicated back
 
 ### Correctness & trust
 
-What makes Ragnarok a *faithful* PyPSA frontend rather than just a feature-alike — see *North star* layer 5 (and layer 3 for diagnostics). Neither exists yet (confirmed by audit).
+What makes Ragnarok a *faithful* PyPSA frontend rather than just a feature-alike — see *North star* layer 5 (and layer 3 for diagnostics). Q1 and Q2 have shipped; Q3 is open.
 
 | ID | Status | Pri | Surface | Task | Why | Cost |
 |---|---|---|---|---|---|---:|
 | `Q1` | `Done` | `High` | `Backend` | **PyPSA reference-parity test suite** — **Shipped 2026-07-02** (`test_pypsa_parity.py`: native n.optimize() vs Ragnarok build→solve→results for dispatch/capacity-expansion/storage — objective, capacities, dispatch, prices; surfaced the overnight-vs-annualised capital_cost convention). *Was:* — run PyPSA's own example networks plus a curated set (unit commitment / multi-investment / storage / sector coupling / SCLOPF) end-to-end through Ragnarok's build → solve → results path, and assert objective, dispatch, prices, and optimal capacities match native `n.optimize()` within tolerance. | The strongest "faithful frontend" guarantee: proves Ragnarok *reproduces* PyPSA, not just round-trips its files. Round-trip I/O is tested; end-to-end result parity is not systematically pinned. | 18,000 |
 | `Q2` | `Done` | `Medium` | `Both` | **Infeasibility & solver diagnostics** — **Shipped 2026-07-02** (`results/diagnostics.py`: copper-plate capacity-shortfall, extreme-coefficient scan, binding-constraint flags + concrete fixes, surfaced in the solver error; 6 tests). *Was:* — when a solve is infeasible / unbounded / numerically ill, surface *why* (offending constraint group, per-bus energy-balance shortfall, suspect coefficient ranges) and suggest fixes (enable load shedding, relax a cap), instead of a raw solver string. | A proper frontend must *explain* failure, not just report it. Pairs with the shipped `load_shedding` backstop. | 14,000 |
+| `Q3` | `Open` | `High` | `Backend` | **`check_model` answers HTTP 500** — the MCP tool `check_model` (`POST /api/model-check`) failed with `HTTP 500: Internal Server Error` twice on a small valid network built through MCP (one bus, a gas generator with `marginal_cost` and `efficiency`, a carrier with `co2_emissions`, one load, snapshots set with `retarget_snapshots`), while `validate_model` and `submit_solve` on the same network succeeded. Reproduce through MCP with that network, read the backend's traceback, fix the cause, and return a reason instead of a 500 for any input the check cannot read. | A model check that crashes on a network the solver accepts leaves an agent with no back-brief and no reason; found 2026-10-08 by VOID's translator, which had to fall back on `validate_model`. | 4,000 |
 
 ### Run history
 
