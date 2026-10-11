@@ -161,6 +161,20 @@ const KNOWN_CORE_TABS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Deep link: `?view=model` (any case) opens that left-bar view on load. Matches
+ * a tab id case-insensitively; an unknown id yields 'Welcome' (and the bounce
+ * effect in App also rejects disabled/unknown tabs). Navigation only: nothing
+ * here clears or reloads the session's model.
+ */
+function initialTabFromUrl(): WorkspaceTab {
+  const raw = new URLSearchParams(window.location.search).get('view')?.trim();
+  if (!raw) return 'Welcome';
+  const lower = raw.toLowerCase();
+  const core = Array.from(KNOWN_CORE_TABS).find((t) => t.toLowerCase() === lower);
+  return core ?? raw;
+}
+
+/**
  * Fill a browser model's MISSING time-series sheets from the session's copy.
  *
  * The mirror of the backend's `_model_with_session_series`, for the one export
@@ -255,9 +269,10 @@ function AppInner() {
     setModel(next);
     requestStaticResync();
   }, [model, requestStaticResync]);
-  // Always open on the Welcome / intro screen — the workspace tab is NOT
-  // persisted across reloads (was restoring the last view, e.g. Comparison).
-  const [tab, setTab] = useState<WorkspaceTab>('Welcome');
+  // Opens on the Welcome / intro screen — the workspace tab is NOT persisted
+  // across reloads (was restoring the last view, e.g. Comparison) — unless the
+  // URL carries `?view=<tab id>` (host embedding), see initialTabFromUrl.
+  const [tab, setTab] = useState<WorkspaceTab>(initialTabFromUrl);
   // Training walkthrough. Lives here, not in TrainingView, so a walkthrough can
   // switch views and keep running — TrainingView unmounts the moment it does.
   // `stepId` ties the walkthrough to the tutorial step it belongs to, so the
