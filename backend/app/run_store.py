@@ -34,6 +34,7 @@ from typing import Any, Iterator
 import pandas as pd
 
 from . import timeseries
+from backend.app.data_root import data_root
 
 logger = logging.getLogger("pypsa_gui.run_store")
 
@@ -41,7 +42,7 @@ logger = logging.getLogger("pypsa_gui.run_store")
 # ``backend/app/run_store.py`` so ``parents[2]`` is the repo root, mirroring
 # the path resolution used by the test conftest and other backend modules.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-RUNS_DIR = _REPO_ROOT / "backend" / "data" / "runs"
+RUNS_DIR = data_root() / "runs"
 
 # A run name is ``{scenario}_{timestamp}`` (e.g. ``이런젠장_2026-06-07T14-30-00``).
 # DENYLIST sanitisation: only filesystem-unsafe characters are replaced, so

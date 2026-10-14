@@ -62,6 +62,7 @@ from pydantic import BaseModel, Field
 from . import worker
 from .engine import run_kind
 from .entities import Portfolio, Run, RunStatus, Scenario
+from backend.app.data_root import data_root
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +73,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 def _default_data_dir() -> Path:
     """The persistence root: ``RAGNAROK_PHYSICAL_RISK_DIR`` env override first."""
     raw = os.environ.get("RAGNAROK_PHYSICAL_RISK_DIR", "").strip()
-    return Path(raw).expanduser() if raw else _REPO_ROOT / "backend" / "data" / "physical_risk"
+    return Path(raw).expanduser() if raw else data_root() / "physical_risk"
 
 
 # Module-level so tests can monkeypatch it (mirrors session_store.SESSION_DIR).

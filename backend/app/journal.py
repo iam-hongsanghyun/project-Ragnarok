@@ -48,10 +48,11 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import actor_context, events_bus, model_store
+from backend.app.data_root import data_root
 
 logger = logging.getLogger("pypsa_gui.journal")
 
-_DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+_DATA_DIR = data_root()
 
 # Inline inverse-op payloads bigger than this spill to a snapshot file.
 _INLINE_UNDO_LIMIT = 32_768

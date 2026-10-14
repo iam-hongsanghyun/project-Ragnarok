@@ -21,10 +21,11 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from backend.app.data_root import data_root
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_PATH = Path(__file__).resolve().parents[2] / "data" / "provenance_log.jsonl"
+_DEFAULT_PATH = data_root() / "provenance_log.jsonl"
 
 
 def _path() -> Path:

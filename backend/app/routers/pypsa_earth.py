@@ -38,6 +38,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from backend.app.data_root import data_root
 
 router = APIRouter(prefix="/api/pypsa-earth", tags=["pypsa-earth"])
 log = logging.getLogger(__name__)
@@ -54,7 +55,7 @@ _CONDA_ENV_VAR = "RAGNAROK_PYPSA_EARTH_CONDA_ENV"
 _DOC = "docs/pypsa-earth-integration.md"
 # Persisted "point at an existing checkout" override — set via the Data-view
 # button so setup survives without an env var or a restart (backend/data/).
-_STATE_FILE = Path(__file__).resolve().parents[2] / "data" / "pypsa_earth.json"
+_STATE_FILE = data_root() / "pypsa_earth.json"
 # The running build's process-group id, persisted so a build orphaned by a
 # backend restart can be reclaimed (it keeps running and holds snakemake's lock).
 _PID_FILE = _STATE_FILE.parent / "pypsa_earth_run.pid"

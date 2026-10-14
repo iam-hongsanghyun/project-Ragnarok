@@ -19,6 +19,7 @@ from shapely.geometry import shape
 from shapely.geometry.base import BaseGeometry
 
 from .protocol import Region
+from backend.app.data_root import data_root
 
 
 _DEFAULT_URL = (
@@ -39,7 +40,7 @@ def _cache_dir() -> Path:
     if base:
         return Path(base).expanduser()
     # Default under backend/data/cache/ (gitignored).
-    return Path(__file__).resolve().parents[2] / "data" / "cache"
+    return data_root() / "cache"
 
 
 def _cache_path() -> Path:

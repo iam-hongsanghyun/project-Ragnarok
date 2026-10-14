@@ -34,6 +34,7 @@ from .models import ExportProjectPayload, RunPayload
 from . import model_store, run_store
 from ..pypsa.network import build_network, validate_model
 from ..pypsa.network.serialize import network_to_model as _network_to_model_json
+from backend.app.data_root import data_root
 
 # xlsx MIME used by the run export endpoint below.
 _XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -224,7 +225,7 @@ async def _collect_job(job_id: str) -> None:
 
 _queue_logger = logging.getLogger("pypsa_gui.queue")
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_QUEUE_DIR = _REPO_ROOT / "backend" / "data" / "queue"
+_QUEUE_DIR = data_root() / "queue"
 _QUEUE_PAYLOAD = "payload.json"
 _QUEUE_META = "meta.json"
 # Written by the WORKER when a queue solve finishes ({status, runName, error,
@@ -1171,7 +1172,7 @@ def identity() -> dict[str, Any]:
     return {
         "app": "ragnarok",
         "root": str(_REPO_ROOT),
-        "dataDir": str(_REPO_ROOT / "backend" / "data"),
+        "dataDir": str(data_root()),
         "frontendDist": str(_FRONTEND_DIST),
     }
 
@@ -1667,7 +1668,7 @@ _ZIP_MEDIA_TYPE = "application/zip"
 # GET /api/exports/{id}/download streams the finished file from disk and deletes
 # it afterwards. A TTL sweeper reaps artefacts the client never collected.
 _export_logger = logging.getLogger("pypsa_gui.exports")
-_EXPORTS_DIR = _REPO_ROOT / "backend" / "data" / "exports"
+_EXPORTS_DIR = data_root() / "exports"
 _EXPORT_TTL_SECONDS = 30 * 60  # reap built-but-uncollected artefacts after 30 min
 _EXPORT_PARTS = ("metadata", "model", "result")
 

@@ -44,13 +44,14 @@ import pandas as pd
 
 from . import timeseries
 from .config import load_system_defaults
+from backend.app.data_root import data_root
 
 logger = logging.getLogger("pypsa_gui.session_store")
 
 # ``__file__`` is ``backend/app/session_store.py`` → ``parents[2]`` is the repo
 # root, mirroring run_store.RUNS_DIR.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-SESSION_DIR = _REPO_ROOT / "backend" / "data" / "session"
+SESSION_DIR = data_root() / "session"
 
 # session_id is used as a directory name — guard against path traversal exactly
 # like run_store guards run names.

@@ -53,6 +53,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Callable
+from backend.app.data_root import data_root
 
 logger = logging.getLogger("pypsa_gui.plugins")
 
@@ -72,7 +73,7 @@ BACKEND_PLUGINS_DIR = Path(
 # memory. Gitignored; removed when the plugin is uninstalled.
 PLUGIN_FILES_DIR = Path(
     os.environ.get("RAGNAROK_PLUGIN_FILES_DIR")
-    or (Path(__file__).resolve().parents[1] / "data" / "plugin_files")
+    or (data_root() / "plugin_files")
 )
 
 # The reserved config key the framework injects so a plugin can resolve its

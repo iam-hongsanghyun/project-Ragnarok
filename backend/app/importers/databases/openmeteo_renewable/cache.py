@@ -18,9 +18,10 @@ import json
 import os
 from pathlib import Path
 from typing import Any
+from backend.app.data_root import data_root
 
 # backend/data/cache/openmeteo — parents[4] is the backend/ root.
-_DEFAULT_DIR = Path(__file__).resolve().parents[4] / "data" / "cache" / "openmeteo"
+_DEFAULT_DIR = data_root() / "cache" / "openmeteo"
 
 # Coordinate snap grid (degrees). 0.1° ≈ 11 km; ERA5 is ~0.25° native.
 GRID_DEG = 0.1

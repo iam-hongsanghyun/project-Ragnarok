@@ -29,10 +29,11 @@ import os
 import time
 from pathlib import Path
 from typing import Any
+from backend.app.data_root import data_root
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_DIR = Path(__file__).resolve().parents[2] / "data" / "import_cache"
+_DEFAULT_DIR = data_root() / "import_cache"
 
 # Sources whose licence forbids server-side caching (fetch-per-user only).
 NEVER_CACHE = frozenset({"renewables_ninja"})
