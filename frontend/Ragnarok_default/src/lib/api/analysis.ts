@@ -5,6 +5,7 @@
  * so the browser renders KPIs without processing thousands of rows.
  */
 import { API_BASE } from 'lib/constants';
+import { DEFAULT_SESSION_ID } from './session';
 
 export interface NumericColumnStats {
   name: string;
@@ -57,16 +58,16 @@ async function deriveGet(sheet: string, params: Record<string, string>, sessionI
   return resp.json();
 }
 
-export const fetchDurationCurve = (sheet: string, column: string, maxPoints = 800, sessionId = 'default') =>
+export const fetchDurationCurve = (sheet: string, column: string, maxPoints = 800, sessionId = DEFAULT_SESSION_ID) =>
   deriveGet(sheet, { mode: 'duration', column, maxPoints: String(maxPoints) }, sessionId) as Promise<DurationResult>;
 
-export const fetchDailyProfile = (sheet: string, columns: string[], sessionId = 'default') =>
+export const fetchDailyProfile = (sheet: string, columns: string[], sessionId = DEFAULT_SESSION_ID) =>
   deriveGet(sheet, { mode: 'daily_profile', columns: columns.join(',') }, sessionId) as Promise<DailyProfileResult>;
 
-export const fetchGroupedAggregate = (sheet: string, groupBy: string, column: string, agg = 'sum', sessionId = 'default') =>
+export const fetchGroupedAggregate = (sheet: string, groupBy: string, column: string, agg = 'sum', sessionId = DEFAULT_SESSION_ID) =>
   deriveGet(sheet, { mode: 'grouped', groupBy, column, agg }, sessionId) as Promise<GroupedResult>;
 
-export async function fetchColumnStats(sheet: string, sessionId = 'default'): Promise<SheetStats> {
+export async function fetchColumnStats(sheet: string, sessionId = DEFAULT_SESSION_ID): Promise<SheetStats> {
   const resp = await fetch(
     `${API_BASE}/api/session/sheet/${encodeURIComponent(sheet)}/stats?session_id=${encodeURIComponent(sessionId)}`,
   );

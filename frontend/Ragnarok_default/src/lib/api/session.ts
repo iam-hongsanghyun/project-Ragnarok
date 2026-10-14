@@ -9,8 +9,18 @@
 import { API_BASE } from 'lib/constants';
 import type { GridRow, WorkbookModel } from 'lib/types';
 
-/** Single active session today; a first-class id so remote/multi-session is a flip later. */
-export const DEFAULT_SESSION_ID = 'default';
+/**
+ * The working-model session this screen shows: `?session=<id>` in its address, else `default`.
+ * A host that keeps several sessions side by side (bridge, one per owner) opens the screen on its
+ * own; the MCP server reaches the same session through `RAGNAROK_SESSION_ID`.
+ */
+export const DEFAULT_SESSION_ID: string = (() => {
+  try {
+    return new URLSearchParams(window.location.search).get('session') || 'default';
+  } catch {
+    return 'default';
+  }
+})();
 
 export interface SessionSheetMeta {
   name: string;

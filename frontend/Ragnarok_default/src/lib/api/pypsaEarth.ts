@@ -7,6 +7,7 @@
  * (`RAGNAROK_PYPSA_EARTH_DIR` — else `available` is false with setup guidance).
  */
 import { API_BASE } from 'lib/constants/config';
+import { DEFAULT_SESSION_ID } from './session';
 import type { WorkbookFragment } from 'lib/api/databases';
 
 export interface PypsaEarthAvailability {
@@ -71,7 +72,7 @@ export async function startBuild(req: BuildRequest): Promise<BuildJobStatus> {
   return j(await fetch(`${API_BASE}/api/pypsa-earth/build`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(req),
+    body: JSON.stringify({ sessionId: DEFAULT_SESSION_ID, ...req }),
   }));
 }
 

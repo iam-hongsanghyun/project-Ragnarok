@@ -6,10 +6,11 @@
  * body, and error detail extracted from the FastAPI `{detail}` envelope.
  */
 import { API_BASE } from 'lib/constants';
+import { DEFAULT_SESSION_ID } from 'lib/api/session';
 import { Libraries, Portfolio, Run, Scenario } from './types';
 
-/** Same single-session convention as the workbook session (`DEFAULT_SESSION_ID`). */
-export const DEFAULT_PHYSICAL_RISK_SESSION_ID = 'default';
+/** The same session as the workbook's (`DEFAULT_SESSION_ID`, from `?session=`). */
+export const DEFAULT_PHYSICAL_RISK_SESSION_ID = DEFAULT_SESSION_ID;
 
 async function asJson<T>(resp: Response): Promise<T> {
   if (!resp.ok) {
