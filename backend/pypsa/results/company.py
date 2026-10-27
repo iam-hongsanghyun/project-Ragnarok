@@ -11,9 +11,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import numpy as np
 import pypsa
 
 from ..utils.emissions import per_generator_emission_factor
+from .finance import storage_assets
 
 _log = logging.getLogger("pypsa.solver")
 
@@ -59,7 +61,8 @@ def build_company_breakdown(
     column = (owner_column or "owner").strip() or "owner"
     gen_owner = _owner_map(model, "generators", column)
     sto_owner = _owner_map(model, "storage_units", column)
-    if not gen_owner and not sto_owner:
+    store_owner = _owner_map(model, "stores", column)
+    if not gen_owner and not sto_owner and not store_owner:
         return None
 
     weights = network.snapshot_weightings["objective"].to_numpy()
@@ -80,6 +83,7 @@ def build_company_breakdown(
         return acc.setdefault(name, {
             "capacityMW": 0.0, "energyMWh": 0.0, "revenue": 0.0,
             "emissionsTonnes": 0.0, "generatorCount": 0.0, "storageCount": 0.0,
+            "storageEnergyMWh": 0.0,
         })
 
     untagged = 0
@@ -101,22 +105,24 @@ def build_company_breakdown(
         b["emissionsTonnes"] += energy * float(eff_ef.get(g, 0.0))
         b["generatorCount"] += 1
 
-    for s in network.storage_units.index:
-        owner = sto_owner.get(str(s))
+    # Storage: StorageUnit and Store + Link, through the one shared rule.
+    def _storage_price(bus: str) -> np.ndarray | None:
+        return mp[bus].to_numpy() if has_lmp and bus in mp.columns else None
+
+    for a in storage_assets(
+        network, _storage_price, weights, storage_units=list(network.storage_units.index),
+        stores=list(network.stores.index),
+    ):
+        owner = (sto_owner if a.sheet == "storage_units" else store_owner).get(a.name)
         if not owner:
             untagged += 1
             continue
         b = _bucket(owner)
-        bus = str(network.storage_units.at[s, "bus"])
-        pd_ = network.storage_units_t.p_dispatch[s].to_numpy() if s in network.storage_units_t.p_dispatch.columns else None
-        pc = network.storage_units_t.p_store[s].to_numpy() if s in network.storage_units_t.p_store.columns else None
-        energy = float((pd_ * weights).sum()) if pd_ is not None else 0.0
-        pi = _price(bus)
-        b["capacityMW"] += float(network.storage_units.at[s, "p_nom_opt"])
-        b["energyMWh"] += energy
-        if pi is not None and pd_ is not None and pc is not None:
-            b["revenue"] += float(((pd_ - pc) * pi * weights).sum())
+        b["capacityMW"] += a.capacity_mw
+        b["energyMWh"] += a.discharged_mwh
+        b["revenue"] += a.revenue
         b["storageCount"] += 1
+        b["storageEnergyMWh"] += a.energy_mwh
 
     if not acc:
         return None
@@ -130,6 +136,7 @@ def build_company_breakdown(
             "emissionsTonnes": round(v["emissionsTonnes"], 2),
             "generatorCount": int(v["generatorCount"]),
             "storageCount": int(v["storageCount"]),
+            "storageEnergyMWh": round(v["storageEnergyMWh"], 2),
         }
         for name, v in acc.items()
     ]

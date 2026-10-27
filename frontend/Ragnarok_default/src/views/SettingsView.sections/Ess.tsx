@@ -83,13 +83,13 @@ export function EssSection(props: EssSectionProps) {
             <label className="sg-setting-label" htmlFor="rs-ess-bus">Bus</label>
             {buses.length > 0 ? (
               <select id="rs-ess-bus" className="sg-num-input" value={cfg.bus} onChange={(e) => set({ bus: e.target.value })}>
-                <option value="">Auto (most volatile)</option>
+                <option value="">Auto (most volatile electricity bus)</option>
                 {buses.map((b) => <option key={b} value={b}>{b}</option>)}
               </select>
             ) : (
               <input id="rs-ess-bus" type="text" className="sg-num-input" placeholder="auto" value={cfg.bus} onChange={(e) => set({ bus: e.target.value })} />
             )}
-            <p className="sg-setting-hint">Where to site the battery. Auto picks the most price-volatile bus.</p>
+            <p className="sg-setting-hint">Where to site the battery. Auto picks the most price-volatile electricity bus (hydrogen, gas and heat buses are skipped).</p>
           </div>
 
           <div className="sg-setting-row">
@@ -101,11 +101,40 @@ export function EssSection(props: EssSectionProps) {
           <div className="sg-setting-row">
             <label className="sg-setting-label" htmlFor="rs-ess-capex">Capital cost (/MW/yr)</label>
             <input id="rs-ess-capex" type="number" min={0} step={1000} className="sg-num-input" value={cfg.capitalCostPerMW} onChange={(e) => num(e.target.value, (n) => set({ capitalCostPerMW: Math.max(0, n) }))} />
+            <p className="sg-setting-hint">Annualised (per year), the same basis as every capital cost in the model; the overnight cost is derived from it over the lifetime below.</p>
+          </div>
+
+          <div className="sg-setting-row">
+            <label className="sg-setting-label" htmlFor="rs-ess-capex-mwh">Energy cost (/MWh/yr)</label>
+            <input id="rs-ess-capex-mwh" type="number" min={0} step={500} className="sg-num-input" value={cfg.capitalCostPerMWh ?? 0} onChange={(e) => num(e.target.value, (n) => set({ capitalCostPerMWh: Math.max(0, n) }))} />
+            <p className="sg-setting-hint">Annualised capital cost of the energy capacity (power × duration), on top of the per-MW cost.</p>
+          </div>
+
+          <div className="sg-setting-row">
+            <label className="sg-setting-label" htmlFor="rs-ess-fom">Fixed O&amp;M (/MW/yr)</label>
+            <input id="rs-ess-fom" type="number" min={0} step={500} className="sg-num-input" value={cfg.fixedOmPerMWYear ?? 0} onChange={(e) => num(e.target.value, (n) => set({ fixedOmPerMWYear: Math.max(0, n) }))} />
+          </div>
+
+          <div className="sg-setting-row">
+            <label className="sg-setting-label" htmlFor="rs-ess-vom">Variable cost (/MWh discharged)</label>
+            <input id="rs-ess-vom" type="number" min={0} step={0.5} className="sg-num-input" value={cfg.variableCostPerMWh ?? 0} onChange={(e) => num(e.target.value, (n) => set({ variableCostPerMWh: Math.max(0, n) }))} />
+          </div>
+
+          <div className="sg-setting-row">
+            <label className="sg-setting-label" htmlFor="rs-ess-life">Lifetime (years)</label>
+            <input id="rs-ess-life" type="number" min={1} max={60} step={1} className="sg-num-input" placeholder="15" value={cfg.lifetimeYears ?? ''} onChange={(e) => { const n = parseFloat(e.target.value); set({ lifetimeYears: Number.isFinite(n) && n > 0 ? Math.min(60, n) : undefined }); }} />
+            <p className="sg-setting-hint">Cash-flow horizon for NPV / IRR / payback. Blank uses 15 years, and the result says so.</p>
           </div>
 
           <div className="sg-setting-row">
             <label className="sg-setting-label" htmlFor="rs-ess-eff">Round-trip efficiency (%)</label>
             <input id="rs-ess-eff" type="number" min={10} max={100} step={1} className="sg-num-input" value={effPct} onChange={(e) => num(e.target.value, (n) => set({ roundTripEfficiency: Math.min(1, Math.max(0.1, n / 100)) }))} />
+          </div>
+
+          <div className="sg-setting-row">
+            <label className="sg-setting-label" htmlFor="rs-ess-loss">Standing loss (%/h)</label>
+            <input id="rs-ess-loss" type="number" min={0} max={20} step={0.01} className="sg-num-input" value={Math.round((cfg.standingLoss ?? 0) * 10000) / 100} onChange={(e) => num(e.target.value, (n) => set({ standingLoss: Math.min(0.2, Math.max(0, n / 100)) }))} />
+            <p className="sg-setting-hint">Share of stored energy that leaks away each hour (0 for a battery, higher for thermal or tank storage).</p>
           </div>
 
           <div className="sg-setting-divider" />

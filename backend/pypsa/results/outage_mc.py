@@ -95,8 +95,9 @@ import pypsa
 from ..constants import carrier_color
 from .adequacy import (
     compute_adequacy,
+    extract_storage_fleet,
     generate_renewable_ensemble,
-    storage_discharge_availability,
+    storage_dispatch,
 )
 
 _log = logging.getLogger("pypsa.solver")
@@ -445,11 +446,12 @@ def build_outage_mc(
     else:
         available += renewable_deterministic[None, :]
 
-    # Storage discharge, on the same convention the ELCC study uses. Omitting it
-    # made this study report a LOLE ten times the ELCC card's baseline for the
-    # same storage-carrying system — two numbers on one dashboard that could not
-    # both be true.
-    available += storage_discharge_availability(network, len(snapshots))[None, :]
+    # Storage serves shortfall through the one shared SOC-limited kernel (power,
+    # energy, efficiency, recharge only from surplus) — the same model adequacy,
+    # ELCC and the convergence sampler use, so they report one reliability.
+    fleet = extract_storage_fleet(network)
+    if len(fleet):
+        available = available + storage_dispatch(available, load, weights, fleet)
 
     modeled_hours = float(weights.sum())
     metrics = compute_adequacy(available, load, weights, modeled_hours=modeled_hours)

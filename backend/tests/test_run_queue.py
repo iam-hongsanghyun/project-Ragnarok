@@ -16,6 +16,15 @@ from backend.app import main, model_store, session_store
 from backend.app.models import RunPayload
 
 
+@pytest.fixture(autouse=True)
+def _skip_model_validity_gate(monkeypatch):
+    """These tests use skeleton models to exercise queue bookkeeping, not validity.
+
+    The pre-run ``validate_model`` gate has its own tests (test_run_lifecycle.py).
+    """
+    monkeypatch.setattr(main, "_refuse_invalid_model", lambda payload: None)
+
+
 def _payload(label: str = "A", snaps: int = 10) -> RunPayload:
     return RunPayload(
         model={"buses": [{"name": "n1"}]},
@@ -246,9 +255,11 @@ def test_restart_recovery_adopts_finished_orphan_outcome() -> None:
     assert jobs[0]["error"] is None
 
 
-def test_restart_recovery_keeps_live_orphan_running() -> None:
+def test_restart_recovery_keeps_live_orphan_running(monkeypatch) -> None:
     # The worker is STILL solving (its pid is alive) → the card stays "running";
-    # the lifespan watcher will flip it when outcome.json appears.
+    # the lifespan watcher will flip it when outcome.json appears. This process is
+    # alive but is not a spawn worker, so stand in for the worker-identity probe.
+    monkeypatch.setattr(main, "_pid_is_solver", main._pid_alive)
     asyncio.run(main.enqueue_run(_payload("C")))
     item = main._run_queue[0]
     _mark_running(item, pid=os.getpid())  # this test process: definitely alive

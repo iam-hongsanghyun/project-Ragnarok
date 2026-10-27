@@ -54,7 +54,19 @@ def _pathway_period_summaries(
     load_dispatch: pd.Series,
     price_series: pd.Series,
     emissions_factors: dict[str, float],
+    *,
+    generator_capacity_by_period: dict[int, float] | None = None,
+    storage_capacity_by_period: dict[int, float] | None = None,
+    expansion_results: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
+    """Per-investment-period totals.
+
+    Beyond the dispatch / emission / price / peak-load figures, each period
+    reports ``installedCapacityMw`` and ``storageCapacityMw`` (assets active in
+    that period only) and ``capexAnnual`` (annuity of the extendable assets
+    active in it, before the investment-period weighting). ``averagePrice`` is
+    the snapshot-weighted mean.
+    """
     if not isinstance(network.snapshots, pd.MultiIndex):
         return []
     summaries: list[dict[str, Any]] = []
@@ -86,9 +98,20 @@ def _pathway_period_summaries(
             "modeledHours": float(weight.sum()),
             "totalDispatch": total_dispatch,
             "totalEmissions": total_emissions,
-            "averagePrice": float(price_series.loc[period_index].mean()) if len(period_index) else 0.0,
+            "averagePrice": (
+                float((price_series.loc[period_index] * weight).sum() / weight.sum())
+                if len(period_index) and float(weight.sum()) > 0.0
+                else 0.0
+            ),
             "peakLoad": float(load_dispatch.loc[period_index].max()) if len(period_index) else 0.0,
             "objectiveWeight": float(network.investment_period_weightings.at[int(period), "objective"]),
             "yearsWeight": float(network.investment_period_weightings.at[int(period), "years"]),
+            "installedCapacityMw": (generator_capacity_by_period or {}).get(int(period)),
+            "storageCapacityMw": (storage_capacity_by_period or {}).get(int(period)),
+            "capexAnnual": (
+                float(sum(r.get("capex_by_period", {}).get(str(int(period)), 0.0) for r in expansion_results))
+                if expansion_results is not None
+                else None
+            ),
         })
     return summaries

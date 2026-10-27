@@ -18,14 +18,22 @@ User input (``dashboard.settings``)
 * ``ess_carrier`` — storage carrier name; **added to the network's carriers when
   it doesn't already exist**.
 * ``ess_hours`` — energy/power ratio → ``StorageUnit.max_hours``.
-* ``ess_efficiency`` — **round-trip** efficiency; split as ``√`` to
-  ``efficiency_store`` and ``efficiency_dispatch`` (the battery convention).
+* ``ess_efficiency`` — **round-trip** efficiency as a fraction in (0, 1];
+  split as ``√`` to ``efficiency_store`` and ``efficiency_dispatch`` (the
+  battery convention). A value above 1 is read as a percent (``90`` → 0.9); 0,
+  blank or anything unusable falls back to :data:`DEFAULT_ROUND_TRIP` and says
+  so — it never silently becomes a lossless battery.
 * ``ess_sizing_mode`` — ``"proportional"`` (a % of the bus's total replaced
   generator capacity) or ``"fixed"`` (a flat MW per bus).
 * ``ess_proportion_pct`` / ``ess_fixed_mw`` — the value for the chosen mode.
-* ``ess_capital_cost`` — annualised capital cost per MW (drives expansion).
+* ``ess_capital_cost`` — **overnight** capital cost per MW of power (drives
+  expansion). The backend annuitises it over ``ess_lifetime`` at the project
+  discount rate, so this is *not* an annualised figure.
 * ``ess_expandable`` — when True, ``p_nom_extendable = True`` with
-  ``ess_p_nom_min`` / ``ess_p_nom_max`` (``0``/blank max → unbounded).
+  ``ess_p_nom_min`` / ``ess_p_nom_max`` (``0``/blank max → unbounded). An
+  extendable ESS with **zero capital cost and no maximum** is free, unbounded
+  storage; it is built (placeholders are a supported workflow) but logs a
+  warning.
 
 One StorageUnit ``ESS_<bus>`` is added per replacement bus. ``p_nom`` is the
 sized capacity (the expansion *starting point* when extendable).
@@ -33,7 +41,7 @@ sized capacity (the expansion *starting point* when extendable).
 Algorithm:
     p_nom_b = ess_fixed_mw                                   (fixed)
     p_nom_b = replaced_capacity_b · ess_proportion_pct/100   (proportional)
-    eta_store = eta_dispatch = sqrt(ess_efficiency)
+    eta_store = eta_dispatch = sqrt(round_trip)      round_trip = resolve_round_trip(ess_efficiency)
 
 Symbols (units):
     replaced_capacity_b   Σ original p_nom replaced at bus b   [MW]
@@ -53,6 +61,62 @@ if TYPE_CHECKING:
     from dashboard_lib.settings import Dashboard
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_ROUND_TRIP = 0.9
+
+
+def resolve_round_trip(raw: object) -> tuple[float, str | None]:
+    """Round-trip efficiency as a fraction in (0, 1], plus a note when it was adjusted.
+
+    * ``0 < x <= 1`` — used as given.
+    * ``1 < x <= 100`` — a percent (``90`` → ``0.9``).
+    * ``0``, blank, negative, > 100 or unparseable — :data:`DEFAULT_ROUND_TRIP`.
+
+    The previous behaviour turned ``0`` into a lossless battery (η = 1) and
+    clamped ``90`` to 1 — both silently.
+    """
+    try:
+        value = float(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        value = 0.0
+    if math.isnan(value) or value <= 0.0:  # NaN, zero, negative
+        return DEFAULT_ROUND_TRIP, (
+            f"ESS round-trip efficiency {raw!r} is unset or not positive; "
+            f"using the default {DEFAULT_ROUND_TRIP:g}"
+        )
+    if value <= 1.0:
+        return value, None
+    if value <= 100.0:
+        return value / 100.0, f"ESS round-trip efficiency {value:g} read as {value:g}% = {value / 100.0:g}"
+    return DEFAULT_ROUND_TRIP, (
+        f"ESS round-trip efficiency {value:g} is out of range (0-1 or 1-100 %); "
+        f"using the default {DEFAULT_ROUND_TRIP:g}"
+    )
+
+
+def _round_trip_setting(settings: object) -> float:
+    rt, note = resolve_round_trip(getattr(settings, "ess_efficiency", DEFAULT_ROUND_TRIP))
+    if note:
+        logger.warning("%s", note)
+        print(f"  {note}")
+    return rt
+
+
+def _warn_free_unbounded(expandable: bool, capital_cost: float, p_nom_max: float, where: str) -> None:
+    """Warn loudly when an extendable ESS has no cost and no ceiling.
+
+    That is free, unlimited storage: the optimiser builds as much as it likes.
+    It stays a warning, not an error, because zero-cost placeholder units that
+    the user prices later in the editor are a supported workflow.
+    """
+    if expandable and capital_cost <= 0.0 and p_nom_max <= 0.0:
+        msg = (
+            f"{where}: extendable ESS has zero capital cost and no maximum — the optimiser "
+            "will treat it as unlimited free storage. Set ess_capital_cost > 0 or a maximum "
+            "(ess_p_nom_max / the rule's capacity_mw) before solving."
+        )
+        logger.warning("%s", msg)
+        print(f"  WARNING: {msg}")
 
 
 def _unique_name(network: pypsa.Network, candidate: str) -> str:
@@ -90,9 +154,8 @@ def add_storage_at_replaced_buses(
         logger.info("ESS: added missing carrier %r", carrier)
 
     # Round-trip efficiency split √ into the per-direction efficiencies.
-    rt = float(getattr(s, "ess_efficiency", 0.9) or 0.0)
-    rt = min(max(rt, 0.0), 1.0)
-    eff = math.sqrt(rt) if rt > 0 else 1.0
+    rt = _round_trip_setting(s)
+    eff = math.sqrt(rt)
 
     mode = str(getattr(s, "ess_sizing_mode", "proportional") or "proportional").strip().lower()
     fixed_mw = float(getattr(s, "ess_fixed_mw", 0.0) or 0.0)
@@ -104,6 +167,7 @@ def add_storage_at_replaced_buses(
     expansion_mode = str(getattr(s, "ess_expansion_mode", "proportional") or "proportional").strip().lower()
     p_nom_min_in = float(getattr(s, "ess_p_nom_min", 0.0) or 0.0)
     p_nom_max_in = float(getattr(s, "ess_p_nom_max", 0.0) or 0.0)
+    _warn_free_unbounded(expandable, capital_cost, p_nom_max_in, "ESS at replaced buses")
 
     def _bound(value: float, replaced_cap: float) -> float:
         """Resolve a min/max input to MW: a % of the bus's replaced capacity in
@@ -203,7 +267,8 @@ def add_storage_at_selected_buses(network: pypsa.Network, dashboard: "Dashboard"
 
     Raises:
         ValueError: On any invalid rule — missing columns, unknown bus/region
-            or mode, or a missing/negative capacity.
+            or mode, or a missing/negative capacity. An ``extendable`` rule with
+            zero capital cost and no ``capacity_mw`` ceiling only warns.
     """
     s = dashboard.settings
     if not getattr(s, "ess_placement", False):
@@ -232,9 +297,8 @@ def add_storage_at_selected_buses(network: pypsa.Network, dashboard: "Dashboard"
         network.add("Carrier", carrier)
         logger.info("ESS placement: added missing carrier %r", carrier)
 
-    rt = float(getattr(s, "ess_efficiency", 0.9) or 0.0)
-    rt = min(max(rt, 0.0), 1.0)
-    eff = math.sqrt(rt) if rt > 0 else 1.0
+    rt = _round_trip_setting(s)
+    eff = math.sqrt(rt)
     max_hours = float(getattr(s, "ess_hours", 4.0) or 0.0)
     capital_cost = float(getattr(s, "ess_capital_cost", 0.0) or 0.0)
     lifetime = float(getattr(s, "ess_lifetime", 15.0) or 15.0)
@@ -275,6 +339,9 @@ def add_storage_at_selected_buses(network: pypsa.Network, dashboard: "Dashboard"
                 f"ESS placement {label}: capacity_mw must be >= 0, got {capacity}"
             )
 
+        _warn_free_unbounded(
+            mode == "extendable", capital_cost, capacity, f"ESS placement {label}"
+        )
         buses = _resolve_member(
             network, dashboard, resolution, value, region_cache, label, "group"
         )

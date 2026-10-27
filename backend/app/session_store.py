@@ -93,6 +93,25 @@ def default_page_size() -> int:
 
 # ── path helpers ────────────────────────────────────────────────────────────────
 
+def json_default(value: Any) -> Any:
+    """``json.dumps`` fallback for the values a pandas/numpy-built model carries.
+
+    Numpy scalars/arrays and datetime-like cells (``Timestamp``, ``datetime``,
+    ``date``) are not JSON types; without this a single such cell made the whole
+    save raise (and, before the temp-db swap, destroyed the session with it).
+    Anything else is still a TypeError — a silent ``str()`` would store garbage.
+    """
+    if hasattr(value, "isoformat"):
+        return value.isoformat()      # datetime / date / pandas Timestamp
+    if type(value).__name__ == "datetime64":
+        return str(value)             # numpy datetime64 (.item() would give raw ns)
+    if hasattr(value, "item") and callable(value.item) and getattr(value, "ndim", 1) == 0:
+        return value.item()           # numpy scalar
+    if hasattr(value, "tolist") and callable(value.tolist):
+        return value.tolist()         # numpy array / pandas Index
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
 def _is_safe_id(session_id: str) -> bool:
     return bool(session_id) and ".." not in session_id and bool(_ID_GUARD.match(session_id))
 
@@ -189,7 +208,7 @@ def save_model(
             kind = "series"
         else:
             _static_path(session_id, name).write_text(
-                json.dumps(rows, ensure_ascii=False), encoding="utf-8"
+                json.dumps(rows, ensure_ascii=False, default=json_default), encoding="utf-8"
             )
             kind = "static"
         sheets_meta.append(
@@ -214,7 +233,7 @@ def save_model(
         "scenarioYear": _scenario_year_from_labels(labels),
         "componentCounts": component_counts,
     }
-    _meta_path(session_id).write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    _meta_path(session_id).write_text(json.dumps(meta, ensure_ascii=False, default=json_default), encoding="utf-8")
     logger.info(
         "Session %s: stored %d sheets, %d snapshots", session_id, len(sheets_meta), len(labels)
     )
@@ -240,7 +259,7 @@ def merge_static_model(session_id: str, model: dict[str, list[dict[str, Any]]]) 
     for name, rows in model.items():
         if not isinstance(rows, list) or is_series_sheet(name):
             continue
-        _static_path(session_id, name).write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+        _static_path(session_id, name).write_text(json.dumps(rows, ensure_ascii=False, default=json_default), encoding="utf-8")
         columns = list(rows[0].keys()) if rows and isinstance(rows[0], dict) else []
         entry = existing.get(name)
         if entry is None:
@@ -252,7 +271,7 @@ def merge_static_model(session_id: str, model: dict[str, list[dict[str, Any]]]) 
             entry["columns"] = columns
     if isinstance(model.get("snapshots"), list):
         meta["snapshotCount"] = len(model["snapshots"])
-    _meta_path(session_id).write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    _meta_path(session_id).write_text(json.dumps(meta, ensure_ascii=False, default=json_default), encoding="utf-8")
     return meta
 
 
@@ -428,7 +447,7 @@ def save_controls(session_id: str, controls: dict[str, Any]) -> None:
         return
     _session_dir(session_id).mkdir(parents=True, exist_ok=True)
     _controls_path(session_id).write_text(
-        json.dumps(controls, ensure_ascii=False), encoding="utf-8"
+        json.dumps(controls, ensure_ascii=False, default=json_default), encoding="utf-8"
     )
 
 
@@ -482,7 +501,7 @@ def patch_sheet(session_id: str, sheet: str, ops: list[dict[str, Any]]) -> dict[
     else:
         p = _static_path(session_id, sheet)
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+        p.write_text(json.dumps(rows, ensure_ascii=False, default=json_default), encoding="utf-8")
 
     columns = list(rows[0].keys()) if rows else list((entry or {}).get("columns", []))
     _update_sheet_meta(session_id, sheet, row_count=len(rows), columns=columns, kind=kind)
@@ -576,7 +595,7 @@ def _update_sheet_meta(
     # Keep snapshot count in step when the snapshots sheet is edited.
     if sheet == "snapshots":
         meta["snapshotCount"] = row_count
-    _meta_path(session_id).write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    _meta_path(session_id).write_text(json.dumps(meta, ensure_ascii=False, default=json_default), encoding="utf-8")
 
 
 # ── clear ───────────────────────────────────────────────────────────────────────

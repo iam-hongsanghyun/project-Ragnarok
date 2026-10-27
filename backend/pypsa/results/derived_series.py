@@ -15,6 +15,11 @@ from __future__ import annotations
 from typing import Any
 
 # metric → the output series sheet it aggregates.
+# Columns that label a row rather than carry a value. A pathway run's series
+# sheets lead with ``period`` (the investment-period year); summing or
+# averaging it as if it were an asset column turned a 100 MW load into 2130.
+LABEL_COLUMNS = ("period",)
+
 METRIC_SHEET = {
     "dispatch_by_carrier": "generators-p",
     "load": "loads-p",
@@ -48,8 +53,11 @@ def derive_series(
     - ``load``: sum across all load columns per snapshot.
     - ``system_price``: mean across all bus columns per snapshot.
     """
-    data_cols = [c for c in columns if c != index_col]
+    data_cols = [c for c in columns if c != index_col and c not in LABEL_COLUMNS]
     labels = [r.get(index_col) for r in rows]
+    # Pathway rows repeat the same timestep in every period, so labels alone are
+    # ambiguous: carry the period of each row alongside (None for single-period).
+    periods = [r.get("period") for r in rows] if "period" in columns else None
     n = len(rows)
 
     if metric == "dispatch_by_carrier":
@@ -77,7 +85,10 @@ def derive_series(
     else:
         raise ValueError(f"Unknown derived metric {metric!r}. Options: {sorted(METRIC_SHEET)}.")
 
-    return {"metric": metric, "indexCol": index_col, "labels": labels, "series": series}
+    out: dict[str, Any] = {"metric": metric, "indexCol": index_col, "labels": labels, "series": series}
+    if periods is not None:
+        out["periods"] = periods
+    return out
 
 
 def _num(v: Any) -> float:

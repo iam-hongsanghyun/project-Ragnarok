@@ -82,9 +82,30 @@ class _Job:
     status: str = "running"   # running | done | error | cancelled
     result: dict | None = None
     error: str | None = None
+    finished_at: float | None = None   # time.monotonic() when it left "running"
 
 
 _jobs: dict[str, _Job] = {}
+
+
+def _prune_direct_jobs() -> None:
+    """Drop finished direct jobs older than the retention window.
+
+    A finished job is normally freed when the client polls its result. Pruning
+    EVERY finished job whenever a new run starts (as this used to) deleted the
+    results of concurrent runs the client had not read yet, so they polled a 404.
+    Only jobs nobody collected within ``simulation.direct_job_retention_seconds``
+    go.
+    """
+    from .config import load_system_defaults
+
+    keep_for = float(
+        load_system_defaults().get("simulation", {}).get("direct_job_retention_seconds", 900)
+    )
+    now = time.monotonic()
+    for jid, j in list(_jobs.items()):
+        if j.status != "running" and j.finished_at is not None and now - j.finished_at > keep_for:
+            _jobs.pop(jid, None)
 
 
 # ── Subprocess worker ─────────────────────────────────────────────────────────
@@ -199,17 +220,41 @@ async def _collect_job(job_id: str) -> None:
     while True:
         try:
             status, data = job.result_queue.get_nowait()
+            if job.status == "cancelled":
+                return
             if status == "ok":
                 job.status = "done"
                 job.result = data
             else:
                 job.status = "error"
                 job.error = data
+            job.finished_at = time.monotonic()
             return
         except queue.Empty:
             if not job.proc.is_alive():
+                # The worker may have put its result an instant before exiting;
+                # drain once more before declaring it dead.
+                try:
+                    status, data = await asyncio.to_thread(job.result_queue.get, True, 1.0)
+                    if job.status != "cancelled":
+                        job.status = "done" if status == "ok" else "error"
+                        job.result = data if status == "ok" else None
+                        job.error = None if status == "ok" else data
+                        job.finished_at = time.monotonic()
+                    return
+                except queue.Empty:
+                    pass
+                # Only cancel_run marks a job "cancelled". A worker that died on
+                # its own (out of memory, native crash, killed) is a failed run,
+                # not a user cancellation — report it as an error.
                 if job.status == "running":
-                    job.status = "cancelled"
+                    job.status = "error"
+                    job.error = (
+                        "The solver process exited without delivering a result "
+                        f"(exit code {job.proc.exitcode}) — it likely ran out of memory "
+                        "or crashed."
+                    )
+                    job.finished_at = time.monotonic()
                 return
             await asyncio.sleep(0.5)
 
@@ -330,6 +375,10 @@ class _QueueItem:
     # History name of the run a finished solve stored (from the worker), so a
     # client can open ITS result instead of guessing the newest run.
     run_name: str | None = None
+    # Dispatch generation. Bumped each time the pump claims the item, so a stale
+    # task from a cancelled attempt can tell it no longer owns the item (a rerun
+    # right after a cancel otherwise had the old task overwrite the new attempt).
+    attempt: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         # Running/done items report the cores actually assigned at dispatch; a
@@ -426,6 +475,32 @@ def _pid_alive(pid: int | None) -> bool:
         return False
 
 
+def _pid_is_solver(pid: int | None) -> bool:
+    """``_pid_alive`` AND, where checkable, the pid still names a spawn worker.
+
+    A pid persisted in meta.json can be recycled by an unrelated process after
+    a restart; liveness alone would then keep a dead run "running" forever and,
+    worse, let Cancel SIGTERM/SIGKILL a stranger. multiprocessing "spawn"
+    children run ``python -c 'from multiprocessing.spawn import spawn_main …'``,
+    so that is what the command line must show. Windows has no cheap equivalent
+    and falls back to liveness.
+    """
+    if not _pid_alive(pid):
+        return False
+    if os.name == "nt":
+        return True
+    try:
+        import subprocess
+
+        out = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "command="],
+            capture_output=True, text=True, timeout=5, check=False,
+        ).stdout.strip()
+    except Exception:  # noqa: BLE001 — cannot verify: trust liveness
+        return True
+    return True if not out else "multiprocessing" in out
+
+
 def _adopt_outcome(item: _QueueItem, outcome: dict[str, Any]) -> None:
     """Apply a worker-written outcome.json to the queue item (done/error)."""
     status = str(outcome.get("status") or "")
@@ -512,7 +587,7 @@ def _load_queue_from_disk() -> None:
                     finished_at = outcome.get("finishedAt") or _now_iso()
                     meta["runName"] = outcome.get("runName") or meta.get("runName")
                     _queue_logger.info("Adopted finished orphan run %s: %s", item_id, status)
-                elif _pid_alive(pid):
+                elif _pid_is_solver(pid):
                     _queue_logger.info("Queue item %s still solving in orphan pid %s", item_id, pid)
                 else:
                     status = "error"
@@ -608,7 +683,7 @@ def _find_queue_item(item_id: str) -> _QueueItem | None:
     return next((it for it in _run_queue if it.id == item_id), None)
 
 
-def _finalize_queue_item(item: _QueueItem) -> None:
+def _finalize_queue_item(item: _QueueItem, attempt: int | None = None) -> None:
     """Guarantee a dispatched item never stays stuck at "running".
 
     Each job runs as a fire-and-forget task (see _queue_pump), so an exception
@@ -617,6 +692,8 @@ def _finalize_queue_item(item: _QueueItem) -> None:
     permanently consume a concurrency slot. Force it to error here; leave
     already-terminal states (done/error/cancelled) untouched.
     """
+    if attempt is not None and item.attempt != attempt:
+        return  # a newer dispatch owns the item now
     if item.status == "running":
         item.status = "error"
         item.error = item.error or "Solve dispatch failed before completion."
@@ -633,19 +710,20 @@ async def _run_queue_item(item: _QueueItem) -> None:
     the worker, await its result, and record the terminal status. The try/finally
     guarantees the slot is released even on an unexpected failure.
     """
+    attempt = item.attempt
     try:
         ctx = mp.get_context("spawn")
-        item.result_queue = ctx.Queue()
-        item.proc = ctx.Process(
+        result_queue = item.result_queue = ctx.Queue()
+        proc = item.proc = ctx.Process(
             target=_solve_worker,
-            args=(str(item.payload_path), item.result_queue, item.cores),
+            args=(str(item.payload_path), result_queue, item.cores),
             daemon=True,
         )
         # A rerun reuses this item's dir — drop any outcome from a previous
         # attempt so restart-recovery can never adopt a stale result.
         _queue_outcome_path(item.id).unlink(missing_ok=True)
-        item.proc.start()
-        item.pid = item.proc.pid  # persisted so a restarted backend can find the orphan
+        proc.start()
+        item.pid = proc.pid  # persisted so a restarted backend can find the orphan
         _persist_queue_meta(item)
 
         # Read the result FIRST. The worker puts a (possibly large) result dict on
@@ -656,13 +734,13 @@ async def _run_queue_item(item: _QueueItem) -> None:
         status: str | None = None
         data: Any = None
         while True:
-            if item.status == "cancelled":
+            if item.status == "cancelled" or item.attempt != attempt:
                 return
             try:
-                status, data = item.result_queue.get_nowait()
+                status, data = result_queue.get_nowait()
                 break
             except queue.Empty:
-                if not item.proc.is_alive():
+                if not proc.is_alive():
                     break  # exited without delivering a result
                 await asyncio.sleep(0.3)
 
@@ -670,12 +748,23 @@ async def _run_queue_item(item: _QueueItem) -> None:
         # runs after the put) and exit. Wait for that — process exit guarantees the
         # run + its xlsx are on disk. Bounded so a stuck child can never wedge its
         # slot indefinitely; other concurrent jobs are unaffected.
-        await asyncio.to_thread(item.proc.join, 600)
-        if item.proc.is_alive():
+        await asyncio.to_thread(proc.join, 600)
+        if proc.is_alive():
             _queue_logger.warning("Queue item %s did not exit within 600s after result", item.id)
+        if item.attempt != attempt:
+            return  # cancelled and re-dispatched meanwhile: not ours to record
         if item.status == "cancelled":
             _persist_queue_meta(item)
             return
+        if status is None:
+            # The worker persists outcome.json before it signals; if the signal
+            # was lost in the exit race, the file still tells what happened.
+            outcome = _read_queue_outcome(item.id)
+            if outcome is not None:
+                _adopt_outcome(item, outcome)
+                _persist_queue_meta(item)
+                _queue_logger.info("Queue item %s finished: %s", item.id, item.status)
+                return
         if status == "ok":
             item.status = "done"
             item.run_name = data if isinstance(data, str) and data else None
@@ -684,12 +773,15 @@ async def _run_queue_item(item: _QueueItem) -> None:
             item.error = str(data)
         else:
             item.status = "error"
-            item.error = "Worker exited without delivering a result."
+            item.error = (
+                "Worker exited without delivering a result "
+                f"(exit code {proc.exitcode}) — it likely ran out of memory or crashed."
+            )
         item.finished_at = _now_iso()
         _persist_queue_meta(item)
         _queue_logger.info("Queue item %s finished: %s", item.id, item.status)
     finally:
-        _finalize_queue_item(item)
+        _finalize_queue_item(item, attempt)
 
 
 async def _watch_orphan(item: _QueueItem) -> None:
@@ -707,7 +799,7 @@ async def _watch_orphan(item: _QueueItem) -> None:
             _persist_queue_meta(item)
             _queue_logger.info("Orphan run %s finished: %s", item.id, item.status)
             return
-        if not _pid_alive(item.pid):
+        if not _pid_is_solver(item.pid):
             # Give a just-exited worker a moment to flush its outcome file.
             await asyncio.sleep(2.0)
             outcome = _read_queue_outcome(item.id)
@@ -770,6 +862,7 @@ async def _queue_pump() -> None:
                         continue
                     # --- synchronous claim: no await until ensure_future ---
                     it.status = "running"
+                    it.attempt += 1
                     it.started_at = _now_iso()
                     it.finished_at = None
                     it.error = None
@@ -1163,6 +1256,23 @@ def _resolve_payload_model(payload: RunPayload) -> RunPayload:
     return RunPayload(**data)
 
 
+def _refuse_invalid_model(payload: RunPayload) -> None:
+    """400 when ``validate_model`` reports errors — the same gate /api/validate shows.
+
+    Runs used to start on any payload, so a model the validator already called
+    broken (duplicate names, dangling bus references, …) solved into wrong
+    results instead of stopping.
+    """
+    report = validate_model(payload)
+    if not report.get("valid", True):
+        errors = [str(e) for e in report.get("errors") or []]
+        shown = "; ".join(errors[:5]) + (f" (+{len(errors) - 5} more)" if len(errors) > 5 else "")
+        raise HTTPException(
+            status_code=400,
+            detail=f"The model has validation errors, so the run was not started: {shown}",
+        )
+
+
 @app.post("/api/validate")
 def validate_case(payload: RunPayload) -> dict[str, Any]:
     return validate_model(_resolve_payload_model(payload))
@@ -1222,11 +1332,10 @@ async def start_run(payload: RunPayload) -> dict[str, Any]:
 
     # Resolve the model from the session when the client sent only a sessionId.
     payload = _resolve_payload_model(payload)
+    _refuse_invalid_model(payload)
 
-    # Prune completed/cancelled jobs to avoid unbounded memory growth
-    stale = [jid for jid, j in list(_jobs.items()) if j.status in ("done", "error", "cancelled")]
-    for jid in stale:
-        _jobs.pop(jid, None)
+    # Prune finished jobs nobody collected within the retention window
+    _prune_direct_jobs()
 
     job_id = str(uuid.uuid4())
     ctx = mp.get_context("spawn")
@@ -1278,13 +1387,14 @@ async def cancel_run(job_id: str) -> dict[str, Any]:
     job = _jobs.get(job_id)
     if job is None:
         return {"jobId": job_id, "status": "not_found"}
+    # Mark first: _collect_job treats a dead worker that was NOT cancelled as a crash.
+    job.status = "cancelled"
     if job.proc.is_alive():
         job.proc.terminate()                       # SIGTERM — graceful
         await asyncio.to_thread(job.proc.join, 3)
         if job.proc.is_alive():
             job.proc.kill()                        # SIGKILL — forceful
             await asyncio.to_thread(job.proc.join, 3)
-    job.status = "cancelled"
     _jobs.pop(job_id, None)
     return {"jobId": job_id, "status": "cancelled"}
 
@@ -1311,6 +1421,7 @@ async def enqueue_run(payload: RunPayload, staged: bool = False) -> dict[str, An
     # Snapshot the session model into the payload at submit time (see
     # _resolve_payload_model) so the queued run is immune to later edits.
     payload = _resolve_payload_model(payload)
+    _refuse_invalid_model(payload)
     item, position = _enqueue_payload(payload)
     if staged:
         item.status = "staged"
@@ -1371,7 +1482,7 @@ async def cancel_queued(item_id: str) -> dict[str, Any]:
             if proc.is_alive():
                 proc.kill()
                 await asyncio.to_thread(proc.join, 3)
-        elif proc is None and _pid_alive(item.pid):
+        elif proc is None and _pid_is_solver(item.pid):
             # Orphaned worker (survived a backend restart) — no mp handle, only
             # the persisted pid. POSIX: SIGTERM → SIGKILL escalation. Windows:
             # os.kill with a non-console signal IS TerminateProcess (hard kill),
@@ -1381,7 +1492,7 @@ async def cancel_queued(item_id: str) -> dict[str, Any]:
                 os.kill(item.pid, signal.SIGTERM)  # type: ignore[arg-type]
                 if hasattr(signal, "SIGKILL"):
                     await asyncio.sleep(3.0)
-                    if _pid_alive(item.pid):
+                    if _pid_is_solver(item.pid):
                         os.kill(item.pid, signal.SIGKILL)
             except OSError:
                 pass  # already gone
@@ -1415,6 +1526,8 @@ async def rerun_queued(item_id: str) -> dict[str, Any]:
     item.started_at = None
     item.finished_at = None
     item.error = None
+    item.run_name = None   # the previous attempt's History run is not this one's
+    item.pid = None
     _persist_queue_meta(item)
     return {"id": item.id, "status": "queued", "position": _queue_position()}
 
@@ -2115,22 +2228,57 @@ def download_backend_run_package(name: str) -> Response:
 # pure format converters.
 
 
-def _model_payload_to_network(payload: RunPayload):
-    """Build a `pypsa.Network` from a RunPayload without solving.
+# Run options that bake a *run* (not the authored model) into the built network:
+# the snapshot window / stride / sampled blocks, the scenario expansions and the
+# solve-mode rewrites. They are dropped for a format export.
+_EXPORT_STRIPPED_OPTIONS = (
+    "snapshotStart", "snapshotEnd", "snapshotCount", "snapshotWeight",
+    "samplingConfig", "stochasticConfig", "rollingConfig",
+    "forceLp", "loadSheddingCost", "carbonPriceSchedule",
+)
 
-    Mirrors the in-process flow that `/api/run` performs: applies the
-    Ragnarok runtime-import rules, snapshots index, time-series sheets, and
-    every deterministic post-load transformation. SCLOPF / stochastic /
-    rolling-horizon flags in `options` are ignored here — the resulting
-    network is the deterministic case the user authored, suitable for
-    sharing with downstream PyPSA tooling.
+
+def _model_payload_to_network(payload: RunPayload):
+    """Build the AUTHORED `pypsa.Network` from a RunPayload, without solving.
+
+    ``build_network`` bakes run-time processing into the network it returns:
+    annualised ``capital_cost``, the carbon-price adder in ``marginal_cost``,
+    injected ``load_shedding_*`` generators, the snapshot window/stride and the
+    sub-annual scaling of ``e_sum_min`` / ``e_sum_max``. Exporting that and
+    re-importing it annuitises and adds carbon a second time. So the export
+    builds with the processing switched off (overnight capital cost, no carbon
+    adder, no shedding backstop, whole snapshot axis at its authored weighting)
+    and undoes the one scaling that has no switch — the result is the model the
+    user authored, suitable for sharing with downstream PyPSA tooling.
 
     The model's time-series sheets are re-attached from the session first — the
     editor posts static sheets only, so without this the exported .nc / .h5
     carries the topology and no profiles at all.
     """
+    import pandas as pd
+
+    from .config import load_system_defaults
+
     model = _model_with_session_series(payload.model, payload.sessionId)
-    network, _notes = build_network(model, payload.scenario, payload.options or {})
+    options = {k: v for k, v in (payload.options or {}).items() if k not in _EXPORT_STRIPPED_OPTIONS}
+    options.update({"skipCapexAnnuitisation": True, "enableLoadShedding": False})
+    scenario = {**(payload.scenario or {}), "carbonPrice": 0.0}
+    network, _notes = build_network(model, scenario, options)
+
+    # build_network scales annual energy caps by (modelled hours / 8760) for a
+    # sub-annual axis; divide it back out so the caps read as authored.
+    hours_in_year = float(load_system_defaults().get("simulation", {}).get("hours_in_year", 8760.0))
+    weights = network.snapshot_weightings["objective"]
+    if isinstance(network.snapshots, pd.MultiIndex) and "period" in network.snapshots.names:
+        modelled_hours = float(weights.groupby(level="period").sum().min())
+    else:
+        modelled_hours = float(weights.sum())
+    factor = min(1.0, modelled_hours / hours_in_year) if modelled_hours > 0 else 1.0
+    if factor < 1.0:
+        for frame in (network.generators, network.storage_units, network.stores):
+            for col in frame.columns:
+                if col.endswith("_sum_min") or col.endswith("_sum_max"):
+                    frame[col] = frame[col] / factor
     return network
 
 

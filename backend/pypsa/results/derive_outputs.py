@@ -129,10 +129,14 @@ def derive_results_from_outputs(
     for key in (
         "mgaConfig", "merchantConfig", "bidStrategyConfig", "assetSwapConfig",
         "essConfig", "marketSimConfig", "powerFlowConfig", "contingencyConfig",
-        "rollingConfig", "stochasticConfig", "pathwayConfig", "samplingConfig",
+        "rollingConfig", "stochasticConfig", "pathwayConfig",
         "securityConstrainedConfig",
     ):
         options.pop(key, None)
+    # ``samplingConfig`` is kept: it is a build-time option (selects the sampled
+    # snapshots and sets their W/M weighting), not an extra solve. Dropping it
+    # rebuilt the full-window axis with unit weights, so every energy / cost
+    # total of a sampled run came out 1/weight too small.
 
     network, notes = build_network(model, scenario, options)
     attach_notes = _attach_outputs(network, outputs)
@@ -163,7 +167,7 @@ def derive_results_from_outputs(
         pathway=parse_pathway_config(None),
         rolling=parse_rolling_config(None),
         stochastic=parse_stochastic_config(None),
-        sampling=parse_sampling_config(None),
+        sampling=parse_sampling_config(options.get("samplingConfig")),
         rolling_windows=[],
         sclopf_enabled=False,
         solver_options={},

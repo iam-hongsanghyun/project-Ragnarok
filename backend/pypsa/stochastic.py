@@ -301,7 +301,12 @@ def per_scenario_summaries(
 
         dispatch_pos = scenario_dispatch.clip(lower=0.0)
         energy_per_gen = dispatch_pos.multiply(weights, axis=0).sum()
-        total_energy = float(energy_per_gen.sum())
+        # Unserved energy (the load-shedding backstop) is not supply.
+        total_energy = float(
+            energy_per_gen[
+                [c for c in energy_per_gen.index if not str(c).startswith("load_shedding_")]
+            ].sum()
+        )
         total_emissions = float((energy_per_gen * ef_per_gen.reindex(energy_per_gen.index).fillna(0.0)).sum())
         if mc_scenario is not None:
             mc = mc_scenario.reindex(
@@ -368,5 +373,42 @@ def collapse_to_representative_scenario(
                 continue
             if isinstance(df.columns, pd.MultiIndex) and "scenario" in df.columns.names:
                 dynamic[attr] = df.xs(rep_name, level="scenario", axis=1)
+                if _is_dual_attribute(attr):
+                    dynamic[attr] = dynamic[attr] / representative.weight
+
+    # Global-constraint duals live in the static frame (``mu``). PyPSA leaves
+    # them at 0.0 on a scenario-indexed frame, so recover the representative
+    # scenario's dual from the solved linopy model, then undo the weighting.
+    gcs = network.global_constraints
+    if "mu" in gcs.columns and len(gcs):
+        model = getattr(network, "model", None)
+        constraints = getattr(model, "constraints", None)
+        for gc_name in gcs.index:
+            mu = float(gcs.at[gc_name, "mu"]) if pd.notna(gcs.at[gc_name, "mu"]) else 0.0
+            if mu == 0.0 and constraints is not None:
+                try:
+                    dual = constraints[f"GlobalConstraint-{gc_name}"].dual
+                    if "scenario" in dual.dims:
+                        dual = dual.sel(scenario=rep_name)
+                    mu = float(dual.values.sum())
+                    # linopy duals are the sensitivity of the (minimise)
+                    # objective to the rhs; PyPSA stores them with the same sign.
+                    gcs.at[gc_name, "mu"] = mu
+                except Exception:  # noqa: BLE001 — dual not available; keep PyPSA's value
+                    continue
+            gcs.at[gc_name, "mu"] = float(gcs.at[gc_name, "mu"]) / representative.weight
 
     return rep_name
+
+
+def _is_dual_attribute(attr: str) -> bool:
+    """Whether a dynamic attribute is a shadow price (scaled by scenario weight).
+
+    Algorithm:
+        The stochastic objective is $$\\min \\sum_s w_s C_s$$, so a dual
+        returned for scenario ``s`` is $\\lambda_s = w_s \\pi_s$ where
+        $\\pi_s$ is the per-scenario price (currency per unit, w_s the
+        normalised scenario probability). Reported price: $\\pi_s = \\lambda_s / w_s$.
+        ASCII: price = dual / weight.
+    """
+    return attr == "marginal_price" or attr.startswith("mu_")

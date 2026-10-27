@@ -182,6 +182,43 @@ def test_fragment_tiles_cf_onto_target_snapshots() -> None:
     assert [r["siting_solar_1"] for r in rows] == pytest.approx([0.0, 0.5, 1.0, 0.0, 0.5])
 
 
+def _day_site() -> dict:
+    """24 h of UTC weather whose GHI is 1000 W/m2 only at 03-10 UTC (the sun)."""
+    ghi = [1000.0 if 3 <= h <= 10 else 0.0 for h in range(24)]
+    return {
+        "lat": 37.4, "lon": 127.1,
+        "time": [f"2023-06-01T{h:02d}:00" for h in range(24)],
+        "ghi": ghi, "wind_ms": [0.0] * 24,
+    }
+
+
+def test_target_snapshot_mode_honours_utc_offset_and_aligns_by_timestamp() -> None:
+    """RS7: UTC+9 sun (03-10 UTC) must land at 12-19 h LOCAL, not at 00-07 h.
+
+    Analytical: solar CF = ghi / 1000 (eta = 1), so the series is 1 on local
+    hours 12..19 and 0 elsewhere, matched on the model's own timestamps.
+    """
+    target = [f"2023-06-01 {h:02d}:00" for h in range(24)]
+    frag, _ = build_siting_fragment(
+        [_day_site()], _buses(), technologies=["solar"], performance_ratio=1.0,
+        capital_cost_per_mw={"solar": 1000.0}, target_snapshots=target, utc_offset=9,
+    )
+    rows = frag.sheets["generators-p_max_pu"]
+    cf = [r["siting_solar_1"] for r in rows]
+    assert cf == pytest.approx([1.0 if 12 <= h <= 19 else 0.0 for h in range(24)])
+
+
+def test_target_snapshot_mode_matches_other_year_by_month_day_hour() -> None:
+    """A representative weather year (2023) under a 2030 model keeps its calendar."""
+    target = [f"2030-06-01 {h:02d}:00" for h in range(24)]
+    frag, _ = build_siting_fragment(
+        [_day_site()], _buses(), technologies=["solar"], performance_ratio=1.0,
+        capital_cost_per_mw={"solar": 1000.0}, target_snapshots=target, utc_offset=9,
+    )
+    cf = [r["siting_solar_1"] for r in frag.sheets["generators-p_max_pu"]]
+    assert cf == pytest.approx([1.0 if 12 <= h <= 19 else 0.0 for h in range(24)])
+
+
 def test_fragment_skips_sites_without_weather() -> None:
     empty = {"lat": 1.0, "lon": 1.0, "time": [], "ghi": [], "wind_ms": []}
     frag, candidates = build_siting_fragment(

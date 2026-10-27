@@ -12,6 +12,9 @@ schedule entry whose year is ≤ the snapshot's year, so a schedule like
 
 applies $30/t through 2029, $60/t through 2039, and $120/t from 2040.
 
+A snapshot BEFORE the first schedule year is priced at the first entry (the
+explicit fallback — the schedule carries no earlier price), and a note says so.
+
 For pathway mode the "year" is read off the snapshot ``period`` level;
 for single-period mode it's the calendar year of each snapshot
 timestamp.
@@ -131,6 +134,37 @@ def apply_carbon_price(
     if emitting.empty:
         return
 
+    if config.is_scheduled:
+        first_year = config.schedule[0].year
+        n_early = int(sum(1 for y in _snapshot_years(network.snapshots) if int(y) < first_year))
+        if n_early:
+            notes.append(
+                f"{n_early} snapshot(s) precede the first carbon-price schedule year "
+                f"({first_year}) and are priced at that entry ({config.schedule[0].price:g})."
+            )
+
+    # A generator with a time-varying efficiency emits co2 / eta_t per MWh, so
+    # its adder follows the snapshot series (static eta would misprice it).
+    eta_t = network.generators_t.efficiency
+    dyn_eta = [g for g in eta_t.columns if g in emitting.index]
+    if dyn_eta:
+        mc_dyn = network.generators_t.marginal_cost
+        ef_carrier = network.generators["carrier"].map(ef_per_carrier).astype(float)
+        for gen in dyn_eta:
+            eta = pd.to_numeric(eta_t[gen], errors="coerce")
+            eta = eta.where(eta > 1e-6, float(network.generators.at[gen, "efficiency"]))
+            adder = series * (float(ef_carrier[gen]) / eta)
+            if gen in mc_dyn.columns:
+                mc_dyn[gen] = mc_dyn[gen].fillna(0.0) + adder
+            else:
+                mc_dyn[gen] = number(network.generators.at[gen, "marginal_cost"], 0.0) + adder
+        notes.append(
+            f"Carbon adder for {len(dyn_eta)} generator(s) follows their time-varying efficiency."
+        )
+        emitting = emitting.drop(index=dyn_eta)
+        if emitting.empty:
+            return
+
     is_varying = config.is_scheduled and series.nunique(dropna=False) > 1
 
     if not is_varying:
@@ -138,8 +172,9 @@ def apply_carbon_price(
         # behaviour so generators using static `marginal_cost` aren't forced
         # onto the per-snapshot path.
         constant = float(series.iloc[0])
+        static_ef = gen_ef.where(~gen_ef.index.isin(dyn_eta), 0.0)
         network.generators["marginal_cost"] = (
-            network.generators["marginal_cost"].fillna(0.0) + constant * gen_ef
+            network.generators["marginal_cost"].fillna(0.0) + constant * static_ef
         )
         mc_t = network.generators_t.marginal_cost
         for gen in mc_t.columns.intersection(emitting.index):

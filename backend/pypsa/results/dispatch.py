@@ -6,6 +6,7 @@ import pypsa
 
 from ..utils.emissions import per_generator_emission_factor
 from ..utils.series import safe_series
+from .pathway_periods import snapshot_active_mask
 
 
 def _snapshot_parts(snapshot: object) -> tuple[int | None, object]:
@@ -76,6 +77,52 @@ def electricity_bus_scope(network: pypsa.Network) -> set[str] | None:
     if not elec:
         return None  # no electricity vector at all — leave aggregates whole-model
     return elec
+
+
+def system_price_series(
+    network: pypsa.Network,
+    elec_scope: set[str] | None,
+    load_p_set: pd.DataFrame,
+) -> pd.Series:
+    """System price per snapshot: nodal prices weighted by nodal load.
+
+    Algorithm:
+        $$\\bar\\pi(t) = \\frac{\\sum_b L_b(t)\\,\\pi_b(t)}{\\sum_b L_b(t)}$$
+        where $\\pi_b(t)$ is the bus marginal price (currency/MWh) and
+        $L_b(t)$ the non-negative load at bus $b$ (MW). Where the total load
+        is zero the unweighted bus mean is used. ASCII: price = sum(L*pi)/sum(L).
+
+    An unweighted bus mean lets a load-free or fuel-only bus drag the system
+    price (36.7 against a load-weighted 50 on a two-bus model). ``elec_scope``
+    restricts the buses exactly as the other system aggregates are scoped.
+    """
+    mp = network.buses_t.marginal_price
+    if mp.empty:
+        return pd.Series(0.0, index=network.snapshots)
+    cols = [b for b in mp.columns if elec_scope is None or str(b) in elec_scope] or list(mp.columns)
+    prices = mp[cols]
+    plain_mean = prices.mean(axis=1)
+    loads = network.loads
+    if load_p_set.empty or "bus" not in loads.columns:
+        return plain_mean
+    bus_load = (
+        load_p_set.clip(lower=0.0)
+        .T.groupby(loads["bus"].reindex(load_p_set.columns).astype(str))
+        .sum()
+        .T.reindex(index=prices.index, columns=[str(c) for c in cols])
+        .fillna(0.0)
+    )
+    bus_load.columns = cols
+    total = bus_load.sum(axis=1)
+    weighted = (prices.fillna(0.0) * bus_load).sum(axis=1) / total.where(total > 0.0)
+    return weighted.fillna(plain_mean)
+
+
+def weighted_mean(series: pd.Series, weights: pd.Series) -> float:
+    """Snapshot-weighted mean ($\\sum w x / \\sum w$); plain mean if the weights sum to zero."""
+    w = weights.reindex(series.index).fillna(1.0)
+    total = float(w.sum())
+    return float((series * w).sum() / total) if total > 0.0 else float(series.mean())
 
 
 def electricity_dispatch_by_carrier(
@@ -258,6 +305,11 @@ def build_curtailment_series(
     p_nom_in = network.generators.loc[gens, "p_nom"].fillna(0.0)
     p_nom = p_nom_in if p_nom_opt is None else p_nom_opt.where(p_nom_opt > 0, p_nom_in)
     avail = tv[gens].reindex(snapshots).fillna(0.0).mul(p_nom, axis=1)
+    # Pathway runs: a unit not yet built (or already retired) in a period has no
+    # availability there, so it cannot be "curtailed" in that period.
+    active = snapshot_active_mask(network, "generators")
+    if active is not None:
+        avail = avail.where(active.reindex(index=snapshots, columns=gens, fill_value=True), 0.0)
     disp = generator_dispatch_frame.reindex(index=snapshots, columns=gens, fill_value=0.0).clip(lower=0.0)
     curt = (avail - disp).clip(lower=0.0)
     carriers = network.generators.loc[gens, "carrier"].astype(str)
@@ -317,21 +369,34 @@ def build_price_emissions_series(
 def build_storage_soc_series(network: pypsa.Network) -> list[dict]:
     """Per-carrier state of charge (MWh) per snapshot.
 
-    Sums ``state_of_charge`` across the storage units of each carrier so the
-    dashboard can plot SoC per storage technology. SoC is a stock (MWh), not a
-    rate — no snapshot weighting applies.
+    Sums ``state_of_charge`` across the StorageUnits of each carrier and
+    ``stores_t.e`` across the Stores of each carrier (PyPSA-Eur-style
+    batteries are Store + Link pairs), so the dashboard plots SoC per storage
+    technology whichever component models it. SoC is a stock (MWh), not a rate
+    — no snapshot weighting applies.
     """
     snapshots = network.snapshots
     labels = [_snapshot_label(s) for s in snapshots]
-    if len(network.storage_units.index) == 0 or network.storage_units_t.state_of_charge.empty:
+    frames: list[pd.DataFrame] = []
+    for static, soc_frame in (
+        (network.storage_units, network.storage_units_t.state_of_charge),
+        (network.stores, network.stores_t.e),
+    ):
+        if len(static.index) == 0 or soc_frame.empty:
+            continue
+        soc = soc_frame.reindex(index=snapshots).fillna(0.0)
+        units = [u for u in soc.columns if u in static.index]
+        if not units:
+            continue
+        carriers = static.loc[units, "carrier"].astype(str)
+        frames.append(soc[units].T.groupby(carriers).sum().T)  # snapshots x carriers
+    if not frames:
         return [
             {"label": lbl, "timestamp": st, "period": p, "values": {}}
             for (lbl, st, p) in labels
         ]
-    soc = network.storage_units_t.state_of_charge.reindex(index=snapshots).fillna(0.0)
-    units = [u for u in soc.columns if u in network.storage_units.index]
-    carriers = network.storage_units.loc[units, "carrier"].astype(str)
-    by_carrier = soc[units].T.groupby(carriers).sum().T  # snapshots x carriers
+    by_carrier = pd.concat(frames, axis=1)
+    by_carrier = by_carrier.T.groupby(level=0).sum().T  # same carrier on units + stores
     cols = [str(c) for c in by_carrier.columns]
     rows = by_carrier.to_numpy().tolist()
     return [
@@ -346,30 +411,46 @@ def build_storage_soc_series(network: pypsa.Network) -> list[dict]:
 
 
 def build_storage_series(network: pypsa.Network) -> list[dict]:
-    """System storage series, aggregated across all storage units.
+    """System storage series, aggregated across StorageUnits and Stores.
 
-    Aggregate-then-derive convention (matches the frontend deriveRunResults):
-    sum the raw power ``p`` across every unit per snapshot, then split the
-    aggregate into charge (abs of the negative part) and discharge (positive
-    part). State of charge is summed directly across units.
+    Charge and discharge are split **per unit** before summing, so one unit
+    charging while another discharges is reported as both flows rather than
+    netted to a smaller number (which understated throughput and storage
+    revenue). State of charge sums ``state_of_charge`` (StorageUnits) and
+    ``e`` (Stores). A Store's ``p`` is positive when it discharges into its
+    bus, the same sign as a StorageUnit's.
     """
     snapshots = network.snapshots
     labels = [_snapshot_label(s) for s in snapshots]
-    if len(network.storage_units.index) > 0:
-        units = list(network.storage_units.index)
-        total_p = sum(safe_series(network.storage_units_t.p, unit) for unit in units)
-        total_soc = sum(safe_series(network.storage_units_t.state_of_charge, unit) for unit in units)
-        # `tolist()` each aggregate series once instead of a per-snapshot `.loc`.
-        charge_vals = total_p.clip(upper=0.0).abs().reindex(snapshots).to_numpy().tolist()
-        discharge_vals = total_p.clip(lower=0.0).reindex(snapshots).to_numpy().tolist()
-        soc_vals = total_soc.reindex(snapshots).to_numpy().tolist()
+    zeros = pd.Series(0.0, index=snapshots)
+    charge = zeros.copy()
+    discharge = zeros.copy()
+    state = zeros.copy()
+    present = False
+    for static, p_frame, soc_frame in (
+        (network.storage_units, network.storage_units_t.p, network.storage_units_t.state_of_charge),
+        (network.stores, network.stores_t.p, network.stores_t.e),
+    ):
+        if len(static.index) == 0:
+            continue
+        present = True
+        for unit in static.index:
+            p_unit = safe_series(p_frame, unit).reindex(snapshots).fillna(0.0)
+            charge = charge + p_unit.clip(upper=0.0).abs()
+            discharge = discharge + p_unit.clip(lower=0.0)
+            state = state + safe_series(soc_frame, unit).reindex(snapshots).fillna(0.0)
+    if not present:
         return [
-            {"label": lbl, "timestamp": st, "period": p,
-             "charge": float(charge_vals[i]), "discharge": float(discharge_vals[i]),
-             "state": float(soc_vals[i])}
-            for i, (lbl, st, p) in enumerate(labels)
+            {"label": lbl, "timestamp": st, "period": p, "charge": 0.0, "discharge": 0.0, "state": 0.0}
+            for (lbl, st, p) in labels
         ]
+    # `tolist()` each aggregate series once instead of a per-snapshot `.loc`.
+    charge_vals = charge.to_numpy().tolist()
+    discharge_vals = discharge.to_numpy().tolist()
+    soc_vals = state.to_numpy().tolist()
     return [
-        {"label": lbl, "timestamp": st, "period": p, "charge": 0.0, "discharge": 0.0, "state": 0.0}
-        for (lbl, st, p) in labels
+        {"label": lbl, "timestamp": st, "period": p,
+         "charge": float(charge_vals[i]), "discharge": float(discharge_vals[i]),
+         "state": float(soc_vals[i])}
+        for i, (lbl, st, p) in enumerate(labels)
     ]

@@ -31,6 +31,13 @@ Algorithm:
         $$ \\mathrm{LOLE}_{\\text{base}} = \\mathrm{LOLE}(\\text{avail\\_full}) $$
         ASCII: LOLE_base = LOLE(avail_full)
 
+    Storage is not additive firm MW. ``avail_full`` includes the discharge of the
+    SOC-limited kernel ``adequacy.storage_dispatch`` (power, energy, efficiency,
+    recharge only from surplus); removing a storage carrier drops its units from
+    the fleet, and for any carrier the remaining storage is re-dispatched on
+    ``avail_without + F`` for every probed $F$. A 0.25 h and an 8 h battery of
+    equal power therefore get different ELCC.
+
     For a target carrier c with nameplate capacity $N_c$ (MW), remove every
     generator/storage unit of that carrier from the ensemble (their MW
     contribution, additive across units, is simply subtracted):
@@ -72,6 +79,7 @@ snapshots by construction (that is precisely what "perfectly firm" means).
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
@@ -79,7 +87,7 @@ import pandas as pd
 import pypsa
 
 from ..constants import carrier_color
-from .adequacy import compute_adequacy
+from .adequacy import compute_adequacy, extract_storage_fleet, storage_dispatch
 from .outage_mc import _is_variable_renewable, sample_outage_masks
 
 _log = logging.getLogger("pypsa.solver")
@@ -124,6 +132,7 @@ def _elcc_for_carrier(
     *,
     tolerance_hours: float = _DEFAULT_TOLERANCE_HOURS,
     max_iters: int = _MAX_BISECTION_ITERS,
+    storage_fn: Callable[[np.ndarray], np.ndarray] | None = None,
 ) -> float:
     """Bisect the firm MW block that restores baseline LOLE.
 
@@ -139,6 +148,10 @@ def _elcc_for_carrier(
         baseline_lole: Full-system LOLE (h/yr) to match.
         tolerance_hours: Convergence tolerance on LOLE (h/yr).
         max_iters: Bisection iteration cap.
+        storage_fn: Optional ``generation (M, T) -> storage discharge (M, T)``
+            (the shared SOC-limited kernel over the *remaining* storage). It
+            is re-run on ``available_without + F`` for every probed ``F``,
+            because firm capacity changes how much the storage has to cover.
 
     Returns:
         ELCC in MW, clamped to ``[0, nameplate_mw]``.
@@ -168,7 +181,10 @@ def _elcc_for_carrier(
         return 0.0
 
     def lole_at(f: float) -> float:
-        return _lole_of(available_without + f, load, weights, modeled_hours)
+        generation = available_without + f
+        if storage_fn is not None:
+            generation = generation + storage_fn(generation)
+        return _lole_of(generation, load, weights, modeled_hours)
 
     lole_lo = lole_at(0.0)
     if lole_lo <= baseline_lole + tolerance_hours:
@@ -307,29 +323,11 @@ def build_elcc(
         thermal_for_list.append(for_rate)
         thermal_mttr_list.append(mttr)
 
-    # Storage units contribute discharge capacity to system adequacy exactly
-    # like a generator in this post-process (state-of-charge-limited energy
-    # constraints are a re-solve concern, out of scope here); modelled as
-    # perfectly firm (no forced outage — mechanical/battery availability is
-    # typically far higher than thermal FOR) at their solved p_max_pu.
-    storage = network.storage_units
-    storage_cap_col = "p_nom_opt" if "p_nom_opt" in storage.columns else "p_nom"
-    storage_names: list[str] = []
-    storage_caps: list[float] = []
-    storage_carrier_list: list[str] = []
-    storage_pmax_by_name: dict[str, np.ndarray] = {}
-    if len(storage) > 0:
-        storage_pmax = network.get_switchable_as_dense("StorageUnit", "p_max_pu")
-        for s in storage.index:
-            name = str(s)
-            carrier = str(storage.at[s, "carrier"]) if "carrier" in storage.columns else ""
-            cap = float(storage.at[s, storage_cap_col]) if storage_cap_col in storage.columns else 0.0
-            if cap <= 0:
-                continue
-            storage_names.append(name)
-            storage_caps.append(cap)
-            storage_carrier_list.append(carrier)
-            storage_pmax_by_name[name] = storage_pmax[s].to_numpy() if s in storage_pmax.columns else np.ones(T)
+    # Storage (StorageUnit, and Store + Link charger/discharger) is dispatched by
+    # the shared SOC-limited kernel against each member's shortfall — a unit is
+    # worth its power AND its energy, not its nameplate MW at every snapshot.
+    fleet = extract_storage_fleet(network)
+    storage_carrier_list = list(fleet.carriers)
 
     all_carriers_present = sorted(
         set(thermal_carrier_list) | set(renewable_carrier_list) | set(storage_carrier_list)
@@ -375,21 +373,13 @@ def build_elcc(
         renewable_contrib_by_carrier.setdefault(carrier, np.zeros((n_members, T)))
         renewable_contrib_by_carrier[carrier] = renewable_contrib_by_carrier[carrier] + contrib
 
-    storage_contrib_by_carrier: dict[str, np.ndarray] = {}
-    for name, cap, carrier in zip(storage_names, storage_caps, storage_carrier_list):
-        base = storage_pmax_by_name[name]
-        contrib = cap * np.broadcast_to(base, (n_members, T))
-        storage_contrib_by_carrier.setdefault(carrier, np.zeros((n_members, T)))
-        storage_contrib_by_carrier[carrier] = storage_contrib_by_carrier[carrier] + contrib
-
     renewable_total = np.zeros((n_members, T))
     for contrib in renewable_contrib_by_carrier.values():
         renewable_total = renewable_total + contrib
-    storage_total = np.zeros((n_members, T))
-    for contrib in storage_contrib_by_carrier.values():
-        storage_total = storage_total + contrib
-
-    available_full = thermal_contrib + renewable_total + storage_total
+    available_gen = thermal_contrib + renewable_total
+    available_full = available_gen
+    if len(fleet):
+        available_full = available_gen + storage_dispatch(available_gen, load, weights, fleet)
     baseline_lole = _lole_of(available_full, load, weights, modeled_hours)
 
     # Per-carrier nameplate: thermal + renewable + storage members of that
@@ -400,9 +390,7 @@ def build_elcc(
     renewable_cap_by_carrier: dict[str, float] = {}
     for cap, carrier in zip(renewable_caps, renewable_carrier_list):
         renewable_cap_by_carrier[carrier] = renewable_cap_by_carrier.get(carrier, 0.0) + cap
-    storage_cap_by_carrier: dict[str, float] = {}
-    for cap, carrier in zip(storage_caps, storage_carrier_list):
-        storage_cap_by_carrier[carrier] = storage_cap_by_carrier.get(carrier, 0.0) + cap
+    storage_cap_by_carrier = fleet.nameplate_by_carrier()
 
     # Thermal contribution per carrier (needed only if a thermal carrier is an
     # explicit target); computed once, reused per carrier.
@@ -427,12 +415,18 @@ def build_elcc(
             contrib = contrib + thermal_contrib_by_carrier[carrier]
         if carrier in renewable_contrib_by_carrier:
             contrib = contrib + renewable_contrib_by_carrier[carrier]
-        if carrier in storage_contrib_by_carrier:
-            contrib = contrib + storage_contrib_by_carrier[carrier]
 
-        available_without = available_full - contrib
+        # Remove the carrier's generation AND its storage; the remaining storage
+        # re-dispatches against the weakened system.
+        gen_without = available_gen - contrib
+        fleet_without = fleet.without_carriers({carrier})
+        storage_fn = (
+            (lambda g, f=fleet_without: storage_dispatch(g, load, weights, f))
+            if len(fleet_without) else None
+        )
         elcc_mw = _elcc_for_carrier(
-            available_without, load, weights, modeled_hours, nameplate, baseline_lole,
+            gen_without, load, weights, modeled_hours, nameplate, baseline_lole,
+            storage_fn=storage_fn,
         )
         elcc_pct = 100.0 * elcc_mw / nameplate if nameplate > _EPS else 0.0
         by_carrier.append(

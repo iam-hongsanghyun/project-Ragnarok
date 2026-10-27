@@ -28,6 +28,7 @@ import pypsa
 from ..carbon_price import apply_carbon_price, parse_carbon_price_config
 from ...app.config import load_system_defaults
 from ..pathway import parse_pathway_config
+from ..rolling import parse_rolling_config
 from ..sampling import average_window_frames, parse_sampling_config, sample_block_indices
 from ..stochastic import apply_scenarios, parse_stochastic_config
 from ..pypsa_schema import (
@@ -40,6 +41,9 @@ from .demand_response import apply_demand_response, apply_price_elastic
 from .load_shedding import add_load_shedding
 from .validators import validate_model  # re-export for backend.app.main
 from .snapshots import (
+    WEIGHTING_COLUMNS,
+    imported_weightings,
+    rescale_weightings,
     _snapshots_index,
     _apply_pathway_config,
     _normalize_dynamic_snapshot_index_names,
@@ -107,10 +111,34 @@ def _sanitize_placeholder_bounds(network: pypsa.Network, notes: list[str]) -> No
         )
 
 
+_TRUE_TOKENS = frozenset({"true", "1", "yes", "y", "t", "on"})
+_FALSE_TOKENS = frozenset({"false", "0", "no", "n", "f", "off"})
+
+
+def _as_bool(value: Any, default: bool) -> bool:
+    """Read a workbook cell as a boolean: ``"FALSE"``/``"0"``/``"no"`` are False.
+
+    ``bool("FALSE")`` is True, so a string-typed boolean column would flip every
+    flag on. Blanks and unrecognised text fall back to the attribute default.
+    """
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return default
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        return bool(value)
+    token = str(value).strip().lower()
+    if token in _TRUE_TOKENS:
+        return True
+    if token in _FALSE_TOKENS:
+        return False
+    return default
+
+
 def _coerce_numeric_columns(
     df: "pd.DataFrame", network: pypsa.Network, list_name: str
 ) -> "pd.DataFrame":
-    """Coerce numeric-typed columns to numbers; blanks/junk → the PyPSA default.
+    """Coerce numeric / boolean columns; blanks/junk → the PyPSA default.
 
     A re-imported workbook can carry empty-string cells in numeric columns
     (optional fields left blank). Passed straight to ``network.add`` PyPSA tries
@@ -121,11 +149,41 @@ def _coerce_numeric_columns(
     """
     defaults = network.components[list_name].defaults
     for col in list(df.columns):
+        if col in defaults.index and defaults.at[col, "dtype"].kind == "b":
+            df[col] = df[col].map(lambda v, d=bool(defaults.at[col, "default"]): _as_bool(v, d))
+            continue
         if col not in defaults.index or defaults.at[col, "dtype"].kind not in ("f", "i"):
             continue
         coerced = pd.to_numeric(df[col], errors="coerce")
         df[col] = coerced.fillna(defaults.at[col, "default"])
     return df
+
+
+def _relax_commitment(network: pypsa.Network, list_name: str) -> tuple[int, int]:
+    """De-commit every committable ``list_name`` component and drop its p_min_pu floor.
+
+    Returns ``(components de-committed, components whose positive p_min_pu — static
+    or time-varying — was cleared)``.
+    """
+    frame = network.components[list_name].static
+    if "committable" not in frame.columns:
+        return 0, 0
+    was_committable = frame["committable"].astype(bool)
+    if not was_committable.any():
+        return 0, 0
+    frame["committable"] = False
+    floored: set[str] = set()
+    if "p_min_pu" in frame.columns:
+        static_floor = was_committable & (frame["p_min_pu"].fillna(0.0) > 0.0)
+        floored.update(static_floor.index[static_floor])
+        frame.loc[static_floor, "p_min_pu"] = 0.0
+    # A time-varying p_min_pu takes precedence over the static value.
+    dyn_floor = network.components[list_name].dynamic["p_min_pu"]
+    for name in dyn_floor.columns.intersection(was_committable.index[was_committable]):
+        if bool((dyn_floor[name].fillna(0.0) > 0.0).any()):
+            floored.add(name)
+            dyn_floor[name] = 0.0
+    return int(was_committable.sum()), len(floored)
 
 
 def build_network(
@@ -151,6 +209,33 @@ def build_network(
     options = options or {}
     pathway = parse_pathway_config(options.get("pathwayConfig"))
     sampling = parse_sampling_config(options.get("samplingConfig"))
+    stochastic = parse_stochastic_config(options.get("stochasticConfig"))
+    rolling = parse_rolling_config(options.get("rollingConfig"))
+
+    # RS6: the custom-constraint compilers index ``Generator-p`` by (snapshot,
+    # name); under stochastic mode linopy adds a scenario level, so they would
+    # crash mid-solve with a tuple-index error. Refuse up front, clearly.
+    if stochastic.enabled:
+        active = [
+            what for what, present in (
+                ("custom constraints", any(
+                    isinstance(c, dict) and c.get("enabled", False)
+                    for c in scenario.get("constraints") or []
+                )),
+                ("constraint specs", bool(scenario.get("constraintSpecs"))),
+                ("DSL constraints", bool(str(scenario.get("customDsl") or "").strip())),
+            ) if present
+        ]
+        if active:
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Stochastic scenarios cannot be combined with {' / '.join(active)}: "
+                    "they are not scenario-aware yet and would be built on the wrong "
+                    "variable dimensions. Disable them, or turn stochastic mode off."
+                ),
+            )
 
     # `discountRate` is consumed by exactly one thing: CAPEX annuitisation below.
     # So it is REQUIRED THERE, when there is CAPEX to annuitise, and not here —
@@ -158,6 +243,16 @@ def build_network(
     # callers to supply a placeholder that then looks like a study input.
     raw_rate = scenario.get("discountRate")
     discount_rate = None if raw_rate is None or raw_rate == "" else number(raw_rate)
+    if discount_rate is not None and not (0.0 <= discount_rate < 1.0):
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"discountRate must be a fraction with 0 <= r < 1 (e.g. 0.05 for 5 %), "
+                f"got {discount_rate:g}. A percentage typed as a whole number (5) would "
+                "annuitise capital cost at 500 %."
+            ),
+        )
     carbon_price = number(scenario.get("carbonPrice"), 0.0)
     currency = str(options.get("currencySymbol", "$"))
 
@@ -172,6 +267,18 @@ def build_network(
     if len(snaps_idx) > 0:
         network.set_snapshots(snaps_idx)
     _apply_pathway_config(network, pathway, notes)
+    # RB9: weightings authored on the snapshots sheet (PyPSA snapshots.csv
+    # `objective`/`stores`/`generators`) are kept, not overwritten by a 1 h
+    # stride further down.
+    authored_weights = imported_weightings(model, network.snapshots)
+    if authored_weights is not None:
+        for col in WEIGHTING_COLUMNS:
+            if col in authored_weights.columns:
+                network.snapshot_weightings[col] = authored_weights[col].to_numpy()
+        notes.append(
+            "Kept snapshot weightings from the snapshots sheet "
+            f"(sum {float(network.snapshot_weightings['objective'].sum()):g} h)."
+        )
 
     # ── Bulk-add every component class PyPSA knows about ──────────────────────
     # Iterate the official component registry — order is dependency-safe
@@ -226,6 +333,7 @@ def build_network(
     # ── Time-series sheets ────────────────────────────────────────────────────
     # PyPSA's per-component `defaults` table marks every time-varying attribute
     # (`varying=True`). Sheet name convention is `<list_name>-<attr>`.
+    uncovered_by_sheet: dict[str, pd.Index] = {}
     for sheet_name, rows in model.items():
         if not rows or "-" not in sheet_name:
             continue
@@ -247,7 +355,9 @@ def build_network(
             continue
         if not bool(comp.defaults.at[attr, "varying"]):
             continue
-        _apply_ts_sheet(network, rows, list_name, attr)
+        gaps = _apply_ts_sheet(network, rows, list_name, attr, notes)
+        if len(gaps) > 0:
+            uncovered_by_sheet[sheet_name] = gaps
     _normalize_dynamic_snapshot_index_names(network)
 
     # ── Snapshot windowing & downsampling ─────────────────────────────────────
@@ -297,6 +407,7 @@ def build_network(
                     windowed = windowed[::step]
         if len(windowed) == 0:
             windowed = full[:1]
+        full_weights = network.snapshot_weightings.copy()
         network.set_snapshots(windowed)
         # Weighting. Contiguous runs: every column = stride hours (unchanged).
         # Sampled runs: objective/generators carry W/M so totals, costs and
@@ -310,9 +421,16 @@ def build_network(
         else:
             represented = float(len(windowed) * step)
         weight = represented / max(1, len(windowed))
-        for col in ("objective", "generators"):
-            network.snapshot_weightings[col] = weight
-        network.snapshot_weightings["stores"] = float(step)
+        if authored_weights is not None:
+            rescaled = rescale_weightings(
+                full_weights, full, windowed, start, stop, step, sampling_active
+            )
+            for col in WEIGHTING_COLUMNS:
+                network.snapshot_weightings[col] = rescaled[col].to_numpy()
+        else:
+            for col in ("objective", "generators"):
+                network.snapshot_weightings[col] = weight
+            network.snapshot_weightings["stores"] = float(step)
         if sampling_active and sampling.mode == "average":
             notes.append(
                 f"Averaged {averaged_periods} period(s) into one {sampling.block_size}-row profile: "
@@ -333,6 +451,23 @@ def build_network(
                 f"(rows {start} → {stop} of {len(full)})."
             )
         _normalize_dynamic_snapshot_index_names(network)
+
+    # A time-series sheet that skips snapshots the run actually models leaves NaN
+    # there, which PyPSA/linopy reads as "no bound" (an unbounded generator).
+    # Rows outside the modelled window are irrelevant, so check only now.
+    for sheet_name, gaps in uncovered_by_sheet.items():
+        missing = gaps.intersection(network.snapshots)
+        if len(missing) > 0:
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Time-series sheet '{sheet_name}' has no row for {len(missing)} of the "
+                    f"{len(network.snapshots)} modelled snapshot(s) (first: {missing[0]}). "
+                    "A missing value would drop that bound in the LP, so the run is refused — "
+                    "add the missing rows, or remove the sheet to use the static value."
+                ),
+            )
 
     # ── Period-factor scaling of annual energy caps ───────────────────────────
     sim_cfg = load_system_defaults().get("simulation", {})
@@ -374,10 +509,21 @@ def build_network(
     # already-annuitised cost, the next run annuitises it a second time, and
     # extendable CAPEX collapses to ~AF² of its real value (≈0.6% at r=5%,
     # 20 y), which makes capacity expansion effectively free.
+    fallback_lifetime = float(sim_cfg.get("fallback_lifetime_years", 20.0))
     annuitisable: tuple[str, ...] = (
         () if bool(options.get("skipCapexAnnuitisation", False))
         else ("generators", "storage_units", "stores", "lines", "links")
     )
+    # RS1: the LP compares capital cost against operating cost over the modelled
+    # window, so the ANNUAL annuity must be pro-rated to that window or a 168 h
+    # run builds nothing that an 8760 h run builds. Single-period only: pathway
+    # runs weight periods through investment_period_weightings instead. The
+    # factor is published in network.meta so reporting does not pro-rate twice.
+    modelled_hours_total = float(network.snapshot_weightings["objective"].sum())
+    capex_window_scale = 1.0
+    window_scaled = 0
+    if annuitisable and not pathway.enabled and modelled_hours_total > 0:
+        capex_window_scale = modelled_hours_total / hours_in_year
     for list_name in annuitisable:
         comp = network.components[list_name]
         frame = comp.static
@@ -412,43 +558,59 @@ def build_network(
             # PyPSA DEFAULTS lifetime to +inf, which has no finite annuity factor
             # (annuity_factor(rate, inf) → NaN). Without this guard the extendable
             # asset's capital_cost annuitises to NaN → 0 in the objective, so it
-            # builds for FREE up to its max. Treat inf / NaN / ≤0 as a 20-year
-            # fallback so CAPEX is actually priced.
+            # builds for FREE up to its max. Treat inf / NaN / ≤0 as the system-default
+            # fallback lifetime (noted) so CAPEX is actually priced.
             lifetimes = pd.to_numeric(frame.loc[ext, "lifetime"], errors="coerce")
-            lifetimes = lifetimes.where((lifetimes > 0) & (lifetimes < float("inf")), 20.0)
+            usable = (lifetimes > 0) & (lifetimes < float("inf"))
+            if not bool(usable.all()):
+                notes.append(
+                    f"{int((~usable).sum())} extendable {comp.name}(s) have no finite lifetime — "
+                    f"annuitised over the system default of {fallback_lifetime:g} years "
+                    "(simulation.fallback_lifetime_years)."
+                )
+            lifetimes = lifetimes.where(usable, fallback_lifetime)
         else:
-            lifetimes = pd.Series(20.0, index=frame.index[ext])
+            lifetimes = pd.Series(fallback_lifetime, index=frame.index[ext])
+            notes.append(
+                f"{int(ext.sum())} extendable {comp.name}(s) carry no lifetime column — "
+                f"annuitised over the system default of {fallback_lifetime:g} years."
+            )
         afs = lifetimes.apply(lambda L: annuity_factor(discount_rate, float(L)))
         frame.loc[ext, "capital_cost"] = frame.loc[ext, "capital_cost"].fillna(0.0) * afs
         notes.append(
             f"Annualised CAPEX for {int(ext.sum())} extendable {comp.name}(s) "
             f"at discount rate {discount_rate:.3f}."
         )
+        if capex_window_scale != 1.0:
+            frame.loc[ext, "capital_cost"] = frame.loc[ext, "capital_cost"] * capex_window_scale
+            window_scaled += int(ext.sum())
+    if window_scaled:
+        network.meta["ragnarok_capex_window_scale"] = float(capex_window_scale)
+        notes.append(
+            f"Scaled annualised CAPEX of {window_scaled} extendable asset(s) to the modelled "
+            f"window (x{capex_window_scale:.4g} = {modelled_hours_total:g} h / "
+            f"{hours_in_year:g} h) so expansion trades against the energy it serves."
+        )
 
     # ── Force-LP override (ignore committable=True flags) ─────────────────────
-    if bool(options.get("forceLp", False)) and "committable" in network.generators.columns:
-        n_committable = int(network.generators["committable"].astype(bool).sum())
-        if n_committable > 0:
-            was_committable = network.generators["committable"].astype(bool)
-            network.generators["committable"] = False
-            # `p_min_pu` means "minimum output WHILE RUNNING" only for a
-            # committable unit. On a plain LP generator it is an unconditional
-            # floor in every snapshot, so leaving it behind would not relax the
-            # MILP — it would replace it with a TIGHTER problem the unit can
-            # never switch off, one that can cost more than the MILP it was
-            # meant to bound, or be infeasible where the MILP was fine.
-            if "p_min_pu" in network.generators.columns:
-                floored = was_committable & (network.generators["p_min_pu"].fillna(0.0) > 0.0)
-                if floored.any():
-                    network.generators.loc[floored, "p_min_pu"] = 0.0
-                    notes.append(
-                        f"Force-LP: also cleared p_min_pu on {int(floored.sum())} de-committed "
-                        "generator(s) — without commitment it is an always-on floor, not a "
-                        "minimum-when-running."
-                    )
-            notes.append(
-                f"Force-LP enabled: overrode committable=True on {n_committable} generator(s)."
-            )
+    # Generators and Links share the commitment machinery (status / start-up
+    # variables → MIP), so both are relaxed. `p_min_pu` means "minimum output
+    # WHILE RUNNING" only for a committable unit; on a plain LP component it is
+    # an unconditional floor in every snapshot, so leaving it behind would not
+    # relax the MILP — it would replace it with a TIGHTER problem the unit can
+    # never switch off. Static AND time-varying floors are therefore cleared.
+    if bool(options.get("forceLp", False)):
+        for list_name, label in (("generators", "generator"), ("links", "link")):
+            n_committable, n_floor = _relax_commitment(network, list_name)
+            if n_floor:
+                notes.append(
+                    f"Force-LP: also cleared p_min_pu on {n_floor} de-committed {label}(s) — "
+                    "without commitment it is an always-on floor, not a minimum-when-running."
+                )
+            if n_committable:
+                notes.append(
+                    f"Force-LP enabled: overrode committable=True on {n_committable} {label}(s)."
+                )
 
     # ── Carbon-price emission factor sanity warning ───────────────────────────
     if "co2_emissions" in network.carriers.columns:
@@ -497,7 +659,6 @@ def build_network(
 
     # ── Stochastic scenarios (must run after every deterministic setup is in
     # place so the scenario dimension can broadcast over the final values) ──
-    stochastic = parse_stochastic_config(options.get("stochasticConfig"))
     if stochastic.enabled:
         apply_scenarios(network, stochastic)
         notes.append(
@@ -508,6 +669,12 @@ def build_network(
             )
             + "."
         )
+
+    if rolling.enabled:
+        # Rows each rolling window COMMITS (horizon - overlap): custom/DSL
+        # budgets are apportioned by these hours so overlapping windows do not
+        # each spend a full share (see ModelContext.window_fraction).
+        network.meta["ragnarok_rolling_step"] = int(rolling.step_snapshots)
 
     final_counts = ", ".join(
         f"{len(network.components[list_name].static)} {list_name}"

@@ -213,3 +213,35 @@ def test_config_zero_fixed_mw_yields_no_storage_end_to_end(libs: dict[str, Any])
     replaced = libs["generator_replacement"].replace_generators(n, dash)
     libs["ess"].add_storage_at_replaced_buses(n, dash, replaced)
     assert len(n.storage_units) == 0
+
+
+@pytest.mark.parametrize(
+    ("given", "round_trip"),
+    [(0.81, 0.81), (1.0, 1.0), (90, 0.9), (85, 0.85), (0.0, 0.9), (None, 0.9), ("", 0.9), (150, 0.9)],
+)
+def test_ess_efficiency_percent_zero_and_blank(libs: dict[str, Any], given: Any, round_trip: float) -> None:
+    n = _network()
+    d = _dashboard(libs, add_ess=True, ess_sizing_mode="fixed", ess_fixed_mw=50, ess_efficiency=given)
+    libs["ess"].add_storage_at_replaced_buses(n, d, {"b1": 600.0})
+    su = n.storage_units.iloc[0]
+    assert su.efficiency_store * su.efficiency_dispatch == pytest.approx(round_trip, rel=1e-12)
+    assert su.efficiency_store == pytest.approx(round_trip ** 0.5, rel=1e-12)
+
+
+def test_ess_extendable_without_cost_or_ceiling_warns(
+    libs: dict[str, Any], caplog: pytest.LogCaptureFixture,
+) -> None:
+    n = _network()
+    d = _dashboard(libs, add_ess=True, ess_expandable=True, ess_capital_cost=0.0, ess_p_nom_max=0.0)
+    with caplog.at_level("WARNING"):
+        libs["ess"].add_storage_at_replaced_buses(n, d, {"b1": 600.0})
+    assert "unlimited free storage" in caplog.text
+    assert len(n.storage_units) == 1  # placeholders stay a supported workflow
+    caplog.clear()
+    # A cost (or a ceiling) makes it a real decision: no warning.
+    with caplog.at_level("WARNING"):
+        libs["ess"].add_storage_at_replaced_buses(
+            _network(), _dashboard(libs, add_ess=True, ess_expandable=True, ess_capital_cost=1000.0),
+            {"b1": 600.0},
+        )
+    assert "unlimited free storage" not in caplog.text

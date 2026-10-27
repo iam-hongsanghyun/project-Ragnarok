@@ -26,9 +26,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import numpy as np
 import pypsa
 
-from .market import HOURS_PER_YEAR, freeze_expansion
+from .adequacy import electricity_buses, store_link_pairs
+from .finance import storage_assets
+from .market import HOURS_PER_YEAR, capex_window_scale, freeze_expansion
 
 _log = logging.getLogger("pypsa.solver")
 
@@ -40,15 +43,15 @@ _MARKET_PREFIX = "__market_"
 def owner_assets_from_model(
     model: dict[str, list[dict[str, Any]]], owner: str, *, column: str = "owner",
 ) -> dict[str, list[str]]:
-    """Names of the generators / storage units whose ``column`` equals ``owner``.
+    """Names of the generators / storage units / stores whose ``column`` equals ``owner``.
 
     The owner tag lives on the model rows (a user-chosen column — ``owner``,
     ``Company``, ``operator``, …); PyPSA drops unknown columns at build time, so
     we read ownership from the model, not the network.
     """
     want = owner.strip()
-    out: dict[str, list[str]] = {"generators": [], "storage_units": []}
-    for sheet, key in (("generators", "generators"), ("storage_units", "storage_units")):
+    out: dict[str, list[str]] = {"generators": [], "storage_units": [], "stores": []}
+    for sheet, key in (("generators", "generators"), ("storage_units", "storage_units"), ("stores", "stores")):
         for row in model.get(sheet, []) or []:
             name = str(row.get("name", "")).strip()
             if name and str(row.get(column, "")).strip() == want:
@@ -61,7 +64,7 @@ def distinct_owners(
 ) -> list[str]:
     """Every distinct non-blank value of ``column`` across generators / storage."""
     seen: list[str] = []
-    for sheet in ("generators", "storage_units"):
+    for sheet in ("generators", "storage_units", "stores"):
         for row in model.get(sheet, []) or []:
             owner = str(row.get(column, "")).strip()
             if owner and owner not in seen:
@@ -149,12 +152,33 @@ def build_merchant(
     assets = owner_assets_from_model(model, owner, column=column)
     own_gens = [g for g in assets["generators"] if g in network.generators.index]
     own_storage = [s for s in assets["storage_units"] if s in network.storage_units.index]
-    if not own_gens and not own_storage:
+    # A Store trades through its Links (or directly, on an electricity bus); a
+    # store with neither has no market access and is left out.
+    store_pairs = store_link_pairs(network)
+    elec = electricity_buses(network)
+    own_stores: list[str] = []
+    store_buses: set[str] = set()
+    own_links: set[str] = set()
+    for s in assets["stores"]:
+        if s not in network.stores.index:
+            continue
+        pair = store_pairs.get(s)
+        if pair is not None:
+            own_links.update(pair.discharge + pair.charge)
+            store_buses.update(str(network.links.at[ln, "bus1"]) for ln in pair.discharge)
+            store_buses.update(str(network.links.at[ln, "bus0"]) for ln in pair.charge)
+        elif str(network.stores.at[s, "bus"]) in elec:
+            store_buses.add(str(network.stores.at[s, "bus"]))
+        else:
+            continue
+        own_stores.append(s)
+    if not own_gens and not own_storage and not own_stores:
         return None
 
     buses = sorted({
         *(str(network.generators.at[g, "bus"]) for g in own_gens),
         *(str(network.storage_units.at[s, "bus"]) for s in own_storage),
+        *store_buses,
     })
     price = _price_by_bus(
         network, buses,
@@ -169,7 +193,11 @@ def build_merchant(
     H = float(weights.sum())
     if H <= 0:
         return None
-    window_years = H / HOURS_PER_YEAR
+    # Basis of the annualised capital charge. When the network builder already
+    # scaled capital_cost to the window (network.meta), capital_cost x p_nom_opt
+    # IS the window share: multiply by 1. Otherwise (pathway, imported solved
+    # network) it is annual and is pro-rated by H/8760.
+    window_years = 1.0 if capex_window_scale(network) is not None else H / HOURS_PER_YEAR
 
     # ``copy()`` refuses with a solver model attached; the app reads every number
     # from solved dataframes, so detaching is side-effect-free downstream.
@@ -192,6 +220,16 @@ def build_merchant(
                 float(df.at[name, "capital_cost"]) * float(df.at[name, "p_nom_opt"])
             )
 
+    def _price_of(bus: str) -> np.ndarray | None:
+        return np.asarray(price[bus], dtype=float) if bus in price else None
+
+    # Store capex (energy + its links) from the same rule finance uses, read
+    # off the solved system network before the freeze.
+    store_capex = {
+        a.name: a.capex_annual
+        for a in storage_assets(network, _price_of, weights, stores=own_stores)
+    }
+
     work = network.copy()
     # Strip everything that is not the owner's assets: the owner trades only with
     # the price-taker market node, not with the rest of the system.
@@ -201,8 +239,14 @@ def build_merchant(
     drop_storage = [s for s in work.storage_units.index if s not in own_storage]
     if drop_storage:
         work.remove("StorageUnit", drop_storage)
-    for comp, attr in (("Load", "loads"), ("Line", "lines"), ("Link", "links"),
-                       ("Transformer", "transformers"), ("Store", "stores")):
+    # The owner's Stores and the Links that wire them to the grid stay.
+    drop_stores = [s for s in work.stores.index if s not in own_stores]
+    if drop_stores:
+        work.remove("Store", drop_stores)
+    drop_links = [ln for ln in work.links.index if ln not in own_links]
+    if drop_links:
+        work.remove("Link", drop_links)
+    for comp, attr in (("Load", "loads"), ("Line", "lines"), ("Transformer", "transformers")):
         idx = list(getattr(work, attr).index)
         if idx:
             work.remove(comp, idx)
@@ -212,6 +256,12 @@ def build_merchant(
     # sizes them itself, which drives profit to exactly zero by construction —
     # see market.freeze_expansion.
     freeze_expansion(work)
+    # Stores carry their size as e_nom, which freeze_expansion does not read.
+    if len(work.stores) and "e_nom_extendable" in work.stores.columns:
+        ext = work.stores.index[work.stores["e_nom_extendable"].astype(bool)]
+        if len(ext) and "e_nom_opt" in work.stores.columns:
+            work.stores.loc[ext, "e_nom"] = work.stores.loc[ext, "e_nom_opt"].astype(float)
+            work.stores.loc[ext, "e_nom_extendable"] = False
 
     # One price-taker market node per owner bus: a generator priced at π(t) that
     # can supply (owner buys) or absorb (owner sells, p < 0) any volume.
@@ -313,6 +363,25 @@ def build_merchant(
         tot_cost += op_cost
         tot_capex += capex
         tot_energy += energy
+
+    # Stores (+ Links) on the shared storage rule; capex from the pre-freeze read.
+    for a in storage_assets(work, _price_of, weights, stores=own_stores):
+        # storage_assets returns the ANNUAL charge, so always pro-rate to the window.
+        capex = store_capex.get(a.name, 0.0) * (H / HOURS_PER_YEAR)
+        asset_rows.append({
+            "name": a.name, "type": "storage", "bus": a.bus, "carrier": a.carrier,
+            "capacityMW": round(a.capacity_mw, 3),
+            "energyMWh": round(a.discharged_mwh, 2),
+            "revenue": round(a.revenue, 2),
+            "operatingCost": round(a.op_cost, 2),
+            "capex": round(capex, 2),
+            "profit": round(a.revenue - a.op_cost - capex, 2),
+            "capturePrice": round(a.revenue / a.discharged_mwh, 2) if a.discharged_mwh > 1e-9 else None,
+        })
+        tot_rev += a.revenue
+        tot_cost += a.op_cost
+        tot_capex += capex
+        tot_energy += a.discharged_mwh
 
     flat_prices = [v for series in price.values() for v in series]
     price_stats = {

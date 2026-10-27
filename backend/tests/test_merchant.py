@@ -124,9 +124,10 @@ def _extendable_model() -> dict[str, list[Any]]:
         if gen["name"] == "wind1":
             gen["p_nom_extendable"] = True
             gen["p_nom_max"] = 400.0
-            # PyPSA charges the full ANNUAL capex in the objective, so over a
-            # six-hour window the rate has to be small for anything to be built.
-            gen["capital_cost"] = 5.0
+            # Overnight cost. build_network annuitises it (20 y fallback, r = 0 ->
+            # 5000/20 = 250 per MW-year) and pro-rates that to the 6 h window
+            # (x 6/8760), so the LP charges 0.171 per MW for the window.
+            gen["capital_cost"] = 5000.0
     return model
 
 
@@ -160,3 +161,6 @@ def test_merchant_still_charges_capital_for_a_built_asset() -> None:
                     {"merchantConfig": {"enabled": True, "owner": "Acme", "priceSource": "lmp"}})
     wind = next(a for a in res["merchant"]["assets"] if a["name"] == "wind1")
     assert wind["capex"] > 0.0
+    # Analytical window capex: (5000 / 20) x (6 / 8760) x 400 MW built = 68.49,
+    # charged once (the LP cost is already window-scaled; no second pro-rating).
+    assert wind["capex"] == pytest.approx(250.0 * 6.0 / 8760.0 * 400.0, rel=1e-3)

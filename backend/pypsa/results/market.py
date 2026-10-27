@@ -12,6 +12,7 @@ import pypsa
 
 from ..constants import carrier_color, generator_color
 from ..utils.series import weighted_sum
+from .pathway_periods import active_assets, is_pathway, period_objective_weights, periods
 
 # System generators (reliability backstops, not merchant assets) — excluded from
 # the supply stack and the profit analytics by name prefix.
@@ -21,6 +22,28 @@ SYSTEM_GEN_PREFIXES = ("load_shedding_", "system_bess")
 # the modeled-horizon basis for capex recovery. A unit-conversion constant (not a
 # tunable parameter), so it lives in code rather than .env.
 HOURS_PER_YEAR = 8760.0
+
+# ``network.meta`` key under which the solve records the factor it multiplied
+# the annualised ``capital_cost`` by (sum of objective snapshot weights / 8760)
+# so the LP's capital term matches the modelled window.
+CAPEX_WINDOW_SCALE_KEY = "ragnarok_capex_window_scale"
+
+
+def capex_window_scale(network: pypsa.Network) -> float | None:
+    """The solve's capital-cost window factor, or ``None`` when it did not scale.
+
+    When present, ``capital_cost x p_nom_opt`` on the solved network is already
+    the share of annual CAPEX falling inside the modelled window, so reports
+    must not pro-rate it again. Pathway runs are not scaled (no key).
+    """
+    meta = getattr(network, "meta", None)
+    if not isinstance(meta, dict):
+        return None
+    try:
+        scale = float(meta.get(CAPEX_WINDOW_SCALE_KEY))
+    except (TypeError, ValueError):
+        return None
+    return scale if scale > 0 else None
 
 
 # ── Counterfactual re-solves ──────────────────────────────────────────────────
@@ -253,13 +276,27 @@ def build_co2_shadow(
             | gc.index.str.contains("co2", case=False)
         ]
         if not co2_gc.empty:
-            name = co2_gc.index[0]
+            # Several CO₂ constraints can coexist (e.g. a total cap and a
+            # per-period cap). Report the binding one — the largest |dual| —
+            # rather than whichever happens to be listed first.
+            if "mu" in co2_gc.columns:
+                mu_abs = pd.to_numeric(co2_gc["mu"], errors="coerce").abs().fillna(0.0)
+                name = mu_abs.idxmax() if float(mu_abs.max()) > 0.0 else co2_gc.index[0]
+            else:
+                name = co2_gc.index[0]
             result["found"] = True
             result["constraint_name"] = name
-            result["cap_unit"] = "ktCO₂e"
+            # A budget in tCO₂ reads in kt; a constraint merely *named* co2 on
+            # another attribute has no known unit, so leave it blank.
+            is_co2_attr = (
+                "carrier_attribute" in gc.columns
+                and str(gc.at[name, "carrier_attribute"]) == "co2_emissions"
+            )
+            result["cap_unit"] = "ktCO₂e" if is_co2_attr else ""
 
             if "constant" in gc.columns:
-                result["cap_value"] = round(float(gc.at[name, "constant"]) / 1000.0, 1)
+                constant = float(gc.at[name, "constant"])
+                result["cap_value"] = round(constant / 1000.0 if is_co2_attr else constant, 1)
 
             mu = 0.0
             if "mu" in gc.columns:
@@ -403,6 +440,35 @@ def build_generator_economics(
     modeled_hours = float(weights.sum())
     horizon_years = modeled_hours / HOURS_PER_YEAR if HOURS_PER_YEAR > 0 else 0.0
 
+    # Fixed-cost basis. Single period: annual annuity x H/8760 (or, when the
+    # solve already scaled capital_cost to the window, capital_cost x p_nom_opt
+    # as is). Pathway: the LP objective weights each period's annuity by the
+    # investment-period weighting and only counts periods an asset is active
+    # in, so revenue/variable cost take the same weighting to share one basis.
+    scale = capex_window_scale(network)
+    pathway = is_pathway(network)
+    period_weight = period_objective_weights(network)
+    period_level = network.snapshots.get_level_values("period") if pathway else None
+    econ_weights = weights
+    if pathway:
+        econ_weights = weights * pd.Series(
+            [period_weight[int(p)] for p in period_level], index=network.snapshots
+        )
+
+    def fixed_costs(list_name: str, name: str, capital_cost: float, p_nom_opt: float) -> tuple[float, float]:
+        """``(annual, modelled-horizon)`` fixed cost of one asset."""
+        base = capital_cost * p_nom_opt
+        if pathway:
+            weight = sum(
+                period_weight[p]
+                for p in periods(network)
+                if bool(active_assets(network, list_name, p).get(name, True))
+            )
+            return base, base * weight
+        if scale is not None:
+            return base / scale, base
+        return base, base * horizon_years
+
     mp = network.buses_t.marginal_price
     have_prices = not mp.empty
     zero = pd.Series(0.0, index=network.snapshots)
@@ -433,14 +499,16 @@ def build_generator_economics(
             mc = mc_dense[name] if name in mc_dense.columns else zero
 
             energy = weighted_sum(p.clip(lower=0.0), weights)
+            energy_econ = weighted_sum(p.clip(lower=0.0), econ_weights)  # capture-price basis
             p_nom_opt = float(p_nom_opt_s.get(name, 0.0))
             if energy <= 1e-9 and p_nom_opt <= 1e-9:
                 continue  # neither dispatched nor built — nothing to report
-            revenue = weighted_sum(price * p, weights)
-            variable_cost = weighted_sum(mc * p, weights)
+            revenue = weighted_sum(price * p, econ_weights)
+            variable_cost = weighted_sum(mc * p, econ_weights)
             gross_margin = revenue - variable_cost
-            fixed_annual = _num(row.get("capital_cost", 0.0)) * p_nom_opt
-            fixed_horizon = fixed_annual * horizon_years
+            fixed_annual, fixed_horizon = fixed_costs(
+                "generators", name, _num(row.get("capital_cost", 0.0)), p_nom_opt
+            )
             carrier = str(row.get("carrier", ""))
             gens.append(
                 {
@@ -453,13 +521,25 @@ def build_generator_economics(
                     "revenue": round(revenue),
                     "variableCost": round(variable_cost),
                     "grossMargin": round(gross_margin),
-                    "capturePrice": round(revenue / energy, 2)
-                    if energy > 1e-9
+                    "capturePrice": round(revenue / energy_econ, 2)
+                    if energy_econ > 1e-9
                     else None,
                     "fixedCostAnnual": round(fixed_annual),
                     "fixedCostHorizon": round(fixed_horizon),
                     "netHorizon": round(gross_margin - fixed_horizon),
                     "recoveryPct": recovery_pct(gross_margin, fixed_horizon),
+                    # Unrounded values: carrier / system recovery is computed from
+                    # these, not from the rounded columns above.
+                    "_raw": {
+                        "energyMwh": energy,
+                        "energyEcon": energy_econ,
+                        "capacityMw": p_nom_opt,
+                        "revenue": revenue,
+                        "variableCost": variable_cost,
+                        "grossMargin": gross_margin,
+                        "fixedCostAnnual": fixed_annual,
+                        "fixedCostHorizon": fixed_horizon,
+                    },
                 }
             )
     gens.sort(key=lambda r: r["grossMargin"], reverse=True)
@@ -490,11 +570,12 @@ def build_generator_economics(
             p_nom_opt = float(p_nom_opt_su.get(name, 0.0))
             if discharged <= 1e-9 and charged <= 1e-9 and p_nom_opt <= 1e-9:
                 continue
-            revenue = weighted_sum(price * p, weights)  # net of charging spend
-            variable_cost = weighted_sum(mc * p.clip(lower=0.0), weights)
+            revenue = weighted_sum(price * p, econ_weights)  # net of charging spend
+            variable_cost = weighted_sum(mc * p.clip(lower=0.0), econ_weights)
             gross_margin = revenue - variable_cost
-            fixed_annual = _num(row.get("capital_cost", 0.0)) * p_nom_opt
-            fixed_horizon = fixed_annual * horizon_years
+            fixed_annual, fixed_horizon = fixed_costs(
+                "storage_units", name, _num(row.get("capital_cost", 0.0)), p_nom_opt
+            )
             carrier = str(row.get("carrier", ""))
             storage.append(
                 {
@@ -524,6 +605,7 @@ def build_generator_economics(
             dict.fromkeys(
                 (
                     "energyMwh",
+                    "energyEcon",
                     "capacityMw",
                     "revenue",
                     "variableCost",
@@ -535,7 +617,7 @@ def build_generator_economics(
             ),
         )
         for k in a:
-            a[k] += g[k]
+            a[k] += g["_raw"][k]
     by_carrier: list[dict[str, Any]] = []
     for carrier, a in agg.items():
         by_carrier.append(
@@ -547,8 +629,8 @@ def build_generator_economics(
                 "revenue": round(a["revenue"]),
                 "variableCost": round(a["variableCost"]),
                 "grossMargin": round(a["grossMargin"]),
-                "capturePrice": round(a["revenue"] / a["energyMwh"], 2)
-                if a["energyMwh"] > 1e-9
+                "capturePrice": round(a["revenue"] / a["energyEcon"], 2)
+                if a["energyEcon"] > 1e-9
                 else None,
                 "fixedCostAnnual": round(a["fixedCostAnnual"]),
                 "fixedCostHorizon": round(a["fixedCostHorizon"]),
@@ -559,8 +641,10 @@ def build_generator_economics(
     by_carrier.sort(key=lambda r: r["grossMargin"], reverse=True)
 
     # ── System totals (generators) ────────────────────────────────────────────
-    sys_margin = float(sum(g["grossMargin"] for g in gens))
-    sys_fixed_horizon = float(sum(g["fixedCostHorizon"] for g in gens))
+    sys_margin = float(sum(g["_raw"]["grossMargin"] for g in gens))
+    sys_fixed_horizon = float(sum(g["_raw"]["fixedCostHorizon"] for g in gens))
+    for g in gens:
+        g.pop("_raw")
     system = {
         "revenue": round(sum(g["revenue"] for g in gens)),
         "variableCost": round(sum(g["variableCost"] for g in gens)),

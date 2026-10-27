@@ -43,11 +43,19 @@ from dataclasses import dataclass
 import pypsa
 
 from ..utils.emissions import per_generator_emission_factor
-from .custom_constraints import ModelContext, build_model_context
+from .custom_constraints import (
+    ConstraintSkipped,
+    ModelContext,
+    build_model_context,
+    raise_on_compile_failures,
+)
 
 _FUNC_ATOMS = ("gen", "cap", "cf", "emissions")
 _BARE_ATOMS = ("gen", "cap", "emissions", "load_shed")
 _SENSES = ("<=", ">=", "==")
+# Atoms measured in energy (MWh / tCO2) — their literal budgets are whole-run
+# quantities that rolling horizon apportions per window.
+_ENERGY_KINDS = ("gen", "emissions", "load_shed")
 
 
 class DslParseError(ValueError):
@@ -248,7 +256,7 @@ def _selected_gens(ctx: ModelContext, term: Term) -> list[str]:
 def _gen_expr(ctx: ModelContext, term: Term):
     gens = _selected_gens(ctx, term)
     if not gens:
-        raise ValueError(f"no generators with {_selector_desc(term)}")
+        raise ConstraintSkipped(f"no generators with {_selector_desc(term)}")
     return (ctx.gen_p.sel({ctx.dim: gens}) * ctx.weights).sum()
 
 
@@ -256,7 +264,7 @@ def _cap_expr(ctx: ModelContext, term: Term):
     n = ctx.network
     gens = _selected_gens(ctx, term)
     if not gens:
-        raise ValueError(f"no generators with {_selector_desc(term)}")
+        raise ConstraintSkipped(f"no generators with {_selector_desc(term)}")
     extendable = [
         g for g in gens
         if "p_nom_extendable" in n.generators.columns and bool(n.generators.at[g, "p_nom_extendable"])
@@ -281,13 +289,13 @@ def _emissions_expr(ctx: ModelContext, term: Term):
     if not emitters:
         sel = _selector_desc(term)
         suffix = "" if sel == "all supply" else f" for {sel}"
-        raise ValueError(f"no CO₂-emitting generators{suffix}")
+        raise ConstraintSkipped(f"no CO₂-emitting generators{suffix}")
     return sum(co2 * (ctx.gen_p.sel({ctx.dim: [g]}) * ctx.weights).sum() for g, co2 in emitters)
 
 
 def _load_shed_expr(ctx: ModelContext):
     if not ctx.shed_gens:
-        raise ValueError("no load-shedding generators (enable load shedding in Settings)")
+        raise ConstraintSkipped("no load-shedding generators (enable load shedding in Settings)")
     return (ctx.gen_p.sel({ctx.dim: ctx.shed_gens}) * ctx.weights).sum()
 
 
@@ -362,6 +370,17 @@ def _apply_parsed(ctx: ModelContext, pc: ParsedConstraint, model, name: str) -> 
         return
     lhs_lin, lhs_c = _combine(ctx, pc.lhs)
     rhs_lin, rhs_c = _combine(ctx, pc.rhs)
+    # A literal number next to an energy term (gen / emissions / load_shed) is an
+    # absolute whole-run budget (MWh, tCO2). Under rolling horizon each window may
+    # only spend its share of it — the same apportioning as the structured path.
+    # Capacity (MW) is a stock and scale-free; shares have no literal to scale.
+    energy = any(t.kind in _ENERGY_KINDS for t in (*pc.lhs, *pc.rhs))
+    if energy and ctx.window_fraction != 1.0:
+        literal = sum(t.coef for t in pc.rhs if t.kind == "const") - sum(
+            t.coef for t in pc.lhs if t.kind == "const"
+        )
+        shift = literal * (ctx.window_fraction - 1.0)
+        rhs_c += shift
     combined = None
     if lhs_lin is not None:
         combined = lhs_lin
@@ -414,7 +433,10 @@ def apply_dsl_constraints(
     notes: list[str],
     snapshots: object | None = None,
 ) -> None:
-    """Parse and apply the DSL text to ``n.model``. Bad lines are skipped with a note.
+    """Parse and apply the DSL text to ``n.model``.
+
+    A line whose selector matches nothing is skipped with a note; a parse or
+    compile failure raises HTTP 400 once every line has been tried.
 
     ``snapshots`` is the window being optimised (rolling horizon); weights/hours
     are scoped to it so ``gen``/``cf`` terms match the dispatch variable's span.
@@ -422,6 +444,7 @@ def apply_dsl_constraints(
     if not text or not text.strip():
         return
     ctx = build_model_context(n, emissions_factors, snapshots)
+    failures: list[str] = []
     for n0, raw in enumerate(text.splitlines(), start=1):
         line = raw.split("#", 1)[0].strip()
         if not line:
@@ -433,8 +456,13 @@ def apply_dsl_constraints(
             notes.append(f"DSL line {n0}: '{pc.raw}' added.")
         except DslParseError as exc:
             notes.append(f"DSL line {n0}: parse error — {exc.message}")
-        except Exception as exc:  # noqa: BLE001 — never crash the solve on one bad line
+            failures.append(f"DSL line {n0}: parse error — {exc.message}")
+        except ConstraintSkipped as exc:
             notes.append(f"DSL line {n0}: could not be added — {exc}")
+        except Exception as exc:  # noqa: BLE001 — collected, then the run is refused
+            notes.append(f"DSL line {n0}: could not be added — {exc}")
+            failures.append(f"DSL line {n0}: {exc}")
+    raise_on_compile_failures(failures)
 
 
 def apply_constraint_specs(
@@ -447,12 +475,14 @@ def apply_constraint_specs(
     """Apply a structured JSON constraint spec list to ``n.model``.
 
     This is the canonical wire format the frontend sends; the text DSL is only a
-    convenience that compiles to the same shape. Bad specs are skipped with a note.
+    convenience that compiles to the same shape. A spec whose selector matches
+    nothing is skipped with a note; a parse or compile failure raises HTTP 400.
     ``snapshots`` scopes weights/hours to the rolling-horizon window.
     """
     if not specs:
         return
     ctx = build_model_context(n, emissions_factors, snapshots)
+    failures: list[str] = []
     for idx, spec in enumerate(specs, start=1):
         name = f"spec_{idx}"
         try:
@@ -461,5 +491,10 @@ def apply_constraint_specs(
             notes.append(f"Constraint spec {idx}: '{pc.raw}' added.")
         except DslParseError as exc:
             notes.append(f"Constraint spec {idx}: parse error — {exc.message}")
-        except Exception as exc:  # noqa: BLE001 — never crash the solve on one bad spec
+            failures.append(f"Constraint spec {idx}: parse error — {exc.message}")
+        except ConstraintSkipped as exc:
             notes.append(f"Constraint spec {idx}: could not be added — {exc}")
+        except Exception as exc:  # noqa: BLE001 — collected, then the run is refused
+            notes.append(f"Constraint spec {idx}: could not be added — {exc}")
+            failures.append(f"Constraint spec {idx}: {exc}")
+    raise_on_compile_failures(failures)

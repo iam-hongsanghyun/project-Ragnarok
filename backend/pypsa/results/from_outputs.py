@@ -35,7 +35,9 @@ from .dispatch import (
     build_price_emissions_series,
     build_storage_series,
     build_storage_soc_series,
+    electricity_bus_scope,
     electricity_dispatch_by_carrier,
+    system_price_series,
 )
 from .emissions import build_emissions_breakdown
 from .expansion import build_expansion_results
@@ -190,11 +192,8 @@ def derive_imported_result(
         else pd.DataFrame(index=network.snapshots)
     )
     load_dispatch = load_dense.sum(axis=1)
-    price_series = (
-        network.buses_t.marginal_price.mean(axis=1)
-        if not network.buses_t.marginal_price.empty
-        else pd.Series(0.0, index=network.snapshots)
-    )
+    # Load-weighted system price (see dispatch.system_price_series).
+    price_series = system_price_series(network, electricity_bus_scope(network), load_dense)
     generator_weights = network.snapshot_weightings["generators"].reindex(network.snapshots).fillna(1.0)
 
     # Installed capacity uses the solved p_nom_opt (== p_nom for non-extendable

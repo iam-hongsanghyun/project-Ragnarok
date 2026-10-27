@@ -36,7 +36,18 @@ from .dispatch import (
     build_storage_series,
     build_storage_soc_series,
     electricity_bus_scope,
+    _is_electricity,
     electricity_dispatch_by_carrier,
+    system_price_series,
+    weighted_mean,
+)
+from .cost_breakdown import other_operating_costs
+from .pathway_periods import (
+    capacity_by_period,
+    is_pathway,
+    period_objective_weights,
+    periods as pathway_periods,
+    snapshot_active_mask,
 )
 from .emissions import build_emissions_breakdown
 from .energy_balance import build_energy_balance
@@ -57,7 +68,7 @@ from .commitment import build_commitment
 from .bid_strategy import build_bid_strategy
 from .optimal_bid import build_optimal_bid
 from .asset_swap import build_asset_swap
-from .ess import build_ess_business_case
+from .ess import build_ess_business_case, ess_cost_kwargs
 from .ppa import build_ppa
 from .ppa_explorer import build_ppa_explorer
 from .expansion import build_expansion_results
@@ -69,6 +80,7 @@ from .market import (
     build_commitment_cost,
     build_generator_economics,
     build_merit_order,
+    capex_window_scale,
     installed_capacity_series,
 )
 from .summaries import _rolling_window_summaries, _pathway_period_summaries
@@ -79,6 +91,22 @@ from .contingency import run_contingency
 # redirecting file descriptors, these INFO lines stream to the launching
 # terminal alongside HiGHS' own verbose output.
 _log = logging.getLogger("pypsa.solver")
+
+
+def _sanitize_nonfinite(value: Any) -> Any:
+    """Replace NaN / ±inf floats with ``None`` (recursively) so the payload is valid JSON.
+
+    Strict JSON has no NaN or Infinity, and the API serialises with
+    ``allow_nan=False``; a single non-finite cell (an unpriced snapshot, a
+    zero-capacity ratio) would otherwise turn a whole solved run into a 500.
+    """
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {k: _sanitize_nonfinite(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_nonfinite(v) for v in value]
+    return value
 
 
 def _coerce_solve_status(result: Any) -> tuple[str, str]:
@@ -167,6 +195,54 @@ def _supply_gap(network: Any) -> tuple[int, int, Any, Any, float] | None:
     idx = load.index[suspect]
     served = float((supply[suspect] / load[suspect]).min())
     return count, int(len(load)), idx[0], idx[-1], served
+
+
+def _rolling_unsupported(network: Any) -> str | None:
+    """Why this model cannot run under rolling horizon, or ``None`` if it can.
+
+    Rolling horizon solves each window as its own LP and keeps only the window's
+    dispatch, so anything decided or bounded over the WHOLE horizon is wrong:
+
+    * capacity expansion — each window re-optimises ``p_nom``, so the run reports
+      the last window's capacity while earlier windows dispatched against
+      another (300 MW dispatched, 100 MW reported);
+    * whole-horizon budgets (``global_constraints``, ``e_sum_min`` / ``e_sum_max``)
+      — each window applies the full budget again, so a 200 t cap becomes 800 t
+      over four windows. Apportioning a budget across overlapping windows is not
+      done, so these are rejected rather than silently loosened.
+    """
+    problems: list[str] = []
+    for list_name, flag in (
+        ("generators", "p_nom_extendable"),
+        ("storage_units", "p_nom_extendable"),
+        ("links", "p_nom_extendable"),
+        ("lines", "s_nom_extendable"),
+        ("transformers", "s_nom_extendable"),
+        ("stores", "e_nom_extendable"),
+    ):
+        frame = getattr(network, list_name, None)
+        if frame is None or not len(frame) or flag not in frame.columns:
+            continue
+        mask = frame[flag].astype(bool)
+        if list_name == "generators":
+            mask = mask & ~frame.index.astype(str).str.startswith("load_shedding_")
+        if bool(mask.any()):
+            problems.append(f"{int(mask.sum())} {list_name} with {flag}=true")
+    if len(network.global_constraints):
+        problems.append(f"{len(network.global_constraints)} global constraint(s)")
+    gens = network.generators
+    for col in ("e_sum_min", "e_sum_max"):
+        if col in gens.columns and bool(np.isfinite(gens[col].astype(float)).any()):
+            problems.append(f"generators with a finite {col}")
+    if not problems:
+        return None
+    return (
+        "Rolling horizon cannot be used with " + "; ".join(problems) + ". "
+        "Each window is solved on its own, so capacity expansion would report only the "
+        "last window's capacity and whole-horizon budgets (global constraints, "
+        "e_sum_min/e_sum_max) would be applied in full to every window. Fix the "
+        "capacities (turn off extendable) and drop the budgets, or run without rolling horizon."
+    )
 
 
 def _rolling_suspect_note(network: Any) -> str | None:
@@ -416,6 +492,11 @@ def run_pypsa(
     snapshot_count = len(network.snapshots)
     snapshot_weight = float(network.snapshot_weightings["objective"].iloc[0]) if snapshot_count else 1.0
 
+    if rolling.enabled:
+        rolling_problem = _rolling_unsupported(network)
+        if rolling_problem:
+            raise HTTPException(status_code=400, detail=rolling_problem)
+
     # Power-flow study mode (pf/lpf) solves network physics, not an LP — none of
     # the cost/price/economics extraction below applies, so delegate to the
     # focused power-flow path and return its payload directly.
@@ -564,6 +645,7 @@ def run_pypsa(
                 extra_functionality=extra_functionality,
                 io_api=_SOLVER_IO_API,
                 include_objective_constant=False,  # see note on the single-period call
+                assign_all_duals=True,  # populate storage / link duals (mu_energy_balance …)
             )
             # PyPSA's rolling-horizon helper does not return a status; it only
             # logs a warning on a failed window and leaves that window's
@@ -589,6 +671,7 @@ def run_pypsa(
                 solver_options=solver_options if solver_options else {},
                 extra_functionality=extra_functionality,
                 io_api=_SOLVER_IO_API,
+                assign_all_duals=True,
             )
             solve_status, solve_condition = _coerce_solve_status(result)
         else:
@@ -598,6 +681,9 @@ def run_pypsa(
                 solver_options=solver_options if solver_options else {},
                 extra_functionality=extra_functionality,
                 io_api=_SOLVER_IO_API,
+                # Storage duals (mu_energy_balance …) stay empty otherwise. PyPSA cannot
+                # assign them for scenario-indexed (stochastic) models.
+                assign_all_duals=not stochastic.enabled,
                 # Keep the objective constant out of the LP. It is a fixed
                 # offset that does not affect the optimal dispatch/capacities,
                 # and this app never reads n.objective (costs are recomputed
@@ -871,16 +957,9 @@ def _build_solved_payload(
         load_dispatch = load_p_set.reindex(columns=_elec_loads, fill_value=0.0).sum(axis=1)
     else:
         load_dispatch = load_p_set.sum(axis=1)
-    _mp = network.buses_t.marginal_price
-    if _mp.empty:
-        price_series = pd.Series(0.0, index=network.snapshots)
-    else:
-        _mp_cols = (
-            [b for b in _mp.columns if str(b) in elec_scope]
-            if elec_scope is not None
-            else list(_mp.columns)
-        )
-        price_series = _mp[_mp_cols].mean(axis=1) if _mp_cols else _mp.mean(axis=1)
+    # System price = nodal prices weighted by nodal load (an unweighted bus mean
+    # lets a load-free bus drag it); averages below are snapshot-weighted.
+    price_series = system_price_series(network, elec_scope, load_p_set)
     shed_cols = [n for n in network.generators.index if n.startswith("load_shedding_")]
     load_shed = dispatch_frame.reindex(columns=shed_cols, fill_value=0.0).sum(axis=1)
     generator_weights = network.snapshot_weightings["generators"].reindex(network.snapshots).fillna(1.0)
@@ -898,8 +977,31 @@ def _build_solved_payload(
         # Sector-coupled: fuel-supply pseudo-generators on gas/heat/H₂ buses are
         # not electric capacity — count electricity-bus generators only.
         _real_gen = _real_gen & network.generators["bus"].astype(str).isin(elec_scope).to_numpy()
-    generator_capacity = float(_gen_installed[_real_gen].sum())
-    storage_capacity = float(installed_capacity_series(network.storage_units).sum())
+    _gen_real_capacity = _gen_installed[_real_gen]
+    _storage_installed = installed_capacity_series(network.storage_units)
+    pathway_run = is_pathway(network)
+    generator_capacity_by_period: dict[int, float] = {}
+    storage_capacity_by_period: dict[int, float] = {}
+    if pathway_run:
+        # Only assets active in a period (build_year <= period < build_year +
+        # lifetime) exist in it; summing every row counted not-yet-built and
+        # retired units. The KPI reports the largest per-period fleet, and each
+        # period's own figure is carried in ``pathway.summaries``.
+        generator_capacity_by_period = capacity_by_period(network, "generators", _gen_real_capacity)
+        storage_capacity_by_period = capacity_by_period(network, "storage_units", _storage_installed)
+        generator_capacity = max(generator_capacity_by_period.values(), default=0.0)
+        storage_capacity = max(storage_capacity_by_period.values(), default=0.0)
+    else:
+        generator_capacity = float(_gen_real_capacity.sum())
+        storage_capacity = float(_storage_installed.sum())
+    # Stores are energy (MWh) not power; report their capacity next to the MW.
+    store_energy_mwh = 0.0
+    if len(network.stores):
+        _e_in = network.stores["e_nom"].fillna(0.0) if "e_nom" in network.stores.columns else 0.0
+        if "e_nom_opt" in network.stores.columns:
+            _e_opt = network.stores["e_nom_opt"].fillna(0.0)
+            _e_in = _e_opt.where(_e_opt > 0, _e_in)
+        store_energy_mwh = float(_e_in.sum()) if hasattr(_e_in, "sum") else 0.0
     total_load = float(load_dispatch.max())
     reserve_requirement = total_load  # installed capacity vs peak demand
 
@@ -959,6 +1061,8 @@ def _build_solved_payload(
     else:
         p_nom_opt_s = _p_nom_in
     tv_p_max_pu_cols = set(network.generators_t.p_max_pu.columns)
+    # Pathway: availability exists only while the unit is active.
+    _active_gen = snapshot_active_mask(network, "generators")
     generator_energy = []
     for gen in generator_dispatch_frame.columns:
         if str(gen).startswith("load_shedding_"):
@@ -970,6 +1074,8 @@ def _build_solved_payload(
             if gen in tv_p_max_pu_cols:
                 p_nom_opt = float(p_nom_opt_s.get(gen, 0.0))
                 avail_s = (network.generators_t.p_max_pu[gen] * p_nom_opt).clip(lower=0.0)
+                if _active_gen is not None and gen in _active_gen.columns:
+                    avail_s = avail_s.where(_active_gen[gen].reindex(avail_s.index, fill_value=True), 0.0)
                 curtailment_mwh = float(
                     weighted_sum(
                         (avail_s - generator_dispatch_frame[gen].clip(lower=0.0)).clip(lower=0.0),
@@ -985,7 +1091,31 @@ def _build_solved_payload(
                     "curtailmentMwh": curtailment_mwh,
                 }
             )
-    generator_energy.sort(key=lambda row: row["value"], reverse=True)
+    # Pathway: also emit one entry per (generator, period) carrying ``period`` so
+    # the period selector can filter. Whole-horizon entries (no ``period`` key)
+    # are unchanged; consumers must use one family or the other, never both.
+    if pathway_run:
+        _level = network.snapshots.get_level_values("period")
+        _per_period: list[dict[str, Any]] = []
+        for row in generator_energy:
+            gen = row["name"]
+            for p in pathway_periods(network):
+                sel = _level == p
+                disp_p = generator_dispatch_frame[gen].clip(lower=0.0)[sel]
+                w_p = generator_weights[sel]
+                energy_p = weighted_sum(disp_p, w_p)
+                curt_p: float | None = None
+                if row["curtailmentMwh"] is not None:
+                    avail_p = (network.generators_t.p_max_pu[gen] * float(p_nom_opt_s.get(gen, 0.0))).clip(lower=0.0)[sel]
+                    if _active_gen is not None and gen in _active_gen.columns:
+                        avail_p = avail_p.where(_active_gen[gen][sel], 0.0)
+                    curt_p = float(weighted_sum((avail_p - disp_p).clip(lower=0.0), w_p))
+                if energy_p > 0.0 or (curt_p or 0.0) > 0.0:
+                    _per_period.append({**row, "value": float(energy_p), "curtailmentMwh": curt_p, "period": int(p)})
+        generator_energy.sort(key=lambda row: row["value"], reverse=True)
+        generator_energy.extend(_per_period)
+    else:
+        generator_energy.sort(key=lambda row: row["value"], reverse=True)
 
     # Cost breakdown. Use the effective per-snapshot marginal cost
     # (``get_switchable_as_dense`` resolves static vs time-varying inputs) so
@@ -1004,6 +1134,16 @@ def _build_solved_payload(
     )
     carbon_price_series = build_price_series(network, carbon_cfg)
     mc_dense = network.get_switchable_as_dense("Generator", "marginal_cost")
+    # Cost weights follow the LP objective: the ``objective`` snapshot weighting,
+    # times the investment-period objective weighting in a pathway run, so the
+    # breakdown sums to the same basis the optimiser minimised.
+    cost_weights = network.snapshot_weightings["objective"].reindex(network.snapshots).fillna(1.0)
+    if pathway_run:
+        _period_w = period_objective_weights(network)
+        cost_weights = cost_weights * pd.Series(
+            [_period_w[int(p)] for p in network.snapshots.get_level_values("period")],
+            index=network.snapshots,
+        )
     for name in network.generators.index:
         if name not in generator_dispatch_frame.columns:
             continue
@@ -1014,10 +1154,10 @@ def _build_solved_payload(
         dispatch_pos = generator_dispatch_frame[name].clip(lower=0.0)
         mc_s = mc_dense[name]
         if name.startswith("load_shedding_"):
-            shed_cost += weighted_sum(dispatch_pos * mc_s, generator_weights)
+            shed_cost += weighted_sum(dispatch_pos * mc_s, cost_weights)
         else:
-            carbon_cost += weighted_sum(dispatch_pos * ef * carbon_price_series, generator_weights)
-            fuel_cost += weighted_sum(dispatch_pos * (mc_s - ef * carbon_price_series).clip(lower=0.0), generator_weights)
+            carbon_cost += weighted_sum(dispatch_pos * ef * carbon_price_series, cost_weights)
+            fuel_cost += weighted_sum(dispatch_pos * (mc_s - ef * carbon_price_series).clip(lower=0.0), cost_weights)
 
     # Expansion CAPEX. `capex_annual` is the full annual annuity
     # (capital_cost × p_nom_opt, per year); the fuel/carbon/shedding components
@@ -1028,9 +1168,19 @@ def _build_solved_payload(
     expansion_results = build_expansion_results(network)
     total_capex_annual = sum(r["capex_annual"] for r in expansion_results)
     _H_window = float(network.snapshot_weightings["objective"].sum())
-    total_capex_window = (
-        total_capex_annual * (_H_window / HOURS_PER_YEAR) if _H_window > 0 else total_capex_annual
-    )
+    _capex_scale = capex_window_scale(network)
+    if pathway_run:
+        # Objective CAPEX: each extendable asset's annuity in every period it is
+        # active, weighted by that period's objective weighting. Not pro-rated to
+        # hours — pathway periods are annual representatives.
+        total_capex_window = float(sum(r.get("capex_weighted", 0.0) for r in expansion_results))
+    elif _capex_scale is not None:
+        # The solve already scaled capital_cost to the modelled window.
+        total_capex_window = total_capex_annual * _capex_scale
+    else:
+        total_capex_window = (
+            total_capex_annual * (_H_window / HOURS_PER_YEAR) if _H_window > 0 else total_capex_annual
+        )
 
     # Market analysis — merit order + CO₂ shadow price (pure post-processing)
     merit_order = build_merit_order(network)
@@ -1059,11 +1209,24 @@ def _build_solved_payload(
         cost_breakdown.append(
             {"label": "Start-up / shut-down cost", "value": round(commitment_cost)}
         )
+    # Objective terms the per-generator maths cannot see: StorageUnit / Store /
+    # Link marginal cost, quadratic and stand-by cost (from n.statistics.opex).
+    cost_breakdown.extend(
+        other_operating_costs(
+            network,
+            generator_explained=fuel_cost + carbon_cost + shed_cost + commitment_cost,
+        )
+    )
     if total_capex_annual > 0:
         # Annual annuity pro-rated to the modelled window (× H/8760) so it is
-        # comparable with the window-total fuel/carbon/shedding components.
+        # comparable with the window-total fuel/carbon/shedding components. A
+        # pathway run reports the investment-period-weighted annuity instead.
         cost_breakdown.append({
-            "label": "Capital cost (annuity, pro-rated to window)",
+            "label": (
+                "Capital cost (annuity × investment-period weighting)"
+                if pathway_run
+                else "Capital cost (annuity, pro-rated to window)"
+            ),
             "value": round(total_capex_window),
         })
 
@@ -1076,11 +1239,23 @@ def _build_solved_payload(
         mp = network.buses_t.marginal_price.round(2)
         bus_cols = [str(b) for b in mp.columns]
         for ts, vals in zip(mp.index, mp.to_numpy().tolist()):
-            nodal_price_series.append({
-                "label": str(ts),
-                "timestamp": str(ts),
-                "values": dict(zip(bus_cols, vals)),
-            })
+            # Pathway snapshots are (period, timestep) tuples — label by the
+            # timestep (ISO) and carry the period separately instead of
+            # stringifying the tuple.
+            if isinstance(ts, tuple) and len(ts) == 2:
+                stamp = pd.Timestamp(ts[1]).isoformat()
+                nodal_price_series.append({
+                    "label": stamp,
+                    "timestamp": stamp,
+                    "period": int(ts[0]),
+                    "values": dict(zip(bus_cols, vals)),
+                })
+            else:
+                nodal_price_series.append({
+                    "label": str(ts),
+                    "timestamp": str(ts),
+                    "values": dict(zip(bus_cols, vals)),
+                })
 
     # Series
     dispatch_s, gen_dispatch_s = build_dispatch_series(network, by_carrier, load_dispatch, generator_dispatch_frame)
@@ -1094,18 +1269,46 @@ def _build_solved_payload(
         load_dispatch,
         price_series,
         emissions_factors,
+        generator_capacity_by_period=generator_capacity_by_period,
+        storage_capacity_by_period=storage_capacity_by_period,
+        expansion_results=expansion_results,
     )
 
-    # Nodal balance
+    # Nodal balance (mean MW per bus). Generation is every injection into the
+    # bus — generators plus StorageUnit / Store discharge — and load is the demand
+    # plus storage charging, so a bus fed only by a battery no longer reads as
+    # zero generation. Links are left out: transmission flow is neither.
+    nodal_in: dict[str, float] = defaultdict(float)
+    nodal_out: dict[str, float] = defaultdict(float)
+
+    def _accumulate(static: pd.DataFrame, p_frame: pd.DataFrame, bus_col: str, sign: float) -> None:
+        if p_frame is None or p_frame.empty or bus_col not in static.columns:
+            return
+        for unit in p_frame.columns:
+            if unit not in static.index:
+                continue
+            flow = p_frame[unit] * sign  # +: injected into the bus
+            bus = str(static.at[unit, bus_col])
+            if bus in ("", "nan", "None"):
+                continue
+            nodal_in[bus] += float(flow.clip(lower=0.0).mean())
+            nodal_out[bus] += float((-flow).clip(lower=0.0).mean())
+
+    _accumulate(network.generators, dispatch_frame[[c for c in dispatch_frame.columns if c in network.generators.index]], "bus", 1.0)
+    _accumulate(network.storage_units, network.storage_units_t.p, "bus", 1.0)
+    _accumulate(network.stores, network.stores_t.p, "bus", 1.0)
+
     nodal_balance = []
     for bus in network.buses.index:
         bus_loads = network.loads.index[network.loads.bus == bus]
         # load_p_set (dense) includes static-only loads; strict .loc on
         # loads_t.p_set raised KeyError for them and killed the whole run.
         load_val = float(load_p_set.loc[:, bus_loads].sum(axis=1).mean()) if len(bus_loads) else 0.0
-        gen_names = list(network.generators.index[network.generators.bus == bus])
-        gen_val = float(dispatch_frame.reindex(columns=gen_names, fill_value=0.0).sum(axis=1).mean()) if gen_names else 0.0
-        nodal_balance.append({"label": bus, "load": load_val, "generation": gen_val})
+        nodal_balance.append({
+            "label": bus,
+            "load": load_val + nodal_out.get(str(bus), 0.0),
+            "generation": nodal_in.get(str(bus), 0.0),
+        })
     nodal_balance = sorted(nodal_balance, key=lambda x: x["load"], reverse=True)
 
     # Line loading. Loading is judged against the SOLVED capacity
@@ -1134,8 +1337,26 @@ def _build_solved_payload(
             peak = float((network.transformers_t.p0[transformer].abs() / _branch_capacity(network.transformers, transformer, "s_nom") * 100.0).max())
             line_loading.append({"label": transformer, "value": peak})
 
+    # Transmission stress is a statement about the grid: a conversion link
+    # (gas -> power, electrolyser, heat pump) is a plant, not a corridor, so it
+    # is left out of the average and the >80 % count. A link is transmission
+    # when both ends sit on buses of the same carrier.
+    _bus_carrier = (
+        network.buses["carrier"].map(lambda c: "electricity" if _is_electricity(c) else str(c))
+        if "carrier" in network.buses.columns
+        else None
+    )
+    _conversion_links: set[str] = set()
+    if _bus_carrier is not None and len(network.links) and {"bus0", "bus1"} <= set(network.links.columns):
+        for _lk in network.links.index:
+            _c0 = _bus_carrier.get(str(network.links.at[_lk, "bus0"]))
+            _c1 = _bus_carrier.get(str(network.links.at[_lk, "bus1"]))
+            if _c0 is not None and _c1 is not None and _c0 != _c1:
+                _conversion_links.add(str(_lk))
+    stress_rows = [x for x in line_loading if x["label"] not in _conversion_links]
+
     total_emissions = sum(emission_totals.values()) / 1000.0
-    average_price = float(price_series.mean())
+    average_price = weighted_mean(price_series, generator_weights)
     peak_net_load = round(float(load_dispatch.max()))
 
     # Electricity-only phrasing when the aggregates are scoped to the
@@ -1150,9 +1371,15 @@ def _build_solved_payload(
         if elec_scope is not None
         else "from workbook load profile"
     )
+    _storage_detail = f"{len(network.storage_units)} storage units (installed, solved p_nom_opt)"
+    if len(network.stores):
+        _storage_detail += f" + {len(network.stores)} stores ({round(store_energy_mwh):,} MWh energy capacity)"
+    if pathway_run:
+        _gen_cap_detail += "; largest per-period fleet (assets active in each investment period)"
+        _storage_detail += "; largest per-period fleet"
     summary = [
         {"label": "Generator capacity", "value": f"{round(generator_capacity):,} MW", "detail": _gen_cap_detail},
-        {"label": "Storage capacity", "value": f"{round(storage_capacity):,} MW", "detail": f"{len(network.storage_units)} storage units (installed, solved p_nom_opt)"},
+        {"label": "Storage capacity", "value": f"{round(storage_capacity):,} MW", "detail": _storage_detail},
         {"label": "Peak demand", "value": f"{round(total_load):,} MW", "detail": _peak_demand_detail},
         {"label": "Generator reserve", "value": f"{round(generator_capacity - reserve_requirement):,} MW", "detail": "generator capacity vs peak demand"},
         {"label": "Storage reserve", "value": f"{round(storage_capacity - reserve_requirement):,} MW", "detail": "storage capacity vs peak demand"},
@@ -1162,7 +1389,7 @@ def _build_solved_payload(
             if carbon_price_series.nunique(dropna=False) > 1
             else f"Carbon price {float(carbon_price_series.iloc[0]):.0f} {currency}/t"
         )},
-        {"label": "Transmission stress", "value": f"{round(np.mean([x['value'] for x in line_loading]) if line_loading else 0):,}%", "detail": f"{sum(1 for x in line_loading if x['value'] > 80.0)} corridors above 80%"},
+        {"label": "Transmission stress", "value": f"{round(np.mean([x['value'] for x in stress_rows]) if stress_rows else 0):,}%", "detail": f"{sum(1 for x in stress_rows if x['value'] > 80.0)} corridors above 80%"},
     ]
 
     # Unit-commitment status note
@@ -1334,6 +1561,7 @@ def _build_solved_payload(
             currency=currency,
             solver_options=solver_options if solver_options else {},
             io_api=_SOLVER_IO_API,
+            **ess_cost_kwargs(ess_cfg),
         )
         if ess_enabled
         else None
@@ -1388,7 +1616,14 @@ def _build_solved_payload(
     )
     # Resource adequacy (A1 ensemble + A2 LOLE) — stochastic renewable ensemble
     # vs load. None when the run has no time-varying renewable generator.
-    adequacy = build_adequacy(network)
+    # Never raises into the solve: any failure (e.g. pathway snapshots are
+    # (period, timestep) tuples) degrades to a run note, like the MC extras below.
+    adequacy: dict[str, Any] | None = None
+    try:
+        adequacy = build_adequacy(network)
+    except Exception as exc:  # noqa: BLE001 — never sink the run over an adequacy extra
+        notes.append(f"Resource adequacy could not be computed: {exc}")
+        _log.warning("adequacy failed: %s", exc)
     # Thermal forced-outage Monte Carlo — outage-aware LOLE/EUE WITH A
     # DISTRIBUTION across members, evaluated post-solve (pure post-process,
     # reuses the adequacy kernel). None when disabled/absent, unsolved, or no
@@ -1476,7 +1711,8 @@ def _build_solved_payload(
     # None-safe (returns enabled: False) when ramp wasn't configured.
     ramp = extract_ramp_results(network, ramp_cfg)
 
-    return {
+    # ``outputs`` is built last and is already finite-only (see full_outputs).
+    payload = {
         "summary": summary,
         "dispatchSeries": dispatch_s,
         "curtailmentSeries": curtailment_s,
@@ -1538,6 +1774,9 @@ def _build_solved_payload(
                 "windowCount": len(rolling_windows),
             } if rolling.enabled else None,
             "sampling": sampling_meta,
+            # Echo of the carbon-price schedule the solve received, so stored
+            # bundles let client-side History views split carbon per snapshot.
+            "carbonPriceSchedule": options.get("carbonPriceSchedule"),
             # What was actually in the network. This used to be emitted only by the
             # imported-result fallback in `from_outputs`, so a real solve stored
             # empty counts and "how big was that run?" had no answer in the run
@@ -1584,5 +1823,7 @@ def _build_solved_payload(
         # component, every snapshot). The frontend turns this into per-asset
         # detail records (`assetDetails`) locally and uses the same cache for
         # Export-Project, so the backend stays a stateless solver.
-        "outputs": build_full_outputs(network),
     }
+    payload = _sanitize_nonfinite(payload)
+    payload["outputs"] = build_full_outputs(network)
+    return payload

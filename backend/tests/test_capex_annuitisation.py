@@ -43,7 +43,11 @@ def test_extendable_asset_without_lifetime_gets_finite_annuitised_capex() -> Non
     # annuitisation).
     assert np.isfinite(cc)
     expected = 1_000_000 * (0.05 / (1 - (1.05) ** -20))
-    assert cc == pytest.approx(expected)
+    # The LP carries the annuity pro-rated to the 24 h window (RS1); the factor is
+    # published so reporting does not pro-rate a second time.
+    scale = network.meta["ragnarok_capex_window_scale"]
+    assert scale == pytest.approx(24.0 / 8760.0, rel=1e-12)
+    assert cc == pytest.approx(expected * scale, rel=1e-9)
 
 
 def test_high_capital_cost_curbs_expansion() -> None:

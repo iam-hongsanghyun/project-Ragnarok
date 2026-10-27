@@ -104,6 +104,71 @@ def _shift_label(label: str, offset_hours: int) -> str:
     return (dt + timedelta(hours=offset_hours)).strftime("%Y-%m-%d %H:%M")
 
 
+def align_cf_to_targets(
+    cf: list[float],
+    utc_times: list[Any],
+    utc_offset: int,
+    target_labels: list[str],
+) -> tuple[list[float | None], dict[str, int]]:
+    """Capacity factors for each target snapshot, matched by wall-clock timestamp.
+
+    The weather arrives hourly in UTC; the model's snapshots are local time, so
+    each weather stamp is shifted by ``utc_offset`` hours first (a UTC+9 site's
+    sun belongs at 09-16 h local, not at 00-07 h). A target is then matched, in
+    order, by (1) its exact local hour, (2) the same month-day-hour of another
+    year (a representative weather year under a different model year), (3) the
+    mean of that local hour-of-day over the whole weather window. A label that
+    is not a timestamp, or whose hour-of-day the weather never covers, gets
+    ``None`` — the caller falls back to positional tiling.
+
+    Algorithm:
+        $$cf^{target}(t) = cf^{wx}\\big(t - \\Delta_{utc}\\big)$$
+        ASCII: cf_target(t_local) = cf_weather(t_local - utc_offset)
+        t_local the model snapshot (local time), utc_offset (h) the shift from
+        UTC to the model's clock, cf dimensionless in [0, 1].
+
+    Returns:
+        ``(values, counts)`` — one entry per target (``None`` when unparseable)
+        and how many were matched by ``exact`` / ``month_day_hour`` / ``hour_of_day``.
+    """
+    import pandas as pd
+
+    counts = {"exact": 0, "month_day_hour": 0, "hour_of_day": 0}
+    if not cf or not utc_times:
+        return [None] * len(target_labels), counts
+    local = pd.DatetimeIndex(pd.to_datetime([str(t).replace("T", " ") for t in utc_times]))
+    if local.tz is not None:
+        local = local.tz_localize(None)
+    local = local + pd.Timedelta(hours=int(utc_offset))
+    n = min(len(local), len(cf))
+    series = pd.Series([float(v) for v in cf[:n]], index=local[:n])
+    series = series[~series.index.duplicated(keep="first")]
+    by_mdh = {(t.month, t.day, t.hour): v for t, v in series.items()}
+    by_hour = series.groupby(series.index.hour).mean().to_dict()
+    out: list[float | None] = []
+    for label in target_labels:
+        try:
+            ts = pd.Timestamp(str(label).replace("T", " "))
+        except (ValueError, TypeError):
+            out.append(None)
+            continue
+        if ts.tzinfo is not None:
+            ts = ts.tz_localize(None)
+        ts = ts.floor("h")
+        if ts in series.index:
+            out.append(float(series.at[ts]))
+            counts["exact"] += 1
+        elif (ts.month, ts.day, ts.hour) in by_mdh:
+            out.append(float(by_mdh[(ts.month, ts.day, ts.hour)]))
+            counts["month_day_hour"] += 1
+        elif ts.hour in by_hour:
+            out.append(float(by_hour[ts.hour]))
+            counts["hour_of_day"] += 1
+        else:
+            out.append(None)  # weather window under a day: caller tiles by position
+    return out, counts
+
+
 def build_siting_fragment(
     sites: list[dict[str, Any]],
     buses: list[dict[str, Any]],
@@ -127,7 +192,9 @@ def build_siting_fragment(
         buses: existing grid buses (``name``/``x``/``y``) to connect to.
         technologies: subset of ``("solar", "wind")`` — one extendable
             generator per technology per site.
-        utc_offset: hours to shift snapshot labels from UTC to local time.
+        utc_offset: hours to shift UTC weather onto the model's clock — applied
+            to the new snapshot labels and, in target-snapshot mode, to the
+            weather before it is matched to the existing labels.
         performance_ratio: flat solar derate η (see ``solar_cf``).
         site_capacity_mw: per-site build ceiling (``p_nom_max``, MW). Without
             a cap the LP dumps everything at the single best site.
@@ -136,8 +203,10 @@ def build_siting_fragment(
         connection_cost_per_mw_km: grid-connection capex rate
             (currency/MW·km); the Link's ``capital_cost`` is this × distance.
         marginal_cost: generator operating cost (currency/MWh), usually 0.
-        target_snapshots: the model's EXISTING snapshot labels. When given, CF
-            series are tiled positionally onto these labels and the fragment
+        target_snapshots: the model's EXISTING snapshot labels (local time).
+            When given, CF series are aligned onto these labels BY TIMESTAMP
+            after shifting the UTC weather by ``utc_offset`` (see
+            :func:`align_cf_to_targets`) and the fragment
             introduces no new snapshots — so the solve window keeps its demand
             data. (Importing the weather window as new snapshots would union
             them into the model where the load series has no values: the LP
@@ -172,7 +241,8 @@ def build_siting_fragment(
     bus_rows: list[dict[str, Any]] = []
     gen_rows: list[dict[str, Any]] = []
     link_rows: list[dict[str, Any]] = []
-    series_by_gen: dict[str, list[float]] = {}
+    series_by_gen: dict[str, list[float | None]] = {}
+    alignment: dict[str, int] = {}
 
     for idx, site in enumerate(kept, start=1):
         lat, lon = float(site["lat"]), float(site["lon"])
@@ -188,7 +258,15 @@ def build_siting_fragment(
                 else wind_cf(site.get("wind_ms") or [])
             )
             gen = f"siting_{tech}_{idx}"
-            series_by_gen[gen] = cf
+            if target_snapshots:
+                aligned, alignment = align_cf_to_targets(cf, times, int(utc_offset), snapshots)
+                # A label that is not a timestamp keeps the positional tiling.
+                series_by_gen[gen] = [
+                    v if v is not None else (cf[i % len(cf)] if cf else None)
+                    for i, v in enumerate(aligned)
+                ]
+            else:
+                series_by_gen[gen] = cf
             mean_by_tech[tech] = round(mean_cf(cf), 4)
             gen_rows.append({
                 "name": gen, "bus": site_bus, "carrier": tech,
@@ -213,15 +291,14 @@ def build_siting_fragment(
             "connectionCostPerMw": conn_cost, "meanCf": mean_by_tech,
         })
 
-    # Tiled indexing: in target-snapshot mode the model window can be longer or
-    # shorter than the fetched weather window, so the CF sequence repeats to
-    # cover it (identity when the fragment lands its own snapshots).
+    # Own-snapshot mode: the series IS the fetched window, one value per label.
+    # Target mode: already aligned to the labels above.
     p_max_pu_rows: list[dict[str, Any]] = []
     for i, snap in enumerate(snapshots):
         row: dict[str, Any] = {"snapshot": snap}
         for gen, cf in series_by_gen.items():
-            if cf:
-                row[gen] = round(cf[i % len(cf)], 4)
+            if cf and cf[i % len(cf)] is not None:
+                row[gen] = round(float(cf[i % len(cf)]), 4)
         p_max_pu_rows.append(row)
 
     frag.sheets["carriers"] = carriers
@@ -237,6 +314,7 @@ def build_siting_fragment(
             "technologies": techs, "site_capacity_mw": cap,
             "capital_cost_per_mw": {t: float(costs.get(t) or 0.0) for t in techs},
             "connection_cost_per_mw_km": float(connection_cost_per_mw_km),
+            **({"utc_offset": int(utc_offset), "alignment": alignment} if target_snapshots else {}),
         }, sort_keys=True),
         datetime.now(timezone.utc).isoformat(timespec="seconds"),
         json.dumps({s: len(r) for s, r in frag.sheets.items()}, sort_keys=True),

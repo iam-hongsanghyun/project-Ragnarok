@@ -107,7 +107,7 @@ import numpy as np
 import pandas as pd
 import pypsa
 
-from .adequacy import storage_discharge_availability
+from .adequacy import StorageFleet, extract_storage_fleet, storage_dispatch
 from .outage_mc import _is_variable_renewable, _per_member_metrics, _snapshot_label, sample_outage_masks
 
 _log = logging.getLogger("pypsa.solver")
@@ -175,6 +175,7 @@ def run_convergence_sampling(
     seed: int,
     modeled_hours: float,
     planned_mask: np.ndarray | None = None,
+    storage_fleet: StorageFleet | None = None,
 ) -> dict[str, Any]:
     """Draw the Markov forced-outage sampler in batches until SE stabilises.
 
@@ -201,6 +202,8 @@ def run_convergence_sampling(
             logical AND with each batch's sampled forced-outage mask before
             computing available generation — i.e. a unit is available only
             if it is neither on forced outage nor on planned maintenance.
+        storage_fleet: Optional storage resources; each batch's shortfall is
+            served by the shared SOC-limited ``adequacy.storage_dispatch``.
 
     Returns:
         Dict with ``achievedMembers``, ``converged``, ``estimate``, ``ciLow``,
@@ -258,6 +261,8 @@ def run_convergence_sampling(
 
         available = np.einsum("g,tg,mgt->mt", thermal_cap, thermal_pmax, mask)
         available = available + renewable_floor[None, :]
+        if storage_fleet is not None and len(storage_fleet):
+            available = available + storage_dispatch(available, load, weights, storage_fleet)
 
         lole_batch, eue_batch = _per_member_metrics(
             available, load, weights, annual_scale=annual_scale
@@ -610,19 +615,17 @@ def build_convergence(
     else:
         maintenance_payload = None
 
-    # Storage discharge counts toward AVAILABILITY on the one shared convention
-    # (see adequacy.storage_discharge_availability) — omitting it made this
-    # study's EUE an order of magnitude above the outage Monte Carlo's for the
-    # same system and the same forced-outage parameters. It is deliberately not
+    # Storage serves shortfall through the shared SOC-limited kernel
+    # (adequacy.storage_dispatch), per sampled member. It is deliberately not
     # folded into `renewable_floor`, which also drives the maintenance
-    # placement's net-load heuristic and is left as it was.
-    availability_floor = renewable_floor + storage_discharge_availability(network, T)
+    # placement's net-load heuristic.
+    storage_fleet = extract_storage_fleet(network)
 
     result = run_convergence_sampling(
-        for_rates, mttr_hours, weights, load, thermal_cap, thermal_pmax, availability_floor,
+        for_rates, mttr_hours, weights, load, thermal_cap, thermal_pmax, renewable_floor,
         target_metric=target_metric, tolerance=tolerance, batch_size=batch_size,
         max_members=max_members, seed=seed, modeled_hours=modeled_hours,
-        planned_mask=planned_mask,
+        planned_mask=planned_mask, storage_fleet=storage_fleet,
     )
 
     summary = [

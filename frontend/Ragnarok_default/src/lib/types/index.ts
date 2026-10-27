@@ -668,6 +668,16 @@ export interface EssConfig {
   steps: number;
   /** Round-trip efficiency (0–1). */
   roundTripEfficiency: number;
+  /** Annualised capital cost of energy capacity (currency per MWh per year). Optional, like the rest below. */
+  capitalCostPerMWh?: number;
+  /** Fixed O&M (currency per MW per year). */
+  fixedOmPerMWYear?: number;
+  /** Cost per MWh discharged. */
+  variableCostPerMWh?: number;
+  /** Project life in years; absent = the backend's 15-year default (reported in the result notes). */
+  lifetimeYears?: number;
+  /** Fraction of stored energy lost per hour (0-1). */
+  standingLoss?: number;
 }
 
 /** One size point of the ESS sweep. */
@@ -679,6 +689,17 @@ export interface EssSizeResult {
   npv: number;
   irr: number | null;
   paybackYears: number | null;
+  annualArbitrageRevenue?: number;
+  annualFixedOm?: number;
+  annualMargin?: number;
+  energyCapacityMWh?: number;
+  chargedMWh?: number;
+  throughputMWh?: number;
+  equivalentFullCycles?: number;
+  annualEquivalentFullCycles?: number;
+  avgChargePrice?: number | null;
+  avgDischargePrice?: number | null;
+  priceSpread?: number | null;
 }
 
 /** ESS business-case result (DW3) — the size sweep + NPV-maximising size. */
@@ -692,6 +713,14 @@ export interface EssBusinessCaseResult {
   sizes: EssSizeResult[];
   bestSizeMW: number;
   bestNpv: number;
+  /** Modelled window, in represented hours. */
+  windowHours?: number;
+  /** 8760 / windowHours. */
+  annualisationFactor?: number;
+  pathway?: boolean;
+  /** Defaults or simplifications the backend applied (e.g. an assumed lifetime). */
+  notes?: string[];
+  standingLoss?: number;
 }
 
 /** One retire filter — generators whose `field` is in `values` (OR within). */

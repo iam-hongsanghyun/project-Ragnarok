@@ -100,6 +100,12 @@ def network_to_model(network: pypsa.Network) -> dict[str, list[dict[str, Any]]]:
     """
     model: dict[str, list[dict[str, Any]]] = {}
     model["snapshots"] = [_snapshot_cells(ts) for ts in list(network.snapshots)]
+    # Non-hourly networks carry their weightings on the snapshots sheet (PyPSA's
+    # snapshots.csv layout) so build_network keeps them instead of re-deriving 1 h.
+    weights = network.snapshot_weightings
+    if len(weights) == len(model["snapshots"]) and not bool((weights == 1.0).all().all()):
+        for row, (_, w) in zip(model["snapshots"], weights.iterrows()):
+            row.update({str(col): float(w[col]) for col in weights.columns})
     if network.name:
         model["network"] = [{"name": str(network.name)}]
     for sheet in component_sheets():

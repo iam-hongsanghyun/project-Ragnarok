@@ -4,7 +4,9 @@
     "max_snapshots": 8760,
     "default_snapshot_count": 24,
     "default_snapshot_weight": 1.0,
-    "hours_in_year": 8760.0
+    "hours_in_year": 8760.0,
+  "fallback_lifetime_years": 20.0,
+  "direct_job_retention_seconds": 900
   },
   "session": {
     "_comment": "Server-side working-model store (backend is the source of truth; the frontend fetches pages/windows on demand). Tunables for temporal-chart windowing and the edit undo stack.",

@@ -226,3 +226,45 @@ def test_per_participant_profit_aggregates_by_owner() -> None:
     assert by["GasCo"]["priceSettingHours"] == 2       # peak1 marginal both hours
     # Ranked by profit, WindCo first.
     assert parts[0]["participant"] == "WindCo"
+
+
+def test_storage_schedule_respects_energy_under_snapshot_weights() -> None:
+    # 3 h snapshots: 10 MW for 3 h is 30 MWh, but the store holds 40 MWh. Ignoring
+    # the weights let a 40 MWh unit charge 4 x 10 MW x 3 h = 120 MWh.
+    prices = pd.Series([10.0, 10.0, 10.0, 10.0, 100.0, 100.0, 100.0, 100.0]).to_numpy()
+    w = pd.Series([3.0] * 8).to_numpy()
+    sched = _storage_schedule(prices, 10.0, 40.0, eta_round=1.0, q_charge=0.4, q_discharge=0.6, weights=w)
+    charged = float((-sched.clip(max=0) * w).sum())
+    discharged = float((sched.clip(min=0) * w).sum())
+    assert charged == pytest.approx(40.0, abs=1e-9)  # first 30 MWh, then the 10 MWh of headroom
+    assert discharged == pytest.approx(40.0, abs=1e-9)
+
+
+def test_simulation_storage_uses_solved_size_and_pypsa_default_hours() -> None:
+    n = pypsa.Network()
+    n.set_snapshots(range(8))
+    n.add("Bus", "b")
+    n.add("Carrier", ["cheap", "dear", "battery"])
+    n.add("Load", "L", bus="b", p_set=[60, 200, 60, 200, 60, 200, 60, 200])
+    n.add("Generator", "cheap", bus="b", carrier="cheap", p_nom=120, marginal_cost=20)
+    n.add("Generator", "dear", bus="b", carrier="dear", p_nom=200, marginal_cost=150)
+    # Extendable, p_nom = 0: the input rating says nothing, the solve sized it.
+    n.add("StorageUnit", "bat", bus="b", carrier="battery", p_nom_extendable=True, p_nom_max=30.0,
+          cyclic_state_of_charge=True)
+    n.optimize(solver_name="highs", include_objective_constant=False)
+    built = float(n.storage_units.at["bat", "p_nom_opt"])
+    assert built > 0
+    row = run_market_simulation(n)["storage"][0]
+    assert row["energyChargedMWh"] > 0.0
+    # PyPSA's default max_hours is 1 h: never more than p_nom_opt x 1 h per cycle,
+    # i.e. at most p_nom_opt x 1 h x 4 charging snapshots over this window.
+    assert row["energyChargedMWh"] <= built * 4 + 1e-6
+
+
+def test_simulation_labels_pathway_snapshots() -> None:
+    n = _network(hours=2)
+    n.set_investment_periods([2030, 2040])
+    n.set_snapshots(pd.MultiIndex.from_product([[2030, 2040], pd.date_range("2030-01-01", periods=2, freq="h")]))
+    res = run_market_simulation(n)
+    assert [p["period"] for p in res["priceSeries"]] == [2030, 2030, 2040, 2040]
+    assert res["priceSeries"][0]["timestamp"].startswith("2030-01-01T00:00:00")

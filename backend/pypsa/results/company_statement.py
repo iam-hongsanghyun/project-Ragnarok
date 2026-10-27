@@ -50,8 +50,8 @@ import pandas as pd
 import pypsa
 
 from ..utils.emissions import per_generator_emission_factor
-from .finance import _crf
-from .market import HOURS_PER_YEAR
+from .finance import _crf, storage_assets
+from .market import HOURS_PER_YEAR, capex_window_scale
 
 _log = logging.getLogger("pypsa.solver")
 
@@ -124,7 +124,8 @@ def build_company_statement(
 
     gen_owner = _owner_map(model, "generators", column)
     sto_owner = _owner_map(model, "storage_units", column)
-    if not gen_owner and not sto_owner:
+    store_owner = _owner_map(model, "stores", column)
+    if not gen_owner and not sto_owner and not store_owner:
         return None
 
     def _bucket() -> dict[str, float]:
@@ -159,30 +160,27 @@ def build_company_statement(
         b["energyMWh"] += energy
         b["carbonCost"] += carbon
         b["fuelVomCost"] += max(0.0, opex - carbon)
-        b["capexAnnual"] += cap_cost * capacity
+        # capital_cost may be window-scaled by the builder: recover the annual charge.
+        b["capexAnnual"] += cap_cost * capacity / (capex_window_scale(network) or 1.0)
         b["emissionsTonnes"] += float((p_pos * ef * weights).sum())
 
-    for s in network.storage_units.index:
-        company = sto_owner.get(str(s))
+    # Storage: StorageUnit and Store + Link on the same rule finance.py uses —
+    # capex only for extendable components, marginal_cost_storage and spill_cost
+    # counted in the variable cost.
+    def _price(bus: str) -> np.ndarray | None:
+        return mp[bus].to_numpy() if bus in mp.columns else None
+
+    for a in storage_assets(
+        network, _price, weights, storage_units=list(sto_owner), stores=list(store_owner),
+    ):
+        company = (sto_owner if a.sheet == "storage_units" else store_owner).get(a.name)
         if not company:
             continue
-        bus = str(network.storage_units.at[s, "bus"])
-        if bus not in mp.columns:
-            continue
-        cols = network.storage_units_t.p_dispatch.columns
-        if s not in cols:
-            continue
         b = acc.setdefault(company, _bucket())
-        pd_ = network.storage_units_t.p_dispatch[s].to_numpy()
-        pc = network.storage_units_t.p_store[s].to_numpy() if s in network.storage_units_t.p_store.columns else pd_ * 0.0
-        pi = mp[bus].to_numpy()
-        mc = float(network.storage_units.at[s, "marginal_cost"]) if "marginal_cost" in network.storage_units.columns else 0.0
-        cap_cost = float(network.storage_units.at[s, "capital_cost"]) if "capital_cost" in network.storage_units.columns else 0.0
-        capacity = float(network.storage_units.at[s, "p_nom_opt"])
-        b["revenue"] += float(((pd_ - pc) * pi * weights).sum())
-        b["energyMWh"] += float((pd_ * weights).sum())
-        b["fuelVomCost"] += float((mc * pd_ * weights).sum())
-        b["capexAnnual"] += cap_cost * capacity
+        b["revenue"] += a.revenue
+        b["energyMWh"] += a.discharged_mwh
+        b["fuelVomCost"] += a.op_cost
+        b["capexAnnual"] += a.capex_annual
 
     if not acc:
         return None

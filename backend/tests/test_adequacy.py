@@ -122,3 +122,35 @@ def test_build_adequacy_ignores_load_shedding_backstop() -> None:
     np.testing.assert_allclose(
         shed["renewableCapacityMW"], base["renewableCapacityMW"], rtol=1e-9, atol=0.0
     )
+
+
+def test_adequacy_and_simulation_survive_pathway_snapshots() -> None:
+    """(period, timestep) snapshots used to 500 the whole run at pd.Timestamp(tuple)."""
+    import logging
+
+    from backend.pypsa.results import run_pypsa
+
+    logging.disable(logging.CRITICAL)
+    snaps = [(f"2025-01-01T{h:02d}:00:00", 2025) for h in range(4)] + [
+        (f"2030-01-01T{h:02d}:00:00", 2030) for h in range(4)
+    ]
+    model = {
+        "buses": [{"name": "b"}],
+        "carriers": [{"name": "gas"}, {"name": "solar"}],
+        "snapshots": [{"snapshot": s, "period": p} for s, p in snaps],
+        "generators": [
+            {"name": "g", "bus": "b", "carrier": "gas", "p_nom": 250, "marginal_cost": 20},
+            {"name": "pv", "bus": "b", "carrier": "solar", "p_nom": 100, "marginal_cost": 0},
+        ],
+        "generators-p_max_pu": [{"snapshot": s, "pv": v} for (s, _), v in zip(snaps, [0, 0.5, 1, 0.2] * 2)],
+        "loads": [{"name": "L", "bus": "b", "p_set": 100}],
+    }
+    opts = {"pathwayConfig": {"enabled": True, "periods": [
+        {"period": 2025, "objectiveWeight": 1, "yearsWeight": 5},
+        {"period": 2030, "objectiveWeight": 1, "yearsWeight": 5},
+    ]}}
+    result = run_pypsa(model, {"discountRate": 0.05}, opts)
+    band = result["adequacy"]["band"]
+    assert len(band) == 8
+    assert band[0]["timestamp"].startswith("2025-01-01T00:00:00")
+    assert band[4]["timestamp"].startswith("2030-01-01T00:00:00")

@@ -21,6 +21,8 @@ from typing import Any
 import pandas as pd
 import pypsa
 
+from .dispatch import electricity_bus_scope, system_price_series
+
 _log = logging.getLogger("pypsa.solver")
 
 _DISPATCH_EPS = 1e-3  # MW below which a generator is treated as off
@@ -39,7 +41,12 @@ def build_price_formation(network: pypsa.Network, *, currency: str) -> dict[str,
     if gen_p is None or gen_p.empty:
         return None
 
-    price = mp.mean(axis=1)  # system price per snapshot (mean nodal price)
+    # System price per snapshot: nodal prices weighted by nodal load (an
+    # unweighted bus mean lets a load-free bus drag it), scoped to the
+    # electricity buses of a sector-coupled model.
+    price = system_price_series(
+        network, electricity_bus_scope(network), network.get_switchable_as_dense("Load", "p_set")
+    )
 
     # Demand per snapshot: the served load (fall back to the set profile).
     if not network.loads_t.p.empty:
@@ -80,8 +87,12 @@ def build_price_formation(network: pypsa.Network, *, currency: str) -> dict[str,
             price_wsum[marg_carrier] = (
                 price_wsum.get(marg_carrier, 0.0) + w * float(price.get(ts, 0.0))
             )
+        # Pathway snapshots are (period, timestep) tuples: label by the ISO
+        # timestep and carry the period, rather than stringifying the tuple.
+        is_tuple = isinstance(ts, tuple) and len(ts) == 2
         rows.append({
-            "snapshot": str(ts),
+            "snapshot": pd.Timestamp(ts[1]).isoformat() if is_tuple else str(ts),
+            **({"period": int(ts[0])} if is_tuple else {}),
             "price": round(float(price.get(ts, 0.0)), 2),
             "demand": round(float(demand.get(ts, 0.0)), 1),
             "residualDemand": round(float(residual.get(ts, 0.0)), 1),

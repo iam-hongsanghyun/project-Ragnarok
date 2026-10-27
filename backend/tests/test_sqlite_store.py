@@ -232,3 +232,43 @@ def test_build_db_over_existing_sheets_no_primary_key_error(_dir) -> None:
     meta = sq._build_db("sql", model2, filename="b.xlsx")  # must NOT raise
     assert meta["filename"] == "b.xlsx"
     assert len(sq.get_sheet_page("sql", "generators")["rows"]) == 1  # second build won
+
+
+# ── RS5: a failed save must not destroy the session ──────────────────────────
+
+
+class _Unserialisable:
+    pass
+
+
+def test_failed_save_keeps_the_existing_session(_dir) -> None:
+    """The rebuild fails on an unserialisable cell; the old session survives."""
+    sq.save_model("keep", _model(), filename="m.xlsx", scenario_name="ref")
+    before = sq.get_meta("keep")
+    bad = _model()
+    bad["generators"][0]["p_nom"] = _Unserialisable()
+    with pytest.raises(TypeError):
+        sq.save_model("keep", bad, filename="bad.xlsx", scenario_name="bad")
+    after = sq.get_meta("keep")
+    assert after is not None and after["filename"] == before["filename"] == "m.xlsx"
+    assert sq.get_sheet_page("keep", "generators", 0, 10)["total"] == 3
+    # no half-built temp file is left behind
+    assert not list((sq.ss.SESSION_DIR / "keep").glob("*.building*"))
+
+
+def test_numpy_and_datetime_cells_are_stored_as_json(_dir) -> None:
+    import datetime as dt
+
+    import numpy as np
+    import pandas as pd
+
+    m = _model()
+    m["generators"][0]["p_nom"] = np.float64(12.5)
+    m["generators"][0]["count"] = np.int64(3)
+    m["generators"][0]["commissioned"] = pd.Timestamp("2030-01-02 03:00")
+    m["generators"][1]["retired"] = dt.date(2050, 1, 1)
+    sq.save_model("np", m, filename="m.xlsx", scenario_name="ref")
+    rows = sq.get_sheet_page("np", "generators", 0, 10)["rows"]
+    assert rows[0]["p_nom"] == 12.5 and rows[0]["count"] == 3
+    assert rows[0]["commissioned"] == "2030-01-02T03:00:00"
+    assert rows[1]["retired"] == "2050-01-01"

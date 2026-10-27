@@ -37,6 +37,8 @@ import numpy as np
 import pandas as pd
 import pypsa
 
+from .dispatch import _snapshot_label
+
 DEFAULT_VOLL = 3000.0  # €/MWh price applied to unserved energy
 _EPS = 1e-9
 
@@ -174,11 +176,23 @@ def _storage_schedule(
     eta_round: float,
     q_charge: float,
     q_discharge: float,
+    weights: np.ndarray | None = None,
 ) -> np.ndarray:
     """Chronological price-threshold arbitrage. Positive = discharge (MW),
-    negative = charge. Only acts when the spread beats round-trip losses."""
+    negative = charge. Only acts when the spread beats round-trip losses.
+
+    Algorithm:
+        A snapshot represents $w_t$ hours (``weights``, default 1), so a power
+        $p$ (MW) moves $p\\,w_t$ MWh. With one-way efficiency
+        $\\eta=\\sqrt{\\eta_{rt}}$ and stored energy $e\\le E$ (MWh):
+            $$ c=\\min\\big(\\bar p,\\ (E-e)/(\\eta w_t)\\big),\\ e\\leftarrow e+c\\,\\eta w_t \\quad
+               d=\\min\\big(\\bar p,\\ e\\,\\eta/w_t\\big),\\ e\\leftarrow e-d\\,w_t/\\eta $$
+        ASCII: charge c=min(P,(E-e)/(eta*w)), e+=c*eta*w; discharge d=min(P,e*eta/w), e-=d*w/eta.
+    """
     if power_mw <= _EPS or energy_mwh <= _EPS or len(prices) == 0:
         return np.zeros(len(prices))
+    w_arr = np.ones(len(prices)) if weights is None else np.asarray(weights, dtype=float)
+    eta = float(np.sqrt(eta_round))
     lo = float(np.quantile(prices, q_charge))
     hi = float(np.quantile(prices, q_discharge))
     if hi * eta_round <= lo:  # spread can't pay for the losses — stay idle
@@ -186,14 +200,17 @@ def _storage_schedule(
     schedule = np.zeros(len(prices))
     soc = 0.0
     for t, p in enumerate(prices):
+        w = float(w_arr[t])
+        if w <= _EPS:
+            continue
         if p <= lo and soc < energy_mwh - _EPS:
-            take = min(power_mw, energy_mwh - soc)
+            take = min(power_mw, (energy_mwh - soc) / (eta * w))
             schedule[t] = -take
-            soc += take * np.sqrt(eta_round)  # charge-side losses
+            soc += take * eta * w  # charge-side losses
         elif p >= hi and soc > _EPS:
-            give = min(power_mw, soc * np.sqrt(eta_round))  # discharge-side losses
+            give = min(power_mw, soc * eta / w)  # discharge-side losses
             schedule[t] = give
-            soc -= give / np.sqrt(eta_round)
+            soc -= give * w / eta
     return schedule
 
 
@@ -286,12 +303,16 @@ def run_market_simulation(network: pypsa.Network, config: dict[str, Any] | None 
         extra_load = np.zeros(T)
         extra_supply = np.zeros(T)
         for s in su.index:
-            power = float(su.at[s, "p_nom"])
-            hours = float(su.get("max_hours", pd.Series(dtype=float)).get(s, 6.0) or 6.0)
+            # Solved size (p_nom_opt) of an extendable unit in a solved network; PyPSA's own
+            # default max_hours (1 h) when the column or value is absent.
+            extendable = "p_nom_extendable" in su.columns and bool(su.at[s, "p_nom_extendable"])
+            use_opt = extendable and "p_nom_opt" in su.columns and getattr(network, "is_solved", False)
+            power = float(su.at[s, "p_nom_opt" if use_opt else "p_nom"])
+            hours = float(su.at[s, "max_hours"]) if "max_hours" in su.columns else 1.0
             eta_store = float(su.get("efficiency_store", pd.Series(dtype=float)).get(s, 1.0) or 1.0)
             eta_disp = float(su.get("efficiency_dispatch", pd.Series(dtype=float)).get(s, 1.0) or 1.0)
             sched = _storage_schedule(price, power, power * hours, eta_store * eta_disp,
-                                      q_charge, q_discharge)
+                                      q_charge, q_discharge, weights)
             extra_load += np.clip(-sched, 0.0, None)
             extra_supply += np.clip(sched, 0.0, None)
             charged = float((np.clip(-sched, 0, None) * weights).sum())
@@ -313,14 +334,17 @@ def run_market_simulation(network: pypsa.Network, config: dict[str, Any] | None 
         revenue_per_unit = dispatch * price[:, None]
     cost_per_unit = dispatch * mc[None, :]
 
-    labels = [pd.Timestamp(s).strftime("%H:%M") for s in snapshots]
-    stamps = [pd.Timestamp(s).isoformat() for s in snapshots]
+    # (period, timestep) snapshots of a pathway run labelled like dispatch.py.
+    parts = [_snapshot_label(s) for s in snapshots]
+    labels = [p[0] for p in parts]
+    stamps = [p[1] for p in parts]
+    periods = [p[2] for p in parts]
     carriers = [str(gens.at[g, "carrier"]) for g in gens.index] if G else []
 
-    # Same row shape as the optimise-path series (period=None: single-period),
+    # Same row shape as the optimise-path series (period None when single-period),
     # so the standard dispatch/price charts render simulation output directly.
     price_series = [
-        {"label": labels[t], "timestamp": stamps[t], "period": None,
+        {"label": labels[t], "timestamp": stamps[t], "period": periods[t],
          "value": round(float(price[t]), 4)}
         for t in range(T)
     ]
@@ -332,7 +356,7 @@ def run_market_simulation(network: pypsa.Network, config: dict[str, Any] | None 
                 values[carriers[i]] = values.get(carriers[i], 0.0) + float(dispatch[t, i])
         if unserved[t] > _EPS:
             values["unserved"] = float(unserved[t])
-        dispatch_series.append({"label": labels[t], "timestamp": stamps[t], "period": None,
+        dispatch_series.append({"label": labels[t], "timestamp": stamps[t], "period": periods[t],
                                 "values": {k: round(v, 4) for k, v in values.items()},
                                 "total": round(float(load[t]), 4)})
 

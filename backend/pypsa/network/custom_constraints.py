@@ -4,8 +4,34 @@ from dataclasses import dataclass
 from typing import Any
 
 import pypsa
+from fastapi import HTTPException
 
 from ..utils.emissions import per_generator_emission_factor
+
+
+class ConstraintSkipped(ValueError):
+    """A constraint whose selector matches nothing in this model.
+
+    There is no component to bind, so it is skipped with a note — unlike a
+    genuine compile failure, which must stop the run (see
+    :func:`raise_on_compile_failures`).
+    """
+
+
+def raise_on_compile_failures(failures: list[str]) -> None:
+    """Fail the run when any constraint could not be compiled.
+
+    A constraint the user asked for but that never reached the LP silently
+    loosens the study (a cap that is not there), so it is an error, not a note.
+    """
+    if failures:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Custom constraint(s) could not be compiled, so the run was stopped rather "
+                "than solved without them: " + "; ".join(failures)
+            ),
+        )
 
 
 @dataclass
@@ -34,13 +60,27 @@ class ModelContext:
     cap_var: Any | None
     cap_dim: str | None
     emissions_factors: dict[str, float]
+    # Hours of the window's rows that this window COMMITS (rolling horizon with
+    # overlap: the first ``horizon - overlap`` rows; later windows re-solve the
+    # rest). ``None`` ⇒ the whole window is committed (no overlap / no rolling).
+    committed_hours: float | None = None
 
     @property
     def window_fraction(self) -> float:
-        """Window hours ÷ full-horizon hours (1.0 outside rolling horizon)."""
+        """Share of a whole-run (MWh) budget this window may spend.
+
+        Algorithm:
+            $$f = H_\\mathrm{commit} / H_\\mathrm{run}$$
+            ASCII: f = committed_hours / full_horizon_hours
+            where H_commit is the hours (h, snapshot-weighted) of the rows the
+            window commits and H_run the whole run's hours. The per-window
+            shares of a rolling run therefore sum to exactly 1, with or without
+            overlap; 1.0 outside rolling horizon.
+        """
         if self.full_horizon_hours <= 0:
             return 1.0
-        return self.modeled_hours / self.full_horizon_hours
+        hours = self.modeled_hours if self.committed_hours is None else self.committed_hours
+        return hours / self.full_horizon_hours
 
 
 def build_model_context(
@@ -69,6 +109,10 @@ def build_model_context(
     shed_gens = [g for g in n.generators.index if g.startswith("load_shedding_")]
     modeled_hours = float(weights.sum())
     full_horizon_hours = float(full_weights.sum())
+    committed_hours: float | None = None
+    step = n.meta.get("ragnarok_rolling_step") if isinstance(n.meta, dict) else None
+    if snapshots is not None and step:
+        committed_hours = float(weights.iloc[: int(step)].sum())
     try:
         cap_var = n.model["Generator-p_nom"]
         cap_dim = cap_var.dims[0]
@@ -87,6 +131,7 @@ def build_model_context(
         cap_var=cap_var,
         cap_dim=cap_dim,
         emissions_factors=emissions_factors,
+        committed_hours=committed_hours,
     )
 
 
@@ -142,7 +187,8 @@ def apply_custom_constraints(
     it, and absolute (MWh) budgets are apportioned by the window's hour-share so
     a whole-run cap isn't applied in full to every window.
 
-    Silently skips any constraint that fails (logs a note instead).
+    A constraint whose selector matches nothing is skipped with a note; one that
+    fails to compile raises HTTP 400 after every constraint has been tried.
     """
     if not constraints:
         return
@@ -157,17 +203,18 @@ def apply_custom_constraints(
     cap_var = ctx.cap_var
     cap_dim = ctx.cap_dim
 
+    failures: list[str] = []
     for i, c in enumerate(constraints):
         if not c.get("enabled", False):
             continue
 
         metric: str = c.get("metric", "")
-        value: float = float(c.get("value", 0))
         carrier: str = c.get("carrier", "")
         label: str = c.get("label", metric)
         cname = f"cc_{i}_{metric}"
 
         try:
+            value: float = float(c.get("value", 0))
             # ── CO₂ emission intensity cap (tCO₂/MWh) ───────────────────────
             # Constraint: Σ(co2_factor_g × dispatch_g) ≤ value × Σ(dispatch_g)
             # where the sum runs over all non-shedding generators. The UI
@@ -331,5 +378,9 @@ def apply_custom_constraints(
             else:
                 notes.append(f"Constraint '{label}': unknown metric '{metric}' — skipped.")
 
+        except ConstraintSkipped as exc:
+            notes.append(f"Constraint '{label}' could not be added: {exc}")
         except Exception as exc:
             notes.append(f"Constraint '{label}' could not be added: {exc}")
+            failures.append(f"'{label}' ({exc})")
+    raise_on_compile_failures(failures)

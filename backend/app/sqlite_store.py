@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import shutil
 import sqlite3
@@ -46,7 +47,7 @@ def _db_path(session_id: str) -> Path:
 
 
 @contextmanager
-def _connect(session_id: str) -> Iterator[sqlite3.Connection]:
+def _connect(session_id: str, path: Path | None = None) -> Iterator[sqlite3.Connection]:
     """Open the session db for one operation and ALWAYS close it.
 
     ``with sqlite3.connect(...)`` only manages the transaction — it leaves the
@@ -55,7 +56,7 @@ def _connect(session_id: str) -> Iterator[sqlite3.Connection]:
     ``clear``/``save_model`` raise PermissionError. This wrapper preserves the
     commit-on-success / rollback-on-error semantics and closes the handle.
     """
-    path = _db_path(session_id)
+    path = path or _db_path(session_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path))
     try:
@@ -86,7 +87,7 @@ def _kv_get(conn: sqlite3.Connection, key: str) -> Any | None:
 def _kv_set(conn: sqlite3.Connection, key: str, value: Any) -> None:
     conn.execute(
         "INSERT INTO _kv(k, v) VALUES(?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v",
-        (key, json.dumps(value, ensure_ascii=False)),
+        (key, json.dumps(value, ensure_ascii=False, default=ss.json_default)),
     )
 
 
@@ -187,8 +188,36 @@ def save_model(
     """Persist a full model into the session's project.db, replacing any current one."""
     if not ss._is_safe_id(session_id):
         raise ValueError(f"Unsafe session id: {session_id!r}")
-    clear(session_id)
-    return _build_db(session_id, model, filename=filename, scenario_name=scenario_name)
+    # Build the replacement beside the live db and swap it in with an atomic
+    # os.replace. Clearing first (as this used to) destroyed the session whenever
+    # the rebuild then failed — an unserialisable cell, a full disk — leaving the
+    # user with nothing. A failed build now leaves the existing session untouched.
+    final = _db_path(session_id)
+    building = final.with_name(final.name + ".building")
+    _discard_db_files(building)
+    try:
+        meta = _build_db(
+            session_id, model, filename=filename, scenario_name=scenario_name, db_path=building
+        )
+    except BaseException:
+        _discard_db_files(building)
+        raise
+    for sidecar in (final.with_name(final.name + "-wal"), final.with_name(final.name + "-shm")):
+        sidecar.unlink(missing_ok=True)
+    os.replace(building, final)
+    _discard_db_files(building)  # stray -wal/-shm of the temp name, if any
+    for path in _legacy_artifacts(session_id):
+        if path.is_dir():
+            shutil.rmtree(path, ignore_errors=True)
+        else:
+            path.unlink(missing_ok=True)
+    return meta
+
+
+def _discard_db_files(db_path: Path) -> None:
+    """Remove a sqlite file and its WAL/SHM sidecars (no error when absent)."""
+    for suffix in ("", "-wal", "-shm"):
+        db_path.with_name(db_path.name + suffix).unlink(missing_ok=True)
 
 
 def _build_db(
@@ -197,13 +226,14 @@ def _build_db(
     *,
     filename: str = "",
     scenario_name: str = "",
+    db_path: Path | None = None,
 ) -> dict[str, Any]:
-    """Create a fresh ``project.db`` and populate it. Assumes no db exists yet.
+    """Create a fresh ``project.db`` (or ``db_path``) and populate it. Assumes no db exists there yet.
 
     Split out of :func:`save_model` so :func:`_ensure_migrated` can build the db
     from legacy files *without* :func:`clear` wiping those files mid-migration.
     """
-    with _connect(session_id) as conn:
+    with _connect(session_id, db_path) as conn:
         # IF NOT EXISTS: between save_model's clear() and this rebuild, a
         # concurrent request (save_controls, fired by the UI while a run is in
         # flight) can recreate the db file with its own _kv — a bare CREATE
@@ -225,7 +255,7 @@ def _build_db(
             conn.execute(f"CREATE TABLE {tbl} (__row INTEGER PRIMARY KEY AUTOINCREMENT, d TEXT)")
             conn.executemany(
                 f"INSERT INTO {tbl}(d) VALUES(?)",
-                [(json.dumps(row, ensure_ascii=False),) for row in rows if isinstance(row, dict)],
+                [(json.dumps(row, ensure_ascii=False, default=ss.json_default),) for row in rows if isinstance(row, dict)],
             )
             columns = list(rows[0].keys()) if rows and isinstance(rows[0], dict) else []
             kind = "series" if ss.is_series_sheet(name, rows) else "static"
@@ -277,7 +307,7 @@ def merge_static_model(session_id: str, model: dict[str, list[dict[str, Any]]]) 
             conn.execute(f"DELETE FROM {tbl}")
             conn.executemany(
                 f"INSERT INTO {tbl}(d) VALUES(?)",
-                [(json.dumps(row, ensure_ascii=False),) for row in rows if isinstance(row, dict)],
+                [(json.dumps(row, ensure_ascii=False, default=ss.json_default),) for row in rows if isinstance(row, dict)],
             )
             columns = list(rows[0].keys()) if rows and isinstance(rows[0], dict) else []
             entry = existing.get(name)
@@ -463,7 +493,7 @@ def patch_sheet(session_id: str, sheet: str, ops: list[dict[str, Any]]) -> dict[
         conn.execute(f"DELETE FROM {tbl}")
         conn.executemany(
             f"INSERT INTO {tbl}(d) VALUES(?)",
-            [(json.dumps(row, ensure_ascii=False),) for row in rows],
+            [(json.dumps(row, ensure_ascii=False, default=ss.json_default),) for row in rows],
         )
         columns = list(rows[0].keys()) if rows else list(entry.get("columns", []))
         entry["rowCount"] = len(rows)
@@ -516,7 +546,7 @@ def transform_series(
         conn.execute(f"DELETE FROM {tbl}")
         conn.executemany(
             f"INSERT INTO {tbl}(d) VALUES(?)",
-            [(json.dumps(row, ensure_ascii=False),) for row in rows],
+            [(json.dumps(row, ensure_ascii=False, default=ss.json_default),) for row in rows],
         )
         columns = list(rows[0].keys()) if rows else list(entry.get("columns", []))
         entry["rowCount"] = len(rows)

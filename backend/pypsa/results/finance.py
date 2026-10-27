@@ -33,11 +33,15 @@ Algorithm:
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from typing import Any
 
+import numpy as np
 import pypsa
 
-from .market import HOURS_PER_YEAR
+from .adequacy import electricity_buses, store_link_pairs
+from .market import HOURS_PER_YEAR, capex_window_scale
 
 _log = logging.getLogger("pypsa.solver")
 
@@ -115,6 +119,179 @@ def _lifetime(df, name: str) -> float:
     return _DEFAULT_LIFETIME
 
 
+@dataclass(frozen=True)
+class StorageAsset:
+    """One storage resource's window economics, on the single shared rule.
+
+    ``revenue`` and ``op_cost`` are window totals (currency, weighted by the
+    snapshot weights); ``capex_annual`` is the annualised capital charge the
+    solve itself paid (currency/yr) — nonzero only for extendable components,
+    exactly as in the PyPSA objective.
+    """
+
+    name: str
+    sheet: str  # model sheet the owner tag lives on: "storage_units" | "stores"
+    bus: str
+    carrier: str
+    capacity_mw: float
+    energy_mwh: float
+    capex_annual: float
+    lifetime: float
+    revenue: float
+    op_cost: float
+    discharged_mwh: float
+    charged_mwh: float
+
+
+_STATIC_FRAME = {"StorageUnit": "storage_units", "Store": "stores", "Link": "links"}
+
+
+def _component_series(network: pypsa.Network, component: str, attr: str, name: str) -> np.ndarray:
+    """Per-snapshot value of ``attr`` (series over static), 0 when the attribute is absent."""
+    T = len(network.snapshots)
+    try:
+        dense = network.get_switchable_as_dense(component, attr)
+        if name in dense.columns:
+            return dense[name].to_numpy(dtype=float)
+    except Exception:  # noqa: BLE001 — attribute not registered on this component
+        pass
+    frame = getattr(network, _STATIC_FRAME[component])
+    value = float(frame.at[name, attr]) if attr in frame.columns else 0.0
+    return np.full(T, value)
+
+
+def _flow(frame: Any, name: str, T: int) -> np.ndarray:
+    return frame[name].to_numpy(dtype=float) if name in frame.columns else np.zeros(T)
+
+
+def storage_assets(
+    network: pypsa.Network,
+    price_of: Callable[[str], np.ndarray | None],
+    weights: np.ndarray,
+    *,
+    storage_units: Iterable[str] = (),
+    stores: Iterable[str] = (),
+) -> list[StorageAsset]:
+    """Window revenue / cost / capex of the named storage, one rule for every consumer.
+
+    Finance, the company statement, the company breakdown and the merchant study
+    all read storage through here, so they cannot drift apart.
+
+    * ``StorageUnit``: revenue = Σ w (p_dispatch − p_store) π; cost =
+      Σ w (marginal_cost·p_dispatch + marginal_cost_storage·soc + spill_cost·spill).
+    * ``Store`` + ``Link``: revenue at the electricity side of the chargers and
+      dischargers (a Store sitting on an electricity bus is injected directly);
+      cost = Σ w (marginal_cost·p + marginal_cost_storage·e) plus the links'
+      ``marginal_cost · p0``. Links serving several stores are split pro rata.
+    * Capex is ``capital_cost × size`` for **extendable** components only (store
+      energy ``e_nom_opt``; links ``p_nom_opt``), the amount the solve charged.
+
+    Assets whose market bus has no price (``price_of`` returns ``None``) are skipped.
+    """
+    T = len(network.snapshots)
+    out: list[StorageAsset] = []
+    # capital_cost may already be window-scaled by the network builder; the
+    # annual charge is recovered by dividing the scale back out.
+    cost_unscale = 1.0 / (capex_window_scale(network) or 1.0)
+
+    su = network.storage_units
+    for s in storage_units:
+        if s not in su.index:
+            continue
+        bus = str(su.at[s, "bus"])
+        pi = price_of(bus)
+        t = network.storage_units_t
+        if pi is None or s not in t.p_dispatch.columns or s not in t.p_store.columns:
+            continue
+        pd_ = t.p_dispatch[s].to_numpy(dtype=float)
+        pc = t.p_store[s].to_numpy(dtype=float)
+        mc = _component_series(network, "StorageUnit", "marginal_cost", str(s))
+        mcs = _component_series(network, "StorageUnit", "marginal_cost_storage", str(s))
+        spill_cost = _component_series(network, "StorageUnit", "spill_cost", str(s))
+        soc = _flow(t.state_of_charge, s, T)
+        spill = _flow(t.spill, s, T)
+        ext = "p_nom_extendable" in su.columns and bool(su.at[s, "p_nom_extendable"])
+        cap_cost = float(su.at[s, "capital_cost"]) if "capital_cost" in su.columns else 0.0
+        power = float(su.at[s, "p_nom_opt"]) if "p_nom_opt" in su.columns else float(su.at[s, "p_nom"])
+        hours = float(su.at[s, "max_hours"]) if "max_hours" in su.columns else 1.0
+        out.append(StorageAsset(
+            name=str(s), sheet="storage_units", bus=bus,
+            carrier=str(su.at[s, "carrier"]) if "carrier" in su.columns else "",
+            capacity_mw=power, energy_mwh=power * hours,
+            capex_annual=cap_cost * power * cost_unscale if ext else 0.0,
+            lifetime=_lifetime(su, s),
+            revenue=float(((pd_ - pc) * pi * weights).sum()),
+            op_cost=float(((mc * pd_ + mcs * soc + spill_cost * spill) * weights).sum()),
+            discharged_mwh=float((pd_ * weights).sum()),
+            charged_mwh=float((pc * weights).sum()),
+        ))
+
+    st = network.stores
+    wanted = [s for s in stores if s in st.index]
+    if wanted:
+        pairs = store_link_pairs(network)
+        elec = electricity_buses(network)
+        links = network.links
+        for s in wanted:
+            bus = str(st.at[s, "bus"])
+            e_nom = float(st.at[s, "e_nom_opt"]) if "e_nom_opt" in st.columns else float(st.at[s, "e_nom"])
+            e_max = float(st.at[s, "e_max_pu"]) if "e_max_pu" in st.columns else 1.0
+            mc = _component_series(network, "Store", "marginal_cost", str(s))
+            mcs = _component_series(network, "Store", "marginal_cost_storage", str(s))
+            e_flow = _flow(network.stores_t.e, s, T)
+            p_store = _flow(network.stores_t.p, s, T)
+            op = float(((mc * p_store + mcs * e_flow) * weights).sum())
+            ext = "e_nom_extendable" in st.columns and bool(st.at[s, "e_nom_extendable"])
+            cap_cost = float(st.at[s, "capital_cost"]) if "capital_cost" in st.columns else 0.0
+            capex = cap_cost * e_nom * cost_unscale if ext else 0.0
+            revenue = discharged = charged = capacity = 0.0
+            market_bus = bus
+            pair = pairs.get(str(s))
+            if pair is not None:
+                market_bus = str(links.at[pair.discharge[0], "bus1"])
+                for ln in pair.discharge + pair.charge:
+                    p0 = _flow(network.links_t.p0, ln, T)
+                    p1 = _flow(network.links_t.p1, ln, T)
+                    link_mc = _component_series(network, "Link", "marginal_cost", ln)
+                    op += float((link_mc * p0 * weights).sum()) * pair.share
+                    l_ext = "p_nom_extendable" in links.columns and bool(links.at[ln, "p_nom_extendable"])
+                    l_cap = float(links.at[ln, "capital_cost"]) if "capital_cost" in links.columns else 0.0
+                    l_size = float(links.at[ln, "p_nom_opt"]) if "p_nom_opt" in links.columns else float(links.at[ln, "p_nom"])
+                    if l_ext:
+                        capex += l_cap * l_size * pair.share * cost_unscale
+                    if ln in pair.discharge:
+                        pi_l = price_of(str(links.at[ln, "bus1"]))
+                        if pi_l is None:
+                            continue
+                        injected = -p1 * pair.share
+                        revenue += float((injected * pi_l * weights).sum())
+                        discharged += float((np.clip(injected, 0.0, None) * weights).sum())
+                        eff = float(links.at[ln, "efficiency"]) if "efficiency" in links.columns else 1.0
+                        capacity += l_size * eff * pair.share
+                    else:
+                        pi_l = price_of(str(links.at[ln, "bus0"]))
+                        if pi_l is None:
+                            continue
+                        drawn = p0 * pair.share
+                        revenue -= float((drawn * pi_l * weights).sum())
+                        charged += float((np.clip(drawn, 0.0, None) * weights).sum())
+            elif bus in elec and price_of(bus) is not None:
+                pi_b = price_of(bus)
+                revenue = float((p_store * pi_b * weights).sum())
+                discharged = float((np.clip(p_store, 0.0, None) * weights).sum())
+                charged = float((np.clip(-p_store, 0.0, None) * weights).sum())
+            else:
+                continue
+            out.append(StorageAsset(
+                name=str(s), sheet="stores", bus=market_bus,
+                carrier=str(st.at[s, "carrier"]) if "carrier" in st.columns else "",
+                capacity_mw=capacity, energy_mwh=e_nom * e_max,
+                capex_annual=capex, lifetime=_lifetime(st, s),
+                revenue=revenue, op_cost=op, discharged_mwh=discharged, charged_mwh=charged,
+            ))
+    return out
+
+
 def build_company_finance(
     network: pypsa.Network,
     model: dict[str, list[dict[str, Any]]],
@@ -172,7 +349,8 @@ def build_company_finance(
 
     gen_owner = _owner("generators")
     sto_owner = _owner("storage_units")
-    if not gen_owner and not sto_owner:
+    store_owner = _owner("stores")
+    if not gen_owner and not sto_owner and not store_owner:
         return None
 
     # company -> list of (overnight_capex, annual_margin, lifetime)
@@ -202,27 +380,19 @@ def build_company_finance(
         mc = mc_dense[g].to_numpy(dtype=float)
         opex = float((mc * p * weights).sum())
         ext = bool(network.generators.at[g, "p_nom_extendable"]) if "p_nom_extendable" in network.generators.columns else False
-        a = float(network.generators.at[g, "capital_cost"]) * float(network.generators.at[g, "p_nom_opt"]) if ext else 0.0
+        a = float(network.generators.at[g, "capital_cost"]) * float(network.generators.at[g, "p_nom_opt"]) / (capex_window_scale(network) or 1.0) if ext else 0.0
         _add(company, a, (revenue - opex) * annualize, _lifetime(network.generators, g))
 
-    for s in network.storage_units.index:
-        company = sto_owner.get(str(s))
-        if not company:
-            continue
-        bus = str(network.storage_units.at[s, "bus"])
-        if bus not in mp.columns:
-            continue
-        pd_ = network.storage_units_t.p_dispatch[s].to_numpy() if s in network.storage_units_t.p_dispatch.columns else None
-        pc = network.storage_units_t.p_store[s].to_numpy() if s in network.storage_units_t.p_store.columns else None
-        if pd_ is None or pc is None:
-            continue
-        pi = mp[bus].to_numpy()
-        revenue = float(((pd_ - pc) * pi * weights).sum())
-        mc = float(network.storage_units.at[s, "marginal_cost"]) if "marginal_cost" in network.storage_units.columns else 0.0
-        opex = float((mc * pd_ * weights).sum())
-        ext = bool(network.storage_units.at[s, "p_nom_extendable"]) if "p_nom_extendable" in network.storage_units.columns else False
-        a = float(network.storage_units.at[s, "capital_cost"]) * float(network.storage_units.at[s, "p_nom_opt"]) if ext else 0.0
-        _add(company, a, (revenue - opex) * annualize, _lifetime(network.storage_units, s))
+    # Storage (StorageUnit and Store + Link) through the one shared rule.
+    def _price(bus: str) -> np.ndarray | None:
+        return mp[bus].to_numpy() if bus in mp.columns else None
+
+    for a in storage_assets(
+        network, _price, weights, storage_units=list(sto_owner), stores=list(store_owner),
+    ):
+        company = (sto_owner if a.sheet == "storage_units" else store_owner).get(a.name)
+        if company:
+            _add(company, a.capex_annual, (a.revenue - a.op_cost) * annualize, a.lifetime)
 
     companies: list[dict[str, Any]] = []
     for company, rows in assets.items():

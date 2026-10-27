@@ -8,6 +8,7 @@ import pypsa
 
 from ..pypsa_schema import bus_reference_attributes
 from ..utils.coerce import number
+from .snapshots import parse_snapshot_labels
 
 # PyPSA multi-port Links: ``bus2``/``efficiency2`` … ``busN``/``efficiencyN``
 # are legitimate per-port attributes (CHP heat co-products, CO₂ tracking, …)
@@ -149,29 +150,42 @@ def _apply_ts_sheet(
     rows: list[dict[str, Any]],
     list_name: str,
     attr: str,
-) -> None:
-    """Assign a time-series sheet to ``network.<list_name>_t.<attr>``."""
+    notes: list[str] | None = None,
+) -> pd.Index:
+    """Assign a time-series sheet to ``network.<list_name>_t.<attr>``.
+
+    Timezone designators on the sheet's labels are dropped (wall-clock kept) so
+    ``...T00:00:00Z`` stamps match the naive snapshot index. Snapshots the sheet
+    has **no row for** stay NaN here and are returned, so the caller can refuse
+    the run once the modelled window is known (a NaN ``p_max_pu``/``p_min_pu``
+    silently drops the bound in the LP). A blank cell inside a covered row is
+    filled from the component's static value and reported in ``notes``.
+
+    Returns:
+        The snapshot labels with no row in this sheet (empty when fully covered).
+    """
+    no_gap: pd.Index = pd.Index([])
     df = pd.DataFrame(rows)
     label_col = next(
         (k for k in ("snapshot", "datetime", "name", "index", "timestep") if k in df.columns),
         None,
     )
     if label_col is None:
-        return
+        return no_gap
     data = df.drop(columns=[label_col, *([c for c in ("period",) if c in df.columns])])
     if data.empty:
-        return
+        return no_gap
     static_frame = network.components[list_name].static
     valid_cols = [c for c in data.columns if c in static_frame.index]
     if not valid_cols:
-        return
+        return no_gap
     data = data[valid_cols].apply(pd.to_numeric, errors="coerce")
     if isinstance(network.snapshots, pd.MultiIndex):
         if "period" in df.columns:
             periods = df["period"].apply(lambda v: int(number(v))).tolist()
             labels = df[label_col]
             try:
-                timesteps = pd.to_datetime(labels)
+                timesteps = parse_snapshot_labels(labels)
             except Exception:
                 timesteps = pd.Index(labels.astype(str))
             data.index = pd.MultiIndex.from_arrays([periods, timesteps], names=["period", "timestep"])
@@ -180,7 +194,7 @@ def _apply_ts_sheet(
             data.index = network.snapshots
         else:
             try:
-                idx = pd.to_datetime(df[label_col])
+                idx = parse_snapshot_labels(df[label_col])
             except Exception:
                 idx = pd.Index(df[label_col].astype(str))
             pieces = []
@@ -192,11 +206,11 @@ def _apply_ts_sheet(
                 period_data.index.name = "snapshot"
                 pieces.append(period_data)
             if not pieces:
-                return
+                return no_gap
             data = pd.concat(pieces)
     else:
         try:
-            data.index = pd.to_datetime(df[label_col])
+            data.index = parse_snapshot_labels(df[label_col])
         except Exception:
             data.index = pd.Index(df[label_col].astype(str))
         # Single-period: dedupe input time-series rows when the same timestamp
@@ -204,11 +218,30 @@ def _apply_ts_sheet(
         # per period). Keep first occurrence so reindex succeeds.
         if data.index.has_duplicates:
             data = data[~data.index.duplicated(keep="first")]
+    uncovered: pd.Index = no_gap
     if len(network.snapshots) > 0:
         if isinstance(network.snapshots, pd.MultiIndex) and not isinstance(data.index, pd.MultiIndex):
+            covered = network.snapshots.get_level_values("timestep").isin(data.index)
             data = data.reindex(network.snapshots, level="timestep")
         else:
+            covered = network.snapshots.isin(data.index)
             data = data.reindex(network.snapshots)
+        uncovered = network.snapshots[~covered]
+        # Blank cells in a covered row -> the component's static value (what an
+        # absent column would have used), not a NaN that drops the bound.
+        static_values = static_frame[attr] if attr in static_frame.columns else None
+        if static_values is not None:
+            blanks = 0
+            for col in data.columns:
+                hole = data[col].isna() & covered
+                if hole.any():
+                    blanks += int(hole.sum())
+                    data.loc[hole, col] = static_values.get(col)
+            if blanks and notes is not None:
+                notes.append(
+                    f"Time-series '{list_name}-{attr}': {blanks} blank cell(s) filled "
+                    f"from the static '{attr}' value."
+                )
     t_frame = getattr(network, list_name + "_t")
     current = getattr(t_frame, attr)
     # Re-stitch via concat (avoid the per-column-insert performance warning).
@@ -217,3 +250,4 @@ def _apply_ts_sheet(
         axis=1,
     )
     setattr(t_frame, attr, merged)
+    return uncovered

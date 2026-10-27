@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -21,8 +22,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/examples", tags=["examples"])
 
-# Tracked (committed) — sits beside the runtime session/ dir but is NOT ignored.
-EXAMPLES_DIR = session_store.SESSION_DIR.parent / "examples"
+# Tracked (committed) bundled data, resolved from this checkout. It must NOT be
+# derived from the runtime data dir: RAGNAROK_DATA_DIR relocates session/ and
+# runs/ (a hosted or shared data dir), and the examples ship with the code, not
+# with the user's data — deriving it from SESSION_DIR hid them all.
+EXAMPLES_DIR = Path(__file__).resolve().parents[2] / "data" / "examples"
 # `_kv` key holding {label, description, order} inside each example's project.db.
 EXAMPLE_KV_KEY = "example"
 
