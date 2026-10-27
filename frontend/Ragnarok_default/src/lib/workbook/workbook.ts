@@ -8,7 +8,8 @@ import {
 } from 'lib/constants/pypsa_schema';
 import type { AppSettings, DateFormat } from 'lib/settings/types';
 import { CustomConstraint, GridRow, Primitive, ProjectImportProvenance, ProjectRunState, RunResults, WorkbookModel } from '../types';
-import { normalizeDateToIso } from 'lib/utils/helpers';
+import { inferDateOrder, normalizeDateWithOrder } from 'lib/utils/helpers';
+import { parseCsvText } from './csvText';
 import { PATHWAY_CONFIG_SHEET, PATHWAY_PERIODS_SHEET } from 'lib/results/pathway';
 import { ROLLING_CONFIG_SHEET } from 'lib/results/rolling';
 import { SCENARIO_SHEET } from 'lib/results/scenarios';
@@ -68,8 +69,8 @@ const TEMPORAL_CONFIG = {
 const SNAPSHOT_COL = TEMPORAL_CONFIG.snapshotColumn;
 const PERIOD_COL = TEMPORAL_CONFIG.periodColumn;
 
-function normalizeSnapshotIso(raw: string, fmt: DateFormat): string {
-  const iso = normalizeDateToIso(raw, fmt);
+function normalizeSnapshotIso(raw: string, order: DateFormat): string {
+  const iso = normalizeDateWithOrder(raw, order);
   return /^\d{4}-\d{2}-\d{2}$/.test(iso)
     ? `${iso}${TEMPORAL_CONFIG.defaultTimeSuffix}`
     : iso;
@@ -157,18 +158,25 @@ function isTemporalRowOrdered(row: GridRow): boolean {
 export function canonicalizeTemporalRows(rows: GridRow[], fmt: DateFormat): GridRow[] {
   if (!hasSnapshotColumn(rows)) return rows;
   let changed = false;
+  // Day/month order is decided ONCE per column (not per cell), so a column of
+  // `01/02/2024`, `13/02/2024` is read consistently as dmy.
+  const pending: string[] = [];
+  for (const row of rows) {
+    const v: unknown = row[SNAPSHOT_COL];
+    if (typeof v === 'string' && !CANONICAL_SNAPSHOT_RE.test(v)) pending.push(v);
+  }
+  const order = pending.length > 0 ? inferDateOrder(pending, fmt) : fmt;
   const out = rows.map((row) => {
     const v: unknown = row[SNAPSHOT_COL];
     let canonical: Primitive;
     if (typeof v === 'string') {
-      canonical = CANONICAL_SNAPSHOT_RE.test(v) ? v : normalizeSnapshotIso(v, fmt);
+      canonical = CANONICAL_SNAPSHOT_RE.test(v) ? v : normalizeSnapshotIso(v, order);
     } else if (v instanceof Date) {
       canonical = isoFromDate(v);
-    } else if (typeof v === 'number' && Number.isFinite(v)) {
-      // Excel date serial → JS Date → ISO-T.
-      const d = excelSerialToDate(v);
-      canonical = d ? isoFromDate(d) : (v as Primitive);
     } else {
+      // Numbers are NEVER reinterpreted as Excel serials here: an integer
+      // snapshot axis (0, 1, 2, ...) must stay an integer. Real Excel date
+      // cells are converted to ISO strings at parse time (`isoizeDateCells`).
       canonical = v as Primitive;
     }
     if (canonical === v && isTemporalRowOrdered(row)) return row; // already canonical — reuse
@@ -189,14 +197,54 @@ function isoFromDate(d: Date): string {
   );
 }
 
-/** Convert an Excel date serial (days since 1899-12-30, fractional = time-of-day). */
-function excelSerialToDate(serial: number): Date | null {
-  if (!Number.isFinite(serial) || serial <= 0) return null;
-  const epoch = Date.UTC(1899, 11, 30);
-  const ms = epoch + Math.round(serial * 86400 * 1000);
-  const d = new Date(ms);
-  // Render in local time (xlsx serials carry no zone); shift back.
-  return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds());
+/**
+ * Convert an Excel date serial (days since 1899-12-30, or 1904-01-01 for a
+ * date1904 workbook; fractional = time-of-day) to a wall-clock ISO string
+ * `YYYY-MM-DDTHH:MM:SS`. Pure UTC arithmetic: an Excel serial carries no zone,
+ * so the browser's zone (and its DST transitions or historical LMT offsets)
+ * must never enter. Rounded to the nearest second to absorb float error.
+ */
+export function excelSerialToIso(serial: number, date1904 = false): string | null {
+  if (!Number.isFinite(serial) || serial < 0) return null;
+  const epoch = date1904 ? Date.UTC(1904, 0, 1) : Date.UTC(1899, 11, 30);
+  const d = new Date(epoch + Math.round(serial * 86400) * 1000);
+  return (
+    `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}` +
+    `T${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())}`
+  );
+}
+
+/**
+ * Replace every date-formatted numeric cell of a sheet (read with
+ * `cellDates:false, cellNF:true`) by its wall-clock ISO string, in place.
+ * Cells with a date number format are detected via SheetJS' `SSF.is_date`.
+ */
+function isoizeDateCells(ws: XLSX.WorkSheet, date1904: boolean): void {
+  for (const addr of Object.keys(ws)) {
+    if (addr.charAt(0) === '!') continue;
+    const cell = ws[addr] as XLSX.CellObject | undefined;
+    if (!cell || cell.t !== 'n' || typeof cell.v !== 'number') continue;
+    const fmt = cell.z;
+    if (typeof fmt !== 'string' || fmt === 'General' || !XLSX.SSF.is_date(fmt)) continue;
+    const iso = excelSerialToIso(cell.v, date1904);
+    if (iso === null) continue;
+    cell.t = 's';
+    cell.v = iso;
+    delete cell.w;
+    delete cell.z;
+  }
+}
+
+/** Read an xlsx buffer WITHOUT SheetJS' local-time Date conversion: dates stay
+ *  numeric serials, flagged via `cellNF`, and are converted by `isoizeDateCells`. */
+function readWorkbookRaw(arrayBuffer: ArrayBuffer): XLSX.WorkBook {
+  const wb = XLSX.read(arrayBuffer, { type: 'array', cellDates: false, cellNF: true });
+  const date1904 = Boolean((wb.Workbook?.WBProps as { date1904?: boolean } | undefined)?.date1904);
+  wb.SheetNames.forEach((name) => {
+    const ws = wb.Sheets[name];
+    if (ws) isoizeDateCells(ws, date1904);
+  });
+  return wb;
 }
 
 /** Back-compat alias: every temporal sheet (input, output, or `snapshots`) is
@@ -347,7 +395,7 @@ export function parseWorkbook(file: File): Promise<WorkbookModel> {
           reject(new Error('Could not read workbook.'));
           return;
         }
-        const wb = XLSX.read(arrayBuffer, { type: 'array', cellDates: true });
+        const wb = readWorkbookRaw(arrayBuffer);
         resolve(parseSheets(wb));
       } catch (error) {
         reject(error instanceof Error ? error : new Error('Workbook import failed.'));
@@ -420,19 +468,17 @@ export function workbookToArrayBuffer(model: WorkbookModel, dateFormat: DateForm
  * kept as `string`.  Unparseable numeric cells become `null`.
  */
 export function parseDelimitedTextToGridRows(text: string): GridRow[] {
-  const wb = XLSX.read(text, { type: 'string', raw: false });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: null });
-
-  return raw.map((row) => {
-    const entries = Object.entries(row).map(([k, v], i): [string, Primitive] => {
-      if (i === 0) {
-        // Snapshot label — keep as string
-        return [k, v == null ? '' : String(v)];
-      }
-      // Numeric value column
-      const n = typeof v === 'number' ? v : parseFloat(String(v ?? ''));
-      return [k, Number.isFinite(n) ? n : null];
+  // Own RFC-4180 reader: every cell stays the literal text of the file. Going
+  // through SheetJS would sniff date-looking strings into local-zone Dates.
+  const table = parseCsvText(text);
+  if (table.length === 0) return [];
+  const header = table[0].map((h, i) => (h.trim() !== '' ? h.trim() : `col${i}`));
+  return table.slice(1).map((cells) => {
+    const entries = header.map((key, i): [string, Primitive] => {
+      const v = cells[i] ?? '';
+      if (i === 0) return [key, v]; // snapshot label: keep as written
+      const n = v.trim() === '' ? NaN : Number(v.trim());
+      return [key, Number.isFinite(n) ? n : null];
     });
     return Object.fromEntries(entries) as GridRow;
   });
@@ -669,7 +715,7 @@ export function projectWorkbookToArrayBuffer(
 export function parseProjectWorkbook(
   arrayBuffer: ArrayBuffer,
 ): { model: WorkbookModel; outputs: ProjectOutputs; metadata: ProjectMetadata } {
-  const wb = XLSX.read(arrayBuffer, { type: 'array', cellDates: true });
+  const wb = readWorkbookRaw(arrayBuffer);
   const model = createEmptyWorkbook();
   const outputs: ProjectOutputs = { static: {}, series: {} };
   const metadata: ProjectMetadata = {};

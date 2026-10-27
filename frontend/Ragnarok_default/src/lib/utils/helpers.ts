@@ -272,39 +272,74 @@ export function formatTimestamp(raw?: string) {
 
 const DATE_RE = /^(\d{1,4})[-/.](\d{1,2})[-/.](\d{1,4})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$/;
 
+function daysInMonth(y: number, mo: number): number {
+  if (mo === 2) return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0 ? 29 : 28;
+  return [4, 6, 9, 11].includes(mo) ? 30 : 31;
+}
+
 /**
- * Convert a date string written in the user's declared INPUT format (`fmt`)
- * into the canonical ISO target (YYYY-MM-DD, plus THH:MM:SS when a time part
- * is present). Strings that don't match a numeric date are returned unchanged,
- * so non-date cells pass through safely.
+ * Decide the day/month order of a COLUMN of date strings once. An explicit
+ * `fmt` wins. In `auto` the whole column votes: a first component > 12 can only
+ * be a day (dmy), a second component > 12 can only be a day (mdy). A column with
+ * no such evidence stays on the historical `mdy` default; contradictory evidence
+ * also falls back to `mdy`, and the per-cell validity check then leaves the
+ * impossible cells unchanged rather than silently swapping them. Strings whose
+ * first component is a 4-digit year are always ymd and do not vote.
  */
-export function normalizeDateToIso(raw: string, fmt: DateFormat = 'auto'): string {
+export function inferDateOrder(values: readonly string[], fmt: DateFormat = 'auto'): DateFormat {
+  if (fmt !== 'auto') return fmt;
+  let firstIsDay = false;
+  let secondIsDay = false;
+  for (const raw of values) {
+    if (typeof raw !== 'string') continue;
+    const m = DATE_RE.exec(raw.trim());
+    if (!m || m[1].length === 4) continue;
+    if (parseInt(m[1], 10) > 12) firstIsDay = true;
+    if (parseInt(m[2], 10) > 12) secondIsDay = true;
+  }
+  if (firstIsDay && !secondIsDay) return 'dmy';
+  return 'mdy';
+}
+
+/**
+ * Convert a date string using an already-decided component order (`ymd`, `dmy`
+ * or `mdy`). Calendar-invalid dates (month 13, 31 Feb, hour 25, ...) are
+ * returned unchanged so a wrong guess never fabricates a different valid date.
+ */
+export function normalizeDateWithOrder(raw: string, fmt: DateFormat): string {
   const m = DATE_RE.exec(raw.trim());
   if (!m) return raw;
   const parts = [parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10)];
-  let order: DateFormat = fmt;
   // A 4-digit leading component is unambiguously the year (no real date has a
   // 4-digit day or month), so it always wins over the user's input-format
-  // setting. Without this, plugin output (always ISO/YMD via
-  // `pd.Timestamp.isoformat`) silently fails to canonicalise when the user's
-  // Date format setting is dmy/mdy: `[d,m,y] = [2024,1,1]` → d=2024 fails the
-  // `<= 31` guard and the function returns the raw string unchanged.
-  if (m[1].length === 4) order = 'ymd';
-  else if (order === 'auto') {
-    if (m[3].length === 4) order = parts[0] > 12 ? 'dmy' : 'mdy';
-    else order = 'mdy';
-  }
+  // setting (plugin output is always ISO/YMD).
+  const order: DateFormat = m[1].length === 4 ? 'ymd' : fmt === 'auto' ? 'mdy' : fmt;
   let y: number, mo: number, d: number;
   if (order === 'ymd') [y, mo, d] = parts;
   else if (order === 'dmy') [d, mo, y] = parts;
   else [mo, d, y] = parts; // mdy
   if (y < 100) y += 2000;
-  if (mo < 1 || mo > 12 || d < 1 || d > 31) return raw;
+  if (mo < 1 || mo > 12 || d < 1 || d > daysInMonth(y, mo)) return raw;
   let iso = `${y}-${pad2(mo)}-${pad2(d)}`;
   if (m[4] !== undefined) {
-    iso += `T${pad2(parseInt(m[4], 10))}:${pad2(parseInt(m[5], 10))}:${pad2(m[6] ? parseInt(m[6], 10) : 0)}`;
+    const hh = parseInt(m[4], 10);
+    const mi = parseInt(m[5], 10);
+    const ss = m[6] ? parseInt(m[6], 10) : 0;
+    if (hh > 23 || mi > 59 || ss > 59) return raw;
+    iso += `T${pad2(hh)}:${pad2(mi)}:${pad2(ss)}`;
   }
   return iso;
+}
+
+/**
+ * Convert one date string written in the user's declared INPUT format (`fmt`)
+ * into the canonical ISO target (YYYY-MM-DD, plus THH:MM:SS when a time part
+ * is present). Strings that don't match a numeric date (or are not a real
+ * calendar date) are returned unchanged. For a whole column prefer
+ * `inferDateOrder` + `normalizeDateWithOrder` so every cell uses one order.
+ */
+export function normalizeDateToIso(raw: string, fmt: DateFormat = 'auto'): string {
+  return normalizeDateWithOrder(raw, inferDateOrder([raw], fmt));
 }
 
 export function snapshotMaxFromWorkbook(rows: GridRow[]): number {

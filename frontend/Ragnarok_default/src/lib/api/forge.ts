@@ -15,7 +15,11 @@ async function post<T>(path: string, req: QueryEditRequest): Promise<T> {
   const resp = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId: DEFAULT_SESSION_ID, ...req }),
+    // `sessionId` goes AFTER the spread: the request builder always carries the key
+    // (as `undefined` when the caller named none), and a spread placed after the
+    // default overwrote it - JSON then dropped it and the server fell back to its
+    // own `default` session instead of the editor's.
+    body: JSON.stringify({ ...req, sessionId: req.sessionId ?? DEFAULT_SESSION_ID }),
   });
   if (!resp.ok) {
     let detail = `HTTP ${resp.status}`;

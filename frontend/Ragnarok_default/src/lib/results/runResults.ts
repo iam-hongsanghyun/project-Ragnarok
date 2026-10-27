@@ -9,6 +9,7 @@
  * every output attribute the backend produced.
  */
 import {
+  CarbonPriceScheduleEntry,
   CarrierEmission,
   Co2Shadow,
   ExpansionAsset,
@@ -29,9 +30,12 @@ import {
 import { carrierColor, numberValue, resolvedColor, stringValue } from 'lib/utils/helpers';
 import {
   deriveAssetDetails,
+  filterSeriesByPeriod,
   generatorEmissionFactor,
   indexInputByTimestamp,
+  inputAveragingFromSampling,
   inputSeriesValueAtStamp,
+  snapshotPeriods,
 } from 'lib/results/assetDetails';
 
 export interface DeriveRunResultsOptions {
@@ -43,6 +47,11 @@ export interface DeriveRunResultsOptions {
   selectedPeriod?: number | null;
   pathway?: RunResults['pathway'] | null;
   rolling?: RunResults['rolling'] | null;
+  /** Year -> price schedule the run solved with; supersedes the scalar
+   *  `carbonPrice` exactly like the backend `build_price_series`. */
+  carbonPriceSchedule?: CarbonPriceScheduleEntry[] | null;
+  /** `runMeta.sampling` of the run (drives averaged-profile input lookups). */
+  sampling?: RunResults['runMeta']['sampling'];
 }
 
 type SeriesMap = NonNullable<RunResults['outputs']>['series'];
@@ -91,15 +100,6 @@ function detectPeriods(series: SeriesMap): number[] {
   return Array.from(found).sort((left, right) => left - right);
 }
 
-function filterSeriesByPeriod(series: SeriesMap, period: number | null): SeriesMap {
-  if (period === null) return series;
-  const filtered: SeriesMap = {};
-  Object.entries(series).forEach(([sheet, rows]) => {
-    filtered[sheet] = (rows ?? []).filter((row) => numberValue(row.period) === period);
-  });
-  return filtered;
-}
-
 function seriesValueAt(rows: GridRow[] | undefined, i: number, col: string): number {
   if (!rows || i >= rows.length) return 0;
   return numberValue(rows[i]?.[col]);
@@ -118,6 +118,39 @@ function staticOutValue(
 // truth, imported above, so both derivers hit the identical fix for reading
 // input time series by snapshot timestamp instead of row position (breaks
 // once outputs are filtered to a non-first investment period).
+
+/**
+ * Carbon price for one snapshot — mirrors backend `build_price_series`: with a
+ * schedule, the latest entry whose year <= the snapshot's year (investment
+ * period in pathway runs, else the calendar year of the stamp), the first
+ * entry before the schedule starts; the scalar only when there is no schedule.
+ */
+export function carbonPriceAt(
+  scalar: number,
+  schedule: CarbonPriceScheduleEntry[] | null | undefined,
+  period: number | null,
+  stamp: string,
+): number {
+  const entries = (schedule ?? [])
+    .map((row) => ({ year: Number(row.year), price: Number(row.price) }))
+    .filter((row) => Number.isFinite(row.year) && row.year > 0 && Number.isFinite(row.price))
+    .sort((a, b) => a.year - b.year);
+  if (entries.length === 0) return scalar;
+  const year = period !== null ? period : Number.parseInt(stamp.slice(0, 4), 10);
+  if (!Number.isFinite(year)) return entries[0].price;
+  let applicable = entries[0].price;
+  for (const entry of entries) if (entry.year <= year) applicable = entry.price;
+  return applicable;
+}
+
+/** Solved capacity: `<attr>_opt` when > 0, else the input rating (PyPSA leaves
+ *  `_opt` at 0 for non-extendable units on some versions). */
+function solvedCapacity(
+  staticMap: StaticMap, sheet: string, name: string, attr: string, inputCap: number,
+): number {
+  const opt = staticOutValue(staticMap, sheet, name, `${attr}_opt`, 0);
+  return opt > 0 ? opt : inputCap;
+}
 
 function fmt(n: number, digits = 0): string {
   return n.toLocaleString(undefined, { maximumFractionDigits: digits });
@@ -146,6 +179,8 @@ export function deriveRunResults(
     selectedPeriod = null,
     pathway = null,
     rolling = null,
+    carbonPriceSchedule = null,
+    sampling = null,
   } = options;
 
   // The light analytics view ships `series: null` (the heavy per-component
@@ -166,6 +201,10 @@ export function deriveRunResults(
   const visibleOutputs = { ...outputs, series: visibleSeries };
   const snapshots = pickSnapshots(visibleOutputs.series);
   const labels = snapshots.map(isoToLabel);
+  const PERIOD_SHEETS = ['generators-p', 'buses-marginal_price', 'storage_units-p', 'stores-p'];
+  // Investment period of each visible snapshot — input lookups key by
+  // `period|snapshot` so every pathway period reads its own profile.
+  const periodOf = snapshotPeriods(visibleOutputs.series, PERIOD_SHEETS);
   const W = weightHint ?? 1;
 
   const genStatic = indexByName(model.generators);
@@ -182,7 +221,9 @@ export function deriveRunResults(
   const socStore = visibleOutputs.series['storage_units-state_of_charge'];
   const priceBus = visibleOutputs.series['buses-marginal_price'];
   const loadInputTs = model['loads-p_set'];
-  const loadInputByStamp = indexInputByTimestamp(loadInputTs);
+  const averaging = inputAveragingFromSampling(sampling, snapshots[0]);
+  const loadInputByStamp = indexInputByTimestamp(loadInputTs, averaging);
+  const mcInputByStamp = indexInputByTimestamp(model['generators-marginal_cost']);
 
   const generators = Object.keys(genStatic);
   const storageUnits = Object.keys(storageStatic);
@@ -217,6 +258,13 @@ export function deriveRunResults(
     return s === '' || s === 'nan' || ELEC_CARRIERS.has(s);
   };
   const elecBuses = new Set(buses.filter((b) => isElec(busStatic[b]?.carrier)));
+  // System aggregates (demand, price, generator capacity) are scoped to the
+  // electricity buses of a sector-coupled model, like the backend
+  // `electricity_bus_scope`; null (= every bus) for single-vector models or
+  // models with no identifiable electricity bus.
+  const elecScope: Set<string> | null =
+    elecBuses.size === 0 || elecBuses.size === buses.length ? null : elecBuses;
+  const inScope = (bus: string): boolean => elecScope === null || elecScope.has(bus);
 
   const carrierDispatch: Record<string, number[]> = {};
   // Backend `electricity_dispatch_by_carrier` (the carrierMix source) is
@@ -300,8 +348,9 @@ export function deriveRunResults(
   for (let i = 0; i < snapshots.length; i++) {
     let total = 0;
     for (const ln of Object.keys(loadStatic)) {
+      if (!inScope(stringValue(loadStatic[ln].bus))) continue;
       total += inputSeriesValueAtStamp(
-        loadInputByStamp, snapshots[i], ln, numberValue(loadStatic[ln].p_set),
+        loadInputByStamp, snapshots[i], ln, numberValue(loadStatic[ln].p_set), periodOf[i],
       );
     }
     loadPerSnapshot[i] = total;
@@ -340,6 +389,7 @@ export function deriveRunResults(
     for (const bus of buses) {
       const p = seriesValueAt(priceBus, i, bus);
       nodalPrices[bus] = Math.round(p * 100) / 100;
+      if (!inScope(bus)) continue;
       priceSum += p;
       priceCount += 1;
     }
@@ -352,30 +402,32 @@ export function deriveRunResults(
   }
 
   // ── Storage system series ─────────────────────────────────────────────────
-  // Aggregate-then-derive: sum raw p across all storage units per snapshot,
-  // then split the aggregate into charge/discharge. SOC is summed directly.
-  // Backend build_storage_series uses the same aggregate-then-derive convention.
+  // Mirrors backend `build_storage_series`: StorageUnits AND Stores, with charge
+  // and discharge split PER UNIT before summing (netting units first understated
+  // throughput when one charged while another discharged). State sums
+  // `state_of_charge` (StorageUnits) and `e` (Stores); a Store's `p` has the same
+  // sign convention (positive = discharge into the bus).
   const storageSeries: StoragePoint[] = [];
-  if (storageUnits.length > 0) {
-    for (let i = 0; i < snapshots.length; i++) {
-      let sumP = 0;
-      let state = 0;
-      for (const unit of storageUnits) {
-        sumP += seriesValueAt(pStore, i, unit);
-        state += seriesValueAt(socStore, i, unit);
+  const storeNames = Object.keys(indexByName(model.stores));
+  const pStoreP = visibleOutputs.series['stores-p'];
+  const eStore = visibleOutputs.series['stores-e'];
+  const storageSources: Array<{ names: string[]; p: GridRow[] | undefined; state: GridRow[] | undefined }> = [
+    { names: storageUnits, p: pStore, state: socStore },
+    { names: storeNames, p: pStoreP, state: eStore },
+  ];
+  for (let i = 0; i < snapshots.length; i++) {
+    let charge = 0;
+    let discharge = 0;
+    let state = 0;
+    for (const src of storageSources) {
+      for (const unit of src.names) {
+        const p = seriesValueAt(src.p, i, unit);
+        charge += Math.abs(Math.min(p, 0));
+        discharge += Math.max(p, 0);
+        state += seriesValueAt(src.state, i, unit);
       }
-      const charge = Math.abs(Math.min(sumP, 0));
-      const discharge = Math.max(sumP, 0);
-      storageSeries.push({
-        label: labels[i], timestamp: snapshots[i], charge, discharge, state,
-      });
     }
-  } else {
-    for (let i = 0; i < snapshots.length; i++) {
-      storageSeries.push({
-        label: labels[i], timestamp: snapshots[i], charge: 0, discharge: 0, state: 0,
-      });
-    }
+    storageSeries.push({ label: labels[i], timestamp: snapshots[i], charge, discharge, state });
   }
 
   // ── Carrier mix (weighted energy) ─────────────────────────────────────────
@@ -394,22 +446,33 @@ export function deriveRunResults(
     .map(([c, v]) => ({ label: c, value: v, color: carrierColor(c) }));
 
   // ── Cost breakdown (fuel + carbon + load shedding + capex) ────────────────
+  // Same split as the backend: fuel = E * marginal_cost (the INPUT cost, which
+  // does not contain the carbon adder), carbon = E * ef * carbon price with the
+  // price resolved per snapshot (schedule by period / calendar year, else the
+  // scalar). Subtracting a scalar carbon term from a cost that never had it
+  // understated fuel and ignored the schedule.
   let fuelCost = 0;
   let carbonCost = 0;
   let shedCost = 0;
+  const carbonAtSnapshot = snapshots.map(
+    (stamp, i) => carbonPriceAt(carbonPrice, carbonPriceSchedule, periodOf[i], stamp),
+  );
   for (const name of generators) {
     const arr = generatorDispatch[name];
-    let energyMWh = 0;
-    for (let i = 0; i < snapshots.length; i++) energyMWh += Math.max(arr[i], 0) * W;
     const ef = genEf[name];
-    const mc = genMc[name];
-    const carbonComponent = energyMWh * ef * carbonPrice;
-    const fuelComponent = energyMWh * Math.max(0, mc - ef * carbonPrice);
-    if (name.startsWith('load_shedding_')) {
-      shedCost += energyMWh * mc;
-    } else {
-      fuelCost += fuelComponent;
-      carbonCost += carbonComponent;
+    const isShed = name.startsWith('load_shedding_');
+    for (let i = 0; i < snapshots.length; i++) {
+      const energyMWh = Math.max(arr[i], 0) * W;
+      if (energyMWh === 0) continue;
+      const mc = Math.max(
+        0, inputSeriesValueAtStamp(mcInputByStamp, snapshots[i], name, genMc[name], periodOf[i]),
+      );
+      if (isShed) {
+        shedCost += energyMWh * mc;
+      } else {
+        fuelCost += energyMWh * mc;
+        carbonCost += energyMWh * ef * carbonAtSnapshot[i];
+      }
     }
   }
 
@@ -457,13 +520,20 @@ export function deriveRunResults(
   pushExpansion(model.links, 'Link', 'p_nom', 'p_nom_extendable', 'links', 'bus0');
   pushExpansion(model.lines, 'Line', 's_nom', 's_nom_extendable', 'lines', 'bus0', 'MVA');
   const totalCapex = expansionResults.reduce((s, e) => s + e.capex_annual, 0);
+  // `capex_annual` is a full-year annuity; the other components are window
+  // totals, so pro-rate onto the modelled window (x H/8760) like the backend.
+  const HOURS_PER_YEAR = 8760;
+  const windowHours = snapshots.length * W;
+  const totalCapexWindow = windowHours > 0 ? totalCapex * (windowHours / HOURS_PER_YEAR) : totalCapex;
 
   const costBreakdown: Array<{ label: string; value: number }> = [
     { label: 'Fuel cost', value: Math.round(fuelCost) },
     { label: 'Carbon cost', value: Math.round(carbonCost) },
     { label: 'Load shedding', value: Math.round(shedCost) },
   ];
-  if (totalCapex > 0) costBreakdown.push({ label: 'Capital cost', value: Math.round(totalCapex) });
+  if (totalCapex > 0) {
+    costBreakdown.push({ label: 'Capital cost (annuity, pro-rated to window)', value: Math.round(totalCapexWindow) });
+  }
 
   // ── Nodal balance ─────────────────────────────────────────────────────────
   const nodalBalance: Array<{ label: string; load: number; generation: number }> = [];
@@ -488,7 +558,7 @@ export function deriveRunResults(
       let lT = 0;
       for (const ln of loadsByBus[bus] ?? []) {
         lT += inputSeriesValueAtStamp(
-          loadInputByStamp, snapshots[i], ln, numberValue(loadStatic[ln]?.p_set),
+          loadInputByStamp, snapshots[i], ln, numberValue(loadStatic[ln]?.p_set), periodOf[i],
         );
       }
       let gT = 0;
@@ -522,7 +592,7 @@ export function deriveRunResults(
       // Use optimised capacity when available (extendable lines after solve),
       // otherwise fall back to the input nominal rating.
       const inputCap = numberValue(rows[name][capAttr]);
-      const cap = staticOutValue(outputs.static, staticSheet, name, `${capAttr}_opt`, inputCap);
+      const cap = solvedCapacity(outputs.static, staticSheet, name, capAttr, inputCap);
       if (cap <= 0) continue;   // skip lines with no capacity (avoids ÷0 noise)
       let peak = 0;
       for (let i = 0; i < snapshots.length; i++) {
@@ -603,10 +673,18 @@ export function deriveRunResults(
   // ── Summary cards ─────────────────────────────────────────────────────────
   // Generator vs storage capacity (and reserve) reported separately, each as
   // installed nameplate p_nom minus peak demand.
+  // Solved capacity (p_nom_opt where > 0, else the input rating); the load-
+  // shedding backstop and non-electricity fuel-supply generators are not
+  // installed electric capacity.
   let genCap = 0;
-  for (const n of generators) genCap += numberValue(genStatic[n].p_nom);
+  for (const n of generators) {
+    if (n.startsWith('load_shedding_') || !inScope(genBus[n])) continue;
+    genCap += solvedCapacity(outputs.static, 'generators', n, 'p_nom', numberValue(genStatic[n].p_nom));
+  }
   let storCap = 0;
-  for (const n of storageUnits) storCap += numberValue(storageStatic[n].p_nom);
+  for (const n of storageUnits) {
+    storCap += solvedCapacity(outputs.static, 'storage_units', n, 'p_nom', numberValue(storageStatic[n].p_nom));
+  }
   const peakLoad = loadPerSnapshot.reduce((m, v) => (v > m ? v : m), 0);
   const avgPrice = systemPriceSeries.length
     ? systemPriceSeries.reduce((s, p) => s + p.value, 0) / systemPriceSeries.length
@@ -623,9 +701,9 @@ export function deriveRunResults(
 
   const summary: SummaryItem[] = [
     { label: 'Generator capacity', value: `${fmt(genCap)} MW`,
-      detail: `${generators.length} generators (installed nameplate)` },
+      detail: `${generators.length} generators (installed, solved p_nom_opt)` },
     { label: 'Storage capacity', value: `${fmt(storCap)} MW`,
-      detail: `${storageUnits.length} storage units (installed nameplate)` },
+      detail: `${storageUnits.length} storage units (installed, solved p_nom_opt)` },
     { label: 'Peak demand', value: `${fmt(peakLoad)} MW`, detail: 'from workbook load profile' },
     { label: 'Generator reserve', value: `${fmt(genCap - peakLoad)} MW`,
       detail: 'generator capacity vs peak demand' },
@@ -662,9 +740,8 @@ export function deriveRunResults(
         const periodSeries = filterSeriesByPeriod(outputs.series, period);
         const periodSnapshots = pickSnapshots(periodSeries);
         const periodPGen = periodSeries['generators-p'];
-        const periodPStore = periodSeries['storage_units-p'];
         const periodPriceBus = periodSeries['buses-marginal_price'];
-        const loadByStamp = indexInputByTimestamp(model['loads-p_set']);
+        const loadByStamp = indexInputByTimestamp(model['loads-p_set']);   // keyed period|stamp
         let totalDispatch = 0;
         let totalEmissions = 0;
         let peakLoad = 0;
@@ -673,23 +750,24 @@ export function deriveRunResults(
         for (let i = 0; i < periodSnapshots.length; i++) {
           let loadAtT = 0;
           for (const ln of Object.keys(loadStatic)) {
+            if (!inScope(stringValue(loadStatic[ln].bus))) continue;
             loadAtT += inputSeriesValueAtStamp(
-              loadByStamp, periodSnapshots[i], ln, numberValue(loadStatic[ln].p_set),
+              loadByStamp, periodSnapshots[i], ln, numberValue(loadStatic[ln].p_set), period,
             );
           }
           peakLoad = Math.max(peakLoad, loadAtT);
+          // Same basis as the backend period summary: real generation only —
+          // the load-shedding backstop and storage discharge are not supply
+          // (storage energy is recycled generation, shedding is unserved load).
           let dispatchAtT = 0;
           for (const name of generators) {
+            if (name.startsWith('load_shedding_')) continue;
             const value = Math.max(seriesValueAt(periodPGen, i, name), 0);
             dispatchAtT += value;
             totalEmissions += value * genEf[name] * W;
           }
-          for (const name of storageUnits) {
-            const value = Math.max(seriesValueAt(periodPStore, i, name), 0);
-            dispatchAtT += value;
-          }
           totalDispatch += dispatchAtT * W;
-          const prices = buses.map((bus) => seriesValueAt(periodPriceBus, i, bus));
+          const prices = buses.filter(inScope).map((bus) => seriesValueAt(periodPriceBus, i, bus));
           const avg = prices.length ? prices.reduce((sum, value) => sum + value, 0) / prices.length : 0;
           priceSum += avg;
           priceCount += 1;

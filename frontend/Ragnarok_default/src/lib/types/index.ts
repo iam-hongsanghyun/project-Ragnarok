@@ -83,6 +83,13 @@ export interface PathwayPeriodConfig {
   period: number;
   objectiveWeight: number;
   yearsWeight: number;
+  /** Period-aware fields from newer backends (assets active in that period
+   *  only); absent/null on older runs. */
+  installedCapacityMw?: number | null;
+  storageCapacityMw?: number | null;
+  /** Annuity of the extendable assets active in the period, before the
+   *  investment-period weighting. */
+  capexAnnual?: number | null;
 }
 
 export interface PathwayConfig {
@@ -474,6 +481,8 @@ export interface PowerFlowResult {
 export interface StatisticsRow {
   component: string;
   carrier: string;
+  /** Pathway runs: one row per (component, carrier, period). */
+  period?: number | null;
   values: Record<string, number | null>;
 }
 
@@ -481,6 +490,8 @@ export interface StatisticsRow {
 export interface StatisticsResult {
   columns: string[];
   rows: StatisticsRow[];
+  /** Pathway runs: the investment periods present in `rows`; [] otherwise. */
+  periods?: number[];
 }
 
 /** One snapshot of the price-formation view (Tier 0). */
@@ -1482,6 +1493,8 @@ export interface Co2Shadow {
   shadow_price: number;
   explicit_price: number;
   cap_ktco2: number | null;
+  /** Unit of the cap as emitted by the backend; may be "". */
+  cap_unit?: string;
   status: 'binding' | 'slack' | 'none';
   note: string;
 }
@@ -1580,6 +1593,12 @@ export interface ExpansionAsset {
   capital_cost: number;
   capex_annual: number;
   unit?: string;   // 'MW' (default), 'MWh' (Store), 'MVA' (Line)
+  /** Pathway runs: investment periods in which the asset exists, annual CAPEX
+   *  per period (keys are period years as strings) and the objective-weighted
+   *  total. Absent on single-period / older runs. */
+  active_periods?: number[];
+  capex_by_period?: Record<string, number>;
+  capex_weighted?: number;
 }
 
 // ── Plugin analytics ─────────────────────────────────────────────────────────
@@ -1749,7 +1768,7 @@ export interface RunResults {
   /** Compact per-generator dispatched energy (MWh) — backend aggregate that
    *  powers the "Dispatch by unit" donut without shipping the per-snapshot
    *  series. Present on light (View) loads; the full series is fetched windowed. */
-  generatorEnergy?: Array<{ name: string; value: number; carrier?: string; color?: string; curtailmentMwh?: number | null }>;
+  generatorEnergy?: Array<{ name: string; value: number; carrier?: string; color?: string; curtailmentMwh?: number | null; period?: number | null }>;
   systemPriceSeries: ValuePoint[];
   systemEmissionsSeries: ValuePoint[];
   storageSeries: StoragePoint[];
@@ -1830,6 +1849,8 @@ export interface RunResults {
     storeWeight: number;
     planningMode?: PlanningMode;
     investmentPeriods?: number[];
+    /** Year -> price schedule the run solved with (fallback source for the frozen schedule). */
+    carbonPriceSchedule?: CarbonPriceScheduleEntry[] | null;
     rolling?: {
       enabled: boolean;
       horizonSnapshots: number;

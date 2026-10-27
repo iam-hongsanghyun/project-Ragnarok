@@ -10,7 +10,7 @@
  * A plugin package is a `.zip` containing a `module.json` manifest. No sample
  * plugins are bundled — the user installs their own.
  */
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { unzipSync, strFromU8 } from 'fflate';
 import type { InstalledPlugin } from 'lib/plugins/types';
 
@@ -27,8 +27,21 @@ function loadJson<T>(key: string, fallback: T): T {
     return fallback;
   }
 }
-function saveJson(key: string, value: unknown): void {
-  try { window.localStorage.setItem(key, JSON.stringify(value)); } catch { /* quota — ignore */ }
+/** Persist to localStorage. Returns false (and announces it) when the browser
+ *  refused the write - quota, private mode - so a caller never reports a plugin
+ *  or setting as saved when it will be gone after a reload. */
+export const STORAGE_ERROR_EVENT = 'ragnarok:storage-error';
+function saveJson(key: string, value: unknown): boolean {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    window.dispatchEvent(new CustomEvent(STORAGE_ERROR_EVENT, {
+      detail: `Browser storage refused the write (${reason}). Plugin changes will be lost on reload - free space or remove unused plugins.`,
+    }));
+    return false;
+  }
 }
 
 // Largest config string value we persist. A binary `file` field stores the whole
@@ -125,16 +138,20 @@ export function useFrontendPlugins() {
     () => loadJson<Record<string, Record<string, unknown>>>(CONFIG_KEY, {}),
   );
 
+  const installedRef = useRef(installed);
+  installedRef.current = installed;
   const persistInstalled = (next: InstalledPlugin[]) => { setInstalled(next); saveJson(STORE_KEY, next); };
 
   const install = useCallback(async (file: File): Promise<{ ok: boolean; error?: string; id?: string }> => {
     try {
       const plugin = await parsePackage(file);
-      setInstalled((prev) => {
-        const next = [...prev.filter((p) => p.id !== plugin.id), plugin];
-        saveJson(STORE_KEY, next);
-        return next;
-      });
+      const next = [...installedRef.current.filter((p) => p.id !== plugin.id), plugin];
+      // Not persisted = not installed: say so instead of showing a plugin that
+      // vanishes on the next reload.
+      if (!saveJson(STORE_KEY, next)) {
+        return { ok: false, error: 'Browser storage is full - the plugin could not be saved. Remove an unused plugin and try again.' };
+      }
+      setInstalled(next);
       return { ok: true, id: plugin.id };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : 'Install failed.' };

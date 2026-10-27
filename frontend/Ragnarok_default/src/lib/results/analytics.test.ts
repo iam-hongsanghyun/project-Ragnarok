@@ -10,9 +10,9 @@
  * 'mean' and 'last' reducers are weight-invariant under a uniform per-run
  * weight and must NOT change.
  */
-import { describe, test, expect } from '@jest/globals';
+import { describe, test, it, expect } from '@jest/globals';
 import type { MetricOption } from 'lib/types';
-import { aggregateMetricRows, aggregateValues, buildDonutFromMetric } from './analytics';
+import { aggregateMetricRows, aggregateValues, buildDonutFromMetric, selectGeneratorEnergy, statisticsForPeriod } from './analytics';
 
 function mwMetric(reducer: MetricOption['reducer']): MetricOption {
   return {
@@ -64,5 +64,29 @@ describe('snapshot-weighted aggregation', () => {
   test('donut range slicing still sums only the selected snapshots', () => {
     const donut = buildDonutFromMetric(mwMetric('mean'), 1, 2, 4);
     expect(donut[0].value).toBe(200);
+  });
+});
+
+
+describe('period-aware backend aggregates', () => {
+  const entries = [
+    { name: 'g', value: 300 },
+    { name: 'g', value: 100, period: 2030 },
+    { name: 'g', value: 200, period: 2040 },
+  ];
+  it('selectGeneratorEnergy never mixes whole-horizon and per-period entries', () => {
+    expect(selectGeneratorEnergy(entries, 2040)?.map((e) => e.value)).toEqual([200]);
+    expect(selectGeneratorEnergy(entries, null)?.map((e) => e.value)).toEqual([300]);
+    expect(selectGeneratorEnergy(entries, 1999)?.map((e) => e.value)).toEqual([300]);
+    expect(selectGeneratorEnergy(entries.slice(0, 1), 2030)?.map((e) => e.value)).toEqual([300]);
+  });
+  it('statisticsForPeriod filters pathway rows and passes single-period through', () => {
+    const st = { columns: ['a'], periods: [2030, 2040], rows: [
+      { component: 'G', carrier: 'x', period: 2030, values: { a: 1 } },
+      { component: 'G', carrier: 'x', period: 2040, values: { a: 2 } },
+    ] };
+    expect(statisticsForPeriod(st, 2040)?.rows.map((r) => r.values.a)).toEqual([2]);
+    const single = { columns: ['a'], rows: [{ component: 'G', carrier: 'x', values: { a: 1 } }] };
+    expect(statisticsForPeriod(single, 2040)).toBe(single);
   });
 });

@@ -82,7 +82,9 @@ export function KpiStripCard({ results, model, currencySymbol = '$' }: Props) {
   // prefer it, and keep the derivation only as a fallback.
   const derivedPeak = systemLoadPerSnap.length > 0 ? Math.max(...systemLoadPerSnap) : undefined;
   const peakDemandSummary = results.summary.find((s) => s.label === 'Peak demand');
-  const peakFromSummary = peakDemandSummary ? Number.parseFloat(peakDemandSummary.value) : NaN;
+  // Strip thousands separators and units ("8,760 MW") before parsing; a bare
+  // parseFloat reads that as 8.
+  const peakFromSummary = peakDemandSummary ? Number(peakDemandSummary.value.replace(/[^\d.-]/g, '')) : NaN;
   const peakLoad = Number.isFinite(peakFromSummary) ? peakFromSummary : derivedPeak;
   // Average load comes from the same averaged `nodalBalance` walk as the peak
   // did, so pairing it with the corrected peak would report a load factor built

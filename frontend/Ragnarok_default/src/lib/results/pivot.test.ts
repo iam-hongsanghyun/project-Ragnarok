@@ -74,6 +74,20 @@ describe('pivot engine', () => {
     expect(rows[1].solar).toBe(100);
   });
 
+  test('pathway result: pivot reads only the selected period rows', () => {
+    const pathwayResults = {
+      runMeta: { snapshotWeight: 1 },
+      pathway: { enabled: true, periods: [2030, 2040], selectedPeriod: 2040, snapshotMappingMode: 'explicit_period_column', summaries: [] },
+      outputs: { static: {}, series: { 'generators-p': [
+        { period: 2030, snapshot: 't0', g1: 10, g2: 20, g3: 5 },
+        { period: 2040, snapshot: 't0', g1: 60, g2: 0, g3: 100 },
+      ] } },
+    } as unknown as RunResults;
+    const { rows } = buildPivotSeries(base, pathwayResults, model, 1);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].wind).toBe(60);
+  });
+
   test('unit stays MW for an hourly (unbucketed) sum — components combine, time does not integrate', () => {
     const { unit } = buildPivotSeries(base, results, model, 1); // base: timeframe 'hourly', aggregate 'sum'
     expect(unit).toBe('MW');

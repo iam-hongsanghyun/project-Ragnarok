@@ -1,4 +1,4 @@
-import { MetricOption, RunResults, SeriesPoint, TimeframeOption, TimeSeriesRow } from '../types';
+import { MetricOption, RunResults, SeriesPoint, StatisticsResult, TimeframeOption, TimeSeriesRow } from '../types';
 import { numberValue } from 'lib/utils/helpers';
 
 export function normalizeSeriesPoint(point: SeriesPoint): TimeSeriesRow {
@@ -15,6 +15,49 @@ export function normalizeSeriesPoint(point: SeriesPoint): TimeSeriesRow {
     ...fallbackValues,
     ...(point.values || {}),
   };
+}
+
+/** Keep rows of the selected investment period. Rows with no numeric `period`
+ *  (single-period runs, aggregates that predate period-aware output) are kept. */
+export function filterRowsByPeriod<T extends object>(
+  rows: T[], period: number | null | undefined,
+): T[] {
+  if (period === null || period === undefined) return rows;
+  return rows.filter((row) => {
+    const raw = (row as { period?: unknown }).period;
+    if (raw === undefined || raw === null || raw === '') return true;
+    const n = Number(raw);
+    return !Number.isFinite(n) || n === period;
+  });
+}
+
+type GeneratorEnergyEntry = NonNullable<RunResults['generatorEnergy']>[number];
+
+/**
+ * Pick ONE family of `generatorEnergy` entries. Pathway backends append
+ * per-(generator, period) entries next to the whole-horizon ones, so mixing
+ * them double counts: with period entries present use only the selected
+ * period's; otherwise (single-period runs, older bundles, no matching period)
+ * use only the period-less whole-horizon entries.
+ */
+export function selectGeneratorEnergy(
+  entries: GeneratorEnergyEntry[] | undefined, period: number | null | undefined,
+): GeneratorEnergyEntry[] | undefined {
+  if (!entries) return entries;
+  const hasPeriod = (e: GeneratorEnergyEntry) => e.period !== undefined && e.period !== null;
+  const perPeriod = entries.filter((e) => hasPeriod(e) && Number(e.period) === period);
+  if (period !== null && period !== undefined && perPeriod.length > 0) return perPeriod;
+  return entries.filter((e) => !hasPeriod(e));
+}
+
+/** Statistics table for the selected period (pathway rows carry `period`;
+ *  single-period tables pass through unchanged). */
+export function statisticsForPeriod(
+  stats: StatisticsResult | undefined, period: number | null | undefined,
+): StatisticsResult | undefined {
+  if (!stats || period === null || period === undefined) return stats;
+  if (!stats.rows.some((r) => r.period !== undefined && r.period !== null)) return stats;
+  return { ...stats, rows: stats.rows.filter((r) => r.period === undefined || r.period === null || Number(r.period) === period) };
 }
 
 export function buildRowsFromGeneratorDetails(

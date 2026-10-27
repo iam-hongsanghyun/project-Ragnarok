@@ -49,8 +49,9 @@ const WIPE_PREFIXES = ['pypsa.', 'ragnarok:', 'ui:'];
 // solver-method migration handles the only stale-default case.
 const WIPE_KEYS: string[] = [];
 // Never wiped — user-owned content that persists until explicitly removed
-// (installed plugins + their configs, and BYOK API keys typed into Settings).
-const PRESERVE_PREFIXES = ['ragnarok:fe-plugins:', 'ragnarok:secret:'];
+// (installed plugins + their configs, BYOK API keys typed into Settings, and the
+// learner's tutorial progress - a build change must not reset it).
+const PRESERVE_PREFIXES = ['ragnarok:fe-plugins:', 'ragnarok:secret:', 'ragnarok:training:'];
 
 try {
   const stored = window.localStorage.getItem(BUILD_ID_KEY);

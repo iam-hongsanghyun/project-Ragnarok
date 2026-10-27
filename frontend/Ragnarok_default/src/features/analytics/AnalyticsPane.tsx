@@ -61,7 +61,10 @@ export function AnalyticsPane({
   return (
     <div className="pane analytics-pane">
       {results.pathway?.enabled && results.pathway.periods.length > 0 && (() => {
-        const active = pathwayConfig?.selectedPeriod ?? results.pathway.selectedPeriod ?? results.pathway.periods[0];
+        // The displayed result owns its period selection (App derives it from the
+        // result's own periods) — the editor's pathway config may describe a
+        // different model than the one being viewed.
+        const active = results.pathway.selectedPeriod ?? results.pathway.periods[0];
         return (
           <section className="chart-card" style={{ marginBottom: 16 }}>
             <div className="chart-card-header">

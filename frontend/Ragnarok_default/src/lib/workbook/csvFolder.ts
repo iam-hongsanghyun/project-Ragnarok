@@ -16,9 +16,9 @@
  * Python-based PyPSA tool.
  */
 import { unzipSync, zipSync, strToU8, strFromU8 } from 'fflate';
-import * as XLSX from 'xlsx';
 import { GridRow, Primitive, WorkbookModel } from '../types';
-import { SHEETS, TS_SHEETS, PYPSA_COMPONENTS } from 'lib/constants/pypsa_schema';
+import { SHEETS, TS_SHEETS, PYPSA_COMPONENTS, PYPSA_COMPONENT_BY_SHEET } from 'lib/constants/pypsa_schema';
+import { parseCsvText } from './csvText';
 
 const ALL_KNOWN_NAMES = new Set<string>([
   ...SHEETS,
@@ -79,24 +79,39 @@ export function exportModelAsCsvFolderZip(model: WorkbookModel, archiveName: str
 
 // ── Import: zip → model ──────────────────────────────────────────────────────
 
-function csvTextToRows(csv: string): GridRow[] {
-  const wb = XLSX.read(csv, { type: 'string', raw: false });
-  if (!wb.SheetNames.length) return [];
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: null });
-  return raw.map((row) => {
+/** A plain decimal literal that survives `Number()` -> `String()` unchanged in
+ *  meaning: no leading zeros (`001`), no stray `+`. Anything else stays text. */
+const CANONICAL_NUMBER_RE = /^-?(0|[1-9]\d*)?(\.\d+)?([eE][+-]?\d+)?$/;
+
+function isStringAttribute(sheet: string, column: string): boolean {
+  if (column === 'name') return true;
+  const attrs = PYPSA_COMPONENT_BY_SHEET[sheet]?.attributes;
+  return Boolean(attrs?.some((a) => a.attribute === column && a.type === 'string'));
+}
+
+/** Parse one CSV into rows. Cells are literal text; only canonical numerals in a
+ *  non-string column become numbers, so `name`/`bus`/`carrier` values such as
+ *  `001` are never reformatted to `1`. */
+function csvTextToRows(csv: string, sheet: string): GridRow[] {
+  const table = parseCsvText(csv);
+  if (table.length === 0) return [];
+  const header = table[0].map((h, i) => (h.trim() !== '' ? h.trim() : `col${i}`));
+  return table.slice(1).map((cells) => {
     const out: GridRow = {};
-    for (const [key, val] of Object.entries(row)) {
-      if (val === null || val === undefined || val === '') {
+    header.forEach((key, i) => {
+      const val = cells[i] ?? '';
+      const trimmed = val.trim();
+      if (trimmed === '') {
         out[key] = '';
-        continue;
+        return;
       }
-      // Try numeric coercion for non-string-like values
-      const asNum = typeof val === 'number' ? val : Number(val);
-      out[key] = Number.isFinite(asNum) && String(val).trim() !== '' && /^-?\d/.test(String(val))
-        ? asNum
-        : String(val);
-    }
+      // First column of a time-series sheet is the snapshot axis: integers stay
+      // integers, anything else (timestamps) stays the literal text.
+      const axis = i === 0 && sheet.includes('-');
+      const textColumn = isStringAttribute(sheet, key) || (axis && !/^-?(0|[1-9]\d*)$/.test(trimmed));
+      const numeric = CANONICAL_NUMBER_RE.test(trimmed) && trimmed !== '-' && trimmed !== '.' && Number.isFinite(Number(trimmed));
+      out[key] = numeric && !textColumn ? Number(trimmed) : val;
+    });
     return out;
   });
 }
@@ -142,7 +157,7 @@ export async function importCsvFolderZip(file: File | Blob | ArrayBuffer | Uint8
       continue;
     }
     const csvText = strFromU8(data);
-    baseModel[sheetName] = csvTextToRows(csvText);
+    baseModel[sheetName] = csvTextToRows(csvText, sheetName);
     importedSheets.push(sheetName);
   }
 

@@ -32,7 +32,16 @@ interface DeriveInput {
   outputs: NonNullable<RunResults['outputs']>;
   currencySymbol?: string;
   snapshotWeight?: number;
+  /** Investment period of each output snapshot (parallel to `snapshots`);
+   *  null where the run has no period column. Keys input lookups by
+   *  `period|snapshot` so every pathway period reads its own profile. */
+  periods?: Array<number | null>;
+  /** Present when the run folded the window into one averaged profile. */
+  averaging?: InputAveraging | null;
 }
+
+/** Run-level sampling block (`runMeta.sampling`). */
+export type RunSampling = NonNullable<RunResults['runMeta']['sampling']>;
 
 export type AssetDetails = RunResults['assetDetails'];
 
@@ -63,20 +72,52 @@ function isoToLabel(iso: string): string {
   return iso.slice(t + 1, t + 6);
 }
 
-/** Read the snapshot timestamps from any output series sheet (PyPSA-standard
- * `snapshot` index column). */
-function pickSnapshots(series: SeriesMap | null | undefined, preferred: string[]): string[] {
+function pickSnapshotRows(series: SeriesMap | null | undefined, preferred: string[]): GridRow[] {
   if (!series) return [];
   for (const key of preferred) {
     const rows = series[key];
-    if (rows && rows.length) return rows.map((r) => stringValue(r.snapshot));
+    if (rows && rows.length) return rows;
   }
   // Fallback: any non-empty series
   for (const key of Object.keys(series)) {
     const rows = series[key];
-    if (rows && rows.length) return rows.map((r) => stringValue(r.snapshot));
+    if (rows && rows.length) return rows;
   }
   return [];
+}
+
+/** Rows of the selected investment period in every series sheet (rows without
+ *  a numeric period are kept so single-period sheets pass through). */
+export function filterSeriesByPeriod(series: SeriesMap, period: number | null): SeriesMap {
+  if (period === null) return series;
+  const filtered: SeriesMap = {};
+  Object.entries(series).forEach(([sheet, rows]) => {
+    filtered[sheet] = (rows ?? []).filter((row) => {
+      const raw = row.period;
+      if (raw === undefined || raw === null || raw === '') return true;
+      return numberValue(raw) === period;
+    });
+  });
+  return filtered;
+}
+
+/** Read the snapshot timestamps from any output series sheet (PyPSA-standard
+ * `snapshot` index column). */
+function pickSnapshots(series: SeriesMap | null | undefined, preferred: string[]): string[] {
+  return pickSnapshotRows(series, preferred).map((r) => stringValue(r.snapshot));
+}
+
+/** Investment period of each snapshot row (same sheet as {@link pickSnapshots});
+ *  null where the row carries no numeric period. */
+export function snapshotPeriods(
+  series: SeriesMap | null | undefined, preferred: string[],
+): Array<number | null> {
+  return pickSnapshotRows(series, preferred).map((r) => {
+    const raw = r.period;
+    if (raw === undefined || raw === null || raw === '') return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  });
 }
 
 /** Look up a numeric value in an output series sheet at a given snapshot. */
@@ -105,10 +146,56 @@ function staticOrInput(
 const SNAPSHOT_COL = 'snapshot';
 
 export interface InputTemporalIndex {
-  /** Rows keyed by canonical ISO snapshot timestamp. */
+  /** Rows keyed by canonical ISO snapshot timestamp (last row wins when the
+   *  sheet repeats a stamp across periods). */
   byStamp: Record<string, GridRow>;
+  /** Rows keyed by `period|stamp`; populated only when the sheet has a
+   *  `period` column. */
+  byPeriodStamp: Record<string, GridRow>;
   /** Component names that have a column in the temporal sheet. */
   columns: Set<string>;
+  /** True when the sheet carries a `period` column. */
+  hasPeriod: boolean;
+}
+
+/** Positional-mean profile fold applied by the backend in sampling mode
+ *  'average' (`average_window_frames`). */
+export interface InputAveraging {
+  /** First modelled snapshot (start of the window). */
+  startStamp: string;
+  /** Window rows folded (`representedSnapshots`). */
+  windowRows: number;
+  blockSize: number;
+}
+
+/** Averaging descriptor from `runMeta.sampling`, or null when not averaged. */
+export function inputAveragingFromSampling(
+  sampling: RunSampling | null | undefined, startStamp: string | undefined,
+): InputAveraging | null {
+  if (!sampling || !sampling.enabled || sampling.mode !== 'average' || !startStamp) return null;
+  const windowRows = Number(sampling.representedSnapshots);
+  const blockSize = Number(sampling.blockSize);
+  if (!(windowRows > 0) || !(blockSize > 0)) return null;
+  return { startStamp, windowRows, blockSize: Math.min(blockSize, windowRows) };
+}
+
+const STAMP_RE =
+  /^(\d{4}-\d{2}-\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(?:Z|[+-]\d{2}(?::?\d{2})?)?)?$/;
+
+/**
+ * Normalise a snapshot stamp to the canonical `YYYY-MM-DDTHH:MM:SS` form:
+ * space separator -> `T`, fractional seconds and a `Z` / `+hh:mm` suffix
+ * dropped, missing seconds padded. Unrecognised strings pass through.
+ */
+export function normalizeStamp(raw: string): string {
+  if (raw.length === 19 && raw[10] === 'T') return raw;
+  const m = STAMP_RE.exec(raw.trim().replace(' ', 'T'));
+  if (!m) return raw;
+  return m[2] === undefined ? m[1] : `${m[1]}T${m[2]}:${m[3]}:${m[4] ?? '00'}`;
+}
+
+function periodKey(period: number, stamp: string): string {
+  return `${period}|${stamp}`;
 }
 
 /**
@@ -116,24 +203,64 @@ export interface InputTemporalIndex {
  * be read by snapshot timestamp instead of by position. Positional indexing
  * breaks once outputs are filtered to a non-first investment period (or any
  * other snapshot subset), because the input sheet still holds every period's
- * rows in order. Also records which component columns are present so the
- * temporal series can win over the static scalar. Single source of truth,
- * shared with runResults.ts (which derives the whole `RunResults` and hits
- * the exact same positional-index failure mode on its own period-filtered
- * outputs).
+ * rows in order. When the sheet has a `period` column rows are ALSO keyed by
+ * `period|stamp` (pathway sheets repeat a stamp per period; a stamp-only key
+ * keeps just the last period). With `averaging`, the modelled block's rows are
+ * replaced by the positional mean over the folded window, so asset views show
+ * the profile the solver actually saw. Single source of truth, shared with
+ * runResults.ts.
  */
-export function indexInputByTimestamp(rows: GridRow[] | undefined): InputTemporalIndex {
+export function indexInputByTimestamp(
+  rows: GridRow[] | undefined,
+  averaging?: InputAveraging | null,
+): InputTemporalIndex {
   const byStamp: Record<string, GridRow> = {};
+  const byPeriodStamp: Record<string, GridRow> = {};
   const columns = new Set<string>();
-  if (!rows || rows.length === 0 || !(SNAPSHOT_COL in rows[0])) return { byStamp, columns };
+  if (!rows || rows.length === 0 || !(SNAPSHOT_COL in rows[0])) {
+    return { byStamp, byPeriodStamp, columns, hasPeriod: false };
+  }
+  const hasPeriod = 'period' in rows[0];
   for (const key of Object.keys(rows[0])) {
     if (key !== SNAPSHOT_COL && key !== 'period') columns.add(key);
   }
   for (const row of rows) {
-    const stamp = stringValue(row[SNAPSHOT_COL]);
-    if (stamp) byStamp[stamp] = row;
+    const raw = stringValue(row[SNAPSHOT_COL]);
+    if (!raw) continue;
+    const stamp = normalizeStamp(raw);
+    byStamp[stamp] = row;
+    if (hasPeriod) {
+      const period = Number(row.period);
+      if (row.period !== undefined && row.period !== null && row.period !== '' && Number.isFinite(period)) {
+        byPeriodStamp[periodKey(period, stamp)] = row;
+      }
+    }
   }
-  return { byStamp, columns };
+  if (averaging && !hasPeriod) {
+    const start = rows.findIndex(
+      (r) => normalizeStamp(stringValue(r[SNAPSHOT_COL])) === normalizeStamp(averaging.startStamp),
+    );
+    if (start >= 0) {
+      const end = Math.min(start + averaging.windowRows, rows.length);
+      const B = Math.min(averaging.blockSize, end - start);
+      for (let j = 0; j < B; j++) {
+        const avg: GridRow = { ...rows[start + j] };
+        for (const col of Array.from(columns)) {
+          let sum = 0;
+          let count = 0;
+          for (let k = start + j; k < end; k += B) {
+            const cell = rows[k]?.[col];
+            if (cell === undefined || cell === null || cell === '') continue;
+            const n = numberValue(cell);
+            if (Number.isFinite(n)) { sum += n; count += 1; }
+          }
+          if (count > 0) avg[col] = sum / count;
+        }
+        byStamp[normalizeStamp(stringValue(rows[start + j][SNAPSHOT_COL]))] = avg;
+      }
+    }
+  }
+  return { byStamp, byPeriodStamp, columns, hasPeriod };
 }
 
 /**
@@ -141,13 +268,18 @@ export function indexInputByTimestamp(rows: GridRow[] | undefined): InputTempora
  * static scalar whenever the component has a column in the time-series sheet —
  * matching PyPSA's convention that `loads_t.p_set` overrides `loads.p_set`.
  * The static `fallback` is used only for components absent from the temporal
- * sheet entirely. Timestamps match exactly (both sides are canonical ISO-`T`).
+ * sheet entirely. When the sheet has a `period` column and `period` is known
+ * the row is keyed by `period|stamp`; otherwise by stamp alone.
  */
 export function inputSeriesValueAtStamp(
   idx: InputTemporalIndex, stamp: string, col: string, fallback: number,
+  period?: number | null,
 ): number {
   if (!idx.columns.has(col)) return fallback;
-  const row = idx.byStamp[stamp];
+  const key = normalizeStamp(stamp);
+  const row = idx.hasPeriod && period !== undefined && period !== null
+    ? idx.byPeriodStamp[periodKey(period, key)]
+    : idx.byStamp[key];
   const cell = row?.[col];
   if (cell === undefined || cell === null || cell === '') return 0;
   return numberValue(cell);
@@ -194,7 +326,7 @@ function buildGenerators(input: DeriveInput, snapshots: string[]): Record<string
 
   const pSeries = series['generators-p'];
   const inputPMaxPu = model['generators-p_max_pu'];
-  const pMaxPuIdx = indexInputByTimestamp(inputPMaxPu);
+  const pMaxPuIdx = indexInputByTimestamp(inputPMaxPu, input.averaging);
   const labels = snapshots.map(isoToLabel);
 
   const details: Record<string, GeneratorDetail> = {};
@@ -230,7 +362,9 @@ function buildGenerators(input: DeriveInput, snapshots: string[]): Record<string
     for (let i = 0; i < snapshots.length; i++) {
       const out = seriesValue(pSeries, i, name);
       const pos = Math.max(out, 0);
-      const ratio = inputSeriesValueAtStamp(pMaxPuIdx, snapshots[i], name, pMaxPuStatic);
+      const ratio = inputSeriesValueAtStamp(
+        pMaxPuIdx, snapshots[i], name, pMaxPuStatic, input.periods?.[i],
+      );
       const avail = Math.max(ratio * pNom, pos); // observed dispatch can't exceed availability
       const emissions = pos * ef;
       energy += pos * snapshotWeight;
@@ -277,7 +411,7 @@ function buildBuses(input: DeriveInput, snapshots: string[]): Record<string, Bus
   const vMagSeries = series['buses-v_mag_pu'];
   const vAngSeries = series['buses-v_ang'];
   const loadInputTs = model['loads-p_set'];
-  const loadInputIdx = indexInputByTimestamp(loadInputTs);
+  const loadInputIdx = indexInputByTimestamp(loadInputTs, input.averaging);
 
   // Index generators / loads by bus once
   const genByBus: Record<string, string[]> = {};
@@ -311,7 +445,7 @@ function buildBuses(input: DeriveInput, snapshots: string[]): Record<string, Bus
       let loadAtT = 0;
       for (const ln of loads) {
         loadAtT += inputSeriesValueAtStamp(
-          loadInputIdx, snapshots[i], ln, numberValue(loadStatic[ln]?.p_set),
+          loadInputIdx, snapshots[i], ln, numberValue(loadStatic[ln]?.p_set), input.periods?.[i],
         );
       }
       let genAtT = 0;
@@ -385,7 +519,10 @@ function buildStorageUnits(input: DeriveInput, snapshots: string[]): Record<stri
   for (const name of Object.keys(staticIn)) {
     const row = staticIn[name];
     const bus = stringValue(row.bus);
-    const pNom = numberValue(row.p_nom);
+    const pNomInput = numberValue(row.p_nom);
+    // Extendable units: the solved `p_nom_opt` is what got built (the input
+    // rating is the 0 lower bound of a from-scratch candidate).
+    const pNom = staticOrInput(outputs.static, 'storage_units', name, 'p_nom_opt', pNomInput);
     const maxHours = numberValue(row.max_hours);
 
     const dispatchSeries: StorageUnitDetail['dispatchSeries'] = [];
@@ -409,7 +546,8 @@ function buildStorageUnits(input: DeriveInput, snapshots: string[]): Record<stri
     details[name] = {
       name, bus,
       summary: [
-        { label: 'Power rating', value: `${fmt(pNom)} MW`, detail: 'Storage unit dispatch limit' },
+        { label: 'Power rating', value: `${fmt(pNom)} MW`,
+          detail: pNom !== pNomInput ? 'Solved p_nom_opt' : 'Storage unit dispatch limit' },
         { label: 'Energy capacity', value: `${fmt(pNom * maxHours)} MWh`, detail: `${maxHours.toFixed(1)} h max_hours` },
         { label: 'Peak state', value: `${fmt(peakState)} MWh`, detail: 'Maximum state of charge' },
       ],
@@ -433,7 +571,8 @@ function buildStores(input: DeriveInput, snapshots: string[]): Record<string, St
   for (const name of Object.keys(staticIn)) {
     const row = staticIn[name];
     const bus = stringValue(row.bus);
-    const eNom = numberValue(row.e_nom);
+    const eNomInput = numberValue(row.e_nom);
+    const eNom = staticOrInput(outputs.static, 'stores', name, 'e_nom_opt', eNomInput);
 
     const energySeries: StoreDetail['energySeries'] = [];
     const powerSeries: StoreDetail['powerSeries'] = [];
@@ -454,7 +593,8 @@ function buildStores(input: DeriveInput, snapshots: string[]): Record<string, St
     details[name] = {
       name, bus,
       summary: [
-        { label: 'Energy rating', value: `${fmt(eNom)} MWh`, detail: 'Store nominal energy' },
+        { label: 'Energy rating', value: `${fmt(eNom)} MWh`,
+          detail: eNom !== eNomInput ? 'Solved e_nom_opt' : 'Store nominal energy' },
         { label: 'Peak energy', value: `${fmt(peakE)} MWh`, detail: 'Maximum stored energy' },
         { label: 'Peak power', value: `${fmt(peakP)} MW`, detail: 'Maximum absolute store power' },
       ],
@@ -657,15 +797,21 @@ export function deriveAssetDetails(
   outputs: RunResults['outputs'] | null | undefined,
   currencySymbol = '$',
   snapshotWeight = 1,
+  sampling?: RunSampling | null,
 ): AssetDetails {
   // No outputs, or a light (View) payload whose per-component series were
   // stripped server-side (`series: null`): per-asset detail is derived on
   // demand from the windowed series, not here. Return empty rather than crash.
   if (!outputs || !outputs.series) return EMPTY_DETAILS;
-  const input: DeriveInput = { model, outputs, currencySymbol, snapshotWeight };
-  const snapshots = pickSnapshots(outputs.series, [
+  const preferred = [
     'generators-p', 'buses-marginal_price', 'storage_units-p', 'stores-p', 'processes-p0', 'shunt_impedances-p',
-  ]);
+  ];
+  const snapshots = pickSnapshots(outputs.series, preferred);
+  const input: DeriveInput = {
+    model, outputs, currencySymbol, snapshotWeight,
+    periods: snapshotPeriods(outputs.series, preferred),
+    averaging: inputAveragingFromSampling(sampling, snapshots[0]),
+  };
   return {
     generators: buildGenerators(input, snapshots),
     buses: buildBuses(input, snapshots),
@@ -689,10 +835,16 @@ export function withDerivedAssetDetails(
   model: WorkbookModel,
   results: RunResults,
   currencySymbol: string,
+  period: number | null = null,
 ): RunResults {
   const weight = results.runMeta?.snapshotWeight ?? 1;
+  // Pathway: a hydrated series holds every period's rows; the per-asset views
+  // show ONE period, so filter before deriving (otherwise periods interleave).
+  const outputs = period !== null && results.outputs?.series
+    ? { ...results.outputs, series: filterSeriesByPeriod(results.outputs.series, period) }
+    : results.outputs;
   return {
     ...results,
-    assetDetails: deriveAssetDetails(model, results.outputs, currencySymbol, weight),
+    assetDetails: deriveAssetDetails(model, outputs, currencySymbol, weight, results.runMeta?.sampling),
   };
 }

@@ -59,7 +59,7 @@ import { getBounds, getBusIndex, carrierColor, numberValue, orderByCarrierRows, 
 import { filenameMatchesScenario, scenarioFilename } from 'lib/utils/scenarioFilename';
 import { usePersistedState } from 'shared/hooks/usePersistedState';
 import { RagnarokLogo } from 'shared/components/RagnarokLogo';
-import { buildRowsFromGeneratorDetails, buildSystemLoadRows, normalizeSeriesPoint } from 'lib/results/analytics';
+import { buildRowsFromGeneratorDetails, buildSystemLoadRows, normalizeSeriesPoint, statisticsForPeriod } from 'lib/results/analytics';
 import { withDerivedAssetDetails } from 'lib/results/assetDetails';
 import { deriveRunResults } from 'lib/results/runResults';
 import { defaultPathwayConfig, getDefaultSelectedPeriod, readPathwayConfigFromModel, samePathwayConfig, writePathwayConfigToModel } from 'lib/results/pathway';
@@ -78,6 +78,7 @@ import { buildRunPayload } from 'features/scenario/buildRunPayload';
 import { readCarbonLibraryFromModel, writeCarbonLibraryToModel, sameCarbonLibrary } from 'lib/results/carbonLibrary';
 import { saveSessionControls, loadSessionControls, clearSession, clearSessionModelOnly } from 'lib/storage/sessionStore';
 import { clearSessionModel, putSessionModel, putStaticModel, getSessionFullModel, getSessionMeta, getSheetPage, isSeriesSheet, patchSheet, seriesSheetCounts, DEFAULT_SESSION_ID } from 'lib/api/session';
+import type { SessionSheetMeta } from 'lib/api/session';
 import type { ClusterResult } from 'lib/forge/transforms';
 import { forgeQueryApply, forgeQueryPreview } from 'lib/api/forge';
 import type { QueryEditRequest } from 'lib/forge/queryEdit';
@@ -115,11 +116,11 @@ import {
   stepIndex as trainingStepIndex,
 } from 'lib/training/progress';
 import { ActivityBar } from './layout/ActivityBar';
-import { isTabModule, parseEnabledModules } from './modules/registry';
+import { isTabModule, parseEnabledModules, TAB_MODULES } from './modules/registry';
 import { useExternalModules } from './modules/external/useExternalModules';
 import { ExternalModuleHost } from './modules/external/ExternalModuleHost';
-import { useModelIssues } from './features/validation/useModelIssues';
-import { useFrontendPlugins } from './features/plugins/frontendPlugins';
+import { useModelIssues, sessionSeriesIssues } from './features/validation/useModelIssues';
+import { useFrontendPlugins, STORAGE_ERROR_EVENT } from './features/plugins/frontendPlugins';
 import { ToastProvider, useToast } from './shared/components/Toast';
 import { DialogProvider, useDialog } from './shared/components/Dialog';
 import { ErrorBoundary } from './shared/components/ErrorBoundary';
@@ -171,7 +172,12 @@ function initialTabFromUrl(): WorkspaceTab {
   if (!raw) return 'Welcome';
   const lower = raw.toLowerCase();
   const core = Array.from(KNOWN_CORE_TABS).find((t) => t.toLowerCase() === lower);
-  return core ?? raw;
+  if (core) return core;
+  // Module tabs (Data, Forge, Siting, ...) match case-insensitively too; an
+  // external module's id is not known yet at first render, so it passes through
+  // as typed (the guard effect below sends an unknown id to Welcome).
+  const module = TAB_MODULES.find((m) => m.id.toLowerCase() === lower);
+  return module ? module.id : raw;
 }
 
 /**
@@ -245,6 +251,46 @@ function AppInner() {
     },
     [requestStaticResync],
   );
+
+  // Loading a model (open / import / example / restore / session refresh) REPLACES
+  // the working model, so nothing before it may be undone: Ctrl+Z would write the
+  // previous model's rows into the new model's session. Loads therefore clear the
+  // history instead of pushing onto it.
+  const clearHistory = useCallback(() => {
+    undoStack.current = [];
+    redoStack.current = [];
+  }, []);
+
+  // Full-model pushes (one per load). They used to be fire-and-forget: a failed
+  // push left the editor showing a model the backend never received, and a Run
+  // clicked right after a load raced the upload. Track them so failures surface,
+  // the Run button stays disabled while one is in flight, and a run waits for
+  // (and checks) the latest one.
+  const [modelPushesInFlight, setModelPushesInFlight] = useState(0);
+  const modelPushRef = useRef<Promise<boolean>>(Promise.resolve(true));
+  // Set once any load path ran, so the slow boot rehydrate never overwrites a
+  // model the user opened while it was still fetching.
+  const userLoadedRef = useRef(false);
+  const trackModelPush = useCallback((push: Promise<unknown>): Promise<boolean> => {
+    setModelPushesInFlight((n) => n + 1);
+    const tracked = push
+      .then(() => true)
+      .catch((error: unknown) => {
+        const msg = error instanceof Error ? error.message : 'unknown error';
+        showToast(
+          `The model could not be sent to the backend session (${msg}). `
+          + 'A run would use stale data - reopen the file or retry the load.',
+          'error',
+        );
+        return false;
+      })
+      .then((ok) => {
+        setModelPushesInFlight((n) => Math.max(0, n - 1));
+        return ok;
+      });
+    modelPushRef.current = tracked;
+    return tracked;
+  }, [showToast]);
 
   // Undo depth. Each entry retains the model object as it was before an edit;
   // editing big time-series sheets makes these add up, so keep the window small
@@ -392,7 +438,7 @@ function AppInner() {
   // restoring an old run while the live sliders differ would recompute its
   // charts with the current carbon price / resolution / discount rate.
   const [resultsContext, setResultsContext] = useState<
-    { carbonPrice: number; snapshotWeight: number; discountRate: number } | null
+    { carbonPrice: number; snapshotWeight: number; discountRate: number; carbonPriceSchedule: CarbonPriceScheduleEntry[] } | null
   >(null);
   const [maxSnapshots, setMaxSnapshots] = useState<number>(RUN_WINDOW.initialMaxSnapshots);
   const [snapshotStart, setSnapshotStart] = useState(RUN_WINDOW.initialSnapshotStart);
@@ -570,7 +616,31 @@ function AppInner() {
     constraints: DEFAULT_CONSTRAINTS,
   }));
   const frontendPlugins = useFrontendPlugins();
-  const modelIssues = useModelIssues(model);
+  // A plugin / config write the browser refused (quota) must reach the user.
+  useEffect(() => {
+    const onStorageError = (event: Event) => {
+      const detail = (event as CustomEvent<string>).detail;
+      showToast(typeof detail === 'string' ? detail : 'Browser storage refused a write.', 'error');
+    };
+    window.addEventListener(STORAGE_ERROR_EVENT, onStorageError);
+    return () => window.removeEventListener(STORAGE_ERROR_EVENT, onStorageError);
+  }, [showToast]);
+  const staticModelIssues = useModelIssues(model);
+  // The browser model carries no time-series, so the series checks run against the
+  // session's sheet meta (columns, row counts) - refreshed whenever the set of
+  // series sheets / their row counts changes.
+  const [sessionSheetMeta, setSessionSheetMeta] = useState<SessionSheetMeta[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void getSessionMeta()
+      .then((meta) => { if (!cancelled) setSessionSheetMeta(meta.sheets ?? []); })
+      .catch(() => { if (!cancelled) setSessionSheetMeta([]); });
+    return () => { cancelled = true; };
+  }, [sessionSeriesCounts]);
+  const modelIssues = useMemo(
+    () => [...staticModelIssues, ...sessionSeriesIssues(model, sessionSheetMeta)],
+    [staticModelIssues, model, sessionSheetMeta],
+  );
 
   // Topology that owns the currently displayed results: the snapshot taken at
   // run/restore time when available, else the live model (e.g. before any run).
@@ -589,6 +659,15 @@ function AppInner() {
   const analyticsCarbonPrice = resultsContext?.carbonPrice ?? carbonPrice;
   const analyticsSnapshotWeight = resultsContext?.snapshotWeight ?? snapshotWeight;
   const analyticsDiscountRate = resultsContext?.discountRate ?? settings.discountRate;
+  // The schedule is frozen with the run like the scalar: a frozen context with
+  // no schedule means the run solved with the scalar only.
+  // Source order: the frozen context, then the schedule the backend recorded in
+  // `runMeta` (older stored runs), and only with no frozen context the live editor.
+  const analyticsCarbonSchedule = resultsContext
+    ? (resultsContext.carbonPriceSchedule.length > 0
+      ? resultsContext.carbonPriceSchedule
+      : (results?.runMeta?.carbonPriceSchedule ?? []))
+    : carbonPriceSchedule;
 
   const displayResults = useMemo(() => {
     if (!results) return null;
@@ -611,25 +690,40 @@ function AppInner() {
     // when it isn't a pathway run. (Without this, KPI/summary cards read
     // `undefined.reduce` and crash.)
     const hasDerivedSummary = Array.isArray(effResults.summary) && effResults.summary.length > 0;
-    if (!effResults.outputs || (!effResults.pathway?.enabled && hasDerivedSummary)) {
-      return withDerivedAssetDetails(analyticsModel, effResults, settings.currencySymbol);
-    }
     const activePathway = effResults.pathway?.enabled ? effResults.pathway : null;
+    // The period shown belongs to the DISPLAYED result: the editor's selection
+    // is honoured only when this result has that period, so viewing a stored run
+    // never depends on (or needs to rewrite) the editor's pathway config.
     const selectedPeriod: number | null = activePathway
-      ? getDefaultSelectedPeriod({
-        ...pathwayConfig,
-        selectedPeriod: pathwayConfig.selectedPeriod ?? activePathway.selectedPeriod,
-        periods: pathwayConfig.periods.length
-          ? pathwayConfig.periods
-          : activePathway.periods.map((period, index) => ({
-            period,
-            objectiveWeight: activePathway.summaries[index]?.objectiveWeight ?? 1,
-            yearsWeight: activePathway.summaries[index]?.yearsWeight ?? 1,
-          })),
-      })
+      ? (() => {
+        const preferred = pathwayConfig.selectedPeriod ?? activePathway.selectedPeriod;
+        if (preferred !== null && activePathway.periods.includes(preferred)) return preferred;
+        return activePathway.periods[0] ?? null;
+      })()
       : null;
+    // Backend aggregates are authoritative whenever the client has no complete
+    // series to re-derive them from: a light (History/View) bundle ships
+    // `outputs.series = null`, and re-deriving from that (or from a partially
+    // hydrated window) overwrote the backend's pathway KPIs and charts with
+    // empty/zero values. Only per-asset details are derived — from the
+    // hydrated series, filtered to the selected period.
+    const lightBundle = !!baseOutputs && !baseOutputs.series;
+    const hasSeriesRows = !!effResults.outputs?.series
+      && Object.values(effResults.outputs.series).some((rows) => Array.isArray(rows) && rows.length > 0);
+    if (!effResults.outputs || (hasDerivedSummary && (!activePathway || lightBundle || !hasSeriesRows))) {
+      const withDetails = withDerivedAssetDetails(analyticsModel, effResults, settings.currencySymbol, selectedPeriod);
+      return activePathway
+        ? {
+          ...withDetails,
+          pathway: { ...activePathway, selectedPeriod },
+          statistics: statisticsForPeriod(withDetails.statistics, selectedPeriod),
+        }
+        : withDetails;
+    }
     const derived = deriveRunResults(analyticsModel, effResults.outputs, {
       carbonPrice: analyticsCarbonPrice,
+      carbonPriceSchedule: analyticsCarbonSchedule,
+      sampling: effResults.runMeta?.sampling,
       currencySymbol: settings.currencySymbol,
       discountRate: analyticsDiscountRate,
       snapshotWeight: analyticsSnapshotWeight,
@@ -652,9 +746,10 @@ function AppInner() {
       emissionsBreakdown: effResults.emissionsBreakdown,
       outputs: effResults.outputs,
       pathway: derived.pathway,
+      statistics: statisticsForPeriod(effResults.statistics, selectedPeriod),
       runMeta: derived.runMeta,
     };
-  }, [results, analyticsModel, settings.currencySymbol, analyticsDiscountRate, analyticsCarbonPrice, analyticsSnapshotWeight, pathwayConfig, hydratedRunSeries, activeRunName]);
+  }, [results, analyticsModel, settings.currencySymbol, analyticsDiscountRate, analyticsCarbonPrice, analyticsCarbonSchedule, analyticsSnapshotWeight, pathwayConfig, hydratedRunSeries, activeRunName]);
 
   // Hydrate the active run's stripped per-component output series ON DEMAND.
   // The light "View" bundle ships `outputs.series = null` to render instantly;
@@ -800,7 +895,76 @@ function AppInner() {
     })) !== JSON.stringify(activeScenario);
   }, [activeScenario, captureCurrentScenario]);
 
-  const resetForNewModel = useCallback((nextModel: WorkbookModel, name?: string, opts?: { pushToSession?: boolean }) => {
+  // Apply EVERY run-mode config a scenario carries - run window, weights, carbon,
+  // constraints, discount rate, pathway / rolling / sampling and all the mode
+  // configs (stochastic, SCLOPF, reserve, ramp, MGA, ESS, ...). The one place a
+  // scenario becomes live state: used when the user picks a scenario AND when a
+  // model is loaded (so a loaded model's active scenario takes effect, instead of
+  // the previous model's settings leaking into it). Presets saved before a mode
+  // existed normalise to disabled. `maxSnapshots` clamps the window when given.
+  const applyScenarioConfigs = useCallback((scenario: ScenarioPreset, maxSnapshotsHint?: number) => {
+    if (maxSnapshotsHint !== undefined) {
+      const nextEnd = Math.max(1, Math.min(maxSnapshotsHint, scenario.snapshotEnd));
+      const nextStart = Math.max(0, Math.min(scenario.snapshotStart, nextEnd - 1));
+      setSnapshotStart(nextStart);
+      setSnapshotEnd(nextEnd);
+    } else {
+      setSnapshotStart(scenario.snapshotStart);
+      setSnapshotEnd(scenario.snapshotEnd);
+    }
+    setSnapshotWeight(scenario.snapshotWeight);
+    setCarbonPrice(scenario.carbonPrice);
+    setForceLp(scenario.forceLp);
+    setCarbonPriceSchedule((scenario.carbonPriceSchedule ?? []).map((row) => ({ ...row })));
+    setConstraints(scenario.constraints.map((row) => ({ ...row })));
+    updateSettings({
+      discountRate: scenario.discountRate,
+      enableLoadShedding: scenario.enableLoadShedding,
+      loadSheddingCost: scenario.loadSheddingCost,
+    });
+    setPathwayConfig({
+      ...scenario.pathwayConfig,
+      selectedPeriod: getDefaultSelectedPeriod(scenario.pathwayConfig),
+    });
+    setRollingConfig(normalizeRollingConfig(scenario.rollingConfig));
+    // Presets saved before these modes were captured normalize to disabled —
+    // applying a preset restores the FULL run configuration either way.
+    setSamplingConfig(normalizeSamplingConfig(scenario.samplingConfig ?? defaultSamplingConfig()));
+    setStochasticConfig(scenario.stochasticConfig ?? { enabled: false, scenarios: [] });
+    setSclopfConfig(scenario.securityConstrainedConfig ?? { enabled: false });
+    setReserveConfig(scenario.reserveConfig ?? { enabled: false, requirementType: 'fraction', fraction: 0.1, providers: 'all', reserveCost: 0 });
+    setOutageMcConfig(scenario.outageMcConfig ?? { enabled: false, nMembers: 200, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, includeRenewableEnsemble: false, physicalRiskUplift: false, physicalRiskSessionId: '' });
+    setCorrelatedSamplingConfig(scenario.correlatedSamplingConfig ?? { enabled: false, nMembers: 200, seed: 42, loadSensitivity: 0.15, renewableSensitivity: 0.3, inflowSensitivity: 0.2, loadStd: 0.05, renewableStd: 0.1, inflowStd: 0.1 });
+    setRampConfig(scenario.rampConfig ?? { enabled: false, rampLimitUp: 0.5, rampLimitDown: 0.5, appliesTo: 'all' });
+    setElccConfig(scenario.elccConfig ?? { enabled: false, nMembers: 200, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, carriers: [] });
+    setConvergenceConfig(scenario.convergenceConfig ?? { enabled: false, targetMetric: 'eue', tolerance: 0.05, batchSize: 50, maxMembers: 2000, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, maintenanceEnabled: false, maintenanceWeeks: 3, maintenanceCarriers: [] });
+    setLmpDecompositionConfig(scenario.lmpDecompositionConfig ?? { enabled: false, referenceMode: 'load-weighted', referenceBus: '' });
+    setPowerFlowConfig(scenario.powerFlowConfig ?? { enabled: false, linear: false });
+    setMarketSimConfig(scenario.marketSimConfig ?? { enabled: false, pricing: 'uniform' as const, voll: 3000, chargeQuantile: 0.25, dischargeQuantile: 0.75, clearingModel: 'singleSided' as const, demandElasticFraction: 0.2, demandWtp: 120 });
+    setContingencyConfig(scenario.contingencyConfig ?? { enabled: false });
+    setMgaConfig(scenario.mgaConfig ?? { enabled: false, slack: 0.05, carriers: [] });
+    setMerchantConfig(scenario.merchantConfig ?? { enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 });
+    setBidStrategyConfig(scenario.bidStrategyConfig ?? { enabled: false, mode: 'fixed', owner: '', markupType: 'percent', markup: 0.2, maxMarkup: 2.0, steps: 8 });
+    setAssetSwapConfig(scenario.assetSwapConfig ?? { enabled: false, removeFilters: [], addCarrier: '', addCapitalCost: 0, addMarginalCost: 0, replaceRatio: 1, sizeReplacement: false, addStorageMW: 0, addStorageHours: 4, addStorageCapexPerMW: 20000 });
+    setEssConfig(scenario.essConfig ?? { enabled: false, bus: '', maxHours: 4, capitalCostPerMW: 30000, minSizeMW: 10, maxSizeMW: 100, steps: 6, roundTripEfficiency: 0.9 });
+    setPpaConfig(scenario.ppaConfig ?? { enabled: false, owner: '', volumeType: 'generation', flatMW: 0, strikePrice: 0 });
+    setDemandResponseConfig(scenario.demandResponseConfig ?? { enabled: false, loads: [], shiftFraction: 0.2, maxShiftHours: 4, elasticEnabled: false, elasticFraction: 0.2, wtpMax: 200 });
+    setOwnerColumn(scenario.ownerColumn ?? 'owner');
+    setFinanceConfig(scenario.financeConfig ?? { gearing: 0, interestRate: 0.05, tenorYears: 15 });
+  }, [updateSettings]);
+
+  const resetForNewModel = useCallback((
+    nextModel: WorkbookModel,
+    name?: string,
+    // pushToSession:false = the model is already in the session (restore/rehydrate).
+    // keepRunModes:true = the SAME model was refreshed in place (server-side edit):
+    // the user's live run-mode configs stay; otherwise the model's active scenario
+    // (or defaults when it carries none) defines them.
+    opts?: { pushToSession?: boolean; keepRunModes?: boolean },
+  ) => {
+    // A load replaces the working model: nothing before it may be undone.
+    clearHistory();
+    userLoadedRef.current = true;
     // The backend session is the source of truth for the working model. Every
     // load path funnels through here, so mirror the model into the session once
     // per load (not per edit — that per-keystroke full-model serialisation is
@@ -833,10 +997,10 @@ function AppInner() {
     // truth. Done once per load (not per edit). Skipped when restoring FROM the
     // session on boot (it's already there).
     if (opts?.pushToSession !== false) {
-      void putSessionModel(nextModel, {
+      void trackModelPush(putSessionModel(nextModel, {
         filename: builtFilename,
         scenarioName: activeImportedScenario?.label ?? '',
-      }).catch(() => { /* best-effort */ });
+      }));
     }
     const snapshotMax = snapshotMaxFromWorkbook(nextModel.snapshots);
     const nextPathway = readPathwayConfigFromModel(nextModel);
@@ -878,7 +1042,10 @@ function AppInner() {
     };
     const fallbackRolling = normalizeRollingConfig(nextRolling);
     const fallbackSampling = normalizeSamplingConfig(nextSampling);
-    const fallbackScenarioCatalog = defaultScenarioCatalog({
+    const keepModes = opts?.keepRunModes === true;
+    const fallbackBase = buildScenarioPreset({
+      id: 'scenario-base',
+      label: 'Base case',
       snapshotStart: RUN_WINDOW.initialSnapshotStart,
       snapshotEnd: snapshotMax,
       snapshotWeight,
@@ -891,29 +1058,37 @@ function AppInner() {
       pathwayConfig: fallbackPathway,
       rollingConfig: fallbackRolling,
       samplingConfig: fallbackSampling,
-      stochasticConfig,
-      securityConstrainedConfig: sclopfConfig,
-      reserveConfig,
-      outageMcConfig,
-      correlatedSamplingConfig,
-      rampConfig,
-      elccConfig,
-      convergenceConfig,
-      lmpDecompositionConfig,
-      powerFlowConfig,
-      marketSimConfig,
-      contingencyConfig,
-      mgaConfig,
-      merchantConfig,
-      bidStrategyConfig,
-      assetSwapConfig,
-      essConfig,
-      ppaConfig,
-      demandResponseConfig,
-      ownerColumn,
-      financeConfig,
       constraints,
+      // A scenario-less load resets the mode configs to their defaults (omitted
+      // here); an in-place refresh of the SAME model keeps the live ones.
+      ...(keepModes ? {
+        stochasticConfig,
+        securityConstrainedConfig: sclopfConfig,
+        reserveConfig,
+        outageMcConfig,
+        correlatedSamplingConfig,
+        rampConfig,
+        elccConfig,
+        convergenceConfig,
+        lmpDecompositionConfig,
+        powerFlowConfig,
+        marketSimConfig,
+        contingencyConfig,
+        mgaConfig,
+        merchantConfig,
+        bidStrategyConfig,
+        assetSwapConfig,
+        essConfig,
+        ppaConfig,
+        demandResponseConfig,
+        ownerColumn,
+        financeConfig,
+      } : {}),
     });
+    const fallbackScenarioCatalog: ScenarioCatalog = {
+      activeScenarioId: fallbackBase.id,
+      scenarios: [fallbackBase],
+    };
     const catalogToApply = nextScenarioCatalog.scenarios.length > 0
       ? nextScenarioCatalog
       : fallbackScenarioCatalog;
@@ -921,24 +1096,11 @@ function AppInner() {
       ?? catalogToApply.scenarios.find((scenario) => scenario.id === catalogToApply.activeScenarioId)
       ?? null;
 
-    if (activeScenarioToApply) {
-      setSnapshotStart(activeScenarioToApply.snapshotStart);
-      setSnapshotEnd(activeScenarioToApply.snapshotEnd);
-      setSnapshotWeight(activeScenarioToApply.snapshotWeight);
-      setCarbonPrice(activeScenarioToApply.carbonPrice);
-      setForceLp(activeScenarioToApply.forceLp);
-      setConstraints(activeScenarioToApply.constraints.map((row) => ({ ...row })));
-      updateSettings({
-        discountRate: activeScenarioToApply.discountRate,
-        enableLoadShedding: activeScenarioToApply.enableLoadShedding,
-        loadSheddingCost: activeScenarioToApply.loadSheddingCost,
-      });
-      setPathwayConfig({
-        ...activeScenarioToApply.pathwayConfig,
-        selectedPeriod: getDefaultSelectedPeriod(activeScenarioToApply.pathwayConfig),
-      });
-      setRollingConfig(normalizeRollingConfig(activeScenarioToApply.rollingConfig));
-      setSamplingConfig(normalizeSamplingConfig(activeScenarioToApply.samplingConfig ?? fallbackSampling));
+    if (activeScenarioToApply && !keepModes) {
+      // Every run-mode config of the model's active scenario becomes live state
+      // (not just window / carbon / pathway) so a loaded model never inherits the
+      // previous model's stochastic / SCLOPF / reserve / ESS / ... settings.
+      applyScenarioConfigs(activeScenarioToApply, snapshotMax);
     } else {
       setPathwayConfig(fallbackPathway);
       setRollingConfig(fallbackRolling);
@@ -977,8 +1139,10 @@ function AppInner() {
     ownerColumn,
     financeConfig,
     constraints,
-    updateSettings,
     setAnalyticsFocus,
+    clearHistory,
+    trackModelPush,
+    applyScenarioConfigs,
   ]);
 
   const prepareModelForBackend = useCallback((source: WorkbookModel): WorkbookModel => {
@@ -1090,26 +1254,40 @@ function AppInner() {
   // clobber the server's series), and relearn the session's temporal sheets.
   const reloadSessionModel = useCallback(async () => {
     const saved = await getSessionFullModel({ staticOnly: true }).catch(() => null);
-    if (saved) resetForNewModel(saved, undefined, { pushToSession: false });
+    if (saved) resetForNewModel(saved, undefined, { pushToSession: false, keepRunModes: true });
     await refreshSeriesCounts();
   }, [resetForNewModel, refreshSeriesCounts]);
 
-  // Mount with an EMPTY editor while the session already holds a model — the tab
-  // was opened after the agent built it, or Bifrost activated a conversation
-  // before this frame existed. Strictly additive: it only fires when there is
-  // nothing in the editor to lose.
-  const hydratedOnce = useRef(false);
-  useEffect(() => {
-    if (hydratedOnce.current) return;
-    hydratedOnce.current = true;
-    void (async () => {
-      if ((model.buses?.length ?? 0) > 0) return;
-      const meta = await getSessionMeta().catch(() => null);
-      const rows = meta?.sheets?.reduce((n, sheet) => n + (sheet.rowCount ?? 0), 0) ?? 0;
-      if (rows > 0) await reloadSessionModel();
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // NOTE: there is ONE boot path for rehydrating the editor from a session that
+  // already holds a model (the "Session persistence" effect below). A second
+  // mount-time effect used to do the same thing and raced it, each calling
+  // resetForNewModel and the loser's controls winning at random.
+
+  // Refresh the browser's static mirror after someone ELSE edited the session (an
+  // agent over MCP): swap in the new static sheets but KEEP everything the edit
+  // did not touch - results, run window, run-mode configs, scenarios - instead of
+  // treating it as a new model load. The run window follows the axis only when it
+  // covered the whole old axis.
+  const windowRef = useRef({ max: maxSnapshots, end: snapshotEnd });
+  windowRef.current = { max: maxSnapshots, end: snapshotEnd };
+  const refreshStaticFromSession = useCallback(async () => {
+    const saved = await getSessionFullModel({ staticOnly: true }).catch(() => null);
+    if (!saved) return;
+    normalizeInputDatesToIso(saved, settings.dateFormat);
+    const nextMax = snapshotMaxFromWorkbook(saved.snapshots);
+    const { max: prevMax, end: prevEnd } = windowRef.current;
+    setMaxSnapshots(nextMax);
+    setSnapshotEnd(prevEnd >= prevMax ? nextMax : Math.min(prevEnd, nextMax));
+    setSnapshotStart((start) => Math.min(start, Math.max(0, nextMax - 1)));
+    setModel(stripSeriesSheets(saved));
+    clearHistory();
+    userLoadedRef.current = true;
+    const nextCatalog = readScenarioCatalogFromModel(saved);
+    if (nextCatalog.scenarios.length > 0) setScenarioCatalog(nextCatalog);
+    setCustomDsl(readCustomDslFromModel(saved));
+    setCarbonLibrary(readCarbonLibraryFromModel(saved));
+    await refreshSeriesCounts();
+  }, [settings.dateFormat, clearHistory, refreshSeriesCounts]);
 
   // Someone ELSE changed the session — an agent over MCP, or Bifrost loading a
   // conversation's project. The browser's static workbook is a mirror, and until
@@ -1118,7 +1296,7 @@ function AppInner() {
   // live, which made it look like a partial write rather than a stale mirror.
   useSessionSync((event) => {
     void (async () => {
-      await reloadSessionModel();
+      await refreshStaticFromSession();
       const what = event.summary || event.kind || 'the model';
       showToast(`Reloaded — ${event.actor === 'agent' ? 'the agent' : 'another client'} changed ${what}`, 'info');
     })();
@@ -1359,7 +1537,9 @@ function AppInner() {
         // are paged into the grid on demand (keeps boot light).
         const savedModel = await getSessionFullModel({ staticOnly: true }).catch(() => null);
         const hasRows = !!savedModel && Object.values(savedModel).some((rows) => Array.isArray(rows) && rows.length > 0);
-        if (!cancelled && savedModel && hasRows) {
+        // `userLoadedRef`: the user opened a model while this was still fetching —
+        // theirs wins, the rehydrate must not replace it.
+        if (!cancelled && !userLoadedRef.current && savedModel && hasRows) {
           // Already in the session — don't push it straight back.
           resetForNewModel(savedModel, controls?.filename, { pushToSession: false });
           // Static rehydrate drops series; learn them from the session meta so
@@ -1385,6 +1565,12 @@ function AppInner() {
             const windowIsForThisModel =
               !sessionFilename || !controls.filename || sessionFilename === controls.filename;
             if (windowIsForThisModel) {
+              // The persisted scenario carries EVERY run-mode config (stochastic,
+              // SCLOPF, reserve, ramp, MGA, ESS, ...), which the fields below do
+              // not. Apply it first; the explicit fields then win where they overlap.
+              if (controls.scenario) {
+                applyScenarioConfigs(controls.scenario, snapshotMaxFromWorkbook(savedModel.snapshots));
+              }
               setSnapshotStart(controls.snapshotStart);
               setSnapshotEnd(controls.snapshotEnd);
             }
@@ -1423,11 +1609,14 @@ function AppInner() {
         filename, carbonPrice, carbonPriceSchedule,
         snapshotStart, snapshotEnd, snapshotWeight, forceLp,
         constraints, rollingConfig, samplingConfig, pathwayConfig,
+        scenario: captureCurrentScenario(),
         savedAt: Date.now(),
       });
     }, 400);
     return () => window.clearTimeout(id);
-  }, [filename, carbonPrice, carbonPriceSchedule, snapshotStart, snapshotEnd, snapshotWeight, forceLp, constraints, rollingConfig, samplingConfig, pathwayConfig]);
+    // captureCurrentScenario changes with every live control, run-mode configs
+    // included, so any of them re-persists.
+  }, [filename, carbonPrice, carbonPriceSchedule, snapshotStart, snapshotEnd, snapshotWeight, forceLp, constraints, rollingConfig, samplingConfig, pathwayConfig, captureCurrentScenario]);
 
   // Structural static-model changes (column ops, clear, reorder, undo/redo)
   // have no row-op equivalent — they request ONE static-merge resync here.
@@ -1435,10 +1624,10 @@ function AppInner() {
   useEffect(() => {
     if (staticResyncTick === 0) return undefined;
     const id = window.setTimeout(() => {
-      void putStaticModel(prepareModelForBackend(modelRef.current)).catch(() => { /* best-effort */ });
+      void trackModelPush(putStaticModel(prepareModelForBackend(modelRef.current)));
     }, 300);
     return () => window.clearTimeout(id);
-  }, [staticResyncTick, prepareModelForBackend]);
+  }, [staticResyncTick, prepareModelForBackend, trackModelPush]);
 
   // Run history lives entirely on the backend (the single source of truth) —
   // see `refreshBackendRuns` / `backendRuns` below. There is no browser-side
@@ -1520,52 +1709,25 @@ function AppInner() {
       ...current,
       activeScenarioId: scenario.id,
     }));
-    const nextEnd = Math.max(1, Math.min(maxSnapshots, scenario.snapshotEnd));
-    const nextStart = Math.max(0, Math.min(scenario.snapshotStart, nextEnd - 1));
-    setSnapshotStart(nextStart);
-    setSnapshotEnd(nextEnd);
-    setSnapshotWeight(scenario.snapshotWeight);
-    setCarbonPrice(scenario.carbonPrice);
-    setCarbonPriceSchedule((scenario.carbonPriceSchedule ?? []).map((row) => ({ ...row })));
-    setForceLp(scenario.forceLp);
-    setConstraints(scenario.constraints.map((row) => ({ ...row })));
-    updateSettings({
-      discountRate: scenario.discountRate,
-      enableLoadShedding: scenario.enableLoadShedding,
-      loadSheddingCost: scenario.loadSheddingCost,
-    });
-    setPathwayConfig({
-      ...scenario.pathwayConfig,
-      selectedPeriod: getDefaultSelectedPeriod(scenario.pathwayConfig),
-    });
-    setRollingConfig(normalizeRollingConfig(scenario.rollingConfig));
-    // Presets saved before these modes were captured normalize to disabled —
-    // applying a preset restores the FULL run configuration either way.
-    setSamplingConfig(normalizeSamplingConfig(scenario.samplingConfig ?? defaultSamplingConfig()));
-    setStochasticConfig(scenario.stochasticConfig ?? { enabled: false, scenarios: [] });
-    setSclopfConfig(scenario.securityConstrainedConfig ?? { enabled: false });
-    setReserveConfig(scenario.reserveConfig ?? { enabled: false, requirementType: 'fraction', fraction: 0.1, providers: 'all', reserveCost: 0 });
-    setOutageMcConfig(scenario.outageMcConfig ?? { enabled: false, nMembers: 200, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, includeRenewableEnsemble: false, physicalRiskUplift: false, physicalRiskSessionId: '' });
-    setCorrelatedSamplingConfig(scenario.correlatedSamplingConfig ?? { enabled: false, nMembers: 200, seed: 42, loadSensitivity: 0.15, renewableSensitivity: 0.3, inflowSensitivity: 0.2, loadStd: 0.05, renewableStd: 0.1, inflowStd: 0.1 });
-    setRampConfig(scenario.rampConfig ?? { enabled: false, rampLimitUp: 0.5, rampLimitDown: 0.5, appliesTo: 'all' });
-    setElccConfig(scenario.elccConfig ?? { enabled: false, nMembers: 200, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, carriers: [] });
-    setConvergenceConfig(scenario.convergenceConfig ?? { enabled: false, targetMetric: 'eue', tolerance: 0.05, batchSize: 50, maxMembers: 2000, seed: 42, forcedOutageRate: 0.05, mttrHours: 48, maintenanceEnabled: false, maintenanceWeeks: 3, maintenanceCarriers: [] });
-    setLmpDecompositionConfig(scenario.lmpDecompositionConfig ?? { enabled: false, referenceMode: 'load-weighted', referenceBus: '' });
-    setPowerFlowConfig(scenario.powerFlowConfig ?? { enabled: false, linear: false });
-    setMarketSimConfig(scenario.marketSimConfig ?? { enabled: false, pricing: 'uniform' as const, voll: 3000, chargeQuantile: 0.25, dischargeQuantile: 0.75, clearingModel: 'singleSided' as const, demandElasticFraction: 0.2, demandWtp: 120 });
-    setContingencyConfig(scenario.contingencyConfig ?? { enabled: false });
-    setMgaConfig(scenario.mgaConfig ?? { enabled: false, slack: 0.05, carriers: [] });
-    setMerchantConfig(scenario.merchantConfig ?? { enabled: false, owner: '', priceSource: 'lmp', flatPrice: 0 });
-    setBidStrategyConfig(scenario.bidStrategyConfig ?? { enabled: false, mode: 'fixed', owner: '', markupType: 'percent', markup: 0.2, maxMarkup: 2.0, steps: 8 });
-    setAssetSwapConfig(scenario.assetSwapConfig ?? { enabled: false, removeFilters: [], addCarrier: '', addCapitalCost: 0, addMarginalCost: 0, replaceRatio: 1, sizeReplacement: false, addStorageMW: 0, addStorageHours: 4, addStorageCapexPerMW: 20000 });
-    setEssConfig(scenario.essConfig ?? { enabled: false, bus: '', maxHours: 4, capitalCostPerMW: 30000, minSizeMW: 10, maxSizeMW: 100, steps: 6, roundTripEfficiency: 0.9 });
-    setPpaConfig(scenario.ppaConfig ?? { enabled: false, owner: '', volumeType: 'generation', flatMW: 0, strikePrice: 0 });
-    setDemandResponseConfig(scenario.demandResponseConfig ?? { enabled: false, loads: [], shiftFraction: 0.2, maxShiftHours: 4, elasticEnabled: false, elasticFraction: 0.2, wtpMax: 200 });
-    setOwnerColumn(scenario.ownerColumn ?? 'owner');
-    setFinanceConfig(scenario.financeConfig ?? { gearing: 0, interestRate: 0.05, tenorYears: 15 });
+    applyScenarioConfigs(scenario, maxSnapshots);
     setStatus(`Applied scenario: ${scenario.label}`);
     showToast(`Scenario applied: ${scenario.label}`, 'success');
-  }, [maxSnapshots, showToast, updateSettings]);
+  }, [applyScenarioConfigs, maxSnapshots, showToast]);
+
+  // Adopt the model-derived state of a project that was swapped in WITHOUT going
+  // through resetForNewModel (Import Project / History import): the DSL box, the
+  // carbon-schedule library, the scenario catalogue and the ACTIVE scenario's
+  // run-mode configs. Without it they kept describing the previous project and
+  // the next export/scenario edit would write the old ones into the new model.
+  const applyProjectConfigFromModel = useCallback((source: WorkbookModel) => {
+    setCustomDsl(readCustomDslFromModel(source));
+    setCarbonLibrary(readCarbonLibraryFromModel(source));
+    const catalog = readScenarioCatalogFromModel(source);
+    if (catalog.scenarios.length === 0) return;
+    setScenarioCatalog(catalog);
+    const active = catalog.scenarios.find((row) => row.id === catalog.activeScenarioId) ?? catalog.scenarios[0];
+    applyScenarioConfigs(active, snapshotMaxFromWorkbook(source.snapshots));
+  }, [applyScenarioConfigs]);
 
   const handleImport = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -1616,8 +1778,8 @@ function AppInner() {
       }
       const bundle = (await resp.json()) as {
         model?: WorkbookModel;
-        scenario?: { constraints?: CustomConstraint[]; carbonPrice?: number; discountRate?: number };
-        options?: { snapshotStart?: number; snapshotEnd?: number; snapshotWeight?: number };
+        scenario?: { constraints?: CustomConstraint[]; carbonPrice?: number; discountRate?: number; carbonPriceSchedule?: CarbonPriceScheduleEntry[] };
+        options?: { snapshotStart?: number; snapshotEnd?: number; snapshotWeight?: number; carbonPriceSchedule?: CarbonPriceScheduleEntry[] };
         result?: RunResults;
         filename?: string;
       };
@@ -1626,6 +1788,14 @@ function AppInner() {
       // hand-built workbook may not — normalise before loading, as the CSV /
       // netCDF import paths do.
       if (importedModel) normalizeInputDatesToIso(importedModel, settings.dateFormat);
+      // Adopt the project's DSL / scenario catalogue / carbon library and its
+      // active scenario's run-mode configs BEFORE the run-specific values below,
+      // which are the run's own record and win where they overlap.
+      if (importedModel) applyProjectConfigFromModel(importedModel);
+      // No recorded window (a plain PyPSA workbook has no RunState sheet) must
+      // default to the whole snapshot axis - `?? 0` made the next run solve one hour.
+      const importedSnapshotCount = importedModel ? snapshotMaxFromWorkbook(importedModel.snapshots) : 1;
+      const importedEnd = bundle.options?.snapshotEnd;
       handleRestoreRun(
         {
           label: bundle.filename || file.name,
@@ -1633,8 +1803,9 @@ function AppInner() {
           model: importedModel,
           carbonPrice: bundle.scenario?.carbonPrice ?? 0,
           discountRate: bundle.scenario?.discountRate,
+          carbonPriceSchedule: bundle.options?.carbonPriceSchedule ?? bundle.scenario?.carbonPriceSchedule,
           snapshotStart: bundle.options?.snapshotStart ?? 0,
-          snapshotEnd: bundle.options?.snapshotEnd ?? 0,
+          snapshotEnd: typeof importedEnd === 'number' && importedEnd > 0 ? importedEnd : importedSnapshotCount,
           snapshotWeight: bundle.options?.snapshotWeight ?? 1,
         },
         { loadIntoEditor: true },
@@ -1924,27 +2095,45 @@ function AppInner() {
   // a database, country, and filters. Merges the fragment into the current
   // model (carriers union, name dedupe, provenance row appended).
   const handleApplyImportedFragment = useCallback(
-    (fragment: WorkbookFragment, databaseName: string, countryName: string) => {
-      pushHistory();
-      // Merge once (deterministic), apply to the mirror, then push to the
-      // session: static sheets via the merge resync; any SERIES sheets in the
-      // fragment (e.g. demand profiles) are replaced sheet-by-sheet via PATCH
-      // because static merges deliberately skip time-series.
-      const merged = mergeWorkbookFragment(modelRef.current, fragment);
-      setModel(merged);
+    async (fragment: WorkbookFragment, databaseName: string, countryName: string) => {
+      const seriesSheets = Object.keys(fragment.sheets).filter((sheet) => isSeriesSheet(sheet));
+      // The browser mirror holds NO time-series, so merging the fragment into it
+      // alone yields sheets that contain only the fragment's columns - and replacing
+      // the session's sheet with that wiped every other asset's profile. Load the
+      // session's current rows for each affected series sheet first and merge the
+      // fragment INTO them (columns union, axis union), then write back.
+      const existingSeries: Record<string, GridRow[]> = {};
+      if (seriesSheets.length > 0) {
+        try {
+          const meta = await getSessionMeta();
+          const held = new Set((meta.sheets ?? []).filter((sheet) => sheet.rowCount > 0).map((sheet) => sheet.name));
+          for (const sheet of seriesSheets) {
+            if (!held.has(sheet)) continue;
+            existingSeries[sheet] = (await getSheetPage(sheet, { offset: 0, limit: 1_000_000 })).rows;
+          }
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'unknown error';
+          setStatus(`Import cancelled - could not read the existing profiles: ${msg}`);
+          showToast(`Import cancelled: the existing time-series could not be read (${msg}), so nothing was changed.`, 'error');
+          return;
+        }
+      }
+      // An import REPLACES parts of the model on both sides, so it is not an
+      // undoable edit (undoing only the static half would desync the series).
+      clearHistory();
+      const merged = mergeWorkbookFragment({ ...modelRef.current, ...existingSeries }, fragment);
+      setModel(stripSeriesSheets(merged));
       requestStaticResync();
-      for (const sheet of Object.keys(fragment.sheets)) {
-        if (!isSeriesSheet(sheet)) continue;
+      for (const sheet of seriesSheets) {
         const rows = (merged[sheet] as GridRow[] | undefined) ?? [];
-        void (async () => {
-          const previous = await getSheetPage(sheet, { offset: 0, limit: 0 })
-            .then((page) => page.total)
-            .catch(() => 0);
-          await patchSheet(sheet, [
-            ...(previous ? [{ op: 'deleteRows' as const, rows: Array.from({ length: previous }, (_, i) => i) }] : []),
-            ...rows.map((r) => ({ op: 'addRow' as const, values: r as Record<string, unknown> })),
-          ]);
-        })().catch(() => { /* best-effort */ });
+        const previous = existingSeries[sheet]?.length ?? 0;
+        void patchSheet(sheet, [
+          ...(previous ? [{ op: 'deleteRows' as const, rows: Array.from({ length: previous }, (_, i) => i) }] : []),
+          ...rows.map((r) => ({ op: 'addRow' as const, values: r as Record<string, unknown> })),
+        ]).then(() => refreshSeriesCounts()).catch((error: unknown) => {
+          const msg = error instanceof Error ? error.message : 'unknown error';
+          showToast(`${sheet} could not be saved to the backend session (${msg}) - a run will not see it.`, 'error');
+        });
       }
       const counts = Object.entries(fragment.sheets)
         .map(([sheet, rows]) => `${rows.length} ${sheet}`)
@@ -1954,7 +2143,7 @@ function AppInner() {
       setStatus(msg);
       showToast(msg, 'success');
     },
-    [pushHistory, showToast, requestStaticResync],
+    [clearHistory, showToast, requestStaticResync, refreshSeriesCounts],
   );
 
   // Build → add a sector-coupling conversion technology (CCGT / electrolyser /
@@ -2204,6 +2393,8 @@ function AppInner() {
     model?: WorkbookModel;
     carbonPrice: number;
     discountRate?: number;
+    /** Year -> price schedule the run solved with (absent = scalar only). */
+    carbonPriceSchedule?: CarbonPriceScheduleEntry[];
     snapshotStart: number;
     snapshotEnd: number;
     snapshotWeight: number;
@@ -2228,6 +2419,7 @@ function AppInner() {
       carbonPrice: entry.carbonPrice,
       snapshotWeight: entry.snapshotWeight,
       discountRate: entry.discountRate ?? settings.discountRate,
+      carbonPriceSchedule: (entry.carbonPriceSchedule ?? []).map((row) => ({ ...row })),
     });
     // VIEW vs IMPORT. Plain "View results" must NOT clone the run's model into
     // the live editable state: that structuredClone (a full workbook) plus the
@@ -2237,7 +2429,9 @@ function AppInner() {
     // analytics topology. The heavy load-into-editor happens solely on explicit
     // "Import project" (loadIntoEditor), which is the path for edit + re-run.
     if (entry.model && opts?.loadIntoEditor) {
-      pushHistory();
+      // A load, not an edit: nothing before it may be undone into the new model.
+      clearHistory();
+      userLoadedRef.current = true;
       const restoredModel = structuredClone(entry.model);
       setModel(restoredModel);
       // The session is the source of truth and runs submit by sessionId — push
@@ -2248,7 +2442,7 @@ function AppInner() {
       // `entry.model` here is only the static topology) — re-pushing would wipe
       // the series.
       if (!opts?.sessionAlreadyLoaded) {
-        void putSessionModel(restoredModel, { filename: entry.label ?? '' }).catch(() => { /* best-effort */ });
+        void trackModelPush(putSessionModel(restoredModel, { filename: entry.label ?? '' }));
       }
       // Make the Model tree list the imported temporal sheets. When we pushed the
       // FULL model (project-file import) its series rows are right here, so count
@@ -2269,38 +2463,50 @@ function AppInner() {
       }
       const snapshotMax = snapshotMaxFromWorkbook(restoredModel.snapshots);
       setMaxSnapshots(snapshotMax);
-      setSnapshotStart(entry.snapshotStart);
-      setSnapshotEnd(entry.snapshotEnd);
+      // A stored window of 0 / missing (plain PyPSA workbook, older bundle) means
+      // "no window recorded", NOT "solve zero snapshots": default to the whole axis.
+      const storedEnd = entry.snapshotEnd > 0 ? Math.min(entry.snapshotEnd, snapshotMax) : snapshotMax;
+      setSnapshotStart(Math.max(0, Math.min(entry.snapshotStart, storedEnd - 1)));
+      setSnapshotEnd(storedEnd);
     }
-    setSnapshotWeight(entry.snapshotWeight);
-    setCarbonPrice(entry.carbonPrice);
-    if (entry.discountRate !== undefined) updateSettings({ discountRate: entry.discountRate });
-    setPathwayConfig((current) => entry.results.pathway?.enabled ? ({
-      ...current,
-      enabled: true,
-      planningMode: 'pathway',
-      periods: entry.results.pathway?.summaries?.map((row) => ({
-        period: row.period,
-        objectiveWeight: row.objectiveWeight,
-        yearsWeight: row.yearsWeight,
-      })) ?? current.periods,
-      selectedPeriod: entry.results.pathway?.selectedPeriod ?? current.selectedPeriod,
-    }) : {
-      ...current,
-      enabled: false,
-      planningMode: 'single_period',
-      selectedPeriod: null,
-    });
-    setRollingConfig((current) => entry.results.rolling ? normalizeRollingConfig({
-      ...current,
-      enabled: entry.results.rolling?.enabled ?? current.enabled,
-      horizonSnapshots: entry.results.rolling?.horizonSnapshots ?? current.horizonSnapshots,
-      overlapSnapshots: entry.results.rolling?.overlapSnapshots ?? current.overlapSnapshots,
-      stepSnapshots: entry.results.rolling?.stepSnapshots ?? current.stepSnapshots,
-    }) : {
-      ...current,
-      enabled: false,
-    });
+    // RF5: these are the EDITOR's run settings (what the next solve uses). Plain
+    // "View result" must leave them alone — the displayed result is pinned by
+    // `resultsContext` / its own pathway periods above — so they are applied only
+    // when the run is loaded into the editor.
+    if (opts?.loadIntoEditor) {
+      setSnapshotWeight(entry.snapshotWeight);
+      setCarbonPrice(entry.carbonPrice);
+      if (entry.discountRate !== undefined) updateSettings({ discountRate: entry.discountRate });
+      setPathwayConfig((current) => entry.results.pathway?.enabled ? ({
+        ...current,
+        enabled: true,
+        planningMode: 'pathway',
+        periods: entry.results.pathway?.summaries?.map((row) => ({
+          period: row.period,
+          objectiveWeight: row.objectiveWeight,
+          yearsWeight: row.yearsWeight,
+        })) ?? current.periods,
+        selectedPeriod: entry.results.pathway?.selectedPeriod ?? current.selectedPeriod,
+      }) : {
+        ...current,
+        enabled: false,
+        planningMode: 'single_period',
+        selectedPeriod: null,
+      });
+      setRollingConfig((current) => entry.results.rolling ? normalizeRollingConfig({
+        ...current,
+        enabled: entry.results.rolling?.enabled ?? current.enabled,
+        horizonSnapshots: entry.results.rolling?.horizonSnapshots ?? current.horizonSnapshots,
+        overlapSnapshots: entry.results.rolling?.overlapSnapshots ?? current.overlapSnapshots,
+        stepSnapshots: entry.results.rolling?.stepSnapshots ?? current.stepSnapshots,
+      }) : {
+        ...current,
+        enabled: false,
+      });
+      if (Array.isArray(entry.carbonPriceSchedule)) {
+        setCarbonPriceSchedule(entry.carbonPriceSchedule.map((row) => ({ ...row })));
+      }
+    }
     // Stay on whatever view/sub-tab the user is currently on — do not yank them
     // to a default Result pane. Any stale asset focus that the restored results
     // don't contain is dropped by the focus-reset effect above.
@@ -2389,8 +2595,11 @@ function AppInner() {
         const becameTerminal =
           (previous === 'queued' || previous === 'running')
           && (job.status === 'done' || job.status === 'error' || job.status === 'cancelled');
-        if (becameTerminal && !seenTerminalRef.current.has(job.id)) {
-          seenTerminalRef.current.add(job.id);
+        // Keyed by id AND start/finish time: a re-run reuses the job id, so an id-only
+        // set swallowed every notification after the first run of that item.
+        const runKey = `${job.id}|${job.startedAt ?? ''}|${job.finishedAt ?? ''}`;
+        if (becameTerminal && !seenTerminalRef.current.has(runKey)) {
+          seenTerminalRef.current.add(runKey);
           anyFinished = true;
           if (job.status === 'done') {
             showToast(`Run "${job.label}" finished — added to History`, 'success');
@@ -2627,6 +2836,9 @@ function AppInner() {
         };
         const aResp = await fetch(`${API_BASE}/api/runs/${encodeURIComponent(name)}/analytics`);
         const light = aResp.ok ? await aResp.json() : {};
+        // The project's active scenario's run-mode configs (stochastic, SCLOPF, ...)
+        // before the run's own recorded values, which win where they overlap.
+        applyProjectConfigFromModel((light.modelStatic ?? {}) as WorkbookModel);
         handleRestoreRun(
           {
             label: light.label || promoted.filename || name,
@@ -2636,6 +2848,7 @@ function AppInner() {
             model: light.modelStatic ?? {},
             carbonPrice: light.scenario?.carbonPrice ?? promoted.scenario?.carbonPrice ?? 0,
             discountRate: light.scenario?.discountRate ?? promoted.scenario?.discountRate,
+            carbonPriceSchedule: light.options?.carbonPriceSchedule ?? light.scenario?.carbonPriceSchedule,
             snapshotStart: promoted.snapshotStart ?? light.options?.snapshotStart ?? 0,
             snapshotEnd: promoted.snapshotEnd ?? light.options?.snapshotEnd ?? 0,
             snapshotWeight: promoted.snapshotWeight ?? light.options?.snapshotWeight ?? 1,
@@ -2684,6 +2897,7 @@ function AppInner() {
         model: bundle.modelStatic,
         carbonPrice: bundle.scenario?.carbonPrice ?? 0,
         discountRate: bundle.scenario?.discountRate,
+        carbonPriceSchedule: bundle.options?.carbonPriceSchedule ?? bundle.scenario?.carbonPriceSchedule,
         snapshotStart: bundle.snapshotStart ?? bundle.options?.snapshotStart ?? 0,
         snapshotEnd: bundle.snapshotEnd ?? bundle.options?.snapshotEnd ?? 0,
         snapshotWeight: bundle.snapshotWeight ?? bundle.options?.snapshotWeight ?? 1,
@@ -2964,7 +3178,11 @@ function AppInner() {
     const saver = (window as any).showSaveFilePicker;
     const suggestedName = filename || 'ragnarok_case.xlsx';
     if (!saver) {
-      const requested = (await promptDialog('Save workbook as', { title: 'Save workbook', defaultValue: suggestedName, confirmText: 'Save' })) || suggestedName;
+      const requestedRaw = await promptDialog('Save workbook as', { title: 'Save workbook', defaultValue: suggestedName, confirmText: 'Save' });
+      // Cancel (null) must abort: it used to fall back to the suggested name and
+      // save anyway.
+      if (requestedRaw === null || requestedRaw === undefined) return;
+      const requested = requestedRaw.trim() || suggestedName;
       try {
         const bytes = await inputWorkbookBytes();
         downloadBytes(bytes, requested, XLSX_MEDIA_TYPE);
@@ -3146,6 +3364,23 @@ function AppInner() {
 
   const handleRunModel = async (staged = false) => {
     const snapshotCount = snapshotEnd - snapshotStart;
+    // An empty / inverted window would solve nothing (or, server-side, fall back to
+    // a single snapshot) and still look like a run: refuse it up front.
+    if (!Number.isFinite(snapshotCount) || snapshotCount <= 0) {
+      const msg = `Run blocked - the snapshot window ${snapshotStart} to ${snapshotEnd} is empty. `
+        + 'Set the end after the start in the Run dialog.';
+      setStatus(msg);
+      showToast(msg, 'error');
+      return;
+    }
+    // A load's full-model push may still be in flight (or may have failed): a run
+    // submits by session id, so it must wait for - and check - the latest upload.
+    if (!(await modelPushRef.current)) {
+      const msg = 'Run blocked - the model has not reached the backend session. Reload the model and retry.';
+      setStatus(msg);
+      showToast(msg, 'error');
+      return;
+    }
     // Parse the constraint DSL with per-line errors: invalid lines are NOT
     // applied, and that must never be silent — warn loudly before the run so
     // "constraint I typed had a typo" can't masquerade as a clean result.
@@ -3224,6 +3459,10 @@ function AppInner() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sessionId: DEFAULT_SESSION_ID, scenario, options }),
         });
+        if (!response.ok) {
+          const detail = await response.text().catch(() => '');
+          throw new Error(detail || `Validation failed (HTTP ${response.status})`);
+        }
         const result = await response.json();
         setValidateResult(result);
         // Don't auto-switch tabs — the pass/fail is reported via the toast/status
@@ -3232,7 +3471,9 @@ function AppInner() {
         setStatus(vMsg);
         showToast(vMsg, result.valid ? 'success' : 'error');
       } catch (error) {
-        setStatus(error instanceof Error ? error.message : 'Validation request failed.');
+        const msg = error instanceof Error ? error.message : 'Validation request failed.';
+        setStatus(msg);
+        showToast(msg, 'error');
       }
       return;
     }
@@ -3344,7 +3585,10 @@ function AppInner() {
           <button
             className="run-button"
             onClick={() => setRunDialogOpen(true)}
-            title="Queue a run (runs execute one at a time)"
+            disabled={modelPushesInFlight > 0}
+            title={modelPushesInFlight > 0
+              ? 'Sending the model to the backend - Run is available when that finishes'
+              : 'Queue a run (runs execute one at a time)'}
           >
             Run
           </button>

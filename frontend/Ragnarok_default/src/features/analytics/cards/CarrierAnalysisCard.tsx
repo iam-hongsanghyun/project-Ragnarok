@@ -18,6 +18,7 @@
 import React from 'react';
 import { RunResults, WorkbookModel } from 'lib/types';
 import { numberValue, carrierColor, stringValue } from 'lib/utils/helpers';
+import { selectGeneratorEnergy } from 'lib/results/analytics';
 
 interface Props {
   results: RunResults;
@@ -54,7 +55,10 @@ export function CarrierAnalysisCard({ results, model }: Props) {
 
   const staticGens = (results.outputs?.static?.['generators'] ?? {}) as Record<string, Record<string, unknown>>;
   const detail = results.assetDetails?.generators ?? {};
-  const genEnergy = results.generatorEnergy ?? [];
+  const genEnergy = selectGeneratorEnergy(
+    results.generatorEnergy,
+    results.pathway?.enabled ? results.pathway.selectedPeriod : null,
+  ) ?? [];
   const geByName = new Map(genEnergy.filter((g) => g.name).map((g) => [g.name, g]));
 
   // Curtailment is only meaningful for generators with a time-varying p_max_pu

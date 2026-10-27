@@ -19,6 +19,7 @@ import type {
   PathwayConfig,
   RollingHorizonConfig,
   SamplingConfig,
+  ScenarioPreset,
   WorkbookModel,
 } from 'lib/types';
 
@@ -47,6 +48,11 @@ export interface SessionControls {
   rollingConfig?: RollingHorizonConfig;
   samplingConfig?: SamplingConfig;
   pathwayConfig?: PathwayConfig;
+  // The FULL live run configuration (window, carbon, every run-mode config:
+  // stochastic, SCLOPF, reserve, ramp, MGA, ESS, ...) captured as a scenario, so
+  // a reload restores all of it - not just the handful of fields above. Absent in
+  // records written by older builds.
+  scenario?: ScenarioPreset;
   savedAt: number;
 }
 

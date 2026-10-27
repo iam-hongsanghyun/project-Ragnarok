@@ -215,6 +215,20 @@ export interface PivotSeriesResult {
   loading: boolean;
 }
 
+/** Output rows of a series sheet for the period on display. A pathway result's
+ *  series holds every investment period back to back; pooling them mixed periods
+ *  into one axis, so keep only the selected period's rows (rows with no period
+ *  pass through). */
+function periodSeriesRows(results: RunResults | null, sheetKey: string): GridRow[] | undefined {
+  const rows = results?.outputs?.series?.[sheetKey];
+  const period = results?.pathway?.enabled ? results.pathway.selectedPeriod : null;
+  if (!rows || period === null || period === undefined) return rows;
+  return rows.filter((row) => {
+    const raw = row.period;
+    return raw === undefined || raw === null || raw === '' || numberValue(raw) === period;
+  });
+}
+
 export function buildPivotSeries(
   config: PivotChartConfig,
   results: RunResults | null,
@@ -252,7 +266,7 @@ export function buildPivotSeries(
   }
 
   const sheetKey = `${compList}-${config.valueAttribute}`;
-  const seriesRows = results?.outputs?.series?.[sheetKey];
+  const seriesRows = periodSeriesRows(results, sheetKey);
   if (!seriesRows || !seriesRows.length) {
     return { rows: [], series: [], unit: rawUnit, loading: true };
   }
@@ -429,7 +443,7 @@ export function buildPivotMix(
 
   if (kind === 'series') {
     const sheetKey = `${compList}-${config.valueAttribute}`;
-    const seriesRows = results?.outputs?.series?.[sheetKey];
+    const seriesRows = periodSeriesRows(results, sheetKey);
     if (!seriesRows || !seriesRows.length) return { data: [], unit, loading: true };
     const start = Math.max(0, config.startIndex);
     const end = Math.min(config.endIndex, seriesRows.length - 1);
@@ -507,7 +521,7 @@ export function buildPivotCategory(
   };
 
   if (kind === 'series') {
-    const seriesRows = results?.outputs?.series?.[`${compList}-${config.valueAttribute}`];
+    const seriesRows = periodSeriesRows(results, `${compList}-${config.valueAttribute}`);
     if (!seriesRows || !seriesRows.length) return { labels: [], series: [], unit, loading: true };
     const start = Math.max(0, config.startIndex);
     const end = Math.min(config.endIndex, seriesRows.length - 1);
@@ -582,7 +596,7 @@ function perComponentValues(
   const dims = indexByName(model[sheet] ?? []);
   const out: Record<string, number> = {};
   if (kind === 'series') {
-    const seriesRows = results?.outputs?.series?.[`${compList}-${attr}`];
+    const seriesRows = periodSeriesRows(results, `${compList}-${attr}`);
     if (!seriesRows || !seriesRows.length) return { values: out, loading: true };
     const start = Math.max(0, config.startIndex);
     const end = Math.min(config.endIndex, seriesRows.length - 1);

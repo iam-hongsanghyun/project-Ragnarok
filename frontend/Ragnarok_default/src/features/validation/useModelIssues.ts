@@ -35,13 +35,17 @@ function snapshotLabelOf(row: Row): string {
 }
 
 /** A label in comparable form. The snapshots sheet and a hand-made CSV routinely
- *  spell the same instant differently ("…T00:00:00" vs "… 00:00:00"), so comparing
- *  raw strings would flag every well-aligned sheet. Non-datetime axes ("now",
- *  integer steps) fall through to the trimmed string. */
-function normSnapshot(label: string): string {
-  if (!label) return '';
-  const ms = Date.parse(label);
-  return Number.isNaN(ms) ? label : new Date(ms).toISOString();
+ *  spell the same instant differently ("...T00:00:00" vs "... 00:00:00"), so comparing
+ *  raw strings would flag every well-aligned sheet. Compared as WALL-CLOCK TEXT -
+ *  never through `Date`, which would read the label in the browser's zone and
+ *  collapse the repeated / skipped hour of a DST change into false mismatches.
+ *  Non-datetime axes ("now", integer steps) fall through to the trimmed string. */
+export function normSnapshot(label: string): string {
+  const text = label.trim();
+  if (!text) return '';
+  const m = /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?$/.exec(text);
+  if (!m) return text;
+  return `${m[1]}T${m[2] ?? '00'}:${m[3] ?? '00'}:${m[4] ?? '00'}`;
 }
 
 function snapshotAxis(snapshotRows: Row[] | undefined): Set<string> {
@@ -414,4 +418,44 @@ export function useModelIssues(model: WorkbookModel): ModelIssue[] {
 
     return issues;
   }, [model]);
+}
+
+/**
+ * Checks for the time-series sheets the SESSION holds. The browser keeps no series
+ * (they page on demand), so `useModelIssues` never sees them on a loaded model and
+ * every series check silently skipped. This runs the checks that need only the
+ * session meta - the sheets' columns and row counts: columns naming no component,
+ * and a row count that does not match the snapshot axis. Value-range and
+ * label-alignment checks need the rows themselves and run server-side (the Run
+ * dialog's dry-run Validate reads the session).
+ */
+export function sessionSeriesIssues(
+  model: WorkbookModel,
+  sheets: ReadonlyArray<{ name: string; kind: string; rowCount: number; columns: string[] }>,
+): ModelIssue[] {
+  const issues: ModelIssue[] = [];
+  const snapshotCount = (model.snapshots ?? []).length;
+  for (const meta of sheets) {
+    if (meta.kind !== 'series' || meta.rowCount === 0 || !isInputTemporalSheet(meta.name)) continue;
+    const parsed = parseTemporalSheetName(meta.name);
+    if (!parsed) continue;
+    const knownNames = new Set(
+      (model[parsed.componentSheet] ?? []).map((row) => stringValue(row.name).trim()).filter(Boolean),
+    );
+    if (snapshotCount > 0 && meta.rowCount !== snapshotCount) {
+      issues.push({
+        sheet: meta.name,
+        rowIndex: 0,
+        severity: 'warning',
+        message: `Row count ${meta.rowCount} differs from the snapshot count ${snapshotCount} - rows off the snapshot axis are dropped on run and uncovered snapshots solve as zero`,
+      });
+    }
+    for (const col of meta.columns) {
+      if (TS_INDEX_KEYS.has(col.toLowerCase())) continue;
+      if (!knownNames.has(col)) {
+        issues.push({ sheet: meta.name, rowIndex: 0, col, severity: 'error', message: `"${col}" does not exist in ${parsed.componentSheet}` });
+      }
+    }
+  }
+  return issues;
 }

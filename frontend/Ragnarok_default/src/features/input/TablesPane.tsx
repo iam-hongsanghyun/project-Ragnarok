@@ -6,7 +6,8 @@ import { getAddableAttributes, getProtectedColumns, TABLE_GROUPS } from 'lib/con
 import { getAttributeSchema, PypsaAttribute, TableGroup } from 'lib/constants/pypsa_schema';
 import { ResizablePanels } from '../../layout/ResizablePanels';
 import { getColumns, getTsFirstCol, stringValue } from 'lib/utils/helpers';
-import { parseCsvToGridRows } from 'lib/workbook/workbook';
+import { canonicalizeTemporalRows, parseCsvToGridRows } from 'lib/workbook/workbook';
+import { mergeSeriesRows } from 'lib/workbook/mergeSeriesRows';
 import { seedTemporalRows } from 'lib/workbook/temporalSeed';
 import { normalizeDateToIso } from 'lib/utils/helpers';
 import type { DateFormat } from '../settings/useSettings';
@@ -394,17 +395,30 @@ export function TablesPane({
     const file = e.target.files?.[0];
     if (!file || sel.kind !== 'ts') return;
     try {
-      const imported = await parseCsvToGridRows(file);
-      if (imported.length === 0) throw new Error('No rows found in the file.');
-      // ts sheets live in the backend session — replace the sheet there (clear
-      // current rows, then add the imported ones) and mirror locally.
-      const current = tsRows?.length ?? 0;
+      const parsed = await parseCsvToGridRows(file);
+      if (parsed.length === 0) throw new Error('No rows found in the file.');
+      // ts sheets live in the backend session. The file usually carries only SOME
+      // of the sheet's component columns, so MERGE it into what the session holds
+      // (matching rows by snapshot label) instead of replacing the sheet - a
+      // replace deleted every column the CSV did not mention. The session is read
+      // fresh: the grid's copy may be stale.
+      const existingRows = (await getSheetPage(String(sel.sheet), { offset: 0, limit: 1_000_000 })
+        .catch(() => null))?.rows ?? [];
+      const labelKey = existingRows.length > 0 ? getTsFirstCol(existingRows) : 'snapshot';
+      const firstCol = Object.keys(parsed[0])[0];
+      const relabelled = parsed.map((r) => {
+        const { [firstCol]: label, ...rest } = r;
+        return { [labelKey]: label, ...rest } as GridRow;
+      });
+      // Same ISO canonicalisation the model load applies, so labels match the axis.
+      const imported = labelKey === 'snapshot' ? canonicalizeTemporalRows(relabelled, dateFormat) : relabelled;
+      const merged = mergeSeriesRows(existingRows, imported, labelKey);
       const ops = [
-        ...(current ? [{ op: 'deleteRows' as const, rows: Array.from({ length: current }, (_, i) => i) }] : []),
-        ...imported.map((r) => ({ op: 'addRow' as const, values: r as Record<string, unknown> })),
+        ...(existingRows.length ? [{ op: 'deleteRows' as const, rows: Array.from({ length: existingRows.length }, (_, i) => i) }] : []),
+        ...merged.map((r) => ({ op: 'addRow' as const, values: r as Record<string, unknown> })),
       ];
-      setTsRows(imported);
       await patchSheet(String(sel.sheet), ops);
+      setTsRows(merged);
       // This may have CREATED the sheet (the store makes a series sheet on first
       // write) — tell the host so the tree's count stops reading 0.
       onTsSheetChanged?.(String(sel.sheet));
@@ -443,9 +457,18 @@ export function TablesPane({
   // Edit a ts cell: update the fetched rows locally (responsive) and persist to
   // the backend session via PATCH. Static-sheet edits keep using the prop
   // handlers (which update the React model).
+  // An edit the backend refused is NOT saved, and the grid already shows it: tell
+  // the user, then re-read the sheet from the session so the grid shows the truth.
+  const reportTsEditFailure = (err: unknown) => {
+    void alertDialog(
+      `The edit to ${String(sel.sheet)} was not saved: ${err instanceof Error ? err.message : String(err)}. The table has been reloaded from the backend.`,
+      { title: 'Edit not saved' },
+    );
+    setTsReloadKey((k) => k + 1);
+  };
   const patchTsCell = (rowIndex: number, col: string, val: Primitive) => {
     setTsRows((prev) => (prev ? prev.map((r, i) => (i === rowIndex ? { ...r, [col]: val } : r)) : prev));
-    void patchSheet(String(sel.sheet), [{ op: 'set', row: rowIndex, column: col, value: val }]).catch(() => { /* best-effort */ });
+    void patchSheet(String(sel.sheet), [{ op: 'set', row: rowIndex, column: col, value: val }]).catch(reportTsEditFailure);
   };
   const patchTsPaste = (edits: { rowIndex: number; col: string; val: Primitive }[], extraRows: number) => {
     setTsRows((prev) => {
@@ -459,7 +482,7 @@ export function TablesPane({
       ...Array.from({ length: extraRows }, () => ({ op: 'addRow' as const, values: {} })),
       ...edits.map((e) => ({ op: 'set' as const, row: e.rowIndex, column: e.col, value: e.val })),
     ];
-    void patchSheet(String(sel.sheet), ops).catch(() => { /* best-effort */ });
+    void patchSheet(String(sel.sheet), ops).catch(reportTsEditFailure);
   };
   /**
    * Seed an EMPTY temporal sheet from the model's snapshot index, so a profile
@@ -659,6 +682,9 @@ export function TablesPane({
   };
   const coerceEditedValue = (col: string, raw: string, current: Primitive): Primitive => {
     if (isTs && temporalLabelCols.has(col.toLowerCase())) return normalizeTemporalDisplay(raw);
+    // A text-typed attribute (name, bus, carrier, type, ...) keeps what was typed:
+    // `001` must not become the number 1 and silently stop matching its references.
+    if (!isTs && raw !== '' && (col === 'name' || getAttributeSchema(sel.sheet, col)?.type === 'string')) return raw;
     return inferInputValue(raw, current);
   };
 

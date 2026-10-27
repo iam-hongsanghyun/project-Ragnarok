@@ -29,6 +29,13 @@ function evalEntry(mod: ExternalTabModule): ExternalModuleExports {
 export function ExternalModuleHost({ module: mod }: { module: ExternalTabModule }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Re-mount only when the module's CODE changes. The installed list is re-fetched
+  // (and re-created) after every enable/disable/refresh; keying the effect on the
+  // object identity tore the tab down and rebuilt it - losing its state - each time.
+  const modRef = useRef(mod);
+  modRef.current = mod;
+  const entryName = mod.manifest.entry ?? 'index.js';
+  const entrySource = mod.files[entryName];
 
   useEffect(() => {
     const el = hostRef.current;
@@ -37,7 +44,7 @@ export function ExternalModuleHost({ module: mod }: { module: ExternalTabModule 
     setError(null);
     let cleanup: (() => void) | void;
     try {
-      const exports = evalEntry(mod);
+      const exports = evalEntry(modRef.current);
       if (typeof exports.mount !== 'function') {
         throw new Error('The module exports no mount(el, ctx) function.');
       }
@@ -53,7 +60,7 @@ export function ExternalModuleHost({ module: mod }: { module: ExternalTabModule 
       }
       el.innerHTML = '';
     };
-  }, [mod]);
+  }, [mod.manifest.id, mod.installedAt, entrySource]);
 
   return (
     <div className="external-module-view">

@@ -9,7 +9,7 @@ import {
   WorkbookModel,
 } from 'lib/types';
 import { carrierColor, hashColor, numberValue, orderByCarrierRows, stringValue } from 'lib/utils/helpers';
-import { buildCurtailmentRowsFromGeneratorDetails, buildRowsFromGeneratorDetails, buildSystemLoadRows, normalizeSeriesPoint } from 'lib/results/analytics';
+import { buildCurtailmentRowsFromGeneratorDetails, buildRowsFromGeneratorDetails, buildSystemLoadRows, filterRowsByPeriod, normalizeSeriesPoint, selectGeneratorEnergy } from 'lib/results/analytics';
 
 // ── Multi-generator aggregation ───────────────────────────────────────────────
 
@@ -248,7 +248,9 @@ export function useMetricOptions(
   // scales by snapshotWeight, so store the rate-equivalent (MWh / weight) here —
   // generatorEnergy.value is already snapshot-weighted MWh from the backend.
   const snapshotWeightForRows = results?.runMeta?.snapshotWeight || 1;
-  const genEnergyFallback = results?.generatorEnergy;
+  const selectedPeriod = results?.pathway?.enabled ? results.pathway.selectedPeriod : null;
+  // One family only: whole-horizon entries, or the selected period's entries.
+  const genEnergyFallback = selectGeneratorEnergy(results?.generatorEnergy, selectedPeriod);
   const baseGenDispRows = hasValues(rawGenDisp)
     ? rawGenDisp
     : buildRowsFromGeneratorDetails(results?.assetDetails.generators || {}, 'generator');
@@ -263,7 +265,7 @@ export function useMetricOptions(
   // System curtailment by carrier: backend per-carrier aggregate (present in
   // both the full and the light analytics bundle), with a client-side fallback
   // derived from per-generator details for bundles predating the field.
-  const rawCurtail = (results?.curtailmentSeries || []).map(normalizeSeriesPoint);
+  const rawCurtail = filterRowsByPeriod((results?.curtailmentSeries || []).map(normalizeSeriesPoint), selectedPeriod);
   const tvGenNames = new Set(
     _model['generators-p_max_pu']?.length ? Object.keys(_model['generators-p_max_pu'][0]) : [],
   );
@@ -275,7 +277,7 @@ export function useMetricOptions(
 
   // Storage SoC by carrier: backend per-carrier aggregate, with a client-side
   // fallback summing per-unit stateSeries grouped via the model's carrier column.
-  const rawSocByCarrier = (results?.storageSocSeries || []).map(normalizeSeriesPoint);
+  const rawSocByCarrier = filterRowsByPeriod((results?.storageSocSeries || []).map(normalizeSeriesPoint), selectedPeriod);
   const sysSocRows = hasValues(rawSocByCarrier)
     ? rawSocByCarrier
     : (() => {

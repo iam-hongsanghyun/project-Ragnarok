@@ -27,7 +27,16 @@ export function useExternalModules(): ExternalModulesApi {
 
   const refresh = useCallback(async () => {
     try {
-      setInstalled(await fetchModules());
+      const fetched = await fetchModules();
+      // Keep the previous object for a module that did not change, so consumers
+      // keyed on identity (the tab host) do not re-mount on every refresh.
+      setInstalled((prev) => fetched.map((next) => {
+        const old = prev.find((m) => m.manifest.id === next.manifest.id);
+        return old && old.installedAt === next.installedAt && old.enabled === next.enabled
+          && old.files[old.manifest.entry ?? 'index.js'] === next.files[next.manifest.entry ?? 'index.js']
+          ? old
+          : next;
+      }));
     } catch {
       // A backend that is still booting must not break the shell — the activity
       // bar simply shows core + built-in modules until the next refresh.
