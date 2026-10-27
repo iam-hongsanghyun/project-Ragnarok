@@ -48,7 +48,18 @@ function ExpansionBarChart({ rows }: { rows: BarRow[] }) {
 
 // ── Summary table ─────────────────────────────────────────────────────────────
 
+/** Optional server columns (n.statistics.*): shown only when some row carries the field. */
+const EXTRA_COLUMNS: { key: 'capex_expanded' | 'capex_installed' | 'overnight_total' | 'fom_total'; label: string }[] = [
+  { key: 'capex_expanded', label: 'Expanded CAPEX' },
+  { key: 'capex_installed', label: 'Installed CAPEX' },
+  { key: 'overnight_total', label: 'Overnight cost' },
+  { key: 'fom_total', label: 'Fixed O&M (horizon)' },
+];
+
 function ExpansionTable({ assets, currencySymbol = '$' }: { assets: ExpansionAsset[]; currencySymbol?: string }) {
+  const extras = EXTRA_COLUMNS.filter((c) => assets.some((a) => a[c.key] != null));
+  const money = (v: number | undefined): string =>
+    v != null && v !== 0 ? `${currencySymbol}${Math.round(v).toLocaleString()}` : '—';
   return (
     <div className="expansion-table-wrap">
       <table className="expansion-table">
@@ -62,6 +73,7 @@ function ExpansionTable({ assets, currencySymbol = '$' }: { assets: ExpansionAss
             <th className="num">Optimised</th>
             <th className="num">New build</th>
             <th className="num">Annual CAPEX ({currencySymbol})</th>
+            {extras.map((c) => <th key={c.key} className="num">{c.label} ({currencySymbol})</th>)}
           </tr>
         </thead>
         <tbody>
@@ -84,6 +96,7 @@ function ExpansionTable({ assets, currencySymbol = '$' }: { assets: ExpansionAss
                   {a.delta_mw > 0 ? '+' : ''}{a.delta_mw.toLocaleString()} {unit}
                 </td>
                 <td className="num">{a.capex_annual > 0 ? `${currencySymbol}${Math.round(a.capex_annual).toLocaleString()}` : '—'}</td>
+                {extras.map((c) => <td key={c.key} className="num">{money(a[c.key])}</td>)}
               </tr>
             );
           })}

@@ -119,8 +119,9 @@ _KIND_BY_SUFFIX = {".xlsx": "pypsa-excel", ".xls": "pypsa-excel", ".zip": "pypsa
         "Import a PyPSA-native or grid-model file INTO the working model through PyPSA's own importers. "
         "kind (inferred from the extension when omitted): 'pypsa-excel' (.xlsx, Network.import_from_excel), "
         "'pypsa-csv' (.zip of a PyPSA CSV folder), 'matpower' (.m or .mat case via import_from_pypower_ppc; "
-        "overwrite_zero_s_nom replaces zero branch ratings), 'pandapower' (.json net; needs pandapower installed "
-        "- see pypsa_io_capabilities). replace=true swaps the working model, false merges sheets over it. "
+        "overwrite_zero_s_nom replaces zero branch ratings), 'pandapower' (.json net from pandapower.to_json; read by "
+        "pandapower in an isolated venv - see pypsa_io_capabilities.pandapowerInstalled; extra_line_data and "
+        "use_pandapower_index map to PyPSA's import_from_pandapower_net). replace=true swaps the working model, false merges sheets over it. "
         "Gates like a model swap - re-call with confirm=true."
     ),
 )
@@ -130,6 +131,8 @@ async def import_pypsa_native(
     replace: bool = True,
     overwrite_zero_s_nom: float | None = None,
     skip_time: bool = False,
+    extra_line_data: bool = False,
+    use_pandapower_index: bool = False,
     confirm: bool = False,
 ) -> Any:
     src: Path = _resolve_in(path)
@@ -149,6 +152,11 @@ async def import_pypsa_native(
         params["skipTime"] = "true"
     if kind == "matpower" and overwrite_zero_s_nom is not None:
         params["overwriteZeroSNom"] = overwrite_zero_s_nom
+    if kind == "pandapower":
+        if extra_line_data:
+            params["extraLineData"] = "true"
+        if use_pandapower_index:
+            params["usePandapowerIndex"] = "true"
     model = await client.import_pypsa_file(kind, src.read_bytes(), src.name, params)
     if replace:
         await client.save_model(model)
@@ -188,7 +196,7 @@ async def export_pypsa_native(
 
 @mcp.tool(
     annotations=_RO,
-    description="Which PyPSA-native import/export paths the backend offers, the netCDF export option keys, and whether the optional pandapower library is installed.",
+    description="Which PyPSA-native import/export paths the backend offers, the netCDF export option keys, and whether the isolated pandapower environment (.venv-pandapower) is available for the pandapower import.",
 )
 async def pypsa_io_capabilities() -> Any:
     return await get_client().pypsa_io_capabilities()

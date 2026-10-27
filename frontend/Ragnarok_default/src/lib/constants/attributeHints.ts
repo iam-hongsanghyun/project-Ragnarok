@@ -77,7 +77,43 @@ export function getAttributeHint(sheet: string, attribute: string): AttributeHin
         + 'each start/stop by snapshot. Only applies to committable units.',
     };
   }
+  if (sheet === 'carriers' && (attribute === 'max_growth' || attribute === 'max_relative_growth')) {
+    return {
+      group: 'Growth limit',
+      unit: attribute === 'max_growth' ? 'MW' : 'ratio',
+      note:
+        'Caps NEW capacity per investment period (max_growth in MW; max_relative_growth as a ratio of the '
+        + 'previous period). Binds only in multi-period (pathway) runs. Edit all carriers together in '
+        + 'Settings > Standard Constraints.',
+    };
+  }
   return null;
+}
+
+/**
+ * Pull columns that share a hint group next to each other (at the position of the
+ * group's first column), so e.g. the four maintenance fields read as one block even
+ * when the schema or an imported file scatters them. Stable; ungrouped columns and
+ * the frozen first column keep their order.
+ */
+export function groupColumns(sheet: string, cols: string[]): string[] {
+  const byGroup = new Map<string, string[]>();
+  for (const c of cols) {
+    const g = getAttributeHint(sheet, c)?.group;
+    if (g) byGroup.set(g, [...(byGroup.get(g) ?? []), c]);
+  }
+  if (byGroup.size === 0) return cols;
+  const out: string[] = [];
+  const placed = new Set<string>();
+  for (const c of cols) {
+    if (placed.has(c)) continue;
+    const g = getAttributeHint(sheet, c)?.group;
+    for (const member of g ? byGroup.get(g)! : [c]) {
+      out.push(member);
+      placed.add(member);
+    }
+  }
+  return out;
 }
 
 /** Header label: `name (unit) *`, with the deprecated badge and the hint's unit applied. */

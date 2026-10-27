@@ -9,6 +9,7 @@ import React from 'react';
 import { AppliedConstraint, CustomConstraint, GridRow, PathwayConfig, Primitive, WorkbookModel } from 'lib/types';
 import { generatorCarriers } from 'lib/constraints/custom';
 import { GlobalConstraintsSection as CustomConstraintsEditor } from '../../features/constraints/GlobalConstraintsSection';
+import { CarrierGrowthEditor } from './Constraints/CarrierGrowthEditor';
 import { GlobalConstraintsTableEditor } from './Constraints/GlobalConstraintsTableEditor';
 import { CustomDslSection } from '../../features/constraints/CustomDslSection';
 
@@ -20,7 +21,7 @@ export interface ConstraintsSectionProps {
   customDsl: string;
   onCustomDslChange: (text: string) => void;
   appliedConstraints?: AppliedConstraint[];
-  onUpdateRow: (sheet: 'global_constraints', rowIndex: number, key: string, value: Primitive) => void;
+  onUpdateRow: (sheet: 'global_constraints' | 'carriers', rowIndex: number, key: string, value: Primitive) => void;
   onAddRow: (sheet: 'global_constraints') => void;
   onDeleteRow: (sheet: 'global_constraints', rowIndex: number) => void;
 }
@@ -80,9 +81,26 @@ export function StandardConstraintsSection(props: ConstraintsSectionProps) {
           carrierAttributes={carrierAttributes}
           busNames={busNames}
           investmentPeriods={investmentPeriods}
+          pathwayEnabled={props.pathwayConfig.enabled}
           onAdd={() => props.onAddRow('global_constraints')}
           onDelete={(rowIndex) => props.onDeleteRow('global_constraints', rowIndex)}
           onSet={(rowIndex, key, value) => props.onUpdateRow('global_constraints', rowIndex, key, value)}
+        />
+      </section>
+      <div className="sg-setting-divider" style={{ margin: '24px 0' }} />
+      <section className="constraints-workspace-section">
+        <header className="constraints-workspace-section-header">
+          <h3>Carrier growth limits</h3>
+          <p>
+            <code>max_growth</code> caps new capacity (MW) per investment period and{' '}
+            <code>max_relative_growth</code> caps it as a ratio of the previous period; both are columns of the{' '}
+            <code>carriers</code> sheet. Leave empty for unlimited. They only bind on multi-period (pathway) runs.
+          </p>
+        </header>
+        <CarrierGrowthEditor
+          carriers={props.model.carriers ?? []}
+          pathwayEnabled={props.pathwayConfig.enabled}
+          onSet={(rowIndex, key, value) => props.onUpdateRow('carriers', rowIndex, key, value)}
         />
       </section>
     </>

@@ -49,9 +49,12 @@ class ExportProjectPayload(BaseModel):
     browser keeps static sheets only, so an inline ``model`` from the UI would
     export a project with no time-series data at all.
 
-    ``sessionId`` also tells the server to embed that session's current Bifrost
-    conversation into the package, so importing the project resumes the chat
-    where it left off.
+    ``conversation`` is the Bifrost chat to embed (``{events, model, autonomy}``,
+    whatever the agent app serialises): the server keeps no conversation store of
+    its own (``sessionId`` only scopes the model's time-series), so the client
+    that owns the chat supplies it. It is written as ``<stem>.conversation.json``
+    in the package and ``POST /api/import/project/load`` hands it back, so
+    importing the project resumes the chat where it left off. Omitted = no sidecar.
     """
 
     # `model` optional: a thin client sends `sessionId` and the server hydrates the
@@ -62,3 +65,4 @@ class ExportProjectPayload(BaseModel):
     scenario: dict[str, Any] = {}
     options: dict[str, Any] = {}
     sessionId: str | None = None
+    conversation: dict[str, Any] | None = None

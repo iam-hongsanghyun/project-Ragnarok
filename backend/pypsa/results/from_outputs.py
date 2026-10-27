@@ -27,10 +27,12 @@ import pandas as pd
 from ..carbon_price import build_price_series, parse_carbon_price_config
 from ..constants import carrier_color
 from ..network import build_network
-from ..utils.emissions import per_generator_emission_factor
 from ..utils.series import weighted_sum
 from .dispatch import (
     build_curtailment_series,
+    curtailment_mwh_by_generator,
+    metric_definitions,
+    system_average_price,
     build_dispatch_series,
     build_price_emissions_series,
     build_storage_series,
@@ -39,7 +41,7 @@ from .dispatch import (
     electricity_dispatch_by_carrier,
     system_price_series,
 )
-from .emissions import build_emissions_breakdown
+from .emissions import build_emissions_breakdown, emission_totals_by_carrier
 from .expansion import build_expansion_results
 from .market import (
     build_applied_constraints,
@@ -68,7 +70,7 @@ def _series_to_frame(
     extra column is dropped.
     """
     if not rows:
-        return pd.DataFrame(0.0, index=snapshots, columns=columns)
+        return _named(pd.DataFrame(0.0, index=snapshots, columns=columns), snapshots)
     df = pd.DataFrame(rows)
     for meta_col in ("timestamp", "period"):
         if meta_col in df.columns:
@@ -83,7 +85,19 @@ def _series_to_frame(
     if reindexed.notna().to_numpy().sum() == 0 and len(df) == len(snapshots):
         df.index = snapshots
         reindexed = df
-    return reindexed.reindex(columns=columns, fill_value=0.0).fillna(0.0)
+    return _named(reindexed.reindex(columns=columns, fill_value=0.0).fillna(0.0), snapshots)
+
+
+def _named(frame: pd.DataFrame, snapshots: pd.Index) -> pd.DataFrame:
+    """Name the axes as PyPSA does (``snapshot`` x ``name``).
+
+    ``n.statistics`` over a ``NetworkCollection`` groups on the ``name`` level of
+    the per-component frames; an unnamed column axis makes the grouping fail
+    (P39), though the same statistic on one network tolerates it.
+    """
+    frame.columns.name = "name"
+    frame.index.name = snapshots.name or "snapshot"
+    return frame
 
 
 def _inject_outputs(network: Any, outputs: dict[str, Any]) -> None:
@@ -217,21 +231,9 @@ def derive_imported_result(
         if carrier in shed_carriers:
             continue
         carrier_energy[carrier] += weighted_sum(s.clip(lower=0.0), generator_weights)
-    # Emissions on the thermal basis (dispatch × co2_emissions / η, M3), summed
-    # per generator then grouped by carrier — η varies by unit, not by carrier.
-    eff_ef = per_generator_emission_factor(network, emissions_factors)
-    for name in generator_dispatch_frame.columns:
-        if str(name).startswith("load_shedding_"):
-            continue
-        factor = float(eff_ef.get(name, 0.0))
-        if not factor:
-            continue
-        carrier = str(network.generators.at[name, "carrier"])
-        if carrier in shed_carriers:
-            continue
-        emission_totals[carrier] += weighted_sum(
-            generator_dispatch_frame[name].clip(lower=0.0) * factor, generator_weights
-        )
+    # Emissions on PyPSA's primary_energy basis (RB10), see emissions.py.
+    emission_totals.update(emission_totals_by_carrier(network, emissions_factors))
+
     carrier_mix = [
         {"label": c, "value": v, "color": carrier_color(network, c)}
         for c, v in sorted(carrier_energy.items(), key=lambda x: x[1], reverse=True)
@@ -240,13 +242,8 @@ def derive_imported_result(
 
     # Per-generator dispatched energy (+ curtailment for renewables), mirroring
     # run_pypsa's "Dispatch by unit" aggregate.
-    _p_nom_in = network.generators["p_nom"].fillna(0.0)
-    if "p_nom_opt" in network.generators.columns:
-        _p_nom_opt = network.generators["p_nom_opt"].fillna(0.0)
-        p_nom_opt_s = _p_nom_opt.where(_p_nom_opt > 0, _p_nom_in)
-    else:
-        p_nom_opt_s = _p_nom_in
-    tv_cols = set(network.generators_t.p_max_pu.columns)
+    # P28: PyPSA's n.statistics.curtailment (variable-availability generators).
+    curtailment_by_gen = curtailment_mwh_by_generator(network)
     generator_carriers = network.generators["carrier"].to_dict()
     generator_energy: list[dict[str, Any]] = []
     for gen in generator_dispatch_frame.columns:
@@ -255,12 +252,7 @@ def derive_imported_result(
         energy = weighted_sum(generator_dispatch_frame[gen].clip(lower=0.0), generator_weights)
         if energy <= 0.0:
             continue
-        curtailment_mwh: float | None = None
-        if gen in tv_cols:
-            avail = (network.generators_t.p_max_pu[gen] * float(p_nom_opt_s.get(gen, 0.0))).clip(lower=0.0)
-            curtailment_mwh = float(
-                weighted_sum((avail - generator_dispatch_frame[gen].clip(lower=0.0)).clip(lower=0.0), generator_weights)
-            )
+        curtailment_mwh: float | None = curtailment_by_gen.get(str(gen))
         carrier = str(generator_carriers.get(gen, ""))
         generator_energy.append(
             {"name": str(gen), "value": float(energy), "carrier": carrier,
@@ -333,7 +325,11 @@ def derive_imported_result(
         line_loading.append({"label": transformer, "value": peak})
 
     total_emissions = sum(emission_totals.values()) / 1000.0
-    average_price = float(price_series.mean()) if len(price_series) else 0.0
+    _avg_stat = system_average_price(network, electricity_bus_scope(network))
+    average_price = (
+        _avg_stat if _avg_stat is not None
+        else (float(price_series.mean()) if len(price_series) else 0.0)
+    )
     peak_price = float(price_series.max()) if len(price_series) else 0.0
     peak_net_load = round(float(load_dispatch.max())) if len(load_dispatch) else 0
 
@@ -391,7 +387,9 @@ def derive_imported_result(
         "generatorEconomics": generator_economics,
         "emissionsBreakdown": emissions_breakdown,
         "narrative": notes,
+        "metricDefinitions": metric_definitions(currency),
         "runMeta": {
+            "averageSystemPrice": float(average_price),
             "snapshotCount": snapshot_count,
             "snapshotWeight": snapshot_weight,
             "modeledHours": snapshot_count * snapshot_weight,

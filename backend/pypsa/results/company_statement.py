@@ -50,7 +50,7 @@ import pandas as pd
 import pypsa
 from ..network.piecewise import overlay_piecewise_marginal_cost
 
-from ..utils.emissions import per_generator_emission_factor
+from ..utils.emissions import per_generator_emission_factor, primary_energy_emissions
 from .finance import _crf, storage_assets
 from .market import HOURS_PER_YEAR, capex_window_scale
 
@@ -163,7 +163,6 @@ def build_company_statement(
         b["fuelVomCost"] += max(0.0, opex - carbon)
         # capital_cost may be window-scaled by the builder: recover the annual charge.
         b["capexAnnual"] += cap_cost * capacity / (capex_window_scale(network) or 1.0)
-        b["emissionsTonnes"] += float((p_pos * ef * weights).sum())
 
     # Storage: StorageUnit and Store + Link on the same rule finance.py uses —
     # capex only for extendable components, marginal_cost_storage and spill_cost
@@ -182,6 +181,22 @@ def build_company_statement(
         b["energyMWh"] += a.discharged_mwh
         b["fuelVomCost"] += a.op_cost
         b["capexAnnual"] += a.capex_annual
+
+    # Emissions line (RB10): PyPSA primary_energy accounting - generators p/eta*ef (signed) plus
+    # non-cyclic storage depletion - allocated to the owners, so the company lines plus
+    # ``unassignedEmissionsTonnes`` equal the system total x 8760/H. The carbon COST line above
+    # stays on the clipped per-generator adder the solve priced.
+    pe = primary_energy_emissions(network, emissions_factors)
+    unassigned = 0.0
+    for series, owners in ((pe.generators, gen_owner), (pe.storage_units, sto_owner), (pe.stores, store_owner)):
+        for name, tco2 in series.items():
+            company = owners.get(str(name))
+            if company and company in acc:
+                acc[company]["emissionsTonnes"] += float(tco2)
+            elif company:
+                acc.setdefault(company, _bucket())["emissionsTonnes"] += float(tco2)
+            else:
+                unassigned += float(tco2)
 
     if not acc:
         return None
@@ -239,4 +254,5 @@ def build_company_statement(
         "carbonPrice": co2_price,
         "companies": companies,
         "totals": totals,
+        "unassignedEmissionsTonnes": round(unassigned * annualize, 2),
     }

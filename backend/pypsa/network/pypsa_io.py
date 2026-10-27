@@ -7,19 +7,23 @@ in PyPSA never has to be re-implemented:
   ``import_from_csv_folder``, ``export_to_excel``, ``export_to_csv_folder``).
 * MATPOWER ``.m`` / ``.mat`` case files -> PYPOWER ``ppc`` dict ->
   ``import_from_pypower_ppc`` (a small parser; no extra dependency).
-* pandapower nets via ``import_from_pandapower_net`` -- pandapower is an
-  OPTIONAL dependency (installing it downgrades numpy/pandas in the PyPSA 1.4
-  environment), so it is imported lazily and reported cleanly when absent.
+* pandapower nets via ``import_from_pandapower_net`` -- pandapower pins pandas~=2.3,
+  so it runs in an isolated venv (``.venv-pandapower``) through a subprocess that
+  dumps the net's tables; PyPSA's own importer maps them.
 * netCDF export options: ``compression``, ``float32``, ``export_standard_types``.
 * ``Lines.apply_seasonal_rating`` as a workbook transform.
 """
 from __future__ import annotations
 
 import io
+import json
+import os
 import re
+import subprocess
 import tempfile
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -215,7 +219,67 @@ def network_from_matpower(
 
 
 class PandapowerUnavailable(RuntimeError):
-    """pandapower is not installed (optional dependency)."""
+    """No usable pandapower interpreter (neither in-process nor the isolated venv)."""
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_DUMP_SCRIPT = _REPO_ROOT / "backend" / "scripts" / "pandapower_dump.py"
+_PANDAPOWER_TIMEOUT_S = 120
+
+
+def pandapower_python() -> Path | None:
+    """Interpreter of the isolated pandapower venv, or ``None``.
+
+    ``RAGNAROK_PANDAPOWER_PYTHON`` overrides; default ``<repo>/.venv-pandapower``
+    (create with ``backend/scripts/setup_pandapower_env.sh``).
+    """
+    override = os.environ.get("RAGNAROK_PANDAPOWER_PYTHON", "").strip()
+    cands = [Path(override)] if override else []
+    cands += [_REPO_ROOT / ".venv-pandapower" / "bin" / "python",
+              _REPO_ROOT / ".venv-pandapower" / "Scripts" / "python.exe"]
+    for c in cands:
+        if c.is_file():
+            return c
+    return None
+
+
+def _net_from_dump(dump: dict[str, Any]) -> SimpleNamespace:
+    """Rebuild the duck-typed pandapower net PyPSA's importer reads (DataFrames by table name)."""
+    net = SimpleNamespace(f_hz=float(dump["f_hz"]))
+    for name, split in dump["tables"].items():
+        df = pd.DataFrame(split["data"], columns=split["columns"])
+        df = df.set_index("index")
+        df.index.name = None
+        if "name" in df.columns and name != "switch":
+            # PyPSA indexes components by pandapower ``name``; many nets leave it null or
+            # repeated (case9 loads), which PyPSA rejects. Fall back to "<table> <index>".
+            names = df["name"].astype(object)
+            blank = names.isna() | (names.astype(str).str.strip() == "")
+            dup = names.duplicated(keep=False) & ~blank
+            fallback = pd.Series([f"{name} {i}" for i in df.index], index=df.index, dtype=object)
+            df["name"] = names.where(~(blank | dup), fallback)
+        setattr(net, name, df)
+    return net
+
+
+def pandapower_dump_via_subprocess(text: str) -> dict[str, Any]:
+    """Run the pandapower JSON net through the isolated venv and return the table dump."""
+    py = pandapower_python()
+    if py is None:
+        raise PandapowerUnavailable(
+            "pandapower is not available: it pins pandas~=2.3, which conflicts with PyPSA 1.4 "
+            "(pandas 3). Create the isolated environment with backend/scripts/setup_pandapower_env.sh "
+            "(-> .venv-pandapower) or set RAGNAROK_PANDAPOWER_PYTHON, or export the net to MATPOWER "
+            "and use the MATPOWER import."
+        )
+    proc = subprocess.run(  # noqa: S603 - fixed argv, no shell, input over stdin
+        [str(py), str(_DUMP_SCRIPT)], input=text, capture_output=True, text=True,
+        timeout=_PANDAPOWER_TIMEOUT_S, check=False,
+    )
+    if proc.returncode != 0:
+        tail = (proc.stderr or "").strip().splitlines()[-3:]
+        raise ValueError("pandapower could not read the net: " + " | ".join(tail))
+    return json.loads(proc.stdout)
 
 
 def network_from_pandapower_json(
@@ -223,18 +287,16 @@ def network_from_pandapower_json(
 ) -> pypsa.Network:
     """pandapower net (``pandapower.to_json`` text) -> ``import_from_pandapower_net``.
 
-    Raises :class:`PandapowerUnavailable` when pandapower is not installed.
+    pandapower itself runs in an isolated venv (subprocess, see
+    :func:`pandapower_dump_via_subprocess`); the PyPSA mapping is PyPSA's own
+    ``import_from_pandapower_net`` applied to the rebuilt tables.
+
+    Raises:
+        PandapowerUnavailable: no pandapower interpreter is configured.
+        ValueError: pandapower could not parse the JSON.
     """
-    try:
-        import pandapower as pp  # type: ignore[import-not-found]
-    except ImportError as exc:  # pragma: no cover - exercised only without the lib
-        raise PandapowerUnavailable(
-            "pandapower is not installed in this environment (it pins older numpy/pandas than "
-            "PyPSA 1.4). Convert the net to MATPOWER with pandapower.converter.to_ppc / "
-            "pp.converter.to_mpc and import that instead, or `pip install pandapower` in an "
-            "environment that allows it."
-        ) from exc
-    net = pp.from_json_string(text)
+    dump = pandapower_dump_via_subprocess(text)
+    net = _net_from_dump(dump)
     n = pypsa.Network()
     n.import_from_pandapower_net(
         net, extra_line_data=extra_line_data, use_pandapower_index=use_pandapower_index
@@ -243,11 +305,8 @@ def network_from_pandapower_json(
 
 
 def pandapower_available() -> bool:
-    try:
-        import pandapower  # noqa: F401  # type: ignore[import-not-found]
-    except ImportError:
-        return False
-    return True
+    """True when the isolated pandapower interpreter exists."""
+    return pandapower_python() is not None
 
 
 # ── Lines.apply_seasonal_rating as a workbook transform (P18) ─────────────────

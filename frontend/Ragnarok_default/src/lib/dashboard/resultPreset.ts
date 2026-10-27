@@ -10,6 +10,7 @@
  */
 import { RunResults, ChartSectionConfig } from 'lib/types';
 import { EMPTY_METRIC_KEY } from 'lib/constants';
+import { dualSheetsOf } from 'lib/results/dualViews';
 import { Card, DashboardLayout, PivotChartConfig } from './types';
 
 let _id = 0;
@@ -189,6 +190,10 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   }
   if (results.phaseShifters && results.phaseShifters.transformers.length > 0) {
     rows.push(row({ cards: [{ card: { id: id('pst'), kind: 'phase-shifters' } as Card }] }));
+  }
+  // Ramp-limit / set-point duals (P30) — only when the solve produced any.
+  if (dualSheetsOf(results).length > 0) {
+    rows.push(row({ cards: [{ card: { id: id('duals'), kind: 'setpoint-duals' } as Card }] }));
   }
 
   // Resource adequacy (A1+A2) — when the run has a stochastic renewable ensemble.

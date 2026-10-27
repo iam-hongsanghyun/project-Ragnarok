@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import type { EChartsCoreOption } from 'echarts/core';
 import { GridRow } from 'lib/types';
 import { stringValue } from 'lib/utils/helpers';
+import { fetchDailyProfile, fetchDurationCurve, fetchGroupedAggregate } from 'lib/api/analysis';
+import { useAsync } from '../../shared/hooks/useAsync';
 import { axisName, buildDurationCurveOption, darkTooltip, fmtNum, tickLabel } from 'lib/charts/options';
 import { readChartTheme } from 'lib/charts/theme';
 import { useEChart } from '../../shared/echarts/useEChart';
@@ -23,13 +25,6 @@ function isNumericCol(rows: GridRow[], col: string): boolean {
 
 function isStringCol(rows: GridRow[], col: string): boolean {
   return !isNumericCol(rows, col);
-}
-
-// Extract hour-of-day (0–23) from a label like "2020-01-01 04:00" or "04:00"
-function extractHour(label: string): number | null {
-  const m = label.match(/(\d{1,2}):(\d{2})/);
-  if (m) return parseInt(m[1], 10);
-  return null;
 }
 
 const PALETTE = [
@@ -244,8 +239,9 @@ function LineArea({ xLabels, series, stacked }: {
 
 // ── 5. Duration curve ─────────────────────────────────────────────────────────
 
+/** `values` arrive sorted descending from the server (`fetchDurationCurve`). */
 function DurationCurve({ values, label, color }: { values: number[]; label: string; color: string }) {
-  const sorted = [...values].sort((a, b) => b - a);
+  const sorted = values;
   if (!sorted.length) return <NoData />;
   const option = buildDurationCurveOption({
     series: [{ key: label, label, color, values: sorted }], title: label, unit: '', theme: readChartTheme(),
@@ -255,28 +251,9 @@ function DurationCurve({ values, label, color }: { values: number[]; label: stri
 
 // ── 6. Daily profile (average by hour-of-day) ─────────────────────────────────
 
-function DailyProfile({ xLabels, series }: {
-  xLabels: string[];
-  series: { key: string; values: number[]; color: string }[];
-}) {
-  // Group by extracted hour-of-day, take mean
-  const hourlyMeans: Record<string, number[]> = {};
-  for (let h = 0; h < 24; h++) hourlyMeans[String(h)] = [];
-  xLabels.forEach((label, i) => {
-    const h = extractHour(label);
-    if (h !== null) {
-      series.forEach((s) => {
-        if (!hourlyMeans[String(h)]) hourlyMeans[String(h)] = [];
-        hourlyMeans[String(h)].push(s.values[i]);
-      });
-    }
-  });
+/** `means[h]` is the average value at hour-of-day `h` (server `fetchDailyProfile`). */
+function DailyProfile({ means, color }: { means: number[]; color: string }) {
   const hours = Array.from({ length: 24 }, (_, h) => h);
-  const means = hours.map((h) => {
-    const vals = hourlyMeans[String(h)] ?? [];
-    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
-  });
-  const color = series[0]?.color ?? '#0f766e';
   const theme = readChartTheme();
   const option: EChartsCoreOption = {
     animation: false,
@@ -309,6 +286,13 @@ function DailyProfile({ xLabels, series }: {
   return <MiniChart option={option} height={190} maxWidth={480} />;
 }
 
+/** Loading / error placeholder for a chart whose series the server is deriving. */
+function DerivedState({ loading, error }: { loading: boolean; error: string | null }) {
+  if (error) return <p className="ia-tip" role="alert">Could not derive the chart: {error}</p>;
+  if (loading) return <p className="ia-tip" aria-busy="true">Loading…</p>;
+  return null;
+}
+
 // ── Legend ────────────────────────────────────────────────────────────────────
 
 function Legend({ items }: { items: { key: string; color: string }[] }) {
@@ -339,6 +323,9 @@ function Ctl({ label, children }: { label: string; children: React.ReactNode }) 
 // ── Main component ─────────────────────────────────────────────────────────────
 
 interface InputAnalyserProps {
+  /** Session sheet the rows come from; the duration curve, daily profile and
+   *  grouped aggregate are derived server-side from it (`lib/api/analysis`). */
+  sheet: string;
   rows: GridRow[];
   cols: string[];
   isTs: boolean;
@@ -353,7 +340,7 @@ type StaticChart = 'bar' | 'grouped-bar' | 'donut' | 'scatter';
 type TsChart     = 'line' | 'stacked-area' | 'duration' | 'daily-profile';
 type AggMethod   = 'sum' | 'mean' | 'max' | 'min' | 'count';
 
-export function InputAnalyser({ rows, cols, isTs, frozenCol, currencySymbol = '$', focusCol = null }: InputAnalyserProps) {
+export function InputAnalyser({ sheet, rows, cols, isTs, frozenCol, currencySymbol = '$', focusCol = null }: InputAnalyserProps) {
   const numericCols = useMemo(
     () => cols.filter((c) => c !== frozenCol && isNumericCol(rows, c)),
     [rows, cols, frozenCol],
@@ -394,16 +381,12 @@ export function InputAnalyser({ rows, cols, isTs, frozenCol, currencySymbol = '$
   const activeScatY = numericCols.includes(scatterY) ? scatterY : (numericCols[1] ?? numericCols[0] ?? '');
   const activeGroup = stringCols.includes(groupCol) ? groupCol : 'none';
 
-  const aggregate = (vals: number[], method: AggMethod): number => {
-    if (!vals.length) return 0;
-    if (method === 'sum')   return vals.reduce((a, b) => a + b, 0);
-    if (method === 'mean')  return vals.reduce((a, b) => a + b, 0) / vals.length;
-    if (method === 'max')   return Math.max(...vals);
-    if (method === 'min')   return Math.min(...vals);
-    if (method === 'count') return vals.length;
-    return 0;
-  };
-
+  // Per-row values are read straight from the grid; a grouped aggregate is
+  // derived server-side from the session sheet.
+  const grouped = useAsync(
+    activeValue && activeGroup !== 'none' && !isTs ? `${sheet}|${activeGroup}|${activeValue}|${agg}` : null,
+    () => fetchGroupedAggregate(sheet, activeGroup, activeValue, agg),
+  );
   const groupedData = useMemo(() => {
     if (!activeValue) return [];
     if (activeGroup === 'none') {
@@ -413,22 +396,25 @@ export function InputAnalyser({ rows, cols, isTs, frozenCol, currencySymbol = '$
         group: '',
       }));
     }
-    const map = new Map<string, number[]>();
-    rows.forEach((r) => {
-      const g = stringValue(r[activeGroup]) || '(blank)';
-      if (!map.has(g)) map.set(g, []);
-      map.get(g)!.push(numVal(r[activeValue]));
-    });
-    return Array.from(map.entries())
-      .map(([label, vals]) => ({ label, value: aggregate(vals, agg), group: label }))
-      .sort((a, b) => b.value - a.value);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, activeValue, activeGroup, agg, nameCol]);
+    return (grouped.data?.bars ?? []).map((b) => ({ label: b.label, value: b.value, group: b.label }));
+  }, [rows, activeValue, activeGroup, nameCol, grouped.data]);
 
   const colorByGroup = useMemo(() => {
     const groups = Array.from(new Set(groupedData.map((d) => d.group)));
     return Object.fromEntries(groups.map((g, i) => [g, PALETTE[i % PALETTE.length]]));
   }, [groupedData]);
+
+  // Time-series charts derived server-side from the session sheet.
+  const singleTs = tsSeries !== '__all__' ? tsSeries : (tsCols.length === 1 ? tsCols[0] : null);
+  const duration = useAsync(
+    isTs && tsChart === 'duration' && singleTs ? `${sheet}|duration|${singleTs}` : null,
+    () => fetchDurationCurve(sheet, singleTs as string),
+  );
+  const dailyCols = (tsSeries === '__all__' ? tsCols : [tsSeries]).slice(0, 15);
+  const daily = useAsync(
+    isTs && tsChart === 'daily-profile' && dailyCols.length > 0 ? `${sheet}|daily|${dailyCols.join(',')}` : null,
+    () => fetchDailyProfile(sheet, dailyCols),
+  );
 
   if (!rows.length) return <div className="ia-empty">No data — add rows to see charts.</div>;
 
@@ -477,10 +463,21 @@ export function InputAnalyser({ rows, cols, isTs, frozenCol, currencySymbol = '$
           {tsChart === 'stacked-area' && <LineArea xLabels={xLabels} series={series} stacked />}
           {tsChart === 'duration' && (
             series.length === 1
-              ? <DurationCurve values={series[0].values} label={series[0].key} color={series[0].color} />
+              ? (duration.data
+                ? <DurationCurve values={duration.data.values} label={series[0].key} color={series[0].color} />
+                : <DerivedState loading={duration.loading} error={duration.error} />)
               : <div className="ia-tip">Select a single series for the duration curve.</div>
           )}
-          {tsChart === 'daily-profile' && <DailyProfile xLabels={xLabels} series={series} />}
+          {tsChart === 'daily-profile' && (daily.data
+            ? <DailyProfile
+                color={series[0]?.color ?? '#0f766e'}
+                // Pooled mean across the shown series (each has the same rows per hour).
+                means={Array.from({ length: 24 }, (_, h) => {
+                  const vals = daily.data!.series.map((s) => s.values[h] ?? 0);
+                  return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+                })}
+              />
+            : <DerivedState loading={daily.loading} error={daily.error} />)}
         </div>
         <Legend items={series} />
       </div>
@@ -570,6 +567,9 @@ export function InputAnalyser({ rows, cols, isTs, frozenCol, currencySymbol = '$
       </div>
 
       <div className="ia-chart-wrap">
+        {staticChart !== 'scatter' && activeGroup !== 'none' && !grouped.data && (
+          <DerivedState loading={grouped.loading} error={grouped.error} />
+        )}
         {staticChart === 'bar' && (
           <HBar labels={labels} values={values} colors={colors} unit={unit} />
         )}

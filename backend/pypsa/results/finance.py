@@ -42,7 +42,7 @@ import pypsa
 from ..network.piecewise import overlay_piecewise_marginal_cost
 
 from .adequacy import electricity_buses, store_link_pairs
-from .market import HOURS_PER_YEAR, capex_window_scale
+from .market import HOURS_PER_YEAR, capex_window_scale, process_assets
 
 _log = logging.getLogger("pypsa.solver")
 
@@ -351,7 +351,8 @@ def build_company_finance(
     gen_owner = _owner("generators")
     sto_owner = _owner("storage_units")
     store_owner = _owner("stores")
-    if not gen_owner and not sto_owner and not store_owner:
+    process_owner = _owner("processes")
+    if not gen_owner and not sto_owner and not store_owner and not process_owner:
         return None
 
     # company -> list of (overnight_capex, annual_margin, lifetime)
@@ -394,6 +395,16 @@ def build_company_finance(
         company = (sto_owner if a.sheet == "storage_units" else store_owner).get(a.name)
         if company:
             _add(company, a.capex_annual, (a.revenue - a.op_cost) * annualize, a.lifetime)
+
+    # Processes (P29): net port value at the nodal prices less marginal cost; capex
+    # for extendable ones only — the same rule as generator economics.
+    if process_owner:
+        for pa in process_assets(network, _price, weights, names=list(process_owner)):
+            _add(
+                process_owner[pa.name], pa.capex_annual,
+                (pa.revenue - pa.variable_cost) * annualize,
+                _lifetime(network.processes, pa.name),
+            )
 
     companies: list[dict[str, Any]] = []
     for company, rows in assets.items():

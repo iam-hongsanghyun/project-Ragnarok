@@ -10,38 +10,31 @@
  *   - **One settings control per row** (the gear), driving every chart in it.
  *   - **Columns are draggable** (header cells) to reorder left/right.
  *
- * Data tiers:
- *   - LIGHT topics (Key metrics, Generation mix) render straight from the
- *     in-memory run meta (`summary`, `carrierMix`) — instant, no fetch.
- *   - FULL topics (cost, emissions, capacity, generation-over-time) need a run's
- *     full results. Those are loaded LAZILY by the parent only once such a row
- *     is switched on, then passed in via `scenario.full`. Until then the cell
- *     shows a loading placeholder. (Loading every run's full year of series up
- *     front froze the tab — hence the tiering.)
+ * Data: every cell reads the server's comparison entry for its run
+ * (`GET /api/results/compare`, WA7). The parent requests the entries for the
+ * shown topics only and passes the request `status`; a cell whose data has not
+ * arrived shows a loading placeholder, a failed request shows the error.
  */
 import React, { useMemo, useState } from 'react';
 import type { EChartsCoreOption } from 'echarts/core';
-import { MixItem, RunResults, SummaryItem } from 'lib/types';
+import { MixItem, SummaryItem } from 'lib/types';
+import type { ComparisonEntry, ComparisonTopicId, LabelledValue } from 'lib/api/resultsDerived';
+import { carrierColor } from 'lib/utils/helpers';
 import { readChartTheme } from 'lib/charts/theme';
 import { buildDonutOption, buildExpansionOption, buildTimeSeriesOption, fmtNum } from 'lib/charts/options';
 import { useEChart } from '../../shared/echarts/useEChart';
 
-/** A scenario column. `full` is undefined until a FULL topic asks for it, then
- *  'loading', then the loaded results (or 'error'). */
+/** A scenario column: the server entry (absent until the first response) plus the
+ *  carrier colours the run meta carries (the server sends values only). */
 export interface ComparisonScenario {
   name: string;
   label: string;
-  carrierMix: MixItem[];
-  /** Installed nameplate capacity (input p_nom) by carrier; populated with the
-   *  FULL fetch (needs the run's input model). */
-  capacityMix: MixItem[];
-  summary: SummaryItem[];
-  full?: RunResults | 'loading' | 'error';
+  entry?: ComparisonEntry;
+  carrierColors: Record<string, string>;
 }
 
-// Cap on points drawn per time-series cell — a full year is 8760×carriers and,
-// across several columns, freezes the tab. Striding keeps the shape, cheaply.
-const MAX_TS_POINTS = 600;
+/** State of the comparison request that feeds the matrix. */
+export type ComparisonStatus = { state: 'loading' } | { state: 'ready' } | { state: 'error'; message: string };
 
 const PALETTE = [
   '#2563eb', '#16a34a', '#f59e0b', '#db2777', '#7c3aed',
@@ -55,27 +48,22 @@ type ChartType = 'donut' | 'bar' | 'area' | 'line';
 interface TopicSettings { chartType: ChartType; stacked: boolean }
 
 interface TopicDef {
-  id: string;
+  id: ComparisonTopicId;
   title: string;
   chartTypes: ChartType[];
   hasStacked: boolean;
-  needsFull: boolean;
   defaults: TopicSettings;
 }
 
 export const TOPICS: TopicDef[] = [
-  { id: 'kpi', title: 'Key metrics', chartTypes: [], hasStacked: false, needsFull: false, defaults: { chartType: 'donut', stacked: false } },
-  { id: 'generation-mix', title: 'Generation mix (modelled window)', chartTypes: ['donut', 'bar'], hasStacked: false, needsFull: false, defaults: { chartType: 'donut', stacked: false } },
-  { id: 'installed-capacity', title: 'Installed capacity by carrier', chartTypes: ['donut', 'bar'], hasStacked: false, needsFull: true, defaults: { chartType: 'bar', stacked: false } },
-  { id: 'generation-time', title: 'Generation over time', chartTypes: ['area', 'line', 'bar'], hasStacked: true, needsFull: true, defaults: { chartType: 'area', stacked: true } },
-  { id: 'cost', title: 'Cost breakdown', chartTypes: ['donut', 'bar'], hasStacked: false, needsFull: true, defaults: { chartType: 'donut', stacked: false } },
-  { id: 'emissions', title: 'Emissions by carrier', chartTypes: ['donut', 'bar'], hasStacked: false, needsFull: true, defaults: { chartType: 'bar', stacked: false } },
-  { id: 'capacity', title: 'Capacity expansion', chartTypes: [], hasStacked: false, needsFull: true, defaults: { chartType: 'bar', stacked: false } },
+  { id: 'kpi', title: 'Key metrics', chartTypes: [], hasStacked: false, defaults: { chartType: 'donut', stacked: false } },
+  { id: 'generation-mix', title: 'Generation mix (modelled window)', chartTypes: ['donut', 'bar'], hasStacked: false, defaults: { chartType: 'donut', stacked: false } },
+  { id: 'installed-capacity', title: 'Installed capacity by carrier', chartTypes: ['donut', 'bar'], hasStacked: false, defaults: { chartType: 'bar', stacked: false } },
+  { id: 'generation-time', title: 'Generation over time', chartTypes: ['area', 'line', 'bar'], hasStacked: true, defaults: { chartType: 'area', stacked: true } },
+  { id: 'cost', title: 'Cost breakdown', chartTypes: ['donut', 'bar'], hasStacked: false, defaults: { chartType: 'donut', stacked: false } },
+  { id: 'emissions', title: 'Emissions by carrier', chartTypes: ['donut', 'bar'], hasStacked: false, defaults: { chartType: 'bar', stacked: false } },
+  { id: 'capacity', title: 'Capacity expansion', chartTypes: [], hasStacked: false, defaults: { chartType: 'bar', stacked: false } },
 ];
-
-export function topicNeedsFull(id: string): boolean {
-  return TOPICS.find((t) => t.id === id)?.needsFull ?? false;
-}
 
 function unitFor(topicId: string, currencySymbol: string): string {
   switch (topicId) {
@@ -88,8 +76,21 @@ function unitFor(topicId: string, currencySymbol: string): string {
   }
 }
 
-const fullOf = (s: ComparisonScenario): RunResults | null =>
-  s.full && s.full !== 'loading' && s.full !== 'error' ? s.full : null;
+/** The entry field a topic reads; a cell is "loading" until the response carries it. */
+const ENTRY_FIELD: Record<ComparisonTopicId, keyof ComparisonEntry> = {
+  'kpi': 'summary',
+  'generation-mix': 'carrierMix',
+  'installed-capacity': 'capacityMix',
+  'cost': 'costBreakdown',
+  'emissions': 'emissionsByCarrier',
+  'capacity': 'expansion',
+  'generation-time': 'dispatchSeries',
+};
+
+const mixOf = (s: ComparisonScenario): MixItem[] =>
+  (s.entry?.carrierMix ?? []).map((m) => ({ ...m, color: s.carrierColors[m.label] ?? carrierColor(m.label) }));
+const capacityMixOf = (s: ComparisonScenario): MixItem[] =>
+  (s.entry?.capacityMix ?? []).map((m) => ({ ...m, color: carrierColor(m.label) }));
 
 // ── Cells ─────────────────────────────────────────────────────────────────────
 
@@ -150,11 +151,10 @@ function categoryCellOption(items: CategoryItem[], colorOf: Map<string, string>,
   return buildDonutOption({ data, unit, theme: readChartTheme() });
 }
 
-function generationTimeOption(r: RunResults, colorOf: Map<string, string>, settings: TopicSettings): EChartsCoreOption | null {
-  const all = r.dispatchSeries ?? [];
-  if (all.length === 0) return null;
-  const stride = all.length > MAX_TS_POINTS ? Math.ceil(all.length / MAX_TS_POINTS) : 1;
-  const points = stride === 1 ? all : all.filter((_, i) => i % stride === 0);
+/** `entry.dispatchSeries` arrives already strided by the server (<= 600 points). */
+function generationTimeOption(entry: ComparisonEntry, colorOf: Map<string, string>, settings: TopicSettings): EChartsCoreOption | null {
+  const points = entry.dispatchSeries ?? [];
+  if (points.length === 0) return null;
   const keys = Array.from(colorOf.keys());
   return buildTimeSeriesOption({
     xLabels: points.map((p) => p.label || p.timestamp),
@@ -169,10 +169,10 @@ function generationTimeOption(r: RunResults, colorOf: Map<string, string>, setti
   });
 }
 
-function expansionCellOption(r: RunResults, colorOf: Map<string, string>): EChartsCoreOption | null {
-  const assets = r.expansionResults ?? [];
+function expansionCellOption(entry: ComparisonEntry, colorOf: Map<string, string>): EChartsCoreOption | null {
+  const assets = entry.expansion ?? [];
   if (assets.length === 0) return null;
-  const rows = assets.map((a) => ({ name: a.name, installed: a.p_nom_mw, optimised: a.p_nom_opt_mw, color: colorOf.get(a.carrier) ?? '#2563eb' }));
+  const rows = assets.map((a) => ({ name: a.name, installed: a.installedMw, optimised: a.optimisedMw, color: colorOf.get(a.carrier) ?? '#2563eb' }));
   return { ...buildExpansionOption(rows, readChartTheme()), legend: { show: false } } as EChartsCoreOption;
 }
 
@@ -186,28 +186,28 @@ function mixColorMap(scenarios: ComparisonScenario[], get: (s: ComparisonScenari
 }
 
 function carrierColorMap(scenarios: ComparisonScenario[]): { legend: LegendItem[]; colorOf: Map<string, string> } {
-  return mixColorMap(scenarios, (s) => s.carrierMix);
+  return mixColorMap(scenarios, mixOf);
 }
 
-/** Union of categories from each scenario's FULL results, palette-coloured. */
-function unifyFull(scenarios: ComparisonScenario[], get: (r: RunResults) => CategoryItem[]): { legend: LegendItem[]; colorOf: Map<string, string> } {
+/** Union of categories from each scenario's entry, palette-coloured. */
+function unifyEntries(scenarios: ComparisonScenario[], get: (e: ComparisonEntry) => CategoryItem[]): { legend: LegendItem[]; colorOf: Map<string, string> } {
   const colorOf = new Map<string, string>();
   const order: string[] = [];
   for (const s of scenarios) {
-    const r = fullOf(s);
-    if (!r) continue;
-    for (const it of get(r)) if (!colorOf.has(it.label)) { colorOf.set(it.label, it.color ?? PALETTE[order.length % PALETTE.length]); order.push(it.label); }
+    if (!s.entry) continue;
+    for (const it of get(s.entry)) if (!colorOf.has(it.label)) { colorOf.set(it.label, it.color ?? PALETTE[order.length % PALETTE.length]); order.push(it.label); }
   }
   return { legend: order.map((l) => ({ key: l, label: l, color: colorOf.get(l)! })), colorOf };
 }
 
-const costItems = (r: RunResults): CategoryItem[] => (r.costBreakdown ?? []).map((c) => ({ label: c.label, value: c.value }));
-const emissionItems = (r: RunResults): CategoryItem[] => (r.emissionsBreakdown?.byCarrier ?? []).map((c) => ({ label: c.carrier, value: c.emissions_tco2 }));
+const asItems = (rows: LabelledValue[] | undefined): CategoryItem[] => (rows ?? []).map((c) => ({ label: c.label, value: c.value }));
+const costItems = (e: ComparisonEntry): CategoryItem[] => asItems(e.costBreakdown);
+const emissionItems = (e: ComparisonEntry): CategoryItem[] => asItems(e.emissionsByCarrier);
 
 // ── Topic row ───────────────────────────────────────────────────────────────
 
-function TopicRow({ topic, scenarios, settings, onSettings, currencySymbol, gridTemplate }: {
-  topic: TopicDef; scenarios: ComparisonScenario[]; settings: TopicSettings;
+function TopicRow({ topic, scenarios, status, settings, onSettings, currencySymbol, gridTemplate }: {
+  topic: TopicDef; scenarios: ComparisonScenario[]; status: ComparisonStatus; settings: TopicSettings;
   onSettings: (s: TopicSettings) => void; currencySymbol: string; gridTemplate: string;
 }) {
   const [showGear, setShowGear] = useState(false);
@@ -215,36 +215,39 @@ function TopicRow({ topic, scenarios, settings, onSettings, currencySymbol, grid
   const hasControls = topic.chartTypes.length > 0 || topic.hasStacked;
 
   const { legend, cells } = useMemo(() => {
-    // KPI — light, per-column lists.
-    if (topic.id === 'kpi') return { legend: [] as LegendItem[], cells: scenarios.map(() => ({ kind: 'kpi' as const })) };
+    type Cell =
+      | { kind: 'kpi' }
+      | { kind: 'loading' }
+      | { kind: 'error'; message: string }
+      | { kind: 'chart'; option: EChartsCoreOption | null };
+    // A cell has no data until the response carries this topic's field.
+    const pending = (s: ComparisonScenario): Cell | null => {
+      if (s.entry?.[ENTRY_FIELD[topic.id]] !== undefined) return null;
+      return status.state === 'error' ? { kind: 'error', message: status.message } : { kind: 'loading' };
+    };
+    const build = (lg: LegendItem[], cell: (s: ComparisonScenario) => Cell) =>
+      ({ legend: lg, cells: scenarios.map((s) => pending(s) ?? cell(s)) });
 
-    // Generation mix — light, carrier-coloured.
+    if (topic.id === 'kpi') return build([], () => ({ kind: 'kpi' }));
+
     if (topic.id === 'generation-mix') {
       const { legend: lg, colorOf } = carrierColorMap(scenarios);
-      return { legend: lg, cells: scenarios.map((s) => ({ kind: 'chart' as const, option: categoryCellOption(s.carrierMix.map((m) => ({ label: m.label, value: m.value, color: m.color })), colorOf, settings, unit) })) };
+      return build(lg, (s) => ({ kind: 'chart', option: categoryCellOption(mixOf(s).map((m) => ({ label: m.label, value: m.value, color: m.color })), colorOf, settings, unit) }));
     }
 
-    // Installed capacity by carrier — FULL (needs each run's input model), the
-    // capacity analogue of the generation mix. Installed nameplate (input p_nom).
+    // Installed capacity by carrier — the capacity analogue of the generation mix
+    // (solved p_nom_opt where present, else input p_nom; the server decides).
     if (topic.id === 'installed-capacity') {
-      const { legend: lg, colorOf } = mixColorMap(scenarios, (s) => s.capacityMix);
-      return { legend: lg, cells: scenarios.map((s) => {
-        if (s.full === undefined || s.full === 'loading') return { kind: 'loading' as const };
-        return { kind: 'chart' as const, option: categoryCellOption(s.capacityMix.map((m) => ({ label: m.label, value: m.value, color: m.color })), colorOf, settings, unit) };
-      }) };
+      const { legend: lg, colorOf } = mixColorMap(scenarios, capacityMixOf);
+      return build(lg, (s) => ({ kind: 'chart', option: categoryCellOption(capacityMixOf(s).map((m) => ({ label: m.label, value: m.value, color: m.color })), colorOf, settings, unit) }));
     }
 
-    // Generation over time — FULL, carrier-coloured.
     if (topic.id === 'generation-time') {
       const { legend: lg, colorOf } = carrierColorMap(scenarios);
-      return { legend: lg, cells: scenarios.map((s) => {
-        const r = fullOf(s);
-        if (s.full === undefined || s.full === 'loading') return { kind: 'loading' as const };
-        return { kind: 'chart' as const, option: r ? generationTimeOption(r, colorOf, settings) : null };
-      }) };
+      return build(lg, (s) => ({ kind: 'chart', option: generationTimeOption(s.entry!, colorOf, settings) }));
     }
 
-    // Capacity expansion — FULL, carrier-coloured bars (Installed vs Optimised legend).
+    // Capacity expansion — carrier-coloured bars (Installed vs Optimised legend).
     if (topic.id === 'capacity') {
       const { colorOf } = carrierColorMap(scenarios);
       const theme = readChartTheme();
@@ -252,25 +255,19 @@ function TopicRow({ topic, scenarios, settings, onSettings, currencySymbol, grid
         { key: 'installed', label: 'Installed', color: theme.borderStrong },
         { key: 'optimised', label: 'Optimised', color: '#2563eb' },
       ];
-      return { legend: lg, cells: scenarios.map((s) => {
-        const r = fullOf(s);
-        if (s.full === undefined || s.full === 'loading') return { kind: 'loading' as const };
-        return { kind: 'chart' as const, option: r ? expansionCellOption(r, colorOf) : null };
-      }) };
+      return build(lg, (s) => ({ kind: 'chart', option: expansionCellOption(s.entry!, colorOf) }));
     }
 
-    // Cost / emissions — FULL, categorical.
+    // Cost / emissions — categorical.
     const get = topic.id === 'cost' ? costItems : emissionItems;
-    const { legend: lg, colorOf } = unifyFull(scenarios, get);
-    return { legend: lg, cells: scenarios.map((s) => {
-      const r = fullOf(s);
-      if (s.full === undefined || s.full === 'loading') return { kind: 'loading' as const };
-      const order = lg.map((l) => l.label);
-      const m = new Map(r ? get(r).map((it) => [it.label, it.value]) : []);
+    const { legend: lg, colorOf } = unifyEntries(scenarios, get);
+    const order = lg.map((l) => l.label);
+    return build(lg, (s) => {
+      const m = new Map(get(s.entry!).map((it) => [it.label, it.value]));
       const items = order.map((l) => ({ label: l, value: m.get(l) ?? 0 }));
-      return { kind: 'chart' as const, option: r ? categoryCellOption(items, colorOf, settings, unit) : null };
-    }) };
-  }, [topic.id, scenarios, settings, unit]);
+      return { kind: 'chart', option: categoryCellOption(items, colorOf, settings, unit) };
+    });
+  }, [topic.id, scenarios, status, settings, unit]);
 
   return (
     <section className="cmp-topic">
@@ -298,8 +295,9 @@ function TopicRow({ topic, scenarios, settings, onSettings, currencySymbol, grid
       <div className="cmp-topic-grid" style={{ gridTemplateColumns: gridTemplate }}>
         {cells.map((c, i) => {
           const key = scenarios[i].name;
-          if (c.kind === 'kpi') return <KpiCell key={key} summary={scenarios[i].summary} />;
+          if (c.kind === 'kpi') return <KpiCell key={key} summary={scenarios[i].entry?.summary ?? []} />;
           if (c.kind === 'loading') return <LoadingCell key={key} />;
+          if (c.kind === 'error') return <div key={key} className="cmp-cell--empty" role="alert">{c.message}</div>;
           return <ChartCell key={key} option={c.option} />;
         })}
         <div className="cmp-legend-cell">
@@ -317,8 +315,9 @@ function TopicRow({ topic, scenarios, settings, onSettings, currencySymbol, grid
 
 // ── Matrix ──────────────────────────────────────────────────────────────────
 
-export function ComparisonMatrix({ scenarios, activeRunName, currencySymbol = '$', enabled, onToggleTopic, onReorder }: {
+export function ComparisonMatrix({ scenarios, status, activeRunName, currencySymbol = '$', enabled, onToggleTopic, onReorder }: {
   scenarios: ComparisonScenario[];
+  status: ComparisonStatus;
   activeRunName: string | null;
   currencySymbol?: string;
   enabled: string[];
@@ -382,6 +381,7 @@ export function ComparisonMatrix({ scenarios, activeRunName, currencySymbol = '$
           key={t.id}
           topic={t}
           scenarios={scenarios}
+          status={status}
           settings={settings[t.id]}
           onSettings={(s) => setSettings((prev) => ({ ...prev, [t.id]: s }))}
           currencySymbol={currencySymbol}

@@ -31,6 +31,7 @@ node_modules/
 # Python virtual environments
 .venv/
 .venv-pypsa/
+.venv-pandapower/
 venv/
 # CLIMADA worker conda prefix env (built by scripts/setup_climada_worker.sh)
 .climada-env/

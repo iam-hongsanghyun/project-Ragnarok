@@ -1,5 +1,5 @@
 import { describe, test, expect } from '@jest/globals';
-import { decorateHeader, getAttributeHint } from './attributeHints';
+import { decorateHeader, getAttributeHint, groupColumns } from './attributeHints';
 
 describe('attribute hints (P46)', () => {
   test('maintenance fields are grouped for generators, links and processes only', () => {
@@ -31,5 +31,19 @@ describe('attribute hints (P46)', () => {
   test('unknown attributes fall back to schema unit', () => {
     expect(getAttributeHint('generators', 'p_nom')).toBeNull();
     expect(decorateHeader('generators', 'p_nom', 'MW', true)).toBe('p_nom (MW) *');
+  });
+
+  test('groupColumns pulls a hint group together at its first column, keeping the rest in order', () => {
+    const cols = ['name', 'maintainable', 'p_nom', 'maintenance_pu', 'carrier', 'maintenance_events'];
+    expect(groupColumns('generators', cols)).toEqual([
+      'name', 'maintainable', 'maintenance_pu', 'maintenance_events', 'p_nom', 'carrier',
+    ]);
+    expect(groupColumns('loads', cols)).toEqual(cols);
+  });
+
+  test('carrier growth limits carry units and a pathway-only note', () => {
+    expect(getAttributeHint('carriers', 'max_growth')?.unit).toBe('MW');
+    expect(getAttributeHint('carriers', 'max_relative_growth')?.group).toBe('Growth limit');
+    expect(getAttributeHint('generators', 'max_growth')).toBeNull();
   });
 });

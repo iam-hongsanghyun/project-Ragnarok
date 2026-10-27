@@ -139,8 +139,8 @@ by `export_run`), the country GeoJSON and `DELETE /api/log`.
 
 ### 2.7 MCP-only modelling and scenario tools
 
-The MCP server has 154 tools: 116 in `backend/mcp/server.py` (§2.1–§2.6 group most of them, not all) and 38 in
-`backend/mcp/tools_*.py`. The table below covers the 38. The GUI reaches the same backend routes through its own
+The MCP server has 156 tools: 116 in `backend/mcp/server.py` (§2.1–§2.6 group most of them, not all) and 40 in
+`backend/mcp/tools_*.py`. The table below covers the 38 added before 2026-10-28; `compare_run_statistics` (tools_results_extra.py, read-only, `GET /api/results/compare?topics=statistics`) compares runs through `pypsa.NetworkCollection` statistics, and `get_metric_options` (same module, read-only, `GET /api/runs/{name}/metrics`) is listed in the last table below. The GUI reaches the same backend routes through its own
 controls (Forge, the Solver section, the Scenarios panel). This table is a snapshot from 2026-10-28, read from the
 code: the tool name and module from the `@mcp.tool` decorator, the endpoints from the `RagnarokClient` method each
 tool calls, the gate from the `confirm` argument, and the purpose from the first sentence of the description. The
@@ -159,12 +159,18 @@ MCP `list_tools` call returns the full descriptions, and `describe_run_options` 
 | `delete_scenario` | — | confirm | Remove a saved scenario preset from the model (stored runs are untouched) |
 | `set_custom_dsl` | `PUT /api/scenarios/dsl` | confirm | Replace the model's custom-constraint DSL sheet (RAGNAROK_CustomDSL) — one constraint per line, e.g. 'gen("gas") <= 120' or 'emissions() <= 5000' |
 
+**Result metrics (`tools_results_extra.py`)**
+
+| Tool | Endpoint(s) | Gate | What it does |
+|---|---|---|---|
+| `get_metric_options` | `GET /api/runs/{name}/metrics` | — | Chart-ready metrics (rows, series, colours) of one per-asset focus (generator, bus, storageUnit, store, branch, process, shuntImpedance) of a stored run - the options the Analytics chart card offers; narrow by `keys`, `group_by`, `bus_filter`, `carrier_filter`, `period`, `end`. Returns `{run, focus, items, total}` |
+
 **Analysis and Forge edits (`tools_analysis.py`)**
 
 | Tool | Endpoint(s) | Gate | What it does |
 |---|---|---|---|
 | `compare_runs` | `GET /api/results/compare` | — | Side-by-side comparison of 2-5 stored runs - the Analytics -> Comparison matrix as data. 'topics' picks columns of detail: kpi (summary KPIs with the generator/storage capacity split), … |
-| `get_kpis` | `GET /api/runs/{name}/kpis` | — | The KPI strip of a stored run: total cost, dispatch MWh, average/min/max price, peak load MW, load factor, renewable share % (zero-emission carriers excluding nuclear and storage), … |
+| `get_kpis` | `GET /api/runs/{name}/kpis` | — | The KPI strip of a stored run: total cost, dispatch MWh, load-weighted average price (`runMeta.averageSystemPrice` = `n.statistics.prices(weighting="load")`; the unweighted series mean only for runs stored before that field), min/max price, peak load MW, load factor, renewable share % (zero-emission carriers excluding nuclear and storage), … |
 | `compare_companies` | `GET /api/runs/{name}/companies` | — | Company comparison for a stored run: the per-owner breakdown (capacity, energy, revenue, emissions), project finance (NPV, IRR, payback) and P&L (net margin) joined by company and ranked by … |
 | `get_asset_details` | `GET /api/runs/{name}/assets` | — | Per-asset details of a stored run. kind is one of generators, buses, storageUnits, stores, branches, processes, shuntImpedances (default all) |
 | `list_conversions` | `GET /api/build/conversions` | — | The sector-coupling conversion templates (CCGT, OCGT, CHP, electrolyser, fuel cell, heat pump, resistive heater, gas boiler, methanation) with efficiency, capital cost and fuel assumptions, … |
@@ -286,7 +292,7 @@ A new **Assistant** tab (activity bar), consistent with the existing view shell:
 
 | Phase | Deliverable | Leans on |
 |---|---|---|
-| **0 · MCP prototype** ✅ *shipped* | An MCP server (`backend/mcp/`) — 154 tools spanning the full surface (§2.7 lists the newest 38): introspect + **schema** (`list_components`/`describe_component`/`describe_run_options` over the live PyPSA registry) · data-in · edit · **generic component CRUD** (`add_component`/`set_component`/`remove_component` cover every PyPSA component + attribute) + typed `add_*` conveniences · series transforms · solve (all modes via free-form scenario/options) · analyse · plugins. Drivable from any MCP client with any model. See §10 to connect a client. | existing API |
+| **0 · MCP prototype** ✅ *shipped* | An MCP server (`backend/mcp/`) — 156 tools spanning the full surface (§2.7 lists the newest 40): introspect + **schema** (`list_components`/`describe_component`/`describe_run_options` over the live PyPSA registry) · data-in · edit · **generic component CRUD** (`add_component`/`set_component`/`remove_component` cover every PyPSA component + attribute) + typed `add_*` conveniences · series transforms · solve (all modes via free-form scenario/options) · analyse · plugins. Drivable from any MCP client with any model. See §10 to connect a client. | existing API |
 | **1 · Embedded agent (L1 shell)** | `LLMProvider` abstraction + Claude API adapter + the plan/act/observe loop + a minimal Assistant chat tab (stream + tool cards). Happy path: "build KOR, solve, report." | Phase 0 tools |
 | **2 · Guardrails & grounding** | confirmation gates, budgets, world-state summarisation, schema retrieval tools, exemplars. | pypsa_schema_builder |
 | **3 · Verification loop** | validate-before-solve, Q2 repair loop, Ember/adequacy sanity, cited report generator. | Q2, I7, A2 |

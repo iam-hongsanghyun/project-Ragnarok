@@ -16,7 +16,12 @@ from ..network import build_network
 from ..network.piecewise import build_piecewise_results, overlay_piecewise_marginal_cost
 from ..network.demand_response import build_demand_response, build_price_elastic
 from ..pathway import parse_pathway_config
-from ..rolling import parse_rolling_config
+from ..rolling import (
+    auto_terminal_penalty,
+    parse_rolling_config,
+    terminal_soc_hook,
+    terminal_soc_targets,
+)
 from ..sampling import parse_sampling_config, sample_block_indices
 from ..stochastic import (
     collapse_to_representative_scenario,
@@ -32,6 +37,9 @@ from ..network.reserves import apply_reserve_constraints, extract_reserve_result
 from ..network.ramp import apply_ramp_constraints, extract_ramp_results, strip_native_ramp_columns
 from .dispatch import (
     build_curtailment_series,
+    curtailment_mw_by_generator,
+    metric_definitions,
+    system_average_price,
     build_dispatch_series,
     build_price_emissions_series,
     build_storage_series,
@@ -50,7 +58,7 @@ from .pathway_periods import (
     periods as pathway_periods,
     snapshot_active_mask,
 )
-from .emissions import build_emissions_breakdown
+from .emissions import build_emissions_breakdown, emission_totals_by_carrier
 from .energy_balance import build_energy_balance
 from .statistics import build_statistics
 from .mga import build_mga
@@ -650,13 +658,32 @@ def run_pypsa(
                 rolling.horizon_snapshots,
                 rolling.overlap_snapshots,
             )
+            # RE7: without a terminal condition the last window drains storage to zero.
+            # Soft target = horizon-start energy (penalised shortfall, never infeasible).
+            rolling_extra = extra_functionality
+            if rolling.terminal_soc and not pathway.enabled and len(network.snapshots):
+                _terminal_targets = terminal_soc_targets(network)
+                if _terminal_targets["StorageUnit"] or _terminal_targets["Store"]:
+                    _terminal_hook = terminal_soc_hook(
+                        _terminal_targets,
+                        rolling.terminal_soc_penalty
+                        if rolling.terminal_soc_penalty is not None
+                        else auto_terminal_penalty(network),
+                        network.snapshots[-1],
+                        notes,
+                    )
+
+                    def rolling_extra(n, snapshots, _base=extra_functionality, _hook=_terminal_hook):
+                        _base(n, snapshots)
+                        _hook(n, snapshots)
+
             network.optimize.optimize_with_rolling_horizon(
                 horizon=rolling.horizon_snapshots,
                 overlap=rolling.overlap_snapshots,
                 multi_investment_periods=pathway.enabled,
                 solver_name=oo.solver_name,
                 solver_options=solver_options if solver_options else {},
-                extra_functionality=extra_functionality,
+                extra_functionality=rolling_extra,
                 io_api=oo.io_api(_SOLVER_IO_API),
                 include_objective_constant=False,  # see note on the single-period call
                 assign_all_duals=True,  # populate storage / link duals (mu_energy_balance …)
@@ -1094,22 +1121,10 @@ def _build_solved_payload(
         if carrier in shed_carriers:
             continue
         carrier_energy[carrier] += weighted_sum(series.clip(lower=0.0), generator_weights)
-    # Emissions on the thermal basis: dispatch × co2_emissions / η (M3), summed
-    # per generator then grouped by carrier — η varies by unit, not by carrier,
-    # so it can't be applied to the carrier-summed dispatch.
-    eff_ef = per_generator_emission_factor(network, emissions_factors)
-    for name in generator_dispatch_frame.columns:
-        if str(name).startswith("load_shedding_"):
-            continue
-        factor = float(eff_ef.get(name, 0.0))
-        if not factor:
-            continue
-        carrier = str(network.generators.at[name, "carrier"])
-        if carrier in shed_carriers:
-            continue
-        emission_totals[carrier] += weighted_sum(
-            generator_dispatch_frame[name].clip(lower=0.0) * factor, generator_weights
-        )
+    # Emissions on PyPSA's primary_energy basis (RB10): generators p/η × co2_emissions
+    # (signed, period-weighted) plus non-cyclic storage depletion — equals the
+    # primary_energy GlobalConstraint LHS. Links/Processes are not counted.
+    emission_totals.update(emission_totals_by_carrier(network, emissions_factors))
 
     carrier_mix = [
         {"label": c, "value": v, "color": carrier_color(network, c)}
@@ -1122,20 +1137,13 @@ def _build_solved_payload(
     # generator series never has to reach the browser — it stays server-side and
     # is fetched windowed only when a time-series chart is opened.
     generator_carriers = network.generators["carrier"].to_dict()
-    # Generators with time-varying p_max_pu (renewables) are the only ones for
-    # which curtailment is meaningful; thermal units at static p_max_pu=1 are
-    # not "curtailed" when running at partial load.
-    # p_nom_opt where solved (>0), else input p_nom — p_nom_opt exists with a
-    # 0.0 default for non-extendable generators on some pypsa versions.
-    _p_nom_in = network.generators["p_nom"].fillna(0.0)
-    if "p_nom_opt" in network.generators.columns:
-        _p_nom_opt = network.generators["p_nom_opt"].fillna(0.0)
-        p_nom_opt_s = _p_nom_opt.where(_p_nom_opt > 0, _p_nom_in)
-    else:
-        p_nom_opt_s = _p_nom_in
-    tv_p_max_pu_cols = set(network.generators_t.p_max_pu.columns)
-    # Pathway: availability exists only while the unit is active.
-    _active_gen = snapshot_active_mask(network, "generators")
+    # Curtailment (P28): PyPSA's n.statistics.curtailment, restricted to generators
+    # with a time-varying p_max_pu (see dispatch.curtailment_mw_by_generator).
+    curtailment_mw = curtailment_mw_by_generator(network)
+    curtailment_mwh_map = {
+        str(g): float(v)
+        for g, v in curtailment_mw.mul(generator_weights, axis=0).sum(axis=0).items()
+    }
     generator_energy = []
     for gen in generator_dispatch_frame.columns:
         if str(gen).startswith("load_shedding_"):
@@ -1143,18 +1151,7 @@ def _build_solved_payload(
         energy = weighted_sum(generator_dispatch_frame[gen].clip(lower=0.0), generator_weights)
         if energy > 0.0:
             carrier = str(generator_carriers.get(gen, ""))
-            curtailment_mwh: float | None = None
-            if gen in tv_p_max_pu_cols:
-                p_nom_opt = float(p_nom_opt_s.get(gen, 0.0))
-                avail_s = (network.generators_t.p_max_pu[gen] * p_nom_opt).clip(lower=0.0)
-                if _active_gen is not None and gen in _active_gen.columns:
-                    avail_s = avail_s.where(_active_gen[gen].reindex(avail_s.index, fill_value=True), 0.0)
-                curtailment_mwh = float(
-                    weighted_sum(
-                        (avail_s - generator_dispatch_frame[gen].clip(lower=0.0)).clip(lower=0.0),
-                        generator_weights,
-                    )
-                )
+            curtailment_mwh: float | None = curtailment_mwh_map.get(str(gen))
             generator_energy.append(
                 {
                     "name": str(gen),
@@ -1178,11 +1175,8 @@ def _build_solved_payload(
                 w_p = generator_weights[sel]
                 energy_p = weighted_sum(disp_p, w_p)
                 curt_p: float | None = None
-                if row["curtailmentMwh"] is not None:
-                    avail_p = (network.generators_t.p_max_pu[gen] * float(p_nom_opt_s.get(gen, 0.0))).clip(lower=0.0)[sel]
-                    if _active_gen is not None and gen in _active_gen.columns:
-                        avail_p = avail_p.where(_active_gen[gen][sel], 0.0)
-                    curt_p = float(weighted_sum((avail_p - disp_p).clip(lower=0.0), w_p))
+                if row["curtailmentMwh"] is not None and gen in curtailment_mw.columns:
+                    curt_p = float(weighted_sum(curtailment_mw[gen][sel], w_p))
                 if energy_p > 0.0 or (curt_p or 0.0) > 0.0:
                     _per_period.append({**row, "value": float(energy_p), "curtailmentMwh": curt_p, "period": int(p)})
         generator_energy.sort(key=lambda row: row["value"], reverse=True)
@@ -1217,6 +1211,9 @@ def _build_solved_payload(
             [_period_w[int(p)] for p in network.snapshots.get_level_values("period")],
             index=network.snapshots,
         )
+    # Carbon-cost split uses the electrical-basis factor (co2 / η) the carbon price
+    # folded into marginal_cost; this is a cost back-out, not an emissions total.
+    eff_ef = per_generator_emission_factor(network, emissions_factors)
     for name in network.generators.index:
         if name not in generator_dispatch_frame.columns:
             continue
@@ -1436,7 +1433,10 @@ def _build_solved_payload(
     stress_rows = [x for x in line_loading if x["label"] not in _conversion_links]
 
     total_emissions = sum(emission_totals.values()) / 1000.0
-    average_price = weighted_mean(price_series, generator_weights)
+    # P28: PyPSA's load-weighted average price (n.statistics.prices); falls back to
+    # the snapshot-weighted mean of the per-snapshot system price if unavailable.
+    _avg_stat = system_average_price(network, elec_scope)
+    average_price = _avg_stat if _avg_stat is not None else weighted_mean(price_series, generator_weights)
     peak_net_load = round(float(load_dispatch.max()))
 
     # Electricity-only phrasing when the aggregates are scoped to the
@@ -1856,7 +1856,9 @@ def _build_solved_payload(
         "demandResponse": demand_response,
         "priceElastic": price_elastic,
         "narrative": notes,
+        "metricDefinitions": metric_definitions(currency),
         "runMeta": {
+            "averageSystemPrice": float(average_price),
             "snapshotCount": snapshot_count,
             "snapshotWeight": snapshot_weight,
             "modeledHours": snapshot_count * snapshot_weight,

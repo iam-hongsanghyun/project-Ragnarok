@@ -7,7 +7,8 @@
  * produced energy (>0 MWh), so the two columns together reveal idle capacity.
  * Shares are each carrier's fraction of total nameplate / total energy.
  *
- *   - Capacity factor (CF) = energy / (nameplate capacity × modelled hours)
+ *   - Capacity factor (CF) = n.statistics.capacity_factor, read from the server's
+ *     generatorEconomics byCarrier rows (capacity-weighted per carrier); not computed here
  *   - Curtailment          = Σ curtailed energy (renewables only), MWh
  *
  * Works for a live run (per-snapshot series in assetDetails) and a stored run
@@ -36,7 +37,8 @@ interface CarrierRow {
   generatedMw: number;
   energyMwh: number;
   generationShare: number;
-  capacityFactor: number;
+  /** Server `generatorEconomics.byCarrier[].capacityFactor`; null when not shipped. */
+  capacityFactor: number | null;
   curtailmentMwh: number | null;
 }
 
@@ -141,6 +143,10 @@ export function CarrierAnalysisCard({ results, model }: Props) {
   const totalNameplate = Array.from(byCarrier.values()).reduce((s, b) => s + b.nameplate, 0);
   const totalEnergy = Array.from(byCarrier.values()).reduce((s, b) => s + b.energy, 0);
 
+  const cfByCarrier = new Map<string, number | null>(
+    (results.generatorEconomics?.byCarrier ?? []).map((c) => [c.carrier, c.capacityFactor ?? null]),
+  );
+
   const rows: CarrierRow[] = Array.from(byCarrier.entries()).map(([carrier, b]) => ({
     carrier,
     color: carrierColor(carrier),
@@ -150,7 +156,7 @@ export function CarrierAnalysisCard({ results, model }: Props) {
     generatedMw: b.generated,
     energyMwh: b.energy,
     generationShare: totalEnergy > 0 ? b.energy / totalEnergy : 0,
-    capacityFactor: b.nameplate > 0 ? b.energy / (b.nameplate * modelledHours) : 0,
+    capacityFactor: cfByCarrier.get(carrier) ?? null,
     curtailmentMwh: b.hasCurt ? b.curt : null,
   })).sort((a, b) => b.energyMwh - a.energyMwh);
 
@@ -173,8 +179,8 @@ export function CarrierAnalysisCard({ results, model }: Props) {
           <h3>Carrier performance</h3>
           <p>
             Capacity is installed nameplate (all units); <b>Generated cap.</b> is the
-            portion that produced energy, so the gap is idle capacity. CF is energy ÷
-            (nameplate × modelled hours). Load-shedding backstop excluded.
+            portion that produced energy, so the gap is idle capacity. CF is PyPSA's
+            capacity factor (n.statistics.capacity_factor). Load-shedding backstop excluded.
           </p>
         </div>
       </div>
@@ -208,7 +214,7 @@ export function CarrierAnalysisCard({ results, model }: Props) {
                 <td>{fmt(r.generatedMw)}</td>
                 <td>{fmt(r.energyMwh)}</td>
                 <td>{pct(r.generationShare)}</td>
-                <td>{r.capacityFactor > 0 ? `${(r.capacityFactor * 100).toFixed(1)}%` : '—'}</td>
+                <td>{r.capacityFactor != null && r.capacityFactor > 0 ? `${(r.capacityFactor * 100).toFixed(1)}%` : '—'}</td>
                 <td>{r.curtailmentMwh === null || r.curtailmentMwh <= 0 ? '—' : fmt(r.curtailmentMwh)}</td>
               </tr>
             ))}

@@ -291,3 +291,31 @@ def test_natural_earth_iso_preferred_over_adm0() -> None:
     assert _feature_iso({"ADM0_A3": "KOS", "ISO_A3": "-99", "ISO_A3_EH": "-99"}) == "XKX"
     assert _feature_iso({"ADM0_A3": "FRA", "ISO_A3": "-99", "ISO_A3_EH": "FRA"}) == "FRA"
     assert _feature_iso({"ADM0_A3": "KOR"}) == "KOR"
+
+
+def test_eia_period_is_hour_ending_shifted_to_hour_beginning() -> None:
+    """RI4: EIA-930 ``period`` is hour-ending UTC (bulk files: "UTC Time at End of Hour"; AECI 2495 MW is
+    api period 2023-01-01T07 == bulk end-of-hour 07:00). Snapshots must be hour-beginning."""
+    from backend.app.importers.databases import eia_demand
+
+    rows = [  # real EIA API values for AECI demand, 2023-01-01
+        {"period": "2023-01-01T05", "value": "2606"},
+        {"period": "2023-01-01T06", "value": "2540"},
+        {"period": "2023-01-01T07", "value": "2495"},
+    ]
+    res = FetchResult("eia_demand", Region("USA", "US", box(-125, 25, -66, 49)), {"respondent": "AECI"},
+                      {"respondent": "AECI", "rows": rows, "date_from": "2023-01-01", "date_to": "2023-01-01"})
+    frag = eia_demand.build().to_sheets(res, ConvertOptions())
+    assert frag.snapshots == ["2023-01-01 04:00", "2023-01-01 05:00", "2023-01-01 06:00"]
+    by_snap = {r["snapshot"]: r["AECI_demand"] for r in frag.sheets["loads-p_set"]}
+    assert by_snap["2023-01-01 06:00"] == 2495.0  # the 06:00-07:00 UTC hour, labelled by its start
+    # midnight rollover
+    assert eia_demand._hour_beginning_label("2023-01-01T00") == "2022-12-31 23:00"
+
+
+def test_eia_request_window_covers_whole_days() -> None:
+    """Hour-ending request window yielding hour-beginning 00:00 of date_from .. 23:00 of date_to."""
+    from backend.app.importers.databases import eia_demand
+
+    assert eia_demand._period_window("2023-01-01", "2023-01-07") == ("2023-01-01T01", "2023-01-08T00")
+    assert eia_demand._period_window("2023-12-31", "2023-12-31") == ("2023-12-31T01", "2024-01-01T00")

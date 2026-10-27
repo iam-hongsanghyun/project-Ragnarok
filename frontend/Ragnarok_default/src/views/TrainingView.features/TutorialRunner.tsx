@@ -8,7 +8,7 @@
  * never submits a run — a learner who watches values appear has not learnt
  * where those values live.
  */
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { WorkspaceTab } from 'lib/types';
 import { Spotlight, Tutorial, TutorialProgress, TutorialStep } from 'lib/training/types';
 import {

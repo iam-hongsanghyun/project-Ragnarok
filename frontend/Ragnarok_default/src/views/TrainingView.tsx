@@ -13,11 +13,10 @@
 import React, { useCallback, useState } from 'react';
 import { WorkspaceTab } from 'lib/types';
 import { Spotlight, TutorialProgress } from 'lib/training/types';
-import { TUTORIALS, findTutorial, modulesByLevel, modulesWithSteps } from 'lib/training/catalog';
+import { TUTORIALS, findTutorial, modulesWithSteps } from 'lib/training/catalog';
 import {
   emptyProgress,
   isStepComplete,
-  percentComplete,
   resolveCurrentStepId,
 } from 'lib/training/progress';
 import { LeftRail, ViewPanel } from 'shared/components/primitives';

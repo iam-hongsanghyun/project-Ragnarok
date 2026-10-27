@@ -38,7 +38,7 @@ an architecture overview (see `architecture.md`).
 5. [Features](#5-features)
    - 5.1 [Build Authoring](#51-build-authoring)
    - 5.2 [Analytics Dashboard and Cards](#52-analytics-dashboard-and-cards)
-   - 5.3 [Run Dialog and Run History](#53-run-dialog-and-run-history)
+   - 5.3 [Run Dialog, Queue and History](#53-run-dialog-queue-and-history)
    - 5.4 [Plugin Host: frontendPlugins and the runtime](#54-plugin-host-frontendplugins-and-the-runtime)
    - 5.5 [PluginDetail](#55-plugindetail)
    - 5.6 [PluginPanel](#56-pluginpanel)
@@ -127,6 +127,8 @@ handler down to view components as props.
 | `resultsModel` | `WorkbookModel \| null` | Topology snapshot taken at run or restore time |
 | `resultsContext` | `{carbonPrice, snapshotWeight, discountRate} \| null` | Derivation inputs frozen at run or restore time |
 | `queueJobs` | `QueueJob[]` | Server run queue, refreshed from `GET /api/queue` |
+| `backendRuns` | `BackendRunMeta[]` | Stored runs (the run history), refreshed from `GET /api/runs`; drives History and Analytics > Comparison |
+| `activeRunName` | `string \| null` | Stored run whose results are shown; `null` for an imported project or an unsaved result. Cards that read server-side results (KPI strip, company comparison, asset details, duration curves, ramp and set-point duals) use it as the run key |
 | `scenarioCatalog` | `ScenarioCatalog` | Named solver scenarios |
 | `pathwayConfig` | `PathwayConfig` | Multi-period investment path settings |
 | `rollingConfig` | `RollingHorizonConfig` | Rolling horizon solve settings |
@@ -198,8 +200,8 @@ Actions performed in order:
 1. Calls `normalizeInputDatesToIso(nextModel, settings.dateFormat)` — idempotent.
 2. Reads snapshot range from `nextModel.snapshots` and updates `maxSnapshots` and `snapshotEnd`.
 3. Reads `pathwayConfig`, `rollingConfig`, `customDsl`, and `scenarioCatalog` from the model.
-4. Resets `results`, `resultsModel`, `resultsContext`, `runStatus`, `chartSections`, `validateResult`, `analyticsFocus`, `projectProvenance`.
-5. Does NOT clear `runHistory` — prior runs survive model swaps.
+4. Resets `results`, `resultsModel`, `resultsContext`, `hydratedRunSeries`, `chartSections`, `validateResult` and `analyticsFocus`. Callers that load a model from outside a stored run also clear `activeRunName`.
+5. Does NOT touch `backendRuns` or `queueJobs`. Run history lives on the server (`GET /api/runs`, `GET /api/queue`), so prior runs survive model swaps.
 6. Applies the imported active scenario (or a synthesised default) to all live sliders.
 
 ### 2.4 Undo / Redo
@@ -269,7 +271,7 @@ Uses `window.showSaveFilePicker` when present; falls back to a programmatic
 
 | Handler | Notes |
 |---|---|
-| `handleImportProject(event)` | Calls `parseProjectFile`, then `resetForNewModel`. Restores settings, constraints, run-state sliders, pathway and rolling config, and (when outputs are present) results via `deriveRunResults`. Prepends a synthetic `RunHistoryEntry`. |
+| `handleImportProject(event)` | Calls `parseProjectFile`, then `resetForNewModel`. Restores settings, constraints, run-state sliders, pathway and rolling config, and (when outputs are present) results via `deriveRunResults` and `handleRestoreRun`. Opening a project is like File > Open: it does not create a History entry. |
 | `handleExportProject()` | Serialises the currently displayed run (not run history) via `projectWorkbookToArrayBuffer`. Uses `analyticsModel` so the file is self-consistent with the active result. |
 
 ### 2.8 Result Workbook Export
@@ -308,8 +310,11 @@ advanced solve options (`advancedSolve`, flattened into `options`). The response
 
 **Phase 3 — track.** `refreshQueue` calls `GET /api/queue` on an interval (faster while
 items are active; the interval comes from `settings.queuePollSeconds`) and updates
-`queueJobs`. A finished run is listed in History (`GET /api/runs`), and its analytics are
-loaded with `GET /api/runs/{name}/analytics`.
+`queueJobs`. When a job newly reaches `done`, `error` or `cancelled`, a toast fires once
+(keyed by job id and start / finish time, so a re-run notifies again) and `backendRuns` is
+refreshed. A finished run is a stored run, listed in History (`GET /api/runs`). Opening it
+(`handleOpenBackendRun`) loads the light analytics bundle with `GET /api/runs/{name}/analytics`
+and sets `activeRunName`. There is no client-side run status or run-history array.
 
 #### `handleCancelQueueItem(id) -> Promise<void>`
 
@@ -319,16 +324,20 @@ The other queue actions are `POST /api/queue/{id}/rerun`, `POST /api/queue/{id}/
 
 A scenario batch posts one `POST /api/queue` per scenario, each with its own `runLabel`.
 
-### 2.11 Run-History Handlers
+### 2.11 Stored-Run (History) Handlers
+
+The server is the single source of truth for run history: every successful solve is stored
+(`backend/app/run_store.py`) and listed by `GET /api/runs` as a `BackendRunMeta`. The
+browser keeps no history array of its own.
 
 | Handler | Signature | Effect |
 |---|---|---|
-| `handleRestoreRun` | `(entry) -> void` | Restores `results`, `resultsModel`, `resultsContext` from the entry; rehydrates model and all sliders; pushes current model to undo. |
-| `handleRenameHistoryEntry` | `(id, label) -> void` | Updates the `label` field |
-| `handlePinHistoryEntry` | `(id, pinned) -> void` | Sets `pinned`; re-applies the unpinned-entry cap |
-| `handleDeleteHistoryEntry` | `(id) -> void` | Removes entry by `id` |
-| `handleClearHistory` | `() -> void` | Confirms then resets `runHistory` to `[]` |
-| `handleToggleComparison` | `(id, inComparison) -> void` | Toggles the Comparison tab inclusion flag |
+| `refreshBackendRuns` | `() -> Promise<BackendRunMeta[]>` | `GET /api/runs`; replaces `backendRuns`. Runs on mount, after a queued job finishes, and every 5 s while the History tab is open |
+| `handleOpenBackendRun` | `(name, opts?) -> Promise<void>` | "View results": fetches the light analytics bundle and calls `handleRestoreRun`. With `asProject` it promotes the run into the session server-side (`POST /api/runs/{name}/promote`) and loads the model into the editor |
+| `handleViewSelectedRuns` | `(names) -> void` | One run opens its Result; two or more open Analytics > Comparison |
+| `handleRestoreRun` | `(entry, opts?) -> void` | Sets `results`, `resultsModel`, `resultsContext` from a restorable run. The editor's model and run settings are replaced only with `loadIntoEditor` |
+| `handleRenameBackendRun` | `(name, newName) -> Promise<void>` | `POST /api/runs/{name}/rename`; follows `activeRunName` to the new name |
+| `handleDeleteBackendRuns` | `(names) -> Promise<void>` | Deletes stored runs and clears `activeRunName` if it was one of them |
 
 ### 2.12 Scenario Handlers
 
@@ -371,9 +380,11 @@ Deep-clones `source` and applies `normalizeInputDatesToIso` with the current
 `settings.dateFormat`. Called before every backend POST to ensure canonical
 ISO timestamps reach the solver.
 
-#### `stopPolling() -> void`
+#### `refreshQueue() -> Promise<void>`
 
-Clears `pollTimerRef.current`. Called before cancel and on unmount.
+One tick of the queue poll: `GET /api/queue`, then `setQueueJobs` and the completion toasts.
+An effect repeats it every `settings.queuePollSeconds` while any job is queued or running,
+and on a slow heartbeat (at least 15 s) otherwise. The effect's cleanup clears the timer on unmount.
 
 #### `handleImportTsSheet(sheet, rows) -> void`
 
@@ -570,16 +581,17 @@ callbacks, which live in `App.tsx`.
 
 **File:** `views/AnalyticsView.tsx`
 
-Results and validation dashboard with four sub-tabs: Validation, Result,
-Analytics, Comparison. The view owns no local state; sub-tab routing is driven
-by `analyticsSubTab` from `App.tsx`. Layout: left sidebar with `RunHistoryList`,
-main area with the active sub-tab body and `AnalyticsSubnav`.
+Results and validation dashboard with five sub-tabs: Validation, Result,
+Analytics, Comparison and Log. The view owns no local state; sub-tab routing is
+driven by `analyticsSubTab` from `App.tsx`. Layout: `AnalyticsSubnav` above the
+active sub-tab body. History is its own tab (`HistoryView`); there is no run
+sidebar here.
 
 Sub-tab routing:
 - `'Validation'` → `ValidationPane`
-- `'Result'` → `AnalyticsPane` (or `EmptyAnalytics` when no results)
-- `'Analytics'` → `AnalyticsDashboard`
+- `'Result'` and `'Analytics'` → `AnalyticsPane` (or `EmptyAnalytics` when no results), which hosts `AnalyticsDashboard`; Result always rebuilds from the curated preset, Analytics keeps the user's layout
 - `'Comparison'` → `ComparisonPane`
+- `'Log'` → `LogPane`
 
 **Representative props:**
 
@@ -594,11 +606,27 @@ Sub-tab routing:
 | `analyticsFocus` | `AnalyticsFocus` | Focused asset |
 | `setAnalyticsFocus` | `(focus) => void` | Focus change |
 | `chartSections` | `ChartSectionConfig[]` | Dashboard layout |
-| `runHistory` | `RunHistoryEntry[]` | All history entries |
+| `backendRuns` | `BackendRunMeta[]` | Stored runs offered by the Comparison picker |
+| `activeRunName` | `string \| null` | Stored run being shown; passed to the cards that read server-side results |
 | `pathwayConfig` | `PathwayConfig` | Period selector state |
 | `onSelectedPeriodChange` | `(period) => void` | Period pill click |
-| `onRestoreRun` | `(entry) => void` | View a past run |
-| `onToggleComparison` | `(id, inComparison) => void` | Comparison checkbox |
+| `onNeedSeries` | `(windows) => void` | Asks `App.tsx` to hydrate per-asset output series for a stored run |
+
+**Server-side results.** For a stored run, these read the backend instead of
+recomputing from raw series, and show loading and error states (`shared/hooks/useAsync.ts`,
+client in `lib/api/resultsDerived.ts`, router `backend/app/routers/results_derived.py`):
+
+| Surface | Endpoint |
+|---|---|
+| `ComparisonPane` / `ComparisonMatrix` | `GET /api/results/compare?runs=&topics=` |
+| `KpiStripCard` | `GET /api/runs/{name}/kpis` |
+| `CompanyComparisonCard` | `GET /api/runs/{name}/companies` |
+| `MapDetailCard` (per-asset popup) | `GET /api/runs/{name}/assets?kind=&names=` |
+| `ServerDurationCurveCard` (system price and load) | `GET /api/runs/{name}/derived/{metric}` |
+| `SetpointDualsCard` (light bundle) | `GET /api/runs/{name}/series/{sheet}` |
+
+A result with no stored run (an imported project) or a pathway run's period view keeps
+the in-browser derivation (`kpisFromResults`, `joinCompanies`, `deriveAssetDetails`).
 
 ### 4.5 PluginsView
 
@@ -736,9 +764,9 @@ based on current results and dispatch rows.
 Horizontal sub-tab navigation bar rendered above the analytics main area.
 Displays the four sub-tab labels with optional issue or validation badges.
 
-### 5.3 Run Dialog and Run History
+### 5.3 Run Dialog, Queue and History
 
-**Files:** `features/run/RunDialog.tsx`, `features/run-history/`
+**Files:** `features/run/RunDialog.tsx`, `views/QueueView.tsx`, `views/HistoryView.tsx`
 
 #### `RunDialog`
 
@@ -766,34 +794,39 @@ Modal dialog for configuring and triggering a solve. Returns `null` when
 
 The primary button label switches to `'Validate'` when `dryRun` is true.
 
-#### `RunHistoryList`
+#### `QueueView`
 
-Vertical list of `RunHistoryCard` components, one per entry in `runHistory`.
+The run queue (`views/QueueView.tsx`), fed by `queueJobs`. One row per `QueueJob` with its
+status (`staged`, `queued`, `running`, `done`, `error`, `cancelled`), position, cores and
+elapsed time. Per-row actions are Cancel (`POST /api/queue/{id}/cancel`), Rerun
+(`POST /api/queue/{id}/rerun`), Import (`POST /api/queue/{id}/import`, loads the item's
+model into the session) and Delete (`DELETE /api/queue/{id}`). A concurrency control posts
+`POST /api/queue/concurrency`.
 
-**Key props:**
+#### `HistoryView`
+
+The run history (`views/HistoryView.tsx`), fed by `backendRuns`. One row per stored run:
+a select checkbox, the label (click to rename), metadata, and View results, Download Excel,
+Export project and Delete actions, with bulk delete on the selection. Rows can be
+reordered by drag and drop (order kept in `localStorage`, key `ragnarok.history.manualOrder`).
+View selected opens one run's Result or, for two or more, the Comparison sub-tab.
 
 | Prop | Type | Meaning |
 |---|---|---|
-| `runHistory` | `RunHistoryEntry[]` | Entries to display |
-| `onRestoreRun` | `(entry) => void` | "View results" click |
-| `onRenameHistoryEntry` | `(id, label) => void` | Commit rename |
-| `onPinHistoryEntry` | `(id, pinned) => void` | Pin/unpin |
-| `onDeleteHistoryEntry` | `(id) => void` | Delete entry |
-| `onToggleComparison` | `(id, inComparison) => void` | Comparison tab toggle |
-| `currencySymbol` | `string` | For carbon price KPI display |
+| `backendRuns` | `BackendRunMeta[]` | Stored runs to list |
+| `onViewSelected` | `(names) => void` | One name: Result; two or more: Comparison |
+| `onImportBackendRun` | `(name) => void` | Promote the run's model into the editor |
+| `onRenameBackendRun` | `(name, newName) => void` | Commit a rename |
+| `onDeleteBackendRuns` | `(names) => void` | Delete stored runs |
+| `onDownloadBackendXlsx` / `onExportBackendProject` | `(names, ...) => void` | Export |
 
-#### `RunHistoryCard`
+#### `ComparisonPane`
 
-Single card for one `RunHistoryEntry`. Manages its own internal state for
-inline label editing and delete confirmation. Label editing commits on blur
-or Enter. Delete requires a two-step confirm.
-
-#### `RunComparisonTable`
-
-Side-by-side comparison table for all entries where `inComparison === true`.
-Returns `null` when fewer than two entries exist. Entries are sorted
-newest-first. Each non-active column shows a percentage-delta badge relative
-to the active run for every numeric KPI row.
+Analytics > Comparison (`features/analytics/ComparisonPane.tsx`). The user picks 2 to 5 stored
+runs; one request, `GET /api/results/compare`, returns a column per run for the shown topics
+(key metrics, generation mix, installed capacity, cost, emissions, capacity expansion,
+generation over time). `ComparisonMatrix` draws one row per topic with a shared legend and
+shows a loading cell until the response arrives or the error if it fails.
 
 ### 5.4 Plugin Host: frontendPlugins and the runtime
 
@@ -1102,6 +1135,18 @@ Renders a table for adding and editing `CustomConstraint` rows (metric, carrier,
 value, unit, enabled toggle). Used by `SettingsView` for the Standard
 Constraints section.
 
+The same section also holds the native `global_constraints` sheet editor
+(`views/SettingsView.sections/Constraints/GlobalConstraintsTableEditor.tsx`) and the
+carrier growth-limit editor (`.../Constraints/CarrierGrowthEditor.tsx`). The
+growth editor edits `max_growth` (MW of new capacity per investment period) and
+`max_relative_growth` (ratio) on the `carriers` sheet; empty means unlimited. Both
+editors show per-row hints from `lib/constraints/globalConstraintHints.ts`, which mirrors
+the server's `validate_model` checks (`backend/pypsa/network/constraint_checks.py`):
+`investment_period` on a single-period run for `primary_energy` / `operational_limit`
+(a PyPSA 1.4 `ValueError`), a period outside the configured ones, a
+`tech_capacity_expansion_limit` without a carrier, and growth limits that cannot bind
+on a single-period run.
+
 ---
 
 ## 6. Shared — Types
@@ -1117,7 +1162,7 @@ Key types and their meanings:
 | `WorkbookModel` | `Record<string, GridRow[]>` — a map from sheet name to rows |
 | `SheetName` | `string` (sheet names are schema-driven; not an enum) |
 | `WorkspaceTab` | `'Build' \| 'Model' \| 'Settings' \| 'Analytics' \| 'Plugins'` |
-| `AnalyticsSubTab` | `'Validation' \| 'Result' \| 'Analytics' \| 'Comparison'` |
+| `AnalyticsSubTab` | `'Validation' \| 'Result' \| 'Analytics' \| 'Comparison' \| 'Log'` |
 | `ChartMode` | `'line' \| 'area' \| 'bar'` |
 | `TimeframeOption` | `'aggregated' \| 'yearly' \| 'monthly' \| 'weekly' \| 'daily' \| 'hourly'` |
 | `PlanningMode` | `'single_period' \| 'pathway'` |
@@ -1128,7 +1173,8 @@ Key types and their meanings:
 | `StochasticConfig` | `{enabled, scenarios: StochasticScenarioOverride[]}` |
 | `SecurityConstrainedConfig` | `{enabled}` |
 | `AnalyticsFocus` | `{type: 'system'} \| {type: 'asset', sheet, name}` |
-| `RunHistoryEntry` | Entry in the session run history; carries a full results and topology snapshot |
+| `BackendRunMeta` | One stored run as listed by `GET /api/runs`: label, window, KPIs, summary and carrier mix (no series) |
+| `QueueJob` | One queue item from `GET /api/queue`: status, position, timing, run name |
 | `ScenarioCatalog` | `{scenarios: ScenarioPreset[], activeScenarioId: string \| null}` |
 | `ScenarioPreset` | Full solver configuration snapshot saved by the user |
 | `ConstraintSpec` | Wire format sent to the backend for DSL-parsed constraints |
@@ -1434,4 +1480,4 @@ columns) and a `Chart` sheet (embedded PNG if SVG render succeeded). The first
 
 Returns a human relative time label from an ISO 8601 timestamp: `'just now'`
 (less than 1 minute), `'Nm ago'` (less than 1 hour), `'Nh ago'` (less than 1
-day), `'Nd ago'` (otherwise). Used in `RunHistoryCard`.
+day), `'Nd ago'` (otherwise). Used in `HistoryView`, `QueueView` and `JournalView`.

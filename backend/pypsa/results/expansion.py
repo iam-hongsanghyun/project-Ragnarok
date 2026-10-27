@@ -12,6 +12,7 @@ import pypsa
 
 from .market import capex_window_scale
 from .pathway_periods import active_assets, is_pathway, period_objective_weights, periods
+from .stat_metrics import asset_statistic
 
 
 def _safe_number(value: Any, fallback: float = 0.0) -> float:
@@ -201,6 +202,7 @@ def build_expansion_results(network: pypsa.Network) -> list[dict[str, Any]]:
 
     _apply_native_costs(network, results)
     _apply_window_scale(network, results)
+    _apply_statistics_capex(network, results)
     _annotate_pathway(network, results)
     return results
 
@@ -258,6 +260,87 @@ def _apply_native_costs(network: pypsa.Network, results: list[dict[str, Any]]) -
         if fom:
             row["fom_cost"] = round(fom, 2)
             row["fom_total"] = round(fom * opt)
+
+
+def _apply_statistics_capex(network: pypsa.Network, results: list[dict[str, Any]]) -> None:
+    """Take CAPEX / FOM from ``n.statistics`` (P28), on the annual basis.
+
+    ``capex_annual`` is ``n.statistics.capex`` (PyPSA 1.3+: periodised investment
+    cost, *excluding* ``fom_cost``) per asset, converted back to a per-year charge:
+
+    $$ K^{annual} = \\frac{\\text{capex}^{stat}}{b}, \\qquad
+       b = \\begin{cases} n_{years} & \\text{native overnight cost (PyPSA scales by the window)}\\\\
+       s_{window} & \\text{Ragnarok-annuitised, scaled by the builder}\\\\ 1 & \\text{unscaled}\\end{cases} $$
+
+    with $n_{years} = \\sum_t w^{obj}_t / 8760$ and, in a pathway run, the statistic
+    already multiplied by the investment-period ``objective`` weight (divided out
+    here). ASCII: capex_annual = stat_capex / basis. Added per row, same basis:
+    ``capex_expanded`` (``expanded_capex``: the part above ``p_nom``),
+    ``capex_installed`` (``installed_capex``: existing ``p_nom``; they sum to
+    ``capex_annual``), ``overnight_total`` (``overnight_cost``: currency, not
+    periodised; only where PyPSA can resolve it) and ``fom_total`` (``fom``,
+    single-period only - PyPSA adds it unscaled per modelled horizon). A row the
+    statistics cannot resolve (unsolved or rebuilt network) keeps the
+    ``capital_cost x p_nom_opt`` figure computed above. A pathway row with a
+    native ``overnight_cost`` also keeps it (per-period ``nyears`` is not exposed).
+    """
+    if not results:
+        return
+    pathway = is_pathway(network)
+    scale = capex_window_scale(network)
+    nyears = float(network.snapshot_weightings["objective"].sum()) / 8760.0 if not pathway else float("nan")
+    comps = sorted({r["component"] for r in results})
+    period_w = period_objective_weights(network) if pathway else {}
+
+    frames = {
+        key: asset_statistic(network, key, comps)
+        for key in ("capex", "installed_capex", "expanded_capex", "fom")
+    }
+    overnight: dict[str, Any] = {}
+    for comp in comps:
+        frame = asset_statistic(network, "overnight_cost", [comp])
+        if not frame.empty:
+            overnight[comp] = frame
+
+    def _single(frame: Any, comp: str, name: str) -> float | None:
+        """The asset's value; in a pathway the first active period, de-weighted."""
+        if frame is None or getattr(frame, "empty", True) or (comp, name) not in frame.index:
+            return None
+        row = frame.loc[(comp, name)]
+        vals = row.dropna()
+        if vals.empty:
+            return None
+        if pathway:
+            col = vals.index[0]
+            return float(vals.iloc[0]) / (period_w.get(int(col), 1.0) or 1.0)
+        return float(vals.iloc[0])
+
+    for row in results:
+        comp, name = row["component"], row["name"]
+        native = bool(row.get("native_cost"))
+        if native:
+            if pathway:
+                continue
+            basis = nyears
+        else:
+            basis = scale or 1.0
+        if not basis or basis != basis:
+            continue
+        capex = _single(frames["capex"], comp, name)
+        if capex is None:
+            continue
+        row["capex_annual"] = round(capex / basis)
+        for key, field in (("expanded_capex", "capex_expanded"), ("installed_capex", "capex_installed")):
+            val = _single(frames[key], comp, name)
+            if val is not None:
+                row[field] = round(val / basis)
+        ov = _single(overnight.get(comp), comp, name)
+        if ov is not None:
+            row["overnight_total"] = round(ov)
+        if not pathway:
+            fom = _single(frames["fom"], comp, name)
+            if fom:
+                row["fom_total"] = round(fom)
 
 
 def _apply_window_scale(network: pypsa.Network, results: list[dict[str, Any]]) -> None:

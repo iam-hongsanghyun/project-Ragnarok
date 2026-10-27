@@ -30,6 +30,11 @@ export function CompanyBreakdownCard({ data }: Props) {
   }
   const maxCap = Math.max(1, ...companies.map((c) => c.capacityMW));
   const hasRevenue = companies.some((c) => c.revenue != null);
+  // Emissions of assets with no owner; owners + unassigned = the system total.
+  const unassigned = data.unassignedEmissionsTonnes ?? 0;
+  const showUnassigned = data.unassignedEmissionsTonnes != null && unassigned !== 0;
+  const ownerEmissions = companies.reduce((s, c) => s + c.emissionsTonnes, 0);
+  const kt = (t: number): string => (t / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 });
 
   return (
     <div className="econ-card">
@@ -80,7 +85,31 @@ export function CompanyBreakdownCard({ data }: Props) {
                     </tr>
                   );
                 })}
+                {showUnassigned && (
+                  <tr>
+                    <td>Unassigned</td>
+                    <td />
+                    <td className="num">—</td>
+                    <td className="num">—</td>
+                    {hasRevenue && <td className="num">—</td>}
+                    <td className="num">{kt(unassigned)}</td>
+                    <td className="num">{data.untaggedCount > 0 ? data.untaggedCount : '—'}</td>
+                  </tr>
+                )}
               </tbody>
+              {showUnassigned && (
+                <tfoot>
+                  <tr>
+                    <td>System total</td>
+                    <td />
+                    <td className="num" />
+                    <td className="num" />
+                    {hasRevenue && <td className="num" />}
+                    <td className="num">{kt(ownerEmissions + unassigned)}</td>
+                    <td className="num" />
+                  </tr>
+                </tfoot>
+              )}
             </table>
           </div>
         </div>

@@ -62,12 +62,14 @@ interface Props {
   analyticsFocus: AnalyticsFocus;
   onFocusChange: (focus: AnalyticsFocus) => void;
   currencySymbol: string;
+  /** Stored run backing the view; the detail card reads its assets from the server. */
+  runName?: string | null;
 }
 
 export function AnalyticsMapCard({
   results, model, bounds, busIndex,
   analyticsFocus, onFocusChange,
-  currencySymbol,
+  currencySymbol, runName,
 }: Props) {
   // ── Geometry pre-builds ──────────────────────────────────────────────────
   const lineGeometries = model.lines
@@ -270,6 +272,7 @@ export function AnalyticsMapCard({
         results={results}
         onClose={() => onFocusChange({ type: 'system' })}
         currencySymbol={currencySymbol}
+        runName={runName}
       />
     </div>
   );

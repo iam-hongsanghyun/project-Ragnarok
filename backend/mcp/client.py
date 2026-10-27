@@ -906,6 +906,9 @@ class RagnarokClient:
     async def get_kpis(self, run_name: str, currency: str | None = None) -> Any:
         return await self._get(f"/api/runs/{run_name}/kpis", {"currency": currency})
 
+    async def get_metric_options(self, run_name: str, focus: str, **params: Any) -> Any:
+        return await self._get(f"/api/runs/{run_name}/metrics", {"focus": focus, **params})
+
     async def compare_companies(self, run_name: str, sort_by: str | None = None) -> Any:
         return await self._get(f"/api/runs/{run_name}/companies", {"sort_by": sort_by})
 

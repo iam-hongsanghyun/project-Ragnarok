@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from ...context import ImportContext
@@ -148,6 +148,31 @@ META = DatabaseMeta(
 )
 
 
+# RI4: EIA ``period`` is HOUR-ENDING, in UTC. Evidence (checked 2026-10-28):
+#  * https://api.eia.gov/v2/electricity/rto/region-data (route metadata, EIA API v2): frequency "hourly"
+#    = "One data point for each hour in UTC time." (``YYYY-MM-DD"T"HH24``); source "Form EIA-930".
+#  * EIA-930 bulk files (https://www.eia.gov/electricity/gridmonitor/sixMonthFiles/, EIA930_BALANCE_*.csv)
+#    label every hour "Local Time at End of Hour" / "UTC Time at End of Hour".
+#  * The same value appears under the same instant in both: AECI demand 2495 MW is the bulk row with
+#    "UTC Time at End of Hour = 01/01/2023 7:00:00 AM" and the API row ``period = 2023-01-01T07``.
+# So ``period = T07`` covers 06:00-07:00 UTC. PyPSA snapshots are interval-start labels (weight = the
+# hour that follows), so every period is shifted back one hour on import.
+_HOUR_ENDING_SHIFT = timedelta(hours=1)
+
+
+def _hour_beginning_label(period: str) -> str:
+    """EIA hour-ending UTC ``period`` (``YYYY-MM-DDTHH``) -> hour-beginning ``YYYY-MM-DD HH:00``."""
+    t = datetime.strptime(str(period)[:13], "%Y-%m-%dT%H") - _HOUR_ENDING_SHIFT
+    return t.strftime("%Y-%m-%d %H:00")
+
+
+def _period_window(date_from: str, date_to: str) -> tuple[str, str]:
+    """API ``start``/``end`` (hour-ending) that yield hour-beginning snapshots 00:00 of
+    ``date_from`` .. 23:00 of ``date_to``: periods ``date_fromT01`` .. ``(date_to+1)T00``."""
+    d1 = date.fromisoformat(date_to) + timedelta(days=1)
+    return f"{date_from}T01", f"{d1.isoformat()}T00"
+
+
 _PAGE = 5000  # EIA v2 caps ``length`` at 5000 rows per response
 _MAX_PAGES = 100
 
@@ -199,14 +224,15 @@ class EiaDemand:
         )
         date_from = str(filters.get("date_from") or "2023-01-01")
         date_to = str(filters.get("date_to") or "2023-01-07")
+        start, end = _period_window(date_from, date_to)
         params = {
             "api_key": api_key,
             "frequency": "hourly",
             "data[0]": "value",
             "facets[type][]": "D",            # D = demand
             "facets[respondent][]": respondent,
-            "start": f"{date_from}T00",
-            "end": f"{date_to}T23",
+            "start": start,
+            "end": end,
             "sort[0][column]": "period",
             "sort[0][direction]": "asc",
             "length": 5000,
@@ -250,7 +276,7 @@ class EiaDemand:
             value = r.get("value")
             if period is None or value in (None, ""):
                 continue
-            snap = str(period).replace("T", " ") + ":00"  # → "YYYY-MM-DD HH:00"
+            snap = _hour_beginning_label(period)  # hour-ending UTC → hour-beginning (RI4)
             snapshots.append(snap)
             p_set_rows.append({"snapshot": snap, load_name: float(value)})
 

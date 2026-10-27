@@ -57,7 +57,7 @@ async def compare_runs(run_names: list[str], topics: list[str] | None = None) ->
 @mcp.tool(
     annotations=_RO,
     description=(
-        "The KPI strip of a stored run: total cost, dispatch MWh, average/min/max price, peak load MW, "
+        "The KPI strip of a stored run: total cost, dispatch MWh, load-weighted average price (n.statistics.prices), min/max price, peak load MW, "
         "load factor, renewable share % (zero-emission carriers excluding nuclear and storage), emissions, "
         "snapshot count and weight. Numbers match the Analytics KPI card."
     ),

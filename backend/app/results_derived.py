@@ -10,9 +10,9 @@ Pure functions (no I/O) so the UI and MCP read the same numbers:
   :func:`run_comparison_entry`  — ``features/analytics/ComparisonPane.tsx`` /
   ``ComparisonMatrix.tsx`` (the data half; charts stay in the browser).
 
-Deliberate differences from the TS: colours are presentation, so a ``color`` is
-returned only where the model row carries an explicit hex colour (generators /
-processes) and carrier-mix items omit it; display strings use ``en-US`` grouping.
+Colours follow ``lib/utils/helpers.ts`` (:func:`carrier_color`, :func:`resolved_color`): a
+generator / process ``color`` is its own hex colour, else its carrier's colour from the
+carriers sheet, else the palette hash. Display strings use ``en-US`` grouping.
 
 Algorithm (KPI strip):
     $$\\text{LF} = \\frac{\\bar P}{P_{peak}},\\quad
@@ -80,6 +80,52 @@ def _fixed(n: float, digits: int) -> str:
 def _explicit_color(value: Any) -> str | None:
     raw = string_value(value).strip()
     return raw if _HEX.match(raw) else None
+
+
+_PALETTE = [
+    "#4e79a7", "#f28e2b", "#e15759", "#76b7b2", "#59a14f",
+    "#edc948", "#b07aa1", "#ff9da7", "#9c755f", "#bab0ab",
+    "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+    "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
+    "#393b79", "#637939", "#8c6d31", "#843c39", "#7b4173",
+    "#3182bd", "#31a354", "#756bb1", "#636363", "#e6550d",
+]
+
+
+def _i32(n: int) -> int:
+    return ((n + 2**31) % 2**32) - 2**31
+
+
+def _js_hash(value: str) -> int:
+    """The ``hash = code + ((hash << 5) - hash)`` loop of ``helpers.ts`` (int32 shift, exact sum)."""
+    units = value.encode("utf-16-le")
+    h = 0
+    for i in range(0, len(units), 2):
+        code = units[i] | (units[i + 1] << 8)
+        h = code + (_i32(_i32(h) << 5) - h)
+    return h
+
+
+def hash_color(value: str) -> str:
+    """``hashColor`` of ``helpers.ts``."""
+    return f"hsl({abs(_js_hash(value)) % 360} 65% 46%)"
+
+
+def carrier_color(carrier: Any, carriers: list[Row] | None = None) -> str:
+    """``carrierColor``: the carriers-sheet colour, else the palette entry the name hashes to."""
+    raw = string_value(carrier).strip()
+    if not raw:
+        return "#94a3b8"
+    key = raw.lower()
+    for row in carriers or []:
+        if string_value(row.get("name")).strip().lower() == key and string_value(row.get("color")).strip():
+            return string_value(row.get("color")).strip()
+    return _PALETTE[abs(_js_hash(key)) % len(_PALETTE)]
+
+
+def resolved_color(explicit: Any, carrier: Any, carriers: list[Row] | None = None) -> str:
+    """``resolvedColor``: an explicit hex colour of the row, else its carrier's colour."""
+    return _explicit_color(explicit) or carrier_color(carrier, carriers)
 
 
 def _index_by_name(rows: list[Row] | None) -> dict[str, Row]:
@@ -331,9 +377,7 @@ def _build_generators(c: _Ctx, names: set[str] | None) -> dict[str, Any]:
             "outputSeries": output_s, "emissionsSeries": emis_s,
             "availableSeries": avail_s, "curtailmentSeries": curt_s,
         }
-        color = _explicit_color(row.get("color"))
-        if color:
-            detail["color"] = color
+        detail["color"] = resolved_color(row.get("color"), carrier, c.model.get("carriers"))
         out[name] = detail
     return out
 
@@ -412,7 +456,7 @@ def _build_buses(c: _Ctx, names: set[str] | None) -> dict[str, Any]:
             "hasVoltageMagnitude": bool(vmag_series) and has_v,
             "hasVoltageAngle": bool(vang_series) and has_a,
             "carrierMix": [
-                {"label": k, "value": v}
+                {"label": k, "value": v, "color": carrier_color(k, c.model.get("carriers"))}
                 for k, v in sorted(((k, v) for k, v in carrier_mix.items() if v > 0), key=lambda kv: -kv[1])
             ],
         }
@@ -576,9 +620,7 @@ def _build_processes(c: _Ctx, names: set[str] | None) -> dict[str, Any]:
             ],
             "p0Series": p0_o, "p1Series": p1_o, "throughputSeries": thr_o,
         }
-        color = _explicit_color(row.get("color"))
-        if color:
-            detail["color"] = color
+        detail["color"] = resolved_color(row.get("color"), detail["carrier"], c.model.get("carriers"))
         out[name] = detail
     return out
 
@@ -660,6 +702,226 @@ def derive_asset_details(
     return {k: (ASSET_KINDS[k](ctx, names) if k in wanted else {}) for k in ASSET_KINDS}
 
 
+# ── per-asset chart options (features/analytics/useMetricOptions.ts) ──────────
+
+FOCUS_KINDS: dict[str, str] = {
+    "generator": "generators", "bus": "buses", "storageUnit": "storageUnits", "store": "stores",
+    "branch": "branches", "process": "processes", "shuntImpedance": "shuntImpedances",
+}
+GROUP_BYS = ("carrier", "asset")
+
+# Output sheets each focus reads (``OUTPUT_SHEETS_FOR_FOCUS`` in lib/api/runs.ts).
+FOCUS_SHEETS: dict[str, list[str]] = {
+    "generator": ["generators-p"],
+    "bus": ["generators-p", "buses-marginal_price", "buses-v_mag_pu", "buses-v_ang"],
+    "storageUnit": ["storage_units-p", "storage_units-state_of_charge"],
+    "store": ["stores-e", "stores-p"],
+    "branch": ["lines-p0", "lines-p1", "links-p0", "links-p1", "transformers-p0", "transformers-p1"],
+    "process": ["processes-p0", "processes-p1"],
+    "shuntImpedance": ["shunt_impedances-p", "shunt_impedances-q"],
+}
+
+_GEN_FIELDS = [
+    ("output", "Output", "MW", "mean", "outputSeries"),
+    ("available", "Available output", "MW", "mean", "availableSeries"),
+    ("curtailment", "Curtailment", "MW", "mean", "curtailmentSeries"),
+    ("emissions", "Emissions", "tCO2e", "sum", "emissionsSeries"),
+]
+_BUS_GEN_KEYS = {
+    "output": ("gen_output_by_bus", "Generator output"),
+    "available": ("gen_available_by_bus", "Generator available"),
+    "curtailment": ("gen_curtailment_by_bus", "Generator curtailment"),
+    "emissions": ("gen_emissions_by_bus", "Generator emissions"),
+}
+
+
+def _opt(key: str, label: str, unit: str, rows: list[Row], series: list[Row], reducer: str, donut: bool = False) -> Row:
+    return {"key": key, "label": label, "unit": unit, "rows": rows, "series": series, "reducer": reducer, "allowDonut": donut}
+
+
+def _col_rows(points: list[Row], *fields: str) -> list[Row]:
+    return [{"label": p["label"], "timestamp": p["timestamp"], **{f: p.get(f) for f in fields}} for p in points]
+
+
+def _single_asset_options(details: dict[str, dict[str, Any]], focus: str, key: str, currency: str, carriers: list[Row]) -> list[Row]:
+    d = details.get(FOCUS_KINDS[focus], {}).get(key)
+    if not d:
+        return []
+    if focus == "generator":
+        c = d.get("color") or carrier_color(d.get("carrier") or "Other", carriers)
+        return [
+            _opt("output", "Output", "MW", _col_rows(d["outputSeries"], "output"), [{"key": "output", "label": "Output MW", "color": c}], "mean"),
+            _opt("available", "Available output", "MW", _col_rows(d["availableSeries"], "available"), [{"key": "available", "label": "Available MW", "color": "#0f766e"}], "mean"),
+            _opt("curtailment", "Curtailment", "MW", _col_rows(d["curtailmentSeries"], "curtailment"), [{"key": "curtailment", "label": "Curtailment MW", "color": "#f59e0b"}], "mean"),
+            _opt("emissions", "Emissions", "tCO2e", _col_rows(d["emissionsSeries"], "emissions"), [{"key": "emissions", "label": "Emissions tCO2e", "color": "#16a34a"}], "sum"),
+        ]
+    if focus == "bus":
+        net = d["netSeries"]
+        out = [
+            _opt("load", "Load", "MW", _col_rows(net, "load"), [{"key": "load", "label": "Load MW", "color": "#f97316"}], "mean"),
+            _opt("generation", "Generation", "MW", _col_rows(net, "generation"), [{"key": "generation", "label": "Generation MW", "color": "#0f766e"}], "mean"),
+            _opt("smp", "SMP", f"{currency}/MWh", _col_rows(net, "smp"), [{"key": "smp", "label": f"SMP {currency}/MWh", "color": "#111827"}], "mean"),
+            _opt("emissions", "Emissions", "tCO2e", _col_rows(net, "emissions"), [{"key": "emissions", "label": "Emissions tCO2e", "color": "#16a34a"}], "sum"),
+        ]
+        if d.get("hasVoltageMagnitude"):
+            out.append(_opt("v_mag_pu", "Voltage magnitude", "p.u.", _col_rows(net, "v_mag_pu"), [{"key": "v_mag_pu", "label": "Voltage p.u.", "color": "#7c3aed"}], "mean"))
+        if d.get("hasVoltageAngle"):
+            out.append(_opt("v_ang", "Voltage angle", "deg/rad", _col_rows(net, "v_ang"), [{"key": "v_ang", "label": "Voltage angle", "color": "#8b5cf6"}], "mean"))
+        return out
+    if focus == "storageUnit":
+        discharge = d["dischargeSeries"]
+        power_rows = [
+            {"label": p["label"], "timestamp": p["timestamp"], "charge": p["charge"],
+             "discharge": (discharge[i]["discharge"] if i < len(discharge) else 0)}
+            for i, p in enumerate(d["chargeSeries"])
+        ]
+        return [
+            _opt("dispatch", "Dispatch", "MW", _col_rows(d["dispatchSeries"], "dispatch"), [{"key": "dispatch", "label": "Dispatch MW", "color": "#0f766e"}], "mean"),
+            _opt("storage_power", "Storage power", "MW", power_rows,
+                 [{"key": "charge", "label": "Charge MW", "color": "#0ea5e9"}, {"key": "discharge", "label": "Discharge MW", "color": "#f97316"}], "mean", True),
+            _opt("state", "State of charge", "MWh", _col_rows(d["stateSeries"], "state"), [{"key": "state", "label": "State MWh", "color": "#14b8a6"}], "mean"),
+        ]
+    if focus == "store":
+        return [
+            _opt("energy", "Energy", "MWh", _col_rows(d["energySeries"], "energy"), [{"key": "energy", "label": "Energy MWh", "color": "#7c3aed"}], "mean"),
+            _opt("power", "Power", "MW", _col_rows(d["powerSeries"], "power"), [{"key": "power", "label": "Power MW", "color": "#6d28d9"}], "mean"),
+        ]
+    if focus == "branch":
+        return [
+            _opt("terminal_flows", "Terminal flows", "MW", _col_rows(d["flowSeries"], "p0", "p1"),
+                 [{"key": "p0", "label": "P0 MW", "color": "#0f766e"}, {"key": "p1", "label": "P1 MW", "color": "#0b5d56"}], "mean", True),
+            _opt("loading", "Loading", "%", _col_rows(d["loadingSeries"], "loading"), [{"key": "loading", "label": "Loading %", "color": "#ea580c"}], "mean"),
+            _opt("losses", "Losses", "MW", _col_rows(d["lossesSeries"], "losses"), [{"key": "losses", "label": "Losses MW", "color": "#dc2626"}], "mean"),
+        ]
+    if focus == "process":
+        c = d.get("color") or carrier_color(d.get("carrier") or "Other", carriers)
+        p1 = d["p1Series"]
+        flow_rows = [
+            {"label": p["label"], "timestamp": p["timestamp"], "p0": p["p0"], "p1": (p1[i]["p1"] if i < len(p1) else 0)}
+            for i, p in enumerate(d["p0Series"])
+        ]
+        return [
+            _opt("throughput", "Throughput", "MW", _col_rows(d["throughputSeries"], "throughput"), [{"key": "throughput", "label": "Throughput MW", "color": c}], "mean"),
+            _opt("terminal_flows", "Terminal flows", "MW", flow_rows,
+                 [{"key": "p0", "label": "P0 MW", "color": "#0f766e"}, {"key": "p1", "label": "P1 MW", "color": "#0b5d56"}], "mean", True),
+        ]
+    if focus == "shuntImpedance":
+        return [
+            _opt("active_power", "Active power", "MW", _col_rows(d["pSeries"], "p"), [{"key": "p", "label": "P MW", "color": "#0ea5e9"}], "mean"),
+            _opt("reactive_power", "Reactive power", "MVar", _col_rows(d["qSeries"], "q"), [{"key": "q", "label": "Q MVar", "color": "#7c3aed"}], "mean"),
+        ]
+    return []
+
+
+def _order_by_carrier_rows(carriers: list[Row], keys: list[str]) -> list[str]:
+    ordered = [n for n in (string_value(r.get("name")).strip() for r in carriers) if n and n in keys]
+    return ordered + [k for k in keys if k not in ordered]
+
+
+def _generator_group_rows(
+    details: dict[str, Row], gen_names: list[str], field: str, series_attr: str, group_by: str, carriers: list[Row],
+) -> tuple[list[Row], list[Row]]:
+    """Sum generator ``field`` per timestamp, keyed by carrier or by generator (``buildMultiGenMetric``)."""
+    by_ts: dict[str, Row] = {}
+    for name in gen_names:
+        gen = details.get(name)
+        if not gen:
+            continue
+        series_key = (gen.get("carrier") or "Unknown") if group_by == "carrier" else name
+        for pt in gen[series_attr]:
+            ts = string_value(pt.get("timestamp") if pt.get("timestamp") is not None else pt.get("label"))
+            entry = by_ts.setdefault(ts, {"label": string_value(pt.get("label")), "timestamp": ts, "vals": {}})
+            entry["vals"][series_key] = entry["vals"].get(series_key, 0) + number_value(pt.get(field))
+    raw_keys: list[str] = []
+    for entry in by_ts.values():
+        for k in entry["vals"]:
+            if k not in raw_keys:
+                raw_keys.append(k)
+    keys = _order_by_carrier_rows(carriers, raw_keys) if group_by == "carrier" else raw_keys
+    rows = [
+        {"label": e["label"], "timestamp": e["timestamp"], **e["vals"]}
+        for e in sorted(by_ts.values(), key=lambda e: e["timestamp"])
+    ]
+    series = [
+        {"key": k, "label": k,
+         "color": carrier_color(k, carriers) if group_by == "carrier" else ((details.get(k) or {}).get("color") or hash_color(k))}
+        for k in keys
+    ]
+    return rows, series
+
+
+def _multi_asset_options(details: dict[str, dict[str, Any]], keys: list[str], focus: str, currency: str, carriers: list[Row]) -> list[Row]:
+    """Merge the single-asset options of ``keys`` by metric, one column per asset (``buildMultiAssetOptions``)."""
+    by_metric: dict[str, Row] = {}
+    for asset in keys:
+        for opt in _single_asset_options(details, focus, asset, currency, carriers):
+            merged = by_metric.setdefault(opt["key"], {**_opt(opt["key"], opt["label"], opt["unit"], [], [], opt["reducer"]), "_rows": {}})
+            row_map: dict[str, Row] = merged["_rows"]
+            single = len(opt["series"]) == 1
+            for s in opt["series"]:
+                sk = asset if single else f"{asset}__{s['key']}"
+                sl = asset if single else f"{asset} {s['label']}"
+                if not any(x["key"] == sk for x in merged["series"]):
+                    merged["series"].append({"key": sk, "label": sl, "color": hash_color(f"{focus}:{asset}:{s['key']}")})
+                for row in opt["rows"]:
+                    rid = f"{row.get('timestamp') or ''}|{row['label']}"
+                    target = row_map.setdefault(rid, {"label": row["label"], "timestamp": row.get("timestamp")})
+                    target[sk] = row.get(s["key"])
+    out = []
+    for m in by_metric.values():
+        m["rows"] = list(m.pop("_rows").values())
+        out.append(m)
+    return out
+
+
+def build_metric_options(
+    details: dict[str, dict[str, Any]],
+    model: Model,
+    focus: str,
+    keys: list[str],
+    group_by: str = "carrier",
+    currency: str = "$",
+    bus_filter: list[str] | None = None,
+    carrier_filter: list[str] | None = None,
+) -> list[Row]:
+    """Chart metrics of a non-system focus (``useMetricOptions``): ``[]`` = every asset of the kind.
+
+    One key gives that asset's own metrics; several (or none) merge them, generators
+    grouped by carrier or asset, a bus adding the output / availability / curtailment /
+    emissions of the generators attached to it. ``details`` is :func:`derive_asset_details`'s
+    output; ``bus_filter`` / ``carrier_filter`` narrow generators (buses narrow storage / stores).
+    """
+    carriers = model.get("carriers") or []
+    kind = FOCUS_KINDS[focus]
+    if len(keys) == 1:
+        return _single_asset_options(details, focus, keys[0], currency, carriers)
+    resolved = keys or list(details.get(kind, {}))
+    buses, carrier_set = set(bus_filter or []), set(carrier_filter or [])
+    gens = details.get("generators", {})
+    if focus == "generator":
+        names = [n for n in resolved if n in gens
+                 and (not buses or gens[n]["bus"] in buses) and (not carrier_set or gens[n]["carrier"] in carrier_set)]
+        out = []
+        for field, label, unit, reducer, attr in _GEN_FIELDS:
+            rows, series = _generator_group_rows(gens, names, field, attr, group_by, carriers)
+            out.append(_opt(field, label, unit, rows, series, reducer, group_by == "carrier"))
+        return out
+    if focus in ("storageUnit", "store"):
+        group = details.get(kind, {})
+        names = [n for n in resolved if (group.get(n) or {}).get("bus", "") in buses] if buses else resolved
+        return _multi_asset_options(details, names, focus, currency, carriers)
+    if focus == "bus":
+        base = _multi_asset_options(details, resolved, focus, currency, carriers)
+        attached = [g["name"] for g in gens.values() if g["bus"] in set(resolved)]
+        extra = []
+        for field, _label, unit, reducer, attr in _GEN_FIELDS:
+            key, label = _BUS_GEN_KEYS[field]
+            rows, series = _generator_group_rows(gens, attached, field, attr, group_by, carriers)
+            extra.append(_opt(key, label, unit, rows, series, reducer, group_by == "carrier"))
+        return base + extra
+    return _multi_asset_options(details, resolved, focus, currency, carriers)
+
+
 # ── KPI strip ────────────────────────────────────────────────────────────────
 
 
@@ -711,7 +973,13 @@ def compute_kpis(
         float(p["value"]) for p in result.get("systemPriceSeries") or []
         if isinstance(p.get("value"), (int, float)) and math.isfinite(p["value"])
     ]
-    avg_price = sum(prices) / len(prices) if prices else 0.0
+    # Load-weighted run average (n.statistics.prices(weighting="load")); a run stored before
+    # ``runMeta.averageSystemPrice`` existed falls back to the unweighted series mean.
+    stored_avg = (result.get("runMeta") or {}).get("averageSystemPrice")
+    if isinstance(stored_avg, (int, float)) and not isinstance(stored_avg, bool) and math.isfinite(stored_avg):
+        avg_price = float(stored_avg)
+    else:
+        avg_price = sum(prices) / len(prices) if prices else 0.0
     min_price = min(prices) if prices else None
     max_price = max(prices) if prices else None
 
@@ -926,12 +1194,17 @@ def split_capacity_summary(base: list[dict[str, Any]], info: dict[str, Any] | No
     return out
 
 
-COMPARISON_TOPICS = ("kpi", "generation-mix", "installed-capacity", "cost", "emissions", "capacity", "generation-time")
+COMPARISON_TOPICS = ("kpi", "generation-mix", "installed-capacity", "cost", "emissions", "capacity", "generation-time", "statistics")
 _MAX_TS_POINTS = 600
 
 
 def run_comparison_entry(name: str, analytics: dict[str, Any], topics: list[str]) -> dict[str, Any]:
-    """One scenario column of the comparison matrix, from a run's analytics bundle."""
+    """One scenario column of the comparison matrix, from a run's analytics bundle.
+
+    The ``statistics`` topic is not filled here: it needs the rebuilt networks of
+    every run in one ``NetworkCollection`` and is attached by the router
+    (:func:`backend.app.run_collection.collection_statistics`, P39).
+    """
     result = analytics.get("result") or {}
     info = installed_capacity(analytics.get("modelStatic"), (result.get("outputs") or {}).get("static"))
     entry: dict[str, Any] = {"name": name, "label": analytics.get("label") or name}

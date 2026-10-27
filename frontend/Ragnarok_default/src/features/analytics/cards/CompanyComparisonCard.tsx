@@ -4,8 +4,9 @@
  * Joins the three per-company result blocks by company name — F1 breakdown
  * (capacity / energy / revenue / emissions), F2 finance (NPV / IRR / payback),
  * and the consolidated statement (net margin) — into one sortable table with an
- * inline bar for the selected metric. Pure view over data already computed; no
- * backend. Renders whatever blocks exist (at least F1 is required).
+ * inline bar for the selected metric. A stored run reads the join and the sort
+ * from the server (`GET /api/runs/{name}/companies`, WA7); a result with no
+ * stored run (an imported project) joins the blocks locally (`joinCompanies`).
  */
 import React from 'react';
 import {
@@ -13,97 +14,62 @@ import {
   CompanyFinanceResult,
   CompanyStatementResult,
 } from 'lib/types';
+import { CompanyRow, fetchRunCompanies } from 'lib/api/resultsDerived';
+import { CompanyComparisonData, joinCompanies } from 'lib/results/companies';
+import { useAsync } from '../../../shared/hooks/useAsync';
 
 interface Props {
   breakdown?: CompanyBreakdownResult;
   finance?: CompanyFinanceResult;
   statement?: CompanyStatementResult;
-}
-
-interface Metric {
-  key: string;
-  label: string;
-  get: (r: Row) => number | null;
-  fmt: (v: number, cur: string) => string;
-  /** Higher is better → sort desc by default; for costs/payback, lower is better. */
-  higherBetter: boolean;
-}
-
-interface Row {
-  company: string;
-  capacityMW?: number;
-  energyMWh?: number;
-  revenue?: number | null;
-  emissionsTonnes?: number;
-  npv?: number;
-  irr?: number | null;
-  paybackYears?: number | null;
-  netMargin?: number;
+  /** Stored run to read the comparison from; null/absent joins the blocks locally. */
+  runName?: string | null;
 }
 
 const money = (v: number, cur: string) => `${v < 0 ? '−' : ''}${cur}${Math.abs(Math.round(v)).toLocaleString()}`;
 const num0 = (v: number) => Math.round(v).toLocaleString();
 
-export function CompanyComparisonCard({ breakdown, finance, statement }: Props) {
-  const cur = breakdown?.currency || finance?.currency || statement?.currency || '';
+/** How each metric key prints; the labels and sort direction come with the data. */
+const FORMAT: Record<string, (v: number, cur: string) => string> = {
+  npv: money,
+  netMargin: money,
+  irr: (v) => `${(v * 100).toFixed(1)}%`,
+  revenue: money,
+  capacityMW: (v) => `${num0(v)} MW`,
+  emissionsTonnes: (v) => `${num0(v)} t`,
+};
 
-  // Join by company name.
-  const rows = new Map<string, Row>();
-  const get = (name: string): Row => {
-    let r = rows.get(name);
-    if (!r) { r = { company: name }; rows.set(name, r); }
-    return r;
-  };
-  for (const c of breakdown?.companies ?? []) {
-    const r = get(c.company);
-    r.capacityMW = c.capacityMW; r.energyMWh = c.energyMWh;
-    r.revenue = c.revenue; r.emissionsTonnes = c.emissionsTonnes;
-  }
-  for (const c of finance?.companies ?? []) {
-    const r = get(c.company);
-    r.npv = c.npv; r.irr = c.irr; r.paybackYears = c.paybackYears;
-  }
-  for (const c of statement?.companies ?? []) {
-    get(c.company).netMargin = c.netMargin;
-  }
-  const data = Array.from(rows.values());
+const valueOf = (r: CompanyRow, key: string): number | null => {
+  const v = (r as unknown as Record<string, number | null | undefined>)[key];
+  return v === undefined ? null : v;
+};
 
-  // Available metrics depend on which blocks are present.
-  const metrics: Metric[] = [];
-  if (finance) metrics.push({ key: 'npv', label: 'NPV', get: (r) => r.npv ?? null, fmt: money, higherBetter: true });
-  if (statement) metrics.push({ key: 'netMargin', label: 'Net margin/yr', get: (r) => r.netMargin ?? null, fmt: money, higherBetter: true });
-  if (finance) metrics.push({ key: 'irr', label: 'IRR', get: (r) => r.irr ?? null, fmt: (v) => `${(v * 100).toFixed(1)}%`, higherBetter: true });
-  metrics.push({ key: 'revenue', label: 'Revenue/yr', get: (r) => r.revenue ?? null, fmt: money, higherBetter: true });
-  metrics.push({ key: 'capacityMW', label: 'Capacity', get: (r) => r.capacityMW ?? null, fmt: (v) => `${num0(v)} MW`, higherBetter: true });
-  metrics.push({ key: 'emissionsTonnes', label: 'Emissions', get: (r) => r.emissionsTonnes ?? null, fmt: (v) => `${num0(v)} t`, higherBetter: false });
-
-  const [sortKey, setSortKey] = React.useState<string>(metrics[0]?.key ?? 'revenue');
-  const [barKey, setBarKey] = React.useState<string>(metrics[0]?.key ?? 'revenue');
-
+function ComparisonTable({ data, sortKey, onSort, busy }: {
+  data: CompanyComparisonData;
+  sortKey: string;
+  onSort: (key: string) => void;
+  busy: boolean;
+}) {
+  const cur = data.currency;
+  const { metrics } = data;
+  const [barKey, setBarKey] = React.useState<string | null>(null);
   const sortMetric = metrics.find((m) => m.key === sortKey) ?? metrics[0];
-  const sorted = [...data].sort((a, b) => {
-    const av = sortMetric?.get(a); const bv = sortMetric?.get(b);
-    if (av === null || av === undefined) return 1;
-    if (bv === null || bv === undefined) return -1;
-    return sortMetric!.higherBetter ? bv - av : av - bv;
-  });
-
   const barMetric = metrics.find((m) => m.key === barKey) ?? metrics[0];
-  const barMax = Math.max(1, ...data.map((r) => Math.abs(barMetric?.get(r) ?? 0)));
+  const barMax = Math.max(1, ...data.items.map((r) => Math.abs(valueOf(r, barMetric.key) ?? 0)));
 
-  if (data.length === 0) {
+  if (data.items.length === 0) {
     return <p className="dashboard-cell-missing">No owner-tagged companies to compare.</p>;
   }
 
   return (
-    <div className="econ-card">
+    <div className="econ-card" aria-busy={busy}>
       <div className="econ-kpi-row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <span className="sg-setting-hint" style={{ margin: 0 }}>Bar metric:</span>
         {metrics.map((m) => (
           <button
             key={m.key}
-            className={`tb-btn sg-solver-btn${barKey === m.key ? '' : ' tb-btn--muted'}`}
-            onClick={() => { setBarKey(m.key); setSortKey(m.key); }}
+            className={`tb-btn sg-solver-btn${barMetric.key === m.key ? '' : ' tb-btn--muted'}`}
+            onClick={() => { setBarKey(m.key); onSort(m.key); }}
           >
             {m.label}
           </button>
@@ -121,23 +87,23 @@ export function CompanyComparisonCard({ breakdown, finance, statement }: Props) 
                   className="num"
                   style={{ cursor: 'pointer' }}
                   title="Sort by this metric"
-                  onClick={() => setSortKey(m.key)}
+                  onClick={() => onSort(m.key)}
                 >
-                  {m.label}{sortKey === m.key ? ' ▾' : ''}
+                  {m.label}{sortMetric.key === m.key ? ' ▾' : ''}
                 </th>
               ))}
-              <th style={{ minWidth: 110 }}>{barMetric?.label}</th>
+              <th style={{ minWidth: 110 }}>{barMetric.label}</th>
             </tr>
           </thead>
           <tbody>
-            {sorted.map((r) => {
-              const bv = barMetric?.get(r) ?? 0;
+            {data.items.map((r) => {
+              const bv = valueOf(r, barMetric.key) ?? 0;
               return (
                 <tr key={r.company}>
                   <td>{r.company}</td>
                   {metrics.map((m) => {
-                    const v = m.get(r);
-                    return <td key={m.key} className="num">{v === null || v === undefined ? '—' : m.fmt(v, cur)}</td>;
+                    const v = valueOf(r, m.key);
+                    return <td key={m.key} className="num">{v === null ? '—' : (FORMAT[m.key] ?? num0 as (v: number, c: string) => string)(v, cur)}</td>;
                   })}
                   <td>
                     <div className="sb-bar">
@@ -151,9 +117,31 @@ export function CompanyComparisonCard({ breakdown, finance, statement }: Props) 
         </table>
       </div>
       <p className="econ-footnote">
-        Companies ranked by {sortMetric?.label}. Joins the per-company breakdown, finance,
+        Companies ranked by {sortMetric.label}. Joins the per-company breakdown, finance,
         and P&amp;L blocks by owner tag — click a column header to re-sort.
       </p>
     </div>
   );
+}
+
+function ServerComparison({ runName }: { runName: string }) {
+  const [sortKey, setSortKey] = React.useState<string | undefined>(undefined);
+  const { data, loading, error } = useAsync(`${runName}|${sortKey ?? ''}`, () => fetchRunCompanies(runName, sortKey));
+  if (error) return <p className="dashboard-cell-missing" role="alert">Could not load the company comparison: {error}</p>;
+  if (!data) return <p className="dashboard-cell-missing" aria-busy="true">Loading company comparison…</p>;
+  return <ComparisonTable data={data} sortKey={sortKey ?? data.sortedBy} onSort={setSortKey} busy={loading} />;
+}
+
+function LocalComparison({ breakdown, finance, statement }: Omit<Props, 'runName'>) {
+  const [sortKey, setSortKey] = React.useState<string | undefined>(undefined);
+  const data = React.useMemo(
+    () => joinCompanies(breakdown, finance, statement, sortKey),
+    [breakdown, finance, statement, sortKey],
+  );
+  return <ComparisonTable data={data} sortKey={sortKey ?? data.sortedBy} onSort={setSortKey} busy={false} />;
+}
+
+export function CompanyComparisonCard({ breakdown, finance, statement, runName }: Props) {
+  if (runName) return <ServerComparison runName={runName} />;
+  return <LocalComparison breakdown={breakdown} finance={finance} statement={statement} />;
 }

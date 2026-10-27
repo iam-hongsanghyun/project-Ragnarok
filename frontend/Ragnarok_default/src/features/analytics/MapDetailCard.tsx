@@ -1,6 +1,8 @@
 import React from 'react';
 import { AnalyticsFocus, RunResults } from 'lib/types';
+import { AssetItem, AssetKind, fetchRunAssets } from 'lib/api/resultsDerived';
 import { carrierColor } from 'lib/utils/helpers';
+import { useAsync } from '../../shared/hooks/useAsync';
 
 // ── Sparkline ─────────────────────────────────────────────────────────────────
 
@@ -62,12 +64,46 @@ interface Props {
   results: RunResults;
   onClose: () => void;
   currencySymbol?: string;
+  /** Stored run to read the asset's details from (`GET /api/runs/{name}/assets`,
+   *  WA7). Without one (an imported project) the card reads `results.assetDetails`. */
+  runName?: string | null;
 }
 
-export function MapDetailCard({ focus, results, onClose, currencySymbol = '$' }: Props) {
-  if (focus.type === 'system') return null;
+const KIND_OF_FOCUS: Record<Exclude<AnalyticsFocus['type'], 'system'>, AssetKind> = {
+  generator: 'generators',
+  bus: 'buses',
+  storageUnit: 'storageUnits',
+  store: 'stores',
+  branch: 'branches',
+  process: 'processes',
+  shuntImpedance: 'shuntImpedances',
+};
+
+export function MapDetailCard({ focus, results, onClose, currencySymbol = '$', runName }: Props) {
+  const kind = focus.type === 'system' ? null : KIND_OF_FOCUS[focus.type];
+  const assetKey = focus.type === 'system' ? '' : focus.key;
+  const period = results.pathway?.enabled ? results.pathway.selectedPeriod ?? null : null;
+  const server = useAsync<AssetItem | null>(
+    runName && kind ? `${runName}|${kind}|${assetKey}|${currencySymbol}|${period ?? ''}` : null,
+    async () => (await fetchRunAssets(runName as string, kind as AssetKind, [assetKey], currencySymbol, period)).items[0] ?? null,
+  );
+  if (focus.type === 'system' || kind === null) return null;
 
   const key = focus.key;
+  // Server detail when a stored run backs the view, else the in-memory derivation.
+  const detailOf = <K extends AssetKind>(k: K): RunResults['assetDetails'][K][string] | undefined =>
+    runName
+      ? (server.data?.kind === k ? (server.data as unknown as RunResults['assetDetails'][K][string]) : undefined)
+      : (results.assetDetails[k] as Record<string, RunResults['assetDetails'][K][string]>)[key];
+  if (runName && server.error) {
+    return <div className="map-detail-card"><p className="mdc-empty" role="alert">Could not load details for {key}: {server.error}</p></div>;
+  }
+  if (runName && server.loading) {
+    return <div className="map-detail-card"><p className="mdc-empty" aria-busy="true">Loading {key}…</p></div>;
+  }
+  if (runName && !server.data) {
+    return <div className="map-detail-card"><p className="mdc-empty">No details for {key} in this run.</p></div>;
+  }
   let subtitle = '';
   let dotColor: string | null = null;
   let sparkValues: number[] = [];
@@ -76,7 +112,7 @@ export function MapDetailCard({ focus, results, onClose, currencySymbol = '$' }:
   let kpis: Array<{ label: string; value: string }> = [];
 
   if (focus.type === 'generator') {
-    const detail = results.assetDetails.generators[key];
+    const detail = detailOf('generators');
     if (!detail) return null;
     subtitle = detail.carrier;
     dotColor = detail.color || carrierColor(detail.carrier);
@@ -85,7 +121,7 @@ export function MapDetailCard({ focus, results, onClose, currencySymbol = '$' }:
     sparkColor = dotColor;
     sparkLabel = 'Output (MW)';
   } else if (focus.type === 'bus') {
-    const detail = results.assetDetails.buses[key];
+    const detail = detailOf('buses');
     if (!detail) return null;
     subtitle = 'Bus';
     kpis = detail.summary.slice(0, 4).map((s) => ({ label: s.label, value: s.value }));
@@ -93,7 +129,7 @@ export function MapDetailCard({ focus, results, onClose, currencySymbol = '$' }:
     sparkColor = '#7c3aed';
     sparkLabel = `Nodal SMP (${currencySymbol}/MWh)`;
   } else if (focus.type === 'storageUnit') {
-    const detail = results.assetDetails.storageUnits[key];
+    const detail = detailOf('storageUnits');
     if (!detail) return null;
     subtitle = 'Storage Unit';
     kpis = detail.summary.slice(0, 4).map((s) => ({ label: s.label, value: s.value }));
@@ -101,7 +137,7 @@ export function MapDetailCard({ focus, results, onClose, currencySymbol = '$' }:
     sparkColor = '#14b8a6';
     sparkLabel = 'State of charge (MWh)';
   } else if (focus.type === 'store') {
-    const detail = results.assetDetails.stores[key];
+    const detail = detailOf('stores');
     if (!detail) return null;
     subtitle = 'Store';
     kpis = detail.summary.slice(0, 4).map((s) => ({ label: s.label, value: s.value }));
@@ -109,7 +145,7 @@ export function MapDetailCard({ focus, results, onClose, currencySymbol = '$' }:
     sparkColor = '#7c3aed';
     sparkLabel = 'Energy (MWh)';
   } else if (focus.type === 'branch') {
-    const detail = results.assetDetails.branches[key];
+    const detail = detailOf('branches');
     if (!detail) return null;
     subtitle = detail.component;
     kpis = detail.summary.slice(0, 4).map((s) => ({ label: s.label, value: s.value }));
@@ -117,7 +153,7 @@ export function MapDetailCard({ focus, results, onClose, currencySymbol = '$' }:
     sparkColor = '#f97316';
     sparkLabel = 'Flow p0 (MW)';
   } else if (focus.type === 'process') {
-    const detail = results.assetDetails.processes[key];
+    const detail = detailOf('processes');
     if (!detail) return null;
     subtitle = detail.carrier ? `Process · ${detail.carrier}` : 'Process';
     dotColor = detail.color || carrierColor(detail.carrier);
@@ -126,7 +162,7 @@ export function MapDetailCard({ focus, results, onClose, currencySymbol = '$' }:
     sparkColor = dotColor;
     sparkLabel = 'Throughput |p0| (MW)';
   } else if (focus.type === 'shuntImpedance') {
-    const detail = results.assetDetails.shuntImpedances[key];
+    const detail = detailOf('shuntImpedances');
     if (!detail) return null;
     subtitle = 'Shunt impedance';
     kpis = detail.summary.slice(0, 4).map((s) => ({ label: s.label, value: s.value }));

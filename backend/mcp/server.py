@@ -2477,3 +2477,6 @@ from . import tools_piecewise  # noqa: E402,F401
 
 # Optimisation / statistics / network-operation tools (PyPSA 1.4: solver options, LP export, consistency, PTDF, statistics, temporal clustering, slice/merge, HAC) - P19-P39.
 from . import tools_optimise  # noqa: E402,F401
+
+# Result-accounting tools (PyPSA-native run comparison through a NetworkCollection) - P28/P29/RB10/P39.
+from . import tools_results_extra  # noqa: E402,F401

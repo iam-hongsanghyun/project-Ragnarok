@@ -526,16 +526,19 @@ multiprocessing queue.
 | Output field | Source |
 |---|---|
 | `dispatchSeries`, `generatorDispatchSeries` | `build_dispatch_series` in `results/dispatch.py` |
-| `systemPriceSeries`, `systemEmissionsSeries` | `build_price_emissions_series` in `dispatch.py` |
+| `systemPriceSeries`, `systemEmissionsSeries` | `system_price_series` / `build_price_emissions_series` in `dispatch.py`. Price: bus marginal prices weighted by `n.statistics.withdrawal` (the per-snapshot form of `n.statistics.prices(weighting="load")`); the run average is `runMeta.averageSystemPrice` = `n.statistics.prices(weighting="load")`. Emissions series: generators only (storage depletion is a stock change, in the total). |
+| `curtailmentSeries`, `generatorEnergy[].curtailmentMwh` | `n.statistics.curtailment` via `curtailment_mw_by_generator` in `dispatch.py`: `max(p_max_pu * p_nom_opt - p, 0)` for generators with a time-varying `p_max_pu`, load shedding excluded, units outside their build/lifetime window masked in multi-period runs (PyPSA does not mask them). Energy uses the `generators` snapshot weights. |
+| `metricDefinitions` | `metric_definitions` in `dispatch.py`: unit + one-line definition of every field whose meaning follows PyPSA |
 | `storageSeries` | `build_storage_series` in `dispatch.py` |
 | `carrierMix` | `dispatch_by_carrier` groups `generators_t.p` by carrier; `weighted_sum` with `snapshot_weightings["generators"]` |
 | `costBreakdown` | Fuel cost, carbon cost, load-shedding cost, expansion CAPEX per generator using `get_switchable_as_dense` for marginal cost |
 | `nodalBalance` | Per-bus average load and generation |
-| `lineLoading` | Peak `\|p0\| / s_nom * 100` for lines, links, transformers |
+| `lineLoading` | Peak `\|p0\| / s_nom_opt * 100` for lines, links, transformers (a peak ratio; `n.statistics.transmission` is net MWh and does not replace it) |
 | `meritOrder` | `build_merit_order` in `results/market.py` |
 | `co2Shadow` | `build_co2_shadow` in `market.py` |
-| `emissionsBreakdown` | `build_emissions_breakdown` in `results/emissions.py` |
-| `expansionResults` | `build_expansion_results` in `results/expansion.py` |
+| `emissionsBreakdown` | `build_emissions_breakdown` in `results/emissions.py`, on PyPSA's `primary_energy` accounting (`primary_energy_emissions` in `utils/emissions.py`): generators `sum(w * p / efficiency) * co2_emissions` (signed, investment-period `years` weight in a multi-period solve), plus non-cyclic StorageUnits/Stores `co2_emissions * (initial - final stock)`. `totalTco2` equals the left-hand side of a `primary_energy` GlobalConstraint. **Link and Process flows are deliberately not counted**: PyPSA does not count them, and the fuel-supply generator already carries the fuel's emissions, so emissions stay at the fuel generator. Per-owner emissions (`companyBreakdown`, `companyStatement`) allocate the same terms to owners (`unassignedEmissionsTonnes` = untagged remainder), so they sum to the total. |
+| `generatorEconomics` | `build_generator_economics` in `results/market.py`: generators, storage units and **Processes** (`processes`: net port value at nodal prices, `marginal_cost * p`, capex of extendable ones). Revenue, supply/withdrawal and capacity factor are `n.statistics.revenue/supply/withdrawal/capacity_factor` per asset and investment period (`results/stat_metrics.py`; money x period objective weight; inactive assets 0); `capturePrice` = revenue / supply (`market_value`); variable cost stays on the dense marginal cost (carbon adder, piecewise overlay). Company finance (`results/finance.py`) takes Process owners through the same `process_assets` rule |
+| `expansionResults` | `build_expansion_results` in `results/expansion.py`: `capex_annual` = `n.statistics.capex` on the annual basis (+ `capex_expanded`, `capex_installed`, `overnight_total`, `fom_total`); pathway rows with a native `overnight_cost` keep the annuity figure |
 | `pathway.summaries` | `_pathway_period_summaries` in `results/summaries.py` |
 | `outputs` | `build_full_outputs(network)` in `results/full_outputs.py` |
 

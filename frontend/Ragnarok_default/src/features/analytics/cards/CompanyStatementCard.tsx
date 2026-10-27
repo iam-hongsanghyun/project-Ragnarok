@@ -43,6 +43,7 @@ export function CompanyStatementCard({ data }: Props) {
   if (companies.length === 0) {
     return <p className="dashboard-cell-missing">No owner-tagged companies to report.</p>;
   }
+  const unassignedT = data.unassignedEmissionsTonnes;
   const cellValue = (e: Omit<CompanyStatementEntry, 'company'>, line: Line): number => {
     const raw = Number(e[line.key] ?? 0);
     // Costs are stored positive; show them as outflows.
@@ -76,6 +77,25 @@ export function CompanyStatementCard({ data }: Props) {
                 </td>
               </tr>
             ))}
+            <tr className="stmt-cost">
+              <td>Emissions (tCO2e/yr)</td>
+              {companies.map((c) => <td key={c.company} className="num">{Math.round(c.emissionsTonnes).toLocaleString()}</td>)}
+              <td className="num total-col">{Math.round(data.totals.emissionsTonnes).toLocaleString()}</td>
+            </tr>
+            {unassignedT != null && unassignedT !== 0 && (
+              <>
+                <tr className="stmt-cost">
+                  <td>Unassigned emissions (tCO2e/yr)</td>
+                  {companies.map((c) => <td key={c.company} className="num" />)}
+                  <td className="num total-col">{Math.round(unassignedT).toLocaleString()}</td>
+                </tr>
+                <tr className="stmt-subtotal">
+                  <td>System emissions (tCO2e/yr)</td>
+                  {companies.map((c) => <td key={c.company} className="num" />)}
+                  <td className="num total-col">{Math.round(data.totals.emissionsTonnes + unassignedT).toLocaleString()}</td>
+                </tr>
+              </>
+            )}
           </tbody>
         </table>
       </div>

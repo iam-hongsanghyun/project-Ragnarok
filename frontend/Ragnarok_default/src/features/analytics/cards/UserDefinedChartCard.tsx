@@ -5,7 +5,6 @@ import {
   ChartSectionConfig,
   ChartSectionType,
   GroupByOption,
-  MetricOption,
   RunResults,
   TimeframeOption,
   WorkbookModel,
@@ -22,6 +21,9 @@ import { TimelineSlider } from '../../../shared/components/DualRangeSlider';
 import { useMetricOptions } from '../useMetricOptions';
 import { AssetPills } from './AssetPills';
 import { SearchableSelect } from '../../../shared/components/SearchableSelect';
+
+/** Per-asset window sizes are requested in whole weeks of hourly snapshots. */
+const WINDOW_STEP_SNAPSHOTS = 168;
 
 const BUS_AGG_METRIC_KEYS = new Set([
   'gen_output_by_bus',
@@ -76,6 +78,7 @@ export function UserDefinedChartCard({
   compact = false,
   title,
   onTitleChange,
+  runName = null,
 }: {
   section: ChartSectionConfig;
   results: RunResults | null;
@@ -90,6 +93,10 @@ export function UserDefinedChartCard({
   /** Card-level title override (set via the modal's Title input). */
   title?: string;
   onTitleChange?: (next: string) => void;
+  /** Stored run behind `results`: per-asset charts are derived by the server
+   *  (`GET /api/runs/{name}/metrics`). Without one (an imported result) they
+   *  are derived in the browser from `results.assetDetails`. */
+  runName?: string | null;
 }) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const { showToast } = useToast();
@@ -139,8 +146,23 @@ export function UserDefinedChartCard({
     new Set(model.generators.map((r) => stringValue(r.carrier)).filter(Boolean)),
   );
 
+  // Hours per snapshot — integrates MW-rate rows into MWh when summing
+  // (donut totals, 'sum'-reducer buckets) on runs with snapshot gaps.
+  const snapshotWeight = results?.runMeta?.snapshotWeight ?? 1;
+
+  // The timeline slider spans the WHOLE run (from a full-length system series),
+  // so the user can scrub/extend the window even past what's loaded. A per-asset
+  // chart loads only up to the slider's right edge (default 1 week; the server
+  // returns that prefix, rounded up to whole weeks so dragging does not refetch
+  // on every step); a preset's "unbounded" endIndex resolves to that default.
+  const fullTimeline = fullRunTimeline(results);
+  const loadEnd = fullTimeline.length > 0
+    ? Math.ceil((effectiveEndIndex(active.focusType, active.endIndex, fullTimeline.length, snapshotWeight) + 1)
+      / WINDOW_STEP_SNAPSHOTS) * WINDOW_STEP_SNAPSHOTS
+    : null;
+
   // Per-card metric options from the card's own focus/keys/groupBy/filters
-  const metricOptions: MetricOption[] = useMetricOptions(
+  const { options: metricOptions, loading: metricsLoading, error: metricsError } = useMetricOptions(
     results,
     model,
     active.focusType,
@@ -149,23 +171,15 @@ export function UserDefinedChartCard({
     currencySymbol,
     active.busFilter ?? [],
     active.carrierFilter ?? [],
+    runName ? { runName, end: loadEnd } : null,
   );
 
-  // Hours per snapshot — integrates MW-rate rows into MWh when summing
-  // (donut totals, 'sum'-reducer buckets) on runs with snapshot gaps.
-  const snapshotWeight = results?.runMeta?.snapshotWeight ?? 1;
-
+  // `metricRows` holds only the loaded prefix [0, loaded), so display clamps to it
+  // until a wider window finishes loading.
   const metric     = metricOptions.find((m) => m.key === active.metricKey);
   const hasMetric  = Boolean(metric);
   const metricRows = metric?.rows || [];
 
-  // The timeline slider spans the WHOLE run (from a full-length system series),
-  // so the user can scrub/extend the window even past what's loaded. Per-asset
-  // series hydrate lazily up to the slider's right edge (default 1 week); a
-  // preset's "unbounded" endIndex resolves to that default. `metricRows` holds
-  // only the loaded prefix [0, loaded), so display clamps to it until the wider
-  // window finishes loading.
-  const fullTimeline = fullRunTimeline(results);
   const totalSnaps = Math.max(fullTimeline.length, metricRows.length);
   const sliderData = fullTimeline.length ? fullTimeline : metricRows;
   const effEndIndex = effectiveEndIndex(active.focusType, active.endIndex, totalSnaps, snapshotWeight);
@@ -468,7 +482,11 @@ export function UserDefinedChartCard({
 
   const chartBody = (
     <div ref={chartContainerRef} className="chart-body">
-      {!hasMetric ? (
+      {!hasMetric && metricsError ? (
+        <div className="chart-empty-state"><p className="empty-text" role="alert">Could not load this chart: {metricsError}</p></div>
+      ) : !hasMetric && metricsLoading ? (
+        <div className="chart-empty-state"><p className="empty-text" aria-busy="true">Loading chart data...</p></div>
+      ) : !hasMetric ? (
         <div className="chart-empty-state">
           <p className="empty-text">{compact ? 'Click the settings button to configure this chart.' : 'Choose component, assets, value and chart type.'}</p>
         </div>

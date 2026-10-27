@@ -28,7 +28,7 @@ export function segmentTotal(segments: CommitmentSegment[]): number {
   return segments.reduce((a, s) => a + s.length, 0);
 }
 
-function Strip({ segments, total, label }: { segments: CommitmentSegment[]; total: number; label: string }) {
+export function Strip({ segments, total, label }: { segments: CommitmentSegment[]; total: number; label: string }) {
   const W = 360, H = 16;
   const spans = maintenanceSpans(segments);
   return (

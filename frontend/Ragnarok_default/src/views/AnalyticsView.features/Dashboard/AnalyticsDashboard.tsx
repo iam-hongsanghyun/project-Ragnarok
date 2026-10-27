@@ -44,6 +44,8 @@ import { RawSheetsCard } from '../../../features/analytics/cards/RawSheetsCard';
 import { PriceFormationCard } from '../../../features/analytics/cards/PriceFormationCard';
 import { CommitmentCard } from '../../../features/analytics/cards/CommitmentCard';
 import { PiecewiseCard } from '../../../features/analytics/cards/PiecewiseCard';
+import { ServerDurationCurveCard } from '../../../features/analytics/cards/ServerDurationCurveCard';
+import { SetpointDualsCard } from '../../../features/analytics/cards/SetpointDualsCard';
 import { MaintenanceCard } from '../../../features/analytics/cards/MaintenanceCard';
 import { PhaseShiftersCard } from '../../../features/analytics/cards/PhaseShiftersCard';
 import { BidStrategyCard } from '../../../features/analytics/cards/BidStrategyCard';
@@ -174,6 +176,7 @@ const ADDABLE_CARDS = [
   { kind: 'load-analysis', label: 'Load analysis' },
   { kind: 'maintenance', label: 'Maintenance schedule' },
   { kind: 'phase-shifters', label: 'Phase shifters' },
+  { kind: 'setpoint-duals', label: 'Ramp / set-point duals' },
 ];
 
 function createCard(kind: string): Card {
@@ -185,6 +188,7 @@ function createCard(kind: string): Card {
     case 'load-analysis': return newLoadAnalysisCard();
     case 'maintenance': return { id: newId('maintenance'), kind: 'maintenance' };
     case 'phase-shifters': return { id: newId('phase-shifters'), kind: 'phase-shifters' };
+    case 'setpoint-duals': return { id: newId('setpoint-duals'), kind: 'setpoint-duals' };
     default:      return newPivotCard();
   }
 }
@@ -246,8 +250,15 @@ export function AnalyticsDashboard({
     const totalSnaps = fullRunTimeline(results).length;
     const weight = results.runMeta?.snapshotWeight ?? 1;
     const windows: Record<string, number> = {};
+    // A per-asset chart of a stored run is derived by the server (`/metrics`), so it
+    // needs nothing hydrated here. The map's nodal-price colouring and the load
+    // analysis still read `results.assetDetails` in the browser; for a layout that
+    // has them, the charts keep requesting windows as before.
+    const serverCharts = !!runName
+      && !layout.cards.some((c) => c.kind === 'map' || c.kind === 'load-analysis');
     for (const card of layout.cards) {
       if (card.kind === 'chart' && card.config.focusType !== 'system') {
+        if (serverCharts) continue;
         const end = effectiveEndIndex(card.config.focusType, card.config.endIndex, totalSnaps, weight);
         const snaps = end + 1;
         for (const sheet of OUTPUT_SHEETS_FOR_FOCUS[card.config.focusType] ?? []) {
@@ -263,7 +274,7 @@ export function AnalyticsDashboard({
       }
     }
     onNeedSeries(windows);
-  }, [layout, onNeedSeries, results]);
+  }, [layout, onNeedSeries, results, runName]);
   const [openMenu, setOpenMenu] = useState<'presets' | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const presetsMenuRef = useRef<HTMLDivElement | null>(null);
@@ -396,6 +407,7 @@ export function AnalyticsDashboard({
               onRemove={() => { /* dashboard cell × handles removal */ }}
               title={card.title}
               onTitleChange={(next) => updateCard(card.id, { title: next.trim() || undefined })}
+              runName={runName}
             />
           );
         case 'pivot':
@@ -421,6 +433,7 @@ export function AnalyticsDashboard({
               analyticsFocus={analyticsFocus}
               onFocusChange={onFocusChange}
               currencySymbol={currencySymbol}
+              runName={runName}
             />
           );
         case 'notes':
@@ -431,8 +444,12 @@ export function AnalyticsDashboard({
             </ul>
           );
         case 'kpi-strip':
-          return <KpiStripCard results={results} model={model} currencySymbol={currencySymbol} />;
+          return <KpiStripCard results={results} model={model} currencySymbol={currencySymbol} runName={runName} />;
         case 'duration-curve':
+          // A stored (non-pathway) run derives the curve server-side; otherwise from the in-memory rows.
+          if (runName && !results.pathway?.enabled) {
+            return <ServerDurationCurveCard runName={runName} source={card.source} currencySymbol={currencySymbol} />;
+          }
           return (
             <DurationCurveCard
               title={card.source === 'price' ? `Marginal price (${currencySymbol}/MWh)` : 'Load (MW)'}
@@ -499,7 +516,7 @@ export function AnalyticsDashboard({
             : <p className="dashboard-cell-missing">No company P&amp;L for this run (needs owner tags and an LP run).</p>;
         case 'company-comparison':
           return (results.companies || results.companyFinance || results.companyStatement)
-            ? <CompanyComparisonCard breakdown={results.companies} finance={results.companyFinance} statement={results.companyStatement} />
+            ? <CompanyComparisonCard breakdown={results.companies} finance={results.companyFinance} statement={results.companyStatement} runName={runName} />
             : <p className="dashboard-cell-missing">No owner-tagged companies to compare.</p>;
         case 'transition-risk':
           return results.companyStatement
@@ -533,6 +550,8 @@ export function AnalyticsDashboard({
           return results.phaseShifters
             ? <PhaseShiftersCard data={results.phaseShifters} />
             : <p className="dashboard-cell-missing">No optimised phase shifters in this run (set <code>phase_shift_min</code> &lt; <code>phase_shift_max</code> on a transformer).</p>;
+        case 'setpoint-duals':
+          return <SetpointDualsCard results={results} runName={runName} currencySymbol={currencySymbol} />;
         case 'bid-strategy':
           return results.bidStrategy
             ? <BidStrategyCard data={results.bidStrategy} />
@@ -690,6 +709,7 @@ export function AnalyticsDashboard({
       case 'piecewise': return 'Piecewise cost curves (solved)';
       case 'maintenance': return 'Maintenance schedule (maintainable units)';
       case 'phase-shifters': return 'Phase shifters (optimised angles)';
+      case 'setpoint-duals': return 'Ramp and set-point duals (shadow prices)';
       case 'bid-strategy': return 'Bid strategy (markup vs price-taker)';
       case 'optimal-bid': return 'Optimal bid (profit-maximising markup)';
       case 'asset-swap': return 'Asset swap (repowering what-if)';

@@ -1836,7 +1836,7 @@ def export_project(payload: ExportProjectPayload) -> Response:
     """Build a Ragnarok Project package (.zip of canonical JSON + readable xlsx).
 
     For an *unsaved* live model with no stored run. The frontend POSTs
-    ``{model, result, scenario, options, sessionId}``; the server re-attaches the
+    ``{model, result, scenario, options, sessionId, conversation?}``; the server re-attaches the
     session's time-series sheets (the browser holds none), packs the lot into a
     lossless project zip (re-importable) and streams it back. (Stored runs use
     the richer ``GET /api/runs/{name}/package``, which has the full bundle.)
@@ -1851,7 +1851,9 @@ def export_project(payload: ExportProjectPayload) -> Response:
             "result": payload.result or {},
         }
         meta = run_store.build_run_meta("ragnarok_project", bundle)
-        data = project_workbook.bundle_to_package(bundle, "ragnarok_project", meta=meta)
+        data = project_workbook.bundle_to_package(
+            bundle, "ragnarok_project", meta=meta, conversation=payload.conversation,
+        )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"Project export failed: {exc}") from exc
     return Response(
@@ -1900,7 +1902,8 @@ async def import_project_load(file: UploadFile) -> dict[str, Any]:
     trail of solves and explicit result imports
     (:func:`import_result_xlsx`) — re-run the loaded model to create a History
     entry. Accepts a Ragnarok Project ``.zip`` (canonical JSON + readable xlsx)
-    or a bare ``.xlsx``; returns ``{model, scenario, options, result, filename}``.
+    or a bare ``.xlsx``; returns ``{model, scenario, options, result, conversation, filename}``
+    (``conversation`` is the package's Bifrost chat sidecar, ``null`` without one).
     """
     from . import project_workbook
 
@@ -1923,6 +1926,8 @@ async def import_project_load(file: UploadFile) -> dict[str, Any]:
         "scenario": bundle.get("scenario") or {},
         "options": options,
         "result": bundle.get("result") or {},
+        # The package's Bifrost chat sidecar (``<stem>.conversation.json``), or None.
+        "conversation": bundle.get("conversation"),
         "filename": filename,
     }
 

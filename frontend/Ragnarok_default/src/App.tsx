@@ -48,6 +48,7 @@ import {
   WorkspaceTab,
   AnalyticsSubTab,
   QueueJob,
+  ProjectLoadResponse,
 } from 'lib/types';
 import { isEmbedded, listenForShowRequests } from 'lib/embedHost';
 import { useSessionSync } from 'shared/hooks/useSessionSync';
@@ -79,6 +80,7 @@ import { readCarbonLibraryFromModel, writeCarbonLibraryToModel, sameCarbonLibrar
 import { saveSessionControls, loadSessionControls, clearSession, clearSessionModelOnly } from 'lib/storage/sessionStore';
 import { postSeasonalRating } from 'lib/api/seasonalRating';
 import { postTemporalCluster, type TemporalOptions, type TemporalResult } from 'lib/api/temporal';
+import { ADOPTION_SETTLE_MS, mayPushStaticResync, sessionHasModel } from 'lib/api/sessionAdoption';
 import { clearSessionModel, putSessionModel, putStaticModel, getSessionFullModel, getSessionMeta, getSheetPage, isSeriesSheet, patchSheet, seriesSheetCounts, DEFAULT_SESSION_ID } from 'lib/api/session';
 import type { SessionSheetMeta } from 'lib/api/session';
 import type { ClusterResult } from 'lib/forge/transforms';
@@ -218,6 +220,17 @@ function downloadBytes(bytes: ArrayBuffer, filename: string, mediaType: string):
 /** Total rows across component sheets (ignoring RAGNAROK_* metadata sheets), so
  *  a workbook that parsed but carried no components can be reported as an empty
  *  import instead of a silent success. */
+/** Workbook sheets that hold each focusable asset type (per-asset details come from the server). */
+const ASSET_SHEETS_OF_FOCUS: Record<string, string[]> = {
+  generator: ['generators'],
+  bus: ['buses'],
+  storageUnit: ['storage_units'],
+  store: ['stores'],
+  branch: ['lines', 'links', 'transformers'],
+  process: ['processes'],
+  shuntImpedance: ['shunt_impedances'],
+};
+
 function countComponentRows(model: WorkbookModel): number {
   let total = 0;
   for (const [sheet, rows] of Object.entries(model)) {
@@ -245,6 +258,13 @@ function AppInner() {
   const modelRef = useRef<WorkbookModel>(model);
   modelRef.current = model;
   const [staticResyncTick, setStaticResyncTick] = useState(0);
+  // The boot check of the session (adopt its model, or find it empty) finished, and the
+  // resync counter at the moment its model was adopted. A resync requested before that
+  // came from the empty default model and must never reach a session that has a model.
+  const [sessionBootChecked, setSessionBootChecked] = useState(false);
+  const adoptedAtTickRef = useRef(0);
+  const staticResyncTickRef = useRef(0);
+  staticResyncTickRef.current = staticResyncTick;
   const requestStaticResync = useCallback(() => setStaticResyncTick((t) => t + 1), []);
   const pushStaticOps = useCallback(
     (sheet: SheetName, ops: SheetEditOp[]) => {
@@ -666,11 +686,11 @@ function AppInner() {
   // no schedule means the run solved with the scalar only.
   // Source order: the frozen context, then the schedule the backend recorded in
   // `runMeta` (older stored runs), and only with no frozen context the live editor.
-  const analyticsCarbonSchedule = resultsContext
+  const analyticsCarbonSchedule = useMemo(() => (resultsContext
     ? (resultsContext.carbonPriceSchedule.length > 0
       ? resultsContext.carbonPriceSchedule
       : (results?.runMeta?.carbonPriceSchedule ?? []))
-    : carbonPriceSchedule;
+    : carbonPriceSchedule), [resultsContext, results?.runMeta?.carbonPriceSchedule, carbonPriceSchedule]);
 
   const displayResults = useMemo(() => {
     if (!results) return null;
@@ -1559,11 +1579,13 @@ function AppInner() {
         // Rehydrate only the small static sheets; series stay in the backend and
         // are paged into the grid on demand (keeps boot light).
         const savedModel = await getSessionFullModel({ staticOnly: true }).catch(() => null);
-        const hasRows = !!savedModel && Object.values(savedModel).some((rows) => Array.isArray(rows) && rows.length > 0);
+        const hasRows = sessionHasModel(savedModel);
         // `userLoadedRef`: the user opened a model while this was still fetching —
         // theirs wins, the rehydrate must not replace it.
         if (!cancelled && !userLoadedRef.current && savedModel && hasRows) {
-          // Already in the session — don't push it straight back.
+          // Already in the session — don't push it straight back, and drop the resyncs the
+          // default empty model asked for before this point (they would wipe it).
+          adoptedAtTickRef.current = staticResyncTickRef.current;
           resetForNewModel(savedModel, controls?.filename, { pushToSession: false });
           // Static rehydrate drops series; learn them from the session meta so
           // the Model tree lists the temporal sheets (paged into the grid on
@@ -1605,13 +1627,21 @@ function AppInner() {
             if (controls.samplingConfig) setSamplingConfig(normalizeSamplingConfig(controls.samplingConfig));
             if (controls.pathwayConfig) setPathwayConfig(controls.pathwayConfig);
           }
+          // The adoption makes effects write config sheets back into the mirror, and those ask
+          // for a resync too. Let them run, then count them as adopted: the session already
+          // holds this model, and a stale mirror pushed over a shared session loses its edits.
+          await new Promise<void>((resolve) => { window.setTimeout(resolve, ADOPTION_SETTLE_MS); });
+          adoptedAtTickRef.current = staticResyncTickRef.current;
           setStatus('Restored your last session.');
           // Transient: clear the boot notice after a few seconds so it doesn't
           // sit in the topbar forever (the next real action sets its own status).
           window.setTimeout(() => { if (!cancelled) setStatus(''); }, 6000);
         }
       } finally {
-        if (!cancelled) sessionRestoredRef.current = true;
+        if (!cancelled) {
+          sessionRestoredRef.current = true;
+          setSessionBootChecked(true);
+        }
       }
     })();
     return () => { cancelled = true; };
@@ -1645,12 +1675,14 @@ function AppInner() {
   // have no row-op equivalent — they request ONE static-merge resync here.
   // Cell/row edits never come through this path (they PATCH precise ops).
   useEffect(() => {
-    if (staticResyncTick === 0) return undefined;
+    if (!mayPushStaticResync({ tick: staticResyncTick, bootChecked: sessionBootChecked, adoptedAtTick: adoptedAtTickRef.current })) {
+      return undefined;
+    }
     const id = window.setTimeout(() => {
       void trackModelPush(putStaticModel(prepareModelForBackend(modelRef.current)));
     }, 300);
     return () => window.clearTimeout(id);
-  }, [staticResyncTick, prepareModelForBackend, trackModelPush]);
+  }, [staticResyncTick, sessionBootChecked, prepareModelForBackend, trackModelPush]);
 
   // Run history lives entirely on the backend (the single source of truth) —
   // see `refreshBackendRuns` / `backendRuns` below. There is no browser-side
@@ -1724,8 +1756,15 @@ function AppInner() {
     if (analyticsFocus.type === 'storageUnit' && displayResults.assetDetails.storageUnits[analyticsFocus.key]) return;
     if (analyticsFocus.type === 'store' && displayResults.assetDetails.stores[analyticsFocus.key]) return;
     if (analyticsFocus.type === 'branch' && displayResults.assetDetails.branches[analyticsFocus.key]) return;
+    // A stored run serves per-asset details from the server (WA7), so a light
+    // bundle (empty assetDetails) keeps the focus while the asset is in the model.
+    if (activeRunName) {
+      const sheets = ASSET_SHEETS_OF_FOCUS[analyticsFocus.type] ?? [];
+      const focusKey = analyticsFocus.key;
+      if (sheets.some((sheet) => (analyticsModel[sheet] ?? []).some((row) => stringValue(row.name) === focusKey))) return;
+    }
     setAnalyticsFocus({ type: 'system' });
-  }, [displayResults, analyticsFocus, setAnalyticsFocus]);
+  }, [displayResults, analyticsFocus, setAnalyticsFocus, activeRunName, analyticsModel]);
 
   const applyScenarioPreset = useCallback((scenario: ScenarioPreset) => {
     setScenarioCatalog((current) => ({
@@ -1799,13 +1838,7 @@ function AppInner() {
       if (!resp.ok) {
         throw new Error((await resp.text()) || `Import failed (HTTP ${resp.status})`);
       }
-      const bundle = (await resp.json()) as {
-        model?: WorkbookModel;
-        scenario?: { constraints?: CustomConstraint[]; carbonPrice?: number; discountRate?: number; carbonPriceSchedule?: CarbonPriceScheduleEntry[] };
-        options?: { snapshotStart?: number; snapshotEnd?: number; snapshotWeight?: number; carbonPriceSchedule?: CarbonPriceScheduleEntry[] };
-        result?: RunResults;
-        filename?: string;
-      };
+      const bundle = (await resp.json()) as ProjectLoadResponse;
       const importedModel = bundle.model;
       // Input dates land canonical (ISO) for Ragnarok-exported projects; a
       // hand-built workbook may not — normalise before loading, as the CSV /

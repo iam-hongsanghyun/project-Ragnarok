@@ -11,6 +11,7 @@
 import React from 'react';
 import { GridRow, Primitive } from 'lib/types';
 import { stringValue } from 'lib/utils/helpers';
+import { globalConstraintHints, TYPE_DESCRIPTION, type ConstraintHintContext } from 'lib/constraints/globalConstraintHints';
 import { getOrderedInputAttributes } from 'lib/constants/pypsa_schema';
 import { SearchableSelect } from '../../../shared/components/SearchableSelect';
 import { NumberDraftInput } from '../../../shared/components/NumberDraftInput';
@@ -36,6 +37,8 @@ interface Props {
   busNames: string[];
   /** Configured investment periods (pathway periods); empty in single-period mode. */
   investmentPeriods: number[];
+  /** Whether the run is multi-period; drives the investment_period hints. */
+  pathwayEnabled: boolean;
   onAdd: () => void;
   onDelete: (rowIndex: number) => void;
   onSet: (rowIndex: number, key: string, value: Primitive) => void;
@@ -47,6 +50,7 @@ export function GlobalConstraintsTableEditor({
   carrierAttributes,
   busNames,
   investmentPeriods,
+  pathwayEnabled,
   onAdd,
   onDelete,
   onSet,
@@ -68,6 +72,7 @@ export function GlobalConstraintsTableEditor({
   // a carrier name (the limit types) or comma-separated carriers (transmission),
   // so suggest the union and let the user type whatever they need.
   const carrierAttrSuggestions = Array.from(new Set([...carrierAttributes, ...carriers]));
+  const hintCtx: ConstraintHintContext = { carriers, carrierAttributes, investmentPeriods, pathwayEnabled };
 
   return (
     <div className="constraints-table-wrap">
@@ -83,6 +88,7 @@ export function GlobalConstraintsTableEditor({
                 {attr.attribute}
               </th>
             ))}
+            <th>hints</th>
             <th aria-label="actions" />
           </tr>
         </thead>
@@ -94,6 +100,20 @@ export function GlobalConstraintsTableEditor({
                   {renderField(attr.attribute, row, i, onSet, carrierAttrSuggestions, busNames)}
                 </td>
               ))}
+              <td className="gc-hints" data-gc-hints={i}>
+                {(() => {
+                  const hints = globalConstraintHints(row, hintCtx);
+                  const desc = TYPE_DESCRIPTION[stringValue(row.type) || 'primary_energy'];
+                  return (
+                    <>
+                      {hints.map((h, k) => (
+                        <div key={k} className={`gc-hint gc-hint--${h.severity}`}>{h.severity === 'error' ? 'Error: ' : 'Warning: '}{h.message}</div>
+                      ))}
+                      {desc && <div className="sg-setting-hint">{desc}</div>}
+                    </>
+                  );
+                })()}
+              </td>
               <td>
                 <button className="gcc-del" onClick={() => onDelete(i)} title="Delete row">x</button>
               </td>

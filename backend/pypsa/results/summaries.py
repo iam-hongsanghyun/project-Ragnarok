@@ -5,7 +5,7 @@ from typing import Any
 import pandas as pd
 import pypsa
 
-from ..utils.emissions import per_generator_emission_factor
+from ..utils.emissions import primary_energy_emissions
 
 
 
@@ -75,8 +75,10 @@ def _pathway_period_summaries(
     # generation — exclude it from the period energy total, matching the
     # carrier_energy / generator_energy exclusion in the same payload.
     real_cols = [c for c in dispatch_only.columns if not str(c).startswith("load_shedding_")]
-    # Per-generator co2_emissions / η (thermal basis, M3).
-    eff_ef = per_generator_emission_factor(network, emissions_factors)
+    # Per-snapshot generator emissions on PyPSA's primary_energy basis (RB10): p/eta * co2_emissions
+    # (signed, tCO2/h). A period's total is sum_t w_t * rate_t - the run total weights it again by the
+    # period's ``yearsWeight``; storage depletion is a whole-horizon stock change and is not split by period.
+    rate = primary_energy_emissions(network, emissions_factors).generator_rate_tph
     for period in network.snapshots.get_level_values("period").unique():
         period_index = network.snapshots[network.snapshots.get_level_values("period") == period]
         # Energy totals use the `generators` snapshot weighting — the same basis
@@ -87,11 +89,7 @@ def _pathway_period_summaries(
         weight = network.snapshot_weightings["generators"].reindex(period_index).fillna(1.0)
         dispatch_period = dispatch_only.loc[period_index]
         total_dispatch = float((dispatch_period[real_cols].sum(axis=1) * weight).sum())
-        total_emissions = 0.0
-        for name in real_cols:
-            if name not in network.generators.index:
-                continue
-            total_emissions += float((dispatch_period[name] * float(eff_ef.get(name, 0.0)) * weight).sum())
+        total_emissions = float(rate.reindex(period_index).mul(weight, axis=0).sum().sum()) if rate.shape[1] else 0.0
         summaries.append({
             "period": int(period),
             "snapshotCount": int(len(period_index)),

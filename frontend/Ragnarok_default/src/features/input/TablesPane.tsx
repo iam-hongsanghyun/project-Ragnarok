@@ -4,7 +4,7 @@ import { GridRow, Primitive, SheetName, TableSel, TsSheetName, WorkbookModel } f
 import { ModelIssue } from '../validation/useModelIssues';
 import { getAddableAttributes, getProtectedColumns, TABLE_GROUPS } from 'lib/constants';
 import { getAttributeSchema, PypsaAttribute, TableGroup } from 'lib/constants/pypsa_schema';
-import { decorateHeader, getAttributeHint } from 'lib/constants/attributeHints';
+import { decorateHeader, getAttributeHint, groupColumns } from 'lib/constants/attributeHints';
 import { ResizablePanels } from '../../layout/ResizablePanels';
 import { getColumns, getTsFirstCol, stringValue } from 'lib/utils/helpers';
 import { canonicalizeTemporalRows, parseCsvToGridRows } from 'lib/workbook/workbook';
@@ -598,10 +598,10 @@ export function TablesPane({
             });
             return out;
           })()
-        : getColumns(rows, sel.sheet as SheetName)
+        : groupColumns(sel.sheet, getColumns(rows, sel.sheet as SheetName))
       : isTs
         ? []
-        : getColumns([], sel.sheet as SheetName);
+        : groupColumns(sel.sheet, getColumns([], sel.sheet as SheetName));
 
   // For temporal sheets, ensure snapshot/timestamp is first
   let cols = rawCols;
@@ -859,6 +859,7 @@ export function TablesPane({
             </div>
             <ColumnStatsPanel sheet={sel.sheet} />
             <InputAnalyser
+              sheet={sel.sheet}
               rows={rows}
               cols={cols}
               isTs={isTs}

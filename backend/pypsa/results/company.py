@@ -14,7 +14,7 @@ from typing import Any
 import numpy as np
 import pypsa
 
-from ..utils.emissions import per_generator_emission_factor
+from ..utils.emissions import primary_energy_emissions
 from .finance import storage_assets
 
 _log = logging.getLogger("pypsa.solver")
@@ -50,10 +50,11 @@ def build_company_breakdown(
         model: The raw model dict — source of the owner tags.
         owner_column: Which model column holds the owner tag.
         currency: Currency symbol (passthrough for the UI).
-        emissions_factors: carrier -> tCO2/MWh, for generator emissions.
+        emissions_factors: carrier -> tCO2/MWh_thermal; emissions follow the
+            ``primary_energy`` accounting of ``utils.emissions.primary_energy_emissions``.
 
     Returns:
-        ``{ownerColumn, currency, companies: [...], untaggedCount}`` or ``None``
+        ``{ownerColumn, currency, companies: [...], untaggedCount, unassignedEmissionsTonnes}`` or ``None``
         when no asset carries an owner tag (nothing to break down).
     """
     if not getattr(network, "is_solved", False):
@@ -66,8 +67,10 @@ def build_company_breakdown(
         return None
 
     weights = network.snapshot_weightings["objective"].to_numpy()
-    # Per-generator co2_emissions / η (thermal basis, M3).
-    eff_ef = per_generator_emission_factor(network, emissions_factors)
+    # Emissions on PyPSA's primary_energy basis (RB10): generators p/η·ef (signed, period-weighted)
+    # plus non-cyclic StorageUnit/Store depletion, each allocated to its owner, so the company
+    # figures plus ``unassignedEmissionsTonnes`` equal the system total exactly.
+    pe = primary_energy_emissions(network, emissions_factors)
     mp = network.buses_t.marginal_price
     has_lmp = mp is not None and not mp.empty
 
@@ -102,7 +105,6 @@ def build_company_breakdown(
         b["energyMWh"] += energy
         if pi is not None and p is not None:
             b["revenue"] += float((p * pi * weights).sum())
-        b["emissionsTonnes"] += energy * float(eff_ef.get(g, 0.0))
         b["generatorCount"] += 1
 
     # Storage: StorageUnit and Store + Link, through the one shared rule.
@@ -123,6 +125,19 @@ def build_company_breakdown(
         b["revenue"] += a.revenue
         b["storageCount"] += 1
         b["storageEnergyMWh"] += a.energy_mwh
+
+    # Emissions: every emitting asset's primary-energy term goes to its owner (a stock that
+    # depletes is the owner's emission even if the asset has no price signal).
+    unassigned = 0.0
+    for series, owners in (
+        (pe.generators, gen_owner), (pe.storage_units, sto_owner), (pe.stores, store_owner),
+    ):
+        for name, tco2 in series.items():
+            owner = owners.get(str(name))
+            if owner:
+                _bucket(owner)["emissionsTonnes"] += float(tco2)
+            else:
+                unassigned += float(tco2)
 
     if not acc:
         return None
@@ -148,4 +163,5 @@ def build_company_breakdown(
         "currency": currency,
         "companies": companies,
         "untaggedCount": untagged,
+        "unassignedEmissionsTonnes": round(unassigned, 2),
     }

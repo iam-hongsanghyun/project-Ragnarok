@@ -84,7 +84,7 @@ async def _apply(resp: dict[str, Any]) -> dict[str, Any]:
 
 @mcp.tool(
     annotations=_MUT,
-    description="Reduce the time axis with PyPSA's native temporal clustering and replace the working model. method: resample (offset like '3h' or '1D', optional drop_leap_day, aggregation_rules), downsample (stride >= 2) or segment (num_segments; needs the optional tsam package). Snapshot weightings keep annual energy and cost correct. Applied on confirm.",
+    description="Reduce the time axis with PyPSA's native temporal clustering and replace the working model. method: resample (offset like '3h' or '1D', optional drop_leap_day, aggregation_rules), downsample (stride >= 2) or segment (num_segments contiguous TSAM segments via tsam 4.1.1, installed in the backend; solver names the MIP solver tsam uses, default highs). Snapshot weightings keep annual energy and cost correct. Applied on confirm.",
 )
 async def temporal_cluster(
     method: str = "resample",
@@ -93,10 +93,11 @@ async def temporal_cluster(
     num_segments: int | None = None,
     drop_leap_day: bool = False,
     aggregation_rules: dict[str, str] | None = None,
+    solver: str | None = None,
     confirm: bool = False,
 ) -> Any:
     args = {"method": method, "offset": offset, "stride": stride, "numSegments": num_segments,
-            "dropLeapDay": drop_leap_day, "aggregationRules": aggregation_rules}
+            "dropLeapDay": drop_leap_day, "aggregationRules": aggregation_rules, "solver": solver}
     if _needs_confirm(cheap=False) and not confirm:
         return _preview(f"Temporal clustering ({method}) of the working model.", args)
     return await _apply(await get_client().temporal_cluster(**{k: v for k, v in args.items() if v is not None}))

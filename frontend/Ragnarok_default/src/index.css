@@ -5526,6 +5526,13 @@ th:hover .col-delete-btn {
 .constraints-cell-input--num {
   text-align: right;
 }
+.gc-hints {
+  min-width: 220px;
+  max-width: 360px;
+  font-size: var(--fs-sm);
+}
+.gc-hint--error { color: var(--danger-strong); }
+.gc-hint--warning { color: var(--warn-text); }
 .constraints-cell-sense {
   font-family: var(--font-mono);
   font-weight: 600;

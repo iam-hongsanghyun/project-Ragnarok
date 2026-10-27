@@ -977,6 +977,9 @@ export interface CompanyBreakdownResult {
   companies: CompanyKpi[];
   /** Assets with no owner tag (not attributed to any company). */
   untaggedCount: number;
+  /** Emissions (tCO2e) of assets with no owner: owners + this = the system total.
+   *  Absent on runs stored before the server shipped it. */
+  unassignedEmissionsTonnes?: number;
 }
 
 /** Optional debt assumptions (F2) for DSCR. Gearing 0 = all-equity. */
@@ -1050,6 +1053,8 @@ export interface CompanyStatementResult {
   carbonPrice: number;
   companies: CompanyStatementEntry[];
   totals: Omit<CompanyStatementEntry, 'company'>;
+  /** Annualised emissions (tCO2e/yr) not attributed to any owner: owners + this = system total. */
+  unassignedEmissionsTonnes?: number;
 }
 
 /** Merchant result block — one owner's profit against the price signal. */
@@ -1603,6 +1608,23 @@ export interface Co2Shadow {
 // deriveRunResults does not recompute it, so a bundle fully re-derived from bare
 // outputs with no backend economics (e.g. a pre-F0 export re-opened) lacks it.
 
+/** One entry of `RunResults.metricDefinitions`. */
+export interface MetricDefinition {
+  unit: string;
+  definition: string;
+}
+
+/** `POST /api/import/project/load` response. `conversation` is the package's
+ *  embedded agent chat sidecar (`{events, model, autonomy}`), null without one. */
+export interface ProjectLoadResponse {
+  model?: WorkbookModel;
+  scenario?: { constraints?: CustomConstraint[]; carbonPrice?: number; discountRate?: number; carbonPriceSchedule?: CarbonPriceScheduleEntry[] };
+  options?: { snapshotStart?: number; snapshotEnd?: number; snapshotWeight?: number; carbonPriceSchedule?: CarbonPriceScheduleEntry[] };
+  result?: RunResults;
+  conversation: Record<string, unknown> | null;
+  filename?: string;
+}
+
 export interface GeneratorEconomicsEntry {
   name: string;
   carrier: string;
@@ -1615,6 +1637,10 @@ export interface GeneratorEconomicsEntry {
   grossMargin: number;
   /** Volume-weighted average price captured ($/MWh); null when no energy. */
   capturePrice: number | null;
+  /** n.statistics.capacity_factor (p.u., 0-1): mean |p| / capacity over the
+   *  periods the asset exists in; null when it has no capacity. Absent on runs
+   *  stored before the server shipped it. */
+  capacityFactor?: number | null;
   fixedCostAnnual: number;
   fixedCostHorizon: number;
   netHorizon: number;
@@ -1648,6 +1674,8 @@ export interface CarrierEconomicsEntry {
   variableCost: number;
   grossMargin: number;
   capturePrice: number | null;
+  /** Capacity-weighted n.statistics.capacity_factor of the carrier (p.u.). */
+  capacityFactor?: number | null;
   fixedCostAnnual: number;
   fixedCostHorizon: number;
   netHorizon: number;
@@ -1686,6 +1714,14 @@ export interface ExpansionAsset {
   delta_mw: number;
   capital_cost: number;
   capex_annual: number;
+  /** n.statistics.expanded_capex / installed_capex on the same per-year basis;
+   *  they sum to `capex_annual`. Absent when the statistics could not resolve the row. */
+  capex_expanded?: number;
+  capex_installed?: number;
+  /** n.statistics.overnight_cost (currency, not periodised). */
+  overnight_total?: number;
+  /** n.statistics.fom (currency per modelled horizon; single-period runs only). */
+  fom_total?: number;
   unit?: string;   // 'MW' (default), 'MWh' (Store), 'MVA' (Line)
   /** Pathway runs: investment periods in which the asset exists, annual CAPEX
    *  per period (keys are period years as strings) and the objective-weighted
@@ -1942,7 +1978,11 @@ export interface RunResults {
   demandResponse?: DemandResponseResult;
   priceElastic?: PriceElasticResult;
   narrative: string[];
+  /** Unit + one-line definition of every field whose meaning follows PyPSA, keyed by field path. */
+  metricDefinitions?: Record<string, MetricDefinition>;
   runMeta: {
+    /** n.statistics.prices(weighting="load"): load-weighted run-average system price. Absent on older runs. */
+    averageSystemPrice?: number;
     snapshotCount: number;
     snapshotWeight: number;
     modeledHours: number;

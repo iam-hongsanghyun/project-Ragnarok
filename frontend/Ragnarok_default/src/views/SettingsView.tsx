@@ -284,7 +284,7 @@ export interface SettingsViewProps {
   customDsl: string;
   onCustomDslChange: (text: string) => void;
   appliedConstraints?: AppliedConstraint[];
-  onUpdateRow: (sheet: 'global_constraints', rowIndex: number, key: string, value: Primitive) => void;
+  onUpdateRow: (sheet: 'global_constraints' | 'carriers', rowIndex: number, key: string, value: Primitive) => void;
   onAddRow: (sheet: 'global_constraints') => void;
   onDeleteRow: (sheet: 'global_constraints', rowIndex: number) => void;
 

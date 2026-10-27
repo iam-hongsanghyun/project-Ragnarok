@@ -75,9 +75,8 @@ describe('catalog integrity', () => {
         for (const e of s.entries ?? []) {
           expect(e.why.length).toBeGreaterThan(40);
         }
-        for (const sp of s.spotlights ?? []) {
-          if (sp.note !== undefined) expect(sp.note.length).toBeGreaterThan(40);
-        }
+        const notes = (s.spotlights ?? []).flatMap((sp) => (sp.note !== undefined ? [sp.note] : []));
+        for (const note of notes) expect(note.length).toBeGreaterThan(40);
       }
     }
   });
@@ -102,13 +101,13 @@ describe('catalog integrity', () => {
   test('every section opens on a step that offers the start choice', () => {
     for (const t of TUTORIALS) {
       let section: string | null | undefined;
-      for (const s of t.steps) {
+      const openers = t.steps.filter((s) => {
         const here = s.section ?? null;
-        if (here !== section) {
-          expect(s.startOptions).toBeDefined();
-          section = here;
-        }
-      }
+        const opens = here !== section;
+        section = here;
+        return opens;
+      });
+      for (const s of openers) expect(s.startOptions).toBeDefined();
     }
   });
 

@@ -5,8 +5,11 @@ Both are pure post-processing on the solved network; no extra LP solve needed.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import pypsa
 from ..network.piecewise import overlay_piecewise_marginal_cost, representative_marginal_costs
@@ -14,6 +17,7 @@ from ..network.piecewise import overlay_piecewise_marginal_cost, representative_
 from ..constants import carrier_color, generator_color
 from ..utils.series import weighted_sum
 from .pathway_periods import active_assets, is_pathway, period_objective_weights, periods
+from .stat_metrics import asset_statistic, asset_value, combine_periods, period_hours_mean
 
 # System generators (reliability backstops, not merchant assets) — excluded from
 # the supply stack and the profit analytics by name prefix.
@@ -398,6 +402,115 @@ def _num(value: Any, default: float = 0.0) -> float:
     return f if f == f else default  # NaN guard (NaN != NaN)
 
 
+@dataclass(frozen=True)
+class ProcessAsset:
+    """One ``Process``'s window economics (P29), currency over the modelled window.
+
+    ``revenue`` is the net value of the ports at the nodal prices (outputs earn,
+    inputs cost); ``variable_cost`` is ``marginal_cost x p`` (internal power). ``capacity_mw`` is
+    ``p_nom_opt`` and ``capex_annual`` the annual charge the solve paid
+    (extendable processes only, window scaling removed).
+    """
+
+    name: str
+    carrier: str
+    bus: str
+    capacity_mw: float
+    energy_mwh: float
+    revenue: float
+    variable_cost: float
+    capital_cost: float
+    extendable: bool
+    capex_annual: float
+
+
+def process_assets(
+    network: pypsa.Network,
+    price_of: Callable[[str], np.ndarray | None],
+    weights: np.ndarray,
+    *,
+    names: Iterable[str] | None = None,
+) -> list[ProcessAsset]:
+    """Revenue / operating cost / capex of the network's ``Process`` components.
+
+    The one rule for every consumer (generator economics, company finance), so
+    they cannot drift apart. ``Process`` is a multi-port conversion (like a
+    ``Link``): ``p0`` is withdrawn from ``bus0`` and each further port ``p<i>``
+    is the (signed) flow into the process from ``bus<i>`` — a negative value is
+    an output that earns the nodal price.
+
+    Algorithm:
+        $$R = \\sum_t w_t \\sum_i -p_i(t)\\,\\pi_{b_i}(t), \\qquad
+          C = \\sum_t w_t\\,c(t)\\,p(t), \\qquad
+          K = \\text{capital\\_cost}\\cdot P^{opt}$$
+        ASCII: R = sum_t w * sum_i(-p_i * price_i) ; C = sum_t w*mc*p ;
+        K = capital_cost * p_nom_opt (extendable only, per year).
+
+    Symbols: w_t weight (h; objective or objective x period weighting), p_i port
+    flow (MW), pi nodal price (currency/MWh), c marginal cost (currency/MWh of
+    internal power p), P_opt solved capacity (MW), K annual capex (currency/yr).
+    Ports whose bus has no price contribute nothing to ``revenue``; stand-by,
+    quadratic and start-up cost terms are not itemised here.
+    """
+    procs = getattr(network, "processes", None)
+    if procs is None or procs.empty:
+        return []
+    t = network.c.processes.dynamic
+    T = len(network.snapshots)
+    try:
+        mc_dense = network.get_switchable_as_dense("Process", "marginal_cost")
+    except Exception:  # noqa: BLE001
+        mc_dense = pd.DataFrame(0.0, index=network.snapshots, columns=procs.index)
+    ports = sorted(
+        int(c[3:]) for c in procs.columns
+        if c.startswith("bus") and c[3:].isdigit()
+    )
+    cost_unscale = 1.0 / (capex_window_scale(network) or 1.0)
+    wanted = set(procs.index) if names is None else {str(n) for n in names}
+    out: list[ProcessAsset] = []
+    for name in procs.index:
+        if name not in wanted:
+            continue
+        # Internal power p (the unit marginal_cost is quoted in); equals the bus0
+        # withdrawal for the default rate0 = -1.
+        p_int = t["p"][name].to_numpy(dtype=float) if "p" in t and name in t["p"].columns else np.zeros(T)
+        revenue = 0.0
+        for i in ports:
+            bus = str(procs.at[name, f"bus{i}"] or "")
+            frame = t.get(f"p{i}")
+            if not bus or frame is None or name not in frame.columns:
+                continue
+            pi = price_of(bus)
+            if pi is None:
+                continue
+            revenue += float((-frame[name].to_numpy(dtype=float) * pi * weights).sum())
+        mc = mc_dense[name].to_numpy(dtype=float) if name in mc_dense.columns else np.zeros(T)
+        ext = bool(procs.at[name, "p_nom_extendable"]) if "p_nom_extendable" in procs.columns else False
+        cap_cost = float(procs.at[name, "capital_cost"]) if "capital_cost" in procs.columns else 0.0
+        p_nom_opt = float(installed_capacity_series(procs).get(name, 0.0))
+        out.append(ProcessAsset(
+            name=str(name),
+            carrier=str(procs.at[name, "carrier"]) if "carrier" in procs.columns else "",
+            bus=str(procs.at[name, "bus0"]) if "bus0" in procs.columns else "",
+            capacity_mw=p_nom_opt,
+            energy_mwh=float((np.clip(p_int, 0.0, None) * weights).sum()),
+            revenue=revenue,
+            variable_cost=float((mc * p_int * weights).sum()),
+            capital_cost=cap_cost,
+            extendable=ext,
+            capex_annual=cap_cost * p_nom_opt * cost_unscale if ext else 0.0,
+        ))
+    return out
+
+
+def _process_energy(network: pypsa.Network, name: str, weights: pd.Series) -> float:
+    """Σ w · max(p, 0) in MWh for one Process (snapshot-weighted internal throughput)."""
+    p = network.c.processes.dynamic.get("p")
+    if p is None or name not in p.columns:
+        return 0.0
+    return float(weighted_sum(p[name].clip(lower=0.0), weights))
+
+
 def installed_capacity_series(df: pd.DataFrame) -> pd.Series:
     """Resolve the effective installed/optimised capacity per component.
 
@@ -422,7 +535,17 @@ def build_generator_economics(
     """Per-asset revenue, gross margin and capex recovery from a solved network.
 
     Pure post-processing — reads dispatch, locational marginal prices (LMPs) and
-    costs already on the solved network; **no extra solve**. Under the least-cost
+    costs already on the solved network; **no extra solve**. Revenue, energy
+    (supply / withdrawal) and the capture price come from ``n.statistics``
+    (``revenue``, ``supply``, ``withdrawal``; P28), read per asset and per
+    investment period (:mod:`.stat_metrics`); inactive assets are NaN in PyPSA's
+    period-resolved statistics and count as 0. Variable cost stays on the
+    app's dense marginal cost (it carries the carbon adder and the piecewise
+    overlay, which ``n.statistics.opex`` does not know about). ``capturePrice``
+    equals ``n.statistics.market_value`` for a unit that never absorbs power
+    (it divides by the output, PyPSA by ``|p|``). PyPSA weights revenue with the
+    ``objective`` snapshot weighting, energy with ``generators``; the app sets
+    both equal. Under the least-cost
     LP the optimal dispatch *is* the perfectly-competitive profit-maximising
     equilibrium (welfare theorem), so these are the **competitive-benchmark**
     economics of each asset. They do **not** model market power — that is the
@@ -502,8 +625,29 @@ def build_generator_economics(
     have_prices = not mp.empty
     zero = pd.Series(0.0, index=network.snapshots)
 
+    # n.statistics per asset (P28): revenue by period x investment-period weight,
+    # energy summed over periods (physical, unweighted) and period-weighted (the
+    # capture-price denominator, same basis as the revenue).
+    stat_w = period_weight if pathway else None
+    stat_components = ["Generator", "StorageUnit"]
+    rev_econ = combine_periods(asset_statistic(network, "revenue", [*stat_components, "Process"]), stat_w)
+    supply_frame = asset_statistic(network, "supply", stat_components)
+    supply = combine_periods(supply_frame)
+    supply_econ = combine_periods(supply_frame, stat_w)
+    withdrawal = combine_periods(asset_statistic(network, "withdrawal", ["StorageUnit"]))
+    # n.statistics.capacity_factor (mean |p| / capacity per period), hours-weighted over
+    # the periods the unit exists in; the carrier value is capacity-weighted like PyPSA's.
+    hours_by_period = (
+        weights.groupby(network.snapshots.get_level_values("period")).sum().to_dict()
+        if pathway else {0: modeled_hours}
+    )
+    cf_num, cf_den = period_hours_mean(asset_statistic(network, "capacity_factor", ["Generator"]), hours_by_period)
+
     def price_at(bus: str) -> pd.Series:
         return mp[bus] if (have_prices and bus in mp.columns) else zero
+
+    def _cf(num: float, den: float) -> float | None:
+        return round(num / den, 4) if den > 1e-9 else None
 
     def recovery_pct(margin: float, fixed_horizon: float) -> float | None:
         return (
@@ -527,12 +671,12 @@ def build_generator_economics(
             price = price_at(bus)
             mc = mc_dense[name] if name in mc_dense.columns else zero
 
-            energy = weighted_sum(p.clip(lower=0.0), weights)
-            energy_econ = weighted_sum(p.clip(lower=0.0), econ_weights)  # capture-price basis
+            energy = asset_value(supply, "Generator", name)
+            energy_econ = asset_value(supply_econ, "Generator", name)  # capture-price basis
             p_nom_opt = float(p_nom_opt_s.get(name, 0.0))
             if energy <= 1e-9 and p_nom_opt <= 1e-9:
                 continue  # neither dispatched nor built — nothing to report
-            revenue = weighted_sum(price * p, econ_weights)
+            revenue = asset_value(rev_econ, "Generator", name)
             variable_cost = weighted_sum(mc * p, econ_weights)
             gross_margin = revenue - variable_cost
             fixed_annual, fixed_horizon = fixed_costs(
@@ -553,6 +697,7 @@ def build_generator_economics(
                     "capturePrice": round(revenue / energy_econ, 2)
                     if energy_econ > 1e-9
                     else None,
+                    "capacityFactor": _cf(asset_value(cf_num, "Generator", name), asset_value(cf_den, "Generator", name)),
                     "fixedCostAnnual": round(fixed_annual),
                     "fixedCostHorizon": round(fixed_horizon),
                     "netHorizon": round(gross_margin - fixed_horizon),
@@ -563,6 +708,8 @@ def build_generator_economics(
                         "energyMwh": energy,
                         "energyEcon": energy_econ,
                         "capacityMw": p_nom_opt,
+                        "cfNum": p_nom_opt * asset_value(cf_num, "Generator", name),
+                        "cfDen": p_nom_opt * asset_value(cf_den, "Generator", name),
                         "revenue": revenue,
                         "variableCost": variable_cost,
                         "grossMargin": gross_margin,
@@ -594,12 +741,12 @@ def build_generator_economics(
             price = price_at(bus)
             mc = mc_dense_su[name] if name in mc_dense_su.columns else zero
 
-            discharged = weighted_sum(p.clip(lower=0.0), weights)
-            charged = weighted_sum((-p).clip(lower=0.0), weights)
+            discharged = asset_value(supply, "StorageUnit", name)
+            charged = asset_value(withdrawal, "StorageUnit", name)
             p_nom_opt = float(p_nom_opt_su.get(name, 0.0))
             if discharged <= 1e-9 and charged <= 1e-9 and p_nom_opt <= 1e-9:
                 continue
-            revenue = weighted_sum(price * p, econ_weights)  # net of charging spend
+            revenue = asset_value(rev_econ, "StorageUnit", name)  # net of charging spend
             variable_cost = weighted_sum(mc * p.clip(lower=0.0), econ_weights)
             gross_margin = revenue - variable_cost
             fixed_annual, fixed_horizon = fixed_costs(
@@ -626,6 +773,32 @@ def build_generator_economics(
             )
     storage.sort(key=lambda r: r["grossMargin"], reverse=True)
 
+    # ── Processes (P29): net port value, marginal cost and capex ──────────────
+    processes_rows: list[dict[str, Any]] = []
+    def proc_price(bus: str) -> Any:
+        return price_at(bus).to_numpy(dtype=float) if (have_prices and bus in mp.columns) else None
+
+    for a in process_assets(network, proc_price, econ_weights.to_numpy(dtype=float)):
+        if a.energy_mwh <= 1e-9 and a.capacity_mw <= 1e-9:
+            continue
+        fixed_annual, fixed_horizon = fixed_costs("processes", a.name, a.capital_cost, a.capacity_mw)
+        proc_revenue = asset_value(rev_econ, "Process", a.name, default=a.revenue)  # n.statistics.revenue
+        margin = proc_revenue - a.variable_cost
+        processes_rows.append({
+            "name": a.name, "carrier": a.carrier, "bus": a.bus,
+            "color": carrier_color(network, a.carrier),
+            "energyMwh": round(_process_energy(network, a.name, weights), 1),
+            "capacityMw": round(a.capacity_mw, 1),
+            "revenue": round(proc_revenue),
+            "variableCost": round(a.variable_cost),
+            "grossMargin": round(margin),
+            "fixedCostAnnual": round(fixed_annual),
+            "fixedCostHorizon": round(fixed_horizon),
+            "netHorizon": round(margin - fixed_horizon),
+            "recoveryPct": recovery_pct(margin, fixed_horizon),
+        })
+    processes_rows.sort(key=lambda r: r["grossMargin"], reverse=True)
+
     # ── Per-carrier rollup (generators) ───────────────────────────────────────
     agg: dict[str, dict[str, float]] = {}
     for g in gens:
@@ -636,6 +809,8 @@ def build_generator_economics(
                     "energyMwh",
                     "energyEcon",
                     "capacityMw",
+                    "cfNum",
+                    "cfDen",
                     "revenue",
                     "variableCost",
                     "grossMargin",
@@ -661,6 +836,7 @@ def build_generator_economics(
                 "capturePrice": round(a["revenue"] / a["energyEcon"], 2)
                 if a["energyEcon"] > 1e-9
                 else None,
+                "capacityFactor": _cf(a["cfNum"], a["cfDen"]),
                 "fixedCostAnnual": round(a["fixedCostAnnual"]),
                 "fixedCostHorizon": round(a["fixedCostHorizon"]),
                 "netHorizon": round(a["grossMargin"] - a["fixedCostHorizon"]),
@@ -696,6 +872,7 @@ def build_generator_economics(
         "horizonYears": round(horizon_years, 4),
         "generators": gens,
         "storage": storage,
+        "processes": processes_rows,
         "byCarrier": by_carrier,
         "system": system,
     }

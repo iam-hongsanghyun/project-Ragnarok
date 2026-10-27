@@ -45,6 +45,22 @@ def _o(path: str, type_: str, meaning: str, default: Any = None, *, allowed: lis
 # Run options added for the PyPSA 1.4 optimise surface (P19-P27, P34, P38). "ui" = Settings -> Solver
 # -> Advanced sends it; everything is also usable through MCP submit_solve options.
 register_options([
+    RunOption(
+        "options.rollingConfig.terminalSoc", "boolean",
+        "Rolling horizon only (RE7). Soft terminal state of charge on the LAST window: storage units and stores "
+        "must end the horizon with at least their horizon-start energy (state_of_charge_initial / e_initial), "
+        "enforced as soc_end + shortfall >= initial with a penalised shortfall, so it can never make a window "
+        "infeasible. Without it rolling horizon forces non-cyclic storage and the last window drains it to zero. "
+        "Ignored with pathway (multi-period) runs.",
+        True, reader="backend/pypsa/rolling.py (terminal_soc_hook), backend/pypsa/results/__init__.py", source="api", group="rolling",
+    ),
+    RunOption(
+        "options.rollingConfig.terminalSocPenalty", "number | null",
+        "Price of one MWh of terminal-SOC shortfall. null = auto: 2 x the highest generator marginal_cost "
+        "(above the replacement cost of the energy, so the last window refills when it can), floor 1.0. The penalty is a solver-side term only; reported costs are "
+        "recomputed from solved values and exclude it.",
+        None, unit="currency/MWh", reader="backend/pypsa/rolling.py (auto_terminal_penalty)", source="api", group="rolling",
+    ),
     _o("options.solverName", "string", "linopy solver (installed only; GET /api/optimise/options lists them). Follow-on studies (merchant, bid, asset swap, ESS) always re-solve on HiGHS.", "highs", source="ui"),
     _o("options.solverOptions", "object", "Raw solver options passed verbatim, merged over the HiGHS solverThreads/solverType translation.", {}),
     _o("options.transmissionLosses", "boolean | object", "Line/link losses: true = secants, or {mode: secants, atol, rtol, max_segments} / {mode: tangents, segments}. An int is read as tangents segments.", False, source="ui"),

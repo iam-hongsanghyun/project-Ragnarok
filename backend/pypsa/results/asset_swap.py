@@ -30,7 +30,7 @@ from typing import Any
 import pypsa
 
 from ..utils.annuity import annuity_factor
-from ..utils.emissions import per_generator_emission_factor
+from ..utils.emissions import primary_energy_emissions
 from .finance import _crf
 from .market import HOURS_PER_YEAR
 
@@ -57,20 +57,16 @@ def _operating_cost(net: pypsa.Network) -> float:
 
 
 def _emissions(net: pypsa.Network, factors: dict[str, float]) -> float:
-    if net.generators.empty or net.generators_t.p.empty:
+    """System emissions (tCO2) on PyPSA's ``primary_energy`` basis (RB10).
+
+    Generators p/eta * co2_emissions (signed, period-weighted in a pathway solve) plus
+    non-cyclic StorageUnit/Store depletion - the same total as the reported run
+    emissions, so a swap's delta is on the basis of the constraint it competes with.
+    A swap that trades efficiency (old gas -> new CCGT) shows its true emissions delta.
+    """
+    if net.generators.empty and net.storage_units.empty and net.stores.empty:
         return 0.0
-    w = net.snapshot_weightings["objective"].to_numpy()
-    # Per-generator co2_emissions / η (thermal basis, M3): a swap that trades
-    # efficiency (e.g. old gas → new CCGT) shows the true emissions delta.
-    eff_ef = per_generator_emission_factor(net, factors)
-    total = 0.0
-    for g in net.generators.index:
-        if g not in net.generators_t.p.columns:
-            continue
-        f = float(eff_ef.get(g, 0.0))
-        if f:
-            total += f * float((net.generators_t.p[g].to_numpy() * w).sum())
-    return total
+    return primary_energy_emissions(net, factors).total
 
 
 def _profile_ref(model: dict[str, list[dict[str, Any]]], carrier: str) -> str | None:

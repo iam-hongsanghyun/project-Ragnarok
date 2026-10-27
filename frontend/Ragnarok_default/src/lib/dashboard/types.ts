@@ -38,6 +38,7 @@ export type CardKind =
   | 'commitment'
   | 'piecewise'
   | 'maintenance'
+  | 'setpoint-duals'
   | 'phase-shifters'
   | 'bid-strategy'
   | 'optimal-bid'
@@ -230,6 +231,10 @@ export interface MaintenanceCardData extends CardBase {
   kind: 'maintenance';
 }
 
+export interface SetpointDualsCardData extends CardBase {
+  kind: 'setpoint-duals';
+}
+
 export interface PhaseShiftersCardData extends CardBase {
   kind: 'phase-shifters';
 }
@@ -371,6 +376,7 @@ export type Card =
   | PiecewiseCardData
   | MaintenanceCardData
   | PhaseShiftersCardData
+  | SetpointDualsCardData
   | BidStrategyCardData
   | OptimalBidCardData
   | AssetSwapCardData

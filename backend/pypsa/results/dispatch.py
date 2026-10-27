@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import warnings
 from typing import Any
 
 import pandas as pd
 import pypsa
 
-from ..utils.emissions import per_generator_emission_factor
+from ..utils.emissions import primary_energy_emissions
 from ..utils.series import safe_series
 from .pathway_periods import snapshot_active_mask
 
@@ -80,21 +81,60 @@ def electricity_bus_scope(network: pypsa.Network) -> set[str] | None:
     return elec
 
 
+def _bus_withdrawal_weights(
+    network: pypsa.Network,
+    columns: list[Any],
+    bus_carrier: list[str] | None = None,
+) -> pd.DataFrame | None:
+    """Per-snapshot, per-bus withdrawal (MW) from ``n.statistics.withdrawal``.
+
+    Called exactly as PyPSA's ``prices(weighting="load")`` calls it (same
+    ``groupby``/``bus_carrier`` arguments), so the weights are PyPSA's: power
+    drawn from a bus by loads, StorageUnit/Store charging, links and - a PyPSA
+    quirk kept on purpose - the sending end of a line or link. ``None`` when the
+    statistic cannot be evaluated or no component has solved flows (e.g. an
+    imported run that never stored ``loads-p``).
+    """
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            w = network.statistics.withdrawal(
+                groupby="bus", bus_carrier=bus_carrier, groupby_time=False, drop_zero=False,
+                round=9, nice_names=False,
+            )
+    except Exception:  # noqa: BLE001 - no solved flows / unsupported component mix
+        return None
+    if w is None or len(w) == 0:
+        return None
+    if "bus" not in (w.index.names or []):
+        return None
+    per_bus = w.groupby(level="bus").sum().T
+    per_bus = per_bus.reindex(index=network.snapshots, columns=columns).fillna(0.0).clip(lower=0.0)
+    return per_bus
+
+
 def system_price_series(
     network: pypsa.Network,
     elec_scope: set[str] | None,
     load_p_set: pd.DataFrame,
 ) -> pd.Series:
-    """System price per snapshot: nodal prices weighted by nodal load.
+    """System price per snapshot: nodal prices weighted by PyPSA's load weighting.
 
     Algorithm:
-        $$\\bar\\pi(t) = \\frac{\\sum_b L_b(t)\\,\\pi_b(t)}{\\sum_b L_b(t)}$$
+        $$\\bar\\pi(t) = \\frac{\\sum_b W_b(t)\\,\\pi_b(t)}{\\sum_b W_b(t)}$$
         where $\\pi_b(t)$ is the bus marginal price (currency/MWh) and
-        $L_b(t)$ the non-negative load at bus $b$ (MW). Where the total load
-        is zero the unweighted bus mean is used. ASCII: price = sum(L*pi)/sum(L).
+        $W_b(t)$ the power withdrawn from bus $b$ (MW) as reported by
+        ``n.statistics.withdrawal`` (loads + storage charging + link inputs +
+        the sending end of lines/links, PyPSA's own weighting).
+        Summed over time with the snapshot weights this is exactly
+        ``n.statistics.prices(weighting="load")`` (see
+        :func:`system_average_price`). ASCII: price(t) = sum_b(W*pi)/sum_b(W).
 
-    An unweighted bus mean lets a load-free or fuel-only bus drag the system
-    price (36.7 against a load-weighted 50 on a two-bus model). ``elec_scope``
+    Definition change (P28): the weights used to be the load ``p_set`` alone;
+    they are now PyPSA's withdrawals, so a storage unit charging at a bus or a
+    link drawing from it pulls the price toward that bus, as in PyPSA. Where a
+    snapshot has no withdrawal (or the run stored no flows) the weights fall
+    back to the load ``p_set``, then to the unweighted bus mean. ``elec_scope``
     restricts the buses exactly as the other system aggregates are scoped.
     """
     mp = network.buses_t.marginal_price
@@ -103,20 +143,84 @@ def system_price_series(
     cols = [b for b in mp.columns if elec_scope is None or str(b) in elec_scope] or list(mp.columns)
     prices = mp[cols]
     plain_mean = prices.mean(axis=1)
+
+    carriers = None
+    if elec_scope is not None and "carrier" in network.buses.columns:
+        bc = network.buses["carrier"].astype(str).replace("", "AC").reindex([str(c) for c in cols])
+        carriers = sorted(set(bc.dropna())) or None
+    weights = _bus_withdrawal_weights(network, cols, carriers)
+    total = weights.sum(axis=1) if weights is not None else None
+    result = plain_mean.copy()
+    if weights is not None and total is not None:
+        weighted = (prices.fillna(0.0) * weights).sum(axis=1) / total.where(total > 0.0)
+        result = weighted.fillna(plain_mean)
+
+    # Fallback for snapshots without stored flows: the load set-point weighting.
     loads = network.loads
-    if load_p_set.empty or "bus" not in loads.columns:
-        return plain_mean
-    bus_load = (
-        load_p_set.clip(lower=0.0)
-        .T.groupby(loads["bus"].reindex(load_p_set.columns).astype(str))
-        .sum()
-        .T.reindex(index=prices.index, columns=[str(c) for c in cols])
-        .fillna(0.0)
-    )
-    bus_load.columns = cols
-    total = bus_load.sum(axis=1)
-    weighted = (prices.fillna(0.0) * bus_load).sum(axis=1) / total.where(total > 0.0)
-    return weighted.fillna(plain_mean)
+    needs_fallback = result.isna() | (total <= 0.0) if total is not None else pd.Series(True, index=prices.index)
+    if needs_fallback.any() and not load_p_set.empty and "bus" in loads.columns:
+        bus_load = (
+            load_p_set.clip(lower=0.0)
+            .T.groupby(loads["bus"].reindex(load_p_set.columns).astype(str))
+            .sum()
+            .T.reindex(index=prices.index, columns=[str(c) for c in cols])
+            .fillna(0.0)
+        )
+        bus_load.columns = cols
+        ltotal = bus_load.sum(axis=1)
+        lw = (prices.fillna(0.0) * bus_load).sum(axis=1) / ltotal.where(ltotal > 0.0)
+        result = result.where(~needs_fallback, lw.fillna(plain_mean))
+    return result.fillna(plain_mean)
+
+
+def system_average_price(network: pypsa.Network, elec_scope: set[str] | None = None) -> float | None:
+    """Run-average system price from ``n.statistics.prices(weighting="load")``.
+
+    Algorithm:
+        $$\\bar\\pi = \\frac{\\sum_t w_t \\sum_b W_b(t)\\,\\pi_b(t)}{\\sum_t w_t \\sum_b W_b(t)}$$
+        where $w_t$ is the objective snapshot weight (h) and $W_b(t)$ the power
+        withdrawn from bus $b$ (MW). ASCII: avg = sum(w*W*pi) / sum(w*W).
+
+    Buses are grouped by bus carrier (PyPSA's ``groupby="bus_carrier"``) and the
+    electricity carriers are combined weighted by their withdrawn energy. The
+    snapshot weights are PyPSA's hours (not multiplied by investment-period
+    weightings, which scale cost, not physical energy or price).
+
+    Returns:
+        currency/MWh, or ``None`` when no marginal prices exist.
+    """
+    mp = network.buses_t.marginal_price
+    if mp is None or mp.empty:
+        return None
+    bus_carrier = network.buses["carrier"].astype(str).replace("", "AC") if "carrier" in network.buses.columns else None
+    if elec_scope is not None and bus_carrier is not None:
+        carriers = sorted(set(bus_carrier[[str(b) in elec_scope for b in bus_carrier.index]]))
+    else:
+        carriers = None
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            kwargs: dict[str, Any] = {"weighting": "load", "drop_zero": False, "round": 9}
+            if carriers:
+                kwargs["bus_carrier"] = carriers
+            by_carrier = network.statistics.prices(groupby="bus_carrier", **kwargs)
+            energy = network.statistics.withdrawal(
+                groupby="bus_carrier", drop_zero=False, round=9, nice_names=False,
+                **({"bus_carrier": carriers} if carriers else {}),
+            )
+    except Exception:  # noqa: BLE001
+        return None
+    if isinstance(by_carrier, pd.DataFrame):
+        by_carrier = by_carrier.mean(axis=1)
+    by_carrier = by_carrier.dropna()
+    if by_carrier.empty:
+        return None
+    if len(by_carrier) == 1:
+        return float(by_carrier.iloc[0])
+    if isinstance(energy, pd.DataFrame):
+        energy = energy.sum(axis=1)
+    e = energy.groupby(level="bus_carrier").sum().reindex(by_carrier.index).fillna(0.0).clip(lower=0.0)
+    return float((by_carrier * e).sum() / e.sum()) if e.sum() > 0 else float(by_carrier.mean())
 
 
 def weighted_mean(series: pd.Series, weights: pd.Series) -> float:
@@ -282,47 +386,110 @@ def build_dispatch_series(
     return dispatch_series, generator_dispatch_series
 
 
-def build_curtailment_series(
+def curtailment_mw_by_generator(
     network: pypsa.Network,
-    generator_dispatch_frame: pd.DataFrame,
-) -> list[dict]:
-    """Per-carrier curtailed power (MW) per snapshot.
-
-    Only generators with a time-varying ``p_max_pu`` (renewables) can be
-    curtailed — a thermal unit at static availability running below p_nom is
-    part-loaded, not curtailed. The load-shedding backstop (which also gets a
-    time-varying p_max_pu) is excluded by name prefix.
+    dispatch: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """Curtailed power (MW) per snapshot per generator, from ``n.statistics.curtailment``.
 
     Algorithm:
-        curtailment_g(t) = max(p_max_pu_g(t) * p_nom_opt_g - p_g(t), 0)   [MW]
-        ASCII: curt = max(avail - dispatch, 0), summed per carrier.
+        $$c_g(t) = \\max\\left(\\bar p_g(t)\\,P^{opt}_g - p_g(t),\\,0\\right)\\cdot a_g(t)$$
+        where $\\bar p_g(t)$ is ``p_max_pu`` (per unit), $P^{opt}_g$ the solved
+        ``p_nom_opt`` (MW), $p_g(t)$ the dispatch (MW) and $a_g(t)\\in\\{0,1\\}$
+        is 1 while the unit is active (multi-period ``build_year``/``lifetime``).
+        ASCII: curt = max(p_max_pu * p_nom_opt - p, 0) * active.
+
+    PyPSA's ``curtailment`` is evaluated with ``groupby_time=False`` (MW per
+    snapshot; energy is ``sum_t w_t c(t)`` with the ``generators`` snapshot
+    weights). Scope: ``Generator`` only (headroom on a Link or StorageUnit is
+    not curtailment), restricted — as PyPSA documents — to assets with a
+    time-varying ``p_max_pu`` (a thermal unit at static availability running
+    below ``p_nom`` is part-loaded, not curtailed), excluding the injected
+    ``load_shedding_*`` backstop. PyPSA does not mask inactive assets in a
+    multi-period run (an unbuilt unit would report its whole availability as
+    curtailed), so the activity mask is applied here.
+
+    Args:
+        network: solved (or output-injected) network.
+        dispatch: optional dispatch frame (MW), used only when
+            ``network.generators_t.p`` is empty (a network that was never
+            solved, whose dispatch was supplied separately); it is then
+            attached as ``generators_t.p`` so PyPSA's statistic can read it.
+
+    Returns:
+        DataFrame indexed by ``network.snapshots``, one column per variable
+        generator; empty (no columns) when there is none.
     """
     snapshots = network.snapshots
-    labels = [_snapshot_label(s) for s in snapshots]
+    if dispatch is not None and network.generators_t.p.empty and not dispatch.empty:
+        network.generators_t.p = dispatch.reindex(index=snapshots).fillna(0.0)
     tv = network.generators_t.p_max_pu
     gens = [
         g for g in tv.columns
         if not str(g).startswith("load_shedding_") and g in network.generators.index
     ]
-    if not gens:
+    empty = pd.DataFrame(index=snapshots)
+    if not gens or network.generators_t.p.empty:
+        return empty
+    # p_nom_opt is populated by a solve; a rebuilt/imported network may carry the
+    # 0.0 default for non-extendable units, where the input p_nom is the rating.
+    ensure_p_nom_opt(network)
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            raw = network.statistics.curtailment(
+                components=["Generator"], groupby=False, groupby_time=False,
+                drop_zero=False, round=9,
+            )
+    except Exception:  # noqa: BLE001
+        return empty
+    if raw is None or len(raw) == 0:
+        return empty
+    frame = raw.droplevel("component").T if "component" in (raw.index.names or []) else raw.T
+    frame = frame.reindex(index=snapshots, columns=gens).fillna(0.0).clip(lower=0.0)
+    active = snapshot_active_mask(network, "generators")
+    if active is not None:
+        frame = frame.where(active.reindex(index=snapshots, columns=gens, fill_value=True), 0.0)
+    return frame
+
+
+def ensure_p_nom_opt(network: pypsa.Network) -> None:
+    """Fill ``p_nom_opt`` with ``p_nom`` where a unit was never sized (<= 0 and fixed).
+
+    PyPSA's capacity statistics read ``p_nom_opt``; a network rebuilt from stored
+    outputs has the 0.0 default for non-extendable units, which would make every
+    availability-based statistic zero. Extendable units are left alone (a solved
+    0 MW is a real result).
+    """
+    gens = network.generators
+    if gens.empty or "p_nom_opt" not in gens.columns:
+        return
+    unsized = (gens["p_nom_opt"].fillna(0.0) <= 0.0) & ~gens["p_nom_extendable"].astype(bool)
+    if unsized.any():
+        gens.loc[unsized, "p_nom_opt"] = gens.loc[unsized, "p_nom"].fillna(0.0)
+
+
+def build_curtailment_series(
+    network: pypsa.Network,
+    generator_dispatch_frame: pd.DataFrame | None = None,
+) -> list[dict]:
+    """Per-carrier curtailed power (MW) per snapshot.
+
+    Definition (P28): PyPSA's ``n.statistics.curtailment`` — see
+    :func:`curtailment_mw_by_generator` for the formula and scope. Values are MW
+    per snapshot summed per carrier (units: MW; energy = MW x snapshot weight).
+    ``generator_dispatch_frame`` is only used when the network carries no
+    ``generators_t.p`` of its own (see :func:`curtailment_mw_by_generator`).
+    """
+    snapshots = network.snapshots
+    labels = [_snapshot_label(s) for s in snapshots]
+    curt = curtailment_mw_by_generator(network, generator_dispatch_frame)
+    if curt.shape[1] == 0:
         return [
             {"label": lbl, "timestamp": st, "period": p, "values": {}}
             for (lbl, st, p) in labels
         ]
-    # p_nom_opt where solved (>0), else input p_nom — the column exists with a
-    # 0.0 default even on unsolved/non-extendable setups.
-    p_nom_opt = network.generators.loc[gens, "p_nom_opt"].fillna(0.0) if "p_nom_opt" in network.generators.columns else None
-    p_nom_in = network.generators.loc[gens, "p_nom"].fillna(0.0)
-    p_nom = p_nom_in if p_nom_opt is None else p_nom_opt.where(p_nom_opt > 0, p_nom_in)
-    avail = tv[gens].reindex(snapshots).fillna(0.0).mul(p_nom, axis=1)
-    # Pathway runs: a unit not yet built (or already retired) in a period has no
-    # availability there, so it cannot be "curtailed" in that period.
-    active = snapshot_active_mask(network, "generators")
-    if active is not None:
-        avail = avail.where(active.reindex(index=snapshots, columns=gens, fill_value=True), 0.0)
-    disp = generator_dispatch_frame.reindex(index=snapshots, columns=gens, fill_value=0.0).clip(lower=0.0)
-    curt = (avail - disp).clip(lower=0.0)
-    carriers = network.generators.loc[gens, "carrier"].astype(str)
+    carriers = network.generators.loc[list(curt.columns), "carrier"].astype(str)
     by_carrier = curt.T.groupby(carriers).sum().T  # snapshots x carriers
     cols = [str(c) for c in by_carrier.columns]
     rows = by_carrier.to_numpy().tolist()
@@ -335,6 +502,21 @@ def build_curtailment_series(
         }
         for i, (lbl, st, p) in enumerate(labels)
     ]
+
+
+def curtailment_mwh_by_generator(network: pypsa.Network) -> dict[str, float]:
+    """Curtailed energy (MWh) per variable generator over the run.
+
+    $E_g = \\sum_t w_t\\,c_g(t)$ with $w_t$ the ``generators`` snapshot weight
+    (hours; investment-period weightings scale cost, not energy). ASCII:
+    E = sum(w * curt). Generators without a time-varying ``p_max_pu`` are absent.
+    """
+    curt = curtailment_mw_by_generator(network)
+    if curt.shape[1] == 0:
+        return {}
+    w = network.snapshot_weightings["generators"].reindex(network.snapshots).fillna(1.0)
+    energy = curt.mul(w, axis=0).sum(axis=0)
+    return {str(g): float(v) for g, v in energy.items()}
 
 
 def build_price_emissions_series(
@@ -350,16 +532,13 @@ def build_price_emissions_series(
         )
     snapshots = network.snapshots
     labels = [_snapshot_label(s) for s in snapshots]
-    # Per-snapshot system emissions (tCO₂/h) = Σ_g clip(dispatch_g, 0) × co2 / η
-    # (thermal basis, M3). Summed per generator because η varies by unit, not by
-    # carrier — so it can't be applied to the carrier-summed ``by_carrier``.
-    eff_ef = per_generator_emission_factor(network, emissions_factors)
-    emitting = eff_ef[eff_ef > 0]
-    p = network.generators_t.p
-    cols = [g for g in emitting.index if g in p.columns] if not p.empty else []
-    if cols:
-        emissions_total = (p[cols].clip(lower=0.0) * emitting.reindex(cols)).sum(axis=1)
-        emission_vals = emissions_total.reindex(snapshots).fillna(0.0).to_numpy().tolist()
+    # Per-snapshot generator emissions (tCO₂/h) = Σ_g p_g/η_g × co2 on PyPSA's
+    # primary_energy basis (signed dispatch, time-varying η; RB10). Storage
+    # depletion is a stock change, not a power flow, so it appears only in the
+    # run total (emissionsBreakdown.totalTco2), not in this series.
+    rate = primary_energy_emissions(network, emissions_factors).generator_rate_tph
+    if rate.shape[1]:
+        emission_vals = rate.sum(axis=1).reindex(snapshots).fillna(0.0).to_numpy().tolist()
     else:
         emission_vals = [0.0] * len(labels)
     price_vals = price_series.reindex(snapshots).to_numpy().tolist()
@@ -463,3 +642,95 @@ def build_storage_series(network: pypsa.Network) -> list[dict]:
          "state": float(soc_vals[i])}
         for i, (lbl, st, p) in enumerate(labels)
     ]
+
+
+def metric_definitions(currency: str = "$") -> dict[str, dict[str, str]]:
+    """Unit + definition metadata for result fields whose meaning follows PyPSA (P28/RB10).
+
+    Emitted once per result as ``metricDefinitions`` so a consumer (UI, MCP,
+    export) can read what a number means without the source.
+    """
+    return {
+        "curtailmentSeries": {
+            "unit": "MW",
+            "definition": (
+                "n.statistics.curtailment (groupby_time=False): max(p_max_pu * p_nom_opt - p, 0) per "
+                "generator with a time-varying p_max_pu, summed per carrier; load-shedding excluded; "
+                "units outside their build/lifetime window masked in multi-period runs."
+            ),
+        },
+        "generatorEnergy.curtailmentMwh": {
+            "unit": "MWh",
+            "definition": "sum_t w_t * curtailment(t), w_t = generators snapshot weighting (hours).",
+        },
+        "systemPriceSeries": {
+            "unit": f"{currency}/MWh",
+            "definition": (
+                "Per snapshot: bus marginal prices weighted by power withdrawn from each bus "
+                "(n.statistics.withdrawal: loads + storage charging + link inputs + the sending end of lines/links, "
+                "as PyPSA weights it) - the per-snapshot form of n.statistics.prices(weighting='load')."
+            ),
+        },
+        "runMeta.averageSystemPrice": {
+            "unit": f"{currency}/MWh",
+            "definition": (
+                "n.statistics.prices(weighting='load') over the run: sum(w*W*price)/sum(w*W) "
+                "with W the power withdrawn from the bus."
+            ),
+        },
+        "emissionsBreakdown": {
+            "unit": "tCO2e",
+            "definition": (
+                "PyPSA primary_energy accounting (see emissions.py): generators sum(w*p/efficiency)*co2_emissions "
+                "(signed; investment-period years weighted in a multi-period solve) plus non-cyclic StorageUnit/Store "
+                "co2_emissions*(initial - final stock). Link/Process flows are not counted (emissions stay at the "
+                "fuel generator). Equals the primary_energy constraint LHS; per-owner emissions "
+                "(companyBreakdown, companyStatement) allocate the same terms and sum to it."
+            ),
+        },
+        "generatorEconomics.revenue": {
+            "unit": currency,
+            "definition": (
+                "n.statistics.revenue per asset: sum_t w_t * p(t) * nodal price (net of charging for storage; "
+                "net port value for a Process), x the investment-period objective weight in a pathway run; "
+                "assets outside their build/lifetime window contribute 0."
+            ),
+        },
+        "generatorEconomics.grossMargin": {
+            "unit": currency,
+            "definition": (
+                "n.statistics.revenue minus variable cost (sum_t w_t * marginal_cost(t) * p(t), carbon adder and "
+                "piecewise overlay folded in)."
+            ),
+        },
+        "generatorEconomics.capturePrice": {
+            "unit": f"{currency}/MWh",
+            "definition": (
+                "n.statistics.revenue / n.statistics.supply (output only): the market value of the asset. Equals "
+                "n.statistics.market_value for a unit that never absorbs power."
+            ),
+        },
+        "generatorEconomics.capacityFactor": {
+            "unit": "p.u.",
+            "definition": (
+                "n.statistics.capacity_factor: mean |p| / p_nom_opt, hours-weighted over the investment periods the "
+                "asset exists in; a carrier value is capacity-weighted."
+            ),
+        },
+        "expansionResults.capex_annual": {
+            "unit": f"{currency}/yr",
+            "definition": (
+                "n.statistics.capex (PyPSA 1.3+: periodised investment cost excluding fom_cost; installed + expanded) "
+                "converted to a per-year charge; capex_expanded / capex_installed are n.statistics.expanded_capex / "
+                "installed_capex on the same basis, overnight_total is n.statistics.overnight_cost and fom_total is "
+                "n.statistics.fom (per modelled horizon)."
+            ),
+        },
+        "lineLoading": {
+            "unit": "%",
+            "definition": (
+                "Peak over snapshots of |p0| / (s_nom_opt or p_nom_opt) x 100 per Line, Link and Transformer. "
+                "Kept off n.statistics.transmission, which is the net energy transmitted (MWh), not a peak loading."
+            ),
+        },
+    }
