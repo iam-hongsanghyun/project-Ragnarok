@@ -112,3 +112,8 @@ backend/data/journal/
 # FUSE leaves these behind when a file is deleted while still held open
 # (network/synced mounts). Never source.
 .fuse_hidden*
+
+# Claude Desktop connector (connector/): build output and the per-checkout runtime
+# state the connector writes (logs, dependency stamp, owned-backend record).
+dist/
+.connector/

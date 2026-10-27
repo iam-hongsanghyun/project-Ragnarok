@@ -13,18 +13,35 @@ Transport is chosen by ``RAGNAROK_MCP_TRANSPORT``:
 Backend connection + guard config (see :mod:`backend.mcp.client` /
 :mod:`backend.mcp.server`): ``RAGNAROK_API_BASE``, ``RAGNAROK_SESSION_ID``,
 ``RAGNAROK_MCP_AUTONOMY``.
+
+``RAGNAROK_MCP_AUTOSTART=1`` starts the backend itself when nothing answers at
+``RAGNAROK_API_BASE`` and stops it on exit (see :mod:`backend.mcp.autostart`).
+Off by default. The Claude Desktop connector turns it on.
 """
 
 from __future__ import annotations
 
 import os
 
+from . import autostart
 from .server import mcp
 
 _HTTP_ALIASES = {"http", "streamable-http", "streamable_http", "shttp"}
 
 
 def main() -> None:
+    try:
+        autostart.start_from_env()
+    except autostart.AutostartError:
+        # The reason has already been written to stderr with the failure marker.
+        raise SystemExit(autostart.EXIT_CODE_FAILED) from None
+    try:
+        _serve()
+    finally:
+        autostart.stop_owned()
+
+
+def _serve() -> None:
     transport = os.environ.get("RAGNAROK_MCP_TRANSPORT", "stdio").strip().lower()
     if transport in _HTTP_ALIASES:
         host = os.environ.get("RAGNAROK_MCP_HOST", "127.0.0.1")

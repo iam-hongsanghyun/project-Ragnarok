@@ -1,0 +1,76 @@
+{
+  "manifest_version": "0.3",
+  "name": "ragnarok",
+  "display_name": "Ragnarok",
+  "version": "0.1.0",
+  "description": "Build, solve and analyse power-system models in Ragnarok from Claude.",
+  "long_description": "Ragnarok is a PyPSA-based power-system modelling app. This connector gives Claude the Ragnarok tools: inspect the loaded model, import data, edit and transform it, submit solves and read the results.\n\nRequirements: a Ragnarok checkout (a git clone of the Ragnarok repository, with its committed build/ folder) and Python 3.11 or newer. The first launch creates a Python environment and installs the PyPSA stack; that takes about 5 to 15 minutes, and tools answer \"still starting\" until it finishes. Progress and errors are in <Ragnarok folder>/.connector/logs/connector.log.\n\nBy default the connector starts the Ragnarok backend on this computer and stops it when Claude closes. Work is shared with the Ragnarok web app's default session, so you can watch Claude's changes live in the browser.",
+  "author": {
+    "name": "PLANiT Institute",
+    "url": "https://planit.institute"
+  },
+  "homepage": "https://planit.institute",
+  "icon": "icon.png",
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/index.js"],
+      "env": {
+        "RAGNAROK_REPO": "${user_config.ragnarok_folder}",
+        "RAGNAROK_PORT": "${user_config.backend_port}",
+        "RAGNAROK_SESSION_ID": "${user_config.session_id}",
+        "RAGNAROK_MCP_AUTONOMY": "${user_config.autonomy}",
+        "RAGNAROK_API_BASE": "${user_config.api_base}"
+      }
+    }
+  },
+  "user_config": {
+    "ragnarok_folder": {
+      "type": "directory",
+      "title": "Ragnarok folder",
+      "description": "The folder that contains Ragnarok's backend/ and build/ folders (a git clone of the Ragnarok repository). The connector creates its Python environment inside it on first launch.",
+      "default": "${HOME}/github/ragnarok",
+      "required": true
+    },
+    "backend_port": {
+      "type": "number",
+      "title": "Backend port",
+      "description": "The local port the Ragnarok backend listens on (127.0.0.1). Change it only if another program already uses this port. Ignored when the API address below is set.",
+      "default": 8000,
+      "min": 1024,
+      "max": 65535,
+      "required": true
+    },
+    "session_id": {
+      "type": "string",
+      "title": "Session",
+      "description": "The Ragnarok working session the tools act on. \"default\" is the session the Ragnarok web app opens, so Claude's changes appear live in the browser. Use another name (for example \"claude\") to keep Claude's work separate from what you have open in the app.",
+      "default": "default",
+      "required": true
+    },
+    "autonomy": {
+      "type": "string",
+      "title": "Autonomy",
+      "description": "How much Claude may do without asking: \"guided\" (recommended: imports, transforms and solves need your confirmation, small edits do not), \"manual\" (every change needs confirmation) or \"auto\" (no confirmation).",
+      "default": "guided",
+      "required": true
+    },
+    "api_base": {
+      "type": "string",
+      "title": "Remote backend address (optional)",
+      "description": "Leave empty to run Ragnarok on this computer. To drive a Ragnarok backend running on another machine, enter its address, for example http://192.168.1.20:8000. The connector then does not start a local backend.",
+      "default": "",
+      "required": false
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "win32"],
+    "runtimes": {
+      "node": ">=16.0.0"
+    }
+  },
+  "keywords": ["power system", "energy model", "PyPSA", "optimisation", "modelling"],
+  "license": "AGPL-3.0-only"
+}

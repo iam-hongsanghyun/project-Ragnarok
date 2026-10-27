@@ -102,6 +102,39 @@ Each drops unset fields and passes any other PyPSA attribute via `extra`. They'r
 | `run_plugin_analysis(id, config, runs)` | `POST /api/plugins/{id}/analyze` (X6 multi-run comparison) |
 | `diagnose_infeasibility()` | Q2 `diagnostics.py` | fed back to the agent on a failed solve for **self-repair** |
 
+### 2.6 The rest of the GUI's reach
+Everything else a person can do from the web UI. Read tools run freely; writes
+gate like their peers (`confirm=true`).
+
+| Tool | Endpoint |
+|---|---|
+| `get_server_info` | `GET /api/health` + `/status` + `/identity` + `/backends` + `/config/build-id` |
+| `get_server_log(tail, level)` / `reload_config` | `GET /api/log` / `POST /api/config/reload` |
+| `list_examples` / `load_example(id)` | `GET /api/examples` / `POST /api/examples/{id}/load` |
+| `list_import_databases` / `list_starter_packs` / `list_import_countries` / `get_import_provenance` | `GET /api/import/databases` \| `/starter-packs` \| `/countries` \| `/provenance` |
+| `list_import_secrets` / `set_import_secret` / `delete_import_secret` | `GET` / `PUT` / `DELETE /api/import/secrets[/{name}]` (names only — values never returned) |
+| `get_distinct_values(sheet, column, master)` | `GET /api/session/sheet/{n}/distinct` \| `/api/session/master/distinct` |
+| `import_master(path)` / `clear_master` | `POST /api/session/master/import` \| `/clear` |
+| `get_run_model_sheet(run, sheet)` / `load_queue_item(id)` | `GET /api/runs/{n}/model/sheet/{s}` / `POST /api/queue/{id}/import` |
+| `export_workbook(dest)` / `import_result(path)` | `POST /api/export/workbook` / `POST /api/import/result` |
+| `get_plugin` / `refresh_plugins` / `install_plugin(path)` / `uninstall_plugin` | `GET /api/plugins/{id}` \| `?refresh=true`, `POST /api/plugins/install` (a .zip, or a directory zipped on the fly), `DELETE /api/plugins/{id}` |
+| `list_plugin_files` / `upload_plugin_file` / `delete_plugin_file` | `/api/plugins/{id}/files[/{name}]` |
+| `get_plugin_options` / `run_plugin_action` | `POST /api/plugins/{id}/options` \| `/action` |
+| `install_tab_module_zip(path)` | `POST /api/modules/install` |
+| `siting_scan(bbox, …, apply)` | `POST /api/siting/scan` — buses and target snapshots default to the working model's |
+| `pypsa_earth_status` / `_configure` / `_build` / `_build_status` / `_stop` / `_apply(job, replace)` | `/api/pypsa-earth/*` |
+
+Fragments from `import_dataset`, `siting_scan` and `pypsa_earth_apply(replace=false)`
+merge through `backend/mcp/fragment.py`, the Python twin of the GUI's
+`mergeFragment.ts`: rows are appended with name dedupe (never a whole-sheet
+replace), carriers and snapshots are unioned, temporal sheets are widened.
+`submit_solve` reports the run **its own** queue job stored (the queue item's
+`runName`), not the newest run in History.
+
+Not wrapped, on purpose: the SSE stream (`/api/events`), the legacy direct
+`/api/run` (the queue supersedes it), async export jobs (`/api/exports`, covered
+by `export_run`), the country GeoJSON and `DELETE /api/log`.
+
 **Confirmation-gated tools** (never auto-run): `submit_solve` (minutes of compute), `import_dataset`/`one_click_model` (live network, rate limits), any `edit_sheet`/`delete` that overwrites user data, and anything spending money (paid APIs). The UI shows a diff/preview and an Approve button; an "autonomy level" setting can pre-authorise the cheap tiers.
 
 ---
@@ -218,6 +251,28 @@ A new **Assistant** tab (activity bar), consistent with the existing view shell:
 
 The MCP server (`backend/mcp/`) is a thin HTTP client of the **running** Ragnarok
 backend. It's model-agnostic: any MCP-capable agent drives it, with any model.
+
+### Install as a connector (one click)
+
+For Claude Desktop (including Cowork), the Ragnarok tools install as a **desktop
+extension** (`ragnarok.mcpb`) rather than through the JSON config below:
+
+1. Build it once on a machine that has the checkout: `scripts/build_connector.sh`
+   → `dist/ragnarok.mcpb`. (Or take the file from whoever built it.)
+2. Double-click `dist/ragnarok.mcpb`. Claude Desktop opens its install dialog.
+3. Set **Ragnarok folder** to your checkout (default `~/github/ragnarok`). Keep
+   **Session** at `default` to watch Claude's work live in the web app. Leave
+   **Remote backend address** empty to run the backend on this computer.
+4. The connector starts the backend itself on port 8000 (or the port you set)
+   and stops it when Claude closes. The first launch installs the Python packages
+   into `.venv-pypsa` (about 5–15 minutes); until then tools answer "still starting"
+   with the log path.
+
+Requirements: Python 3.11+ on the machine (python.org or Homebrew); macOS or
+Windows. Logs: `<checkout>/.connector/logs/connector.log` (launcher) and `backend.log`
+(backend). Details and the design: [`connector/README.md`](../connector/README.md).
+The `RAGNAROK_MCP_AUTOSTART` flag that the connector sets is documented in
+`backend/mcp/autostart.py`; it is off for every other launch path.
 
 ### Prerequisites
 
