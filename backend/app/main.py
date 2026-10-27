@@ -327,6 +327,9 @@ class _QueueItem:
     # Cores assigned to this solve, resolved at dispatch (see _resolve_cores).
     # None until dispatched — to_dict then reports a live projection instead.
     cores: int | None = None
+    # History name of the run a finished solve stored (from the worker), so a
+    # client can open ITS result instead of guessing the newest run.
+    run_name: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         # Running/done items report the cores actually assigned at dispatch; a
@@ -343,6 +346,7 @@ class _QueueItem:
             "error": self.error,
             "payloadAvailable": self.payload_path.exists(),
             "cores": cores,
+            "runName": self.run_name,
             **self.summary,
         }
 
@@ -428,6 +432,7 @@ def _adopt_outcome(item: _QueueItem, outcome: dict[str, Any]) -> None:
     item.status = "done" if status == "done" else "error"
     item.error = str(outcome["error"]) if outcome.get("error") else None
     item.finished_at = str(outcome.get("finishedAt") or _now_iso())
+    item.run_name = str(outcome["runName"]) if outcome.get("runName") else item.run_name
 
 
 def _write_json_atomic(path: Path, data: dict[str, Any]) -> None:
@@ -459,6 +464,7 @@ def _queue_meta(item: _QueueItem) -> dict[str, Any]:
         "error": item.error,
         "pid": item.pid,
         "cores": item.cores,
+        "runName": item.run_name,
         "payloadFile": _QUEUE_PAYLOAD,
     }
 
@@ -504,6 +510,7 @@ def _load_queue_from_disk() -> None:
                     status = "done" if outcome.get("status") == "done" else "error"
                     error = outcome.get("error")
                     finished_at = outcome.get("finishedAt") or _now_iso()
+                    meta["runName"] = outcome.get("runName") or meta.get("runName")
                     _queue_logger.info("Adopted finished orphan run %s: %s", item_id, status)
                 elif _pid_alive(pid):
                     _queue_logger.info("Queue item %s still solving in orphan pid %s", item_id, pid)
@@ -526,6 +533,7 @@ def _load_queue_from_disk() -> None:
                 error=str(error) if error else None,
                 pid=pid,
                 cores=cores,
+                run_name=str(meta["runName"]) if meta.get("runName") else None,
             )
             restored.append(item)
             if status != meta.get("status") or finished_at != meta.get("finishedAt"):
@@ -670,6 +678,7 @@ async def _run_queue_item(item: _QueueItem) -> None:
             return
         if status == "ok":
             item.status = "done"
+            item.run_name = data if isinstance(data, str) and data else None
         elif status == "err":
             item.status = "error"
             item.error = str(data)

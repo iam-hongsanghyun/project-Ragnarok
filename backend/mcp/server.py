@@ -1158,7 +1158,9 @@ async def import_dataset(
             },
         )
     resp = await client.import_dataset(country_iso, dataset_ids, filters)
-    await client.merge_sheets(resp["fragment"]["sheets"])
+    # Append like the GUI's "Add to workbook" — replacing whole sheets would drop
+    # every existing generator/load the import doesn't mention.
+    await client.apply_fragment(resp["fragment"])
     return {
         "status": "applied",
         "source_id": resp.get("source_id"),
@@ -1279,13 +1281,18 @@ async def submit_solve(
             "error": final.get("error"),
         }
 
-    runs = (await client.list_runs()).get("runs", [])
-    run_name = _newest_run_name(runs)
+    # The queue records the History name of the run THIS job stored. Fall back to
+    # "newest run" only for a backend too old to report it — never when it says
+    # the result failed to store, which would hand back another run's numbers.
+    if "runName" in final:
+        run_name = final.get("runName")
+    else:
+        run_name = _newest_run_name((await client.list_runs()).get("runs", []))
     if not run_name:
         return {
             "status": "done",
             "jobId": job_id,
-            "note": "Solve finished but no run was found to report.",
+            "note": "Solve finished but its result was not stored in History — check get_server_log.",
         }
     analytics = await client.get_analytics(run_name)
     return {
@@ -1786,6 +1793,457 @@ async def import_project(path: str, persist: bool = False, confirm: bool = False
     model = out.get("model") or {}
     await client.save_model(model)
     return {"status": "loaded", "sheets": sorted(model), "filename": out.get("filename")}
+
+
+@mcp.tool(
+    annotations=_EXPORT_ANN,
+    description="Save the CURRENT working model as an input-only workbook (.xlsx) — the GUI's Save / Save As: every input sheet incl. time series plus the Ragnarok config sheets, no result sheets. 'dest' overrides the path. Does not change the model.",
+)
+async def export_workbook(dest: str | None = None) -> Any:
+    data, suggested = await get_client().export_workbook()
+    out = _resolve_out(dest, suggested or "ragnarok_case.xlsx")
+    out.write_bytes(data)
+    return {"status": "exported", "path": str(out), "bytes": len(data)}
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False),
+    description="Import a RESULT-bearing file from disk as a new History run (model + results): a Ragnarok project .zip, or a bare results .xlsx from another tool whose analytics are derived from its outputs. The working model is untouched; open the run with get_analytics. Re-call with confirm=true to apply.",
+)
+async def import_result(path: str, confirm: bool = False) -> Any:
+    src = _resolve_in(path)
+    if not src.exists():
+        return {"error": f"file not found: {src}"}
+    if _needs_confirm(cheap=False) and not confirm:
+        return _preview(f"Store {src.name} as a History run.", {"path": str(src)})
+    out = await get_client().import_result_file(src.read_bytes(), src.name)
+    return {"status": "stored", "run": out.get("name"), "meta": out.get("meta")}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Server, examples, importer catalog, secrets, master model, plugins, siting and
+# PyPSA-Earth — the rest of the GUI's reach, so an agent can do everything a
+# person can from the web UI.
+# ══════════════════════════════════════════════════════════════════════════════
+@mcp.tool(
+    annotations=_RO,
+    description="Which Ragnarok this is and whether it is ready: health checks (store, queue, solver, disk), warm-up status, checkout root + data dir, optimisation backends and build id. Call first when something looks wrong.",
+)
+async def get_server_info() -> Any:
+    return await get_client().server_info()
+
+
+@mcp.tool(
+    annotations=_RO,
+    description="Recent backend log lines (HTTP access, errors, backend loggers), newest last. 'tail' caps the count; 'level' keeps only that level and above (DEBUG, INFO, WARNING, ERROR). Solver stdout is not included.",
+)
+async def get_server_log(tail: int = 100, level: str | None = None) -> Any:
+    out = await get_client().get_log()
+    entries = list((out or {}).get("entries") or [])
+    if level:
+        order = {"DEBUG": 10, "INFO": 20, "WARNING": 30, "ERROR": 40, "CRITICAL": 50}
+        floor = order.get(level.upper(), 0)
+        entries = [e for e in entries if order.get(str(e.get("level", "")).upper(), 0) >= floor]
+    return {"entries": entries[-max(1, tail):], "cursor": (out or {}).get("cursor")}
+
+
+@mcp.tool(
+    annotations=_MUT,
+    description="Rebuild the cached PyPSA schema/config bundle (after the PyPSA package changed) without restarting the backend. Re-call with confirm=true to apply.",
+)
+async def reload_config(confirm: bool = False) -> Any:
+    if _needs_confirm(cheap=True) and not confirm:
+        return _preview("Rebuild the PyPSA schema/config bundle.", {})
+    return await get_client().reload_config()
+
+
+@mcp.tool(annotations=_RO, description="List the bundled example models (id, label, description). Load one with load_example.")
+async def list_examples() -> Any:
+    return await get_client().list_examples()
+
+
+@mcp.tool(
+    annotations=_MUT,
+    description="Load a bundled example as the working model (replaces the current model). Ids from list_examples. Re-call with confirm=true to apply.",
+)
+async def load_example(example_id: str, confirm: bool = False) -> Any:
+    if _needs_confirm(cheap=False) and not confirm:
+        return _preview(f"Load example {example_id!r} (replaces the working model).", {"example_id": example_id})
+    return {"status": "loaded", "meta": await get_client().load_example(example_id)}
+
+
+@mcp.tool(annotations=_RO, description="The flat dataset registry: one entry per importable dataset across every source (id, source, kind, filters). Import with import_dataset.")
+async def list_import_databases() -> Any:
+    return await get_client().list_import_databases()
+
+
+@mcp.tool(annotations=_RO, description="Country starter-pack recipes (country → years) that build_starter_pack can assemble.")
+async def list_starter_packs() -> Any:
+    return await get_client().list_starter_packs()
+
+
+@mcp.tool(annotations=_RO, description="The country index importers accept (ISO codes and names). The first call may fetch Natural Earth boundaries.")
+async def list_import_countries() -> Any:
+    return await get_client().list_import_countries()
+
+
+@mcp.tool(annotations=_RO, description="Recent data imports from the persistent provenance log (source, dataset, country, filters, time), newest first.")
+async def get_import_provenance(limit: int = 50) -> Any:
+    return await get_client().import_provenance(limit)
+
+
+@mcp.tool(annotations=_RO, description="Names of the API keys the backend holds for importers (stored on the server or set in its environment). Values are never returned.")
+async def list_import_secrets() -> Any:
+    return await get_client().list_import_secrets()
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False),
+    description="Store an importer API key on the backend (e.g. name='entsoe_token'); an empty value deletes it. Only pass a key the user gave you for this purpose — never echo it back. Re-call with confirm=true to apply.",
+)
+async def set_import_secret(name: str, value: str, confirm: bool = False) -> Any:
+    if _needs_confirm(cheap=False) and not confirm:
+        return _preview(f"Store the API key {name!r} on the backend.", {"name": name, "value": "***"})
+    return await get_client().put_import_secret(name, value)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False),
+    description="Remove a stored importer API key. Re-call with confirm=true to apply.",
+)
+async def delete_import_secret(name: str, confirm: bool = False) -> Any:
+    if _needs_confirm(cheap=False) and not confirm:
+        return _preview(f"Delete the stored API key {name!r}.", {"name": name})
+    return await get_client().delete_import_secret(name)
+
+
+@mcp.tool(
+    annotations=_RO,
+    description="Sorted distinct non-empty values of one column in a working-model sheet (master=true: in the master model) — e.g. every carrier, every bus a generator uses. Cheaper than paging the sheet.",
+)
+async def get_distinct_values(sheet: str, column: str, master: bool = False) -> Any:
+    return await get_client().distinct_values(sheet, column, master=master)
+
+
+@mcp.tool(
+    annotations=_RO,
+    description="One page of a STORED run's input model sheet (what that run solved), e.g. to compare it with the working model.",
+)
+async def get_run_model_sheet(run_name: str, sheet: str, offset: int = 0, limit: int = 200) -> Any:
+    return await get_client().get_run_model_sheet(run_name, sheet, offset, limit)
+
+
+@mcp.tool(
+    annotations=_MUT,
+    description="Load a queue item's model snapshot back into the working model (to tweak and re-run as a new entry); returns the scenario and run options it was queued with. Replaces the working model. Re-call with confirm=true to apply.",
+)
+async def load_queue_item(item_id: str, confirm: bool = False) -> Any:
+    if _needs_confirm(cheap=False) and not confirm:
+        return _preview(f"Load queue item {item_id!r} into the working model (replaces it).", {"item_id": item_id})
+    return await get_client().import_queue_item(item_id)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False),
+    description="Store a multi-year project (.zip/.xlsx on disk) as the MASTER model — the source derive_from_master filters into the working model. The working model is untouched; replaces any previous master. Re-call with confirm=true to apply.",
+)
+async def import_master(path: str, confirm: bool = False) -> Any:
+    src = _resolve_in(path)
+    if not src.exists():
+        return {"error": f"file not found: {src}"}
+    if _needs_confirm(cheap=False) and not confirm:
+        return _preview(f"Store {src.name} as the master model.", {"path": str(src)})
+    return await get_client().import_master(src.read_bytes(), src.name)
+
+
+@mcp.tool(
+    annotations=_MUT,
+    description="Remove the stored master model (the working model is untouched). Re-call with confirm=true to apply.",
+)
+async def clear_master(confirm: bool = False) -> Any:
+    if _needs_confirm(cheap=False) and not confirm:
+        return _preview("Remove the stored master model.", {})
+    return await get_client().clear_master()
+
+
+def _zip_dir(src: Path) -> bytes:
+    """Zip a plugin/module directory in memory (its contents at the zip root)."""
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f in sorted(src.rglob("*")):
+            if f.is_file() and "__pycache__" not in f.parts:
+                zf.write(f, f.relative_to(src).as_posix())
+    return buf.getvalue()
+
+
+def _package_bytes(path: str) -> tuple[bytes, str] | dict[str, str]:
+    """A .zip as-is, or a directory zipped on the fly; an error dict otherwise."""
+    src = _resolve_in(path)
+    if src.is_dir():
+        return _zip_dir(src), f"{src.name}.zip"
+    if src.is_file() and src.suffix.lower() == ".zip":
+        return src.read_bytes(), src.name
+    return {"error": f"expected a .zip file or a directory: {src}"}
+
+
+@mcp.tool(annotations=_RO, description="One backend plugin's manifest: hooks, GUI config schema, actions and options sources.")
+async def get_plugin(plugin_id: str) -> Any:
+    return await get_client().get_plugin(plugin_id)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False),
+    description="Install (or update) a BACKEND plugin from a .zip or a directory on disk holding manifest.json + plugin.py. Installing runs the plugin's Python inside the backend, so only install code the user trusts. Re-call with confirm=true to apply.",
+)
+async def install_plugin(path: str, confirm: bool = False) -> Any:
+    pkg = _package_bytes(path)
+    if isinstance(pkg, dict):
+        return pkg
+    if _needs_confirm(cheap=False) and not confirm:
+        return _preview(f"Install the backend plugin from {path} (runs its Python in the backend).", {"path": path})
+    return await get_client().install_plugin(*pkg)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False),
+    description="Uninstall a backend plugin: deletes its directory and its uploaded data files. Re-call with confirm=true to apply.",
+)
+async def uninstall_plugin(plugin_id: str, confirm: bool = False) -> Any:
+    if _needs_confirm(cheap=False) and not confirm:
+        return _preview(f"Uninstall the backend plugin {plugin_id!r} and its data files.", {"plugin_id": plugin_id})
+    return await get_client().uninstall_plugin(plugin_id)
+
+
+@mcp.tool(
+    annotations=_RO,
+    description="Re-scan the plugins directory (picks up a plugin copied in by hand) and list the loaded backend plugins.",
+)
+async def refresh_plugins() -> Any:
+    return await get_client().refresh_plugins()
+
+
+@mcp.tool(annotations=_RO, description="List the data files uploaded to a backend plugin (referenced by name in its config).")
+async def list_plugin_files(plugin_id: str) -> Any:
+    return await get_client().list_plugin_files(plugin_id)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False),
+    description="Upload a data file from disk into a backend plugin's server-side store (e.g. the workbook a dashboard importer reads); reference it by name in the plugin config. Re-call with confirm=true to apply.",
+)
+async def upload_plugin_file(plugin_id: str, path: str, confirm: bool = False) -> Any:
+    src = _resolve_in(path)
+    if not src.is_file():
+        return {"error": f"file not found: {src}"}
+    if _needs_confirm(cheap=True) and not confirm:
+        return _preview(f"Upload {src.name} to plugin {plugin_id!r}.", {"plugin_id": plugin_id, "path": str(src)})
+    return await get_client().upload_plugin_file(plugin_id, src.read_bytes(), src.name)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False),
+    description="Delete one uploaded data file from a backend plugin. Re-call with confirm=true to apply.",
+)
+async def delete_plugin_file(plugin_id: str, filename: str, confirm: bool = False) -> Any:
+    if _needs_confirm(cheap=False) and not confirm:
+        return _preview(f"Delete {filename!r} from plugin {plugin_id!r}.", {"plugin_id": plugin_id, "filename": filename})
+    return await get_client().delete_plugin_file(plugin_id, filename)
+
+
+@mcp.tool(
+    annotations=_RO,
+    description="Ask a backend plugin for the choices of one of its dropdowns ('name' = the options source in its manifest), given the current config. Read-only on the model.",
+)
+async def get_plugin_options(plugin_id: str, name: str, config: dict[str, Any] | None = None) -> Any:
+    return await get_client().plugin_options(plugin_id, name, config)
+
+
+@mcp.tool(
+    annotations=_MUT,
+    description="Run a backend plugin's named action hook (a manifest 'action' button, e.g. 'Fill table') with a config; returns {ok, message, config?} where config is the patched form. Re-call with confirm=true to apply.",
+)
+async def run_plugin_action(
+    plugin_id: str, hook: str, config: dict[str, Any] | None = None, confirm: bool = False
+) -> Any:
+    if _needs_confirm(cheap=True) and not confirm:
+        return _preview(f"Run action {hook!r} of plugin {plugin_id!r}.", {"hook": hook, "config": config or {}})
+    return await get_client().plugin_action(plugin_id, hook, config)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False),
+    description="Install a third-party tab-module from a .zip on disk (the zip form of install_tab_module, which takes a directory). Re-call with confirm=true to apply.",
+)
+async def install_tab_module_zip(path: str, confirm: bool = False) -> Any:
+    src = _resolve_in(path)
+    if not (src.is_file() and src.suffix.lower() == ".zip"):
+        return {"error": f"expected a .zip file: {src}"}
+    if _needs_confirm(cheap=False) and not confirm:
+        return _preview(f"Install the tab-module {src.name} (adds a tab to the web UI).", {"path": str(src)})
+    return await get_client().install_tab_module_zip(src.read_bytes(), src.name)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True),
+    description=(
+        "Siting scan: sample candidate solar/wind sites in a bbox [minLon, minLat, maxLon, maxLat], fetch their weather "
+        "(open-meteo | pvgis | nasa-power, keyless) and build extendable candidate generators + grid-connection links "
+        "to the nearest existing buses; the capacity-expansion solve then picks the winners. Buses and target snapshots "
+        "default to the working model's, so CF series land on its window. apply=false (default) only returns the "
+        "candidates; apply=true merges them into the model like the GUI's 'Add candidates to model' (needs confirm=true)."
+    ),
+)
+async def siting_scan(
+    bbox: list[float],
+    technologies: list[str] | None = None,
+    grid_points: int = 25,
+    date_from: str = "2019-01-01",
+    date_to: str = "2019-01-31",
+    utc_offset: int = 0,
+    weather_source: str = "open-meteo",
+    site_capacity_mw: float = 100.0,
+    capital_cost_per_mw: dict[str, float] | None = None,
+    connection_cost_per_mw_km: float = 0.0,
+    marginal_cost: float = 0.0,
+    performance_ratio: float = 0.9,
+    use_model_snapshots: bool = True,
+    apply: bool = False,
+    confirm: bool = False,
+) -> Any:
+    client = get_client()
+    model = await client.load_full_model(static_only=True)
+    buses = [
+        {"name": str(b["name"]), "x": float(b["x"]), "y": float(b["y"])}
+        for b in (model.get("buses") or [])
+        if b.get("name") and _is_number(b.get("x")) and _is_number(b.get("y"))
+    ]
+    if not buses:
+        return {"error": "the working model has no buses with x/y coordinates to connect candidates to."}
+    req: dict[str, Any] = {
+        "bbox": bbox,
+        "technologies": technologies or ["solar", "wind"],
+        "gridPoints": grid_points,
+        "dateFrom": date_from,
+        "dateTo": date_to,
+        "utcOffset": utc_offset,
+        "weatherSource": weather_source,
+        "performanceRatio": performance_ratio,
+        "buses": buses,
+        "siteCapacityMw": site_capacity_mw,
+        "capitalCostPerMw": capital_cost_per_mw or {},
+        "connectionCostPerMwKm": connection_cost_per_mw_km,
+        "marginalCost": marginal_cost,
+    }
+    if use_model_snapshots:
+        page = await client.get_sheet_page("snapshots", 0, 10_000_000)
+        snaps = [r.get("snapshot") for r in (page or {}).get("rows", []) if r.get("snapshot")]
+        if snaps:
+            req["targetSnapshots"] = snaps
+    if apply and _needs_confirm(cheap=False) and not confirm:
+        return _preview(
+            f"Scan {grid_points} candidate sites (fetches live weather) and add them to the model.",
+            {k: v for k, v in req.items() if k not in ("buses", "targetSnapshots")},
+        )
+    resp = await client.siting_scan(req)
+    out = {"candidates": resp.get("candidates"), "preview": resp.get("preview")}
+    if apply:
+        await client.apply_fragment(resp.get("fragment") or {})
+        out["status"] = "applied"
+    else:
+        out["status"] = "scanned"
+        out["hint"] = "Re-run with apply=true (and confirm=true) to add these candidates to the model."
+    return out
+
+
+def _is_number(v: Any) -> bool:
+    try:
+        float(v)
+        return v is not None and v != ""
+    except (TypeError, ValueError):
+        return False
+
+
+@mcp.tool(
+    annotations=_RO,
+    description="PyPSA-Earth: whether the workflow is set up on the server (and where), suggested checkout dirs, and every build job this backend knows about.",
+)
+async def pypsa_earth_status() -> Any:
+    client = get_client()
+    return {"available": await client.pypsa_earth_available(), "builds": await client.pypsa_earth_builds()}
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False),
+    description="Point Ragnarok at a pypsa-earth checkout on the server (must contain a Snakefile); an empty dir clears the setting. Re-call with confirm=true to apply.",
+)
+async def pypsa_earth_configure(directory: str, confirm: bool = False) -> Any:
+    if _needs_confirm(cheap=True) and not confirm:
+        return _preview(f"Use {directory or '(none)'} as the PyPSA-Earth workflow.", {"dir": directory})
+    return await get_client().pypsa_earth_configure(directory)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True),
+    description="Start a PyPSA-Earth build for a country (country_iso like 'KR'): runs the snakemake workflow in the background (can take hours, downloads data). Returns a job id — poll pypsa_earth_build_status, then pypsa_earth_apply. Re-call with confirm=true to start.",
+)
+async def pypsa_earth_build(
+    country_iso: str,
+    country_name: str = "",
+    horizon_year: int = 2030,
+    carriers: list[str] | None = None,
+    clusters: int = 10,
+    confirm: bool = False,
+) -> Any:
+    req: dict[str, Any] = {
+        "countryIso": country_iso,
+        "countryName": country_name,
+        "horizonYear": horizon_year,
+        "clusters": clusters,
+    }
+    if carriers is not None:
+        req["carriers"] = carriers
+    if _needs_confirm(cheap=False) and not confirm:
+        return _preview(f"Start a PyPSA-Earth build for {country_iso} ({clusters} clusters, hours of compute).", req)
+    return await get_client().pypsa_earth_build(req)
+
+
+@mcp.tool(annotations=_RO, description="Status of one PyPSA-Earth build job (queued / running / done / error / stopped, phase, detail).")
+async def pypsa_earth_build_status(job_id: str) -> Any:
+    return await get_client().pypsa_earth_build_status(job_id)
+
+
+@mcp.tool(
+    annotations=_MUT,
+    description="Stop a running PyPSA-Earth build. Completed workflow steps are kept, so a new build resumes from them. Re-call with confirm=true to apply.",
+)
+async def pypsa_earth_stop(job_id: str, confirm: bool = False) -> Any:
+    if _needs_confirm(cheap=True) and not confirm:
+        return _preview(f"Stop PyPSA-Earth build {job_id}.", {"job_id": job_id})
+    return await get_client().pypsa_earth_stop(job_id)
+
+
+@mcp.tool(
+    annotations=_MUT,
+    description="Load a finished PyPSA-Earth build into Ragnarok. replace=true (default) makes it the working model; replace=false merges it into the current model like an import. Re-call with confirm=true to apply.",
+)
+async def pypsa_earth_apply(job_id: str, replace: bool = True, confirm: bool = False) -> Any:
+    client = get_client()
+    res = await client.pypsa_earth_build_result(job_id)
+    fragment = (res or {}).get("fragment") or {}
+    counts = (res or {}).get("counts")
+    if _needs_confirm(cheap=False) and not confirm:
+        return _preview(
+            f"{'Replace the working model with' if replace else 'Merge into the working model'} PyPSA-Earth build {job_id}.",
+            {"job_id": job_id, "counts": counts},
+        )
+    if replace:
+        await client.save_model(fragment.get("sheets") or {})
+    else:
+        await client.apply_fragment(fragment)
+    return {"status": "applied", "mode": "replace" if replace else "merge", "counts": counts}
 
 
 # ══════════════════════════════════════════════════════════════════════════════

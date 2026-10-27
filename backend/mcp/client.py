@@ -727,7 +727,184 @@ class RagnarokClient:
         path = "/api/import/project" if persist else "/api/import/project/load"
         return await self._request("POST", path, files=files)
 
+    async def _upload(self, path: str, data: bytes, filename: str, params: dict[str, Any] | None = None) -> Any:
+        files = {"file": (filename, data, "application/octet-stream")}
+        return await self._request("POST", path, files=files, params=_clean(params))
+
+    # ── server / instance info ─────────────────────────────────────────────────
+    async def server_info(self) -> dict[str, Any]:
+        """Health, warm-up status, checkout identity, backends and build id in one call."""
+        out: dict[str, Any] = {}
+        for key, path in (
+            ("health", "/api/health"),
+            ("status", "/api/status"),
+            ("identity", "/api/identity"),
+            ("backends", "/api/backends"),
+            ("build", "/api/config/build-id"),
+        ):
+            try:
+                out[key] = await self._get(path)
+            except RagnarokAPIError as exc:
+                out[key] = {"error": exc.detail, "status": exc.status}
+        return out
+
+    async def get_log(self) -> Any:
+        return await self._get("/api/log")
+
+    async def reload_config(self) -> Any:
+        return await self._post("/api/config/reload")
+
+    # ── bundled examples ───────────────────────────────────────────────────────
+    async def list_examples(self) -> Any:
+        return await self._get("/api/examples")
+
+    async def load_example(self, example_id: str) -> Any:
+        return await self._request(
+            "POST", f"/api/examples/{example_id}/load", params={"session_id": self.session_id}
+        )
+
+    # ── importer catalog / provenance / BYOK secrets ───────────────────────────
+    async def list_import_databases(self) -> Any:
+        return await self._get("/api/import/databases")
+
+    async def list_starter_packs(self) -> Any:
+        return await self._get("/api/import/starter-packs")
+
+    async def list_import_countries(self) -> Any:
+        return await self._get("/api/import/countries")
+
+    async def import_provenance(self, limit: int = 50) -> Any:
+        return await self._get("/api/import/provenance", {"limit": limit})
+
+    async def list_import_secrets(self) -> Any:
+        return await self._get("/api/import/secrets")
+
+    async def put_import_secret(self, name: str, value: str) -> Any:
+        return await self._put(f"/api/import/secrets/{name}", {"value": value})
+
+    async def delete_import_secret(self, name: str) -> Any:
+        return await self._request("DELETE", f"/api/import/secrets/{name}")
+
+    # ── session extras: distinct values, master model, queue → editor ──────────
+    async def distinct_values(self, sheet: str, column: str, *, master: bool = False) -> Any:
+        if master:
+            return await self._get(
+                "/api/session/master/distinct",
+                {"sheet": sheet, "column": column, "session_id": self.session_id},
+            )
+        return await self._get(
+            f"/api/session/sheet/{sheet}/distinct",
+            {"column": column, "session_id": self.session_id},
+        )
+
+    async def import_master(self, data: bytes, filename: str) -> Any:
+        return await self._upload(
+            "/api/session/master/import", data, filename, {"session_id": self.session_id}
+        )
+
+    async def clear_master(self) -> Any:
+        return await self._request(
+            "POST", "/api/session/master/clear", params={"session_id": self.session_id}
+        )
+
+    async def import_queue_item(self, item_id: str) -> Any:
+        return await self._request(
+            "POST", f"/api/queue/{item_id}/import", params={"session_id": self.session_id}
+        )
+
+    async def get_run_model_sheet(self, name: str, sheet: str, offset: int = 0, limit: int = 200) -> Any:
+        return await self._get(
+            f"/api/runs/{name}/model/sheet/{sheet}", {"offset": offset, "limit": limit}
+        )
+
+    # ── workbook / result files ────────────────────────────────────────────────
+    async def export_workbook(
+        self, scenario: dict[str, Any] | None = None, options: dict[str, Any] | None = None
+    ) -> tuple[bytes, str | None]:
+        """The INPUT workbook (.xlsx) for the working model — the GUI's Save."""
+        model = await self.load_full_model(static_only=True)
+        body = {
+            "model": model,
+            "scenario": scenario or {},
+            "options": options or {},
+            "sessionId": self.session_id,
+        }
+        return await self._request_bytes("POST", "/api/export/workbook", json=body)
+
+    async def import_result_file(self, data: bytes, filename: str) -> Any:
+        return await self._upload("/api/import/result", data, filename)
+
+    # ── backend plugins: lifecycle, data files, options, actions ───────────────
+    async def get_plugin(self, plugin_id: str) -> Any:
+        return await self._get(f"/api/plugins/{plugin_id}")
+
+    async def refresh_plugins(self) -> Any:
+        return await self._get("/api/plugins", {"refresh": "true"})
+
+    async def install_plugin(self, data: bytes, filename: str) -> Any:
+        return await self._upload("/api/plugins/install", data, filename)
+
+    async def uninstall_plugin(self, plugin_id: str) -> Any:
+        return await self._request("DELETE", f"/api/plugins/{plugin_id}")
+
+    async def list_plugin_files(self, plugin_id: str) -> Any:
+        return await self._get(f"/api/plugins/{plugin_id}/files")
+
+    async def upload_plugin_file(self, plugin_id: str, data: bytes, filename: str) -> Any:
+        return await self._upload(f"/api/plugins/{plugin_id}/files", data, filename)
+
+    async def delete_plugin_file(self, plugin_id: str, filename: str) -> Any:
+        return await self._request("DELETE", f"/api/plugins/{plugin_id}/files/{filename}")
+
+    async def plugin_options(self, plugin_id: str, name: str, config: dict[str, Any] | None = None) -> Any:
+        return await self._post(
+            f"/api/plugins/{plugin_id}/options",
+            {"name": name, "config": config or {}, "sessionId": self.session_id},
+        )
+
+    async def plugin_action(self, plugin_id: str, hook: str, config: dict[str, Any] | None = None) -> Any:
+        return await self._post(
+            f"/api/plugins/{plugin_id}/action", {"hook": hook, "config": config or {}}
+        )
+
+    async def install_tab_module_zip(self, data: bytes, filename: str) -> Any:
+        return await self._upload("/api/modules/install", data, filename)
+
+    # ── siting (candidate-site scan; returns a fragment, mutates nothing) ──────
+    async def siting_scan(self, req: dict[str, Any]) -> Any:
+        return await self._post("/api/siting/scan", req)
+
+    # ── PyPSA-Earth (external workflow build → network fragment) ───────────────
+    async def pypsa_earth_available(self) -> Any:
+        return await self._get("/api/pypsa-earth/available")
+
+    async def pypsa_earth_configure(self, directory: str) -> Any:
+        return await self._post("/api/pypsa-earth/configure", {"dir": directory})
+
+    async def pypsa_earth_build(self, req: dict[str, Any]) -> Any:
+        return await self._post("/api/pypsa-earth/build", {**req, "sessionId": self.session_id})
+
+    async def pypsa_earth_builds(self) -> Any:
+        return await self._get("/api/pypsa-earth/builds")
+
+    async def pypsa_earth_build_status(self, job_id: str) -> Any:
+        return await self._get(f"/api/pypsa-earth/build/{job_id}")
+
+    async def pypsa_earth_build_result(self, job_id: str) -> Any:
+        return await self._get(f"/api/pypsa-earth/build/{job_id}/result")
+
+    async def pypsa_earth_stop(self, job_id: str) -> Any:
+        return await self._post(f"/api/pypsa-earth/build/{job_id}/stop")
+
     # ── apply helpers — persist a build/transform result into the session ──────
+    async def apply_fragment(self, fragment: dict[str, Any]) -> Any:
+        """Merge an importer/siting/PyPSA-Earth fragment the way the GUI's
+        "Add to workbook" does (append + name dedupe, snapshot union) and save."""
+        from .fragment import merge_fragment
+
+        model = await self.load_full_model()
+        return await self.save_model(merge_fragment(model or {}, fragment))
+
     async def save_model(self, model: dict[str, list[dict[str, Any]]]) -> Any:
         """Replace the session's working model (used after a fresh build)."""
         return await self._post(

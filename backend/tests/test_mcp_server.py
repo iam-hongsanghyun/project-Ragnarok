@@ -56,6 +56,10 @@ class FakeClient:
         self.calls.append(("merge_sheets", sorted(sheets)))
         return {}
 
+    async def apply_fragment(self, fragment: dict) -> dict:
+        self.calls.append(("apply_fragment", sorted(fragment.get("sheets") or {})))
+        return {}
+
     async def submit_solve(self, scenario=None, options=None) -> dict:
         self.calls.append(("submit_solve", scenario, options))
         return {"id": "job1", "status": "queued"}
@@ -245,7 +249,7 @@ def _install(monkeypatch, autonomy: str = "guided") -> FakeClient:
 def test_tool_catalog_and_annotations() -> None:
     tools = asyncio.run(mcp.list_tools())
     by_name = {t.name: t for t in tools}
-    assert len(tools) == 80, f"expected 80 tools, got {len(tools)}"
+    assert len(tools) == 116, f"expected 116 tools, got {len(tools)}"
     # check_model: reads the model back so "is this what I asked for?" can be
     # answered against the model rather than against the agent's account of it.
     assert "check_model" in by_name
@@ -313,6 +317,25 @@ def test_tool_catalog_and_annotations() -> None:
         # Tab-modules (a whole tab, not a plugin — docs/module.md). Only the
         # listing is read-only; install/enable/remove are gated writes.
         "list_tab_modules",
+        # The rest of the GUI's reach: server/instance, examples, importer
+        # catalog, secrets (names only), distinct values, stored-run inputs,
+        # plugin introspection and PyPSA-Earth status.
+        "get_server_info",
+        "get_server_log",
+        "list_examples",
+        "list_import_databases",
+        "list_starter_packs",
+        "list_import_countries",
+        "get_import_provenance",
+        "list_import_secrets",
+        "get_distinct_values",
+        "get_run_model_sheet",
+        "get_plugin",
+        "refresh_plugins",
+        "list_plugin_files",
+        "get_plugin_options",
+        "pypsa_earth_status",
+        "pypsa_earth_build_status",
     }
 
 
@@ -342,7 +365,7 @@ def test_gate_previews_without_confirm(monkeypatch) -> None:
     assert out["status"] == "preview"
     assert out["autonomy"] == "guided"
     assert not fake.called("import_dataset"), "preview must not hit the backend"
-    assert not fake.called("merge_sheets")
+    assert not fake.called("apply_fragment")
 
 
 def test_gate_executes_with_confirm(monkeypatch) -> None:
@@ -352,7 +375,9 @@ def test_gate_executes_with_confirm(monkeypatch) -> None:
     )
     assert out["status"] == "applied"
     assert out["source_id"] == "osm"
-    assert fake.called("import_dataset") and fake.called("merge_sheets")
+    # Appended like the GUI's "Add to workbook", not whole-sheet replaced.
+    assert fake.called("import_dataset") and fake.called("apply_fragment")
+    assert not fake.called("merge_sheets")
 
 
 # ── guard: cheap edit runs under guided but is gated under manual ───────────────
