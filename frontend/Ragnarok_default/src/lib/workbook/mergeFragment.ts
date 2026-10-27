@@ -4,7 +4,15 @@
  * Rules:
  *  - Static sheets get the new rows appended with name dedupe (existing rows
  *    win; new rows with colliding names get a `_2` / `_3` / … suffix).
- *  - The `carriers` sheet is unioned by name.
+ *  - The `carriers` sheet is unioned by name. When a carrier already exists
+ *    its attributes are MERGED: an existing non-empty value wins and only
+ *    empty/missing cells are filled from the fragment — except for the
+ *    fuel-price importer (`provenance.database_id === 'fuel_prices'`), whose
+ *    values deliberately overwrite (the user just typed fresh prices).
+ *  - Fuel-price fragments also set, for every existing generator whose
+ *    `carrier` has a `fuel_cost_thermal`, `marginal_cost = fuel_cost_thermal /
+ *    efficiency` (efficiency blank/<=0 -> 1). Provenance stays on the carrier
+ *    row (`raw_price`, `raw_unit`, `fuel_cost_basis`) and the provenance sheet.
  *  - The `RAGNAROK_Provenance` sheet picks up one new row per fetch.
  *  - When the fragment carries `snapshots`, the workbook's `snapshots` sheet
  *    is unioned with the imported range (lexical sort on ISO-`T` strings)
@@ -69,22 +77,65 @@ function appendWithDedupe(
   return out;
 }
 
-function unionCarriers(existing: GridRow[], incoming: Array<Record<string, unknown>>): GridRow[] {
+const FUEL_PRICES_DB = 'fuel_prices';
+
+function isFilled(v: unknown): boolean {
+  return v !== undefined && v !== null && v !== '';
+}
+
+/** Union by name. An existing carrier is merged attribute-wise: existing
+ *  non-empty values win, empty ones are filled from the fragment; with
+ *  `overwrite` (fuel-price importer) the fragment's non-empty values win. */
+function unionCarriers(
+  existing: GridRow[],
+  incoming: Array<Record<string, unknown>>,
+  overwrite = false,
+): GridRow[] {
   const byName = new Map<string, GridRow>();
   for (const r of existing) {
     const name = typeof r.name === 'string' ? r.name : null;
-    if (name) byName.set(name, r);
+    if (name) byName.set(name, { ...r });
   }
+  const unnamed = existing.filter((r) => typeof r.name !== 'string' || !r.name);
   for (const raw of incoming) {
     const name = typeof raw.name === 'string' ? raw.name : null;
-    if (!name || byName.has(name)) continue;
-    const row: GridRow = {};
-    for (const [k, v] of Object.entries(raw)) {
-      row[k] = v as Primitive;
+    if (!name) continue;
+    const row = byName.get(name);
+    if (!row) {
+      const fresh: GridRow = {};
+      for (const [k, v] of Object.entries(raw)) fresh[k] = v as Primitive;
+      byName.set(name, fresh);
+      continue;
     }
-    byName.set(name, row);
+    for (const [k, v] of Object.entries(raw)) {
+      if (k === 'name' || !isFilled(v)) continue;
+      if (overwrite || !isFilled(row[k])) row[k] = v as Primitive;
+    }
   }
-  return Array.from(byName.values());
+  return [...Array.from(byName.values()), ...unnamed];
+}
+
+/** Fuel-price fragments: every generator of a priced carrier gets
+ *  `marginal_cost = fuel_cost_thermal / efficiency`. */
+function applyFuelCostToGenerators(
+  generators: GridRow[],
+  carriers: Array<Record<string, unknown>>,
+): GridRow[] {
+  const thermal = new Map<string, number>();
+  for (const c of carriers) {
+    const n = typeof c.name === 'string' ? c.name : null;
+    const t = Number(c.fuel_cost_thermal);
+    if (n && isFilled(c.fuel_cost_thermal) && Number.isFinite(t)) thermal.set(n, t);
+  }
+  if (thermal.size === 0) return generators;
+  return generators.map((g) => {
+    const carrier = typeof g.carrier === 'string' ? g.carrier : '';
+    const t = thermal.get(carrier);
+    if (t === undefined) return g;
+    let eff = isFilled(g.efficiency) ? Number(g.efficiency) : 1;
+    if (!(eff > 0)) eff = 1;
+    return { ...g, marginal_cost: Math.round((t / eff) * 1e4) / 1e4 };
+  });
 }
 
 function appendProvenanceRow(existing: GridRow[], provenance: ProvenanceRow): GridRow[] {
@@ -288,10 +339,18 @@ export function mergeWorkbookFragment(
   }
 
   if (fragment.sheets[CARRIERS_SHEET]) {
+    const fuelPrices = fragment.provenance?.database_id === FUEL_PRICES_DB;
     out[CARRIERS_SHEET] = unionCarriers(
       (out[CARRIERS_SHEET] || []) as GridRow[],
       fragment.sheets[CARRIERS_SHEET],
+      fuelPrices,
     );
+    if (fuelPrices && Array.isArray(out.generators)) {
+      out.generators = applyFuelCostToGenerators(
+        out.generators as GridRow[],
+        fragment.sheets[CARRIERS_SHEET],
+      );
+    }
   }
 
   // ── Snapshots + temporal sheets ────────────────────────────────────────

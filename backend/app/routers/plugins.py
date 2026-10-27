@@ -33,8 +33,10 @@ See :mod:`backend.app.plugins` for the registry/loader and the plugin contract.
 from __future__ import annotations
 
 import io
+import os
 import re
 import shutil
+import tempfile
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -133,7 +135,7 @@ def _safe_extract_zip(data: bytes, dest_root: Path) -> str:
 
     The zip must contain ``manifest.json`` (with an ``id``) and ``plugin.py`` at
     the same level (root or one folder deep). Returns the plugin id. Replaces any
-    existing plugin with that id.
+    existing plugin with that id — only after the new one extracted and test-loaded.
     """
     try:
         zf = zipfile.ZipFile(io.BytesIO(data))
@@ -181,22 +183,43 @@ def _safe_extract_zip(data: bytes, dest_root: Path) -> str:
     if dest.parent != root_resolved:  # paranoia: id can't escape the install dir
         raise HTTPException(status_code=400, detail="Refusing to install outside the plugins dir.")
 
-    if dest.exists():
-        shutil.rmtree(dest)  # replace-in-place, like frontend install
-    dest.mkdir(parents=True)
-    for name in names:
-        if not name.startswith(prefix):
-            continue
-        rel = name[len(prefix):]
-        if not rel:
-            continue
-        target = (dest / rel).resolve()
-        # Path.is_relative_to is separator-agnostic — the old startswith(dest+"/")
-        # check used the POSIX separator and rejected EVERY entry on Windows.
-        if not target.is_relative_to(dest):
-            raise HTTPException(status_code=400, detail="Unsafe path in .zip (zip-slip).")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(zf.read(name))
+    # Extract into a hidden staging dir (discover() skips dot-dirs), test-load it,
+    # and only then swap it over any installed version — a broken upload must
+    # never destroy the working plugin it was meant to replace.
+    staging = Path(tempfile.mkdtemp(prefix=f".install-{plugin_id}-", dir=dest_root))
+    try:
+        for name in names:
+            if not name.startswith(prefix):
+                continue
+            rel = name[len(prefix):]
+            if not rel:
+                continue
+            target = (staging / rel).resolve()
+            # Path.is_relative_to is separator-agnostic — the old startswith(dest+"/")
+            # check used the POSIX separator and rejected EVERY entry on Windows.
+            if not target.is_relative_to(staging.resolve()):
+                raise HTTPException(status_code=400, detail="Unsafe path in .zip (zip-slip).")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(zf.read(name))
+        if plugins._load_one(staging) is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Plugin {plugin_id!r} failed to load; the installed version (if any) was left untouched.",
+            )
+        backup = None
+        if dest.exists():
+            backup = dest_root / f".old-{plugin_id}-{staging.name.rsplit('-', 1)[-1]}"
+            os.replace(dest, backup)
+        try:
+            os.replace(staging, dest)
+        except OSError:
+            if backup is not None:
+                os.replace(backup, dest)  # restore the previous version
+            raise
+        if backup is not None:
+            shutil.rmtree(backup, ignore_errors=True)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)  # no-op once renamed
     return plugin_id
 
 

@@ -775,6 +775,8 @@ def _enrich_branches(
         v_nom_by_bus[str(b["name"])] = _num(b.get("v_nom"))
     out: list[dict[str, Any]] = []
     for i, row in enumerate(branch_rows):
+        if _num(row.get("status")) == 0:
+            continue  # out-of-service branch (MATPOWER status 0): not part of the network
         bus0 = _int_str(row.get("fbus"))
         bus1 = _int_str(row.get("tbus"))
         v0 = v_nom_by_bus.get(bus0, 0.0)
@@ -783,6 +785,14 @@ def _enrich_branches(
         angle = _num(row.get("angle"))
         is_transformer = ratio != 0 or angle != 0
         z_base = (v0 * v0) / base_mva if base_mva > 0 else 0.0
+        s_nom = _num(row.get("rateA"))
+        # PyPSA transformers take x / r / b in per unit on the transformer's own
+        # s_nom base, not ohms. Re-base the MATPOWER system-base (baseMVA) p.u.:
+        #   x, r: z_pu_snom = z_pu_sys * s_nom / baseMVA
+        #   b:    y_pu_snom = y_pu_sys * baseMVA / s_nom   (admittance inverts)
+        # rateA = 0 means "unlimited" in MATPOWER; keep the system base then.
+        tr_base = s_nom if (s_nom > 0 and base_mva > 0) else base_mva
+        z_scale = (tr_base / base_mva) if base_mva > 0 else 1.0
         out.append({
             "name": str(i + 1),
             "bus0": bus0,
@@ -790,7 +800,10 @@ def _enrich_branches(
             "v_nom_0": v0,
             "v_nom_1": v1,
             "is_transformer": is_transformer,
-            "s_nom": _num(row.get("rateA")),
+            "s_nom": s_nom,
+            "r_pu_snom": _num(row.get("r")) * z_scale,
+            "x_pu_snom": _num(row.get("x")) * z_scale,
+            "b_pu_snom": (_num(row.get("b")) / z_scale if z_scale > 0 else 0),
             "r_ohm": _num(row.get("r")) * z_base,
             "x_ohm": _num(row.get("x")) * z_base,
             "b_siemens": (_num(row.get("b")) / z_base if z_base > 0 else 0),
@@ -835,10 +848,10 @@ def _build_transformers(branches: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "bus1": b["bus1"],
             "type": "",
             "model": "t",
-            "x": b["x_ohm"],
-            "r": b["r_ohm"],
+            "x": b["x_pu_snom"],
+            "r": b["r_pu_snom"],
             "g": 0,
-            "b": b["b_siemens"],
+            "b": b["b_pu_snom"],
             "s_nom": b["s_nom"],
             "tap_ratio": b["tap_ratio"],
             "tap_side": 0,

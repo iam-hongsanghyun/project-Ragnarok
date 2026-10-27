@@ -8,14 +8,14 @@ NEM and WEM market data through a keyed REST API. Two datasets share the source:
     into ``generators-p_max_pu`` for the variable-renewable techs (solar, wind).
 
 Both call ``GET /v4/data/network/{network}`` with a Bearer token
-(``openelectricity_key``). Timestamps come back in the network's local timezone;
-we keep local wall-clock snapshots (so the diurnal shape lines up with local
-demand). Get a free key at platform.openelectricity.org.au → Settings → API.
+(``openelectricity_key``). The request window is network-local time (NEM
+UTC+10, WEM UTC+8, no DST); timestamps come back with that offset and are
+converted to UTC ``YYYY-MM-DD HH:00`` snapshots, like the other importers. Get a free key at platform.openelectricity.org.au → Settings → API.
 """
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from ...context import ImportContext
@@ -50,7 +50,7 @@ _NETWORK_FILTER = Filter(
 )
 _DATE_FILTERS = [
     Filter(id="date_from", label="From", kind="date", default="2024-01-01",
-           description="Start of the hourly window (inclusive, network-local time)."),
+           description="Start of the hourly window (inclusive, network-local time; snapshots are returned in UTC)."),
     Filter(id="date_to", label="To", kind="date", default="2024-01-07",
            description="End of the hourly window (inclusive). Keep it short — hourly data is large."),
 ]
@@ -61,14 +61,28 @@ def _network(filters: dict[str, Any]) -> str:
     return net if net in ("NEM", "WEM") else "NEM"
 
 
-def _snapshot(ts: str) -> str:
-    """OpenElectricity ISO stamp (``2024-09-01T00:00:00+10:00``) → local
-    ``YYYY-MM-DD HH:00`` (offset dropped — keep local wall-clock)."""
+# Fixed network offsets (neither the NEM, AEST, nor the WEM, AWST, observes DST
+# in the API's reporting); used only for stamps that arrive without an offset.
+_NETWORK_UTC_OFFSET_H = {"NEM": 10, "WEM": 8}
+
+
+def _snapshot(ts: str, default_offset_h: int = 10) -> str:
+    """OpenElectricity ISO stamp (``2024-09-01T00:00:00+10:00``) → UTC
+    ``YYYY-MM-DD HH:00``. A stamp without an offset is taken as network-local
+    (``default_offset_h``)."""
     s = str(ts)
-    return f"{s[0:10]} {s[11:13]}:00" if len(s) >= 13 else s
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError:
+        return f"{s[0:10]} {s[11:13]}:00" if len(s) >= 13 else s
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone(timedelta(hours=default_offset_h)))
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:00")
 
 
-def _results_by_label(body: Any, metric: str, label_key: str | None) -> dict[str, list[tuple[str, float]]]:
+def _results_by_label(
+    body: Any, metric: str, label_key: str | None, default_offset_h: int = 10
+) -> dict[str, list[tuple[str, float]]]:
     """Fold an APIV4 TimeSeries response into ``{label: [(snapshot, value)]}``.
 
     ``label_key`` selects the grouping column (e.g. ``fueltech_group``); when
@@ -91,7 +105,7 @@ def _results_by_label(body: Any, metric: str, label_key: str | None) -> dict[str
                 if value is None:
                     continue
                 try:
-                    bucket.append((_snapshot(str(stamp)), float(value)))
+                    bucket.append((_snapshot(str(stamp), default_offset_h), float(value)))
                 except (TypeError, ValueError):
                     continue
     return out
@@ -102,7 +116,10 @@ async def _fetch(ctx: ImportContext, network: str, metrics: str, date_from: str,
     token = ctx.require_secret(_SECRET)
     params = {
         "metrics": metrics, "interval": "1h",
-        "date_start": f"{date_from}T00:00:00", "date_end": f"{date_to}T00:00:00",
+        # date_end is exclusive: advance the inclusive end date by one day so the
+        # last day is returned in full.
+        "date_start": f"{date_from}T00:00:00",
+        "date_end": f"{(date.fromisoformat(date_to) + timedelta(days=1)).isoformat()}T00:00:00",
         **extra,
     }
     try:
@@ -143,7 +160,7 @@ _DEMAND_META = DatabaseMeta(
     description=(
         "Hourly operational demand for the Australian NEM or WEM from the "
         "OpenElectricity API. Lands one network bus + a Load + hourly loads-p_set "
-        "(network-local time). Needs a free OpenElectricity API key (Settings → API keys)."
+        "(UTC). Needs a free OpenElectricity API key (Settings → API keys)."
     ),
     targets=["buses", "loads", "loads-p_set", "carriers"],
     country_coverage=["AUS"], requires_secrets=[_SECRET],
@@ -158,7 +175,7 @@ class OpenElectricityDemand:
         net = _network(filters)
         df, dt = str(filters.get("date_from") or "2024-01-01"), str(filters.get("date_to") or "2024-01-07")
         body = await _fetch(ctx, net, "demand", df, dt, {"primary_grouping": "network"})
-        series = _results_by_label(body, "demand", None)
+        series = _results_by_label(body, "demand", None, _NETWORK_UTC_OFFSET_H[net])
         hourly = next(iter(series.values()), [])
         hourly.sort()
         return FetchResult(_DEMAND_META.id, region, dict(filters), {"network": net, "hourly": hourly})
@@ -173,7 +190,7 @@ class OpenElectricityDemand:
         return PreviewSummary(
             counts=counts,
             samples={"hours": [{"snapshot": s, "mw": round(v, 1)} for s, v in hourly[:24]]},
-            notes=[f"{result.payload['network']}: {len(hourly)} hourly demand points (local time)."],
+            notes=[f"{result.payload['network']}: {len(hourly)} hourly demand points (UTC)."],
         )
 
     def to_sheets(self, result: FetchResult, options: ConvertOptions) -> WorkbookFragment:
@@ -222,7 +239,7 @@ class OpenElectricityRenewable:
         net = _network(filters)
         df, dt = str(filters.get("date_from") or "2024-01-01"), str(filters.get("date_to") or "2024-01-07")
         body = await _fetch(ctx, net, "power", df, dt, {"secondary_grouping": "fueltech_group"})
-        series = _results_by_label(body, "power", "fueltech_group")
+        series = _results_by_label(body, "power", "fueltech_group", _NETWORK_UTC_OFFSET_H[net])
         gen = {carrier: sorted(series[grp]) for grp, carrier in _VRE_FUELTECH.items() if series.get(grp)}
         return FetchResult(_GEN_META.id, region, dict(filters), {"network": net, "gen": gen})
 

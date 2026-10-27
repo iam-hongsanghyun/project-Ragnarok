@@ -30,6 +30,13 @@ FRONTEND="$ROOT/frontend/Ragnarok_default"
 free_port() { local pids; pids=$(lsof -ti tcp:"$1" 2>/dev/null || true); [ -n "$pids" ] && kill $pids 2>/dev/null || true; }
 
 # ── Python env ────────────────────────────────────────────────────────────────
+# Rebuild a stale venv (broken interpreter, or Python < 3.11 left by an OS /
+# Homebrew upgrade). Removing the venv also drops its .req_hash, so the
+# dependency install below cannot be skipped against the old interpreter.
+if [ -d "$VENV" ] && ! "$PY" -c "import sys; sys.exit(0 if sys.version_info>=(3,11) else 1)" >/dev/null 2>&1; then
+  echo "Rebuilding virtual environment (Python < 3.11 or broken)..."
+  rm -rf "$VENV"
+fi
 if [ ! -x "$PY" ]; then
   echo "Creating Python virtual environment..."
   PYBIN=""

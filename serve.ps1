@@ -31,6 +31,19 @@ function Free-Port([int]$p) {
 }
 
 # -- Python env ------------------------------------------------------------------
+# Rebuild a stale venv (broken interpreter or Python < 3.11). Removing the venv
+# also drops its .req_hash, so the dependency install cannot be skipped.
+if (Test-Path $PythonExe) {
+    $prevEAP0 = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & $PythonExe -c "import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)" 2>$null
+    $venvOk = ($LASTEXITCODE -eq 0)
+    $ErrorActionPreference = $prevEAP0
+    if (-not $venvOk) {
+        Write-Host 'Rebuilding virtual environment (Python < 3.11 or broken)...'
+        Remove-Item -Recurse -Force $VenvDir
+    }
+}
 if (-not (Test-Path $PythonExe)) {
     $Python = $null
     foreach ($candidate in @('python', 'py', 'python3')) {

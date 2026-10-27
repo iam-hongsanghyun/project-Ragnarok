@@ -37,9 +37,26 @@ def _ctx(body: Any) -> ImportContext:
     return ImportContext(secrets={"openelectricity_key": "tok"}, http=_FakeHttp(body))
 
 
-def test_snapshot_drops_offset_keeps_local_wallclock() -> None:
-    assert _snapshot("2024-09-01T00:00:00+10:00") == "2024-09-01 00:00"
-    assert _snapshot("2024-09-01T13:00:00+10:00") == "2024-09-01 13:00"
+def test_snapshot_converts_to_utc() -> None:
+    assert _snapshot("2024-09-01T00:00:00+10:00") == "2024-08-31 14:00"
+    assert _snapshot("2024-09-01T13:00:00+10:00") == "2024-09-01 03:00"
+    assert _snapshot("2024-09-01T08:00:00+08:00") == "2024-09-01 00:00"
+    assert _snapshot("2024-09-01T00:00:00", 8) == "2024-08-31 16:00"  # offsetless = network-local
+
+
+def test_fetch_requests_exclusive_end_one_day_after_date_to() -> None:
+    seen: dict = {}
+
+    class _Spy(_FakeHttp):
+        async def get_json(self, url, *, params=None, headers=None):
+            seen.update(params)
+            return {"data": []}
+
+    db = OpenElectricityDemand()
+    ctx = ImportContext(secrets={"openelectricity_key": "tok"}, http=_Spy({}))
+    asyncio.run(db.fetch(_region(), {"network": "NEM", "date_from": "2024-01-01", "date_to": "2024-01-07"}, ctx))
+    assert seen["date_start"] == "2024-01-01T00:00:00"
+    assert seen["date_end"] == "2024-01-08T00:00:00"
 
 
 def test_results_by_label_groups_and_skips_nulls() -> None:
@@ -51,8 +68,8 @@ def test_results_by_label_groups_and_skips_nulls() -> None:
     ]}]}
     out = _results_by_label(body, "power", "fueltech_group")
     assert set(out) == {"solar", "wind"}
-    assert out["solar"] == [("2024-01-01 00:00", 0.0), ("2024-01-01 01:00", 500.0)]  # null dropped
-    assert out["wind"] == [("2024-01-01 00:00", 300.0)]
+    assert out["solar"] == [("2023-12-31 14:00", 0.0), ("2023-12-31 15:00", 500.0)]  # null dropped
+    assert out["wind"] == [("2023-12-31 14:00", 300.0)]
 
 
 def test_demand_dataset_builds_load_series() -> None:
@@ -69,7 +86,7 @@ def test_demand_dataset_builds_load_series() -> None:
     assert frag.sheets["loads"][0]["name"] == "NEM_demand"
     rows = frag.sheets["loads-p_set"]
     assert [r["NEM_demand"] for r in rows] == [20000.0, 21000.0]
-    assert frag.snapshots == ["2024-01-01 00:00", "2024-01-01 01:00"]
+    assert frag.snapshots == ["2023-12-31 14:00", "2023-12-31 15:00"]  # UTC
 
 
 def test_renewable_dataset_peak_normalises_solar_and_wind() -> None:

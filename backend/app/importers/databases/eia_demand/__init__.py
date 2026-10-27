@@ -148,6 +148,41 @@ META = DatabaseMeta(
 )
 
 
+_PAGE = 5000  # EIA v2 caps ``length`` at 5000 rows per response
+_MAX_PAGES = 100
+
+
+async def _fetch_all_rows(ctx: ImportContext, params: dict[str, Any]) -> list[dict[str, Any]]:
+    """Page the EIA v2 endpoint with ``offset`` until ``response.total`` rows
+    are read (a page that comes back short or empty also ends the loop when
+    ``total`` is missing). A single request silently truncates at 5000 rows —
+    under a year of hourly data."""
+    rows: list[dict[str, Any]] = []
+    total: int | None = None
+    for page in range(_MAX_PAGES):
+        body = await ctx.http.get_json(_API_URL, params={**params, "offset": page * _PAGE})
+        resp = (body or {}).get("response") or {}
+        data = resp.get("data") or []
+        if total is None:
+            try:
+                total = int(resp.get("total"))
+            except (TypeError, ValueError):
+                total = None
+        rows.extend(data)
+        if not data:
+            break
+        if total is not None:
+            if len(rows) >= total:
+                break
+        elif len(data) < _PAGE:
+            break
+    else:
+        raise RuntimeError(f"EIA: more than {_MAX_PAGES * _PAGE} rows; narrow the date window.")
+    if total is not None and len(rows) < total:
+        raise RuntimeError(f"EIA returned {len(rows)} of {total} rows; retry.")
+    return rows
+
+
 class EiaDemand:
     meta = META
 
@@ -176,8 +211,7 @@ class EiaDemand:
             "sort[0][direction]": "asc",
             "length": 5000,
         }
-        body = await ctx.http.get_json(_API_URL, params=params)
-        rows = (((body or {}).get("response") or {}).get("data")) or []
+        rows = await _fetch_all_rows(ctx, params)
         return FetchResult(META.id, region, dict(filters),
                            {"respondent": respondent, "rows": rows,
                             "date_from": date_from, "date_to": date_to})

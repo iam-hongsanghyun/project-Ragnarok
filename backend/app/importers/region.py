@@ -27,7 +27,12 @@ _DEFAULT_URL = (
     "/master/geojson/ne_50m_admin_0_countries.geojson"
 )
 
-_ISO_KEYS = ("ADM0_A3", "ISO_A3_EH", "ISO_A3", "SOV_A3")
+# ISO-3166 alpha-3 first: Natural Earth's ADM0_A3 is its own scheme and differs
+# from ISO for a few countries (South Sudan SDS, Kosovo KOS, W. Sahara SAH), which
+# would break every importer keyed on ISO codes. ADM0_A3 / SOV_A3 are the
+# fallback for features with no ISO code (-99), mapped through _ADM0_TO_ISO3.
+_ISO_KEYS = ("ISO_A3_EH", "ISO_A3", "ADM0_A3", "SOV_A3")
+_ADM0_TO_ISO3 = {"SDS": "SSD", "KOS": "XKX", "SAH": "ESH"}
 _NAME_KEYS = ("ADMIN", "NAME", "NAME_LONG", "SOVEREIGNT")
 
 
@@ -77,7 +82,7 @@ def _feature_iso(props: dict[str, Any]) -> str | None:
     for k in _ISO_KEYS:
         v = props.get(k)
         if isinstance(v, str) and v and v != "-99":
-            return v.upper()
+            return _ADM0_TO_ISO3.get(v.upper(), v.upper())
     return None
 
 

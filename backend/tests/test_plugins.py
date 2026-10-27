@@ -997,3 +997,37 @@ def test_layout_referencing_unknown_output_is_rejected(_plugins_dir) -> None:
     _write_plugin(_plugins_dir, "badlayout", LAYOUT_BAD)
     with pytest.raises(ValueError, match="unknown output"):
         plugins.run_analyze("badlayout", {}, {})
+
+
+def test_reinstall_with_broken_zip_keeps_old_version(_plugins_dir) -> None:
+    """RI4: a failing re-install must not delete the working plugin it replaces."""
+    good = _make_zip(
+        {
+            "manifest.json": json.dumps({"id": "keep", "name": "Keep", "version": "1.0.0"}),
+            "plugin.py": "def transform(model, config):\n    return {}\n",
+        }
+    )
+    asyncio.run(plugins_router.install_plugin(_upload(good, "keep.zip")))
+    broken = _make_zip(
+        {
+            "manifest.json": json.dumps({"id": "keep", "name": "Keep", "version": "2.0.0"}),
+            "plugin.py": "import this_module_does_not_exist_xyz\n",
+        }
+    )
+    with pytest.raises(plugins_router.HTTPException) as exc:
+        asyncio.run(plugins_router.install_plugin(_upload(broken, "keep.zip")))
+    assert exc.value.status_code == 400
+    assert plugins.get("keep") is not None
+    assert json.loads((_plugins_dir / "keep" / "manifest.json").read_text())["version"] == "1.0.0"
+    assert not [p for p in _plugins_dir.iterdir() if p.name.startswith(".")]  # staging cleaned up
+
+    # a good upgrade replaces it
+    newer = _make_zip(
+        {
+            "manifest.json": json.dumps({"id": "keep", "name": "Keep", "version": "3.0.0"}),
+            "plugin.py": "def transform(model, config):\n    return {}\n",
+        }
+    )
+    out = asyncio.run(plugins_router.install_plugin(_upload(newer, "keep.zip")))
+    assert out["version"] == "3.0.0"
+    assert not [p for p in _plugins_dir.iterdir() if p.name.startswith(".")]

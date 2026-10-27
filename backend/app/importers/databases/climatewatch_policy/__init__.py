@@ -43,6 +43,7 @@ _SECTORS = {
     "total": "Total excluding LULUCF",
 }
 _MT_TO_T = 1_000_000.0
+_HOURS_PER_YEAR = 8760.0
 
 
 def _pick_series(records: list[dict], sector_label: str) -> tuple[dict[int, float], str]:
@@ -94,11 +95,51 @@ META = DatabaseMeta(
         Filter(id="target_year", label="Target year", kind="number", default=2050,
                min=2000, max=2100, step=1,
                description="Year the cap applies to."),
+        Filter(id="window_hours", label="Modelled hours", kind="number", default=8760,
+               min=1, max=8784, step=1, unit="h",
+               description="Hours the model's snapshots cover (sum of snapshot weightings). "
+                           "The cap is an annual tonnage, so it is scaled by hours/8760; "
+                           "leave 8760 only for a full-year model."),
         Filter(id="reduction_pct", label="Reduction vs baseline (%)", kind="number",
                default=100.0, min=0.0, max=100.0, step=5.0,
                description="Cut vs the baseline year. 100 = net zero (cap 0)."),
     ],
 )
+
+
+_PER_PAGE = 200
+_MAX_PAGES = 20
+
+
+async def _fetch_records(ctx: ImportContext, iso: str) -> list[dict]:
+    """All historical-emissions records for ``iso``, following pagination.
+
+    The API returns the records in pages; the sector/gas we want can sit beyond
+    page 1. Follows ``meta.next_page`` (or ``meta.total_pages``) when present;
+    an unpaginated body simply ends after the first request.
+    """
+    records: list[dict] = []
+    page = 1
+    for _ in range(_MAX_PAGES):
+        try:
+            body = await ctx.http.get_json(_API, params={
+                "regions": iso, "source": "Climate Watch",
+                "page": page, "per_page": _PER_PAGE,
+            })
+        except RuntimeError as exc:
+            raise RuntimeError(f"Climate Watch request failed ({exc}).") from None
+        records.extend((body or {}).get("data") or [])
+        meta = (body or {}).get("meta") or {}
+        pag = meta.get("pagination") if isinstance(meta.get("pagination"), dict) else meta
+        nxt = pag.get("next_page")
+        total_pages = pag.get("total_pages")
+        if isinstance(nxt, int) and nxt > page:
+            page = nxt
+        elif isinstance(total_pages, int) and page < total_pages:
+            page += 1
+        else:
+            break
+    return records
 
 
 class ClimateWatchPolicy:
@@ -108,11 +149,7 @@ class ClimateWatchPolicy:
         iso = (region.country_iso or "").strip().upper()
         if not iso:
             raise RuntimeError("Climate Watch: no country selected.")
-        try:
-            body = await ctx.http.get_json(_API, params={"regions": iso, "source": "Climate Watch"})
-        except RuntimeError as exc:
-            raise RuntimeError(f"Climate Watch request failed ({exc}).") from None
-        records = (body or {}).get("data") or []
+        records = await _fetch_records(ctx, iso)
         sector_key = str(filters.get("sector") or "electricity")
         sector_label = _SECTORS.get(sector_key, _SECTORS["electricity"])
         series, gas = _pick_series(records, sector_label)
@@ -131,16 +168,33 @@ class ClimateWatchPolicy:
         years = sorted(series)
         chosen = max([y for y in years if y <= base_year], default=None) or min(years, key=lambda y: abs(y - base_year))
         baseline_mt = series[chosen]
-        constant_t = round(baseline_mt * _MT_TO_T * (1.0 - reduction / 100.0), 1)
+        annual_t = baseline_mt * _MT_TO_T * (1.0 - reduction / 100.0)
+        try:
+            window_h = float(f.get("window_hours") if f.get("window_hours") not in (None, "") else _HOURS_PER_YEAR)
+        except (TypeError, ValueError):
+            window_h = _HOURS_PER_YEAR
+        if not window_h > 0:
+            window_h = _HOURS_PER_YEAR
+        # PyPSA's primary_energy constant bounds the emissions summed over the
+        # modelled (weighted) snapshots, so an annual tonnage must be pro-rated.
+        constant_t = round(annual_t * window_h / _HOURS_PER_YEAR, 1)
         return {
             "ok": True, "base_year_used": chosen, "baseline_mt": baseline_mt,
             "target_year": target_year, "reduction": reduction, "constant_t": constant_t,
+            "annual_t": round(annual_t, 1), "window_hours": window_h,
         }
 
     def preview(self, result: FetchResult) -> PreviewSummary:
         cap = self._cap(result)
         if not cap["ok"]:
             return PreviewSummary(counts={}, samples={}, notes=[cap["reason"]])
+        extra: list[str] = []
+        if result.payload["gas"] != "CO2":
+            extra.append("WARNING: no CO₂-only series published; baseline is All GHG "
+                         "(CO₂e), which overstates a CO₂ cap.")
+        if cap["window_hours"] == _HOURS_PER_YEAR:
+            extra.append("Cap is an annual tonnage (window = 8760 h); set 'Modelled hours' "
+                         "if the model covers fewer hours.")
         return PreviewSummary(
             counts={"global_constraints": 1, "cap_MtCO2": round(cap["constant_t"] / _MT_TO_T, 2)},
             samples={"constraint": [{"target_year": cap["target_year"], "cap_tCO2": cap["constant_t"]}]},
@@ -148,7 +202,9 @@ class ClimateWatchPolicy:
                 f"{result.payload['iso']} {result.payload['sector_label']} baseline "
                 f"{cap['baseline_mt']:.1f} MtCO₂ ({cap['base_year_used']}, gas {result.payload['gas']}).",
                 f"Cap {cap['reduction']:.0f}% below baseline by {cap['target_year']} "
-                f"→ {cap['constant_t'] / _MT_TO_T:.2f} MtCO₂.",
+                f"→ {cap['annual_t'] / _MT_TO_T:.2f} MtCO₂/yr, {cap['constant_t'] / _MT_TO_T:.4f} "
+                f"MtCO₂ over {cap['window_hours']:.0f} h.",
+                *extra,
             ],
         )
 
@@ -164,7 +220,10 @@ class ClimateWatchPolicy:
                 "constant": cap["constant_t"],
                 "source": (f"Climate Watch {result.payload['sector_label']} baseline "
                            f"{cap['baseline_mt']:.1f} MtCO₂ ({cap['base_year_used']}), "
-                           f"−{cap['reduction']:.0f}% by {cap['target_year']}"),
+                           f"−{cap['reduction']:.0f}% by {cap['target_year']}; annual "
+                           f"{cap['annual_t']:.0f} t scaled to {cap['window_hours']:.0f} h"
+                           + ("" if result.payload["gas"] == "CO2"
+                              else "; gas = All GHG (CO2e), not CO2")),
             }]
         frag.provenance = Provenance(
             META.id, result.region.country_iso, result.region.country_name,

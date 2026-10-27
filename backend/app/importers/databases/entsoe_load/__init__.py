@@ -194,6 +194,65 @@ def _first_reason_text(root: ET.Element) -> str:
     return ""
 
 
+def _timeseries_curve_type(ts: ET.Element) -> str:
+    """``curveType`` of a TimeSeries (``A01`` fixed-size blocks, ``A03``
+    variable-sized blocks); empty when absent."""
+    for c in _children(ts, "curveType"):
+        return (c.text or "").strip()
+    return ""
+
+
+def _period_points(
+    ts: ET.Element, period: ET.Element, value_tag: str
+) -> list[tuple[datetime, float]]:
+    """``(timestamp_utc, value)`` for one Period.
+
+    Timestamp = interval start + resolution x (position - 1). For curveType
+    ``A03`` ENTSO-E *omits* a point whose value equals its predecessor, so each
+    point is held (forward-filled) until the next listed position and the last
+    one until the period's ``timeInterval/end``. Other curve types are read as
+    listed.
+    """
+    start: datetime | None = None
+    end: datetime | None = None
+    res_min = 60
+    interval = _children(period, "timeInterval")
+    if interval:
+        starts = _children(interval[0], "start")
+        if starts:
+            start = _parse_dt(starts[0].text)
+        ends = _children(interval[0], "end")
+        if ends:
+            end = _parse_dt(ends[0].text)
+    resolutions = _children(period, "resolution")
+    if resolutions:
+        res_min = _resolution_minutes(resolutions[0].text)
+    if start is None:
+        return []
+    listed: list[tuple[int, float]] = []
+    for pt in _children(period, "Point"):
+        pos_el = _children(pt, "position")
+        val_el = _children(pt, value_tag)
+        if not pos_el or not val_el:
+            continue
+        try:
+            listed.append((int(pos_el[0].text or ""), float(val_el[0].text or "")))
+        except (TypeError, ValueError):
+            continue
+    listed.sort(key=lambda pv: pv[0])
+    if _timeseries_curve_type(ts) != "A03" or not listed:
+        return [(start + timedelta(minutes=res_min * (pos - 1)), v) for pos, v in listed]
+    last_pos = listed[-1][0]
+    if end is not None and end > start:
+        last_pos = max(last_pos, int((end - start).total_seconds() // 60 // res_min))
+    out: list[tuple[datetime, float]] = []
+    for i, (pos, v) in enumerate(listed):
+        nxt = listed[i + 1][0] if i + 1 < len(listed) else last_pos + 1
+        for q in range(pos, max(nxt, pos + 1)):
+            out.append((start + timedelta(minutes=res_min * (q - 1)), v))
+    return out
+
+
 def _parse_load_xml(xml_text: str) -> list[tuple[datetime, float]]:
     """Extract ``(timestamp_utc, MW)`` points from a GL_MarketDocument.
 
@@ -209,30 +268,7 @@ def _parse_load_xml(xml_text: str) -> list[tuple[datetime, float]]:
     series = [e for e in root.iter() if _local(e.tag) == "TimeSeries"]
     for ts in series:
         for period in _children(ts, "Period"):
-            start: datetime | None = None
-            res_min = 60
-            interval = _children(period, "timeInterval")
-            if interval:
-                starts = _children(interval[0], "start")
-                if starts:
-                    start = _parse_dt(starts[0].text)
-            resolutions = _children(period, "resolution")
-            if resolutions:
-                res_min = _resolution_minutes(resolutions[0].text)
-            if start is None:
-                continue
-            for pt in _children(period, "Point"):
-                pos_el = _children(pt, "position")
-                qty_el = _children(pt, "quantity")
-                if not pos_el or not qty_el:
-                    continue
-                try:
-                    pos = int(pos_el[0].text or "")
-                    qty = float(qty_el[0].text or "")
-                except (TypeError, ValueError):
-                    continue
-                t = start + timedelta(minutes=res_min * (pos - 1))
-                points.append((t, qty))
+            points.extend(_period_points(ts, period, "quantity"))
     return points
 
 

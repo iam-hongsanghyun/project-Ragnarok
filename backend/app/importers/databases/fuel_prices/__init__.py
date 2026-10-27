@@ -3,14 +3,17 @@
 Turns a fuel-price snapshot (the numbers a user reads off a futures screen or a
 market report) into per-carrier **thermal** fuel costs on the ``carriers`` sheet,
 doing the unit conversion so users stop hand-typing €/MWh from $/MMBtu, $/tonne
-and $/bbl. Each enabled fuel lands as one carrier row with ``marginal_cost``
-(currency/MWh thermal) plus the raw price / unit / conversion for provenance; a
+and $/bbl. Each enabled fuel lands as one carrier row with ``fuel_cost_thermal``
+(currency/MWh thermal) plus the raw price / unit / conversion for provenance
+(PyPSA carriers have no marginal_cost, so the cost reaches dispatch only via the
+merge step, which sets every generator of that carrier to
+``marginal_cost = fuel_cost_thermal / efficiency``); a
 carbon price (currency/tCO₂) is carried through for the run's carbon setting.
 
 Not a network fetch — the prices are user inputs (the TODO's "user's own futures
-snapshot" source), converted deterministically. To get €/MWh **electric** at a
-generator, divide the thermal cost by that generator's efficiency (Ragnarok's M3
-convention already treats fuel + carbon on the primary-energy basis).
+snapshot" source), converted deterministically. The electric €/MWh at a
+generator is the thermal cost divided by that generator's efficiency
+(``electric_marginal_cost``); carbon stays on the primary-energy basis (M3).
 
 Conversions (thermal energy content, documented constants):
     gas      $/MMBtu × 3.41214 MMBtu/MWh
@@ -56,8 +59,23 @@ _FUELS: list[tuple[str, str, str, Any]] = [
 ]
 
 
+def electric_marginal_cost(fuel_cost_thermal: float, efficiency: Any) -> float:
+    """Generator ``marginal_cost`` (currency/MWh electric) = thermal fuel cost / efficiency.
+
+    A missing, non-numeric or non-positive efficiency counts as 1 (PyPSA's
+    default), so the generator still receives the thermal price.
+    """
+    try:
+        eff = float(efficiency)
+    except (TypeError, ValueError):
+        eff = 1.0
+    if not eff > 0:  # also catches NaN
+        eff = 1.0
+    return round(float(fuel_cost_thermal) / eff, 4)
+
+
 def convert_fuel_prices(filters: dict[str, Any]) -> list[dict[str, Any]]:
-    """Pure: filter values → carrier rows with thermal ``marginal_cost``.
+    """Pure: filter values → carrier rows with thermal ``fuel_cost_thermal``.
 
     A fuel is included only when its price is a positive number.
     """
@@ -71,7 +89,11 @@ def convert_fuel_prices(filters: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         rows.append({
             "name": carrier,
-            "marginal_cost": round(float(conv(raw)), 4),
+            # NOT a PyPSA carriers attribute: the merge step (mergeFragment.ts /
+            # backend/mcp/fragment.py) turns it into each generator's
+            # ``marginal_cost = fuel_cost_thermal / efficiency`` (see
+            # ``electric_marginal_cost``).
+            "fuel_cost_thermal": round(float(conv(raw)), 4),
             "fuel_cost_basis": "thermal (currency/MWh_th)",
             "raw_price": raw,
             "raw_unit": unit,
@@ -94,10 +116,11 @@ META = DatabaseMeta(
     description=(
         "Enter current or forward fuel prices in their native units (gas $/MMBtu, "
         "coal & biomass $/tonne, oil $/bbl, nuclear directly in $/MWh thermal). "
-        "They're converted to per-MWh thermal fuel costs and land on the carriers "
-        "sheet as marginal_cost, so you stop hand-typing €/MWh. A carbon price "
-        "(currency/tCO₂) is carried through for the run's carbon setting. Divide "
-        "the thermal cost by a plant's efficiency for its €/MWh electric."
+        "They're converted to per-MWh thermal fuel costs, kept on the carriers "
+        "sheet (fuel_cost_thermal), and applied to every existing generator of that "
+        "carrier as marginal_cost = fuel cost / efficiency (overwriting its "
+        "marginal_cost). A carbon price (currency/tCO₂) is carried through for the "
+        "run's carbon setting."
     ),
     targets=["carriers"],
     country_coverage="global",  # prices aren't country-specific here
@@ -137,7 +160,7 @@ class FuelPrices:
         carriers = result.payload["carriers"]
         carbon = result.payload["carbon_price"]
         notes = [
-            f"{c['name']}: {c['raw_price']} {c['raw_unit']} → {c['marginal_cost']} /MWh thermal"
+            f"{c['name']}: {c['raw_price']} {c['raw_unit']} → {c['fuel_cost_thermal']} /MWh thermal"
             for c in carriers
         ]
         if carbon > 0:

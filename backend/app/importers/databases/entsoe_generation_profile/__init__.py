@@ -52,8 +52,7 @@ from ..entsoe_load import (
     _EIC_BY_ISO,
     _first_reason_text,
     _local,
-    _parse_dt,
-    _resolution_minutes,
+    _period_points,
     _slug,
     _to_period,
     national_bus_name,
@@ -88,29 +87,7 @@ def _parse_generation_xml(xml_text: str) -> dict[str, list[tuple[datetime, float
             continue
         bucket = out.setdefault(psr, [])
         for period in _children(ts, "Period"):
-            start = None
-            res_min = 60
-            interval = _children(period, "timeInterval")
-            if interval:
-                starts = _children(interval[0], "start")
-                if starts:
-                    start = _parse_dt(starts[0].text)
-            resolutions = _children(period, "resolution")
-            if resolutions:
-                res_min = _resolution_minutes(resolutions[0].text)
-            if start is None:
-                continue
-            for pt in _children(period, "Point"):
-                pos_el = _children(pt, "position")
-                qty_el = _children(pt, "quantity")
-                if not pos_el or not qty_el:
-                    continue
-                try:
-                    pos = int(pos_el[0].text or "")
-                    qty = float(qty_el[0].text or "")
-                except (TypeError, ValueError):
-                    continue
-                bucket.append((start + timedelta(minutes=res_min * (pos - 1)), qty))
+            bucket.extend(_period_points(ts, period, "quantity"))
     return out
 
 

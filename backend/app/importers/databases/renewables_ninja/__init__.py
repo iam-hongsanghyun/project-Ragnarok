@@ -51,11 +51,22 @@ def _techs(filters: dict[str, Any]) -> list[str]:
     return picked or ["solar", "wind"]
 
 
+def _stamp(key: Any) -> str:
+    """Epoch-ms / epoch-s key → UTC ``YYYY-MM-DD HH:MM``; ISO keys pass through."""
+    k = str(key).strip()
+    if k.isdigit() and len(k) >= 10:
+        secs = int(k) / 1000.0 if len(k) >= 13 else float(int(k))
+        return datetime.fromtimestamp(secs, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+    return k[:16].replace("T", " ")
+
+
 def _series(body: Any) -> list[tuple[str, float]]:
     """Parse a ninja ``format=json`` body → sorted ``[(snapshot, cf)]``.
 
     ``data`` maps a timestamp to ``{"electricity": <cf>}`` (capacity=1 → the
-    value is the capacity factor). Timestamps are ``YYYY-MM-DD HH:MM``.
+    value is the capacity factor). The API keys the series by **epoch
+    milliseconds (UTC)** (``"1546300800000"``); an ISO ``YYYY-MM-DD[ T]HH:MM``
+    key is accepted too. Snapshots are UTC ``YYYY-MM-DD HH:MM``.
     """
     data = (body or {}).get("data") or {}
     out: list[tuple[str, float]] = []
@@ -64,8 +75,8 @@ def _series(body: Any) -> list[tuple[str, float]]:
         if val is None:
             continue
         try:
-            out.append((str(ts)[:16].replace("T", " "), float(val)))
-        except (TypeError, ValueError):
+            out.append((_stamp(ts), float(val)))
+        except (TypeError, ValueError, OverflowError, OSError):
             continue
     out.sort()
     return out
@@ -144,7 +155,9 @@ class RenewablesNinja:
 
         tasks = {}
         if "solar" in techs:
-            tasks["solar"] = self._fetch_cf(ctx, _PV_URL, {**common, "system_loss": 0.1, "tracking": 0, "tilt": 35, "azim": 180})
+            tasks["solar"] = self._fetch_cf(ctx, _PV_URL, {**common, "system_loss": 0.1, "tracking": 0, "tilt": 35,
+                                                  # panels face the equator: south (180) in the northern hemisphere, north (0) in the southern
+                                                  "azim": 180 if lat >= 0 else 0})
         if "wind" in techs:
             tasks["wind"] = self._fetch_cf(ctx, _WIND_URL, {**common, "height": 100, "turbine": "Vestas V90 2000"})
         results = await asyncio.gather(*tasks.values())

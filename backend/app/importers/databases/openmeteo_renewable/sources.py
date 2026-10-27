@@ -123,6 +123,10 @@ async def nasa_power(http: Any, lat: float, lon: float, date_from: str, date_to:
         "latitude": lat, "longitude": lon,
         "start": date_from.replace("-", ""), "end": date_to.replace("-", ""),
         "format": "JSON",
+        # POWER hourly defaults to LST (local solar time); the pipeline stamps
+        # weather as UTC and applies ``utc_offset`` itself, so ask for UTC
+        # explicitly (otherwise the longitude shift is applied twice).
+        "time-standard": "UTC",
     })
     param = (((body or {}).get("properties") or {}).get("parameter")) or {}
     ghi_map = param.get("ALLSKY_SFC_SW_DWN") or {}

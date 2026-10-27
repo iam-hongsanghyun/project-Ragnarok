@@ -31,8 +31,8 @@ def combine_fragments(
     filters: dict[str, Any],
     dataset_ids: list[str],
 ) -> WorkbookFragment:
-    """Fold dataset fragments into one. Static sheets concatenate, ``carriers``
-    unions by name, temporal sheets merge per-snapshot (combining columns), and
+    """Fold dataset fragments into one. Static sheets concatenate with
+    name dedupe, ``carriers`` unions by name, temporal sheets merge per-snapshot (combining columns), and
     snapshots take the sorted union. One provenance row summarises the batch.
     """
     out = WorkbookFragment()
@@ -66,7 +66,28 @@ def combine_fragments(
                         existing.append(nr)
                         by_snap[snap] = nr
             else:
-                out.sheets.setdefault(sheet, []).extend(dict(r) for r in rows)
+                # Static sheets dedupe by ``name`` (first row wins; empty cells of
+                # the kept row are filled from later duplicates). Datasets of one
+                # source each emit the same bus rows, which would otherwise be
+                # renamed ``DEU_2`` by the frontend merge. Rows without a name
+                # are kept as-is.
+                existing = out.sheets.setdefault(sheet, [])
+                by_name = {
+                    str(r["name"]): r for r in existing if r.get("name") not in (None, "")
+                }
+                for r in rows:
+                    name = r.get("name")
+                    if name in (None, ""):
+                        existing.append(dict(r))
+                    elif str(name) in by_name:
+                        kept = by_name[str(name)]
+                        for k, v in r.items():
+                            if kept.get(k) in (None, "") and v not in (None, ""):
+                                kept[k] = v
+                    else:
+                        nr = dict(r)
+                        existing.append(nr)
+                        by_name[str(name)] = nr
         for s in frag.snapshots or []:
             snapshots.add(s)
 

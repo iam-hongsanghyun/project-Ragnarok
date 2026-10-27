@@ -47,7 +47,11 @@ from ..osm import (
 
 # number + optional SI power unit (W/kW/MW/GW). OSM `plant:output:electricity`
 # values look like "1300 MW", "0.5 MWp", "300000000 W", "2 GW".
-_POWER_RE = re.compile(r"(-?\d+(?:[.,]\d+)?)\s*([kKmMgG]?[wW])?")
+# A comma followed by exactly three digits is a thousands separator ("1,300 MW"
+# = 1300; "1,300.5" = 1300.5); any other comma is a decimal comma ("0,5 MW").
+_POWER_RE = re.compile(
+    r"(-?\d{1,3}(?:,\d{3})+(?:\.\d+)?(?!\d)|-?\d+(?:[.,]\d+)?)\s*([kKmMgG]?[wW])?"
+)
 
 # Common OSM plant:source values, offered as a filter (empty = all).
 _SOURCES = [
@@ -66,7 +70,11 @@ def _parse_power_mw(value: Any) -> float | None:
     if not m:
         return None
     try:
-        num = float(m.group(1).replace(",", "."))
+        raw = m.group(1)
+        if re.fullmatch(r"-?\d{1,3}(?:,\d{3})+(?:\.\d+)?", raw):
+            num = float(raw.replace(",", ""))  # thousands separators
+        else:
+            num = float(raw.replace(",", "."))  # decimal comma
     except ValueError:
         return None
     unit = (m.group(2) or "").lower()
