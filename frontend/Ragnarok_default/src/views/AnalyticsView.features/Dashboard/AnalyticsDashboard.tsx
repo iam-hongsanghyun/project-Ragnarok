@@ -43,6 +43,9 @@ import { AdequacyCard } from '../../../features/analytics/cards/AdequacyCard';
 import { RawSheetsCard } from '../../../features/analytics/cards/RawSheetsCard';
 import { PriceFormationCard } from '../../../features/analytics/cards/PriceFormationCard';
 import { CommitmentCard } from '../../../features/analytics/cards/CommitmentCard';
+import { PiecewiseCard } from '../../../features/analytics/cards/PiecewiseCard';
+import { MaintenanceCard } from '../../../features/analytics/cards/MaintenanceCard';
+import { PhaseShiftersCard } from '../../../features/analytics/cards/PhaseShiftersCard';
 import { BidStrategyCard } from '../../../features/analytics/cards/BidStrategyCard';
 import { OptimalBidCard } from '../../../features/analytics/cards/OptimalBidCard';
 import { AssetSwapCard } from '../../../features/analytics/cards/AssetSwapCard';
@@ -157,6 +160,8 @@ function newPivotCard(): Card { return { id: newId('pivot'), kind: 'pivot', conf
 function newChartCard(): Card { return { id: newId('chart'), kind: 'chart', config: defaultChartConfig() }; }
 function newMapCard(): Card   { return { id: newId('map'),   kind: 'map' }; }
 function newNotesCard(): Card { return { id: newId('notes'), kind: 'notes' }; }
+function newCo2ShadowCard(): Card { return { id: newId('co2-shadow'), kind: 'co2-shadow' }; }
+function newLoadAnalysisCard(): Card { return { id: newId('load-analysis'), kind: 'load-analysis' }; }
 
 /** Kinds offered from an empty placeholder cell's "+" menu. The Pivot chart is
  *  the primary chart builder; the legacy metric chart stays available. */
@@ -165,6 +170,10 @@ const ADDABLE_CARDS = [
   { kind: 'chart', label: 'Metric chart' },
   { kind: 'map',   label: 'Map' },
   { kind: 'notes', label: 'Run notes' },
+  { kind: 'co2-shadow', label: 'CO₂ shadow price' },
+  { kind: 'load-analysis', label: 'Load analysis' },
+  { kind: 'maintenance', label: 'Maintenance schedule' },
+  { kind: 'phase-shifters', label: 'Phase shifters' },
 ];
 
 function createCard(kind: string): Card {
@@ -172,6 +181,10 @@ function createCard(kind: string): Card {
     case 'chart': return newChartCard();
     case 'map':   return newMapCard();
     case 'notes': return newNotesCard();
+    case 'co2-shadow': return newCo2ShadowCard();
+    case 'load-analysis': return newLoadAnalysisCard();
+    case 'maintenance': return { id: newId('maintenance'), kind: 'maintenance' };
+    case 'phase-shifters': return { id: newId('phase-shifters'), kind: 'phase-shifters' };
     default:      return newPivotCard();
   }
 }
@@ -203,6 +216,8 @@ interface Props {
    *  the parent hydrates only those sheets at the length needed. Empty {} when
    *  the layout is system-only. */
   onNeedSeries?: (windows: Record<string, number>) => void;
+  /** Stored-run name behind `results` (enables parametrised statistics queries). */
+  runName?: string | null;
 }
 
 export function AnalyticsDashboard({
@@ -215,6 +230,7 @@ export function AnalyticsDashboard({
   initialLayout = DEFAULT_LAYOUT,
   showPresets = true,
   onNeedSeries,
+  runName,
 }: Props) {
   const { layout, setLayout, editing, setEditing, resetToDefault } =
     useDashboardLayout(initialLayout, storageKey);
@@ -459,7 +475,7 @@ export function AnalyticsDashboard({
             : <p className="dashboard-cell-missing">No asset economics available for this run.</p>;
         case 'statistics':
           return results.statistics
-            ? <StatisticsCard data={results.statistics} />
+            ? <StatisticsCard data={results.statistics} runName={runName ?? null} />
             : <p className="dashboard-cell-missing">No statistics available for this run.</p>;
         case 'near-optimal':
           return results.nearOptimal
@@ -505,6 +521,18 @@ export function AnalyticsDashboard({
           return results.commitment
             ? <CommitmentCard data={results.commitment} />
             : <p className="dashboard-cell-missing">No committable units in this run.</p>;
+        case 'piecewise':
+          return results.piecewise
+            ? <PiecewiseCard data={results.piecewise} currencySymbol={currencySymbol} />
+            : <p className="dashboard-cell-missing">No piecewise curves in this run (add a &lt;component&gt;-&lt;attribute&gt;-pw sheet in Forge).</p>;
+        case 'maintenance':
+          return results.maintenance
+            ? <MaintenanceCard data={results.maintenance} />
+            : <p className="dashboard-cell-missing">No maintainable units in this run (set <code>maintainable</code> on a generator, link or process).</p>;
+        case 'phase-shifters':
+          return results.phaseShifters
+            ? <PhaseShiftersCard data={results.phaseShifters} />
+            : <p className="dashboard-cell-missing">No optimised phase shifters in this run (set <code>phase_shift_min</code> &lt; <code>phase_shift_max</code> on a transformer).</p>;
         case 'bid-strategy':
           return results.bidStrategy
             ? <BidStrategyCard data={results.bidStrategy} />
@@ -659,6 +687,9 @@ export function AnalyticsDashboard({
       case 'raw-sheets': return 'Imported raw sheets (unrecognised)';
       case 'price-formation': return 'Price formation (why the price is what it is)';
       case 'commitment': return 'Unit commitment (starts & on/off)';
+      case 'piecewise': return 'Piecewise cost curves (solved)';
+      case 'maintenance': return 'Maintenance schedule (maintainable units)';
+      case 'phase-shifters': return 'Phase shifters (optimised angles)';
       case 'bid-strategy': return 'Bid strategy (markup vs price-taker)';
       case 'optimal-bid': return 'Optimal bid (profit-maximising markup)';
       case 'asset-swap': return 'Asset swap (repowering what-if)';

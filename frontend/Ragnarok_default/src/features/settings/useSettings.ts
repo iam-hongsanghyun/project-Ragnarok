@@ -34,6 +34,7 @@ function loadSettings(): AppSettings {
         solverType,
         solveAcceptance: parsed.solveAcceptance ?? SETTINGS_DEFAULTS.solveAcceptance,
         objectiveAutoScale: parsed.objectiveAutoScale ?? SETTINGS_DEFAULTS.objectiveAutoScale,
+        advancedSolve: parsed.advancedSolve,
         currencyCode: parsed.currencyCode ?? SETTINGS_DEFAULTS.currencyCode,
         currencySymbol: parsed.currencySymbol ?? SETTINGS_DEFAULTS.currencySymbol,
         enableLoadShedding: parsed.enableLoadShedding ?? SETTINGS_DEFAULTS.enableLoadShedding,

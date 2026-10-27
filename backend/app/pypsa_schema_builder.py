@@ -163,6 +163,25 @@ def _filter_attribute_names(
     return out
 
 
+def _piecewise_attributes_for(list_name: str, sheet_name: str) -> list[dict[str, Any]]:
+    """Curves PyPSA accepts on ``list_name``, with the sheet that carries each."""
+    from backend.pypsa.network.piecewise import piecewise_catalog, piecewise_sheet_name
+
+    return [
+        {
+            "attribute": row["attribute"],
+            "x": row["x"],
+            "kind": row["kind"],
+            "ported": row["ported"],
+            "allow_extendable": row["allow_extendable"],
+            "output": row["output"],
+            "sheet": piecewise_sheet_name(sheet_name, row["attribute"]),
+        }
+        for row in piecewise_catalog()
+        if row["list_name"] == list_name
+    ]
+
+
 def build_pypsa_schema() -> dict[str, Any]:
     """Build the schema dict the frontend + backend share.
 
@@ -217,6 +236,9 @@ def build_pypsa_schema() -> dict[str, Any]:
                 list_name_order.index(list_name)
                 if list_name in list_name_order else -1
             ),
+            # PyPSA >= 1.3 curves this component accepts (pypsa/data/piecewise.csv):
+            # one `<sheet>-<attribute>-pw` workbook sheet each (P10).
+            "piecewise_attributes": _piecewise_attributes_for(list_name, sheet_name),
         }
 
     # ``snapshots`` is not a PyPSA component, but the workbook treats it as

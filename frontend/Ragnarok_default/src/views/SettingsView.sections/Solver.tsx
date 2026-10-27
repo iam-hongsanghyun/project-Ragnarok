@@ -5,6 +5,8 @@ import React from 'react';
 import { SolveAcceptance, SolverType } from '../../features/settings/useSettings';
 import { SETTINGS_CONFIG } from 'lib/constants';
 import { NumberDraftInput } from '../../shared/components/NumberDraftInput';
+import type { AdvancedSolveOptions } from 'lib/settings/advancedSolve';
+import { SolverAdvanced } from './SolverAdvanced';
 
 export interface SolverSectionProps {
   solverThreads: number;
@@ -12,6 +14,8 @@ export interface SolverSectionProps {
   solveAcceptance: SolveAcceptance;
   objectiveAutoScale: boolean;
   queuePollSeconds: number;
+  advancedSolve?: AdvancedSolveOptions;
+  onAdvancedSolveChange: (v: AdvancedSolveOptions) => void;
   onSolverThreadsChange: (v: number) => void;
   onSolverTypeChange: (v: SolverType) => void;
   onSolveAcceptanceChange: (v: SolveAcceptance) => void;
@@ -134,6 +138,7 @@ export function SolverSection(props: SolverSectionProps) {
           off automatically. Lower = snappier updates, more backend requests.
         </p>
       </div>
+      <SolverAdvanced value={props.advancedSolve} onChange={props.onAdvancedSolveChange} />
     </section>
   );
 }

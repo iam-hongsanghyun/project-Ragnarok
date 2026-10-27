@@ -1,4 +1,5 @@
-"""Tests for backend/mcp/fragment.py — the MCP twin of the GUI's mergeFragment.ts.
+"""Tests for backend/app/fragment_merge.py — the single merge behind POST /api/session/merge-fragment
+(used by the GUI and by MCP).
 
 The agent path has no browser, so an importer/siting/PyPSA-Earth fragment must
 merge the way "Add to workbook" does: append with name dedupe (never replace a
@@ -7,7 +8,7 @@ whole sheet), union carriers and snapshots, widen temporal sheets.
 
 from __future__ import annotations
 
-from backend.mcp.fragment import PROVENANCE_SHEET, merge_fragment
+from backend.app.fragment_merge import PROVENANCE_SHEET, merge_fragment
 
 
 def _model() -> dict:

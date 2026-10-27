@@ -87,21 +87,3 @@ export interface StepGroup {
   items: Array<{ step: TutorialStep; number: number }>;
 }
 
-/**
- * Steps grouped into consecutive runs that share a `section`, preserving order.
- *
- * Runs rather than a keyed map: a course is read front to back, so a section
- * that reappears later is a second heading, not an append to the first — which
- * also makes an accidentally out-of-order step visible instead of silently
- * absorbed.
- */
-export function stepsBySection(steps: TutorialStep[]): StepGroup[] {
-  const groups: StepGroup[] = [];
-  steps.forEach((step, i) => {
-    const section = step.section ?? null;
-    const last = groups[groups.length - 1];
-    if (last && last.section === section) last.items.push({ step, number: i + 1 });
-    else groups.push({ section, items: [{ step, number: i + 1 }] });
-  });
-  return groups;
-}

@@ -1,6 +1,6 @@
 import { describe, test, expect } from '@jest/globals';
 import { applyRounding, numericColumns } from './transforms';
-import { buildTargets, haversineKm, sheetSnappable, snapSheet } from './snap';
+import { buildTargets, sheetSnappable } from './snap';
 import { nonEmptySheets, roundFindings, snapFindings } from './validate';
 import type { GridRow, WorkbookModel } from 'lib/types';
 
@@ -30,47 +30,14 @@ describe('forge/transforms', () => {
   });
 });
 
+// The nearest-bus snap (haversine, buffer, bus0/bus1 anchors) is backend code now
+// (backend/app/forge_helpers.py); its parity tests are in
+// backend/tests/test_forge_build_helpers.py. Only the render-time helpers stay here.
 describe('forge/snap', () => {
-  test('haversine ~111 km per degree of longitude at the equator', () => {
-    expect(haversineKm(0, 0, 0, 1)).toBeCloseTo(111.19, 0);
-  });
-
-  const buses: GridRow[] = [
-    { name: 'A', x: 0, y: 0 },
-    { name: 'B', x: 1, y: 0 },
-  ];
-  const targets = buildTargets(buses);
-
   test('buildTargets reads x=lon, y=lat from named rows', () => {
+    const targets = buildTargets([{ name: 'A', x: 0, y: 0 }, { name: 'B', x: 1, y: 0 }, { name: 'nocoord' }]);
     expect(targets.map((t) => t.name)).toEqual(['A', 'B']);
     expect(targets[1]).toMatchObject({ lat: 0, lon: 1 });
-  });
-
-  test('snap assigns nearest within buffer and reports those outside', () => {
-    const overlay: GridRow[] = [
-      { name: 'g1', x: 0.1, y: 0, bus: '' }, // ~11 km from A
-      { name: 'g2', x: 0.9, y: 0, bus: '' }, // ~11 km from B
-      { name: 'far', x: 5, y: 0, bus: '' }, // ~445 km from B
-      { name: 'nogeo', bus: '' }, // no coordinates
-    ];
-    const r = snapSheet(overlay, targets, 50);
-    expect(r.rows[0].bus).toBe('A');
-    expect(r.rows[1].bus).toBe('B');
-    expect(r.rows[2].bus).toBe(''); // beyond buffer → unchanged
-    expect(r.assigned).toBe(2);
-    expect(r.outside).toHaveLength(1);
-    expect(r.outside[0]).toMatchObject({ name: 'far', nearest: 'B', field: 'bus' });
-    expect(r.noCoords).toBe(1);
-    expect(r.anchors).toEqual(['bus']);
-  });
-
-  test('snap drives bus0 / bus1 from branch endpoint anchors', () => {
-    const lines: GridRow[] = [{ name: 'L', x0: 0, y0: 0, x1: 1, y1: 0, bus0: '', bus1: '' }];
-    const r = snapSheet(lines, targets, 50);
-    expect(r.rows[0].bus0).toBe('A');
-    expect(r.rows[0].bus1).toBe('B');
-    expect(r.assigned).toBe(2);
-    expect(r.anchors.sort()).toEqual(['bus0', 'bus1']);
   });
 
   test('sheetSnappable detects any coordinate anchor', () => {

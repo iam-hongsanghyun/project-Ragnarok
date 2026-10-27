@@ -177,12 +177,6 @@ async function jsonOrThrow<T>(resp: Response, action: string): Promise<T> {
   return (await resp.json()) as T;
 }
 
-export async function listDatabases(): Promise<DatabaseMeta[]> {
-  const resp = await fetch(`${API_BASE}/api/import/databases`);
-  const body = await jsonOrThrow<{ databases: DatabaseMeta[] }>(resp, 'list databases');
-  return body.databases;
-}
-
 export async function listSources(): Promise<Source[]> {
   const resp = await fetch(`${API_BASE}/api/import/sources`);
   const body = await jsonOrThrow<{ sources: Source[] }>(resp, 'list sources');

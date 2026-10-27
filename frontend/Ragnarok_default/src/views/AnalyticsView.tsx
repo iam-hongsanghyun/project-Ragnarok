@@ -151,6 +151,7 @@ export function AnalyticsView(props: AnalyticsViewProps) {
             pathwayConfig={props.pathwayConfig}
             onSelectedPeriodChange={props.onSelectedPeriodChange}
             onNeedSeries={props.onNeedSeries}
+            runName={props.activeRunName}
           />
         )
       )}

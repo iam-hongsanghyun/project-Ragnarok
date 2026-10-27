@@ -514,29 +514,6 @@ export function Dashboard({ layout, onLayoutChange, editing, renderCard, cardTit
 
 // ── Layout mutation utilities (used by the parent toolbar) ─────────────────
 
-export function addCard(layout: DashboardLayout, rowId: string | null, card: Card): DashboardLayout {
-  const nextCards = [...layout.cards, card];
-  const cell = { id: newId('cell'), flex: 1, cardId: card.id };
-  if (rowId === null) {
-    // No row chosen — append a new row with this single cell.
-    return {
-      cards: nextCards,
-      rows: [...layout.rows, { id: newId('row'), height: 280, autoHeight: true, cells: [cell] }],
-    };
-  }
-  const exists = layout.rows.some((r) => r.id === rowId);
-  if (!exists) {
-    return {
-      cards: nextCards,
-      rows: [...layout.rows, { id: newId('row'), height: 280, autoHeight: true, cells: [cell] }],
-    };
-  }
-  return {
-    cards: nextCards,
-    rows: layout.rows.map((r) => (r.id === rowId ? { ...r, cells: [...r.cells, cell] } : r)),
-  };
-}
-
 export { newId };
 
 // ── Inline rename input for cell titles ─────────────────────────────────

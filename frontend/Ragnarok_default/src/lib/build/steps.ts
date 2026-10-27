@@ -8,7 +8,6 @@
  */
 import { WorkbookModel } from 'lib/types';
 import { ModelIssue } from 'lib/validation/issue';
-import { getComponentSchema } from 'lib/constants/pypsa_schema';
 
 export interface BuildStep {
   id: string;
@@ -138,11 +137,3 @@ export function getStepIssues(step: BuildStep, issues: ModelIssue[]): ModelIssue
   return issues.filter((issue) => sheets.has(issue.sheet));
 }
 
-export function findStepByIndex(index: number): BuildStep | null {
-  return BUILD_STEPS[index] ?? null;
-}
-
-/** Step is gated only by missing schema rows, not by validation severity. */
-export function stepHasSchema(step: BuildStep): boolean {
-  return getComponentSchema(step.primarySheet) != null;
-}

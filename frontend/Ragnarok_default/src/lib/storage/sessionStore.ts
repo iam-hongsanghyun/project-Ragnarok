@@ -20,7 +20,6 @@ import type {
   RollingHorizonConfig,
   SamplingConfig,
   ScenarioPreset,
-  WorkbookModel,
 } from 'lib/types';
 
 const DB_NAME = 'ragnarok';
@@ -111,18 +110,6 @@ export async function loadSessionControls(): Promise<SessionControls | null> {
     return await get<SessionControls>(CONTROLS_KEY);
   } catch {
     return null;
-  }
-}
-
-export async function loadSession(): Promise<{ model: WorkbookModel | null; controls: SessionControls | null }> {
-  try {
-    const [model, controls] = await Promise.all([
-      get<WorkbookModel>(MODEL_KEY),
-      get<SessionControls>(CONTROLS_KEY),
-    ]);
-    return { model, controls };
-  } catch {
-    return { model: null, controls: null };
   }
 }
 

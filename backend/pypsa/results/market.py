@@ -9,6 +9,7 @@ from typing import Any
 
 import pandas as pd
 import pypsa
+from ..network.piecewise import overlay_piecewise_marginal_cost, representative_marginal_costs
 
 from ..constants import carrier_color, generator_color
 from ..utils.series import weighted_sum
@@ -85,29 +86,55 @@ def freeze_expansion(network: pypsa.Network) -> None:
 
 # ── Commitment costs ──────────────────────────────────────────────────────────
 
+COMMITTABLE_LISTS = ("generators", "links", "processes")
+
+
+def event_cost_frame(network: pypsa.Network, list_name: str, status_attr: str) -> pd.DataFrame:
+    """Per-snapshot cost of each ``start_up`` / ``shut_down`` event, by unit.
+
+    ``start_up_cost`` / ``shut_down_cost`` are static_or_series in PyPSA >= 1.4,
+    so the price at the snapshot of the event comes from
+    ``get_switchable_as_dense`` (not the static column). Events are charged once
+    per occurrence, never scaled by the snapshot weighting (matches
+    ``n.statistics.opex(cost_types=...)``). Empty frame when the component has no
+    committable units or no event series.
+    """
+    cost_col = {"start_up": "start_up_cost", "shut_down": "shut_down_cost"}[status_attr]
+    comp = network.components[list_name]
+    events = comp.dynamic.get(status_attr)
+    if events is None or getattr(events, "empty", True):
+        return pd.DataFrame()
+    if cost_col not in comp.static.columns or "committable" not in comp.static.columns:
+        return pd.DataFrame()
+    com_i = comp.static.index[comp.static["committable"].astype(bool)]
+    com_i = com_i.intersection(events.columns)
+    if len(com_i) == 0:
+        return pd.DataFrame()
+    cost = network.get_switchable_as_dense(list_name, cost_col, inds=com_i)
+    return events.loc[:, com_i].astype(float) * cost.loc[:, com_i].reindex(events.index).fillna(0.0)
+
+
 def build_commitment_cost(network: pypsa.Network) -> float:
     """Total start-up + shut-down cost actually incurred over the window.
 
     PyPSA's unit-commitment formulation carries ``start_up`` / ``shut_down``
-    status series alongside ``status``; each transition is charged the
-    generator's ``start_up_cost`` / ``shut_down_cost``. Those are objective
-    terms, but they are per-EVENT rather than per-MWh, so nothing in the
-    energy-weighted cost maths sees them.
+    status series alongside ``status``; each transition is charged the unit's
+    ``start_up_cost`` / ``shut_down_cost`` *at that snapshot* (both attributes
+    may be time series). Covers committable Generators, Links and Processes.
+    Those are objective terms, but they are per-EVENT rather than per-MWh, so
+    nothing in the energy-weighted cost maths sees them.
 
     Returns 0.0 when nothing is committable, when the run relaxed the integers
     (``forceLp``), or when no unit ever changed state.
     """
     total = 0.0
-    for status_attr, cost_col in (("start_up", "start_up_cost"), ("shut_down", "shut_down_cost")):
-        events = getattr(network.generators_t, status_attr, None)
-        if events is None or getattr(events, "empty", True):
+    for list_name in COMMITTABLE_LISTS:
+        if list_name not in network.components.keys():
             continue
-        if cost_col not in network.generators.columns:
-            continue
-        costs = network.generators[cost_col].reindex(events.columns).fillna(0.0)
-        # Transitions are 0/1 per snapshot; a start-up is charged once, whatever
-        # the snapshot weighting (it is an event, not an hourly rate).
-        total += float((events.astype(float) * costs).to_numpy().sum())
+        for status_attr in ("start_up", "shut_down"):
+            frame = event_cost_frame(network, list_name, status_attr)
+            if not frame.empty:
+                total += float(frame.to_numpy().sum())
     return total
 
 
@@ -134,6 +161,7 @@ def build_merit_order(network: pypsa.Network) -> list[dict[str, Any]]:
     """
     capacity = installed_capacity_series(network.generators)
     rows: list[dict[str, Any]] = []
+    curve_cost = representative_marginal_costs(network)  # generators priced by a piecewise curve
     for name in network.generators.index:
         if any(name.startswith(pfx) for pfx in SYSTEM_GEN_PREFIXES):
             continue
@@ -147,7 +175,7 @@ def build_merit_order(network: pypsa.Network) -> list[dict[str, Any]]:
                 "name": name,
                 "carrier": carrier,
                 "bus": str(gen.get("bus", "")),
-                "marginal_cost": round(float(gen.get("marginal_cost", 0.0)), 2),
+                "marginal_cost": round(float(curve_cost.get(name, gen.get("marginal_cost", 0.0))), 2),
                 "p_nom": round(p_nom, 1),
                 "color": generator_color(network, name),
             }
@@ -172,6 +200,7 @@ def build_merit_order(network: pypsa.Network) -> list[dict[str, Any]]:
 _NATIVE_CONSTRAINT_PREFIXES = (
     "Generator-",
     "Link-",
+    "Process-",
     "Line-",
     "Bus-",
     "StorageUnit-",
@@ -485,7 +514,7 @@ def build_generator_economics(
     gens: list[dict[str, Any]] = []
     gen_p = network.generators_t.p
     if not gen_p.empty and len(network.generators):
-        mc_dense = network.get_switchable_as_dense("Generator", "marginal_cost")
+        mc_dense = overlay_piecewise_marginal_cost(network, network.get_switchable_as_dense("Generator", "marginal_cost"))
         p_nom_opt_s = installed_capacity_series(network.generators)
         for name in network.generators.index:
             if any(str(name).startswith(pfx) for pfx in SYSTEM_GEN_PREFIXES):

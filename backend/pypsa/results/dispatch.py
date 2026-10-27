@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Any
 
 import pandas as pd
 import pypsa
@@ -197,43 +198,52 @@ def _add_conversion_link_injections(
     absent (the light stored-run path injects ``p0`` only), it falls back to
     ``p0`` × the dense per-snapshot ``efficiency{N}``.
     """
-    links = network.links
-    if len(links) == 0 or network.links_t.p0.empty:
-        return
-    dyn = network.links_t
-    p0 = dyn.p0
+    # Links and Processes convert the same way (P29): ``p0`` is the withdrawal at
+    # bus0 and ``p{N}`` the (negative) injection at bus{N}; a Process just has no
+    # ``efficiency{N}`` (its ``rate{N}`` / ``-rate0`` plays that role).
     snapshots = network.snapshots
-    # Output ports: bus1 plus any multi-port columns (bus2, bus3, … — a blank
-    # port cell = port unused). Mirrors energy_balance.py's discovery.
-    ports = ["1"] + sorted(
-        c[3:] for c in links.columns
-        if c.startswith("bus") and c[3:].isdigit() and c not in ("bus0", "bus1")
-    )
-    for link in links.index:
-        if link not in p0.columns:
+    sources: list[tuple[str, pd.DataFrame, Any]] = [("Link", network.links, network.links_t)]
+    if len(getattr(network, "processes", [])):
+        sources.append(("Process", network.processes, network.c.processes.dynamic))
+    for comp, links, dyn in sources:
+        if len(links) == 0 or dyn["p0"].empty:
             continue
-        bus0 = str(links.at[link, "bus0"]) if "bus0" in links.columns else ""
-        if bus0 in elec_buses:
-            continue  # same-vector / transmission link, not a conversion into power
-        inflow = p0[link].reindex(snapshots).fillna(0.0).clip(lower=0.0)
-        carrier = str(links.at[link, "carrier"]) if "carrier" in links.columns else ""
-        key = carrier or str(link)
-        for port in ports:
-            bus_col = f"bus{port}"
-            if bus_col not in links.columns:
+        p0 = dyn["p0"]
+        # Output ports: bus1 plus any multi-port columns (bus2, bus3, … — a blank
+        # port cell = port unused). Mirrors energy_balance.py's discovery.
+        ports = ["1"] + sorted(
+            c[3:] for c in links.columns
+            if c.startswith("bus") and c[3:].isdigit() and c not in ("bus0", "bus1")
+        )
+        for link in links.index:
+            if link not in p0.columns:
                 continue
-            out_bus = links.at[link, bus_col]
-            if not isinstance(out_bus, str) or out_bus not in elec_buses:
-                continue
-            pn = dyn[f"p{port}"] if f"p{port}" in dyn else None
-            if pn is not None and link in pn.columns:
-                # Solved flow: -p{N} is the injection into bus{N}.
-                inj = (-pn[link].reindex(snapshots).fillna(0.0)).clip(lower=0.0)
-            else:
-                inj = inflow * _link_port_efficiency(network, link, port, snapshots)
-            if not (inj.abs() > 1e-12).any():
-                continue
-            result[key] = result[key].add(inj, fill_value=0.0) if key in result else inj
+            bus0 = str(links.at[link, "bus0"]) if "bus0" in links.columns else ""
+            if bus0 in elec_buses:
+                continue  # same-vector / transmission link, not a conversion into power
+            inflow = p0[link].reindex(snapshots).fillna(0.0).clip(lower=0.0)
+            carrier = str(links.at[link, "carrier"]) if "carrier" in links.columns else ""
+            key = carrier or str(link)
+            for port in ports:
+                bus_col = f"bus{port}"
+                if bus_col not in links.columns:
+                    continue
+                out_bus = links.at[link, bus_col]
+                if not isinstance(out_bus, str) or out_bus not in elec_buses:
+                    continue
+                pn = dyn[f"p{port}"] if f"p{port}" in dyn else None
+                if pn is not None and link in pn.columns:
+                    # Solved flow: -p{N} is the injection into bus{N}.
+                    inj = (-pn[link].reindex(snapshots).fillna(0.0)).clip(lower=0.0)
+                elif comp == "Process":
+                    rate0 = float(links.at[link, "rate0"]) if "rate0" in links.columns else -1.0
+                    raten = float(links.at[link, f"rate{port}"]) if f"rate{port}" in links.columns else 0.0
+                    inj = inflow * (raten / -rate0 if rate0 else 0.0)
+                else:
+                    inj = inflow * _link_port_efficiency(network, link, port, snapshots)
+                if not (inj.abs() > 1e-12).any():
+                    continue
+                result[key] = result[key].add(inj, fill_value=0.0) if key in result else inj
 
 
 def build_dispatch_series(
@@ -329,7 +339,6 @@ def build_curtailment_series(
 
 def build_price_emissions_series(
     network: pypsa.Network,
-    by_carrier: dict[str, pd.Series],
     price_series: pd.Series,
     emissions_factors: dict[str, float] | None = None,
 ) -> tuple[list[dict], list[dict]]:

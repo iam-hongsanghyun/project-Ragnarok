@@ -57,27 +57,6 @@ export function MapLegend({ carriers, showLines = true }: MapLegendProps) {
   );
 }
 
-// ── Loading colour scale legend (Analytics map) ───────────────────────────────
-
-interface LoadingLegendProps {
-  show: boolean;
-}
-
-export function LoadingLegend({ show }: LoadingLegendProps) {
-  if (!show) return null;
-  return (
-    <div className="map-legend loading-legend">
-      <div className="map-legend-title">Line loading</div>
-      <div className="loading-gradient-bar" />
-      <div className="loading-gradient-labels">
-        <span>0%</span>
-        <span>50%</span>
-        <span>100%</span>
-      </div>
-    </div>
-  );
-}
-
 // ── Nodal SMP colour scale legend ─────────────────────────────────────────────
 
 interface SmpLegendProps {

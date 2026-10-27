@@ -20,6 +20,7 @@ import type { AppSettings } from 'lib/settings/types';
 import { getDefaultSelectedPeriod } from 'lib/results/pathway';
 import { normalizeRollingConfig } from 'lib/results/rolling';
 import { normalizeSamplingConfig } from 'lib/results/sampling';
+import { advancedSolveToOptions, type AdvancedSolveOptions } from 'lib/settings/advancedSolve';
 
 export interface RunUiOptions {
   /** Optimisation backend id (only 'pypsa' today). */
@@ -33,6 +34,8 @@ export interface RunUiOptions {
   solverType: SolverType;
   solveAcceptance: AppSettings['solveAcceptance'];
   objectiveAutoScale: boolean;
+  /** Advanced n.optimize options from Settings → Solver (optional). */
+  advancedSolve?: AdvancedSolveOptions;
   currencySymbol: string;
 }
 
@@ -72,6 +75,7 @@ export function buildRunPayload(
     solverType: uiOpts.solverType,
     solveAcceptance: uiOpts.solveAcceptance,
     objectiveAutoScale: uiOpts.objectiveAutoScale,
+    ...advancedSolveToOptions(uiOpts.advancedSolve),
     currencySymbol: uiOpts.currencySymbol,
     enableLoadShedding: preset.enableLoadShedding,
     loadSheddingCost: preset.loadSheddingCost,

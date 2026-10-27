@@ -33,10 +33,13 @@ import {
   runBackendHook,
   uploadPluginFile,
 } from 'lib/api/plugins';
+import { fetchReportRuns } from 'lib/api/reports';
+import type { ReportRunOption } from 'lib/reporting/types';
 import type { SessionMeta } from 'lib/api/session';
 import type { PluginOptionsResolver } from 'lib/plugins/options';
 import { PluginOptionsContext } from '../../shared/hooks/pluginOptionsContext';
 import { useDebouncedValue } from '../../shared/hooks/useDebouncedValue';
+import { usePersistedState } from '../../shared/hooks/usePersistedState';
 import { inferPluginUi } from './PluginDetail';
 import { PluginPanel } from './PluginPanel';
 import { SearchableSelect } from '../../shared/components/SearchableSelect';
@@ -45,6 +48,8 @@ import { useToast } from '../../shared/components/Toast';
 interface Props {
   manifest: BackendPluginManifest;
   model: WorkbookModel;
+  /** The current run result — sent as `result` to `analyze(result, config)`. */
+  results?: unknown;
   onBuilt: (meta: SessionMeta) => void;
 }
 
@@ -211,7 +216,7 @@ function ServerFilePicker({
   );
 }
 
-export function BackendPluginDetail({ manifest, model, onBuilt }: Props) {
+export function BackendPluginDetail({ manifest, model, results, onBuilt }: Props) {
   const { showToast } = useToast();
   // Config lives in plain React state (fast, in-memory) and is persisted to
   // localStorage on a DEBOUNCE — never on every keystroke. Heavy/binary values
@@ -242,6 +247,22 @@ export function BackendPluginDetail({ manifest, model, onBuilt }: Props) {
     return () => window.clearTimeout(id);
   }, [config, storeKey]);
   const [busy, setBusy] = useState(false);
+
+  // Contract v2 `multiRun`: the user picks stored runs; their names go to analyze
+  // as `runs` and the server loads each run's analytics.
+  const [selectedRuns, setSelectedRuns] = usePersistedState<string[]>(`ui:be-plugin-runs:${manifest.id}`, []);
+  const [runOptions, setRunOptions] = useState<ReportRunOption[]>([]);
+  useEffect(() => {
+    if (!manifest.multiRun) return undefined;
+    let cancelled = false;
+    void fetchReportRuns()
+      .then((list) => { if (!cancelled) setRunOptions(list); })
+      .catch(() => { /* backend down — picker stays empty */ });
+    return () => { cancelled = true; };
+  }, [manifest.multiRun]);
+  const runsKey = manifest.multiRun ? selectedRuns.join('\u0001') : '';
+  const toggleRun = (name: string) =>
+    setSelectedRuns(selectedRuns.includes(name) ? selectedRuns.filter((n) => n !== name) : [...selectedRuns, name]);
 
   // `file` fields are rendered as server-side pickers (above); everything else
   // is rendered by PluginPanel from a schema with the file fields removed.
@@ -296,14 +317,16 @@ export function BackendPluginDetail({ manifest, model, onBuilt }: Props) {
     let cancelled = false;
     (async () => {
       try {
-        const data = await analyzeBackendPlugin(manifest.id, {}, JSON.parse(configKey) as Record<string, unknown>);
+        const data = await analyzeBackendPlugin(
+          manifest.id, results ?? {}, JSON.parse(configKey) as Record<string, unknown>, runsKey ? runsKey.split('\u0001') : [],
+        );
         if (!cancelled) setAnalytics({ name: manifest.name, ui: inferPluginUi(data), data });
       } catch {
         if (!cancelled) setAnalytics(null);
       }
     })();
     return () => { cancelled = true; };
-  }, [manifest.id, manifest.name, manifest.hooks.analyze, manifest.analyzeOnDemand, configKey]);
+  }, [manifest.id, manifest.name, manifest.hooks.analyze, manifest.analyzeOnDemand, configKey, results, runsKey]);
 
   // Manual trigger for on-demand analyze plugins (uses the current config).
   const runAnalysis = async () => {
@@ -311,7 +334,8 @@ export function BackendPluginDetail({ manifest, model, onBuilt }: Props) {
     setAnalyzing(true);
     try {
       const data = await analyzeBackendPlugin(
-        manifest.id, {}, withDefaults(manifest.config, config) as Record<string, unknown>,
+        manifest.id, results ?? {}, withDefaults(manifest.config, config) as Record<string, unknown>,
+        manifest.multiRun ? selectedRuns : [],
       );
       setAnalytics({ name: manifest.name, ui: inferPluginUi(data), data });
     } catch (err) {
@@ -382,6 +406,29 @@ export function BackendPluginDetail({ manifest, model, onBuilt }: Props) {
               onChange={(filename) => setConfigValue(key, filename)}
             />
           ))}
+        </div>
+      )}
+      {manifest.multiRun && manifest.hooks.analyze && (
+        <div className="plugin-panel-section be-run-picker">
+          <span className="sg-module-config-label">Stored runs to analyse</span>
+          {runOptions.length === 0 ? (
+            <p className="sg-setting-hint">No stored runs yet — solve a model first.</p>
+          ) : (
+            <ul className="be-run-picker-list">
+              {runOptions.map((r) => (
+                <li key={r.name}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={selectedRuns.includes(r.name)}
+                      onChange={() => toggleRun(r.name)}
+                    />{' '}
+                    {r.label || r.name}
+                  </label>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
       <PluginOptionsContext.Provider value={resolveOptions}>

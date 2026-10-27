@@ -197,10 +197,19 @@ def compute_for_rate_uplift(
             f"matching a named generator — no uplift applied.{skipped_note}"
         )
 
+    # Lazy for the same reason as the store import in apply_physical_risk_uplift.
+    from .physical_risk.engine import is_stub_detail
+
+    stub_note = (
+        " Source is the deterministic STUB engine (no CLIMADA worker) — canned damage "
+        "ratios, not a real hazard assessment."
+        if is_stub_detail(getattr(result, "detail", None))
+        else ""
+    )
     note = (
         f"forced-outage uplift derived from physical-risk session {session_id!r}, "
         f"perils [{', '.join(peril_labels)}] "
-        f"(damage-ratio capped at {_UPLIFT_CAP:.0%}).{skipped_note}"
+        f"(damage-ratio capped at {_UPLIFT_CAP:.0%}).{skipped_note}{stub_note}"
     )
     return uplift_by_name, note
 

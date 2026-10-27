@@ -274,7 +274,7 @@ def derive_imported_result(
     )
     curtailment_s = build_curtailment_series(network, generator_dispatch_frame)
     price_s, emissions_s = build_price_emissions_series(
-        network, by_carrier, price_series, emissions_factors
+        network, price_series, emissions_factors
     )
     storage_s = build_storage_series(network)
     storage_soc_s = build_storage_soc_series(network)

@@ -43,6 +43,46 @@ from .entities import (
 # Note appended to every worker-gated stub result so the frontend can flag it.
 _STUB_DETAIL = "Deterministic stub result — CLIMADA worker not attached."
 
+
+def is_stub_detail(detail: str | None) -> bool:
+    """True when a result's ``detail`` marks it as stub output (incl. worker fallbacks)."""
+    return bool(detail) and str(detail).startswith(_STUB_DETAIL)
+
+
+# Stub scenario response: severity grows linearly with the forcing level parsed from
+# the scenario id and with the horizon's distance from the base year. Calibrated so
+# the default scenario (``Scenario()``) reproduces the baseline numbers exactly —
+# the scale below is RELATIVE to it. A placeholder for the worker, not climatology.
+_STUB_FORCING_MAX = 8.5  # W/m2 — the highest forcing level the id parser expects
+_STUB_HORIZON_END = 2100  # horizon year at which the horizon term saturates
+_STUB_SCENARIO_SENSITIVITY = 0.6  # fractional EAI uplift at max forcing and horizon end
+
+
+def _scenario_severity(scenario: Scenario) -> float:
+    """Stub severity index ``1 + k * (forcing / forcing_max) * horizon_fraction``.
+
+    Forcing is the last two digits of the scenario id read as tenths of W/m2
+    (``rcp45`` / ``ssp245`` -> 4.5); an id without digits counts as the default
+    scenario's forcing, so it never changes the result.
+    """
+    def forcing(rcp: str) -> float | None:
+        digits = "".join(ch for ch in rcp if ch.isdigit())
+        return int(digits[-2:]) / 10.0 if digits else None
+
+    default = Scenario()
+    default_forcing = forcing(default.rcp) or 0.0
+    scenario_forcing = forcing(scenario.rcp)
+    horizon_span = _STUB_HORIZON_END - _BASE_YEAR
+
+    def index(forcing_w_m2: float, horizon: int) -> float:
+        fraction = min(1.0, max(0.0, (horizon - _BASE_YEAR) / horizon_span))
+        return 1.0 + _STUB_SCENARIO_SENSITIVITY * (forcing_w_m2 / _STUB_FORCING_MAX) * fraction
+
+    return index(
+        default_forcing if scenario_forcing is None else scenario_forcing, scenario.horizon
+    ) / index(default_forcing, default.horizon)
+
+
 # Per-peril severity multipliers applied to each asset's value to get its EAI in
 # the stub. Ordering is stable so results are reproducible run-to-run. Covers the
 # Phase-0 ids plus the vendored perils library; anything else takes the default.
@@ -105,8 +145,9 @@ def _asset_eai(value: float, index: int, factor: float) -> float:
 def _run_engine(portfolio: Portfolio, perils: list[str], scenario: Scenario) -> PhysicalRunOutput:
     """Compute the STUB run output (the worker path lives in :func:`run_kind`)."""
     results: list[PhysicalRunResult] = []
+    severity = _scenario_severity(scenario)
     for peril in perils:
-        factor = _PERIL_FACTOR.get(peril, _DEFAULT_FACTOR)
+        factor = _PERIL_FACTOR.get(peril, _DEFAULT_FACTOR) * severity
         per_asset = [
             AssetImpact(assetId=a.id, eai=_asset_eai(a.value, i, factor))
             for i, a in enumerate(portfolio.assets)
@@ -119,12 +160,12 @@ def _run_engine(portfolio: Portfolio, perils: list[str], scenario: Scenario) -> 
                 perAsset=per_asset,
                 aaiAgg=aai_agg,
                 freqCurve=FreqCurve(returnPeriods=list(_RETURN_PERIODS), losses=losses),
-                deltaPct=_PERIL_DELTA_PCT.get(peril, 0.0),
+                deltaPct=round(((1.0 + _PERIL_DELTA_PCT.get(peril, 0.0) / 100.0) * severity - 1.0) * 100.0, 2),
             )
         )
 
     currency = portfolio.assets[0].currency if portfolio.assets else "USD"
-    return PhysicalRunOutput(currency=currency, perils=results)
+    return PhysicalRunOutput(currency=currency, perils=results, detail=_STUB_DETAIL)
 
 
 def run_physical(

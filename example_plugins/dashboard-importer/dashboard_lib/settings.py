@@ -523,16 +523,3 @@ def read_dashboard(dashboard_path: str | Path) -> Dashboard:
         carrier_rules_t=carrier_rules_t,
         region_rules=region_rules,
     )
-
-
-# ---------------------------------------------------------------------------
-# Backward-compatibility shim
-# ---------------------------------------------------------------------------
-
-def read_settings(dashboard_path: str | Path) -> Settings:
-    """Return only the scalar :class:`Settings` from *dashboard_path*.
-
-    Prefer :func:`read_dashboard` for new code — it parses all sheets at once.
-    This shim is kept so existing callers continue to work.
-    """
-    return read_dashboard(dashboard_path).settings

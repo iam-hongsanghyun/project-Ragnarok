@@ -11,6 +11,7 @@ import {
 import { ConfigFieldRow } from '../modules/ModuleManagerSection';
 import { PluginChart } from './PluginChart';
 import { isPluginChartSpec } from 'lib/plugins/chartSpec';
+import { splitOutputLayout } from 'lib/plugins/layout';
 
 type PluginInnerTab = 'description' | 'input' | 'output';
 
@@ -226,7 +227,9 @@ function buildOutputSections(entry: PluginAnalyticsEntry | null): OutputSection[
   if (!entry || !entry.data || Object.keys(entry.data).length === 0) return [];
   const groups = new Map<string, OutputSection>();
 
-  Object.entries(entry.data).forEach(([key, value]) => {
+  // The reserved `layout` key and the keys it arranges render in OutputView's
+  // row block; only the remaining keys flow into the default sections.
+  Object.entries(splitOutputLayout(entry.data).rest).forEach(([key, value]) => {
     const hint = entry.ui?.[key];
     const sectionTitle = hint?.section || 'Results';
     const existing = groups.get(sectionTitle) ?? {
@@ -369,18 +372,39 @@ function InputView({ module, config, onConfigChange, carriers, model, onModuleAc
 function OutputView({ module, analytics }: { module: ModuleDescriptor; analytics: PluginAnalyticsEntry | null }) {
   const sections = buildOutputSections(analytics);
   const panel = module.panel as ModulePanelConfig | undefined;
-  if (sections.length === 0) {
+  const rows = analytics?.data ? splitOutputLayout(analytics.data).rows : [];
+  if (sections.length === 0 && rows.length === 0) {
     return <p className="sg-setting-hint">No results yet — run the model first.</p>;
   }
   return (
-    <PanelGrid layout={panel?.outputLayout}>
-      {sections.map((section) => (
-        <section key={section.id} className="plugin-panel-section">
-          <h3 className="plugin-panel-section-title">{section.title}</h3>
-          <PluginResults data={section.data} ui={section.ui} />
-        </section>
+    <>
+      {rows.map((row, i) => (
+        <div
+          key={`layout-row-${i}`}
+          className="plugin-layout-row"
+          style={{ gridTemplateColumns: `repeat(${row.length}, minmax(0, 1fr))` }}
+        >
+          {row.map((key) => (
+            <section key={key} className="plugin-panel-section">
+              <PluginResults
+                data={{ [key]: analytics!.data[key] }}
+                ui={{ [key]: analytics!.ui?.[key] ?? {} }}
+              />
+            </section>
+          ))}
+        </div>
       ))}
-    </PanelGrid>
+      {sections.length > 0 && (
+        <PanelGrid layout={panel?.outputLayout}>
+          {sections.map((section) => (
+            <section key={section.id} className="plugin-panel-section">
+              <h3 className="plugin-panel-section-title">{section.title}</h3>
+              <PluginResults data={section.data} ui={section.ui} />
+            </section>
+          ))}
+        </PanelGrid>
+      )}
+    </>
   );
 }
 

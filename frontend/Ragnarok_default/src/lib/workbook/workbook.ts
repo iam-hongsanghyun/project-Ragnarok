@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { PYPSA_SCHEMA_META, SHEETS, TS_SHEETS } from 'lib/constants';
+import { isPiecewiseSheet } from 'lib/forge/piecewise';
 import {
   isInputTemporalSheet,
   normalizeSheetName,
@@ -435,6 +436,7 @@ export function buildWorkbook(model: WorkbookModel, dateFormat: DateFormat = 'au
     const ws = temporalSheetToWorksheet(prepared);
     XLSX.utils.book_append_sheet(workbook, ws, sheet);
   });
+  appendPiecewiseSheets(workbook, model);
   [PATHWAY_CONFIG_SHEET, PATHWAY_PERIODS_SHEET, ROLLING_CONFIG_SHEET, SCENARIO_SHEET, CARBON_LIBRARY_SHEET].forEach((sheet) => {
     const rows = (model as any)[sheet] as GridRow[] | undefined;
     if (!rows || rows.length === 0) return;
@@ -444,12 +446,15 @@ export function buildWorkbook(model: WorkbookModel, dateFormat: DateFormat = 'au
   return workbook;
 }
 
-export function exportWorkbook(
-  model: WorkbookModel,
-  filename = 'ragnarok_case.xlsx',
-  dateFormat: DateFormat = 'auto',
-) {
-  XLSX.writeFile(buildWorkbook(model, dateFormat), filename);
+/** `<list>-<attr>-pw` piecewise-curve sheets (long form, one row per breakpoint) — P10/P40. */
+function appendPiecewiseSheets(workbook: ReturnType<typeof XLSX.utils.book_new>, model: WorkbookModel): void {
+  Object.keys(model)
+    .filter(isPiecewiseSheet)
+    .forEach((sheet) => {
+      const rows = (model as any)[sheet] as GridRow[] | undefined;
+      if (!rows || rows.length === 0) return;
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), sheet);
+    });
 }
 
 export function workbookToArrayBuffer(model: WorkbookModel, dateFormat: DateFormat = 'auto'): ArrayBuffer {
@@ -607,6 +612,7 @@ export function buildProjectWorkbook(
     const ws = temporalSheetToWorksheet(prepared);
     XLSX.utils.book_append_sheet(workbook, ws, sheet);
   });
+  appendPiecewiseSheets(workbook, model);
 
   // ── Output time-series sheets ────────────────────────────────────────
   Object.entries(outputs.series).forEach(([sheet, rows]) => {
@@ -692,19 +698,6 @@ export function buildProjectWorkbook(
   }
 
   return workbook;
-}
-
-/** Serialise a full project workbook to an ArrayBuffer (for the File System
- *  Access API, where the caller owns writing to a user-chosen file). */
-export function projectWorkbookToArrayBuffer(
-  model: WorkbookModel,
-  outputs: ProjectOutputs | null | undefined,
-  metadata: ProjectMetadata | null | undefined,
-): ArrayBuffer {
-  return XLSX.write(
-    buildProjectWorkbook(model, outputs ?? EMPTY_OUTPUTS, metadata ?? EMPTY_METADATA),
-    { bookType: 'xlsx', type: 'array' },
-  ) as ArrayBuffer;
 }
 
 /**
@@ -931,24 +924,3 @@ export function parseProjectWorkbook(
   return { model, outputs, metadata };
 }
 
-export function parseProjectFile(
-  file: File,
-): Promise<{ model: WorkbookModel; outputs: ProjectOutputs; metadata: ProjectMetadata }> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const arrayBuffer = event.target?.result;
-        if (!(arrayBuffer instanceof ArrayBuffer)) {
-          reject(new Error('Could not read project workbook.'));
-          return;
-        }
-        resolve(parseProjectWorkbook(arrayBuffer));
-      } catch (error) {
-        reject(error instanceof Error ? error : new Error('Project import failed.'));
-      }
-    };
-    reader.onerror = () => reject(new Error('Project import failed.'));
-    reader.readAsArrayBuffer(file);
-  });
-}

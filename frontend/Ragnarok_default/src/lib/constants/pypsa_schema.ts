@@ -39,6 +39,21 @@ export interface PypsaAttribute {
   piecewise?: boolean;
 }
 
+/** One piecewise curve PyPSA accepts on a component (`pypsa/data/piecewise.csv`). */
+export interface PypsaPiecewiseAttribute {
+  attribute: string;
+  /** x axis: `p_pu`, `p_dispatch_pu`, `p_nom`, `s_nom` or `e_nom`. */
+  x: string;
+  kind: 'cost' | 'efficiency';
+  /** y attribute carries a port number (`efficiency2`, `rate1`). */
+  ported: boolean;
+  allow_extendable: boolean;
+  /** `*_piecewise_opt` result attribute (cost curves). */
+  output: string | null;
+  /** Workbook sheet carrying the curve: `<sheet>-<attribute>-pw`. */
+  sheet: string;
+}
+
 export interface PypsaComponentSchema {
   unique_id: string;
   component_name: string;
@@ -55,6 +70,8 @@ export interface PypsaComponentSchema {
   input_temporal_attributes: string[];
   input_static_attributes: string[];
   order: number;
+  /** PyPSA >= 1.3 curves this component accepts (P10). Absent on older bundles. */
+  piecewise_attributes?: PypsaPiecewiseAttribute[];
 }
 
 export interface PypsaSchemaFile {
@@ -124,6 +141,8 @@ export let SHEETS: string[] = [];
 export let TS_SHEETS: string[] = [];
 export let ALL_KNOWN_TS_SHEETS: string[] = [];
 export let ALL_KNOWN_SHEETS: string[] = [];
+/** `<list>-<attr>-pw` piecewise-curve sheets (long form, one row per breakpoint). */
+export let PW_SHEETS: string[] = [];
 export let TABLE_GROUPS: TableGroup[] = [];
 /* eslint-enable import/no-mutable-exports */
 
@@ -172,6 +191,9 @@ export function applyConfigBundle(
     ),
   );
   ALL_KNOWN_SHEETS = [...SHEETS, ...ALL_KNOWN_TS_SHEETS];
+  PW_SHEETS = PYPSA_COMPONENTS.flatMap((component) =>
+    (component.piecewise_attributes ?? []).map((pw) => pw.sheet),
+  );
   TABLE_GROUPS = PYPSA_COMPONENTS.map((component) => ({
     uniqueId: component.unique_id,
     label: component.label,
@@ -296,10 +318,6 @@ export function getProtectedColumns(sheet: string): string[] {
     .map((attr) => attr.attribute);
 }
 
-export function isInputSheet(sheet: string): boolean {
-  return SHEETS.includes(sheet) || TS_SHEETS.includes(sheet);
-}
-
 export function isTemporalSheet(sheet: string): boolean {
   return ALL_KNOWN_TS_SHEETS.includes(sheet);
 }
@@ -327,13 +345,6 @@ export function isInputTemporalSheet(sheet: string): boolean {
   if (!parsed) return false;
   const component = getComponentSchema(parsed.componentSheet);
   return !!component?.input_temporal_attributes.includes(parsed.attribute);
-}
-
-export function isOutputTemporalSheet(sheet: string): boolean {
-  const parsed = parseTemporalSheetName(sheet);
-  if (!parsed) return false;
-  const component = getComponentSchema(parsed.componentSheet);
-  return !!component?.output_attributes.includes(parsed.attribute) && !!component?.temporal_attributes.includes(parsed.attribute);
 }
 
 export function stripOutputStaticAttributes(sheet: string, row: GridRow): GridRow {

@@ -133,6 +133,28 @@ def build_expansion_results(network: pypsa.Network) -> list[dict[str, Any]]:
                 }
             )
 
+    # ── Processes (p_nom_extendable, P29) ──────────────────────────────────────
+    processes = getattr(network, "processes", None)
+    if processes is not None and not processes.empty and "p_nom_extendable" in processes.columns:
+        ext_pr = processes[processes.p_nom_extendable]
+        for name in ext_pr.index:
+            p_nom = _safe_number(ext_pr.at[name, "p_nom"])
+            p_nom_opt = _safe_number(ext_pr.at[name, "p_nom_opt"], p_nom) if "p_nom_opt" in ext_pr.columns else p_nom
+            capital_cost = _safe_number(ext_pr.at[name, "capital_cost"]) if "capital_cost" in ext_pr.columns else 0.0
+            results.append(
+                {
+                    "name": name,
+                    "component": "Process",
+                    "carrier": str(ext_pr.at[name, "carrier"]) if "carrier" in ext_pr.columns else "",
+                    "bus": str(ext_pr.at[name, "bus0"]),
+                    "p_nom_mw": round(p_nom, 1),
+                    "p_nom_opt_mw": round(p_nom_opt, 1),
+                    "delta_mw": round(p_nom_opt - p_nom, 1),
+                    "capital_cost": round(capital_cost, 2),
+                    "capex_annual": round(capital_cost * p_nom_opt),
+                }
+            )
+
     # ── Lines (s_nom_extendable) ───────────────────────────────────────────────
     if not network.lines.empty and "s_nom_extendable" in network.lines.columns:
         ext_ln = network.lines[network.lines.s_nom_extendable]
@@ -177,6 +199,7 @@ def build_expansion_results(network: pypsa.Network) -> list[dict[str, Any]]:
                 }
             )
 
+    _apply_native_costs(network, results)
     _apply_window_scale(network, results)
     _annotate_pathway(network, results)
     return results
@@ -187,9 +210,54 @@ _LIST_NAME = {
     "StorageUnit": "storage_units",
     "Store": "stores",
     "Link": "links",
+    "Process": "processes",
     "Line": "lines",
     "Transformer": "transformers",
 }
+
+
+_NOM_OPT_COL = {
+    "Generator": "p_nom_opt", "StorageUnit": "p_nom_opt", "Link": "p_nom_opt",
+    "Store": "e_nom_opt", "Process": "p_nom_opt", "Line": "s_nom_opt", "Transformer": "s_nom_opt",
+}
+
+
+def _apply_native_costs(network: pypsa.Network, results: list[dict[str, Any]]) -> None:
+    """Read PyPSA-native ``overnight_cost`` / ``fom_cost`` (PyPSA 1.1+) into the rows.
+
+    PyPSA prices an extendable asset at
+    $$ c = \\text{overnight}\\cdot a(r, L)\\cdot n_{years} + \\text{fom\\_cost} $$
+    (``pypsa.costs.periodized_cost``); a finite ``overnight_cost`` overrides
+    ``capital_cost``. ASCII: cost = overnight * annuity(r, L) * nyears + fom_cost.
+    For such rows ``capital_cost`` / ``capex_annual`` are reported as the ANNUAL
+    annuity (overnight * a) so they share the basis of Ragnarok-annuitised rows,
+    and ``native_cost`` is set so the window scaling is not undone twice.
+    ``fom_cost`` is added to the objective unscaled (per modelled horizon); it is
+    reported per row as ``fom_cost`` / ``fom_total`` (currency) — previously these
+    objective terms were invisible in the reports.
+    """
+    from pypsa.costs import annuity
+
+    for row in results:
+        comp_name = _LIST_NAME[row["component"]]
+        static = network.components[comp_name].static
+        name = row["name"]
+        if name not in static.index:
+            continue
+        opt_col = _NOM_OPT_COL[row["component"]]
+        opt = _safe_number(static.at[name, opt_col]) if opt_col in static.columns else row["p_nom_opt_mw"]
+        overnight = _safe_number(static.at[name, "overnight_cost"], float("nan")) if "overnight_cost" in static.columns else float("nan")
+        if not math.isnan(overnight):
+            rate = _safe_number(static.at[name, "discount_rate"], 0.0) if "discount_rate" in static.columns else 0.0
+            life = _safe_number(static.at[name, "lifetime"], float("inf")) if "lifetime" in static.columns else float("inf")
+            annual = overnight * float(annuity(rate, life))
+            row["capital_cost"] = round(annual, 2)
+            row["capex_annual"] = round(annual * opt)
+            row["native_cost"] = True
+        fom = _safe_number(static.at[name, "fom_cost"]) if "fom_cost" in static.columns else 0.0
+        if fom:
+            row["fom_cost"] = round(fom, 2)
+            row["fom_total"] = round(fom * opt)
 
 
 def _apply_window_scale(network: pypsa.Network, results: list[dict[str, Any]]) -> None:
@@ -198,6 +266,8 @@ def _apply_window_scale(network: pypsa.Network, results: list[dict[str, Any]]) -
     if scale is None or scale <= 0:
         return
     for row in results:
+        if row.get("native_cost"):
+            continue  # PyPSA scaled it itself; already reported on the annual basis
         row["capital_cost"] = round(row["capital_cost"] / scale, 2)
         row["capex_annual"] = round(row["capex_annual"] / scale)
 

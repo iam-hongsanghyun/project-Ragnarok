@@ -171,11 +171,6 @@ def _raw_meta(session_id: str) -> dict[str, Any] | None:
         return None
 
 
-def _tables(session_id: str) -> dict[str, str]:
-    with _connect(session_id) as conn:
-        return _kv_get(conn, "tables") or {}
-
-
 # ── save / ingest ─────────────────────────────────────────────────────────────
 
 def save_model(

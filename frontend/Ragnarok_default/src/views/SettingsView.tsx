@@ -77,6 +77,7 @@ import { StandardConstraintsSection, AdvancedConstraintsSection } from './Settin
 import { AppearanceSection } from './SettingsView.sections/Appearance';
 import { ProjectDefaultsSection } from './SettingsView.sections/ProjectDefaults';
 import { SolverSection } from './SettingsView.sections/Solver';
+import type { AdvancedSolveOptions } from 'lib/settings/advancedSolve';
 import { ApiKeysSection } from './SettingsView.sections/ApiKeys';
 import { ModulesSection } from './SettingsView.sections/Modules';
 
@@ -302,6 +303,8 @@ export interface SettingsViewProps {
   solverType: SolverType;
   solveAcceptance: SolveAcceptance;
   objectiveAutoScale: boolean;
+  advancedSolve?: AdvancedSolveOptions;
+  onAdvancedSolveChange: (v: AdvancedSolveOptions) => void;
   queuePollSeconds: number;
   onSolverThreadsChange: (v: number) => void;
   onSolverTypeChange: (v: SolverType) => void;

@@ -443,3 +443,37 @@ def test_uplift_clips_total_for_at_max() -> None:
     mask = sample_outage_masks(clipped_for, mttr, weights, n_members=50, seed=3)
     empirical_for = 1.0 - mask.mean()
     assert empirical_for == pytest.approx(0.95, abs=0.02)
+
+
+def test_uplift_note_says_stub_when_the_stub_engine_fed_it() -> None:
+    """WA10: a stub-sourced uplift must be labelled so in the provenance note."""
+    store, session_id, _run_id = _make_store_with_done_run(
+        asset_name="g0", asset_value=1_000_000.0, perils=["tropical_cyclone"],
+    )
+    uplift, note = compute_for_rate_uplift(store, session_id)
+    assert uplift
+    assert "STUB" in note
+
+
+def test_stub_physical_scenario_scales_and_default_is_unchanged() -> None:
+    """WA10: the stub honours rcp/horizon, relative to the default scenario."""
+    from backend.app.physical_risk import engine
+    from backend.app.physical_risk.entities import Scenario
+
+    portfolio = Portfolio(
+        assets=[PhysicalRiskAsset(name="g0", kind="generator", lat=1.0, lon=1.0, value=1_000_000.0)]
+    )
+    base = engine.run_physical(portfolio, ["tropical_cyclone"], Scenario())
+    assert base.detail is not None and engine.is_stub_detail(base.detail)
+    assert base.perils[0].aaiAgg == pytest.approx(_TC_FACTOR * 1_000_000.0, rel=1e-9)
+
+    hot = engine.run_physical(portfolio, ["tropical_cyclone"], Scenario(rcp="rcp85", horizon=2100))
+    cool = engine.run_physical(portfolio, ["tropical_cyclone"], Scenario(rcp="rcp26", horizon=2030))
+    assert hot.perils[0].aaiAgg > base.perils[0].aaiAgg > cool.perils[0].aaiAgg
+    # Analytical check: severity = (1+k*8.5/8.5*1) / (1+k*4.5/8.5*(25/75)), k = 0.6.
+    expected = (1.0 + 0.6) / (1.0 + 0.6 * (4.5 / 8.5) * (25.0 / 75.0))
+    assert hot.perils[0].aaiAgg / base.perils[0].aaiAgg == pytest.approx(expected, rel=1e-6)
+    # An id with no digits behaves like the default scenario.
+    assert engine.run_physical(portfolio, ["tropical_cyclone"], Scenario(rcp="custom")).perils[
+        0
+    ].aaiAgg == pytest.approx(base.perils[0].aaiAgg)

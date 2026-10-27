@@ -20,6 +20,12 @@ file-converter endpoints.
 """
 from __future__ import annotations
 
+# Load backend/.env before any submodule reads os.environ (several settings are
+# read at import time). Process environment wins over the file.
+from ..env_file import load_env_file as _load_env_file
+
+_load_env_file()
+
 # Keep pandas on NumPy/object strings even though pyarrow (our Parquet engine)
 # is installed; otherwise pandas 3 defaults to Arrow strings that PyPSA 1.4's
 # spatial clustering cannot aggregate. See _pandas_compat for the full rationale.

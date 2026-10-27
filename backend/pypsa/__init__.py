@@ -37,3 +37,19 @@ import pypsa as _pypsa
 # already gives every frame); left unset PyPSA 1.4 emits a FutureWarning on each
 # import and flips the behaviour in v2.
 _pypsa.options.api.legacy_string_dtype = True
+
+# P33 — upstream noise: PyPSA 1.4's statistics grouper (`pypsa/statistics/grouping.py`)
+# fills a float column with an ndarray, which pandas 3 flags as a Pandas4Warning once
+# per grouped call (~500 times per example sweep). It is harmless today and PyPSA's to
+# fix; filter exactly that message from exactly that module so every other pandas
+# warning (including ours) stays visible.
+import warnings as _warnings
+
+import pandas as _pd
+
+_warnings.filterwarnings(
+    "ignore",
+    message=".*'ndarray' is not supported as a fill value.*",
+    category=getattr(_pd.errors, "Pandas4Warning", FutureWarning),
+    module=r"pypsa\.statistics\.grouping",
+)

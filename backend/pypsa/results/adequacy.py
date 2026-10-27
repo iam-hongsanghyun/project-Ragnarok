@@ -39,6 +39,33 @@ from .dispatch import _snapshot_label
 _log = logging.getLogger("pypsa.solver")
 
 
+def maintenance_available_pmax(network: pypsa.Network) -> pd.DataFrame:
+    """Generator ``p_max_pu`` with scheduled-maintenance outages applied.
+
+    A ``maintainable`` generator that the solve scheduled into maintenance
+    (``generators_t.maintenance`` = 1) has only ``1 - maintenance_pu`` of its
+    capacity available that snapshot:
+    $$ a_{g,t} = p^{max}_{g,t}\\,(1 - m_{g,t}\\,\\mu_g) $$
+    ASCII: avail_pu[g,t] = p_max_pu[g,t] * (1 - maintenance[g,t] * maintenance_pu[g]).
+    Symbols: m = maintenance status (0/1), mu = maintenance_pu (per unit).
+    Without a maintenance schedule the plain ``p_max_pu`` is returned, so
+    adequacy, the outage Monte Carlo, ELCC and the convergence sampler all see
+    planned outages exactly as the solve placed them.
+    """
+    pmax = network.get_switchable_as_dense("Generator", "p_max_pu")
+    maint = getattr(network.generators_t, "maintenance", None)
+    gens = network.generators
+    if maint is None or getattr(maint, "empty", True) or "maintenance_pu" not in gens.columns:
+        return pmax
+    cols = [c for c in maint.columns if c in pmax.columns]
+    if not cols:
+        return pmax
+    out = pmax.copy()
+    mu = gens["maintenance_pu"].reindex(cols).fillna(1.0)
+    out[cols] = pmax[cols] * (1.0 - maint[cols].reindex(pmax.index).fillna(0.0) * mu)
+    return out
+
+
 def generate_renewable_ensemble(
     base: np.ndarray,
     *,
@@ -501,7 +528,7 @@ def build_adequacy(
     weights = network.snapshot_weightings["objective"].to_numpy()
 
     gens = network.generators
-    pmax = network.get_switchable_as_dense("Generator", "p_max_pu")
+    pmax = maintenance_available_pmax(network)
     tv_cols = set(getattr(network.generators_t, "p_max_pu", pd.DataFrame()).columns)
 
     firm = np.zeros(T)

@@ -30,6 +30,8 @@ interface Props {
    *  charts need, each at the max snapshot count requested (light "View"
    *  bundles strip them). */
   onNeedSeries?: (windows: Record<string, number>) => void;
+  /** Stored-run name backing these results (for parametrised statistics queries); null when unsaved. */
+  runName?: string | null;
 }
 
 function EmptyAnalytics() {
@@ -57,6 +59,7 @@ export function AnalyticsPane({
   pathwayConfig,
   onSelectedPeriodChange,
   onNeedSeries,
+  runName,
 }: Props) {
   return (
     <div className="pane analytics-pane">
@@ -114,6 +117,7 @@ export function AnalyticsPane({
           initialLayout={subTab === 'Result' ? buildResultPreset(results) : PRESETS[0].build()}
           showPresets={subTab === 'Analytics'}
           onNeedSeries={onNeedSeries}
+          runName={runName}
         />
       )}
     </div>

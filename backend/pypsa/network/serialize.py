@@ -13,6 +13,8 @@ from typing import Any
 
 import pypsa
 
+from .components import _is_extra_port_attr
+from .piecewise import network_piecewise_rows
 from ..pypsa_schema import (
     component_sheets,
     input_static_attributes,
@@ -121,7 +123,11 @@ def network_to_model(network: pypsa.Network) -> dict[str, list[dict[str, Any]]]:
             for name, row in static.iterrows():
                 d: dict[str, Any] = {"name": str(name)}
                 for col, val in row.items():
-                    if allowed_static and col not in allowed_static:
+                    if (
+                        allowed_static
+                        and col not in allowed_static
+                        and not _is_extra_port_attr(sheet, str(col))
+                    ):
                         continue
                     keep, sval = _scalar(val)
                     if keep:
@@ -134,7 +140,11 @@ def network_to_model(network: pypsa.Network) -> dict[str, list[dict[str, Any]]]:
         if dynamic is None:
             continue
         for attr in list(dynamic.keys()):
-            if allowed_temporal and attr not in allowed_temporal:
+            if (
+                allowed_temporal
+                and attr not in allowed_temporal
+                and not _is_extra_port_attr(sheet, str(attr))
+            ):
                 continue
             df = dynamic[attr]
             if df is None or df.empty:
@@ -149,4 +159,7 @@ def network_to_model(network: pypsa.Network) -> dict[str, list[dict[str, Any]]]:
                 ts_rows.append(row_d)
             if ts_rows:
                 model[f"{sheet}-{attr}"] = ts_rows
+    # PyPSA >= 1.3 piecewise curves -> `<list>-<attr>-pw` sheets (P40); without
+    # this a netCDF/HDF5 import silently turns every curve into a scalar cost.
+    model.update(network_piecewise_rows(network))
     return model

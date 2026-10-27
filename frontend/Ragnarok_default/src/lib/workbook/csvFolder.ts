@@ -19,6 +19,8 @@ import { unzipSync, zipSync, strToU8, strFromU8 } from 'fflate';
 import { GridRow, Primitive, WorkbookModel } from '../types';
 import { SHEETS, TS_SHEETS, PYPSA_COMPONENTS, PYPSA_COMPONENT_BY_SHEET } from 'lib/constants/pypsa_schema';
 import { parseCsvText } from './csvText';
+import { isPiecewiseSheet, longToNativeTable, nativeTableToLong, parsePiecewiseSheetName } from 'lib/forge/piecewise';
+import { xAttributeOfSheet } from 'lib/forge/piecewiseSchema';
 
 const ALL_KNOWN_NAMES = new Set<string>([
   ...SHEETS,
@@ -57,6 +59,27 @@ function rowsToCsv(rows: GridRow[]): string {
   return `${header}\n${lines.join('\n')}\n`;
 }
 
+/** Native wide CSV text for a `-pw` sheet (falls back to long rows when the x axis is unknown). */
+function piecewiseSheetToCsv(sheet: string, rows: GridRow[]): string {
+  const parsed = parsePiecewiseSheetName(sheet);
+  const xAttr = xAttributeOfSheet(sheet);
+  if (!parsed || !xAttr) return rowsToCsv(rows);
+  const table = longToNativeTable(rows, xAttr, parsed.attribute);
+  return `${table.map((line) => line.map((c) => escapeCell(c)).join(',')).join('\n')}\n`;
+}
+
+/** `-pw` CSV -> long rows; accepts PyPSA's wide layout and Ragnarok's own long layout. */
+function piecewiseCsvToRows(csv: string, sheet: string): GridRow[] {
+  const parsed = parsePiecewiseSheetName(sheet);
+  const xAttr = xAttributeOfSheet(sheet);
+  if (parsed && xAttr) {
+    const table = parseCsvText(csv);
+    const wide = nativeTableToLong(table, xAttr, parsed.attribute);
+    if (wide.length > 0) return wide;
+  }
+  return csvTextToRows(csv, sheet);
+}
+
 // ── Export: model → zip ──────────────────────────────────────────────────────
 
 /** Pack the model into a deflated zip and return the raw bytes. The
@@ -65,8 +88,11 @@ export function exportModelAsCsvFolderBytes(model: WorkbookModel, archiveName: s
   const files: Record<string, Uint8Array> = {};
   for (const [sheetName, rows] of Object.entries(model)) {
     if (!Array.isArray(rows) || rows.length === 0) continue;
-    if (!ALL_KNOWN_NAMES.has(sheetName)) continue; // skip Ragnarok-only metadata sheets
-    const csv = rowsToCsv(rows as GridRow[]);
+    if (!ALL_KNOWN_NAMES.has(sheetName) && !isPiecewiseSheet(sheetName)) continue; // skip Ragnarok-only metadata sheets
+    // Piecewise curves go out in PyPSA's own wide layout so `Network.import_from_csv_folder` reads them.
+    const csv = isPiecewiseSheet(sheetName)
+      ? piecewiseSheetToCsv(sheetName, rows as GridRow[])
+      : rowsToCsv(rows as GridRow[]);
     if (!csv.trim()) continue;
     files[`${archiveName}/${sheetName}.csv`] = strToU8(csv);
   }
@@ -152,12 +178,14 @@ export async function importCsvFolderZip(file: File | Blob | ArrayBuffer | Uint8
     if (!path.toLowerCase().endsWith('.csv')) continue;
     const filename = path.split('/').pop()!;
     const sheetName = filename.replace(/\.csv$/i, '');
-    if (!ALL_KNOWN_NAMES.has(sheetName)) {
+    if (!ALL_KNOWN_NAMES.has(sheetName) && !isPiecewiseSheet(sheetName)) {
       unknownFiles.push(path);
       continue;
     }
     const csvText = strFromU8(data);
-    baseModel[sheetName] = csvTextToRows(csvText, sheetName);
+    baseModel[sheetName] = isPiecewiseSheet(sheetName)
+      ? piecewiseCsvToRows(csvText, sheetName)
+      : csvTextToRows(csvText, sheetName);
     importedSheets.push(sheetName);
   }
 

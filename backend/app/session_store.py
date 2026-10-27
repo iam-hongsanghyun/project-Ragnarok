@@ -83,10 +83,6 @@ def default_max_points() -> int:
     return int(_session_cfg().get("max_chart_points_default", 800))
 
 
-def default_window_hours() -> int:
-    return int(_session_cfg().get("chart_window_hours_default", 168))
-
-
 def default_page_size() -> int:
     return int(_session_cfg().get("sheet_page_default", 200))
 
@@ -153,7 +149,8 @@ def is_series_sheet(name: str, rows: list[dict[str, Any]] | None = None) -> bool
     """
     if name == "snapshots":
         return False
-    return "-" in name
+    # `<list>-<attr>-pw` is a piecewise-curve table (one row per breakpoint), static.
+    return "-" in name and not name.endswith("-pw")
 
 
 # ── save / ingest ────────────────────────────────────────────────────────────────

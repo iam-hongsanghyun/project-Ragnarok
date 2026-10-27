@@ -8,7 +8,6 @@ export function defaultPathwayConfig(): PathwayConfig {
     planningMode: 'single_period',
     enabled: false,
     snapshotMappingMode: 'explicit_period_column',
-    overridePolicy: 'reuse_base_inputs',
     periods: [],
     selectedPeriod: null,
   };
@@ -58,7 +57,6 @@ export function readPathwayConfigFromModel(model: WorkbookModel): PathwayConfig 
       configRow.snapshotMappingMode === 'repeat_all_snapshots'
         ? 'repeat_all_snapshots'
         : 'explicit_period_column',
-    overridePolicy: 'reuse_base_inputs',
     periods,
     selectedPeriod: selected,
   };
@@ -72,7 +70,6 @@ export function writePathwayConfigToModel(
     enabled: config.enabled,
     planningMode: config.planningMode,
     snapshotMappingMode: config.snapshotMappingMode,
-    overridePolicy: config.overridePolicy,
     selectedPeriod: config.selectedPeriod,
   }];
   const periodRows: GridRow[] = config.periods.map((period) => ({

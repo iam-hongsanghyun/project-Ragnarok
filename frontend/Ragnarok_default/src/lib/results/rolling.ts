@@ -33,10 +33,7 @@ export function defaultRollingConfig(): RollingHorizonConfig {
     enabled: false,
     horizonSnapshots: 168,
     overlapSnapshots: 24,
-    stepPolicy: 'derived',
     stepSnapshots: 144,
-    preserveTerminalState: true,
-    selectedWindow: null,
   };
 }
 
@@ -54,10 +51,7 @@ export function normalizeRollingConfig(config: RollingHorizonConfig): RollingHor
     ...config,
     horizonSnapshots,
     overlapSnapshots,
-    stepPolicy: 'derived',
     stepSnapshots: deriveRollingStepSnapshots(horizonSnapshots, overlapSnapshots),
-    preserveTerminalState: config.preserveTerminalState !== false,
-    selectedWindow: config.selectedWindow ?? null,
   };
 }
 
@@ -67,10 +61,7 @@ export function readRollingConfigFromModel(model: WorkbookModel): RollingHorizon
     enabled: primitiveBoolean(configRow.enabled as Primitive, false),
     horizonSnapshots: clampPositiveInt(primitiveNumber(configRow.horizonSnapshots as Primitive, 168), 168),
     overlapSnapshots: Math.max(0, primitiveNumber(configRow.overlapSnapshots as Primitive, 24) ?? 24),
-    stepPolicy: 'derived',
     stepSnapshots: clampPositiveInt(primitiveNumber(configRow.stepSnapshots as Primitive, 144), 144),
-    preserveTerminalState: primitiveBoolean(configRow.preserveTerminalState as Primitive, true),
-    selectedWindow: primitiveNumber(configRow.selectedWindow as Primitive, null),
   });
   return next;
 }
@@ -84,10 +75,7 @@ export function writeRollingConfigToModel(
     enabled: normalized.enabled,
     horizonSnapshots: normalized.horizonSnapshots,
     overlapSnapshots: normalized.overlapSnapshots,
-    stepPolicy: normalized.stepPolicy,
     stepSnapshots: normalized.stepSnapshots,
-    preserveTerminalState: normalized.preserveTerminalState,
-    selectedWindow: normalized.selectedWindow,
   }];
   return {
     ...model,

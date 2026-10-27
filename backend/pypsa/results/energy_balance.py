@@ -8,6 +8,10 @@ energy come from and where did it go?
 
 This builder answers that per bus-carrier, reading the solved flows:
 
+Implementation: ``n.statistics.supply`` / ``withdrawal`` (``at_port="all"``) with a
+custom grouper (P28), so Processes, multi-port conversions and reverse flows are
+accounted natively. Reading guide:
+
   • Generators on a carrier's buses           → a **source** (by fuel carrier)
   • Loads on a carrier's buses                 → a **sink**  ("Demand")
   • Link withdrawing from a carrier (``p0``)   → a **sink**  (conversion out)
@@ -44,8 +48,90 @@ def _bus_carriers(network: pypsa.Network) -> pd.Series:
     return s.replace("", "AC").fillna("AC")
 
 
+_COMPONENTS = ["Generator", "Load", "Link", "Process", "StorageUnit", "Store"]
+_SEP = "\x1f"  # kind/label separator inside a grouper key
+_SKIP = "\x00skip"
+
+
+def _label_grouper(direction: str) -> Any:
+    """Grouper naming each asset by ``kind SEP label`` for one flow direction.
+
+    ``direction`` is ``"supply"`` (energy injected into a bus) or ``"withdrawal"``.
+    Labels reproduce the long-standing payload: generators by fuel carrier
+    (``generation``), loads ``Demand`` (``load``), conversion devices by their
+    carrier or ``→ <out carrier>`` / ``<in carrier> →`` (``conversion``), storage
+    ``… discharge`` / ``… charge`` (``storage``). The load-shedding backstop is
+    skipped. Registered through PyPSA's ``statistics.groupers`` mechanism.
+    """
+
+    def grouper(n: pypsa.Network, c: str, port: str = "", nice_names: bool = False) -> pd.Series:
+        return _group_labels(n, c).rename("label")
+
+    def _group_labels(n: pypsa.Network, c: str) -> pd.Series:
+        static = n.c[c].static
+        names = pd.Series(static.index.get_level_values("name") if isinstance(static.index, pd.MultiIndex) else static.index, index=static.index).astype(str)
+        if c == "Generator":
+            fuel = static["carrier"].astype(str).replace("", "generation")
+            out = "generation" + _SEP + fuel
+            return out.where(~names.str.startswith("load_shedding_"), _SKIP)
+        if c == "Load":
+            return pd.Series("load" + _SEP + "Demand", index=static.index)
+        if c in ("Link", "Process"):
+            own = static["carrier"].astype(str) if "carrier" in static.columns else pd.Series("", index=static.index)
+            bus_carrier = _bus_carriers(n)
+            c0 = static["bus0"].astype(str).map(bus_carrier).fillna("AC")
+            c1 = static["bus1"].astype(str).map(bus_carrier).fillna("AC")
+            fallback = ("→ " + c1) if direction == "withdrawal" else (c0 + " →")
+            return "conversion" + _SEP + own.where(own != "", fallback)
+        label = {
+            ("StorageUnit", "supply"): "Storage discharge",
+            ("StorageUnit", "withdrawal"): "Storage charge",
+            ("Store", "supply"): "Store discharge",
+            ("Store", "withdrawal"): "Store charge",
+        }[(c, direction)]
+        return pd.Series("storage" + _SEP + label, index=static.index)
+
+    return grouper
+
+
+def _flows(network: pypsa.Network, direction: str) -> dict[tuple[str, str, str], float]:
+    """``{(bus carrier, kind, label): MWh}`` from ``n.statistics.supply/withdrawal``.
+
+    ``at_port="all"`` evaluates every port of multi-port Links and Processes
+    separately, clipping each port's flow per snapshot, so a CHP heat co-product
+    or a Process output lands on its own bus carrier. PyPSA applies the
+    ``generators`` snapshot weightings.
+    """
+    fn = getattr(network.statistics, direction)
+    try:
+        series = fn(
+            components=_COMPONENTS,
+            groupby=["bus_carrier", _label_grouper(direction)],
+            at_port="all",
+            nice_names=False,
+        )
+    except Exception:  # noqa: BLE001 - no matching components (e.g. no storage) is not an error
+        return {}
+    if isinstance(series, pd.DataFrame):  # multi-investment-period run: one column per period
+        series = series.sum(axis=1)
+    out: dict[tuple[str, str, str], float] = defaultdict(float)
+    for key, value in series.items():
+        if not isinstance(key, tuple) or len(key) < 2 or pd.isna(value):
+            continue
+        bus_c, grp = str(key[-2]), str(key[-1])
+        if grp == _SKIP or _SEP not in grp:
+            continue
+        kind, label = grp.split(_SEP, 1)
+        out[(bus_c if bus_c not in ("", "nan") else "AC", kind, label)] += float(value)
+    return out
+
+
 def build_energy_balance(network: pypsa.Network) -> dict[str, Any] | None:
     """Per-carrier source/sink energy balance, or ``None`` if single-carrier.
+
+    Computed with ``n.statistics.supply`` / ``withdrawal`` (``at_port="all"``) so
+    every port of every Link **and Process** is accounted (P28/P29) — the
+    hand-rolled version ignored Processes and reverse flows.
 
     Returns:
         ``{"carriers": [{carrier, supplyMWh, demandMWh, sources[], sinks[]}]}``
@@ -58,87 +144,18 @@ def build_energy_balance(network: pypsa.Network) -> dict[str, Any] | None:
     if bus_carrier.nunique() < 2:
         return None  # electricity-only: the carrier-mix donut already covers it
 
-    weights = network.snapshot_weightings["generators"].reindex(network.snapshots).fillna(1.0)
-
     sources: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     sinks: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     src_kind: dict[tuple[str, str], str] = {}
     snk_kind: dict[tuple[str, str], str] = {}
-
-    def add_source(carrier: str, label: str, energy: float, kind: str) -> None:
-        if energy <= _EPS:
-            return
-        sources[carrier][label] += energy
-        src_kind[(carrier, label)] = kind
-
-    def add_sink(carrier: str, label: str, energy: float, kind: str) -> None:
-        if energy <= _EPS:
-            return
-        sinks[carrier][label] += energy
-        snk_kind[(carrier, label)] = kind
-
-    # ── Generators → source on their bus's carrier, grouped by fuel carrier ──
-    gp = network.generators_t.p
-    for g in network.generators.index:
-        if str(g).startswith("load_shedding_"):
-            continue
-        if g not in gp.columns:
-            continue
-        c = bus_carrier.get(str(network.generators.at[g, "bus"]), "AC")
-        fuel = str(network.generators.at[g, "carrier"]) or "generation"
-        add_source(c, fuel, weighted_sum(gp[g].clip(lower=0.0), weights), "generation")
-
-    # ── Loads → sink ("Demand") ──────────────────────────────────────────────
-    lp = network.loads_t.p_set
-    for load in network.loads.index:
-        if load not in lp.columns:
-            continue
-        c = bus_carrier.get(str(network.loads.at[load, "bus"]), "AC")
-        add_sink(c, "Demand", weighted_sum(lp[load].clip(lower=0.0), weights), "load")
-
-    # ── Links → sink on bus0's carrier, source on each output port's carrier ─
-    if len(network.links.index):
-        links = network.links
-        dyn = network.links_t
-        p0 = dyn.p0
-        has_lc = "carrier" in links.columns
-        # Output ports: bus1 plus any multi-port columns (bus2, bus3, … — CHP
-        # heat co-products and the like). A blank port cell = port unused.
-        ports = ["1"] + sorted(
-            c[3:] for c in links.columns
-            if c.startswith("bus") and c[3:].isdigit() and c not in ("bus0", "bus1")
-        )
-        for lk in links.index:
-            c0 = bus_carrier.get(str(links.at[lk, "bus0"]), "AC")
-            c1 = bus_carrier.get(str(links.at[lk, "bus1"]), "AC")
-            lcarr = (str(links.at[lk, "carrier"]) if has_lc else "") or ""
-            if lk in p0.columns:
-                add_sink(c0, lcarr or f"→ {c1}", weighted_sum(p0[lk].clip(lower=0.0), weights), "conversion")
-            for port in ports:
-                pi = dyn[f"p{port}"] if f"p{port}" in dyn else None
-                if pi is None or lk not in pi.columns:
-                    continue
-                bus = str(links.at[lk, f"bus{port}"]).strip()
-                if not bus or bus.lower() == "nan":
-                    continue
-                ci = bus_carrier.get(bus, "AC")
-                add_source(ci, lcarr or f"{c0} →", weighted_sum((-pi[lk]).clip(lower=0.0), weights), "conversion")
-
-    # ── Storage units + Stores → discharge source / charge sink ─────────────
-    for comp, frame in (("storage_units", "storage_units_t"), ("stores", "stores_t")):
-        idx = getattr(network, comp).index
-        if not len(idx):
-            continue
-        pf = getattr(network, frame).p
-        static = getattr(network, comp)
-        disc_label = "Storage discharge" if comp == "storage_units" else "Store discharge"
-        char_label = "Storage charge" if comp == "storage_units" else "Store charge"
-        for unit in idx:
-            if unit not in pf.columns:
-                continue
-            c = bus_carrier.get(str(static.at[unit, "bus"]), "AC")
-            add_source(c, disc_label, weighted_sum(pf[unit].clip(lower=0.0), weights), "storage")
-            add_sink(c, char_label, weighted_sum(pf[unit].clip(upper=0.0).abs(), weights), "storage")
+    for (carrier, kind, label), energy in _flows(network, "supply").items():
+        if energy > _EPS:
+            sources[carrier][label] += energy
+            src_kind[(carrier, label)] = kind
+    for (carrier, kind, label), energy in _flows(network, "withdrawal").items():
+        if energy > _EPS:
+            sinks[carrier][label] += energy
+            snk_kind[(carrier, label)] = kind
 
     carriers_out: list[dict[str, Any]] = []
     for c in set(sources) | set(sinks):

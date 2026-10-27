@@ -184,6 +184,42 @@ profile.
 **Undo and redo** — Ctrl+Z (Cmd+Z on macOS) undoes the last model edit. Ctrl+Shift+Z
 or Ctrl+Y redoes. The undo stack holds up to 50 operations per session.
 
+### Piecewise cost and efficiency curves
+
+A `marginal_cost`, `capital_cost` or `efficiency` can be a piecewise-linear curve instead of one
+number (PyPSA 1.3+). Open **Forge → Marginal cost curve → Piecewise breakpoints**, choose the component
+(generators, links, processes, storage units, stores) and the curve, narrow the rows with filters,
+and type the breakpoints (x, y). The editor checks the curve as you type: x must be strictly
+increasing, start at 0 and (per-unit curves) end at 1, and per-unit curves need a fixed capacity.
+It also tells you whether the curve is **convex** (solved as an LP) or **non-convex** (PyPSA adds
+binaries and the run becomes a MIP). **Apply** writes the curve to a
+`<component>-<attribute>-pw` sheet for every matched row; **Clear** removes it. A curve replaces the
+scalar value of the same attribute on that row.
+
+The sheet layout (one row per breakpoint, and what y means for each attribute) is in
+[backend.md §5.7](backend.md#57-piecewisepy--piecewise-linear-curves). `capital_cost`
+curves use absolute `p_nom` / `e_nom` / `s_nom` on the x axis and overnight prices; the run
+annuitises them like the single capital cost. After a solve, the **Piecewise cost curves** card in
+Analytics shows each curve and the average cost the optimiser realised on it. The curves round-trip
+through netCDF, HDF5, the CSV-folder zip (PyPSA's own layout) and project workbooks. **Settings → Solver →
+Advanced → Piecewise formulation** chooses how PyPSA formulates each curve.
+
+### Maintenance and phase shifters
+
+Edit these as ordinary attributes in the Generators, Links, Processes and Transformers sheets
+(Model view, table editor). The attribute hints explain each column.
+
+- **Maintenance.** Set `maintainable` to true on a generator, link or process. Then set
+  `maintenance_duration` (hours per event), `maintenance_events` (events per horizon) and
+  `maintenance_pu` (fraction of capacity out during an event, 0 to 1). The solver places the
+  events. The **Maintenance schedule** card on the Analytics dashboard shows them. Force-LP does not relax
+  maintenance, so a model with it stays a MIP.
+- **Phase shifters.** On a transformer, set `phase_shift_min` and `phase_shift_max` (degrees).
+  The solver picks the angle inside that range. The **Phase shifters** card shows the chosen
+  angles. The power-flow study does not use them.
+
+The attribute checks are in [backend.md §5.8](backend.md#58-maintenance-and-phase-shifting-transformers).
+
 ### Topology map
 
 The right column shows a read-only Leaflet map with bus positions, branch
@@ -463,29 +499,50 @@ each row.
 
 Stochastic mode cannot be combined with rolling horizon or SCLOPF.
 
+CVaR risk aversion is not in the GUI. Set it through the API or MCP with `options.riskPreference`
+(see [backend.md §7.3](backend.md#73-stochastic)).
+
 #### Security-constrained (SCLOPF)
 
 Enables N-1 security-constrained linear optimal power flow. Every dispatch
 decision must remain feasible under the outage of any single passive branch
 (line or transformer) in the network.
 
-**Enabling** — click **On**. The button is disabled if rolling horizon,
-stochastic mode, or pathway mode is active; disable those modes first.
+**Enabling** — click **On**. The button is disabled if rolling horizon or stochastic mode is
+active; disable that mode first.
 
 When enabled, the section shows the count of branches in N-1 coverage, broken
 down by lines and transformers.
 
-SCLOPF cannot be combined with rolling horizon, stochastic mode, or multi-period
-pathway.
+SCLOPF cannot be combined with rolling horizon or stochastic mode. It works with multi-period
+pathway. The API can limit the secured branches to a subset (`securityConstrainedConfig.branchOutages`);
+the GUI secures all of them.
 
 #### Solver
 
-HiGHS configuration for the optimization step.
+Settings for the optimisation step.
 
 | Setting | Options | Default | Notes |
 |---|---|---|---|
-| Threads | auto, 1, 2, 4, 8 | auto | `auto` lets HiGHS use all available cores. |
-| Algorithm | Simplex, IPM | Simplex | IPM (interior point method) is often faster for large LP models. Use Simplex for MIP or unit-commitment runs. |
+| Threads | auto, 1, 2, 4, 8 | auto | `auto` lets HiGHS use all available cores. Concurrent queued solves share the cores. |
+| Method | Auto, Simplex, IPM, PDLP, HiPO | Auto | HiGHS's LP method. `Auto` lets HiGHS choose. HiPO falls back to IPM where the HiGHS build lacks it. Method does not apply to MIP or unit-commitment runs. |
+| Solution acceptance | Lenient, Strict | Lenient | What counts as a successful solve. Lenient accepts any solution the solver toolchain validated, including interior-point (IPM / HiPO) runs that finish without crossover. Strict requires an optimal vertex solution. |
+| Auto-scale objective | Off, On | On | Scales the objective before the solve. It can speed up simplex. |
+
+**Advanced (n.optimize)** is collapsed by default. It holds:
+
+- **Solver**: the solvers installed in the backend environment. HiGHS is the default.
+- **Committable big-M (MW)** and **Cycle basis method** (`bfs-refined` or `paton`).
+- **Piecewise formulation**: how PyPSA formulates each piecewise curve (see above).
+- **Transmission losses**: secant-based line and link losses. This adds constraints per branch.
+- **Linearised unit commitment**: relaxes committable binaries to an LP.
+- **Compute infeasibilities (IIS)**: on an infeasible solve, appends the solver's IIS. Gurobi and Xpress only.
+
+#### Power flow
+
+Runs a power-flow study instead of an optimisation. **Mode** is **Off (optimise)** or **On**; **On** is
+disabled while a mode that conflicts with it is active. **Method** is **AC (Newton-Raphson)** or **Linear (DC)**. The study does not dispatch. It cannot be
+combined with rolling horizon, stochastic mode, SCLOPF, pathway or sampled blocks.
 
 ---
 
@@ -753,10 +810,9 @@ or exclude individual runs from the comparison.
 
 ## 8. Run history
 
-After each successful run, Ragnarok adds an entry to the run history rail on the
-right side of the Analytics view. The run history is session-scoped: it survives
-opening a new model or importing a project within the same browser tab, but is
-cleared when you close or reload the tab.
+After each successful run, Ragnarok saves the run on the backend and adds an entry to the run
+history rail on the right side of the Analytics view. The rail reloads the list from the backend every
+few seconds, so entries survive a page reload.
 
 Up to five unpinned entries are kept automatically. Pinned entries are never
 auto-removed.
@@ -960,15 +1016,15 @@ generated from PyPSA's own component registry.
 
 ### Supported study modes
 
-All modes call `network.optimize()` (LOPF) via HiGHS.
+The optimising modes call `network.optimize()` (LOPF) through the selected solver, HiGHS by default.
 
 | Mode | Description | Incompatible with |
 |---|---|---|
 | Single-period | One optimization over the full snapshot window. | — |
-| Multi-period pathway | Joint investment + dispatch across defined periods. | SCLOPF |
+| Multi-period pathway | Joint investment + dispatch across defined periods. | Sampled blocks |
 | Rolling horizon | Sequence of overlapping window solves. | Stochastic, SCLOPF |
 | Two-stage stochastic | Shared capacity, scenario-specific dispatch. | Rolling horizon, SCLOPF |
-| Security-constrained (SCLOPF, N-1) | Dispatch feasible under any single branch outage. | Rolling horizon, Stochastic, Pathway |
+| Security-constrained (SCLOPF, N-1) | Dispatch feasible under any single branch outage. | Rolling horizon, Stochastic |
 
 Combining incompatible modes returns a 400 error from the backend.
 
@@ -980,23 +1036,30 @@ Combining incompatible modes returns a 400 error from the backend.
 | Multi-period pathway | Yes | |
 | Rolling-horizon dispatch | Yes | Cannot combine with stochastic or SCLOPF |
 | Two-stage stochastic | Yes | Cannot combine with rolling horizon or SCLOPF |
-| Security-constrained LOPF (N-1) | Yes | Cannot combine with rolling, stochastic, or pathway |
+| Security-constrained LOPF (N-1) | Yes | Cannot combine with rolling horizon or stochastic; works with pathway |
 | Unit commitment (MIP) | Yes | Per-generator `committable` flag; Force-LP override available |
-| Power-flow only (PF/LPF) | No | Roadmapped |
 | Custom linopy constraints (table) | Yes | 8 metric types |
 | Custom DSL constraints | Yes | Free-text; `gen`, `cap`, `emissions`, `load_shed`, `cf` |
 | Native global_constraints | Yes | |
 | Carbon price (flat adder) | Yes | Scalar or year-indexed schedule; no ETS curve or banking |
 | Load shedding (VOLL backstop) | Yes | Configurable cost; per-bus |
 | Annuitised CAPEX (expansion) | Yes | |
-| HiGHS solver | Yes | Simplex or IPM; thread count configurable |
-| Other solvers (Gurobi, GLPK, CPLEX) | No | HiGHS only |
+| HiGHS solver (default) | Yes | Method Auto / Simplex / IPM / PDLP / HiPO; thread count configurable |
+| Other installed solvers | Yes | Settings → Solver → Advanced lists the solvers installed in the backend |
+| Piecewise cost and efficiency curves | Yes | Forge → Marginal cost curve; Piecewise cost curves (solved) card |
+| Maintenance scheduling | Yes | Generator / link / process attributes; Maintenance schedule card; Force-LP does not relax it |
+| Phase-shifting transformers | Yes | Transformer attributes; Phase shifters card; the power-flow study ignores the angles |
+| Temporal clustering | Yes | Forge → Temporal clustering |
+| Power-flow study (LPF / AC PF) | Yes | Settings → Power flow; no optimisation |
+| CVaR risk aversion | No | API and MCP only (`options.riskPreference`) |
+| Iterative transmission expansion | No | API and MCP only (`options.iterativeExpansion`) |
+| MATPOWER / pandapower import | No | API and MCP only |
 | Map-based network visualization | Yes | Leaflet |
 | Dispatch / price / emissions charts | Yes | Recharts |
 | Per-asset detail card | Yes | Generators, buses, lines, links, storage, processes, shunt impedances |
 | LMP (nodal marginal prices) | Yes | Per-bus time series |
 | Session run history | Yes | Every solved run is persisted server-side and listed in History |
-| Persisted scenario manager (cross-session) | No | |
+| Scenario presets | Yes | Saved in the workbook (`RAGNAROK_Scenarios` sheet) |
 | Open / Save workbook (.xlsx) | Yes | Inputs only |
 | Import / Export Project (.xlsx) | Yes | Inputs + solved outputs + metadata |
 | Export Result workbook (.xlsx) | Yes | Full output dataset |
@@ -1010,20 +1073,19 @@ Combining incompatible modes returns a 400 error from the backend.
 
 ### Current limitations
 
-**No standalone power-flow study.** Every run is an optimization (LOPF).
-Power-flow-only modes are roadmapped but not yet implemented.
+**Power flow is a study mode, not a workflow.** Settings → Power flow runs PyPSA's linear or AC
+power flow on the model. It does not optimise, and there is no separate power-flow view.
 
-**HiGHS only.** There is no UI mechanism to switch solvers. Gurobi, GLPK, CPLEX,
-and other solvers are not exposed.
+**HiGHS by default.** Other solvers appear in Settings → Solver → Advanced only when they are
+installed in the backend environment. Ragnarok does not install them.
 
 **Local backend only.** The FastAPI process runs at `http://127.0.0.1:8000`. There
 is no authentication layer, cloud deployment, or multi-user session management.
 Ragnarok is not intended for public network exposure as shipped.
 
-**Session-scoped run history.** The run history list lives in browser memory. It
-survives model swaps within the same browser session but is cleared on page reload
-or "Clear all". There is no database-backed scenario store and no export of the
-full run history list.
+**Run history lives on the backend.** Every successful run is stored in the backend's run store and
+listed from `GET /api/runs`, so it survives a page reload. Export Project keeps only the current run;
+earlier runs stay with the backend that solved them.
 
 **Copper-plate unless impedances and limits are provided.** A network with buses
 but no lines (or lines with `s_nom = 0` and no resistance/reactance) behaves as
@@ -1081,8 +1143,8 @@ infeasible given the installed capacity.
 ### Incompatible modes error (400 from backend)
 
 **Cause**: You have enabled a combination of study modes that cannot run together:
-stochastic + rolling horizon, SCLOPF + rolling horizon, SCLOPF + stochastic, or
-SCLOPF + pathway.
+stochastic + rolling horizon, SCLOPF + rolling horizon, SCLOPF + stochastic, or a
+power-flow study or N-1 contingency run combined with another study mode.
 
 **Fix**: Go to **Settings** and disable the conflicting mode before running. The
 SCLOPF and Stochastic section headers show a warning message identifying the
@@ -1113,11 +1175,11 @@ backend terminal output for error details.
 
 ### Run history is empty after refreshing the page
 
-**Cause**: Run history is stored only in browser memory. Reloading the tab clears it.
+**Cause**: The history list comes from the backend (`GET /api/runs`). An empty list means the backend
+that answers is not the one that solved your runs.
 
-**Fix**: Before closing or reloading, export the runs you want to keep using
-**Export Project**. Re-import the file in a future session with **Import Project**
-to restore that run as an entry in the history rail.
+**Fix**: Check the address the browser uses. To keep a run on another machine, use **Export Project**
+and re-import the file with **Import Project**, which restores that run as an entry in the history rail.
 
 ### "Run disconnected — server restarted"
 

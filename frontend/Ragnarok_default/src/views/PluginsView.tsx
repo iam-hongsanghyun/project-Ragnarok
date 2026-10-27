@@ -179,7 +179,7 @@ export function PluginsView(props: Props) {
             results={props.results}
           />
         ) : activeBe ? (
-          <BackendPluginDetail manifest={activeBe} model={props.model} onBuilt={props.onBackendModelBuilt} />
+          <BackendPluginDetail manifest={activeBe} model={props.model} results={props.results} onBuilt={props.onBackendModelBuilt} />
         ) : (
           <div className="view-empty">
             <h3>No plugins installed</h3>

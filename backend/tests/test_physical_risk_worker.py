@@ -368,7 +368,9 @@ def test_missing_env_in_auto_mode_serves_stub_silently(
     result = engine.run_kind("physical", pf, ["tropical_cyclone"], _SCENARIO, {})
 
     assert isinstance(result, PhysicalRunOutput)
-    assert result.detail is None  # silent — no worker was expected
+    # No fallback reason (no worker was expected) — but the stub is still flagged.
+    assert result.detail is not None and "Worker fallback" not in result.detail
+    assert engine.is_stub_detail(result.detail)
     assert not pr_worker.available()
     stub = engine._run_engine(pf, ["tropical_cyclone"], _SCENARIO)
     assert result.perils[0].aaiAgg == stub.perils[0].aaiAgg

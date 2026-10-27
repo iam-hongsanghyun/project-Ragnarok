@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 
 class RunPayload(BaseModel):
-    """Body for ``POST /api/run`` / ``/api/queue`` / ``/api/validate``.
+    """Body for ``POST /api/queue`` / ``/api/validate``.
 
     ``model`` is the full workbook. As the working model moves server-side, a
     run may instead reference a stored session via ``sessionId`` (then ``model``

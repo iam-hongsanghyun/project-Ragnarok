@@ -1,7 +1,7 @@
 {
   "meta": {
     "source": "pypsa.Network().line_types / .transformer_types",
-    "pypsa_version": "1.2.2",
+    "pypsa_version": "1.4.0",
     "generator": "backend/app/pypsa_schema_builder.py",
     "note": "Built at backend startup from the live PyPSA Network's default type catalogues. Always in sync with the installed PyPSA version."
   },

@@ -14,7 +14,9 @@ from __future__ import annotations
 
 from typing import Any
 
+import pandas as pd
 import pypsa
+from fastapi import HTTPException
 
 from .full_outputs import build_full_outputs
 from .power_flow import EMPTY_OPTIMISE_FIELDS
@@ -36,10 +38,34 @@ def run_contingency(
     snapshot_count: int,
     snapshot_weight: float,
     notes: list[str],
+    config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Run N-1 contingency analysis and return the focused result payload."""
+    """Run N-1 contingency analysis and return the focused result payload.
+
+    ``config`` (``contingencyConfig``, P38) may carry ``snapshot`` - an ISO label or
+    integer position to evaluate instead of the peak-demand snapshot (PyPSA's
+    ``lpf_contingency`` handles one snapshot per call) - and ``branchOutages``, a
+    list of branch names (or ``"Transformer:name"``) to test instead of every
+    passive branch.
+    """
+    config = config or {}
+    requested = config.get("snapshot")
+    outage_subset = None
+    if config.get("branchOutages"):
+        from ..optimise_options import parse_branch_outages
+
+        outage_subset = parse_branch_outages(config["branchOutages"])
     # Evaluate at peak demand — the snapshot most likely to expose an overload.
-    if len(network.loads):
+    if requested not in (None, "", "peak"):
+        if isinstance(requested, int) or (isinstance(requested, str) and requested.isdigit()):
+            peak_snap = network.snapshots[int(requested)]
+        else:
+            peak_snap = pd.Timestamp(requested)
+            if peak_snap not in network.snapshots:
+                raise HTTPException(
+                    status_code=400, detail=f"contingencyConfig.snapshot {requested!r} is not a snapshot."
+                )
+    elif len(network.loads):
         load_dense = network.get_switchable_as_dense("Load", "p_set")
         peak_snap = (
             load_dense.sum(axis=1).idxmax()
@@ -57,7 +83,10 @@ def run_contingency(
     base_max = 0.0
 
     try:
-        df = network.lpf_contingency(snapshots=peak_snap)
+        df = network.lpf_contingency(
+            snapshots=peak_snap,
+            branch_outages=pd.MultiIndex.from_tuples(list(outage_subset)) if outage_subset else None,
+        )
         base = df["base"]
         outage_cols = [c for c in df.columns if c != "base"]
         n_outages = len(outage_cols)

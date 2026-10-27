@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import pandas as pd
@@ -176,12 +177,64 @@ def _check_numeric_sanity(sheet: str, rows: list[dict[str, Any]], warnings: list
                 errors.append(f"{sheet}: row '{name}' has negative '{field}' ({value}).")
             if field.endswith("_pu") and (value < 0 or value > 1):
                 warnings.append(f"{sheet}: row '{name}' has '{field}'={value} outside [0, 1].")
+            if field == "v_ang_min" and math.isfinite(value):
+                warnings.append(
+                    f"{sheet}: row '{name}' sets v_ang_min={value} — deprecated in PyPSA 1.4 and ignored "
+                    "(it is dropped before solve); use v_ang_max (degrees, symmetric |angle difference| cap)."
+                )
+            if field == "v_ang_max" and math.isfinite(value) and value <= 0:
+                warnings.append(f"{sheet}: row '{name}' has v_ang_max={value} deg — a non-positive cap forbids all flow.")
             if field == "efficiency" and value > 5:
                 warnings.append(f"{sheet}: row '{name}' has efficiency={value} — check units (ratio/COP, not %).")
             if field == "co2_emissions" and value > 5:
                 warnings.append(
                     f"{sheet}: row '{name}' has co2_emissions={value} — expected tCO₂/MWh (likely needs ÷1000 if entered as kg/MWh)."
                 )
+
+
+def _check_phase_shift_bounds(sheet: str, rows: list[dict[str, Any]], warnings: list[str], errors: list[str]) -> None:
+    """Phase-shifting transformer bounds (degrees): ``phase_shift_min <= phase_shift_max``."""
+    if sheet != "transformers":
+        return
+    for row in rows:
+        name = _row_name(row) or "<unnamed>"
+        lo = number(row.get("phase_shift_min"), None)
+        hi = number(row.get("phase_shift_max"), None)
+        if lo is None or hi is None:
+            continue
+        if lo > hi:
+            errors.append(f"transformers: row '{name}' has phase_shift_min ({lo}) > phase_shift_max ({hi}).")
+        elif lo < hi:
+            setpoint = number(row.get("phase_shift"), None)
+            if setpoint not in (None, 0.0):
+                warnings.append(
+                    f"transformers: row '{name}' optimises its phase shift in [{lo}, {hi}] deg; "
+                    f"the 'phase_shift' setpoint ({setpoint}) is ignored."
+                )
+
+
+def _check_maintenance_attributes(sheet: str, rows: list[dict[str, Any]], warnings: list[str], errors: list[str]) -> None:
+    """``maintainable`` units need a positive duration and event count (hours / count)."""
+    if sheet not in ("generators", "links", "processes"):
+        return
+    for row in rows:
+        flag = row.get("maintainable")
+        if str(flag).strip().lower() not in ("true", "1", "yes"):
+            continue
+        name = _row_name(row) or "<unnamed>"
+        duration = number(row.get("maintenance_duration"), 0.0)
+        events = number(row.get("maintenance_events"), 1.0)
+        if duration is None or duration <= 0:
+            warnings.append(
+                f"{sheet}: row '{name}' is maintainable but maintenance_duration is 0 — no outage can be scheduled."
+            )
+        if events is not None and events < 1:
+            warnings.append(f"{sheet}: row '{name}' is maintainable with maintenance_events={events:g} (< 1).")
+        if str(row.get("committable")).strip().lower() in ("true", "1", "yes") or str(row.get("p_nom_extendable")).strip().lower() in ("true", "1", "yes"):
+            warnings.append(
+                f"{sheet}: row '{name}' combines maintainable with committable/extendable capacity — "
+                "adds binaries (MILP); set forceLp to relax."
+            )
 
 
 def _check_carrier_refs(sheet: str, rows: list[dict[str, Any]], carrier_names: set[str], warnings: list[str]) -> None:
@@ -426,6 +479,8 @@ def validate_model(payload: RunPayload) -> dict[str, Any]:
         _check_required_fields(sheet, rows, errors)
         _check_bus_refs(sheet, rows, bus_names, errors)
         _check_numeric_sanity(sheet, rows, warnings, errors)
+        _check_phase_shift_bounds(sheet, rows, warnings, errors)
+        _check_maintenance_attributes(sheet, rows, warnings, errors)
         _check_carrier_refs(sheet, rows, carrier_names, warnings)
         _check_output_columns(sheet, rows, notes)
 
@@ -433,6 +488,28 @@ def validate_model(payload: RunPayload) -> dict[str, Any]:
         model, raw_snapshot_count, _snapshot_axis(snapshot_rows),
         pathway.enabled, notes, warnings, errors,
     )
+
+    # P27: PyPSA 1.4 global-constraint / growth-limit rules, before the build.
+    from .constraint_checks import check_global_constraints, check_growth_limits, consistency_report
+
+    glc_errors, glc_warnings = check_global_constraints(
+        model, pathway_enabled=pathway.enabled, periods=[row.period for row in pathway.periods],
+    )
+    errors.extend(glc_errors)
+    warnings.extend(glc_warnings)
+    warnings.extend(check_growth_limits(model, pathway_enabled=pathway.enabled))
+    # P37: opt-in PyPSA n.consistency_check (builds the network; options.consistencyCheck
+    # = true, or {"strict": ["all"], "checkDtypes": true}). Off by default - validate runs
+    # before every solve and a build there would double the setup cost.
+    _cc = options.get("consistencyCheck")
+    if _cc and not errors:
+        _cc_cfg = _cc if isinstance(_cc, dict) else {}
+        _report = consistency_report(
+            model, payload.scenario or {}, options,
+            strict=_cc_cfg.get("strict"), check_dtypes=bool(_cc_cfg.get("checkDtypes", False)),
+        )
+        errors.extend(f"consistency_check: {m}" for m in _report["errors"])
+        warnings.extend(f"consistency_check: {m}" for m in _report["warnings"])
 
     network_summary = {
         sheet: len(workbook_rows(model, sheet))

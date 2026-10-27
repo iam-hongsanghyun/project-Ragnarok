@@ -13,6 +13,7 @@ from fastapi import HTTPException
 
 from ..constants import carrier_color
 from ..network import build_network
+from ..network.piecewise import build_piecewise_results, overlay_piecewise_marginal_cost
 from ..network.demand_response import build_demand_response, build_price_elastic
 from ..pathway import parse_pathway_config
 from ..rolling import parse_rolling_config
@@ -53,6 +54,13 @@ from .emissions import build_emissions_breakdown
 from .energy_balance import build_energy_balance
 from .statistics import build_statistics
 from .mga import build_mga
+from ..optimise_options import (
+    apply_risk_preference,
+    build_branch_outages,
+    iis_text,
+    merge_solver_options,
+    parse_optimise_options,
+)
 from .merchant import build_merchant
 from .adequacy import build_adequacy
 from .outage_mc import build_outage_mc
@@ -64,7 +72,8 @@ from .company import build_company_breakdown
 from .company_statement import build_company_statement
 from .finance import build_company_finance
 from .price_formation import build_price_formation
-from .commitment import build_commitment
+from .commitment import build_commitment, build_maintenance
+from .phase_shift import build_phase_shifters
 from .bid_strategy import build_bid_strategy
 from .optimal_bid import build_optimal_bid
 from .asset_swap import build_asset_swap
@@ -351,6 +360,8 @@ def run_pypsa(
     sampling = parse_sampling_config(options.get("samplingConfig"))
     sclopf_cfg = options.get("securityConstrainedConfig") or {}
     sclopf_enabled = bool(sclopf_cfg.get("enabled", False))
+    # P19-P26: solver choice + the remaining n.optimize kwargs (backend/pypsa/optimise_options.py).
+    oo = parse_optimise_options(options)
     powerflow_cfg = options.get("powerFlowConfig") or {}
     pf_enabled = bool(powerflow_cfg.get("enabled", False))
     pf_linear = bool(powerflow_cfg.get("linear", False))
@@ -394,11 +405,8 @@ def run_pypsa(
             status_code=400,
             detail="Security-constrained (SCLOPF) cannot be combined with rolling horizon or stochastic mode.",
         )
-    if sclopf_enabled and pathway.enabled:
-        raise HTTPException(
-            status_code=400,
-            detail="Security-constrained (SCLOPF) cannot be combined with multi-investment pathway mode.",
-        )
+    # SCLOPF + multi-investment pathway: lifted (P23). PyPSA 1.4 fixed multi-period
+    # SCLOPF; the N-1 constraints are added per investment period and sub-network.
     if pf_enabled and (
         rolling.enabled or stochastic.enabled or sclopf_enabled or pathway.enabled or sampling.enabled
     ):
@@ -481,6 +489,9 @@ def run_pypsa(
     # sent here), so there is no plugin hook in this pipeline.
     _t_build = time.perf_counter()
     network, notes = build_network(model, scenario, options)
+    _risk_note = apply_risk_preference(network, oo)  # P21: CVaR (stochastic only)
+    if _risk_note:
+        notes.append(_risk_note)
     _log.info(
         "network built in %.2fs — %d snapshots, %d buses, %d generators",
         time.perf_counter() - _t_build,
@@ -508,6 +519,7 @@ def run_pypsa(
             snapshot_count=snapshot_count,
             snapshot_weight=snapshot_weight,
             notes=notes,
+            pf_options=powerflow_cfg,  # P34: xTol / useSeed / distributeSlack / slackWeights / skipPre
         )
     # Market-simulation study mode (B2): rule-based merit-order clearing instead
     # of an LP — same delegation pattern as the power-flow study.
@@ -531,6 +543,7 @@ def run_pypsa(
             snapshot_count=snapshot_count,
             snapshot_weight=snapshot_weight,
             notes=notes,
+            config=contingency_cfg,  # P38: snapshot / branchOutages
         )
 
     # CO₂ emission factors are a static carrier property, shared across
@@ -605,7 +618,8 @@ def run_pypsa(
     # Read solver performance options from run payload. HiGHS is always the
     # solver (solver_name="highs"); solverType picks the method within HiGHS and
     # the default "auto" leaves it to HiGHS (the fast path, == a bare optimize).
-    solver_options = _build_solver_options(options)
+    solver_options = merge_solver_options(_build_solver_options(options), oo, options)
+    ac_feasibility: dict[str, Any] | None = None
 
     rolling_windows: list[dict[str, Any]] = []
     rolling_suspect: str | None = None
@@ -640,12 +654,13 @@ def run_pypsa(
                 horizon=rolling.horizon_snapshots,
                 overlap=rolling.overlap_snapshots,
                 multi_investment_periods=pathway.enabled,
-                solver_name="highs",
+                solver_name=oo.solver_name,
                 solver_options=solver_options if solver_options else {},
                 extra_functionality=extra_functionality,
-                io_api=_SOLVER_IO_API,
+                io_api=oo.io_api(_SOLVER_IO_API),
                 include_objective_constant=False,  # see note on the single-period call
                 assign_all_duals=True,  # populate storage / link duals (mu_energy_balance …)
+                **oo.optimize_kwargs(),
             )
             # PyPSA's rolling-horizon helper does not return a status; it only
             # logs a warning on a failed window and leaves that window's
@@ -667,23 +682,26 @@ def run_pypsa(
             # `branch_outages` (default: all passive branches in the
             # network).
             result = network.optimize.optimize_security_constrained(
-                solver_name="highs",
+                branch_outages=build_branch_outages(network, oo),  # P23: None = every passive branch
+                multi_investment_periods=pathway.enabled,
+                solver_name=oo.solver_name,
                 solver_options=solver_options if solver_options else {},
                 extra_functionality=extra_functionality,
-                io_api=_SOLVER_IO_API,
+                io_api=oo.io_api(_SOLVER_IO_API),
                 assign_all_duals=True,
+                **oo.optimize_kwargs(),
                 # Explicit like every other solve: PyPSA 1.4 warns when unset and
                 # flips the default to False in v2.0.
                 include_objective_constant=False,
             )
             solve_status, solve_condition = _coerce_solve_status(result)
         else:
-            result = network.optimize(
+            _plain_kwargs: dict[str, Any] = dict(
                 multi_investment_periods=pathway.enabled,
-                solver_name="highs",
+                solver_name=oo.solver_name,
                 solver_options=solver_options if solver_options else {},
                 extra_functionality=extra_functionality,
-                io_api=_SOLVER_IO_API,
+                io_api=oo.io_api(_SOLVER_IO_API),
                 # Storage duals (mu_energy_balance …) stay empty otherwise. PyPSA cannot
                 # assign them for scenario-indexed (stochastic) models.
                 assign_all_duals=not stochastic.enabled,
@@ -695,8 +713,25 @@ def run_pypsa(
                 # PyPSA v2.0 default ahead of time. Not user-configurable: it
                 # is a numerical detail, not a modelling choice.
                 include_objective_constant=False,
+                **oo.optimize_kwargs(),
             )
-            solve_status, solve_condition = _coerce_solve_status(result)
+            if oo.iterative_expansion:  # P22
+                from ..optimise_extras import run_iterative_expansion
+
+                solve_status, solve_condition, _it_note = run_iterative_expansion(
+                    network, oo, **{k: v for k, v in _plain_kwargs.items() if k != "multi_investment_periods"}
+                )
+                notes.append(_it_note)
+            elif oo.two_stage:  # P26
+                from ..optimise_extras import run_two_stage
+
+                solve_status, solve_condition, _ts_note = run_two_stage(
+                    network, oo, stage_kwargs=_plain_kwargs
+                )
+                notes.append(_ts_note)
+            else:
+                result = network.optimize(**_plain_kwargs)
+                solve_status, solve_condition = _coerce_solve_status(result)
         _log.info(
             "solve finished in %.2fs — status=%s condition=%s",
             time.perf_counter() - _t_solve,
@@ -734,7 +769,7 @@ def run_pypsa(
                 try:
                     from .diagnostics import diagnose_infeasibility, diagnosis_text
 
-                    diag = diagnose_infeasibility(network, currency=currency)
+                    diag = diagnose_infeasibility(network)
                     diagnosis = f" {diag['headline']}.\n{diagnosis_text(diag)}\n"
                 except Exception:  # diagnostics must never mask the real error
                     _log.exception("Infeasibility diagnosis failed for the supply-gap gate")
@@ -791,8 +826,11 @@ def run_pypsa(
                 try:
                     from .diagnostics import diagnose_infeasibility, diagnosis_text
 
-                    diag = diagnose_infeasibility(network, currency=currency)
+                    diag = diagnose_infeasibility(network)
                     detail = f"{base_msg} {diag['headline']}.\n{diagnosis_text(diag)}{strict_hint}"
+                    _iis = iis_text(network, oo)  # P19: solver IIS (Gurobi/Xpress) when requested
+                    if _iis:
+                        detail += f"\nSolver IIS:\n{_iis}"
                 except Exception:  # diagnostics must never mask the real error
                     detail = base_msg + strict_hint
             else:
@@ -820,13 +858,29 @@ def run_pypsa(
                 "solved with IPM instead. To enable HiPO, install a HiGHS built "
                 "with -DHIPO=ON (and METIS + BLAS)."
             )
-        solver_note = "HiGHS"
-        if solver_options.get("solver"):
+        solver_note = "HiGHS" if oo.solver_name == "highs" else oo.solver_name
+        if oo.solver_name == "highs" and solver_options.get("solver"):
             solver_note += f", {solver_options['solver'].upper()}"
-        else:
+        elif oo.solver_name == "highs":
             solver_note += " (auto method)"
         if solver_options.get("threads"):
             solver_note += f" ({solver_options['threads']} threads)"
+        _oo_kw = {k: v for k, v in oo.optimize_kwargs().items() if k not in ("model_kwargs", "log_to_console")}
+        if _oo_kw:
+            notes.append("n.optimize options: " + ", ".join(f"{k}={v}" for k, v in _oo_kw.items()) + ".")
+        if oo.nonlinear_pf:  # P25 - AC feasibility of the LOPF dispatch, on a copy
+            from ..optimise_extras import run_ac_feasibility
+
+            ac_feasibility = run_ac_feasibility(network, oo.nonlinear_pf)
+            notes.append(
+                "AC feasibility check of the LOPF dispatch: "
+                + (
+                    f"converged, |V| {ac_feasibility.get('voltageMin')}–{ac_feasibility.get('voltageMax')} pu, "
+                    f"slack shift {ac_feasibility.get('slackShiftMwh')} MWh."
+                    if ac_feasibility.get("converged")
+                    else f"did not converge ({ac_feasibility.get('error') or 'see maxMismatch'})."
+                )
+            )
         if rolling.enabled:
             notes.append(
                 "PyPSA rolling horizon solved with "
@@ -835,7 +889,8 @@ def run_pypsa(
             )
         elif sclopf_enabled:
             n_passive = (
-                len(network.lines) + len(network.transformers)
+                len(oo.branch_outages) if oo.branch_outages
+                else len(network.lines) + len(network.transformers)
                 if "transformers" in network.components.keys()
                 else len(network.lines)
             )
@@ -851,7 +906,7 @@ def run_pypsa(
         raise HTTPException(status_code=500, detail=f"PyPSA optimization failed: {exc}") from exc
 
 
-    return _build_solved_payload(
+    payload = _build_solved_payload(
         network, model, scenario, options, notes,
         currency=currency,
         owner_column=owner_column,
@@ -864,8 +919,22 @@ def run_pypsa(
         sampling=sampling,
         rolling_windows=rolling_windows,
         sclopf_enabled=sclopf_enabled,
-        solver_options=solver_options,
+        # Follow-on studies (merchant, bid, asset-swap, ESS ...) re-solve on HiGHS, so
+        # they must receive HiGHS options even when the main solve used another solver.
+        solver_options=solver_options if oo.solver_name == "highs" else _build_solver_options(options),
+        oo=oo,
     )
+    payload["acFeasibility"] = _sanitize_nonfinite(ac_feasibility)  # P25 (None unless requested)
+    payload["optimiseOptions"] = {  # what actually ran (P19/P20), echoed for reports and MCP
+        "solver": oo.solver_name,
+        **{k: v for k, v in oo.optimize_kwargs().items() if k != "log_to_console"},
+        "riskPreference": (
+            {"alpha": oo.risk_alpha, "omega": oo.risk_omega} if oo.risk_alpha is not None else None
+        ),
+        "iterativeExpansion": bool(oo.iterative_expansion),
+        "twoStage": oo.two_stage,
+    }
+    return payload
 
 
 def _build_solved_payload(
@@ -887,6 +956,7 @@ def _build_solved_payload(
     rolling_windows: list[dict[str, Any]],
     sclopf_enabled: bool,
     solver_options: dict[str, Any],
+    oo: Any = None,
 ) -> dict[str, Any]:
     """Assemble the full results payload from a SOLVED network.
 
@@ -1136,7 +1206,7 @@ def _build_solved_payload(
         scenario.get("carbonPrice") or 0.0, options.get("carbonPriceSchedule")
     )
     carbon_price_series = build_price_series(network, carbon_cfg)
-    mc_dense = network.get_switchable_as_dense("Generator", "marginal_cost")
+    mc_dense = overlay_piecewise_marginal_cost(network, network.get_switchable_as_dense("Generator", "marginal_cost"))
     # Cost weights follow the LP objective: the ``objective`` snapshot weighting,
     # times the investment-period objective weighting in a pathway run, so the
     # breakdown sums to the same basis the optimiser minimised.
@@ -1184,6 +1254,10 @@ def _build_solved_payload(
         total_capex_window = (
             total_capex_annual * (_H_window / HOURS_PER_YEAR) if _H_window > 0 else total_capex_annual
         )
+
+    # PyPSA-native `fom_cost` (per MW, added to the objective unscaled) — an
+    # objective term nothing above sees; surface it on its own line.
+    total_fom = float(sum(r.get("fom_total", 0.0) for r in expansion_results))
 
     # Market analysis — merit order + CO₂ shadow price (pure post-processing)
     merit_order = build_merit_order(network)
@@ -1233,6 +1307,9 @@ def _build_solved_payload(
             "value": round(total_capex_window),
         })
 
+    if total_fom > 0:
+        cost_breakdown.append({"label": "Fixed O&M (fom_cost)", "value": round(total_fom)})
+
     # Per-bus LMP (nodal marginal prices) — one value series per snapshot.
     # Vectorised: the naive per-(snapshot, bus) `mp.at[...]` scalar lookup is
     # O(snapshots × buses) — ~1.7M label lookups for a 1-year, multi-bus run.
@@ -1263,7 +1340,7 @@ def _build_solved_payload(
     # Series
     dispatch_s, gen_dispatch_s = build_dispatch_series(network, by_carrier, load_dispatch, generator_dispatch_frame)
     curtailment_s = build_curtailment_series(network, generator_dispatch_frame)
-    price_s, emissions_s = build_price_emissions_series(network, by_carrier, price_series, emissions_factors)
+    price_s, emissions_s = build_price_emissions_series(network, price_series, emissions_factors)
     storage_s = build_storage_series(network)
     storage_soc_s = build_storage_soc_series(network)
     pathway_summaries = _pathway_period_summaries(
@@ -1458,9 +1535,14 @@ def _build_solved_payload(
             slack=float(mga_cfg.get("slack", 0.05) or 0.05),
             carriers=mga_cfg.get("carriers") or None,
             currency=currency,
-            solver_options=solver_options if solver_options else {},
-            io_api=_SOLVER_IO_API,
+            solver_options=(
+                merge_solver_options(_build_solver_options(options), oo, options)
+                if oo is not None else (solver_options or {})
+            ),
+            io_api=oo.io_api(_SOLVER_IO_API) if oo is not None else _SOLVER_IO_API,
             multi_investment_periods=pathway.enabled,
+            solver_name=oo.solver_name if oo is not None else "highs",
+            config=mga_cfg,
         )
         if mga_enabled
         else None
@@ -1581,6 +1663,8 @@ def _build_solved_payload(
     price_formation = build_price_formation(network, currency=currency)
     # Unit-commitment view (Tier 1) — starts, start-up costs, on/off patterns.
     commitment = build_commitment(network, currency=currency)
+    maintenance = build_maintenance(network)
+    phase_shifters = build_phase_shifters(network)
     # PPA contract valuation (PP1) — value a fixed-price PPA against the LMP.
     ppa = (
         build_ppa(
@@ -1617,6 +1701,13 @@ def _build_solved_payload(
         currency=currency,
         debt=options.get("financeConfig") or None,
     )
+    # PyPSA >= 1.3 piecewise curves: the curve plus its solved *_piecewise_opt (P30).
+    piecewise: dict[str, Any] | None = None
+    try:
+        piecewise = build_piecewise_results(network)
+    except Exception as exc:  # noqa: BLE001 - a reporting extra must not sink the run
+        notes.append(f"Piecewise-curve results could not be computed: {exc}")
+        _log.warning("piecewise results failed: %s", exc)
     # Resource adequacy (A1 ensemble + A2 LOLE) — stochastic renewable ensemble
     # vs load. None when the run has no time-varying renewable generator.
     # Never raises into the solve: any failure (e.g. pathway snapshots are
@@ -1742,6 +1833,7 @@ def _build_solved_payload(
         "companyFinance": company_finance,
         "companyStatement": company_statement,
         "adequacy": adequacy,
+        "piecewise": piecewise,
         "outageMc": outage_mc,
         "elcc": elcc,
         "correlatedSampling": correlated_sampling,
@@ -1749,6 +1841,8 @@ def _build_solved_payload(
         "lmpDecomposition": lmp_decomposition,
         "priceFormation": price_formation,
         "commitment": commitment,
+        "maintenance": maintenance,
+        "phaseShifters": phase_shifters,
         "ppa": ppa,
         "ppaExplorer": ppa_explorer,
         "bidStrategy": bid_strategy,

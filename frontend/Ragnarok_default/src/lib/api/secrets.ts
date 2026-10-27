@@ -1,5 +1,5 @@
 /**
- * Resolver for API keys + endpoint overrides.
+ * Resolver for API keys.
  *
  * Lookup chain, first match wins:
  *
@@ -32,10 +32,9 @@ function storageGet(storage: Storage | undefined, key: string): string | null {
 }
 
 function envGet(key: string): string | null {
-  // CRA inlines `process.env.REACT_APP_*` at build time. We construct the
-  // env name dynamically here, but the inlining still works because CRA's
-  // webpack DefinePlugin picks up the reference pattern at compile time
-  // for known keys — see the explicit table below.
+  // CRA's DefinePlugin inlines the whole `process.env` object (every
+  // REACT_APP_* var present at build time) as a literal, so the dynamically
+  // built key below resolves without an explicit per-key table.
   const envKey = `REACT_APP_RAGNAROK_${key.toUpperCase()}`;
   const v = (process.env as Record<string, string | undefined>)[envKey];
   return v && v.trim() ? v.trim() : null;
@@ -98,16 +97,6 @@ export function clearSecret(name: string): void {
   } catch {
     /* ignore */
   }
-}
-
-/**
- * Read an upstream URL override (e.g. when running against a local mirror).
- * Lookup is env-only — URL overrides aren't per-user config.
- */
-export function getEndpointOverride(name: string): string | null {
-  const envKey = `REACT_APP_RAGNAROK_${name.toUpperCase()}`;
-  const v = (process.env as Record<string, string | undefined>)[envKey];
-  return v && v.trim() ? v.trim() : null;
 }
 
 // ── Server-recorded keys (Settings writes through to the backend) ───────────

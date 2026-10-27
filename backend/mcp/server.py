@@ -275,14 +275,17 @@ async def describe_component(component: str) -> Any:
 
 @mcp.tool(
     annotations=_RO,
-    description="All solve knobs available: backend capabilities (carbon price, multi-year pathway, rolling horizon, stochastic, SCLOPF, power flow, market simulation, MGA, …) and the simulation defaults. These are the keys you pass to submit_solve's scenario/options. For the seven reliability/market analytics (reserves, outage-MC, ramp, correlated sampling, ELCC, convergence, LMP decomposition) call describe_analytics.",
+    description="Reference for EVERY key submit_solve's scenario/options accept: type, default, unit, allowed values, meaning and the backend reader, for ~50 keys (snapshot window, solver, load shedding, carbon price schedule, modelOverrides, pathway, rolling, sampling, stochastic, SCLOPF, power flow, market simulation, contingency, MGA, merchant, bid strategy, asset swap, ESS, PPA, demand response, finance, reserve/outage/ramp/ELCC/convergence/LMP analytics, constraints, constraintSpecs, customDsl). Without 'key' returns a compact index plus the backend capability flags, simulation defaults, notes (DSL precedence, pre-run guards); with key (e.g. 'options.essConfig', 'scenario.constraints', 'options.solverType') returns every field of that key. To run a SAVED scenario use list_scenarios + submit_scenario instead of hand-building options.",
 )
-async def describe_run_options() -> Any:
-    cfg = await get_client().get_config()
-    return {
-        "capabilities": cfg.get("capabilities"),
-        "simulation_defaults": cfg.get("simulation_defaults"),
-    }
+async def describe_run_options(key: str | None = None) -> Any:
+    client = get_client()
+    reference = await client.get_run_options_reference(key)
+    out: dict[str, Any] = {"reference": reference}
+    if not key:
+        cfg = await client.get_config()
+        out["capabilities"] = cfg.get("capabilities")
+        out["simulation_defaults"] = cfg.get("simulation_defaults")
+    return out
 
 
 @mcp.tool(
@@ -2458,3 +2461,19 @@ async def physical_risk_report(session_id: str | None = None) -> Any:
     if not sid:
         return _PR_NO_SESSION
     return await get_client().physical_risk_report(sid)
+
+
+# Run-spec tools (saved scenarios, carbon library, DSL sheet) - WA3-WA6.
+from . import tools_runspec  # noqa: E402,F401
+
+# Analysis tools: server-side results + Forge/Build helpers - WA7/WA8.
+from . import tools_analysis  # noqa: E402,F401
+
+# Component-coverage tools: seasonal ratings, maintenance, PyPSA-native I/O - P11/P18/P41-P43.
+from . import tools_components  # noqa: E402,F401
+
+# Piecewise-linear curve tools (PyPSA 1.3+): set/get/clear curves, run option - P10/P47.
+from . import tools_piecewise  # noqa: E402,F401
+
+# Optimisation / statistics / network-operation tools (PyPSA 1.4: solver options, LP export, consistency, PTDF, statistics, temporal clustering, slice/merge, HAC) - P19-P39.
+from . import tools_optimise  # noqa: E402,F401

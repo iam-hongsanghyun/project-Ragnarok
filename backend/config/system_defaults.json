@@ -1,64 +1,19 @@
 {
   "_comment": "Parameters for system-managed backend behavior and automatically injected components.",
   "simulation": {
-    "max_snapshots": 8760,
     "default_snapshot_count": 24,
     "default_snapshot_weight": 1.0,
     "hours_in_year": 8760.0,
-  "fallback_lifetime_years": 20.0,
-  "direct_job_retention_seconds": 900
+    "fallback_lifetime_years": 20.0
   },
   "session": {
-    "_comment": "Server-side working-model store (backend is the source of truth; the frontend fetches pages/windows on demand). Tunables for temporal-chart windowing and the edit undo stack.",
+    "_comment": "Server-side working-model store (backend is the source of truth; the frontend fetches pages/windows on demand). Tunables for temporal-chart windowing.",
     "max_chart_points_default": 800,
-    "chart_window_hours_default": 168,
-    "sheet_page_default": 200,
-    "undo_depth": 25
+    "sheet_page_default": 200
   },
   "load_shedding": {
     "_comment": "Per-bus load-shedding (VOLL) generators, added only when enableLoadShedding=true. The marginal_cost here is the backend default; the running app can override it from frontend Settings in the user-selected currency.",
     "carrier": "LoadShedding",
-    "p_nom_floor": 1000,
     "marginal_cost": 2000.0
-  },
-  "system_bess": {
-    "carrier": "Storage",
-    "max_hours": 4.0,
-    "efficiency_store": 0.91,
-    "efficiency_dispatch": 0.91,
-    "cyclic_state_of_charge": true,
-    "marginal_cost": 8.0
-  },
-  "demand_profile": {
-    "start_date": "2026-01-11",
-    "base_shape_24h": [0.66, 0.63, 0.61, 0.60, 0.61, 0.65,
-                       0.73, 0.82, 0.91, 0.96, 0.99, 1.01,
-                       1.03, 1.04, 1.02, 1.01, 1.06, 1.12,
-                       1.18, 1.16, 1.08, 0.96, 0.82, 0.72]
-  },
-  "availability_profiles": {
-    "Solar": {
-      "type": "sinusoidal",
-      "peak_hour": 12,
-      "half_width_hours": 6
-    },
-    "Wind": {
-      "type": "sinusoidal_offset",
-      "amplitude": 0.18,
-      "base": 0.58,
-      "period_hours": 24,
-      "phase_rad": 0.8,
-      "clip_min": 0.18,
-      "clip_max": 0.92
-    },
-    "Hydro": {
-      "type": "sinusoidal_offset",
-      "amplitude": 0.08,
-      "base": 0.46,
-      "period_hours": 24,
-      "phase_rad": 1.5,
-      "clip_min": 0.25,
-      "clip_max": 0.72
-    }
   }
 }

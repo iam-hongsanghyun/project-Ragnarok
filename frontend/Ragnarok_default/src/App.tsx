@@ -53,7 +53,7 @@ import { isEmbedded, listenForShowRequests } from 'lib/embedHost';
 import { useSessionSync } from 'shared/hooks/useSessionSync';
 import { API_BASE, DEFAULT_CONSTRAINTS, getDefaultRowForSheet, getNewRowDefaults, RUN_WINDOW, SHEETS } from 'lib/constants';
 import { canonicalizeOutputSeries, canonicalizeTemporalRows, createEmptyWorkbook, normalizeInputDatesToIso, parseWorkbook } from 'lib/workbook/workbook';
-import { mergeWorkbookFragment } from 'lib/workbook/mergeFragment';
+import { mergeWorkbookFragmentRemote } from 'lib/workbook/mergeFragment';
 import type { WorkbookFragment } from 'lib/api/databases';
 import { getBounds, getBusIndex, carrierColor, numberValue, orderByCarrierRows, setCarrierColorOverrides, snapshotMaxFromWorkbook, stringValue } from 'lib/utils/helpers';
 import { filenameMatchesScenario, scenarioFilename } from 'lib/utils/scenarioFilename';
@@ -77,6 +77,8 @@ import { buildScenarioPreset, defaultScenarioCatalog, readScenarioCatalogFromMod
 import { buildRunPayload } from 'features/scenario/buildRunPayload';
 import { readCarbonLibraryFromModel, writeCarbonLibraryToModel, sameCarbonLibrary } from 'lib/results/carbonLibrary';
 import { saveSessionControls, loadSessionControls, clearSession, clearSessionModelOnly } from 'lib/storage/sessionStore';
+import { postSeasonalRating } from 'lib/api/seasonalRating';
+import { postTemporalCluster, type TemporalOptions, type TemporalResult } from 'lib/api/temporal';
 import { clearSessionModel, putSessionModel, putStaticModel, getSessionFullModel, getSessionMeta, getSheetPage, isSeriesSheet, patchSheet, seriesSheetCounts, DEFAULT_SESSION_ID } from 'lib/api/session';
 import type { SessionSheetMeta } from 'lib/api/session';
 import type { ClusterResult } from 'lib/forge/transforms';
@@ -93,6 +95,7 @@ import { SettingsView } from './views/SettingsView';
 import { PluginsView } from './views/PluginsView';
 import { ModelView } from './views/ModelView';
 import { HistoryView } from './views/HistoryView';
+import { JournalView } from './views/JournalView';
 import { QueueView } from './views/QueueView';
 import { ViewPaneHeader } from './shared/components/primitives';
 import { BuildView } from './features/build/BuildView';
@@ -427,7 +430,7 @@ function AppInner() {
   const [analyticsSubTab, setAnalyticsSubTab] = usePersistedState<AnalyticsSubTab>('ui:analytics-subtab', 'Result');
   const [physicalRiskSubTab, setPhysicalRiskSubTab] = usePersistedState<PhysicalRiskSubTab>('ui:physical-risk-subtab', 'Assets');
   // History top-tab sub-navigation: the live run Queue, or the persisted run History.
-  const [historySubTab, setHistorySubTab] = usePersistedState<'Queue' | 'History'>('ui:history-subtab', 'History');
+  const [historySubTab, setHistorySubTab] = usePersistedState<'Queue' | 'History' | 'Edits'>('ui:history-subtab', 'History');
   const [results, setResults] = useState<RunResults | null>(null);
   // Topology snapshot taken at the moment `results` were produced/restored.
   // Analytics (map, asset derivation) must reflect the run that owns the
@@ -1196,6 +1199,25 @@ function AppInner() {
     [resetForNewModel, showToast],
   );
 
+  // Forge → temporal clustering (P35). Same flow as network clustering: sync the
+  // working model to the session, reduce it there, preview, then replace on apply.
+  const handleTemporalPreview = useCallback(
+    async (opts: TemporalOptions): Promise<TemporalResult> => {
+      await putStaticModel(prepareModelForBackend(model));
+      return postTemporalCluster(opts);
+    },
+    [model, prepareModelForBackend],
+  );
+
+  const handleTemporalApply = useCallback(
+    (reduced: WorkbookModel) => {
+      resetForNewModel(reduced);
+      setActiveRunName(null);
+      showToast('Time axis reduced — clustered model loaded into the editor', 'success');
+    },
+    [resetForNewModel, showToast],
+  );
+
   // Forge → set a carrier's total capacity to a target. Sync the working model
   // to the session (same as a run), ask the backend to redistribute the target
   // across the carrier's generators, then replace the working model with the
@@ -1445,6 +1467,7 @@ function AppInner() {
       solverType: settings.solverType,
       solveAcceptance: settings.solveAcceptance,
       objectiveAutoScale: settings.objectiveAutoScale,
+      advancedSolve: settings.advancedSolve,
       currencySymbol: settings.currencySymbol,
     },
     dslToSpecs(customDsl),
@@ -2120,8 +2143,16 @@ function AppInner() {
       }
       // An import REPLACES parts of the model on both sides, so it is not an
       // undoable edit (undoing only the static half would desync the series).
+      let merged: WorkbookModel;
+      try {
+        merged = await mergeWorkbookFragmentRemote({ ...modelRef.current, ...existingSeries }, fragment);
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : 'unknown error';
+        setStatus(`Import cancelled - the merge failed: ${msg}`);
+        showToast(`Import cancelled: ${msg}`, 'error');
+        return;
+      }
       clearHistory();
-      const merged = mergeWorkbookFragment({ ...modelRef.current, ...existingSeries }, fragment);
       setModel(stripSeriesSheets(merged));
       requestStaticResync();
       for (const sheet of seriesSheets) {
@@ -2150,9 +2181,17 @@ function AppInner() {
   // heat pump / …): merge the pure-built fragment (Link + carrier bus + carriers
   // + fuel supply) into the working model via the same path the importers use.
   const handleApplyConversion = useCallback(
-    (fragment: WorkbookFragment, label: string) => {
+    async (fragment: WorkbookFragment, label: string) => {
+      let merged: WorkbookModel;
+      try {
+        merged = await mergeWorkbookFragmentRemote(modelRef.current, fragment);
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : 'unknown error';
+        setStatus(`Could not add ${label}: ${msg}`);
+        showToast(`Could not add ${label}: ${msg}`, 'error');
+        return;
+      }
       pushHistory();
-      const merged = mergeWorkbookFragment(modelRef.current, fragment);
       setModel(merged);
       requestStaticResync();
       const counts = Object.entries(fragment.sheets)
@@ -2184,6 +2223,22 @@ function AppInner() {
         'Hydro inflow (GloFAS)', 'working model',
       );
       return data as { attached: string[]; skipped: string[]; sites: number; notes: string[] };
+    },
+    [model, prepareModelForBackend, handleApplyImportedFragment],
+  );
+
+  // Forge → seasonal line ratings (PyPSA Lines.apply_seasonal_rating). The backend
+  // returns the model with `lines-s_max_pu` written; only that series sheet is merged
+  // back so the editor keeps its own edits (s_nom is untouched).
+  const handleApplySeasonalRating = useCallback(
+    async (opts: { ratings: Record<string, { summer: number; winter: number }>; summerMonths: number[]; compose: boolean }) => {
+      await putStaticModel(prepareModelForBackend(model));
+      const data = await postSeasonalRating(opts.ratings, opts.summerMonths, opts.compose);
+      handleApplyImportedFragment(
+        { sheets: { 'lines-s_max_pu': data.model['lines-s_max_pu'] ?? [] } } as WorkbookFragment,
+        'Seasonal line ratings', 'working model',
+      );
+      return { lines: data.lines, summerMonths: data.summerMonths, compose: data.compose, snapshots: data.snapshots };
     },
     [model, prepareModelForBackend, handleApplyImportedFragment],
   );
@@ -3325,6 +3380,7 @@ function AppInner() {
         filename, dateFormat: settings.dateFormat,
         solverThreads: settings.solverThreads, solverType: settings.solverType,
         solveAcceptance: settings.solveAcceptance, objectiveAutoScale: settings.objectiveAutoScale,
+        advancedSolve: settings.advancedSolve,
         currencySymbol: settings.currencySymbol,
       };
       // Ensure every run in the batch gets a DISTINCT run name. The run name is
@@ -3360,7 +3416,7 @@ function AppInner() {
     } finally {
       setBatchBusy(false);
     }
-  }, [scenarioCatalog.scenarios, activeScenario, constraints, customDsl, model, prepareModelForBackend, handleSetQueueConcurrency, queueCpuCount, filename, settings.dateFormat, settings.solverThreads, settings.solverType, settings.solveAcceptance, settings.objectiveAutoScale, settings.currencySymbol, refreshQueue, showToast]);
+  }, [scenarioCatalog.scenarios, activeScenario, constraints, customDsl, model, prepareModelForBackend, handleSetQueueConcurrency, queueCpuCount, filename, settings.dateFormat, settings.solverThreads, settings.solverType, settings.solveAcceptance, settings.objectiveAutoScale, settings.advancedSolve, settings.currencySymbol, refreshQueue, showToast]);
 
   const handleRunModel = async (staged = false) => {
     const snapshotCount = snapshotEnd - snapshotStart;
@@ -3427,6 +3483,7 @@ function AppInner() {
         solverType: settings.solverType,
         solveAcceptance: settings.solveAcceptance,
         objectiveAutoScale: settings.objectiveAutoScale,
+        advancedSolve: settings.advancedSolve,
         currencySymbol: settings.currencySymbol,
       },
       constraintSpecs,
@@ -3853,6 +3910,8 @@ function AppInner() {
               solverType={settings.solverType}
               solveAcceptance={settings.solveAcceptance}
               objectiveAutoScale={settings.objectiveAutoScale}
+              advancedSolve={settings.advancedSolve}
+              onAdvancedSolveChange={(v) => updateSettings({ advancedSolve: v })}
               queuePollSeconds={settings.queuePollSeconds}
               onSolverThreadsChange={(v) => updateSettings({ solverThreads: v })}
               onSolverTypeChange={(v) => updateSettings({ solverType: v })}
@@ -3984,7 +4043,10 @@ function AppInner() {
               onQueryEditApply={handleQueryEditApply}
               onClusterPreview={handleClusterPreview}
               onClusterApply={handleClusterApply}
+              onTemporalPreview={handleTemporalPreview}
+              onTemporalApply={handleTemporalApply}
               onScaleCarrierCapacity={handleScaleCarrierCapacity}
+              onApplySeasonalRating={handleApplySeasonalRating}
               onAttachRenewableProfiles={handleAttachRenewableProfiles}
               onRetargetSnapshots={handleRetargetSnapshots}
               onForecastSnapshots={handleForecastSnapshots}
@@ -4063,9 +4125,17 @@ function AppInner() {
                     >
                       History
                     </button>
+                    <button
+                      className={`subnav-btn${historySubTab === 'Edits' ? ' subnav-btn--active' : ''}`}
+                      onClick={() => setHistorySubTab('Edits')}
+                    >
+                      Edits
+                    </button>
                   </nav>
                 </ViewPaneHeader>
-                {historySubTab === 'Queue' ? (
+                {historySubTab === 'Edits' ? (
+                  <JournalView onSessionChanged={reloadSessionModel} />
+                ) : historySubTab === 'Queue' ? (
                   <QueueView
                     jobs={queueJobs}
                     concurrency={queueConcurrency}

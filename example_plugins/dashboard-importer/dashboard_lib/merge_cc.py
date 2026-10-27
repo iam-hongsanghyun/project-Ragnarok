@@ -30,7 +30,6 @@ mean         Un-weighted arithmetic mean.
 """
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pandas as pd
@@ -38,47 +37,6 @@ import pypsa
 
 if TYPE_CHECKING:
     from lib.settings import Dashboard
-
-
-# ---------------------------------------------------------------------------
-# Reading merge rules from dashboard
-# ---------------------------------------------------------------------------
-
-def read_cc_rules(dashboard_path: str | Path) -> pd.DataFrame | None:
-    """Read CC merge rules from the ``CC_group`` sheet in *dashboard_path*.
-
-    Args:
-        dashboard_path: Path to ``dashboard.xlsx`` (or equivalent workbook).
-
-    Returns:
-        DataFrame with columns ``attribute`` and ``rule``, or ``None`` if the
-        ``CC_group`` sheet is absent (CC merging is then disabled).
-    """
-    dashboard_path = Path(dashboard_path)
-    for engine in ("calamine", "openpyxl"):
-        try:
-            xl = pd.ExcelFile(dashboard_path, engine=engine)
-            break
-        except ImportError:
-            continue
-    else:
-        raise ImportError("Install python-calamine or openpyxl to read dashboard.xlsx")
-
-    if "CC_group" not in xl.sheet_names:
-        return None
-
-    df = xl.parse("CC_group")
-    if df.empty:
-        return None
-
-    df.columns = df.columns.str.strip()
-    if "attribute" not in df.columns or "rule" not in df.columns:
-        raise ValueError(
-            "CC_group sheet must have 'attribute' and 'rule' columns. "
-            f"Found: {list(df.columns)}"
-        )
-
-    return df[["attribute", "rule"]].dropna(subset=["attribute", "rule"]).reset_index(drop=True)
 
 
 # ---------------------------------------------------------------------------

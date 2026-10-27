@@ -23,6 +23,11 @@ from __future__ import annotations
 
 import os
 
+from ..env_file import load_env_file
+
+# backend/.env first: server.py reads some RAGNAROK_MCP_* settings at import time.
+load_env_file()
+
 from . import autostart
 from .server import mcp
 

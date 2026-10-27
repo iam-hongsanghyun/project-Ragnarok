@@ -25,7 +25,7 @@ The central insight: **Ragnarok's HTTP API + the session store already are a com
                         ┌──────────────────────────────────────────────────────┘
                         ▼
        Existing Ragnarok API  (session store = shared working memory)
-   import/* · session/* · transform/* · /api/run + queue · runs/*/analytics · plugins/*
+   import/* · session/* · transform/* · /api/queue · runs/*/analytics · plugins/*
 ```
 
 Two deployment shapes, same tool catalog:
@@ -90,9 +90,9 @@ Each drops unset fields and passes any other PyPSA attribute via `extra`. They'r
 ### 2.4 Configure + solve
 | Tool | Endpoint | Notes |
 |---|---|---|
-| `set_run_options(scenario, options)` | (payload for the solve) | carbon price, discount, pathway/rolling/stochastic, market-sim, owner column — the "user settings" |
-| `submit_solve()` | `POST /api/run` → queue | **async**: returns a job; the agent polls, does not block |
-| `poll_run(job_id)` | `GET /api/queue` / `/api/run/{job_id}` | wait for `ready` / `error` |
+| `submit_solve(scenario, options)` | `POST /api/queue` | **async**: queues the run and returns its queue item. `scenario` and `options` are the user settings (carbon price, discount rate, solve mode, solver, …); `describe_run_options` documents every key |
+| `get_queue()` | `GET /api/queue` | the agent polls this for each item's status (`queued`, `running`, `done`, `error`) |
+| `cancel_solve(item_id)` | `POST /api/queue/{id}/cancel` | cancels a queued item or kills a running one. Never gated |
 
 ### 2.5 Analyse
 | Tool | Endpoint |
@@ -100,7 +100,7 @@ Each drops unset fields and passes any other PyPSA attribute via `extra`. They'r
 | `get_analytics(run)` | `GET /api/runs/{name}/analytics` (summary, carrier mix, cost, emissions, adequacy…) |
 | `get_derived(run, metric)` | `GET /api/runs/{name}/derived/{metric}` |
 | `run_plugin_analysis(id, config, runs)` | `POST /api/plugins/{id}/analyze` (X6 multi-run comparison) |
-| `diagnose_infeasibility()` | Q2 `diagnostics.py` | fed back to the agent on a failed solve for **self-repair** |
+| (no separate tool) | `GET /api/queue` | the infeasibility diagnosis (`backend/pypsa/results/diagnostics.py`) is written into a failed run's error text; the agent reads it from `get_queue` and repairs the model for **self-repair** |
 
 ### 2.6 The rest of the GUI's reach
 Everything else a person can do from the web UI. Read tools run freely; writes
@@ -125,17 +125,89 @@ gate like their peers (`confirm=true`).
 | `pypsa_earth_status` / `_configure` / `_build` / `_build_status` / `_stop` / `_apply(job, replace)` | `/api/pypsa-earth/*` |
 
 Fragments from `import_dataset`, `siting_scan` and `pypsa_earth_apply(replace=false)`
-merge through `backend/mcp/fragment.py`, the Python twin of the GUI's
-`mergeFragment.ts`: rows are appended with name dedupe (never a whole-sheet
+merge through `POST /api/session/merge-fragment` (`backend/app/fragment_merge.py`,
+the same implementation the GUI uses): rows are appended with name dedupe (never a whole-sheet
 replace), carriers and snapshots are unioned, temporal sheets are widened.
 `submit_solve` reports the run **its own** queue job stored (the queue item's
 `runName`), not the newest run in History.
 
-Not wrapped, on purpose: the SSE stream (`/api/events`), the legacy direct
-`/api/run` (the queue supersedes it), async export jobs (`/api/exports`, covered
+Not wrapped, on purpose: the SSE stream (`/api/events`), the removed direct
+`/api/run` (the queue replaced it: `submit_solve` and `get_queue`), async export jobs (`/api/exports`, covered
 by `export_run`), the country GeoJSON and `DELETE /api/log`.
 
 **Confirmation-gated tools** (never auto-run): `submit_solve` (minutes of compute), `import_dataset`/`one_click_model` (live network, rate limits), any `edit_sheet`/`delete` that overwrites user data, and anything spending money (paid APIs). The UI shows a diff/preview and an Approve button; an "autonomy level" setting can pre-authorise the cheap tiers.
+
+### 2.7 MCP-only modelling and scenario tools
+
+The MCP server has 154 tools: 116 in `backend/mcp/server.py` (§2.1–§2.6 group most of them, not all) and 38 in
+`backend/mcp/tools_*.py`. The table below covers the 38. The GUI reaches the same backend routes through its own
+controls (Forge, the Solver section, the Scenarios panel). This table is a snapshot from 2026-10-28, read from the
+code: the tool name and module from the `@mcp.tool` decorator, the endpoints from the `RagnarokClient` method each
+tool calls, the gate from the `confirm` argument, and the purpose from the first sentence of the description. The
+MCP `list_tools` call returns the full descriptions, and `describe_run_options` documents every run-option key.
+
+**Scenario authoring and run specs (`tools_runspec.py`)**
+
+| Tool | Endpoint(s) | Gate | What it does |
+|---|---|---|---|
+| `list_scenarios` | `GET /api/scenarios`; `GET /api/scenarios/carbon-schedules`; `GET /api/scenarios/dsl` | — | List the model's saved scenario presets (id, label, window, carbon price, enabled study modes, constraint count, model overrides), its carbon-schedule library, and the status of its … |
+| `describe_scenario` | `POST /api/scenarios/resolve` | — | One saved scenario in full (every preset field) and the exact {scenario, options} run body submit_scenario would send |
+| `submit_scenario` | `POST /api/scenarios/resolve`; `POST /api/queue` | confirm | Solve ONE saved scenario exactly as the web UI's scenario run would (preset + the model's DSL sheet + solver defaults) - no hand-built options |
+| `submit_scenarios` | `GET /api/scenarios`; `POST /api/scenarios/resolve`; `POST /api/validate`; `GET /api/queue`; `POST /api/queue` | confirm | Queue SEVERAL saved scenarios as a batch (scenario_ids=None or [] runs ALL saved scenarios), one queue job each with a distinct run label, like the UI's 'run scenarios' |
+| `save_scenario` | — | confirm | Create or update a saved scenario preset — the same record the Scenarios panel in the web UI edits. 'fields' merge over the stored preset (a config block such as pathwayConfig replaces the … |
+| `set_active_scenario` | — | confirm | Make a saved scenario the model's active one (the preset the web UI loads its run controls from) |
+| `delete_scenario` | — | confirm | Remove a saved scenario preset from the model (stored runs are untouched) |
+| `set_custom_dsl` | `PUT /api/scenarios/dsl` | confirm | Replace the model's custom-constraint DSL sheet (RAGNAROK_CustomDSL) — one constraint per line, e.g. 'gen("gas") <= 120' or 'emissions() <= 5000' |
+
+**Analysis and Forge edits (`tools_analysis.py`)**
+
+| Tool | Endpoint(s) | Gate | What it does |
+|---|---|---|---|
+| `compare_runs` | `GET /api/results/compare` | — | Side-by-side comparison of 2-5 stored runs - the Analytics -> Comparison matrix as data. 'topics' picks columns of detail: kpi (summary KPIs with the generator/storage capacity split), … |
+| `get_kpis` | `GET /api/runs/{name}/kpis` | — | The KPI strip of a stored run: total cost, dispatch MWh, average/min/max price, peak load MW, load factor, renewable share % (zero-emission carriers excluding nuclear and storage), … |
+| `compare_companies` | `GET /api/runs/{name}/companies` | — | Company comparison for a stored run: the per-owner breakdown (capacity, energy, revenue, emissions), project finance (NPV, IRR, payback) and P&L (net margin) joined by company and ranked by … |
+| `get_asset_details` | `GET /api/runs/{name}/assets` | — | Per-asset details of a stored run. kind is one of generators, buses, storageUnits, stores, branches, processes, shuntImpedances (default all) |
+| `list_conversions` | `GET /api/build/conversions` | — | The sector-coupling conversion templates (CCGT, OCGT, CHP, electrolyser, fuel cell, heat pump, resistive heater, gas boiler, methanation) with efficiency, capital cost and fuel assumptions, … |
+| `snap_to_buses` | `POST /api/forge/snap` | confirm | Forge spatial snap: set bus / bus0 / bus1 of every row on 'sheet' that carries x/y (x0/y0, x1/y1 for branches) to its nearest bus within 'buffer_km' (great-circle) |
+| `adjust_values` | `POST /api/forge/adjust` | confirm | Forge bulk adjust: 'adjustments' is a list of {sheet, attribute, action: multiply\|add\|set, amount, filters: [{column, value}]} (filters are ANDed equality matches; multiply amount is a … |
+| `revert_adjustments` | `POST /api/forge/adjust/revert` | confirm | Undo adjust_values: restore the cells targeted by 'adjustments' to their ORIGINAL value from 'baseline' (a cell that was absent originally is removed). 'adjustments' is a list of {sheet, … |
+| `add_conversion` | `POST /api/build/conversion` | confirm | Build: add one conversion technology to the working model - the Link plus any missing carrier bus, carriers and (for gas-fed templates) a fuel-supply generator, reusing existing ones. … |
+| `merge_fragment` | `POST /api/session/merge-fragment` | confirm | Merge a WorkbookFragment (from import_dataset, siting_scan or PyPSA-Earth) into the working model with the GUI's 'Add to workbook' rules: rows are appended with name dedupe (never a … |
+
+**Optimisation options, network analysis and transforms (`tools_optimise.py`)**
+
+| Tool | Endpoint(s) | Gate | What it does |
+|---|---|---|---|
+| `describe_optimise_options` | `GET /api/optimise/options` | — | Installed solvers (capability flags) and every n.optimize / study option key accepted in submit_solve's options: transmissionLosses, linearizedUnitCommitment, committableBigM, … |
+| `export_lp` | `POST /api/optimise/export-lp` | — | Write the working model's LP (or .mps) file WITHOUT solving, for inspection or an external solver. options may carry the same model-building keys as submit_solve (transmissionLosses, … |
+| `consistency_check` | `POST /api/analysis/consistency` | — | Run PyPSA's n.consistency_check on the working model (no solve): returns errors (strict failures such as maintenance/phase-shift/scenario-invariant violations) and every warning. … |
+| `network_analysis` | `POST /api/analysis/network` | — | Grid-analysis outputs of the topology (no solve): include any of subnetworks (slack bus/generator), ptdf, bodf, cycles, adjacency, incidence. cycle_basis_method bfs-refined\|paton |
+| `get_statistics` | `POST /api/statistics/query` | — | One PyPSA n.statistics metric on a stored run with PyPSA's own parameters. metric: … |
+| `temporal_cluster` | `POST /api/session/model`; `POST /api/transform/temporal` | confirm | Reduce the time axis with PyPSA's native temporal clustering and replace the working model. method: resample (offset like '3h' or '1D', optional drop_leap_day, aggregation_rules), … |
+| `slice_model` | `POST /api/session/model`; `POST /api/transform/slice` | confirm | Keep only a snapshot window (start/end: integer positions, end exclusive, or ISO labels, inclusive) and/or a bus subset (buses) of the working model via n.slice_network |
+| `merge_models` | `POST /api/session/model`; `POST /api/transform/merge` | confirm | Merge another model into the working model with n.merge: give other_run (a stored run name) OR other_session_id |
+| `cluster_network_hac` | `POST /api/transform/cluster`; `POST /api/session/model` | confirm | Hierarchical agglomerative (HAC) spatial clustering to n_clusters buses on numeric bus columns (features, default ['x','y']), linkage ward\|complete\|average\|single, affinity … |
+| `set_carrier_growth_limit` | `POST /api/forge/query/apply` | confirm | Set a carrier's PyPSA growth limits on the carriers sheet: max_growth (MW of NEW capacity per investment period) and/or max_relative_growth (ratio) |
+
+**Component coverage and PyPSA-native I/O (`tools_components.py`)**
+
+| Tool | Endpoint(s) | Gate | What it does |
+|---|---|---|---|
+| `apply_seasonal_rating` | `POST /api/transform/seasonal-rating`; `POST /api/session/model` | confirm | Write per-snapshot line limits (lines-s_max_pu) from summer/winter MVA ratings, via PyPSA's Lines.apply_seasonal_rating. ratings = {line: {summer: MVA, winter: MVA}}; s_nom is unchanged … |
+| `set_maintenance` | `GET /api/session/sheet/{name}`; `PATCH /api/session/sheet/{name}` | confirm | Configure scheduled maintenance (PyPSA 1.3+) on a Generator, Link or Process |
+| `import_pypsa_native` | `POST /api/import/pypsa-excel`; `POST /api/import/pypsa-csv`; `POST /api/import/matpower`; `POST /api/import/pandapower` | confirm | Import a PyPSA-native or grid-model file INTO the working model through PyPSA's own importers. kind (inferred from the extension when omitted): 'pypsa-excel' (.xlsx, … |
+| `export_pypsa_native` | `POST /api/export/pypsa-excel`; `POST /api/export/pypsa-csv` | — | Export the CURRENT working model as a PyPSA-native Excel workbook (kind='excel', Network.export_to_excel) or a zip of a PyPSA CSV folder (kind='csv', export_to_csv_folder). … |
+| `pypsa_io_capabilities` | `GET /api/import/pypsa-io/capabilities` | — | Which PyPSA-native import/export paths the backend offers, the netCDF export option keys, and whether the optional pandapower library is installed |
+
+**Piecewise curves (`tools_piecewise.py`)**
+
+| Tool | Endpoint(s) | Gate | What it does |
+|---|---|---|---|
+| `describe_piecewise` | `GET /api/piecewise/catalog` | — | Reference for piecewise-linear cost / efficiency curves (PyPSA 1.3+): which component attributes accept a curve (marginal_cost on Generator/Link/Process/StorageUnit/Store; capital_cost also … |
+| `get_piecewise_curve` | `GET /api/piecewise/catalog`; `GET /api/session/model/full`; `POST /api/piecewise/check` | — | Read piecewise curves from the working model. component: 'Generator' or 'generators' etc.; name and attribute (marginal_cost \| capital_cost \| efficiency \| rate0..) narrow the result |
+| `set_piecewise_curve` | `GET /api/piecewise/catalog`; `POST /api/piecewise/check`; `PATCH /api/session/sheet/{name}` | confirm | Set (replace) the piecewise curve of ONE component: component 'Generator'\|'Link'\|'Process'\|'StorageUnit'\|'Store' (capital_cost also 'Line'\|'Transformer'), name, attribute ('marginal_cost' \| … |
+| `clear_piecewise_curve` | `GET /api/piecewise/catalog`; `PATCH /api/session/sheet/{name}` | confirm | Remove the piecewise curve of one component (the scalar cost / efficiency applies again). attribute omitted = every curve of that component |
+| `check_piecewise_options` | `POST /api/piecewise/options/check` | — | Validate and normalise the piecewise run option |
 
 ---
 
@@ -214,7 +286,7 @@ A new **Assistant** tab (activity bar), consistent with the existing view shell:
 
 | Phase | Deliverable | Leans on |
 |---|---|---|
-| **0 · MCP prototype** ✅ *shipped* | An MCP server (`backend/mcp/`) — ~36 tools spanning the full surface: introspect + **schema** (`list_components`/`describe_component`/`describe_run_options` over the live PyPSA registry) · data-in · edit · **generic component CRUD** (`add_component`/`set_component`/`remove_component` cover every PyPSA component + attribute) + typed `add_*` conveniences · series transforms · solve (all modes via free-form scenario/options) · analyse · plugins. Drivable from any MCP client with any model. See §10 to connect a client. | existing API |
+| **0 · MCP prototype** ✅ *shipped* | An MCP server (`backend/mcp/`) — 154 tools spanning the full surface (§2.7 lists the newest 38): introspect + **schema** (`list_components`/`describe_component`/`describe_run_options` over the live PyPSA registry) · data-in · edit · **generic component CRUD** (`add_component`/`set_component`/`remove_component` cover every PyPSA component + attribute) + typed `add_*` conveniences · series transforms · solve (all modes via free-form scenario/options) · analyse · plugins. Drivable from any MCP client with any model. See §10 to connect a client. | existing API |
 | **1 · Embedded agent (L1 shell)** | `LLMProvider` abstraction + Claude API adapter + the plan/act/observe loop + a minimal Assistant chat tab (stream + tool cards). Happy path: "build KOR, solve, report." | Phase 0 tools |
 | **2 · Guardrails & grounding** | confirmation gates, budgets, world-state summarisation, schema retrieval tools, exemplars. | pypsa_schema_builder |
 | **3 · Verification loop** | validate-before-solve, Q2 repair loop, Ember/adequacy sanity, cited report generator. | Q2, I7, A2 |

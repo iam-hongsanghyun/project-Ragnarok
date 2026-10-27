@@ -4,6 +4,7 @@ import { GridRow, Primitive, SheetName, TableSel, TsSheetName, WorkbookModel } f
 import { ModelIssue } from '../validation/useModelIssues';
 import { getAddableAttributes, getProtectedColumns, TABLE_GROUPS } from 'lib/constants';
 import { getAttributeSchema, PypsaAttribute, TableGroup } from 'lib/constants/pypsa_schema';
+import { decorateHeader, getAttributeHint } from 'lib/constants/attributeHints';
 import { ResizablePanels } from '../../layout/ResizablePanels';
 import { getColumns, getTsFirstCol, stringValue } from 'lib/utils/helpers';
 import { canonicalizeTemporalRows, parseCsvToGridRows } from 'lib/workbook/workbook';
@@ -625,8 +626,7 @@ export function TablesPane({
     if (isTs) return col;
     const attr = getAttributeSchema(sel.sheet, col);
     if (!attr) return col;
-    const unit = attr.unit && attr.unit !== 'n/a' ? ` (${attr.unit})` : '';
-    return `${col}${unit}${attr.required ? ' *' : ''}`;
+    return decorateHeader(sel.sheet, col, attr.unit, !!attr.required);
   }, [isTs, sel.sheet]);
 
   // "Essentials only" = required columns + the frozen col + any column that
@@ -953,6 +953,7 @@ export function TablesPane({
 
   const docPanel = (
     <AttributeDoc
+      sheet={sel.sheet}
       attr={focusedCol ? getAttributeSchema(sel.sheet, focusedCol) : null}
       colName={focusedCol}
       stats={focusedCol ? computeColumnStats(rows, focusedCol) : null}
@@ -981,14 +982,17 @@ export function TablesPane({
 }
 
 interface AttributeDocProps {
+  /** Sheet the focused column belongs to (for 1.3/1.4 attribute hints). */
+  sheet?: string;
   attr: PypsaAttribute | null;
   colName: string | null;
   /** Numeric summary of the focused column (null when not numeric / no column). */
   stats: ColumnStats | null;
 }
 
-function AttributeDoc({ attr, colName, stats }: AttributeDocProps) {
-  const unit = attr?.unit && attr.unit !== 'n/a' ? attr.unit : '';
+function AttributeDoc({ sheet, attr, colName, stats }: AttributeDocProps) {
+  const hint = sheet && attr ? getAttributeHint(sheet, attr.attribute) : null;
+  const unit = hint?.unit ?? (attr?.unit && attr.unit !== 'n/a' ? attr.unit : '');
   return (
     <div className="tables-attr-doc">
       {!colName ? (
@@ -1009,11 +1013,14 @@ function AttributeDoc({ attr, colName, stats }: AttributeDocProps) {
             <span className={`tables-attr-doc-type tables-attr-doc-type--${attr.type}`}>{attr.type}</span>
             {attr.required && <span className="tables-attr-doc-required">required</span>}
             {attr.status === 'output' && <span className="tables-attr-doc-output">output</span>}
+            {hint?.group && <span className="tables-attr-doc-required">{hint.group}</span>}
+            {hint?.deprecated && <span className="tables-attr-doc-output">deprecated</span>}
             {attr.default && attr.default !== 'n/a' && (
               <span className="tables-attr-doc-default">default <code>{attr.default}</code></span>
             )}
           </div>
           <p className="tables-attr-doc-desc">{attr.description || 'No description available.'}</p>
+          {hint && <p className="tables-attr-doc-desc"><b>Note:</b> {hint.note}</p>}
         </>
       )}
 

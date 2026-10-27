@@ -10,8 +10,10 @@
  *   • standard_types        — built-in line / transformer catalogues
  *                             (same source)
  *   • network_import_policy — curated rule table
- *   • capabilities          — solver-backend capability list
- *   • simulation_defaults   — server-authoritative simulation knobs
+ *   • capabilities          — solver-backend capability list (read by MCP
+ *                             `describe_run_options`; the browser ignores it)
+ *   • simulation_defaults   — server-authoritative default run window
+ *                             (applied over app_config.json at boot)
  *   • build_id              — deterministic id of the bundle's content;
  *                             changes when the backend's PyPSA version
  *                             changes or when configs are updated. The
@@ -61,7 +63,6 @@ export interface NetworkImportPolicyBundle {
 }
 
 export interface SimulationDefaults {
-  maxSnapshots: number;
   defaultSnapshotCount: number;
   defaultSnapshotWeight: number;
 }
@@ -195,13 +196,3 @@ export async function loadConfigBundle(): Promise<ConfigBundle> {
   return bundle;
 }
 
-/**
- * Hard refresh — fetch full bundle even if cache hits. Useful from a
- * "Reload schema" affordance in the future, or after a manual server
- * restart.
- */
-export async function reloadConfigBundle(): Promise<ConfigBundle> {
-  const bundle = await fetchFullBundle();
-  writeCache(bundle);
-  return bundle;
-}

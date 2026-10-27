@@ -48,8 +48,9 @@ def test_config_bundle_contract():
     assert "name" in sample_row
     # Simulation defaults are populated.
     sim = body["simulation_defaults"]
-    assert sim["maxSnapshots"] > 0
+    assert "maxSnapshots" not in sim  # removed: it was never enforced anywhere
     assert sim["defaultSnapshotCount"] > 0
+    assert sim["defaultSnapshotWeight"] > 0
     # build_id has the version-dash-hash shape.
     assert "-" in body["build_id"]
 

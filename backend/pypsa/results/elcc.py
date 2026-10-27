@@ -87,7 +87,7 @@ import pandas as pd
 import pypsa
 
 from ..constants import carrier_color
-from .adequacy import compute_adequacy, extract_storage_fleet, storage_dispatch
+from .adequacy import maintenance_available_pmax, compute_adequacy, extract_storage_fleet, storage_dispatch
 from .outage_mc import _is_variable_renewable, sample_outage_masks
 
 _log = logging.getLogger("pypsa.solver")
@@ -273,7 +273,7 @@ def build_elcc(
     if len(gens) == 0:
         return None
 
-    pmax = network.get_switchable_as_dense("Generator", "p_max_pu")
+    pmax = maintenance_available_pmax(network)
     cap_col = "p_nom_opt" if "p_nom_opt" in gens.columns else "p_nom"
 
     # ── Classify generators: thermal (Markov-outage-sampled) vs variable

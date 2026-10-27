@@ -86,7 +86,12 @@ def _profile_ref(model: dict[str, list[dict[str, Any]]], carrier: str) -> str | 
 
 
 def _norm_filters(remove_filters: list[dict[str, Any]] | None, remove_carrier: str) -> list[dict[str, Any]]:
-    """Normalise retire filters; fall back to a single carrier filter (legacy)."""
+    """Normalise retire filters; fall back to a single carrier filter.
+
+    ``assetSwapConfig.removeCarrier`` is a kept back-compat alias for API clients
+    (pre-``removeFilters``); the GUI sends ``removeFilters``. Pinned by
+    ``test_asset_swap``.
+    """
     out: list[dict[str, Any]] = []
     for f in remove_filters or []:
         field = str((f or {}).get("field", "")).strip()

@@ -10,8 +10,8 @@ endpoint.
 **Scope boundary.** This document describes what the code does — module by
 module, function by function — for analysts and contributors working on or
 integrating with the backend. It does not cover end-user steps (see
-`docs/guides/USER_MANUAL.md`) or system-level architectural decisions (see
-`docs/architecture/ARCHITECTURE.md`). Frontend internals are in
+`user-manual.md`) or system-level architectural decisions (see
+`architecture.md`). Frontend internals are in
 `docs/reference/frontend-*.md`.
 
 ---
@@ -32,6 +32,7 @@ integrating with the backend. It does not cover end-user steps (see
    - 5.4 [snapshots.py](#54-snapshotspy)
    - 5.5 [load_shedding.py](#55-load_sheddingpy)
    - 5.6 [validators.py](#56-validatorspy)
+   - 5.7 [piecewise.py — piecewise-linear curves](#57-piecewisepy--piecewise-linear-curves)
 6. [Result extraction](#6-result-extraction)
    - 6.1 [run_pypsa return value](#61-run_pypsa-return-value)
    - 6.2 [dispatch.py](#62-dispatchpy)
@@ -121,7 +122,7 @@ backend/
     stochastic.py        StochasticConfig, apply_scenarios, collapse_to_representative_scenario
     carbon_price.py      CarbonPriceConfig, apply_carbon_price
     constants.py         Carrier/generator colour utilities
-    pypsa_schema.py      Schema accessors (reads pypsa_schema.json, network_import_policy.json)
+    pypsa_schema.py      Schema accessors (runtime schema from pypsa_schema_builder.py; network_import_policy.json)
     network/
       __init__.py        build_network, re-exports validate_model
       components.py      Bulk-add helpers (_ordered_component_sheets, _apply_ts_sheet, …)
@@ -145,7 +146,7 @@ backend/
       series.py          safe_series, weighted_sum
       workbook.py        workbook_rows
   config/
-    system_defaults.json  Simulation limits, VOLL defaults, demand/availability profiles
+    system_defaults.json  Simulation defaults, session paging, VOLL defaults
 ```
 
 ---
@@ -171,7 +172,9 @@ payload at submit time, so a later session edit never mutates an
 already-submitted or queued run. A payload with neither `model` nor `sessionId`,
 or a `sessionId` with no loaded model, gets HTTP 400.
 
-Key `options` fields:
+Key `options` fields. This table lists the core keys only. Every key, with its type,
+default, unit and reader, is served by `GET /api/run-options` (MCP `describe_run_options`).
+The PyPSA 1.4 solve options are in [§7.6](#76-other-pypsa-14-solve-options).
 
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -184,11 +187,14 @@ Key `options` fields:
 | `loadSheddingCost` | `float` | system_defaults | VOLL marginal cost (currency/MWh) |
 | `currencySymbol` | `str` | `"$"` | Symbol for cost strings in results |
 | `solverThreads` | `int` | `0` (auto) | HiGHS thread count |
-| `solverType` | `str` | `"simplex"` | `"simplex"` or `"ipm"` |
+| `solverType` | `str` | `"auto"` | HiGHS LP method: `auto`, `simplex`, `ipm`, `pdlp` or `hipo` (`hipo` falls back to `ipm` where HiGHS lacks it) |
 | `pathwayConfig` | `dict` | disabled | Multi-investment planning config |
 | `rollingConfig` | `dict` | disabled | Rolling-horizon config |
 | `stochasticConfig` | `dict` | disabled | Two-stage stochastic config |
 | `securityConstrainedConfig` | `dict` | disabled | SCLOPF config |
+| `solverName` | `str` | `"highs"` | linopy solver; other installed solvers are listed by `GET /api/optimise/options` |
+| `piecewiseOptions` | `list[dict]` | `[]` | Formulation override per piecewise curve ([§5.7](#57-piecewisepy--piecewise-linear-curves)) |
+| `riskPreference` | `dict` | disabled | CVaR for stochastic mode ([§7.3](#73-stochastic)) |
 | `carbonPriceSchedule` | `list[dict]` | `None` | Year-price schedule overriding scalar |
 
 ### 2.2 Endpoints
@@ -222,15 +228,11 @@ No network is built; no solve occurs.
 
 #### Async solve job
 
-| Method | Path | Body / Params | Returns |
-|---|---|---|---|
-| `POST` | `/api/run` | `RunPayload` | `{"jobId": uuid, "status": "running"}` |
-| `GET` | `/api/run/{job_id}` | — | `{"jobId", "status"}` while running; `{"jobId", "status": "done", "result": {...}}` when complete |
-| `DELETE` | `/api/run/{job_id}` | — | `{"jobId", "status": "cancelled"}` |
-
-`POST /api/run` returns HTTP 400 immediately for an unknown backend name.
-`GET /api/run/{job_id}` returns HTTP 500 on error, HTTP 499 on cancellation,
-HTTP 404 when the job ID is not found (already delivered or never existed).
+Solves run through the run queue: `POST /api/queue` (body `RunPayload`; returns
+immediately with the queue item), `GET /api/queue` (status of every item) and
+the per-item cancel / rerun / delete routes. The former direct-job API
+(`POST/GET/DELETE /api/run[/{job_id}]`) was removed - nothing in the UI or MCP
+called it.
 
 #### Binary format converters (no solve)
 
@@ -249,19 +251,12 @@ workbook JSON shape via `_network_to_model_json`.
 
 ### 2.3 Job lifecycle
 
-`POST /api/run` spawns a child process using Python's `multiprocessing`
+Each queued solve spawns a child process using Python's `multiprocessing`
 `"spawn"` context. The worker function `_solve_worker` (module-level, so it can
 be pickled) calls `backend.run()` and puts `("ok", result)` or `("err", msg)`
-onto a `multiprocessing.Queue`.
-
-An asyncio background task (`_collect_job`) polls the queue every 0.5 s and
-transitions `_Job.status` to `"done"` or `"error"` on receipt. If the process
-exits without posting a result, the job transitions to `"cancelled"`.
-
-Completed jobs (`"done"`, `"error"`, `"cancelled"`) are removed from the
-in-process `_jobs` dict either when polled by the client or at the next `POST
-/api/run` call (stale-job pruning). The job store is in-process memory; there
-is no persistence across server restarts.
+onto a `multiprocessing.Queue`; the queue runner collects it and transitions the
+item to `done` or `error`. The queue is in-process memory with disk-backed
+payloads; see `_QueueItem` in `backend/app/main.py`.
 
 ---
 
@@ -317,10 +312,14 @@ To add a future backend, implement the `Backend` protocol and call
 `run_pypsa(model, scenario, options)` in `backend/pypsa/results/__init__.py`
 is the complete pipeline.
 
-**Mutually exclusive mode combinations** raise HTTP 400:
+**Mode combinations refused with HTTP 400** (checked at the top of `run_pypsa`):
 - Stochastic + rolling horizon.
-- Security-constrained (SCLOPF) + rolling horizon or stochastic.
-- SCLOPF + pathway.
+- Sampled snapshot blocks + rolling horizon, or + pathway.
+- Security-constrained (SCLOPF) + rolling horizon or stochastic. SCLOPF + pathway is allowed.
+- Power-flow study + rolling horizon, stochastic, SCLOPF, pathway, or sampled blocks.
+- N-1 contingency + rolling horizon, stochastic, SCLOPF, pathway, sampled blocks, or power flow.
+
+MGA has its own restrictions in the same function.
 
 **Stage 1 — Parse mode configs.**
 `parse_pathway_config`, `parse_rolling_config`, `parse_stochastic_config` are
@@ -338,8 +337,10 @@ One of three paths:
 - All other cases (single-period, pathway, stochastic):
   `network.optimize(multi_investment_periods=pathway.enabled, ...)`.
 
-All paths pass `solver_name="highs"`, `extra_functionality`, and
-`solver_options` (derived from `solverThreads` and `solverType`).
+All paths pass `solver_name` (from `options.solverName`, default `highs`),
+`extra_functionality`, and `solver_options`. For HiGHS, `solver_options` come from
+`solverThreads` and `solverType`. For another solver only its thread key is mapped, and
+`options.solverOptions` is merged last (`backend/pypsa/optimise_options.py`).
 
 **`extra_functionality(n, snapshots)`** is a closure defined inside
 `run_pypsa`. It is called by PyPSA/linopy after the LP model is assembled but
@@ -483,7 +484,102 @@ Checks performed (non-exhaustive):
 - Per-component: duplicate names, required fields, bus references, numeric sanity (negative `p_nom`, `*_pu` outside [0, 1], `efficiency > 5`, `co2_emissions > 5`), carrier references, output-column presence.
 - Time-series sheets: snapshot label column, row count vs snapshot count, component column existence, value range.
 
+### 5.7 `piecewise.py` — piecewise-linear curves
+
+PyPSA >= 1.3 lets `marginal_cost`, `capital_cost`, `efficiency` and Process `rate` be a
+piecewise-linear curve (`c.piecewise[attr]`) instead of a scalar. Which curve each component
+accepts, on which x axis, and whether the component may be extendable is PyPSA's own table
+(`pypsa/data/piecewise.csv`); `piecewise_catalog()` reads it and the schema builder publishes it as
+`piecewise_attributes` on every component.
+
+**Sheet format.** One sheet per curve, named `<list>-<attribute>-pw` (PyPSA's own file name, so a
+CSV folder is interchangeable), in long form with one row per breakpoint:
+
+| name | breakpoint | p_pu | marginal_cost |
+|---|---|---|---|
+| g1 | 0 | 0 | 0 |
+| g1 | 1 | 0.5 | 10 |
+| g1 | 2 | 1 | 40 |
+
+`name` is the component; the two value columns are the x attribute and the curve attribute
+(`breakpoint` is informational; rows are sorted by x). A multi-port curve names its port
+(`links-efficiency2-pw`, `processes-rate1-pw`).
+
+| Sheet | x axis | y |
+|---|---|---|
+| `generators/links/processes-marginal_cost-pw` | `p_pu` | price per unit of x on the segment ending at the breakpoint |
+| `storage_units-marginal_cost-pw` | `p_dispatch_pu` | same |
+| `stores-marginal_cost-pw` | `p_pu` | same |
+| `<list>-capital_cost-pw` (also lines, transformers) | `p_nom` / `e_nom` / `s_nom` (absolute) | overnight price per unit of x on the segment |
+| `generators/links-efficiency-pw`, `processes-rate<k>-pw` | `p_pu` | efficiency (rate) at the breakpoint |
+
+Cost of operating at `x`: `C(x) = sum_i y_i * (min(x, x_i) - x_{i-1})+` (y at the first breakpoint
+is ignored). A cost curve is convex, hence an LP with tangent cuts, iff `y_1 <= y_2 <= ...`;
+anything else is a MIP (binaries). Efficiency / rate curves are equalities: a MIP unless a straight
+line. Per-unit curves need a fixed, finite nominal capacity (`*_extendable = false`), start at
+`x = 0` and end at `x = 1`; capital curves may be on extendable assets. A scalar cost on a component
+that has a curve is ignored by PyPSA.
+
+**Build** (`network/__init__.py`): after the components exist, `apply_piecewise_sheets` parses each
+`-pw` sheet (`rows_to_frame`), validates it and calls PyPSA's `_import_piecewise_from_df`; every
+refusal is a 400 naming the sheet and component. Three build steps treat curves like the scalars
+they replace: `capital_cost` curves are multiplied by the same annuity factor and window pro-rating
+as the scalar capital cost; the carbon price is added to every segment price of an emitting
+generator's `marginal_cost` curve (a price schedule that changes within the run is refused, since
+a curve is time-invariant); and curves cannot be combined with stochastic scenarios (PyPSA limit).
+
+**Run option `piecewiseOptions`** (`options.piecewiseOptions`, parsed in `parse_piecewise_options`, handed to
+`n.optimize(piecewise_options=...)`): a list of `{component, attribute, method, name?, sign?}` that
+overrides the formulation per curve. `method` is `auto` (default: LP for convex cost curves,
+incremental binaries otherwise), `lp`, `incremental` or `sos2`. HiGHS has no SOS2, so `sos2` also
+sets `reformulate_sos="auto"` and linopy rewrites it with binaries. `sign` defaults to PyPSA's own
+(`>=` for cost curves, `=` for efficiency / rate).
+
+**Round trips.** `network_to_model` emits the `-pw` sheets, so netCDF / HDF5 / CSV-folder imports keep
+curves; the build's netCDF / HDF5 export carries them natively. The session store treats a `-pw`
+sheet as a static table (not a snapshot series). The browser's CSV-folder zip writes and reads
+PyPSA's wide layout (`name,g,g / attribute,p_pu,marginal_cost / breakpoint,,`), and also reads the
+long layout; xlsx and project workbooks carry the long sheet.
+
+**Results.** `build_piecewise_results` returns `result.piecewise`: per curve the breakpoints, its
+shape (`convex` / `linear` / `nonconvex`) and the solved `marginal_cost_piecewise_opt` (realised
+average cost per MWh, min / max over dispatched snapshots, operating cost) or
+`capital_cost_piecewise_opt` (average annual cost per unit of optimal capacity). The raw series are
+in `outputs.series["<list>-marginal_cost_piecewise_opt"]`. The generator cost breakdown, finance,
+company statement and economics read the realised average (`overlay_piecewise_marginal_cost`), so
+the breakdown sums to the objective.
+
+**API / MCP.** `GET /api/piecewise/catalog`, `POST /api/piecewise/check`, `POST /api/piecewise/options/check`
+(`backend/app/routers/piecewise.py`); MCP tools `describe_piecewise`, `get_piecewise_curve`,
+`set_piecewise_curve`, `clear_piecewise_curve`, `check_piecewise_options`.
+
 ---
+
+### 5.8 Maintenance and phase-shifting transformers
+
+Both are plain PyPSA attributes. The schema-driven builder passes them through, so no
+sheet kind is needed. Edit them in the Generators, Links, Processes and Transformers sheets
+(or with the MCP tool `set_maintenance`).
+
+| Attribute | Sheet | Meaning |
+|---|---|---|
+| `maintainable` | `generators`, `links`, `processes` | `true` lets the solver schedule maintenance for that unit |
+| `maintenance_duration` | same | hours per maintenance event |
+| `maintenance_events` | same | number of events per horizon |
+| `maintenance_pu` | same | fraction of capacity unavailable during an event (0–1) |
+| `phase_shift_min`, `phase_shift_max` | `transformers` | optimisable phase-shift range, in degrees |
+
+Checks: `_check_maintenance_attributes` (positive duration and event count for a
+maintainable unit) and `_check_phase_shift_bounds` (`phase_shift_min <= phase_shift_max`) in
+`backend/pypsa/network/validators.py`. Both run in the validation pass.
+
+Results: `generators_t.maintenance` and `maintenance_start` are extracted by
+`full_outputs.py`; the analytics maintenance card reads them. `transformers-phase_shift_opt`
+holds the optimised angle, shown by the phase-shifter card. Adequacy uses `maintenance_pu`
+(`results/adequacy.py`). The power-flow study ignores the optimised angles and warns when a
+phase-shifting transformer is present (`results/power_flow.py`).
+
+Force-LP does not relax `maintainable`, so a model with maintenance stays a MIP.
 
 ## 6. Result extraction
 
@@ -656,7 +752,7 @@ Walks every component in the schema and extracts all output attributes.
 }
 ```
 
-Only attributes with `status="output"` in `pypsa_schema.json` are extracted.
+Only attributes with `status="output"` in the runtime schema (`backend/app/pypsa_schema_builder.py`) are extracted.
 `static_or_series` output attributes are recorded as series. NaN values are
 omitted. Multi-investment results include a `period` key alongside `snapshot`
 in each series row.
@@ -701,8 +797,8 @@ When pathway is enabled:
 
 **`RollingHorizonConfig`** — `enabled`, `horizon_snapshots` (default 168,
 clamped >= 1), `overlap_snapshots` (default 24, clamped >= 0), `step_snapshots`
-(derived as `max(1, horizon - overlap)`; not read from payload),
-`preserve_terminal_state` (default True), `selected_window`.
+(derived as `max(1, horizon - overlap)`; not read from payload). Storage is
+always non-cyclic across windows (carried state); there is no terminal-state option.
 
 **`parse_rolling_config(raw) -> RollingHorizonConfig`**
 
@@ -755,15 +851,28 @@ scenario name.
 
 Stochastic cannot be combined with rolling horizon or SCLOPF.
 
+**CVaR (`options.riskPreference`).** `{alpha, omega}` with `0 < alpha < 1` and
+`0 <= omega <= 1` calls `network.set_risk_preference(alpha, omega)`
+(`backend/pypsa/optimise_options.py`). It needs an enabled `stochasticConfig`, otherwise
+the run is refused with HTTP 400. The GUI has no control for it. Use the API or the MCP
+`submit_solve` options.
+
+**Scenario-invariant attributes.** `is_scenario_invariant(attribute)` in `stochastic.py`
+checks PyPSA's own `RE_INVARIANT_ATTRS`. An override on one of these attributes (for example
+`p_nom_set` or `carrier`) is refused with HTTP 400 naming the scenario and the attribute.
+PyPSA would raise a `ConsistencyError` at solve time, so the check runs first.
+
 ### 7.4 Security-constrained (SCLOPF)
 
 Enabled via `options["securityConstrainedConfig"]["enabled"] = true`.
 
 `run_pypsa` calls `network.optimize.optimize_security_constrained(...)`. This
-enforces N-1 security for all passive branches (lines and transformers). PyPSA
-adds line-loading constraints for every possible single-branch outage.
+enforces N-1 security for every passive branch (lines and transformers), or only the
+`securityConstrainedConfig.branchOutages` subset when it is given (for example `'L1'` or
+`'Transformer:T1'`). PyPSA adds line-loading constraints for every outage in that set.
 
-SCLOPF cannot be combined with rolling horizon, stochastic, or pathway.
+SCLOPF cannot be combined with rolling horizon or stochastic mode. Pathway is allowed:
+PyPSA 1.4 adds the N-1 constraints per investment period.
 
 The `securityConstrained` key in the result dict reports `enabled: true` and
 `branchCount` (lines + transformers).
@@ -803,6 +912,28 @@ Adds the carbon adder to every generator whose carrier has `co2_emissions > 0`.
   series, overriding the static column during the solve.
 
 ---
+
+### 7.6 Other PyPSA 1.4 solve options
+
+These are run-option keys (see `GET /api/run-options` for types, defaults and units). The
+readers are the functions that consume them.
+
+| Option | Effect | Reader |
+|---|---|---|
+| `solverName`, `solverOptions` | Installed linopy solver; raw solver options merged last | `optimise_options.py` (`parse_optimise_options`) |
+| `transmissionLosses` | Line and link losses by secants or tangents | `optimise_options.py` |
+| `linearizedUnitCommitment` | Relaxes committable binaries to an LP | `optimise_options.py` |
+| `committableBigM` | Big-M for committable and extendable units | `optimise_options.py` |
+| `cycleBasisMethod` | Cycle basis for Kirchhoff voltage law (`bfs-refined`, `paton`) | `optimise_options.py` |
+| `computeInfeasibilities` | On an infeasible solve, appends the IIS for solvers that provide one | `optimise_options.py` |
+| `riskPreference` | CVaR for stochastic mode ([§7.3](#73-stochastic)) | `optimise_options.py` |
+| `iterativeExpansion` | Iterative transmission expansion (`optimize_transmission_expansion_iteratively`) | `optimise_extras.py` (`run_iterative_expansion`) |
+| `twoStage` | Sizes capacities on the LP relaxation, fixes them, then re-solves the dispatch | `optimise_extras.py` (`run_two_stage`) |
+| `nonLinearPowerFlowAfterOptimise` | AC power flow on a copy of the solved dispatch; result in `acFeasibility` | `optimise_extras.py` (`run_ac_feasibility`) |
+| `powerFlowConfig` | Power-flow study (`lpf` or `pf`) instead of an LP | `results/power_flow.py` |
+
+Network-analysis outputs (PTDF, BODF, cycles, incidence) need no solve. They are served by
+`POST /api/analysis/network` and the MCP `network_analysis` tool.
 
 ## 8. Constraints
 
@@ -873,9 +1004,29 @@ Bad specs are skipped with a note; the solve continues.
 
 ### 8.3 `apply_dsl_constraints` — free-text DSL
 
-Fallback when `constraintSpecs` is empty but `scenario["customDsl"]` is
-non-empty. Parses the text line by line; `#` starts a comment; blank lines are
-ignored. Bad lines are skipped with a note.
+Used when `scenario["constraintSpecs"]` is absent. Parses the text line by line;
+`#` starts a comment; blank lines are ignored. Bad lines fail the solve (HTTP 400).
+
+**Which DSL a run uses (precedence).** At submit time (`_resolve_payload_model`,
+`backend/app/run_guards.py`): `scenario.constraintSpecs` when the key is present (even
+`[]`), else `scenario.customDsl` when present (even `""`), else the text of the model's
+`RAGNAROK_CustomDSL` sheet (first row, column `text`), which is copied into
+`scenario.customDsl` so the queued snapshot carries it. The browser always sends
+`constraintSpecs`, so its runs are unchanged; MCP and plugin-`contribute` DSL written to
+the sheet now applies without a browser re-parse.
+
+**Pre-run guards** (`run_guards.run_input_problems`, called from `_refuse_invalid_model`
+and `/api/validate`; ported from the browser's run handler): an empty or inverted snapshot
+window (`snapshotCount` wins, else `snapshotEnd - snapshotStart`), DSL text that does not
+parse, and an enabled `carrier_*` constraint whose carrier no generator uses. Each refuses
+the run with HTTP 400 and a sentence naming what to fix.
+
+**Scenario presets on the backend.** `backend/app/scenario_presets.py` ports the
+browser's preset, carbon-library and DSL-sheet logic; `/api/scenarios/*` serves it and the
+MCP tools `list_scenarios`, `describe_scenario`, `submit_scenario`, `submit_scenarios` use
+it. `backend/app/run_options_reference.py` documents every run key (`/api/run-options`,
+MCP `describe_run_options`). `backend/tests/fixtures/scenario_parity.json` is shared
+with the frontend's `backendParity.test.ts` so the two implementations stay equal.
 
 Constraint names in the linopy model: `dsl_<line_number>` (1-based).
 
@@ -971,10 +1122,11 @@ returns `1.0 / lifetime_years` (straight-line, no time-value-of-money).
 
 ### `backend/pypsa/pypsa_schema.py`
 
-Schema accessors that read `frontend/Ragnarok_default/src/config/pypsa_schema.json`
-and `network_import_policy.json`. All functions use `lru_cache(maxsize=1)`.
-The schema is shared between frontend and backend; new PyPSA attributes added
-to the schema are automatically handled by the backend without code changes.
+Schema accessors over the runtime schema. `load_pypsa_schema()` calls
+`backend/app/pypsa_schema_builder.build_pypsa_schema()`, which reads the installed PyPSA,
+and is cached with `lru_cache(maxsize=1)`. The frontend gets the same schema from
+`GET /api/config`, so a PyPSA upgrade changes both sides without code changes.
+`network_import_policy.json` is the one curated file.
 
 | Function | Returns | Description |
 |---|---|---|
@@ -1001,21 +1153,26 @@ Read and cached by `load_system_defaults()` in `backend/app/config.py`
 
 | Section | Key | Default | Description |
 |---|---|---|---|
-| `simulation` | `max_snapshots` | 8760 | Upper limit enforced by the frontend |
 | `simulation` | `default_snapshot_count` | 24 | Default when not specified |
 | `simulation` | `default_snapshot_weight` | 1.0 | Default hours per snapshot |
 | `simulation` | `hours_in_year` | 8760.0 | Used for period-factor scaling of annual caps |
 | `load_shedding` | `marginal_cost` | 2000.0 | Fallback VOLL cost (currency/MWh) |
-| `load_shedding` | `p_nom_floor` | 1000 | Minimum VOLL generator size (MW) |
 | `load_shedding` | `carrier` | `"LoadShedding"` | Carrier assigned to VOLL generators |
 | `session` | `max_chart_points_default` | 800 | Default `maxPoints` for series windows ([Section 11](#11-session-subsystem-server-side-working-model)) |
-| `session` | `chart_window_hours_default` | 168 | Default chart window span (hours) |
 | `session` | `sheet_page_default` | 200 | Default page size for sheet reads |
-| `session` | `undo_depth` | 25 | Frontend edit undo-stack depth |
 
 The `simulation` keys reach the frontend as `simulation_defaults`
-(`maxSnapshots`, `defaultSnapshotCount`, `defaultSnapshotWeight`) inside the
+(`defaultSnapshotCount`, `defaultSnapshotWeight`) inside the
 `GET /api/config` bundle (see [Section 15](#15-boot-config--apiconfig)).
+
+### Environment overrides (`backend/.env`)
+
+`backend/.env` (copy `backend/.env.example`) is loaded once at process start by
+`backend/env_file.py` - from `backend/app/__init__.py` and the MCP entrypoint,
+before any setting is read. A variable already in the process environment wins.
+Every `RAGNAROK_*` / `CLIMATERISK_*` variable the code reads is listed in
+`.env.example` (enforced by `backend/tests/test_env_file.py`). `RAGNAROK_PORT`
+and `RAGNAROK_PLUGINS_ENV` are read by the launcher scripts only.
 
 ### FastAPI app settings
 
@@ -1023,8 +1180,8 @@ The FastAPI app (`backend/app/main.py`) adds a CORS middleware with
 `allow_origins=["*"]`. In production, scope this to the specific frontend
 origin.
 
-The app is launched by `uvicorn` (see `docs/architecture/PROCESSES.md`).
-`GET /api/run/{job_id}` polling noise is suppressed at the `uvicorn.access`
+The app is launched by `uvicorn` (see `architecture.md`).
+`GET /api/log` polling noise is suppressed at the `uvicorn.access`
 INFO level and re-emitted at DEBUG via `_SuppressPollLogs`.
 
 ---
@@ -1149,7 +1306,7 @@ Helpers also used by the SQLite engine:
 | `is_series_sheet(name, rows=None)` | `<component>-<attribute>` naming convention; `snapshots` is static. |
 | `_snapshot_labels(model)` / `_scenario_year_from_labels(labels)` | Snapshot labels from the `snapshots` sheet; year parsed from the first label. |
 | `_apply_ops(rows, ops)` | Pure application of `set` / `addRow` / `deleteRows` ops to a row list. |
-| `default_max_points()` / `default_window_hours()` / `default_page_size()` | Defaults from `system_defaults.json` → `session` (800 / 168 / 200). |
+| `default_max_points()` / `default_page_size()` | Defaults from `system_defaults.json` → `session` (800 / 200). |
 
 ### 11.4 `timeseries.py` — windowing and downsampling
 
@@ -1215,10 +1372,10 @@ order matters. Each entry records the actor, the sheets touched, a monotonic
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/api/journal` | Mutation timeline for a session, newest last |
-| `GET` | `/api/journal/{entry_id}/diff` | What that entry changed |
-| `POST` | `/api/journal/{entry_id}/undo` | Revert one entry |
-| `POST` | `/api/journal/revert` | Revert to a version |
+| `GET` | `/api/session/journal` | Mutation timeline for a session, newest last |
+| `GET` | `/api/session/journal/{entry_id}/diff` | What that entry changed |
+| `POST` | `/api/session/journal/{entry_id}/undo` | Revert one entry |
+| `POST` | `/api/session/journal/revert` | Revert to a version |
 
 Journal data lands under `backend/data/journal/` and is **gitignored** — it is runtime
 state. Tests must not write there: `conftest.py` has an autouse fixture pointing
@@ -1427,7 +1584,7 @@ from the live backend registry — and memoised for the life of the process.
 | `standard_types` | PyPSA line + transformer catalogues, built live |
 | `network_import_policy` | Curated rule table, read from disk |
 | `capabilities` | Solver-backend capability list from the backend registry |
-| `simulation_defaults` | `{maxSnapshots, defaultSnapshotCount, defaultSnapshotWeight}` from `system_defaults.json` → `simulation` |
+| `simulation_defaults` | `{defaultSnapshotCount, defaultSnapshotWeight}` from `system_defaults.json` → `simulation` |
 | `build_id` / `backend_version` | The frontend's cache key |
 
 ---

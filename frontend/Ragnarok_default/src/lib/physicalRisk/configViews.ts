@@ -221,12 +221,6 @@ export async function getFullLibraries(): Promise<FullLibraries> {
   return asJson<FullLibraries>(resp);
 }
 
-/** Fetch the full portfolio (including `scenario`) for a physical-risk session. */
-export async function getFullSession(sessionId: string): Promise<FullPortfolio> {
-  const resp = await fetch(`${API_BASE}/api/physical-risk/session/${encodeURIComponent(sessionId)}`);
-  return asJson<FullPortfolio>(resp);
-}
-
 /** Replace the stored portfolio for a session (full-document sync, same as `saveSession`). */
 export async function saveFullSession(
   sessionId: string,

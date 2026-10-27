@@ -5283,6 +5283,22 @@ th:hover .col-delete-btn {
 .plugin-panel-grid--single {
   grid-template-columns: minmax(0, 1fr);
 }
+/* Contract v2 `layout` rows: keys named in one row render side-by-side. */
+.journal-diff {
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  max-height: 240px;
+  overflow: auto;
+  font-size: 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.plugin-layout-row {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 12px;
+}
 .plugin-panel-grid--2x1,
 .plugin-panel-grid--2x2 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -11140,3 +11156,11 @@ section.data-import-filters__group {
   padding: 10px 16px; font-size: var(--fs-md); color: var(--idk-accent-700);
   box-shadow: 0 4px 12px rgba(0,0,0,0.08); white-space: nowrap;
 }
+
+/* Forge piecewise-curve editor (P10/P46) */
+.forge-pw-table { width: 100%; border-collapse: collapse; margin: 6px 0; }
+.forge-pw-table th, .forge-pw-table td { padding: 2px 6px; text-align: left; font-size: var(--fs-xs, 12px); }
+.forge-pw-table input.forge-number { width: 100%; }
+.forge-pw-messages { list-style: none; margin: 6px 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-xs, 12px); }
+.forge-pw-error { color: var(--danger, #b91c1c); }
+.forge-pw-mip { color: var(--warning, #b45309); }

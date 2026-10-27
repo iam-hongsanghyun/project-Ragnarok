@@ -36,6 +36,9 @@ export type CardKind =
   | 'raw-sheets'
   | 'price-formation'
   | 'commitment'
+  | 'piecewise'
+  | 'maintenance'
+  | 'phase-shifters'
   | 'bid-strategy'
   | 'optimal-bid'
   | 'asset-swap'
@@ -219,6 +222,18 @@ export interface CommitmentCardData extends CardBase {
   kind: 'commitment';
 }
 
+export interface PiecewiseCardData extends CardBase {
+  kind: 'piecewise';
+}
+
+export interface MaintenanceCardData extends CardBase {
+  kind: 'maintenance';
+}
+
+export interface PhaseShiftersCardData extends CardBase {
+  kind: 'phase-shifters';
+}
+
 export interface BidStrategyCardData extends CardBase {
   kind: 'bid-strategy';
 }
@@ -353,6 +368,9 @@ export type Card =
   | RawSheetsCardData
   | PriceFormationCardData
   | CommitmentCardData
+  | PiecewiseCardData
+  | MaintenanceCardData
+  | PhaseShiftersCardData
   | BidStrategyCardData
   | OptimalBidCardData
   | AssetSwapCardData

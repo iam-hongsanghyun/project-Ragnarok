@@ -121,24 +121,25 @@ pypsa_gui/
     └── Ragnarok_default/            default React/TypeScript UI (its own npm package)
         ├── package.json             npm project root (proxy → 127.0.0.1:8000)
         ├── public/                  CRA static root (index.html)
-        ├── scripts/                 build-time codegen (*.mjs) for src/config JSON + docs
+        ├── scripts/                 build and docs generators (build.mjs, generate-support-matrix.mjs)
         └── src/
             ├── App.tsx              Root component: state, event handlers, run flow
             ├── index.tsx            ReactDOM entry point
             ├── index.css            All CSS (scoped by component prefix)
-            ├── config/              generated JSON (pypsa_schema.json, capabilities.json …)
-            ├── constants/           schema adapters + shared constants
+            ├── config/              frontend-only JSON (app_config.json, currencies.json)
+            ├── lib/                 api clients, schema adapters and constants, workbook I/O,
+            │                          results, forge, utils, and types (lib/types/index.ts)
             ├── layout/              ActivityBar, Sidebar, and chrome
-            ├── views/               top-level tab views (Model, Analytics, Settings, Plugins)
-            ├── features/            feature folders: build, input, map, analytics,
-            │                          constraints, validation, run, run-history,
-            │                          plugins, settings
-            └── shared/              cross-feature types, utils, and components
+            ├── views/               top-level tab views (Model, Forge, Analytics, Settings, …)
+            ├── features/            feature folders: build, input, map, analytics, run,
+            │                          scenario, settings, validation, plugins, …
+            ├── modules/             tab modules (data, forge, siting, training, …)
+            └── shared/              components, hooks, and echarts helpers
 ```
 
 Per-module function reference for the backend is in
-[`docs/reference/backend.md`](backend.md). Frontend component reference is in
-[`docs/reference/frontend.md`](frontend.md).
+[`backend.md`](backend.md). Frontend component reference is in
+[`frontend.md`](frontend.md).
 
 ---
 
@@ -173,8 +174,8 @@ The rules:
 | Frontend plugin <-> Ragnarok backend | No — a frontend plugin needing server-side computation runs its own local server |
 | Backend plugin <-> Ragnarok backend | In-process — installed via `/api/plugins/install`, dispatched through `backend/app/plugins.py` |
 
-The **solve pipeline** is plugin-agnostic: `{model, scenario, options}` arrives
-at `POST /api/run` and no plugin code executes at any solve stage. Backend
+The **solve pipeline** is plugin-agnostic: `{sessionId, scenario, options}` arrives
+at `POST /api/queue` and no plugin code executes at any solve stage. Backend
 plugins act *before* the solve — their `transform`/`contribute` hooks write into
 the server-side session under a strict contract: the hook receives a defensive
 copy of the model, only its return value is persisted, and any hook exception
@@ -202,14 +203,16 @@ deploying the backend on a server requires no plugin changes.
    Run button → RunDialog (modal)
    → user picks snapshotStart/End, snapshotWeight, carbonPrice, dryRun
 
-   POST /api/run  (or /api/validate for dry-run)
+   POST /api/session/model/static   the GUI syncs its workbook into the session
+   POST /api/queue                  enqueue the run (POST /api/validate for a dry run)
    Body: RunPayload {
-     model: WorkbookModel,       entire sheet data as JSON
-     scenario: { constraints, constraintSpecs, carbonPrice },
-     options:  { snapshotCount, snapshotStart, snapshotWeight, ... }
+     sessionId: "default",         the queue snapshots the session model at submit
+     scenario:  { constraints, constraintSpecs, carbonPrice, ... },
+     options:   { snapshotStart, snapshotCount, snapshotWeight, ... }
    }
 
 4. BACKEND
+   _queue_pump starts the item in a spawned worker (_solve_worker)
    build_network(model, scenario, options)
      → attach buses, loads, generators, lines, links, transformers,
        storage_units, stores, global_constraints
@@ -238,7 +241,8 @@ deploying the backend on a server requires no plugin changes.
 
 ## 5. RunPayload schema
 
-Sent as JSON to `POST /api/run` and `POST /api/validate`.
+Sent as JSON to `POST /api/queue` and `POST /api/validate`. The browser sends `sessionId`
+in place of `model`; the field list is in [backend.md §2.1](backend.md#21-requestresponse-models).
 
 ```json
 {
@@ -326,7 +330,7 @@ Entry point: `handleOpenWorkbook` in `App.tsx`.
 1. On Chromium, `showOpenFilePicker` returns a `FileSystemFileHandle`. On other
    browsers the hidden `<input type="file">` fires `handleImport` instead.
 2. Either path calls `parseWorkbook(file)` in
-   `src/shared/utils/workbook.ts`. SheetJS reads the `ArrayBuffer` via
+   `src/lib/workbook/workbook.ts`. SheetJS reads the `ArrayBuffer` via
    `XLSX.read(arrayBuffer, { type: 'array', cellDates: true })`.
 3. `parseSheets` iterates every sheet, normalises the sheet name to a canonical key,
    and calls `XLSX.utils.sheet_to_json` with `defval: null`. Each cell passes through
@@ -340,7 +344,7 @@ Entry point: `handleOpenWorkbook` in `App.tsx`.
 6. `resetForNewModel` is the single choke point for loading any model into live state.
    It reads embedded pathway, rolling, and scenario config from the model, applies the
    active scenario's parameters to the React state sliders, and clears `results`,
-   `resultsModel`, `resultsContext`, and `runStatus`.
+   `resultsModel`, and `resultsContext`.
 
 **Project import** (`handleImportProject`) follows the same path but calls
 `parseProjectWorkbook`, which splits static component sheets into input columns (model)
@@ -409,46 +413,33 @@ re-render loops.
   `pathwayConfig`, `rollingConfig`, `stochasticConfig`, `securityConstrainedConfig`,
   `carbonPriceSchedule`.
 
-#### Starting the job (`POST /api/run`)
+#### Starting the job (`POST /api/queue`)
 
-1. `POST /api/run` in `backend/app/main.py` receives `RunPayload`.
-2. The backend validates the backend name via `get_backend`; unknown names return 400.
-3. Stale completed or cancelled jobs are pruned from the `_jobs` dict.
-4. A UUID `job_id` is generated. A multiprocessing `Queue` and a `Process` are created
-   using `mp.get_context("spawn")` so the worker imports cleanly in a fresh
-   interpreter. The target is `_solve_worker`.
-5. `_solve_worker` runs in the child process. It calls `get_backend(options["backend"])`
-   — currently always `PypsaBackend` from `backend/pypsa/adapter.py` — then calls
-   `backend.run(model, scenario, options)`, which calls `run_pypsa`. On completion it
-   puts `("ok", result)` or `("err", message)` into the queue.
-6. An asyncio task `_collect_job(job_id)` polls the queue every 0.5 s.
-7. `{ jobId, status: "running" }` is returned synchronously to the frontend.
+1. `enqueue_run` in `backend/app/main.py` receives `RunPayload`. It validates the backend
+   name (`get_backend`, unknown names return 400).
+2. `_resolve_payload_model` copies the session model into the payload, so later session
+   edits cannot change a queued run. `_refuse_invalid_model` rejects a model that fails
+   the pre-run checks.
+3. `_enqueue_payload` writes the queue item and returns `{id, status, position}`.
+   `?staged=true` parks the item as `staged` until the user starts it.
+4. `_queue_pump` (an asyncio loop) fills free slots up to the queue concurrency. Each
+   item runs `_run_queue_item`, which starts a `multiprocessing` `spawn` child running
+   `_solve_worker`. The worker calls `backend.run(model, scenario, options)` (which calls
+   `run_pypsa`).
+5. On success the run is stored in the run store (History, `GET /api/runs`).
 
-#### Polling (`GET /api/run/{job_id}`)
+#### Polling (`GET /api/queue`)
 
-The frontend polls starting after `RUN_POLLING.initialDelayMs`. Each poll:
+The GUI refreshes `GET /api/queue` while items are active and notifies the user when one
+finishes. The concurrency setting is read from `GET /api/queue` and changed with
+`POST /api/queue/concurrency`. The finished run is then loaded from History:
+`GET /api/runs/{name}` and `GET /api/runs/{name}/analytics`.
 
-- A 404 means the server restarted and lost the job; the UI transitions to `'error'`.
-- A network error schedules a retry after `RUN_POLLING.retryDelayMs`.
-- When `data.status === 'running'`, the next poll is scheduled after
-  `RUN_POLLING.runningDelayMs`.
-- When `data.status === 'done'`, `applyResult(data.result)` is called and the job is
-  removed from `_jobs` to free memory.
+#### Cancel, rerun, delete
 
-Cancel (`handleCancelRun`) calls `DELETE /api/run/{jobId}`, which terminates the child
-process via `proc.terminate()` and `proc.join(3)`.
-
-#### Applying the result (frontend)
-
-`applyResult(rawResults)` in `App.tsx`:
-
-1. Canonicalises backend output timestamps via `canonicalizeOutputSeries`.
-2. Updates `pathwayConfig` and `rollingConfig` from returned metadata.
-3. Freezes `resultsModel` to the exact topology submitted, so later edits do not
-   corrupt analytics for this run.
-4. Freezes `resultsContext` (`carbonPrice`, `snapshotWeight`, `discountRate`) so
-   pathway KPIs stay stable even if the user moves the live sliders.
-5. Appends a `RunHistoryEntry` to `runHistory`.
+`POST /api/queue/{item_id}/cancel` cancels a queued item or kills a running worker. The queue
+row and its payload are kept. `POST /api/queue/{item_id}/rerun` runs the item again in place.
+`DELETE /api/queue/{item_id}` removes the queue row and its payload. It does not delete History entries.
 
 ### 7.5 Network build: `build_network`
 
@@ -588,15 +579,10 @@ rather than the live editable model.
 
 ### 7.9 Run history
 
-At the end of `applyResult`, a `RunHistoryEntry` is prepended to `runHistory` state.
-The entry stores the full raw `RunResults`, a deep clone of the submitted model, and
-frozen derivation context values. Pinned entries are retained indefinitely. Unpinned
-entries are trimmed to `MAX_UNPINNED_HISTORY`. Run history is session-scoped in-memory
-React state — it is never written to disk and does not survive a page reload.
-
-`handleRestoreRun(entry)` restores both results and model state, pushes the current
-live model onto the undo stack, and pins analytics to the stored topology. It does not
-switch tabs.
+History is stored on the server. Every successful solve is written to the run store
+(`backend/app/run_store.py`, one SQLite file per run) and listed by `GET /api/runs`. The
+GUI loads an entry's analytics on demand (`GET /api/runs/{name}/analytics`). It renames
+and deletes entries with `POST /api/runs/{name}/rename` and `DELETE /api/runs/{name}`.
 
 ### 7.10 Export and import pipelines
 
@@ -624,7 +610,7 @@ every result category: `OUT_Summary`, `OUT_Dispatch`, `OUT_GenDispatch`,
 **Export / Import CSV Folder**
 
 Each sheet is written as a separate CSV into a zip archive via `exportModelAsCsvFolderZip`
-in `src/shared/utils/csvFolder.ts`.
+in `src/lib/workbook/csvFolder.ts`.
 
 **Export / Import netCDF and HDF5**
 
@@ -695,7 +681,7 @@ applied by PyPSA's own optimizer without any special backend logic.
 
 The Constraints workspace tab exposes a text-based DSL. Before submission, the frontend
 compiles the DSL text into a `constraintSpecs` JSON array via `dslToSpecs()` in
-`src/shared/utils/constraintDsl.ts`. The `constraintSpecs` array is sent inside
+`src/lib/constraints/dsl.ts`. The `constraintSpecs` array is sent inside
 `scenario.constraintSpecs` in the `RunPayload`. The backend applies them via
 `apply_constraint_specs()` in `backend/pypsa/network/constraint_dsl.py` inside
 `extra_functionality`. Older payloads that still contain raw DSL text in
@@ -727,7 +713,7 @@ zero of either — plugins are purely 3rd-party. For full authoring detail see
 The complete involvement map. Every plugin touchpoint, what the plugin sees
 there, what it can change, and what contains it. Anything not in this table is
 out of a plugin's reach by construction — most importantly **the solve**:
-`POST /api/run` executes zero plugin code, for either kind.
+`POST /api/queue` executes zero plugin code, for either kind.
 
 Lifecycle of a backend plugin:
 
@@ -742,7 +728,7 @@ form open                        apply                            after solve
   └─ file upload → scratch dir                               ▼
                                      ONLY the RETURN VALUE is persisted
                                      into the session (input is a copy)
-solve (POST /api/run)
+solve (POST /api/queue)
   └─ no plugin involvement — the solve pipeline is plugin-free
 ```
 
@@ -758,7 +744,7 @@ solve (POST /api/run)
 | `analyze(result, config)` | both | Output tab / results change | the run result it is handed | nothing — returns display data; host renders all markup | errors → 400 / toast |
 | Data-file upload | backend | file picker | own scratch dir `plugin_files/<id>/` only | files in that dir | path injected by host; dir removed on uninstall |
 | Own local server | frontend | `plugins.env` launch | whatever its process can | its own process | separate OS process; never contacted by the Ragnarok backend |
-| Solve | — | `POST /api/run` | — | — | **no plugin code executes** |
+| Solve | — | `POST /api/queue` | — | — | **no plugin code executes** |
 
 **The trust boundary, stated plainly.** Everything in the Containment column is
 *behavioral* containment (what the framework persists, how errors surface). It
@@ -791,7 +777,7 @@ not.
 
 `transform` and `contribute` are mutually exclusive per plugin. `analyze` runs
 automatically when `results` changes. Plugin actions mutate React model state directly
-in the browser before any run is submitted. The `RunPayload` sent to `POST /api/run`
+in the browser before any run is submitted. The `RunPayload` sent to `POST /api/queue`
 contains only the resulting `{model, scenario, options}` — the backend never sees
 plugin identity.
 
@@ -988,8 +974,8 @@ headline limitations are:
   limits in the workbook.
 - **No ETS / carbon market.** Carbon price is a flat $/tCO2 adder to generator
   marginal costs; there is no ETS permit price curve or intertemporal banking.
-- **HiGHS only.** The solver is fixed to HiGHS via PyPSA's default linopt interface.
-  GLPK and Gurobi are not exposed in the UI.
+- **HiGHS by default.** HiGHS is the default solver. Settings → Solver → Advanced lists the other
+  solvers installed in the backend (`options.solverName`); Ragnarok does not install them.
 - **Backend assumed local by default.** The app defaults to `http://127.0.0.1:8000`.
   Moving the backend server-side is architecturally safe (the frontend/backend
   separation is already clean) but no authentication layer exists yet.

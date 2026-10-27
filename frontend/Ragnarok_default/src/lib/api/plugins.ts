@@ -25,10 +25,14 @@ export interface BackendPluginManifest {
   description: string;
   capabilities: string[];
   config: ModuleConfigSchema;
-  hooks: { transform: boolean; contribute: boolean; analyze: boolean; options?: boolean };
+  hooks: { transform: boolean; contribute: boolean; analyze: boolean; options?: boolean; resultMapper?: boolean };
   /** When true, analyze is NOT auto-run on panel open — the Output tab shows a
    *  "Run analysis" button instead (for plugins whose analyze is expensive). */
   analyzeOnDemand?: boolean;
+  /** Contract v2: analyze also receives `runs` (the stored runs the user picks). */
+  multiRun?: boolean;
+  /** Plugin contract version (1 = analyze(result, config); 2 adds multiRun + layout). */
+  contractVersion?: number;
 }
 
 async function asJson<T>(resp: Response): Promise<T> {
@@ -155,16 +159,19 @@ export async function runBackendAction(
   return asJson<PluginActionResult>(resp);
 }
 
-/** Run a backend plugin's `analyze(result, config)` and return its output. */
+/** Run a backend plugin's `analyze(result, config[, runs])` and return its output.
+ *  `runs` are stored-run names (contract v2 multiRun); the server loads each run's
+ *  analytics. `result` is the current run result (empty object when none). */
 export async function analyzeBackendPlugin(
   id: string,
   result: unknown,
   config: Record<string, unknown>,
+  runs: string[] = [],
 ): Promise<Record<string, unknown>> {
   const resp = await fetch(`${API_BASE}/api/plugins/${encodeURIComponent(id)}/analyze`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ result, config }),
+    body: JSON.stringify({ result: result ?? {}, config, runs }),
   });
   return asJson<Record<string, unknown>>(resp);
 }

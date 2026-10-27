@@ -2,8 +2,8 @@
 
 Implementation reference for `frontend/Ragnarok_default/src/`. Covers application
 structure, root state and handlers, view and feature components, and shared
-utilities. This is not a user manual (see `docs/guides/user-manual.md`) and not
-an architecture overview (see `docs/architecture/`).
+utilities. This is not a user manual (see `user-manual.md`) and not
+an architecture overview (see `architecture.md`).
 
 ---
 
@@ -90,7 +90,6 @@ frontend/Ragnarok_default/src/
     build/                   BuildView, BuildNetworkMap, BuildDetailPane, steps.ts.
     analytics/               AnalyticsPane, ComparisonPane, useMetricOptions.
     run/                     RunDialog.
-    run-history/             RunHistoryList, RunHistoryCard, RunComparisonTable.
     plugins/                 frontendPlugins.ts, PluginDetail, PluginPanel, BackendPluginDetail.
     input/                   TablesPane, DataGrid, grid/range.ts, tsv.ts.
     map/                     MapPane, BuildNetworkMap, FitToBounds, MapLegend.
@@ -98,12 +97,17 @@ frontend/Ragnarok_default/src/
     settings/                useSettings.
     constraints/             GlobalConstraintsSection.
     modules/                 ModuleManagerSection (ConfigFieldRow).
-  shared/
+  lib/
     types/index.ts           All shared TypeScript types and interfaces.
     utils/                   Utility modules (see Section 7).
+    api/                     HTTP clients, one module per backend area.
+    constants/               Schema adapters, config (API_BASE, RUN_WINDOW, RUN_POLLING), sheets.
+    workbook/                Workbook, CSV-folder and project parse / save.
+    results/                 RunResults derivation, analytics, pathway, rolling.
+  shared/
     components/Toast.tsx     Toast notification context + hook.
-  config/                    Runtime config (API_BASE, etc.).
-  constants/                 Schema metadata, RUN_WINDOW, DEFAULT_CONSTRAINTS, etc.
+    hooks/                   Shared React hooks.
+  config/                    Frontend-only JSON (app_config.json, currencies.json).
 ```
 
 ---
@@ -122,8 +126,7 @@ handler down to view components as props.
 | `results` | `RunResults \| null` | Raw result from the last completed or restored run |
 | `resultsModel` | `WorkbookModel \| null` | Topology snapshot taken at run or restore time |
 | `resultsContext` | `{carbonPrice, snapshotWeight, discountRate} \| null` | Derivation inputs frozen at run or restore time |
-| `runStatus` | `'idle' \| 'running' \| 'done' \| 'error'` | Current run lifecycle state |
-| `runHistory` | `RunHistoryEntry[]` | Session-scoped list of past runs |
+| `queueJobs` | `QueueJob[]` | Server run queue, refreshed from `GET /api/queue` |
 | `scenarioCatalog` | `ScenarioCatalog` | Named solver scenarios |
 | `pathwayConfig` | `PathwayConfig` | Multi-period investment path settings |
 | `rollingConfig` | `RollingHorizonConfig` | Rolling horizon solve settings |
@@ -286,34 +289,35 @@ Uses `window.showSaveFilePicker` when present; falls back to a programmatic
 
 ### 2.10 Run Lifecycle
 
+Solves run through the server queue. The browser does not poll a single job.
+
 #### `handleRunModel() -> Promise<void>`
 
-Three-phase async workflow:
+**Phase 1 — sync the model.** The workbook is posted to the session with
+`putStaticModel` (`POST /api/session/model/static`). Submission then sends only
+`sessionId`, so the backend snapshots the session model into the queue item.
 
-**Phase 1 — dry run:** When `dryRun` is true, POSTs to `/api/validate` and
-routes to the Validation sub-tab. No job is started.
+**Phase 2 — dry run or enqueue.** With `dryRun` set, `POST /api/validate` runs and the
+result goes to the Analytics → Validation sub-tab. No job starts. Otherwise
+`POST /api/queue` receives `{sessionId, scenario, options}`; `?staged=true` is sent for
+"Queue next Run". `scenario` holds `constraints`, `constraintSpecs` (from `customDsl` via
+`dslToSpecs`, `lib/constraints/dsl.ts`), `carbonPrice` and `discountRate`. `options` holds the
+solver settings, snapshot window, pathway / rolling / stochastic / SCLOPF config, and the
+advanced solve options (`advancedSolve`, flattened into `options`). The response is
+`{id, status, position}`.
 
-**Phase 2 — start job:** POSTs `{model, scenario, options}` to `/api/run`.
-The `scenario` object includes `constraints`, `constraintSpecs` (parsed from
-`customDsl` via `dslToSpecs`), `carbonPrice`, and `discountRate`. The `options`
-object carries solver settings, snapshot window, pathway and rolling config,
-stochastic and SCLOPF config, currency symbol, and other run-control keys.
-Receives a `jobId`; sets `runStatus = 'running'`.
+**Phase 3 — track.** `refreshQueue` calls `GET /api/queue` on an interval (faster while
+items are active; the interval comes from `settings.queuePollSeconds`) and updates
+`queueJobs`. A finished run is listed in History (`GET /api/runs`), and its analytics are
+loaded with `GET /api/runs/{name}/analytics`.
 
-**Phase 3 — poll:** Inner `poll()` fetches `/api/run/:jobId` every
-`RUN_POLLING.runningDelayMs` ms until status is no longer `'running'`. On 404
-or non-OK, sets `runStatus = 'error'`. On network error, retries after
-`RUN_POLLING.retryDelayMs`. On success, calls `applyResult`.
+#### `handleCancelQueueItem(id) -> Promise<void>`
 
-**`applyResult(rawResults)`** (inner closure): canonicalises output series
-dates, updates `results`, `resultsModel`, `resultsContext`, appends a
-`RunHistoryEntry` (capped to `MAX_UNPINNED_HISTORY` unpinned), and sets
-`runStatus = 'done'`.
+Sends `POST /api/queue/{id}/cancel`. A running worker is killed and the queue row is kept.
+The other queue actions are `POST /api/queue/{id}/rerun`, `POST /api/queue/{id}/import`
+(load the item's model back into the session) and `DELETE /api/queue/{id}`.
 
-#### `handleCancelRun() -> Promise<void>`
-
-Calls `stopPolling()`, sends `DELETE /api/run/:jobId`, clears `jobIdRef` and
-`sessionStorage`, sets `runStatus = 'idle'`.
+A scenario batch posts one `POST /api/queue` per scenario, each with its own `runLabel`.
 
 ### 2.11 Run-History Handlers
 
@@ -357,7 +361,7 @@ touch the Ragnarok backend. There are no App-level plugin handler functions.
 - Passed to `SettingsView` (Constraints section) and `PluginsView` as a
   prop so plugins can append new constraint lines via `onCustomDslChange`.
 - Converted to `constraintSpecs` (a `ConstraintSpec[]`) by calling
-  `dslToSpecs(customDsl)` at run time, just before the `/api/run` POST.
+  `dslToSpecs(customDsl)` at run time, just before the `POST /api/queue` call.
 
 ### 2.15 Internal Helpers
 
@@ -941,7 +945,7 @@ Detail pane for one **backend** (server-side) plugin — the counterpart of
 same `PluginPanel` config GUI from the manifest's `config` schema, but every
 hook runs on the server via `lib/api/plugins.ts`:
 
-- A `transform`/`contribute` action POSTs to `/api/plugins/{id}/{hook}`; the
+- A `transform`/`contribute` action POSTs to `/api/plugins/{plugin_id}/transform` (or `/contribute`); the
   backend writes the result into the session and the parent rehydrates the
   editor from there — the model never enters the browser.
 - Any other `action` hook POSTs to `/api/plugins/{id}/action`; a returned
@@ -1119,8 +1123,8 @@ Key types and their meanings:
 | `PlanningMode` | `'single_period' \| 'pathway'` |
 | `ConstraintMetric` | Union of 8 constraint type strings (co2_cap, carrier_max_gen, etc.) |
 | `CustomConstraint` | `{id, enabled, label, metric, carrier, value, unit}` |
-| `PathwayConfig` | `{planningMode, enabled, snapshotMappingMode, overridePolicy, periods, selectedPeriod}` |
-| `RollingHorizonConfig` | `{enabled, horizonSnapshots, overlapSnapshots, stepPolicy, stepSnapshots, preserveTerminalState, selectedWindow}` |
+| `PathwayConfig` | `{planningMode, enabled, snapshotMappingMode, periods, selectedPeriod}` |
+| `RollingHorizonConfig` | `{enabled, horizonSnapshots, overlapSnapshots, stepSnapshots}` |
 | `StochasticConfig` | `{enabled, scenarios: StochasticScenarioOverride[]}` |
 | `SecurityConstrainedConfig` | `{enabled}` |
 | `AnalyticsFocus` | `{type: 'system'} \| {type: 'asset', sheet, name}` |
@@ -1391,10 +1395,10 @@ Rolling-horizon config serialisation.
 
 | Function | Signature | Effect |
 |---|---|---|
-| `defaultRollingConfig` | `() -> RollingHorizonConfig` | `enabled: false`, `horizonSnapshots: 168`, `overlapSnapshots: 24`, `stepSnapshots: 144`, `preserveTerminalState: true` |
+| `defaultRollingConfig` | `() -> RollingHorizonConfig` | `enabled: false`, `horizonSnapshots: 168`, `overlapSnapshots: 24`, `stepSnapshots: 144` |
 | `readRollingConfigFromModel` | `(model) -> RollingHorizonConfig` | Reads `RAGNAROK_Rolling` first row |
 | `writeRollingConfigToModel` | `(model, config) -> WorkbookModel` | Overwrites `RAGNAROK_Rolling` |
-| `normalizeRollingConfig` | `(config) -> RollingHorizonConfig` | Clamps snapshot counts to positive integers; derives `stepSnapshots` when `stepPolicy === 'derived'` |
+| `normalizeRollingConfig` | `(config) -> RollingHorizonConfig` | Clamps snapshot counts to positive integers; derives `stepSnapshots` as `horizon - overlap` |
 | `sameRollingConfig` | `(a, b) -> boolean` | JSON-equality check |
 
 ### 7.13 scenarios.ts

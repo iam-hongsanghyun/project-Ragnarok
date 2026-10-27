@@ -249,7 +249,7 @@ def _install(monkeypatch, autonomy: str = "guided") -> FakeClient:
 def test_tool_catalog_and_annotations() -> None:
     tools = asyncio.run(mcp.list_tools())
     by_name = {t.name: t for t in tools}
-    assert len(tools) == 116, f"expected 116 tools, got {len(tools)}"
+    assert len(tools) == 154, f"expected 154 tools, got {len(tools)}"
     # check_model: reads the model back so "is this what I asked for?" can be
     # answered against the model rather than against the agent's account of it.
     assert "check_model" in by_name
@@ -336,6 +336,24 @@ def test_tool_catalog_and_annotations() -> None:
         "get_plugin_options",
         "pypsa_earth_status",
         "pypsa_earth_build_status",
+        # Run-spec reference and saved scenarios (MCP-only modelling).
+        "list_scenarios",
+        "describe_scenario",
+        # Server-side analysis: comparison, KPIs, asset details, conversions.
+        "compare_runs",
+        "get_kpis",
+        "compare_companies",
+        "get_asset_details",
+        "list_conversions",
+        # PyPSA 1.4: piecewise curves, native I/O, optimisation and analysis reads.
+        "describe_piecewise",
+        "get_piecewise_curve",
+        "check_piecewise_options",
+        "pypsa_io_capabilities",
+        "describe_optimise_options",
+        "consistency_check",
+        "network_analysis",
+        "get_statistics",
     }
 
 

@@ -247,7 +247,7 @@ class PhysicalRunOutput(BaseModel):
     perils: list[PhysicalRunResult] = Field(default_factory=list)
     detail: str | None = Field(
         default=None,
-        description="Engine note (e.g. the worker-fallback reason); None for a clean stub run.",
+        description="Engine note: the stub marker (or the worker-fallback reason); None only for a real worker run.",
     )
 
 

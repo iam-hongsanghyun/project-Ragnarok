@@ -24,10 +24,16 @@
  *
  * Used by `App.handleApplyWorkbookFragment` when the user clicks
  * "Add to workbook" in the Data view.
+ *
+ * The authoritative implementation is the backend's
+ * (`POST /api/session/merge-fragment`, `backend/app/fragment_merge.py`), shared
+ * with the MCP server: the UI calls `mergeWorkbookFragmentRemote`. The local
+ * `mergeWorkbookFragment` below is only the fallback for an unreachable backend.
  */
 import { GridRow, Primitive, WorkbookModel } from '../types';
 import { WorkbookFragment, ProvenanceRow } from '../api/databases';
 import { PROVENANCE_SHEET } from 'lib/workbook/workbook';
+import { API_BASE } from 'lib/constants';
 
 const CARRIERS_SHEET = 'carriers';
 const SNAPSHOTS_SHEET = 'snapshots';
@@ -383,4 +389,50 @@ export function mergeWorkbookFragment(
   }
 
   return out;
+}
+
+
+/** Sheets a fragment merge can read or write: the fragment's own sheets plus the
+ *  ones the merge rules touch implicitly (carriers/snapshots/provenance, buses
+ *  for renames, generators for fuel-price re-pricing). Sending only these keeps
+ *  the request small. */
+function touchedSheets(fragment: WorkbookFragment): string[] {
+  return Array.from(new Set([
+    ...Object.keys(fragment.sheets),
+    'buses', CARRIERS_SHEET, SNAPSHOTS_SHEET, 'generators', PROVENANCE_SHEET,
+  ]));
+}
+
+/**
+ * Merge a fragment via the backend (the single implementation shared with MCP).
+ * Returns `model` with the merged sheets replaced. Falls back to the local
+ * merge only when the backend cannot be reached (network error); an HTTP error
+ * from the backend is thrown, not papered over.
+ */
+export async function mergeWorkbookFragmentRemote(
+  model: WorkbookModel,
+  fragment: WorkbookFragment,
+): Promise<WorkbookModel> {
+  const subset: Record<string, unknown> = {};
+  for (const sheet of touchedSheets(fragment)) {
+    const rows = (model as Record<string, unknown>)[sheet];
+    if (Array.isArray(rows)) subset[sheet] = rows;
+  }
+  let resp: Response;
+  try {
+    resp = await fetch(`${API_BASE}/api/session/merge-fragment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: subset, fragment }),
+    });
+  } catch {
+    return mergeWorkbookFragment(model, fragment);
+  }
+  if (!resp.ok) {
+    let detail = resp.statusText;
+    try { detail = (await resp.json())?.detail ?? detail; } catch { /* non-JSON */ }
+    throw new Error(`Merge failed (${resp.status}): ${detail}`);
+  }
+  const body = (await resp.json()) as { model: Record<string, GridRow[]> };
+  return { ...model, ...body.model } as WorkbookModel;
 }

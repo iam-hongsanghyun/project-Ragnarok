@@ -118,7 +118,7 @@ _HANDLER.setFormatter(logging.Formatter("%(message)s"))
 class _DropPollLogger(logging.Filter):
     """Drop the DEBUG re-emits from the ``pypsa_gui.poll`` logger.
 
-    main.py's access-log filter suppresses `/api/run/{id}` and `/api/log`
+    main.py's access-log filter suppresses `/api/log`
     polls from the INFO access stream and re-emits them on a separate
     ``pypsa_gui.poll`` logger at DEBUG level — so curious operators can
     still capture them with ``uvicorn --log-level debug``. Without this

@@ -48,6 +48,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import pypsa
+from ..network.piecewise import overlay_piecewise_marginal_cost
 
 from ..utils.emissions import per_generator_emission_factor
 from .finance import _crf, storage_assets
@@ -116,7 +117,7 @@ def build_company_statement(
     co2_price = float(co2_arr.mean()) if len(co2_arr) else 0.0
     # Dense marginal cost: a varying schedule writes its adder to the
     # time-varying frame only, so the static column alone would miss it.
-    mc_dense = network.get_switchable_as_dense("Generator", "marginal_cost")
+    mc_dense = overlay_piecewise_marginal_cost(network, network.get_switchable_as_dense("Generator", "marginal_cost"))
 
     gearing = float((debt or {}).get("gearing", 0.0) or 0.0)
     interest = float((debt or {}).get("interestRate", 0.0) or 0.0)

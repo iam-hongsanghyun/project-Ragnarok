@@ -67,7 +67,7 @@ def _snapshot_labels(model: dict[str, Any]) -> list[str]:
 
 
 def _temporal_sheets(model: dict[str, Any]) -> list[str]:
-    return [k for k in model if isinstance(k, str) and "-" in k and isinstance(model.get(k), list)]
+    return [k for k in model if isinstance(k, str) and "-" in k and not k.endswith("-pw") and isinstance(model.get(k), list)]
 
 
 def back_brief(model: dict[str, Any]) -> dict[str, Any]:

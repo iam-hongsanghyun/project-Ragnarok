@@ -191,7 +191,8 @@ export async function getSeriesWindow(
 /** A PyPSA time-series sheet is ``<component>-<attribute>`` (e.g. generators-p_max_pu);
  *  ``snapshots`` is the time axis, treated as static. Mirrors the backend rule. */
 export function isSeriesSheet(name: string): boolean {
-  return name !== 'snapshots' && name.includes('-');
+  // `<list>-<attr>-pw` is a piecewise-curve table (one row per breakpoint): static.
+  return name !== 'snapshots' && name.includes('-') && !name.endsWith('-pw');
 }
 
 /** Map of `<series sheet> → row count` from a session meta. Time-series sheets

@@ -1,6 +1,6 @@
 """Build a PyPSA Network from the in-memory workbook model.
 
-The frontend POSTs the workbook to /api/run as a per-sheet JSON object:
+The frontend POSTs the workbook to /api/queue as a per-sheet JSON object:
 ``model: {sheet_name: [row_dict, ...]}``. We turn each sheet into a pandas
 DataFrame and use PyPSA's bulk `network.add()` API to import every column
 the user provided. The mapping between sheet names, PyPSA component classes,
@@ -60,6 +60,7 @@ from .components import (
     _normalize_extra_port_columns,
 )
 from .network_sheet import _apply_network_sheet, _peak_load_per_bus
+from .piecewise import apply_carbon_to_curves, apply_piecewise_sheets, scale_capital_curves
 
 __all__ = ["build_network", "validate_model"]
 
@@ -87,7 +88,10 @@ def _sanitize_placeholder_bounds(network: pypsa.Network, notes: list[str]) -> No
         if frame.empty:
             continue
         for col in list(frame.columns):
-            is_upper = col.endswith("_nom_max") or col.endswith("_sum_max") or col == "lifetime"
+            is_upper = (
+                col.endswith("_nom_max") or col.endswith("_sum_max")
+                or col in ("lifetime", "v_ang_max")
+            )
             is_lower = col.endswith("_sum_min")
             if not (is_upper or is_lower):
                 continue
@@ -184,6 +188,79 @@ def _relax_commitment(network: pypsa.Network, list_name: str) -> tuple[int, int]
             floored.add(name)
             dyn_floor[name] = 0.0
     return int(was_committable.sum()), len(floored)
+
+
+def _drop_deprecated_v_ang_min(network: pypsa.Network, notes: list[str]) -> None:
+    """Warn about and clear a finite ``v_ang_min`` (deprecated and ignored in PyPSA 1.4).
+
+    PyPSA >= 1.4 enforces ``v_ang_max`` as a symmetric |angle difference| cap in
+    degrees and ignores ``v_ang_min`` (emitting a DeprecationWarning). Old
+    workbooks that carry a finite ``v_ang_min`` mean "lower bound"; surface that
+    their meaning changed, then reset to -inf so no DeprecationWarning fires.
+    """
+    for list_name in ("lines", "transformers"):
+        if list_name not in network.components.keys():
+            continue
+        frame = network.components[list_name].static
+        if "v_ang_min" not in frame.columns:
+            continue
+        finite = np.isfinite(pd.to_numeric(frame["v_ang_min"], errors="coerce").to_numpy(dtype=float))
+        if finite.any():
+            frame.loc[finite, "v_ang_min"] = -np.inf
+            notes.append(
+                f"Warning: v_ang_min is deprecated in PyPSA 1.4 and ignored; cleared it on "
+                f"{int(finite.sum())} {list_name}. Use v_ang_max (degrees, symmetric |angle difference| cap)."
+            )
+
+
+def _relax_maintenance(network: pypsa.Network, list_name: str) -> int:
+    """Clear ``maintainable`` on ``list_name`` (it adds binary maintenance variables).
+
+    Returns the number of components relaxed. The scheduled-outage binaries make
+    the problem a MILP exactly like ``committable``, so Force-LP must drop them.
+    """
+    if list_name not in network.components.keys():
+        return 0
+    frame = network.components[list_name].static
+    if "maintainable" not in frame.columns:
+        return 0
+    flagged = frame["maintainable"].astype(bool)
+    if not flagged.any():
+        return 0
+    frame["maintainable"] = False
+    return int(flagged.sum())
+
+
+def _apply_carbon_to_piecewise(network: pypsa.Network, config: Any, notes: list[str]) -> None:
+    """Fold the carbon price into generator ``marginal_cost`` curves.
+
+    ``apply_carbon_price`` writes the adder to the scalar / time-series cost, which
+    PyPSA ignores for a generator that has a curve. A single price is added to
+    every segment; a price schedule cannot be expressed in a time-invariant curve.
+    """
+    from ..carbon_price import build_price_series
+    from ..utils.emissions import per_generator_emission_factor
+
+    if not network.components["generators"].has_piecewise("marginal_cost"):
+        return
+    if "co2_emissions" not in network.carriers.columns:
+        return
+    series = build_price_series(network, config)
+    if (series <= 0).all():
+        return
+    if series.nunique(dropna=False) > 1:
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=400,
+            detail="A carbon-price schedule that changes within the run cannot be applied to "
+            "generators with a piecewise marginal_cost curve (a curve is time-invariant). "
+            "Use a single carbon price, or model the fuel cost outside the curve.",
+        )
+    ef_carrier = network.carriers["co2_emissions"]
+    if isinstance(ef_carrier.index, pd.MultiIndex) and "name" in ef_carrier.index.names:
+        ef_carrier = ef_carrier.groupby(level="name").first()
+    ef = per_generator_emission_factor(network, ef_carrier.to_dict())
+    apply_carbon_to_curves(network, float(series.iloc[0]), ef, notes)
 
 
 def build_network(
@@ -317,7 +394,12 @@ def build_network(
         kwargs = {col: df[col].tolist() for col in df.columns}
         network.add(cls, df.index.tolist(), **kwargs)
 
+    # PyPSA >= 1.3 piecewise-linear curves (`<list>-<attr>-pw` sheets), attached
+    # once every component exists; capital curves are annuitised further down.
+    apply_piecewise_sheets(network, model, notes, stochastic=stochastic.enabled)
+
     _sanitize_placeholder_bounds(network, notes)
+    _drop_deprecated_v_ang_min(network, notes)
 
     # Generic per-component row count (schema-driven — every populated
     # component class shows up automatically, including new ones PyPSA adds).
@@ -497,6 +579,7 @@ def build_network(
         options.get("carbonPriceSchedule"),
     )
     apply_carbon_price(network, carbon_config, notes, currency)
+    _apply_carbon_to_piecewise(network, carbon_config, notes)
 
     # ── Annuitise CAPEX for extendable assets ─────────────────────────────────
     # The extendable flag column name varies by component (p_nom_extendable,
@@ -533,9 +616,38 @@ def build_network(
         ext = frame[ext_cols[0]].astype(bool)
         if not ext.any():
             continue
+        # P15: a finite PyPSA-native `overnight_cost` takes precedence over
+        # `capital_cost` and PyPSA annuitises it itself (discount_rate, lifetime,
+        # window pro-rating and fom_cost). Those rows must NOT be annuitised or
+        # window-scaled a second time here; they only need a discount rate.
+        if "overnight_cost" in frame.columns:
+            native = ext & pd.to_numeric(frame["overnight_cost"], errors="coerce").notna()
+            if native.any():
+                if "discount_rate" in frame.columns:
+                    dr_col = pd.to_numeric(frame["discount_rate"], errors="coerce")
+                    missing = native & dr_col.isna()
+                    if missing.any():
+                        if discount_rate is None:
+                            from fastapi import HTTPException
+                            raise HTTPException(
+                                status_code=400,
+                                detail=(
+                                    f"discountRate is required for THIS run: {int(missing.sum())} extendable "
+                                    f"{comp.name}(s) carry overnight_cost but no discount_rate. Put "
+                                    "scenario={\"discountRate\": 0.05} (or a per-asset discount_rate)."
+                                ),
+                            )
+                        frame.loc[missing, "discount_rate"] = float(discount_rate)
+                notes.append(
+                    f"{int(native.sum())} extendable {comp.name}(s) use PyPSA-native overnight_cost "
+                    "(annuitised by PyPSA with discount_rate/lifetime, plus fom_cost); capital_cost ignored."
+                )
+                ext = ext & ~native
+                if not ext.any():
+                    continue
         # 0 × AF is 0 at every rate, so free extendable capacity needs no rate.
         costs = pd.to_numeric(frame.loc[ext, "capital_cost"], errors="coerce").fillna(0.0)
-        if not bool(costs.abs().gt(0).any()):
+        if not bool(costs.abs().gt(0).any()) and not comp.has_piecewise("capital_cost"):
             continue
         if discount_rate is None:
             from fastapi import HTTPException
@@ -577,12 +689,16 @@ def build_network(
             )
         afs = lifetimes.apply(lambda L: annuity_factor(discount_rate, float(L)))
         frame.loc[ext, "capital_cost"] = frame.loc[ext, "capital_cost"].fillna(0.0) * afs
+        scale_capital_curves(network, list_name, afs)  # piecewise capital curves: same annuity
         notes.append(
             f"Annualised CAPEX for {int(ext.sum())} extendable {comp.name}(s) "
             f"at discount rate {discount_rate:.3f}."
         )
         if capex_window_scale != 1.0:
             frame.loc[ext, "capital_cost"] = frame.loc[ext, "capital_cost"] * capex_window_scale
+            scale_capital_curves(
+                network, list_name, pd.Series(capex_window_scale, index=frame.index[ext])
+            )
             window_scaled += int(ext.sum())
     if window_scaled:
         network.meta["ragnarok_capex_window_scale"] = float(capex_window_scale)
@@ -600,7 +716,9 @@ def build_network(
     # relax the MILP — it would replace it with a TIGHTER problem the unit can
     # never switch off. Static AND time-varying floors are therefore cleared.
     if bool(options.get("forceLp", False)):
-        for list_name, label in (("generators", "generator"), ("links", "link")):
+        for list_name, label in (
+            ("generators", "generator"), ("links", "link"), ("processes", "process"),
+        ):
             n_committable, n_floor = _relax_commitment(network, list_name)
             if n_floor:
                 notes.append(
@@ -610,6 +728,15 @@ def build_network(
             if n_committable:
                 notes.append(
                     f"Force-LP enabled: overrode committable=True on {n_committable} {label}(s)."
+                )
+        for list_name, label in (
+            ("generators", "generator"), ("links", "link"), ("processes", "process"),
+        ):
+            n_maint = _relax_maintenance(network, list_name)
+            if n_maint:
+                notes.append(
+                    f"Force-LP enabled: overrode maintainable=True on {n_maint} {label}(s) "
+                    "(scheduled-maintenance binaries removed)."
                 )
 
     # ── Carbon-price emission factor sanity warning ───────────────────────────

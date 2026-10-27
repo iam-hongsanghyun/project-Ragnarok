@@ -184,6 +184,13 @@ class BackendPlugin:
     def has_options(self) -> bool:
         return callable(getattr(self.module, "options", None))
 
+    @property
+    def has_result_mapper(self) -> bool:
+        """The ``result_mapper_matches`` + ``result_mapper_map`` pair (see result_mappers)."""
+        return callable(getattr(self.module, "result_mapper_matches", None)) and callable(
+            getattr(self.module, "result_mapper_map", None)
+        )
+
     def to_dict(self) -> dict[str, Any]:
         """The manifest the frontend reads to render the plugin and its form."""
         return {
@@ -204,6 +211,7 @@ class BackendPlugin:
                 "contribute": self.has_contribute,
                 "analyze": self.has_analyze,
                 "options": self.has_options,
+                "resultMapper": self.has_result_mapper,
             },
             "analyzeOnDemand": self.analyze_on_demand,
             "multiRun": self.multi_run,
@@ -250,8 +258,12 @@ def _load_one(directory: Path) -> BackendPlugin | None:
             multi_run=bool(manifest.get("multiRun", False)),
             contract_version=int(manifest.get("contractVersion", 1) or 1),
         )
-        if not (plugin.has_transform or plugin.has_contribute or plugin.has_analyze):
-            logger.warning("Skip backend plugin %s: no transform/contribute/analyze hook", plugin.id)
+        if not (
+            plugin.has_transform or plugin.has_contribute or plugin.has_analyze or plugin.has_result_mapper
+        ):
+            logger.warning(
+                "Skip backend plugin %s: no transform/contribute/analyze/result_mapper hook", plugin.id
+            )
             return None
         logger.info("Loaded backend plugin %s v%s", plugin.id, plugin.version)
         return plugin

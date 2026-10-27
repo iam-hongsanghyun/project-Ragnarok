@@ -3,15 +3,15 @@
 Ragnarok is a local React + FastAPI application built on [PyPSA](https://pypsa.org) for:
 
 - editing a PyPSA-style workbook
-- running a PyPSA optimization with HiGHS
+- running PyPSA 1.4.0 optimizations (HiGHS by default; other installed solvers selectable)
 - reviewing results in a map, table, and analytics UI
 - exporting either:
   - an input workbook (Save / Save As)
   - a full project workbook with solved PyPSA outputs (Export Project)
   - a full results workbook (Export Result)
-  - PyPSA-native formats: CSV folder, netCDF, HDF5
+  - PyPSA-native formats: CSV folder, netCDF, HDF5 (in the GUI); Excel and CSV folder through PyPSA itself, and MATPOWER import, through the API and MCP
 
-The current schema is generated from PyPSA GitHub metadata and checked into the repo at [src/config/pypsa_schema.json](/Users/sanghyun/github/pypsa_gui/frontend/Ragnarok_default/src/config/pypsa_schema.json). The authoritative PyPSA references for this README are:
+The component schema is read at backend startup from the installed PyPSA package by [backend/app/pypsa_schema_builder.py](backend/app/pypsa_schema_builder.py) and served to the frontend by `GET /api/config`. Nothing is fetched from GitHub at build time, and no schema JSON is checked in. The PyPSA version is pinned in [backend/requirements.txt](backend/requirements.txt). The authoritative PyPSA references for this README are:
 
 - [PyPSA Components](https://docs.pypsa.org/latest/user-guide/components/)
 - [PyPSA Import and Export](https://docs.pypsa.org/latest/user-guide/import-export/)
@@ -27,12 +27,18 @@ All documentation lives in [docs/](./docs/) (start at the [docs index](./docs/RE
 |---|---|
 | [docs/user-manual.md](./docs/user-manual.md) | Using the app: install, launch, every view and feature, import/export, capabilities |
 | [docs/architecture.md](./docs/architecture.md) | Tech stack, repo layout, topology, data flow, process logic, design |
-| [docs/backend.md](./docs/backend.md) | Backend details: HTTP API, solve pipeline, network build, results, modes, constraints |
-| [docs/frontend.md](./docs/frontend.md) | Frontend details: App state, views, features, plugin host, shared utils/types |
+| [docs/backend.md](./docs/backend.md) | Backend details: HTTP API, solve pipeline, network build, results, modes, constraints, piecewise curves |
+| [docs/frontend.md](./docs/frontend.md) | Frontend details: App state, views, features, plugin host, `src/lib` layout |
+| [docs/bifrost-agent.md](./docs/bifrost-agent.md) | MCP server (Bifrost): tool catalog, scenario authoring tools, client setup |
 | [docs/plugin.md](./docs/plugin.md) | Building a plugin (frontend JS or backend Python): manifest, GUI schema, hooks, own server, examples |
 | [docs/module.md](./docs/module.md) | Modules: core vs module tabs, Settings → Modules, and authoring a module (a whole tab, first- or third-party) |
-| [docs/SUPPORT_MATRIX.md](./docs/SUPPORT_MATRIX.md) | Generated feature support matrix |
+| [docs/SUPPORT_MATRIX.md](./docs/SUPPORT_MATRIX.md) | Generated support matrix (`npm run generate:support-matrix`) |
 | [docs/TODO.md](./docs/TODO.md) | Living project task log and roadmap |
+
+Reference that is generated at run time, not copied into these docs:
+
+- `GET /api/run-options` (MCP `describe_run_options`): every run-option key, its type, default, unit and reader. Source: [backend/app/run_options_reference.py](backend/app/run_options_reference.py).
+- `GET /api/config`: the component schema, standard line and transformer types, and capabilities the frontend boots from.
 
 ## Scope
 
@@ -62,11 +68,11 @@ The repository is split into a pluggable **frontend** and a pluggable **backend*
 
 Frontend (paths below are relative to `frontend/Ragnarok_default/`):
 
-- [src/App.tsx](/Users/sanghyun/github/pypsa_gui/frontend/Ragnarok_default/src/App.tsx): app shell, run flow, workbook open/save/import/export, run history
-- [src/constants/pypsa_schema.ts](/Users/sanghyun/github/pypsa_gui/frontend/Ragnarok_default/src/constants/pypsa_schema.ts): generated PyPSA schema adapter for the frontend
-- [src/shared/utils/workbook.ts](/Users/sanghyun/github/pypsa_gui/frontend/Ragnarok_default/src/shared/utils/workbook.ts): workbook parse/save/project round-trip
-- [src/shared/utils/deriveRunResults.ts](/Users/sanghyun/github/pypsa_gui/frontend/Ragnarok_default/src/shared/utils/deriveRunResults.ts): rebuilds `RunResults` from imported workbook outputs
-- [src/shared/utils/helpers.ts](/Users/sanghyun/github/pypsa_gui/frontend/Ragnarok_default/src/shared/utils/helpers.ts): `normalizeDateToIso` (input date parser), `isoDate`/`isoTime` (canonical display helpers), `formatTimestamp`
+- [src/App.tsx](frontend/Ragnarok_default/src/App.tsx): app shell, run flow (`POST /api/queue`), workbook open/save/import/export, run history
+- [src/lib/constants/pypsa_schema.ts](frontend/Ragnarok_default/src/lib/constants/pypsa_schema.ts): PyPSA schema adapter; filled from `GET /api/config` at boot
+- [src/lib/workbook/workbook.ts](frontend/Ragnarok_default/src/lib/workbook/workbook.ts): workbook parse/save/project round-trip
+- [src/lib/results/runResults.ts](frontend/Ragnarok_default/src/lib/results/runResults.ts): `deriveRunResults` rebuilds `RunResults` from imported workbook outputs
+- [src/lib/utils/helpers.ts](frontend/Ragnarok_default/src/lib/utils/helpers.ts): `normalizeDateToIso` (input date parser), `isoDate`/`isoTime` (canonical display helpers), `formatTimestamp`
 
 ### Date handling
 
@@ -78,12 +84,15 @@ Time-series chart x-axis labels adapt to the visible span: `HH:MM` (≤ 24 h), `
 
 Backend:
 
-- [backend/app/main.py](/Users/sanghyun/github/pypsa_gui/backend/app/main.py): FastAPI app and run lifecycle
-- [backend/app/backends/](/Users/sanghyun/github/pypsa_gui/backend/app/backends): pluggable backend seam — `Backend` protocol, registry, and the PyPSA reference adapter (run selected by `options.backend`)
-- [backend/pypsa/network/__init__.py](/Users/sanghyun/github/pypsa_gui/backend/pypsa/network/__init__.py): schema-driven network builder
-- [backend/pypsa/results/__init__.py](/Users/sanghyun/github/pypsa_gui/backend/pypsa/results/__init__.py): solve + analytics result assembly
-- [backend/pypsa/results/full_outputs.py](/Users/sanghyun/github/pypsa_gui/backend/pypsa/results/full_outputs.py): schema-driven solved output extraction
-- [backend/pypsa/pypsa_schema.py](/Users/sanghyun/github/pypsa_gui/backend/pypsa/pypsa_schema.py): backend schema helpers
+- [backend/app/main.py](backend/app/main.py): FastAPI app and run queue (`POST /api/queue`)
+- [backend/app/pypsa_schema_builder.py](backend/app/pypsa_schema_builder.py): builds the component schema and standard types from the installed PyPSA
+- [backend/app/run_options_reference.py](backend/app/run_options_reference.py): documents every run-option key (`GET /api/run-options`)
+- [backend/app/backends/](backend/app/backends): pluggable backend seam — `Backend` protocol, registry, and the PyPSA reference adapter (run selected by `options.backend`)
+- [backend/pypsa/network/__init__.py](backend/pypsa/network/__init__.py): schema-driven network builder
+- [backend/pypsa/results/__init__.py](backend/pypsa/results/__init__.py): solve + analytics result assembly
+- [backend/pypsa/results/full_outputs.py](backend/pypsa/results/full_outputs.py): schema-driven solved output extraction
+- [backend/pypsa/pypsa_schema.py](backend/pypsa/pypsa_schema.py): backend schema helpers
+- [backend/mcp/](backend/mcp): MCP server (154 tools) for AI agents; see [docs/bifrost-agent.md](docs/bifrost-agent.md)
 
 ## Current User Flows
 
@@ -136,10 +145,6 @@ Backend:
 
 - writes a result-oriented workbook with `OUT_*` sheets for reporting
 
-`Export Report`
-
-- writes a self-contained HTML report of the current result
-
 ## Support Matrix: Optimization Capabilities
 
 This section is separate from workbook/component support because PyPSA’s
@@ -158,8 +163,12 @@ optimization envelope is broader than the workflow Ragnarok currently exposes.
 | Multi-carrier optimization | `Partial` | The backend can ingest multi-carrier workbook structures, but the UX and analytics remain electricity-centric. |
 | Rolling-horizon optimization | `Partial` | Backend stitching and a dedicated frontend configuration surface are implemented; analytics remain stitched-result-first rather than window-first. |
 | Multi-investment / pathway planning | `Partial` | Opt-in pathway mode is implemented with backend multi-investment expansion, pathway metadata, and period-aware analytics. Authoring remains flat/workbook-first rather than native PyPSA MultiIndex editing. |
-| Stochastic optimization | `Partial` | Two-stage stochastic mode is implemented (probability-weighted scenarios expressing uncertainty via per-scenario overrides, e.g. load × 0.8, fuel × 2). No scenario trees or CVaR. Cannot combine with rolling horizon. |
-| Security-constrained optimization / SCLOPF | `Partial` | SCLOPF mode with branch-outage contingencies is implemented. Cannot combine with rolling, stochastic, or pathway modes. |
+| Stochastic optimization | `Partial` | Two-stage stochastic mode is implemented (probability-weighted scenarios expressing uncertainty via per-scenario overrides, e.g. load × 0.8, fuel × 2). CVaR risk aversion (`options.riskPreference`) is available through the API and MCP, not the GUI. Attributes that must match across scenarios (PyPSA's scenario-invariant set) are refused with HTTP 400. No scenario trees. Cannot combine with rolling horizon, SCLOPF, power-flow, or contingency modes. |
+| Security-constrained optimization / SCLOPF | `Partial` | SCLOPF mode with branch-outage contingencies is implemented; the outage set can be a subset of branches. Works with multi-investment pathway. Cannot combine with rolling horizon or stochastic mode. |
+| Scheduled maintenance (PyPSA 1.3+) | `Partial` | `maintainable`, `maintenance_duration`, `maintenance_events`, `maintenance_pu` on Generator, Link and Process; maintenance card in analytics. Force-LP does not relax it, so the model stays a MIP. |
+| Phase-shifting transformers | `Partial` | `phase_shift_min` / `phase_shift_max` bounds are validated and the optimised angles appear in analytics. The power-flow study mode ignores the optimised angles. |
+| Iterative transmission expansion | `Partial` | `options.iterativeExpansion` runs PyPSA's iterative line-expansion loop. No GUI control; API and MCP only. |
+| Solver choice | `Partial` | HiGHS is the default. Settings → Solver → Advanced lists the installed linopy solvers; `options.solverName` selects one. Some follow-on studies always re-solve on HiGHS. |
 | Scenario-based planning UX | `Partial` | Frontend scenario presets capture window, constraints, carbon price, pathway, rolling, stochastic, and SCLOPF settings in workbook metadata. Custom constraint DSL is saved with the model workbook, not per preset. |
 | Multi-period result analytics | `Partial` | Period summaries and selected-period detailed charts are supported; not every analytics surface is natively multi-period. |
 
@@ -167,19 +176,24 @@ optimization envelope is broader than the workflow Ragnarok currently exposes.
 
 | PyPSA capability | Ragnarok status | Notes |
 |---|---|---|
-| Excel workbook import (`Network.import_from_excel` equivalent user workflow) | `Partial` | Ragnarok opens Excel workbooks, but it parses into its own in-memory model instead of delegating import to PyPSA directly. |
-| Excel workbook export (`Network.export_to_excel` equivalent) | `Partial` | `Save` exports inputs only. `Export Project` exports input + solved outputs plus Ragnarok metadata sheets, but not the backend-solved network artifact itself. |
-| Generic component schema sync from PyPSA GitHub | `Full` | Build-time generator populates [src/config/pypsa_schema.json](/Users/sanghyun/github/pypsa_gui/frontend/Ragnarok_default/src/config/pypsa_schema.json). |
+| Excel workbook import (`Network.import_from_excel`) | `Partial` | The GUI parses Excel workbooks into its own in-memory model. The backend also imports through PyPSA itself (`POST /api/import/pypsa-excel`, MCP `import_pypsa_native`). |
+| Excel workbook export (`Network.export_to_excel`) | `Partial` | `Save` exports inputs only. `Export Project` exports input + solved outputs plus Ragnarok metadata sheets, but not the backend-solved network artifact itself. The backend also exports through PyPSA (`POST /api/export/pypsa-excel`). |
+| Component schema from the installed PyPSA | `Full` | Read at backend startup by [backend/app/pypsa_schema_builder.py](backend/app/pypsa_schema_builder.py) and served by `GET /api/config`. No checked-in copy. |
+| Piecewise-linear cost and efficiency curves (PyPSA 1.3+) | `Full` | `<list>-<attr>-pw` sheets, Forge → Marginal cost curve → Piecewise breakpoints, `options.piecewiseOptions` for the formulation (LP, incremental, SOS2). See [docs/backend.md](docs/backend.md) §5.7. |
+| Temporal clustering (`n.cluster.temporal`) | `Full` | Forge → Temporal clustering (resample, downsample, segment) and MCP `temporal_cluster`. |
+| Spatial clustering (k-means, modularity, HAC) | `Full` | Forge → Reduce / cluster network, plus MCP `cluster_network_hac` for hierarchical clustering. |
+| Network analysis: PTDF, BODF, cycles, incidence | `Partial` | `POST /api/analysis/network` and MCP `network_analysis`. No GUI view. |
+| MATPOWER import (`import_from_pypower_ppc`) | `Full` | `POST /api/import/matpower`, MCP `import_pypsa_native`. |
+| pandapower import (`import_from_pandapower_net`) | `Partial` | `POST /api/import/pandapower` answers 501 until pandapower is installed. Installing it would downgrade numpy and pandas. |
 | Generic input table editing for documented components/attributes | `Full` | Input tables are schema-driven rather than hardcoded. |
-| Generic backend ingestion of documented input attributes | `Full` | Backend uses schema-derived input static/time-series attributes in [backend/pypsa/network/__init__.py](/Users/sanghyun/github/pypsa_gui/backend/pypsa/network/__init__.py). |
-| Generic solved-output extraction for documented PyPSA outputs | `Full` | Backend extracts schema-marked outputs in [backend/pypsa/results/full_outputs.py](/Users/sanghyun/github/pypsa_gui/backend/pypsa/results/full_outputs.py). |
-| Input-only save/load round-trip | `Full` | Known PyPSA input sheets round-trip through [src/shared/utils/workbook.ts](/Users/sanghyun/github/pypsa_gui/frontend/Ragnarok_default/src/shared/utils/workbook.ts). |
+| Generic backend ingestion of documented input attributes | `Full` | Backend uses schema-derived input static/time-series attributes in [backend/pypsa/network/__init__.py](backend/pypsa/network/__init__.py). |
+| Generic solved-output extraction for documented PyPSA outputs | `Full` | Backend extracts schema-marked outputs in [backend/pypsa/results/full_outputs.py](backend/pypsa/results/full_outputs.py). |
+| Input-only save/load round-trip | `Full` | Known PyPSA input sheets round-trip through [src/lib/workbook/workbook.ts](frontend/Ragnarok_default/src/lib/workbook/workbook.ts). |
 | Full project workbook round-trip | `Partial` | Solved outputs and Ragnarok metadata now round-trip settings (including date format), constraints, run window, provenance, scenarios, pathway, rolling, and plugin analytics. Prior run-history entries are not preserved (only the current run is reconstructed on import). Remaining gap is the backend-solved network artifact. |
 | Restore analytics from imported solved workbook | `Full` | Frontend reconstructs analytics locally from `(model, outputs)` and restores plugin analytics / solve metadata from workbook metadata sheets. |
 | Result workbook export for reporting | `Full` | `Export Result` keeps a dedicated reporting workbook. |
-| HTML report export | `Full` | Implemented in [src/shared/utils/exportReport.ts](/Users/sanghyun/github/pypsa_gui/frontend/Ragnarok_default/src/shared/utils/exportReport.ts). |
-| Structural validation before solve | `Partial` | Validation is now schema-aware across documented component sheets and time-series sheets, but it still stops short of full PyPSA semantic validation. |
-| HiGHS optimization | `Full` | Uses `network.optimize()` with HiGHS. |
+| Structural validation before solve | `Partial` | Validation is schema-aware across documented component sheets and time-series sheets. It still stops short of full PyPSA semantic validation; `options.consistencyCheck` (validate) and `POST /api/analysis/consistency` add PyPSA's own `consistency_check`. |
+| HiGHS optimization | `Full` | Uses `network.optimize()` (linopy) with HiGHS as the default; `options.solverName` selects another installed solver. |
 | Carbon price adder | `Full` | Applied to generator marginal costs from carrier emission factors. |
 | Capacity expansion for extendable assets | `Full` | Annualized CAPEX applied for extendable generators, storage units, stores, lines, and links. |
 | Unit commitment / MIP | `Partial` | Supported through PyPSA/HiGHS generator attributes, but analytics and validation are still more dispatch-focused than UC-focused. |
@@ -187,7 +201,7 @@ optimization envelope is broader than the workflow Ragnarok currently exposes.
 | Custom constraints panel | `Partial` | Several custom constraints are implemented, but not the full PyPSA constraint space. |
 | Rolling-horizon optimization | `Partial` | Backend rolling-window orchestration and frontend controls are implemented; analytics remain stitched-result-first. |
 | Multi-investment / pathway planning | `Partial` | Pathway mode is implemented through backend expansion from a flat workbook plus Ragnarok-owned pathway metadata sheets. |
-| Stochastic optimization | `Partial` | Two-stage stochastic solve mode with probability-weighted scenario overrides; no scenario trees. |
+| Stochastic optimization | `Partial` | Two-stage stochastic solve mode with probability-weighted scenario overrides; CVaR through `options.riskPreference` (API/MCP); no scenario trees. |
 | Security-constrained optimization | `Partial` | SCLOPF solve mode with branch-outage contingencies. |
 | Native `global_constraints` workbook usage | `Implicit` | Sheet is available and passed through the generic network builder, but Ragnarok adds only limited dedicated UI/analytics around it. |
 | Plugin system (frontend + backend) | `Full` | Two kinds, one hook contract (`transform`/`contribute`/`analyze`/`options`/named actions): frontend plugins run in the browser before a run is submitted; backend plugins run in the backend process via `/api/plugins/*` and write into the server-side session. The solve pipeline itself is plugin-agnostic — no staged in-solve plugin execution. |
@@ -195,8 +209,8 @@ optimization envelope is broader than the workflow Ragnarok currently exposes.
 | Project settings / constraints / run-state metadata round-trip | `Full` | Stored in dedicated Ragnarok metadata sheets and restored on project import. |
 | CO2 shadow price restoration from imported project | `Full` | Stored in `RAGNAROK_ResultMeta` and restored on import. |
 | Backend retention of solved runs | `Full` | Every successful solve is persisted server-side automatically (`run_store.py`, one SQLite file per run) and served back through History/"View result" without re-solving. The solved `pypsa.Network` object itself is not retained — results and full outputs are. |
-| CSV-folder / netCDF / HDF5 workflows | `Full` | CSV folder import/export (PyPSA-native layout, zipped, frontend-side); netCDF and HDF5 import/export via backend converters (`/api/export/netcdf`, `/api/import/hdf5`, …). |
-| Power flow-only studies / separate PF UX | `Not supported` | Current workflow is optimization-centric. Roadmapped — see Roadmap below. |
+| CSV-folder / netCDF / HDF5 workflows | `Full` | CSV folder import/export (PyPSA-native layout, zipped, frontend-side, and through PyPSA on the backend: `/api/import/pypsa-csv`, `/api/export/pypsa-csv`); netCDF and HDF5 import/export via backend converters (`/api/export/netcdf`, `/api/import/hdf5`, …). |
+| Power-flow study (`lpf` / `pf`) | `Partial` | Settings → Power flow runs PyPSA's `lpf()` or `pf()` instead of an LP. There is no separate power-flow workflow; see Roadmap below. |
 | Pluggable / non-PyPSA optimization backend | `Partial` | A backend abstraction layer is in place (`backend/app/backends/`): one `run(model, scenario, options)` adapter per backend, selected by `options.backend` (default `pypsa`), with `GET /api/backends` reporting capabilities. PyPSA is the only adapter today; the seam is ready for additional backends. |
 
 ## Support Matrix: PyPSA Components
@@ -214,7 +228,7 @@ optimization envelope is broader than the workflow Ragnarok currently exposes.
 | `transformers` | `Full` | `Full` | `Full` | `Full` | Visualized as branches in analytics. |
 | `storage_units` | `Full` | `Full` | `Full` | `Full` | Dedicated detail and SoC analytics. |
 | `stores` | `Full` | `Full` | `Full` | `Full` | Dedicated detail analytics. |
-| `processes` | `Full` | `Full` | `Full` | `Not supported` | Generic workbook/backend support exists, but no dedicated result UX. |
+| `processes` | `Full` | `Full` | `Full` | `Partial` | Shown in energy balance, carrier mix and expansion. Not in finance or generator economics. Emissions are attributed to the fuel generator. |
 | `shunt_impedances` | `Full` | `Full` | `Full` | `Not supported` | Generic workbook/backend support only. |
 | `global_constraints` | `Full` | `Implicit` | `Full` | `Partial` | Workbook/backend support exists; result UX is limited. |
 | `line_types` | `Full` | `Implicit` | `Full` | `Not supported` | Preserved and passed through, but no dedicated UX. |
@@ -246,9 +260,9 @@ Ragnarok does not maintain a separate backend skip policy for schema-defined she
 
 5. Ragnarok does not yet cover all of PyPSA’s broader planning modes.
    The largest optimization gaps today are:
-   - stochastic optimization
-   - security-constrained optimization
-   - stochastic / uncertainty workflow beyond frontend scenario presets
+   - CVaR risk aversion and iterative transmission expansion, which are API and MCP only
+   - maintenance and phase-shifting transformers, which are edited as plain attributes (with hints) and are not relaxed by Force-LP
+   - stochastic uncertainty beyond per-scenario overrides (no scenario trees)
    - richer scenario-aware analytics
 
 ## Roadmap
@@ -342,16 +356,19 @@ Key backend checks:
 python3 -m py_compile backend/app/main.py backend/pypsa/network/__init__.py backend/pypsa/results/__init__.py
 ```
 
-Regenerate the PyPSA schema:
+Regenerate the support matrix (reads the backend schema from `.venv-pypsa`, or `$RAGNAROK_PYTHON`):
 
 ```bash
-npm run generate:pypsa-schema
+cd frontend/Ragnarok_default
+npm run generate:support-matrix
 ```
+
+The component schema has no build step. It is read from the installed PyPSA at backend startup. After a PyPSA upgrade, refresh the Jest fixtures with the command in [`frontend/Ragnarok_default/src/lib/constants/__fixtures__/README.md`](frontend/Ragnarok_default/src/lib/constants/__fixtures__/README.md).
 
 ## Repository Notes
 
 - The frontend is intentionally Excel-first.
-- The schema is generated from PyPSA GitHub metadata, but support in Ragnarok still depends on whether a feature is:
+- The schema comes from the installed PyPSA package, but support in Ragnarok still depends on whether a feature is:
   - only preserved in workbook form
   - actively consumed by the backend
   - surfaced in analytics

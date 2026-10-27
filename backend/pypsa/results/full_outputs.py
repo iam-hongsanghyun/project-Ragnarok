@@ -24,6 +24,7 @@ sheets are written verbatim alongside the input time-series sheets.
 from __future__ import annotations
 
 import math
+import re
 from typing import Any
 
 import numpy as np
@@ -35,6 +36,9 @@ from ..pypsa_schema import (
     load_pypsa_schema,
     non_component_sheets,
 )
+
+
+_RE_EXTRA_PORT_FLOW = re.compile(r"^p[2-9]\d*$")
 
 
 def _safe_scalar(value: Any) -> Any:
@@ -207,7 +211,16 @@ def build_full_outputs(network: pypsa.Network) -> dict[str, Any]:
         t_frame = getattr(network, f"{list_name}_t", None)
         if t_frame is None:
             t_frame = comp.dynamic
-        if t_frame is None or not series_attrs:
+        if t_frame is None:
+            continue
+        # Multi-port Link/Process flows ``p2``, ``p3`` … are registered by
+        # PyPSA dynamically (not in the schema), so add them from the live frame.
+        if list_name in ("links", "processes"):
+            series_attrs = list(series_attrs) + sorted(
+                str(k) for k in t_frame.keys()
+                if _RE_EXTRA_PORT_FLOW.match(str(k)) and str(k) not in series_attrs
+            )
+        if not series_attrs:
             continue
         for attr in series_attrs:
             df = getattr(t_frame, attr, None)

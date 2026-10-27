@@ -16,30 +16,44 @@ from .snapshots import parse_snapshot_labels
 # ``efficiency``. PyPSA registers the extra ports dynamically the moment a
 # ``bus{N}`` column exists, so the builder must let these columns through its
 # schema filter rather than strip them.
-_RE_EXTRA_PORT = re.compile(r"^(?:bus|efficiency)[2-9]\d*$")
+_RE_EXTRA_PORT = re.compile(r"^(?:bus|efficiency|delay|cyclic_delay)[2-9]\d*$")
+# PyPSA 1.4 ``Process`` is the N-port generalisation of Link: ``bus{N}`` with
+# per-port ``rate{N}`` (signed flow ratio), ``delay{N}`` and ``cyclic_delay{N}``.
+# Its schema declares ports 0 and 1 only; ports >= 2 register dynamically.
+_RE_EXTRA_PORT_PROCESS = re.compile(r"^(?:bus|rate|delay|cyclic_delay)[2-9]\d*$")
 
 
 def _is_extra_port_attr(sheet: str, attr: str) -> bool:
-    """True for a multi-port Link attribute (``bus2``, ``efficiency3``, …)."""
-    return sheet == "links" and bool(_RE_EXTRA_PORT.match(str(attr)))
+    """True for a multi-port Link/Process attribute (``bus2``, ``rate3``, ``delay2`` …)."""
+    if sheet == "links":
+        return bool(_RE_EXTRA_PORT.match(str(attr)))
+    if sheet == "processes":
+        return bool(_RE_EXTRA_PORT_PROCESS.match(str(attr)))
+    return False
 
 
 def _extra_port_columns(sheet: str, columns: Iterable[Any]) -> set[str]:
-    """Multi-port Link columns present in ``columns`` (empty for other sheets)."""
+    """Multi-port Link/Process columns present in ``columns`` (empty for other sheets)."""
     return {str(c) for c in columns if _is_extra_port_attr(sheet, str(c))}
 
 
 def _normalize_extra_port_columns(df: pd.DataFrame, sheet: str) -> pd.DataFrame:
-    """Make multi-port Link columns safe for ``network.add``.
+    """Make multi-port columns safe for ``network.add``.
 
     ``bus{N}`` must be strings — a row that doesn't use the port carries NaN
     after the DataFrame build, and PyPSA only treats the *empty string* as
-    "port unused". ``efficiency{N}`` must be numeric; blanks coerce to NaN so
-    PyPSA fills its own per-port default (1.0) at add time.
+    "port unused". ``efficiency{N}``/``rate{N}``/``delay{N}`` must be numeric;
+    blanks coerce to NaN so PyPSA fills its own per-port default at add time.
+    ``cyclic_delay{N}`` is boolean (blank -> False).
     """
     for col in _extra_port_columns(sheet, df.columns):
         if col.startswith("bus"):
             df[col] = df[col].fillna("").astype(str).str.strip()
+        elif col.startswith("cyclic_delay"):
+            df[col] = df[col].map(
+                lambda v: False if v is None or (isinstance(v, float) and pd.isna(v))
+                else (str(v).strip().lower() in ("1", "true", "yes", "t") if isinstance(v, str) else bool(v))
+            ).astype(bool)
         else:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     return df

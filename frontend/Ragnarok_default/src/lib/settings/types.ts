@@ -7,8 +7,11 @@
  * and re-exports these for back-compatibility.
  */
 
+import type { AdvancedSolveOptions } from './advancedSolve';
+
 export type DateFormat = 'auto' | 'dmy' | 'mdy' | 'ymd';
-// HiGHS is always the solver; this picks its method. 'auto' lets HiGHS choose.
+// HiGHS method (HiGHS is the default solver; advancedSolve.solverName picks another).
+// 'auto' lets HiGHS choose.
 // 'hipo' uses HiGHS's HiPO interior-point solver where the build includes it,
 // and falls back to IPM elsewhere (handled server-side) — so it's safe to pick
 // on any machine.
@@ -20,6 +23,8 @@ export type SolverType = 'auto' | 'simplex' | 'ipm' | 'pdlp' | 'hipo';
 export type SolveAcceptance = 'lenient' | 'strict';
 
 export interface AppSettings {
+  /** Advanced n.optimize options (solver, losses, piecewise ...); see advancedSolve.ts. */
+  advancedSolve?: AdvancedSolveOptions;
   dateFormat: DateFormat;
   solverThreads: number; // 0 = let HiGHS decide (all cores)
   solverType: SolverType;

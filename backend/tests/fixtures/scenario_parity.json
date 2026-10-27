@@ -1,0 +1,1966 @@
+{
+ "cases": [
+  {
+   "expected": {
+    "carbon": [
+     {
+      "id": "carbon-a",
+      "name": "NGFS",
+      "schedule": [
+       {
+        "price": 60,
+        "year": 2030
+       },
+       {
+        "price": 0,
+        "year": 2035
+       },
+       {
+        "price": 120,
+        "year": 2040
+       }
+      ]
+     },
+     {
+      "id": "carbon-b",
+      "name": "Carbon schedule",
+      "schedule": []
+     }
+    ],
+    "catalog": {
+     "activeScenarioId": "scenario-rich",
+     "scenarios": [
+      {
+       "assetSwapConfig": {
+        "addCapitalCost": 0,
+        "addCarrier": "",
+        "addMarginalCost": 0,
+        "addStorageCapexPerMW": 20000,
+        "addStorageHours": 4,
+        "addStorageMW": 0,
+        "enabled": false,
+        "removeFilters": [],
+        "replaceRatio": 1,
+        "sizeReplacement": false
+       },
+       "bidStrategyConfig": {
+        "enabled": false,
+        "markup": 0.2,
+        "markupType": "percent",
+        "maxMarkup": 2.0,
+        "mode": "fixed",
+        "owner": "",
+        "steps": 8
+       },
+       "carbonPrice": 0,
+       "carbonPriceSchedule": [],
+       "constraints": [],
+       "contingencyConfig": {
+        "enabled": false
+       },
+       "convergenceConfig": {
+        "batchSize": 50,
+        "enabled": false,
+        "forcedOutageRate": 0.05,
+        "maintenanceCarriers": [],
+        "maintenanceEnabled": false,
+        "maintenanceWeeks": 3,
+        "maxMembers": 2000,
+        "mttrHours": 48,
+        "seed": 42,
+        "targetMetric": "eue",
+        "tolerance": 0.05
+       },
+       "correlatedSamplingConfig": {
+        "enabled": false,
+        "inflowSensitivity": 0.2,
+        "inflowStd": 0.1,
+        "loadSensitivity": 0.15,
+        "loadStd": 0.05,
+        "nMembers": 200,
+        "renewableSensitivity": 0.3,
+        "renewableStd": 0.1,
+        "seed": 42
+       },
+       "demandResponseConfig": {
+        "elasticEnabled": false,
+        "elasticFraction": 0.2,
+        "enabled": false,
+        "loads": [],
+        "maxShiftHours": 4,
+        "shiftFraction": 0.2,
+        "wtpMax": 200
+       },
+       "discountRate": 0,
+       "elccConfig": {
+        "carriers": [],
+        "enabled": false,
+        "forcedOutageRate": 0.05,
+        "mttrHours": 48,
+        "nMembers": 200,
+        "seed": 42
+       },
+       "enableLoadShedding": false,
+       "essConfig": {
+        "bus": "",
+        "capitalCostPerMW": 30000,
+        "enabled": false,
+        "maxHours": 4,
+        "maxSizeMW": 100,
+        "minSizeMW": 10,
+        "roundTripEfficiency": 0.9,
+        "steps": 6
+       },
+       "financeConfig": {
+        "gearing": 0,
+        "interestRate": 0.05,
+        "tenorYears": 15
+       },
+       "forceLp": false,
+       "id": "scenario-base",
+       "label": "Base case",
+       "lmpDecompositionConfig": {
+        "enabled": false,
+        "referenceBus": "",
+        "referenceMode": "load-weighted"
+       },
+       "loadSheddingCost": 1000,
+       "marketSimConfig": {
+        "chargeQuantile": 0.25,
+        "clearingModel": "singleSided",
+        "demandBids": [],
+        "demandElasticFraction": 0.2,
+        "demandWtp": 120,
+        "dischargeQuantile": 0.75,
+        "enabled": false,
+        "pricing": "uniform",
+        "voll": 3000
+       },
+       "merchantConfig": {
+        "enabled": false,
+        "flatPrice": 0,
+        "owner": "",
+        "priceSource": "lmp"
+       },
+       "mgaConfig": {
+        "carriers": [],
+        "enabled": false,
+        "slack": 0.05
+       },
+       "modelOverrides": [],
+       "notes": "",
+       "outageMcConfig": {
+        "enabled": false,
+        "forcedOutageRate": 0.05,
+        "includeRenewableEnsemble": false,
+        "mttrHours": 48,
+        "nMembers": 200,
+        "physicalRiskSessionId": "",
+        "physicalRiskUplift": false,
+        "seed": 42
+       },
+       "ownerColumn": "owner",
+       "pathwayConfig": {
+        "enabled": false,
+        "periods": [],
+        "planningMode": "single_period",
+        "selectedPeriod": null,
+        "snapshotMappingMode": "explicit_period_column"
+       },
+       "powerFlowConfig": {
+        "enabled": false,
+        "linear": false
+       },
+       "ppaConfig": {
+        "enabled": false,
+        "flatMW": 0,
+        "owner": "",
+        "strikePrice": 0,
+        "volumeType": "generation"
+       },
+       "rampConfig": {
+        "appliesTo": "all",
+        "enabled": false,
+        "rampLimitDown": 0.5,
+        "rampLimitUp": 0.5
+       },
+       "reserveConfig": {
+        "enabled": false,
+        "fraction": 0.1,
+        "providers": "all",
+        "requirementType": "fraction",
+        "reserveCost": 0
+       },
+       "rollingConfig": {
+        "enabled": false,
+        "horizonSnapshots": 168,
+        "overlapSnapshots": 24,
+        "stepSnapshots": 144
+       },
+       "samplingConfig": {
+        "blockCount": 4,
+        "blockSize": 168,
+        "enabled": false,
+        "gapSnapshots": 672,
+        "mode": "count"
+       },
+       "securityConstrainedConfig": {
+        "enabled": false
+       },
+       "snapshotEnd": 24,
+       "snapshotStart": 0,
+       "snapshotWeight": 1,
+       "stochasticConfig": {
+        "enabled": false,
+        "scenarios": []
+       }
+      },
+      {
+       "assetSwapConfig": {
+        "addCarrier": "solar",
+        "enabled": true,
+        "removeFilters": [
+         {
+          "field": "carrier",
+          "values": [
+           "coal"
+          ]
+         }
+        ]
+       },
+       "bidStrategyConfig": {
+        "enabled": false,
+        "markup": 0.2,
+        "markupType": "percent",
+        "maxMarkup": 2.0,
+        "mode": "fixed",
+        "owner": "",
+        "steps": 8
+       },
+       "carbonPrice": 55.5,
+       "carbonPriceSchedule": [
+        {
+         "price": 80,
+         "year": 2030
+        },
+        {
+         "price": 40,
+         "year": 2025
+        }
+       ],
+       "constraints": [
+        {
+         "carrier": "coal",
+         "enabled": true,
+         "id": "c1",
+         "label": "Coal cap",
+         "metric": "carrier_max_gen",
+         "unit": "MWh",
+         "value": 1000
+        },
+        {
+         "carrier": "",
+         "enabled": false,
+         "id": "c2",
+         "label": "off",
+         "metric": "co2_cap",
+         "unit": "tCO2/MWh",
+         "value": 0.3
+        }
+       ],
+       "contingencyConfig": {
+        "enabled": false
+       },
+       "convergenceConfig": {
+        "batchSize": 50,
+        "enabled": false,
+        "forcedOutageRate": 0.05,
+        "maintenanceCarriers": [],
+        "maintenanceEnabled": false,
+        "maintenanceWeeks": 3,
+        "maxMembers": 2000,
+        "mttrHours": 48,
+        "seed": 42,
+        "targetMetric": "eue",
+        "tolerance": 0.05
+       },
+       "correlatedSamplingConfig": {
+        "enabled": false,
+        "inflowSensitivity": 0.2,
+        "inflowStd": 0.1,
+        "loadSensitivity": 0.15,
+        "loadStd": 0.05,
+        "nMembers": 200,
+        "renewableSensitivity": 0.3,
+        "renewableStd": 0.1,
+        "seed": 42
+       },
+       "demandResponseConfig": {
+        "enabled": true,
+        "loads": [
+         "L1"
+        ]
+       },
+       "discountRate": 0.07,
+       "elccConfig": {
+        "carriers": [
+         "wind"
+        ],
+        "enabled": true
+       },
+       "enableLoadShedding": true,
+       "essConfig": {
+        "bus": "b1",
+        "capitalCostPerMW": 1,
+        "capitalCostPerMWh": 9000,
+        "enabled": true,
+        "lifetimeYears": 12,
+        "maxHours": 2,
+        "maxSizeMW": 2,
+        "minSizeMW": 1,
+        "roundTripEfficiency": 0.8,
+        "steps": 3
+       },
+       "financeConfig": {
+        "gearing": 0.6,
+        "interestRate": 0.04,
+        "tenorYears": 12
+       },
+       "forceLp": true,
+       "id": "scenario-rich",
+       "label": "Rich",
+       "lmpDecompositionConfig": {
+        "enabled": false,
+        "referenceBus": "",
+        "referenceMode": "load-weighted"
+       },
+       "loadSheddingCost": 5000,
+       "marketSimConfig": {
+        "chargeQuantile": 0.25,
+        "clearingModel": "singleSided",
+        "demandBids": [],
+        "demandElasticFraction": 0.2,
+        "demandWtp": 120,
+        "dischargeQuantile": 0.75,
+        "enabled": true,
+        "pricing": "payAsBid",
+        "voll": 3000
+       },
+       "merchantConfig": {
+        "enabled": true,
+        "flatPrice": 40,
+        "owner": "Acme",
+        "ownerColumn": "company",
+        "priceSeries": [
+         1,
+         2,
+         3
+        ],
+        "priceSource": "series"
+       },
+       "mgaConfig": {
+        "carriers": [],
+        "enabled": false,
+        "slack": 0.05
+       },
+       "modelOverrides": [
+        {
+         "column": "p_nom",
+         "name": "g1",
+         "sheet": "generators",
+         "value": 500
+        },
+        {
+         "column": "p_nom",
+         "name": "g2",
+         "sheet": "generators"
+        }
+       ],
+       "notes": "all the knobs",
+       "outageMcConfig": {
+        "enabled": false,
+        "forcedOutageRate": 0.05,
+        "includeRenewableEnsemble": false,
+        "mttrHours": 48,
+        "nMembers": 200,
+        "physicalRiskSessionId": "",
+        "physicalRiskUplift": false,
+        "seed": 42
+       },
+       "ownerColumn": "company",
+       "pathwayConfig": {
+        "enabled": true,
+        "overridePolicy": "reuse_base_inputs",
+        "periods": [
+         {
+          "objectiveWeight": 1,
+          "period": 2030,
+          "yearsWeight": 5
+         },
+         {
+          "objectiveWeight": 0.8,
+          "period": 2035,
+          "yearsWeight": 5
+         }
+        ],
+        "planningMode": "pathway",
+        "selectedPeriod": 2099,
+        "snapshotMappingMode": "explicit_period_column"
+       },
+       "powerFlowConfig": {
+        "enabled": false,
+        "linear": false
+       },
+       "ppaConfig": {
+        "enabled": false,
+        "flatMW": 0,
+        "owner": "",
+        "strikePrice": 0,
+        "volumeType": "generation"
+       },
+       "rampConfig": {
+        "appliesTo": "all",
+        "enabled": false,
+        "rampLimitDown": 0.5,
+        "rampLimitUp": 0.5
+       },
+       "reserveConfig": {
+        "enabled": false,
+        "fraction": 0.1,
+        "providers": "all",
+        "requirementType": "fraction",
+        "reserveCost": 0
+       },
+       "rollingConfig": {
+        "enabled": true,
+        "horizonSnapshots": 100,
+        "overlapSnapshots": 99,
+        "preserveTerminalState": false,
+        "selectedWindow": null,
+        "stepPolicy": "derived",
+        "stepSnapshots": 1
+       },
+       "samplingConfig": {
+        "blockCount": 4,
+        "blockSize": 24,
+        "enabled": true,
+        "gapSnapshots": 0,
+        "mode": "count"
+       },
+       "securityConstrainedConfig": {
+        "enabled": false
+       },
+       "snapshotEnd": 72,
+       "snapshotStart": 24,
+       "snapshotWeight": 2,
+       "stochasticConfig": {
+        "enabled": true,
+        "scenarios": [
+         {
+          "id": "s1",
+          "name": "dry",
+          "overrides": [
+           {
+            "attribute": "p_max_pu",
+            "id": "o1",
+            "operation": "multiply",
+            "scopeType": "carrier",
+            "scopeValue": "hydro",
+            "sheet": "generators",
+            "value": 0.7
+           }
+          ],
+          "weight": 0.5
+         },
+         {
+          "id": "s2",
+          "name": "wet",
+          "overrides": [],
+          "weight": 0.5
+         }
+        ]
+       }
+      },
+      {
+       "assetSwapConfig": {
+        "addCapitalCost": 0,
+        "addCarrier": "",
+        "addMarginalCost": 0,
+        "addStorageCapexPerMW": 20000,
+        "addStorageHours": 4,
+        "addStorageMW": 0,
+        "enabled": false,
+        "removeFilters": [],
+        "replaceRatio": 1,
+        "sizeReplacement": false
+       },
+       "bidStrategyConfig": {
+        "enabled": false,
+        "markup": 0.2,
+        "markupType": "percent",
+        "maxMarkup": 2.0,
+        "mode": "fixed",
+        "owner": "",
+        "steps": 8
+       },
+       "carbonPrice": 0,
+       "carbonPriceSchedule": [],
+       "constraints": [],
+       "contingencyConfig": {
+        "enabled": false
+       },
+       "convergenceConfig": {
+        "batchSize": 50,
+        "enabled": false,
+        "forcedOutageRate": 0.05,
+        "maintenanceCarriers": [],
+        "maintenanceEnabled": false,
+        "maintenanceWeeks": 3,
+        "maxMembers": 2000,
+        "mttrHours": 48,
+        "seed": 42,
+        "targetMetric": "eue",
+        "tolerance": 0.05
+       },
+       "correlatedSamplingConfig": {
+        "enabled": false,
+        "inflowSensitivity": 0.2,
+        "inflowStd": 0.1,
+        "loadSensitivity": 0.15,
+        "loadStd": 0.05,
+        "nMembers": 200,
+        "renewableSensitivity": 0.3,
+        "renewableStd": 0.1,
+        "seed": 42
+       },
+       "demandResponseConfig": {
+        "elasticEnabled": false,
+        "elasticFraction": 0.2,
+        "enabled": false,
+        "loads": [],
+        "maxShiftHours": 4,
+        "shiftFraction": 0.2,
+        "wtpMax": 200
+       },
+       "discountRate": 0,
+       "elccConfig": {
+        "carriers": [],
+        "enabled": false,
+        "forcedOutageRate": 0.05,
+        "mttrHours": 48,
+        "nMembers": 200,
+        "seed": 42
+       },
+       "enableLoadShedding": false,
+       "essConfig": {
+        "bus": "",
+        "capitalCostPerMW": 30000,
+        "enabled": false,
+        "maxHours": 4,
+        "maxSizeMW": 100,
+        "minSizeMW": 10,
+        "roundTripEfficiency": 0.9,
+        "steps": 6
+       },
+       "financeConfig": {
+        "gearing": 0,
+        "interestRate": 0.05,
+        "tenorYears": 15
+       },
+       "forceLp": false,
+       "id": "scenario-legacy",
+       "label": "Legacy",
+       "lmpDecompositionConfig": {
+        "enabled": false,
+        "referenceBus": "",
+        "referenceMode": "load-weighted"
+       },
+       "loadSheddingCost": 1000,
+       "marketSimConfig": {
+        "chargeQuantile": 0.25,
+        "clearingModel": "singleSided",
+        "demandBids": [],
+        "demandElasticFraction": 0.2,
+        "demandWtp": 120,
+        "dischargeQuantile": 0.75,
+        "enabled": true,
+        "pricing": "uniform",
+        "voll": 3000
+       },
+       "merchantConfig": {
+        "enabled": false,
+        "ownerColumn": "company"
+       },
+       "mgaConfig": {
+        "carriers": [],
+        "enabled": false,
+        "slack": 0.05
+       },
+       "modelOverrides": [],
+       "notes": "",
+       "outageMcConfig": {
+        "enabled": false,
+        "forcedOutageRate": 0.05,
+        "includeRenewableEnsemble": false,
+        "mttrHours": 48,
+        "nMembers": 200,
+        "physicalRiskSessionId": "",
+        "physicalRiskUplift": false,
+        "seed": 42
+       },
+       "ownerColumn": "company",
+       "pathwayConfig": {
+        "enabled": false,
+        "periods": [],
+        "planningMode": "single_period",
+        "selectedPeriod": null,
+        "snapshotMappingMode": "explicit_period_column"
+       },
+       "powerFlowConfig": {
+        "enabled": false,
+        "linear": false
+       },
+       "ppaConfig": {
+        "enabled": false,
+        "flatMW": 0,
+        "owner": "",
+        "strikePrice": 0,
+        "volumeType": "generation"
+       },
+       "rampConfig": {
+        "appliesTo": "all",
+        "enabled": false,
+        "rampLimitDown": 0.5,
+        "rampLimitUp": 0.5
+       },
+       "reserveConfig": {
+        "enabled": false,
+        "fraction": 0.1,
+        "providers": "all",
+        "requirementType": "fraction",
+        "reserveCost": 0
+       },
+       "rollingConfig": {
+        "enabled": false,
+        "horizonSnapshots": 168,
+        "overlapSnapshots": 24,
+        "stepSnapshots": 144
+       },
+       "samplingConfig": {
+        "blockCount": 4,
+        "blockSize": 168,
+        "enabled": false,
+        "gapSnapshots": 672,
+        "mode": "count"
+       },
+       "securityConstrainedConfig": {
+        "enabled": false
+       },
+       "snapshotEnd": 48,
+       "snapshotStart": 0,
+       "snapshotWeight": 1,
+       "stochasticConfig": {
+        "enabled": false,
+        "scenarios": []
+       }
+      }
+     ]
+    },
+    "dsl": {
+     "lines": [
+      {
+       "lineNo": 2,
+       "raw": "gen(coal) <= 1000",
+       "spec": {
+        "id": "gen(coal) <= 1000",
+        "lhs": [
+         {
+          "carrier": "coal",
+          "coef": 1,
+          "kind": "gen"
+         }
+        ],
+        "rhs": [
+         {
+          "coef": 1000,
+          "kind": "const"
+         }
+        ],
+        "sense": "<="
+       }
+      },
+      {
+       "lineNo": 3,
+       "raw": "cap(solar & wind) >= 500",
+       "spec": {
+        "id": "cap(solar & wind) >= 500",
+        "lhs": [
+         {
+          "coef": 1,
+          "kind": "cap",
+          "values": [
+           "solar",
+           "wind"
+          ]
+         }
+        ],
+        "rhs": [
+         {
+          "coef": 500,
+          "kind": "const"
+         }
+        ],
+        "sense": ">="
+       }
+      },
+      {
+       "lineNo": 5,
+       "raw": "2 * gen(gas) + gen(\"offshore wind\") <= 3 * load_shed",
+       "spec": {
+        "id": "2 * gen(gas) + gen(\"offshore wind\") <= 3 * load_shed",
+        "lhs": [
+         {
+          "carrier": "gas",
+          "coef": 2,
+          "kind": "gen"
+         },
+         {
+          "carrier": "offshore wind",
+          "coef": 1,
+          "kind": "gen"
+         }
+        ],
+        "rhs": [
+         {
+          "coef": 3,
+          "kind": "load_shed"
+         }
+        ],
+        "sense": "<="
+       }
+      },
+      {
+       "lineNo": 6,
+       "raw": "cf(type, a & b) <= 0.8",
+       "spec": {
+        "id": "cf(type, a & b) <= 0.8",
+        "lhs": [
+         {
+          "coef": 1,
+          "column": "type",
+          "kind": "cf",
+          "values": [
+           "a",
+           "b"
+          ]
+         }
+        ],
+        "rhs": [
+         {
+          "coef": 0.8,
+          "kind": "const"
+         }
+        ],
+        "sense": "<="
+       }
+      },
+      {
+       "error": "missing comparator (one of <=, >=, ==)",
+       "lineNo": 7,
+       "raw": "gen(coal) 1000"
+      },
+      {
+       "error": "'foo(...)' is not a valid term",
+       "lineNo": 8,
+       "raw": "foo(x) <= 1"
+      },
+      {
+       "error": "expected a term after '2 *'",
+       "lineNo": 9,
+       "raw": "gen(a) <= 2 *"
+      },
+      {
+       "lineNo": 10,
+       "raw": "emissions <= 0.5 * gen",
+       "spec": {
+        "id": "emissions <= 0.5 * gen",
+        "lhs": [
+         {
+          "coef": 1,
+          "kind": "emissions"
+         }
+        ],
+        "rhs": [
+         {
+          "coef": 0.5,
+          "kind": "gen"
+         }
+        ],
+        "sense": "<="
+       }
+      }
+     ],
+     "specs": [
+      {
+       "id": "gen(coal) <= 1000",
+       "lhs": [
+        {
+         "carrier": "coal",
+         "coef": 1,
+         "kind": "gen"
+        }
+       ],
+       "rhs": [
+        {
+         "coef": 1000,
+         "kind": "const"
+        }
+       ],
+       "sense": "<="
+      },
+      {
+       "id": "cap(solar & wind) >= 500",
+       "lhs": [
+        {
+         "coef": 1,
+         "kind": "cap",
+         "values": [
+          "solar",
+          "wind"
+         ]
+        }
+       ],
+       "rhs": [
+        {
+         "coef": 500,
+         "kind": "const"
+        }
+       ],
+       "sense": ">="
+      },
+      {
+       "id": "2 * gen(gas) + gen(\"offshore wind\") <= 3 * load_shed",
+       "lhs": [
+        {
+         "carrier": "gas",
+         "coef": 2,
+         "kind": "gen"
+        },
+        {
+         "carrier": "offshore wind",
+         "coef": 1,
+         "kind": "gen"
+        }
+       ],
+       "rhs": [
+        {
+         "coef": 3,
+         "kind": "load_shed"
+        }
+       ],
+       "sense": "<="
+      },
+      {
+       "id": "cf(type, a & b) <= 0.8",
+       "lhs": [
+        {
+         "coef": 1,
+         "column": "type",
+         "kind": "cf",
+         "values": [
+          "a",
+          "b"
+         ]
+        }
+       ],
+       "rhs": [
+        {
+         "coef": 0.8,
+         "kind": "const"
+        }
+       ],
+       "sense": "<="
+      },
+      {
+       "id": "emissions <= 0.5 * gen",
+       "lhs": [
+        {
+         "coef": 1,
+         "kind": "emissions"
+        }
+       ],
+       "rhs": [
+        {
+         "coef": 0.5,
+         "kind": "gen"
+        }
+       ],
+       "sense": "<="
+      }
+     ],
+     "text": "# cap coal\ngen(coal) <= 1000\ncap(solar & wind) >= 500   # trailing\n\n2 * gen(gas) + gen(\"offshore wind\") <= 3 * load_shed\ncf(type, a & b) <= 0.8\ngen(coal) 1000\nfoo(x) <= 1\ngen(a) <= 2 *\nemissions <= 0.5 * gen\n"
+    },
+    "generatorCarriers": [
+     "alpha",
+     "coal",
+     "gas",
+     "Gas"
+    ],
+    "runBodies": {
+     "scenario-base": {
+      "options": {
+       "assetSwapConfig": {
+        "addCapitalCost": 0,
+        "addCarrier": "",
+        "addMarginalCost": 0,
+        "addStorageCapexPerMW": 20000,
+        "addStorageHours": 4,
+        "addStorageMW": 0,
+        "enabled": false,
+        "removeFilters": [],
+        "replaceRatio": 1,
+        "sizeReplacement": false
+       },
+       "backend": "pypsa",
+       "bidStrategyConfig": {
+        "enabled": false,
+        "markup": 0.2,
+        "markupType": "percent",
+        "maxMarkup": 2.0,
+        "mode": "fixed",
+        "owner": "",
+        "steps": 8
+       },
+       "carbonPriceSchedule": [],
+       "contingencyConfig": {
+        "enabled": false
+       },
+       "convergenceConfig": {
+        "batchSize": 50,
+        "enabled": false,
+        "forcedOutageRate": 0.05,
+        "maintenanceCarriers": [],
+        "maintenanceEnabled": false,
+        "maintenanceWeeks": 3,
+        "maxMembers": 2000,
+        "mttrHours": 48,
+        "seed": 42,
+        "targetMetric": "eue",
+        "tolerance": 0.05
+       },
+       "correlatedSamplingConfig": {
+        "enabled": false,
+        "inflowSensitivity": 0.2,
+        "inflowStd": 0.1,
+        "loadSensitivity": 0.15,
+        "loadStd": 0.05,
+        "nMembers": 200,
+        "renewableSensitivity": 0.3,
+        "renewableStd": 0.1,
+        "seed": 42
+       },
+       "currencySymbol": "EUR",
+       "dateFormat": "dmy",
+       "demandResponseConfig": {
+        "elasticEnabled": false,
+        "elasticFraction": 0.2,
+        "enabled": false,
+        "loads": [],
+        "maxShiftHours": 4,
+        "shiftFraction": 0.2,
+        "wtpMax": 200
+       },
+       "elccConfig": {
+        "carriers": [],
+        "enabled": false,
+        "forcedOutageRate": 0.05,
+        "mttrHours": 48,
+        "nMembers": 200,
+        "seed": 42
+       },
+       "enableLoadShedding": false,
+       "essConfig": {
+        "bus": "",
+        "capitalCostPerMW": 30000,
+        "enabled": false,
+        "maxHours": 4,
+        "maxSizeMW": 100,
+        "minSizeMW": 10,
+        "roundTripEfficiency": 0.9,
+        "steps": 6
+       },
+       "filename": "case.xlsx",
+       "financeConfig": {
+        "gearing": 0,
+        "interestRate": 0.05,
+        "tenorYears": 15
+       },
+       "forceLp": false,
+       "lmpDecompositionConfig": {
+        "enabled": false,
+        "referenceBus": "",
+        "referenceMode": "load-weighted"
+       },
+       "loadSheddingCost": 1000,
+       "marketSimConfig": {
+        "chargeQuantile": 0.25,
+        "clearingModel": "singleSided",
+        "demandBids": [],
+        "demandElasticFraction": 0.2,
+        "demandWtp": 120,
+        "dischargeQuantile": 0.75,
+        "enabled": false,
+        "pricing": "uniform",
+        "voll": 3000
+       },
+       "merchantConfig": {
+        "enabled": false,
+        "flatPrice": 0,
+        "owner": "",
+        "priceSource": "lmp"
+       },
+       "mgaConfig": {
+        "carriers": [],
+        "enabled": false,
+        "slack": 0.05
+       },
+       "objectiveAutoScale": true,
+       "outageMcConfig": {
+        "enabled": false,
+        "forcedOutageRate": 0.05,
+        "includeRenewableEnsemble": false,
+        "mttrHours": 48,
+        "nMembers": 200,
+        "physicalRiskSessionId": "",
+        "physicalRiskUplift": false,
+        "seed": 42
+       },
+       "ownerColumn": "owner",
+       "pathwayConfig": {
+        "enabled": false,
+        "periods": [],
+        "planningMode": "single_period",
+        "selectedPeriod": null,
+        "snapshotMappingMode": "explicit_period_column"
+       },
+       "powerFlowConfig": {
+        "enabled": false,
+        "linear": false
+       },
+       "ppaConfig": {
+        "enabled": false,
+        "flatMW": 0,
+        "owner": "",
+        "strikePrice": 0,
+        "volumeType": "generation"
+       },
+       "rampConfig": {
+        "appliesTo": "all",
+        "enabled": false,
+        "rampLimitDown": 0.5,
+        "rampLimitUp": 0.5
+       },
+       "reserveConfig": {
+        "enabled": false,
+        "fraction": 0.1,
+        "providers": "all",
+        "requirementType": "fraction",
+        "reserveCost": 0
+       },
+       "rollingConfig": {
+        "enabled": false,
+        "horizonSnapshots": 168,
+        "overlapSnapshots": 24,
+        "stepSnapshots": 144
+       },
+       "samplingConfig": {
+        "blockCount": 4,
+        "blockSize": 168,
+        "enabled": false,
+        "gapSnapshots": 672,
+        "mode": "count"
+       },
+       "scenarioLabel": "Base case",
+       "securityConstrainedConfig": {
+        "enabled": false
+       },
+       "snapshotCount": 24,
+       "snapshotEnd": 24,
+       "snapshotStart": 0,
+       "snapshotWeight": 1,
+       "solveAcceptance": "strict",
+       "solverThreads": 2,
+       "solverType": "ipm",
+       "stochasticConfig": {
+        "enabled": false,
+        "scenarios": []
+       }
+      },
+      "scenario": {
+       "carbonPrice": 0,
+       "constraintSpecs": [
+        {
+         "id": "gen(coal) <= 1000",
+         "lhs": [
+          {
+           "carrier": "coal",
+           "coef": 1,
+           "kind": "gen"
+          }
+         ],
+         "rhs": [
+          {
+           "coef": 1000,
+           "kind": "const"
+          }
+         ],
+         "sense": "<="
+        },
+        {
+         "id": "cap(solar & wind) >= 500",
+         "lhs": [
+          {
+           "coef": 1,
+           "kind": "cap",
+           "values": [
+            "solar",
+            "wind"
+           ]
+          }
+         ],
+         "rhs": [
+          {
+           "coef": 500,
+           "kind": "const"
+          }
+         ],
+         "sense": ">="
+        },
+        {
+         "id": "2 * gen(gas) + gen(\"offshore wind\") <= 3 * load_shed",
+         "lhs": [
+          {
+           "carrier": "gas",
+           "coef": 2,
+           "kind": "gen"
+          },
+          {
+           "carrier": "offshore wind",
+           "coef": 1,
+           "kind": "gen"
+          }
+         ],
+         "rhs": [
+          {
+           "coef": 3,
+           "kind": "load_shed"
+          }
+         ],
+         "sense": "<="
+        },
+        {
+         "id": "cf(type, a & b) <= 0.8",
+         "lhs": [
+          {
+           "coef": 1,
+           "column": "type",
+           "kind": "cf",
+           "values": [
+            "a",
+            "b"
+           ]
+          }
+         ],
+         "rhs": [
+          {
+           "coef": 0.8,
+           "kind": "const"
+          }
+         ],
+         "sense": "<="
+        },
+        {
+         "id": "emissions <= 0.5 * gen",
+         "lhs": [
+          {
+           "coef": 1,
+           "kind": "emissions"
+          }
+         ],
+         "rhs": [
+          {
+           "coef": 0.5,
+           "kind": "gen"
+          }
+         ],
+         "sense": "<="
+        }
+       ],
+       "constraints": [],
+       "discountRate": 0
+      }
+     },
+     "scenario-legacy": {
+      "options": {
+       "assetSwapConfig": {
+        "addCapitalCost": 0,
+        "addCarrier": "",
+        "addMarginalCost": 0,
+        "addStorageCapexPerMW": 20000,
+        "addStorageHours": 4,
+        "addStorageMW": 0,
+        "enabled": false,
+        "removeFilters": [],
+        "replaceRatio": 1,
+        "sizeReplacement": false
+       },
+       "backend": "pypsa",
+       "bidStrategyConfig": {
+        "enabled": false,
+        "markup": 0.2,
+        "markupType": "percent",
+        "maxMarkup": 2.0,
+        "mode": "fixed",
+        "owner": "",
+        "steps": 8
+       },
+       "carbonPriceSchedule": [],
+       "contingencyConfig": {
+        "enabled": false
+       },
+       "convergenceConfig": {
+        "batchSize": 50,
+        "enabled": false,
+        "forcedOutageRate": 0.05,
+        "maintenanceCarriers": [],
+        "maintenanceEnabled": false,
+        "maintenanceWeeks": 3,
+        "maxMembers": 2000,
+        "mttrHours": 48,
+        "seed": 42,
+        "targetMetric": "eue",
+        "tolerance": 0.05
+       },
+       "correlatedSamplingConfig": {
+        "enabled": false,
+        "inflowSensitivity": 0.2,
+        "inflowStd": 0.1,
+        "loadSensitivity": 0.15,
+        "loadStd": 0.05,
+        "nMembers": 200,
+        "renewableSensitivity": 0.3,
+        "renewableStd": 0.1,
+        "seed": 42
+       },
+       "currencySymbol": "EUR",
+       "dateFormat": "dmy",
+       "demandResponseConfig": {
+        "elasticEnabled": false,
+        "elasticFraction": 0.2,
+        "enabled": false,
+        "loads": [],
+        "maxShiftHours": 4,
+        "shiftFraction": 0.2,
+        "wtpMax": 200
+       },
+       "elccConfig": {
+        "carriers": [],
+        "enabled": false,
+        "forcedOutageRate": 0.05,
+        "mttrHours": 48,
+        "nMembers": 200,
+        "seed": 42
+       },
+       "enableLoadShedding": false,
+       "essConfig": {
+        "bus": "",
+        "capitalCostPerMW": 30000,
+        "enabled": false,
+        "maxHours": 4,
+        "maxSizeMW": 100,
+        "minSizeMW": 10,
+        "roundTripEfficiency": 0.9,
+        "steps": 6
+       },
+       "filename": "case.xlsx",
+       "financeConfig": {
+        "gearing": 0,
+        "interestRate": 0.05,
+        "tenorYears": 15
+       },
+       "forceLp": false,
+       "lmpDecompositionConfig": {
+        "enabled": false,
+        "referenceBus": "",
+        "referenceMode": "load-weighted"
+       },
+       "loadSheddingCost": 1000,
+       "marketSimConfig": {
+        "chargeQuantile": 0.25,
+        "clearingModel": "singleSided",
+        "demandBids": [],
+        "demandElasticFraction": 0.2,
+        "demandWtp": 120,
+        "dischargeQuantile": 0.75,
+        "enabled": true,
+        "pricing": "uniform",
+        "voll": 3000
+       },
+       "merchantConfig": {
+        "enabled": false,
+        "ownerColumn": "company"
+       },
+       "mgaConfig": {
+        "carriers": [],
+        "enabled": false,
+        "slack": 0.05
+       },
+       "objectiveAutoScale": true,
+       "outageMcConfig": {
+        "enabled": false,
+        "forcedOutageRate": 0.05,
+        "includeRenewableEnsemble": false,
+        "mttrHours": 48,
+        "nMembers": 200,
+        "physicalRiskSessionId": "",
+        "physicalRiskUplift": false,
+        "seed": 42
+       },
+       "ownerColumn": "company",
+       "pathwayConfig": {
+        "enabled": false,
+        "periods": [],
+        "planningMode": "single_period",
+        "selectedPeriod": null,
+        "snapshotMappingMode": "explicit_period_column"
+       },
+       "powerFlowConfig": {
+        "enabled": false,
+        "linear": false
+       },
+       "ppaConfig": {
+        "enabled": false,
+        "flatMW": 0,
+        "owner": "",
+        "strikePrice": 0,
+        "volumeType": "generation"
+       },
+       "rampConfig": {
+        "appliesTo": "all",
+        "enabled": false,
+        "rampLimitDown": 0.5,
+        "rampLimitUp": 0.5
+       },
+       "reserveConfig": {
+        "enabled": false,
+        "fraction": 0.1,
+        "providers": "all",
+        "requirementType": "fraction",
+        "reserveCost": 0
+       },
+       "rollingConfig": {
+        "enabled": false,
+        "horizonSnapshots": 168,
+        "overlapSnapshots": 24,
+        "stepSnapshots": 144
+       },
+       "samplingConfig": {
+        "blockCount": 4,
+        "blockSize": 168,
+        "enabled": false,
+        "gapSnapshots": 672,
+        "mode": "count"
+       },
+       "scenarioLabel": "Legacy",
+       "securityConstrainedConfig": {
+        "enabled": false
+       },
+       "snapshotCount": 48,
+       "snapshotEnd": 48,
+       "snapshotStart": 0,
+       "snapshotWeight": 1,
+       "solveAcceptance": "strict",
+       "solverThreads": 2,
+       "solverType": "ipm",
+       "stochasticConfig": {
+        "enabled": false,
+        "scenarios": []
+       }
+      },
+      "scenario": {
+       "carbonPrice": 0,
+       "constraintSpecs": [
+        {
+         "id": "gen(coal) <= 1000",
+         "lhs": [
+          {
+           "carrier": "coal",
+           "coef": 1,
+           "kind": "gen"
+          }
+         ],
+         "rhs": [
+          {
+           "coef": 1000,
+           "kind": "const"
+          }
+         ],
+         "sense": "<="
+        },
+        {
+         "id": "cap(solar & wind) >= 500",
+         "lhs": [
+          {
+           "coef": 1,
+           "kind": "cap",
+           "values": [
+            "solar",
+            "wind"
+           ]
+          }
+         ],
+         "rhs": [
+          {
+           "coef": 500,
+           "kind": "const"
+          }
+         ],
+         "sense": ">="
+        },
+        {
+         "id": "2 * gen(gas) + gen(\"offshore wind\") <= 3 * load_shed",
+         "lhs": [
+          {
+           "carrier": "gas",
+           "coef": 2,
+           "kind": "gen"
+          },
+          {
+           "carrier": "offshore wind",
+           "coef": 1,
+           "kind": "gen"
+          }
+         ],
+         "rhs": [
+          {
+           "coef": 3,
+           "kind": "load_shed"
+          }
+         ],
+         "sense": "<="
+        },
+        {
+         "id": "cf(type, a & b) <= 0.8",
+         "lhs": [
+          {
+           "coef": 1,
+           "column": "type",
+           "kind": "cf",
+           "values": [
+            "a",
+            "b"
+           ]
+          }
+         ],
+         "rhs": [
+          {
+           "coef": 0.8,
+           "kind": "const"
+          }
+         ],
+         "sense": "<="
+        },
+        {
+         "id": "emissions <= 0.5 * gen",
+         "lhs": [
+          {
+           "coef": 1,
+           "kind": "emissions"
+          }
+         ],
+         "rhs": [
+          {
+           "coef": 0.5,
+           "kind": "gen"
+          }
+         ],
+         "sense": "<="
+        }
+       ],
+       "constraints": [],
+       "discountRate": 0
+      }
+     },
+     "scenario-rich": {
+      "options": {
+       "assetSwapConfig": {
+        "addCarrier": "solar",
+        "enabled": true,
+        "removeFilters": [
+         {
+          "field": "carrier",
+          "values": [
+           "coal"
+          ]
+         }
+        ]
+       },
+       "backend": "pypsa",
+       "bidStrategyConfig": {
+        "enabled": false,
+        "markup": 0.2,
+        "markupType": "percent",
+        "maxMarkup": 2.0,
+        "mode": "fixed",
+        "owner": "",
+        "steps": 8
+       },
+       "carbonPriceSchedule": [
+        {
+         "price": 80,
+         "year": 2030
+        },
+        {
+         "price": 40,
+         "year": 2025
+        }
+       ],
+       "contingencyConfig": {
+        "enabled": false
+       },
+       "convergenceConfig": {
+        "batchSize": 50,
+        "enabled": false,
+        "forcedOutageRate": 0.05,
+        "maintenanceCarriers": [],
+        "maintenanceEnabled": false,
+        "maintenanceWeeks": 3,
+        "maxMembers": 2000,
+        "mttrHours": 48,
+        "seed": 42,
+        "targetMetric": "eue",
+        "tolerance": 0.05
+       },
+       "correlatedSamplingConfig": {
+        "enabled": false,
+        "inflowSensitivity": 0.2,
+        "inflowStd": 0.1,
+        "loadSensitivity": 0.15,
+        "loadStd": 0.05,
+        "nMembers": 200,
+        "renewableSensitivity": 0.3,
+        "renewableStd": 0.1,
+        "seed": 42
+       },
+       "currencySymbol": "EUR",
+       "dateFormat": "dmy",
+       "demandResponseConfig": {
+        "enabled": true,
+        "loads": [
+         "L1"
+        ]
+       },
+       "elccConfig": {
+        "carriers": [
+         "wind"
+        ],
+        "enabled": true
+       },
+       "enableLoadShedding": true,
+       "essConfig": {
+        "bus": "b1",
+        "capitalCostPerMW": 1,
+        "capitalCostPerMWh": 9000,
+        "enabled": true,
+        "lifetimeYears": 12,
+        "maxHours": 2,
+        "maxSizeMW": 2,
+        "minSizeMW": 1,
+        "roundTripEfficiency": 0.8,
+        "steps": 3
+       },
+       "filename": "case.xlsx",
+       "financeConfig": {
+        "gearing": 0.6,
+        "interestRate": 0.04,
+        "tenorYears": 12
+       },
+       "forceLp": true,
+       "lmpDecompositionConfig": {
+        "enabled": false,
+        "referenceBus": "",
+        "referenceMode": "load-weighted"
+       },
+       "loadSheddingCost": 5000,
+       "marketSimConfig": {
+        "chargeQuantile": 0.25,
+        "clearingModel": "singleSided",
+        "demandBids": [],
+        "demandElasticFraction": 0.2,
+        "demandWtp": 120,
+        "dischargeQuantile": 0.75,
+        "enabled": true,
+        "pricing": "payAsBid",
+        "voll": 3000
+       },
+       "merchantConfig": {
+        "enabled": true,
+        "flatPrice": 40,
+        "owner": "Acme",
+        "ownerColumn": "company",
+        "priceSeries": [
+         1,
+         2,
+         3
+        ],
+        "priceSource": "series"
+       },
+       "mgaConfig": {
+        "carriers": [],
+        "enabled": false,
+        "slack": 0.05
+       },
+       "modelOverrides": [
+        {
+         "column": "p_nom",
+         "name": "g1",
+         "sheet": "generators",
+         "value": 500
+        },
+        {
+         "column": "p_nom",
+         "name": "g2",
+         "sheet": "generators"
+        }
+       ],
+       "objectiveAutoScale": true,
+       "outageMcConfig": {
+        "enabled": false,
+        "forcedOutageRate": 0.05,
+        "includeRenewableEnsemble": false,
+        "mttrHours": 48,
+        "nMembers": 200,
+        "physicalRiskSessionId": "",
+        "physicalRiskUplift": false,
+        "seed": 42
+       },
+       "ownerColumn": "company",
+       "pathwayConfig": {
+        "enabled": true,
+        "overridePolicy": "reuse_base_inputs",
+        "periods": [
+         {
+          "objectiveWeight": 1,
+          "period": 2030,
+          "yearsWeight": 5
+         },
+         {
+          "objectiveWeight": 0.8,
+          "period": 2035,
+          "yearsWeight": 5
+         }
+        ],
+        "planningMode": "pathway",
+        "selectedPeriod": 2030,
+        "snapshotMappingMode": "explicit_period_column"
+       },
+       "powerFlowConfig": {
+        "enabled": false,
+        "linear": false
+       },
+       "ppaConfig": {
+        "enabled": false,
+        "flatMW": 0,
+        "owner": "",
+        "strikePrice": 0,
+        "volumeType": "generation"
+       },
+       "rampConfig": {
+        "appliesTo": "all",
+        "enabled": false,
+        "rampLimitDown": 0.5,
+        "rampLimitUp": 0.5
+       },
+       "reserveConfig": {
+        "enabled": false,
+        "fraction": 0.1,
+        "providers": "all",
+        "requirementType": "fraction",
+        "reserveCost": 0
+       },
+       "rollingConfig": {
+        "enabled": true,
+        "horizonSnapshots": 100,
+        "overlapSnapshots": 99,
+        "preserveTerminalState": false,
+        "selectedWindow": null,
+        "stepPolicy": "derived",
+        "stepSnapshots": 1
+       },
+       "samplingConfig": {
+        "blockCount": 4,
+        "blockSize": 24,
+        "enabled": true,
+        "gapSnapshots": 0,
+        "mode": "count"
+       },
+       "scenarioLabel": "Rich",
+       "securityConstrainedConfig": {
+        "enabled": false
+       },
+       "snapshotCount": 48,
+       "snapshotEnd": 72,
+       "snapshotStart": 24,
+       "snapshotWeight": 2,
+       "solveAcceptance": "strict",
+       "solverThreads": 2,
+       "solverType": "ipm",
+       "stochasticConfig": {
+        "enabled": true,
+        "scenarios": [
+         {
+          "id": "s1",
+          "name": "dry",
+          "overrides": [
+           {
+            "attribute": "p_max_pu",
+            "id": "o1",
+            "operation": "multiply",
+            "scopeType": "carrier",
+            "scopeValue": "hydro",
+            "sheet": "generators",
+            "value": 0.7
+           }
+          ],
+          "weight": 0.5
+         },
+         {
+          "id": "s2",
+          "name": "wet",
+          "overrides": [],
+          "weight": 0.5
+         }
+        ]
+       }
+      },
+      "scenario": {
+       "carbonPrice": 55.5,
+       "constraintSpecs": [
+        {
+         "id": "gen(coal) <= 1000",
+         "lhs": [
+          {
+           "carrier": "coal",
+           "coef": 1,
+           "kind": "gen"
+          }
+         ],
+         "rhs": [
+          {
+           "coef": 1000,
+           "kind": "const"
+          }
+         ],
+         "sense": "<="
+        },
+        {
+         "id": "cap(solar & wind) >= 500",
+         "lhs": [
+          {
+           "coef": 1,
+           "kind": "cap",
+           "values": [
+            "solar",
+            "wind"
+           ]
+          }
+         ],
+         "rhs": [
+          {
+           "coef": 500,
+           "kind": "const"
+          }
+         ],
+         "sense": ">="
+        },
+        {
+         "id": "2 * gen(gas) + gen(\"offshore wind\") <= 3 * load_shed",
+         "lhs": [
+          {
+           "carrier": "gas",
+           "coef": 2,
+           "kind": "gen"
+          },
+          {
+           "carrier": "offshore wind",
+           "coef": 1,
+           "kind": "gen"
+          }
+         ],
+         "rhs": [
+          {
+           "coef": 3,
+           "kind": "load_shed"
+          }
+         ],
+         "sense": "<="
+        },
+        {
+         "id": "cf(type, a & b) <= 0.8",
+         "lhs": [
+          {
+           "coef": 1,
+           "column": "type",
+           "kind": "cf",
+           "values": [
+            "a",
+            "b"
+           ]
+          }
+         ],
+         "rhs": [
+          {
+           "coef": 0.8,
+           "kind": "const"
+          }
+         ],
+         "sense": "<="
+        },
+        {
+         "id": "emissions <= 0.5 * gen",
+         "lhs": [
+          {
+           "coef": 1,
+           "kind": "emissions"
+          }
+         ],
+         "rhs": [
+          {
+           "coef": 0.5,
+           "kind": "gen"
+          }
+         ],
+         "sense": "<="
+        }
+       ],
+       "constraints": [
+        {
+         "carrier": "coal",
+         "enabled": true,
+         "id": "c1",
+         "label": "Coal cap",
+         "metric": "carrier_max_gen",
+         "unit": "MWh",
+         "value": 1000
+        }
+       ],
+       "discountRate": 0.07
+      }
+     }
+    },
+    "unresolved": []
+   },
+   "model": {
+    "RAGNAROK_CarbonSchedules": [
+     {
+      "id": "carbon-a",
+      "json": "[{\"year\": 2040, \"price\": 120}, {\"year\": \"2030\", \"price\": \"60\"}, {\"year\": \"x\", \"price\": 1}, {\"price\": 5}, {\"year\": 2035, \"price\": null}]",
+      "name": "NGFS"
+     },
+     {
+      "id": "carbon-b",
+      "json": "oops",
+      "name": ""
+     },
+     {
+      "id": " ",
+      "json": "[]",
+      "name": "blank id"
+     }
+    ],
+    "RAGNAROK_CustomDSL": [
+     {
+      "text": "# cap coal\ngen(coal) <= 1000\ncap(solar & wind) >= 500   # trailing\n\n2 * gen(gas) + gen(\"offshore wind\") <= 3 * load_shed\ncf(type, a & b) <= 0.8\ngen(coal) 1000\nfoo(x) <= 1\ngen(a) <= 2 *\nemissions <= 0.5 * gen\n"
+     }
+    ],
+    "RAGNAROK_Scenarios": [
+     {
+      "active": false,
+      "id": "scenario-base",
+      "json": "{}",
+      "label": "Base case",
+      "notes": ""
+     },
+     {
+      "active": true,
+      "id": "scenario-rich",
+      "json": "{\"snapshotStart\": 24, \"snapshotEnd\": \"72\", \"snapshotWeight\": 2, \"carbonPrice\": 55.5, \"carbonPriceSchedule\": [{\"year\": 2030, \"price\": 80}, {\"year\": 2025, \"price\": 40}], \"discountRate\": 0.07, \"forceLp\": \"yes\", \"enableLoadShedding\": true, \"loadSheddingCost\": 5000, \"pathwayConfig\": {\"planningMode\": \"pathway\", \"enabled\": true, \"snapshotMappingMode\": \"explicit_period_column\", \"overridePolicy\": \"reuse_base_inputs\", \"periods\": [{\"period\": 2030, \"objectiveWeight\": 1, \"yearsWeight\": 5}, {\"period\": 2035, \"objectiveWeight\": 0.8, \"yearsWeight\": 5}], \"selectedPeriod\": 2099}, \"rollingConfig\": {\"enabled\": true, \"horizonSnapshots\": 100.7, \"overlapSnapshots\": 250, \"stepPolicy\": \"derived\", \"stepSnapshots\": 1, \"preserveTerminalState\": false, \"selectedWindow\": null}, \"samplingConfig\": {\"enabled\": 1, \"mode\": \"weird\", \"blockSize\": \"24\", \"blockCount\": 0, \"gapSnapshots\": -5}, \"stochasticConfig\": {\"enabled\": true, \"scenarios\": [{\"id\": \"s1\", \"name\": \"dry\", \"weight\": 0.5, \"overrides\": [{\"id\": \"o1\", \"sheet\": \"generators\", \"attribute\": \"p_max_pu\", \"scopeType\": \"carrier\", \"scopeValue\": \"hydro\", \"operation\": \"multiply\", \"value\": 0.7}]}, {\"id\": \"s2\", \"name\": \"wet\", \"weight\": 0.5}]}, \"marketSimConfig\": {\"enabled\": true, \"pricing\": \"payAsBid\"}, \"essConfig\": {\"enabled\": true, \"bus\": \"b1\", \"maxHours\": 2, \"capitalCostPerMW\": 1, \"minSizeMW\": 1, \"maxSizeMW\": 2, \"steps\": 3, \"roundTripEfficiency\": 0.8, \"capitalCostPerMWh\": 9000, \"lifetimeYears\": 12}, \"merchantConfig\": {\"enabled\": true, \"owner\": \"Acme\", \"priceSource\": \"series\", \"flatPrice\": 40, \"priceSeries\": [1, 2, 3], \"ownerColumn\": \"company\"}, \"assetSwapConfig\": {\"enabled\": true, \"removeFilters\": [{\"field\": \"carrier\", \"values\": [\"coal\"]}], \"addCarrier\": \"solar\"}, \"elccConfig\": {\"enabled\": true, \"carriers\": [\"wind\"]}, \"demandResponseConfig\": {\"enabled\": true, \"loads\": [\"L1\"]}, \"financeConfig\": {\"gearing\": 0.6, \"interestRate\": 0.04, \"tenorYears\": 12}, \"constraints\": [{\"id\": \"c1\", \"enabled\": true, \"label\": \"Coal cap\", \"metric\": \"carrier_max_gen\", \"carrier\": \"coal\", \"value\": 1000, \"unit\": \"MWh\"}, {\"id\": \"c2\", \"enabled\": false, \"label\": \"off\", \"metric\": \"co2_cap\", \"carrier\": \"\", \"value\": 0.3, \"unit\": \"tCO2/MWh\"}], \"modelOverrides\": [{\"sheet\": \"generators\", \"name\": \"g1\", \"column\": \"p_nom\", \"value\": 500}, {\"sheet\": \"\", \"name\": \"x\", \"column\": \"y\", \"value\": 1}, {\"sheet\": \"generators\", \"name\": \"g2\", \"column\": \"p_nom\"}]}",
+      "label": "  Rich  ",
+      "notes": "all the knobs"
+     },
+     {
+      "active": false,
+      "id": "scenario-broken",
+      "json": "{not json",
+      "label": "Broken",
+      "notes": ""
+     },
+     {
+      "active": false,
+      "id": "scenario-noperiods",
+      "json": "{\"pathwayConfig\": {\"enabled\": true}}",
+      "label": "NoPeriods",
+      "notes": ""
+     },
+     {
+      "id": "",
+      "json": "{}",
+      "label": "No id"
+     },
+     {
+      "active": "false",
+      "id": "scenario-legacy",
+      "json": "{\"snapshotEnd\": 48, \"merchantConfig\": {\"enabled\": false, \"ownerColumn\": \"company\"}, \"marketSimConfig\": {\"enabled\": true}, \"constraints\": \"nope\", \"modelOverrides\": \"nope\"}",
+      "label": "Legacy",
+      "notes": ""
+     }
+    ],
+    "generators": [
+     {
+      "carrier": "coal",
+      "name": "g1"
+     },
+     {
+      "carrier": " gas ",
+      "name": "g2"
+     },
+     {
+      "carrier": "Gas",
+      "name": "g3"
+     },
+     {
+      "carrier": "",
+      "name": "g4"
+     },
+     {
+      "name": "g5"
+     },
+     {
+      "carrier": "alpha",
+      "name": "g6"
+     }
+    ]
+   },
+   "name": "main",
+   "uiOptions": {
+    "currencySymbol": "EUR",
+    "dateFormat": "dmy",
+    "filename": "case.xlsx",
+    "objectiveAutoScale": true,
+    "solveAcceptance": "strict",
+    "solverThreads": 2,
+    "solverType": "ipm"
+   }
+  }
+ ]
+}

@@ -46,11 +46,10 @@ _install_log_capture()
 
 
 # ── Suppress per-poll access log noise ───────────────────────────────────────
-# Two routes are polled continuously by the frontend and would flood the
+# One route is polled continuously by the frontend and would flood the
 # terminal with one INFO line per poll:
-#   • GET /api/run/{id} — every 1.5 s while a solve is in progress
-#   • GET /api/log      — every 2 s while the Analytics → Log tab is open
-# Drop these from the INFO access log; re-emit at DEBUG so they remain
+#   • GET /api/log — every 2 s while the Analytics → Log tab is open
+# Drop it from the INFO access log; re-emit at DEBUG so they remain
 # capturable when needed (e.g. uvicorn --log-level debug). Critically, the
 # /api/log polls themselves must NOT be captured into the in-process log
 # ring buffer or the buffer fills with its own poll traffic.
@@ -58,7 +57,7 @@ _install_log_capture()
 class _SuppressPollLogs(logging.Filter):
     _debug = logging.getLogger("pypsa_gui.poll")
 
-    _POLL_ROUTES = ('"GET /api/run/', '"GET /api/log ')
+    _POLL_ROUTES = ('"GET /api/log ',)
 
     def filter(self, record: logging.LogRecord) -> bool:  # noqa: A003
         msg = record.getMessage()
@@ -70,42 +69,6 @@ class _SuppressPollLogs(logging.Filter):
 
 
 logging.getLogger("uvicorn.access").addFilter(_SuppressPollLogs())
-
-
-# ── Job store ─────────────────────────────────────────────────────────────────
-
-@dataclass
-class _Job:
-    id: str
-    proc: mp.Process
-    result_queue: "mp.Queue[tuple[str, Any]]"
-    status: str = "running"   # running | done | error | cancelled
-    result: dict | None = None
-    error: str | None = None
-    finished_at: float | None = None   # time.monotonic() when it left "running"
-
-
-_jobs: dict[str, _Job] = {}
-
-
-def _prune_direct_jobs() -> None:
-    """Drop finished direct jobs older than the retention window.
-
-    A finished job is normally freed when the client polls its result. Pruning
-    EVERY finished job whenever a new run starts (as this used to) deleted the
-    results of concurrent runs the client had not read yet, so they polled a 404.
-    Only jobs nobody collected within ``simulation.direct_job_retention_seconds``
-    go.
-    """
-    from .config import load_system_defaults
-
-    keep_for = float(
-        load_system_defaults().get("simulation", {}).get("direct_job_retention_seconds", 900)
-    )
-    now = time.monotonic()
-    for jid, j in list(_jobs.items()):
-        if j.status != "running" and j.finished_at is not None and now - j.finished_at > keep_for:
-            _jobs.pop(jid, None)
 
 
 # ── Subprocess worker ─────────────────────────────────────────────────────────
@@ -203,60 +166,6 @@ def _solve_worker(
     except Exception as exc:  # noqa: BLE001
         _write_outcome("error", error=str(exc))
         result_queue.put(("err", str(exc)))
-
-
-async def _collect_job(job_id: str) -> None:
-    """Background asyncio task — waits for the worker process and updates job state.
-
-    The worker puts a ``(status, payload)`` tuple onto its queue once the
-    solve finishes (``payload`` is the result dict on success or an error
-    message string on failure). Solver output (HiGHS / linopy / PyPSA)
-    streams live to the launching terminal during the solve, so there is
-    nothing to fan into the log buffer here.
-    """
-    job = _jobs.get(job_id)
-    if job is None:
-        return
-    while True:
-        try:
-            status, data = job.result_queue.get_nowait()
-            if job.status == "cancelled":
-                return
-            if status == "ok":
-                job.status = "done"
-                job.result = data
-            else:
-                job.status = "error"
-                job.error = data
-            job.finished_at = time.monotonic()
-            return
-        except queue.Empty:
-            if not job.proc.is_alive():
-                # The worker may have put its result an instant before exiting;
-                # drain once more before declaring it dead.
-                try:
-                    status, data = await asyncio.to_thread(job.result_queue.get, True, 1.0)
-                    if job.status != "cancelled":
-                        job.status = "done" if status == "ok" else "error"
-                        job.result = data if status == "ok" else None
-                        job.error = None if status == "ok" else data
-                        job.finished_at = time.monotonic()
-                    return
-                except queue.Empty:
-                    pass
-                # Only cancel_run marks a job "cancelled". A worker that died on
-                # its own (out of memory, native crash, killed) is a failed run,
-                # not a user cancellation — report it as an error.
-                if job.status == "running":
-                    job.status = "error"
-                    job.error = (
-                        "The solver process exited without delivering a result "
-                        f"(exit code {job.proc.exitcode}) — it likely ran out of memory "
-                        "or crashed."
-                    )
-                    job.finished_at = time.monotonic()
-                return
-            await asyncio.sleep(0.5)
 
 
 # ── Run queue (serial, disk-backed payloads) ──────────────────────────────────
@@ -1049,6 +958,14 @@ app.include_router(_transforms_router.router)
 from .routers import forge_query as _forge_query_router  # noqa: E402
 app.include_router(_forge_query_router.router)
 
+# Forge/Build helpers (snap, adjust, conversions) + the single fragment merge, and
+# server-side results (comparison, KPIs, companies, asset details) — one
+# implementation shared by the GUI and the MCP server (WA7 / WA8).
+from .routers import forge_build as _forge_build_router  # noqa: E402
+from .routers import results_derived as _results_derived_router  # noqa: E402
+app.include_router(_forge_build_router.router)
+app.include_router(_results_derived_router.router)
+
 # Server-side working model ("session"). The backend is the source of truth for
 # the model; the frontend imports once and then fetches pages/windows on demand.
 from .routers import session as _session_router  # noqa: E402
@@ -1093,6 +1010,12 @@ app.include_router(_pypsa_earth_router.router)
 # over a price series. A decision surface on top of prices, not a solve option.
 from .routers import procurement as _procurement_router  # noqa: E402
 app.include_router(_procurement_router.router)
+from .routers import piecewise as _piecewise_router  # noqa: E402
+app.include_router(_piecewise_router.router)
+
+# PyPSA-native Excel/CSV/MATPOWER/pandapower I/O + seasonal-rating transform (P18, P41-P43).
+from .routers import pypsa_io as _pypsa_io_router  # noqa: E402
+app.include_router(_pypsa_io_router.router)
 
 # Native physical-climate-risk capability (Phase 0 scaffold) — portfolio seeded
 # from the model, evaluated by a deterministic stub engine (no CLIMADA/conda yet).
@@ -1110,6 +1033,18 @@ app.include_router(_siting_router.router)
 # what the run already carries; deterministic given the run, no AI involved.
 from .routers import reports as _reports_router  # noqa: E402
 app.include_router(_reports_router.router)
+
+# Optimisation-adjacent PyPSA 1.4 endpoints — solver/option catalogue, LP export,
+# consistency check, network analysis (PTDF/BODF), parametrised statistics,
+# temporal clustering, slice/merge.
+from .routers import optimise as _optimise_router  # noqa: E402
+app.include_router(_optimise_router.router)
+
+# Scenario presets / carbon library / DSL sheet resolved server-side (WA6), so a
+# client other than the browser can run a saved scenario.
+from .routers import scenarios as _scenarios_router  # noqa: E402
+app.include_router(_scenarios_router.router)
+app.include_router(_scenarios_router.options_router)
 
 
 @app.get("/api/backends")
@@ -1245,11 +1180,16 @@ def _resolve_payload_model(payload: RunPayload) -> RunPayload:
         model = scenario_overrides.apply_model_overrides(model, overrides)
     data = _payload_to_dict(payload)
     data["model"] = model
+    # DSL precedence (WA3): scenario.constraintSpecs > scenario.customDsl > the
+    # model's RAGNAROK_CustomDSL sheet. Resolved HERE, at submit time, so the
+    # queued snapshot carries the text it will solve with.
+    from . import run_guards
+    data["scenario"] = run_guards.apply_model_dsl_fallback(model, data.get("scenario"))
     # Opt-in physical-risk -> forced-outage-rate coupling: if
     # options.outageMcConfig.physicalRiskUplift is set, look up the
     # referenced physical-risk session's latest completed run and inject
     # options.outageMcConfig.forRateUplift before the snapshot is frozen, so
-    # both /api/run and /api/queue (both call this) pick it up. No-op unless
+    # /api/queue and /api/validate (both call this) pick it up. No-op unless
     # the config opts in; never raises.
     from . import physical_risk_uplift
     data["options"] = physical_risk_uplift.apply_physical_risk_uplift(data.get("options"))
@@ -1271,11 +1211,28 @@ def _refuse_invalid_model(payload: RunPayload) -> None:
             status_code=400,
             detail=f"The model has validation errors, so the run was not started: {shown}",
         )
+    # WA4: the browser-only pre-run guards (empty window, DSL syntax, unresolved
+    # carrier constraint), so a run from MCP/a script is stopped for the same reasons.
+    from . import run_guards
+    problems = run_guards.run_input_problems(payload.model, payload.scenario, payload.options)
+    if problems:
+        raise HTTPException(
+            status_code=400,
+            detail="The run was not started: " + " ".join(problems),
+        )
 
 
 @app.post("/api/validate")
 def validate_case(payload: RunPayload) -> dict[str, Any]:
-    return validate_model(_resolve_payload_model(payload))
+    resolved = _resolve_payload_model(payload)
+    report = validate_model(resolved)
+    # The same pre-run guards a run is refused for (WA4), so validating first
+    # tells an MCP client what submit would reject.
+    from . import run_guards
+    problems = run_guards.run_input_problems(resolved.model, resolved.scenario, resolved.options)
+    if problems:
+        report = {**report, "valid": False, "errors": [*(report.get("errors") or []), *problems]}
+    return report
 
 
 @app.get("/api/identity")
@@ -1310,93 +1267,6 @@ def model_check_case(payload: RunPayload) -> dict[str, Any]:
     if not isinstance(model, dict):
         raise HTTPException(status_code=400, detail="The model to check is not a workbook of sheets.")
     return check_model(model)
-
-
-@app.post("/api/run")
-async def start_run(payload: RunPayload) -> dict[str, Any]:
-    """
-    Start a PyPSA optimisation job in a child process and return immediately.
-
-    The frontend POSTs the in-memory workbook as JSON:
-    `{model: {sheet: rows[]}, scenario: {...}, options: {...}}`.
-    The backend builds the PyPSA network directly from each sheet via
-    bulk `network.add()` and optimises in a child process. The frontend
-    polls GET /api/run/{job_id} for status and results.
-    """
-    # Fail fast on an unknown backend so the caller gets a 400 immediately
-    # rather than a 500 after the first poll.
-    try:
-        get_backend((payload.options or {}).get("backend"))
-    except BackendError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    # Resolve the model from the session when the client sent only a sessionId.
-    payload = _resolve_payload_model(payload)
-    _refuse_invalid_model(payload)
-
-    # Prune finished jobs nobody collected within the retention window
-    _prune_direct_jobs()
-
-    job_id = str(uuid.uuid4())
-    ctx = mp.get_context("spawn")
-    result_queue: mp.Queue = ctx.Queue()
-    proc: mp.Process = ctx.Process(
-        target=_solve_worker,
-        args=(payload, result_queue),
-        daemon=True,
-    )
-    proc.start()
-    _jobs[job_id] = _Job(id=job_id, proc=proc, result_queue=result_queue)
-    asyncio.create_task(_collect_job(job_id))
-    return {"jobId": job_id, "status": "running"}
-
-
-@app.get("/api/run/{job_id}")
-async def poll_run(job_id: str) -> dict[str, Any]:
-    """Poll the status of a running job. Returns result inline when done."""
-    job = _jobs.get(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="Job not found or already cleaned up.")
-    if job.status == "running":
-        return {"jobId": job_id, "status": "running"}
-    elif job.status == "done":
-        result = job.result
-        _jobs.pop(job_id, None)   # free memory after delivery
-        return {"jobId": job_id, "status": "done", "result": result}
-    elif job.status == "error":
-        error = job.error
-        _jobs.pop(job_id, None)
-        raise HTTPException(status_code=500, detail=f"PyPSA optimization failed: {error}")
-    else:  # cancelled
-        _jobs.pop(job_id, None)
-        raise HTTPException(status_code=499, detail="Optimization was cancelled.")
-
-
-@app.delete("/api/run/{job_id}")
-async def cancel_run(job_id: str) -> dict[str, Any]:
-    """Terminate a running job's child process.
-
-    Escalate SIGTERM → SIGKILL. ``terminate()`` only sends SIGTERM, which the
-    worker honours when it returns to Python — but a long native solve does
-    not. The rolling-horizon path is the worst case: it chains many HiGHS
-    solves in one process, so SIGTERM is frequently not acted on within the
-    grace window and the worker keeps grinding through the remaining windows
-    as an orphan after the job is forgotten. So if it is still alive after a
-    short grace period, send SIGKILL (uncatchable) and only then drop the job.
-    """
-    job = _jobs.get(job_id)
-    if job is None:
-        return {"jobId": job_id, "status": "not_found"}
-    # Mark first: _collect_job treats a dead worker that was NOT cancelled as a crash.
-    job.status = "cancelled"
-    if job.proc.is_alive():
-        job.proc.terminate()                       # SIGTERM — graceful
-        await asyncio.to_thread(job.proc.join, 3)
-        if job.proc.is_alive():
-            job.proc.kill()                        # SIGKILL — forceful
-            await asyncio.to_thread(job.proc.join, 3)
-    _jobs.pop(job_id, None)
-    return {"jobId": job_id, "status": "cancelled"}
 
 
 # ── Run queue endpoints ───────────────────────────────────────────────────────
@@ -2099,7 +1969,6 @@ async def import_project(file: UploadFile) -> dict[str, Any]:
 
 
 @app.post("/api/import/result")
-@app.post("/api/import/result/xlsx")  # legacy alias (pre-zip-support frontends)
 async def import_result(file: UploadFile) -> dict[str, Any]:
     """Import a RESULT-bearing file as a persistent History entry (model + results).
 
@@ -2292,7 +2161,9 @@ async def export_netcdf(payload: RunPayload) -> Response:
     with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as tmp:
         path = Path(tmp.name)
     try:
-        network.export_to_netcdf(str(path))
+        from ..pypsa.network.pypsa_io import netcdf_export_kwargs
+
+        network.export_to_netcdf(str(path), **netcdf_export_kwargs(payload.options))
         data = path.read_bytes()
     finally:
         path.unlink(missing_ok=True)
@@ -2313,7 +2184,7 @@ async def export_hdf5(payload: RunPayload) -> Response:
     with tempfile.NamedTemporaryFile(suffix=".h5", delete=False) as tmp:
         path = Path(tmp.name)
     try:
-        network.export_to_hdf5(str(path))
+        network.export_to_hdf5(str(path), export_standard_types=bool((payload.options or {}).get("exportStandardTypes")))
         data = path.read_bytes()
     finally:
         path.unlink(missing_ok=True)

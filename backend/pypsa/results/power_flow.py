@@ -26,6 +26,7 @@ import pypsa
 
 from ..utils.series import weighted_sum
 from .full_outputs import build_full_outputs
+from .phase_shift import optimised_phase_shifters
 
 # Empty optimise-only result fields, kept so the stored payload is the same
 # shape the frontend expects for any run (the charts simply render empty).
@@ -142,6 +143,33 @@ def _nodal_balance(network: pypsa.Network) -> list[dict[str, Any]]:
     return out
 
 
+def pf_kwargs_from_config(cfg: dict[str, Any] | None) -> dict[str, Any]:
+    """Translate ``powerFlowConfig`` camelCase keys into ``n.pf()`` keyword arguments.
+
+    Raises:
+        HTTPException: 400 on a non-positive ``xTol`` or an unknown ``slackWeights``.
+    """
+    from fastapi import HTTPException
+
+    cfg = cfg or {}
+    x_tol = float(cfg.get("xTol", 1e-6))
+    if not x_tol > 0:
+        raise HTTPException(status_code=400, detail="powerFlowConfig.xTol must be > 0.")
+    weights = str(cfg.get("slackWeights", "p_set"))
+    if weights not in ("p_set", "p_nom", "p_nom_opt"):
+        raise HTTPException(
+            status_code=400,
+            detail="powerFlowConfig.slackWeights must be 'p_set', 'p_nom' or 'p_nom_opt'.",
+        )
+    return {
+        "skip_pre": bool(cfg.get("skipPre", False)),
+        "x_tol": x_tol,
+        "use_seed": bool(cfg.get("useSeed", False)),
+        "distribute_slack": bool(cfg.get("distributeSlack", False)),
+        "slack_weights": weights,
+    }
+
+
 def run_power_flow(
     network: pypsa.Network,
     *,
@@ -150,6 +178,7 @@ def run_power_flow(
     snapshot_count: int,
     snapshot_weight: float,
     notes: list[str],
+    pf_options: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run a power-flow study and return the focused result payload.
 
@@ -159,10 +188,33 @@ def run_power_flow(
         currency: symbol for formatted summary strings.
         snapshot_count / snapshot_weight: modelled-window meta for ``runMeta``.
         notes: the build-phase narrative to append flow notes to.
+        pf_options: ``powerFlowConfig`` extras (P34) - ``xTol`` (Newton tolerance),
+            ``useSeed`` (start from the previous solution), ``distributeSlack`` +
+            ``slackWeights`` (``p_set`` | ``p_nom`` | ``p_nom_opt``-style weighting of
+            the slack over all generators) and ``skipPre`` (skip topology
+            determination; used by both ``pf`` and ``lpf``).
     """
+    pf_kwargs = pf_kwargs_from_config(pf_options)
     weights = (
         network.snapshot_weightings["generators"].reindex(network.snapshots).fillna(1.0)
     )
+
+    # A network that carries an optimised phase shift (solved by n.optimize()) must
+    # be re-run at those angles; pf()/lpf() otherwise use the static setpoint and
+    # silently ignore phase_shift_opt / the [min, max] range.
+    opt_ps = getattr(network.transformers_t, "phase_shift_opt", None)
+    if opt_ps is not None and not getattr(opt_ps, "empty", True):
+        network.transformers_t.phase_shift = opt_ps.copy()
+        notes.append(
+            f"Power flow uses the optimised phase shift of {opt_ps.shape[1]} phase-shifting transformer(s)."
+        )
+    else:
+        pst = optimised_phase_shifters(network)
+        if pst:
+            notes.append(
+                f"{len(pst)} transformer(s) have phase_shift_min < phase_shift_max, but power flow "
+                "uses the fixed 'phase_shift' setpoint (the range is only optimised by n.optimize())."
+            )
 
     converged = True
     n_iter_max = 0
@@ -170,9 +222,9 @@ def run_power_flow(
     error_msg: str | None = None
     try:
         if linear:
-            network.lpf()
+            network.lpf(skip_pre=pf_kwargs["skip_pre"])
         else:
-            res = network.pf()
+            res = network.pf(**pf_kwargs)
             conv = getattr(res, "converged", None)
             if conv is not None and getattr(conv, "size", 0):
                 converged = bool(conv.to_numpy().all())

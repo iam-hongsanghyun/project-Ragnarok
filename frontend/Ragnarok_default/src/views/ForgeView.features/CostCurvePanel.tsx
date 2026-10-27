@@ -18,13 +18,14 @@ import { SearchableSelect } from 'shared/components/SearchableSelect';
 import {
   Adjustment,
   AdjustFilter,
-  applyAdjustments,
   columnsOf,
   matchCount,
   rowMatches,
   uniqueValues,
 } from 'lib/forge/adjust';
 import { CurvePoint, fitQuadraticCost, marginalCostAt } from 'lib/forge/costcurve';
+import { PiecewiseCurveEditor } from './PiecewiseCurveEditor';
+import { adjustSheets } from 'lib/api/forgeBuild';
 
 interface Props {
   model: WorkbookModel;
@@ -59,6 +60,9 @@ export function CostCurvePanel({ model, sheetsWithRows, currencySymbol, onApplyS
   const [filters, setFilters] = usePersistedState<AdjustFilter[]>('ui:forge-costcurve-filters', []);
   const [points, setPoints] = usePersistedState<CurvePoint[]>('ui:forge-costcurve-points', DEFAULT_POINTS);
   const [pMax, setPMax] = usePersistedState<number>('ui:forge-costcurve-pmax', 100);
+  // `quadratic`: closest convex quadratic (marginal_cost + marginal_cost_quadratic).
+  // `piecewise`: breakpoints on the `<list>-<attr>-pw` sheets (PyPSA 1.3+, P10/P46).
+  const [mode, setMode] = usePersistedState<'quadratic' | 'piecewise'>('ui:forge-costcurve-mode', 'quadratic');
 
   const activeSheet = eligible.includes(sheet) ? sheet : (eligible[0] ?? '');
   const rows = useMemo(() => rowsOf(model, activeSheet), [model, activeSheet]);
@@ -148,7 +152,7 @@ export function CostCurvePanel({ model, sheetsWithRows, currencySymbol, onApplyS
   const resetCurve = () => setPoints([{ p: 0, mc: 10 }, { p: pMax, mc: 40 }]);
 
   // ── Apply: two `set` adjustments through the tested Adjust engine ─────────
-  const apply = () => {
+  const apply = async () => {
     if (!activeSheet) { onStatus('Pick a component first.'); return; }
     if (matches === 0) { onStatus('No rows match — nothing to write. Check the filters.'); return; }
     const c1 = Number(fit.marginalCost.toFixed(6));
@@ -157,7 +161,14 @@ export function CostCurvePanel({ model, sheetsWithRows, currencySymbol, onApplyS
       { id: 'cc_mc', sheet: activeSheet, filters, attribute: 'marginal_cost', action: 'set', amount: c1 },
       { id: 'cc_q', sheet: activeSheet, filters, attribute: 'marginal_cost_quadratic', action: 'set', amount: c2 },
     ];
-    const result = applyAdjustments(model, adjustments, {});
+    let result: Awaited<ReturnType<typeof adjustSheets>>;
+    try {
+      // Runs on the backend (the same engine as the MCP adjust_values tool).
+      result = await adjustSheets({ [activeSheet]: rowsOf(model, activeSheet) }, adjustments);
+    } catch (error) {
+      onStatus(`Could not apply the cost curve: ${error instanceof Error ? error.message : 'unknown error'}`);
+      return;
+    }
     onApplySheets(result.sheets);
     onStatus(
       `Set marginal_cost = ${c1} and marginal_cost_quadratic = ${c2} on ${matches} ${activeSheet} row${matches === 1 ? '' : 's'}.`,
@@ -167,6 +178,30 @@ export function CostCurvePanel({ model, sheetsWithRows, currencySymbol, onApplyS
   // ── Axis ticks ─────────────────────────────────────────────────────────
   const xTicks = [0, 0.25, 0.5, 0.75, 1].map((f) => f * pMax);
   const yTicks = [0, 0.5, 1].map((f) => f * yMax);
+
+  const modeSwitch = (
+    <div className="forge-adjust-row" role="group" aria-label="Curve type">
+      <button type="button" className={`tb-btn${mode === 'quadratic' ? '' : ' tb-btn--muted'}`} aria-pressed={mode === 'quadratic'} onClick={() => setMode('quadratic')}>
+        Quadratic fit
+      </button>
+      <button type="button" className={`tb-btn${mode === 'piecewise' ? '' : ' tb-btn--muted'}`} aria-pressed={mode === 'piecewise'} onClick={() => setMode('piecewise')}>
+        Piecewise breakpoints
+      </button>
+    </div>
+  );
+
+  if (mode === 'piecewise') {
+    return (
+      <PiecewiseCurveEditor
+        model={model}
+        sheetsWithRows={sheetsWithRows}
+        currencySymbol={currencySymbol}
+        onApplySheets={onApplySheets}
+        onStatus={onStatus}
+        modeSwitch={modeSwitch}
+      />
+    );
+  }
 
   if (eligible.length === 0) {
     return (
@@ -187,6 +222,7 @@ export function CostCurvePanel({ model, sheetsWithRows, currencySymbol, onApplyS
           <code> marginal_cost</code> (linear) + <code>marginal_cost_quadratic</code>.
         </p>
       </header>
+      {modeSwitch}
 
       {/* Component + filters */}
       <div className="forge-adjust-row forge-adjust-spec">

@@ -90,7 +90,7 @@ def convert_fuel_prices(filters: dict[str, Any]) -> list[dict[str, Any]]:
         rows.append({
             "name": carrier,
             # NOT a PyPSA carriers attribute: the merge step (mergeFragment.ts /
-            # backend/mcp/fragment.py) turns it into each generator's
+            # backend/app/fragment_merge.py) turns it into each generator's
             # ``marginal_cost = fuel_cost_thermal / efficiency`` (see
             # ``electric_marginal_cost``).
             "fuel_cost_thermal": round(float(conv(raw)), 4),

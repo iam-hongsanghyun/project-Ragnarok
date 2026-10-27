@@ -138,6 +138,10 @@ def _parse_linexpr(tokens: list[tuple[str, str]], line_no: int) -> list[Term]:
         if tokens[i][0] == "num" and i + 1 < n and tokens[i + 1][0] == "star":
             coef = sign * float(tokens[i][1])
             i += 2
+            # `2 *` with nothing after it ran off the end and crashed with an
+            # IndexError; report it as the parse error the editor already shows.
+            if i >= n:
+                raise DslParseError(line_no, f"expected a term after '{tokens[i - 2][1]} *'")
         kind, val = tokens[i]
         if kind == "num":
             terms.append(Term(coef * float(val), "const", None))

@@ -66,10 +66,10 @@ class ConfigBundle:
     * ``network_import_policy`` — curated rule table, read from disk.
     * ``capabilities`` — solver-backend capability list (from the
       backend registry — also dynamic).
-    * ``simulation_defaults`` — server-side simulation knobs (max
-      snapshots, default snapshot count, default snapshot weight).
-      Backend authoritative so the frontend doesn't need to ship its
-      own defaults.
+    * ``simulation_defaults`` — server-side simulation knobs (default
+      snapshot count, default snapshot weight). Backend authoritative:
+      the browser applies them over its shipped run-window defaults at
+      boot (``ConfigBootstrap``).
     * ``build_id`` + ``backend_version`` — for the frontend cache key.
     """
 
@@ -115,12 +115,13 @@ def _build_id(
     standard_types: dict[str, Any],
     network_import_policy: dict[str, Any],
     backend_version: str,
+    simulation_defaults: dict[str, Any] | None = None,
 ) -> str:
     """Deterministic short id over the bundle's content.
 
     The frontend keys its cache by this value, so any change in the
-    schema / types / policy / backend version flips the id and triggers
-    a fresh fetch on next page load.
+    schema / types / policy / simulation defaults / backend version flips
+    the id and triggers a fresh fetch on next page load.
     """
     payload = json.dumps(
         {
@@ -128,6 +129,7 @@ def _build_id(
             "standard_types": standard_types,
             "network_import_policy": network_import_policy,
             "backend_version": backend_version,
+            "simulation_defaults": simulation_defaults or {},
         },
         sort_keys=True,
         default=str,
@@ -191,7 +193,6 @@ def build_bundle(progress: ProgressCallback | None = None) -> ConfigBundle:
     tick("finalize")
     sim_cfg = load_system_defaults().get("simulation", {})
     simulation_defaults = {
-        "maxSnapshots": int(sim_cfg.get("max_snapshots", 8760)),
         "defaultSnapshotCount": int(sim_cfg.get("default_snapshot_count", 24)),
         "defaultSnapshotWeight": float(sim_cfg.get("default_snapshot_weight", 1.0)),
     }
@@ -204,6 +205,7 @@ def build_bundle(progress: ProgressCallback | None = None) -> ConfigBundle:
         simulation_defaults=simulation_defaults,
         build_id=_build_id(
             schema, standard_types, network_import_policy, backend_version,
+            simulation_defaults,
         ),
         backend_version=backend_version,
     )

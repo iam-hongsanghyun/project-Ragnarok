@@ -10,10 +10,11 @@ import {
   buildPivotScatter,
   buildPivotSeries,
   pivotSeriesSheet,
+  pivotValueAttributes,
   pivotValueKind,
 } from './pivot';
 
-const attr = (a: string, type: string, status: 'input' | 'output', storage: 'static' | 'series'): PypsaAttribute => ({
+const attr = (a: string, type: string, status: 'input' | 'output', storage: 'static' | 'series' | 'static_or_series'): PypsaAttribute => ({
   attribute: a, type, unit: type === 'string' ? 'n/a' : 'MW', default: '', description: '', status, raw_status: status, required: false, storage,
 });
 
@@ -21,8 +22,8 @@ beforeAll(() => {
   const generators: PypsaComponentSchema = {
     unique_id: 'generators', component_name: 'Generator', list_name: 'generators', sheet_name: 'generators',
     label: 'Generator', category: 'gen', source_file: '',
-    attributes: [attr('p', 'float', 'output', 'series'), attr('p_nom_opt', 'float', 'output', 'static'), attr('p_nom', 'float', 'input', 'static'), attr('carrier', 'string', 'input', 'static')],
-    input_attributes: ['p_nom', 'carrier'], output_attributes: ['p', 'p_nom_opt'],
+    attributes: [attr('p', 'float', 'output', 'series'), attr('p_nom_opt', 'float', 'output', 'static'), attr('p_nom', 'float', 'input', 'static'), attr('carrier', 'string', 'input', 'static'), attr('marginal_cost', 'float', 'input', 'static_or_series')],
+    input_attributes: ['p_nom', 'carrier', 'marginal_cost'], output_attributes: ['p', 'p_nom_opt'],
     temporal_attributes: ['p'], static_attributes: ['p_nom_opt', 'p_nom', 'carrier'],
     input_temporal_attributes: [], input_static_attributes: ['p_nom', 'carrier'], order: 1,
   };
@@ -208,5 +209,14 @@ describe('pivot engine', () => {
     // hour 0: wind mean of (10+20)=30 and (30+40)=70 → 50; hour 1: wind 60.
     expect(rows[0].wind).toBe(50);
     expect(rows[1].wind).toBe(60);
+  });
+});
+
+describe('pivotValueAttributes (P17)', () => {
+  test('static_or_series input attributes (marginal_cost) are offered next to static ones', () => {
+    const values = pivotValueAttributes('generators').map((o) => o.value);
+    expect(values).toContain('marginal_cost');
+    expect(values).toContain('p_nom');
+    expect(values).not.toContain('carrier'); // non-numeric stays out
   });
 });

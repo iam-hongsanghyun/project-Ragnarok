@@ -34,6 +34,7 @@ import {
   applyStandardTypesBundle,
   type StandardTypesCatalogue,
 } from 'lib/constants/pypsa_standard_types';
+import { applySimulationDefaults } from 'lib/constants/config';
 import { RagnarokLogo } from 'shared/components/RagnarokLogo';
 
 type Phase = 'connecting' | 'warming' | 'fetching_config' | 'ready' | 'error';
@@ -68,6 +69,7 @@ export function ConfigBootstrap({ children }: Props) {
       applyStandardTypesBundle(
         bundle.standard_types as unknown as StandardTypesCatalogue,
       );
+      applySimulationDefaults(bundle.simulation_defaults);
       if (cancelledRef.current) return;
       setPhase('ready');
     };

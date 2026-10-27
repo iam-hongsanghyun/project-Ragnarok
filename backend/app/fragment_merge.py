@@ -1,10 +1,12 @@
-"""Merge a backend-built ``WorkbookFragment`` into a working model — the MCP twin
-of the web UI's ``lib/workbook/mergeFragment.ts``.
+"""Merge a backend-built ``WorkbookFragment`` into a working model.
+
+The ONE implementation, served by ``POST /api/session/merge-fragment`` and used
+by both the web UI ("Add to workbook", Build conversions) and the MCP server.
+``lib/workbook/mergeFragment.ts`` is kept only as an unreachable-backend fallback.
 
 Importers, siting scans and PyPSA-Earth builds return a *fragment* (sheet rows,
 optional ``snapshots`` and a ``provenance`` row) without touching the session.
-The GUI merges it client-side on "Add to workbook"; the agent path has no
-browser, so the same rules live here:
+Merge rules:
 
 * static sheets get the new rows appended with name dedupe (existing rows win;
   colliding names get ``_2`` / ``_3`` / … and references are rewritten);
@@ -20,7 +22,7 @@ browser, so the same rules live here:
 Unlike the TS original, a renamed component is also renamed in the temporal
 columns of the same fragment, so its profile follows it.
 
-Pure functions, stdlib only (this subpackage imports nothing from backend.app).
+Pure functions, stdlib only.
 """
 
 from __future__ import annotations

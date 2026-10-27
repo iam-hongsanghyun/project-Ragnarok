@@ -91,7 +91,11 @@ export function pivotValueAttributes(sheet: string): PivotAttrOpt[] {
   };
   for (const attr of c.output_attributes) add(attr, pivotValueKind(sheet, attr));
   for (const a of c.attributes) {
-    if (a.status === 'input' && a.storage === 'static' && isNumericType(a.type)) add(a.attribute, 'input');
+    // static_or_series attributes (marginal_cost, efficiency, start_up_cost, ...) hold a
+    // static value per component, so they pivot like static ones (P17).
+    if (a.status === 'input' && (a.storage === 'static' || a.storage === 'static_or_series') && isNumericType(a.type)) {
+      add(a.attribute, 'input');
+    }
   }
   return out;
 }

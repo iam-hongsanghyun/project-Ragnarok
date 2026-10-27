@@ -59,19 +59,6 @@ def owner_assets_from_model(
     return out
 
 
-def distinct_owners(
-    model: dict[str, list[dict[str, Any]]], *, column: str = "owner",
-) -> list[str]:
-    """Every distinct non-blank value of ``column`` across generators / storage."""
-    seen: list[str] = []
-    for sheet in ("generators", "storage_units", "stores"):
-        for row in model.get(sheet, []) or []:
-            owner = str(row.get(column, "")).strip()
-            if owner and owner not in seen:
-                seen.append(owner)
-    return seen
-
-
 def _price_by_bus(
     network: pypsa.Network,
     buses: list[str],

@@ -95,6 +95,7 @@ import pypsa
 from ..constants import carrier_color
 from .adequacy import (
     compute_adequacy,
+    maintenance_available_pmax,
     extract_storage_fleet,
     generate_renewable_ensemble,
     storage_dispatch,
@@ -354,7 +355,7 @@ def build_outage_mc(
     if len(gens) == 0:
         return None
 
-    pmax = network.get_switchable_as_dense("Generator", "p_max_pu")
+    pmax = maintenance_available_pmax(network)
     cap_col = "p_nom_opt" if "p_nom_opt" in gens.columns else "p_nom"
 
     thermal_names: list[str] = []

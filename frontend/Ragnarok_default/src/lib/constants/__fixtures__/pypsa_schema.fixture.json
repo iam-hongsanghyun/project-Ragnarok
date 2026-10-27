@@ -1,7 +1,7 @@
 {
   "meta": {
     "source": "installed pypsa package",
-    "pypsa_version": "1.2.2",
+    "pypsa_version": "1.4.0",
     "generator": "backend/app/pypsa_schema_builder.py",
     "note": "Built at backend startup from <site-packages>/pypsa/data/component_attrs/*.csv. Always in sync with the installed PyPSA version.",
     "non_component_sheets": [
@@ -30,7 +30,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "v_nom",
@@ -41,7 +42,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "type",
@@ -52,7 +54,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "x",
@@ -63,7 +66,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "y",
@@ -74,7 +78,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "carrier",
@@ -85,7 +90,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "unit",
@@ -96,7 +102,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "location",
@@ -107,7 +114,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "v_mag_pu_set",
@@ -118,7 +126,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "v_mag_pu_min",
@@ -129,7 +138,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "v_mag_pu_max",
@@ -140,7 +150,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "control",
@@ -151,7 +162,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "generator",
@@ -162,7 +174,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "sub_network",
@@ -173,7 +186,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p",
@@ -184,7 +198,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "q",
@@ -195,7 +210,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "v_mag_pu",
@@ -206,7 +222,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "v_ang",
@@ -217,7 +234,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "marginal_price",
@@ -228,7 +246,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         }
       ],
       "input_attributes": [
@@ -294,7 +313,8 @@
         "v_mag_pu_min",
         "v_mag_pu_max"
       ],
-      "order": 0
+      "order": 0,
+      "piecewise_attributes": []
     },
     "carriers": {
       "unique_id": "carriers",
@@ -314,7 +334,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "co2_emissions",
@@ -325,7 +346,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "color",
@@ -336,7 +358,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "nice_name",
@@ -347,7 +370,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "max_growth",
@@ -358,7 +382,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "max_relative_growth",
@@ -369,7 +394,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         }
       ],
       "input_attributes": [
@@ -399,7 +425,8 @@
         "max_growth",
         "max_relative_growth"
       ],
-      "order": 1
+      "order": 1,
+      "piecewise_attributes": []
     },
     "generators": {
       "unique_id": "generators",
@@ -419,7 +446,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "bus",
@@ -430,7 +458,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "control",
@@ -441,7 +470,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "type",
@@ -452,7 +482,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p_nom",
@@ -463,7 +494,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p_nom_mod",
@@ -474,7 +506,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p_nom_extendable",
@@ -485,7 +518,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p_nom_min",
@@ -496,7 +530,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p_nom_max",
@@ -507,7 +542,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p_nom_set",
@@ -518,7 +554,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p_min_pu",
@@ -529,7 +566,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "p_max_pu",
@@ -540,7 +578,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "p_set",
@@ -551,7 +590,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "p_init",
@@ -562,7 +602,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "e_sum_min",
@@ -573,7 +614,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "e_sum_max",
@@ -584,7 +626,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "q_set",
@@ -595,7 +638,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "sign",
@@ -606,7 +650,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "carrier",
@@ -617,18 +662,20 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "marginal_cost",
-          "type": "static or series",
+          "type": "static or piecewise or series",
           "unit": "currency/MWh",
           "default": "0.",
           "description": "Marginal cost of production of 1 MWh.",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": true
         },
         {
           "attribute": "marginal_cost_quadratic",
@@ -639,7 +686,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "active",
@@ -650,7 +698,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "build_year",
@@ -661,7 +710,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "lifetime",
@@ -672,7 +722,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "capital_cost",
@@ -683,7 +734,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "overnight_cost",
@@ -694,7 +746,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "discount_rate",
@@ -705,7 +758,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "fom_cost",
@@ -716,18 +770,20 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "efficiency",
-          "type": "static or series",
+          "type": "static or piecewise or series",
           "unit": "per unit",
           "default": "1",
           "description": "Ratio output and primary energy carrier input (e.g. 0.4 MWh~elec~/MWh~fuel~). This is required for global constraints on primary energy in optimization.",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": true
         },
         {
           "attribute": "committable",
@@ -738,29 +794,80 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
+        },
+        {
+          "attribute": "maintainable",
+          "type": "boolean",
+          "unit": "n/a",
+          "default": "False",
+          "description": "Apply maintenance scheduling constraints.",
+          "status": "input",
+          "raw_status": "Input (optional)",
+          "required": false,
+          "storage": "static",
+          "piecewise": false
+        },
+        {
+          "attribute": "maintenance_duration",
+          "type": "float",
+          "unit": "hours",
+          "default": "0",
+          "description": "Elapsed time per maintenance event. Each event covers consecutive snapshots whose weightings sum to at least this value. Only if `maintainable=True`.",
+          "status": "input",
+          "raw_status": "Input (optional)",
+          "required": false,
+          "storage": "static",
+          "piecewise": false
+        },
+        {
+          "attribute": "maintenance_pu",
+          "type": "float",
+          "unit": "per unit",
+          "default": "1.0",
+          "description": "Fraction of capacity unavailable during maintenance (0-1). Only if `maintainable=True`.",
+          "status": "input",
+          "raw_status": "Input (optional)",
+          "required": false,
+          "storage": "static",
+          "piecewise": false
+        },
+        {
+          "attribute": "maintenance_events",
+          "type": "int",
+          "unit": "n/a",
+          "default": "1",
+          "description": "Number of required maintenance events per optimization horizon. Only if `maintainable=True`.",
+          "status": "input",
+          "raw_status": "Input (optional)",
+          "required": false,
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "start_up_cost",
-          "type": "float",
+          "type": "static or series",
           "unit": "currency",
           "default": "0",
           "description": "Cost to start up the generator. Only used if `committable=True`.",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "shut_down_cost",
-          "type": "float",
+          "type": "static or series",
           "unit": "currency",
           "default": "0",
           "description": "Cost to shut down the generator. Only used if `committable=True`.",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "stand_by_cost",
@@ -771,7 +878,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "min_up_time",
@@ -782,7 +890,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "min_down_time",
@@ -793,29 +902,32 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "up_time_before",
           "type": "int",
           "unit": "snapshots",
           "default": "1",
-          "description": "Number of snapshots that the generator was online before `n.snapshots` start. Only used if `committable=True` and `min_up_time>0`. Does not consider snapshot weightings.",
+          "description": "Number of snapshots that the generator was online before the first optimized snapshot. Replaced by the solved status if earlier snapshots were already optimized. Only used if `committable=True`. Does not consider snapshot weightings.",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "down_time_before",
           "type": "int",
           "unit": "snapshots",
           "default": "0",
-          "description": "Number of snapshots that the generator was offline before `n.snapshots` start. Only used if `committable=True` and `min_down_time>0`. Does not consider snapshot weightings.",
+          "description": "Number of snapshots that the generator was offline before the first optimized snapshot. Replaced by the solved status if earlier snapshots were already optimized. Takes precedence over `up_time_before` if positive. Only used if `committable=True`. Does not consider snapshot weightings.",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "ramp_limit_up",
@@ -826,7 +938,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "ramp_limit_down",
@@ -837,7 +950,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "ramp_limit_start_up",
@@ -848,7 +962,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "ramp_limit_shut_down",
@@ -859,7 +974,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "weight",
@@ -870,7 +986,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p",
@@ -881,7 +998,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "q",
@@ -892,7 +1010,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "p_nom_opt",
@@ -903,7 +1022,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "status",
@@ -914,7 +1034,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "start_up",
@@ -925,7 +1046,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "shut_down",
@@ -936,7 +1058,32 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
+        },
+        {
+          "attribute": "maintenance",
+          "type": "series",
+          "unit": "n/a",
+          "default": "0",
+          "description": "Maintenance status (1=in maintenance). Only returned if `maintainable=True`.",
+          "status": "output",
+          "raw_status": "Output",
+          "required": false,
+          "storage": "series",
+          "piecewise": false
+        },
+        {
+          "attribute": "maintenance_start",
+          "type": "series",
+          "unit": "n/a",
+          "default": "0",
+          "description": "Whether a maintenance event begins in the snapshot (1 is yes, 0 is no). Only returned if `maintainable=True`.",
+          "status": "output",
+          "raw_status": "Output",
+          "required": false,
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "mu_upper",
@@ -947,7 +1094,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "mu_lower",
@@ -958,7 +1106,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "mu_p_set",
@@ -969,7 +1118,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "mu_ramp_limit_up",
@@ -980,7 +1130,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "mu_ramp_limit_down",
@@ -991,7 +1142,32 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
+        },
+        {
+          "attribute": "capital_cost_piecewise_opt",
+          "type": "float",
+          "unit": "currency/MW",
+          "default": "0.",
+          "description": "Optimised capital cost when using piecewise linearisation.",
+          "status": "output",
+          "raw_status": "Output",
+          "required": false,
+          "storage": "static",
+          "piecewise": false
+        },
+        {
+          "attribute": "marginal_cost_piecewise_opt",
+          "type": "series",
+          "unit": "currency/MWh",
+          "default": "0.",
+          "description": "Optimised marginal cost when using piecewise linearisation.",
+          "status": "output",
+          "raw_status": "Output",
+          "required": false,
+          "storage": "series",
+          "piecewise": false
         }
       ],
       "input_attributes": [
@@ -1025,6 +1201,10 @@
         "fom_cost",
         "efficiency",
         "committable",
+        "maintainable",
+        "maintenance_duration",
+        "maintenance_pu",
+        "maintenance_events",
         "start_up_cost",
         "shut_down_cost",
         "stand_by_cost",
@@ -1045,11 +1225,15 @@
         "status",
         "start_up",
         "shut_down",
+        "maintenance",
+        "maintenance_start",
         "mu_upper",
         "mu_lower",
         "mu_p_set",
         "mu_ramp_limit_up",
-        "mu_ramp_limit_down"
+        "mu_ramp_limit_down",
+        "capital_cost_piecewise_opt",
+        "marginal_cost_piecewise_opt"
       ],
       "temporal_attributes": [
         "p_min_pu",
@@ -1059,6 +1243,8 @@
         "marginal_cost",
         "marginal_cost_quadratic",
         "efficiency",
+        "start_up_cost",
+        "shut_down_cost",
         "stand_by_cost",
         "ramp_limit_up",
         "ramp_limit_down",
@@ -1067,11 +1253,14 @@
         "status",
         "start_up",
         "shut_down",
+        "maintenance",
+        "maintenance_start",
         "mu_upper",
         "mu_lower",
         "mu_p_set",
         "mu_ramp_limit_up",
-        "mu_ramp_limit_down"
+        "mu_ramp_limit_down",
+        "marginal_cost_piecewise_opt"
       ],
       "static_attributes": [
         "name",
@@ -1104,6 +1293,10 @@
         "fom_cost",
         "efficiency",
         "committable",
+        "maintainable",
+        "maintenance_duration",
+        "maintenance_pu",
+        "maintenance_events",
         "start_up_cost",
         "shut_down_cost",
         "stand_by_cost",
@@ -1116,7 +1309,8 @@
         "ramp_limit_start_up",
         "ramp_limit_shut_down",
         "weight",
-        "p_nom_opt"
+        "p_nom_opt",
+        "capital_cost_piecewise_opt"
       ],
       "input_temporal_attributes": [
         "p_min_pu",
@@ -1126,6 +1320,8 @@
         "marginal_cost",
         "marginal_cost_quadratic",
         "efficiency",
+        "start_up_cost",
+        "shut_down_cost",
         "stand_by_cost",
         "ramp_limit_up",
         "ramp_limit_down"
@@ -1161,6 +1357,10 @@
         "fom_cost",
         "efficiency",
         "committable",
+        "maintainable",
+        "maintenance_duration",
+        "maintenance_pu",
+        "maintenance_events",
         "start_up_cost",
         "shut_down_cost",
         "stand_by_cost",
@@ -1174,7 +1374,36 @@
         "ramp_limit_shut_down",
         "weight"
       ],
-      "order": 2
+      "order": 2,
+      "piecewise_attributes": [
+        {
+          "attribute": "marginal_cost",
+          "x": "p_pu",
+          "kind": "cost",
+          "ported": false,
+          "allow_extendable": false,
+          "output": "marginal_cost_piecewise_opt",
+          "sheet": "generators-marginal_cost-pw"
+        },
+        {
+          "attribute": "capital_cost",
+          "x": "p_nom",
+          "kind": "cost",
+          "ported": false,
+          "allow_extendable": true,
+          "output": "capital_cost_piecewise_opt",
+          "sheet": "generators-capital_cost-pw"
+        },
+        {
+          "attribute": "efficiency",
+          "x": "p_pu",
+          "kind": "efficiency",
+          "ported": false,
+          "allow_extendable": false,
+          "output": null,
+          "sheet": "generators-efficiency-pw"
+        }
+      ]
     },
     "global_constraints": {
       "unique_id": "global_constraints",
@@ -1194,7 +1423,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "type",
@@ -1205,7 +1435,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "investment_period",
@@ -1216,7 +1447,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "bus",
@@ -1227,7 +1459,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "carrier_attribute",
@@ -1238,7 +1471,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "sense",
@@ -1249,7 +1483,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "constant",
@@ -1260,7 +1495,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "mu",
@@ -1271,7 +1507,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         }
       ],
       "input_attributes": [
@@ -1307,7 +1544,8 @@
         "sense",
         "constant"
       ],
-      "order": 13
+      "order": 13,
+      "piecewise_attributes": []
     },
     "line_types": {
       "unique_id": "line_types",
@@ -1327,7 +1565,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "f_nom",
@@ -1338,7 +1577,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "r_per_length",
@@ -1349,7 +1589,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "x_per_length",
@@ -1360,7 +1601,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "c_per_length",
@@ -1371,7 +1613,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "i_nom",
@@ -1382,7 +1625,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "mounting",
@@ -1393,7 +1637,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "cross_section",
@@ -1404,7 +1649,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "references",
@@ -1415,7 +1661,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         }
       ],
       "input_attributes": [
@@ -1454,7 +1701,8 @@
         "cross_section",
         "references"
       ],
-      "order": 8
+      "order": 8,
+      "piecewise_attributes": []
     },
     "lines": {
       "unique_id": "lines",
@@ -1474,7 +1722,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "bus0",
@@ -1485,7 +1734,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "bus1",
@@ -1496,18 +1746,20 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "type",
           "type": "string",
           "unit": "n/a",
           "default": "n/a",
-          "description": "Name of line standard type. If this is not an empty string \"\", the line standard type impedance parameters are multiplied with the `length` and divided/multiplied by `num_parallel` to compute `x`, `r`, etc. This will override any values set in `r`, `x, and `b`. If the string is empty, values manually provided for `r`, `x`, etc. are taken.",
+          "description": "Name of line standard type. If this is not an empty string \"\", the line standard type impedance parameters are multiplied with the `length` and divided/multiplied by `num_parallel` to compute `x`, `r`, etc. This will override any values set in `r`, `x`, and `b`. If the string is empty, values manually provided for `r`, `x`, etc. are taken.",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "x",
@@ -1518,7 +1770,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "r",
@@ -1529,7 +1782,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "g",
@@ -1540,7 +1794,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "b",
@@ -1551,7 +1806,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "s_nom",
@@ -1562,7 +1818,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "s_nom_mod",
@@ -1573,7 +1830,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "s_nom_extendable",
@@ -1584,7 +1842,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "s_nom_min",
@@ -1595,7 +1854,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "s_nom_max",
@@ -1606,7 +1866,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "s_nom_set",
@@ -1617,7 +1878,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "s_max_pu",
@@ -1628,7 +1890,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "capital_cost",
@@ -1639,7 +1902,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "overnight_cost",
@@ -1650,7 +1914,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "discount_rate",
@@ -1661,7 +1926,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "fom_cost",
@@ -1672,7 +1938,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "active",
@@ -1683,7 +1950,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "build_year",
@@ -1694,7 +1962,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "lifetime",
@@ -1705,7 +1974,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "length",
@@ -1716,7 +1986,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "carrier",
@@ -1727,7 +1998,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "terrain_factor",
@@ -1738,7 +2010,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "num_parallel",
@@ -1749,29 +2022,32 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "v_ang_min",
           "type": "float",
           "unit": "degrees",
           "default": "-inf",
-          "description": "Minimum voltage angle difference across the line.  Placeholder attribute not currently used.",
+          "description": "Deprecated and ignored. `v_ang_max` applies symmetrically as an absolute voltage angle difference limit.",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "v_ang_max",
           "type": "float",
           "unit": "degrees",
           "default": "inf",
-          "description": "Maximum voltage angle difference across the line. Placeholder attribute not currently used.",
+          "description": "Maximum magnitude of the voltage angle difference across the line in degrees. Enforced in the optimisation as a symmetric cap on the line's angle difference. Ignored when inf.",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "sub_network",
@@ -1782,7 +2058,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p0",
@@ -1793,7 +2070,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "q0",
@@ -1804,7 +2082,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "p1",
@@ -1815,7 +2094,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "q1",
@@ -1826,7 +2106,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "x_pu",
@@ -1837,7 +2118,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "r_pu",
@@ -1848,7 +2130,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "g_pu",
@@ -1859,7 +2142,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "b_pu",
@@ -1870,7 +2154,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "x_pu_eff",
@@ -1881,7 +2166,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "r_pu_eff",
@@ -1892,7 +2178,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "s_nom_opt",
@@ -1903,7 +2190,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "mu_lower",
@@ -1914,7 +2202,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "mu_upper",
@@ -1925,7 +2214,20 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
+        },
+        {
+          "attribute": "capital_cost_piecewise_opt",
+          "type": "float",
+          "unit": "currency/MVA",
+          "default": "0.",
+          "description": "Optimised capital cost when using piecewise linearisation.",
+          "status": "output",
+          "raw_status": "Output",
+          "required": false,
+          "storage": "static",
+          "piecewise": false
         }
       ],
       "input_attributes": [
@@ -1972,7 +2274,8 @@
         "r_pu_eff",
         "s_nom_opt",
         "mu_lower",
-        "mu_upper"
+        "mu_upper",
+        "capital_cost_piecewise_opt"
       ],
       "temporal_attributes": [
         "s_max_pu",
@@ -2019,7 +2322,8 @@
         "b_pu",
         "x_pu_eff",
         "r_pu_eff",
-        "s_nom_opt"
+        "s_nom_opt",
+        "capital_cost_piecewise_opt"
       ],
       "input_temporal_attributes": [
         "s_max_pu"
@@ -2054,7 +2358,18 @@
         "v_ang_min",
         "v_ang_max"
       ],
-      "order": 7
+      "order": 7,
+      "piecewise_attributes": [
+        {
+          "attribute": "capital_cost",
+          "x": "s_nom",
+          "kind": "cost",
+          "ported": false,
+          "allow_extendable": true,
+          "output": "capital_cost_piecewise_opt",
+          "sheet": "lines-capital_cost-pw"
+        }
+      ]
     },
     "links": {
       "unique_id": "links",
@@ -2074,7 +2389,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "bus0",
@@ -2085,7 +2401,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "bus1",
@@ -2096,7 +2413,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "type",
@@ -2107,7 +2425,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "carrier",
@@ -2118,18 +2437,20 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "efficiency",
-          "type": "static or series",
+          "type": "static or piecewise or series",
           "unit": "per unit",
           "default": "1",
           "description": "Efficiency of energy transfer from `bus0` to `bus1`. Can be time-dependent (e.g. to represent temperature-dependent heat pump COP).  Further efficiency attributes for further buses (e.g. `bus2`, `bus3`, etc.) are automatically expanded as needed (e.g. `efficiency2`, `efficiency3`, etc.).",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": true
         },
         {
           "attribute": "active",
@@ -2140,7 +2461,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "build_year",
@@ -2151,7 +2473,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "lifetime",
@@ -2162,7 +2485,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p_nom",
@@ -2173,7 +2497,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p_nom_mod",
@@ -2184,7 +2509,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p_nom_extendable",
@@ -2195,7 +2521,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p_nom_min",
@@ -2206,7 +2533,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p_nom_max",
@@ -2217,7 +2545,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p_nom_set",
@@ -2228,7 +2557,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p_set",
@@ -2239,7 +2569,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "p_init",
@@ -2250,7 +2581,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p_min_pu",
@@ -2261,7 +2593,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "p_max_pu",
@@ -2272,7 +2605,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "capital_cost",
@@ -2283,7 +2617,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "overnight_cost",
@@ -2294,7 +2629,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "discount_rate",
@@ -2305,7 +2641,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "fom_cost",
@@ -2316,18 +2653,20 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "marginal_cost",
-          "type": "static or series",
+          "type": "static or piecewise or series",
           "unit": "currency/MWh",
           "default": "0.",
           "description": "Marginal cost of 1 MWh consumption from `bus0` (e.g. including variable operation and maintenance costs of an electrolyser but excluding electricity costs).",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": true
         },
         {
           "attribute": "marginal_cost_quadratic",
@@ -2338,7 +2677,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "stand_by_cost",
@@ -2349,7 +2689,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "length",
@@ -2360,7 +2701,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "terrain_factor",
@@ -2371,7 +2713,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "committable",
@@ -2382,29 +2725,80 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
+        },
+        {
+          "attribute": "maintainable",
+          "type": "boolean",
+          "unit": "n/a",
+          "default": "False",
+          "description": "Apply maintenance scheduling constraints.",
+          "status": "input",
+          "raw_status": "Input (optional)",
+          "required": false,
+          "storage": "static",
+          "piecewise": false
+        },
+        {
+          "attribute": "maintenance_duration",
+          "type": "float",
+          "unit": "hours",
+          "default": "0",
+          "description": "Elapsed time per maintenance event. Each event covers consecutive snapshots whose weightings sum to at least this value. Only if `maintainable=True`.",
+          "status": "input",
+          "raw_status": "Input (optional)",
+          "required": false,
+          "storage": "static",
+          "piecewise": false
+        },
+        {
+          "attribute": "maintenance_pu",
+          "type": "float",
+          "unit": "per unit",
+          "default": "1.0",
+          "description": "Fraction of capacity unavailable during maintenance (0-1). Only if `maintainable=True`.",
+          "status": "input",
+          "raw_status": "Input (optional)",
+          "required": false,
+          "storage": "static",
+          "piecewise": false
+        },
+        {
+          "attribute": "maintenance_events",
+          "type": "int",
+          "unit": "n/a",
+          "default": "1",
+          "description": "Number of required maintenance events per optimization horizon. Only if `maintainable=True`.",
+          "status": "input",
+          "raw_status": "Input (optional)",
+          "required": false,
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "start_up_cost",
-          "type": "float",
+          "type": "static or series",
           "unit": "currency",
           "default": "0",
           "description": "Cost to start up the link. Only used if `committable=True`.",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "shut_down_cost",
-          "type": "float",
+          "type": "static or series",
           "unit": "currency",
           "default": "0",
           "description": "Cost to shut down the link. Only used if `committable=True`.",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "min_up_time",
@@ -2415,7 +2809,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "min_down_time",
@@ -2426,29 +2821,32 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "up_time_before",
           "type": "int",
           "unit": "snapshots",
           "default": "1",
-          "description": "Number of snapshots that the link was online before network.snapshots start. Only read if `committable=True` and `min_up_time>0`. Does not consider snapshot weightings.",
+          "description": "Number of snapshots that the link was online before the first optimized snapshot. Replaced by the solved status if earlier snapshots were already optimized. Only used if `committable=True`. Does not consider snapshot weightings.",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "down_time_before",
           "type": "int",
           "unit": "snapshots",
           "default": "0",
-          "description": "Number of snapshots that the link was offline before network.snapshots start. Only read if `committable=True` and `min_down_time>0`. Does not consider snapshot weightings.",
+          "description": "Number of snapshots that the link was offline before the first optimized snapshot. Replaced by the solved status if earlier snapshots were already optimized. Takes precedence over `up_time_before` if positive. Only used if `committable=True`. Does not consider snapshot weightings.",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "ramp_limit_up",
@@ -2459,7 +2857,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "ramp_limit_down",
@@ -2470,7 +2869,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "ramp_limit_start_up",
@@ -2481,7 +2881,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "ramp_limit_shut_down",
@@ -2492,7 +2893,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "delay",
@@ -2503,7 +2905,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "cyclic_delay",
@@ -2514,7 +2917,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p",
@@ -2525,7 +2929,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "p0",
@@ -2536,7 +2941,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "p1",
@@ -2547,7 +2953,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "p_nom_opt",
@@ -2558,7 +2965,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "status",
@@ -2569,7 +2977,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "start_up",
@@ -2580,7 +2989,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "shut_down",
@@ -2591,7 +3001,32 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
+        },
+        {
+          "attribute": "maintenance",
+          "type": "series",
+          "unit": "n/a",
+          "default": "0",
+          "description": "Maintenance status (1=in maintenance). Only returned if `maintainable=True`.",
+          "status": "output",
+          "raw_status": "Output",
+          "required": false,
+          "storage": "series",
+          "piecewise": false
+        },
+        {
+          "attribute": "maintenance_start",
+          "type": "series",
+          "unit": "n/a",
+          "default": "0",
+          "description": "Whether a maintenance event begins in the snapshot (1 is yes, 0 is no). Only returned if `maintainable=True`.",
+          "status": "output",
+          "raw_status": "Output",
+          "required": false,
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "mu_lower",
@@ -2602,7 +3037,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "mu_upper",
@@ -2613,7 +3049,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "mu_p_set",
@@ -2624,7 +3061,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "mu_ramp_limit_up",
@@ -2635,7 +3073,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "mu_ramp_limit_down",
@@ -2646,7 +3085,32 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
+        },
+        {
+          "attribute": "capital_cost_piecewise_opt",
+          "type": "float",
+          "unit": "currency/MW",
+          "default": "0.",
+          "description": "Optimised capital cost when using piecewise linearisation.",
+          "status": "output",
+          "raw_status": "Output",
+          "required": false,
+          "storage": "static",
+          "piecewise": false
+        },
+        {
+          "attribute": "marginal_cost_piecewise_opt",
+          "type": "series",
+          "unit": "currency/MWh",
+          "default": "0.",
+          "description": "Optimised marginal cost when using piecewise linearisation.",
+          "status": "output",
+          "raw_status": "Output",
+          "required": false,
+          "storage": "series",
+          "piecewise": false
         }
       ],
       "input_attributes": [
@@ -2679,6 +3143,10 @@
         "length",
         "terrain_factor",
         "committable",
+        "maintainable",
+        "maintenance_duration",
+        "maintenance_pu",
+        "maintenance_events",
         "start_up_cost",
         "shut_down_cost",
         "min_up_time",
@@ -2700,11 +3168,15 @@
         "status",
         "start_up",
         "shut_down",
+        "maintenance",
+        "maintenance_start",
         "mu_lower",
         "mu_upper",
         "mu_p_set",
         "mu_ramp_limit_up",
-        "mu_ramp_limit_down"
+        "mu_ramp_limit_down",
+        "capital_cost_piecewise_opt",
+        "marginal_cost_piecewise_opt"
       ],
       "temporal_attributes": [
         "efficiency",
@@ -2714,6 +3186,8 @@
         "marginal_cost",
         "marginal_cost_quadratic",
         "stand_by_cost",
+        "start_up_cost",
+        "shut_down_cost",
         "ramp_limit_up",
         "ramp_limit_down",
         "p",
@@ -2722,11 +3196,14 @@
         "status",
         "start_up",
         "shut_down",
+        "maintenance",
+        "maintenance_start",
         "mu_lower",
         "mu_upper",
         "mu_p_set",
         "mu_ramp_limit_up",
-        "mu_ramp_limit_down"
+        "mu_ramp_limit_down",
+        "marginal_cost_piecewise_opt"
       ],
       "static_attributes": [
         "name",
@@ -2758,6 +3235,10 @@
         "length",
         "terrain_factor",
         "committable",
+        "maintainable",
+        "maintenance_duration",
+        "maintenance_pu",
+        "maintenance_events",
         "start_up_cost",
         "shut_down_cost",
         "min_up_time",
@@ -2770,7 +3251,8 @@
         "ramp_limit_shut_down",
         "delay",
         "cyclic_delay",
-        "p_nom_opt"
+        "p_nom_opt",
+        "capital_cost_piecewise_opt"
       ],
       "input_temporal_attributes": [
         "efficiency",
@@ -2780,6 +3262,8 @@
         "marginal_cost",
         "marginal_cost_quadratic",
         "stand_by_cost",
+        "start_up_cost",
+        "shut_down_cost",
         "ramp_limit_up",
         "ramp_limit_down"
       ],
@@ -2813,6 +3297,10 @@
         "length",
         "terrain_factor",
         "committable",
+        "maintainable",
+        "maintenance_duration",
+        "maintenance_pu",
+        "maintenance_events",
         "start_up_cost",
         "shut_down_cost",
         "min_up_time",
@@ -2826,7 +3314,36 @@
         "delay",
         "cyclic_delay"
       ],
-      "order": 4
+      "order": 4,
+      "piecewise_attributes": [
+        {
+          "attribute": "marginal_cost",
+          "x": "p_pu",
+          "kind": "cost",
+          "ported": false,
+          "allow_extendable": false,
+          "output": "marginal_cost_piecewise_opt",
+          "sheet": "links-marginal_cost-pw"
+        },
+        {
+          "attribute": "capital_cost",
+          "x": "p_nom",
+          "kind": "cost",
+          "ported": false,
+          "allow_extendable": true,
+          "output": "capital_cost_piecewise_opt",
+          "sheet": "links-capital_cost-pw"
+        },
+        {
+          "attribute": "efficiency",
+          "x": "p_pu",
+          "kind": "efficiency",
+          "ported": true,
+          "allow_extendable": false,
+          "output": null,
+          "sheet": "links-efficiency-pw"
+        }
+      ]
     },
     "loads": {
       "unique_id": "loads",
@@ -2846,7 +3363,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "bus",
@@ -2857,7 +3375,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "carrier",
@@ -2868,7 +3387,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "type",
@@ -2879,7 +3399,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p_set",
@@ -2890,7 +3411,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "q_set",
@@ -2901,7 +3423,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "sign",
@@ -2912,7 +3435,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p",
@@ -2923,7 +3447,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "q",
@@ -2934,7 +3459,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "active",
@@ -2945,7 +3471,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         }
       ],
       "input_attributes": [
@@ -2992,7 +3519,8 @@
         "sign",
         "active"
       ],
-      "order": 3
+      "order": 3,
+      "piecewise_attributes": []
     },
     "network": {
       "unique_id": "network",
@@ -3012,7 +3540,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "snapshots",
@@ -3023,7 +3552,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "snapshot_weightings",
@@ -3034,7 +3564,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "investment_periods",
@@ -3045,7 +3576,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "investment_period_weightings",
@@ -3056,7 +3588,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "now",
@@ -3067,7 +3600,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "srid",
@@ -3078,7 +3612,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "crs",
@@ -3089,7 +3624,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "buses",
@@ -3100,7 +3636,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "buses_t",
@@ -3111,7 +3648,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "lines",
@@ -3122,7 +3660,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "lines_t",
@@ -3133,7 +3672,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "components",
@@ -3144,7 +3684,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "components_t",
@@ -3155,7 +3696,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "branches()",
@@ -3166,7 +3708,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "graph()",
@@ -3177,7 +3720,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         }
       ],
       "input_attributes": [
@@ -3230,7 +3774,8 @@
         "srid",
         "crs"
       ],
-      "order": -1
+      "order": -1,
+      "piecewise_attributes": []
     },
     "processes": {
       "unique_id": "processes",
@@ -3250,7 +3795,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "bus0",
@@ -3261,7 +3807,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "bus1",
@@ -3272,7 +3819,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "type",
@@ -3283,7 +3831,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "carrier",
@@ -3294,29 +3843,32 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "rate0",
-          "type": "static or series",
+          "type": "static or piecewise or series",
           "unit": "per unit",
           "default": "-1",
           "description": "Rate of energy transfer at `bus0` relative to internal power `p`. Can be time-dependent (e.g. to represent temperature-dependent heat pump COP).  `Rate`s for further buses (e.g. `bus2`, `bus3`, etc.) are automatically expanded as needed (e.g. `rate2`, `rate3`, etc.).",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": true
         },
         {
           "attribute": "rate1",
-          "type": "static or series",
+          "type": "static or piecewise or series",
           "unit": "per unit",
           "default": "1",
           "description": "Rate of energy transfer at `bus1` relative to internal power `p`. Can be time-dependent (e.g. to represent temperature-dependent heat pump COP).  `Rate`s for further buses (e.g. `bus2`, `bus3`, etc.) are automatically expanded as needed (e.g. `rate2`, `rate3`, etc.).",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": true
         },
         {
           "attribute": "active",
@@ -3327,7 +3879,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "build_year",
@@ -3338,7 +3891,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "lifetime",
@@ -3349,18 +3903,20 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p_nom",
           "type": "float",
           "unit": "MW",
           "default": "0",
-          "description": "Limit of power which can pass through process (in units of `bus0`). Ignored if `p_nom_extendable=True`.",
+          "description": "Limit of internal power `p` which can pass through process (in units of `p`, which equals the flow at any bus whose `rate` is set to \u00b11; with the default `rate0=-1` this is the flow at `bus0`). Ignored if `p_nom_extendable=True`.",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p_nom_mod",
@@ -3371,7 +3927,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p_nom_extendable",
@@ -3382,7 +3939,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p_nom_min",
@@ -3393,7 +3951,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p_nom_max",
@@ -3404,7 +3963,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p_nom_set",
@@ -3415,7 +3975,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p_set",
@@ -3426,7 +3987,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "p_init",
@@ -3437,7 +3999,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p_min_pu",
@@ -3448,7 +4011,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "p_max_pu",
@@ -3459,29 +4023,32 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "capital_cost",
           "type": "float",
           "unit": "currency/MW",
           "default": "0",
-          "description": "Fixed period costs of extending `p_nom` by 1 MW (unit of `bus0`, e.g. annuitized investment costs). Used directly unless `overnight_cost` is specified. Any `length` factor must already be included.",
+          "description": "Fixed period costs of extending `p_nom` by 1 MW (unit of internal power `p`, e.g. annuitized investment costs). Used directly unless `overnight_cost` is specified. Any `length` factor must already be included.",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "overnight_cost",
           "type": "float",
           "unit": "currency/MW",
           "default": "NaN",
-          "description": "Overnight (upfront) investment cost per MW (unit of `bus0`). If specified, PyPSA calculates annuity using `discount_rate` and `lifetime`. Takes precedence over `capital_cost`.",
+          "description": "Overnight (upfront) investment cost per MW (unit of internal power `p`). If specified, PyPSA calculates annuity using `discount_rate` and `lifetime`. Takes precedence over `capital_cost`.",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "discount_rate",
@@ -3492,40 +4059,44 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "fom_cost",
           "type": "float",
           "unit": "currency/MW",
           "default": "0",
-          "description": "Fixed period operation and maintenance costs per MW (unit of `bus0`), added to annuitized investment cost.",
+          "description": "Fixed period operation and maintenance costs per MW (unit of internal power `p`), added to annuitized investment cost.",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "marginal_cost",
-          "type": "static or series",
+          "type": "static or piecewise or series",
           "unit": "currency/MWh",
           "default": "0.",
-          "description": "Marginal cost of 1 MWh consumption from `bus0` (e.g. including variable operation and maintenance costs of an electrolyser but excluding electricity costs).",
+          "description": "Marginal cost of 1 MWh of internal power `p` (e.g. including variable operation and maintenance costs of an electrolyser but excluding electricity costs). Equals the cost per MWh at `bus0` when `rate0=-1`.",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": true
         },
         {
           "attribute": "marginal_cost_quadratic",
           "type": "static or series",
           "unit": "currency/MWh",
           "default": "0.",
-          "description": "Quadratic marginal cost for 1 MWh of consumption from `bus0`.",
+          "description": "Quadratic marginal cost for 1 MWh of internal power `p`.",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "stand_by_cost",
@@ -3536,7 +4107,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "length",
@@ -3547,7 +4119,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "terrain_factor",
@@ -3558,40 +4131,44 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "committable",
           "type": "boolean",
           "unit": "n/a",
           "default": "False",
-          "description": "Apply unit commitment constraints. This is only possible with `p_nom_extendable=False`.",
+          "description": "Apply unit commitment constraints.",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "start_up_cost",
-          "type": "float",
+          "type": "static or series",
           "unit": "currency",
           "default": "0",
           "description": "Cost to start up the process. Only used if `committable=True`.",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "shut_down_cost",
-          "type": "float",
+          "type": "static or series",
           "unit": "currency",
           "default": "0",
           "description": "Cost to shut down the process. Only used if `committable=True`.",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "min_up_time",
@@ -3602,7 +4179,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "min_down_time",
@@ -3613,29 +4191,32 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "up_time_before",
           "type": "int",
           "unit": "snapshots",
           "default": "1",
-          "description": "Number of snapshots that the process was online before network.snapshots start. Only read if `committable=True` and `min_up_time>0`. Does not consider snapshot weightings.",
+          "description": "Number of snapshots that the process was online before the first optimized snapshot. Replaced by the solved status if earlier snapshots were already optimized. Only used if `committable=True`. Does not consider snapshot weightings.",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "down_time_before",
           "type": "int",
           "unit": "snapshots",
           "default": "0",
-          "description": "Number of snapshots that the process was offline before network.snapshots start. Only read if `committable=True` and `min_down_time>0`. Does not consider snapshot weightings.",
+          "description": "Number of snapshots that the process was offline before the first optimized snapshot. Replaced by the solved status if earlier snapshots were already optimized. Takes precedence over `up_time_before` if positive. Only used if `committable=True`. Does not consider snapshot weightings.",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "ramp_limit_up",
@@ -3646,7 +4227,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "ramp_limit_down",
@@ -3657,7 +4239,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "ramp_limit_start_up",
@@ -3668,7 +4251,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "ramp_limit_shut_down",
@@ -3679,7 +4263,56 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
+        },
+        {
+          "attribute": "maintainable",
+          "type": "boolean",
+          "unit": "n/a",
+          "default": "False",
+          "description": "Apply maintenance scheduling constraints.",
+          "status": "input",
+          "raw_status": "Input (optional)",
+          "required": false,
+          "storage": "static",
+          "piecewise": false
+        },
+        {
+          "attribute": "maintenance_duration",
+          "type": "float",
+          "unit": "hours",
+          "default": "0",
+          "description": "Elapsed time per maintenance event. Each event covers consecutive snapshots whose weightings sum to at least this value. Only if `maintainable=True`.",
+          "status": "input",
+          "raw_status": "Input (optional)",
+          "required": false,
+          "storage": "static",
+          "piecewise": false
+        },
+        {
+          "attribute": "maintenance_pu",
+          "type": "float",
+          "unit": "per unit",
+          "default": "1.0",
+          "description": "Fraction of capacity unavailable during maintenance (0-1). Only if `maintainable=True`.",
+          "status": "input",
+          "raw_status": "Input (optional)",
+          "required": false,
+          "storage": "static",
+          "piecewise": false
+        },
+        {
+          "attribute": "maintenance_events",
+          "type": "int",
+          "unit": "n/a",
+          "default": "1",
+          "description": "Number of required maintenance events per optimization horizon. Only if `maintainable=True`.",
+          "status": "input",
+          "raw_status": "Input (optional)",
+          "required": false,
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "delay0",
@@ -3690,7 +4323,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "cyclic_delay0",
@@ -3701,7 +4335,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "delay1",
@@ -3712,7 +4347,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "cyclic_delay1",
@@ -3723,7 +4359,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p",
@@ -3734,7 +4371,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "p0",
@@ -3745,7 +4383,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "p1",
@@ -3756,7 +4395,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "p_nom_opt",
@@ -3767,7 +4407,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "status",
@@ -3778,7 +4419,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "start_up",
@@ -3789,7 +4431,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "shut_down",
@@ -3800,7 +4443,32 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
+        },
+        {
+          "attribute": "maintenance",
+          "type": "series",
+          "unit": "n/a",
+          "default": "0",
+          "description": "Maintenance status (1=in maintenance). Only returned if `maintainable=True`.",
+          "status": "output",
+          "raw_status": "Output",
+          "required": false,
+          "storage": "series",
+          "piecewise": false
+        },
+        {
+          "attribute": "maintenance_start",
+          "type": "series",
+          "unit": "n/a",
+          "default": "0",
+          "description": "Whether a maintenance event begins in the snapshot (1 is yes, 0 is no). Only returned if `maintainable=True`.",
+          "status": "output",
+          "raw_status": "Output",
+          "required": false,
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "mu_lower",
@@ -3811,7 +4479,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "mu_upper",
@@ -3822,7 +4491,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "mu_p_set",
@@ -3833,7 +4503,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "mu_ramp_limit_up",
@@ -3844,7 +4515,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "mu_ramp_limit_down",
@@ -3855,7 +4527,32 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
+        },
+        {
+          "attribute": "capital_cost_piecewise_opt",
+          "type": "float",
+          "unit": "currency/MW",
+          "default": "0.",
+          "description": "Optimised capital cost when using piecewise linearisation.",
+          "status": "output",
+          "raw_status": "Output",
+          "required": false,
+          "storage": "static",
+          "piecewise": false
+        },
+        {
+          "attribute": "marginal_cost_piecewise_opt",
+          "type": "series",
+          "unit": "currency/MWh",
+          "default": "0.",
+          "description": "Optimised marginal cost when using piecewise linearisation.",
+          "status": "output",
+          "raw_status": "Output",
+          "required": false,
+          "storage": "series",
+          "piecewise": false
         }
       ],
       "input_attributes": [
@@ -3899,6 +4596,10 @@
         "ramp_limit_down",
         "ramp_limit_start_up",
         "ramp_limit_shut_down",
+        "maintainable",
+        "maintenance_duration",
+        "maintenance_pu",
+        "maintenance_events",
         "delay0",
         "cyclic_delay0",
         "delay1",
@@ -3912,11 +4613,15 @@
         "status",
         "start_up",
         "shut_down",
+        "maintenance",
+        "maintenance_start",
         "mu_lower",
         "mu_upper",
         "mu_p_set",
         "mu_ramp_limit_up",
-        "mu_ramp_limit_down"
+        "mu_ramp_limit_down",
+        "capital_cost_piecewise_opt",
+        "marginal_cost_piecewise_opt"
       ],
       "temporal_attributes": [
         "rate0",
@@ -3927,6 +4632,8 @@
         "marginal_cost",
         "marginal_cost_quadratic",
         "stand_by_cost",
+        "start_up_cost",
+        "shut_down_cost",
         "ramp_limit_up",
         "ramp_limit_down",
         "p",
@@ -3935,11 +4642,14 @@
         "status",
         "start_up",
         "shut_down",
+        "maintenance",
+        "maintenance_start",
         "mu_lower",
         "mu_upper",
         "mu_p_set",
         "mu_ramp_limit_up",
-        "mu_ramp_limit_down"
+        "mu_ramp_limit_down",
+        "marginal_cost_piecewise_opt"
       ],
       "static_attributes": [
         "name",
@@ -3982,11 +4692,16 @@
         "ramp_limit_down",
         "ramp_limit_start_up",
         "ramp_limit_shut_down",
+        "maintainable",
+        "maintenance_duration",
+        "maintenance_pu",
+        "maintenance_events",
         "delay0",
         "cyclic_delay0",
         "delay1",
         "cyclic_delay1",
-        "p_nom_opt"
+        "p_nom_opt",
+        "capital_cost_piecewise_opt"
       ],
       "input_temporal_attributes": [
         "rate0",
@@ -3997,6 +4712,8 @@
         "marginal_cost",
         "marginal_cost_quadratic",
         "stand_by_cost",
+        "start_up_cost",
+        "shut_down_cost",
         "ramp_limit_up",
         "ramp_limit_down"
       ],
@@ -4041,12 +4758,45 @@
         "ramp_limit_down",
         "ramp_limit_start_up",
         "ramp_limit_shut_down",
+        "maintainable",
+        "maintenance_duration",
+        "maintenance_pu",
+        "maintenance_events",
         "delay0",
         "cyclic_delay0",
         "delay1",
         "cyclic_delay1"
       ],
-      "order": 9
+      "order": 9,
+      "piecewise_attributes": [
+        {
+          "attribute": "marginal_cost",
+          "x": "p_pu",
+          "kind": "cost",
+          "ported": false,
+          "allow_extendable": false,
+          "output": "marginal_cost_piecewise_opt",
+          "sheet": "processes-marginal_cost-pw"
+        },
+        {
+          "attribute": "capital_cost",
+          "x": "p_nom",
+          "kind": "cost",
+          "ported": false,
+          "allow_extendable": true,
+          "output": "capital_cost_piecewise_opt",
+          "sheet": "processes-capital_cost-pw"
+        },
+        {
+          "attribute": "rate",
+          "x": "p_pu",
+          "kind": "efficiency",
+          "ported": true,
+          "allow_extendable": false,
+          "output": null,
+          "sheet": "processes-rate-pw"
+        }
+      ]
     },
     "shapes": {
       "unique_id": "shapes",
@@ -4066,7 +4816,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "geometry",
@@ -4077,7 +4828,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "component",
@@ -4088,7 +4840,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "idx",
@@ -4099,7 +4852,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "type",
@@ -4110,7 +4864,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         }
       ],
       "input_attributes": [
@@ -4137,7 +4892,8 @@
         "idx",
         "type"
       ],
-      "order": 14
+      "order": 14,
+      "piecewise_attributes": []
     },
     "shunt_impedances": {
       "unique_id": "shunt_impedances",
@@ -4157,7 +4913,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "bus",
@@ -4168,7 +4925,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "g",
@@ -4179,7 +4937,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "b",
@@ -4190,7 +4949,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "sign",
@@ -4201,7 +4961,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p",
@@ -4212,7 +4973,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "q",
@@ -4223,7 +4985,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "g_pu",
@@ -4234,7 +4997,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "b_pu",
@@ -4245,7 +5009,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "active",
@@ -4256,7 +5021,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         }
       ],
       "input_attributes": [
@@ -4296,7 +5062,8 @@
         "sign",
         "active"
       ],
-      "order": 12
+      "order": 12,
+      "piecewise_attributes": []
     },
     "storage_units": {
       "unique_id": "storage_units",
@@ -4316,7 +5083,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "bus",
@@ -4327,7 +5095,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "control",
@@ -4338,7 +5107,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "type",
@@ -4349,7 +5119,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p_nom",
@@ -4360,7 +5131,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p_nom_mod",
@@ -4371,7 +5143,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p_nom_extendable",
@@ -4382,7 +5155,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p_nom_min",
@@ -4393,7 +5167,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p_nom_max",
@@ -4404,7 +5179,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p_nom_set",
@@ -4415,7 +5191,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p_min_pu",
@@ -4426,7 +5203,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "p_max_pu",
@@ -4437,7 +5215,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "p_set",
@@ -4448,7 +5227,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "q_set",
@@ -4459,7 +5239,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "p_dispatch_set",
@@ -4470,7 +5251,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "p_store_set",
@@ -4481,7 +5263,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "sign",
@@ -4492,7 +5275,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "carrier",
@@ -4503,7 +5287,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "spill_cost",
@@ -4514,18 +5299,20 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "marginal_cost",
-          "type": "static or series",
+          "type": "static or piecewise or series",
           "unit": "currency/MWh",
           "default": "0",
           "description": "Marginal cost of production (discharge) of 1 MWh.",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": true
         },
         {
           "attribute": "marginal_cost_quadratic",
@@ -4536,7 +5323,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "marginal_cost_storage",
@@ -4547,7 +5335,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "capital_cost",
@@ -4558,7 +5347,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "overnight_cost",
@@ -4569,7 +5359,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "discount_rate",
@@ -4580,7 +5371,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "fom_cost",
@@ -4591,7 +5383,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "active",
@@ -4602,7 +5395,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "build_year",
@@ -4613,7 +5407,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "lifetime",
@@ -4624,7 +5419,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "state_of_charge_initial",
@@ -4635,7 +5431,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "state_of_charge_initial_per_period",
@@ -4646,7 +5443,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "state_of_charge_set",
@@ -4657,7 +5455,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "cyclic_state_of_charge",
@@ -4668,7 +5467,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "cyclic_state_of_charge_per_period",
@@ -4679,7 +5479,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "max_hours",
@@ -4690,7 +5491,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "efficiency_store",
@@ -4701,7 +5503,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "efficiency_dispatch",
@@ -4712,7 +5515,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "standing_loss",
@@ -4723,7 +5527,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "inflow",
@@ -4734,7 +5539,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "p",
@@ -4745,7 +5551,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "p_dispatch",
@@ -4756,7 +5563,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "p_store",
@@ -4767,7 +5575,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "q",
@@ -4778,7 +5587,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "state_of_charge",
@@ -4789,7 +5599,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "spill",
@@ -4800,7 +5611,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "p_nom_opt",
@@ -4811,7 +5623,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "mu_upper",
@@ -4822,7 +5635,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "mu_lower",
@@ -4833,7 +5647,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "mu_state_of_charge_set",
@@ -4844,7 +5659,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "mu_energy_balance",
@@ -4855,7 +5671,32 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
+        },
+        {
+          "attribute": "capital_cost_piecewise_opt",
+          "type": "float",
+          "unit": "currency/MW",
+          "default": "0.",
+          "description": "Optimised capital cost when using piecewise linearisation.",
+          "status": "output",
+          "raw_status": "Output",
+          "required": false,
+          "storage": "static",
+          "piecewise": false
+        },
+        {
+          "attribute": "marginal_cost_piecewise_opt",
+          "type": "series",
+          "unit": "currency/MWh",
+          "default": "0.",
+          "description": "Optimised marginal cost when using piecewise linearisation.",
+          "status": "output",
+          "raw_status": "Output",
+          "required": false,
+          "storage": "series",
+          "piecewise": false
         }
       ],
       "input_attributes": [
@@ -4910,7 +5751,9 @@
         "mu_upper",
         "mu_lower",
         "mu_state_of_charge_set",
-        "mu_energy_balance"
+        "mu_energy_balance",
+        "capital_cost_piecewise_opt",
+        "marginal_cost_piecewise_opt"
       ],
       "temporal_attributes": [
         "p_min_pu",
@@ -4937,7 +5780,8 @@
         "mu_upper",
         "mu_lower",
         "mu_state_of_charge_set",
-        "mu_energy_balance"
+        "mu_energy_balance",
+        "marginal_cost_piecewise_opt"
       ],
       "static_attributes": [
         "name",
@@ -4979,7 +5823,8 @@
         "efficiency_dispatch",
         "standing_loss",
         "inflow",
-        "p_nom_opt"
+        "p_nom_opt",
+        "capital_cost_piecewise_opt"
       ],
       "input_temporal_attributes": [
         "p_min_pu",
@@ -5039,7 +5884,27 @@
         "standing_loss",
         "inflow"
       ],
-      "order": 6
+      "order": 6,
+      "piecewise_attributes": [
+        {
+          "attribute": "marginal_cost",
+          "x": "p_dispatch_pu",
+          "kind": "cost",
+          "ported": false,
+          "allow_extendable": false,
+          "output": "marginal_cost_piecewise_opt",
+          "sheet": "storage_units-marginal_cost-pw"
+        },
+        {
+          "attribute": "capital_cost",
+          "x": "p_nom",
+          "kind": "cost",
+          "ported": false,
+          "allow_extendable": true,
+          "output": "capital_cost_piecewise_opt",
+          "sheet": "storage_units-capital_cost-pw"
+        }
+      ]
     },
     "stores": {
       "unique_id": "stores",
@@ -5059,7 +5924,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "bus",
@@ -5070,7 +5936,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "type",
@@ -5081,7 +5948,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "carrier",
@@ -5092,7 +5960,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "e_nom",
@@ -5103,7 +5972,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "e_nom_mod",
@@ -5114,7 +5984,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "e_nom_extendable",
@@ -5125,7 +5996,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "e_nom_min",
@@ -5136,7 +6008,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "e_nom_max",
@@ -5147,7 +6020,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "e_nom_set",
@@ -5158,7 +6032,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "e_min_pu",
@@ -5169,7 +6044,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "e_max_pu",
@@ -5180,7 +6056,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "e_initial",
@@ -5191,7 +6068,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "e_initial_per_period",
@@ -5202,7 +6080,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "e_cyclic",
@@ -5213,7 +6092,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "e_cyclic_per_period",
@@ -5224,7 +6104,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p_set",
@@ -5235,7 +6116,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "q_set",
@@ -5246,7 +6128,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "e_set",
@@ -5257,7 +6140,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "sign",
@@ -5268,29 +6152,32 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "marginal_cost",
-          "type": "static or series",
+          "type": "static or piecewise or series",
           "unit": "currency/MWh",
           "default": "0",
-          "description": "Marginal cost applied to both charging and discharging of 1 MWh.",
+          "description": "Marginal cost of net dispatch of 1 MWh (positive `p` incurs cost; negative `p` is credited).",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": true
         },
         {
           "attribute": "marginal_cost_quadratic",
           "type": "static or series",
           "unit": "currency/MWh",
           "default": "0",
-          "description": "Quadratic marginal cost of applied to charging and discharging of 1 MWh.",
+          "description": "Quadratic marginal cost of net dispatch of 1 MWh.",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "marginal_cost_storage",
@@ -5301,7 +6188,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "capital_cost",
@@ -5312,7 +6200,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "overnight_cost",
@@ -5323,7 +6212,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "discount_rate",
@@ -5334,7 +6224,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "fom_cost",
@@ -5345,7 +6236,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "standing_loss",
@@ -5356,7 +6248,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "active",
@@ -5367,7 +6260,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "build_year",
@@ -5378,7 +6272,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "lifetime",
@@ -5389,7 +6284,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p",
@@ -5400,7 +6296,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "q",
@@ -5411,7 +6308,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "e",
@@ -5422,7 +6320,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "e_nom_opt",
@@ -5433,7 +6332,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "mu_upper",
@@ -5444,7 +6344,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "mu_lower",
@@ -5455,7 +6356,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "mu_energy_balance",
@@ -5466,7 +6368,32 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
+        },
+        {
+          "attribute": "capital_cost_piecewise_opt",
+          "type": "float",
+          "unit": "currency/MWh",
+          "default": "0.",
+          "description": "Optimised capital cost when using piecewise linearisation.",
+          "status": "output",
+          "raw_status": "Output",
+          "required": false,
+          "storage": "static",
+          "piecewise": false
+        },
+        {
+          "attribute": "marginal_cost_piecewise_opt",
+          "type": "series",
+          "unit": "currency/MWh",
+          "default": "0.",
+          "description": "Optimised marginal cost when using piecewise linearisation.",
+          "status": "output",
+          "raw_status": "Output",
+          "required": false,
+          "storage": "series",
+          "piecewise": false
         }
       ],
       "input_attributes": [
@@ -5509,7 +6436,9 @@
         "e_nom_opt",
         "mu_upper",
         "mu_lower",
-        "mu_energy_balance"
+        "mu_energy_balance",
+        "capital_cost_piecewise_opt",
+        "marginal_cost_piecewise_opt"
       ],
       "temporal_attributes": [
         "e_min_pu",
@@ -5526,7 +6455,8 @@
         "e",
         "mu_upper",
         "mu_lower",
-        "mu_energy_balance"
+        "mu_energy_balance",
+        "marginal_cost_piecewise_opt"
       ],
       "static_attributes": [
         "name",
@@ -5560,7 +6490,8 @@
         "active",
         "build_year",
         "lifetime",
-        "e_nom_opt"
+        "e_nom_opt",
+        "capital_cost_piecewise_opt"
       ],
       "input_temporal_attributes": [
         "e_min_pu",
@@ -5606,7 +6537,27 @@
         "build_year",
         "lifetime"
       ],
-      "order": 5
+      "order": 5,
+      "piecewise_attributes": [
+        {
+          "attribute": "marginal_cost",
+          "x": "p_pu",
+          "kind": "cost",
+          "ported": false,
+          "allow_extendable": false,
+          "output": "marginal_cost_piecewise_opt",
+          "sheet": "stores-marginal_cost-pw"
+        },
+        {
+          "attribute": "capital_cost",
+          "x": "e_nom",
+          "kind": "cost",
+          "ported": false,
+          "allow_extendable": true,
+          "output": "capital_cost_piecewise_opt",
+          "sheet": "stores-capital_cost-pw"
+        }
+      ]
     },
     "sub_networks": {
       "unique_id": "sub_networks",
@@ -5626,7 +6577,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "carrier",
@@ -5637,7 +6589,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "slack_bus",
@@ -5648,7 +6601,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         }
       ],
       "input_attributes": [],
@@ -5665,7 +6619,8 @@
       ],
       "input_temporal_attributes": [],
       "input_static_attributes": [],
-      "order": 15
+      "order": 15,
+      "piecewise_attributes": []
     },
     "transformer_types": {
       "unique_id": "transformer_types",
@@ -5685,7 +6640,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "f_nom",
@@ -5696,7 +6652,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "s_nom",
@@ -5707,7 +6664,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "v_nom_0",
@@ -5718,7 +6676,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "v_nom_1",
@@ -5729,7 +6688,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "vsc",
@@ -5740,7 +6700,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "vscr",
@@ -5751,7 +6712,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "pfe",
@@ -5762,7 +6724,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "i0",
@@ -5773,7 +6736,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "phase_shift",
@@ -5784,7 +6748,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "tap_side",
@@ -5795,7 +6760,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "tap_neutral",
@@ -5806,7 +6772,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "tap_min",
@@ -5817,7 +6784,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "tap_max",
@@ -5828,7 +6796,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "tap_step",
@@ -5839,7 +6808,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "references",
@@ -5850,7 +6820,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         }
       ],
       "input_attributes": [
@@ -5910,7 +6881,8 @@
         "tap_step",
         "references"
       ],
-      "order": 11
+      "order": 11,
+      "piecewise_attributes": []
     },
     "transformers": {
       "unique_id": "transformers",
@@ -5930,7 +6902,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "bus0",
@@ -5941,7 +6914,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "bus1",
@@ -5952,7 +6926,8 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "type",
@@ -5963,7 +6938,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "model",
@@ -5974,51 +6950,56 @@
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "x",
           "type": "float",
           "unit": "per unit",
           "default": "0",
-          "description": "Series reactance (per unit, using `s_nom` as base power); must be non-zero for AC branch in linear power flow. Series impedance $z = r + jx$ must be non-zero for the non-linear power flow. Ignored if type defined.",
+          "description": "Series reactance (per unit, using `s_nom` as base power and `v_nom` as base voltage); must be non-zero for AC branch in linear power flow. Series impedance $z = r + jx$ must be non-zero for the non-linear power flow. Ignored if type defined.",
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "r",
           "type": "float",
           "unit": "per unit",
           "default": "0",
-          "description": "Series resistance (per unit, using `s_nom` as base power); must be non-zero for DC branch in linear power flow. Series impedance $z = r + jx$ must be non-zero for the non-linear power flow. Ignored if type defined.",
+          "description": "Series resistance (per unit, using `s_nom` as base power and `v_nom` as base voltage); must be non-zero for DC branch in linear power flow. Series impedance $z = r + jx$ must be non-zero for the non-linear power flow. Ignored if type defined.",
           "status": "input",
           "raw_status": "Input (required)",
           "required": true,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "g",
           "type": "float",
           "unit": "per unit",
           "default": "0",
-          "description": "Shunt conductivity (per unit, using `s_nom` as base power). Ignored if type defined.",
+          "description": "Shunt conductivity (per unit, using `s_nom` as base power and `v_nom` as base voltage). Ignored if type defined.",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "b",
           "type": "float",
           "unit": "per unit",
           "default": "0",
-          "description": "Shunt susceptance (per unit, using `s_nom` as base power). Ignored if type defined.",
+          "description": "Shunt susceptance (per unit, using `s_nom` as base power and `v_nom` as base voltage). Ignored if type defined.",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "s_nom",
@@ -6029,7 +7010,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "s_nom_mod",
@@ -6040,7 +7022,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "s_nom_extendable",
@@ -6051,7 +7034,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "s_nom_min",
@@ -6062,7 +7046,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "s_nom_max",
@@ -6073,7 +7058,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "s_nom_set",
@@ -6084,7 +7070,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "s_max_pu",
@@ -6095,7 +7082,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static_or_series"
+          "storage": "static_or_series",
+          "piecewise": false
         },
         {
           "attribute": "capital_cost",
@@ -6106,7 +7094,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "overnight_cost",
@@ -6117,7 +7106,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "discount_rate",
@@ -6128,7 +7118,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "fom_cost",
@@ -6139,7 +7130,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "num_parallel",
@@ -6150,7 +7142,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "tap_ratio",
@@ -6161,7 +7154,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "tap_side",
@@ -6172,29 +7166,56 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "tap_position",
           "type": "int",
           "unit": "n/a",
           "default": "0",
-          "description": "If the transformer has a `type`, determines position relative to the neutral tap position.",
+          "description": "If the transformer has a `type`, the absolute tap position on the same scale as `tap_min`/`tap_neutral`/`tap_max`. The off-nominal voltage ratio is computed from the offset to `tap_neutral`, so the nominal ratio (`tap_ratio` = 1) is obtained when `tap_position == tap_neutral`.",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "phase_shift",
-          "type": "float",
+          "type": "static or series",
           "unit": "Degrees",
           "default": "0",
-          "description": "Voltage phase angle shift. Ignored if type defined.",
+          "description": "Voltage phase angle shift setpoint. Ignored if type defined. Sign convention follows `pf`/`lpf`: the realised flow is P = (theta0 - theta1 - phase_shift) / x, so the KVL cycle constraint reads sum_l C_lk * (x_l * P_l + phase_shift_l) = 0 (in rad). This is the negative of the angle convention in Verboomen 2008 (= -alpha_Verboomen); do not flip the sign towards the paper or LOPF will diverge from `pf`/`lpf` (issue #1220). When `phase_shift_min < phase_shift_max` the shift becomes a per-snapshot decision variable instead and `phase_shift` is ignored.",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static_or_series",
+          "piecewise": false
+        },
+        {
+          "attribute": "phase_shift_min",
+          "type": "float",
+          "unit": "Degrees",
+          "default": "0",
+          "description": "Lower bound (degrees) for the per-snapshot phase shift. When `phase_shift_min < phase_shift_max` the shift is optimised as a decision variable bounded by `phase_shift_min`/`phase_shift_max` (e.g. a phase-shifting transformer whose tap the TSO optimises); otherwise the shift is fixed to `phase_shift`.",
+          "status": "input",
+          "raw_status": "Input (optional)",
+          "required": false,
+          "storage": "static",
+          "piecewise": false
+        },
+        {
+          "attribute": "phase_shift_max",
+          "type": "float",
+          "unit": "Degrees",
+          "default": "0",
+          "description": "Upper bound (degrees) for the per-snapshot phase shift. See `phase_shift_min`.",
+          "status": "input",
+          "raw_status": "Input (optional)",
+          "required": false,
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "active",
@@ -6205,7 +7226,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "build_year",
@@ -6216,7 +7238,8 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "lifetime",
@@ -6227,29 +7250,32 @@
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "v_ang_min",
           "type": "float",
           "unit": "Degrees",
           "default": "-inf",
-          "description": "Minimum voltage angle difference across the transformer.Placeholder attribute not currently used.",
+          "description": "Deprecated and ignored. `v_ang_max` applies symmetrically as an absolute voltage angle difference limit.",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "v_ang_max",
           "type": "float",
           "unit": "Degrees",
           "default": "inf",
-          "description": "Maximum voltage angle difference across the transformer.Placeholder attribute not currently used.",
+          "description": "Maximum magnitude of the voltage angle difference across the transformer in degrees. Enforced in the optimisation as a symmetric cap on the angle difference including the phase shift. Ignored when inf.",
           "status": "input",
           "raw_status": "Input (optional)",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "sub_network",
@@ -6260,7 +7286,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "p0",
@@ -6271,7 +7298,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "q0",
@@ -6282,7 +7310,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "p1",
@@ -6293,7 +7322,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "q1",
@@ -6304,73 +7334,80 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "x_pu",
           "type": "float",
           "unit": "per unit",
           "default": "0",
-          "description": "Per unit series reactance calculated by `n.calculate_dependent_values()` from `x` and `n.buses.v_nom`.",
+          "description": "Per unit series reactance rescaled to a 1 MVA base power by `n.calculate_dependent_values()` from `x` via `x_pu = x / s_nom`.",
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "r_pu",
           "type": "float",
           "unit": "per unit",
           "default": "0",
-          "description": "Per unit series resistance calculated by `n.calculate_dependent_values()` from `r` and `n.buses.v_nom`.",
+          "description": "Per unit series resistance rescaled to a 1 MVA base power by `n.calculate_dependent_values()` from `r` via `r_pu = r / s_nom`.",
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "g_pu",
           "type": "float",
           "unit": "per unit",
           "default": "0",
-          "description": "Per unit shunt conductivity calculated by `n.calculate_dependent_values()` from `g` and `n.buses.v_nom`.",
+          "description": "Per unit shunt conductivity rescaled to a 1 MVA base power by `n.calculate_dependent_values()` from `g` via `g_pu = g * s_nom`.",
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "b_pu",
           "type": "float",
           "unit": "per unit",
           "default": "0",
-          "description": "Per unit shunt susceptance calculated by `n.calculate_dependent_values()` from `b` and `n.buses.v_nom`.",
+          "description": "Per unit shunt susceptance rescaled to a 1 MVA base power by `n.calculate_dependent_values()` from `b` via `b_pu = b * s_nom`.",
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "x_pu_eff",
           "type": "float",
           "unit": "per unit",
           "default": "0",
-          "description": "Effective per unit series reactance for linear power flow, calculated by `n.calculate_dependent_values()` from `x`, `tap_ratio` for transformers and `n.buses.v_nom`.",
+          "description": "Effective per unit series reactance for linear power flow, calculated by `n.calculate_dependent_values()` from `x_pu` and `tap_ratio` via `x_pu_eff = x_pu * tap_ratio`.",
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "r_pu_eff",
           "type": "float",
           "unit": "per unit",
           "default": "0",
-          "description": "Effective per unit series resistance for linear power flow, calculated by `n.calculate_dependent_values()` from `x`, `tap_ratio` for transformers and `n.buses.v_nom`.",
+          "description": "Effective per unit series resistance for linear power flow, calculated by `n.calculate_dependent_values()` from `r_pu` and `tap_ratio` via `r_pu_eff = r_pu * tap_ratio`.",
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "s_nom_opt",
@@ -6381,7 +7418,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "static"
+          "storage": "static",
+          "piecewise": false
         },
         {
           "attribute": "mu_lower",
@@ -6392,7 +7430,8 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
         },
         {
           "attribute": "mu_upper",
@@ -6403,7 +7442,20 @@
           "status": "output",
           "raw_status": "Output",
           "required": false,
-          "storage": "series"
+          "storage": "series",
+          "piecewise": false
+        },
+        {
+          "attribute": "phase_shift_opt",
+          "type": "series",
+          "unit": "Degrees",
+          "default": "0",
+          "description": "Realised per-snapshot voltage phase angle shift. Equals `phase_shift` for fixed transformers; for optimised transformers (`phase_shift_min < phase_shift_max`) it holds the value chosen by `n.optimize()`.",
+          "status": "output",
+          "raw_status": "Output",
+          "required": false,
+          "storage": "series",
+          "piecewise": false
         }
       ],
       "input_attributes": [
@@ -6432,6 +7484,8 @@
         "tap_side",
         "tap_position",
         "phase_shift",
+        "phase_shift_min",
+        "phase_shift_max",
         "active",
         "build_year",
         "lifetime",
@@ -6452,16 +7506,19 @@
         "r_pu_eff",
         "s_nom_opt",
         "mu_lower",
-        "mu_upper"
+        "mu_upper",
+        "phase_shift_opt"
       ],
       "temporal_attributes": [
         "s_max_pu",
+        "phase_shift",
         "p0",
         "q0",
         "p1",
         "q1",
         "mu_lower",
-        "mu_upper"
+        "mu_upper",
+        "phase_shift_opt"
       ],
       "static_attributes": [
         "name",
@@ -6489,6 +7546,8 @@
         "tap_side",
         "tap_position",
         "phase_shift",
+        "phase_shift_min",
+        "phase_shift_max",
         "active",
         "build_year",
         "lifetime",
@@ -6504,7 +7563,8 @@
         "s_nom_opt"
       ],
       "input_temporal_attributes": [
-        "s_max_pu"
+        "s_max_pu",
+        "phase_shift"
       ],
       "input_static_attributes": [
         "name",
@@ -6532,13 +7592,26 @@
         "tap_side",
         "tap_position",
         "phase_shift",
+        "phase_shift_min",
+        "phase_shift_max",
         "active",
         "build_year",
         "lifetime",
         "v_ang_min",
         "v_ang_max"
       ],
-      "order": 10
+      "order": 10,
+      "piecewise_attributes": [
+        {
+          "attribute": "capital_cost",
+          "x": "s_nom",
+          "kind": "cost",
+          "ported": false,
+          "allow_extendable": true,
+          "output": "capital_cost_piecewise_opt",
+          "sheet": "transformers-capital_cost-pw"
+        }
+      ]
     },
     "snapshots": {
       "unique_id": "snapshots",

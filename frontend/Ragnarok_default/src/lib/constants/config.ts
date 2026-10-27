@@ -35,6 +35,25 @@ export const API_BASE =
 export const MAX_UNPINNED_HISTORY = APP_CONFIG.runHistory.maxUnpinnedEntries;
 export const RUN_POLLING = APP_CONFIG.runPolling;
 export const RUN_WINDOW = APP_CONFIG.runWindow;
+
+/**
+ * Server-authoritative run-window defaults (`GET /api/config` →
+ * `simulation_defaults`) win over the values shipped in app_config.json. Called
+ * once at boot, before the app reads RUN_WINDOW; non-positive/missing values
+ * leave the shipped default in place.
+ */
+export function applySimulationDefaults(
+  defaults: { defaultSnapshotCount?: number; defaultSnapshotWeight?: number } | undefined,
+): void {
+  const count = defaults?.defaultSnapshotCount;
+  const weight = defaults?.defaultSnapshotWeight;
+  if (typeof count === 'number' && Number.isFinite(count) && count > 0) {
+    RUN_WINDOW.defaultSnapshotEnd = Math.floor(count);
+  }
+  if (typeof weight === 'number' && Number.isFinite(weight) && weight > 0) {
+    RUN_WINDOW.defaultSnapshotWeight = weight;
+  }
+}
 export const FORGE_CONFIG = APP_CONFIG.forge;
 export const VALIDATION_CONFIG = APP_CONFIG.validation;
 export const CARBON_CHART_CONFIG = APP_CONFIG.carbonChart;

@@ -350,15 +350,15 @@ def test_legacy_json_run_migrates_to_db_on_read(_runs_dir: Path) -> None:
 def test_derive_name_default_filename_is_clean_timestamp() -> None:
     # No runLabel / scenario label and the default filename → the name is the
     # bare timestamp (no "_ragnarok_case", no trailing ".xlsx").
-    name = run_store._derive_name({}, {}, {"filename": "ragnarok_case.xlsx"})
+    name = run_store._derive_name({}, {"filename": "ragnarok_case.xlsx"})
     assert name.count("_") == 0
     assert ".xlsx" not in name
     # A real filename DOES become a label (extension stripped). The name is
     # scenarioname_datetime, so the label LEADS and the timestamp follows.
-    named = run_store._derive_name({}, {}, {"filename": "north-sea.xlsx"})
+    named = run_store._derive_name({}, {"filename": "north-sea.xlsx"})
     assert named.startswith("north-sea_")
     # scenario label wins and also leads.
-    scen = run_store._derive_name({}, {"label": "ref-case"}, {})
+    scen = run_store._derive_name({"label": "ref-case"}, {})
     assert scen.startswith("ref-case_")
 
 
@@ -412,7 +412,7 @@ def test_export_parts_select_sheet_groups(_runs_dir: Path) -> None:
 
 def test_korean_scenario_label_survives_into_run_name() -> None:
     # DENYLIST sanitisation: non-Latin labels are kept, not stripped to nothing.
-    name = run_store._derive_name({}, {"label": "이런젠장 시나리오"}, {})
+    name = run_store._derive_name({"label": "이런젠장 시나리오"}, {})
     assert name.startswith("이런젠장-시나리오_")
     assert run_store._is_safe_name(name) is True
     # Traversal/path characters are still rejected.

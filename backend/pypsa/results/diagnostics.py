@@ -113,7 +113,7 @@ def _period_factor(network: pypsa.Network) -> float:
     return min(1.0, modelled_hours / hours_in_year) if modelled_hours > 0 else 1.0
 
 
-def diagnose_infeasibility(network: pypsa.Network, *, currency: str = "$") -> dict[str, Any]:
+def diagnose_infeasibility(network: pypsa.Network) -> dict[str, Any]:
     """Structure-level diagnosis of an infeasible / unbounded model."""
     lines: list[str] = []
     suggestions: list[str] = []

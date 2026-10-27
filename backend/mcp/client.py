@@ -896,14 +896,49 @@ class RagnarokClient:
     async def pypsa_earth_stop(self, job_id: str) -> Any:
         return await self._post(f"/api/pypsa-earth/build/{job_id}/stop")
 
+    # ── BEGIN analysis block (WA7/WA8): server-side results + Forge/Build helpers ─
+    async def compare_runs(self, runs: list[str], topics: list[str] | None = None) -> Any:
+        return await self._get(
+            "/api/results/compare",
+            {"runs": ",".join(runs), "topics": ",".join(topics) if topics else None},
+        )
+
+    async def get_kpis(self, run_name: str, currency: str | None = None) -> Any:
+        return await self._get(f"/api/runs/{run_name}/kpis", {"currency": currency})
+
+    async def compare_companies(self, run_name: str, sort_by: str | None = None) -> Any:
+        return await self._get(f"/api/runs/{run_name}/companies", {"sort_by": sort_by})
+
+    async def get_asset_details(self, run_name: str, **params: Any) -> Any:
+        return await self._get(f"/api/runs/{run_name}/assets", params)
+
+    async def forge_snap(self, **body: Any) -> Any:
+        return await self._post("/api/forge/snap", {**body, "sessionId": self.session_id})
+
+    async def forge_adjust(self, body: dict[str, Any], *, revert: bool = False) -> Any:
+        path = "/api/forge/adjust/revert" if revert else "/api/forge/adjust"
+        return await self._post(path, {**body, "sessionId": self.session_id})
+
+    async def list_conversions(self) -> Any:
+        return await self._get("/api/build/conversions", {"session_id": self.session_id})
+
+    async def build_conversion(self, **body: Any) -> Any:
+        return await self._post("/api/build/conversion", {**body, "sessionId": self.session_id})
+
+    async def merge_fragment(self, fragment: dict[str, Any], *, apply: bool = False) -> Any:
+        return await self._post(
+            "/api/session/merge-fragment",
+            {"fragment": fragment, "apply": apply, "sessionId": self.session_id},
+        )
+
+    # ── END analysis block ─────────────────────────────────────────────────────
+
     # ── apply helpers — persist a build/transform result into the session ──────
     async def apply_fragment(self, fragment: dict[str, Any]) -> Any:
         """Merge an importer/siting/PyPSA-Earth fragment the way the GUI's
         "Add to workbook" does (append + name dedupe, snapshot union) and save."""
-        from .fragment import merge_fragment
-
-        model = await self.load_full_model()
-        return await self.save_model(merge_fragment(model or {}, fragment))
+        # One merge implementation, server-side (shared with the GUI).
+        return await self.merge_fragment(fragment, apply=True)
 
     async def save_model(self, model: dict[str, list[dict[str, Any]]]) -> Any:
         """Replace the session's working model (used after a fresh build)."""
@@ -916,6 +951,183 @@ class RagnarokClient:
         model = await self.load_full_model()
         model.update(sheets)
         return await self.save_model(model)
+
+    # ── BEGIN run-spec block (WA3-WA6): run-options reference, scenarios, DSL ───
+    # Used by backend/mcp/tools_runspec.py. Read-only except where noted.
+    async def get_run_options_reference(self, key: str | None = None) -> Any:
+        """``GET /api/run-options`` - the run-options index, or every field of ``key``."""
+        return await self._get("/api/run-options", {"key": key})
+
+    async def list_scenarios(self) -> Any:
+        """Saved scenario presets (short rows) from the model's RAGNAROK_Scenarios sheet."""
+        return await self._get("/api/scenarios", {"session_id": self.session_id})
+
+    async def get_scenario(self, scenario_id: str) -> Any:
+        """One full scenario preset."""
+        return await self._get(
+            f"/api/scenarios/{scenario_id}", {"session_id": self.session_id}
+        )
+
+    async def list_carbon_schedules(self) -> Any:
+        """The model's carbon-schedule library (RAGNAROK_CarbonSchedules)."""
+        return await self._get(
+            "/api/scenarios/carbon-schedules", {"session_id": self.session_id}
+        )
+
+    async def get_custom_dsl(self) -> Any:
+        """The model's RAGNAROK_CustomDSL sheet text, parsed per line."""
+        return await self._get("/api/scenarios/dsl", {"session_id": self.session_id})
+
+    async def resolve_scenario(
+        self,
+        scenario_id: str,
+        *,
+        ui_options: dict[str, Any] | None = None,
+        carbon_schedule_id: str | None = None,
+        options_patch: dict[str, Any] | None = None,
+        run_label: str | None = None,
+    ) -> Any:
+        """The ``{scenario, options}`` run body for a saved scenario (does not queue)."""
+        return await self._post(
+            "/api/scenarios/resolve",
+            self._sid_body(
+                {
+                    "scenarioId": scenario_id,
+                    "uiOptions": ui_options,
+                    "carbonScheduleId": carbon_schedule_id,
+                    "optionsPatch": options_patch,
+                    "runLabel": run_label,
+                }
+            ),
+        )
+    async def validate_run(
+        self, scenario: dict[str, Any], options: dict[str, Any]
+    ) -> Any:
+        """``POST /api/validate`` for a specific run body: model errors plus the pre-run guards."""
+        return await self._post(
+            "/api/validate", self._sid_body({"scenario": scenario, "options": options})
+        )
+
+    async def save_scenario(
+        self, scenario_id: str, fields: dict[str, Any], *, activate: bool = False
+    ) -> Any:
+        """Create or update a saved scenario preset (fields merge over the stored one)."""
+        return await self._put(
+            f"/api/scenarios/{scenario_id}",
+            {"sessionId": self.session_id, "fields": fields, "activate": activate},
+        )
+
+    async def activate_scenario(self, scenario_id: str) -> Any:
+        return await self._request(
+            "POST", f"/api/scenarios/{scenario_id}/activate", params={"session_id": self.session_id}
+        )
+
+    async def delete_scenario(self, scenario_id: str) -> Any:
+        return await self._request(
+            "DELETE", f"/api/scenarios/{scenario_id}", params={"session_id": self.session_id}
+        )
+
+    async def set_custom_dsl(self, text: str, *, allow_errors: bool = False) -> Any:
+        """Replace the model's RAGNAROK_CustomDSL sheet (refused on parse errors unless allowed)."""
+        return await self._put(
+            "/api/scenarios/dsl",
+            {"sessionId": self.session_id, "text": text, "allowErrors": allow_errors},
+        )
+    # ── END run-spec block ──────────────────────────────────────────────────────
+
+    # ── BEGIN components block (P8-P18, P41-P43): PyPSA-native I/O, seasonal ratings ─
+    async def seasonal_rating(self, **kw: Any) -> Any:
+        body = self._sid_body({})
+        body.update({k: v for k, v in kw.items() if v is not None})
+        return await self._post("/api/transform/seasonal-rating", body)
+
+    async def import_pypsa_file(
+        self, kind: str, data: bytes, filename: str, params: dict[str, Any] | None = None
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Upload a PyPSA Excel / CSV-zip / MATPOWER / pandapower file; returns the model JSON."""
+        out = await self._upload(f"/api/import/{kind}", data, filename, params)
+        return (out or {}).get("model") or {}
+
+    async def export_pypsa_native(
+        self, kind: str, *, scenario: dict[str, Any] | None = None, options: dict[str, Any] | None = None
+    ) -> tuple[bytes, str | None]:
+        """Bytes of the working model as PyPSA Excel (``pypsa-excel``) or CSV-folder zip (``pypsa-csv``)."""
+        scenario = dict(scenario or {})
+        scenario.setdefault("discountRate", DEFAULT_DISCOUNT_RATE)
+        body = {"sessionId": self.session_id, "scenario": scenario, "options": options or {}}
+        return await self._request_bytes("POST", f"/api/export/{kind}", json=body)
+
+    async def pypsa_io_capabilities(self) -> Any:
+        return await self._get("/api/import/pypsa-io/capabilities")
+    # ── END components block ────────────────────────────────────────────────────
+
+    # ── BEGIN piecewise block (P10): curves on <list>-<attr>-pw sheets ───────────
+    # Used by backend/mcp/tools_piecewise.py.
+    async def piecewise_catalog(self) -> Any:
+        """``GET /api/piecewise/catalog`` - supported curves, option key, methods."""
+        return await self._get("/api/piecewise/catalog")
+
+    async def piecewise_check(self, list_name: str, attribute: str, rows: list[dict[str, Any]]) -> Any:
+        """``POST /api/piecewise/check`` - parse + classify rows without building a network."""
+        return await self._post(
+            "/api/piecewise/check", {"listName": list_name, "attribute": attribute, "rows": rows}
+        )
+
+    async def piecewise_options_check(self, piecewise_options: Any) -> Any:
+        """``POST /api/piecewise/options/check`` - validate + normalise ``options.piecewiseOptions``."""
+        return await self._post("/api/piecewise/options/check", {"piecewiseOptions": piecewise_options})
+
+    async def get_piecewise_rows(self, sheet: str) -> list[dict[str, Any]]:
+        """All rows of a ``-pw`` sheet in the session ([] when the sheet does not exist)."""
+        try:
+            page = await self.get_sheet_page(sheet, 0, 100000)
+        except RagnarokAPIError as exc:
+            if exc.status == 404:
+                return []
+            raise
+        return list(page.get("rows") or [])
+
+    async def replace_piecewise_curve(self, sheet: str, name: str, rows: list[dict[str, Any]]) -> None:
+        """Replace one component's breakpoint rows (empty ``rows`` clears the curve)."""
+        existing = await self.get_piecewise_rows(sheet)
+        drop = [i for i, r in enumerate(existing) if str(r.get("name")) == name]
+        if drop:
+            await self.patch_sheet(sheet, [{"op": "deleteRows", "rows": drop}])
+        for row in rows:
+            await self.add_row(sheet, row)
+    # ── END piecewise block ─────────────────────────────────────────────────────
+
+    # ── optimise / statistics / network-ops block (P19-P39) ─────────────────────
+    async def optimise_options(self) -> Any:
+        """``GET /api/optimise/options`` - installed solvers and n.optimize option keys."""
+        return await self._get("/api/optimise/options")
+
+    async def export_lp(self, file_name: str, scenario: dict[str, Any] | None, options: dict[str, Any] | None) -> Any:
+        body = self._sid_body({"fileName": file_name, "scenario": scenario, "options": options})
+        return await self._post("/api/optimise/export-lp", body)
+
+    async def consistency_check(self, strict: list[str] | None, check_dtypes: bool, options: dict[str, Any] | None) -> Any:
+        body = self._sid_body({"strict": strict, "checkDtypes": check_dtypes, "options": options})
+        return await self._post("/api/analysis/consistency", body)
+
+    async def network_analysis(self, include: list[str] | None, cycle_basis_method: str, max_branches: int) -> Any:
+        body = self._sid_body({"include": include, "cycleBasisMethod": cycle_basis_method, "maxBranches": max_branches})
+        return await self._post("/api/analysis/network", body)
+
+    async def statistics_query(self, run_name: str, metric: str, **kw: Any) -> Any:
+        body = {"runName": run_name, "metric": metric}
+        body.update({k: v for k, v in kw.items() if v is not None})
+        return await self._post("/api/statistics/query", body)
+
+    async def temporal_cluster(self, **kw: Any) -> Any:
+        return await self._post("/api/transform/temporal", self._sid_body(kw))
+
+    async def slice_network(self, **kw: Any) -> Any:
+        return await self._post("/api/transform/slice", self._sid_body(kw))
+
+    async def merge_network(self, **kw: Any) -> Any:
+        return await self._post("/api/transform/merge", self._sid_body(kw))
+    # ── END optimise block ──────────────────────────────────────────────────────
 
 
 def _clean(params: dict[str, Any] | None) -> dict[str, Any] | None:

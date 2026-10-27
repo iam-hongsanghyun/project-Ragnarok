@@ -107,7 +107,7 @@ import numpy as np
 import pandas as pd
 import pypsa
 
-from .adequacy import StorageFleet, extract_storage_fleet, storage_dispatch
+from .adequacy import maintenance_available_pmax, StorageFleet, extract_storage_fleet, storage_dispatch
 from .outage_mc import _is_variable_renewable, _per_member_metrics, _snapshot_label, sample_outage_masks
 
 _log = logging.getLogger("pypsa.solver")
@@ -470,7 +470,7 @@ def build_convergence(
     if len(gens) == 0:
         return None
 
-    pmax = network.get_switchable_as_dense("Generator", "p_max_pu")
+    pmax = maintenance_available_pmax(network)
     cap_col = "p_nom_opt" if "p_nom_opt" in gens.columns else "p_nom"
 
     thermal_names: list[str] = []

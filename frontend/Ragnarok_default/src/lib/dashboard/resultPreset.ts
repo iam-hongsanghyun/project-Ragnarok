@@ -178,6 +178,19 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
     rows.push(row({ cards: [{ card: { id: id('raw'), kind: 'raw-sheets' } as Card }] }));
   }
 
+  // Piecewise-linear cost / efficiency curves (PyPSA 1.3+) — only when the model has any.
+  if (results.piecewise) {
+    rows.push(row({ cards: [{ card: { id: id('pw'), kind: 'piecewise' } as Card }] }));
+  }
+
+  // Scheduled maintenance (P11) and optimised phase shifters (P12) — only when present.
+  if (results.maintenance && results.maintenance.units.length > 0) {
+    rows.push(row({ cards: [{ card: { id: id('maint'), kind: 'maintenance' } as Card }] }));
+  }
+  if (results.phaseShifters && results.phaseShifters.transformers.length > 0) {
+    rows.push(row({ cards: [{ card: { id: id('pst'), kind: 'phase-shifters' } as Card }] }));
+  }
+
   // Resource adequacy (A1+A2) — when the run has a stochastic renewable ensemble.
   if (results.adequacy) {
     rows.push(row({ cards: [{ card: { id: id('adq'), kind: 'adequacy' } as Card }] }));
@@ -232,7 +245,7 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   // 5. Merit order + curtailment-by-carrier line chart. The curtailment chart
   // takes the slot the CO₂-shadow card used to occupy; the carrier-analysis
   // table below is now full-width. (The co2-shadow card kind still exists and
-  // can be added manually — only the default layout drops it.)
+  // can be added from an empty cell's "+" menu — only the default layout drops it.)
   const merit:  Card = { id: id('merit'),    kind: 'merit-order' };
   const curt = makeChart({ metricKey: 'curtailment', chartType: 'line' });
   rows.push(row({ cards: [{ card: merit }, { card: curt }] }));

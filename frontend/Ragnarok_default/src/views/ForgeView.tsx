@@ -18,16 +18,14 @@ import { FORGE_CONFIG, VALIDATION_CONFIG } from 'lib/constants';
 import { LeftRail, ViewPanel } from 'shared/components/primitives';
 import { NumberDraftInput } from 'shared/components/NumberDraftInput';
 import { applyRounding, busColumns, numericColumns, type RoundOp, type ClusterResult } from 'lib/forge/transforms';
-import {
-  buildTargets,
-  sheetSnappable,
-  snapSheet,
-  type OutsideEntry,
-  type SnapResult,
-} from 'lib/forge/snap';
+import { buildTargets, sheetSnappable, type OutsideEntry } from 'lib/forge/snap';
+import { snapRows } from 'lib/api/forgeBuild';
 import { nonEmptySheets, roundFindings, snapFindings, type ForgeFinding } from 'lib/forge/validate';
 import { CostCurvePanel } from './ForgeView.features/CostCurvePanel';
 import { CapacityTargetPanel, type ScaleCarrierCapacityResult } from './ForgeView.features/CapacityTargetPanel';
+import { TemporalClusterPanel } from './ForgeView.features/TemporalClusterPanel';
+import type { TemporalOptions, TemporalResult } from 'lib/api/temporal';
+import { SeasonalRatingPanel, type SeasonalRatingOptions, type SeasonalRatingResult } from './ForgeView.features/SeasonalRatingPanel';
 import { AdjustQueryPanel } from './ForgeView.features/AdjustQueryPanel';
 import type { QueryApplyResult, QueryEditRequest, QueryPreview } from 'lib/forge/queryEdit';
 
@@ -63,6 +61,12 @@ interface Props {
     mode: 'cap' | 'fix';
     shares?: Record<string, number>;
   }) => Promise<ScaleCarrierCapacityResult>;
+  /** P35 — reduce the session model's time axis with n.cluster.temporal; returns a preview. */
+  onTemporalPreview?: (opts: TemporalOptions) => Promise<TemporalResult>;
+  /** Replace the working model with a previewed temporally-clustered model. */
+  onTemporalApply?: (model: WorkbookModel) => void;
+  /** P18 — write `lines-s_max_pu` from summer/winter MVA ratings (PyPSA apply_seasonal_rating). */
+  onApplySeasonalRating?: (opts: SeasonalRatingOptions) => Promise<SeasonalRatingResult>;
   /** Attach Open-Meteo weather profiles to the existing renewable fleet by
    *  coordinate; applies server-side + merges, returns a summary. */
   onAttachRenewableProfiles?: (opts: {
@@ -104,7 +108,7 @@ export interface AttachProfilesResult {
   sites: number;
 }
 
-type Operation = 'round' | 'adjust' | 'costcurve' | 'snap' | 'cluster' | 'capacityTarget' | 'renewable' | 'hydroInflow' | 'retarget' | 'forecast' | 'driverForecast' | 'evDemand';
+type Operation = 'round' | 'adjust' | 'costcurve' | 'snap' | 'cluster' | 'capacityTarget' | 'seasonalRating' | 'renewable' | 'hydroInflow' | 'retarget' | 'forecast' | 'driverForecast' | 'evDemand' | 'temporalCluster';
 type OpGroup = 'Numeric' | 'Economics' | 'Geospatial' | 'Topology' | 'Temporal';
 
 /** Catalog of Forge tools, grouped. Add a new tool by adding an entry here
@@ -118,7 +122,9 @@ const OPERATIONS: Array<{ id: Operation; label: string; group: OpGroup }> = [
   { id: 'hydroInflow', label: 'Attach hydro inflow', group: 'Geospatial' },
   { id: 'cluster', label: 'Reduce / cluster network', group: 'Topology' },
   { id: 'capacityTarget', label: 'Set carrier capacity target', group: 'Topology' },
+  { id: 'seasonalRating', label: 'Seasonal line ratings', group: 'Topology' },
   { id: 'retarget', label: 'Retarget snapshot window', group: 'Temporal' },
+  { id: 'temporalCluster', label: 'Temporal clustering', group: 'Temporal' },
   { id: 'forecast', label: 'Forecast to future year', group: 'Temporal' },
   { id: 'driverForecast', label: 'Driver-based demand forecast', group: 'Temporal' },
   { id: 'evDemand', label: 'EV fleet demand', group: 'Temporal' },
@@ -256,7 +262,7 @@ function SearchableMultiSelect({
   );
 }
 
-export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEditApply, onClusterPreview, onClusterApply, onScaleCarrierCapacity, onAttachRenewableProfiles, onRetargetSnapshots, onForecastSnapshots, onDriverForecast, onEvDemand, onAttachHydroInflow }: Props) {
+export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEditApply, onClusterPreview, onClusterApply, onTemporalPreview, onTemporalApply, onScaleCarrierCapacity, onApplySeasonalRating, onAttachRenewableProfiles, onRetargetSnapshots, onForecastSnapshots, onDriverForecast, onEvDemand, onAttachHydroInflow }: Props) {
   // Persisted so the chosen tool + validation result survive leaving and
   // returning to the Forge tab (the view unmounts on tab switch). The findings
   // scan the whole model, so these three drivers fully restore the result.
@@ -314,19 +320,27 @@ export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEdi
   const toggleOverlay = (sheet: string) =>
     setOverlaySel((prev) => (prev.includes(sheet) ? prev.filter((s) => s !== sheet) : [...prev, sheet]));
 
-  const applySnap = () => {
+  const applySnap = async () => {
     const partial: Record<string, GridRow[]> = {};
     const outside: OutsideEntry[] = [];
     const perSheet: Array<{ sheet: string; anchors: string[]; assigned: number }> = [];
     let assigned = 0;
     let noCoords = 0;
-    for (const sheet of selectedOverlays) {
-      const result: SnapResult = snapSheet(rowsOf(model, sheet), targets, bufferKm);
-      partial[sheet] = result.rows;
-      assigned += result.assigned;
-      noCoords += result.noCoords;
-      outside.push(...result.outside.map((o) => ({ ...o, name: `${sheet}: ${o.name}` })));
-      perSheet.push({ sheet, anchors: result.anchors, assigned: result.assigned });
+    try {
+      // The snap runs on the backend (same code as the MCP snap_to_buses tool).
+      const busRows = rowsOf(model, 'buses');
+      const results = await Promise.all(selectedOverlays.map((sheet) => snapRows(rowsOf(model, sheet), busRows, bufferKm)));
+      selectedOverlays.forEach((sheet, i) => {
+        const result = results[i];
+        partial[sheet] = result.rows;
+        assigned += result.assigned;
+        noCoords += result.noCoords;
+        outside.push(...result.outside.map((o) => ({ ...o, name: `${sheet}: ${o.name}` })));
+        perSheet.push({ sheet, anchors: result.anchors, assigned: result.assigned });
+      });
+    } catch (error) {
+      setStatus(`Snap failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+      return;
     }
     onApplySheets(partial);
     setSnapReport({ assigned, outside, noCoords, perSheet });
@@ -769,6 +783,26 @@ export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEdi
             />
           ) : (
             <div className="view-empty"><p>Setting a carrier capacity target needs a live backend session.</p></div>
+          )
+        ) : operation === 'temporalCluster' ? (
+          onTemporalPreview ? (
+            <TemporalClusterPanel
+              onTemporalPreview={onTemporalPreview}
+              onTemporalApply={onTemporalApply}
+              onStatus={setStatus}
+            />
+          ) : (
+            <div className="view-empty"><p>Temporal clustering needs a live backend session.</p></div>
+          )
+        ) : operation === 'seasonalRating' ? (
+          onApplySeasonalRating ? (
+            <SeasonalRatingPanel
+              model={model}
+              onApplySeasonalRating={onApplySeasonalRating}
+              onStatus={setStatus}
+            />
+          ) : (
+            <div className="view-empty"><p>Seasonal line ratings need a live backend session.</p></div>
           )
         ) : operation === 'snap' ? (
           <section className="forge-section">

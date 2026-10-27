@@ -108,7 +108,7 @@ def _sanitise_label(label: str) -> str:
     return cleaned[:_LABEL_MAX_LEN]
 
 
-def _derive_name(model: dict[str, Any], scenario: dict[str, Any], options: dict[str, Any]) -> str:
+def _derive_name(scenario: dict[str, Any], options: dict[str, Any]) -> str:
     """Build a ``scenarioname_datetime`` filesystem-safe run name.
 
     The scenario name leads (from ``options['runLabel']``, the scenario label, or
@@ -293,7 +293,7 @@ def build_run_meta(name: str, bundle: dict[str, Any], size_bytes: int = 0) -> di
 def _is_series_sheet(name: str) -> bool:
     """A PyPSA time-series sheet is ``<component>-<attribute>``; ``snapshots`` is
     the time axis (static). Mirrors session_store.is_series_sheet."""
-    return name != "snapshots" and "-" in name
+    return name != "snapshots" and "-" in name and not name.endswith("-pw")  # -pw = piecewise table
 
 
 def _model_static(model: Any) -> dict[str, Any]:
@@ -836,7 +836,7 @@ def store_run(
         scenario = scenario or {}
         RUNS_DIR.mkdir(parents=True, exist_ok=True)
 
-        name = _reserve_name(_derive_name(model, scenario, options))
+        name = _reserve_name(_derive_name(scenario, options))
         saved_at = datetime.now(timezone.utc).isoformat()
         filename = str(options.get("filename") or "")
         label = _label_for_bundle(scenario, options, filename)

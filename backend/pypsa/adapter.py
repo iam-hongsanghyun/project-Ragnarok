@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .optimise_options import optimise_option_catalogue, solver_capabilities
 from .results import run_pypsa
 
 
@@ -40,7 +41,17 @@ class PypsaBackend:
                 "loadShedding": True,
                 "unitCommitment": True,
                 "powerFlow": True,
+                "cvarRisk": True,
+                "iterativeTransmissionExpansion": True,
+                "mgaDirections": True,
+                "acFeasibilityAfterOptimise": True,
+                "twoStage": True,
             },
+            # P20/P45: installed solvers + the n.optimize option keys (see
+            # backend/pypsa/optimise_options.py); the GUI Solver settings and the MCP
+            # describe_run_options both read these.
+            "solvers": solver_capabilities(),
+            "optimiseOptions": optimise_option_catalogue()["keys"],
         }
 
     def run(

@@ -68,6 +68,12 @@ class ClusterRequest(BaseModel):
     # cluster's mean / max / min, zero, or the attribute's schema default. Text
     # attributes (carrier, unit) always merge to the most common value.
     conflictStrategy: str = "mean"
+    # method="hac" (hierarchical agglomerative clustering, P36): the numeric bus
+    # columns used as the feature matrix (default ["x", "y"]), the distance
+    # metric and the linkage criterion (ward requires euclidean).
+    hacFeatures: list[str] | None = None
+    hacAffinity: str = "euclidean"
+    hacLinkage: str = "ward"
     scenario: dict[str, Any] | None = None
     options: dict[str, Any] | None = None
 
@@ -568,6 +574,9 @@ def cluster_model(
     conflict_strategy: str = "mean",
     scenario: dict[str, Any] | None = None,
     options: dict[str, Any] | None = None,
+    hac_features: list[str] | None = None,
+    hac_affinity: str = "euclidean",
+    hac_linkage: str = "ward",
 ) -> dict[str, Any]:
     """Reduce a workbook model to fewer buses. Pure (no I/O) so it is
     unit-testable; the endpoint is a thin session-loading wrapper.
@@ -636,6 +645,34 @@ def cluster_model(
             busmap = network.cluster.spatial.busmap_by_kmeans(
                 bus_weightings=weightings, n_clusters=n_clusters
             )
+        elif method == "hac":
+            # Hierarchical agglomerative clustering on a bus-feature matrix (P36).
+            cols = [c for c in (hac_features or ["x", "y"]) if c]
+            missing = [c for c in cols if c not in network.buses.columns]
+            if missing:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"HAC feature column(s) not on the buses: {', '.join(missing)}.",
+                )
+            feature = network.buses[cols].apply(pd.to_numeric, errors="coerce")
+            if feature.isna().any().any():
+                raise HTTPException(
+                    status_code=400,
+                    detail="HAC features must be numeric on every bus (found blanks/text).",
+                )
+            if feature.drop_duplicates().shape[0] < 2:
+                raise HTTPException(
+                    status_code=400,
+                    detail="HAC needs at least two distinct feature rows (e.g. distinct bus coordinates).",
+                )
+            busmap = network.cluster.spatial.busmap_by_hac(
+                n_clusters=n_clusters,
+                feature=feature,
+                affinity=hac_affinity,
+                linkage=hac_linkage,
+            )
+            busmap = busmap.astype(str)
+            method = f"hac:{hac_linkage}"
         elif method == "modularity":
             # Greedy modularity communities are built over the LINE graph only —
             # PyPSA never adds links as edges. On a link-only network (HVDC /
@@ -660,7 +697,7 @@ def cluster_model(
         else:
             raise HTTPException(
                 status_code=400,
-                detail=f"Unknown clustering method '{method}'. Use 'modularity', 'kmeans' or 'single'.",
+                detail=f"Unknown clustering method '{method}'. Use 'modularity', 'kmeans', 'hac' or 'single'.",
             )
 
         # Bus attributes that disagree within a cluster and have no PyPSA default
@@ -705,8 +742,11 @@ def cluster_model(
                 strategies["aggregate_one_ports"] = other
                 strategies["one_port_strategies"] = oneport_strat
 
-        clustered = network.cluster.spatial.cluster_by_busmap(busmap, **strategies)
-        clustered = getattr(clustered, "n", clustered)  # Clustering wrapper vs Network
+        # get_clustering_from_busmap (P36) keeps the line map for disaggregation;
+        # its ``.n`` is exactly what cluster_by_busmap returns.
+        clustering = network.cluster.spatial.get_clustering_from_busmap(busmap, **strategies)
+        clustered = getattr(clustering, "n", clustering)  # Clustering wrapper vs Network
+        linemap = getattr(clustering, "linemap", None)
 
         # Clustering only re-attaches links (dropping intra-cluster loops);
         # merging parallel corridors is our own post-step.
@@ -737,6 +777,10 @@ def cluster_model(
     return {
         "model": reduced,
         "busmap": {str(k): str(v) for k, v in busmap.to_dict().items()},
+        # original line -> clustered line (empty when the clustering kept no map)
+        "linemap": (
+            {str(k): str(v) for k, v in linemap.to_dict().items()} if linemap is not None else {}
+        ),
         "method": method,
         "groupByColumn": group_by_column if by_column else None,
         "aggregatedComponents": sorted(agg),
@@ -764,6 +808,9 @@ async def cluster_network(req: ClusterRequest) -> dict[str, Any]:
         conflict_strategy=req.conflictStrategy,
         scenario=req.scenario,
         options=req.options,
+        hac_features=req.hacFeatures,
+        hac_affinity=req.hacAffinity,
+        hac_linkage=req.hacLinkage,
     )
 
 

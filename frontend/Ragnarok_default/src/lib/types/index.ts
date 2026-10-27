@@ -25,8 +25,6 @@ export type ChartSectionType = ChartMode | 'donut';
 export type TimeframeOption = 'aggregated' | 'yearly' | 'monthly' | 'weekly' | 'daily' | 'hourly';
 export type PlanningMode = 'single_period' | 'pathway';
 export type SnapshotMappingMode = 'explicit_period_column' | 'repeat_all_snapshots';
-export type PathwayOverridePolicy = 'reuse_base_inputs';
-export type RollingStepPolicy = 'derived';
 
 export type ConstraintMetric =
   | 'co2_cap' | 'max_load_shed'
@@ -58,8 +56,8 @@ export type ModulePermission =
 
 /**
  * In-memory workbook: a map from sheet name → rows. The set of valid sheet
- * names is driven by the generated PyPSA schema (`src/config/pypsa_schema.json`)
- * — see `SHEETS` and `TS_SHEETS` in `constants/pypsa_schema.ts`. No named
+ * names is driven by the PyPSA schema the backend builds at runtime from the
+ * installed PyPSA (`GET /api/config`) — see `SHEETS` and `TS_SHEETS` in `constants/pypsa_schema.ts`. No named
  * fields are baked into the type so the model stays in sync with the schema
  * even when PyPSA adds new components.
  *
@@ -96,7 +94,6 @@ export interface PathwayConfig {
   planningMode: PlanningMode;
   enabled: boolean;
   snapshotMappingMode: SnapshotMappingMode;
-  overridePolicy: PathwayOverridePolicy;
   periods: PathwayPeriodConfig[];
   selectedPeriod: number | null;
 }
@@ -116,10 +113,8 @@ export interface RollingHorizonConfig {
   enabled: boolean;
   horizonSnapshots: number;
   overlapSnapshots: number;
-  stepPolicy: RollingStepPolicy;
+  /** Derived (horizon - overlap); echoed for display, the backend recomputes it. */
   stepSnapshots: number;
-  preserveTerminalState: boolean;
-  selectedWindow: number | null;
 }
 
 /** Sampled snapshot blocks ("test run"): solve a reduced snapshot set,
@@ -545,6 +540,76 @@ export interface CommitmentCarrier {
   starts: number;
   startUpCostTotal: number;
   units: number;
+}
+
+/** One piecewise-linear curve (PyPSA >= 1.3) and its solved `*_piecewise_opt` (P30). */
+export interface PiecewiseCurveResult {
+  component: string;
+  list: string;
+  name: string;
+  attribute: string;
+  xAttribute: string;
+  shape: 'convex' | 'linear' | 'nonconvex';
+  breakpoints: Array<{ x: number; y: number }>;
+  solved?:
+    | { averagePerMWh: number; minPerMWh: number; maxPerMWh: number; energyMWh: number; operatingCost: number }
+    | { averagePerUnit: number; capacityOpt: number; annualCost: number };
+}
+
+export interface PiecewiseResult {
+  curves: PiecewiseCurveResult[];
+  /** Operating cost carried by marginal_cost curves (adds into the LP objective). */
+  totalOperatingCost: number;
+  /** Annual capital cost carried by capital_cost curves. */
+  totalCapitalCost: number;
+}
+
+/** One maintainable unit's solved schedule (P11). `segments` are run-length; `on` = in maintenance. */
+export interface MaintenanceUnit {
+  name: string;
+  component: string;
+  events: number;
+  hoursInMaintenance: number;
+  maintenancePu: number;
+  segments: CommitmentSegment[];
+}
+
+/** Scheduled-maintenance view (PyPSA >= 1.4 `maintenance` / `maintenance_start`). */
+export interface MaintenanceResult {
+  units: MaintenanceUnit[];
+  totals: { unitCount: number; events: number };
+}
+
+/** One phase-shifting transformer's optimised angle (P12). Angles in degrees. */
+export interface PhaseShifterRow {
+  name: string;
+  phaseShiftMinDeg: number;
+  phaseShiftMaxDeg: number;
+  meanDeg: number;
+  minDeg: number;
+  maxDeg: number;
+  /** Fraction of snapshots (0..1) at either bound. */
+  shareAtBound: number;
+  series: Array<{ snapshot: string; phaseShiftDeg: number }>;
+}
+
+export interface PhaseShiftersResult {
+  unit: 'degrees';
+  transformers: PhaseShifterRow[];
+}
+
+/** Response of POST /api/statistics/query (P31). */
+export interface StatisticsQueryResponse {
+  metric: string;
+  groupby: string[] | null;
+  busCarrier: string[] | null;
+  aggregateTime: string | boolean;
+  atPort: boolean;
+  /** Parameters the metric does not accept (dropped by the backend). */
+  ignoredParameters: string[];
+  levels: string[];
+  columns: string[];
+  rows: Array<{ key: Record<string, string>; values: Record<string, number | null> }>;
 }
 
 /** Unit-commitment view (Tier 1) — starts, start-up costs, on/off patterns. */
@@ -1854,6 +1919,12 @@ export interface RunResults {
   priceFormation?: PriceFormationResult;
   /** Unit-commitment view (starts, start-up costs, on/off patterns). */
   commitment?: CommitmentResult;
+  /** Piecewise-linear cost / efficiency curves and their solved *_piecewise_opt (P30). */
+  piecewise?: PiecewiseResult | null;
+  /** Scheduled maintenance of maintainable units (P11); null when none. */
+  maintenance?: MaintenanceResult | null;
+  /** Optimised phase-shifting transformer angles (P12); null when none. */
+  phaseShifters?: PhaseShiftersResult | null;
   /** Bid-strategy simulation (markup vs price-taker baseline). */
   bidStrategy?: BidStrategyResult;
   /** Optimal-bid finder (profit-maximising markup + sweep curve). */
