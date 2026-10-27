@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from fastapi import HTTPException
 
 from backend.app.config import load_system_defaults
 from backend.pypsa.network import build_network
@@ -197,25 +198,34 @@ def test_dsl_column_selector_caps_joint_optimised_capacity() -> None:
     assert float(n.generators_t.p["G_backup"].sum()) == pytest.approx(80.0, rel=1e-6)
 
 
-def test_dsl_unknown_column_is_skipped_with_note() -> None:
+def test_dsl_unknown_column_stops_the_run_with_a_400_naming_the_line() -> None:
+    """RS6: a constraint that cannot be compiled loosens the study, so the run stops
+    (HTTP 400) instead of solving without it and leaving a note."""
     n, _ = build_network(_model(2), SCENARIO, {"snapshotStart": 0, "snapshotCount": 2})
     notes: list[str] = []
 
     def ef(net, snapshots):
         apply_dsl_constraints(net, "gen(no_such_column, x) <= 1\n", {}, notes, snapshots)
 
-    n.optimize(solver_name="highs", extra_functionality=ef)
-    assert any("no_such_column" in note for note in notes)
-    assert float(n.generators_t.p["G_gas"].sum()) == pytest.approx(200.0)  # unconstrained
+    with pytest.raises(HTTPException) as info:
+        n.optimize(solver_name="highs", extra_functionality=ef)
+    assert info.value.status_code == 400
+    assert "DSL line 1" in info.value.detail and "no_such_column" in info.value.detail
 
 
-def test_custom_dsl_bad_line_is_skipped_with_note_and_good_line_applies() -> None:
+def test_custom_dsl_bad_line_stops_the_run_and_the_good_line_alone_applies() -> None:
+    """RS6: a bad line stops the run with a 400 naming the line (parse error on the
+    unsupported '<'); with the bad line removed the good line caps gas at 120."""
     n, _ = build_network(_model(2), SCENARIO, {"snapshotStart": 0, "snapshotCount": 2})
     notes: list[str] = []
 
-    def ef(net, snapshots):
-        apply_dsl_constraints(net, 'gen("gas") < 150\ngen("gas") <= 120\n', {}, notes, snapshots)
+    def ef(text: str):
+        return lambda net, snapshots: apply_dsl_constraints(net, text, {}, notes, snapshots)
 
-    n.optimize(solver_name="highs", extra_functionality=ef)
-    assert any("skip" in note.lower() or "line" in note.lower() for note in notes)  # bad line surfaced
+    with pytest.raises(HTTPException) as info:
+        n.optimize(solver_name="highs", extra_functionality=ef('gen("gas") < 150\ngen("gas") <= 120\n'))
+    assert info.value.status_code == 400
+    assert "DSL line 1" in info.value.detail and "parse error" in info.value.detail
+
+    n.optimize(solver_name="highs", extra_functionality=ef('gen("gas") <= 120\n'))
     assert float(n.generators_t.p["G_gas"].sum()) == pytest.approx(120.0, rel=1e-6)

@@ -19,13 +19,13 @@
  *   pay-as-bid   identical dispatch · bill 15,622,897 · every profit zero · wind earns 0
  *   gas is marginal in 7,888 of 8,760 hours; coal in 872; wind in none
  *   storage      nothing charged or discharged — no spread to trade
- *   scarcity (gas 40 MW)  470 unserved hours · 2,779.5 MWh · avg 209.94 · bill 214,758,788
- *     and in it: oil_1 finally runs — 63,065 MWh for a profit of 54,144,000,
- *     setting the price in 2,374 hours; both storage units wake up.
+ *   scarcity (gas 40 MW)  471 unserved hours · 2,782.2 MWh · avg 210.32 · bill 215,094,657
+ *     and in it: oil_1 finally runs — 63,317 MWh for a profit of 54,259,200,
+ *     setting the price in 2,379 hours; both storage units wake up.
  *
  * The arc: pay-as-bid appears to cut the bill 38% and pays a truthful zero-cost
  * bidder nothing, which is why the saving is imaginary; and the peaker module 14
- * showed earning nothing earns 54 million in the 470 hours that matter, which is
+ * showed earning nothing earns 54 million in the 471 hours that matter, which is
  * how an energy-only market is supposed to pay for capacity.
  */
 import { TutorialStep } from '../types';
@@ -435,16 +435,16 @@ export const MODULE_15_MARKET_DESIGN: TutorialStep[] = [
       'Everything so far has been a comfortable year. Make it uncomfortable: throttle the gas supply '
       + 'from 150 MW to 40 and re-run under uniform pricing.',
 
-      'The stack can no longer cover demand in every hour. 2,779.5 MWh goes unserved across 470 hours — '
+      'The stack can no longer cover demand in every hour. 2,782.2 MWh goes unserved across 471 hours — '
       + '0.27% of the year\'s energy — and in those hours the price is the value of lost load, 3,000 per '
       + 'MWh.',
 
-      'The bill moves out of all proportion to the shortfall: average price 24.50 to 209.94, consumer '
-      + 'cost 25,394,711 to 214,758,788. Eight and a half times, for a system that still served 99.73% '
+      'The bill moves out of all proportion to the shortfall: average price 24.50 to 210.32, consumer '
+      + 'cost 25,394,711 to 215,094,657. Eight and a half times, for a system that still served 99.73% '
       + 'of the same demand.',
 
       'And the oil peaker finally earns its keep. It ran for none of the 8,760 hours in the base case; '
-      + 'here it produces 63,065 MWh, sets the price in 2,374 hours, and clears a profit of 54,144,000. '
+      + 'here it produces 63,317 MWh, sets the price in 2,379 hours, and clears a profit of 54,259,200. '
       + 'That is the answer to module 14\'s puzzle — an energy-only market pays for capacity through '
       + 'scarcity rents, which means it pays almost nothing for years and then everything at once.',
     ],
@@ -453,16 +453,16 @@ export const MODULE_15_MARKET_DESIGN: TutorialStep[] = [
       + 'price, and run.',
 
       'Read the summary against the baseline, then find oil_1 in the per-unit table and read its four '
-      + 'numbers: 63,065 MWh, revenue 61,711,804, profit 54,144,000, price-setting hours 2,374. Module '
+      + 'numbers: 63,317 MWh, revenue 61,857,209, profit 54,259,200, price-setting hours 2,379. Module '
       + '14 reported that same unit earning nothing whatsoever.',
 
-      'Then check the storage. Both units are now trading — the battery charging 20,715 MWh and '
-      + 'discharging 16,743, the pumped hydro 78,259 and 59,166. Nothing about the storage changed; the '
+      'Then check the storage. Both units are now trading — the battery charging 20,725 MWh and '
+      + 'discharging 16,751, the pumped hydro 78,272 and 59,176. Nothing about the storage changed; the '
       + 'price variance did, exactly as step 7 predicted.',
 
-      'Finally, work out where the money went. Unserved energy times VOLL is 2,779.5 × 3,000, about 8.3 '
-      + 'million — nowhere near the 189 million the bill rose by. The rest is every other megawatt-hour '
-      + 'in those 470 hours also clearing at 3,000. Scarcity pricing pays the scarcity price to '
+      'Finally, work out where the money went. Unserved energy times VOLL is 2,782.2 × 3,000, about 8.3 '
+      + 'million — nowhere near the 190 million the bill rose by. The rest is every other megawatt-hour '
+      + 'in those 471 hours also clearing at 3,000. Scarcity pricing pays the scarcity price to '
       + 'everybody running, not only to the last unit.',
 
       'And ask whether you believe it. VOLL is an administrative parameter and this entire result is '
@@ -473,12 +473,12 @@ export const MODULE_15_MARKET_DESIGN: TutorialStep[] = [
     run: {
       label: 'Run → Run model (gas throttled to 40 MW)',
       detail: ['Same sweep. The scarcity hours are what change.'],
-      expect: '470 unserved hours, 2,779.5 MWh unserved, average price 209.94, bill 214,758,788.',
+      expect: '471 unserved hours, 2,782.2 MWh unserved, average price 210.32, bill 215,094,657.',
     },
     verify: [
-      'The run reports 2,779.5 MWh unserved across 470 hours',
-      'The average price rises to 209.94 and the peak reaches VOLL at 3,000',
-      'oil_1 profits 54,144,000 having earned nothing in the base case',
+      'The run reports 2,782.2 MWh unserved across 471 hours',
+      'The average price rises to 210.32 and the peak reaches VOLL at 3,000',
+      'oil_1 profits 54,259,200 having earned nothing in the base case',
       'Both storage units are now charging and discharging',
       'You can explain why the bill rose far more than unserved energy times VOLL',
     ],

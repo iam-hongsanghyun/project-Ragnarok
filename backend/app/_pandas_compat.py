@@ -1,16 +1,19 @@
-"""pandas 3.0 / pyarrow / xarray compatibility shim.
+"""pandas 3.0 / pyarrow / PyPSA compatibility shim.
 
 We depend on **pyarrow** as the Parquet engine for the server-side session store
 (``session_store.py``). But pandas 3.0 changes its *default string dtype* to an
-Arrow-backed string (``ArrowStringArray``) the moment pyarrow is importable —
-and the pinned ``xarray<2026`` that PyPSA requires cannot consume Arrow-backed
-arrays (``TypeError: Invalid array type: ArrowStringArray`` when PyPSA builds the
-network's xarray coordinates).
+Arrow-backed string (``ArrowStringArray``)
+the moment pyarrow is importable. PyPSA 1.4's spatial clustering
+(``pypsa.clustering.spatial.aggregatelines``, reached from the Forge "Reduce
+network" transform) cannot aggregate those columns
+(``operation 'truediv' not supported for dtype 'str'``). Older xarray<2026 pins
+also rejected them when PyPSA built the network's coordinates; that pin is gone,
+the clustering failure is not.
 
-So merely *installing* pyarrow would break every solve. The documented, surgical
-fix is to keep pandas' legacy NumPy/object string inference
+So merely *installing* pyarrow would break network reduction. The documented,
+surgical fix is to keep pandas' legacy NumPy/object string inference
 (``future.infer_string = False``). Parquet I/O still uses pyarrow; only the
-in-memory string dtype reverts to what PyPSA/xarray expect. The records boundary
+in-memory string dtype reverts to what PyPSA expects. The records boundary
 in ``session_store`` (``DataFrame.to_dict(orient="records")``) already launders
 any Arrow scalars read back from Parquet into plain ``str``, so model data that
 flows into PyPSA is never Arrow-typed.
@@ -22,6 +25,8 @@ the child too). It is idempotent.
 """
 from __future__ import annotations
 
+import warnings
+
 import pandas as pd
 
 
@@ -32,7 +37,11 @@ def ensure_object_strings() -> None:
     re-imported subprocesses.
     """
     try:
-        pd.set_option("future.infer_string", False)
+        with warnings.catch_warnings():
+            # pandas 3.1 warns that this option goes away in pandas 4; the
+            # requirements pin pandas<4, so the warning is expected noise.
+            warnings.simplefilter("ignore", category=getattr(pd.errors, "Pandas4Warning", Warning))
+            pd.set_option("future.infer_string", False)
     except (KeyError, ValueError):
         # Option absent on this pandas build → its default already matches.
         pass

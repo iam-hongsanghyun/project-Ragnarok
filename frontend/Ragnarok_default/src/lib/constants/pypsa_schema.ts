@@ -35,6 +35,8 @@ export interface PypsaAttribute {
   raw_status: string;
   required: boolean;
   storage: PypsaAttrStorage;
+  /** PyPSA >= 1.3: the type cell lists `piecewise` (a piecewise-linear curve may replace the scalar). */
+  piecewise?: boolean;
 }
 
 export interface PypsaComponentSchema {

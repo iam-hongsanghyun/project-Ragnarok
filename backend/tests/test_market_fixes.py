@@ -221,8 +221,13 @@ def test_simulation_storage_energy_is_weighted() -> None:
           efficiency_store=1.0, efficiency_dispatch=1.0)
     n.snapshot_weightings["objective"] = 2.0
     res = run_market_simulation(n)
-    # 20 MW discharged into both peak snapshots × 2 h/snapshot = 80 MWh.
-    np.testing.assert_allclose(res["storage"][0]["energyDischargedMWh"], 80.0,
+    # The battery is 20 MW × 2 h = 40 MWh, so no more than 40 MWh can ever be
+    # discharged. (The old expectation of 80 = 20 MW × 2 peak snapshots × 2 h
+    # ignored that energy limit.) Each snapshot is 2 h: charging 20 MW in one
+    # snapshot fills the 40 MWh, and discharging 20 MW in one peak snapshot
+    # empties it. Weighted accounting is still what is pinned: an unweighted
+    # (1 h/snapshot) sum would report 20 MWh.
+    np.testing.assert_allclose(res["storage"][0]["energyDischargedMWh"], 40.0,
                                rtol=1e-9, atol=1e-6)
 
 

@@ -672,6 +672,9 @@ def run_pypsa(
                 extra_functionality=extra_functionality,
                 io_api=_SOLVER_IO_API,
                 assign_all_duals=True,
+                # Explicit like every other solve: PyPSA 1.4 warns when unset and
+                # flips the default to False in v2.0.
+                include_objective_constant=False,
             )
             solve_status, solve_condition = _coerce_solve_status(result)
         else:

@@ -149,7 +149,7 @@ EXAMPLES: list[Example] = [
 def author(ex: Example) -> None:
     n = ex.build()
     probe = n.copy()
-    probe.optimize(solver_name="highs")
+    probe.optimize(solver_name="highs", include_objective_constant=False)
     assert probe.objective is not None and np.isfinite(probe.objective), f"{ex.id} did not solve"
 
     model = _network_to_model_json(n)

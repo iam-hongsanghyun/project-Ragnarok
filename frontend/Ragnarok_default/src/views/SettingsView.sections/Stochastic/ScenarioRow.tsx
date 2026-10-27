@@ -12,8 +12,24 @@ import { PYPSA_COMPONENTS } from 'lib/constants/pypsa_schema';
 import { SearchableSelect } from '../../../shared/components/SearchableSelect';
 import { NumberDraftInput } from '../../../shared/components/NumberDraftInput';
 
+/**
+ * Attributes PyPSA >= 1.4 requires to be identical across scenarios (topology and
+ * problem structure): offering them would end in a ConsistencyError at solve
+ * time, so the backend rejects them with a 400 and the picker never lists them.
+ * Mirrors `pypsa.constants.RE_INVARIANT_ATTRS` (the backend uses PyPSA's own).
+ */
+const SCENARIO_INVARIANT_ATTR =
+  /^(?:bus\d*|type|[pse]_nom_(?:extendable|mod|set|opt)|committable|sign|carrier|weight|build_year|lifetime|active|(?:cyclic_)?delay\d*)$/;
+
+export const isScenarioInvariantAttribute = (attribute: string): boolean =>
+  SCENARIO_INVARIANT_ATTR.test(attribute);
+
+const overridableAttributes = (sheet: string | undefined): string[] =>
+  (PYPSA_COMPONENTS.find((c) => c.sheet_name === sheet)?.input_static_attributes ?? [])
+    .filter((a) => !isScenarioInvariantAttribute(a));
+
 const OVERRIDABLE_SHEETS = PYPSA_COMPONENTS
-  .filter((c) => !['snapshots', 'network', 'carriers'].includes(c.sheet_name) && c.input_static_attributes.length > 0)
+  .filter((c) => !['snapshots', 'network', 'carriers'].includes(c.sheet_name) && overridableAttributes(c.sheet_name).length > 0)
   .map((c) => c.sheet_name);
 
 interface Props {
@@ -28,8 +44,7 @@ export function StochasticScenarioRow({ scenario, model, onUpdate, onRemove }: P
   const addOverride = () => {
     const id = `ov_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const firstSheet = OVERRIDABLE_SHEETS[0] ?? 'generators';
-    const sheetSchema = PYPSA_COMPONENTS.find((c) => c.sheet_name === firstSheet);
-    const firstAttr = sheetSchema?.input_static_attributes[0] ?? 'marginal_cost';
+    const firstAttr = overridableAttributes(firstSheet)[0] ?? 'marginal_cost';
     setOverrides([
       ...scenario.overrides,
       { id, sheet: firstSheet, attribute: firstAttr, scopeType: 'all', scopeValue: '', operation: 'multiply', value: 1.0 },
@@ -89,8 +104,7 @@ export function StochasticScenarioRow({ scenario, model, onUpdate, onRemove }: P
               </tr>
             )}
             {scenario.overrides.map((o) => {
-              const sheetSchema = PYPSA_COMPONENTS.find((c) => c.sheet_name === o.sheet);
-              const attrOptions = sheetSchema?.input_static_attributes ?? [];
+              const attrOptions = overridableAttributes(o.sheet);
               const sheetRows = (model[o.sheet] ?? []) as Array<Record<string, unknown>>;
               const matchOptions = o.scopeType === 'name'
                 ? Array.from(new Set(sheetRows.map((r) => String(r.name ?? '').trim()).filter(Boolean)))
@@ -105,8 +119,7 @@ export function StochasticScenarioRow({ scenario, model, onUpdate, onRemove }: P
                       value={o.sheet}
                       options={OVERRIDABLE_SHEETS}
                       onChange={(nextSheet) => {
-                        const next = PYPSA_COMPONENTS.find((c) => c.sheet_name === nextSheet);
-                        const nextAttr = next?.input_static_attributes[0] ?? o.attribute;
+                        const nextAttr = overridableAttributes(nextSheet)[0] ?? o.attribute;
                         updateOverride(o.id, { sheet: nextSheet, attribute: nextAttr, scopeValue: '' });
                       }}
                     />

@@ -21,8 +21,8 @@ file-converter endpoints.
 from __future__ import annotations
 
 # Keep pandas on NumPy/object strings even though pyarrow (our Parquet engine)
-# is installed; otherwise pandas 3.0 defaults to Arrow strings that the pinned
-# xarray<2026 / PyPSA cannot consume. See _pandas_compat for the full rationale.
+# is installed; otherwise pandas 3 defaults to Arrow strings that PyPSA 1.4's
+# spatial clustering cannot aggregate. See _pandas_compat for the full rationale.
 from ._pandas_compat import ensure_object_strings as _ensure_object_strings
 
 _ensure_object_strings()

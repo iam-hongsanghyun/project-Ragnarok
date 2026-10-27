@@ -134,8 +134,9 @@ def build_mga(
                     sense=sense,
                     slack=slack,
                     multi_investment_periods=multi_investment_periods,
-                    # Do NOT override include_objective_constant here, however
-                    # tempting it is to match the main solve. PyPSA's budget
+                    # include_objective_constant stays True here (passed explicitly:
+                    # PyPSA 1.4 warns when unset), however tempting it is to match
+                    # the main solve's False. PyPSA's budget
                     # constraint is written to pair with the constant INCLUDED:
                     #
                     #     objective + installed_capex <= (1 + slack) * (capex + opex)
@@ -146,6 +147,7 @@ def build_mga(
                     # on this course's expanded year, 25.6M + 7.5M against a
                     # budget of 26.9M — so EVERY direction came back infeasible
                     # and the whole study returned nothing at all.
+                    include_objective_constant=True,
                     solver_name="highs",
                     solver_options=solver_options,
                     io_api=io_api,

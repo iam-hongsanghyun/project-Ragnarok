@@ -10,8 +10,10 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from fastapi import HTTPException
 
 from backend.pypsa.results import run_pypsa
+from backend.pypsa.stochastic import is_scenario_invariant
 
 
 def _model() -> dict[str, list[dict[str, Any]]]:
@@ -226,3 +228,32 @@ def test_stochastic_and_rolling_horizon_rejected() -> None:
         )
     assert exc.value.status_code == 400
     assert "stochastic" in exc.value.detail.lower()
+
+
+@pytest.mark.parametrize(
+    "attribute",
+    ["bus", "bus1", "bus2", "carrier", "p_nom_set", "s_nom_set", "e_nom_set", "delay",
+     "cyclic_delay2", "p_nom_extendable", "committable", "build_year", "lifetime", "type"],
+)
+def test_scenario_invariant_overrides_are_a_400(attribute: str) -> None:
+    """PyPSA 1.4 raises ConsistencyError when these differ across scenarios; the
+    run must stop up front with a 400 naming the scenario and attribute."""
+    assert is_scenario_invariant(attribute)
+    bad = {"sheet": "generators", "attribute": attribute, "scopeType": "all",
+           "scopeValue": "", "operation": "set", "value": 1.0}
+    with pytest.raises(HTTPException) as info:
+        run_pypsa(
+            _model(),
+            {"discountRate": 0.05},
+            {"stochasticConfig": {"enabled": True, "scenarios": [
+                {"name": "a", "weight": 1.0, "overrides": [bad]},
+                {"name": "b", "weight": 1.0},
+            ]}},
+        )
+    assert info.value.status_code == 400
+    assert "'a'" in info.value.detail and f"generators.{attribute}" in info.value.detail
+
+
+@pytest.mark.parametrize("attribute", ["marginal_cost", "p_set", "p_max_pu", "capital_cost", "efficiency"])
+def test_operating_attributes_are_not_invariant(attribute: str) -> None:
+    assert not is_scenario_invariant(attribute)

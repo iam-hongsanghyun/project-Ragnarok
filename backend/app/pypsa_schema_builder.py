@@ -97,15 +97,25 @@ def _normalize_status(status: str) -> str:
 
 
 def _normalize_storage(type_str: str) -> str:
-    """``static or series`` → ``static_or_series``; ``series`` → ``series``;
-    everything else → ``static``. Matches the JS generator's mapping.
+    """Map a PyPSA ``type`` cell to ``static`` / ``series`` / ``static_or_series``.
+
+    Any type that names both ``static`` and ``series`` is ``static_or_series``,
+    whatever sits between them: ``static or series`` (PyPSA <= 1.2) and
+    ``static or piecewise or series`` (PyPSA >= 1.3). A bare ``series`` is
+    ``series``; everything else is ``static``.
     """
     lowered = (type_str or "").lower()
-    if "static or series" in lowered:
+    words = set(lowered.replace(",", " ").split())
+    if "static" in words and "series" in words:
         return "static_or_series"
-    if "series" in lowered:
+    if "series" in words:
         return "series"
     return "static"
+
+
+def _is_piecewise(type_str: str) -> bool:
+    """True when the ``type`` cell lists ``piecewise`` (PyPSA >= 1.3 cost/efficiency curves)."""
+    return "piecewise" in (type_str or "").lower().split()
 
 
 def _title_case(value: str) -> str:
@@ -130,6 +140,7 @@ def _build_attribute(record: dict[str, str]) -> dict[str, Any]:
         "raw_status": raw_status,
         "required": "(required)" in raw_status,
         "storage": storage,
+        "piecewise": _is_piecewise(type_str),
     }
 
 

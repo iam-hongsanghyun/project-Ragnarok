@@ -30,6 +30,8 @@ from typing import Any
 
 import pandas as pd
 import pypsa
+from fastapi import HTTPException
+from pypsa.constants import RE_INVARIANT_ATTRS
 
 from .utils.coerce import number
 
@@ -63,11 +65,27 @@ class StochasticConfig:
     scenarios: tuple[StochasticScenario, ...]
 
 
+def is_scenario_invariant(attribute: str) -> bool:
+    """True when PyPSA requires ``attribute`` to be identical across scenarios.
+
+    These attributes (bus/port wiring, ``carrier``, ``*_nom_set``, ``*_extendable``,
+    ``build_year``, ``lifetime``, ``delay`` ...) fix the topology or the
+    mathematical structure, so PyPSA >= 1.4 raises ``ConsistencyError`` when a
+    scenario changes them. The pattern is PyPSA's own (``RE_INVARIANT_ATTRS``),
+    never a copy of it, so it follows the installed version.
+    """
+    return RE_INVARIANT_ATTRS.fullmatch(attribute) is not None
+
+
 def parse_stochastic_config(raw: dict[str, Any] | None) -> StochasticConfig:
     """Build a :class:`StochasticConfig` from the JSON payload posted by the GUI.
 
     Disabled if there are fewer than two valid scenarios, since a single
     scenario is just a deterministic solve.
+
+    Raises:
+        HTTPException: 400 when an override targets a scenario-invariant
+            attribute (see :func:`is_scenario_invariant`).
     """
     raw = raw or {}
     if not bool(raw.get("enabled")):
@@ -88,6 +106,16 @@ def parse_stochastic_config(raw: dict[str, Any] | None) -> StochasticConfig:
             attribute = str(raw_override.get("attribute") or "").strip()
             if not sheet or not attribute:
                 continue
+            if is_scenario_invariant(attribute):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Stochastic scenario '{name}': override of '{sheet}.{attribute}' is not "
+                        "allowed. PyPSA requires that attribute to be identical across scenarios "
+                        "(it defines the network topology or the optimisation problem). "
+                        "Override an operating attribute instead (e.g. marginal_cost, p_set, p_max_pu)."
+                    ),
+                )
             scope_type = str(raw_override.get("scopeType") or "all").strip().lower()
             if scope_type not in ("all", "name", "carrier"):
                 scope_type = "all"

@@ -22,9 +22,18 @@ from __future__ import annotations
 
 # Force NumPy/object strings before any pypsa.Network is built (pyarrow is
 # installed for the session store's Parquet engine, which would otherwise flip
-# pandas 3.0 to Arrow strings that xarray<2026 rejects). See
+# pandas 3 to Arrow strings, which PyPSA 1.4's spatial clustering cannot
+# aggregate: `aggregatelines` raises "truediv not supported for dtype 'str'"). See
 # backend.app._pandas_compat. Solver tests import this engine package directly,
 # so the shim must live here too, not only in the API host.
 from ..app._pandas_compat import ensure_object_strings as _ensure_object_strings
 
 _ensure_object_strings()
+
+import pypsa as _pypsa
+
+# Pin PyPSA's string-dtype option explicitly. True = convert imported strings to
+# NumPy object dtype (PyPSA's own historical behaviour, and what the shim above
+# already gives every frame); left unset PyPSA 1.4 emits a FutureWarning on each
+# import and flips the behaviour in v2.
+_pypsa.options.api.legacy_string_dtype = True

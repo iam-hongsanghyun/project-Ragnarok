@@ -872,45 +872,65 @@ def test_module_12_brownfield_year_misses_the_reliability_standard(tmp_path: Pat
 
     Nothing in its deterministic run suggested a problem — it sheds no load at
     all. Against the 2.4 h/yr "one day in ten years" yardstick its mean LOLE is
-    seven times over.
+    twenty-seven times over.
+
+    Re-baselined 2026-10-27 (was P50 8.0 / P95 58.25 / mean 17.78): adequacy now
+    dispatches storage with its state-of-charge limits (RE2) instead of counting
+    the 20 MW battery and the pumped hydro as firm for as long as the shortfall
+    lasts, so the same fleet is far less adequate. The lesson only got stronger.
     """
     res = _reliability("training_m7_year", tmp_path, {"outageMcConfig": _M12_MC})
     lole = res["outageMc"]["loleDistribution"]
     eue = res["outageMc"]["eueDistribution"]
-    assert lole["p50"] == pytest.approx(8.0, abs=0.5)
-    assert lole["p95"] == pytest.approx(58.25, rel=0.02)
-    assert lole["mean"] == pytest.approx(17.78, rel=0.02)
-    assert eue["p50"] == pytest.approx(67.6, rel=0.02)
-    assert eue["p95"] == pytest.approx(1_021.9, rel=0.02)
+    assert lole["p50"] == pytest.approx(46.5, abs=1.0)
+    assert lole["p95"] == pytest.approx(160.55, rel=0.02)
+    assert lole["mean"] == pytest.approx(64.06, rel=0.02)
+    assert eue["p50"] == pytest.approx(1_045.7, rel=0.02)
+    assert eue["p95"] == pytest.approx(5_608.3, rel=0.02)
     assert lole["mean"] > 2.4 * 5, "the module's point is that this misses the standard badly"
 
 
 def test_module_12_expansion_improves_adequacy_it_never_asked_about(tmp_path: Path) -> None:
     """Module 7 optimised cost. Reliability was not in the objective or a constraint.
 
-    The mean LOLE still falls twenty-nine-fold — and the P95 still breaches the
-    standard, which is the caveat the module refuses to drop.
+    The mean LOLE still falls about thirteen-fold — and the system still misses
+    the standard, on the mean (about twice it) and far more at P95. That is the
+    caveat the module refuses to drop: least-cost expansion improved adequacy by
+    accident, it did not deliver it.
+
+    Re-baselined 2026-10-27 (was P50 0.0 / P95 3.0 / mean 0.61, i.e. "meets the
+    standard on the mean"): with storage dispatched under its state-of-charge
+    limits (RE2) the expanded system's mean LOLE is 4.73 h/yr, above 2.4.
     """
     res = _reliability("training_m7", tmp_path, {"outageMcConfig": _M12_MC})
     lole = res["outageMc"]["loleDistribution"]
-    assert lole["p50"] == pytest.approx(0.0, abs=1e-6)
-    assert lole["p95"] == pytest.approx(3.0, abs=0.5)
-    assert lole["mean"] == pytest.approx(0.61, rel=0.05)
-    assert res["outageMc"]["eueDistribution"]["p50"] == pytest.approx(0.0, abs=1e-6)
-    assert lole["mean"] < 2.4, "the expanded system meets the standard on the mean"
-    assert lole["p95"] > 2.4, "and still breaches it one year in twenty"
+    assert lole["p50"] == pytest.approx(1.0, abs=0.5)
+    assert lole["p95"] == pytest.approx(19.1, rel=0.03)
+    assert lole["mean"] == pytest.approx(4.73, rel=0.03)
+    assert res["outageMc"]["eueDistribution"]["p50"] == pytest.approx(4.69, rel=0.05)
+    assert res["outageMc"]["eueDistribution"]["p95"] == pytest.approx(366.5, rel=0.03)
+    brownfield_mean = 64.06  # pinned in test_module_12_brownfield_year_misses_the_reliability_standard
+    assert brownfield_mean / lole["mean"] > 10, "the expansion improved the mean LOLE more than tenfold"
+    assert 2.4 < lole["mean"] < 2.4 * 3, "but the mean is still about twice the standard"
+    assert lole["p95"] > 2.4 * 5, "and one year in twenty is many times over it"
 
 
 def test_module_12_capacity_credit_ranks_by_when_the_system_is_short(tmp_path: Path) -> None:
-    """Wind about 46% of nameplate, solar about 16% — because the tight hours are
+    """Wind about 50% of nameplate, solar about 20% — because the tight hours are
     winter evenings. The module makes the point that this is a property of the
-    pairing rather than of the technology."""
+    pairing rather than of the technology.
+
+    The 20 MW battery is credited 11% — it was 98% when storage counted as firm at
+    its power rating for the whole shortfall (RE2): its state of charge now limits it.
+    """
     res = _reliability("training_m7", tmp_path,
                        {"elccConfig": {**_M12_MC, "carriers": []}})
     by_carrier = {c["carrier"]: c for c in res["elcc"]["byCarrier"]}
-    assert by_carrier["wind"]["elccPct"] == pytest.approx(46.25, rel=0.03)
-    assert by_carrier["solar"]["elccPct"] == pytest.approx(15.92, rel=0.05)
+    assert by_carrier["wind"]["elccPct"] == pytest.approx(50.2, rel=0.03)
+    assert by_carrier["solar"]["elccPct"] == pytest.approx(20.4, rel=0.05)
     assert by_carrier["wind"]["elccPct"] > by_carrier["solar"]["elccPct"] * 2
+    assert by_carrier["AC"]["elccPct"] == pytest.approx(11.03, rel=0.05)  # battery (carrier "AC")
+    assert by_carrier["AC"]["elccPct"] < 25.0, "an energy-limited battery is not firm capacity"
 
 
 def test_module_12_elcc_baseline_matches_the_monte_carlo_mean(tmp_path: Path) -> None:
@@ -927,22 +947,27 @@ def test_module_12_elcc_baseline_matches_the_monte_carlo_mean(tmp_path: Path) ->
 
 
 def test_module_12_convergence_reports_that_it_did_not_converge(tmp_path: Path) -> None:
-    """A rare-event estimate at a 5% tolerance does not settle in 1,000 members.
+    """A rare-event estimate at a 2% tolerance does not settle in 1,000 members.
 
     The module teaches the trace rather than the headline: the estimate is
-    stable from 50 members and the standard error is still ~10% at 1,000.
+    stable from 50 members and the standard error is still ~3% at 1,000.
+
+    Re-authored 2026-10-27: at the old 5% tolerance the study now converges (400
+    members) because the brownfield year's shortfalls are no longer rare once
+    storage is energy-limited (EUE 1,554 MWh/yr, was 192), so the sampling
+    setting is tightened to 2% to keep the lesson true.
     """
     res = _reliability("training_m7_year", tmp_path, {"convergenceConfig": {
-        "enabled": True, "targetMetric": "eue", "tolerance": 0.05,
+        "enabled": True, "targetMetric": "eue", "tolerance": 0.02,
         "batchSize": 50, "maxMembers": 1000, "seed": 42,
         "forcedOutageRate": 0.05, "mttrHours": 48.0, "maintenanceEnabled": False,
     }})
     cv = res["convergenceSampling"]
     assert cv["converged"] is False
     assert cv["achievedMembers"] == 1000
-    assert cv["estimate"] == pytest.approx(191.87, rel=0.02)
-    assert cv["ciLow"] == pytest.approx(172.45, rel=0.02)
-    assert cv["ciHigh"] == pytest.approx(211.30, rel=0.02)
+    assert cv["estimate"] == pytest.approx(1_554.30, rel=0.02)
+    assert cv["ciLow"] == pytest.approx(1_457.16, rel=0.02)
+    assert cv["ciHigh"] == pytest.approx(1_651.44, rel=0.02)
     # The estimate settles long before the error does — the step's whole point.
     trace = cv["trace"]
     assert trace[0]["se"] > 2 * trace[-1]["se"]
@@ -1272,18 +1297,22 @@ def test_module_15_scarcity_pays_the_peaker_that_earned_nothing(tmp_path: Path) 
 
     The storage that found no spread in the base market trades here, because the
     variance it needed finally exists.
+
+    Re-baselined 2026-10-27 (was 2,779.5 MWh / 470 h / 209.94 / 214,758,788 / oil
+    2,374 h): the simulation's storage rule now respects the units' energy limits
+    (RE3), which moves the scarcity hours by a handful and the bill by 0.15%.
     """
     scarce = _sim(tmp_path, "uniform", gas_p_nom=40.0)
     summary = scarce["summary"]
-    assert summary["unservedMWh"] == pytest.approx(2_779.5, rel=0.01)
-    assert summary["unservedHours"] == 470
+    assert summary["unservedMWh"] == pytest.approx(2_782.2, rel=0.01)
+    assert summary["unservedHours"] == 471
     assert summary["peakPrice"] == pytest.approx(3_000.0, rel=1e-6)
-    assert summary["avgPrice"] == pytest.approx(209.94, rel=0.01)
-    assert summary["totalCost"] == pytest.approx(214_758_788.0, rel=0.001)
+    assert summary["avgPrice"] == pytest.approx(210.32, rel=0.01)
+    assert summary["totalCost"] == pytest.approx(215_094_657.0, rel=0.001)
     oil = next(u for u in scarce["units"] if u["name"] == "oil_1")
-    assert oil["energyMWh"] == pytest.approx(63_065.0, rel=0.01)
-    assert oil["profit"] == pytest.approx(54_144_000.0, rel=0.01)
-    assert oil["priceSettingHours"] == 2374
+    assert oil["energyMWh"] == pytest.approx(63_316.7, rel=0.01)
+    assert oil["profit"] == pytest.approx(54_259_200.0, rel=0.01)
+    assert oil["priceSettingHours"] == 2379
     assert any(s["energyDischargedMWh"] > 0 for s in scarce["storage"]), "storage wakes up"
 
 
