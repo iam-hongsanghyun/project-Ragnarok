@@ -68,15 +68,37 @@ export function statisticsForPeriod(
   return { ...stats, rows: stats.rows.filter((r) => r.period === undefined || r.period === null || Number(r.period) === period) };
 }
 
+/** Hours the snapshots stand for: one number for a uniform run, or PyPSA's own `snapshot_weightings` per snapshot
+ *  (`runMeta.snapshotWeights`; a sampled run's snapshots represent different numbers of hours). */
+export type SnapshotWeights = number | readonly number[];
+
+/** The run's snapshot hours: PyPSA's per-snapshot weightings when the payload carries them, else the uniform number. */
+export function runSnapshotWeights(
+  results: { runMeta?: { snapshotWeights?: number[] | null; snapshotWeight?: number } } | null | undefined,
+): SnapshotWeights {
+  const perSnapshot = results?.runMeta?.snapshotWeights;
+  return perSnapshot && perSnapshot.length ? perSnapshot : (results?.runMeta?.snapshotWeight ?? 1);
+}
+
+/** Hours of snapshot `index` of `count` rows. A per-snapshot array that does not line up with the rows (a period
+ *  view, a window of a different length) falls back to its mean, never to a wrong row's weight. */
+export function weightAt(weights: SnapshotWeights, index: number, count: number): number {
+  if (typeof weights === 'number') return weights;
+  if (weights.length === count) return weights[index] ?? 1;
+  return weights.length ? weights.reduce((a, b) => a + b, 0) / weights.length : 1;
+}
+
 /** Reduce per-snapshot values over a time bucket.
  *
- * `snapshotWeight` (hours per snapshot) integrates rates into amounts for the
- * 'sum' reducer: a 4-hourly run summing MW snapshots must scale by 4 to get
- * MWh. 'mean' and 'last' are weight-invariant under the uniform per-run
- * weight used here, so they stay untouched. */
-export function aggregateValues(values: number[], reducer: MetricOption['reducer'], snapshotWeight = 1) {
+ * `weights` (hours per snapshot) integrate rates into amounts for the 'sum' reducer: a 4-hourly run summing
+ * MW snapshots must scale by 4 to get MWh, and a sampled run by each snapshot's own hours (`weightAt`).
+ * `values` are the rows' values in row order and `offset` is the index of the first of them among
+ * `count` rows. 'mean' and 'last' are weight-invariant and stay untouched. */
+export function aggregateValues(
+  values: number[], reducer: MetricOption['reducer'], weights: SnapshotWeights = 1, offset = 0, count = values.length,
+) {
   if (!values.length) return 0;
-  if (reducer === 'sum') return values.reduce((sum, value) => sum + value, 0) * snapshotWeight;
+  if (reducer === 'sum') return values.reduce((sum, value, i) => sum + value * weightAt(weights, offset + i, count), 0);
   if (reducer === 'last') return values[values.length - 1];
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
@@ -117,7 +139,8 @@ export function effectiveSpanMs(rows: Array<{ timestamp?: string }>): number {
   return median > 0 ? median * times.length : rawSpan;
 }
 
-export function aggregateMetricRows(metric: MetricOption, startIndex: number, endIndex: number, timeframe: TimeframeOption, snapshotWeight = 1) {
+export function aggregateMetricRows(metric: MetricOption, startIndex: number, endIndex: number, timeframe: TimeframeOption, snapshotWeight: SnapshotWeights = 1) {
+  const count = metric.rows.length;
   const rows = metric.rows.slice(startIndex, endIndex + 1);
   if (!rows.length) return [];
   if (timeframe === 'hourly') return rows;
@@ -128,12 +151,16 @@ export function aggregateMetricRows(metric: MetricOption, startIndex: number, en
         rows.map((row) => numberValue(row[item.key] as string | number | undefined)),
         metric.reducer,
         snapshotWeight,
+        startIndex,
+        count,
       );
     });
     return [aggregated];
   }
   const buckets = new Map<string, TimeSeriesRow[]>();
-  rows.forEach((row) => {
+  const rowIndex = new Map<TimeSeriesRow, number>();
+  rows.forEach((row, i) => {
+    rowIndex.set(row, startIndex + i);
     const bucket = getTimeBucket(row.timestamp, timeframe);
     const current = buckets.get(bucket) || [];
     current.push(row);
@@ -142,27 +169,38 @@ export function aggregateMetricRows(metric: MetricOption, startIndex: number, en
   return Array.from(buckets.entries()).map(([bucket, bucketRows]) => {
     const aggregated: TimeSeriesRow = { label: bucket, timestamp: bucketRows[bucketRows.length - 1]?.timestamp };
     metric.series.forEach((item) => {
-      aggregated[item.key] = aggregateValues(
-        bucketRows.map((row) => numberValue(row[item.key] as string | number | undefined)),
-        metric.reducer,
-        snapshotWeight,
-      );
+      // A sum weights each row by its own hours, so the bucket carries its rows' absolute indices.
+      aggregated[item.key] = metric.reducer === 'sum'
+        ? bucketRows.reduce(
+            (sum, row) => sum + numberValue(row[item.key] as string | number | undefined) * weightAt(snapshotWeight, rowIndex.get(row) ?? 0, count),
+            0,
+          )
+        : aggregateValues(
+            bucketRows.map((row) => numberValue(row[item.key] as string | number | undefined)),
+            metric.reducer,
+            snapshotWeight,
+          );
     });
     return aggregated;
   });
 }
 
-export function buildDonutFromMetric(metric: MetricOption, startIndex: number, endIndex: number, snapshotWeight = 1) {
+export function buildDonutFromMetric(metric: MetricOption, startIndex: number, endIndex: number, snapshotWeight: SnapshotWeights = 1) {
   // A donut is the SUM over the selected period — sum the raw per-snapshot
   // values across [startIndex, endIndex], regardless of the metric's reducer
   // (mean/last) or any timeframe bucketing. So sliding the range re-sums exactly
   // the selected snapshots. `snapshotWeight` (hours per snapshot) integrates
-  // MW-rate rows into MWh totals on runs with gaps between snapshots.
+  // MW-rate rows into MWh totals on runs with gaps between snapshots; a per-snapshot array weights each row
+  // by its own hours (a sampled run).
+  const count = metric.rows.length;
   const rows = metric.rows.slice(startIndex, endIndex + 1);
   return metric.series
     .map((item) => ({
       label: item.label,
-      value: rows.reduce((sum, row) => sum + Math.abs(numberValue(row[item.key] as string | number | undefined)), 0) * snapshotWeight,
+      value: rows.reduce(
+        (sum, row, i) => sum + Math.abs(numberValue(row[item.key] as string | number | undefined)) * weightAt(snapshotWeight, startIndex + i, count),
+        0,
+      ),
       color: item.color,
     }))
     .filter((item) => item.value > 0)

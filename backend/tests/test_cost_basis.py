@@ -144,9 +144,9 @@ def test_d20_build_components_snaps_no_placeholder_and_keeps_v_ang_min() -> None
     model = _gen_model()
     model["generators"][0]["p_nom_max"] = 1e12
     n, _ = build_components(model, {})
-    assert float(n.generators.at["w", "p_nom_max"]) == 1e12          # build_network would snap it to inf
+    assert float(n.generators.at["w", "p_nom_max"]) == 1e12
     n2, _ = build_network(model, SCENARIO, OPTIONS)
-    assert np.isinf(float(n2.generators.at["w", "p_nom_max"]))
+    assert float(n2.generators.at["w", "p_nom_max"]) == 1e12         # D13: the run no longer snaps it; the Forge action does
 
 
 def test_d20_netcdf_export_is_one_to_one() -> None:

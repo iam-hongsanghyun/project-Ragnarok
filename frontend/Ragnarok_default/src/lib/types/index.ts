@@ -1463,6 +1463,9 @@ export interface GeneratorDetail {
   emissionsSeries: Array<{ label: string; timestamp: string; emissions: number }>;
   availableSeries: Array<{ label: string; timestamp: string; available: number }>;
   curtailmentSeries: Array<{ label: string; timestamp: string; curtailment: number }>;
+  /** PyPSA's weighted totals of this generator (n.statistics under the run's snapshot weightings); absent when the
+   *  run stores no outputs to ask PyPSA about. The `summary` Energy / Operating cost / Emissions lines show them. */
+  totals?: { energyMwh: number; operatingCost: number; carbonCost: number; emissionsTco2: number; curtailmentMwh: number };
 }
 
 export interface BusDetail {
@@ -2003,7 +2006,12 @@ export interface RunResults {
     averageSystemPrice?: number;
     snapshotCount: number;
     snapshotWeight: number;
+    /** Sum of PyPSA's snapshot weightings (h) of the run. */
     modeledHours: number;
+    /** PyPSA's `snapshot_weightings["generators"]` per snapshot (h), in snapshot order. A window sum multiplies each
+     *  snapshot by ITS weight (a sampled run's snapshots stand for different numbers of hours). Null when the run
+     *  stores no outputs to rebuild a network from; absent on a payload older than the field. */
+    snapshotWeights?: number[] | null;
     storeWeight: number;
     planningMode?: PlanningMode;
     investmentPeriods?: number[];

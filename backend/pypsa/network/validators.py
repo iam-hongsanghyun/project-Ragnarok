@@ -8,7 +8,6 @@ import pandas as pd
 from ...app.models import RunPayload
 from ..pathway import parse_pathway_config
 from ..pypsa_schema import (
-    bus_reference_attributes,
     component_schema,
     component_sheets,
     input_temporal_attributes,
@@ -141,29 +140,6 @@ def _check_duplicate_names(sheet: str, rows: list[dict[str, Any]], errors: list[
         seen.add(name)
 
 
-def _check_bus_refs(
-    sheet: str,
-    rows: list[dict[str, Any]],
-    bus_names: set[str],
-    errors: list[str],
-) -> None:
-    refs = bus_reference_attributes(sheet)
-    if not refs:
-        return
-    for row in rows:
-        name = _row_name(row) or "<unnamed>"
-        for attr in refs:
-            field = str(attr.get("attribute", ""))
-            required = bool(attr.get("required"))
-            value = text(row.get(field))
-            if not value:
-                if required:
-                    errors.append(f"{sheet}: row '{name}' is missing required bus reference '{field}'.")
-                continue
-            if value not in bus_names:
-                errors.append(f"{sheet}: row '{name}' references unknown bus '{value}' via '{field}'.")
-
-
 def _check_numeric_sanity(sheet: str, rows: list[dict[str, Any]], warnings: list[str], errors: list[str]) -> None:
     for row in rows:
         name = _row_name(row) or "<unnamed>"
@@ -180,7 +156,7 @@ def _check_numeric_sanity(sheet: str, rows: list[dict[str, Any]], warnings: list
             if field == "v_ang_min" and math.isfinite(value):
                 warnings.append(
                     f"{sheet}: row '{name}' sets v_ang_min={value} — deprecated in PyPSA 1.4 and ignored "
-                    "(it is dropped before solve); use v_ang_max (degrees, symmetric |angle difference| cap)."
+                    "(PyPSA warns; the value goes to it as written); use v_ang_max (degrees, symmetric |angle difference| cap)."
                 )
             if field == "v_ang_max" and math.isfinite(value) and value <= 0:
                 warnings.append(f"{sheet}: row '{name}' has v_ang_max={value} deg — a non-positive cap forbids all flow.")
@@ -190,63 +166,6 @@ def _check_numeric_sanity(sheet: str, rows: list[dict[str, Any]], warnings: list
                 warnings.append(
                     f"{sheet}: row '{name}' has co2_emissions={value} — expected tCO₂/MWh (likely needs ÷1000 if entered as kg/MWh)."
                 )
-
-
-def _check_phase_shift_bounds(sheet: str, rows: list[dict[str, Any]], warnings: list[str], errors: list[str]) -> None:
-    """Phase-shifting transformer bounds (degrees): ``phase_shift_min <= phase_shift_max``."""
-    if sheet != "transformers":
-        return
-    for row in rows:
-        name = _row_name(row) or "<unnamed>"
-        lo = number(row.get("phase_shift_min"), None)
-        hi = number(row.get("phase_shift_max"), None)
-        if lo is None or hi is None:
-            continue
-        if lo > hi:
-            errors.append(f"transformers: row '{name}' has phase_shift_min ({lo}) > phase_shift_max ({hi}).")
-        elif lo < hi:
-            setpoint = number(row.get("phase_shift"), None)
-            if setpoint not in (None, 0.0):
-                warnings.append(
-                    f"transformers: row '{name}' optimises its phase shift in [{lo}, {hi}] deg; "
-                    f"the 'phase_shift' setpoint ({setpoint}) is ignored."
-                )
-
-
-def _check_maintenance_attributes(sheet: str, rows: list[dict[str, Any]], warnings: list[str], errors: list[str]) -> None:
-    """``maintainable`` units need a positive duration and event count (hours / count)."""
-    if sheet not in ("generators", "links", "processes"):
-        return
-    for row in rows:
-        flag = row.get("maintainable")
-        if str(flag).strip().lower() not in ("true", "1", "yes"):
-            continue
-        name = _row_name(row) or "<unnamed>"
-        duration = number(row.get("maintenance_duration"), 0.0)
-        events = number(row.get("maintenance_events"), 1.0)
-        if duration is None or duration <= 0:
-            warnings.append(
-                f"{sheet}: row '{name}' is maintainable but maintenance_duration is 0 — no outage can be scheduled."
-            )
-        if events is not None and events < 1:
-            warnings.append(f"{sheet}: row '{name}' is maintainable with maintenance_events={events:g} (< 1).")
-        if str(row.get("committable")).strip().lower() in ("true", "1", "yes") or str(row.get("p_nom_extendable")).strip().lower() in ("true", "1", "yes"):
-            warnings.append(
-                f"{sheet}: row '{name}' combines maintainable with committable/extendable capacity — "
-                "adds binaries (MILP); set forceLp to relax."
-            )
-
-
-def _check_carrier_refs(sheet: str, rows: list[dict[str, Any]], carrier_names: set[str], warnings: list[str]) -> None:
-    if not carrier_names:
-        return
-    for row in rows:
-        if "carrier" not in row:
-            continue
-        name = _row_name(row) or "<unnamed>"
-        carrier = text(row.get("carrier"))
-        if carrier and carrier not in carrier_names:
-            warnings.append(f"{sheet}: row '{name}' references undefined carrier '{carrier}'.")
 
 
 def _check_output_columns(sheet: str, rows: list[dict[str, Any]], notes: list[str]) -> None:
@@ -447,8 +366,6 @@ def validate_model(payload: RunPayload) -> dict[str, Any]:
     buses = workbook_rows(model, "buses")
     if not buses:
         errors.append("No buses defined. At least one bus is required.")
-    bus_names: set[str] = {_row_name(row) for row in buses if _row_name(row)}
-    carrier_names: set[str] = {_row_name(row) for row in workbook_rows(model, "carriers") if _row_name(row)}
 
     loads = workbook_rows(model, "loads")
     generators = workbook_rows(model, "generators")
@@ -477,11 +394,7 @@ def validate_model(payload: RunPayload) -> dict[str, Any]:
             continue
         _check_duplicate_names(sheet, rows, errors)
         _check_required_fields(sheet, rows, errors)
-        _check_bus_refs(sheet, rows, bus_names, errors)
         _check_numeric_sanity(sheet, rows, warnings, errors)
-        _check_phase_shift_bounds(sheet, rows, warnings, errors)
-        _check_maintenance_attributes(sheet, rows, warnings, errors)
-        _check_carrier_refs(sheet, rows, carrier_names, warnings)
         _check_output_columns(sheet, rows, notes)
 
     _check_ts_sheets(

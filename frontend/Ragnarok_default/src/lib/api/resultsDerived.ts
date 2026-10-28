@@ -9,6 +9,7 @@
  *   GET /api/runs/{name}/companies?sort_by=&period= -> {run, period, items, total, currency, sortedBy, metrics}
  *   GET /api/runs/{name}/assets?kind=&names=&series=&period=&end=  -> {run, items, total, offset, limit}
  *   GET /api/runs/{name}/period/{period}?currency= -> {run, period, result}  (one investment period of a pathway run)
+ *   GET /api/runs/{name}/derived?period=          -> {run, period, weights, modeledHours, generators, buses, processes}
  *   GET /api/runs/{name}/metrics?focus=&keys=&groupBy=...  -> {run, focus, items: MetricOption[], total}
  *   GET /api/runs/{name}/analysis/{topic}?period=...  -> card analytics (load, carrier performance,
  *       transition risk, duration curve, totals); see `fetchRunAnalysis`
@@ -414,3 +415,25 @@ export function fetchRunAnalysis<T extends keyof AnalysisTopics>(
   const qs = params.toString();
   return getJson(`/api/runs/${enc(run)}/analysis/${topic}${qs ? `?${qs}` : ''}`, `Analysis ${topic}`);
 }
+
+// ── Weighted totals (core cleanup step 6) ─────────────────────────────────────
+
+/** `GET /api/runs/{name}/derived?period=`: PyPSA's own weighted totals of a stored run (`n.statistics` under the
+ *  run's snapshot weightings), plus the per-snapshot weights a browser window sum must use. */
+export interface RunDerived {
+  run: string;
+  period: number | null;
+  /** `snapshot_weightings["generators"]` per snapshot (h), in snapshot order of the period. */
+  weights: number[];
+  modeledHours: number;
+  generators: Record<string, {
+    energyMwh: number; operatingCost: number; carbonCost: number; emissionsTco2: number; curtailmentMwh: number;
+  }>;
+  buses: Record<string, {
+    loadMwh: number; generationMwh: number; averagePrice: number; carrierMwh: Record<string, number>;
+  }>;
+  processes: Record<string, { throughputMwh: number; operatingCost: number }>;
+}
+
+export const fetchRunDerived = (name: string, period?: number | null): Promise<RunDerived> =>
+  getJson(`/api/runs/${enc(name)}/derived${period != null ? `?period=${period}` : ''}`, 'Run derived totals');

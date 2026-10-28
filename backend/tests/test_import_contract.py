@@ -24,6 +24,7 @@ from typing import Any
 
 import pandas as pd
 import pytest
+from fastapi import HTTPException
 
 from backend.pypsa.network import build_network
 
@@ -265,9 +266,9 @@ def test_generic_loop_imports_global_constraints_without_bus(
     assert float(row["constant"]) == pytest.approx(1000.0)
 
 
-def test_broken_bus_reference_is_dropped(scenario: dict[str, Any]) -> None:
-    """Rows whose required bus reference points to a missing bus must be
-    dropped and reported in ``notes``, never silently passed to PyPSA."""
+def test_broken_bus_reference_is_refused(scenario: dict[str, Any]) -> None:
+    """A row whose bus reference points to a missing bus is refused with PyPSA's own message (core cleanup A6):
+    it is neither dropped with a note nor passed on to the solve."""
     model = {
         "buses": _two_bus_buses(),
         "snapshots": _hourly_snapshots(2),
@@ -277,13 +278,9 @@ def test_broken_bus_reference_is_dropped(scenario: dict[str, Any]) -> None:
             {"name": "dangling", "bus": "nonexistent_bus", "carrier": "wind", "p_nom": 10.0},
         ],
     }
-    network, notes = build_network(model, scenario)
-
-    assert "ok" in network.generators.index
-    assert "dangling" not in network.generators.index
-    assert any("dangling" in note for note in notes), (
-        "Expected the dropped row to be surfaced in notes; got: " + repr(notes)
-    )
+    with pytest.raises(HTTPException) as exc:
+        build_network(model, scenario)
+    assert exc.value.status_code == 400 and "dangling" in str(exc.value.detail)
 
 
 def test_snapshots_reordered_chronologically(scenario: dict[str, Any]) -> None:

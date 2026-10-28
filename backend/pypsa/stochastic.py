@@ -61,6 +61,9 @@ class StochasticScenario:
     overrides: tuple[ScenarioOverride, ...]
 
 
+_WEIGHT_SUM_TOLERANCE = 1e-6
+
+
 @dataclass(frozen=True)
 class StochasticConfig:
     enabled: bool
@@ -87,7 +90,8 @@ def parse_stochastic_config(raw: dict[str, Any] | None) -> StochasticConfig:
 
     Raises:
         HTTPException: 400 when an override targets a scenario-invariant
-            attribute (see :func:`is_scenario_invariant`).
+            attribute (see :func:`is_scenario_invariant`), or when the scenario
+            weights do not sum to 1 (PyPSA's requirement; nothing is rescaled).
     """
     raw = raw or {}
     if not bool(raw.get("enabled")):
@@ -143,13 +147,19 @@ def parse_stochastic_config(raw: dict[str, Any] | None) -> StochasticConfig:
     if len(scenarios) < 2:
         return StochasticConfig(enabled=False, scenarios=())
 
-    # Normalise weights to sum=1
+    # PyPSA's ``set_scenarios`` requires probabilities that sum to 1; Ragnarok no longer rescales them.
     total = sum(s.weight for s in scenarios)
-    normalised = tuple(
-        StochasticScenario(name=s.name, weight=s.weight / total, overrides=s.overrides)
-        for s in scenarios
-    )
-    return StochasticConfig(enabled=True, scenarios=normalised)
+    if abs(total - 1.0) > _WEIGHT_SUM_TOLERANCE:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Stochastic scenario weights must sum to 1 (PyPSA's scenario probabilities); "
+                f"they sum to {total:g}. Set the weights to probabilities, e.g. "
+                + ", ".join(f"{s.name}={s.weight / total:.6g}" for s in scenarios)
+                + "."
+            ),
+        )
+    return StochasticConfig(enabled=True, scenarios=tuple(scenarios))
 
 
 def apply_scenarios(network: pypsa.Network, config: StochasticConfig) -> None:
@@ -263,107 +273,66 @@ def per_scenario_summaries(
     emissions_factors: dict[str, float],
     currency_symbol: str,
 ) -> list[dict[str, Any]]:
-    """Compute one summary row per scenario from a solved stochastic network.
+    """One summary row per scenario of a solved stochastic network, read from ``n.statistics``.
 
-    ``totalOperatingCost`` prices dispatch at the **dense** marginal cost
-    (``get_switchable_as_dense``) plus the carbon-pricing module's adder: a workbook
-    ``generators-marginal_cost`` series lives only in the time-varying frame, so the
-    static column alone would misprice it. Falls back to the
-    static column when the dense read is unavailable.
+    PyPSA keeps the ``scenario`` level in its statistics, unweighted by probability:
+    ``totalOperatingCost`` is ``n.statistics.opex`` (every component's marginal, start-up,
+    stand-by ... cost) plus the carbon-pricing module's declared term evaluated per scenario;
+    ``totalEnergyMwh`` and ``loadShedEnergyMwh`` are ``n.statistics.supply`` of the generators
+    (shedding backstops split out by name). Emissions are the carrier ``co2_emissions`` x
+    ``supply / efficiency`` (PyPSA's ``primary_energy`` basis): PyPSA has no emissions statistic.
 
-    Algorithm (per scenario s, generators g, snapshots t, weights w):
-        $$C_s = \\sum_{g,t} w_t \\, c_{g,t} \\, \\max(p^s_{g,t}, 0)$$
-        ASCII: cost = sum_gt w * mc_dense[g,t] * max(p[g,t], 0).
+    Algorithm (per scenario s, generator g):
+        $$C_s = \\sum_{c} \\mathrm{opex}_{s,c} + \\sum_{g,t} w_t \\pi_t e_g p^s_{g,t} / \\eta_g$$
+        ASCII: cost_s = statistics.opex[s] + carbon_term[s].
 
-        Symbols: c = marginal cost [currency/MWh], p = dispatch [MW],
-        w = snapshot weight [h].
+        Symbols: opex = ``n.statistics.opex`` [currency], w = snapshot weight [h],
+        pi = carbon price [currency/tCO2], e = carrier emission factor [tCO2/MWh_th],
+        eta = efficiency [-], p = dispatch [MW].
     """
     if not config.enabled:
         return []
+    from .results.stat_metrics import asset_statistic  # results imports this module
+
+    opex = asset_statistic(network, "opex", ["Generator", "StorageUnit", "Store", "Link", "Line", "Transformer"])
+    supply = asset_statistic(network, "supply", ["Generator"])
+    carbon = carbon_pricing.carbon_cost_by_generator(network, per_scenario=True)
+
+    def per_scenario(frame: pd.DataFrame) -> pd.Series:
+        if frame.empty or "scenario" not in frame.index.names:
+            return pd.Series(dtype=float)
+        return frame.fillna(0.0).sum(axis=1).groupby(level="scenario").sum()
+
+    cost_by_scenario = per_scenario(opex)
+    if len(carbon) and isinstance(carbon.index, pd.MultiIndex):
+        cost_by_scenario = cost_by_scenario.add(carbon.groupby(level="scenario").sum(), fill_value=0.0)
+
+    gens = network.generators
+    static = gens.xs(config.scenarios[0].name, level="scenario") if isinstance(gens.index, pd.MultiIndex) else gens
+    shed = {str(g) for g in static.index if is_shedding(g, static.at[g, "carrier"])}
+    eta = pd.to_numeric(static["efficiency"], errors="coerce").fillna(1.0)
+    eta = eta.where(eta > 1e-6, 1.0)
+    factor = static["carrier"].map(emissions_factors).fillna(0.0) / eta  # tCO2 per MWh of dispatch
+
     rows: list[dict[str, Any]] = []
-    weights = network.snapshot_weightings["generators"].reindex(network.snapshots).fillna(1.0)
-    gen_p = network.generators_t.p
-    generators_static = network.generators
-    try:
-        mc_dense_all = carbon_pricing.add_adder(network, network.get_switchable_as_dense("Generator", "marginal_cost"))
-    except Exception:
-        mc_dense_all = None
-
     for scenario in config.scenarios:
-        # Time-series: `gen_p` columns are a MultiIndex (scenario, generator_name).
-        if isinstance(gen_p.columns, pd.MultiIndex):
-            try:
-                scenario_dispatch = gen_p.xs(scenario.name, level="scenario", axis=1)
-            except KeyError:
-                scenario_dispatch = pd.DataFrame(index=network.snapshots)
-        else:
-            scenario_dispatch = gen_p
-
-        # Dense marginal cost sliced to this scenario (columns mirror gen_p's).
-        mc_scenario: pd.DataFrame | None = None
-        if mc_dense_all is not None:
-            if isinstance(mc_dense_all.columns, pd.MultiIndex):
-                try:
-                    mc_scenario = mc_dense_all.xs(scenario.name, level="scenario", axis=1)
-                except KeyError:
-                    mc_scenario = None
-            else:
-                mc_scenario = mc_dense_all
-
-        # Static rows: filter by scenario level
-        if isinstance(generators_static.index, pd.MultiIndex):
-            try:
-                scenario_static = generators_static.xs(scenario.name, level="scenario")
-            except KeyError:
-                scenario_static = generators_static.iloc[0:0]
-        else:
-            scenario_static = generators_static
-
-        carriers = scenario_static.get("carrier", pd.Series(dtype=str))
-        # tCO₂ per MWh_electrical = carrier co2_emissions / η (thermal basis, M3).
-        ef_per_gen = carriers.map(emissions_factors).fillna(0.0)
-        eta = pd.to_numeric(
-            scenario_static.get("efficiency", pd.Series(dtype=float)), errors="coerce"
-        ).reindex(ef_per_gen.index).fillna(1.0)
-        eta = eta.where(eta > 1e-6, 1.0)
-        ef_per_gen = ef_per_gen / eta
-        marginal_cost_static = scenario_static.get("marginal_cost", pd.Series(dtype=float)).fillna(0.0)
-
-        dispatch_pos = scenario_dispatch.clip(lower=0.0)
-        energy_per_gen = dispatch_pos.multiply(weights, axis=0).sum()
-        # Unserved energy (the load-shedding backstop) is not supply.
-        total_energy = float(
-            energy_per_gen[
-                [c for c in energy_per_gen.index if not is_shedding(c)]
-            ].sum()
-        )
-        total_emissions = float((energy_per_gen * ef_per_gen.reindex(energy_per_gen.index).fillna(0.0)).sum())
-        if mc_scenario is not None:
-            mc = mc_scenario.reindex(
-                index=dispatch_pos.index, columns=dispatch_pos.columns
-            ).fillna(0.0)
-            total_operating_cost = float(
-                (dispatch_pos * mc).multiply(weights, axis=0).sum().sum()
-            )
-        else:
-            total_operating_cost = float((energy_per_gen * marginal_cost_static.reindex(energy_per_gen.index).fillna(0.0)).sum())
-
-        shed = [c for c in scenario_dispatch.columns if is_shedding(c)]
-        load_shed_energy = (
-            float(scenario_dispatch[shed].clip(lower=0.0).multiply(weights, axis=0).sum().sum())
-            if shed
-            else 0.0
-        )
-
+        energy = pd.Series(dtype=float)
+        if not supply.empty and "scenario" in supply.index.names:
+            sliced = supply.fillna(0.0).sum(axis=1).xs(scenario.name, level="scenario")
+            energy = sliced.droplevel("component") if "component" in sliced.index.names else sliced
+        is_shed = energy.index.isin(shed)
+        total_energy = float(energy[~is_shed].sum())
+        total_emissions = float((energy[~is_shed] * factor.reindex(energy.index[~is_shed]).fillna(0.0)).sum())
+        total_cost = float(cost_by_scenario.get(scenario.name, 0.0))
         rows.append({
             "name": scenario.name,
             "weight": scenario.weight,
             "overrideCount": len(scenario.overrides),
             "totalEnergyMwh": total_energy,
             "totalEmissionsTco2": total_emissions,
-            "totalOperatingCost": total_operating_cost,
-            "totalOperatingCostFormatted": f"{round(total_operating_cost):,} {currency_symbol}",
-            "loadShedEnergyMwh": load_shed_energy,
+            "totalOperatingCost": total_cost,
+            "totalOperatingCostFormatted": f"{round(total_cost):,} {currency_symbol}",
+            "loadShedEnergyMwh": float(energy[is_shed].sum()),
         })
     return rows
 

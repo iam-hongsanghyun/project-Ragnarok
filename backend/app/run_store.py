@@ -322,133 +322,66 @@ def _model_static(model: Any) -> dict[str, Any]:
     return {name: rows for name, rows in model.items() if not _is_series_sheet(str(name))}
 
 
-def _generator_energy_fallback(result: dict[str, Any], bundle: dict[str, Any]) -> list[dict[str, Any]]:
-    """Per-generator dispatched energy from the per-snapshot series (older runs).
+def _stored_network(bundle: dict[str, Any]) -> Any | None:
+    """The stored run's network with its solved outputs injected, or ``None`` when it stores no series.
 
-    New runs carry ``result['generatorEnergy']`` (computed server-side at solve
-    time); runs stored before that field existed are summed here from
-    ``generatorDispatchSeries`` so the "Dispatch by unit" donut still has its
-    small aggregate after the heavy series is stripped from the light view.
+    ``network_from_outputs`` rebuilds it from the stored model / scenario / options (the legacy build profile
+    for a run stored before ``buildVersion``) and PyPSA is then asked for every total below, under the run's own
+    snapshot weightings.
     """
-    rows = result.get("generatorDispatchSeries")
-    if not isinstance(rows, list) or not rows:
-        return []
-    totals: dict[str, float] = {}
-    for row in rows:
-        values = row.get("values") if isinstance(row, dict) else None
-        if isinstance(values, dict):
-            for key, value in values.items():
-                try:
-                    totals[str(key)] = totals.get(str(key), 0.0) + float(value)
-                except (TypeError, ValueError):
-                    continue
-    weight = bundle.get("snapshotWeight") or (bundle.get("options") or {}).get("snapshotWeight") or 1.0
+    from ..pypsa.results.statistics_query import network_from_outputs
+
+    result = bundle.get("result") or {}
+    outputs = result.get("outputs") if isinstance(result, dict) else None
+    if not isinstance(outputs, dict) or not outputs.get("series") or not isinstance(bundle.get("model"), dict):
+        return None
     try:
-        weight = float(weight)
-    except (TypeError, ValueError):
-        weight = 1.0
-    carrier_map: dict[str, str] = {}
-    gens = (bundle.get("model") or {}).get("generators")
-    if isinstance(gens, list):
-        for g in gens:
-            if isinstance(g, dict) and g.get("name") is not None:
-                carrier_map[str(g["name"])] = str(g.get("carrier", ""))
+        return network_from_outputs(bundle["model"], bundle.get("scenario") or {}, bundle.get("options") or {}, outputs)
+    except Exception as exc:  # noqa: BLE001 - a backfill must never make the run unreadable
+        logger.warning("Stored run could not be rebuilt for statistics: %s", exc)
+        return None
+
+
+def _generator_energy_fallback(result: dict[str, Any], bundle: dict[str, Any]) -> list[dict[str, Any]]:
+    """Per-generator dispatched energy (older runs), from ``n.statistics.supply`` on the rebuilt network.
+
+    New runs carry ``result['generatorEnergy']`` (computed at solve time); runs stored before that field
+    existed get it here so the "Dispatch by unit" donut still has its small aggregate after the heavy series
+    is stripped from the light view. PyPSA applies the run's own snapshot weightings (a sampled run is not a
+    uniform weight). ``[]`` when the run stores no output series.
+    """
+    network = _stored_network(bundle)
+    if network is None:
+        return []
+    from ..pypsa.results.run_statistics import run_statistics
+
+    carriers = network.generators["carrier"].astype(str).to_dict()
     out = [
-        {"name": k, "value": v * weight, "carrier": carrier_map.get(k, "")}
-        for k, v in totals.items()
-        if v > 0.0
+        {"name": name, "value": values["energyMwh"], "carrier": carriers.get(name, "")}
+        for name, values in run_statistics(network)["generators"].items()
+        if values["energyMwh"] > 0.0 and not is_shedding(name, carriers.get(name))
     ]
     out.sort(key=lambda row: row["value"], reverse=True)
     return out
 
 
 def _curtailment_fallback(bundle: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, float]]:
-    """Per-carrier curtailment series + per-generator curtailed MWh from a
-    stored bundle (runs saved before the solve-time fields existed).
-
-    Everything needed is already in the run db: per-snapshot dispatch
-    (``generatorDispatchSeries``), the input ``generators-p_max_pu`` sheet in
-    the model snapshot (index-aligned with solved snapshots, same convention as
-    the frontend's assetDetails), and ``p_nom_opt`` in the static outputs.
+    """Per-carrier curtailment series + per-generator curtailed MWh of a stored run (runs saved before the
+    solve-time fields existed): ``n.statistics.curtailment`` on the rebuilt network.
 
     Algorithm:
-        curtailment_g(t) = max(p_max_pu_g(t) * p_nom_g - p_g(t), 0)   [MW]
-        ASCII: curt = max(avail - dispatch, 0); MWh = sum_t curt * weight.
+        curtailment_g(t) = max(p_max_pu_g(t) * p_nom_g - p_g(t), 0)   [MW]   (PyPSA's statistic)
+        MWh_g = sum_t w_t * curtailment_g(t)                                    (w = snapshot weightings)
 
-    Only generators with a time-varying ``p_max_pu`` (renewables) are
-    curtailable; the load-shedding backstop is excluded by name prefix.
-    Returns ``([], {})`` when the bundle lacks the required series.
+    Only generators with a time-varying ``p_max_pu`` are curtailable; the load-shedding backstop is excluded.
+    Returns ``([], {})`` when the run stores no output series.
     """
-    result = bundle.get("result") or {}
-    disp_rows = result.get("generatorDispatchSeries")
-    model = bundle.get("model") or {}
-    pmax_rows = model.get("generators-p_max_pu")
-    if not isinstance(disp_rows, list) or not disp_rows:
+    network = _stored_network(bundle)
+    if network is None:
         return [], {}
-    if not isinstance(pmax_rows, list) or not pmax_rows or not isinstance(pmax_rows[0], dict):
-        pmax_rows = []
+    from ..pypsa.results.dispatch import build_curtailment_series, curtailment_mwh_by_generator
 
-    p_nom_in: dict[str, float] = {}
-    carrier_map: dict[str, str] = {}
-    for g in model.get("generators") or []:
-        if isinstance(g, dict) and g.get("name") is not None:
-            name = str(g["name"])
-            try:
-                p_nom_in[name] = float(g.get("p_nom") or 0.0)
-            except (TypeError, ValueError):
-                p_nom_in[name] = 0.0
-            carrier_map[name] = str(g.get("carrier", "") or "")
-
-    static_gens = ((result.get("outputs") or {}).get("static") or {}).get("generators") or {}
-
-    def _p_nom(name: str) -> float:
-        try:
-            opt = float((static_gens.get(name) or {}).get("p_nom_opt") or 0.0)
-        except (TypeError, ValueError):
-            opt = 0.0
-        return opt if opt > 0 else p_nom_in.get(name, 0.0)
-
-    tv_gens = [
-        c for c in (pmax_rows[0] if pmax_rows else {})
-        if c in p_nom_in and not is_shedding(c)
-    ]
-    tv_p_nom = {g: _p_nom(g) for g in tv_gens}
-
-    weight = bundle.get("snapshotWeight") or (bundle.get("options") or {}).get("snapshotWeight") or 1.0
-    try:
-        weight = float(weight)
-    except (TypeError, ValueError):
-        weight = 1.0
-
-    series: list[dict[str, Any]] = []
-    mwh: dict[str, float] = {}
-    for i, row in enumerate(disp_rows):
-        if not isinstance(row, dict):
-            continue
-        values = row.get("values") if isinstance(row.get("values"), dict) else {}
-        pmax_row = pmax_rows[i] if i < len(pmax_rows) else {}
-        out_vals: dict[str, float] = {}
-        for g in tv_gens:
-            try:
-                ratio = float(pmax_row.get(g) or 0.0)
-            except (TypeError, ValueError):
-                ratio = 0.0
-            try:
-                disp = max(float(values.get(g) or 0.0), 0.0)
-            except (TypeError, ValueError):
-                disp = 0.0
-            curt = max(max(ratio, 0.0) * tv_p_nom[g] - disp, 0.0)
-            if curt > 1e-6:
-                carrier = carrier_map.get(g, "") or "Other"
-                out_vals[carrier] = out_vals.get(carrier, 0.0) + curt
-                mwh[g] = mwh.get(g, 0.0) + curt * weight
-        series.append({
-            "label": row.get("label"),
-            "timestamp": row.get("timestamp"),
-            "period": row.get("period"),
-            "values": out_vals,
-        })
-    return series, mwh
+    return build_curtailment_series(network), curtailment_mwh_by_generator(network)
 
 
 def _storage_soc_fallback(bundle: dict[str, Any]) -> list[dict[str, Any]]:
@@ -504,6 +437,27 @@ def _attach_storage_soc(light_result: dict[str, Any], bundle: dict[str, Any]) ->
     return True
 
 
+def _attach_snapshot_weights(light_result: dict[str, Any], bundle: dict[str, Any]) -> bool:
+    """Backfill ``runMeta.snapshotWeights`` (PyPSA's per-snapshot hours) on a run stored before the field existed.
+
+    The weights are ``n.snapshot_weightings`` of the rebuilt network, so a sampled / authored-weight run is
+    summed with each snapshot's own hours instead of one uniform number. ``modeledHours`` becomes their sum
+    (the old stored value was ``count x the first weight``: identical for uniform weights, wrong otherwise).
+    Key presence marks "already derived": a run with no output series stores ``None`` once.
+    """
+    meta = light_result.get("runMeta")
+    if not isinstance(meta, dict) or "snapshotWeights" in meta:
+        return False
+    network = _stored_network(bundle)
+    if network is None:
+        meta["snapshotWeights"] = None
+        return True
+    weights = network.snapshot_weightings["generators"].reindex(network.snapshots).fillna(1.0)
+    meta["snapshotWeights"] = [float(w) for w in weights.to_numpy()]
+    meta["modeledHours"] = float(weights.sum())
+    return True
+
+
 def _attach_curtailment(light_result: dict[str, Any], bundle: dict[str, Any]) -> bool:
     """Backfill ``curtailmentSeries`` + per-generator ``curtailmentMwh`` on a
     light result that predates the solve-time fields. Returns True if changed.
@@ -550,6 +504,7 @@ def _light_analytics(bundle: dict[str, Any]) -> dict[str, Any]:
         # derive them from the stored series + model snapshot.
         _attach_curtailment(light_result, bundle)
         _attach_storage_soc(light_result, bundle)
+        _attach_snapshot_weights(light_result, bundle)
         # The dominant payload (tens of MB) — only needed for the per-unit
         # time-series view, which fetches it windowed on demand.
         light_result["generatorDispatchSeries"] = None
@@ -1035,11 +990,13 @@ def get_run_analytics(name: str) -> dict[str, Any] | None:
             stored_result = analytics.get("result")
             if isinstance(stored_result, dict) and (
                 "curtailmentSeries" not in stored_result or "storageSocSeries" not in stored_result
+                or "snapshotWeights" not in (stored_result.get("runMeta") or {})
             ):
                 bundle = get_run(name)
                 if bundle is not None:
                     changed = _attach_curtailment(stored_result, bundle)
                     changed = _attach_storage_soc(stored_result, bundle) or changed
+                    changed = _attach_snapshot_weights(stored_result, bundle) or changed
                     if changed:
                         try:
                             with _connect(name) as conn:

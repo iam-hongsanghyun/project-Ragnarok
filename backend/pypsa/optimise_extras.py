@@ -84,53 +84,48 @@ def _detach_model(network: pypsa.Network) -> None:
         pass
 
 
-def run_ac_feasibility(network: pypsa.Network, cfg: dict[str, Any]) -> dict[str, Any]:
-    """AC feasibility check of a solved LOPF dispatch (P25).
+def run_ac_feasibility(
+    network: pypsa.Network, cfg: dict[str, Any], solve_kwargs: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """AC feasibility check of the LOPF dispatch (P25), by PyPSA itself.
 
-    Mirrors the second half of PyPSA's ``optimize_and_run_non_linear_powerflow``
-    on a *copy* of the solved network, so the reported optimum is untouched:
-    dispatch ``p`` becomes ``p_set``, one generator per sub-network is the slack
-    (the rest PV, the first other one PQ so the Jacobian is regular) and
-    ``n.pf()`` runs for every snapshot.
+    Calls ``optimize_and_run_non_linear_powerflow`` on a *copy* of the network, so the
+    reported optimum is untouched. PyPSA re-solves the copy with the run's own solve
+    options (one more LP/MILP solve), turns the dispatch into ``p_set``, picks the
+    slack/PV/PQ roles and runs ``n.pf()`` for every snapshot. Ragnarok only summarises
+    the power-flow result.
 
     Args:
         network: solved network (its solver model is detached).
         cfg: ``{distributeSlack, slackWeights, xTol, useSeed, skipPre}``.
+        solve_kwargs: the ``n.optimize`` keyword arguments of the main solve
+            (solver, options, ``extra_functionality`` ...), so the copy solves the same
+            problem.
 
     Returns:
         ``{converged, iterations, maxMismatch, voltageMin, voltageMax,
         peakLineLoadingPct, lossesMwh, slackShiftMwh, distributeSlack}``, or
-        ``{converged: False, error}`` if PyPSA raised.
+        ``{converged: False, error}`` if PyPSA raised or the copy did not solve.
     """
     _detach_model(network)
     work = network.copy()
     try:
-        for comp in work.one_port_components | {"Process", "Link"}:
-            c = work.c[comp]
-            if not c.dynamic["p"].empty:
-                c.dynamic["p_set"] = c.dynamic["p"].copy()
-        gens = work.c.generators.static
-        gens["control"] = "PV"
-        for sub in work.c.sub_networks.static.obj:
-            gens.loc[sub.slack_generator, "control"] = "Slack"
-        for sub in work.c.sub_networks.static.obj:
-            members = sub.c.generators.static.index
-            others = members.difference([sub.slack_generator])
-            if not others.empty:
-                gens.loc[others[0], "control"] = "PQ"
-        res = work.pf(
+        res = work.optimize.optimize_and_run_non_linear_powerflow(
             skip_pre=bool(cfg.get("skipPre", False)),
             x_tol=float(cfg.get("xTol", 1e-6)),
             use_seed=bool(cfg.get("useSeed", False)),
             distribute_slack=bool(cfg.get("distributeSlack", False)),
             slack_weights=str(cfg.get("slackWeights", "p_set")),
+            **(solve_kwargs or {}),
         )
     except Exception as exc:  # noqa: BLE001 - report, do not fail the run
         _log.warning("AC feasibility check failed: %s", exc)
         return {"converged": False, "error": str(exc)}
+    if "converged" not in res:  # PyPSA returned the failed-solve dict
+        return {"converged": False, "error": f"re-solve on the copy ended {res.get('termination_condition')}"}
 
     weights = work.snapshot_weightings["generators"].reindex(work.snapshots).fillna(1.0)
-    converged = bool(res.converged.to_numpy().all()) if getattr(res, "converged", None) is not None else True
+    converged = bool(res["converged"].to_numpy().all())
     vmag = work.buses_t.v_mag_pu
     loss = pd.Series(0.0, index=work.snapshots)
     peak = 0.0
@@ -143,8 +138,8 @@ def run_ac_feasibility(network: pypsa.Network, cfg: dict[str, Any]) -> dict[str,
     gen_pf = work.generators_t.p.mul(weights, axis=0).sum().sum() if not work.generators_t.p.empty else 0.0
     return {
         "converged": converged,
-        "iterations": int(res.n_iter.to_numpy().max()) if getattr(res, "n_iter", None) is not None else 0,
-        "maxMismatch": float(res.error.to_numpy().max()) if getattr(res, "error", None) is not None else 0.0,
+        "iterations": int(res["n_iter"].to_numpy().max()),
+        "maxMismatch": float(res["error"].to_numpy().max()),
         "voltageMin": round(float(vmag.min().min()), 4) if not vmag.empty else None,
         "voltageMax": round(float(vmag.max().max()), 4) if not vmag.empty else None,
         "peakLineLoadingPct": round(peak, 1),

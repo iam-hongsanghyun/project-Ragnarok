@@ -117,3 +117,20 @@ export async function fillDiscountRate(
     discountRate, overwrite: opts.overwrite ?? false, apply: opts.apply ?? false,
   });
 }
+
+/** Result of the Forge "Clean placeholder bounds" action. */
+export interface CleanPlaceholderBoundsResult {
+  cleaned: number;
+  cells: { sheet: string; name: string; column: string; value: number }[];
+  sheets: Record<string, number>;
+  applied: boolean;
+}
+
+/** Forge action behind the model-check warning: blank every finite 1e9+ bound (`p_nom_max`, `e_sum_max`,
+ *  `lifetime` ... 1e12 standing for "no limit") so the row takes PyPSA's `inf` default. The run no longer
+ *  snaps them itself. Previews unless `apply`. */
+export async function cleanPlaceholderBounds(
+  opts: { apply?: boolean } = {},
+): Promise<CleanPlaceholderBoundsResult> {
+  return postJson<CleanPlaceholderBoundsResult>('/api/forge/clean-placeholder-bounds', { apply: opts.apply ?? false });
+}

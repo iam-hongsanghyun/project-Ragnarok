@@ -233,6 +233,20 @@ function periodSeriesRows(results: RunResults | null, sheetKey: string): GridRow
   });
 }
 
+/** Hours each row of `rows` (the period-filtered rows of `sheetKey`) stands for: PyPSA's own per-snapshot
+ *  weightings (`runMeta.snapshotWeights`, aligned to the unfiltered sheet) when the run carries them, else the
+ *  uniform `fallback`. A sampled run's snapshots stand for different numbers of hours, so a window sum
+ *  multiplies each row by ITS hours. */
+function rowHours(results: RunResults | null, sheetKey: string, rows: GridRow[], fallback: number): number[] {
+  const all = results?.outputs?.series?.[sheetKey];
+  const weights = results?.runMeta?.snapshotWeights;
+  if (!all || !weights || weights.length !== all.length) return rows.map(() => fallback);
+  if (rows.length === all.length) return weights.slice();
+  const position = new Map<GridRow, number>();
+  all.forEach((row, i) => position.set(row, i));
+  return rows.map((row) => weights[position.get(row) ?? -1] ?? fallback);
+}
+
 export function buildPivotSeries(
   config: PivotChartConfig,
   results: RunResults | null,
@@ -278,6 +292,7 @@ export function buildPivotSeries(
   const start = Math.max(0, config.startIndex);
   const end = Math.min(config.endIndex, seriesRows.length - 1);
   const window = seriesRows.slice(start, end + 1);
+  const hours = rowHours(results, sheetKey, seriesRows, snapshotWeight).slice(start, end + 1);
 
   // Per snapshot: reduce member components into one value per group (across-
   // component reduction uses `aggregate`; weight is applied only at time-bucket
@@ -310,7 +325,7 @@ export function buildPivotSeries(
   // is still a rate.
   const bucketed = config.timeframe !== 'hourly';
   const rows = bucketed
-    ? bucketRows(perRow, keys, config.timeframe, config.aggregate, snapshotWeight)
+    ? bucketRows(perRow, keys, config.timeframe, config.aggregate, hours)
     : perRow;
   const unit = integratedUnit(rawUnit, bucketed && config.aggregate === 'sum');
 
@@ -397,34 +412,37 @@ export function buildPivotCategoryMulti(
   return { labels, series, unit, loading };
 }
 
+/** `hours[i]` is the hours snapshot row `i` of `perRow` stands for. */
 function bucketRows(
   perRow: TimeSeriesRow[],
   keys: string[],
   timeframe: PivotChartConfig['timeframe'],
   agg: Aggregate,
-  weight: number,
+  hours: number[],
 ): TimeSeriesRow[] {
   if (timeframe === 'aggregated') {
     const row: TimeSeriesRow = { label: 'Total', timestamp: perRow[perRow.length - 1]?.timestamp };
-    keys.forEach((k) => { row[k] = bucketReduce(perRow.map((r) => numberValue(r[k])), agg, weight); });
+    keys.forEach((k) => { row[k] = bucketReduce(perRow.map((r) => numberValue(r[k])), agg, hours); });
     return [row];
   }
-  const buckets = new Map<string, TimeSeriesRow[]>();
-  for (const r of perRow) {
+  const buckets = new Map<string, { rows: TimeSeriesRow[]; hours: number[] }>();
+  perRow.forEach((r, i) => {
     const b = getTimeBucket(r.timestamp, timeframe);
-    (buckets.get(b) ?? buckets.set(b, []).get(b)!).push(r);
-  }
-  return Array.from(buckets.entries()).map(([b, rs]) => {
-    const row: TimeSeriesRow = { label: b, timestamp: rs[rs.length - 1]?.timestamp };
-    keys.forEach((k) => { row[k] = bucketReduce(rs.map((r) => numberValue(r[k])), agg, weight); });
+    const bucket = buckets.get(b) ?? buckets.set(b, { rows: [], hours: [] }).get(b)!;
+    bucket.rows.push(r);
+    bucket.hours.push(hours[i] ?? 1);
+  });
+  return Array.from(buckets.entries()).map(([b, bucket]) => {
+    const row: TimeSeriesRow = { label: b, timestamp: bucket.rows[bucket.rows.length - 1]?.timestamp };
+    keys.forEach((k) => { row[k] = bucketReduce(bucket.rows.map((r) => numberValue(r[k])), agg, bucket.hours); });
     return row;
   });
 }
 
-/** Time-bucket reduce: `sum` integrates over the snapshot weight (MW→MWh); the
- *  others are weight-invariant. */
-function bucketReduce(values: number[], agg: Aggregate, weight: number): number {
-  if (agg === 'sum') return values.reduce((a, b) => a + b, 0) * weight;
+/** Time-bucket reduce: `sum` integrates each value over ITS snapshot's hours (MW→MWh); the others are
+ *  weight-invariant. `hours[i]` belongs to `values[i]`. */
+function bucketReduce(values: number[], agg: Aggregate, hours: number[]): number {
+  if (agg === 'sum') return values.reduce((a, v, i) => a + v * (hours[i] ?? 1), 0);
   return reduce(values, agg);
 }
 
@@ -451,16 +469,19 @@ export function buildPivotMix(
     if (!seriesRows || !seriesRows.length) return { data: [], unit, loading: true };
     const start = Math.max(0, config.startIndex);
     const end = Math.min(config.endIndex, seriesRows.length - 1);
-    for (const srow of seriesRows.slice(start, end + 1)) {
+    const hours = rowHours(results, `${compList}-${config.valueAttribute}`, seriesRows, snapshotWeight);
+    const integrate = config.aggregate === 'sum';
+    seriesRows.slice(start, end + 1).forEach((srow, i) => {
       for (const col of componentColumns(srow)) {
         const dim = dims[col] ?? {};
         if (!passComponentFilters(dim, config.filters)) continue;
         const v = numberValue(srow[col]);
         if (!passValueFilters(v, config.filters)) continue;
         const key = groupKeyOf(dim, col, config.groupBy);
-        (groups.get(key) ?? groups.set(key, []).get(key)!).push(v);
+        // A sum is an integral: each snapshot enters with ITS hours.
+        (groups.get(key) ?? groups.set(key, []).get(key)!).push(integrate ? v * (hours[start + i] ?? 1) : v);
       }
-    }
+    });
   } else {
     const staticVals = results?.outputs?.static?.[compList] ?? {};
     for (const [name, dim] of Object.entries(dims)) {
@@ -473,10 +494,9 @@ export function buildPivotMix(
     }
   }
 
-  // A series donut integrates a rate over the period (sum × weight = energy);
-  // static/input keep the chosen aggregate.
-  const total = (vals: number[]) =>
-    kind === 'series' && config.aggregate === 'sum' ? vals.reduce((a, b) => a + b, 0) * snapshotWeight : reduce(vals, config.aggregate);
+  // A series donut integrates a rate over the period: the pooled values already carry their snapshot hours, so
+  // a `sum` is their plain sum (energy); static/input keep the chosen aggregate.
+  const total = (vals: number[]) => reduce(vals, config.aggregate);
 
   const data: MixItem[] = Array.from(groups.entries())
     .map(([label, vals]) => ({ label, value: total(vals), color: colorFor(label, config.groupBy) }))
@@ -485,11 +505,7 @@ export function buildPivotMix(
   return { data, unit, loading: false };
 }
 
-/** Reduce a group's pooled values to one number: series + `sum` integrates over
- *  the snapshot weight (energy); everything else uses the chosen aggregate. */
-function totalOf(vals: number[], kind: PivotValueKind, agg: Aggregate, weight: number): number {
-  return kind === 'series' && agg === 'sum' ? vals.reduce((a, b) => a + b, 0) * weight : reduce(vals, agg);
-}
+
 
 // ── Build: category bar (grouped / horizontal / stacked over categories) ─────
 
@@ -529,7 +545,9 @@ export function buildPivotCategory(
     if (!seriesRows || !seriesRows.length) return { labels: [], series: [], unit, loading: true };
     const start = Math.max(0, config.startIndex);
     const end = Math.min(config.endIndex, seriesRows.length - 1);
-    for (const srow of seriesRows.slice(start, end + 1)) {
+    const hours = rowHours(results, `${compList}-${config.valueAttribute}`, seriesRows, snapshotWeight);
+    const integrate = config.aggregate === 'sum';
+    seriesRows.slice(start, end + 1).forEach((srow, i) => {
       for (const col of componentColumns(srow)) {
         const dim = dims[col] ?? {};
         if (!passComponentFilters(dim, config.filters)) continue;
@@ -537,9 +555,10 @@ export function buildPivotCategory(
         if (!passValueFilters(v, config.filters)) continue;
         const cat = catField ? (stringValue(dim[catField]) || 'Unknown') : col;
         const ser = serFields.length ? serFields.map((f) => stringValue(dim[f]) || 'Unknown').join(' · ') : SINGLE;
-        push(cat, ser, v);
+        // A sum is an integral: each snapshot enters with ITS hours.
+        push(cat, ser, integrate ? v * (hours[start + i] ?? 1) : v);
       }
-    }
+    });
   } else {
     const staticVals = results?.outputs?.static?.[compList] ?? {};
     for (const [name, dim] of Object.entries(dims)) {
@@ -553,7 +572,7 @@ export function buildPivotCategory(
     }
   }
 
-  const cellTotal = (vals: number[] | undefined) => (vals ? totalOf(vals, kind, config.aggregate, snapshotWeight) : 0);
+  const cellTotal = (vals: number[] | undefined) => (vals ? reduce(vals, config.aggregate) : 0);
   let labels = orderKeys(Array.from(byCat.keys()), catField ? [catField] : [], model);
   const serKeys: string[] = [];
   Array.from(byCat.values()).forEach((m) => Array.from(m.keys()).forEach((k) => { if (!serKeys.includes(k)) serKeys.push(k); }));
@@ -593,7 +612,7 @@ export interface PivotScatterResult {
  *  isn't hydrated. */
 function perComponentValues(
   sheet: string, attr: string, config: PivotChartConfig,
-  results: RunResults | null, model: WorkbookModel, weight: number,
+  results: RunResults | null, model: WorkbookModel, fallbackHours: number,
 ): { values: Record<string, number>; loading: boolean } {
   const kind = pivotValueKind(sheet, attr);
   const compList = getComponentSchema(sheet)?.list_name ?? sheet;
@@ -605,10 +624,11 @@ function perComponentValues(
     const start = Math.max(0, config.startIndex);
     const end = Math.min(config.endIndex, seriesRows.length - 1);
     const cols = new Map<string, number[]>();
-    for (const srow of seriesRows.slice(start, end + 1)) {
+    const hours = rowHours(results, `${compList}-${attr}`, seriesRows, fallbackHours).slice(start, end + 1);
+    seriesRows.slice(start, end + 1).forEach((srow) => {
       for (const col of componentColumns(srow)) (cols.get(col) ?? cols.set(col, []).get(col)!).push(numberValue(srow[col]));
-    }
-    cols.forEach((vals, col) => { out[col] = bucketReduce(vals, config.aggregate, weight); });
+    });
+    cols.forEach((vals, col) => { out[col] = bucketReduce(vals, config.aggregate, hours); });
   } else {
     const staticVals = results?.outputs?.static?.[compList] ?? {};
     for (const [name, dim] of Object.entries(dims)) {

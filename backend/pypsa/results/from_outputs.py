@@ -376,7 +376,8 @@ def derive_imported_result(
             "averageSystemPrice": float(average_price),
             "snapshotCount": snapshot_count,
             "snapshotWeight": snapshot_weight,
-            "modeledHours": snapshot_count * snapshot_weight,
+            "modeledHours": float(network.snapshot_weightings["generators"].reindex(network.snapshots).fillna(1.0).sum()),
+            "snapshotWeights": [float(w) for w in network.snapshot_weightings["generators"].reindex(network.snapshots).fillna(1.0).to_numpy()],
             "componentCounts": {
                 "buses": len(network.buses),
                 "generators": len(network.generators),

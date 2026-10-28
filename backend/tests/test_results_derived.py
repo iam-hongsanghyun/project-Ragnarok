@@ -61,7 +61,7 @@ def test_solved_capacity_for_extendable_storage() -> None:
 
 
 def test_period_filter() -> None:
-    d = rd.derive_asset_details(MODEL, OUTPUTS, snapshot_weight=1, period=2040)
+    d = rd.derive_asset_details(MODEL, OUTPUTS, period=2040)
     assert [p["load"] for p in d["buses"]["b1"]["netSeries"]] == [80]
 
 
@@ -72,23 +72,29 @@ def test_averaged_sampling_uses_positional_mean() -> None:
     outputs = {"static": {}, "series": {"buses-marginal_price": [
         {"snapshot": "2030-01-01T00:00:00", "b1": 1}, {"snapshot": "2030-01-01T01:00:00", "b1": 1}]}}
     sampling = {"enabled": True, "mode": "average", "blockSize": 2, "representedSnapshots": 4}
-    d = rd.derive_asset_details(model, outputs, "$", 2, sampling)
+    d = rd.derive_asset_details(model, outputs, "$", None, sampling)
     assert [p["load"] for p in d["buses"]["b1"]["netSeries"]] == [20, 30]
 
 
-def test_generator_detail_matches_ts_formulae() -> None:
+def test_generator_detail_shows_pypsas_weighted_totals_and_no_guessed_ones() -> None:
+    """The summary lines are the run's n.statistics totals (stats); without them nothing is multiplied by a uniform weight."""
     model = {
         "buses": [{"name": "b1"}], "carriers": [{"name": "gas", "co2_emissions": 0.2}],
         "generators": [{"name": "g1", "bus": "b1", "carrier": "gas", "p_nom": 100, "marginal_cost": 10, "efficiency": 0.5}],
     }
     outputs = {"static": {}, "series": {"generators-p": [
         {"snapshot": "2030-01-01T00:00:00", "g1": 60}, {"snapshot": "2030-01-01T01:00:00", "g1": 40}]}}
-    g = rd.derive_asset_details(model, outputs, "$", 2, kinds=["generators"])["generators"]["g1"]
+    bare = rd.derive_asset_details(model, outputs, "$", kinds=["generators"])["generators"]["g1"]
+    assert bare["summary"] == [] and "totals" not in bare
+    stats = {"modeledHours": 3.0, "generators": {"g1": {
+        "energyMwh": 260.0, "operatingCost": 3_000.4, "carbonCost": 400.0, "emissionsTco2": 104.0, "curtailmentMwh": 0.0}}}
+    g = rd.derive_asset_details(model, outputs, "$", stats, kinds=["generators"])["generators"]["g1"]
     s = {i["label"]: i for i in g["summary"]}
-    assert s["Energy"]["value"] == "200 MWh"                       # (60+40) * 2 h
-    assert s["Operating cost"]["value"] == "2,000 $"               # 200 * 10
-    assert s["Emissions"]["value"] == "80 tCO2e"                   # 200 MWh * 0.2 / 0.5
-    assert g["curtailmentSeries"] == []                            # no time-varying availability
+    assert s["Energy"]["value"] == "260 MWh"
+    assert s["Operating cost"]["value"] == "3,000 $"
+    assert s["Emissions"]["value"] == "104 tCO2e"
+    assert "Curtailment" not in s                                   # no time-varying availability
+    assert g["curtailmentSeries"] == [] and g["totals"]["carbonCost"] == 400.0
 
 
 def test_fmt_matches_to_locale_string() -> None:
@@ -251,9 +257,19 @@ def test_kpis_companies_assets_endpoints(stored) -> None:
     assert a["total"] == 1 and "outputSeries" not in a["items"][0]        # summaries only by default
     full = client.get(f"/api/runs/{names[1]}/assets", params={"names": "w"}).json()
     assert [p["output"] for p in full["items"][0]["outputSeries"]] == [5.0, 5.0]
-    assert full["items"][0]["summary"][0]["value"] == "10 MWh"
     assert client.get(f"/api/runs/{names[0]}/assets", params={"kind": "x"}).status_code == 400
     assert client.get("/api/runs/nope/kpis").status_code == 404
+
+
+def test_asset_summary_totals_are_the_runs_statistics(stored_with_snapshots) -> None:
+    """The generator summary is n.statistics under the run's weightings: 5 MW x 2 snapshots x 1 h = 10 MWh."""
+    client, names = stored_with_snapshots
+    full = client.get(f"/api/runs/{names[1]}/assets", params={"names": "w"}).json()
+    summary = {row["label"]: row["value"] for row in full["items"][0]["summary"]}
+    assert summary["Energy"] == "10 MWh"
+    derived = client.get(f"/api/runs/{names[1]}/derived").json()
+    assert derived["weights"] == [1.0, 1.0] and derived["modeledHours"] == 2.0
+    assert derived["generators"]["w"]["energyMwh"] == pytest.approx(10.0)
 
 
 @pytest.fixture()

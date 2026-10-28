@@ -411,6 +411,33 @@ def fill_discount_rate(model: Model, rate: float, *, overwrite: bool = False) ->
     return {"sheets": changed, "filled": filled, "overwritten": overwritten, "skipped": skipped}
 
 
+def clean_placeholder_bounds(model: Model) -> dict[str, Any]:
+    """Blank every placeholder bound (a finite 1e9+ value standing for "no limit").
+
+    The visible replacement of the run-time snap to +/-inf: the offending cells are cleared, so the row takes
+    PyPSA's own default (``inf`` for ``*_nom_max`` / ``*_sum_max`` / ``lifetime`` / ``v_ang_max``, ``-inf`` for
+    ``*_sum_min``). A genuine finite cap is never touched. See :mod:`backend.pypsa.network.placeholders`.
+
+    Returns:
+        ``{sheets, cleaned, cells}``; ``sheets`` holds only the changed sheets' rows, ``cells`` lists
+        ``{sheet, name, column, value}``.
+    """
+    from ..pypsa.network.placeholders import find_placeholders
+
+    cells = find_placeholders(model)
+    changed: dict[str, list[Row]] = {}
+    for sheet, name, column, _value in cells:
+        rows = changed.setdefault(sheet, _copy_rows(model, sheet))
+        for row in rows:
+            if _str(row.get("name")) == name and column in row:
+                row.pop(column)
+    return {
+        "sheets": changed,
+        "cleaned": len(cells),
+        "cells": [{"sheet": sh, "name": nm, "column": col, "value": val} for sh, nm, col, val in cells],
+    }
+
+
 # ── Forge: bulk adjust / revert ──────────────────────────────────────────────
 
 _SEP = "\x00"

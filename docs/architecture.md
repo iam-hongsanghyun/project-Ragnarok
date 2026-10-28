@@ -535,8 +535,10 @@ multiprocessing queue.
 | `curtailmentSeries`, `generatorEnergy[].curtailmentMwh` | `n.statistics.curtailment` via `curtailment_mw_by_generator` in `dispatch.py`: `max(p_max_pu * p_nom_opt - p, 0)` for generators with a time-varying `p_max_pu`, load shedding excluded, units outside their build/lifetime window masked in multi-period runs (PyPSA does not mask them). Energy uses the `generators` snapshot weights. |
 | `metricDefinitions` | `metric_definitions` in `dispatch.py`: unit + one-line definition of every field whose meaning follows PyPSA |
 | `storageSeries` | `build_storage_series` in `dispatch.py` |
-| `carrierMix` | `dispatch_by_carrier` groups `generators_t.p` by carrier; `weighted_sum` with `snapshot_weightings["generators"]` |
-| `costBreakdown` | Fuel cost, carbon cost, load-shedding cost, expansion CAPEX per generator using `get_switchable_as_dense` for marginal cost |
+| `carrierMix` | `carrier_supply_mwh` in `dispatch.py`: `n.statistics.supply` into the electricity buses, by carrier (generators, plus conversion Links / Processes). PyPSA applies the snapshot weightings; the per-snapshot `dispatch_by_carrier` series only draw the stack |
+| `costBreakdown` | Fuel and load-shedding cost = `n.statistics.opex` (`generator_operating_cost`, includes `*_piecewise_opt`); carbon cost = the carbon-pricing module's declared term at the solution (`carbon_pricing.carbon_cost_by_generator`); expansion CAPEX / fom = `n.statistics.capex` / `fom` |
+| `runMeta.modeledHours`, `runMeta.snapshotWeights` | `sum` and the list of `snapshot_weightings["generators"]`: PyPSA's own hours per snapshot (a sampled run is not `count x one weight`); the browser multiplies a window sum by each snapshot's own weight |
+| `GET /api/runs/{name}/derived`, per-asset `summary` of `/assets`, `/analysis/load-analysis` | `results/run_statistics.py`: `n.statistics.supply` / `opex` / `curtailment` / `withdrawal` / `prices(weighting="load")` per generator, bus and Process on the network rebuilt from the stored outputs, plus the carbon term and `primary_energy` emissions |
 | `nodalBalance` | Per-bus average load and generation |
 | `lineLoading` | Peak `\|p0\| / s_nom_opt * 100` for lines, links, transformers (a peak ratio; `n.statistics.transmission` is net MWh and does not replace it) |
 | `meritOrder` | `build_merit_order` in `results/market.py` |
@@ -687,8 +689,10 @@ Rolling horizon and SCLOPF cannot be combined.
 `parse_stochastic_config` builds a `StochasticConfig` from `options.stochasticConfig`.
 `apply_scenarios` calls `network.set_scenarios(weights)` to expand all frames to a
 `(scenario, name)` MultiIndex, then applies per-scenario `ScenarioOverride` objects.
-After the solve, `per_scenario_summaries` computes per-scenario energy/emissions/cost
-totals. `collapse_to_representative_scenario` then slices all static and dynamic frames
+After the solve, `per_scenario_summaries` reads `n.statistics.opex` / `supply` (they keep the
+`scenario` level, unweighted by probability) plus the carbon module's per-scenario term. Scenario
+weights must sum to 1 (PyPSA's rule; the run is refused otherwise, the Stochastic section has a
+visible *Normalise weights* button). `collapse_to_representative_scenario` then slices all static and dynamic frames
 to the highest-weight scenario, restoring the deterministic shape that all downstream
 extraction code expects.
 

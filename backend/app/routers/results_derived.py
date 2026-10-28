@@ -6,6 +6,7 @@
 * ``GET /api/runs/{name}/assets``    per-asset details (list, or full series for named assets)
 * ``GET /api/runs/{name}/metrics``   chart metrics of a per-asset focus (the chart card's options)
 * ``GET /api/runs/{name}/period/{period}``  the result payload of ONE investment period of a pathway run
+* ``GET /api/runs/{name}/derived``   weighted per-asset totals and the snapshot weights, from ``n.statistics``
 
 ``kpis``, ``companies``, ``assets`` and ``metrics`` all take ``period`` (a pathway
 run's investment period); omitted = the whole horizon. KPIs and companies read the
@@ -31,6 +32,8 @@ _BUNDLE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _BUNDLE_CACHE_SIZE = 2  # whole runs held in memory; a dashboard's cards share one load
 _PERIOD_CACHE: dict[tuple[str, float, int, str], dict[str, Any]] = {}
 _PERIOD_CACHE_SIZE = 8  # derived period payloads (each re-extraction takes about a second)
+_STATS_CACHE: dict[tuple[str, float, int | None], dict[str, Any]] = {}
+_STATS_CACHE_SIZE = 8  # run statistics (each needs the run's network rebuilt)
 
 MAX_COMPARE_RUNS = 5  # the matrix's column cap (ComparisonPane MAX_SCENARIOS)
 
@@ -116,6 +119,41 @@ def _period_result(name: str, period: int, currency: str | None = None) -> dict[
     return derived
 
 
+def run_stats(name: str, period: int | None = None) -> dict[str, Any] | None:
+    """Weighted totals of stored run ``name`` (one investment period with ``period``), from ``n.statistics``.
+
+    Rebuilds the run's network from its stored model and outputs (``network_from_outputs``; the period is
+    its ``period_view_network`` slice) and asks PyPSA: see
+    :func:`backend.pypsa.results.run_statistics.run_statistics`. ``None`` when the run stores no outputs
+    (nothing to ask PyPSA about). Cached per run file mtime.
+    """
+    from ...pypsa.results.derive_outputs import period_view_network
+    from ...pypsa.results.run_statistics import run_statistics
+    from ...pypsa.results.statistics_query import network_from_outputs
+
+    bundle = _bundle(name)
+    path = run_store._db_path(name)
+    stamp = path.stat().st_mtime if path.exists() else 0.0
+    key = (name, stamp, period)
+    hit = _STATS_CACHE.get(key)
+    if hit is not None:
+        return hit
+    outputs = (bundle.get("result") or {}).get("outputs") or {}
+    if not outputs.get("series"):
+        return None
+    network = network_from_outputs(bundle.get("model") or {}, bundle.get("scenario") or {}, bundle.get("options") or {}, outputs)
+    if period is not None:
+        try:
+            network = period_view_network(network, int(period))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    stats = run_statistics(network)
+    while len(_STATS_CACHE) >= _STATS_CACHE_SIZE:
+        _STATS_CACHE.pop(next(iter(_STATS_CACHE)))
+    _STATS_CACHE[key] = stats
+    return stats
+
+
 def _csv(raw: str | None) -> list[str]:
     return [p.strip() for p in (raw or "").split(",") if p.strip()]
 
@@ -175,11 +213,15 @@ def get_run_kpis(name: str, currency: str = "$", period: int | None = None) -> d
             return []
         buses = rd.derive_asset_details(
             bundle.get("model") or {}, (bundle.get("result") or {}).get("outputs"), currency,
-            rd.number_value((result.get("runMeta") or {}).get("snapshotWeight")) or 1.0,
-            (result.get("runMeta") or {}).get("sampling"), kinds=["buses"], period=period,
+            None, (result.get("runMeta") or {}).get("sampling"), kinds=["buses"], period=period,
         )["buses"]
         return rd.system_load_series(buses)
 
+    if period is None and not (result.get("runMeta") or {}).get("modeledHours"):
+        # A run stored before runMeta.modeledHours (the sum of the snapshot weightings): read it from PyPSA.
+        stats = run_stats(name)
+        if stats is not None:
+            result = {**result, "runMeta": {**(result.get("runMeta") or {}), "modeledHours": stats["modeledHours"]}}
     kpis = rd.compute_kpis(
         result, model_static.get("carriers") or [], rd._storage_carriers(model_static), currency, load_fallback,
     )
@@ -223,6 +265,23 @@ def get_run_period(
     return {"run": name, "period": period, "result": result}
 
 
+@router.get("/api/runs/{name}/derived")
+def get_run_derived(name: str, period: int | None = Query(None, description="Pathway investment period; default the whole horizon.")) -> dict[str, Any]:
+    """Weighted totals of a stored run, read from ``n.statistics`` under the run's own snapshot weightings.
+
+    ``weights`` is PyPSA's ``snapshot_weightings["generators"]`` per snapshot (hours, in snapshot order of the
+    period); a browser window sum multiplies each snapshot by ITS weight (a sampled run's snapshots stand for
+    different numbers of hours, so one uniform weight is wrong). ``generators`` / ``buses`` / ``processes`` carry
+    the per-asset totals (energy, operating cost incl. the carbon term, emissions, curtailment, load energy, mean
+    load-weighted price, carrier mix). 404 when the run stores no outputs.
+    """
+    _analytics(name)  # 404 before any work
+    stats = run_stats(name, period)
+    if stats is None:
+        raise HTTPException(status_code=404, detail="This run stores no outputs to derive statistics from.")
+    return {"run": name, "period": period, **stats}
+
+
 @router.get("/api/runs/{name}/assets")
 def get_run_assets(
     name: str,
@@ -249,9 +308,9 @@ def get_run_assets(
             k: v[:end] for k, v in rd.filter_series_by_period(outputs["series"], period).items()
         }}
         period = None
+    stats = run_stats(name, period)
     details = rd.derive_asset_details(
-        bundle.get("model") or {}, outputs, currency,
-        rd.number_value(meta.get("snapshotWeight")) or 1.0, meta.get("sampling"),
+        bundle.get("model") or {}, outputs, currency, stats, meta.get("sampling"),
         kinds=[kind] if kind else None, names=wanted, period=period,
     )
     with_series = series or wanted is not None
@@ -299,12 +358,12 @@ def get_run_metrics(
     )
     if end is not None:
         series = {k: v[:end] for k, v in series.items()}
-    weight = rd.number_value(meta.get("snapshotWeight")) or 1.0
+    stats = run_stats(name, period)
     sliced = {**outputs, "series": series}
     wanted: set[str] | None = set(asset_keys) if asset_keys else None
 
     def derive(kind: str, names: set[str] | None) -> dict[str, Any]:
-        return rd.derive_asset_details(model, sliced, currency, weight, meta.get("sampling"), kinds=[kind], names=names)
+        return rd.derive_asset_details(model, sliced, currency, stats, meta.get("sampling"), kinds=[kind], names=names)
 
     details = derive(rd.FOCUS_KINDS[focus], wanted)
     if focus == "bus" and len(asset_keys) != 1:
@@ -386,18 +445,24 @@ def get_run_analysis(
         series = rd.filter_series_by_period(
             {k: v for k, v in ((stored.get("outputs") or {}).get("series") or {}).items() if rd._DUAL_SHEET.match(k)}, period,
         )
-        body = rd.setpoint_duals(series, rd.number_value((stored.get("runMeta") or {}).get("snapshotWeight")) or 1.0)
+        stats = run_stats(name, period)
+        body = rd.setpoint_duals(series, (stats or {}).get("weights") or [])
         return {"run": name, "topic": topic, "period": period, **body}
     result = _period_result(name, period, currency) if period is not None else (analytics.get("result") or {})
     if topic == "load-analysis":
         bundle = _bundle(name)
         stored = bundle.get("result") or {}
         meta = stored.get("runMeta") or {}
+        stats = run_stats(name, period)
         details = rd.derive_asset_details(
-            bundle.get("model") or {}, stored.get("outputs"), currency,
-            rd.number_value(meta.get("snapshotWeight")) or 1.0, meta.get("sampling"), kinds=["buses"], period=period,
+            bundle.get("model") or {}, stored.get("outputs"), currency, stats, meta.get("sampling"),
+            kinds=["buses"], period=period,
         )["buses"]
-        body = rd.load_analysis(details, rd.number_value(meta.get("snapshotWeight")) or 1.0)
+        body = rd.load_analysis(
+            details,
+            {b: v["loadMwh"] for b, v in ((stats or {}).get("buses") or {}).items()},
+            (stats or {}).get("modeledHours"),
+        )
     elif topic == "carrier-performance":
         body = rd.carrier_performance(
             result, analytics.get("modelStatic"), ((analytics.get("result") or {}).get("outputs") or {}).get("static"), period,

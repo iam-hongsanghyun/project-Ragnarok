@@ -68,7 +68,7 @@ def test_load_analysis_two_buses_diversity() -> None:
     def bus(name: str, loads: list[float]) -> dict[str, Any]:
         return {"name": name, "netSeries": [{"load": v} for v in loads]}
 
-    out = rd.load_analysis({"a": bus("a", [100.0, 0.0]), "c": bus("c", [0.0, 100.0])}, snapshot_weight=2.0)
+    out = rd.load_analysis({"a": bus("a", [100.0, 0.0]), "c": bus("c", [0.0, 100.0])}, {"a": 200.0, "c": 200.0}, 4.0)
     np.testing.assert_allclose(out["systemPeakMw"], 100.0)
     np.testing.assert_allclose(out["coincidenceFactor"], 0.5)
     np.testing.assert_allclose(out["systemLoadFactor"], 1.0)  # flat 100 MW system load
@@ -78,7 +78,7 @@ def test_load_analysis_two_buses_diversity() -> None:
 
 
 def test_load_analysis_without_load_has_no_rows() -> None:
-    out = rd.load_analysis({"a": {"name": "a", "netSeries": [{"load": 0.0}]}}, 1.0)
+    out = rd.load_analysis({"a": {"name": "a", "netSeries": [{"load": 0.0}]}}, {"a": 0.0}, 1.0)
     assert out["buses"] == [] and out["systemLoadFactor"] is None and out["coincidenceFactor"] is None
 
 
@@ -220,7 +220,10 @@ def test_bus_detail_carries_the_mean_nodal_price(client: TestClient, name: str) 
 
 
 def test_setpoint_duals_binding_hours_peak_and_strip() -> None:
-    """gas binds at t1 (-12.5), t2 (-30) and t4 (5): weight 2 -> 6 binding hours, peak -30 at t2."""
+    """gas binds at t1 (-12.5), t2 (-30) and t4 (5): weights 2, 2, 2 -> 6 binding hours, peak -30 at t2.
+
+    The hours are the sum of each binding snapshot's own weight: with weights (1, 2, 3, 4, 5) the same pattern binds
+    for 2 + 3 + 5 = 10 hours."""
     rows = [
         {"snapshot": "2030-01-01T00:00:00", "gas": 0, "coal": 0},
         {"snapshot": "2030-01-01T01:00:00", "gas": -12.5, "coal": 0},
@@ -228,7 +231,7 @@ def test_setpoint_duals_binding_hours_peak_and_strip() -> None:
         {"snapshot": "2030-01-01T03:00:00", "gas": 0, "coal": 0},
         {"snapshot": "2030-01-01T04:00:00", "gas": 5, "coal": 0},
     ]
-    out = rd.setpoint_duals({"generators-mu_ramp_limit_down": rows, "generators-p": rows}, snapshot_weight=2.0)
+    out = rd.setpoint_duals({"generators-mu_ramp_limit_down": rows, "generators-p": rows}, [2.0] * 5)
     assert out["sheets"] == ["generators-mu_ramp_limit_down"]  # only the four dual sheets
     assert out["assetsChecked"] == 2 and out["total"] == 1
     (row,) = out["rows"]
@@ -239,9 +242,11 @@ def test_setpoint_duals_binding_hours_peak_and_strip() -> None:
         {"on": False, "length": 1}, {"on": True, "length": 2}, {"on": False, "length": 1}, {"on": True, "length": 1},
     ]
     np.testing.assert_allclose(out["bindingHours"], 6.0)
+    uneven = rd.setpoint_duals({"generators-mu_ramp_limit_down": rows}, [1.0, 2.0, 3.0, 4.0, 5.0])
+    np.testing.assert_allclose(uneven["rows"][0]["bindingHours"], 10.0)
     # Numerical noise is slack; a non-dual sheet is ignored.
-    assert rd.summarise_dual_sheet("generators-mu_p_set", [{"snapshot": "a", "g": 1e-9}], 1.0)["rows"] == []
-    assert rd.summarise_dual_sheet("generators-p", rows, 1.0) == {"rows": [], "assetsChecked": 0}
+    assert rd.summarise_dual_sheet("generators-mu_p_set", [{"snapshot": "a", "g": 1e-9}], [1.0])["rows"] == []
+    assert rd.summarise_dual_sheet("generators-p", rows, [1.0]) == {"rows": [], "assetsChecked": 0}
 
 
 def test_setpoint_duals_route_reads_the_stored_sheet_per_period(client: TestClient, name: str) -> None:

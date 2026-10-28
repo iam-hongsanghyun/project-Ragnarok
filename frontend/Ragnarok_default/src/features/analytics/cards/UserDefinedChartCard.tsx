@@ -10,7 +10,7 @@ import {
   WorkbookModel,
 } from 'lib/types';
 import { clamp, numberValue, stringValue } from 'lib/utils/helpers';
-import { aggregateMetricRows, buildDonutFromMetric } from 'lib/results/analytics';
+import { aggregateMetricRows, buildDonutFromMetric, runSnapshotWeights } from 'lib/results/analytics';
 import { curtailmentFor, withCurtailment } from 'lib/results/curtailOverlay';
 import { EMPTY_METRIC_KEY } from 'lib/constants';
 import { effectiveEndIndex, fullRunTimeline } from 'lib/api/runs';
@@ -198,14 +198,14 @@ export function UserDefinedChartCard({
     ? clamp(Math.max(effEndIndex, safeStart), safeStart, Math.max(metricRows.length - 1, 0))
     : 0;
   const aggregatedRows = hasMetric
-    ? aggregateMetricRows(metric!, safeStart, safeEnd, active.timeframe, snapshotWeight)
+    ? aggregateMetricRows(metric!, safeStart, safeEnd, active.timeframe, runSnapshotWeights(results))
     : [];
 
   // The donut is the SUM over the SELECTED period — it tracks the range slider
   // (safeStart/safeEnd), and buildDonutFromMetric sums the raw per-snapshot
   // values across that range, scaled by the snapshot weight (MW·h → MWh).
   const donutData = hasMetric && active.chartType === 'donut'
-    ? buildDonutFromMetric(metric!, safeStart, safeEnd, snapshotWeight)
+    ? buildDonutFromMetric(metric!, safeStart, safeEnd, runSnapshotWeights(results))
     : [];
   // The donut integrates a MW rate over time, so its total is energy.
   const donutUnit = metric?.unit === 'MW' ? 'MWh' : metric?.unit || '';

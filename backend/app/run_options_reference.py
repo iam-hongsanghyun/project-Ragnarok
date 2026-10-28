@@ -183,7 +183,7 @@ _FIELDS: dict[str, dict[str, tuple]] = {
     },
     "stochasticConfig": {
         "enabled": (_B, None, "Run stochastic."),
-        "scenarios[]": ("object[]", None, "Uncertainty scenarios; weights are normalised."),
+        "scenarios[]": ("object[]", None, "Uncertainty scenarios; weights are PyPSA scenario probabilities and must sum to 1 (a run with another sum is refused)."),
         "scenarios[].id": (_S, None, "Scenario id (UI)."),
         "scenarios[].name": (_S, None, "Scenario name."),
         "scenarios[].weight": (_N, "-", "Probability weight."),

@@ -1,15 +1,16 @@
 """LMP decomposition — post-process energy/congestion split of nodal prices.
 
 Physical-risk roadmap item #5. This is a **strict post-process reporting
-extra**: it never touches the solve, never reads a dual off a line, and never
-re-derives a price. PyPSA's ``n.optimize()`` (linopy backend, HiGHS/Gurobi)
-does not attach shadow prices to the ``Line-fix-s-lower`` / ``Line-fix-s-upper``
-flow-limit constraints by default (``n.lines_t.mu_upper`` /
-``n.lines_t.mu_lower`` come back as empty DataFrames), so any congestion
-decomposition built on this codebase must be derived purely from the two
-quantities that ARE always populated after a solve: the bus-level locational
-marginal price (LMP, ``n.buses_t.marginal_price``, currency/MWh) and the
-solved line/link flows (``n.lines_t.p0`` / ``n.links_t.p0``, MW).
+extra**: it never touches the solve and never re-derives a price. The split
+itself (an energy reference price plus a per-bus congestion residual) is
+Ragnarok's, because PyPSA has no such decomposition; it is built from the
+bus-level locational marginal price (LMP, ``n.buses_t.marginal_price``,
+currency/MWh) and the solved flows. The money the lines collect is NOT
+recomputed: the congestion rent of every Line / Link is
+``n.statistics.revenue`` (see :func:`_branch_congestion_rent`), which applies
+the snapshot weightings itself. (The solve passes ``assign_all_duals=True``,
+so ``n.lines_t.mu_upper`` is populated as well; the old premise that line
+duals are empty no longer holds, and no result here reads them.)
 
 **Energy vs. congestion split.** In a lossless linear DC power flow (which is
 what PyPSA's LOPF solves), the LMP at bus *b* and snapshot *t* can always be
@@ -52,29 +53,19 @@ Algorithm:
 
     **Congestion rent per line.** For a directed flow $f_{\\ell,t}$ (MW) on
     line/link $\\ell$ from bus $u$ to bus $v$ (PyPSA's ``p0`` sign convention:
-    positive = flowing bus0 -> bus1), the instantaneous merchandising surplus
-    collected on that link is the price difference across it times the flow
-    that crosses it:
-        $$ \\mathrm{rent}_{\\ell,t} = (\\mathrm{LMP}_{v,t} - \\mathrm{LMP}_{u,t})\\cdot f_{\\ell,t},
+    positive = flowing bus0 -> bus1), the merchandising surplus collected on that
+    link is the negative of the nodal payments over all its ports, which is
+    exactly PyPSA's ``n.statistics.revenue`` of the branch:
+        $$ \\mathrm{rent}_{\\ell,t} = -\\sum_{k} \\mathrm{LMP}_{b_k,t}\\; p_{k,t},
            \\qquad \\mathrm{congestionRent}_\\ell = \\sum_t w_t\\,\\mathrm{rent}_{\\ell,t} $$
-        ASCII: rent[l,t] = (LMP[v,t] - LMP[u,t]) * flow[l,t]; congestion_rent[l]
-        = sum_t(w[t]*rent[l,t])
+        ASCII: rent[l,t] = -(sum over ports k of LMP[bus_k,t] * p_k[t]); congestion_rent[l]
+        = sum_t(w[t]*rent[l,t]) = n.statistics.revenue(Line/Link)
 
-        For a multi-port Link (``bus2``/``bus3``/… with solved ``p2``/``p3``/…
-        series), the merchandising surplus generalises to the negative of the
-        TOTAL nodal payment over every populated port k (of which the two-port
-        expression above is the k in {0, 1} special case):
-        $$ \\mathrm{rent}_{\\ell,t} = -\\sum_{k} \\mathrm{LMP}_{b_k,t}\\; p_{k,t} $$
-        ASCII: rent[l,t] = -(sum over ports k of LMP[bus_k,t] * p_k[t])
-
-        This is exactly the line's contribution to the market's total
-        congestion revenue (what a transmission-rights auction would collect)
-        and, at a snapshot where the line binds its thermal limit, equals
-        shadow_price x capacity even though this module never reads a line
-        dual — it is derived purely from the two solved nodal prices and the
-        solved flow (verified on a 2-bus toy: LMP_A=10, LMP_B=80, flow_A->B=50
-        MW => rent = 70 x 50 = 3500 per snapshot, matching the flow-limit
-        shadow price x capacity that a dual-based calculation would give).
+        For a lossless line (p1 = -p0) this is (LMP_v - LMP_u)·p0; for a lossy link
+        (p1 = -efficiency·p0) it credits only delivered power, so pure-loss price
+        spreads collect zero rent. Verified on a 2-bus toy: LMP_A=10, LMP_B=80,
+        flow_A->B=50 MW => rent = 70 x 50 = 3500 per snapshot, equal to the
+        flow-limit shadow price x capacity.
 
     A line/link is flagged *congested* in a snapshot when its flow magnitude
     is at least 99% of its capacity (``s_nom`` for lines, ``p_nom`` for
@@ -223,52 +214,18 @@ def _effective_cap(df: pd.DataFrame, name: Any, nom_col: str, opt_col: str, max_
     return nom * max_pu
 
 
-def _link_extra_ports(
-    network: pypsa.Network,
-    links: pd.DataFrame,
-    name: Any,
-) -> list[tuple[str, pd.Series]]:
-    """Populated ports >= 2 of a multi-port link, as ``(bus, p_series)`` pairs.
-
-    A multi-port Link carries ``bus2``/``bus3``/… columns (blank string =
-    port unused) with matching solved ``links_t.p2``/``p3``/… series (MW,
-    same sign convention as ``p1``: negative = power delivered to that bus).
-    Ports whose bus is blank or whose flow series is absent are skipped;
-    returned in ascending port order.
-    """
-    ports: list[tuple[int, str, pd.Series]] = []
-    for col in links.columns:
-        if not (col.startswith("bus") and col[3:].isdigit()):
-            continue
-        port = int(col[3:])
-        if port < 2:
-            continue
-        bus_n = str(links.at[name, col])
-        if not bus_n or bus_n == "nan":
-            continue
-        frame = network.links_t.get(f"p{port}")
-        if frame is None or frame.empty or name not in frame.columns:
-            continue
-        ports.append((port, bus_n, frame[name]))
-    ports.sort(key=lambda entry: entry[0])
-    return [(bus_n, series) for _port, bus_n, series in ports]
-
-
 def _collect_branches(
     network: pypsa.Network,
-) -> list[tuple[str, str, str, str, pd.Series, pd.Series, float, list[tuple[str, pd.Series]]]]:
-    """Enumerate lines + links as ``(name, kind, bus_from, bus_to, p0, p1, cap, extra_ports)``.
+) -> list[tuple[str, str, str, str, pd.Series, pd.Series, float]]:
+    """Enumerate lines + links as ``(name, kind, bus_from, bus_to, p0, p1, cap)``.
 
     ``p0``/``p1`` are the solved flow series (MW) injected into the branch at
     bus0/bus1 (PyPSA sign convention: ``p1 = -efficiency * p0`` for links,
     ``p1 = -p0`` for lossless lines), so the pair carries link losses. ``cap``
     is the branch's *effective* thermal limit (MW): ``s_nom_opt * s_max_pu`` for
     lines, ``p_nom_opt * p_max_pu`` for links (see ``_effective_cap``).
-    ``extra_ports`` lists a multi-port link's populated ports >= 2 as
-    ``(bus, p_series)`` pairs (see ``_link_extra_ports``); always empty for
-    lines and two-port links.
     """
-    branches: list[tuple[str, str, str, str, pd.Series, pd.Series, float, list[tuple[str, pd.Series]]]] = []
+    branches: list[tuple[str, str, str, str, pd.Series, pd.Series, float]] = []
 
     lines = network.lines
     if len(lines) > 0 and not network.lines_t.p0.empty:
@@ -287,7 +244,6 @@ def _collect_branches(
                     p0,
                     p1,
                     _effective_cap(lines, name, "s_nom", "s_nom_opt", "s_max_pu"),
-                    [],
                 )
             )
 
@@ -308,57 +264,37 @@ def _collect_branches(
                     p0,
                     p1,
                     _effective_cap(links, name, "p_nom", "p_nom_opt", "p_max_pu"),
-                    _link_extra_ports(network, links, name),
                 )
             )
 
     return branches
 
 
-def _branch_rent_t(
-    lmp_arr: np.ndarray,
-    bus_index: dict[str, int],
-    snapshots: pd.Index,
-    bus_from: str,
-    bus_to: str,
-    flow_series: pd.Series,
-    p1_series: pd.Series,
-    extra_ports: list[tuple[str, pd.Series]],
-) -> np.ndarray | None:
-    """Per-snapshot merchandising surplus (congestion rent) of one branch.
+def _branch_congestion_rent(network: pypsa.Network) -> tuple[dict[tuple[str, str], float], pd.Series]:
+    """Congestion rent of every Line / Link from ``n.statistics.revenue``.
 
-    Algorithm:
-        The negative of the total nodal payment over every populated port
-        (see the module docstring's congestion-rent section):
-            $$ \\mathrm{rent}_{\\ell,t} = -\\sum_{k} \\mathrm{LMP}_{b_k,t}\\; p_{k,t} $$
-            ASCII: rent[l,t] = -(LMP[to,t]*p1[t] + LMP[from,t]*p0[t]
-                                 + sum over ports k>=2 of LMP[bus_k,t]*p_k[t])
-        For a lossless line (p1 = -p0) this reduces to (LMP_to - LMP_from)·p0;
-        for a lossy link (p1 = -efficiency·p0) it credits only delivered power,
-        so pure-loss price spreads collect zero rent (no rights-auction
-        surplus). Symbols: $b_k$ = bus at port k; $p_{k,t}$ = solved port flow
-        (MW, negative = delivered); LMP in currency/MWh.
+    PyPSA's ``revenue`` of a branch is the negative of the nodal payments over all its ports
+    (``-sum_k LMP_k p_k``, ``p_k`` the solved port flows), i.e. the merchandising surplus; for the 2-bus toy
+    LMP_A = 10, LMP_B = 80, flow A -> B = 50 MW it is 70 x 50 = 3500 per snapshot. It applies the snapshot
+    weightings itself, so nothing is weighted here.
 
     Returns:
-        (T,) rent array (currency/h), or ``None`` when ``bus_from``/``bus_to``
-        is not a priced bus (the branch is skipped, mirroring the pre-existing
-        two-port behaviour). An extra port whose bus is unpriced contributes
-        nothing rather than dropping the whole branch.
+        ``({(component, name): rent over the horizon}, per-snapshot total rent over every branch (currency/h))``.
     """
-    i_from = bus_index.get(bus_from)
-    i_to = bus_index.get(bus_to)
-    if i_from is None or i_to is None:
-        return None
-    flow = flow_series.reindex(snapshots).fillna(0.0).to_numpy()
-    p1 = p1_series.reindex(snapshots).fillna(0.0).to_numpy()
-    rent_t = -(lmp_arr[:, i_to] * p1 + lmp_arr[:, i_from] * flow)
-    for bus_n, pn_series in extra_ports:
-        i_n = bus_index.get(bus_n)
-        if i_n is None:
-            continue
-        pn = pn_series.reindex(snapshots).fillna(0.0).to_numpy()
-        rent_t = rent_t - lmp_arr[:, i_n] * pn
-    return rent_t
+    from .stat_metrics import asset_statistic, combine_periods
+
+    present = [c for c in ("Line", "Link") if len(network.components[c].static)]
+    if not present:
+        return {}, pd.Series(0.0, index=network.snapshots)
+    total = combine_periods(asset_statistic(network, "revenue", present))
+    by_branch = {(str(c), str(n)): float(v) for (c, n), v in total.items()}
+    per_snapshot = asset_statistic(network, "revenue", present, groupby_time=False)
+    trace = (
+        per_snapshot.fillna(0.0).sum(axis=0).reindex(network.snapshots).fillna(0.0)
+        if not per_snapshot.empty
+        else pd.Series(0.0, index=network.snapshots)
+    )
+    return by_branch, trace
 
 
 def build_lmp_decomposition(
@@ -368,10 +304,9 @@ def build_lmp_decomposition(
     """Decompose solved nodal prices into an energy component + congestion.
 
     Reads ``options["lmpDecompositionConfig"]``. Pure post-process: never
-    re-solves, never reads a line/link dual (PyPSA's default LOPF does not
-    attach shadow prices to line flow-limit constraints — see module
-    docstring), only ``buses_t.marginal_price`` and ``lines_t.p0`` /
-    ``links_t.p0``.
+    re-solves and never reads a line/link dual; it reads ``buses_t.marginal_price`` and
+    ``lines_t.p0`` / ``links_t.p0`` for the split and utilisation, and
+    ``n.statistics.revenue`` for the congestion rent of each branch.
 
     Args:
         network: Solved ``pypsa.Network``.
@@ -460,18 +395,13 @@ def build_lmp_decomposition(
     line_rows: list[dict[str, Any]] = []
     total_congestion_rent = 0.0
 
-    for name, kind, bus_from, bus_to, flow_series, p1_series, cap, extra_ports in branches:
-        # Merchandising surplus (congestion rent) = negative of the nodal
-        # payments the branch induces on ALL its buses — the two-port
-        # -(LMP_to·p1 + LMP_from·p0) plus every extra port's -(LMP·p_k) for
-        # multi-port links (see _branch_rent_t for the math and the
-        # lossless/lossy special cases).
-        rent_t = _branch_rent_t(
-            lmp_arr, bus_index, snapshots, bus_from, bus_to, flow_series, p1_series, extra_ports
-        )
-        if rent_t is None:
-            continue
-        congestion_rent = _safe_float(float(np.dot(rent_t, weights)))
+    rent_by_branch, rent_per_t = _branch_congestion_rent(network)
+    for name, kind, bus_from, bus_to, flow_series, p1_series, cap in branches:
+        if bus_from not in bus_index or bus_to not in bus_index:
+            continue  # an unpriced end: not a branch of this decomposition
+        # Merchandising surplus (congestion rent): n.statistics.revenue of the branch (see
+        # _branch_congestion_rent), under the snapshot weightings.
+        congestion_rent = _safe_float(rent_by_branch.get(("Line" if kind == "line" else "Link", name), 0.0))
         total_congestion_rent += congestion_rent
 
         flow = flow_series.reindex(snapshots).fillna(0.0).to_numpy()
@@ -529,22 +459,13 @@ def build_lmp_decomposition(
             (load_arr * lmp_arr).sum(axis=1) / np.where(load_arr.sum(axis=1) > _EPS, load_arr.sum(axis=1), 1.0),
             lmp_arr.mean(axis=1),
         )
-        # Instantaneous (unweighted) per-snapshot total congestion rent across
-        # ALL lines+links, not just the top-N kept in `lines`.
-        rent_per_t = np.zeros(T)
-        for name, kind, bus_from, bus_to, flow_series, p1_series, cap, extra_ports in branches:
-            rent_t = _branch_rent_t(
-                lmp_arr, bus_index, snapshots, bus_from, bus_to, flow_series, p1_series, extra_ports
-            )
-            if rent_t is None:
-                continue
-            rent_per_t += rent_t
-
+        # Instantaneous (unweighted) per-snapshot total congestion rent across ALL lines+links, not just
+        # the top-N kept in `lines`: n.statistics.revenue with groupby_time=False.
         series = {
             "snapshots": labels,
             "energy": [round(_safe_float(v), 2) for v in energy_t],
             "meanLmp": [round(_safe_float(v), 2) for v in mean_lmp_per_t],
-            "congestionRent": [round(_safe_float(v), 2) for v in rent_per_t],
+            "congestionRent": [round(_safe_float(v), 2) for v in rent_per_t.to_numpy()],
         }
 
     # ── Summary KPIs ─────────────────────────────────────────────────────────

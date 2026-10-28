@@ -13,7 +13,7 @@ from fastapi import HTTPException
 
 from ..constants import carrier_color
 from ..network import build_network
-from ..network.piecewise import build_piecewise_results, overlay_piecewise_marginal_cost
+from ..network.piecewise import build_piecewise_results
 from ..network.demand_response import build_demand_response, build_price_elastic
 from ..pathway import parse_pathway_config
 from ..rolling import (
@@ -51,6 +51,7 @@ from .dispatch import (
     build_storage_soc_series,
     electricity_bus_scope,
     _is_electricity,
+    carrier_supply_mwh,
     electricity_dispatch_by_carrier,
     system_price_series,
     weighted_mean,
@@ -907,7 +908,19 @@ def run_pypsa(
         if oo.nonlinear_pf:  # P25 - AC feasibility of the LOPF dispatch, on a copy
             from ..optimise_extras import run_ac_feasibility
 
-            ac_feasibility = run_ac_feasibility(network, oo.nonlinear_pf)
+            ac_feasibility = run_ac_feasibility(
+                network,
+                oo.nonlinear_pf,
+                dict(
+                    solver_name=oo.solver_name,
+                    solver_options=solver_options if solver_options else {},
+                    extra_functionality=extra_functionality,
+                    io_api=oo.io_api(_SOLVER_IO_API),
+                    include_objective_constant=False,
+                    multi_investment_periods=pathway.enabled,
+                    **oo.optimize_kwargs(),
+                ),
+            )
             notes.append(
                 "AC feasibility check of the LOPF dispatch: "
                 + (
@@ -1126,11 +1139,11 @@ def _build_solved_payload(
     )
 
     emission_totals: dict[str, float] = defaultdict(float)
-    carrier_energy: dict[str, float] = defaultdict(float)
-    for carrier, series in by_carrier.items():
-        if carrier in shed_carriers:
-            continue
-        carrier_energy[carrier] += weighted_sum(series.clip(lower=0.0), generator_weights)
+    # Carrier mix: n.statistics.supply into the electricity buses, by carrier (the per-snapshot
+    # ``by_carrier`` series below only draw the dispatch stack).
+    carrier_energy: dict[str, float] = defaultdict(
+        float, {c: v for c, v in carrier_supply_mwh(network).items() if c not in shed_carriers}
+    )
     # Emissions on PyPSA's primary_energy basis (RB10): generators p/η × co2_emissions
     # (signed, period-weighted) plus non-cyclic storage depletion — equals the
     # primary_energy GlobalConstraint LHS. Links/Processes are not counted.
@@ -1833,7 +1846,10 @@ def _build_solved_payload(
             "averageSystemPrice": float(average_price),
             "snapshotCount": snapshot_count,
             "snapshotWeight": snapshot_weight,
-            "modeledHours": snapshot_count * snapshot_weight,
+            # Sum of PyPSA's snapshot weightings (h): exact for a sampled run, where count x one weight is not.
+            "modeledHours": float(generator_weights.sum()),
+            # PyPSA's per-snapshot hours (the browser multiplies a window sum by each snapshot's own weight).
+            "snapshotWeights": [float(w) for w in generator_weights.to_numpy()],
             "storeWeight": float(store_weights.iloc[0]) if len(store_weights) else snapshot_weight,
             "planningMode": pathway.planning_mode,
             "investmentPeriods": [row.period for row in pathway.periods],

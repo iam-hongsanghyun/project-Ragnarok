@@ -259,12 +259,31 @@ def _check_weighting_vs_spacing(model: dict[str, Any], out: list[dict[str, Any]]
         ))
 
 
+def _check_placeholder_bounds(model: dict[str, Any], out: list[dict[str, Any]]) -> None:
+    from .network.placeholders import PLACEHOLDER_THRESHOLD, find_placeholders
+
+    found = find_placeholders(model)
+    if not found:
+        return
+    sample = ", ".join(f"{sheet}.{name}.{column}" for sheet, name, column, _ in found[:3])
+    out.append(_finding(
+        WARN, "placeholder_bounds",
+        f"{len(found)} bound cell(s) hold a finite value of {PLACEHOLDER_THRESHOLD:.0e} or more (e.g. {sample}). "
+        "PyPSA uses them as written, so the LP carries a huge right-hand side (poor conditioning) where "
+        "'no limit' was meant.",
+        "Run the clean-up: blank cells take PyPSA's default (inf). Nothing is changed until you run the action.",
+        {"id": "clean_placeholder_bounds", "label": "Clean placeholder bounds",
+         "endpoint": "POST /api/forge/clean-placeholder-bounds"},
+    ))
+
+
 def check_model(model: dict[str, Any]) -> dict[str, Any]:
     """Back-brief plus trap findings for a workbook model. Read-only."""
     findings: list[dict[str, Any]] = []
     _check_snapshot_alignment(model, findings)
     _check_weighting_vs_spacing(model, findings)
     _check_generators(model, findings)
+    _check_placeholder_bounds(model, findings)
     _check_structure(model, findings)
     warnings = [f for f in findings if f["level"] == WARN]
     return {

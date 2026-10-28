@@ -256,6 +256,44 @@ def electricity_dispatch_by_carrier(
     return result
 
 
+def carrier_supply_mwh(network: pypsa.Network) -> dict[str, float]:
+    """Energy supplied into the electricity buses per carrier (MWh), from ``n.statistics.supply``.
+
+    The whole-horizon totals behind the carrier mix: ``supply`` of the generators on electricity buses by
+    carrier, plus the Links / Processes that CONVERT into electricity (input on a non-electricity bus,
+    grouped by the Link's carrier, or its name when blank). Same-vector transmission links are not supply.
+    PyPSA applies the snapshot weightings (and, in a pathway run, sums the periods as energy), the
+    ``bus_carrier`` filter and the output-port discovery, so none of it is repeated here. The load-shedding
+    backstop is not supply and is left out by name.
+
+    Returns:
+        ``{carrier: MWh}``, zeros omitted.
+    """
+    from ..utils.shedding import is_shedding
+    from .stat_metrics import asset_statistic, combine_periods
+
+    elec_buses = _electricity_bus_names(network)
+    bus_carriers = sorted({str(c) if str(c).strip() else "AC" for b, c in network.buses["carrier"].items() if str(b) in elec_buses}) \
+        if "carrier" in network.buses.columns else None
+    kwargs: dict[str, Any] = {"bus_carrier": bus_carriers} if bus_carriers else {}
+    present = [c for c in ("Generator", "Link", "Process") if len(network.components[c].static)]
+    energy = combine_periods(asset_statistic(network, "supply", present, **kwargs))
+    out: dict[str, float] = {}
+    for (component, name), value in energy.items():
+        static = network.components[component].static
+        if name not in static.index:
+            continue
+        carrier = str(static.at[name, "carrier"]) if "carrier" in static.columns else ""
+        if component == "Generator":
+            if is_shedding(name, carrier) or str(static.at[name, "bus"]) not in elec_buses:
+                continue
+        elif str(static.at[name, "bus0"]) in elec_buses:
+            continue  # same-vector / transmission link
+        key = carrier or str(name) if component != "Generator" else carrier
+        out[key] = out.get(key, 0.0) + float(value)
+    return {c: v for c, v in out.items() if v}
+
+
 def _link_port_efficiency(
     network: pypsa.Network,
     link: str,

@@ -28,6 +28,7 @@ from __future__ import annotations
 import math
 import re
 from decimal import ROUND_HALF_UP, Decimal
+from collections.abc import Mapping, Sequence
 from typing import Any, Callable
 from ..pypsa.utils.shedding import is_shedding
 
@@ -312,13 +313,14 @@ def generator_emission_factor(row: Row, carrier_static: dict[str, Row]) -> float
 
 
 class _Ctx:
-    def __init__(self, model: Model, outputs: dict[str, Any], currency: str, weight: float,
+    def __init__(self, model: Model, outputs: dict[str, Any], currency: str, stats: dict[str, Any] | None,
                  snapshots: list[str], periods: list[int | None], averaging: dict[str, Any] | None) -> None:
         self.model = model
         self.series: Series = outputs.get("series") or {}
         self.static: dict[str, Any] = outputs.get("static") or {}
         self.currency = currency
-        self.weight = weight
+        #: ``backend.pypsa.results.run_statistics.run_statistics`` of the run (or period): the weighted totals.
+        self.stats: dict[str, Any] = stats or {}
         self.snapshots = snapshots
         self.labels = [_iso_to_label(s) for s in snapshots]
         self.periods = periods
@@ -337,6 +339,7 @@ def _build_generators(c: _Ctx, names: set[str] | None) -> dict[str, Any]:
     carrier_static = _index_by_name(c.model.get("carriers"))
     p_series = c.series.get("generators-p")
     p_max_pu_idx = InputIndex(c.model.get("generators-p_max_pu"), c.averaging)
+    totals: dict[str, Any] = c.stats.get("generators") or {}
     out: dict[str, Any] = {}
     for name, row in gen_static.items():
         if not _wants(names, name):
@@ -344,40 +347,50 @@ def _build_generators(c: _Ctx, names: set[str] | None) -> dict[str, Any]:
         carrier = string_value(row.get("carrier")) or "Other"
         p_nom_input = number_value(row.get("p_nom"))
         p_nom = _static_or_input(c.static, "generators", name, "p_nom_opt", p_nom_input)
-        mc = number_value(row.get("marginal_cost"))
         raw_pmax = row.get("p_max_pu")
         p_max_pu_static = 1.0 if raw_pmax is None or raw_pmax == "" else number_value(raw_pmax)
         efficiency = generator_efficiency(row)
         ef = generator_emission_factor(row, carrier_static)
         time_varying = name in p_max_pu_idx.columns
         output_s, emis_s, avail_s, curt_s = [], [], [], []
-        energy = total_em = 0.0
         for i, stamp in enumerate(c.snapshots):
             o = _series_value(p_series, i, name)
             pos = max(o, 0.0)
             ratio = p_max_pu_idx.value_at(stamp, name, p_max_pu_static, c.period(i))
             avail = max(ratio * p_nom, pos)
             em = pos * ef
-            energy += pos * c.weight
-            total_em += em * c.weight
             label = c.labels[i]
             output_s.append({"label": label, "timestamp": stamp, "output": o})
             emis_s.append({"label": label, "timestamp": stamp, "emissions": em})
             avail_s.append({"label": label, "timestamp": stamp, "available": avail})
             if time_varying:
                 curt_s.append({"label": label, "timestamp": stamp, "curtailment": max(avail - pos, 0.0)})
+        # The totals are PyPSA's (n.statistics.supply / opex / curtailment, the carbon module's term and
+        # primary_energy emissions), weighted by the run's own snapshot weightings; none is re-summed here.
+        summary: list[dict[str, Any]] = []
+        total = totals.get(name)
+        if total is not None:
+            hours = number_value(c.stats.get("modeledHours"))
+            mc_text = f"statistics.opex + carbon term ({fmt(number_value(total.get('carbonCost')))} {c.currency} carbon)"
+            summary = [
+                {"label": "Energy", "value": f"{fmt(number_value(total.get('energyMwh')))} MWh",
+                 "detail": f"n.statistics.supply over {fmt(hours, 1)} modelled hours"},
+                {"label": "Operating cost", "value": f"{fmt(number_value(total.get('operatingCost')))} {c.currency}",
+                 "detail": mc_text},
+                {"label": "Emissions", "value": f"{fmt(number_value(total.get('emissionsTco2')))} tCO2e",
+                 "detail": f"primary_energy basis, {_fixed(ef, 2)} t/MWh thermal-basis factor (eta {_fixed(efficiency, 2)})"},
+            ]
+            if time_varying:
+                summary.append({"label": "Curtailment", "value": f"{fmt(number_value(total.get('curtailmentMwh')))} MWh",
+                                "detail": "n.statistics.curtailment"})
         detail: dict[str, Any] = {
             "name": name, "carrier": carrier, "bus": string_value(row.get("bus")),
-            "summary": [
-                {"label": "Energy", "value": f"{fmt(energy)} MWh", "detail": f"{fmt(c.weight, 3)} h weighting applied"},
-                {"label": "Operating cost", "value": f"{fmt(energy * mc)} {c.currency}",
-                 "detail": f"{_fixed(mc, 1)} {c.currency}/MWh marginal cost"},
-                {"label": "Emissions", "value": f"{fmt(total_em)} tCO2e",
-                 "detail": f"{_fixed(ef, 2)} t/MWh thermal-basis factor (eta {_fixed(efficiency, 2)})"},
-            ],
+            "summary": summary,
             "outputSeries": output_s, "emissionsSeries": emis_s,
             "availableSeries": avail_s, "curtailmentSeries": curt_s,
         }
+        if total is not None:
+            detail["totals"] = {k: number_value(v) for k, v in total.items()}
         detail["color"] = resolved_color(row.get("color"), carrier, c.model.get("carriers"))
         out[name] = detail
     return out
@@ -393,6 +406,8 @@ def _build_buses(c: _Ctx, names: set[str] | None) -> dict[str, Any]:
     vmag_series = c.series.get("buses-v_mag_pu")
     vang_series = c.series.get("buses-v_ang")
     load_idx = InputIndex(c.model.get("loads-p_set"), c.averaging)
+    totals: dict[str, Any] = c.stats.get("buses") or {}
+    hours = number_value(c.stats.get("modeledHours"))
     gen_by_bus: dict[str, list[str]] = {}
     load_by_bus: dict[str, list[str]] = {}
     for row in gen_static.values():
@@ -409,9 +424,6 @@ def _build_buses(c: _Ctx, names: set[str] | None) -> dict[str, Any]:
             continue
         gens, loads = gen_by_bus.get(name, []), load_by_bus.get(name, [])
         net: list[dict[str, Any]] = []
-        carrier_mix: dict[str, float] = {}
-        load_avg = gen_avg = price_avg = 0.0
-        price_count = 0
         has_v = has_a = False
         for i, stamp in enumerate(c.snapshots):
             load_t = sum(
@@ -423,37 +435,36 @@ def _build_buses(c: _Ctx, names: set[str] | None) -> dict[str, Any]:
                 pos = max(_series_value(p_series, i, gn), 0.0)
                 gen_t += pos
                 g = gen_static.get(gn)
-                carrier = string_value((g or {}).get("carrier")) or "Other"
                 em_t += pos * (generator_emission_factor(g, carrier_static) if g else 0.0)
-                carrier_mix[carrier] = carrier_mix.get(carrier, 0.0) + pos * c.weight
             smp = _series_value(price_series, i, name) if price_series else 0.0
-            if price_series:
-                price_count += 1
             vmag = _series_value(vmag_series, i, name) if vmag_series else 0.0
             vang = _series_value(vang_series, i, name) if vang_series else 0.0
             if vmag_series and vmag != 0:
                 has_v = True
             if vang_series and vang != 0:
                 has_a = True
-            load_avg += load_t
-            gen_avg += gen_t
-            price_avg += smp
             net.append({
                 "label": c.labels[i], "timestamp": stamp, "load": load_t, "generation": gen_t,
                 "smp": smp, "emissions": em_t, "v_mag_pu": vmag, "v_ang": vang,
             })
-        n = len(c.snapshots) or 1
-        load_avg /= n
-        gen_avg /= n
-        price_avg = price_avg / price_count if price_count else 0.0
+        # Weighted totals are PyPSA's (see run_statistics): mean power = energy / modelled hours, price =
+        # n.statistics.prices(weighting="load"), carrier mix = n.statistics.supply.
+        total = totals.get(name)
+        summary: list[dict[str, Any]] = []
+        price_avg = number_value((total or {}).get("averagePrice"))
+        if total is not None:
+            load_avg = number_value(total.get("loadMwh")) / hours if hours > 0 else 0.0
+            gen_avg = number_value(total.get("generationMwh")) / hours if hours > 0 else 0.0
+            summary = [
+                {"label": "Average load", "value": f"{fmt(load_avg)} MW", "detail": f"{len(loads)} load(s) attached"},
+                {"label": "Average generation", "value": f"{fmt(gen_avg)} MW", "detail": f"{len(gens)} generator(s) attached"},
+                {"label": "Average SMP", "value": f"{fmt(price_avg)} {c.currency}/MWh", "detail": "Load-weighted bus marginal price"},
+            ]
+        carrier_mix = {k: number_value(v) for k, v in ((total or {}).get("carrierMwh") or {}).items()}
         out[name] = {
             "name": name,
             "averageSmp": price_avg,
-            "summary": [
-                {"label": "Average load", "value": f"{fmt(load_avg)} MW", "detail": f"{len(loads)} load(s) attached"},
-                {"label": "Average generation", "value": f"{fmt(gen_avg)} MW", "detail": f"{len(gens)} generator(s) attached"},
-                {"label": "Average SMP", "value": f"{fmt(price_avg)} {c.currency}/MWh", "detail": "Bus marginal price"},
-            ],
+            "summary": summary,
             "netSeries": net,
             "hasVoltageMagnitude": bool(vmag_series) and has_v,
             "hasVoltageAngle": bool(vang_series) and has_a,
@@ -592,14 +603,13 @@ def _build_processes(c: _Ctx, names: set[str] | None) -> dict[str, Any]:
             continue
         p_nom_input = number_value(row.get("p_nom"))
         p_nom = _static_or_input(c.static, "processes", name, "p_nom_opt", p_nom_input)
-        mc = number_value(row.get("marginal_cost"))
+        total = (c.stats.get("processes") or {}).get(name)
         p0_o, p1_o, thr_o = [], [], []
-        throughput_energy = ratio_num = ratio_den = 0.0
+        ratio_num = ratio_den = 0.0
         for i, stamp in enumerate(c.snapshots):
             p0 = _series_value(p0_series, i, name)
             p1 = _series_value(p1_series, i, name)
             throughput = abs(p0)
-            throughput_energy += throughput * c.weight
             if abs(p0) > 1e-9:
                 ratio_num += abs(p1) / abs(p0) * throughput
                 ratio_den += throughput
@@ -613,12 +623,14 @@ def _build_processes(c: _Ctx, names: set[str] | None) -> dict[str, Any]:
             "summary": [
                 {"label": "Power rating", "value": f"{fmt(p_nom)} MW",
                  "detail": "Solved p_nom_opt" if p_nom != p_nom_input else "Input p_nom"},
-                {"label": "Throughput", "value": f"{fmt(throughput_energy)} MWh",
-                 "detail": f"{fmt(c.weight, 3)} h weighting applied"},
+                *([
+                    {"label": "Throughput", "value": f"{fmt(number_value(total.get('throughputMwh')))} MWh",
+                     "detail": "n.statistics.withdrawal at bus0"},
+                    {"label": "Operating cost", "value": f"{fmt(number_value(total.get('operatingCost')))} {c.currency}",
+                     "detail": "n.statistics.opex"},
+                ] if total is not None else []),
                 {"label": "Realised efficiency", "value": _fixed(eff, 3) if eff > 0 else "—",
                  "detail": "Throughput-weighted |p1|/|p0|"},
-                {"label": "Operating cost", "value": f"{fmt(throughput_energy * mc)} {c.currency}",
-                 "detail": f"{_fixed(mc, 1)} {c.currency}/MWh marginal cost"},
             ],
             "p0Series": p0_o, "p1Series": p1_o, "throughputSeries": thr_o,
         }
@@ -677,7 +689,7 @@ def derive_asset_details(
     model: Model,
     outputs: dict[str, Any] | None,
     currency: str = "$",
-    snapshot_weight: float = 1.0,
+    stats: dict[str, Any] | None = None,
     sampling: dict[str, Any] | None = None,
     *,
     kinds: list[str] | None = None,
@@ -685,6 +697,12 @@ def derive_asset_details(
     period: int | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Per-asset detail records, keyed ``kind -> name -> detail`` (as ``RunResults.assetDetails``).
+
+    The per-snapshot series come from the stored outputs. The weighted totals (energy, operating cost,
+    emissions, curtailment, mean load / price, carrier mix) come from ``stats``, the
+    :func:`backend.pypsa.results.run_statistics.run_statistics` of the run (or of ``period``): PyPSA's
+    ``n.statistics`` under the run's own snapshot weightings. Without ``stats`` the summaries carry only
+    what the series alone state (ratings, peaks); no total is guessed from a uniform weight.
 
     ``kinds`` / ``names`` narrow the work to what the caller needs; ``period``
     keeps one investment period of a pathway run.
@@ -696,7 +714,7 @@ def derive_asset_details(
         outputs = {**outputs, "series": filter_series_by_period(outputs["series"], period)}
     snapshots = [string_value(r.get("snapshot")) for r in _pick_snapshot_rows(outputs["series"], _PREFERRED)]
     ctx = _Ctx(
-        model, outputs, currency, snapshot_weight, snapshots,
+        model, outputs, currency, stats, snapshots,
         snapshot_periods(outputs["series"], _PREFERRED),
         input_averaging_from_sampling(sampling, snapshots[0] if snapshots else None),
     )
@@ -1019,9 +1037,10 @@ def compute_kpis(
     else:
         peak_load = max(load()) if load() else None
 
-    weight = number_value(run_meta.get("snapshotWeight"))
-    count = number_value(run_meta.get("snapshotCount"))
-    modeled_hours = count * weight
+    # Modelled hours = the sum of PyPSA's snapshot weightings (``runMeta.modeledHours``); a run stored before
+    # the field existed falls back to count x the run's uniform hours-per-snapshot.
+    stored_hours = number_value(run_meta.get("modeledHours"))
+    modeled_hours = stored_hours if stored_hours > 0 else number_value(run_meta.get("snapshotCount")) * number_value(run_meta.get("snapshotWeight"))
     if modeled_hours > 0:
         avg_load: float | None = total_dispatch / modeled_hours
     elif load():
@@ -1272,20 +1291,24 @@ def _js_round2(x: float) -> float:
     return math.floor(x * 100 + 0.5) / 100
 
 
-def load_analysis(buses: dict[str, Any], snapshot_weight: float) -> dict[str, Any]:
-    """System and per-bus demand utilisation from the buses' ``netSeries``.
+def load_analysis(
+    buses: dict[str, Any], load_mwh: Mapping[str, float], modeled_hours: float | None = None,
+) -> dict[str, Any]:
+    """System and per-bus demand utilisation from the buses' ``netSeries`` and PyPSA's load energy.
 
     Algorithm:
         $$LF = \\frac{\\bar P}{P_{peak}},\\quad
           CF = \\frac{\\max_t \\sum_b P_{b,t}}{\\sum_b \\max_t P_{b,t}},\\quad
-          E_b = w \\sum_t P_{b,t},\\quad s_b = E_b / \\sum_b E_b$$
-        ASCII: LF = mean(P) / max(P); CF = system peak / sum of bus peaks;
-        E_b = w * sum_t P_bt; share_b = E_b / sum E.
-        $P_{b,t}$ = non-negative load of bus $b$ at snapshot $t$ (MW); $w$ = snapshot weight (h).
+          s_b = E_b / \\sum_b E_b$$
+        ASCII: LF = mean(P) / max(P); CF = system peak / sum of bus peaks; share_b = E_b / sum E.
+        $P_{b,t}$ = non-negative load of bus $b$ at snapshot $t$ (MW); $E_b$ = energy withdrawn by the
+        bus's loads (MWh).
 
-    Peak, load factor and coincidence have no ``n.statistics`` counterpart; the
-    per-bus energy equals ``n.statistics.withdrawal(components="Load", groupby="bus")``
-    for fixed loads (pinned in ``test_p28_card_analysis``).
+    Peak, load factor and coincidence have no ``n.statistics`` counterpart and are read off the series
+    (the mean power is ``energy / modeled_hours`` when ``modeled_hours`` is given, the plain snapshot mean
+    otherwise). The per-bus energy ``load_mwh`` IS PyPSA's:
+    ``n.statistics.withdrawal(components="Load", groupby="bus")`` under the snapshot weightings
+    (:func:`backend.pypsa.results.run_statistics.run_statistics`, ``buses[b]["loadMwh"]``).
 
     Returns:
         ``{systemPeakMw, systemEnergyMwh, systemLoadFactor, coincidenceFactor, buses, total}``;
@@ -1296,13 +1319,17 @@ def load_analysis(buses: dict[str, Any], snapshot_weight: float) -> dict[str, An
     for d in details:
         loads = [max(0.0, _num(p.get("load"))) for p in d.get("netSeries") or []]
         if not loads:
-            rows.append({"name": d["name"], "peakMw": 0.0, "energyMwh": 0.0, "loadFactor": None, "share": 0.0})
+            rows.append({"name": d["name"], "peakMw": 0.0, "energyMwh": _num(load_mwh.get(d["name"])), "loadFactor": None, "share": 0.0})
             continue
         peak = max(loads)
         total = sum(loads)
         rows.append({
-            "name": d["name"], "peakMw": peak, "energyMwh": total * snapshot_weight,
-            "loadFactor": (total / len(loads)) / peak if peak > 0 else None, "share": 0.0,
+            "name": d["name"], "peakMw": peak, "energyMwh": _num(load_mwh.get(d["name"])),
+            "loadFactor": (
+                (_num(load_mwh.get(d["name"])) / modeled_hours if modeled_hours and modeled_hours > 0 else total / len(loads)) / peak
+                if peak > 0 else None
+            ),
+            "share": 0.0,
         })
     total_energy = sum(r["energyMwh"] for r in rows)
     for r in rows:
@@ -1314,7 +1341,9 @@ def load_analysis(buses: dict[str, Any], snapshot_weight: float) -> dict[str, An
         for i in range(n)
     ]
     system_peak = max(system_at_t, default=0.0)
-    system_avg = sum(system_at_t) / n if n else 0.0
+    system_avg = (
+        total_energy / modeled_hours if modeled_hours and modeled_hours > 0 else (sum(system_at_t) / n if n else 0.0)
+    )
     sum_bus_peaks = sum(r["peakMw"] for r in rows)
     kept = [r for r in rows if r["energyMwh"] > 0] if total_energy > 0 else []
     return {
@@ -1597,11 +1626,11 @@ def result_totals(result: dict[str, Any], system_peak_load_mw: float | None = No
     return out
 
 
-def summarise_dual_sheet(sheet: str, rows: list[Row], snapshot_weight: float, tolerance: float = 1e-6) -> dict[str, Any]:
+def summarise_dual_sheet(sheet: str, rows: list[Row], weights: Sequence[float], tolerance: float = 1e-6) -> dict[str, Any]:
     """Which assets bind in one ``<list>-mu_*`` dual sheet, when and at what shadow price.
 
     A dual with $|\\mu| > tolerance$ (currency/MWh) marks a binding snapshot. Per asset: binding
-    snapshots, binding hours = snapshots x weight, the signed dual of largest magnitude and when it
+    snapshots, binding hours = the sum of the snapshot weightings (h) of those snapshots, the signed dual of largest magnitude and when it
     occurred, the mean $|\\mu|$ over the binding snapshots and a run-length strip of the pattern.
 
     Returns:
@@ -1615,7 +1644,8 @@ def summarise_dual_sheet(sheet: str, rows: list[Row], snapshot_weight: float, to
     for asset in assets:
         binding, peak, peak_at, abs_sum = 0, 0.0, "", 0.0
         segments: list[dict[str, Any]] = []
-        for row in rows:
+        hours = 0.0
+        for index, row in enumerate(rows):
             raw = row.get(asset)
             try:
                 v = float(raw)  # type: ignore[arg-type]
@@ -1629,6 +1659,7 @@ def summarise_dual_sheet(sheet: str, rows: list[Row], snapshot_weight: float, to
             if not on:
                 continue
             binding += 1
+            hours += float(weights[index]) if index < len(weights) else 1.0
             abs_sum += abs(v)
             if abs(v) > abs(peak):
                 peak, peak_at = v, string_value(row.get("snapshot"))
@@ -1636,21 +1667,21 @@ def summarise_dual_sheet(sheet: str, rows: list[Row], snapshot_weight: float, to
             continue
         out.append({
             "component": parsed.group(1), "attribute": parsed.group(2), "asset": asset,
-            "bindingSnapshots": binding, "bindingHours": binding * snapshot_weight, "totalSnapshots": len(rows),
+            "bindingSnapshots": binding, "bindingHours": hours, "totalSnapshots": len(rows),
             "peakShadowPrice": peak, "peakAt": peak_at, "meanShadowPrice": abs_sum / binding, "segments": segments,
         })
     out.sort(key=lambda r: -abs(r["peakShadowPrice"]))
     return {"rows": out, "assetsChecked": len(assets)}
 
 
-def setpoint_duals(series: Series, snapshot_weight: float) -> dict[str, Any]:
+def setpoint_duals(series: Series, weights: Sequence[float]) -> dict[str, Any]:
     """Ramp-limit / set-point duals (P30) over every dual sheet of ``series`` (one run or period)."""
     sheets = sorted(k for k, rows in series.items() if _DUAL_SHEET.match(k) and rows)
     rows: list[dict[str, Any]] = []
     checked = 0
     snapshots = 0
     for sheet in sheets:
-        summary = summarise_dual_sheet(sheet, series[sheet], snapshot_weight)
+        summary = summarise_dual_sheet(sheet, series[sheet], weights)
         rows.extend(summary["rows"])
         checked += summary["assetsChecked"]
         snapshots = max(snapshots, len(series[sheet]))

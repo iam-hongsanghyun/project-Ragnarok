@@ -44,6 +44,12 @@ export function StochasticSection({
     setScenarios(config.scenarios.filter((s) => s.id !== id));
 
   const totalWeight = config.scenarios.reduce((sum, s) => sum + (Number(s.weight) || 0), 0);
+  const weightsSumToOne = Math.abs(totalWeight - 1) <= 1e-6;
+  // A visible edit of the stored weights: the run itself never rescales them.
+  const normaliseWeights = () =>
+    setScenarios(
+      config.scenarios.map((s) => ({ ...s, weight: (Number(s.weight) || 0) / totalWeight })),
+    );
 
   return (
     <section className="constraints-workspace-section">
@@ -52,8 +58,9 @@ export function StochasticSection({
         <p>
           Two-stage stochastic planning: shared capacity decisions,
           scenario-specific dispatch. Each row gets four quick knobs;
-          per-cell uncertainty drops into "Advanced overrides". Weights
-          normalise to sum=1 at solve time; minimum 2 scenarios.
+          per-cell uncertainty drops into "Advanced overrides". Weights are
+          scenario probabilities and must sum to 1 (PyPSA requires it; a run
+          with another sum is refused); minimum 2 scenarios.
         </p>
       </header>
       <div className="sg-setting-row">
@@ -96,7 +103,16 @@ export function StochasticSection({
           {config.scenarios.length > 0 && (
             <p className="sg-setting-hint">
               {config.scenarios.length >= 2 ? 'Total weight ' : 'Need ≥ 2 scenarios. Total weight '}
-              <strong>{totalWeight.toFixed(2)}</strong> (normalised to 1.00 on solve).
+              <strong>{totalWeight.toFixed(2)}</strong>
+              {weightsSumToOne ? '.' : ' - must be 1.00 to solve.'}
+              {!weightsSumToOne && totalWeight > 0 && (
+                <>
+                  {' '}
+                  <button className="tb-btn" onClick={normaliseWeights}>
+                    Normalise weights to 1
+                  </button>
+                </>
+              )}
             </p>
           )}
         </>

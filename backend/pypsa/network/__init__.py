@@ -52,7 +52,7 @@ from .components import (
     _has_name,
     _strip_blank_columns,
     _ordered_component_sheets,
-    _drop_broken_bus_refs,
+    refuse_unknown_buses,
     _ensure_carriers,
     _apply_ts_sheet,
     _extra_port_columns,
@@ -64,57 +64,6 @@ from .serialize import ANNOTATION_COLUMNS
 from .piecewise import apply_piecewise_sheets
 
 __all__ = ["build_components", "build_network", "build_stored_network", "validate_model"]
-
-# Any finite value with absolute magnitude beyond this threshold is treated as
-# a placeholder for "no limit". Workbooks exported by upstream tooling often
-# store 1e12 in p_nom_max / e_sum_min / e_sum_max / lifetime instead of the
-# inf they were meant to represent, which feeds enormous RHS values into the
-# LP and degrades HiGHS numerical conditioning (RHS ranges spanning 12+
-# orders of magnitude trigger "excessively large row bounds" warnings and
-# can push the solver into degenerate / unbounded territory). We snap those
-# back to ±inf so PyPSA / linopy drop them at LP build time.
-_INF_PLACEHOLDER_THRESHOLD = 1e9
-
-
-def _sanitize_placeholder_bounds(network: pypsa.Network, notes: list[str]) -> None:
-    """Replace 1e12-style placeholder bounds with PyPSA's natural ±inf.
-
-    Touches ``*_nom_max`` / ``*_nom_min`` / ``*_sum_max`` / ``*_sum_min`` and
-    ``lifetime`` on every component class. Pure replacement — no math — so
-    rows that already used ``inf`` or sensible finite caps are left alone.
-    """
-    affected = 0
-    for list_name in network.components.keys():
-        frame = network.components[list_name].static
-        if frame.empty:
-            continue
-        for col in list(frame.columns):
-            is_upper = (
-                col.endswith("_nom_max") or col.endswith("_sum_max")
-                or col in ("lifetime", "v_ang_max")
-            )
-            is_lower = col.endswith("_sum_min")
-            if not (is_upper or is_lower):
-                continue
-            series = pd.to_numeric(frame[col], errors="coerce")
-            mask_up = is_upper and (series >= _INF_PLACEHOLDER_THRESHOLD)
-            mask_lo = is_lower and (series <= -_INF_PLACEHOLDER_THRESHOLD)
-            mask = (mask_up if is_upper else False) | (mask_lo if is_lower else False)
-            try:
-                hits = int(mask.sum())
-            except Exception:
-                hits = 0
-            if hits == 0:
-                continue
-            replacement = np.inf if is_upper else -np.inf
-            frame.loc[mask, col] = replacement
-            affected += hits
-    if affected:
-        notes.append(
-            f"Sanitised {affected} placeholder bound(s) (≥{_INF_PLACEHOLDER_THRESHOLD:.0e}) → ±inf "
-            "to keep the LP numerically well-conditioned."
-        )
-
 
 _TRUE_TOKENS = frozenset({"true", "1", "yes", "y", "t", "on"})
 _FALSE_TOKENS = frozenset({"false", "0", "no", "n", "f", "off"})
@@ -164,29 +113,6 @@ def _coerce_numeric_columns(
     return df
 
 
-def _drop_deprecated_v_ang_min(network: pypsa.Network, notes: list[str]) -> None:
-    """Warn about and clear a finite ``v_ang_min`` (deprecated and ignored in PyPSA 1.4).
-
-    PyPSA >= 1.4 enforces ``v_ang_max`` as a symmetric |angle difference| cap in
-    degrees and ignores ``v_ang_min`` (emitting a DeprecationWarning). Old
-    workbooks that carry a finite ``v_ang_min`` mean "lower bound"; surface that
-    their meaning changed, then reset to -inf so no DeprecationWarning fires.
-    """
-    for list_name in ("lines", "transformers"):
-        if list_name not in network.components.keys():
-            continue
-        frame = network.components[list_name].static
-        if "v_ang_min" not in frame.columns:
-            continue
-        finite = np.isfinite(pd.to_numeric(frame["v_ang_min"], errors="coerce").to_numpy(dtype=float))
-        if finite.any():
-            frame.loc[finite, "v_ang_min"] = -np.inf
-            notes.append(
-                f"Warning: v_ang_min is deprecated in PyPSA 1.4 and ignored; cleared it on "
-                f"{int(finite.sum())} {list_name}. Use v_ang_max (degrees, symmetric |angle difference| cap)."
-            )
-
-
 def _carry_plant_ids(network: pypsa.Network, model: dict[str, Any]) -> None:
     """Copy the :data:`ANNOTATION_COLUMNS` of the workbook rows onto the network's static frames.
 
@@ -211,14 +137,13 @@ def _load_model(
     pathway: Any,
     notes: list[str],
     *,
-    sanitize: bool,
     stochastic_enabled: bool = False,
 ) -> tuple[pypsa.Network, dict[str, pd.Index], pd.DataFrame | None]:
     """Hand the workbook to PyPSA 1:1: the network sheet, snapshots, every component and time series.
 
     No run-time conversion happens here: values go in exactly as the workbook holds them.
-    ``sanitize`` additionally snaps 1e9+ placeholder bounds to ±inf and clears a deprecated
-    ``v_ang_min`` - a run-time convenience that a build serialised back to a workbook must not apply.
+    Placeholder bounds (1e9+ standing for "no limit") and a deprecated ``v_ang_min`` go to PyPSA as written
+    (PyPSA warns about ``v_ang_min``); the visible clean-up is ``forge_helpers.clean_placeholder_bounds``.
 
     Returns:
         ``(network, uncovered_by_sheet, authored_weights)``.
@@ -275,22 +200,17 @@ def _load_model(
         # PyPSA defaults. Skip only if there are no rows at all.
         if len(df.index) == 0:
             continue
-        df = _drop_broken_bus_refs(df, cls, network, sheet_name, notes)
-        if len(df.index) == 0:
-            continue
         if "carrier" in df.columns and cls != "Carrier":
-            _ensure_carriers(network, df["carrier"])
+            _ensure_carriers(network, df["carrier"], notes)
         df = _coerce_numeric_columns(df, network, sheet_name)
         kwargs = {col: df[col].tolist() for col in df.columns}
         network.add(cls, df.index.tolist(), **kwargs)
 
+    refuse_unknown_buses(network)  # PyPSA's own check, strict: no silent row drops
+
     # PyPSA >= 1.3 piecewise-linear curves (`<list>-<attr>-pw` sheets), attached
     # once every component exists.
     apply_piecewise_sheets(network, model, notes, stochastic=stochastic_enabled)
-
-    if sanitize:
-        _sanitize_placeholder_bounds(network, notes)
-        _drop_deprecated_v_ang_min(network, notes)
 
     _carry_plant_ids(network, model)
 
@@ -375,9 +295,8 @@ def build_components(
     Use this for every build whose network is serialised BACK to a workbook (Forge
     transforms, netcdf / hdf5 export). :func:`build_network` is the run builder: it
     also windows the snapshots, records the carbon price for the carbon-pricing module
-    (an objective term, not a cost conversion), runs the annual-budgets module, adds load shedding and demand response, relaxes commitment, snaps 1e9
-    placeholders to inf and drops ``v_ang_min`` - each correct for a solve and each
-    wrong in a workbook the user keeps. None of that happens here, and no cost is
+    (an objective term, not a cost conversion), runs the annual-budgets module, adds load shedding and demand response, and relaxes commitment - each
+    correct for a solve and each wrong in a workbook the user keeps. None of that happens here, and no cost is
     ever converted (``capital_cost`` / ``overnight_cost`` / ``fom_cost`` pass through).
 
     Only ``options["pathwayConfig"]`` is read: it decides whether the snapshots carry
@@ -388,7 +307,7 @@ def build_components(
     """
     notes: list[str] = []
     pathway = parse_pathway_config((options or {}).get("pathwayConfig"))
-    network, uncovered_by_sheet, _weights = _load_model(model, pathway, notes, sanitize=False)
+    network, uncovered_by_sheet, _weights = _load_model(model, pathway, notes)
     _raise_on_uncovered_snapshots(network, uncovered_by_sheet)
     return network, notes
 
@@ -512,7 +431,7 @@ def build_network(
     currency = str(options.get("currencySymbol", "$"))
 
     network, uncovered_by_sheet, authored_weights = _load_model(
-        model, pathway, notes, sanitize=True, stochastic_enabled=stochastic.enabled
+        model, pathway, notes, stochastic_enabled=stochastic.enabled
     )
 
     # ── Snapshot window ────────────────────────────────────────────────────────

@@ -1357,6 +1357,7 @@ what they return and derives none of it.
 | `fetchRunAssets(run, kind, names, currency, period?)` | `GET /api/runs/{name}/assets` | Named assets with series |
 | `fetchRunAssetKind(run, kind, currency, {period, end})` | `GET /api/runs/{name}/assets?series=true` | Every asset of a kind, paged; `end` = first N snapshots |
 | `fetchRunMetrics(run, query)` | `GET /api/runs/{name}/metrics` | Per-asset chart metrics, `period` and `end` |
+| `fetchRunDerived(run, period?)` | `GET /api/runs/{name}/derived` | PyPSA's weighted per-asset totals and the per-snapshot weights (`n.statistics`) |
 | `fetchRunAnalysis(run, topic, query)` | `GET /api/runs/{name}/analysis/{topic}` | Typed by topic (`AnalysisTopics`): `load-analysis`, `carrier-performance`, `transition-risk`, `duration-curve`, `setpoint-duals`, `totals`. The cards print these values and compute nothing; `period` selects a pathway period |
 
 ### 7.7 Per-asset details

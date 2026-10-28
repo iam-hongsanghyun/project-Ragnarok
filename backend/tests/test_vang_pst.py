@@ -39,15 +39,22 @@ def test_v_ang_max_enforced_and_matches_native():
     assert free.objective < native.objective - 1.0
 
 
-def test_v_ang_min_dropped_with_warning():
+def test_v_ang_min_goes_to_pypsa_as_written_and_the_validator_warns():
+    """D14: the build no longer clears a finite v_ang_min; PyPSA warns about it, so does the validator."""
+    from backend.app.models import RunPayload
+    from backend.pypsa.network import validate_model
+
     model = network_to_model(_ring())
     model["lines"][0]["v_ang_min"] = -5.0
-    with warnings.catch_warnings():
-        warnings.simplefilter("error", DeprecationWarning)
-        net, notes = build_network(model, {"carbonPrice": 0.0, "discountRate": 0.0}, {})
+    net, notes = build_network(model, {"carbonPrice": 0.0, "discountRate": 0.0}, {})
+    assert net.lines.at["l1", "v_ang_min"] == -5.0
+    assert not any("v_ang_min" in x for x in notes)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
         net.optimize(solver_name="highs")
-    assert any("v_ang_min is deprecated" in x for x in notes)
-    assert net.lines.at["l1", "v_ang_min"] == -np.inf
+    assert any("v_ang_min" in str(w.message) for w in caught)
+    report = validate_model(RunPayload(model=model, scenario={}, options={}))
+    assert any("v_ang_min" in w for w in report["warnings"])
 
 
 def test_phase_shifter_summary_and_pf_uses_opt():

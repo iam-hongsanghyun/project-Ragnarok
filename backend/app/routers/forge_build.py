@@ -113,6 +113,31 @@ def fill_discount_rate(req: FillDiscountRateRequest) -> dict[str, Any]:
     return result
 
 
+# ── Forge: clean placeholder bounds ──────────────────────────────────────────
+
+
+class CleanPlaceholderBoundsRequest(BaseModel):
+    sessionId: str = "default"
+    apply: bool = Field(False, description="Write the changed sheets into the session (preview when false).")
+
+
+@router.post("/api/forge/clean-placeholder-bounds")
+def clean_placeholder_bounds(req: CleanPlaceholderBoundsRequest) -> dict[str, Any]:
+    """Blank every finite 1e9+ bound (1e12 standing for "no limit") so the row takes PyPSA's ``inf`` default.
+
+    The run no longer snaps these itself; the model check flags them and this is the visible fix.
+    A preview (the cells it would clear) unless ``apply``.
+    """
+    model = _session_model(req.sessionId)
+    result = fh.clean_placeholder_bounds(model)
+    result["applied"] = False
+    if req.apply and result["sheets"]:
+        _write_sheets(req.sessionId, model, result["sheets"])
+        result["applied"] = True
+    result["sheets"] = {s: len(rows) for s, rows in result["sheets"].items()}
+    return result
+
+
 # ── Forge: adjust / revert ───────────────────────────────────────────────────
 
 

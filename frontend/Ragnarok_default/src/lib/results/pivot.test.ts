@@ -220,3 +220,31 @@ describe('pivotValueAttributes (P17)', () => {
     expect(values).not.toContain('carrier'); // non-numeric stays out
   });
 });
+
+describe('pivot sums use PyPSA per-snapshot weightings (a sampled run)', () => {
+  // t0 stands for 1 h, t1 for 5 h: energy is sum_t MW_t * w_t, not sum MW * one number.
+  const weighted = { ...results, runMeta: { snapshotWeight: 1, snapshotWeights: [1, 5] } } as unknown as RunResults;
+
+  test('donut, category bar and bucketed series weight each snapshot by its own hours', () => {
+    const { data } = buildPivotMix({ ...base, chartType: 'donut' }, weighted, model, 1);
+    expect(data.find((d) => d.label === 'wind')?.value).toBe(30 * 1 + 60 * 5);
+    expect(data.find((d) => d.label === 'solar')?.value).toBe(5 * 1 + 100 * 5);
+    const cat = buildPivotCategory({ ...base, chartType: 'grouped-bar' }, weighted, model, 1);
+    expect(cat.series[0].values).toEqual([30 + 300, 5 + 500]);
+    const { rows } = buildPivotSeries({ ...base, timeframe: 'aggregated' }, weighted, model, 1);
+    expect(rows[0].wind).toBe(330);
+  });
+
+  test('a window keeps the weights of ITS snapshots, and mean is weight-invariant', () => {
+    const { data } = buildPivotMix({ ...base, chartType: 'donut', startIndex: 1, endIndex: 1 }, weighted, model, 1);
+    expect(data.find((d) => d.label === 'wind')?.value).toBe(60 * 5);
+    const mean = buildPivotMix({ ...base, aggregate: 'mean', chartType: 'donut' }, weighted, model, 1);
+    const unweighted = buildPivotMix({ ...base, aggregate: 'mean', chartType: 'donut' }, results, model, 1);
+    expect(mean.data.find((d) => d.label === 'wind')?.value).toBe(unweighted.data.find((d) => d.label === 'wind')?.value);
+  });
+
+  test('without per-snapshot weights the uniform number is used, as before', () => {
+    const { data } = buildPivotMix({ ...base, chartType: 'donut' }, results, model, 2);
+    expect(data.find((d) => d.label === 'wind')?.value).toBe(90 * 2);
+  });
+});

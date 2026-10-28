@@ -450,17 +450,20 @@ def build_piecewise_results(network: pypsa.Network) -> dict[str, Any] | None:
 
     ``marginal_cost_piecewise_opt`` is the realised average cost per MWh (the
     solved ``y / x`` of the auxiliary variable) per snapshot; ``capital_cost_piecewise_opt``
-    is the realised average annual cost per unit of the optimal capacity.
+    is the realised average cost per unit of the optimal capacity. The money is PyPSA's own:
+    ``n.statistics.opex`` / ``capex`` include the ``*_piecewise_opt`` terms, so each curve's
+    ``operatingCost`` / ``annualCost`` and the two totals are read from there, with PyPSA's snapshot
+    and investment-period weightings. Only the curve display (breakpoints, shape, realised
+    per-MWh range) is built here.
 
     Returns:
         ``{"curves": [...], "totalOperatingCost", "totalCapitalCost"}`` or
-        ``None`` when the network has no curves. Operating cost uses the
-        ``objective`` snapshot weighting, so it adds into the LP objective.
+        ``None`` when the network has no curves.
     """
+    from ..results.stat_metrics import asset_statistic, combine_periods
+
     rows: list[dict[str, Any]] = []
     weights = network.snapshot_weightings["objective"]
-    total_opex = 0.0
-    total_capex = 0.0
     for list_name in network.components.keys():
         comp = network.components[list_name]
         store = getattr(comp, "piecewise", None)
@@ -490,13 +493,11 @@ def build_piecewise_results(network: pypsa.Network) -> dict[str, Any] | None:
                 solved: dict[str, Any] | None = None
                 try:
                     if attr == "marginal_cost":
-                        solved, cost = _solved_marginal(network, comp, str(name), weights)
-                        total_opex += cost
+                        solved, _ = _solved_marginal(network, comp, str(name), weights)
                     elif attr == "capital_cost" and "capital_cost_piecewise_opt" in comp.static.columns:
                         opt = float(comp.static.at[name, "capital_cost_piecewise_opt"])
                         nom = float(comp.static.at[name, _nominal(comp.name) + "_opt"])
-                        solved = {"averagePerUnit": opt, "capacityOpt": nom, "annualCost": opt * nom}
-                        total_capex += opt * nom
+                        solved = {"averagePerUnit": opt, "capacityOpt": nom}
                 except Exception:  # noqa: BLE001 - a reporting extra must not sink the run
                     solved = None
                 if solved is not None:
@@ -504,10 +505,28 @@ def build_piecewise_results(network: pypsa.Network) -> dict[str, Any] | None:
                 rows.append(row)
     if not rows:
         return None
+
+    def money(statistic: str, attribute: str, **kwargs: Any) -> pd.Series:
+        wanted = {(r["component"], r["name"]) for r in rows if r["attribute"] == attribute}
+        if not wanted:
+            return pd.Series(dtype=float)
+        frame = asset_statistic(network, statistic, sorted({c for c, _ in wanted}), **kwargs)
+        total = combine_periods(frame)
+        return total[[idx in wanted for idx in total.index]]
+
+    opex = money("opex", "marginal_cost", cost_types=["marginal_cost"])
+    capex = money("capex", "capital_cost")
+    for row in rows:
+        key = (row["component"], row["name"])
+        cost = opex if row["attribute"] == "marginal_cost" else capex if row["attribute"] == "capital_cost" else None
+        if cost is not None and key in cost.index and isinstance(row.get("solved"), dict):
+            row["solved"]["operatingCost" if cost is opex else "annualCost"] = float(cost[key])
+        if row["attribute"] == "capital_cost" and isinstance(row.get("solved"), dict):
+            row["solved"].setdefault("annualCost", 0.0)  # statistic unavailable: the type contract keeps the key
     return {
         "curves": rows,
-        "totalOperatingCost": float(total_opex),
-        "totalCapitalCost": float(total_capex),
+        "totalOperatingCost": float(opex.sum()),
+        "totalCapitalCost": float(capex.sum()),
     }
 
 

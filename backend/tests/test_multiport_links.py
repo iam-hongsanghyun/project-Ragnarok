@@ -105,13 +105,15 @@ def test_energy_balance_counts_heat_coproduct() -> None:
     assert elec_src["CHP"]["energyMWh"] == pytest.approx(400.0, abs=1e-3)
 
 
-def test_broken_bus2_ref_drops_row_with_note() -> None:
+def test_broken_bus2_ref_is_refused() -> None:
+    """A non-blank bus2 that does not exist is refused (PyPSA's strict unknown-bus check), not dropped with a note."""
+    from fastapi import HTTPException
+
     model = _chp_model()
     model["links"][0]["bus2"] = "no_such_bus"
-    n, notes = build_network(model, SCENARIO, OPTIONS)
-    assert "CHP" not in n.links.index
-    assert "tie" in n.links.index
-    assert any("bus2='no_such_bus'" in note for note in notes)
+    with pytest.raises(HTTPException) as exc:
+        build_network(model, SCENARIO, OPTIONS)
+    assert exc.value.status_code == 400 and "CHP" in str(exc.value.detail)
 
 
 def test_time_varying_efficiency2_sheet_applies() -> None:

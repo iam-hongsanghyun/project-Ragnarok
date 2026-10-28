@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
 import pytest
 from fastapi import HTTPException
 
@@ -89,24 +90,16 @@ def test_stochastic_solve_returns_per_scenario_summaries() -> None:
     assert scenarios["high"]["totalOperatingCost"] == pytest.approx(6000.0)
 
 
-def test_weights_normalise_to_one() -> None:
-    """Unnormalised weights (e.g. 60 / 40) must be rescaled to 0.6 / 0.4."""
-    result = run_pypsa(
-        _model(),
-        {"discountRate": 0.05},
-        {
-            "stochasticConfig": {
-                "enabled": True,
-                "scenarios": [
-                    {"name": "a", "weight": 60.0},
-                    {"name": "b", "weight": 40.0},
-                ],
-            }
-        },
-    )
-    scenarios = {s["name"]: s for s in result["stochastic"]["scenarios"]}
-    assert scenarios["a"]["weight"] == pytest.approx(0.6)
-    assert scenarios["b"]["weight"] == pytest.approx(0.4)
+def test_weights_that_do_not_sum_to_one_are_refused() -> None:
+    """PyPSA needs probabilities summing to 1; Ragnarok no longer rescales 60 / 40 silently (D15)."""
+    with pytest.raises(HTTPException) as exc:
+        run_pypsa(
+            _model(),
+            {"discountRate": 0.05},
+            {"stochasticConfig": {"enabled": True, "scenarios": [{"name": "a", "weight": 60.0}, {"name": "b", "weight": 40.0}]}},
+        )
+    assert exc.value.status_code == 400
+    assert "sum to 1" in str(exc.value.detail) and "a=0.6" in str(exc.value.detail)
 
 
 def test_single_scenario_falls_back_to_deterministic() -> None:
@@ -257,3 +250,25 @@ def test_scenario_invariant_overrides_are_a_400(attribute: str) -> None:
 @pytest.mark.parametrize("attribute", ["marginal_cost", "p_set", "p_max_pu", "capital_cost", "efficiency"])
 def test_operating_attributes_are_not_invariant(attribute: str) -> None:
     assert not is_scenario_invariant(attribute)
+
+
+def test_per_scenario_cost_is_statistics_opex_plus_the_carbon_term() -> None:
+    """Each scenario's cost = n.statistics.opex (unweighted by probability) + the carbon module's term (A5)."""
+    result = run_pypsa(
+        _model(),
+        {"discountRate": 0.05, "carbonPrice": 10.0},
+        {
+            "stochasticConfig": {
+                "enabled": True,
+                "scenarios": [
+                    {"name": "low", "weight": 0.6, "overrides": [_load_multiplier_override(0.8)]},
+                    {"name": "high", "weight": 0.4, "overrides": [_load_multiplier_override(1.5)]},
+                ],
+            }
+        },
+    )
+    rows = {s["name"]: s for s in result["stochastic"]["scenarios"]}
+    # energy x (marginal 20 + 0.4 tCO2/MWh x 10 per tCO2) = energy x 24
+    np.testing.assert_allclose(rows["low"]["totalOperatingCost"], 160.0 * 24.0, rtol=1e-9)
+    np.testing.assert_allclose(rows["high"]["totalOperatingCost"], 300.0 * 24.0, rtol=1e-9)
+    np.testing.assert_allclose(rows["low"]["totalEmissionsTco2"], 64.0, rtol=1e-9)

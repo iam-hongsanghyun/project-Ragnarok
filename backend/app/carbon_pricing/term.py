@@ -186,14 +186,20 @@ def extra_functionality(n: pypsa.Network, snapshots: Any = None) -> None:
 # ── the numbers read back from the solution ───────────────────────────────────────
 
 def carbon_cost_by_generator(
-    network: pypsa.Network, config: CarbonPriceConfig | None = None, *, period_weighted: bool = True
+    network: pypsa.Network,
+    config: CarbonPriceConfig | None = None,
+    *,
+    period_weighted: bool = True,
+    per_scenario: bool = False,
 ) -> pd.Series:
     """Carbon cost of each generator, ``sum_t w_t omega_p pi_t p_t e / eta_t`` (currency), from the solved dispatch.
 
     This is the objective term evaluated at the solution: the same weights, price and efficiency.
     Expected value over scenarios in a stochastic run. ``period_weighted=False`` leaves out the
     investment-period objective weighting (a per-modelled-window figure, as the company statement
-    reports). Indexed by generator name.
+    reports). Indexed by generator name; ``per_scenario=True`` keeps a stochastic run's
+    ``(scenario, name)`` index with each scenario's own cost (no probability weighting), the
+    shape ``n.statistics.opex(groupby=False)`` has.
     """
     cfg = config if config is not None else plan_of(network)
     adder = adder_frame(network, cfg)
@@ -207,6 +213,8 @@ def carbon_cost_by_generator(
     if not cols:
         return pd.Series(dtype=float)
     cost = (p[cols].fillna(0.0) * adder[cols]).mul(weight, axis=0).sum(axis=0)
+    if per_scenario:
+        return cost.astype(float)
     if isinstance(cost.index, pd.MultiIndex) and "scenario" in (cost.index.names or []):
         probability = network.scenario_weightings["weight"]
         cost = cost.mul(probability.reindex(cost.index.get_level_values("scenario")).to_numpy(), axis=0)

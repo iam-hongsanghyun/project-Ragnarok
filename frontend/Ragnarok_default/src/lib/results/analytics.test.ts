@@ -12,7 +12,7 @@
  */
 import { describe, test, it, expect } from '@jest/globals';
 import type { MetricOption } from 'lib/types';
-import { aggregateMetricRows, aggregateValues, buildDonutFromMetric, selectGeneratorEnergy, statisticsForPeriod } from './analytics';
+import { aggregateMetricRows, aggregateValues, buildDonutFromMetric, runSnapshotWeights, selectGeneratorEnergy, statisticsForPeriod, weightAt } from './analytics';
 
 function mwMetric(reducer: MetricOption['reducer']): MetricOption {
   return {
@@ -88,5 +88,34 @@ describe('period-aware backend aggregates', () => {
     expect(statisticsForPeriod(st, 2040)?.rows.map((r) => r.values.a)).toEqual([2]);
     const single = { columns: ['a'], rows: [{ component: 'G', carrier: 'x', values: { a: 1 } }] };
     expect(statisticsForPeriod(single, 2040)).toBe(single);
+  });
+});
+
+
+describe('per-snapshot weights (a sampled run)', () => {
+  // The three rows stand for 1 h, 2 h and 5 h (PyPSA snapshot_weightings), not one uniform number.
+  const weights = [1, 2, 5];
+
+  test('sum integrates each snapshot with its own hours', () => {
+    expect(aggregateValues([10, 20, 30], 'sum', weights)).toBe(10 * 1 + 20 * 2 + 30 * 5);
+    expect(aggregateValues([20, 30], 'sum', weights, 1, 3)).toBe(20 * 2 + 30 * 5);   // a window starting at row 1
+  });
+
+  test('donut and aggregated rows use the same per-row hours', () => {
+    expect(buildDonutFromMetric(mwMetric('mean'), 0, 2, weights)[0].value).toBe(200);
+    expect(buildDonutFromMetric(mwMetric('mean'), 1, 2, weights)[0].value).toBe(190);
+    expect(aggregateMetricRows(mwMetric('sum'), 0, 2, 'aggregated', weights)[0].wind).toBe(200);
+    expect(aggregateMetricRows(mwMetric('sum'), 0, 2, 'daily', weights)[0].wind).toBe(200);
+  });
+
+  test('weights that do not line up with the rows fall back to their mean, never a wrong row', () => {
+    expect(weightAt([1, 2, 5], 0, 4)).toBeCloseTo(8 / 3);
+    expect(weightAt(4, 7, 100)).toBe(4);
+  });
+
+  test('the run carries PyPSA weights, else the uniform one', () => {
+    expect(runSnapshotWeights({ runMeta: { snapshotWeights: [1, 2], snapshotWeight: 9 } })).toEqual([1, 2]);
+    expect(runSnapshotWeights({ runMeta: { snapshotWeights: null, snapshotWeight: 4 } })).toBe(4);
+    expect(runSnapshotWeights(null)).toBe(1);
   });
 });

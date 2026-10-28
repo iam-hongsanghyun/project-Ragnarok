@@ -6,7 +6,6 @@ from typing import Any, Iterable
 import pandas as pd
 import pypsa
 
-from ..pypsa_schema import bus_reference_attributes
 from ..utils.coerce import number
 from .snapshots import parse_snapshot_labels
 
@@ -94,69 +93,39 @@ def _bus_ref_columns_for_list(network: pypsa.Network, list_name: str) -> list[st
     return [a for a in defaults.index if a == "bus" or (a.startswith("bus") and a[3:].isdigit())]
 
 
-def _drop_broken_bus_refs(
-    df: pd.DataFrame,
-    cls: str,
-    network: pypsa.Network,
-    sheet: str,
-    notes: list[str],
-) -> pd.DataFrame:
-    """Drop rows where a *required* bus reference points to a missing bus.
+def refuse_unknown_buses(network: pypsa.Network) -> None:
+    """Refuse a model whose components point at buses that do not exist.
 
-    The schema is the source of truth for which bus references are required —
-    components like ``global_constraints`` declare ``bus`` as optional, so an
-    absent ``bus`` column on those sheets must not delete every row.
+    PyPSA's own ``check_for_unknown_buses`` (the one ``n.consistency_check`` runs) is called
+    strictly for every component; Ragnarok used to drop such rows with a note, so a typo
+    in a bus name silently removed a generator or a line.
+
+    Raises:
+        HTTPException: 400 carrying PyPSA's message (component list and the offending names).
     """
-    bus_cols = _bus_ref_columns_for_list(network, sheet)
-    extra_bus_cols = sorted(
-        c for c in _extra_port_columns(sheet, df.columns) if c.startswith("bus")
-    )
-    if not bus_cols and not extra_bus_cols:
-        return df
-    schema_required = {
-        attr["attribute"]
-        for attr in bus_reference_attributes(sheet)
-        if attr.get("required")
-    }
-    required = [c for c in bus_cols if c in ("bus", "bus0", "bus1") and c in schema_required]
-    if not required and not extra_bus_cols:
-        return df
-    valid_buses = set(network.buses.index)
-    keep_mask = pd.Series(True, index=df.index)
-    skipped: list[str] = []
-    for col in required:
-        if col not in df.columns:
-            notes.append(f"Sheet '{sheet}' has no '{col}' column — all rows skipped.")
-            return df.iloc[0:0]
-        for name, bus in df[col].items():
-            if pd.isna(bus) or str(bus).strip() == "" or str(bus) not in valid_buses:
-                keep_mask[name] = False
-                skipped.append(f"{name} ({col}='{bus}')")
-    # Multi-port refs (bus2+) are optional: blank means "port unused" and is
-    # fine, but a non-blank ref to a missing bus would fail PyPSA's consistency
-    # check at solve time — drop the row loudly instead.
-    for col in extra_bus_cols:
-        for name, bus in df[col].items():
-            if pd.isna(bus) or str(bus).strip() == "":
-                continue
-            if str(bus) not in valid_buses:
-                keep_mask[name] = False
-                skipped.append(f"{name} ({col}='{bus}')")
-    dropped = (~keep_mask).sum()
-    if dropped:
-        notes.append(
-            f"{cls}: {int(dropped)} row(s) skipped — bus reference missing: "
-            f"{', '.join(skipped[:5])}{' …' if len(skipped) > 5 else ''}"
-        )
-    return df[keep_mask]
+    from fastapi import HTTPException
+    from pypsa.consistency import ConsistencyError, check_for_unknown_buses
+
+    for component in network.components:
+        if component.static.empty:
+            continue
+        try:
+            check_for_unknown_buses(network, component, strict=True)
+        except ConsistencyError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{exc} The run is refused rather than dropping those rows silently.",
+            ) from exc
 
 
-def _ensure_carriers(network: pypsa.Network, carriers: pd.Series) -> None:
-    """Auto-add any carrier referenced by a component but missing from carriers sheet."""
+def _ensure_carriers(network: pypsa.Network, carriers: pd.Series, notes: list[str] | None = None) -> None:
+    """Auto-add any carrier referenced by a component but missing from carriers sheet (said in ``notes``)."""
     referenced = {str(c).strip() for c in carriers.dropna().unique() if str(c).strip()}
-    missing = referenced - set(network.carriers.index)
+    missing = sorted(referenced - set(network.carriers.index))
     for name in missing:
         network.add("Carrier", name)
+    if missing and notes is not None:
+        notes.append(f"Carriers referenced but not on the carriers sheet were added with PyPSA defaults: {', '.join(missing)}.")
 
 
 def _apply_ts_sheet(

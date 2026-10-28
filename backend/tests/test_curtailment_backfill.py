@@ -32,9 +32,12 @@ def _legacy_bundle() -> dict:
     Gas: static p_max_pu (not in the series sheet) → never curtailed.
     """
     model = {
+        "snapshots": [{"snapshot": "2025-01-01T00:00:00"}, {"snapshot": "2025-01-01T01:00:00"}],
+        "buses": [{"name": "b"}],
+        "carriers": [{"name": "Wind"}, {"name": "Gas"}],
         "generators": [
-            {"name": "wind", "carrier": "Wind", "p_nom": 100.0},
-            {"name": "gas", "carrier": "Gas", "p_nom": 100.0},
+            {"name": "wind", "bus": "b", "carrier": "Wind", "p_nom": 100.0},
+            {"name": "gas", "bus": "b", "carrier": "Gas", "p_nom": 100.0},
         ],
         "generators-p_max_pu": [
             {"snapshot": "2025-01-01T00:00:00", "wind": 0.5},
@@ -56,7 +59,10 @@ def _legacy_bundle() -> dict:
         ],
         "outputs": {
             "static": {"generators": {"wind": {"p_nom_opt": 100.0}, "gas": {"p_nom_opt": 100.0}}},
-            "series": {},
+            "series": {"generators-p": [
+                {"snapshot": "2025-01-01T00:00:00", "wind": 30.0, "gas": 70.0},
+                {"snapshot": "2025-01-01T01:00:00", "wind": 100.0, "gas": 30.0},
+            ]},
         },
     }
     return {"model": model, "result": result, "snapshotWeight": 1.0}
@@ -68,11 +74,17 @@ def test_curtailment_fallback_math() -> None:
     assert mwh == {"wind": 20.0}
 
 
-def test_curtailment_fallback_respects_snapshot_weight() -> None:
+def test_curtailment_fallback_follows_the_runs_own_snapshot_weightings() -> None:
+    """PyPSA's weightings, not one uniform number: snapshot 0 stands for 3 h and snapshot 1 for 1 h."""
     bundle = _legacy_bundle()
-    bundle["snapshotWeight"] = 3.0
+    bundle["model"]["snapshots"] = [
+        {"snapshot": "2025-01-01T00:00:00", "objective": 3.0, "generators": 3.0, "stores": 3.0},
+        {"snapshot": "2025-01-01T01:00:00", "objective": 1.0, "generators": 1.0, "stores": 1.0},
+    ]
     _series, mwh = run_store._curtailment_fallback(bundle)
-    assert mwh == {"wind": 60.0}
+    assert mwh == {"wind": 60.0}  # 20 MW x 3 h + 0 MW x 1 h
+    energy = {e["name"]: e["value"] for e in run_store._generator_energy_fallback(bundle["result"], bundle)}
+    assert energy == {"wind": 30.0 * 3 + 100.0 * 1, "gas": 70.0 * 3 + 30.0 * 1}
 
 
 def test_attach_curtailment_enriches_generator_energy() -> None:

@@ -361,7 +361,7 @@ Any `condition != "optimal"` raises HTTP 500 with a diagnostic message naming
 likely causes (placeholder `1e12` bounds, conflicting constraints).
 
 **Stage 5 — Stochastic post-processing** (when enabled).
-`per_scenario_summaries` collects per-scenario KPIs from the multi-indexed
+`per_scenario_summaries` reads per-scenario KPIs from `n.statistics` on the multi-indexed
 solved network; `collapse_to_representative_scenario` selects the
 highest-weight scenario and reshapes all static and dynamic frames to a plain
 `name` index so the extraction pipeline below operates without modification.
@@ -392,7 +392,7 @@ Processing order:
 3. Apply the `network` workbook sheet (name, SRID, CRS, `now`).
 4. Build the snapshot index from the `snapshots` sheet; apply pathway investment periods.
 5. Bulk-add every component class in dependency-safe order (carriers and buses first) using PyPSA's `network.add()`. Only `input_static_attributes` columns are kept; others are dropped before `add()`.
-6. Run `_sanitize_placeholder_bounds` — replaces values >= 1e9 in `*_nom_max`, `*_sum_max`, `*_sum_min`, and `lifetime` columns with `±inf` to prevent HiGHS numerical conditioning issues.
+6. Refuse dangling bus references (`refuse_unknown_buses`: PyPSA's own strict `check_for_unknown_buses`; rows are never dropped silently). Placeholder bounds (>= 1e9 in `*_nom_max`, `*_sum_max`, `*_sum_min`, `lifetime`) and a finite `v_ang_min` are **no longer converted**: the model check warns (`placeholder_bounds`) and `POST /api/forge/clean-placeholder-bounds` blanks them visibly (the row then takes PyPSA's `inf` default); PyPSA warns about `v_ang_min`.
 7. Apply time-series sheets (`<list_name>-<attr>`), aligning each to `network.snapshots`.
 8. Slice the snapshot window (`snapshotStart`, `snapshotCount`); the workbook's weightings are kept as they are. **No stride:** `snapshotWeight` above 1 is refused (resolution is the Forge temporal transform, §5.13). With `samplingConfig.enabled` the **test-run sampling module** (`backend/pypsa/sampling.py`, `apply_test_run_sampling`) writes the sampled snapshots and weightings and the run notes say so; `POST /api/transform/sample` writes the same result into the workbook. Pathway mode ignores the window (and sampling, with a note).
 9. **Annual-budgets module** (§5.12): write `annual × Σw/8760` into the `e_sum_*` / GlobalConstraint `constant` of the rows in `RAGNAROK_AnnualBudgets`. Every other `e_sum` / `constant` passes through as PyPSA's total.
@@ -1046,15 +1046,16 @@ with stochastic or SCLOPF.
 `ScenarioOverride` — `sheet`, `attribute`, `scope_type` (`"all"` | `"name"` |
 `"carrier"`), `scope_value`, `operation` (`"multiply"` | `"set"`), `value`.
 
-`StochasticScenario` — `name`, `weight` (normalised to sum=1), `overrides`.
+`StochasticScenario` — `name`, `weight` (a probability), `overrides`.
 
 `StochasticConfig` — `enabled`, `scenarios`.
 
 **`parse_stochastic_config(raw) -> StochasticConfig`**
 
 Activated when `raw["enabled"]` is truthy and at least two valid scenarios are
-present (a single scenario is a deterministic solve). Weights are normalised to
-sum to 1.0. Scenarios with empty names or non-positive weights are skipped.
+present (a single scenario is a deterministic solve). Weights must sum to 1 (PyPSA's
+`set_scenarios` requirement): otherwise HTTP 400 naming the sum and the normalised values;
+nothing is rescaled. Scenarios with empty names or non-positive weights are skipped.
 
 **`apply_scenarios(network, config)`**
 
@@ -1065,9 +1066,10 @@ scenario dimension broadcasts over final values.
 
 **`per_scenario_summaries(network, config, emissions_factors, currency_symbol)`**
 
-Slices the solved multi-indexed network per scenario and computes:
-`totalEnergyMwh`, `totalEmissionsTco2`, `totalOperatingCost` (and formatted
-variant), `loadShedEnergyMwh`, `name`, `weight`, `overrideCount`.
+Reads `n.statistics` (``opex``, ``supply``; the ``scenario`` level is kept) plus the carbon-pricing
+module's per-scenario term and returns: `totalEnergyMwh`, `totalEmissionsTco2`, `totalOperatingCost`
+(every component's opex + carbon; and formatted variant), `loadShedEnergyMwh`, `name`, `weight`,
+`overrideCount`.
 
 **`collapse_to_representative_scenario(network, config) -> str`**
 
