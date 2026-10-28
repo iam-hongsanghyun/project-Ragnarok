@@ -55,6 +55,7 @@ import { useSessionSync } from 'shared/hooks/useSessionSync';
 import { API_BASE, DEFAULT_CONSTRAINTS, getDefaultRowForSheet, getNewRowDefaults, RUN_WINDOW, SHEETS } from 'lib/constants';
 import { canonicalizeOutputSeries, canonicalizeTemporalRows, createEmptyWorkbook, normalizeInputDatesToIso, parseWorkbook } from 'lib/workbook/workbook';
 import { mergeWorkbookFragmentRemote } from 'lib/workbook/mergeFragment';
+import { applyPlantChange, type PlantChange } from 'lib/build/plants';
 import type { WorkbookFragment } from 'lib/api/databases';
 import { getBounds, getBusIndex, carrierColor, numberValue, orderByCarrierRows, setCarrierColorOverrides, snapshotMaxFromWorkbook, stringValue } from 'lib/utils/helpers';
 import { filenameMatchesScenario, scenarioFilename } from 'lib/utils/scenarioFilename';
@@ -107,6 +108,8 @@ import { ForgeView } from './views/ForgeView';
 import { AnalyticsView } from './views/AnalyticsView';
 import { PhysicalRiskView, PhysicalRiskSubTab } from './views/PhysicalRiskView';
 import { SitingView } from './views/SitingView';
+import { ScreeningView } from './views/ScreeningView';
+import { P2XView } from './modules/p2x/P2XView';
 import { ReportingView } from './views/ReportingView';
 import { TrainingView } from './views/TrainingView';
 import { SpotlightOverlay } from './features/training/SpotlightOverlay';
@@ -2236,6 +2239,31 @@ function AppInner() {
     [pushHistory, showToast, requestStaticResync],
   );
 
+  // Build → plants: add, edit (re-derive) or delete ONE plant. The backend returns a change set
+  // (rows to remove, shared rows to release, a fragment to merge); apply it as a single undoable edit.
+  const handleApplyPlantChange = useCallback(
+    async (change: PlantChange, label: string) => {
+      let next: WorkbookModel = applyPlantChange(modelRef.current, change);
+      const frag = change.fragment;
+      if (frag && Object.keys(frag.sheets).length > 0) {
+        try {
+          next = await mergeWorkbookFragmentRemote(next, frag as unknown as WorkbookFragment);
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'unknown error';
+          setStatus(`${label} failed: ${msg}`);
+          showToast(`${label} failed: ${msg}`, 'error');
+          throw error;
+        }
+      }
+      pushHistory();
+      setModel(next);
+      requestStaticResync();
+      setStatus(label);
+      showToast(label, 'success');
+    },
+    [pushHistory, showToast, requestStaticResync],
+  );
+
   // Forge → attach Open-Meteo renewable profiles to the existing fleet by
   // coordinate. Sync static sheets first (the backend resolves each generator's
   // x/y from the session model), call the transform, and merge the returned
@@ -3964,6 +3992,8 @@ function AppInner() {
               dateFormat={settings.dateFormat}
               onOpenRunSetup={() => { setDryRun(false); setRunDialogOpen(true); }}
               onApplyConversion={handleApplyConversion}
+              onApplyPlantChange={handleApplyPlantChange}
+              discountRate={settings.discountRate}
               requestedStep={guide?.stops[guide.index]?.buildStep ?? null}
               snapshotWeight={snapshotWeight}
               onSnapshotWeightChange={setSnapshotWeight}
@@ -4023,6 +4053,7 @@ function AppInner() {
               currencySymbol={settings.currencySymbol}
               dateFormat={settings.dateFormat}
               seriesSheetCounts={sessionSeriesCounts}
+              onApplyPlantChange={handleApplyPlantChange}
               hasResults={Boolean(results)}
               onOpen={handleOpenWorkbook}
               onSave={saveWorkbook}
@@ -4125,6 +4156,23 @@ function AppInner() {
               currencySymbol={settings.currencySymbol}
               runName={activeRunName}
               period={selectedPeriod}
+            />
+          )}
+
+          {tab === 'Screening' && enabledModules.has('Screening') && (
+            <ScreeningView
+              model={model}
+              onApplyFragment={handleApplyImportedFragment}
+              currencySymbol={settings.currencySymbol}
+              runName={activeRunName}
+            />
+          )}
+
+          {tab === 'P2X' && enabledModules.has('P2X') && (
+            <P2XView
+              model={model}
+              discountRate={settings.discountRate}
+              onApplyFragment={handleApplyImportedFragment}
             />
           )}
 

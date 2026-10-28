@@ -88,6 +88,12 @@ def _period_cell(period: Any) -> Any:
     return val
 
 
+#: Workbook annotation columns that are not PyPSA attributes but must survive a PyPSA-native export / import
+#: (``Network.export_to_netcdf`` / ``csv`` / ``excel`` keep any extra static column). ``plant`` is the id of the
+#: Build plant template a component belongs to (``backend/app/plants``). Not an LP input.
+ANNOTATION_COLUMNS: tuple[str, ...] = ("plant",)
+
+
 def network_to_model(network: pypsa.Network) -> dict[str, list[dict[str, Any]]]:
     """Round-trip a built network into the in-memory model shape.
 
@@ -126,6 +132,7 @@ def network_to_model(network: pypsa.Network) -> dict[str, list[dict[str, Any]]]:
                     if (
                         allowed_static
                         and col not in allowed_static
+                        and col not in ANNOTATION_COLUMNS
                         and not _is_extra_port_attr(sheet, str(col))
                     ):
                         continue

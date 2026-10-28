@@ -64,6 +64,22 @@ describe('workbook project round-trip', () => {
     expect(north?.y).toBe(53.5);
   });
 
+  test('the Build `plant` column and the plant / P2X registry sheets survive a project save and load', () => {
+    const model = makeBaseModel() as Record<string, unknown>;
+    (model.generators as GridRow[])[0] = { ...(model.generators as GridRow[])[0], plant: 'ccgt_1' };
+    model.processes = [{ name: 'ccgt_1_syn', bus0: 'bus_north', bus1: 'bus_south', rate0: -1, rate1: 0.7, plant: 'ccgt_1' }];
+    model.RAGNAROK_PLANTS = [{ name: 'ccgt_1', json: '{"plantId":"ccgt_1","type":"ccgt"}', plant: 'ccgt_1' }];
+    model.RAGNAROK_P2X = [{ name: 'p2x', json: '{"chainId":"p2x"}', plant: 'p2x' }];
+    const { model: parsed } = parseProjectWorkbook(toArrayBuffer(buildProjectWorkbook(model as unknown as WorkbookModel)));
+    const out = parsed as unknown as Record<string, GridRow[]>;
+    expect(out.generators.find((r) => r.name === 'gen_coal')?.plant).toBe('ccgt_1');
+    expect(out.generators.find((r) => r.name === 'gen_wind')?.plant ?? null).toBeNull();
+    expect(out.processes[0]).toMatchObject({ name: 'ccgt_1_syn', rate1: 0.7, plant: 'ccgt_1' });
+    expect(out.RAGNAROK_PLANTS[0]).toMatchObject({ name: 'ccgt_1', plant: 'ccgt_1' });
+    expect(JSON.parse(String(out.RAGNAROK_PLANTS[0].json))).toEqual({ plantId: 'ccgt_1', type: 'ccgt' });
+    expect(out.RAGNAROK_P2X[0].name).toBe('p2x');
+  });
+
   test('output static + series round-trip without merging destructively into inputs', () => {
     const model = makeBaseModel();
     const outputs: ProjectOutputs = {

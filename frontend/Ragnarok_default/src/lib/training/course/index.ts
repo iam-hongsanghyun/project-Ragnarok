@@ -1,7 +1,7 @@
 /**
- * The power-market modelling course — 15 modules, complete.
+ * The power-market modelling course — 17 modules, complete.
  *
- * All fifteen are written. The tutorial's summary, `minutes` and `outcomes`
+ * All seventeen are written. The tutorial's summary, `minutes` and `outcomes`
  * describe what is actually there: a learner reading the catalog card should be
  * told the truth about what they are starting, and progress is a percentage of
  * real steps.
@@ -9,7 +9,10 @@
  * One tutorial, not ten, because the course is cumulative: the model built in
  * module 1 is the model policy instruments are applied to in module 8. Modules
  * are `section` headings on the steps, so the rail groups them while progress
- * stays a single track.
+ * stays a single track. Modules 16 and 17 are the exception that proves it: each
+ * opens from its own small system (a three-period pathway, a solar-heavy day)
+ * because the question it asks needs a different shape of model from the one the
+ * first fifteen grew.
  *
  * ── Design decisions this course is built on ─────────────────────────────────
  *
@@ -27,10 +30,22 @@
  *   modelling idea, tool-independent) ahead of `explain` (what to do in
  *   Ragnarok). Neither reads as an aside to the other.
  *
- * Steps live one module per file so each stays reviewable. Add a module by
- * appending its array to `STEPS` below.
+ *   Every number is pinned — a lesson states only figures that a solve of its own
+ *   example produced, and `backend/tests/test_training_checkpoints.py` re-solves
+ *   them. A module that adds a figure adds the test that holds it.
+ *
+ * ── Adding a module ──────────────────────────────────────────────────────────
+ *
+ * One module is one file under this directory exporting its `TutorialStep[]`,
+ * plus one entry in `COURSE_MODULES` below pairing those steps with their catalog
+ * card. Order in the list is teaching order and the number in `section` ("18 ·
+ * ...") must match it. `STEPS` and `MODULES` are derived from the list, so
+ * there is no second table to keep in step; `catalog.test.ts` checks the join
+ * between the two, the numbering, and that every example id a module offers
+ * exists in `backend/data/examples/`. A module with new numbers also adds its
+ * `test_module_N_*` tests and its examples to `backend/scripts/make_examples.py`.
  */
-import { CourseModule, Tutorial } from '../types';
+import { CourseModule, Tutorial, TutorialStep } from '../types';
 import { MODULE_1_FOUNDATIONS } from './module1Foundations';
 import { MODULE_2_DISPATCH } from './module2Dispatch';
 import { MODULE_3_NETWORKS } from './module3Networks';
@@ -46,167 +61,230 @@ import { MODULE_12_ADEQUACY } from './module12Adequacy';
 import { MODULE_13_DEMAND } from './module13Demand';
 import { MODULE_14_PARTICIPANT } from './module14Participant';
 import { MODULE_15_MARKET_DESIGN } from './module15MarketDesign';
+import { MODULE_16_PATHWAY } from './module16Pathway';
+import { MODULE_17_BESS } from './module17Bess';
 
-const STEPS = [
-  ...MODULE_1_FOUNDATIONS,
-  ...MODULE_2_DISPATCH,
-  ...MODULE_3_NETWORKS,
-  ...MODULE_4_STORAGE,
-  ...MODULE_5_SECTOR_COUPLING,
-  ...MODULE_6_TIME,
-  ...MODULE_7_INVESTMENT,
-  ...MODULE_8_POLICY,
-  ...MODULE_9_DECISION,
-  ...MODULE_10_POWER_FLOW,
-  ...MODULE_11_COMMITMENT,
-  ...MODULE_12_ADEQUACY,
-  ...MODULE_13_DEMAND,
-  ...MODULE_14_PARTICIPANT,
-  ...MODULE_15_MARKET_DESIGN,
-];
+/** A module as the catalog holds it: the card a learner picks, and the steps behind it. */
+interface ModuleEntry {
+  module: CourseModule;
+  steps: TutorialStep[];
+}
 
 /**
- * The modules a learner picks from, in teaching order.
+ * The modules a learner picks from, in teaching order, each with its steps.
  *
- * `section` matches the string on the module's steps — the join between the two
- * — so a module with no steps written yet simply has none to show, and a step
- * whose section is not listed here would be unreachable rather than silently
- * mis-grouped. `catalog.test.ts` checks both directions.
+ * `module.section` matches the string on the steps — the join between the two —
+ * so a step whose section is not listed here would be unreachable rather than
+ * silently mis-grouped. `catalog.test.ts` checks both directions.
  */
-const MODULES: CourseModule[] = [
+const COURSE_MODULES: ModuleEntry[] = [
   {
-    section: '1 · Foundations',
-    title: 'Foundations',
-    level: 'Beginner',
-    minutes: 60,
-    summary: 'What a power-system model is, what a network is made of, and one full '
-      + 'change → validate → run → read loop on a model small enough to check by hand.',
+    module: {
+      section: '1 · Foundations',
+      title: 'Foundations',
+      level: 'Beginner',
+      minutes: 60,
+      summary: 'What a power-system model is, what a network is made of, and one full '
+        + 'change → validate → run → read loop on a model small enough to check by hand.',
+    },
+    steps: MODULE_1_FOUNDATIONS,
   },
   {
-    section: '2 · Economic dispatch',
-    title: 'Economic dispatch',
-    level: 'Beginner',
-    minutes: 120,
-    summary: 'The merit order, the marginal unit that sets the price, demand that varies '
-      + 'by the hour, and variable generation with its curtailment and zero prices.',
+    module: {
+      section: '2 · Economic dispatch',
+      title: 'Economic dispatch',
+      level: 'Beginner',
+      minutes: 120,
+      summary: 'The merit order, the marginal unit that sets the price, demand that varies '
+        + 'by the hour, and variable generation with its curtailment and zero prices.',
+    },
+    steps: MODULE_2_DISPATCH,
   },
   {
-    section: '3 · Networks and congestion',
-    title: 'Networks and congestion',
-    level: 'Intermediate',
-    minutes: 110,
-    summary: 'Split the fleet across two buses joined by one line: a cheap generator that cannot reach '
-      + 'the demand, two prices instead of one, congestion rent, and what the constraint costs.',
+    module: {
+      section: '3 · Networks and congestion',
+      title: 'Networks and congestion',
+      level: 'Intermediate',
+      minutes: 110,
+      summary: 'Split the fleet across two buses joined by one line: a cheap generator that cannot reach '
+        + 'the demand, two prices instead of one, congestion rent, and what the constraint costs.',
+    },
+    steps: MODULE_3_NETWORKS,
   },
   {
-    section: '4 · Storage and time coupling',
-    title: 'Storage and time coupling',
-    level: 'Intermediate',
-    minutes: 100,
-    summary: 'The first component that links one hour to the next: a battery that charges on the cheap '
-      + 'hour, removes the peaker from the answer entirely, and is worth three times as much on one side '
-      + 'of the constraint as the other.',
+    module: {
+      section: '4 · Storage and time coupling',
+      title: 'Storage and time coupling',
+      level: 'Intermediate',
+      minutes: 100,
+      summary: 'The first component that links one hour to the next: a battery that charges on the cheap '
+        + 'hour, removes the peaker from the answer entirely, and is worth three times as much on one side '
+        + 'of the constraint as the other.',
+    },
+    steps: MODULE_4_STORAGE,
   },
   {
-    section: '5 · Sector coupling and fuel supply',
-    title: 'Sector coupling and fuel supply',
-    level: 'Intermediate',
-    minutes: 120,
-    summary: 'Gas gets its own bus, its own price and its own store, and the gas plant becomes what it '
-      + 'is — a CCGT converting fuel into power. Adds run-of-river hydro and a pumped-hydro scheme worth '
-      + 'a fraction of a battery a tenth its size.',
+    module: {
+      section: '5 · Sector coupling and fuel supply',
+      title: 'Sector coupling and fuel supply',
+      level: 'Intermediate',
+      minutes: 120,
+      summary: 'Gas gets its own bus, its own price and its own store, and the gas plant becomes what it '
+        + 'is — a CCGT converting fuel into power. Adds run-of-river hydro and a pumped-hydro scheme worth '
+        + 'a fraction of a battery a tenth its size.',
+    },
+    steps: MODULE_5_SECTOR_COUPLING,
   },
   {
-    section: '6 · Time — resolution and horizon',
-    title: 'Time — resolution and horizon',
-    level: 'Advanced',
-    minutes: 110,
-    summary: 'Replace three snapshots with a real day and find out how much of what you concluded was '
-      + 'about the axis: the pumped hydro written off in module 5 turns out to be worth twenty-three '
-      + 'times more. Then resolution, representative periods and rolling horizon, and what each breaks.',
+    module: {
+      section: '6 · Time — resolution and horizon',
+      title: 'Time — resolution and horizon',
+      level: 'Advanced',
+      minutes: 110,
+      summary: 'Replace three snapshots with a real day and find out how much of what you concluded was '
+        + 'about the axis: the pumped hydro written off in module 5 turns out to be worth twenty-three '
+        + 'times more. Then resolution, representative periods and rolling horizon, and what each breaks.',
+    },
+    steps: MODULE_6_TIME,
   },
   {
-    section: '7 · Investment and capacity expansion',
-    title: 'Investment and capacity expansion',
-    level: 'Advanced',
-    minutes: 150,
-    summary: 'Capacity becomes a decision on a full year. Four assets compete, three get built, and '
-      + 'solar wins a place despite losing on levelised cost. Ends by showing what a brownfield run '
-      + 'hides and how two points on the discount rate reweight the whole portfolio.',
+    module: {
+      section: '7 · Investment and capacity expansion',
+      title: 'Investment and capacity expansion',
+      level: 'Advanced',
+      minutes: 150,
+      summary: 'Capacity becomes a decision on a full year. Four assets compete, three get built, and '
+        + 'solar wins a place despite losing on levelised cost. Ends by showing what a brownfield run '
+        + 'hides and how two points on the discount rate reweight the whole portfolio.',
+    },
+    steps: MODULE_7_INVESTMENT,
   },
   {
-    section: '8 · Policy instruments',
-    title: 'Policy instruments',
-    level: 'Expert',
-    minutes: 140,
-    summary: 'The carbon factors typed in module 1 finally matter. A price and a cap turn out to be the '
-      + 'same instrument — verified by setting the price to the cap\'s shadow price and getting the same '
-      + 'system back — and a carbon price is what finally makes storage worth building.',
+    module: {
+      section: '8 · Policy instruments',
+      title: 'Policy instruments',
+      level: 'Expert',
+      minutes: 140,
+      summary: 'The carbon factors typed in module 1 finally matter. A price and a cap turn out to be the '
+        + 'same instrument — verified by setting the price to the cap\'s shadow price and getting the same '
+        + 'system back — and a carbon price is what finally makes storage worth building.',
+    },
+    steps: MODULE_8_POLICY,
   },
   {
-    section: '9 · From result to decision',
-    title: 'From result to decision',
-    level: 'Expert',
-    minutes: 90,
-    summary: 'The capstone, and the only module that adds no modelling capability. Turns the runs you '
-      + 'already have into a range with its conditions, a sensitivity ranking, a provenance trail and an '
-      + 'honest statement of what the model cannot see.',
+    module: {
+      section: '9 · From result to decision',
+      title: 'From result to decision',
+      level: 'Expert',
+      minutes: 90,
+      summary: 'The capstone, and the only module that adds no modelling capability. Turns the runs you '
+        + 'already have into a range with its conditions, a sensitivity ranking, a provenance trail and an '
+        + 'honest statement of what the model cannot see.',
+    },
+    steps: MODULE_9_DECISION,
   },
   {
-    section: '10 · Meshed networks and power flow',
-    title: 'Meshed networks and power flow',
-    level: 'Expert',
-    minutes: 100,
-    summary: 'Steps back to a three-bus ring small enough to compute by hand, and shows that power '
-      + 'divides itself between parallel paths whatever anyone wants. Ends with a nodal price above '
-      + 'every generator in the model, an AC power flow, and an N-1 check two outages fail.',
+    module: {
+      section: '10 · Meshed networks and power flow',
+      title: 'Meshed networks and power flow',
+      level: 'Expert',
+      minutes: 100,
+      summary: 'Steps back to a three-bus ring small enough to compute by hand, and shows that power '
+        + 'divides itself between parallel paths whatever anyone wants. Ends with a nodal price above '
+        + 'every generator in the model, an AC power flow, and an N-1 check two outages fail.',
+    },
+    steps: MODULE_10_POWER_FLOW,
   },
   {
-    section: '11 · Commitment and operating constraints',
-    title: 'Commitment and operating constraints',
-    level: 'Expert',
-    minutes: 100,
-    summary: 'A power station is not a tap. Minimum stable output, start-up costs, minimum down time '
-      + 'and ramp limits — and a coal unit that holds on through a windy dip, spilling free wind to '
-      + 'avoid a start-up charge, until one number is changed and it does the opposite.',
+    module: {
+      section: '11 · Commitment and operating constraints',
+      title: 'Commitment and operating constraints',
+      level: 'Expert',
+      minutes: 100,
+      summary: 'A power station is not a tap. Minimum stable output, start-up costs, minimum down time '
+        + 'and ramp limits — and a coal unit that holds on through a windy dip, spilling free wind to '
+        + 'avoid a start-up charge, until one number is changed and it does the opposite.',
+    },
+    steps: MODULE_11_COMMITMENT,
   },
   {
-    section: '12 · Adequacy and uncertainty',
-    title: 'Adequacy and uncertainty',
-    level: 'Expert',
-    minutes: 110,
-    summary: 'The closing module: plant breaks. Samples forced outages across the year module 7 started '
-      + 'from and finds a system seven times outside the reliability standard nothing had measured — '
-      + 'then asks what module 7\'s least-cost expansion did to that, by accident.',
+    module: {
+      section: '12 · Adequacy and uncertainty',
+      title: 'Adequacy and uncertainty',
+      level: 'Expert',
+      minutes: 110,
+      summary: 'The closing module: plant breaks. Samples forced outages across the year module 7 started '
+        + 'from and finds a system seven times outside the reliability standard nothing had measured — '
+        + 'then asks what module 7\'s least-cost expansion did to that, by accident.',
+    },
+    steps: MODULE_12_ADEQUACY,
   },
   {
-    section: '13 · Where the demand comes from',
-    title: 'Where the demand comes from',
-    level: 'Expert',
-    minutes: 100,
-    summary: 'Twelve modules took the demand profile as given. This one projects it forward two ways '
-      + 'that agree on annual energy to within a fraction of a per cent — and finds a 3.5% higher peak '
-      + 'and thirty megawatts less solar in the build programme.',
+    module: {
+      section: '13 · Where the demand comes from',
+      title: 'Where the demand comes from',
+      level: 'Expert',
+      minutes: 100,
+      summary: 'Twelve modules took the demand profile as given. This one projects it forward two ways '
+        + 'that agree on annual energy to within a fraction of a per cent — and finds a 3.5% higher peak '
+        + 'and thirty megawatts less solar in the build programme.',
+    },
+    steps: MODULE_13_DEMAND,
   },
   {
-    section: '14 · The other side of the market',
-    title: 'The other side of the market',
-    level: 'Expert',
-    minutes: 110,
-    summary: 'Thirteen modules asked the planner\'s question. This one gives the same solved year to '
-      + 'two owners and asks what their assets earn — capture price, a zero profit that is the right '
-      + 'answer, a peaker paid nothing, a PPA, and what one markup does to everybody\'s bill.',
+    module: {
+      section: '14 · The other side of the market',
+      title: 'The other side of the market',
+      level: 'Expert',
+      minutes: 110,
+      summary: 'Thirteen modules asked the planner\'s question. This one gives the same solved year to '
+        + 'two owners and asks what their assets earn — capture price, a zero profit that is the right '
+        + 'answer, a peaker paid nothing, a PPA, and what one markup does to everybody\'s bill.',
+    },
+    steps: MODULE_14_PARTICIPANT,
   },
   {
-    section: '15 · Market design: how the price is set',
-    title: 'Market design: how the price is set',
-    level: 'Expert',
-    minutes: 100,
-    summary: 'Swaps the optimiser for explicit clearing rules and changes them. Pay-as-bid appears to '
-      + 'cut the bill 38% while paying a wind farm nothing — and a scarce year multiplies the bill by '
-      + 'eight and a half, which is how the peaker module 14 found earning nothing gets paid.',
+    module: {
+      section: '15 · Market design: how the price is set',
+      title: 'Market design: how the price is set',
+      level: 'Expert',
+      minutes: 100,
+      summary: 'Swaps the optimiser for explicit clearing rules and changes them. Pay-as-bid appears to '
+        + 'cut the bill 38% while paying a wind farm nothing — and a scarce year multiplies the bill by '
+        + 'eight and a half, which is how the peaker module 14 found earning nothing gets paid.',
+    },
+    steps: MODULE_15_MARKET_DESIGN,
+  },
+  {
+    module: {
+      section: '16 · The multi-year pathway',
+      title: 'The multi-year pathway',
+      level: 'Expert',
+      minutes: 140,
+      summary: 'One problem across 2030, 2040 and 2050: plant that retires on a date, wind and batteries that '
+        + 'get cheaper each decade, a cap that tightens. Two weights that look alike and do different jobs, '
+        + 'a period view that masks what is not there, and a cap ten times too loose or too tight that '
+        + 'solves without a warning.',
+    },
+    steps: MODULE_16_PATHWAY,
+  },
+  {
+    module: {
+      section: '17 · Batteries in depth',
+      title: 'Batteries in depth',
+      level: 'Expert',
+      minutes: 130,
+      summary: 'Past module 4: how long a battery should be, what each loss costs, what the edges of a '
+        + 'horizon are worth, and the three different answers to what it earns — a price taker\'s, its own, '
+        + 'and the system\'s. Capacity credit that rises with duration, and when a Store and two Links '
+        + 'beats a StorageUnit.',
+    },
+    steps: MODULE_17_BESS,
   },
 ];
+
+const MODULES: CourseModule[] = COURSE_MODULES.map((entry) => entry.module);
+const STEPS: TutorialStep[] = COURSE_MODULES.flatMap((entry) => entry.steps);
 
 export const POWER_MARKET_COURSE: Tutorial = {
   id: 'power-market-modelling',
@@ -221,12 +299,13 @@ export const POWER_MARKET_COURSE: Tutorial = {
   minutes: MODULES.reduce((total, m) => total + m.minutes, 0),
   summary:
     'Build one power-system model from an empty sheet to a policy-tested investment case, learning the '
-    + 'modelling theory and the Ragnarok mechanics together at every step. Twelve modules: foundations, '
+    + 'modelling theory and the Ragnarok mechanics together at every step. Seventeen modules: foundations, '
     + 'economic dispatch, networks and congestion, storage, sector coupling, time and horizon, '
-    + 'investment, policy instruments and turning a result into a decision — then three closing modules '
-    + 'on meshed networks and power flow, on unit commitment, and on what any of it is worth once plant '
-    + 'starts breaking and where the demand profile itself came from. Assumes no prior knowledge of '
-    + 'power systems or optimisation, and every answer '
+    + 'investment, policy instruments and turning a result into a decision — then six closing modules '
+    + 'on meshed networks and power flow, on unit commitment, on what any of it is worth once plant '
+    + 'starts breaking, on where the demand profile itself came from, on the participant\'s side of the '
+    + 'market and on how its price is set — and two deep dives, a multi-year pathway and batteries in '
+    + 'depth. Assumes no prior knowledge of power systems or optimisation, and every answer '
     + 'up to module 5 — and all of modules 10 and 11 — is small enough to check by hand.',
   outcomes: [
     'Explain what a power-system optimisation model is: objective, decision variables, constraints',
@@ -246,11 +325,14 @@ export const POWER_MARKET_COURSE: Tutorial = {
     'Project demand two ways and say what the composition of growth, not just its rate, changes',
     'Read a result from a participant\'s books: capture price, contract settlement and market power',
     'Say which findings survive a change of market design and which are artefacts of the settlement rule',
+    'Set up a multi-period pathway, and say what the objective weight, the years weight, build_year and lifetime each do',
+    'Read a period view: inactive assets masked, money weighted, emissions multiplied by years',
+    'Choose a battery\'s duration, count its losses and edges correctly, and say what it earns to a price taker, to itself and to the system',
   ],
   prerequisites: [
     'Ragnarok is running and the top bar shows a status other than a connection error',
     'No prior power-systems or optimisation knowledge — the course starts from the beginning',
-    'About 27 hours across fifteen modules; each opens from a checkpoint, so it need not be one sitting',
+    `About ${Math.round(MODULES.reduce((total, m) => total + m.minutes, 0) / 60)} hours across ${MODULES.length} modules; each opens from a checkpoint, so it need not be one sitting`,
     'Modules 7 to 9 solve a full year, so expect roughly a minute per run from there on',
   ],
   steps: STEPS,

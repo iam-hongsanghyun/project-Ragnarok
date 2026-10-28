@@ -252,7 +252,7 @@ def _build_db(
                 f"INSERT INTO {tbl}(d) VALUES(?)",
                 [(json.dumps(row, ensure_ascii=False, default=ss.json_default),) for row in rows if isinstance(row, dict)],
             )
-            columns = list(rows[0].keys()) if rows and isinstance(rows[0], dict) else []
+            columns = ss.columns_of_rows(rows)
             kind = "series" if ss.is_series_sheet(name, rows) else "static"
             sheets_meta.append({"name": name, "kind": kind, "rowCount": len(rows), "columns": columns})
             tables[name] = tbl
@@ -304,7 +304,7 @@ def merge_static_model(session_id: str, model: dict[str, list[dict[str, Any]]]) 
                 f"INSERT INTO {tbl}(d) VALUES(?)",
                 [(json.dumps(row, ensure_ascii=False, default=ss.json_default),) for row in rows if isinstance(row, dict)],
             )
-            columns = list(rows[0].keys()) if rows and isinstance(rows[0], dict) else []
+            columns = ss.columns_of_rows(rows)
             entry = existing.get(name)
             if entry is None:
                 meta.setdefault("sheets", []).append(

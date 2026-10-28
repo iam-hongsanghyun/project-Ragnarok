@@ -51,7 +51,9 @@ loop still works end to end.
 | Data | `Data` | importers for public data sources, country starter packs |
 | Forge | `Forge` | model transforms: reduction, capacity targets, retargeting, profiles |
 | Physical Risk | `PhysicalRisk` | CLIMADA physical climate risk, adaptation, outage coupling |
-| Siting | `Siting` | location optimisation for new capacity |
+| Siting | `Siting` | location optimisation: candidate scan + capacity-expansion solve |
+| Screening | `Screening` | statistical pre-screen of solar / wind sites and of regions on uploaded historical series: correlation, clustering, within- vs between-region structure, complementarity, portfolios, add selected sites to the model |
+| P2X | `P2X` | power-to-X use cases (H2, ammonia, methanol, e-fuels): chain builder, RFNBO matching, LCOH / LCOA / LCOM results |
 | Post-analysis | `PostAnalysis` | tools that read a finished run without re-solving |
 | Training | `Training` | the guided course / interactive walkthroughs |
 
@@ -81,7 +83,7 @@ The enabled set lives in `AppSettings.enabledModules` as a **comma-separated id
 string**, e.g.:
 
 ```
-"Data,Forge,PhysicalRisk,Siting,PostAnalysis,Training"
+"Data,Forge,PhysicalRisk,Siting,Screening,PostAnalysis,Training"
 ```
 
 A string, not an array, on purpose: it is a primitive, so it survives the

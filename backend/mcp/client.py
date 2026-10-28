@@ -1174,6 +1174,40 @@ class RagnarokClient:
         )
     # ── END demand-db block ─────────────────────────────────────────────────────
 
+    # ── BEGIN siting-screening block ────────────────────────────────────────────
+    # Used by backend/mcp/tools_screening.py. Datasets are per session.
+    _SCREEN = "/api/screening"
+
+    async def screening_upload(
+        self, series: bytes, series_name: str, *, sites: bytes | None, sites_name: str, validate_only: bool,
+        form: dict[str, Any],
+    ) -> Any:
+        files: dict[str, Any] = {"file": (series_name, series, "application/octet-stream")}
+        if sites is not None:
+            files["sitesFile"] = (sites_name, sites, "application/octet-stream")
+        data = {k: str(v) for k, v in (_clean(form) or {}).items()}
+        if not validate_only:
+            data["sessionId"] = self.session_id
+        return await self._request(
+            "POST", f"{self._SCREEN}/{'validate' if validate_only else 'datasets'}", files=files, data=data
+        )
+
+    async def screening_list(self, kind: str | None = None) -> Any:
+        return await self._get(f"{self._SCREEN}/datasets", {"sessionId": self.session_id, "kind": kind})
+
+    async def screening_get(self, dataset_id: str) -> Any:
+        return await self._get(f"{self._SCREEN}/datasets/{dataset_id}", {"sessionId": self.session_id})
+
+    async def screening_delete(self, dataset_id: str) -> Any:
+        return await self._request(
+            "DELETE", f"{self._SCREEN}/datasets/{dataset_id}", params={"sessionId": self.session_id}
+        )
+
+    async def screening_post(self, route: str, body: dict[str, Any]) -> Any:
+        """POST one of correlation / lagged / profiles / metrics / optimise / cluster / promote."""
+        return await self._post(f"{self._SCREEN}/{route}", {**(_clean(body) or {}), "sessionId": self.session_id})
+    # ── END siting-screening block ──────────────────────────────────────────────
+
 
 def _clean(params: dict[str, Any] | None) -> dict[str, Any] | None:
     """Drop ``None`` values so they don't serialize as the string ``"None"``."""

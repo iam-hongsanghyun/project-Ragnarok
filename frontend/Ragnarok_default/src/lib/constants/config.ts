@@ -29,8 +29,18 @@ export interface SettingsDefaultsConfig {
 export const APP_CONFIG: AppConfig = appConfigJson;
 export const CURRENCIES: CurrencyConfig[] = currenciesJson as CurrencyConfig[];
 
-export const API_BASE =
-  window.location.hostname === 'localhost' ? APP_CONFIG.api.localhostBaseUrl : '';
+/**
+ * Base URL of the backend API. The app talks to ITS OWN origin whatever hostname it was opened on
+ * (`localhost`, `127.0.0.1`, a LAN name): a same-origin call needs no CORS and no second port. Only an
+ * explicit `REACT_APP_API_BASE` (build-time) or `api.baseUrl` in app_config.json overrides that. The dev
+ * server (`npm start`) reaches the backend through the CRA `proxy` in package.json, so it needs no base either.
+ */
+export function resolveApiBase(...explicit: Array<string | undefined | null>): string {
+  const chosen = explicit.map((v) => (v ?? '').trim()).find((v) => v !== '') ?? '';
+  return chosen.replace(/\/+$/, '');
+}
+
+export const API_BASE = resolveApiBase(process.env.REACT_APP_API_BASE, APP_CONFIG.api.baseUrl);
 
 export const MAX_UNPINNED_HISTORY = APP_CONFIG.runHistory.maxUnpinnedEntries;
 export const RUN_POLLING = APP_CONFIG.runPolling;

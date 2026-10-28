@@ -60,6 +60,7 @@ from .components import (
     _normalize_extra_port_columns,
 )
 from .network_sheet import _apply_network_sheet, _peak_load_per_bus
+from .serialize import ANNOTATION_COLUMNS
 from .piecewise import apply_carbon_to_curves, apply_piecewise_sheets, scale_capital_curves
 
 __all__ = ["build_network", "validate_model"]
@@ -263,6 +264,26 @@ def _apply_carbon_to_piecewise(network: pypsa.Network, config: Any, notes: list[
     apply_carbon_to_curves(network, float(series.iloc[0]), ef, notes)
 
 
+
+def _carry_plant_ids(network: pypsa.Network, model: dict[str, Any]) -> None:
+    """Copy the :data:`ANNOTATION_COLUMNS` of the workbook rows onto the network's static frames.
+
+    The builder keeps only schema attributes, so without this a PyPSA file exported from the workbook would
+    lose which components form one plant. Rows with no value stay blank. Not an LP input.
+    """
+    for list_name in network.components.keys():
+        rows = model.get(list_name)
+        if not isinstance(rows, list) or not rows:
+            continue
+        frame = network.components[list_name].static
+        if frame.empty or isinstance(frame.index, pd.MultiIndex):
+            continue
+        for col in ANNOTATION_COLUMNS:
+            tags = {str(r.get("name")): str(r.get(col)) for r in rows
+                    if isinstance(r, dict) and r.get(col) not in (None, "") and r.get("name") not in (None, "")}
+            if tags:
+                frame[col] = [tags.get(str(i), "") for i in frame.index]
+
 def build_network(
     model: dict[str, list[dict[str, Any]]],
     scenario: dict[str, Any],
@@ -400,6 +421,8 @@ def build_network(
 
     _sanitize_placeholder_bounds(network, notes)
     _drop_deprecated_v_ang_min(network, notes)
+
+    _carry_plant_ids(network, model)
 
     # Generic per-component row count (schema-driven — every populated
     # component class shows up automatically, including new ones PyPSA adds).
@@ -595,7 +618,7 @@ def build_network(
     fallback_lifetime = float(sim_cfg.get("fallback_lifetime_years", 20.0))
     annuitisable: tuple[str, ...] = (
         () if bool(options.get("skipCapexAnnuitisation", False))
-        else ("generators", "storage_units", "stores", "lines", "links")
+        else ("generators", "storage_units", "stores", "lines", "links", "processes")
     )
     # RS1: the LP compares capital cost against operating cost over the modelled
     # window, so the ANNUAL annuity must be pro-rated to that window or a 168 h

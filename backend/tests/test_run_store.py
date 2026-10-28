@@ -96,6 +96,7 @@ def test_run_store_lifecycle(_runs_dir: Path) -> None:
         "selectedPeriod": 2030,
         "summaries": [{"period": 2030, "totalDispatch": 1.0}],
     }
+    assert meta["isPathway"] is True and meta["pathwayPeriods"] == [2030, 2040]      # the flag the P2X results picker reads
     assert meta["rolling"] == {
         "enabled": False,
         "horizonSnapshots": 24,
@@ -496,3 +497,10 @@ def test_get_run_model_returns_input_model_without_output_series(_runs_dir: Path
     assert data["snapshotWeight"] == 2
 
     assert run_store.get_run_model("does-not-exist") is None
+
+
+def test_pathway_flags_cover_single_period_missing_and_dict_periods() -> None:
+    assert run_store.pathway_flags(None) == {"isPathway": False, "pathwayPeriods": []}
+    assert run_store.pathway_flags({"enabled": False, "periods": [2030]}) == {"isPathway": False, "pathwayPeriods": []}
+    assert run_store.pathway_flags({"enabled": True, "periods": [{"period": 2030}, {"period": "2040"}, "x"]}) == {
+        "isPathway": True, "pathwayPeriods": [2030, 2040]}

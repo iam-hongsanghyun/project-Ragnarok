@@ -27,7 +27,7 @@ import type { WorkspaceTab } from './types';
  *  a host should not be able to mount a third-party tab. */
 const NAVIGABLE: readonly string[] = [
   'Welcome', 'Build', 'Data', 'Forge', 'Model', 'Market', 'PostAnalysis',
-  'Analytics', 'PhysicalRisk', 'Siting', 'History', 'Settings',
+  'Analytics', 'PhysicalRisk', 'Siting', 'Screening', 'History', 'Settings',
 ];
 
 export interface ShowRequest {

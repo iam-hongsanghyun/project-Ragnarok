@@ -33,6 +33,8 @@ integrating with the backend. It does not cover end-user steps (see
    - 5.5 [load_shedding.py](#55-load_sheddingpy)
    - 5.6 [validators.py](#56-validatorspy)
    - 5.7 [piecewise.py — piecewise-linear curves](#57-piecewisepy--piecewise-linear-curves)
+   - 5.9 [p2x — power-to-X routes, chains, RFNBO, results](#59-p2x--power-to-x-routes-chains-rfnbo-results)
+   - 5.10 [plants — Build plant picker, co-firing, results by plant](#510-plants--build-plant-picker-co-firing-results-by-plant)
 6. [Result extraction](#6-result-extraction)
    - 6.1 [run_pypsa return value](#61-run_pypsa-return-value)
    - 6.2 [dispatch.py](#62-dispatchpy)
@@ -64,7 +66,7 @@ integrating with the backend. It does not cover end-user steps (see
     - 12.1 [run_store.py](#121-run_storepy)
     - 12.2 [Run and export endpoints](#122-run-and-export-endpoints)
 13. [Project workbook](#13-project-workbook)
-14. [External-data importers — /api/import/*](#14-external-data-importers--apiimport) (incl. [14.1 Demand database](#141-demand-database--apidemand-db-d2))
+14. [External-data importers — /api/import/*](#14-external-data-importers--apiimport) (incl. [14.2 Siting screening](#142-siting-screening--apisitingscreening), [14.1 Demand database](#141-demand-database--apidemand-db-d2))
 15. [Boot config — /api/config](#15-boot-config--apiconfig)
 
 ---
@@ -395,7 +397,7 @@ Processing order:
 8. Window and downsample snapshots (`snapshotStart`, `snapshotCount`, `snapshotWeight`). For pathway mode, windowing ignores `snapshotStart`/`snapshotCount` and only applies the step (downsampling).
 9. Scale annual energy-sum caps (`*_sum_min`, `*_sum_max`) by the period factor when modelled hours < 8760.
 10. Apply carbon price (scalar or schedule) to generator marginal costs.
-11. Annuitise `capital_cost` for extendable assets using `annuity_factor(discountRate, lifetime)`. Default lifetime is 20 years when not specified.
+11. Annuitise `capital_cost` for extendable assets (generators, storage units, stores, lines, links and **processes**) using `annuity_factor(discountRate, lifetime)`, pro-rated to the modelled window (`ragnarok_capex_window_scale`). Default lifetime is 20 years when not specified. A Process carries the same cost as a Link with identical parameters. Then copy the `plant` annotation column (`serialize.ANNOTATION_COLUMNS`) onto the network frames so a PyPSA export keeps which components form a plant.
 12. Override `committable=False` on all generators if `forceLp` is set.
 13. Emit a warning note for any carrier with `co2_emissions > 5` (likely entered as kg/MWh instead of tCO2/MWh).
 14. Add per-bus load-shedding generators if `enableLoadShedding`.
@@ -584,6 +586,121 @@ holds the optimised angle, shown by the phase-shifter card. Adequacy uses `maint
 phase-shifting transformer is present (`results/power_flow.py`).
 
 Force-LP does not relax `maintainable`, so a model with maintenance stays a MIP.
+
+### 5.9 `p2x` — power-to-X routes, chains, RFNBO, results
+
+A use-case surface over the core model; no separate engine. Code: `backend/app/p2x/`
+(`technologies.json` + `technologies.py`, `chains.py`, `config_store.py`, `results.py`), the router
+`backend/app/routers/p2x.py` and the solve fragment `backend/pypsa/network/rfnbo.py`.
+
+| Route | Purpose |
+|---|---|
+| `GET /api/p2x/technologies` | the technology data file: every parameter with value, unit, source (document, locator, year), cost year and currency, and a `verified` flag (`file`, `derived`, `literature-recalled`, `assumption`) |
+| `GET /api/p2x/chain/defaults` | the default chain spec, the products and the model's anchor bus |
+| `POST /api/p2x/chain` | build a chain from a spec; `apply=false` previews (fragment, component summary, warnings, row counts), `apply=true` merges the fragment into the session. `model` takes an inline model (UI mirror) for a preview |
+| `GET` / `PUT /api/p2x/rfnbo/config` | the session's RFNBO matching settings, stored outside the workbook (`<RAGNAROK_DATA_DIR>/p2x/rfnbo_<session>.json`) |
+| `POST /api/p2x/rfnbo/checks` | pre-solve additionality and geographic checks and what each candidate filter would drop |
+| `GET /api/p2x/results/{run}` | LCOH, LCOA, LCOM, e-fuel cost, cost waterfall, electrolyser CF and full-load hours, H2 SoC, compliance table, checks, Art. 4 alternatives. Query: `period` (pathway investment period), `electricity_cost` (`nodal` or `ppa`), `chain_id` |
+
+**Technology data.** Defaults are read from `technologies.json` (override the file with
+`RAGNAROK_P2X_TECHNOLOGIES_FILE`): PyPSA/technology-data `v0.15.0` (commit `07e43575`, `outputs/costs_2030.csv` and
+`inputs/data_sheets_for_renewable_fuels.xlsx`, the Danish Energy Agency renewable-fuels catalogue), 2030 values,
+EUR2025 (the 100 MW electrolyser sheets are EUR2020 in the source and carry the converted value plus `rawValue`,
+`rawCostYear` and `priceIndex`). Constants: H2 33.33, NH3 5.17, MeOH 5.54 kWh/kg LHV.
+
+**Chain components.** The electrolyser, compressor and H2 discharge are `Link`s; the synthesis steps, the ASU and the CO2 capture are
+PyPSA 1.4 `Process`es (`conversion_row` in `chains.py`; `spec.componentType` = `process` (default) or `link`). A synthesis
+`Process` has `rate0 = -1` at `bus0` (H2, `p_nom` in MW_H2, LHV), `rate1 = 1/h` at the product bus and negative `rate2` (electricity) and
+`rate3` (N2 or CO2); the Link form carries the same numbers as `efficiency` / `efficiency2` / `efficiency3`. Flows have the same sign
+convention (`p_i = -rate_i p`, positive = drawn from the bus), so the two forms are the same LP: identical objective, series, sizes,
+LCOH / LCOA / LCOM (`tests/test_p2x_process_parity.py`). Processes were only usable once `build_network` annualised their
+`capital_cost` (`annuitisable` now includes `processes`, with the same annuity factor and `capex_window_scale` as a Link;
+`tests/test_process_capex_annuitisation.py`). The registry (`RAGNAROK_P2X`, version 2) records `componentType` and each component's
+`sheet`; the results read series from `processes-pN` or `links-pN` by that field, so a chain stored with Links (version 1)
+reads unchanged. Costs follow PyPSA's own split: each priced component carries `overnight_cost` (EUR per MW or MWh), `fom_cost` (EUR per MW
+or MWh per year), `lifetime` and `discount_rate` (the chain's rate; the UI sets it from Settings); `capital_cost` is blank. `build_network` takes
+the native-cost path (PyPSA annualises `overnight_cost` with the row's rate and lifetime; the app pro-rates to the window). The registry row
+(`RAGNAROK_P2X`) lets the results find the components. Stack replacement is a marginal cost per MWh_el (stack cost / stack life in hours).
+Chains saved before this change carry a folded `capital_cost` and are still read (the split into capex and FOM uses `f / (a + f)`).
+
+**RFNBO run option `options.rfnboConfig`** (documented by `describe_run_options`): with `enabled`, the solve adds, for
+every matching period `T`, `sum_{t in T} w_t sum_e p_el[e,t] <= sum_{t in T} w_t sum_g p_gen[g,t]`
+(Delegated Regulation (EU) 2023/1184 Art. 6). Hourly is one row per snapshot; monthly one row per calendar month;
+`auto` is monthly before `hourlyFrom` (2030-01-01) and hourly from it. Additionality (Art. 5(a): the generator came into
+operation not earlier than 36 months before the electrolyser, tested on calendar years) and geographic correlation
+(Art. 7(1)(a): same bus or same `bidding_zone` / `zone` / `country`) are checks and candidate filters
+(`enforceAdditionality`, `enforceGeographic`), never LP constraints; Art. 5(b), 7(1)(b)/(c) are listed as `attest`.
+Art. 4 grid alternatives (zone renewable share above 90 %, emission intensity below 18 gCO2e/MJ) are reported from the
+solved run only. A run with matching on and no electrolyser or no eligible designated generator is refused (400). A run
+that sets no `rfnboConfig` takes the session's stored settings at submit time (`main._resolve_payload_model`); an explicit
+`rfnboConfig`, even `{"enabled": false}`, wins, and the frozen run options record what was used.
+
+**Results.** Computed from the stored model, outputs and options (`results.py` docstring has the algorithm). The LCOH is
+annualised capex plus FOM of the electrolyser, compressor and H2 store (the LP's capital charge split by `f / (a + f)`),
+plus electricity (nodal price x consumption, or the designated generators' PPA cost), water and stack wear, over the H2
+produced in kg. LCOA, LCOM and the e-fuel cost add the synthesis link, the hydrogen it took at the LCOH, its electricity,
+its share of the N2 or CO2 supply and the product tank.
+
+The fixed charge is read from PyPSA, not recomputed: the results rebuild the network from the stored model, scenario and options (no solve) and take
+`n.components[..].capital_cost` (overnight x annuity at the row's rate x window years; FOM is not in it) times the installed capacity, plus
+`fom_cost` x capacity x window years. A period slice takes its share of the stored window. FOM note: the LP objective adds `fom_cost x p_nom`
+**unscaled** (a full year of FOM whatever the window), so on a window shorter than a year the objective's FOM is larger than the pro-rated FOM the
+results report; this is how the app / PyPSA native-cost path behaves and is not changed here.
+
+### 5.10 `plants` — Build plant picker, co-firing, results by plant
+
+One plant-type picker over the core model; no separate engine. Code: `backend/app/plants/` (`technologies.json` +
+`technologies.py`, `thermal.py`, `catalog.py`, `registry.py`, `results.py`), the router `backend/app/routers/plants.py`, the MCP tools
+`backend/mcp/tools_plants.py` and the solve fragment `backend/pypsa/network/cofiring.py`. The P2X chain is built by
+`p2x/chains.py` (not duplicated).
+
+| Route | Purpose |
+|---|---|
+| `GET /api/build/plant/types` | the plant types (`generator`, `bess`, `ccgt`, `ocgt`, `cofiring_simple`, `cofiring_network`, `p2x`) with their fields (key, label, kind, unit, default, `advanced`) and defaults |
+| `GET /api/build/plant/technologies` | the technology data file: every parameter with value, unit, source, cost year / currency and `verified` (`file`, `derived`, `literature`, `assumption`), the fuels and the LHV constants |
+| `GET /api/build/plants` | the plants of the session model (cards: type, bus, capacity, components) |
+| `POST /api/build/plant` | build a plant from `{type, spec}`; `apply=false` previews, `apply=true` merges into the session. `model` = inline model (UI mirror, stateless) |
+| `POST /api/build/plant/edit` | re-derive a plant from its stored spec + a patch: old rows removed, new ones merged, under the same id |
+| `POST /api/build/plant/delete` | delete a plant and nothing else; a bus or carrier another row references is kept and released |
+| `GET /api/build/plant/results/{run}` | results grouped by plant id. Query: `plant`, `period`, `include_series` |
+
+**Change set.** Every write returns `change = {remove: {sheet: [names]}, release: [{sheet, name}], fragment, kept}`; the browser
+applies it to the model it holds (`lib/build/plants.ts`), the session applies the same thing (`registry.apply_change`). A plant is the set
+of rows whose `plant` column equals its id plus one `RAGNAROK_PLANTS` row (type, normalised spec, components, feeders, blend). The
+`plant` column survives the session store (sheet columns are the union of the row keys), the workbook export / import and, because
+`build_network` copies `ANNOTATION_COLUMNS` onto the PyPSA frames, `export_to_netcdf` / `csv` / `excel`; the registry is Ragnarok-only
+(an imported plant is listed and deletable, not editable).
+
+**Technology data** (`RAGNAROK_PLANTS_TECHNOLOGIES_FILE` overrides the file): PyPSA/technology-data `v0.15.0` (commit `07e43575`,
+`outputs/costs_2030.csv`; `inputs/technology_data_for_el_and_dh.xlsx`, DEA sheets `05 Gas turb. CC, steam extract.` and `52 OCGT - Natural gas`,
+2030 column; `inputs/technology_data_catalogue_for_energy_storage.xlsx`). CCGT: efficiency 0.58, 1108.7 EUR2025/kW, FOM 3.35 %, VOM
+5.61 EUR/MWh, 25 a, minimum load 40 %, secondary regulation 15 %/min. OCGT: 0.41, 581.4 EUR/kW, 1.78 %, 6.01 EUR/MWh, 25 a, 20 %, 30 %/min,
+start-up 43 EUR2015/MW (x 1.3358 = 57.4). Gas: 0.198 tCO2/MWh_th, 28.42 EUR/MWh_th. Assumptions (flagged `assumption`): CCGT start-up cost
+60 EUR/MW, minimum up / down 4 h (OCGT 1 h), the H2 price (100 EUR/MWh_LHV), the H2 derate (0, off). Part-load efficiency is not modelled
+(`notModelled` in the file). LHV per Nm3: H2 10.78 (derived from 119.96 MJ/kg x 0.08988 kg/Nm3), CH4 35.8 (literature, recalled).
+
+**Formulation.** Simple co-firing generator: `mc = ((1-s) c_g + s c_h)/eta + v`, carrier `co2_emissions = (1-s) e_g` (the app divides a
+generator's carrier factor by its efficiency). Turbine Link: `p_nom = P_el/eta`, `capital_cost = k_el eta`, `marginal_cost = v eta`,
+`start_up_cost = u P_el`; costs are `overnight_cost = k_el eta`, `fom_cost = f k_el eta`, `lifetime`, `discount_rate` (no `capital_cost`); unit-commitment fields are written only when `committable` and the size is fixed (`p_min_pu` is a minimum load
+only for a committable unit). Blend share: `vol_to_energy_share`, and per plant `(1 - s_max) h_t - s_max g_t <= 0`,
+`s_min g_t - (1 - s_min) h_t <= 0` per snapshot (hourly) or summed with the snapshot weights (period), added in `extra_functionality`
+beside the RFNBO hook (`cofiring_<plant>_<min|max>_<hourly|period>`).
+
+**Run option `options.cofiringConfig`** (documented by `describe_run_options`): `{enabled, plants, minShare, maxShare, unit: energy|vol,
+scope: hourly|period, perPlant}`. A run that sets none takes each plant's stored `blendMax` / `blendMin`; an explicit value, even
+`{enabled: false}`, wins. A limit naming no fuel-network plant, or `minShare > maxShare`, is refused (400) before the solve.
+
+**Results** (`plants/results.py`): per plant generation, capacity factor, full-load hours, starts (solved `start_up` for committable units,
+else counted from dispatch and labelled), operating / fixed (PyPSA's effective capital cost read from the rebuilt network + `fom_cost` x window years) / fuel cost, revenue at the bus price; for gas plants the gas and H2 use (MWh_th),
+the H2 share per hour (energy and vol), emissions and the emissions avoided against the same dispatch burnt as 100 % gas
+(`e_g x H2 energy`); BESS charge / discharge and cycles; P2X LCOH. Fuel supplier rows are shared and not booked on a plant; fuel is valued
+at the nodal price of the plant's fuel bus.
+
+**MCP** (`tools_plants.py`): `list_plant_types` (read-only), `get_plant_results` (read-only), `add_plant`, `edit_plant`, `remove_plant`
+(gated by `confirm`). `add_conversion` is unchanged.
+
+**Run list.** `GET /api/runs` entries carry `isPathway` and `pathwayPeriods` (derived from the stored pathway block for runs saved before
+the flag existed); the P2X results panel offers a period picker only for a pathway run.
 
 ## 6. Result extraction
 
@@ -1635,6 +1752,118 @@ stored one and is counted under `changed` in `refresh_log.jsonl`.
 
 Tests: `backend/tests/test_demand_db.py` (fixtures in `backend/tests/fixtures/demand_db/`, no
 network). The live OPSD check is marked `integration`: `RAGNAROK_INTEGRATION=1 pytest -m integration`.
+
+### 14.2 Screening — `/api/screening/*`
+
+A statistical pre-screen of solar and wind sites, and of the regions they sit in, on uploaded historical
+series, before the expansion-based siting (`POST /api/siting/scan`, the Siting tab). A tab module of its own
+(frontend `src/modules/screening/`). Code: `backend/app/screening/` (`datasets.py` parse / validate / store,
+`correlation.py` the statistics, `promote.py` the generator fragment; alignment reuses
+`siting/core.py::align_cf_to_targets`), router `backend/app/routers/screening.py`, MCP tools
+`backend/mcp/tools_screening.py` (names keep the `siting_` prefix; see [bifrost-agent.md](./bifrost-agent.md)).
+
+**Dataset store.** A dataset is not model sheets. It lives per session under
+`<data root>/screening_datasets/<session id>/<dataset id>/` as `series.parquet` (UTC timestamp index x site
+columns, capacity factor 0-1, NaN-free) and `meta.json` (sites, step, window, validation report, provenance),
+so it survives reload and restart. `kind="regions"` holds one series per region (meta key `regions`: `name, lat, lon, technology, unit, capacityMw,
+geometry`); `kind="reference"` holds one load or price series (not normalised). Ids and session names are guarded
+against path traversal. Datasets stored by the earlier Siting > Screening step sit under
+`<data root>/siting_datasets/<session id>/`; `datasets_dir()` moves them into `screening_datasets/` the first time the
+session is touched (idempotent; a dataset already present in the new folder is left alone), so they keep loading.
+
+**Upload.** Series as CSV or xlsx in two layouts: *long* (`site, timestamp, value`) or *wide* (a timestamp
+column, one column per site); the site table (file `sitesFile` or JSON `sitesJson`) has `name, lat, lon,
+technology (solar|wind|other)`, optional `region`, `unit` (`cf` | `mw`) and `capacity_mw` (needed for `mw`).
+Validation: unparseable timestamps (more than 5 % rejects), duplicate timestamps (averaged), gaps per site
+(reported; `gapPolicy=interpolate` fills up to `maxInterpSteps`, default 48, linear in time, and drops what
+remains; `drop` removes every timestamp with a gap), time zone (`timezone`, an IANA name, default UTC: naive
+stamps are read in it and stored as UTC; stamps with an offset are converted as written), off-grid stamps
+(averaged into the median step) and unit sanity (a series outside 0-1 after the MW / capacity division is an
+error with a hint, never silently clipped).
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/validate` | multipart; the validation report, nothing stored |
+| `POST` | `/datasets` | multipart; validate and store (`name`, `kind`, `referenceKind`, `unit`, `sessionId`; for `kind=regions` the region table in `sitesFile` / `sitesJson` and optional polygons in `geojsonFile` / `geojson`) |
+| `GET` | `/datasets` | `{items, total}` for the session (`kind` = sites | regions | reference, `limit`, `offset`; `siteCount`, `regionCount`) |
+| `GET` | `/datasets/{id}` | sites (with mean CF), step, window, validation report |
+| `DELETE` | `/datasets/{id}` | remove a dataset |
+| `POST` | `/correlation` | matrix on a basis, correlation-vs-distance pairs, optional `reference` (`load`, `price` of a `run`, or an uploaded `dataset`; `align` exact or calendar) |
+| `POST` | `/lagged` | cross-correlation of one site against others, lags -N..+N h (N <= 336) |
+| `POST` | `/profiles` | diurnal (24), monthly (12), seasonal means per site and a down-sampled series |
+| `POST` | `/metrics` | complementarity metrics of a weighted portfolio and its duration curve |
+| `POST` | `/optimise` | long-only minimum-variance / maximum-mean portfolio, its metrics, an efficient frontier |
+| `POST` | `/cluster` | hierarchical clustering on 1 - r: leaf order, labels, linkage |
+| `POST` | `/regions` | the region series in use: members and normalised weights, capacity, centroid, polygon, mean CF |
+| `POST` | `/regions/structure` | within- vs between-region correlation and site-vs-region table (site datasets) |
+| `POST` | `/promote` | preview (default) or `apply`: sites become generators with `p_max_pu` |
+
+(All paths are under `/api/screening`.) The statistic routes share the selection and basis fields
+`datasetId, sites, basis (hourly|daily|weekly|monthly|seasonal|diurnal|month_hour|custom), rule (pandas offset
+alias), seasonMap {month: label}, start, end, months, utcOffsetHours, method (pearson|spearman), anomaly,
+anomalyStandardise, level, weighting, siteWeights, byTechnology, technology`. Window, clock offset and months apply before the basis; anomalies are hourly values minus
+their (month, hour) mean and are refused on the diurnal / month-hour bases. NaN correlations (a constant series)
+are returned as `null`.
+
+**Upload, region dataset.** `kind=regions`: a series per region (wide or long) and a region table with `name`
+(aliases `region`, `zone`, `area`, `country`), optional `lat` / `lon` (centroid), `technology` (blank allowed), `unit`,
+`capacity_mw`, optional `geometry` (a GeoJSON Polygon / MultiPolygon as text, `[lon, lat]`); `geojson` is a
+FeatureCollection whose `properties.name` (or `region`, `id`) matches a region. A region with no centroid takes
+the shoelace centroid of its polygon's largest ring; with neither it is analysed but not drawn. Polygons are
+validated (type, ring size, WGS84 range). The unit / CF-range / gap / time-zone validation is the site upload's.
+
+**Region level.** `level` is `site` (default) or `region` on `/correlation`, `/lagged`, `/profiles`, `/metrics`,
+`/optimise` and `/cluster`. At `region` the analysed series are region series: aggregated from the sites of a site
+dataset (`weighting` equal | capacity | custom with `siteWeights {site: w}`; `byTechnology` gives
+`"<region> | <technology>"` columns; `technology` keeps one) or the series of a region dataset (weights ignored).
+CF aggregation: $X_{r,t} = \sum_{i\in r} w_i x_{it} / \sum_{i\in r} w_i$ (equal $w=1$, capacity $w=P_i$ MW, or
+user); a capacity weighting needs a positive `capacity_mw` for every member; a region whose weights sum to 0 and
+negative weights are 422. The response shapes are the site level's, with region names in `sites` and weights, and
+`distance` between centroids (regions without one are left out); `regionCaps` on `/optimise` act on the region
+label, so with `byTechnology` they cap a region's total across its technology columns. `/promote` stays
+site-level.
+
+**Region statistics** (all in `correlation.py`, pure): `aggregate_regions` (above); `pair_stats` (n, mean, median,
+std, min, q1, q3, max of a set of correlations); `within_between_correlation(corr, group_of)`: for the site
+correlation matrix $r_{ij}$, within sets $W_g=\{r_{ij}: g(i)=g(j)=g\}$ and between sets $B_{gh}=\{r_{ij}:
+g(i)=g, g(j)=h\}$ summarised by `pair_stats`, pooled means $\bar r_W, \bar r_B$ and the gain $\bar r_W-\bar r_B$
+(positive: sites of a region move together more than across regions, so spreading across regions buys
+diversification; about 0: region borders carry no information); `site_region_correlation`: $r_{i,h}=
+\mathrm{corr}(x_i,X_h)$ for every region and, for the site's own region, the leave-one-out $X_{g(i)}^{(-i)}$ (the full
+series contains the site, so it would correlate for free); a site is *odd* when its best other region beats its own.
+`/regions/structure` applies them to the site dataset on the chosen basis (at most
+`RAGNAROK_SITING_MAX_STRUCTURE_SITES`, 400, since only per-region summaries are returned) and adds `aggregateR`,
+the correlation of the two aggregated region series, to each between entry.
+
+**Statistics** (each function in `correlation.py` carries an `Algorithm:` block with LaTeX and an ASCII line):
+Pearson and Spearman (Pearson of average ranks); portfolio $y_t=\sum_i w_i x_{it}$ with mean CF, CV
+$\sigma_y/\bar y$, P10 / P50 / P90 as *exceedance* (P90 is the 10th percentile: the output reached in 90 % of
+the hours), low-output share $\Pr(y<\theta)$, coincident-low probability of a pair next to its independent
+product, ramp correlation of the step changes, worst-N loss $1-\bar y_{(N)}/\bar y$ and diversification ratio
+$\sum w_i\sigma_i/\sigma_y$; optimiser $\min w^\top\Sigma w$ s.t. $\mathbf 1^\top w=1$, $\mu^\top w\ge\mu^*$, $0\le
+w\le w_{max}$, region sums $\le c_r$ (SLSQP; or $\max\mu^\top w$ s.t. $w^\top\Sigma w\le v_{cap}$); infeasible targets
+are found first with an LP / the minimum variance and the error states the reachable value; clustering is
+average-linkage (scipy) on $D=1-r$ with optimal leaf ordering. `scipy` is in `requirements.txt`.
+
+**Promotion.** `POST /promote` builds one `WorkbookFragment` (carriers, generators, `generators-p_max_pu`,
+snapshots, provenance) and returns it with an alignment report. Each site attaches to the nearest bus with
+coordinates (or `busOverrides`); `pNomMw` defaults to the site capacity, else 100 MW; `extendable` makes
+zero-capacity candidates (`p_nom_max`, `capitalCost`). Profiles go through
+`siting/core.py::align_cf_to_targets` (UTC shifted by `utcOffset`, then exact hour, the same month-day-hour
+of another year, or the hour-of-day mean); `report` lists per site the exact / calendar / hour-mean / unmatched
+counts and `warnings` (no overlap, non-hourly dataset or model, name clashes, an empty model). The GUI keeps the
+fragment and merges it itself (the Data-view path); `apply=true` (API, MCP) merges server-side through
+`fragment_merge.merge_fragment` and answers 409 when `report.ok` is false unless `force=true`.
+
+**Limits** (environment variables, defaults): `RAGNAROK_SITING_MAX_UPLOAD_BYTES` 200 MB,
+`RAGNAROK_SITING_MAX_SITES` 400 per dataset, `RAGNAROK_SITING_MAX_MATRIX_SITES` 60 per analysis request (regions count as sites), `RAGNAROK_SITING_MAX_STRUCTURE_SITES` 400,
+`RAGNAROK_SITING_MAX_CHART_POINTS` 500, `RAGNAROK_SITING_MAX_LAG_HOURS` 336,
+`RAGNAROK_SITING_MAX_INTERP_STEPS` 48.
+
+Tests: `test_screening_correlation.py` (analytical), `test_screening_regions.py` (region statistics: identical regions = 1,
+one site repeated k times = that site, capacity weighting by hand, two independent blocks: within 0.80 +- 0.03 and
+between 0.00 +- 0.03 at seed 7, leave-one-out, odd site, polygon centroid), `test_screening.py` (validation, routes, region
+level, region upload, old-folder migration, promotion), `test_mcp_screening.py`.
 
 ---
 

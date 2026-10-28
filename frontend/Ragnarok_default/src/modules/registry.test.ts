@@ -3,7 +3,7 @@
  *
  * The classification is a product decision (2026-08-01): core = Welcome,
  * Build, Model, Market & Policy, Settings, Analytics, History, Plugins;
- * modules = Data, Forge, Physical Risk, Siting, Post-analysis, Reporting,
+ * modules = Data, Forge, Physical Risk, Siting, Screening, P2X, Post-analysis, Reporting,
  * Training. These tests pin it so a tab can't silently change sides.
  */
 import { describe, expect, it } from '@jest/globals';
@@ -16,7 +16,7 @@ import {
   serializeEnabledModules,
 } from './registry';
 
-const MODULE_TABS: WorkspaceTab[] = ['Data', 'Forge', 'PhysicalRisk', 'Siting', 'PostAnalysis', 'Reporting', 'Training'];
+const MODULE_TABS: WorkspaceTab[] = ['Data', 'Forge', 'PhysicalRisk', 'Siting', 'Screening', 'P2X', 'PostAnalysis', 'Reporting', 'Training'];
 const CORE_TABS: WorkspaceTab[] = ['Welcome', 'Build', 'Model', 'Market', 'Settings', 'Analytics', 'History', 'Plugins'];
 
 describe('the core/module split', () => {

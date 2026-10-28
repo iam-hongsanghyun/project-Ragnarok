@@ -1,0 +1,46 @@
+/* P2X tab: chain designer, RFNBO panel, results. Tokens only (see styles/_tokens.css). */
+.p2x-view { display: flex; flex-direction: column; min-height: 0; }
+.p2x-scroll { flex: 1; min-height: 0; overflow: auto; padding: 16px 20px 40px; }
+.p2x-grid { display: grid; grid-template-columns: minmax(340px, 460px) minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 1000px) { .p2x-grid { grid-template-columns: 1fr; } }
+.p2x-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 14px; }
+.p2x-card h3 { margin: 0 0 8px; font-size: var(--fs-md); font-weight: 600; color: var(--text); }
+.p2x-card h4 { margin: 10px 0 4px; font-size: var(--fs-sm); font-weight: 600; color: var(--text-secondary); }
+.p2x-note { color: var(--muted); font-size: var(--fs-sm); margin: 4px 0 8px; line-height: 1.45; }
+.p2x-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 6px 0; font-size: var(--fs-sm); }
+.p2x-row > label { min-width: 120px; color: var(--text-secondary); }
+.p2x-row input[type="text"], .p2x-row input[type="number"], .p2x-row select, .p2x-card textarea {
+  padding: 4px 7px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--panel-strong); color: var(--text); font-family: var(--font-sans); font-size: var(--fs-sm);
+}
+.p2x-row input[type="number"] { width: 110px; }
+.p2x-card textarea { width: 100%; min-height: 64px; font-family: var(--font-mono); }
+.p2x-btn { padding: 5px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface);
+  color: var(--text); font-size: var(--fs-xs); font-weight: 600; cursor: pointer; }
+.p2x-btn:hover:not(:disabled) { border-color: var(--brand); color: var(--brand); }
+.p2x-btn:disabled { opacity: 0.5; cursor: default; }
+.p2x-btn--primary { background: var(--brand); color: #fff; border-color: var(--brand); }
+.p2x-btn--primary:hover:not(:disabled) { background: var(--brand-strong); color: #fff; }
+.p2x-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.p2x-table th { text-align: left; font-weight: 600; color: var(--text-secondary); border-bottom: 1px solid var(--border-strong); padding: 4px 6px; }
+.p2x-table td { padding: 4px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.p2x-table td.num, .p2x-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.p2x-chip { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: var(--fs-2xs); font-weight: 600; }
+.p2x-chip--pass { background: #e1f5e1; color: var(--ok-text); }
+.p2x-chip--fail { background: var(--danger-soft); color: var(--danger-strong); }
+.p2x-chip--unknown, .p2x-chip--attest { background: var(--warn-soft); color: var(--warn-text); }
+.p2x-chip--file, .p2x-chip--derived { background: var(--brand-soft); color: var(--brand); }
+.p2x-chip--literature-recalled, .p2x-chip--assumption { background: var(--warn-soft); color: var(--warn-text); }
+.p2x-warn { background: var(--warn-soft); color: var(--warn-text); border-radius: var(--radius-sm); padding: 6px 9px; margin: 6px 0; font-size: var(--fs-sm); }
+.p2x-error { background: var(--danger-soft); color: var(--danger-strong); border-radius: var(--radius-sm); padding: 6px 9px; margin: 6px 0; font-size: var(--fs-sm); }
+.p2x-kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.p2x-kpi { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
+.p2x-kpi .p2x-kpi-label { font-size: var(--fs-xs); color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.p2x-kpi .p2x-kpi-value { font-size: var(--fs-2xl); font-weight: 600; color: var(--text); margin-top: 2px; font-variant-numeric: tabular-nums; }
+.p2x-kpi .p2x-kpi-sub { font-size: var(--fs-xs); color: var(--muted); }
+.p2x-chart { width: 100%; height: 300px; }
+.p2x-chart--tall { height: 360px; }
+.p2x-params td input { width: 120px; text-align: right; }
+.p2x-src { color: var(--muted); font-size: var(--fs-xs); }
+.p2x-gens { max-height: 170px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px 8px; }
+.p2x-gens label { display: flex; gap: 6px; align-items: center; font-size: var(--fs-sm); padding: 1px 0; }

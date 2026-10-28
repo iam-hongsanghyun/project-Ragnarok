@@ -182,6 +182,160 @@ def build_company_view() -> pypsa.Network:
     return n
 
 
+# ── Training course examples (modules 16 and 17) ────────────────────────────
+#
+# Authored here rather than by hand so the numbers the lessons state can be
+# regenerated: ``make_examples training_m16 training_m16_start training_m17 ...``.
+# Every figure the lessons quote is pinned in tests/test_training_checkpoints.py.
+
+PATHWAY_PERIODS = (2030, 2040, 2050)
+#: Years each period stands for, and the discount rate the objective weights are built from.
+PATHWAY_YEARS = 10
+PATHWAY_DISCOUNT = 0.05
+#: Emission caps in tCO2 PER PERIOD (annual tonnes x PATHWAY_YEARS): 1.0 / 0.4 / 0.03 MtCO2 a year.
+PATHWAY_CO2_CAPS = {2030: 10_000_000.0, 2040: 4_000_000.0, 2050: 300_000.0}
+
+
+def pathway_objective_weights(
+    periods: tuple[int, ...] = PATHWAY_PERIODS,
+    years: int = PATHWAY_YEARS,
+    rate: float = PATHWAY_DISCOUNT,
+) -> dict[int, float]:
+    r"""Objective weight of each investment period: the discounted year count it stands for.
+
+    Algorithm:
+        $$ w_p = \sum_{k=0}^{Y-1} (1+r)^{-(p - p_0 + k)} $$
+        ASCII: w_p = sum_{k=0..Y-1} (1+r)^-(p - p0 + k)
+        p: period label (calendar year); p_0: first period (base year of the present
+        value); Y: years the period stands for (years); r: discount rate (1/year).
+    """
+    base = periods[0]
+    return {p: sum((1.0 + rate) ** -(p - base + k) for k in range(years)) for p in periods}
+
+
+def build_pathway(with_caps: bool = False) -> pypsa.Network:
+    """Single-bus system over three investment periods (2030 / 2040 / 2050).
+
+    Each period is one representative day (24 hourly snapshots) standing for a
+    year: ``objective`` and ``generators`` weights of 365, ``stores`` weight 1 so
+    the battery's state of charge still integrates hours. Coal retires through
+    ``build_year`` + ``lifetime``; wind, solar and battery are offered as one
+    vintage per period at falling overnight costs; demand grows 20% a decade.
+    ``with_caps`` adds one ``primary_energy`` CO2 cap per period.
+    """
+    n = pypsa.Network()
+    n.name = "Multi-year pathway"
+    hours = 24
+    stamps = [
+        (p, pd.Timestamp(year=p, month=6, day=1) + pd.Timedelta(hours=h))
+        for p in PATHWAY_PERIODS for h in range(hours)
+    ]
+    n.set_snapshots(pd.MultiIndex.from_tuples(stamps, names=["period", "timestep"]))
+    n.investment_periods = list(PATHWAY_PERIODS)
+    n.snapshot_weightings["objective"] = 365.0
+    n.snapshot_weightings["generators"] = 365.0
+    n.snapshot_weightings["stores"] = 1.0
+    for name, co2 in (("AC", 0.0), ("coal", 0.34), ("gas", 0.20), ("wind", 0.0), ("solar", 0.0), ("battery", 0.0)):
+        n.add("Carrier", name, co2_emissions=co2)
+    n.add("Bus", "grid", carrier="AC", v_nom=380, x=127.0, y=37.5)
+
+    h = np.arange(hours)
+    solar = np.round(np.clip(np.sin((h - 6) / 12 * np.pi), 0, 1) * 0.9, 4)
+    wind = np.round(0.35 + 0.15 * np.cos((h - 3) / 24 * 2 * np.pi), 4)
+    shape = np.round(0.70 + 0.30 * np.exp(-(((h - 19) / 3.0) ** 2)) + 0.15 * np.exp(-(((h - 9) / 3.0) ** 2)), 4)
+    peak = {2030: 200.0, 2040: 240.0, 2050: 280.0}
+    load = pd.Series(0.0, index=n.snapshots)
+    for p in PATHWAY_PERIODS:
+        load.loc[p] = peak[p] * shape
+    n.add("Load", "demand", bus="grid", p_set=load)
+
+    n.add("Generator", "coal_old", bus="grid", carrier="coal", p_nom=150, marginal_cost=20,
+          efficiency=0.4, build_year=1985, lifetime=50)
+    n.add("Generator", "coal_new", bus="grid", carrier="coal", p_nom=150, marginal_cost=20,
+          efficiency=0.4, build_year=2000, lifetime=45)
+    n.add("Generator", "gas_ccgt", bus="grid", carrier="gas", p_nom=150, marginal_cost=55,
+          efficiency=0.5, build_year=2010, lifetime=45)
+    wind_cost = {2030: 1_600_000, 2040: 1_300_000, 2050: 1_000_000}
+    solar_cost = {2030: 900_000, 2040: 650_000, 2050: 450_000}
+    batt_cost = {2030: 500_000, 2040: 350_000, 2050: 250_000}
+    for p in PATHWAY_PERIODS:
+        n.add("Generator", f"wind_{p}", bus="grid", carrier="wind", p_nom_extendable=True, p_nom_max=200,
+              capital_cost=wind_cost[p], lifetime=25, build_year=p, p_max_pu=np.tile(wind, len(PATHWAY_PERIODS)))
+        n.add("Generator", f"solar_{p}", bus="grid", carrier="solar", p_nom_extendable=True, p_nom_max=250,
+              capital_cost=solar_cost[p], lifetime=25, build_year=p, p_max_pu=np.tile(solar, len(PATHWAY_PERIODS)))
+        n.add("StorageUnit", f"batt_{p}", bus="grid", carrier="battery", p_nom_extendable=True, p_nom_max=100,
+              max_hours=4, efficiency_store=0.92, efficiency_dispatch=0.92, cyclic_state_of_charge=True,
+              capital_cost=batt_cost[p], lifetime=15, build_year=p)
+    if with_caps:
+        for p, tonnes in PATHWAY_CO2_CAPS.items():
+            n.add("GlobalConstraint", f"co2_cap_{p}", type="primary_energy", carrier_attribute="co2_emissions",
+                  sense="<=", constant=tonnes, investment_period=p)
+    return n
+
+
+def tag_pathway_settings(model: dict) -> None:
+    """Carry the Settings -> Multi-year planning table the module has the learner type.
+
+    Written the way the app writes it (``RAGNAROK_Pathway`` / ``RAGNAROK_PathwayPeriods``),
+    so loading the finished checkpoint also restores the pathway settings.
+    """
+    weights = pathway_objective_weights()
+    model["RAGNAROK_Pathway"] = [{
+        "enabled": True, "planningMode": "pathway",
+        "snapshotMappingMode": "explicit_period_column", "selectedPeriod": PATHWAY_PERIODS[0],
+    }]
+    model["RAGNAROK_PathwayPeriods"] = [
+        {"period": p, "objectiveWeight": round(weights[p], 4), "yearsWeight": PATHWAY_YEARS}
+        for p in PATHWAY_PERIODS
+    ]
+
+
+# Module 17 — a solar-heavy single bus over three days, the middle one overcast.
+BESS_DAYS = 3
+BESS_SUN_DAYS = (1.0, 0.45, 0.9)
+
+
+def build_bess_system(battery: str = "none") -> pypsa.Network:
+    """Solar-heavy single bus for the battery module: midday surplus, an evening peak.
+
+    700 MW of solar against a 393 MW evening peak; a 300 MW CCGT (80 per MWh) and a
+    200 MW peaker (140 per MWh) cover what solar cannot. ``battery``: ``"none"`` (the
+    start of module 17), ``"unit"`` (the finished module: a 100 MW / 4 h StorageUnit at
+    0.95 each way) or ``"store"`` (a Store + two Links whose power and energy are
+    sized independently — the step 10 comparison).
+    """
+    hours = 24 * BESS_DAYS
+    n = pypsa.Network()
+    n.name = "Solar-heavy system" + ("" if battery == "none" else f" + battery ({battery})")
+    n.set_snapshots(pd.date_range("2030-06-01", periods=hours, freq="h"))
+    for name, co2 in (("AC", 0.0), ("gas", 0.20), ("solar", 0.0), ("battery", 0.0)):
+        n.add("Carrier", name, co2_emissions=co2)
+    n.add("Bus", "grid", carrier="AC", v_nom=110, x=127.0, y=37.5)
+    h = np.arange(hours) % 24
+    day = np.arange(hours) // 24
+    sun = np.round(np.clip(np.sin((h - 6) / 12 * np.pi), 0, 1) * np.array(BESS_SUN_DAYS)[day] * 0.9, 4)
+    shape = np.round(0.55 + 0.45 * np.exp(-(((h - 19.5) / 2.5) ** 2)) + 0.10 * np.exp(-(((h - 8) / 2.0) ** 2)), 4)
+    n.add("Generator", "solar", bus="grid", carrier="solar", p_nom=700, marginal_cost=0.0, p_max_pu=sun)
+    n.add("Generator", "gas_ccgt", bus="grid", carrier="gas", p_nom=300, marginal_cost=80, efficiency=0.5)
+    n.add("Generator", "gas_peaker", bus="grid", carrier="gas", p_nom=200, marginal_cost=140, efficiency=0.35)
+    n.add("Load", "demand", bus="grid", p_set=400.0 * shape)
+    if battery == "unit":
+        n.add("StorageUnit", "batt", bus="grid", carrier="battery", p_nom=100, max_hours=4,
+              efficiency_store=0.95, efficiency_dispatch=0.95, standing_loss=0.0,
+              cyclic_state_of_charge=True)
+    elif battery == "store":
+        # Overnight costs per MW / MWh; Ragnarok annuitises them and pro-rates to the 72 h window.
+        n.add("Bus", "batt_bus", carrier="battery", v_nom=0.0, x=127.0, y=37.6)
+        n.add("Store", "batt_store", bus="batt_bus", carrier="battery", e_nom_extendable=True, e_nom_max=3200,
+              e_cyclic=True, capital_cost=200_000, lifetime=15)
+        n.add("Link", "batt_charge", bus0="grid", bus1="batt_bus", carrier="battery", efficiency=0.95,
+              p_nom_extendable=True, p_nom_max=400, capital_cost=100_000, lifetime=15)
+        n.add("Link", "batt_discharge", bus0="batt_bus", bus1="grid", carrier="battery", efficiency=0.95,
+              p_nom_extendable=True, p_nom_max=400, capital_cost=100_000, lifetime=15)
+    return n
+
+
+
 EXAMPLES: list[Example] = [
     Example(
         id="three_bus",
@@ -213,13 +367,58 @@ EXAMPLES: list[Example] = [
         build=build_company_view,
         tag=tag_company_owners,
     ),
+    Example(
+        id="training_m16_start",
+        label="Training: module 16 start (a three-period system)",
+        description="Module 16's starting model: one bus, three investment periods (2030 / 2040 / 2050) each a representative day "
+                    "standing for a year, two coal units that retire, a gas unit, and wind / solar / battery offered as one vintage per "
+                    "period at falling cost. The snapshots carry a period column. Nothing is configured yet: no pathway settings, no CO2 cap.",
+        order=102,
+        build=build_pathway,
+    ),
+    Example(
+        id="training_m16",
+        label="Training: module 16 model (end of module)",
+        description="Module 16 finished: the three-period system with the Settings -> Multi-year planning table filled in "
+                    "(objective weights 8.1078 / 4.9775 / 3.0558, 10 years each, 5% discount rate) and a CO2 cap per period "
+                    "(10 / 4 / 0.3 MtCO2 per period, i.e. 1.0 / 0.4 / 0.03 Mt a year).",
+        order=103,
+        build=lambda: build_pathway(with_caps=True),
+        tag=tag_pathway_settings,
+    ),
+    Example(
+        id="training_m17_start",
+        label="Training: module 17 start (a solar-heavy system)",
+        description="Module 17's starting model: 700 MW of solar against a 393 MW evening peak over three days (the middle one overcast), "
+                    "a 300 MW CCGT at 80 and a 200 MW peaker at 140. No battery yet.",
+        order=104,
+        build=lambda: build_bess_system("none"),
+    ),
+    Example(
+        id="training_m17",
+        label="Training: module 17 model (end of module)",
+        description="Module 17 finished: the solar-heavy system with a 100 MW / 4 h battery at 0.95 charging and 0.95 discharging "
+                    "efficiency, no standing loss and a cyclic state of charge.",
+        order=105,
+        build=lambda: build_bess_system("unit"),
+    ),
+    Example(
+        id="training_m17_store",
+        label="Training: module 17 Store + Link battery (step 10)",
+        description="The solar-heavy system with the battery written as a Store and two Links, so its charging power, discharging "
+                    "power and energy capacity are three independent decisions. Capital costs are overnight; the module's step 10 sizes it.",
+        order=106,
+        build=lambda: build_bess_system("store"),
+    ),
 ]
 
 
 def author(ex: Example) -> None:
     n = ex.build()
     probe = n.copy()
-    probe.optimize(solver_name="highs", include_objective_constant=False)
+    # A multi-period example must be probed as one, or PyPSA refuses the (period, timestep) index.
+    probe.optimize(solver_name="highs", include_objective_constant=False,
+                   multi_investment_periods=bool(getattr(probe, "has_investment_periods", False)))
     assert probe.objective is not None and np.isfinite(probe.objective), f"{ex.id} did not solve"
 
     model = _network_to_model_json(n)

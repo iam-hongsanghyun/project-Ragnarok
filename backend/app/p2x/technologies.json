@@ -1,0 +1,1355 @@
+{
+  "schema": 1,
+  "title": "Ragnarok P2X technology defaults",
+  "basis": {
+    "currency": "EUR",
+    "costYear": 2025,
+    "technologyYear": 2030,
+    "priceIndex": {
+      "2020->2025": 1.2573346
+    },
+    "priceIndexNote": "EUR2020 -> EUR2025 factor taken from the ratio of costs_2030.csv ('electrolysis small' investment) to the DEA sheet '86 AEC 10 MW' 2030 value; the technology-data repository applies the same factor to every DEA 2020-price entry."
+  },
+  "sources": {
+    "technology-data": {
+      "repository": "https://github.com/PyPSA/technology-data",
+      "version": "v0.15.0",
+      "commit": "07e43575c7996a988c60964d00772376ab9bd10c",
+      "release": "2026-06-28",
+      "files": [
+        "outputs/costs_2030.csv",
+        "inputs/data_sheets_for_renewable_fuels.xlsx"
+      ]
+    },
+    "dea": "Danish Energy Agency, Technology Data for Renewable Fuels (as redistributed in the technology-data inputs folder above)"
+  },
+  "constants": {
+    "h2_lhv_kwh_per_kg": {
+      "value": 33.33,
+      "unit": "kWh/kg",
+      "source": "task specification"
+    },
+    "nh3_lhv_kwh_per_kg": {
+      "value": 5.17,
+      "unit": "kWh/kg",
+      "source": "task specification"
+    },
+    "meoh_lhv_kwh_per_kg": {
+      "value": 5.54,
+      "unit": "kWh/kg",
+      "source": "task specification"
+    },
+    "efuel_lhv_kwh_per_kg": {
+      "value": 11.94,
+      "unit": "kWh/kg",
+      "source": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv, description of 'methanol-to-kerosene' (kerosene LHV 11.94 kWh/kg, Concawe 2022)"
+    },
+    "meoh_density_t_per_m3": {
+      "value": 0.79,
+      "unit": "t/m3",
+      "source": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/data_sheets_for_renewable_fuels.xlsx (Danish Energy Agency, Technology Data for Renewable Fuels), sheet '98 Methanol from hydrogen', row 32"
+    },
+    "efuel_density_t_per_m3": {
+      "value": 0.8,
+      "unit": "t/m3",
+      "source": "typical Jet A-1 / FT kerosene density, recalled, NOT verified (verified=literature-recalled)"
+    },
+    "h2o_stoichiometric_kg_per_kg_h2": {
+      "value": 8.94,
+      "unit": "kg/kg",
+      "source": "2 H2 + O2 -> 2 H2O molar masses (18.015/2.016)"
+    },
+    "hours_per_year": {
+      "value": 8760,
+      "unit": "h",
+      "source": "calendar"
+    }
+  },
+  "technologies": {
+    "electrolyser_aec": {
+      "label": "Alkaline electrolyser (AEC), 100 MW plant, 2030",
+      "parameters": {
+        "specific_energy": {
+          "value": 53.565843,
+          "unit": "kWh_el/kg_H2",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/data_sheets_for_renewable_fuels.xlsx (Danish Energy Agency, Technology Data for Renewable Fuels)",
+            "locator": "sheet '86 AEC 100 MW', row 11 (electricity consumption stack+BOP level), 2030 column",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file",
+          "note": "Primary efficiency input. LHV efficiency = 33.33 / specific_energy."
+        },
+        "capex": {
+          "value": 691.534046,
+          "unit": "EUR/kW_el",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/data_sheets_for_renewable_fuels.xlsx (Danish Energy Agency, Technology Data for Renewable Fuels)",
+            "locator": "sheet '86 AEC 100 MW', row 26 (specific investment, total input_e), 2030 column",
+            "year": 2030
+          },
+          "costYear": 2025,
+          "currency": "EUR",
+          "verified": "file",
+          "rawValue": 550,
+          "rawUnit": "EUR/kW_el",
+          "rawCostYear": 2020,
+          "priceIndex": 1.2573346
+        },
+        "fom": {
+          "value": 4.0,
+          "unit": "%/year of capex",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/data_sheets_for_renewable_fuels.xlsx (Danish Energy Agency, Technology Data for Renewable Fuels)",
+            "locator": "sheet '86 AEC 100 MW', row 36 (fixed O&M), 2030 column",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file",
+          "note": "DEA note S: stack replacement costs are NOT included in FOM."
+        },
+        "lifetime": {
+          "value": 25.0,
+          "unit": "years",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/data_sheets_for_renewable_fuels.xlsx (Danish Energy Agency, Technology Data for Renewable Fuels)",
+            "locator": "sheet '86 AEC 100 MW', row 22 (technical lifetime), 2030 column",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "stack_lifetime_hours": {
+          "value": 92500.0,
+          "unit": "h",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/data_sheets_for_renewable_fuels.xlsx (Danish Energy Agency, Technology Data for Renewable Fuels)",
+            "locator": "sheet '86 AEC 100 MW', row 23 (frequency of stack replacement), 2030 column",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "stack_capex": {
+          "value": 145.159019,
+          "unit": "EUR/kW_el",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/data_sheets_for_renewable_fuels.xlsx (Danish Energy Agency, Technology Data for Renewable Fuels)",
+            "locator": "sheet '86 AEC 100 MW', row 27 (hereof electrolyser stack), 2030 column",
+            "year": 2030
+          },
+          "costYear": 2025,
+          "currency": "EUR",
+          "verified": "file",
+          "rawValue": 115.44979,
+          "rawUnit": "EUR/kW_el",
+          "rawCostYear": 2020,
+          "priceIndex": 1.2573346
+        },
+        "water_use": {
+          "value": 185.169748,
+          "unit": "kg_H2O/MWh_el",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/data_sheets_for_renewable_fuels.xlsx (Danish Energy Agency, Technology Data for Renewable Fuels)",
+            "locator": "sheet '86 AEC 100 MW', row 12 (ultrapure water for electrolysis), 2030 column",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "forced_outage": {
+          "value": 3.0,
+          "unit": "%",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/data_sheets_for_renewable_fuels.xlsx (Danish Energy Agency, Technology Data for Renewable Fuels)",
+            "locator": "sheet '86 AEC 100 MW', row 20 (forced outage), 2030 column",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "planned_outage": {
+          "value": 11.0,
+          "unit": "days/year",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/data_sheets_for_renewable_fuels.xlsx (Danish Energy Agency, Technology Data for Renewable Fuels)",
+            "locator": "sheet '86 AEC 100 MW', row 21 (planned outage), 2030 column",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "availability": {
+          "value": 0.939863,
+          "unit": "per unit",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/data_sheets_for_renewable_fuels.xlsx (Danish Energy Agency, Technology Data for Renewable Fuels)",
+            "locator": "derived: 1 - forced outage - planned outage / 365 ('86 AEC 100 MW' rows 20-21)",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "derived"
+        },
+        "min_load": {
+          "value": 15.0,
+          "unit": "% of nominal input",
+          "source": {
+            "document": "Buttler & Spliethoff (2018), Renewable and Sustainable Energy Reviews 82, 2440-2454, doi:10.1016/j.rser.2017.09.003",
+            "locator": "Table of electrolyser technologies, partial-load range (alkaline)",
+            "year": 2018
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "literature-recalled",
+          "note": "Recalled from the literature, NOT re-verified in this session. Applied only when committable (MIP) is requested."
+        }
+      },
+      "notes": "DEA 2030 column of the 100 MW AEC sheet. Prices EUR2020 in the sheet, converted to EUR2025 with the technology-data v0.15.0 price index."
+    },
+    "electrolyser_pem": {
+      "label": "PEM electrolyser (PEMEC), 100 MW plant, 2030",
+      "parameters": {
+        "specific_energy": {
+          "value": 56.92491,
+          "unit": "kWh_el/kg_H2",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/data_sheets_for_renewable_fuels.xlsx (Danish Energy Agency, Technology Data for Renewable Fuels)",
+            "locator": "sheet '86 PEMEC 100 MW', row 11 (electricity consumption stack+BOP level), 2030 column",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file",
+          "note": "Primary efficiency input. LHV efficiency = 33.33 / specific_energy."
+        },
+        "capex": {
+          "value": 817.267509,
+          "unit": "EUR/kW_el",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/data_sheets_for_renewable_fuels.xlsx (Danish Energy Agency, Technology Data for Renewable Fuels)",
+            "locator": "sheet '86 PEMEC 100 MW', row 26 (specific investment, total input_e), 2030 column",
+            "year": 2030
+          },
+          "costYear": 2025,
+          "currency": "EUR",
+          "verified": "file",
+          "rawValue": 650,
+          "rawUnit": "EUR/kW_el",
+          "rawCostYear": 2020,
+          "priceIndex": 1.2573346
+        },
+        "fom": {
+          "value": 2.0,
+          "unit": "%/year of capex",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/data_sheets_for_renewable_fuels.xlsx (Danish Energy Agency, Technology Data for Renewable Fuels)",
+            "locator": "sheet '86 PEMEC 100 MW', row 36 (fixed O&M), 2030 column",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file",
+          "note": "DEA note S: stack replacement costs are NOT included in FOM."
+        },
+        "lifetime": {
+          "value": 25.0,
+          "unit": "years",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/data_sheets_for_renewable_fuels.xlsx (Danish Energy Agency, Technology Data for Renewable Fuels)",
+            "locator": "sheet '86 PEMEC 100 MW', row 22 (technical lifetime), 2030 column",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "stack_lifetime_hours": {
+          "value": 77500.0,
+          "unit": "h",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/data_sheets_for_renewable_fuels.xlsx (Danish Energy Agency, Technology Data for Renewable Fuels)",
+            "locator": "sheet '86 PEMEC 100 MW', row 23 (frequency of stack replacement), 2030 column",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "stack_capex": {
+          "value": 279.328288,
+          "unit": "EUR/kW_el",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/data_sheets_for_renewable_fuels.xlsx (Danish Energy Agency, Technology Data for Renewable Fuels)",
+            "locator": "sheet '86 PEMEC 100 MW', row 27 (hereof electrolyser stack), 2030 column",
+            "year": 2030
+          },
+          "costYear": 2025,
+          "currency": "EUR",
+          "verified": "file",
+          "rawValue": 222.159067,
+          "rawUnit": "EUR/kW_el",
+          "rawCostYear": 2020,
+          "priceIndex": 1.2573346
+        },
+        "water_use": {
+          "value": 177.740971,
+          "unit": "kg_H2O/MWh_el",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/data_sheets_for_renewable_fuels.xlsx (Danish Energy Agency, Technology Data for Renewable Fuels)",
+            "locator": "sheet '86 PEMEC 100 MW', row 12 (ultrapure water for electrolysis), 2030 column",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "forced_outage": {
+          "value": 3.0,
+          "unit": "%",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/data_sheets_for_renewable_fuels.xlsx (Danish Energy Agency, Technology Data for Renewable Fuels)",
+            "locator": "sheet '86 PEMEC 100 MW', row 20 (forced outage), 2030 column",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "planned_outage": {
+          "value": 11.0,
+          "unit": "days/year",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/data_sheets_for_renewable_fuels.xlsx (Danish Energy Agency, Technology Data for Renewable Fuels)",
+            "locator": "sheet '86 PEMEC 100 MW', row 21 (planned outage), 2030 column",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "availability": {
+          "value": 0.939863,
+          "unit": "per unit",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/data_sheets_for_renewable_fuels.xlsx (Danish Energy Agency, Technology Data for Renewable Fuels)",
+            "locator": "derived: 1 - forced outage - planned outage / 365 ('86 PEMEC 100 MW' rows 20-21)",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "derived"
+        },
+        "min_load": {
+          "value": 5.0,
+          "unit": "% of nominal input",
+          "source": {
+            "document": "Buttler & Spliethoff (2018), Renewable and Sustainable Energy Reviews 82, 2440-2454, doi:10.1016/j.rser.2017.09.003",
+            "locator": "Table of electrolyser technologies, partial-load range (PEM)",
+            "year": 2018
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "literature-recalled",
+          "note": "Recalled from the literature, NOT re-verified in this session. Applied only when committable (MIP) is requested."
+        }
+      },
+      "notes": "DEA 2030 column of the 100 MW PEMEC sheet. Prices EUR2020 in the sheet, converted to EUR2025 with the technology-data v0.15.0 price index."
+    },
+    "h2_compressor": {
+      "label": "H2 storage compressor",
+      "parameters": {
+        "specific_energy_el": {
+          "value": 0.05,
+          "unit": "MWh_el/MWh_H2",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'hydrogen storage compressor' / 'compression-electricity-input'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file",
+          "note": "1.707 kWh/kg_H2 (CSV description)."
+        },
+        "capex": {
+          "value": 110.2557,
+          "unit": "EUR/kW_H2",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'hydrogen storage compressor' / 'investment'",
+            "year": 2030
+          },
+          "costYear": 2025,
+          "currency": "EUR",
+          "verified": "file"
+        },
+        "fom": {
+          "value": 4.0,
+          "unit": "%/year",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'hydrogen storage compressor' / 'FOM'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "lifetime": {
+          "value": 15.0,
+          "unit": "years",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'hydrogen storage compressor' / 'lifetime'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        }
+      }
+    },
+    "h2_storage_tank": {
+      "label": "Compressed H2 tank incl. compressor (DEA)",
+      "parameters": {
+        "capex": {
+          "value": 60.0469,
+          "unit": "EUR/kWh_H2",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'hydrogen storage tank type 1 including compressor' / 'investment'",
+            "year": 2030
+          },
+          "costYear": 2025,
+          "currency": "EUR",
+          "verified": "file"
+        },
+        "fom": {
+          "value": 1.1133,
+          "unit": "%/year",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'hydrogen storage tank type 1 including compressor' / 'FOM'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "lifetime": {
+          "value": 30.0,
+          "unit": "years",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'hydrogen storage tank type 1 including compressor' / 'lifetime'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        }
+      },
+      "notes": "Compressor cost is inside the tank price: use when no explicit compressor energy penalty is wanted."
+    },
+    "h2_storage_tank_bare": {
+      "label": "Compressed H2 tank type 1, excluding compressor (Stoeckl et al.)",
+      "parameters": {
+        "capex": {
+          "value": 16.974,
+          "unit": "EUR/kWh_H2",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'hydrogen storage tank type 1' / 'investment'",
+            "year": 2030
+          },
+          "costYear": 2025,
+          "currency": "EUR",
+          "verified": "file"
+        },
+        "fom": {
+          "value": 2.0,
+          "unit": "%/year",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'hydrogen storage tank type 1' / 'FOM'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "lifetime": {
+          "value": 20.0,
+          "unit": "years",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'hydrogen storage tank type 1' / 'lifetime'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        }
+      },
+      "notes": "Pair with h2_compressor when the compressor energy penalty is switched on."
+    },
+    "h2_storage_cavern": {
+      "label": "Salt cavern H2 storage (DEA)",
+      "parameters": {
+        "capex": {
+          "value": 2.6741,
+          "unit": "EUR/kWh_H2",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'hydrogen storage underground' / 'investment'",
+            "year": 2030
+          },
+          "costYear": 2025,
+          "currency": "EUR",
+          "verified": "file"
+        },
+        "fom": {
+          "value": 0.0,
+          "unit": "%/year",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'hydrogen storage underground' / 'FOM'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "lifetime": {
+          "value": 100.0,
+          "unit": "years",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'hydrogen storage underground' / 'lifetime'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        }
+      },
+      "notes": "Geology-dependent; one cheap site-specific store. Pair with h2_compressor for the compression energy."
+    },
+    "asu": {
+      "label": "Air separation unit (N2 for Haber-Bosch)",
+      "parameters": {
+        "specific_energy_el": {
+          "value": 0.25,
+          "unit": "MWh_el/t_N2",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'air separation unit' / 'electricity-input'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "capex": {
+          "value": 1035947.761,
+          "unit": "EUR/(t_N2/h)",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'air separation unit' / 'investment'",
+            "year": 2030
+          },
+          "costYear": 2025,
+          "currency": "EUR",
+          "verified": "file"
+        },
+        "fom": {
+          "value": 3.0,
+          "unit": "%/year",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'air separation unit' / 'FOM'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "lifetime": {
+          "value": 30.0,
+          "unit": "years",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'air separation unit' / 'lifetime'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        }
+      }
+    },
+    "haber_bosch": {
+      "label": "Haber-Bosch ammonia synthesis (green NH3)",
+      "parameters": {
+        "h2_input": {
+          "value": 1.1484,
+          "unit": "MWh_H2/MWh_NH3",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'Haber-Bosch' / 'hydrogen-input'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file",
+          "note": "LHV basis. 178 kg_H2 per t_NH3."
+        },
+        "el_input": {
+          "value": 0.2473,
+          "unit": "MWh_el/MWh_NH3",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'Haber-Bosch' / 'electricity-input'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file",
+          "note": "Synthesis-loop compressors only; ASU electricity is the separate asu entry."
+        },
+        "n2_input": {
+          "value": 0.1597,
+          "unit": "t_N2/MWh_NH3",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'Haber-Bosch' / 'nitrogen-input'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "capex": {
+          "value": 1842.9888,
+          "unit": "EUR/kW_NH3",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'Haber-Bosch' / 'investment'",
+            "year": 2030
+          },
+          "costYear": 2025,
+          "currency": "EUR",
+          "verified": "file"
+        },
+        "fom": {
+          "value": 3.0,
+          "unit": "%/year",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'Haber-Bosch' / 'FOM'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "vom": {
+          "value": 0.0284,
+          "unit": "EUR/MWh_NH3",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'Haber-Bosch' / 'VOM'",
+            "year": 2030
+          },
+          "costYear": 2025,
+          "currency": "EUR",
+          "verified": "file"
+        },
+        "lifetime": {
+          "value": 30.0,
+          "unit": "years",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'Haber-Bosch' / 'lifetime'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "heat_out": {
+          "value": 0.146,
+          "unit": "per unit",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'Haber-Bosch' / 'efficiency-heat'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file",
+          "note": "Recoverable heat is NOT credited by the chain template."
+        },
+        "min_load": {
+          "value": 20.0,
+          "unit": "% of nominal",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/data_sheets_for_renewable_fuels.xlsx (Danish Energy Agency, Technology Data for Renewable Fuels)",
+            "locator": "sheet '103 Hydrogen to Ammonia', row 19 (operation capacity '20-100%')",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        }
+      }
+    },
+    "methanolisation": {
+      "label": "Methanol synthesis from H2 + CO2",
+      "parameters": {
+        "h2_input": {
+          "value": 1.138,
+          "unit": "MWh_H2/MWh_MeOH",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'methanolisation' / 'hydrogen-input'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "co2_input": {
+          "value": 0.248,
+          "unit": "t_CO2/MWh_MeOH",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'methanolisation' / 'carbondioxide-input'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "el_input": {
+          "value": 0.271,
+          "unit": "MWh_e/MWh_MeOH",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'methanolisation' / 'electricity-input'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file",
+          "note": "DECHEMA (2017) value. The DEA sheet '98 Methanol from hydrogen' lists 0.1 MWh/t_MeOH (~0.018 MWh/MWh) and cites 0.5 MWh/t_MeOH from Haldor Topsoe; the technology-data CSV value is used."
+        },
+        "heat_out": {
+          "value": 0.1,
+          "unit": "MWh_th/MWh_MeOH",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'methanolisation' / 'heat-output'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file",
+          "note": "Not credited by the chain template."
+        },
+        "capex": {
+          "value": 1364.7451,
+          "unit": "EUR/kW_MeOH",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'methanolisation' / 'investment'",
+            "year": 2030
+          },
+          "costYear": 2025,
+          "currency": "EUR",
+          "verified": "file"
+        },
+        "fom": {
+          "value": 2.8,
+          "unit": "%/year",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'methanolisation' / 'FOM'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "lifetime": {
+          "value": 30.0,
+          "unit": "years",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'methanolisation' / 'lifetime'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        }
+      }
+    },
+    "fischer_tropsch": {
+      "label": "Fischer-Tropsch e-fuel (H2 + CO2 -> FT liquids / kerosene)",
+      "parameters": {
+        "h2_input": {
+          "value": 1.421,
+          "unit": "MWh_H2/MWh_FT",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'Fischer-Tropsch' / 'hydrogen-input'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "co2_input": {
+          "value": 0.326,
+          "unit": "t_CO2/MWh_FT",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'Fischer-Tropsch' / 'carbondioxide-input'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "el_input": {
+          "value": 0.007,
+          "unit": "MWh_el/MWh_FT",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'Fischer-Tropsch' / 'electricity-input'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "heat_out": {
+          "value": 0.2,
+          "unit": "per unit",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'Fischer-Tropsch' / 'efficiency-heat'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file",
+          "note": "District-heat output per MWh_FT; not credited."
+        },
+        "capex": {
+          "value": 2139.2794,
+          "unit": "EUR/kW_FT",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'Fischer-Tropsch' / 'investment'",
+            "year": 2030
+          },
+          "costYear": 2025,
+          "currency": "EUR",
+          "verified": "file"
+        },
+        "fom": {
+          "value": 6.35,
+          "unit": "%/year",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'Fischer-Tropsch' / 'FOM'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "vom": {
+          "value": 5.6156,
+          "unit": "EUR/MWh_FT",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'Fischer-Tropsch' / 'VOM'",
+            "year": 2030
+          },
+          "costYear": 2025,
+          "currency": "EUR",
+          "verified": "file"
+        },
+        "lifetime": {
+          "value": 25.0,
+          "unit": "years",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'Fischer-Tropsch' / 'lifetime'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        }
+      },
+      "notes": "Yield: 1 / h2_input = 0.704 MWh_LHV FT liquids per MWh_LHV H2 (DEA 102 Hydrogen to Jet, 2030). Methanol-to-kerosene (below) is catalogued as an alternative route and is not wired."
+    },
+    "methanol_to_kerosene": {
+      "label": "Methanol-to-kerosene (catalogued alternative, not wired)",
+      "parameters": {
+        "methanol_input": {
+          "value": 1.0764,
+          "unit": "MWh_MeOH/MWh_kerosene",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'methanol-to-kerosene' / 'methanol-input'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "h2_input": {
+          "value": 0.0279,
+          "unit": "MWh_H2/MWh_kerosene",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'methanol-to-kerosene' / 'hydrogen-input'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "capex": {
+          "value": 338223.0077,
+          "unit": "EUR/MW_kerosene",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'methanol-to-kerosene' / 'investment'",
+            "year": 2030
+          },
+          "costYear": 2025,
+          "currency": "EUR",
+          "verified": "file"
+        },
+        "fom": {
+          "value": 4.5,
+          "unit": "%/year",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'methanol-to-kerosene' / 'FOM'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "vom": {
+          "value": 1.6974,
+          "unit": "EUR/MWh_kerosene",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'methanol-to-kerosene' / 'VOM'",
+            "year": 2030
+          },
+          "costYear": 2025,
+          "currency": "EUR",
+          "verified": "file"
+        },
+        "lifetime": {
+          "value": 30.0,
+          "unit": "years",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'methanol-to-kerosene' / 'lifetime'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        }
+      }
+    },
+    "co2_dac": {
+      "label": "Direct air capture (low-temperature, DEA)",
+      "parameters": {
+        "el_input": {
+          "value": 0.4,
+          "unit": "MWh_el/t_CO2",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'direct air capture' / 'electricity-input'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "compression_el": {
+          "value": 0.15,
+          "unit": "MWh/tCO2",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'direct air capture' / 'compression-electricity-input'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "heat_input": {
+          "value": 1.6,
+          "unit": "MWh_th/t_CO2",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'direct air capture' / 'heat-input'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file",
+          "note": "Provided by air-sourced heat pumps in the technology-data model."
+        },
+        "heat_cop": {
+          "value": 3.0,
+          "unit": "per unit",
+          "source": {
+            "document": "Ragnarok default (assumption, no upstream source)",
+            "locator": "-",
+            "year": 2026
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "assumption",
+          "note": "COP of the heat pump that supplies the DAC heat. Ragnarok assumption; edit it."
+        },
+        "capex": {
+          "value": 7544007.6068,
+          "unit": "EUR/(t_CO2/h)",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'direct air capture' / 'investment'",
+            "year": 2030
+          },
+          "costYear": 2025,
+          "currency": "EUR",
+          "verified": "file"
+        },
+        "fom": {
+          "value": 4.95,
+          "unit": "%/year",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'direct air capture' / 'FOM'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "lifetime": {
+          "value": 20.0,
+          "unit": "years",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'direct air capture' / 'lifetime'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        }
+      }
+    },
+    "co2_point": {
+      "label": "Point-source CO2 capture (cement kiln post-combustion, DEA 401.c)",
+      "parameters": {
+        "el_input": {
+          "value": 0.022,
+          "unit": "MWh/tCO2",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'cement capture' / 'electricity-input'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "compression_el": {
+          "value": 0.085,
+          "unit": "MWh/tCO2",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'cement capture' / 'compression-electricity-input'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "heat_input": {
+          "value": 0.72,
+          "unit": "MWh/tCO2",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'cement capture' / 'heat-input'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "heat_cop": {
+          "value": 3.0,
+          "unit": "per unit",
+          "source": {
+            "document": "Ragnarok default (assumption, no upstream source)",
+            "locator": "-",
+            "year": 2026
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "assumption",
+          "note": "COP of the heat pump that supplies the capture heat. Ragnarok assumption; edit it. Use a very high COP to represent free waste heat."
+        },
+        "capex": {
+          "value": 3269069.963,
+          "unit": "EUR/(t_CO2/h)",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'cement capture' / 'investment'",
+            "year": 2030
+          },
+          "costYear": 2025,
+          "currency": "EUR",
+          "verified": "file"
+        },
+        "fom": {
+          "value": 3.0,
+          "unit": "%/year",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'cement capture' / 'FOM'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "vom": {
+          "value": 3.1433,
+          "unit": "EUR/tCO2",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'cement capture' / 'VOM'",
+            "year": 2030
+          },
+          "costYear": 2025,
+          "currency": "EUR",
+          "verified": "file"
+        },
+        "lifetime": {
+          "value": 25.0,
+          "unit": "years",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'cement capture' / 'lifetime'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        }
+      }
+    },
+    "nh3_storage": {
+      "label": "Liquid NH3 storage tank incl. liquefaction",
+      "parameters": {
+        "capex": {
+          "value": 211.8256,
+          "unit": "EUR/MWh_NH3",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'NH3 (l) storage tank incl. liquefaction' / 'investment'",
+            "year": 2030
+          },
+          "costYear": 2025,
+          "currency": "EUR",
+          "verified": "file"
+        },
+        "fom": {
+          "value": 2.0,
+          "unit": "%/year",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'NH3 (l) storage tank incl. liquefaction' / 'FOM'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "lifetime": {
+          "value": 20.0,
+          "unit": "years",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'NH3 (l) storage tank incl. liquefaction' / 'lifetime'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        }
+      }
+    },
+    "meoh_storage": {
+      "label": "Methanol product storage (liquid-product tank)",
+      "parameters": {
+        "capex_per_m3": {
+          "value": 218.4543,
+          "unit": "EUR/m3",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'General liquid hydrocarbon storage (product)' / 'investment'",
+            "year": 2030
+          },
+          "costYear": 2025,
+          "currency": "EUR",
+          "verified": "file"
+        },
+        "fom": {
+          "value": 6.25,
+          "unit": "%/year",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'General liquid hydrocarbon storage (product)' / 'FOM'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "lifetime": {
+          "value": 30.0,
+          "unit": "years",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'General liquid hydrocarbon storage (product)' / 'lifetime'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        }
+      },
+      "notes": "Per-MWh cost = capex_per_m3 / (density x LHV) using constants.meoh_density_t_per_m3 and constants.meoh_lhv_kwh_per_kg."
+    },
+    "efuel_storage": {
+      "label": "E-fuel (FT liquids) product storage",
+      "parameters": {
+        "capex_per_m3": {
+          "value": 218.4543,
+          "unit": "EUR/m3",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'General liquid hydrocarbon storage (product)' / 'investment'",
+            "year": 2030
+          },
+          "costYear": 2025,
+          "currency": "EUR",
+          "verified": "file"
+        },
+        "fom": {
+          "value": 6.25,
+          "unit": "%/year",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'General liquid hydrocarbon storage (product)' / 'FOM'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        },
+        "lifetime": {
+          "value": 30.0,
+          "unit": "years",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'General liquid hydrocarbon storage (product)' / 'lifetime'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        }
+      },
+      "notes": "Per-MWh cost = capex_per_m3 / (density x LHV) using the efuel constants."
+    },
+    "water": {
+      "label": "Process water (seawater RO desalination)",
+      "parameters": {
+        "supply_cost": {
+          "value": 0.7285,
+          "unit": "EUR/m3",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv (derived)",
+            "locator": "rows 'seawater desalination' investment 43,923.9463 EUR/(m3/h), FOM, lifetime, electricity-input 3.0348 kWh/m3; levelised at 5 %, 8000 full-load h, 50 EUR/MWh_el",
+            "year": 2030
+          },
+          "costYear": 2025,
+          "currency": "EUR",
+          "verified": "derived",
+          "note": "About 0.2 % of LCOH; kept so the cost waterfall shows it explicitly."
+        },
+        "desal_capex": {
+          "value": 43923.9463,
+          "unit": "EUR/(m3/h)",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'seawater desalination' / 'investment'",
+            "year": 2030
+          },
+          "costYear": 2025,
+          "currency": "EUR",
+          "verified": "file"
+        },
+        "desal_el": {
+          "value": 3.0348,
+          "unit": "kWh/m^3-H2O",
+          "source": {
+            "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+            "locator": "row 'seawater desalination' / 'electricity-input'",
+            "year": 2030
+          },
+          "costYear": null,
+          "currency": null,
+          "verified": "file"
+        }
+      }
+    }
+  },
+  "defaults": {
+    "discount_rate": {
+      "value": 0.05,
+      "unit": "per unit/year",
+      "source": "Ragnarok default; the same fallback as backend/app/routers/transforms.py:_DEFAULT_DISCOUNT_RATE. The UI passes Settings -> Discount rate instead."
+    }
+  }
+}

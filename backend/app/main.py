@@ -1031,6 +1031,15 @@ app.include_router(_physical_risk_router.router)
 from .routers import siting as _siting_router  # noqa: E402
 app.include_router(_siting_router.router)
 
+# P2X use-case surface (technologies, chain builder, RFNBO checks, results) - builds into the core model.
+from .routers import p2x as _p2x_router  # noqa: E402
+app.include_router(_p2x_router.router)
+# Build plants (picker: generator, BESS, CCGT, OCGT, gas + H2 co-firing, P2X chain): one endpoint per action.
+from .routers import plants as _plants_router  # noqa: E402
+app.include_router(_plants_router.router)
+from .routers import screening as _screening_router  # noqa: E402  (statistical site pre-screen)
+app.include_router(_screening_router.router)
+
 # Reports — perspective-based report documents (policy maker, investor, PPA
 # buyer, …) assembled from stored run analytics. Pure selection and framing of
 # what the run already carries; deterministic given the run, no AI involved.
@@ -1196,6 +1205,9 @@ def _resolve_payload_model(payload: RunPayload) -> RunPayload:
     # the config opts in; never raises.
     from . import physical_risk_uplift
     data["options"] = physical_risk_uplift.apply_physical_risk_uplift(data.get("options"))
+    # P2X: the RFNBO matching settings chosen in the P2X tab ride with a run that sets none itself.
+    from .p2x import config_store as _p2x_config
+    data["options"] = _p2x_config.apply_session_rfnbo(payload.sessionId, data.get("options"))
     return RunPayload(**data)
 
 

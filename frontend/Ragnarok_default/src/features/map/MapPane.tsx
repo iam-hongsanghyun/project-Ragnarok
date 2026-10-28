@@ -6,6 +6,7 @@ import { numberValue, stringValue, resolvedColor } from 'lib/utils/helpers';
 import { FitToBounds } from './FitToBounds';
 import { NoZoomAnimation } from './NoZoomAnimation';
 import { MapLegend } from './MapLegend';
+import { inPlant, plantMarkers } from 'lib/build/plants';
 
 type LayerKey = 'buses' | 'generators' | 'lines' | 'links' | 'transformers';
 
@@ -50,6 +51,7 @@ export function MapPane({ model, bounds, busIndex }: Props) {
   const uniqueCarriers = Array.from(
     new Set(model.generators.map((g) => stringValue(g.carrier)).filter(Boolean)),
   );
+  const markers = plantMarkers(model, busIndex);   // a plant is ONE marker; its components are not drawn separately
   const lineGeometries = model.lines
     .map((line) => {
       const bus0 = busIndex[stringValue(line.bus0)];
@@ -64,6 +66,7 @@ export function MapPane({ model, bounds, busIndex }: Props) {
     .filter(Boolean) as Array<{ name: string; positions: [number, number][]; sNom: number }>;
 
   const linkGeometries = model.links
+    .filter((link) => !inPlant(link))
     .map((link) => {
       const bus0 = busIndex[stringValue(link.bus0)];
       const bus1 = busIndex[stringValue(link.bus1)];
@@ -128,7 +131,7 @@ export function MapPane({ model, bounds, busIndex }: Props) {
           ))}
           {visibleLayers.buses && model.buses.map((bus, index) => {
             const coords = ownCoords(bus);
-            if (!coords) return null;
+            if (!coords || inPlant(bus)) return null;
             return (
               <CircleMarker
                 key={`${stringValue(bus.name)}-${index}`}
@@ -144,6 +147,7 @@ export function MapPane({ model, bounds, busIndex }: Props) {
             );
           })}
           {visibleLayers.generators && model.generators.map((generator, index) => {
+            if (inPlant(generator)) return null;
             const bus = busIndex[stringValue(generator.bus)];
             const coords = resolveCoords(generator, bus, 0.07);
             if (!coords) return null;
@@ -158,6 +162,13 @@ export function MapPane({ model, bounds, busIndex }: Props) {
               </CircleMarker>
             );
           })}
+          {visibleLayers.generators && markers.map((m) => (
+            <CircleMarker key={`plant-${m.plantId}`} center={m.coords} radius={9} pathOptions={{ color: '#7c3aed', weight: 3, fillColor: '#f5f3ff', fillOpacity: 0.95 }}>
+              <Tooltip>
+                <strong>{m.plantId}</strong> · {m.type ?? 'plant'}{m.capacityMwEl !== null ? ` · ${Math.round(m.capacityMwEl)} MW` : ''} · {m.componentCount} components
+              </Tooltip>
+            </CircleMarker>
+          ))}
         </MapContainer>
         <MapLegend carriers={uniqueCarriers} showLines />
         <div className="map-layer-controls">

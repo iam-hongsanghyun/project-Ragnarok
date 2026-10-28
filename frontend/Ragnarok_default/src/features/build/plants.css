@@ -1,0 +1,22 @@
+/* Build plants: the plant-type picker and the plant cards (Build -> Generators, Model tree). */
+.plant-picker, .plant-list { flex: 0 0 auto; border-top: 1px solid var(--border); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.plant-picker__title, .plant-list__title { margin: 0; font-size: var(--fs-md); font-weight: 600; }
+.plant-picker__hint, .plant-list__hint { margin: 0; font-size: var(--fs-sm); color: var(--text-muted, var(--muted)); }
+.plant-picker__field { display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-sm); }
+.plant-picker__field > span { color: var(--text-muted, var(--muted)); }
+.plant-picker__field--check { flex-direction: row; align-items: center; gap: 6px; }
+.plant-picker__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
+.plant-picker__adv > summary { cursor: pointer; font-size: var(--fs-sm); color: var(--text-muted, var(--muted)); margin-bottom: 6px; }
+.plant-picker__preview { margin: 0; font-size: var(--fs-sm); color: var(--text-muted, var(--muted)); font-style: italic; }
+.plant-picker__warn { margin: 0; font-size: var(--fs-sm); color: var(--warn, #b45309); }
+.plant-picker__error { margin: 0; font-size: var(--fs-sm); color: var(--danger, #b91c1c); }
+.plant-picker__actions { display: flex; gap: 8px; align-items: center; }
+.plant-picker textarea { font-family: var(--mono, monospace); font-size: var(--fs-sm); min-height: 56px; }
+.plant-card { border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; }
+.plant-card__head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.plant-card__toggle { background: none; border: 0; cursor: pointer; padding: 0 2px; color: inherit; font: inherit; }
+.plant-card__name { font-weight: 600; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plant-card__meta { font-size: var(--fs-sm); color: var(--text-muted, var(--muted)); order: 3; flex: 1 0 100%; padding-left: 22px; }
+.plant-card__components { margin: 0; padding-left: 18px; font-size: var(--fs-sm); display: flex; flex-direction: column; gap: 2px; }
+.plant-card__components code { font-size: inherit; }
+.plant-card__missing { color: var(--danger, #b91c1c); }

@@ -210,6 +210,20 @@ def _nonstandard_tags(scenario: dict[str, Any], options: dict[str, Any], result:
     return tags
 
 
+def pathway_flags(pathway_meta: dict[str, Any] | None) -> dict[str, Any]:
+    """Flat ``isPathway`` / ``pathwayPeriods`` of a run's meta: whether the run is a multi-investment-period (pathway) run
+    and which periods it has, so a results picker can offer them instead of a free number."""
+    enabled = bool(isinstance(pathway_meta, dict) and pathway_meta.get("enabled"))
+    periods = pathway_meta.get("periods") if enabled and isinstance(pathway_meta, dict) else None
+    clean: list[int] = []
+    for p in periods if isinstance(periods, list) else []:
+        try:
+            clean.append(int(p["period"] if isinstance(p, dict) else p))
+        except (TypeError, ValueError, KeyError):
+            continue
+    return {"isPathway": enabled, "pathwayPeriods": clean}
+
+
 def build_run_meta(name: str, bundle: dict[str, Any], size_bytes: int = 0) -> dict[str, Any]:
     """Compute the lightweight meta sidecar from a run bundle.
 
@@ -278,6 +292,7 @@ def build_run_meta(name: str, bundle: dict[str, Any], size_bytes: int = 0) -> di
         "summary": summary,
         "carrierMix": carrier_mix,
         "pathway": pathway_meta,
+        **pathway_flags(pathway_meta),
         "rolling": rolling_meta,
         "scenarioLabel": scenario_label,
         # History-card display fields (see HistoryView): scenario name, the
@@ -906,6 +921,8 @@ def list_runs() -> list[dict[str, Any]]:
                     meta = _kv_get(conn, "meta")
                 if isinstance(meta, dict) and meta.get("name"):
                     meta["xlsxReady"] = True  # the workbook is always derivable
+                    if "isPathway" not in meta:   # sidecar written before the flag existed
+                        meta.update(pathway_flags(meta.get("pathway")))
                     runs.append(meta)
                     seen.add(str(meta["name"]))
             except Exception:  # noqa: BLE001
@@ -917,6 +934,8 @@ def list_runs() -> list[dict[str, Any]]:
                 name = str(meta.get("name", ""))
                 if name and name not in seen:
                     meta["xlsxReady"] = bool(name)
+                    if "isPathway" not in meta:
+                        meta.update(pathway_flags(meta.get("pathway")))
                     runs.append(meta)
             except Exception:  # noqa: BLE001
                 logger.warning("Skipping unreadable run meta: %s", path.name)

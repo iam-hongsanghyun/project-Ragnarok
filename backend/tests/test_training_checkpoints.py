@@ -1337,6 +1337,720 @@ def test_module_15_the_study_clears_workbook_capacity(tmp_path: Path) -> None:
     assert wind_expanded["energyMWh"] < 300_000.0, "not the expanded fleet's 603,645 MWh"
 
 
+# ── Module 16 — the multi-year pathway ───────────────────────────────────────
+#
+# `training_m16_start` is three investment periods (2030 / 2040 / 2050), each ONE
+# representative day standing for a year: snapshot weights 365 on `objective` and
+# `generators`, 1 on `stores`. Every number the module states comes from solving it
+# through the app's own path with the Settings -> Multi-year planning table the
+# module has the learner type (objective weights = discounted years, years = 10).
+
+_M16_SCENARIO = {"carbonPrice": 0.0, "discountRate": 0.05}
+_M16_PERIODS = (2030, 2040, 2050)
+_M16_WEIGHTS = {2030: 8.1078, 2040: 4.9775, 2050: 3.0558}
+
+
+def _m16_options(weights: dict[int, float] | None = None, years: float = 10.0,
+                 price: dict[int, float] | None = None) -> dict:
+    options: dict = {
+        **OPTIONS,
+        "pathwayConfig": {
+            "enabled": True, "planningMode": "pathway",
+            "snapshotMappingMode": "explicit_period_column",
+            "periods": [
+                {"period": p, "objectiveWeight": (weights or _M16_WEIGHTS)[p], "yearsWeight": years}
+                for p in _M16_PERIODS
+            ],
+        },
+    }
+    if price:
+        options["carbonPriceSchedule"] = [{"year": y, "price": v} for y, v in price.items()]
+    return options
+
+
+def _m16_model(tmp_path: Path, example: str = "training_m16_start", *,
+               caps: dict[int, float] | None = None, coal_old_lifetime: float | None = None) -> dict:
+    model = {k: [dict(r) for r in v] for k, v in _model_from_example(example, tmp_path).items()}
+    if caps is not None:
+        model["global_constraints"] = [
+            {"name": f"co2_cap_{p}", "type": "primary_energy", "carrier_attribute": "co2_emissions",
+             "sense": "<=", "constant": c, "investment_period": p}
+            for p, c in caps.items()
+        ]
+    if coal_old_lifetime is not None:
+        for gen in model["generators"]:
+            if gen["name"] == "coal_old":
+                gen["lifetime"] = coal_old_lifetime
+    return model
+
+
+def _m16_solve(model: dict, options: dict):
+    n, _notes = build_network(model, _M16_SCENARIO, options)
+    n.optimize(solver_name="highs", multi_investment_periods=True, include_objective_constant=False)
+    return n
+
+
+def _m16_annual_emissions(n) -> dict[int, float]:
+    """tCO2 a year per period: sum_t w_t * p_t / eta * co2 (the `years` weight is NOT applied)."""
+    out: dict[int, float] = {}
+    level = n.snapshots.get_level_values("period")
+    for p in _M16_PERIODS:
+        snaps = n.snapshots[level == p]
+        weight = n.snapshot_weightings["generators"].loc[snaps]
+        total = 0.0
+        for g in n.generators.index:
+            factor = float(n.carriers.at[n.generators.at[g, "carrier"], "co2_emissions"])
+            total += (
+                float((n.generators_t.p.loc[snaps, g] * weight).sum())
+                / float(n.generators.at[g, "efficiency"]) * factor
+            )
+        out[p] = total
+    return out
+
+
+def _m16_builds(n) -> dict[str, float]:
+    """Optimal capacity (MW) of every vintage the optimiser actually built."""
+    out = {k: float(v) for k, v in n.generators.p_nom_opt.items() if k[-4:].isdigit() and v > 0.01}
+    out.update({k: float(v) for k, v in n.storage_units.p_nom_opt.items() if v > 0.01})
+    return out
+
+
+def test_module_16_objective_weights_are_discounted_years() -> None:
+    """Step 2's typed numbers: w_p = sum_{k<10} 1.05^-(p - 2030 + k)."""
+    from backend.scripts.make_examples import pathway_objective_weights
+
+    weights = pathway_objective_weights()
+    for period, typed in _M16_WEIGHTS.items():
+        assert weights[period] == pytest.approx(typed, abs=5e-5)
+    # Each decade is worth 1.05^-10 = 0.6139 of the one before: the discount factor, not 'a third each'.
+    assert weights[2040] / weights[2030] == pytest.approx(1.05 ** -10, rel=1e-9)
+    assert weights[2050] / weights[2040] == pytest.approx(1.05 ** -10, rel=1e-9)
+
+
+def test_module_16_checkpoint_carries_the_settings_the_module_types(tmp_path: Path) -> None:
+    """`training_m16` restores the pathway table and the three caps, so 'start from the finished model' works."""
+    model = _model_from_example("training_m16", tmp_path)
+    periods = {int(r["period"]): r for r in model["RAGNAROK_PathwayPeriods"]}
+    assert {p: r["objectiveWeight"] for p, r in periods.items()} == _M16_WEIGHTS
+    assert all(r["yearsWeight"] == 10 for r in periods.values())
+    assert model["RAGNAROK_Pathway"][0]["enabled"] is True
+    caps = {int(r["investment_period"]): float(r["constant"]) for r in model["global_constraints"]}
+    assert caps == {2030: 10_000_000.0, 2040: 4_000_000.0, 2050: 300_000.0}
+    # The start model has neither.
+    start = _model_from_example("training_m16_start", tmp_path)
+    assert "global_constraints" not in start and "RAGNAROK_PathwayPeriods" not in start
+    assert all("period" in row for row in start["snapshots"]), "the snapshots sheet carries the period column"
+
+
+def test_module_16_assets_become_active_and_retire_by_build_year_and_lifetime(tmp_path: Path) -> None:
+    """Step 3: active iff build_year <= period < build_year + lifetime."""
+    from backend.pypsa.results.pathway_periods import active_assets
+
+    n = _m16_solve(_m16_model(tmp_path), _m16_options())
+    active = {p: active_assets(n, "generators", p) for p in _M16_PERIODS}
+    assert [bool(active[p]["coal_old"]) for p in _M16_PERIODS] == [True, False, False]   # 1985 + 50 = 2035
+    assert [bool(active[p]["coal_new"]) for p in _M16_PERIODS] == [True, True, False]    # 2000 + 45 = 2045
+    assert [bool(active[p]["gas_ccgt"]) for p in _M16_PERIODS] == [True, True, True]     # 2010 + 45 = 2055
+    assert [bool(active[p]["wind_2040"]) for p in _M16_PERIODS] == [False, True, True]
+    assert [bool(active[p]["solar_2050"]) for p in _M16_PERIODS] == [False, False, True]
+
+
+def test_module_16_baseline_pathway_without_policy(tmp_path: Path) -> None:
+    """Step 4: nothing is built in 2030 — waiting is cheaper while the vintages get cheaper."""
+    n = _m16_solve(_m16_model(tmp_path), _m16_options())
+    assert float(n.objective) == pytest.approx(589_565_227.7, rel=1e-6)
+    builds = _m16_builds(n)
+    assert set(builds) == {"wind_2040", "solar_2040", "wind_2050", "solar_2050", "batt_2040", "batt_2050"}
+    assert builds["wind_2040"] == pytest.approx(183.39, abs=0.05)
+    assert builds["solar_2040"] == pytest.approx(7.60, abs=0.05)
+    assert builds["wind_2050"] == pytest.approx(200.0, abs=0.05)      # the p_nom_max
+    assert builds["solar_2050"] == pytest.approx(250.0, abs=0.05)     # the p_nom_max
+    assert builds["batt_2040"] == pytest.approx(39.57, abs=0.05)
+    assert builds["batt_2050"] == pytest.approx(100.0, abs=0.05)
+    annual = _m16_annual_emissions(n)
+    assert annual[2030] == pytest.approx(1_189_325.0, rel=1e-4)
+    assert annual[2040] == pytest.approx(967_293.0, rel=1e-4)
+    assert annual[2050] == pytest.approx(59_145.0, rel=1e-3)
+
+
+def test_module_16_period_views_mask_inactive_assets_and_weight_money(tmp_path: Path) -> None:
+    """Steps 5-6: the period selector. Energy is summed, money is x the period's objective weight."""
+    from backend.app import results_derived as rd
+    from backend.pypsa.results import run_pypsa
+    from backend.pypsa.results.derive_outputs import derive_results_from_outputs
+
+    model = _m16_model(tmp_path)
+    options = _m16_options()
+    whole = run_pypsa(model, _M16_SCENARIO, options)
+    views = {p: derive_results_from_outputs(model, whole["outputs"], _M16_SCENARIO, options, period=p)
+             for p in _M16_PERIODS}
+
+    def kpis(result: dict) -> dict:
+        return rd.compute_kpis(result, model["carriers"], set(), "$", list)
+
+    # Whole-horizon KPI strip: emissions are x years (22,158 kt = 10 x the sum of the annual figures).
+    assert kpis(whole)["emissions"] == "22,158 ktCO2e"
+    assert kpis(views[2030])["emissions"] == "11,893 ktCO2e"
+    assert kpis(views[2040])["emissions"] == "9,673 ktCO2e"
+    assert kpis(views[2050])["emissions"] == "591 ktCO2e"
+    # Inactive assets are masked: 2040 has coal_new + gas_ccgt + wind_2040 + solar_2040 = 491 MW, not 641.
+    capacity = {p: next(s["value"] for s in views[p]["summary"] if s["label"] == "Generator capacity")
+                for p in _M16_PERIODS}
+    assert capacity == {2030: "450 MW", 2040: "491 MW", 2050: "791 MW"}
+    summaries = {s["period"]: s for s in whole["pathway"]["summaries"]}
+    assert summaries[2040]["installedCapacityMw"] == pytest.approx(490.99, abs=0.05)
+    assert summaries[2040]["installedCapacityMw"] != pytest.approx(490.99 + 150.0, abs=1.0)
+
+    # Money: fuel cost in a period view = annual fuel x the period's objective weight; the periods add up to the run.
+    def part(result: dict, label: str) -> float:
+        return float(next(c["value"] for c in result["costBreakdown"] if c["label"].startswith(label)))
+
+    for label in ("Fuel cost", "Capital cost"):
+        assert sum(part(views[p], label) for p in _M16_PERIODS) == pytest.approx(part(whole, label), rel=1e-6)
+    assert part(whole, "Fuel cost") == pytest.approx(365_027_989.0, rel=1e-6)
+    assert part(whole, "Capital cost") == pytest.approx(224_537_234.0, rel=1e-6)
+    assert part(views[2030], "Fuel cost") == pytest.approx(226_889_583.0, rel=1e-6)
+    assert part(views[2030], "Capital cost") == pytest.approx(0.0, abs=1.0)
+    # Average prices are NOT weighted (they are per-MWh): coal marginal in 2030, gas in 2050.
+    assert summaries[2030]["averagePrice"] == pytest.approx(20.0, abs=1e-6)
+    assert summaries[2050]["averagePrice"] == pytest.approx(38.67, abs=0.02)
+    assert [summaries[p]["objectiveWeight"] for p in _M16_PERIODS] == [8.1078, 4.9775, 3.0558]
+
+
+def test_module_16_capital_is_an_annuity_charged_in_every_active_period(tmp_path: Path) -> None:
+    """Step 7: overnight 1.3M -> 92,238/yr; wind_2040 is active 2040 AND 2050, so it is paid twice."""
+    from backend.pypsa.results import run_pypsa
+    from backend.pypsa.utils.annuity import annuity_factor
+
+    af25, af15 = annuity_factor(0.05, 25.0), annuity_factor(0.05, 15.0)
+    assert af25 == pytest.approx(0.0709525, abs=1e-7)
+    assert af15 == pytest.approx(0.0963423, abs=1e-7)
+    res = run_pypsa(_m16_model(tmp_path), _M16_SCENARIO, _m16_options())
+    rows = {r["name"]: r for r in res["expansionResults"]}
+    assert rows["wind_2040"]["capital_cost"] == pytest.approx(1_300_000.0 * af25, rel=1e-6)
+    assert rows["batt_2040"]["capital_cost"] == pytest.approx(350_000.0 * af15, rel=1e-6)
+    assert rows["wind_2040"]["active_periods"] == [2040, 2050]
+    assert rows["wind_2050"]["active_periods"] == [2050]
+    annual = rows["wind_2040"]["capital_cost"] * rows["wind_2040"]["p_nom_opt_mw"]
+    assert rows["wind_2040"]["capex_by_period"]["2040"] == pytest.approx(annual, rel=1e-4)
+    assert rows["wind_2040"]["capex_by_period"]["2050"] == pytest.approx(annual, rel=1e-4)
+    assert rows["wind_2040"]["capex_by_period"]["2030"] == 0
+    assert rows["wind_2040"]["capex_weighted"] == pytest.approx(annual * (4.9775 + 3.0558), rel=1e-4)
+
+
+def test_module_16_retirement_date_moves_the_baseline_but_not_the_capped_plan(tmp_path: Path) -> None:
+    """Step 6: extending coal_old to 60 years keeps it through 2040 (retires 2045)."""
+    options = _m16_options()
+    base = _m16_solve(_m16_model(tmp_path, coal_old_lifetime=60.0), options)
+    assert float(base.objective) == pytest.approx(581_972_357.1, rel=1e-6)
+    annual = _m16_annual_emissions(base)
+    assert annual[2040] == pytest.approx(1_337_165.0, rel=1e-4)     # was 967,293
+    assert annual[2050] == pytest.approx(256_170.0, rel=1e-3)       # was 59,145
+    # Under the cap trajectory the retirement date is irrelevant: the same plan, to the dollar.
+    capped = _m16_solve(_m16_model(tmp_path, "training_m16", coal_old_lifetime=60.0), options)
+    assert float(capped.objective) == pytest.approx(626_611_133.6, rel=1e-6)
+
+
+def test_module_16_carbon_price_schedule_is_read_by_period_label(tmp_path: Path) -> None:
+    """Step 7b: a year -> price table; in pathway mode the 'year' is the period label."""
+    from backend.pypsa.results import run_pypsa
+
+    price = {2030: 20.0, 2040: 60.0, 2050: 120.0}
+    options = _m16_options(price=price)
+    n = _m16_solve(_m16_model(tmp_path), options)
+    annual = _m16_annual_emissions(n)
+    assert annual[2030] == pytest.approx(570_936.0, rel=1e-3)
+    assert annual[2040] == pytest.approx(123_492.0, rel=1e-3)
+    assert annual[2050] == pytest.approx(0.0, abs=1.0)
+    assert float(n.objective) == pytest.approx(872_790_016.5, rel=1e-6)
+    res = run_pypsa(_m16_model(tmp_path), _M16_SCENARIO, options)
+    carbon = next(c["value"] for c in res["costBreakdown"] if c["label"] == "Carbon cost")
+    assert float(carbon) == pytest.approx(129_461_548.0, rel=1e-4)
+    # The objective now includes the carbon payments, so it is NOT comparable with the cap run's.
+    assert float(n.objective) > 626_611_133.6
+
+
+def test_module_16_cap_trajectory_binds_every_period(tmp_path: Path) -> None:
+    """Step 8: caps typed as tonnes PER PERIOD = annual tonnes x years."""
+    from backend.pypsa.results import run_pypsa
+
+    n = _m16_solve(_m16_model(tmp_path, "training_m16"), _m16_options())
+    assert float(n.objective) == pytest.approx(626_611_133.6, rel=1e-6)
+    annual = _m16_annual_emissions(n)
+    for period, cap in {2030: 10_000_000.0, 2040: 4_000_000.0, 2050: 300_000.0}.items():
+        assert annual[period] * 10.0 == pytest.approx(cap, rel=1e-4)     # binds exactly, x the years weight
+    builds = _m16_builds(n)
+    assert builds["solar_2030"] == pytest.approx(89.27, abs=0.05)         # the first thing the 2030 cap buys
+    assert builds["wind_2040"] == pytest.approx(200.0, abs=0.05)
+    assert builds["solar_2040"] == pytest.approx(154.59, abs=0.05)
+    assert builds["batt_2040"] == pytest.approx(89.05, abs=0.05)
+    # The Settings table pre-fills sense "==": here every cap binds, so an equality lands on the same plan.
+    equal_model = _m16_model(tmp_path, "training_m16")
+    for row in equal_model["global_constraints"]:
+        row["sense"] = "=="
+    assert float(_m16_solve(equal_model, _m16_options()).objective) == pytest.approx(float(n.objective), rel=1e-9)
+    # Ragnarok reports ONE shadow price: the binding constraint with the largest |dual| - the 2030 cap.
+    res = run_pypsa(_m16_model(tmp_path, "training_m16"), _M16_SCENARIO, _m16_options())
+    shadow = res["co2Shadow"]
+    assert shadow["constraint_name"] == "co2_cap_2030" and shadow["status"] == "binding"
+    assert shadow["shadow_price"] == pytest.approx(12.0533, rel=2e-3)
+    assert shadow["cap_value"] == pytest.approx(10_000.0, abs=0.1)        # kt of period tonnes
+    mu = {name: abs(float(v)) for name, v in n.global_constraints["mu"].items()}
+    assert mu["co2_cap_2030"] == pytest.approx(12.0533, rel=2e-3)
+    assert mu["co2_cap_2040"] == pytest.approx(8.3878, rel=5e-3)
+    assert mu["co2_cap_2050"] == pytest.approx(0.6943, rel=2e-2)
+
+
+def test_module_16_a_cap_dual_is_in_discounted_dollars_per_period_tonne(tmp_path: Path) -> None:
+    """The unit the module teaches: relax the 2030 cap by 1,000 t and the objective falls by mu x 1,000;
+    in 2030 money per annual tonne the price is mu x years / objective weight = 14.87."""
+    base = _m16_solve(_m16_model(tmp_path, "training_m16"), _m16_options())
+    mu = abs(float(base.global_constraints.at["co2_cap_2030", "mu"]))
+    relaxed = _m16_solve(
+        _m16_model(tmp_path, "training_m16", caps={2030: 10_001_000.0, 2040: 4_000_000.0, 2050: 300_000.0}),
+        _m16_options(),
+    )
+    assert float(base.objective) - float(relaxed.objective) == pytest.approx(mu * 1_000.0, rel=1e-3)
+    assert mu * 10.0 / 8.1078 == pytest.approx(14.866, abs=0.01)
+
+
+def test_module_16_years_weight_scales_the_cap_in_both_directions(tmp_path: Path) -> None:
+    """Step 9: the cap is on sum_t w_t x years x e_t, so the constant and the years weight are one decision."""
+    correct = _m16_solve(_m16_model(tmp_path, "training_m16"), _m16_options())
+    # (a) years weight left at 1 with the per-period caps: the caps are ten times too loose - and slack.
+    slack = _m16_solve(_m16_model(tmp_path, "training_m16"), _m16_options(years=1.0))
+    assert float(slack.objective) == pytest.approx(589_565_227.7, rel=1e-6)    # the no-policy baseline
+    assert _m16_annual_emissions(slack)[2030] == pytest.approx(1_189_325.0, rel=1e-4)
+    # (b) annual tonnes typed with years = 10: ten times too tight.
+    annual_caps = {2030: 1_000_000.0, 2040: 400_000.0, 2050: 30_000.0}
+    tight = _m16_solve(_m16_model(tmp_path, "training_m16", caps=annual_caps), _m16_options())
+    assert float(tight.objective) == pytest.approx(907_496_653.8, rel=1e-6)
+    assert float(tight.objective) / float(correct.objective) == pytest.approx(1.448, abs=0.002)
+    em = _m16_annual_emissions(tight)
+    assert em[2030] == pytest.approx(100_000.0, rel=1e-3)
+    assert em[2040] == pytest.approx(40_000.0, rel=1e-3)
+    assert em[2050] == pytest.approx(3_000.0, rel=1e-2)
+    # (c) the same annual tonnes with years = 1 is the intended plan again.
+    fixed = _m16_solve(_m16_model(tmp_path, "training_m16", caps=annual_caps), _m16_options(years=1.0))
+    assert float(fixed.objective) == pytest.approx(float(correct.objective), rel=1e-9)
+
+
+def test_module_16_only_ratios_of_objective_weights_matter(tmp_path: Path) -> None:
+    """Step 10: weights 1/1/1 and 10/10/10 give one plan (objective x10); discounting gives a different one."""
+    model = _m16_model(tmp_path, "training_m16")
+    one = _m16_solve(model, _m16_options(weights={2030: 1.0, 2040: 1.0, 2050: 1.0}))
+    ten = _m16_solve(model, _m16_options(weights={2030: 10.0, 2040: 10.0, 2050: 10.0}))
+    discounted = _m16_solve(model, _m16_options())
+    assert float(one.objective) == pytest.approx(128_682_062.9, rel=1e-6)
+    assert float(ten.objective) == pytest.approx(10.0 * float(one.objective), rel=1e-9)
+    assert _m16_builds(one) == pytest.approx(_m16_builds(ten), abs=1e-3)
+    assert _m16_builds(one)["solar_2030"] == pytest.approx(85.94, abs=0.05)
+    assert _m16_builds(discounted)["solar_2030"] == pytest.approx(89.27, abs=0.05)
+    # Without discounting the 2050 cap is not even binding any more.
+    assert _m16_annual_emissions(one)[2050] * 10.0 < 300_000.0 * 0.5
+    assert float(discounted.objective) / float(one.objective) > 4.5
+
+
+def test_module_16_kpi_strip_strings_the_lessons_quote(tmp_path: Path) -> None:
+    """What the KPI strip prints for each run the module has the learner make (whole run and per period)."""
+    from backend.app import results_derived as rd
+    from backend.pypsa.results import run_pypsa
+    from backend.pypsa.results.derive_outputs import derive_results_from_outputs
+
+    def strip(model: dict, options: dict) -> dict:
+        res = run_pypsa(model, _M16_SCENARIO, options)
+        out = {"whole": rd.compute_kpis(res, model["carriers"], set(), "$", list)}
+        for p in _M16_PERIODS:
+            view = derive_results_from_outputs(model, res["outputs"], _M16_SCENARIO, options, period=p)
+            out[p] = rd.compute_kpis(view, model["carriers"], set(), "$", list)
+        return out
+
+    base = strip(_m16_model(tmp_path), _m16_options())
+    assert base["whole"]["totalCost"] == "$589,565,223"
+    assert [base[p]["emissions"] for p in _M16_PERIODS] == ["11,893 ktCO2e", "9,673 ktCO2e", "591 ktCO2e"]
+    assert base[2040]["totalCost"] == "$205,870,256"
+    life = strip(_m16_model(tmp_path, coal_old_lifetime=60.0), _m16_options())
+    assert life["whole"]["totalCost"] == "$581,972,355"
+    assert [life[p]["emissions"] for p in _M16_PERIODS] == ["11,893 ktCO2e", "13,372 ktCO2e", "2,562 ktCO2e"]
+    price = strip(_m16_model(tmp_path), _m16_options(price={2030: 20.0, 2040: 60.0, 2050: 120.0}))
+    assert price["whole"]["totalCost"] == "$872,790,029"
+    assert [price[p]["emissions"] for p in _M16_PERIODS] == ["5,709 ktCO2e", "1,235 ktCO2e", "0 ktCO2e"]
+    cap = strip(_m16_model(tmp_path, "training_m16"), _m16_options())
+    assert cap["whole"]["totalCost"] == "$626,611,124"
+    assert [cap[p]["emissions"] for p in _M16_PERIODS] == ["10,000 ktCO2e", "4,000 ktCO2e", "300 ktCO2e"]
+    loose = strip(_m16_model(tmp_path, "training_m16"), _m16_options(years=1.0))
+    assert loose["whole"]["totalCost"] == "$589,565,223"
+    assert [loose[p]["emissions"] for p in _M16_PERIODS] == ["1,189 ktCO2e", "967 ktCO2e", "59 ktCO2e"]
+    tight = strip(_m16_model(tmp_path, "training_m16", caps={2030: 1e6, 2040: 4e5, 2050: 3e4}), _m16_options())
+    assert tight["whole"]["totalCost"] == "$907,496,651"
+    assert [tight[p]["emissions"] for p in _M16_PERIODS] == ["1,000 ktCO2e", "400 ktCO2e", "30 ktCO2e"]
+
+
+def test_module_16_foresight_a_2050_cap_changes_what_is_built_in_2040(tmp_path: Path) -> None:
+    """Step 11: one joint problem. Ragnarok has no myopic mode; a late cap pulls investment forward."""
+    base = _m16_solve(_m16_model(tmp_path), _m16_options())
+    late = _m16_solve(_m16_model(tmp_path, caps={2050: 300_000.0}), _m16_options())
+    assert _m16_builds(base)["batt_2040"] == pytest.approx(39.57, abs=0.05)
+    assert _m16_builds(late)["batt_2040"] == pytest.approx(97.7, abs=0.1)
+    assert _m16_builds(base)["solar_2040"] == pytest.approx(7.60, abs=0.05)
+    assert _m16_builds(late)["solar_2040"] == pytest.approx(63.85, abs=0.1)
+    # 2040 itself is unconstrained, yet its emissions differ from the no-policy run.
+    assert _m16_annual_emissions(base)[2040] == pytest.approx(967_293.0, rel=1e-4)
+    assert _m16_annual_emissions(late)[2040] == pytest.approx(1_004_338.0, rel=1e-4)
+
+
+# ── Module 17 — batteries in depth ───────────────────────────────────────────
+#
+# `training_m17_start` is a solar-heavy single bus over three days (the middle one
+# overcast): 700 MW of solar, a 300 MW CCGT at 80 and a 200 MW peaker at 140
+# against a 400 MW evening peak. `training_m17` adds a 100 MW / 4 h battery at
+# 0.95 each way. Every figure the module states is solved here through the app's
+# own build path; module 4's 3-hour battery is not repeated.
+
+_M17_SCENARIO = {"carbonPrice": 0.0, "discountRate": 0.05}
+
+
+def _m17_model(tmp_path: Path, example: str = "training_m17", **battery: object) -> dict:
+    model = {k: [dict(r) for r in v] for k, v in _model_from_example(example, tmp_path).items()}
+    for row in model.get("storage_units", []):
+        row.update(battery)
+    return model
+
+
+def _m17_solve(model: dict, options: dict | None = None):
+    n, _notes = build_network(model, _M17_SCENARIO, {**OPTIONS, **(options or {})})
+    n.optimize(solver_name="highs", include_objective_constant=False)
+    return n
+
+
+def _m17_objective(tmp_path: Path, example: str = "training_m17", options: dict | None = None,
+                   **battery: object) -> float:
+    return float(_m17_solve(_m17_model(tmp_path, example, **battery), options).objective)
+
+
+def _m17_flows(n) -> tuple[float, float]:
+    """(MWh discharged, MWh drawn from the grid) over the run."""
+    su = n.storage_units_t
+    return float(su.p_dispatch["batt"].sum()), float(su.p_store["batt"].sum())
+
+
+def test_module_17_start_system_has_a_midday_surplus_and_three_prices(tmp_path: Path) -> None:
+    """Step 1: with no battery, prices are 0 / 80 / 140 and 40% of the solar is thrown away."""
+    n = _m17_solve(_m17_model(tmp_path, "training_m17_start"))
+    assert float(n.objective) == pytest.approx(997_894.4, rel=1e-6)
+    price = n.buses_t.marginal_price["grid"]
+    assert int((price.abs() < 1e-6).sum()) == 23           # solar surplus: free energy
+    assert int(((price - 80.0).abs() < 1e-6).sum()) == 37  # CCGT marginal
+    assert int(((price - 140.0).abs() < 1e-6).sum()) == 12 # peaker marginal
+    available = n.generators.at["solar", "p_nom"] * n.generators_t.p_max_pu["solar"]
+    curtailed = float((available - n.generators_t.p["solar"]).sum())
+    assert float(available.sum()) == pytest.approx(11_245.4, abs=0.1)
+    assert curtailed == pytest.approx(4_463.4, abs=0.1)
+    assert float(n.generators_t.p["gas_peaker"].sum()) == pytest.approx(831.4, abs=0.1)
+    assert float(n.generators_t.p["gas_ccgt"].sum()) == pytest.approx(11_018.8, abs=0.1)
+
+
+def test_module_17_battery_removes_the_peaker_and_cannibalises_its_own_spread(tmp_path: Path) -> None:
+    """Step 2: 100 MW / 4 h. The system saves 125,176; the battery's OWN revenue at the new prices is 60,800."""
+    n = _m17_solve(_m17_model(tmp_path))
+    assert float(n.objective) == pytest.approx(872_717.9, rel=1e-6)
+    assert 997_894.4 - float(n.objective) == pytest.approx(125_176.5, abs=0.5)
+    discharged, drawn = _m17_flows(n)
+    assert discharged == pytest.approx(941.19, abs=0.02)
+    assert drawn == pytest.approx(1_042.87, abs=0.02)
+    assert discharged / drawn == pytest.approx(0.95 * 0.95, rel=1e-9)     # round trip is the product
+    assert discharged / 400.0 == pytest.approx(2.35, abs=0.005)            # equivalent full cycles in the window
+    price = n.buses_t.marginal_price["grid"]
+    assert float(price.max()) == pytest.approx(80.0, abs=1e-6)             # the 140 hours are gone
+    assert int(((price - 140.0).abs() < 1e-6).sum()) == 0
+    assert float(price.mean()) == pytest.approx(59.458, abs=0.001)          # was 64.444
+    revenue = float(((n.storage_units_t.p_dispatch["batt"] - n.storage_units_t.p_store["batt"]) * price).sum())
+    assert revenue == pytest.approx(60_800.0, abs=0.5)
+    # The state of charge fills on the sunny days and only part-way on the overcast one.
+    soc = n.storage_units_t.state_of_charge["batt"]
+    by_day = [float(soc.iloc[24 * d: 24 * d + 24].max()) for d in range(3)]
+    assert by_day == pytest.approx([400.0, 291.7, 400.0], abs=0.1)
+    assert [int(soc.iloc[24 * d: 24 * d + 24].to_numpy().argmax()) for d in (0, 2)] == [16, 16]
+    # Curtailment fell by exactly what the battery drew.
+    available = n.generators.at["solar", "p_nom"] * n.generators_t.p_max_pu["solar"]
+    assert float((available - n.generators_t.p["solar"]).sum()) == pytest.approx(4_463.4 - drawn, abs=0.2)
+
+
+def test_module_17_value_of_each_extra_hour_of_duration_falls_and_then_stops(tmp_path: Path) -> None:
+    """Step 3: max_hours 1 / 2 / 4 / 8 at 100 MW; more than 8 h is worth nothing here."""
+    objective = {h: _m17_objective(tmp_path, max_hours=h) for h in (1, 2, 4, 8, 16)}
+    assert objective[1] == pytest.approx(957_994.4, rel=1e-6)
+    assert objective[2] == pytest.approx(918_875.7, rel=1e-6)
+    assert objective[4] == pytest.approx(872_717.9, rel=1e-6)
+    assert objective[8] == pytest.approx(818_988.5, rel=1e-6)
+    assert objective[16] == pytest.approx(objective[8], rel=1e-9)
+    base = 997_894.4
+    per_hour = [(base - objective[1]) / 1, (objective[1] - objective[2]) / 1,
+                (objective[2] - objective[4]) / 2, (objective[4] - objective[8]) / 4]
+    assert per_hour == pytest.approx([39_900.0, 39_118.7, 23_079.0, 13_432.3], abs=1.0)
+    assert per_hour == sorted(per_hour, reverse=True)
+
+
+def test_module_17_energy_binds_before_power_and_then_power_binds(tmp_path: Path) -> None:
+    """Step 3: 400 MWh as 400 MW x 1 h, 200 x 2 h or 100 x 4 h is one answer; 50 x 8 h is power-limited."""
+    same = [_m17_objective(tmp_path, p_nom=p, max_hours=h) for p, h in ((400, 1), (200, 2), (100, 4))]
+    assert same == pytest.approx([872_717.9] * 3, rel=1e-6)
+    assert _m17_objective(tmp_path, p_nom=50, max_hours=8) == pytest.approx(890_040.0, rel=1e-6)
+
+
+def test_module_17_efficiency_applies_to_each_leg_and_splitting_wrongly_double_counts(tmp_path: Path) -> None:
+    """Step 4: 0.95 x 0.95 = 0.9025 round trip. Typing the round trip into BOTH legs gives 0.8145."""
+    lossless = _m17_objective(tmp_path, efficiency_store=1.0, efficiency_dispatch=1.0)
+    split = _m17_objective(tmp_path)
+    double = _m17_objective(tmp_path, efficiency_store=0.9025, efficiency_dispatch=0.9025)
+    assert lossless == pytest.approx(867_952.0, rel=1e-6)
+    assert split == pytest.approx(872_717.9, rel=1e-6)
+    assert double == pytest.approx(877_712.6, rel=1e-6)
+    assert double - split == pytest.approx(4_994.7, abs=0.5)
+    n = _m17_solve(_m17_model(tmp_path, efficiency_store=0.9025, efficiency_dispatch=0.9025))
+    discharged, drawn = _m17_flows(n)
+    assert discharged / drawn == pytest.approx(0.9025 ** 2, rel=1e-9)       # 0.8145
+    # What the learner meant by "90% round trip": sqrt(0.9) = 0.9487 on each leg.
+    assert 0.9 ** 0.5 == pytest.approx(0.94868, abs=1e-5)
+
+
+def test_module_17_standing_loss_is_a_fraction_of_the_stock_lost_every_hour(tmp_path: Path) -> None:
+    """Step 5: 1% an hour is 21.4% a day, and it makes holding energy expensive."""
+    objective = {sl: _m17_objective(tmp_path, standing_loss=sl) for sl in (0.0, 0.002, 0.01, 0.02)}
+    assert objective[0.0] == pytest.approx(872_717.9, rel=1e-6)
+    assert objective[0.002] == pytest.approx(873_718.0, rel=1e-6)
+    assert objective[0.01] == pytest.approx(876_703.9, rel=1e-6)
+    assert objective[0.02] == pytest.approx(879_928.8, rel=1e-6)
+    assert 1 - 0.99 ** 24 == pytest.approx(0.2143, abs=1e-4)
+    n = _m17_solve(_m17_model(tmp_path, standing_loss=0.01))
+    soc, su = n.storage_units_t.state_of_charge["batt"], n.storage_units_t
+    idle = [i for i in range(1, len(soc))
+            if abs(su.p_dispatch["batt"].iloc[i]) < 1e-9 and abs(su.p_store["batt"].iloc[i]) < 1e-9
+            and soc.iloc[i - 1] > 1.0]
+    assert idle, "the schedule has an idle hour holding energy"
+    for i in idle:
+        assert soc.iloc[i] == pytest.approx(0.99 * soc.iloc[i - 1], rel=1e-9)
+
+
+def test_module_17_state_of_charge_boundaries_are_free_energy_or_a_forbidden_carry(tmp_path: Path) -> None:
+    """Step 6: initial energy is paid for by nobody; a short cyclic window forbids carrying energy over."""
+    cyclic = _m17_objective(tmp_path)
+    empty_start = _m17_objective(tmp_path, cyclic_state_of_charge=False, state_of_charge_initial=0.0)
+    half_start = _m17_objective(tmp_path, cyclic_state_of_charge=False, state_of_charge_initial=200.0)
+    full_start = _m17_objective(tmp_path, cyclic_state_of_charge=False, state_of_charge_initial=400.0)
+    assert empty_start == pytest.approx(cyclic, rel=1e-9)
+    assert half_start == pytest.approx(857_517.9, rel=1e-6)
+    assert cyclic - half_start == pytest.approx(200.0 * 0.95 * 80.0, abs=0.5)     # 190 MWh out x 80
+    assert cyclic - full_start == pytest.approx(400.0 * 0.95 * 80.0, abs=0.5)
+    # One day at a time: the three windows, each closed on itself.
+    days, base_days = [], []
+    for start in (0, 24, 48):
+        window = {"snapshotStart": start, "snapshotCount": 24}
+        days.append(_m17_objective(tmp_path, options=window))
+        base_days.append(_m17_objective(tmp_path, "training_m17_start", options=window))
+    assert days == pytest.approx([271_976.0, 326_985.5, 274_585.6], rel=1e-6)
+    assert base_days == pytest.approx([319_003.2, 357_278.4, 321_612.8], rel=1e-6)
+    assert sum(days) - cyclic == pytest.approx(829.2, abs=0.5)    # closing the loop daily costs this much
+    saving = [b - d for b, d in zip(base_days, days)]
+    assert saving == pytest.approx([47_027.2, 30_292.9, 47_027.2], abs=1.0)
+    assert saving[0] / ((997_894.4 - cyclic) / 3.0) == pytest.approx(1.127, abs=0.002)   # one sunny day flatters
+
+
+def test_module_17_rolling_horizon_terminal_soc_only_governs_the_last_window(tmp_path: Path) -> None:
+    """Step 7: a soft target of the horizon-start energy on the final window (default on)."""
+    from backend.pypsa.results import run_pypsa
+    from backend.pypsa.rolling import auto_terminal_penalty
+
+    def roll(terminal: bool, soc0: float) -> tuple[float, list[float]]:
+        res = run_pypsa(
+            _m17_model(tmp_path, cyclic_state_of_charge=False, state_of_charge_initial=soc0),
+            _M17_SCENARIO,
+            {**OPTIONS, "rollingConfig": {"enabled": True, "horizonSnapshots": 24, "overlapSnapshots": 0,
+                                          "terminalSoc": terminal}},
+        )
+        cost = sum(float(c["value"]) for c in res["costBreakdown"])
+        soc = [float(r["batt"]) for r in res["outputs"]["series"]["storage_units-state_of_charge"]]
+        return cost, soc
+
+    on_cost, on_soc = roll(True, 200.0)
+    off_cost, off_soc = roll(False, 200.0)
+    assert on_soc[-1] == pytest.approx(200.0, abs=0.01)
+    assert off_soc[-1] == pytest.approx(0.0, abs=0.01)
+    assert on_cost == pytest.approx(875_602.0, rel=1e-4)
+    assert off_cost == pytest.approx(858_347.0, rel=1e-4)
+    # The first two windows drain the energy regardless: they cannot see the end.
+    assert on_soc[23] == pytest.approx(0.0, abs=0.01) and on_soc[47] == pytest.approx(0.0, abs=0.01)
+    # No initial energy, no target: both options agree, and cost 829 more than the joint three-day solve.
+    zero_on, _ = roll(True, 0.0)
+    zero_off, _ = roll(False, 0.0)
+    assert zero_on == pytest.approx(zero_off, rel=1e-9)
+    assert zero_on == pytest.approx(873_547.0, rel=1e-4)
+    # The automatic penalty: twice the dearest marginal cost, so refilling always beats paying the shortfall.
+    n = _m17_solve(_m17_model(tmp_path))
+    assert auto_terminal_penalty(n) == pytest.approx(280.0, abs=1e-9)
+
+
+def test_module_17_three_answers_to_what_is_a_battery_worth(tmp_path: Path) -> None:
+    """Step 8: the price-taker ESS sweep (base prices), the battery's revenue at the prices it makes, and
+    the system saving are three different numbers for the same 100 MW / 4 h."""
+    from backend.pypsa.results import run_pypsa
+
+    # The Settings defaults except capital cost, size range and step count: bus auto, 4 h, round trip 90%.
+    cfg = {"enabled": True, "bus": "", "maxHours": 4, "capitalCostPerMW": 60_000.0, "minSizeMW": 50.0,
+           "maxSizeMW": 200.0, "steps": 4, "roundTripEfficiency": 0.9}
+    res = run_pypsa(_m17_model(tmp_path, "training_m17_start"), _M17_SCENARIO, {**OPTIONS, "essConfig": cfg})
+    case = res["essBusinessCase"]
+    assert case["bus"] == "grid"
+    assert case["windowHours"] == pytest.approx(72.0) and case["annualisationFactor"] == pytest.approx(121.6667, abs=1e-4)
+    assert case["notes"] == ["No lifetime given: 15 years assumed."]
+    sizes = {s["sizeMW"]: s for s in case["sizes"]}
+    assert sorted(sizes) == [50.0, 100.0, 150.0, 200.0]
+    row = sizes[100.0]
+    assert row["arbitrageRevenue"] == pytest.approx(159_378.79, rel=1e-5)            # window revenue
+    assert row["annualArbitrageRevenue"] == pytest.approx(19_391_086.61, rel=1e-5)
+    assert row["annualisedCapex"] == pytest.approx(6_000_000.0, rel=1e-9)
+    assert row["energyCapacityMWh"] == pytest.approx(400.0)
+    assert row["throughputMWh"] == pytest.approx(1_138.4, abs=0.1)
+    assert row["equivalentFullCycles"] == pytest.approx(2.85, abs=0.005)
+    assert row["annualEquivalentFullCycles"] == pytest.approx(346.3, abs=0.1)
+    assert row["avgChargePrice"] == pytest.approx(0.0, abs=1e-6)
+    assert row["avgDischargePrice"] == pytest.approx(140.0, abs=1e-6)
+    assert row["priceSpread"] == pytest.approx(140.0, abs=1e-6)
+    assert row["npv"] == pytest.approx(138_994_899.79, rel=1e-4)
+    assert row["irr"] == pytest.approx(0.30566, abs=1e-4) and row["paybackYears"] == pytest.approx(3.21, abs=0.01)
+    assert case["bestSizeMW"] == 200.0                                                # NPV rises with size, to the top
+    # A price taker has no price effect, so revenue is linear in size - the flaw the module names.
+    assert sizes[200.0]["arbitrageRevenue"] == pytest.approx(2.0 * row["arbitrageRevenue"], rel=1e-6)
+    assert sizes[50.0]["arbitrageRevenue"] == pytest.approx(0.5 * row["arbitrageRevenue"], rel=1e-6)
+    # The same battery inside the optimisation: it removes the 140 hours it was assumed to sell into.
+    n = _m17_solve(_m17_model(tmp_path))
+    price = n.buses_t.marginal_price["grid"]
+    own = float(((n.storage_units_t.p_dispatch["batt"] - n.storage_units_t.p_store["batt"]) * price).sum())
+    system = 997_894.4 - float(n.objective)
+    assert (round(own, 1), round(system, 1)) == pytest.approx((60_800.0, 125_176.5), abs=1.0)
+    assert own < system < row["arbitrageRevenue"]
+    # A battery of size zero in the model is the same as none: the sweep sees the same base prices.
+    zero = run_pypsa(_m17_model(tmp_path, p_nom=0.0), _M17_SCENARIO, {**OPTIONS, "essConfig": cfg})
+    zero_row = next(r for r in zero["essBusinessCase"]["sizes"] if r["sizeMW"] == 100.0)
+    assert zero_row["arbitrageRevenue"] == pytest.approx(row["arbitrageRevenue"], rel=1e-9)
+    discharged, _ = _m17_flows(n)
+    assert discharged / 400.0 < row["equivalentFullCycles"]                           # 2.35 < 2.85
+
+
+def test_module_17_kpi_strip_strings_the_lessons_quote(tmp_path: Path) -> None:
+    """What the KPI strip prints for the runs the module has the learner make."""
+    from backend.app import results_derived as rd
+    from backend.pypsa.results import run_pypsa
+
+    def strip(example: str = "training_m17", options: dict | None = None, **battery: object) -> dict:
+        model = _m17_model(tmp_path, example, **battery)
+        res = run_pypsa(model, _M17_SCENARIO, {**OPTIONS, **(options or {})})
+        return rd.compute_kpis(res, model["carriers"], {"battery"}, "$", list)
+
+    def prices(k: dict) -> tuple[float, float]:
+        return round(k["minPrice"], 1), round(k["maxPrice"], 1)
+
+    start = strip("training_m17_start")
+    assert start["totalCost"] == "$997,894" and prices(start) == (0.0, 140.0)
+    assert round(start["avgPrice"], 1) == 71.4 and round(start["dispatchMwh"], 1) == 18_632.2
+    batt = strip()
+    assert batt["totalCost"] == "$872,718" and prices(batt) == (0.0, 80.0)
+    assert round(batt["avgPrice"], 1) == 58.9
+    assert round(batt["dispatchMwh"] - start["dispatchMwh"], 1) == pytest.approx(101.7, abs=0.1)   # the round-trip loss
+    assert strip(max_hours=1)["totalCost"] == "$957,994"
+    assert strip(max_hours=2)["totalCost"] == "$918,876"
+    assert strip(max_hours=8)["totalCost"] == "$818,989" and prices(strip(max_hours=8)) == (0.0, 80.0)
+    assert strip(p_nom=50, max_hours=8)["totalCost"] == "$890,040"
+    double = strip(efficiency_store=0.9025, efficiency_dispatch=0.9025)
+    assert double["totalCost"] == "$877,713" and prices(double) == (0.0, 98.2)
+    assert strip(efficiency_store=1.0, efficiency_dispatch=1.0)["totalCost"] == "$867,952"
+    standing = strip(standing_loss=0.01)
+    assert standing["totalCost"] == "$876,704" and prices(standing) == (0.0, 93.2)
+    assert strip(cyclic_state_of_charge=False, state_of_charge_initial=200.0)["totalCost"] == "$857,518"
+    day1 = strip(options={"snapshotStart": 0, "snapshotCount": 24})
+    assert day1["totalCost"] == "$271,976"
+    assert strip("training_m17_start", {"snapshotStart": 0, "snapshotCount": 24})["totalCost"] == "$319,003"
+    day2 = strip(options={"snapshotStart": 24, "snapshotCount": 24})
+    assert day2["totalCost"] == "$326,985" and prices(day2) == (80.0, 88.6)
+    rolled = strip(options={"rollingConfig": {"enabled": True, "horizonSnapshots": 24, "overlapSnapshots": 0}},
+                   cyclic_state_of_charge=False, state_of_charge_initial=200.0)
+    assert rolled["totalCost"] == "$875,602"
+
+
+def test_module_17_storage_energy_balance_dual_is_the_price_of_the_energy_it_holds(tmp_path: Path) -> None:
+    """Step 8: mu_energy_balance = 0.95 x 80 = 76 in 54 snapshots, 0 in the 18 free ones."""
+    from backend.pypsa.results import run_pypsa
+
+    res = run_pypsa(_m17_model(tmp_path), _M17_SCENARIO, OPTIONS)
+    series = res["outputs"]["series"]
+    mu = [float(r["batt"]) for r in series["storage_units-mu_energy_balance"]]
+    price = [float(r["grid"]) for r in series["buses-marginal_price"]]
+    assert len(mu) == 72
+    assert sum(abs(v - 76.0) < 1e-6 for v in mu) == 54
+    assert sum(abs(v) < 1e-6 for v in mu) == 18
+    # Wherever the CCGT is the marginal unit the stored MWh is worth what it displaces after the discharge loss.
+    for m, p in zip(mu, price):
+        if abs(p - 80.0) < 1e-6:
+            assert m == pytest.approx(0.95 * 80.0, abs=1e-6)
+        if abs(p) < 1e-6:
+            assert m == pytest.approx(0.0, abs=1e-6)
+
+
+def test_module_17_capacity_credit_rises_with_duration(tmp_path: Path) -> None:
+    """Step 9: ELCC of the 100 MW battery at 200 outage-MC members, seed 42, FOR 5%, MTTR 48 h."""
+    from backend.pypsa.results import run_pypsa
+
+    pct, lole = {}, {}
+    for hours in (1, 2, 4, 6, 8):
+        res = run_pypsa(_m17_model(tmp_path, max_hours=hours), _M17_SCENARIO,
+                        {**OPTIONS, "elccConfig": {**_M12_MC, "carriers": ["battery"]}})
+        by_carrier = {c["carrier"]: c for c in res["elcc"]["byCarrier"]}
+        pct[hours] = by_carrier["battery"]["elccPct"]
+        lole[hours] = res["elcc"]["baselineLoleHrs"]
+    assert pct[1] == pytest.approx(20.0, abs=0.5)
+    assert pct[2] == pytest.approx(20.0, abs=0.5)
+    assert pct[4] == pytest.approx(24.2, abs=0.8)
+    assert pct[6] == pytest.approx(45.6, abs=1.5)
+    assert pct[8] == pytest.approx(92.96, abs=2.5)
+    assert [pct[h] for h in (1, 2, 4, 6, 8)] == sorted(pct[h] for h in (1, 2, 4, 6, 8))
+    assert lole[1] == pytest.approx(326.07, rel=0.02) and lole[8] == pytest.approx(97.33, rel=0.03)
+    assert lole[1] > lole[2] > lole[4] > lole[6] > lole[8]
+
+
+def test_module_17_storage_unit_versus_store_and_links_sizing(tmp_path: Path) -> None:
+    """Step 10: a StorageUnit ties energy to power by max_hours; Store + two Links sizes three things."""
+    def storage_unit_model(capital_cost: float = 1_000_000.0, hours: float = 4.0) -> dict:
+        model = {k: [dict(r) for r in v] for k, v in _model_from_example("training_m17_start", tmp_path).items()}
+        model["storage_units"] = [{
+            "name": "batt", "bus": "grid", "carrier": "battery", "p_nom": 0.0, "p_nom_extendable": True,
+            "p_nom_min": 0.0, "p_nom_max": 400.0, "max_hours": hours, "efficiency_store": 0.95,
+            "efficiency_dispatch": 0.95, "cyclic_state_of_charge": True, "capital_cost": capital_cost,
+            "lifetime": 15.0,
+        }]
+        return model
+
+    unit = _m17_solve(storage_unit_model())
+    assert float(unit.objective) == pytest.approx(950_780.2, rel=1e-6)
+    p_opt = float(unit.storage_units.p_nom_opt["batt"])
+    assert p_opt == pytest.approx(92.96, abs=0.05)
+    assert p_opt * 4.0 == pytest.approx(371.8, abs=0.2)                     # energy follows power: max_hours x p_nom
+    store = _m17_solve(_m17_model(tmp_path, "training_m17_store"))
+    assert float(store.objective) == pytest.approx(948_727.7, rel=1e-6)
+    assert float(store.stores.e_nom_opt["batt_store"]) == pytest.approx(401.41, abs=0.1)
+    assert float(store.links.p_nom_opt["batt_charge"]) == pytest.approx(53.56, abs=0.05)
+    assert float(store.links.p_nom_opt["batt_discharge"]) == pytest.approx(97.85, abs=0.05)
+    # The same unit prices: 2 links x 100,000 + 4 h x 200,000 = 1,000,000 per MW. The freedom is worth 2,052.
+    assert float(unit.objective) - float(store.objective) == pytest.approx(2_052.5, abs=0.5)
+    assert float(store.links.p_nom_opt["batt_charge"]) < float(store.links.p_nom_opt["batt_discharge"])
+    # max_hours moved without moving capital_cost: the energy price silently changes 4x.
+    short = _m17_solve(storage_unit_model(hours=2.0))
+    long = _m17_solve(storage_unit_model(hours=8.0))
+    assert float(short.objective) == pytest.approx(997_308.4, rel=1e-6)       # barely better than no battery
+    assert float(long.objective) == pytest.approx(882_153.7, rel=1e-6)
+    assert float(long.storage_units.p_nom_opt["batt"]) == pytest.approx(218.44, abs=0.1)
+    assert float(long.storage_units.p_nom_opt["batt"]) * 8.0 == pytest.approx(1_747.5, abs=1.0)
+
+
 # ── The checkpoints the course references must exist and be loadable ─────────
 
 def test_every_course_checkpoint_is_a_listable_example() -> None:
@@ -1344,7 +2058,9 @@ def test_every_course_checkpoint_is_a_listable_example() -> None:
     the learner a dead button, which is worse than no button."""
     for example_id in ("training_m1", "training_m2", "training_m3", "training_m4",
                        "training_m5", "training_m6", "training_m7_year", "training_m7",
-                       "training_m10", "training_m11"):
+                       "training_m10", "training_m11",
+                       "training_m16_start", "training_m16", "training_m17_start", "training_m17",
+                       "training_m17_store"):
         db = EXAMPLES / example_id / "project.db"
         assert db.exists(), f"{example_id}: no project.db"
         con = sqlite3.connect(db)

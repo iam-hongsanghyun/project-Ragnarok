@@ -35,6 +35,9 @@ your own plugins, see [docs/guides/PLUGIN_AUTHORING.md](plugin.md).
 10. [Plugins](#10-plugins)
 11. [Capabilities and limitations](#11-capabilities-and-limitations)
 12. [Troubleshooting](#12-troubleshooting)
+13. [P2X module — power-to-X chains, RFNBO matching, LCOH](#13-p2x-module--power-to-x-chains-rfnbo-matching-lcoh)
+14. [Screening and siting](#14-screening-and-siting)
+15. [Training — the power-market modelling course](#15-training--the-power-market-modelling-course)
 
 ---
 
@@ -286,6 +289,76 @@ lines, links, transformers).
 2. Click the source bus marker, then click the destination bus marker. A branch
    row is added to the sheet with `bus0` and `bus1` set automatically.
 
+### Adding a plant (the plant-type picker)
+
+On the **Generators** step the right-hand panel starts with **Add a plant**: one picker for every kind of plant.
+Pick a type, a **bus** and a **capacity** (a fixed MW, or *Let the solver size it*), fill the few key fields, and press
+**Add**. Everything else is defaulted from the technology data files and sits behind **Advanced**. A live preview says what
+will be created ("Creates: 1 links, 1 generators, ...") and lists warnings before anything changes.
+
+| Type | What it makes | Key fields |
+|---|---|---|
+| Generator | One generator | carrier, marginal cost; advanced: capital cost, lifetime, efficiency, build year |
+| BESS | One storage unit (inverter + Li-ion storage, cost from technology-data) | capacity, duration (h); advanced: one-way efficiency |
+| CCGT / OCGT | A gas-to-electricity Link, the gas bus, a gas supplier and the gas carrier (an existing gas bus and supplier are reused) | capacity (MW electric), *Unit commitment*; advanced: gas price, efficiency, parameter overrides |
+| Gas + H2 co-firing (simple) | One generator on a fixed gas / H2 blend | turbine, H2 share and its basis (vol % or energy %), H2 price |
+| Gas + H2 co-firing (fuel network) | Gas bus and H2 bus feeding a turbine-fuel bus through two feeder Links, and the turbine Link | turbine, H2 bus (an existing one, e.g. a P2X chain's, or a new one with an H2 supplier), maximum / minimum H2 share, basis, hourly or period |
+| P2X chain | The P2X chain (electrolyser, H2 storage, optional ammonia / methanol / e-fuel synthesis, offtake), built by the same code as the P2X tab | product, H2 storage, offtake MW |
+
+**One plant is one unit.** Every component a template creates carries the plant's name in a `plant` column, and one
+`RAGNAROK_PLANTS` row stores its type and settings. Below the picker the **Plants** list shows one card per plant,
+expandable to its components, with **Edit** and **Delete**. The Model tab lists the same cards above the sheet tree, and
+both maps draw **one marker per plant** (a violet ring at its bus) instead of one per component.
+
+- **Edit** reopens the picker on that plant. Saving *re-derives all its components* from the stored settings plus your changes
+  (a hand edit of one of its rows is replaced; edit the plant, not its rows). The plant keeps its name.
+- **Delete** removes every component of the plant and nothing else. A bus or carrier that another component still uses (a
+  gas bus two plants share, the electricity bus, a carrier another generator has) is **kept**; the confirmation says which.
+  If a kept bus has nothing feeding it any more, the message says so.
+- A plant opened from a PyPSA file has the `plant` column but no registry row: it is listed and can be deleted, but not edited.
+- The `plant` column and the registry sheets are saved with the workbook, the project, the session and the PyPSA netCDF / CSV /
+  Excel exports (the column; the registry is a Ragnarok sheet).
+
+**Unit commitment (CCGT, OCGT, co-firing).** Tick *Unit commitment* and the plant's operating characteristics take effect: a
+minimum load (CCGT 40 %, OCGT 20 % of rated output, DEA), minimum up / down time, a start-up cost per start (per MW x the plant's
+MW) and, if the time step is coarse enough for it to bind, ramp limits. The solve becomes a MILP; the Analytics commitment view
+shows the starts. Unit commitment needs a fixed size: with *Let the solver size it* the fields are not written and the preview says
+so (`committable` and `extendable` cannot be combined on one unit). PyPSA has one start-up cost per unit, so hot / warm / cold
+starts are not distinguished (the data has no such split for a CCGT), and the efficiency is the rated value at every load.
+
+#### Gas + H2 co-firing
+
+*Simple.* One generator burns a fixed blend. With H2 energy share `s`, rated efficiency `eta`, gas price `c_g`, H2 price `c_h`
+(EUR/MWh of fuel, LHV), gas CO2 factor `e_g` (0.198 tCO2/MWh) and variable O&M `v`:
+`marginal cost = ((1 - s) c_g + s c_h) / eta + v` and the blend carrier's `co2_emissions = (1 - s) e_g`. A share entered as
+**vol %** is converted with the lower heating value per normal cubic metre (H2 10.78 MJ/Nm3, CH4 35.8 MJ/Nm3):
+`s = x L_H / (x L_H + (1 - x) L_G)`, so **30 vol % is 11.4 % of the energy**.
+
+*Fuel network.* The solver chooses the blend. Gas and H2 each enter the plant's fuel bus through a feeder Link (efficiency 1, LHV
+basis); the turbine Link runs from the fuel bus to the electricity bus. Set the limits on the plant (maximum / minimum H2 share,
+vol % or energy %, hourly or over the period) and they are enforced in every solve:
+
+- *hourly*: `h_t <= s_max (h_t + g_t)` and `h_t >= s_min (h_t + g_t)` for every snapshot (`h` = H2 flow, `g` = gas flow, MW LHV);
+- *period*: the same with the snapshot-weighted sums, so the H2 may pile into the hours it is cheap. A period limit is never
+  tighter than the hourly one.
+
+A run option overrides the stored limits: `options.cofiringConfig` (`describe_run_options` documents it; `{enabled: false}`
+switches them off). With rolling horizon the period is each window.
+
+An H2 derate of the turbine (efficiency or capacity) is **off by default** and has no source in the data files: it is an
+assumption you can switch on with the parameter overrides (`fuels.h2_derate_efficiency_per_share`) for a sensitivity only.
+
+*Results* (MCP `get_plant_results`, `GET /api/build/plant/results/{run}`): per plant the generation, capacity factor, full-load
+hours, starts (solved for committable units), costs, and for the gas plants the gas and H2 use, the **H2 share per hour (energy %
+and the vol % equivalent)**, the CO2 emitted and the **CO2 avoided against the same dispatch burnt as 100 % gas**
+(`e_g x H2 energy`). Fuel is valued at the nodal price of the plant's fuel bus, so a supplier shared by two plants is not booked
+on the one that created it. Results can be grouped by plant for any run with plants.
+
+**Data and sources.** `GET /api/build/plant/technologies` lists every parameter with its value, unit, source and a `verified`
+flag: `file` (read from PyPSA technology-data v0.15.0 or its DEA workbooks), `derived`, `literature` (recalled, not re-fetched) or
+`assumption` (CCGT start-up cost, minimum up / down times, the H2 price and the H2 derate are assumptions: replace them with
+plant data).
+
 ---
 
 ## 5. Settings view
@@ -351,8 +424,15 @@ In **Pathway** mode, you define a table of investment periods. Each row has:
 | Column | Description |
 |---|---|
 | Period | The investment year (e.g. 2030, 2040). |
-| Obj. weight | Relative weight of this period in the objective function. |
-| Years | Duration of the period in years. PyPSA uses this to annuitize capital costs. |
+| Obj. weight | Weight of this period's costs in the objective — a discounting device. Set it to the discounted number of years the period stands for (at 5 % and ten years: 8.1078, 4.9775, 3.0558 for 2030, 2040, 2050). Only the ratios between periods change the plan. |
+| Years | Calendar years the period stands for. PyPSA multiplies a period's energy-sum constraints by it — a CO2 cap on a period is a cap on its annual emissions times Years — but not its costs. A cap constant and the Years value are one decision. |
+
+Clicking **Pathway** pre-fills 2030 and 2040 with weight 1 and Years 5 and 10; **Add period** appends a row 10 years later with weight 1 and Years 10. Treat these as
+placeholders. Ragnarok annuitises capital costs with the project discount rate
+(Settings → Project defaults) and charges the annual figure in every period an
+asset is active (`build_year` ≤ period < `build_year` + `lifetime`); the objective
+weights are separate numbers you type and are not derived from that rate. The solve
+is one perfect-foresight problem; there is no myopic (period by period) mode.
 
 Add periods with **Add period** and remove them with the × button on each row.
 
@@ -1216,3 +1296,283 @@ or the referenced directory does not exist.
 `<absolute path>|<run command>` with no leading or trailing spaces. Verify the
 directory path is correct and that the run command works if you execute it
 manually in that directory. Restart `run.command` after making changes.
+
+---
+
+## 13. P2X module — power-to-X chains, RFNBO matching, LCOH
+
+P2X is an optional module (Settings → Modules → P2X, on by default). It builds power-to-X use cases into the
+working model as ordinary components and reads the results from the P2X angle; there is no separate solver. Open the
+**P2X** tab (hydrogen molecule icon on the activity bar). It has three sections.
+
+### 13.1 Chain designer
+
+1. Pick the **products**: hydrogen (always), ammonia, methanol, e-fuel (Fischer-Tropsch liquids).
+2. Choose the **electricity bus** the electrolyser draws from and the **H2 bus** (a new one, or an existing bus).
+3. **Electrolyser**: alkaline or PEM, extendable (the solve sizes it) or a fixed size, the commissioning year (the
+   reference for additionality), the DEA availability (forced and planned outage) and, for a fixed size only, the
+   minimum load (this makes the solve a MIP: `committable` and `extendable` cannot be combined).
+4. **Hydrogen storage**: none, compressed tank or salt cavern, with an optional explicit compressor that draws electricity.
+5. **Synthesis**, CO2 supply (direct air capture or point source) and product tanks for the derivatives. Ammonia adds an
+   air separation unit for the nitrogen.
+6. **Offtake**: tonnes per year (flat) or an uploaded profile (one value per snapshot, normalised to a mean of 1). A
+   chain only runs for what is asked of it.
+7. **Designated renewable generators**: the RES the electrolyser is matched to (the PPA).
+8. **Parameters**: every technology parameter is editable and defaults from the data file. Hover a row for its source;
+   the chip says whether the value was read from the upstream file (`file`), derived, recalled from the literature
+   (`literature-recalled`, not re-verified) or a Ragnarok assumption.
+
+**Preview** shows the components that would be added, with sizes, efficiencies and overnight costs. **Apply to model**
+merges them (it is enabled only for the inputs you previewed). Costs use PyPSA's own split: each priced component carries an
+`overnight_cost`, a `fom_cost` (per year), a `lifetime` and a `discount_rate` (from Settings), and PyPSA annualises the overnight cost, pro-rated to the
+modelled window.
+
+The synthesis steps (Haber-Bosch, methanolisation, Fischer-Tropsch), the air separation unit and the CO2 capture are PyPSA 1.4
+**Process** components (`rate0 = -1` on the H2 or electricity input, `rate1..3` the product and the other inputs); the
+electrolyser, compressor and H2 discharge stay **Links**. A Process and a multi-port Link with the same ratios are the same LP
+(identical objective, dispatch, LCOH / LCOA / LCOM); a chain saved earlier with Links reads exactly as before, and
+`componentType: "link"` in the chain spec builds the Link form. The same chain can also be added from **Build -> Generators ->
+Add a plant -> P2X chain**.
+
+### 13.2 RFNBO
+
+RFNBO rules follow Commission Delegated Regulation (EU) 2023/1184. The settings are stored for the session and used by
+the next solve that does not set its own `rfnboConfig` option.
+
+- **Temporal correlation (Art. 6)**: *hourly* adds, for every snapshot, electrolyser electricity <= designated RES
+  output. *Monthly* does the same summed over each calendar month (allowed until 31 Dec 2029; hourly from 1 Jan 2030).
+  *Auto* switches at the date you give.
+- **Additionality (Art. 5(a))**: the designated generator came into operation not earlier than 36 months before the
+  electrolyser (by build year). This is a check, and with *Drop designated generators that fail* a candidate filter, never an
+  LP constraint. An extendable generator without a build year is new. Art. 5(b), no operating or investment aid, cannot be
+  read from a model and is listed for attestation.
+- **Geographic correlation (Art. 7(1)(a))**: same bus or same `bidding_zone`, `zone` or `country` value.
+- **Art. 4 grid alternatives** (zone renewable share above 90 %, emission intensity below 18 gCO2e/MJ) are reported after
+  a solve, never enforced.
+
+The tab shows the check results before the solve. A solve with matching on and no electrolyser or no eligible designated
+generator is refused with a sentence saying why.
+
+### 13.3 Results
+
+Choose a stored run (for a pathway run a **period** picker lists the run's investment periods; a single-period run has none) and the electricity cost basis: **nodal** (nodal price x
+consumption) or **PPA** (the designated generators' cost, with unmatched energy at the nodal price). You get LCOH per kg H2,
+LCOA per t NH3, LCOM per t MeOH and the e-fuel cost per MWh and per litre; the electrolyser capacity factor and full-load
+hours; a cost waterfall per product; the electrolyser dispatch against the designated RES (zoomable); the H2 store state of
+charge; and the compliance table (share of compliant hours and the unmatched electricity, hourly and monthly, whether
+or not matching was on in the solve), the additionality and geographic checks and the Art. 4 reports.
+
+### 13.4 Limits
+
+- Heat from synthesis, the electrolyser and DAC is not credited; only the energy flows listed in the preview are modelled.
+- Additionality is tested on calendar years (the model's resolution). Storage behind the connection point (Art. 6) and
+  the day-ahead price conditions of Art. 7(1)(b)/(c) are not modelled.
+- With rolling horizon, monthly periods are cut at the window edge.
+- Costs are in the model's currency; the data file is EUR2025 and no exchange rate is applied.
+- Agents reach the same functions through the MCP tools `list_p2x_technologies`, `preview_p2x_chain`, `get_p2x_results`
+  (read-only) and `build_p2x_chain` (gated by `confirm`). RFNBO options go through `submit_solve` as
+  `options.rfnboConfig` (see `describe_run_options`).
+
+---
+
+## 14. Screening and siting
+
+Two separate tabs (both modules, switched on under Settings > Modules): **Screening** (a statistical
+pre-screen of solar and wind sites, and of the regions they sit in, on the history you already hold) and
+**Siting** (scan candidate locations, add them to the model and let the capacity-expansion solve choose).
+Screening answers *which sites and regions repeat each other*; Siting answers *where the solve builds*.
+Screening hands sites to the model through **Add selected sites to model**, which can add them as
+zero-capacity expansion candidates, the same candidates Siting then works with.
+
+### 14.1 Screening
+
+Open **Screening** in the activity bar. It answers: which sites (or regions) repeat each other (redundant), which
+complement each other, whether spreading across regions buys diversification, and what portfolio is steadiest. It
+uses only the series you upload; nothing touches the model until you add sites.
+
+**1 · Data.** Choose a series file (CSV or xlsx) and a site table.
+
+- *Wide* series: a timestamp column and one column per site. *Long* series: columns `site`, `timestamp`,
+  `value`.
+- Site table columns: `name`, `lat`, `lon`, `technology` (solar, wind or other), optional `region`, `unit`
+  (`cf` for a capacity factor 0-1, or `mw`) and `capacity_mw` (needed for `mw`, so the series can be
+  divided by it).
+- **Region series** (the *Region series* button): one series per region (a national or zonal capacity factor or
+  generation, wide or long) with a region table: `name`, optional `lat` / `lon` (the centroid for the map), `technology`,
+  `unit`, `capacity_mw`, and optionally a GeoJSON polygon, either in a `geometry` column or as a GeoJSON file whose
+  features carry `properties.name`. A region with a polygon but no centroid gets the polygon's. The same validation as
+  for sites applies (timestamps, duplicates, gaps, time zone, capacity factor 0-1).
+- Pick the **time zone** of timestamps that carry no offset (default UTC; type any IANA name such as
+  `Asia/Seoul`). Everything is stored in UTC.
+- **Validate** reports timestamps that could not be read, duplicates (averaged), gaps per site, how the time
+  zone was read, and unit problems (a capacity factor outside 0-1 is rejected, with a hint if it looks like a
+  percentage). **Gaps**: *Interpolate short gaps* fills holes up to 48 steps and drops the rest; *Drop*
+  removes every timestamp with a hole. **Upload** stores the dataset on the server for this session; it is
+  still there after a reload. Click a stored dataset to make it the active one; **Delete** removes it.
+- **Reference series** stores a load or price series (MW or currency per MWh) to correlate the sites with.
+
+**2 · Level.** *Site* | *Region* (below). **3 · Analysis** (all computed on the server).
+
+| Control | What it does |
+|---|---|
+| Sites in scope | All, selected, solar only, wind only (at most 60 per analysis; at the region level: all or selected regions) |
+| Basis | Hourly (raw), daily, weekly, monthly, seasonal (one value per season and year; optional mapping such as `wet:6-9; dry:12,1,2`), diurnal (24 hour-of-day means), month x hour, or any pandas offset alias (`6h`, `2W`, `QS`) |
+| Method | Pearson, or Spearman (rank based, robust to the many zeros of solar) |
+| Anomalies | Correlate hourly values with the diurnal and seasonal cycle removed, so two solar sites do not look alike only because the sun rises. Not offered on the diurnal bases |
+| Date range, Months only | Restrict the history, for example `6-8` for summer |
+| Clock = UTC + | Shifts the analysis clock so diurnal shapes follow local time |
+| Clusters | Number of clusters of the hierarchical clustering on 1 - correlation |
+| Reference series | Correlate each site with the model's load, the system price of the active run, or an uploaded series; *same calendar hour, any year* matches a reference from another year |
+
+**Reading the results.**
+
+- **Site map.** Colour by technology, by cluster or by correlation. Click a site to focus it: the other sites
+  get a line and fill coloured by their correlation with it (blue positive, orange negative). Tick sites in
+  the table to select them (rings on the map); *Select cluster n* picks a whole cluster.
+- **Correlation heatmap.** Sites ordered by cluster, so blocks of similar sites sit together. Hover for the
+  value; drag the colour scale to filter by correlation.
+- **Correlation vs distance.** One point per site pair, one legend entry per technology pair (click to
+  hide). Scroll to zoom, drag to pan.
+- **Profiles.** For the selected sites (up to 8): diurnal, monthly, per season, or the time series. Click a
+  legend entry to hide a line; the time series zooms with the wheel and the slider.
+- **Lagged correlation.** The focus site against the others for lags of up to 336 hours. A positive best lag
+  means the other site repeats what the focus site did that many hours earlier (a front moving between them).
+- **Portfolio.** Tick sites, set weights (scaled to sum 1) or press **Optimise** (minimum variance, optionally at
+  least a target mean CF; or maximum mean CF under a cap on the standard deviation; a per-site weight cap and
+  region caps such as `north:0.5`). The table shows mean CF, coefficient of variation, P10 / P50 / P90 (P90 is
+  the output exceeded in 90 % of the hours), the share of hours below the low-output threshold and the loss of
+  output in the worst N hours, for the portfolio and each site; the pair table shows how often two sites are
+  low together against what independence would give, and the correlation of their ramps. The combined output
+  duration curve (legend: show a site's own curve) and the risk / return plot with the efficient frontier are
+  interactive.
+
+**Region level.** Press *Region* under *2 · Level* and every panel above reads regions instead of sites.
+The region series come from one of two places:
+
+- *Aggregated from the sites* of the active site dataset: the capacity factor of a region is
+  `CF_region = sum(w x CF_site) / sum(w)` over its sites. The weights `w` are *equal*, the *installed capacity*
+  of each site (then it is the region's output over its installed capacity; every site needs a `capacity_mw`) or
+  *custom* (`NOR1:2, NOR2:1`; a site not listed counts 0). *One series per region and technology* splits
+  `north` into `north | wind` and `north | solar`; *Technology* keeps only one technology. A site with no region
+  label is left out and reported. The region centroid is the weighted mean of its sites.
+- An *uploaded region dataset* (above), used as it is.
+
+What the region panels show:
+
+- **Region map.** Polygons when uploaded, centroids always (marker size grows with the number of sites); colour by
+  region, cluster or correlation. Click a region: the others get a line and fill coloured by their correlation with it.
+- **Region heatmap, correlation vs distance (between centroids), profiles and lagged correlation.** The site panels,
+  on the region series, on every basis (hourly to month x hour, custom, anomalies, date range) and both methods.
+  The optional reference series is correlated with each region.
+- **Within- vs between-region correlation** (needs sites, so it reads the active site dataset). A box plot of the
+  pairwise site correlations *inside* each region and *across* each region pair (hover for count, mean, median,
+  quartiles and range; the diamond is the correlation of the two aggregated region series, always higher than the
+  pair mean because averaging removes local noise). The text under it gives the pooled means and their gap: a
+  large gap means region borders carry information, so spreading capacity across regions buys diversification; a
+  gap near zero means they do not. The table below it gives each site's correlation with its **own region** (with
+  the site left out of the region series, so it is not compared with itself) and with the closest other region,
+  and flags sites that behave more like another region than their own (*Only sites that behave like another
+  region* filters to them).
+- **Region portfolio.** The Portfolio panel on region series: weights per region, metrics, duration curve, and
+  *Optimise* with a per-region weight cap and region caps (with one series per region and technology, a cap limits
+  the region's total across technologies). Region portfolios are for screening: *Add to model* is offered at the
+  site level only.
+
+**Add selected sites to model.** Opens a preview: each selected site becomes a generator (carrier = its
+technology) on the nearest bus with a `p_max_pu` profile from the dataset, aligned to the model's snapshots.
+Set the model clock (UTC + n hours), a capacity per site (default: the site's own capacity, else 100 MW), a
+marginal cost, or make them zero-capacity *expansion candidates* with a capex. **Preview** shows, per site,
+how many snapshots matched exactly, by the same calendar hour of another year, by the hour-of-day mean, or
+not at all, with warnings; **Add to model** merges them (the same rules as Data > Add to workbook). Then run
+the model as usual.
+
+### 14.2 Siting
+
+Open **Siting** in the activity bar: draw a candidate region on the map, scan it (keyless weather per grid
+point), add the extendable candidates to the model and run the capacity-expansion solve; the map and table then
+show the built MW per candidate, and zero-built candidates are the rejected locations.
+
+---
+
+## 15. Training — the power-market modelling course
+
+The **Training** tab (activity bar, *Training*; enable it under Settings > Modules) holds one course,
+*Power market modelling with Ragnarok*: seventeen modules from an empty sheet to a policy-tested investment case. It
+teaches the modelling idea and the Ragnarok control together, on the real app, and never edits your model for you.
+
+**How a module works.** Each step shows, in order: *where* (the view and control), the *concept* (the modelling idea,
+independent of the tool), what to *do*, any *values to type* (shown verbatim, copyable, never auto-applied — you type
+them, so you learn which sheet and column they live in), the *run* to start, and *verify* — observable facts that tell
+you the step worked. **Show me** walks real controls with a ring and a note; it never blocks input. The first step of
+every module offers a three-way start: from nothing, from the model the module begins with, or from the model it ends
+with. Nothing loads on its own; loading replaces the session model. Progress is stored per course in the browser.
+
+**Numbers are checked.** Every figure a lesson states was produced by solving that module's own bundled example through
+the app's build path, and `backend/tests/test_training_checkpoints.py` re-solves each one (`test_module_N_*`). If a
+solver or model change moves a number, the test fails before the lesson lies.
+
+| Module | Level | Starts from |
+|---|---|---|
+| 1 Foundations to 15 Market design | Beginner to Expert | `training_m1` … `training_m11`, `training_m7_year` (one growing model) |
+| 16 The multi-year pathway | Expert | `training_m16_start`; finished model `training_m16` |
+| 17 Batteries in depth | Expert | `training_m17_start`; finished model `training_m17`; `training_m17_store` for step 10 |
+
+Bundled examples are listed under Welcome > Start with Examples and loadable by id (`/api/examples/{id}/load`). They are
+authored by `backend/scripts/make_examples.py`; regenerate one with
+`.venv-pypsa/bin/python -m backend.scripts.make_examples <id>`.
+
+### Module 16 — the multi-year pathway
+
+A one-bus system over 2030, 2040 and 2050, each period one representative day (24 snapshots weighted 365) standing for a
+year. Existing coal retires through `build_year` + `lifetime`; wind, solar and a 4-hour battery are offered as one
+*vintage* per period at falling overnight cost; demand grows 20 % a decade. You set up **Settings > Multi-year
+planning** (objective weights 8.1078 / 4.9775 / 3.0558, Years 10), read the period selector in **Analytics > Result**, and
+then add a carbon-price schedule (**Market & Policy > Carbon price**) and a per-period CO2 cap (**Build > Constraints**,
+one `global_constraints` row per period with `investment_period`).
+
+What it establishes, each pinned by a test:
+
+- **Two weights, two jobs.** The objective weight discounts cost; only its ratios matter (weights 1/1/1 and 10/10/10 give one
+  plan, cost ×10). The Years weight multiplies energy-sum constraints. A cap typed per period with Years 1 is ten times
+  too loose and never binds; annual tonnes typed with Years 10 are ten times too tight (+45 % cost). Neither warns.
+- **Period views** mask assets that are not active, sum energy, weight money by the period's objective weight (so the
+  period totals add to the run) and report emissions as annual × Years. Served by `GET /api/runs/{name}/period/{period}`
+  and `/api/runs/{name}/kpis?period=`.
+- **Annuity vs overnight.** `capital_cost` is overnight; Ragnarok annuitises it and charges the annual figure in every
+  active period. Entering an annual cost would annuitise it twice.
+- **Retirement** is an input: extending `coal_old` to 60 years raises 2040 emissions and lowers the unconstrained cost, and
+  changes nothing under a binding cap.
+- **Perfect foresight.** A cap that applies only in 2050 changes what is built in 2040. There is no myopic mode.
+- A cap's shadow price is a dual of the *discounted* objective per period-tonne; in the period's own money per annual
+  tonne it is `mu × years / objective weight`.
+
+### Module 17 — batteries in depth
+
+A solar-heavy single bus over three summer days (the middle one overcast): 700 MW of solar, a 300 MW CCGT at 80, a
+200 MW peaker at 140, 393 MW evening peak. Module 4 is not repeated; this module covers:
+
+- **Duration and power** — each extra hour of energy is worth less than the last (39 900, 39 119, then 23 079 and 13 432 an
+  hour) and eight hours equals sixteen; power matters only until the peak is shaved.
+- **Efficiency** — the round trip is the product of the two legs; typing a round-trip figure into both legs double-counts.
+- **Standing loss** — a per-hour fraction of the stock (`standing_loss` 0.01 is 21.4 % a day).
+- **State-of-charge edges** — non-cyclic with initial energy is free energy; short cyclic windows forbid carrying energy;
+  rolling horizon carries a soft **terminal state of charge** on its last window (default on, `rollingConfig.terminalSoc`
+  and `terminalSocPenalty` in the API/MCP, no Settings switch).
+- **What a battery earns** — **Market & Policy > ESS business case** is a price-taker sweep on the base run's prices
+  (equivalent full cycles, throughput, average charge and discharge price, spread, NPV/IRR); inside the model the same
+  battery earns less at the prices it makes and saves the system something in between. Storage energy-balance duals are in
+  the run's output series `storage_units-mu_energy_balance`.
+- **Capacity value** — the 100 MW battery's ELCC (**Settings > Solve > ELCC**) rises with duration: 20.0 / 20.0 / 24.2 /
+  45.6 / 93.0 % at 1 / 2 / 4 / 6 / 8 hours.
+- **Sizing** — an extendable StorageUnit fixes energy = `p_nom` × `max_hours`; a Store with two Links sizes charging power,
+  discharging power and energy separately. Changing `max_hours` without changing `capital_cost` changes the price of energy.
+
+Both modules use a short window or representative days; the lessons state where a per-year figure is a three-day (or
+one-day-per-year) sample scaled up.
+
+### Adding a module (authors)
+
+One file per module under `frontend/Ragnarok_default/src/lib/training/course/`, one entry in `COURSE_MODULES` in
+`course/index.ts` (catalog card and steps together; order is teaching order and the `N · ` prefix of the section must match),
+the module's example(s) in `make_examples.py`, and `test_module_N_*` tests that solve each stated number.
+`catalog.test.ts` checks the section join, the numbering, and that every example id a module names exists.

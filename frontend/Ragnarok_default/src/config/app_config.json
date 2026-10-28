@@ -1,6 +1,6 @@
 {
   "api": {
-    "localhostBaseUrl": "http://127.0.0.1:8000"
+    "baseUrl": ""
   },
   "runHistory": {
     "maxUnpinnedEntries": 5
@@ -52,7 +52,7 @@
       "discountRate": 0.05,
       "queuePollSeconds": 30,
       "solveAcceptance": "lenient",
-      "enabledModules": "Data,Forge,PhysicalRisk,Siting,PostAnalysis,Reporting,Training"
+      "enabledModules": "Data,Forge,PhysicalRisk,Siting,Screening,P2X,PostAnalysis,Reporting,Training"
     },
     "ranges": {
       "carbonPrice": {

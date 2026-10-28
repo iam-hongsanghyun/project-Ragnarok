@@ -475,9 +475,11 @@ internal sub-modules are not imported directly from outside `network/`.
 8. **Carbon price.** `apply_carbon_price` adds `price × emission_factor` to each
    emitting generator's marginal cost in both static and `_t` frames. A varying
    schedule is always written to `_t`.
-9. **CAPEX annuitisation.** For extendable components, `capital_cost` is multiplied by
-   `annuity_factor(discount_rate, lifetime)` from `utils/annuity.py`. Lifetime
-   defaults to 20 years when absent.
+9. **CAPEX annuitisation.** For extendable generators, storage units, stores, lines, links
+   and processes, `capital_cost` is multiplied by
+   `annuity_factor(discount_rate, lifetime)` from `utils/annuity.py` and pro-rated to the
+   modelled window (a `Process` is annuitised exactly like a `Link`: before this it carried its
+   overnight cost against one window). Lifetime defaults to 20 years when absent.
 10. **Force-LP.** If `options["forceLp"]` is true, all `committable=True` flags on
     generators are set to `False`.
 11. **Load shedding.** `add_load_shedding` adds a `Generator` named
@@ -897,8 +899,25 @@ aggregated by `src/modules/registry.ts`:
 | Forge | `Forge` |
 | Physical Risk | `PhysicalRisk` |
 | Siting | `Siting` |
+| P2X | `P2X` |
 | Post-analysis | `PostAnalysis` |
 | Training | `Training` |
+
+**Where P2X sits.** P2X has no engine of its own. Its chain builder
+(`backend/app/p2x/chains.py`, served by `routers/p2x.py`) emits an ordinary workbook fragment
+(buses, carriers, Links, `Process`es for the synthesis, ASU and CO2-capture steps, Stores, Loads and a `RAGNAROK_P2X` registry row) that goes through
+the same fragment merge as the Build conversions, so the core solve, run store and every analytics view
+see plain PyPSA components. RFNBO matching is one more `extra_functionality` fragment in the solve
+(`backend/pypsa/network/rfnbo.py`, enabled by `options.rfnboConfig`), and the P2X results
+(`backend/app/p2x/results.py`) are a read of a stored run, like the report perspectives.
+
+**Where Build plants sit.** The plant-type picker in Build -> Generators (`features/build/PlantPicker.tsx`, `PlantList.tsx`) is
+presentation over `/api/build/plant*` (`backend/app/routers/plants.py`, code in `backend/app/plants/`). A plant is a group of ordinary
+components that share a `plant` column plus one `RAGNAROK_PLANTS` registry row; add, edit (re-derive) and delete all return one
+*change set* (`remove`, `release`, `fragment`) that the browser applies to its model (`lib/build/plants.ts`, one undoable edit) and the session
+applies identically, so MCP (`tools_plants.py`) and the UI share the code. The P2X chain in the picker is built by `p2x/chains.py`. The gas + H2
+blend-share limit is one more `extra_functionality` fragment (`backend/pypsa/network/cofiring.py`, `options.cofiringConfig`) next to the RFNBO one;
+the results (`plants/results.py`) are a read of a stored run grouped by plant id.
 
 Users compose the workspace in **Settings → Modules**: toggling a module adds/removes
 its tab from the activity bar. The set persists in `AppSettings.enabledModules` as a
@@ -1003,7 +1022,11 @@ headline limitations are:
   marginal costs; there is no ETS permit price curve or intertemporal banking.
 - **HiGHS by default.** HiGHS is the default solver. Settings → Solver → Advanced lists the other
   solvers installed in the backend (`options.solverName`); Ragnarok does not install them.
-- **Backend assumed local by default.** The app defaults to `http://127.0.0.1:8000`.
+- **API base is the page's own origin.** The frontend calls `API_BASE` = `REACT_APP_API_BASE` / `api.baseUrl` in
+  `app_config.json` when one is set, else the origin it was served from, whatever the hostname (`localhost`, `127.0.0.1`, a LAN
+  name); it used to switch to `http://127.0.0.1:8000` on `localhost`, which broke a single-port server opened as
+  `http://localhost:<port>`. The dev server reaches the backend through the CRA `proxy`.
+- **Backend assumed local by default.** The default launcher serves it at `http://127.0.0.1:8000`.
   Moving the backend server-side is architecturally safe (the frontend/backend
   separation is already clean) but no authentication layer exists yet.
 - **Session-scoped run history.** Past runs can be viewed, compared, pinned, renamed,

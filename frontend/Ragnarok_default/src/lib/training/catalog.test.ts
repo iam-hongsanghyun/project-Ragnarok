@@ -1,4 +1,6 @@
 import { describe, test, expect } from '@jest/globals';
+import fs from 'fs';
+import path from 'path';
 import { TUTORIALS, LEVEL_ORDER, findTutorial, tutorialsByLevel } from './catalog';
 import { POWER_MARKET_COURSE } from './course';
 
@@ -148,4 +150,56 @@ test('the course total is the sum of its modules', () => {
   // against modules totalling 27 before this was derived from them.
   const summed = (POWER_MARKET_COURSE.modules ?? []).reduce((t, m) => t + m.minutes, 0);
   expect(POWER_MARKET_COURSE.minutes).toBe(summed);
+});
+
+describe('course modules', () => {
+  const modules = POWER_MARKET_COURSE.modules ?? [];
+  const steps = POWER_MARKET_COURSE.steps;
+
+  test('every step belongs to a declared module, and every module has steps', () => {
+    // A step whose section matches no module is unreachable in the rail; a module with
+    // no steps is a card that opens onto nothing. Both are silent without this.
+    const declared = new Set(modules.map((m) => m.section));
+    for (const s of steps) expect(declared).toContain(s.section);
+    for (const m of modules) {
+      expect(steps.filter((s) => s.section === m.section).length).toBeGreaterThan(0);
+    }
+  });
+
+  test('modules are numbered in teaching order and their steps run in the same order', () => {
+    // Adding a module is appending an entry; the "N · " prefix must say where it landed.
+    modules.forEach((m, i) => expect(m.section.startsWith(`${i + 1} · `)).toBe(true));
+    const sectionOrder = steps
+      .map((s) => s.section as string)
+      .filter((section, i, all) => i === 0 || section !== all[i - 1]);
+    expect(sectionOrder).toEqual(modules.map((m) => m.section));
+  });
+
+  test('every module declares a known level and a positive duration', () => {
+    for (const m of modules) {
+      expect(LEVEL_ORDER).toContain(m.level);
+      expect(m.minutes).toBeGreaterThan(0);
+      expect(m.summary.length).toBeGreaterThan(40);
+    }
+  });
+
+  // The ids a module offers must be bundled examples, or the learner gets a dead button.
+  // The backend test checks that each bundled example lists; this checks the names agree.
+  test('every example a module offers exists in backend/data/examples', () => {
+    const examples = path.resolve(__dirname, '../../../../../backend/data/examples');
+    for (const s of steps) {
+      const ids = [s.startOptions?.prebuiltExampleId, s.startOptions?.completeExampleId].filter(Boolean) as string[];
+      for (const id of ids) {
+        expect(fs.existsSync(path.join(examples, id, 'project.db'))).toBe(true);
+      }
+    }
+  });
+
+  test('a module with no per-module checkpoint tests would be a module with unpinned numbers', () => {
+    // The two deep-dive modules state figures solved from their own examples; the backend
+    // checkpoint file must carry a test_module_N_* for each. Read it rather than trust it.
+    const file = fs.readFileSync(
+      path.resolve(__dirname, '../../../../../backend/tests/test_training_checkpoints.py'), 'utf8');
+    for (const n of [16, 17]) expect(file).toMatch(new RegExp(`def test_module_${n}_`));
+  });
 });

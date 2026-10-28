@@ -12,6 +12,8 @@ _BACKEND = Path(__file__).resolve().parents[1]
 _NOT_SETTINGS = {
     "RAGNAROK_SECRET_",  # prefix; documented via the concrete RAGNAROK_SECRET_<NAME> example
     "RAGNAROK_AUTOSTART_FAILED",  # stderr marker, not a setting
+    "RAGNAROK_P2X",  # workbook sheet name of the P2X chain registry, not an env var
+    "RAGNAROK_PLANTS",  # workbook sheet name of the Build plant registry, not an env var
 }
 
 

@@ -592,6 +592,23 @@ def run_pypsa(
             status_code=400,
             detail="Ramp-rate limits cannot be combined with stochastic scenarios.",
         )
+    # P2X / RFNBO hourly-or-monthly matching (Delegated Reg. (EU) 2023/1184 Art. 6): resolved
+    # BEFORE the solve so a mis-designated chain is a 400 and not a silent zero-electrolyser run.
+    from ..network import rfnbo as _rfnbo
+    try:
+        rfnbo_plan = _rfnbo.resolve_plan(model, options.get("rfnboConfig"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if rfnbo_plan and stochastic.enabled:
+        raise HTTPException(status_code=400, detail="RFNBO matching cannot be combined with stochastic scenarios.")
+    # Gas + H2 co-firing blend-share limits (fuel-network plants; backend/pypsa/network/cofiring.py): same pre-solve 400 rule.
+    from ..network import cofiring as _cofiring
+    try:
+        cofiring_plan = _cofiring.resolve_plan(model, options.get("cofiringConfig"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if cofiring_plan and stochastic.enabled:
+        raise HTTPException(status_code=400, detail="Co-firing blend-share limits cannot be combined with stochastic scenarios.")
     if ramp_enabled:
         # Cache per-generator ramp overrides and blank the native columns BEFORE
         # the solve, so PyPSA's own (unweighted) ramp constraint doesn't fire on
@@ -618,6 +635,12 @@ def run_pypsa(
         # variables, never mutates anything the constraints above built.
         if ramp_enabled:
             apply_ramp_constraints(n, ramp_cfg, snapshots, notes)
+        # RFNBO temporal matching: electrolyser electricity <= designated RES output per period.
+        if rfnbo_plan:
+            _rfnbo.apply_rfnbo_constraints(n, rfnbo_plan, snapshots, notes)
+        # Co-firing: H2 energy share of each fuel-network plant within [min, max], hourly or over the period.
+        if cofiring_plan:
+            _cofiring.apply_cofiring_constraints(n, cofiring_plan, snapshots, notes)
 
 
     # Currency symbol for formatted output strings

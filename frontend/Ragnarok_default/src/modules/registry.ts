@@ -16,7 +16,9 @@ import type { TabModuleDefinition, TabModuleId } from './types';
 import { dataModule } from './data/manifest';
 import { forgeModule } from './forge/manifest';
 import { physicalRiskModule } from './physical-risk/manifest';
+import { screeningModule } from './screening/manifest';
 import { sitingModule } from './siting/manifest';
+import { p2xModule } from './p2x/manifest';
 import { postAnalysisModule } from './post-analysis/manifest';
 import { reportingModule } from './reporting/manifest';
 import { trainingModule } from './training/manifest';
@@ -27,6 +29,8 @@ export const TAB_MODULES: readonly TabModuleDefinition[] = [
   forgeModule,
   physicalRiskModule,
   sitingModule,
+  screeningModule,
+  p2xModule,
   postAnalysisModule,
   reportingModule,
   trainingModule,

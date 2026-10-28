@@ -25,6 +25,8 @@ import { SheetTree } from './ModelView.features/SheetTree';
 import { MapPane } from '../features/map/MapPane';
 import { TablesPane } from '../features/input/TablesPane';
 import { ResizablePanels } from '../layout/ResizablePanels';
+import { PlantList } from '../features/build/PlantList';
+import type { PlantChange } from 'lib/build/plants';
 
 export interface ModelViewProps extends FileToolbarProps {
   model: WorkbookModel;
@@ -56,6 +58,8 @@ export interface ModelViewProps extends FileToolbarProps {
   dateFormat: DateFormat;
   /** Session series-sheet row counts (temporal sheets live server-side). */
   seriesSheetCounts?: Record<string, number>;
+  /** Apply a plant change set (delete from the plant card). */
+  onApplyPlantChange?: (change: PlantChange, label: string) => void | Promise<void>;
 }
 
 export function ModelView(props: ModelViewProps) {
@@ -66,6 +70,7 @@ export function ModelView(props: ModelViewProps) {
       <FileToolbar {...props} />
       <ResizablePanels id="model" direction="horizontal" className="model-columns" initialSizes={[20, 40, 40]} minSize={160}>
         <section className="model-column model-column-tree">
+          {props.onApplyPlantChange && <PlantList model={props.model} onApply={props.onApplyPlantChange} compact />}
           <SheetTree
             model={props.model}
             issues={props.modelIssues}

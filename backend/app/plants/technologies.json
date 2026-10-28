@@ -1,0 +1,530 @@
+{
+ "schema": 1,
+ "title": "Ragnarok thermal plant technology defaults (CCGT, OCGT, gas + H2 co-firing, BESS)",
+ "basis": {
+  "currency": "EUR",
+  "costYear": 2025,
+  "technologyYear": 2030,
+  "priceIndex": {
+   "2015->2025": 1.3358031
+  },
+  "priceIndexNote": "EUR2015 -> EUR2025 factor from costs_2030.csv CCGT 'investment' (1108.7166 EUR/kW) over the DEA sheet 05 2030 value (830 EUR/kW); the repository applies it to every DEA 2015-price entry. Reproduces OCGT investment 435.24 -> 581.3949."
+ },
+ "sources": {
+  "technology-data": {
+   "repository": "https://github.com/PyPSA/technology-data",
+   "version": "v0.15.0",
+   "commit": "07e43575c7996a988c60964d00772376ab9bd10c",
+   "files": [
+    "outputs/costs_2030.csv",
+    "inputs/technology_data_for_el_and_dh.xlsx",
+    "inputs/technology_data_catalogue_for_energy_storage.xlsx"
+   ]
+  },
+  "dea": "Danish Energy Agency technology catalogues, as redistributed in the technology-data inputs folder"
+ },
+ "constants": {
+  "h2_lhv_mj_per_nm3": {
+   "value": 10.78,
+   "unit": "MJ/Nm3 (0 degC, 101.325 kPa)",
+   "verified": "derived",
+   "source": "H2 LHV 119.96 MJ/kg (US DOE Hydrogen and Fuel Cell Technologies Office, H2Tools 'Lower and Higher Heating Values of Hydrogen and Other Fuels') x normal density 0.08988 kg/Nm3 = 10.78; the task brief gives 10.8. Inputs recalled from the literature, not re-fetched in this build."
+  },
+  "ch4_lhv_mj_per_nm3": {
+   "value": 35.8,
+   "unit": "MJ/Nm3 (0 degC, 101.325 kPa)",
+   "verified": "literature",
+   "source": "CH4 LHV 50.0 MJ/kg (US DOE H2Tools table) x normal density 0.7168 kg/Nm3 = 35.8; matches the task brief. Recalled from the literature, not re-fetched in this build. Natural gas is taken as pure CH4 (a real gas of ~36-39 MJ/Nm3 shifts the vol-to-energy conversion slightly)."
+  },
+  "h2_lhv_kwh_per_kg": {
+   "value": 33.33,
+   "unit": "kWh/kg",
+   "verified": "file",
+   "source": "same constant as backend/app/p2x/technologies.json (task specification)"
+  },
+  "hours_per_year": {
+   "value": 8760,
+   "unit": "h",
+   "verified": "derived",
+   "source": "calendar"
+  }
+ },
+ "fuels": {
+  "gas_co2": {
+   "value": 0.198,
+   "unit": "tCO2/MWh_th (LHV)",
+   "source": {
+    "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+    "locator": "technology 'gas', parameter 'CO2 intensity' (stoichiometric calculation with 50 GJ/t CH4)",
+    "year": 2030
+   },
+   "verified": "file"
+  },
+  "gas_price": {
+   "value": 28.4158,
+   "unit": "EUR/MWh_th (LHV)",
+   "source": {
+    "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+    "locator": "technology 'gas', parameter 'fuel' (World Bank 2025 / ENTSO-E & ENTSOG TYNDP 2024 commodity prices)",
+    "year": 2030
+   },
+   "verified": "file",
+   "costYear": 2025,
+   "currency": "EUR"
+  },
+  "h2_price": {
+   "value": 100.0,
+   "unit": "EUR/MWh_LHV",
+   "source": {
+    "document": "Ragnarok assumption (no value in the pinned data files)",
+    "locator": "delivered hydrogen at the plant gate, about 3.3 EUR/kg; set from the P2X chain's LCOH when known",
+    "year": 2030
+   },
+   "verified": "assumption",
+   "costYear": 2025,
+   "currency": "EUR"
+  },
+  "h2_co2": {
+   "value": 0.0,
+   "unit": "tCO2/MWh_LHV",
+   "source": {
+    "document": "stoichiometry",
+    "locator": "H2 + 1/2 O2 -> H2O",
+    "year": 2030
+   },
+   "verified": "derived"
+  },
+  "h2_derate_efficiency_per_share": {
+   "value": 0.0,
+   "unit": "efficiency points (per unit) lost per unit energy share of H2",
+   "source": {
+    "document": "Ragnarok assumption (no value in the pinned data files)",
+    "locator": "OFF by default; no value in the pinned data files",
+    "year": 2030
+   },
+   "verified": "assumption",
+   "note": "Switch-on parameter for a sensitivity: efficiency = rated - this x H2 energy share (simple mode: the fixed share; fuel network: the maximum share). Do not enable without an OEM figure."
+  },
+  "h2_derate_capacity_per_share": {
+   "value": 0.0,
+   "unit": "per unit of rated MW_el lost per unit energy share of H2",
+   "source": {
+    "document": "Ragnarok assumption (no value in the pinned data files)",
+    "locator": "OFF by default; no value in the pinned data files",
+    "year": 2030
+   },
+   "verified": "assumption",
+   "note": "Same use as the efficiency derate, on p_nom."
+  }
+ },
+ "technologies": {
+  "ccgt": {
+   "label": "Combined-cycle gas turbine (CCGT), 100-500 MW unit, 2030",
+   "notes": "technology-data v0.15.0 takes CCGT cost and efficiency from the DEA sheet '05 Gas turb. CC, steam extract.' (condensation mode, net). Operating parameters are read from the same sheet.",
+   "parameters": {
+    "efficiency": {
+     "value": 0.58,
+     "unit": "per unit (LHV, net, rated load)",
+     "source": {
+      "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+      "locator": "technology 'CCGT', parameter 'efficiency' (DEA sheet 05 row 8, 58 %)",
+      "year": 2030
+     },
+     "verified": "file",
+     "costYear": null
+    },
+    "capex": {
+     "value": 1108.7166,
+     "unit": "EUR/kW_el",
+     "source": {
+      "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+      "locator": "technology 'CCGT', parameter 'investment'",
+      "year": 2030
+     },
+     "verified": "file",
+     "costYear": 2025,
+     "currency": "EUR",
+     "rawValue": 830.0,
+     "rawUnit": "EUR/kW_el",
+     "rawCostYear": 2015,
+     "priceIndex": 1.3358031
+    },
+    "fom": {
+     "value": 3.3494,
+     "unit": "%/year of capex",
+     "source": {
+      "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+      "locator": "technology 'CCGT', parameter 'FOM' (27 800 EUR/MW/yr / 830 000 EUR/MW)",
+      "year": 2030
+     },
+     "verified": "file"
+    },
+    "vom": {
+     "value": 5.6104,
+     "unit": "EUR/MWh_el",
+     "source": {
+      "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+      "locator": "technology 'CCGT', parameter 'VOM'",
+      "year": 2030
+     },
+     "verified": "file",
+     "costYear": 2025,
+     "currency": "EUR",
+     "rawValue": 4.2,
+     "rawUnit": "EUR/MWh_el",
+     "rawCostYear": 2015,
+     "priceIndex": 1.3358031
+    },
+    "lifetime": {
+     "value": 25.0,
+     "unit": "years",
+     "source": {
+      "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+      "locator": "technology 'CCGT', parameter 'lifetime'",
+      "year": 2030
+     },
+     "verified": "file"
+    },
+    "min_load": {
+     "value": 0.4,
+     "unit": "per unit of rated output",
+     "source": {
+      "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/technology_data_for_el_and_dh.xlsx (Danish Energy Agency, Technology Data for Generation of Electricity and District Heating)",
+      "locator": "sheet '05 Gas turb. CC, steam extract.', 2030 column, row 19 'Minimum load (% of full load)' = 40",
+      "year": 2030
+     },
+     "verified": "file",
+     "note": "Applied as p_min_pu only when the unit is committable (a plain p_min_pu would be an always-on floor)."
+    },
+    "ramp_rate": {
+     "value": 15.0,
+     "unit": "% of rated output per minute",
+     "source": {
+      "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/technology_data_for_el_and_dh.xlsx (Danish Energy Agency, Technology Data for Generation of Electricity and District Heating)",
+      "locator": "sheet '05 Gas turb. CC, steam extract.', 2030 column, row 18 'Secondary regulation (% per minute)' = 15",
+      "year": 2030
+     },
+     "verified": "file",
+     "note": "Becomes ramp_limit_up / ramp_limit_down = min(1, rate x 60 x dt_h / 100) per snapshot; at hourly resolution it is 1 (not binding) and is then omitted."
+    },
+    "warm_start_time": {
+     "value": 1.0,
+     "unit": "h",
+     "source": {
+      "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/technology_data_for_el_and_dh.xlsx (Danish Energy Agency, Technology Data for Generation of Electricity and District Heating)",
+      "locator": "sheet '05 Gas turb. CC, steam extract.', 2030 column, row 20 'Warm start-up time (hours)' = 1",
+      "year": 2030
+     },
+     "verified": "file",
+     "note": "Informational: PyPSA 1.4 has one start_up_cost per unit, no hot / warm / cold distinction and no start-up duration."
+    },
+    "cold_start_time": {
+     "value": 2.5,
+     "unit": "h",
+     "source": {
+      "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/technology_data_for_el_and_dh.xlsx (Danish Energy Agency, Technology Data for Generation of Electricity and District Heating)",
+      "locator": "sheet '05 Gas turb. CC, steam extract.', 2030 column, row 21 'Cold start-up time (hours)' = 2.5",
+      "year": 2030
+     },
+     "verified": "file",
+     "note": "Informational, see warm_start_time."
+    },
+    "start_up_cost": {
+     "value": 60.0,
+     "unit": "EUR/MW_el per start",
+     "source": {
+      "document": "Ragnarok assumption (no value in the pinned data files)",
+      "locator": "no start-up cost in DEA sheet 05; same order as the DEA OCGT value (ocgt.start_up_cost)",
+      "year": 2030
+     },
+     "verified": "assumption",
+     "note": "Single value (PyPSA has no hot / warm / cold split and the data does not support one). Replace with plant data.",
+     "costYear": 2025,
+     "currency": "EUR"
+    },
+    "min_up_time": {
+     "value": 4.0,
+     "unit": "h",
+     "source": {
+      "document": "Ragnarok assumption (no value in the pinned data files)",
+      "locator": "typical combined-cycle minimum run time (2-6 h); not in the DEA sheet",
+      "year": 2030
+     },
+     "verified": "assumption",
+     "note": "Converted to snapshots (ceil(h / dt)); committable units only."
+    },
+    "min_down_time": {
+     "value": 4.0,
+     "unit": "h",
+     "source": {
+      "document": "Ragnarok assumption (no value in the pinned data files)",
+      "locator": "typical combined-cycle minimum down time (2-6 h); not in the DEA sheet",
+      "year": 2030
+     },
+     "verified": "assumption",
+     "note": "Converted to snapshots; committable units only."
+    }
+   },
+   "notModelled": [
+    {
+     "item": "part-load efficiency",
+     "source": {
+      "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/technology_data_for_el_and_dh.xlsx (Danish Energy Agency, Technology Data for Generation of Electricity and District Heating)",
+      "locator": "sheet '05 Gas turb. CC, steam extract.', 2030 column, note A 'Low efficiency at low loads'",
+      "year": 2030
+     },
+     "note": "the efficiency is the rated value at every load. PyPSA committable units have p_min_pu and stand_by_cost but no efficiency curve here."
+    }
+   ]
+  },
+  "ocgt": {
+   "label": "Open-cycle gas turbine (OCGT), 100 MW unit, 2030",
+   "notes": "technology-data v0.15.0 takes OCGT cost and efficiency from the DEA sheet '52 OCGT - Natural gas'. Operating parameters are read from the same sheet.",
+   "parameters": {
+    "efficiency": {
+     "value": 0.41,
+     "unit": "per unit (LHV, net, rated load)",
+     "source": {
+      "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+      "locator": "technology 'OCGT', parameter 'efficiency' (DEA sheet 52 row 8, 41 %)",
+      "year": 2030
+     },
+     "verified": "file"
+    },
+    "capex": {
+     "value": 581.3949,
+     "unit": "EUR/kW_el",
+     "source": {
+      "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+      "locator": "technology 'OCGT', parameter 'investment'",
+      "year": 2030
+     },
+     "verified": "file",
+     "costYear": 2025,
+     "currency": "EUR",
+     "rawValue": 435.24,
+     "rawUnit": "EUR/kW_el",
+     "rawCostYear": 2015,
+     "priceIndex": 1.3358031
+    },
+    "fom": {
+     "value": 1.7795,
+     "unit": "%/year of capex",
+     "source": {
+      "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+      "locator": "technology 'OCGT', parameter 'FOM' (7 745.28 EUR/MW/yr / 435 240 EUR/MW)",
+      "year": 2030
+     },
+     "verified": "file"
+    },
+    "vom": {
+     "value": 6.0111,
+     "unit": "EUR/MWh_el",
+     "source": {
+      "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+      "locator": "technology 'OCGT', parameter 'VOM'",
+      "year": 2030
+     },
+     "verified": "file",
+     "costYear": 2025,
+     "currency": "EUR",
+     "rawValue": 4.5,
+     "rawUnit": "EUR/MWh_el",
+     "rawCostYear": 2015,
+     "priceIndex": 1.3358031
+    },
+    "lifetime": {
+     "value": 25.0,
+     "unit": "years",
+     "source": {
+      "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+      "locator": "technology 'OCGT', parameter 'lifetime'",
+      "year": 2030
+     },
+     "verified": "file"
+    },
+    "min_load": {
+     "value": 0.2,
+     "unit": "per unit of rated output",
+     "source": {
+      "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/technology_data_for_el_and_dh.xlsx (Danish Energy Agency, Technology Data for Generation of Electricity and District Heating)",
+      "locator": "sheet '52 OCGT - Natural gas', 2030 column, row 19 'Minimum load (% of full load)' = 20",
+      "year": 2030
+     },
+     "verified": "file",
+     "note": "Applied as p_min_pu only when committable."
+    },
+    "ramp_rate": {
+     "value": 30.0,
+     "unit": "% of rated output per minute",
+     "source": {
+      "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/technology_data_for_el_and_dh.xlsx (Danish Energy Agency, Technology Data for Generation of Electricity and District Heating)",
+      "locator": "sheet '52 OCGT - Natural gas', 2030 column, row 18 'Secondary regulation (% of full load per minute)' = 30",
+      "year": 2030
+     },
+     "verified": "file",
+     "note": "See ccgt.ramp_rate: not binding at hourly resolution."
+    },
+    "warm_start_time": {
+     "value": 0.08333333333333333,
+     "unit": "h",
+     "source": {
+      "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/technology_data_for_el_and_dh.xlsx (Danish Energy Agency, Technology Data for Generation of Electricity and District Heating)",
+      "locator": "sheet '52 OCGT - Natural gas', 2030 column, row 20 'Warm start-up time (minutes)' = 5",
+      "year": 2030
+     },
+     "verified": "file",
+     "note": "Informational."
+    },
+    "cold_start_time": {
+     "value": 0.16666666666666666,
+     "unit": "h",
+     "source": {
+      "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/technology_data_for_el_and_dh.xlsx (Danish Energy Agency, Technology Data for Generation of Electricity and District Heating)",
+      "locator": "sheet '52 OCGT - Natural gas', 2030 column, row 21 'Cold start-up time (minutes)' = 10",
+      "year": 2030
+     },
+     "verified": "file",
+     "note": "Informational."
+    },
+    "start_up_cost": {
+     "value": 57.4395,
+     "unit": "EUR/MW_el per start",
+     "source": {
+      "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/technology_data_for_el_and_dh.xlsx (Danish Energy Agency, Technology Data for Generation of Electricity and District Heating)",
+      "locator": "sheet '52 OCGT - Natural gas', 2030 column, row 36 'Startup cost (EUR/MW/startup)' = 43 (EUR2015) x price index",
+      "year": 2030
+     },
+     "verified": "derived",
+     "note": "PyPSA start_up_cost is per start of the unit, so the plant sets start_up_cost = this value x rated MW_el.",
+     "costYear": 2025,
+     "currency": "EUR",
+     "rawValue": 43.0,
+     "rawUnit": "EUR/MW/startup",
+     "rawCostYear": 2015,
+     "priceIndex": 1.3358031
+    },
+    "min_up_time": {
+     "value": 1.0,
+     "unit": "h",
+     "source": {
+      "document": "Ragnarok assumption (no value in the pinned data files)",
+      "locator": "no minimum run time for an OCGT in the DEA sheet; one snapshot",
+      "year": 2030
+     },
+     "verified": "assumption",
+     "note": "At 1 h snapshots this is no constraint."
+    },
+    "min_down_time": {
+     "value": 1.0,
+     "unit": "h",
+     "source": {
+      "document": "Ragnarok assumption (no value in the pinned data files)",
+      "locator": "no minimum down time for an OCGT in the DEA sheet; one snapshot",
+      "year": 2030
+     },
+     "verified": "assumption"
+    }
+   },
+   "notModelled": [
+    {
+     "item": "part-load efficiency",
+     "source": {
+      "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), inputs/technology_data_for_el_and_dh.xlsx (Danish Energy Agency, Technology Data for Generation of Electricity and District Heating)",
+      "locator": "sheet '52 OCGT - Natural gas', 2030 column, note B 'The efficiency is drastically reduced at part-load'",
+      "year": 2030
+     },
+     "note": "rated efficiency at every load."
+    }
+   ]
+  },
+  "bess": {
+   "label": "Battery energy storage (inverter + Li-ion storage), 2030",
+   "notes": "PyPSA StorageUnit: p_nom = inverter power, energy = p_nom x max_hours. technology-data 'battery inverter' + 'battery storage'.",
+   "parameters": {
+    "inverter_capex": {
+     "value": 213.9279,
+     "unit": "EUR/kW",
+     "source": {
+      "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+      "locator": "technology 'battery inverter', parameter 'investment'",
+      "year": 2030
+     },
+     "verified": "file",
+     "costYear": 2025,
+     "currency": "EUR"
+    },
+    "inverter_fom": {
+     "value": 0.3375,
+     "unit": "%/year of capex",
+     "source": {
+      "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+      "locator": "technology 'battery inverter', parameter 'FOM'",
+      "year": 2030
+     },
+     "verified": "file"
+    },
+    "inverter_lifetime": {
+     "value": 10.0,
+     "unit": "years",
+     "source": {
+      "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+      "locator": "technology 'battery inverter', parameter 'lifetime'",
+      "year": 2030
+     },
+     "verified": "file"
+    },
+    "storage_capex": {
+     "value": 189.861,
+     "unit": "EUR/kWh",
+     "source": {
+      "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+      "locator": "technology 'battery storage', parameter 'investment'",
+      "year": 2030
+     },
+     "verified": "file",
+     "costYear": 2025,
+     "currency": "EUR"
+    },
+    "storage_lifetime": {
+     "value": 25.0,
+     "unit": "years",
+     "source": {
+      "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+      "locator": "technology 'battery storage', parameter 'lifetime'",
+      "year": 2030
+     },
+     "verified": "file"
+    },
+    "efficiency_one_way": {
+     "value": 0.96,
+     "unit": "per unit",
+     "source": {
+      "document": "PyPSA/technology-data v0.15.0 (commit 07e43575c7996a988c60964d00772376ab9bd10c), outputs/costs_2030.csv",
+      "locator": "technology 'battery inverter', parameter 'efficiency'",
+      "year": 2030
+     },
+     "verified": "file",
+     "note": "Charge and discharge each; round trip = 0.96^2 = 0.9216."
+    },
+    "max_hours": {
+     "value": 4.0,
+     "unit": "h",
+     "source": {
+      "document": "Ragnarok assumption (no value in the pinned data files)",
+      "locator": "default duration of a grid battery",
+      "year": 2030
+     },
+     "verified": "assumption"
+    }
+   }
+  }
+ },
+ "defaults": {
+  "discount_rate": {
+   "value": 0.05,
+   "unit": "per unit/year",
+   "source": "same default as backend/app/p2x/technologies.json; the UI passes Settings -> Discount rate"
+  }
+ }
+}

@@ -183,6 +183,8 @@ def test_process_flows_through_run_payload_analytics() -> None:
     assert mix["CCGTp"] == pytest.approx(400.0, abs=1e-3)
     row = next(e for e in res["expansionResults"] if e["name"] == "proc")
     assert row["component"] == "Process" and row["p_nom_opt_mw"] == pytest.approx(200.0, abs=0.11)
-    assert row["capex_annual"] == pytest.approx(200.0 * 1000, rel=1e-6)
+    # An extendable Process is annuitised like a Link (it was charged its overnight cost before): rate 0 over the 20 a fallback lifetime
+    # is 1/20 of the overnight 1000 per MW, on the annual basis.
+    assert row["capex_annual"] == pytest.approx(200.0 * 1000 / 20.0, rel=1e-6)
     bal = {c["carrier"]: c for c in res["energyBalance"]["carriers"]}
     assert bal["gas"]["sinks"][0]["energyMWh"] == pytest.approx(800.0, abs=0.11)

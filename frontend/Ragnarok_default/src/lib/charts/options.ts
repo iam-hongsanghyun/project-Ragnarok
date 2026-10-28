@@ -36,7 +36,7 @@ const SURFACE = '#fcfcfb';
 
 /** A soft "lifted" hover shadow — reuses the same ink tone as `--shadow` in
  *  _tokens.css rather than inventing a new hue. */
-const HOVER_SHADOW = { shadowBlur: 6, shadowColor: 'rgba(28, 27, 23, 0.18)' };
+export const HOVER_SHADOW = { shadowBlur: 6, shadowColor: 'rgba(28, 27, 23, 0.18)' };
 
 /**
  * Max over an array WITHOUT spreading into `Math.max`. Spreading a large array
@@ -85,7 +85,7 @@ export function axisName(theme: ChartTheme): Record<string, unknown> {
   return { color: theme.muted, fontSize: 11, fontWeight: 600, fontFamily: theme.fontSans };
 }
 
-function dashedSplitLine(theme: ChartTheme): Record<string, unknown> {
+export function dashedSplitLine(theme: ChartTheme): Record<string, unknown> {
   return { show: true, lineStyle: { color: theme.grid, type: [4, 6] } };
 }
 
@@ -97,7 +97,7 @@ function axisLine(theme: ChartTheme): Record<string, unknown> {
 /** One line of a restyled tooltip: the value leads (bold, tooltip-text
  *  colour), the series/point name follows in a muted secondary tone. `value`
  *  is the already-formatted display string (number + unit baked in). */
-function tooltipValueRow(theme: ChartTheme, marker: string | undefined, value: string, name: string): string {
+export function tooltipValueRow(theme: ChartTheme, marker: string | undefined, value: string, name: string): string {
   return `<div style="display:flex;align-items:baseline;gap:6px;white-space:nowrap;">`
     + `<span style="font-weight:600;color:${theme.tooltipText};">${value}</span>`
     + `<span style="opacity:.68;">${marker ?? ''}${name}</span>`
@@ -105,7 +105,7 @@ function tooltipValueRow(theme: ChartTheme, marker: string | undefined, value: s
 }
 
 /** Muted header row for a multi-series axis tooltip (the hovered X value). */
-function tooltipHeader(label: string): string {
+export function tooltipHeader(label: string): string {
   return `<div style="opacity:.6;margin-bottom:4px;">${label}</div>`;
 }
 
@@ -119,7 +119,7 @@ interface AxisTooltipParam {
 
 /** Compact top-right toolbox — dataZoom toggle, restore, save-as-image —
  *  shared by every chart family that benefits from export/zoom. */
-function chartToolbox(theme: ChartTheme, title: string): Record<string, unknown> {
+export function chartToolbox(theme: ChartTheme, title: string): Record<string, unknown> {
   return {
     show: true,
     top: 0,
@@ -138,7 +138,7 @@ function chartToolbox(theme: ChartTheme, title: string): Record<string, unknown>
 
 /** Inside (wheel/drag) + slider dataZoom pair on one axis, styled to match
  *  the recessive grid/axis chrome tokens. */
-function axisDataZoom(theme: ChartTheme, axis: 'x' | 'y'): Record<string, unknown>[] {
+export function axisDataZoom(theme: ChartTheme, axis: 'x' | 'y'): Record<string, unknown>[] {
   const key = axis === 'x' ? 'xAxisIndex' : 'yAxisIndex';
   const sliderChrome = {
     borderColor: theme.grid,
@@ -164,7 +164,7 @@ function axisDataZoom(theme: ChartTheme, axis: 'x' | 'y'): Record<string, unknow
 
 /** Functional, togglable scroll legend — only ever used when a chart carries
  *  >= 2 series (single-series charts get no legend). */
-function scrollLegend(theme: ChartTheme, pos: { top?: number | string; left?: number | string; right?: number | string; bottom?: number | string }): Record<string, unknown> {
+export function scrollLegend(theme: ChartTheme, pos: { top?: number | string; left?: number | string; right?: number | string; bottom?: number | string }): Record<string, unknown> {
   return {
     type: 'scroll',
     icon: 'roundRect',

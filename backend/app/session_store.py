@@ -173,6 +173,17 @@ def _scenario_year_from_labels(labels: list[str]) -> int | None:
     return int(head[:4]) if len(head) >= 4 and head[:4].isdigit() else None
 
 
+def columns_of_rows(rows: list[Any]) -> list[str]:
+    """Column names of a sheet: the union of the row keys in first-seen order (a column that only some rows carry,
+    e.g. the Build ``plant`` id, is still a column)."""
+    seen: dict[str, None] = {}
+    for row in rows:
+        if isinstance(row, dict):
+            for key in row:
+                seen.setdefault(key, None)
+    return list(seen)
+
+
 def save_model(
     session_id: str,
     model: dict[str, list[dict[str, Any]]],
@@ -198,7 +209,7 @@ def save_model(
     for name, rows in model.items():
         if not isinstance(rows, list):
             continue
-        columns = list(rows[0].keys()) if rows and isinstance(rows[0], dict) else []
+        columns = columns_of_rows(rows)
         if is_series_sheet(name, rows):
             df = pd.DataFrame(rows)
             df.to_parquet(_series_path(session_id, name), index=False)
@@ -257,7 +268,7 @@ def merge_static_model(session_id: str, model: dict[str, list[dict[str, Any]]]) 
         if not isinstance(rows, list) or is_series_sheet(name):
             continue
         _static_path(session_id, name).write_text(json.dumps(rows, ensure_ascii=False, default=json_default), encoding="utf-8")
-        columns = list(rows[0].keys()) if rows and isinstance(rows[0], dict) else []
+        columns = columns_of_rows(rows)
         entry = existing.get(name)
         if entry is None:
             meta.setdefault("sheets", []).append(

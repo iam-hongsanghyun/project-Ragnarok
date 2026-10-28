@@ -92,4 +92,9 @@ export interface ReportRunOption {
   name: string;
   label?: string;
   savedAt?: string;
+  /** Multi-investment-period (pathway) run. Absent on a run stored before the flag existed: read `pathway.enabled`. */
+  isPathway?: boolean;
+  /** Investment periods of a pathway run (years). */
+  pathwayPeriods?: number[];
+  pathway?: { enabled?: boolean; periods?: Array<number | { period: number }> } | null;
 }

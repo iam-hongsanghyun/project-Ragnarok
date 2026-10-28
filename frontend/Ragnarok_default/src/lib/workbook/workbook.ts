@@ -24,6 +24,9 @@ export const CONSTRAINTS_SHEET = 'RAGNAROK_Constraints';
 export const RUN_STATE_SHEET = 'RAGNAROK_RunState';
 export const RUN_HISTORY_SHEET = 'RAGNAROK_RunHistory';
 export const PROVENANCE_SHEET = 'RAGNAROK_Provenance';
+/** Build plant registry (one JSON row per plant: type, spec, components) and the P2X chain registry. Both must travel with the workbook, or a plant could not be edited after a reload. */
+export const PLANT_REGISTRY_SHEET = 'RAGNAROK_PLANTS';
+export const P2X_REGISTRY_SHEET = 'RAGNAROK_P2X';
 // Backend-only human-readable landing sheet in exported workbooks. Carries no
 // data the parser needs, so it's skipped on import (never absorbed as a model
 // sheet). The frontend never writes it.
@@ -437,7 +440,7 @@ export function buildWorkbook(model: WorkbookModel, dateFormat: DateFormat = 'au
     XLSX.utils.book_append_sheet(workbook, ws, sheet);
   });
   appendPiecewiseSheets(workbook, model);
-  [PATHWAY_CONFIG_SHEET, PATHWAY_PERIODS_SHEET, ROLLING_CONFIG_SHEET, SCENARIO_SHEET, CARBON_LIBRARY_SHEET].forEach((sheet) => {
+  [PATHWAY_CONFIG_SHEET, PATHWAY_PERIODS_SHEET, ROLLING_CONFIG_SHEET, SCENARIO_SHEET, CARBON_LIBRARY_SHEET, PLANT_REGISTRY_SHEET, P2X_REGISTRY_SHEET].forEach((sheet) => {
     const rows = (model as any)[sheet] as GridRow[] | undefined;
     if (!rows || rows.length === 0) return;
     const ws = XLSX.utils.json_to_sheet(rows);
@@ -622,7 +625,7 @@ export function buildProjectWorkbook(
     XLSX.utils.book_append_sheet(workbook, ws, sheet);
   });
 
-  [PATHWAY_CONFIG_SHEET, PATHWAY_PERIODS_SHEET, ROLLING_CONFIG_SHEET, SCENARIO_SHEET, CARBON_LIBRARY_SHEET].forEach((sheet) => {
+  [PATHWAY_CONFIG_SHEET, PATHWAY_PERIODS_SHEET, ROLLING_CONFIG_SHEET, SCENARIO_SHEET, CARBON_LIBRARY_SHEET, PLANT_REGISTRY_SHEET, P2X_REGISTRY_SHEET].forEach((sheet) => {
     const rows = (model as any)[sheet] as GridRow[] | undefined;
     if (!rows || rows.length === 0) return;
     const ws = XLSX.utils.json_to_sheet(rows);

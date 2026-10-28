@@ -2483,3 +2483,12 @@ from . import tools_results_extra  # noqa: E402,F401
 
 # Self-hosted hourly demand database tools (list / fetch a slice / import into the model) - D2.
 from . import tools_demand_db  # noqa: E402,F401
+
+# Screening module tools (statistical pre-screen of solar / wind sites: datasets, correlation, portfolio, promote).
+from . import tools_screening  # noqa: E402,F401
+
+# P2X power-to-X tools (technologies, chain preview / build, LCOH-LCOA-LCOM results).
+from . import tools_p2x  # noqa: E402,F401
+
+# Build plant tools (plant-type catalogue, add / edit / remove one plant, results grouped by plant).
+from . import tools_plants  # noqa: E402,F401

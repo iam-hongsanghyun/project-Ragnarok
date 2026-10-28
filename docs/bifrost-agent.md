@@ -139,7 +139,7 @@ by `export_run`), the country GeoJSON and `DELETE /api/log`.
 
 ### 2.7 MCP-only modelling and scenario tools
 
-The MCP server has 161 tools: 116 in `backend/mcp/server.py` (§2.1–§2.6 group most of them, not all) and 45 in
+The MCP server has 184 tools: 116 in `backend/mcp/server.py` (§2.1–§2.6 group most of them, not all) and 68 in
 `backend/mcp/tools_*.py`. The table below covers the 38 added before 2026-10-28; `compare_run_statistics` (tools_results_extra.py, read-only, `GET /api/results/compare?topics=statistics`) compares runs through `pypsa.NetworkCollection` statistics, and `get_metric_options` (same module, read-only, `GET /api/runs/{name}/metrics`), `get_period_results` (same module, read-only, `GET /api/runs/{name}/period/{period}`) and `get_run_analysis` (same module, read-only, `GET /api/runs/{name}/analysis/{topic}`) are listed in the last table below. The GUI reaches the same backend routes through its own
 controls (Forge, the Solver section, the Scenarios panel). This table is a snapshot from 2026-10-28, read from the
 code: the tool name and module from the `@mcp.tool` decorator, the endpoints from the `RagnarokClient` method each
@@ -225,6 +225,26 @@ MCP `list_tools` call returns the full descriptions, and `describe_run_options` 
 | `get_demand_db_slice` | `GET /api/demand-db/slice` | — | One series for `year_from..year_to` (by `series` or `country`): full-window stats (hours, TWh, peak/mean MW) plus up to `max_values` hourly values |
 | `import_demand_db` | `POST /api/import/run` (`demand_db`); `POST /api/session/merge-fragment` | confirm | Put a series into the working model as a national bus, a Load and an hourly `loads-p_set` with snapshots; reads the local snapshot only, no network or key |
 
+**Screening module (`tools_screening.py`, tool names keep the `siting_` prefix)** — read-only unless marked confirm; routes under `/api/screening/*`, see [backend.md](backend.md) §14.2. The statistic tools take `level='region'` (regions aggregated from a site dataset, or a region dataset) with `weighting`, `site_weights`, `by_technology`, `technology`.
+
+| Tool | Gate | What it does |
+|---|---|---|
+| `list_siting_datasets`, `get_siting_dataset`, `validate_siting_dataset` | — | List, read and validate per-site historical series (CF 0–1, UTC) |
+| `upload_siting_dataset`, `delete_siting_dataset` | confirm | Store or delete a dataset (without confirm, upload returns the validation preview) |
+| `siting_correlation`, `siting_lagged_correlation`, `siting_profiles` | — | Pearson/Spearman matrices on a chosen basis, lagged cross-correlation, diurnal/seasonal profiles |
+| `siting_portfolio_metrics`, `siting_optimise_portfolio`, `siting_cluster_sites` | — | Portfolio complementarity metrics, min-variance / max-CF weights, hierarchical clusters |
+| `siting_region_series`, `siting_region_structure` | — | Region series in use (members, weights, centroid); within- vs between-region correlation and site-vs-region table |
+| `promote_siting_sites` | confirm | Add selected sites as generators with `p_max_pu` aligned to the model's snapshots |
+
+**P2X and plants (`tools_p2x.py`, `tools_plants.py`)**
+
+| Tool | Gate | What it does |
+|---|---|---|
+| `list_p2x_technologies`, `preview_p2x_chain`, `get_p2x_results` | — | Technology data with sources; a chain preview; LCOH/LCOA/LCOM and RFNBO compliance for a run |
+| `build_p2x_chain` | confirm | Add an H2 chain (electrolyser, storage, NH3/MeOH/e-fuel Processes) to the model |
+| `list_plant_types`, `get_plant_results` | — | Plant types and defaults; per-plant generation, CF, starts, H2 share and CO2 avoided |
+| `add_plant`, `edit_plant`, `remove_plant` | confirm | Add, re-derive or remove a whole plant (Generator, BESS, CCGT/OCGT, co-firing, P2X chain) |
+
 ---
 
 ## 3. LLM provider abstraction
@@ -302,7 +322,7 @@ A new **Assistant** tab (activity bar), consistent with the existing view shell:
 
 | Phase | Deliverable | Leans on |
 |---|---|---|
-| **0 · MCP prototype** ✅ *shipped* | An MCP server (`backend/mcp/`) — 161 tools spanning the full surface (§2.7 lists the newest 45): introspect + **schema** (`list_components`/`describe_component`/`describe_run_options` over the live PyPSA registry) · data-in · edit · **generic component CRUD** (`add_component`/`set_component`/`remove_component` cover every PyPSA component + attribute) + typed `add_*` conveniences · series transforms · solve (all modes via free-form scenario/options) · analyse · plugins. Drivable from any MCP client with any model. See §10 to connect a client. | existing API |
+| **0 · MCP prototype** ✅ *shipped* | An MCP server (`backend/mcp/`) — 184 tools spanning the full surface (§2.7 lists the newest 68): introspect + **schema** (`list_components`/`describe_component`/`describe_run_options` over the live PyPSA registry) · data-in · edit · **generic component CRUD** (`add_component`/`set_component`/`remove_component` cover every PyPSA component + attribute) + typed `add_*` conveniences · series transforms · solve (all modes via free-form scenario/options) · analyse · plugins. Drivable from any MCP client with any model. See §10 to connect a client. | existing API |
 | **1 · Embedded agent (L1 shell)** | `LLMProvider` abstraction + Claude API adapter + the plan/act/observe loop + a minimal Assistant chat tab (stream + tool cards). Happy path: "build KOR, solve, report." | Phase 0 tools |
 | **2 · Guardrails & grounding** | confirmation gates, budgets, world-state summarisation, schema retrieval tools, exemplars. | pypsa_schema_builder |
 | **3 · Verification loop** | validate-before-solve, Q2 repair loop, Ember/adequacy sanity, cited report generator. | Q2, I7, A2 |

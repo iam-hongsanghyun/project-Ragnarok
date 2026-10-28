@@ -13,7 +13,9 @@
 import * as echarts from 'echarts/core';
 import {
   BarChart,
+  BoxplotChart,
   CustomChart,
+  HeatmapChart,
   LineChart,
   PieChart,
   ScatterChart,
@@ -26,12 +28,15 @@ import {
   TitleComponent,
   ToolboxComponent,
   TooltipComponent,
+  VisualMapComponent,
 } from 'echarts/components';
 import { SVGRenderer } from 'echarts/renderers';
 
 echarts.use([
   BarChart,
+  BoxplotChart,
   CustomChart,
+  HeatmapChart,
   LineChart,
   PieChart,
   ScatterChart,
@@ -42,6 +47,7 @@ echarts.use([
   TitleComponent,
   ToolboxComponent, // dataZoom toggle, restore, saveAsImage
   TooltipComponent,
+  VisualMapComponent, // heatmap colour scale (continuous slider filters the range)
   SVGRenderer,
 ]);
 

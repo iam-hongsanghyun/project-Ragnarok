@@ -21,6 +21,7 @@ import type { Map as LeafletMap } from 'leaflet';
 import { GridRow, WorkbookModel } from 'lib/types';
 import { numberValue, stringValue, resolvedColor } from 'lib/utils/helpers';
 import { NoZoomAnimation } from '../map/NoZoomAnimation';
+import { inPlant, plantMarkers } from 'lib/build/plants';
 
 const POINT_SHEETS = new Set(['generators', 'loads', 'storage_units', 'stores']);
 export const BRANCH_SHEETS = new Set(['lines', 'links', 'transformers']);
@@ -219,6 +220,8 @@ interface Props {
   onPickBus?: (busName: string) => void;
   /** Abandon the current link request. */
   onCancelLink?: () => void;
+  /** A plant marker was clicked (a plant is drawn as ONE marker; its components are not drawn). */
+  onSelectPlant?: (plantId: string) => void;
 }
 
 interface ContextMenuState {
@@ -231,7 +234,7 @@ interface ContextMenuState {
 
 export function BuildNetworkMap({
   model, busIndex, activeSheet, selectedRowIndex, onSelectRow, onAddAtLocation, onDeleteRow, onMoveRow,
-  linkMode, onStartLink, onPickBus, onCancelLink,
+  linkMode, onStartLink, onPickBus, onCancelLink, onSelectPlant,
 }: Props) {
   const rows: GridRow[] = (model as Record<string, GridRow[]>)[activeSheet] ?? [];
   const busActive = activeSheet === 'buses';
@@ -245,6 +248,10 @@ export function BuildNetworkMap({
   // visible while one class is being edited.
   const contextBranchSheets = Array.from(BRANCH_SHEETS).filter((s) => s !== activeSheet);
   const contextPointSheets = Array.from(POINT_SHEETS).filter((s) => s !== activeSheet);
+
+  // A plant is ONE marker at its bus: its generators, links and own buses are not drawn individually
+  // (the Buses step still shows the plant's buses, since that step edits them).
+  const markers = plantMarkers(model, busIndex);
 
   const [menu, setMenu] = useState<ContextMenuState | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -301,9 +308,10 @@ export function BuildNetworkMap({
   if (busActive) {
     model.buses.forEach((b, i) => { const c = ownCoords(b); if (c) clickTargets.push({ rowIndex: i, latlng: c }); });
   } else if (pointActive) {
-    rows.forEach((r, i) => { const c = pointCoords(r, busIndex); if (c) clickTargets.push({ rowIndex: i, latlng: c }); });
+    rows.forEach((r, i) => { if (inPlant(r)) return; const c = pointCoords(r, busIndex); if (c) clickTargets.push({ rowIndex: i, latlng: c }); });
   } else if (branchActive) {
     rows.forEach((r, i) => {
+      if (inPlant(r)) return;
       const p = branchPositions(r, busIndex);
       if (p) clickTargets.push({ rowIndex: i, latlng: [(p[0][0] + p[1][0]) / 2, (p[0][1] + p[1][1]) / 2] });
     });
@@ -341,6 +349,7 @@ export function BuildNetworkMap({
         {contextBranchSheets.map((sheet) => {
           const sheetRows = (model as Record<string, GridRow[]>)[sheet] ?? [];
           return sheetRows.map((row, index) => {
+            if (inPlant(row)) return null;
             const positions = branchPositions(row, busIndex);
             if (!positions) return null;
             return (
@@ -359,6 +368,7 @@ export function BuildNetworkMap({
         {contextPointSheets.map((sheet) => {
           const sheetRows = (model as Record<string, GridRow[]>)[sheet] ?? [];
           return sheetRows.map((row, index) => {
+            if (inPlant(row)) return null;
             const coords = pointCoords(row, busIndex);
             if (!coords) return null;
             return (
@@ -375,6 +385,7 @@ export function BuildNetworkMap({
 
         {/* Dashed connectors: active point component → its linked bus. */}
         {pointActive && rows.map((row, index) => {
+          if (inPlant(row)) return null;
           const stored = ownCoords(row);
           const own: [number, number] | null = drag?.rowIndex === index ? [drag.lat, drag.lng] : stored;
           const bus = busIndex[stringValue(row.bus)];
@@ -391,6 +402,7 @@ export function BuildNetworkMap({
 
         {/* Active branch layer — clickable */}
         {branchActive && rows.map((row, index) => {
+          if (inPlant(row)) return null;
           const positions = branchPositions(row, busIndex);
           if (!positions) return null;
           const sel = index === selectedRowIndex;
@@ -413,7 +425,7 @@ export function BuildNetworkMap({
         {/* Buses — context, the active+clickable layer, or pickable in link mode */}
         {model.buses.map((bus, index) => {
           const stored = ownCoords(bus);
-          if (!stored) return null;
+          if (!stored || (inPlant(bus) && !busActive)) return null;
           const dragging = busActive && drag?.rowIndex === index;
           const coords: [number, number] = dragging ? [drag!.lat, drag!.lng] : stored;
           const sel = busActive && index === selectedRowIndex;
@@ -444,6 +456,7 @@ export function BuildNetworkMap({
 
         {/* Active point layer (generators / loads / storage / stores) — clickable */}
         {pointActive && rows.map((row, index) => {
+          if (inPlant(row)) return null;
           const stored = pointCoords(row, busIndex);
           if (!stored) return null;
           const dragging = drag?.rowIndex === index;
@@ -463,6 +476,22 @@ export function BuildNetworkMap({
             </CircleMarker>
           );
         })}
+
+        {/* One marker per plant (diamond-ish: a larger ring) */}
+        {markers.map((m) => (
+          <CircleMarker
+            key={`plant-${m.plantId}`}
+            center={m.coords}
+            radius={9}
+            pathOptions={{ color: '#7c3aed', weight: 3, fillColor: '#f5f3ff', fillOpacity: 0.95 }}
+            eventHandlers={{ click: () => onSelectPlant?.(m.plantId) }}
+          >
+            <Tooltip>
+              <strong>{m.plantId}</strong><br />
+              {m.type ?? 'plant'}{m.capacityMwEl !== null ? ` · ${Math.round(m.capacityMwEl)} MW` : ''} · {m.componentCount} components
+            </Tooltip>
+          </CircleMarker>
+        ))}
       </MapContainer>
 
       {linking && (

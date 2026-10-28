@@ -21,6 +21,8 @@ export type TabModuleId =
   | 'Forge'
   | 'PhysicalRisk'
   | 'Siting'
+  | 'Screening'
+  | 'P2X'
   | 'PostAnalysis'
   | 'Reporting'
   | 'Training';
