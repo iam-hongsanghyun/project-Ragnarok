@@ -44,6 +44,9 @@ class Example:
     # Optional hook run on the converted model JSON, for columns PyPSA itself has no attribute
     # for (the `owner` tag the Company views group on).
     tag: Callable[[dict], None] | None = None
+    # Solve the TAGGED model through the app's own path as well: a plant added by ``tag`` is not in the
+    # PyPSA network the first probe solves.
+    probe_model: bool = False
 
 
 # ── Builders ────────────────────────────────────────────────────────────────
@@ -339,6 +342,100 @@ def build_bess_system(battery: str = "none") -> pypsa.Network:
     return n
 
 
+# ── Training course examples (modules 18 and 19) ────────────────────────────
+#
+# Each module's finished checkpoint is its start network with one plant added through the
+# plant picker's own builder (``plants.catalog.build_plant`` -> fragment merge), the path the
+# Build -> Generators step takes, so the checkpoint holds exactly what the learner's clicks make.
+
+def _add_plant(model: dict, type_id: str, spec: dict) -> None:
+    """Merge one plant (the plant picker's fragment, registry row included) into ``model`` in place."""
+    from backend.app import fragment_merge
+    from backend.app.plants import catalog
+
+    built = catalog.build_plant(type_id, spec, model)
+    merged = fragment_merge.merge_fragment(model, built["fragment"])
+    model.clear()
+    model.update(merged)
+
+
+# Module 18 — one week of a grid where gas is the marginal unit in every hour, so a grid-connected
+# electrolyser runs on gas power unless a matching rule stops it.
+P2X_HOURS = 168
+P2X_SUN_DAYS = (1.0, 0.8, 0.3, 0.9, 1.0, 0.6, 0.95)
+P2X_WIND_DAYS = (0.55, 0.35, 0.15, 0.1, 0.45, 0.7, 0.5)
+#: The P2X plant the module has the learner add from Build -> Generators (blank plant name = ``p2x``).
+P2X_PLANT_SPEC = {"plantId": "p2x", "extendable": True, "product": "H2", "storage": "tank", "offtakeMw": 30.0,
+                  "discountRate": EXAMPLE_DISCOUNT, "chain": {"designatedGenerators": ["solar", "wind"]}}
+
+
+def build_p2x_grid() -> pypsa.Network:
+    """Single bus over one March week of 2030: 120 MW solar, 100 MW wind, 400 MW gas at 70 per MWh.
+
+    Demand (150-205 MW) always exceeds the renewable output, so every hour's price is gas's 70 and
+    the wind and solar are never curtailed. Both renewables carry ``build_year`` 2029 so the RFNBO
+    additionality check (36 months before a 2030 electrolyser) has a year to test.
+    """
+    n = pypsa.Network()
+    n.name = "Grid for an electrolyser"
+    n.set_snapshots(pd.date_range("2030-03-04", periods=P2X_HOURS, freq="h"))
+    for name, co2 in (("AC", 0.0), ("gas", 0.20), ("solar", 0.0), ("wind", 0.0)):
+        n.add("Carrier", name, co2_emissions=co2)
+    n.add("Bus", "grid", carrier="AC", v_nom=110, x=127.0, y=37.5)
+    h = np.arange(P2X_HOURS) % 24
+    day = np.arange(P2X_HOURS) // 24
+    solar = np.round(np.clip(np.sin((h - 6) / 12 * np.pi), 0, 1) * np.array(P2X_SUN_DAYS)[day] * 0.85, 4)
+    wind = np.round(np.clip(np.array(P2X_WIND_DAYS)[day] + 0.12 * np.sin(np.arange(P2X_HOURS) / 24 * 2 * np.pi * 1.3), 0.02, 1), 4)
+    shape = np.round(0.75 + 0.25 * np.exp(-(((h - 19) / 3.0) ** 2)) + 0.10 * np.exp(-(((h - 9) / 2.5) ** 2)), 4)
+    n.add("Generator", "solar", bus="grid", carrier="solar", p_nom=120, marginal_cost=0.0, p_max_pu=solar, build_year=2029)
+    n.add("Generator", "wind", bus="grid", carrier="wind", p_nom=100, marginal_cost=0.0, p_max_pu=wind, build_year=2029)
+    n.add("Generator", "gas", bus="grid", carrier="gas", p_nom=400, marginal_cost=70, efficiency=0.5)
+    n.add("Load", "demand", bus="grid", p_set=200.0 * shape)
+    return n
+
+
+def tag_p2x_plant(model: dict) -> None:
+    """The module 18 checkpoint: the grid plus the P2X plant (electrolyser, H2 bus, tank, 30 MW offtake)."""
+    _add_plant(model, "p2x", P2X_PLANT_SPEC)
+
+
+# Module 19 — three June days, a solar surplus at noon, an oil peaker and an H2 pipeline.
+COFIRE_HOURS = 72
+COFIRE_SUN_DAYS = (1.0, 0.7, 0.95)
+#: The co-firing plant the module ends with (Build -> Generators -> Gas + H2 co-firing (fuel network)).
+COFIRE_PLANT_SPEC = {"plantId": "cofire", "pNom": 200.0, "h2Bus": "h2", "blendMax": 0.3, "blendMin": 0.3,
+                     "blendUnit": "vol", "blendScope": "hourly", "committable": True, "minLoadEfficiency": 0.52,
+                     "startCostWarm": 120.0, "startWarmAfterHours": 5.0, "discountRate": EXAMPLE_DISCOUNT}
+
+
+def build_cofiring_system() -> pypsa.Network:
+    """Single bus, three days: 250 MW solar against a 297 MW evening peak, a 400 MW oil peaker at 160.
+
+    A separate ``h2`` bus holds a 50 MW hydrogen pipeline at 100 per MWh (the plant data file's own H2
+    price assumption). Nothing burns it yet: the module adds the turbine.
+    """
+    n = pypsa.Network()
+    n.name = "Solar and a peaker, with an H2 pipeline"
+    n.set_snapshots(pd.date_range("2030-06-01", periods=COFIRE_HOURS, freq="h"))
+    for name, co2 in (("AC", 0.0), ("oil", 0.27), ("solar", 0.0), ("H2", 0.0)):
+        n.add("Carrier", name, co2_emissions=co2)
+    n.add("Bus", "grid", carrier="AC", v_nom=110, x=127.0, y=37.5)
+    n.add("Bus", "h2", carrier="H2", x=127.0, y=37.6)
+    h = np.arange(COFIRE_HOURS) % 24
+    day = np.arange(COFIRE_HOURS) // 24
+    sun = np.round(np.clip(np.sin((h - 6) / 12 * np.pi), 0, 1) * np.array(COFIRE_SUN_DAYS)[day] * 0.85, 4)
+    shape = np.round(0.6 + 0.4 * np.exp(-(((h - 19.5) / 3.0) ** 2)) + 0.08 * np.exp(-(((h - 8) / 2.0) ** 2)), 4)
+    n.add("Generator", "solar", bus="grid", carrier="solar", p_nom=250, marginal_cost=0.0, p_max_pu=sun)
+    n.add("Generator", "peaker", bus="grid", carrier="oil", p_nom=400, marginal_cost=160, efficiency=0.35)
+    n.add("Generator", "h2_pipeline", bus="h2", carrier="H2", p_nom=50, marginal_cost=100)
+    n.add("Load", "demand", bus="grid", p_set=300.0 * shape)
+    return n
+
+
+def tag_cofiring_plant(model: dict) -> None:
+    """The module 19 checkpoint: the system plus a 200 MW co-firing CCGT at a fixed 30 vol% H2 blend, committed."""
+    _add_plant(model, "cofiring_network", COFIRE_PLANT_SPEC)
+
 
 EXAMPLES: list[Example] = [
     Example(
@@ -414,6 +511,46 @@ EXAMPLES: list[Example] = [
         order=106,
         build=lambda: build_bess_system("store"),
     ),
+    Example(
+        id="training_m18_start",
+        label="Training: module 18 start (a grid for an electrolyser)",
+        description="Module 18's starting model: one bus over one March week of 2030 with 120 MW of solar, 100 MW of wind "
+                    "(both built in 2029) and 400 MW of gas at 70 per MWh against 150-205 MW of demand, so gas sets the price "
+                    "in every hour. No P2X chain yet.",
+        order=107,
+        build=build_p2x_grid,
+    ),
+    Example(
+        id="training_m18",
+        label="Training: module 18 model (end of module)",
+        description="Module 18 finished: the same grid with a P2X plant from Build -> Generators: an alkaline electrolyser the "
+                    "solver sizes, a new H2 bus, an extendable compressed-hydrogen tank and a flat 30 MW hydrogen offtake, with "
+                    "solar and wind designated for RFNBO matching. The matching rule itself is a P2X tab setting, not part of the workbook.",
+        order=108,
+        build=build_p2x_grid,
+        tag=tag_p2x_plant,
+        probe_model=True,
+    ),
+    Example(
+        id="training_m19_start",
+        label="Training: module 19 start (solar, a peaker and an H2 pipeline)",
+        description="Module 19's starting model: one bus over three June days with 250 MW of solar against a 297 MW evening "
+                    "peak and a 400 MW oil peaker at 160 per MWh, plus an h2 bus with a 50 MW hydrogen pipeline at 100 per MWh. "
+                    "No gas turbine yet.",
+        order=109,
+        build=build_cofiring_system,
+    ),
+    Example(
+        id="training_m19",
+        label="Training: module 19 model (end of module)",
+        description="Module 19 finished: a 200 MW gas + H2 co-firing CCGT (fuel network) burning a fixed 30 vol% hydrogen "
+                    "blend every hour, with unit commitment, an efficiency of 0.52 at minimum load, and a warm start of 120 per "
+                    "MW after 5 hours offline.",
+        order=110,
+        build=build_cofiring_system,
+        tag=tag_cofiring_plant,
+        probe_model=True,
+    ),
 ]
 
 
@@ -433,6 +570,12 @@ def author(ex: Example) -> None:
 
     if ex.tag is not None:
         ex.tag(model)
+    if ex.probe_model:
+        from backend.pypsa.results import run_pypsa
+
+        res = run_pypsa(model, {"discountRate": EXAMPLE_DISCOUNT, "carbonPrice": 0.0}, {"enableLoadShedding": False})
+        total = float(sum(r["value"] for r in res["costBreakdown"]))
+        assert np.isfinite(total), f"{ex.id}: the tagged model did not solve"
 
     model_store.save_model(AUTHOR_SESSION, model, filename=ex.label)
     src = session_store.SESSION_DIR / AUTHOR_SESSION / "project.db"

@@ -196,10 +196,10 @@ describe('course modules', () => {
   });
 
   test('a module with no per-module checkpoint tests would be a module with unpinned numbers', () => {
-    // The two deep-dive modules state figures solved from their own examples; the backend
+    // The deep-dive modules state figures solved from their own examples; the backend
     // checkpoint file must carry a test_module_N_* for each. Read it rather than trust it.
     const file = fs.readFileSync(
       path.resolve(__dirname, '../../../../../backend/tests/test_training_checkpoints.py'), 'utf8');
-    for (const n of [16, 17]) expect(file).toMatch(new RegExp(`def test_module_${n}_`));
+    for (const n of [16, 17, 18, 19]) expect(file).toMatch(new RegExp(`def test_module_${n}_`));
   });
 });

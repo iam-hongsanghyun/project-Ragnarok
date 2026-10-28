@@ -17,10 +17,12 @@ format.
 """
 from __future__ import annotations
 
+import functools
 import itertools
 import json
 import shutil
 import sqlite3
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -2086,6 +2088,622 @@ def test_module_17_storage_unit_versus_store_and_links_sizing(tmp_path: Path) ->
     assert float(long.storage_units.p_nom_opt["batt"]) * 8.0 == pytest.approx(1_747.5, abs=1.0)
 
 
+# ── Module 18 — Power-to-X ───────────────────────────────────────────────────
+#
+# `training_m18_start` is one March week of 2030 on one bus: 120 MW solar, 100 MW wind
+# (both built 2029) and 400 MW of gas at 70 against 150-205 MW of demand, so gas sets the
+# price in every hour. The module adds a P2X plant from Build -> Generators (the plant
+# picker's own builder, `plants.catalog.build_plant`, the path `/api/build/plant` takes),
+# solves it with RFNBO matching off, monthly and hourly (the P2X tab's settings ride as
+# `options.rfnboConfig`), and reads the P2X results (`p2x.results.p2x_results`, the panel's
+# `/api/p2x/results/{run}`). `training_m18` is that plant on the start grid.
+
+_M18_SCENARIO = {"carbonPrice": 0.0, "discountRate": 0.05}
+_M18_MATCHING = {
+    "none": {},
+    "monthly": {"rfnboConfig": {"enabled": True, "temporal": "monthly"}},
+    "hourly": {"rfnboConfig": {"enabled": True, "temporal": "hourly"}},
+}
+
+
+@functools.lru_cache(maxsize=None)
+def _m18_example(example_id: str) -> str:
+    """A bundled example read once per session (the model as JSON so the cache hands out fresh copies)."""
+    return json.dumps(_model_from_example(example_id, Path(tempfile.mkdtemp(prefix="m18_"))))
+
+
+def _m18_model(example_id: str = "training_m18") -> dict:
+    return json.loads(_m18_example(example_id))
+
+
+def _m18_product(product: str) -> dict:
+    """The checkpoint with its P2X plant re-derived for ``product`` (Build -> Generators -> plant card -> Edit)."""
+    from backend.app.plants import catalog, registry
+
+    model = _m18_model()
+    return registry.apply_change(model, catalog.edit_plant(model, "p2x", {"product": product}))
+
+
+@functools.lru_cache(maxsize=None)
+def _m18_run(matching: str = "none", product: str = "H2", example_id: str = "training_m18") -> tuple[str, str]:
+    """(model, result) of one module-18 solve through ``run_pypsa``, cached: several tests read the same run."""
+    from backend.pypsa.results import run_pypsa
+
+    model = _m18_product(product) if product != "H2" else _m18_model(example_id)
+    options = {**OPTIONS, **_M18_MATCHING[matching]}
+    return json.dumps(model), json.dumps(run_pypsa(model, _M18_SCENARIO, options))
+
+
+def _m18(matching: str = "none", product: str = "H2", example_id: str = "training_m18") -> tuple[dict, dict, dict]:
+    """(model, result, P2X results) - the P2X results only when the model has a chain."""
+    from backend.app.p2x import results as p2x_results
+
+    model_s, res_s = _m18_run(matching, product, example_id)
+    model, res = json.loads(model_s), json.loads(res_s)
+    p2x: dict = {}
+    if model.get("RAGNAROK_P2X"):
+        bundle = {"model": model, "result": res, "options": {**OPTIONS, **_M18_MATCHING[matching]}, "scenario": _M18_SCENARIO}
+        p2x = p2x_results.p2x_results(bundle)
+    return model, res, p2x
+
+
+def _total(res: dict) -> float:
+    """Total cost as the KPI strip adds it: the run's cost breakdown."""
+    return float(sum(r["value"] for r in res["costBreakdown"]))
+
+
+def _series(res: dict, sheet: str, name: str) -> list[float]:
+    return [float(r[name]) for r in res["outputs"]["series"][sheet]]
+
+
+def _kpis(model: dict, res: dict) -> dict:
+    from backend.app import results_derived as rd
+
+    return rd.compute_kpis(res, model["carriers"], set(), "$", list)
+
+
+def test_module_18_technology_data_is_what_the_electrolyser_is_built_from() -> None:
+    """Step 2: the P2X tab's Technology parameters, and the Link the chain writes from them."""
+    from backend.app.p2x import technologies as tech
+
+    cat = tech.catalogue()
+    aec = cat["technologies"]["electrolyser_aec"]["parameters"]
+    values = {k: aec[k]["value"] for k in ("specific_energy", "capex", "fom", "lifetime", "stack_capex",
+                                           "stack_lifetime_hours", "water_use", "availability", "min_load")}
+    assert values == pytest.approx({"specific_energy": 53.565843, "capex": 691.534046, "fom": 4.0, "lifetime": 25.0,
+                                    "stack_capex": 145.159019, "stack_lifetime_hours": 92_500.0,
+                                    "water_use": 185.169748, "availability": 0.939863, "min_load": 15.0}, rel=1e-12)
+    assert "technology-data v0.15.0" in aec["capex"]["source"]["document"]
+    assert [aec[k]["verified"] for k in ("capex", "availability", "min_load")] == ["file", "derived", "literature-recalled"]
+    assert (aec["forced_outage"]["value"], aec["planned_outage"]["value"]) == (3.0, 11.0)       # what availability is derived from
+    tank = cat["technologies"]["h2_storage_tank"]["parameters"]
+    assert (tank["capex"]["value"], tank["fom"]["value"], tank["lifetime"]["value"]) == pytest.approx((60.0469, 1.1133, 30.0))
+    water = cat["technologies"]["water"]["parameters"]["supply_cost"]["value"]
+    assert water == pytest.approx(0.7285, rel=1e-12)
+    lhv = tech.constants()["h2_lhv_kwh_per_kg"]
+    assert lhv == pytest.approx(33.33)
+    # What the chain wrote into the checkpoint's electrolyser Link.
+    ely = next(r for r in _m18_model()["links"] if r["name"] == "p2x_electrolyser")
+    assert (ely["bus0"], ely["bus1"], ely["carrier"]) == ("grid", "p2x_bus_h2", "electrolysis")
+    assert float(ely["efficiency"]) == pytest.approx(lhv / 53.565843, abs=1e-8)              # 0.6222
+    assert round(float(ely["efficiency"]), 4) == 0.6222
+    wear = 145.159019 * 1000.0 / 92_500.0                                                   # 1.569 per MWh_el
+    water_cost = 185.169748 / 1000.0 * 0.7285                                              # 0.135 per MWh_el
+    assert (round(wear, 3), round(water_cost, 3)) == (1.569, 0.135)
+    assert float(ely["marginal_cost"]) == pytest.approx(wear + water_cost, abs=1e-6)        # 1.704
+    assert float(ely["overnight_cost"]) == pytest.approx(691_534.046, abs=1e-6)
+    assert float(ely["p_max_pu"]) == pytest.approx(0.939863, abs=1e-9)
+    assert float(ely["lifetime"]) == 25.0 and float(ely["discount_rate"]) == 0.05
+
+
+def test_module_18_start_grid_prices_every_hour_at_gas() -> None:
+    """Step 1: gas is marginal in all 168 hours and no renewable MWh is thrown away."""
+    model, res, _ = _m18(example_id="training_m18_start")
+    assert _total(res) == pytest.approx(1_163_072.0, abs=1.0)
+    price = _series(res, "buses-marginal_price", "grid")
+    assert len(price) == 168 and all(abs(p - 70.0) < 1e-6 for p in price)
+    k = _kpis(model, res)
+    assert k["totalCost"] == "$1,163,072" and (k["minPrice"], k["maxPrice"]) == pytest.approx((70.0, 70.0))
+    assert round(k["renewableSharePct"], 1) == 39.9
+    assert k["peakLoadMw"] == pytest.approx(200.0, abs=1e-6)
+    used = sum(_series(res, "generators-p", "solar")) + sum(_series(res, "generators-p", "wind"))
+    avail = sum(120.0 * float(r["solar"]) + 100.0 * float(r["wind"]) for r in model["generators-p_max_pu"])
+    assert used == pytest.approx(avail, abs=1e-6) and avail == pytest.approx(11_035.95, abs=0.01)   # nothing curtailed
+    assert float(res["emissionsBreakdown"]["totalTco2"]) == pytest.approx(6_646.12, abs=0.01)
+
+
+def test_module_18_the_plant_picker_builds_the_chain_the_checkpoint_holds() -> None:
+    """Step 3: P2X chain, solver-sized, tank, 30 MW offtake, solar and wind designated: what Apply merges."""
+    from backend.app import fragment_merge
+    from backend.app.plants import catalog
+
+    start = _m18_model("training_m18_start")
+    built = catalog.build_plant("p2x", {"extendable": True, "offtakeMw": 30,
+                                        "chain": {"designatedGenerators": ["solar", "wind"]}, "discountRate": 0.05}, start)
+    assert built["plantId"] == "p2x"                                                        # blank name -> the type id
+    counts = {s: len(v) for s, v in built["fragment"]["sheets"].items() if not s.startswith("RAGNAROK")}
+    assert counts == {"buses": 1, "carriers": 3, "links": 1, "stores": 1, "loads": 1}       # the preview's "Creates:" line
+    sheets = built["fragment"]["sheets"]
+    assert [r["name"] for r in sheets["links"]] == ["p2x_electrolyser"]
+    assert [r["name"] for r in sheets["stores"]] == ["p2x_h2_store"]
+    assert [(r["name"], r["p_set"]) for r in sheets["loads"]] == [("p2x_load_H2", 30.0)]
+    assert sheets["stores"][0]["e_cyclic"] is True and sheets["stores"][0]["e_nom_extendable"] is True
+    assert any("fom_cost is written per modelled HORIZON" in w for w in built["warnings"])
+    merged = fragment_merge.merge_fragment(start, built["fragment"])
+    checkpoint = _m18_model()
+    for sheet in ("buses", "carriers", "generators", "links", "stores", "loads"):
+        assert merged[sheet] == checkpoint[sheet], sheet
+    for sheet in ("RAGNAROK_P2X", "RAGNAROK_PLANTS"):                                       # registry rows: the same JSON
+        assert [json.loads(r["json"]) for r in merged[sheet]] == [json.loads(r["json"]) for r in checkpoint[sheet]], sheet
+
+
+def test_module_18_without_matching_the_electrolyser_runs_flat_on_gas_power() -> None:
+    """Step 4: the cheapest hydrogen here runs the electrolyser at its availability every hour, no store."""
+    model, res, p2x = _m18("none")
+    assert _total(res) == pytest.approx(1_819_359.0, abs=1.0)
+    assert _total(res) - 1_163_072.0 == pytest.approx(656_287.0, abs=1.0)
+    e = p2x["electrolyser"]
+    assert e["capacityMw"] == pytest.approx(51.30, abs=0.005)
+    assert e["capacityFactor"] == pytest.approx(0.939863, abs=1e-6)                         # = availability: flat out
+    assert e["fullLoadHoursPerYear"] == pytest.approx(8_233.2, abs=0.1)
+    assert e["electricityMwh"] == pytest.approx(8_099.97, abs=0.01)
+    assert e["h2Tonnes"] == pytest.approx(151.215, abs=0.001)                               # 30 MW x 168 h / 33.33
+    assert 30.0 * 168.0 / 33.33 == pytest.approx(e["h2Tonnes"], rel=1e-9)
+    assert 30.0 / 33.33 == pytest.approx(0.90, abs=0.001)                                    # t of hydrogen an hour
+    assert e["electricityMwh"] / 168.0 == pytest.approx(48.2, abs=0.05)                      # MW drawn in every hour
+    assert max(_series(res, "stores-e", "p2x_h2_store")) == pytest.approx(0.0, abs=1e-6)
+    assert p2x["lcoh"]["perKg"] == pytest.approx(4.340, abs=0.0005)
+    pc = p2x["lcoh"]["perComponent"]
+    assert pc["Electricity (electrolyser)"] == pytest.approx(70.0 * 53.565843 / 1000.0, rel=1e-6)   # 3.75 (efficiency stored to 8 digits)
+    assert {k: round(v, 2) for k, v in pc.items()} == {
+        "Electricity (electrolyser)": 3.75, "Electrolyser capex": 0.32, "Electrolyser FOM": 0.18,
+        "Stack replacement": 0.08, "Water": 0.01, "Compression": 0.0, "H2 storage": 0.0}
+    assert pc["Electricity (electrolyser)"] / p2x["lcoh"]["perKg"] == pytest.approx(0.86, abs=0.005)
+    comp = p2x["rfnbo"]["compliance"]
+    assert (comp["hourly"]["compliantOperatingPeriods"], comp["hourly"]["operatingPeriods"]) == (109, 168)
+    assert comp["hourly"]["compliantShareOfOperating"] == pytest.approx(0.649, abs=0.0005)
+    assert comp["hourly"]["unmatchedMwh"] == pytest.approx(1_327.9, abs=0.05)
+    assert comp["monthly"]["compliantShareOfOperating"] == pytest.approx(1.0)
+    # Every MWh it draws is a gas MWh at the margin: 0.20 tCO2/MWh_th / 0.5 = 0.4 t per MWh_el.
+    emitted = float(res["emissionsBreakdown"]["totalTco2"])
+    assert emitted == pytest.approx(9_886.11, abs=0.01)
+    assert emitted - 6_646.12 == pytest.approx(0.4 * e["electricityMwh"], abs=0.02)       # 3,240 t
+    assert (emitted - 6_646.12) / (e["h2Tonnes"] * 1000.0) * 1000.0 == pytest.approx(21.4, abs=0.05)   # kg CO2 / kg H2
+
+
+def test_module_18_monthly_matching_on_a_one_week_window_changes_nothing() -> None:
+    """Step 5: one calendar month = the whole window; the designated plant made 11,036 MWh, the electrolyser took 8,100."""
+    _, base, p_base = _m18("none")
+    _, res, p2x = _m18("monthly")
+    assert _total(res) == pytest.approx(_total(base), rel=1e-9)
+    assert p2x["electrolyser"]["capacityMw"] == pytest.approx(p_base["electrolyser"]["capacityMw"], rel=1e-6)
+    assert p2x["lcoh"]["perKg"] == pytest.approx(p_base["lcoh"]["perKg"], rel=1e-9)
+    assert p2x["ppa"]["designatedEnergyMwh"] == pytest.approx(11_035.95, abs=0.01)
+    assert p2x["electrolyser"]["electricityMwh"] < p2x["ppa"]["designatedEnergyMwh"]
+    assert p2x["rfnbo"]["matchingEnabled"] is True
+
+
+def test_module_18_hourly_matching_buys_electrolyser_and_storage() -> None:
+    """Step 6: the same hydrogen, made only when the sun or the wind is there."""
+    _, res, p2x = _m18("hourly")
+    assert _total(res) == pytest.approx(1_898_786.0, abs=1.0)
+    assert _total(res) - 1_819_359.0 == pytest.approx(79_427.0, abs=1.0)
+    e = p2x["electrolyser"]
+    assert e["capacityMw"] == pytest.approx(66.43, abs=0.005)
+    assert e["capacityFactor"] == pytest.approx(0.7258, abs=0.00005)
+    assert e["fullLoadHoursPerYear"] == pytest.approx(6_357.6, abs=0.1)
+    assert e["electricityMwh"] == pytest.approx(8_099.97, abs=0.01)                         # same energy, more MW
+    assert max(_series(res, "stores-e", "p2x_h2_store")) == pytest.approx(651.5, abs=0.05)
+    assert 651.49 / 30.0 == pytest.approx(21.7, abs=0.05)                                   # hours of offtake held
+    assert 651.49 / 33.33 == pytest.approx(19.5, abs=0.05)                                  # tonnes of hydrogen held
+    soc = _series(res, "stores-e", "p2x_h2_store")
+    assert soc.index(max(soc)) // 24 == 1                                                   # peaks on day 2
+    assert min(soc[72:96]) == pytest.approx(0.0, abs=1e-6)                                  # empty on day 4
+    lcoh = p2x["lcoh"]["perKg"]
+    assert lcoh == pytest.approx(4.865, abs=0.0005)
+    assert lcoh - 4.340 == pytest.approx(0.525, abs=0.001) and lcoh / 4.340089 - 1 == pytest.approx(0.121, abs=0.0005)
+    assert {k: round(v, 2) for k, v in p2x["lcoh"]["perComponent"].items()} == {
+        "Electricity (electrolyser)": 3.75, "Electrolyser capex": 0.41, "Electrolyser FOM": 0.23,
+        "Stack replacement": 0.08, "Water": 0.01, "Compression": 0.0, "H2 storage": 0.38}
+    comp = p2x["rfnbo"]["compliance"]
+    assert comp["hourly"]["compliantShareOfOperating"] == pytest.approx(1.0) and comp["hourly"]["unmatchedMwh"] == pytest.approx(0.0, abs=1e-6)
+    ely = _series(res, "links-p0", "p2x_electrolyser")
+    designated = [s + w for s, w in zip(_series(res, "generators-p", "solar"), _series(res, "generators-p", "wind"))]
+    assert all(p <= d + 1e-6 for p, d in zip(ely, designated))                             # the constraint, hour by hour
+
+
+def test_module_18_matching_moves_cost_not_emissions() -> None:
+    """Steps 6-7: 9,886.1 t in all three runs; additionality passes on dates; Art. 4(1) fails at 30.9%."""
+    emissions = {m: float(_m18(m)[1]["emissionsBreakdown"]["totalTco2"]) for m in ("none", "monthly", "hourly")}
+    assert emissions == pytest.approx({"none": 9_886.11, "monthly": 9_886.11, "hourly": 9_886.11}, abs=0.01)
+    _, res, p2x = _m18("hourly")
+    assert all(abs(p - 70.0) < 1e-6 for p in _series(res, "buses-marginal_price", "grid"))
+    checks = p2x["rfnbo"]["checks"]
+    assert [(r["generator"], r["status"]) for r in checks["additionality"]] == [("solar", "pass"), ("wind", "pass")]
+    assert [(r["generator"], r["status"]) for r in checks["geographic"]] == [("solar", "pass"), ("wind", "pass")]
+    art41 = p2x["rfnbo"]["gridAlternatives"]["art41"]
+    assert art41["renewableShare"] == pytest.approx(0.309, abs=0.0005) and art41["pass"] is False
+    # Curtailment is zero with or without the chain: no renewable MWh was spare for the electrolyser to take.
+    model, _, _ = _m18("hourly")
+    avail = sum(120.0 * float(r["solar"]) + 100.0 * float(r["wind"]) for r in model["generators-p_max_pu"])
+    used = sum(_series(res, "generators-p", "solar")) + sum(_series(res, "generators-p", "wind"))
+    assert used == pytest.approx(avail, abs=1e-6)
+
+
+def test_module_18_ammonia_is_two_processes_and_moves_the_storage_to_the_product() -> None:
+    """Step 8: Product NH3 adds an ASU and Haber-Bosch as Processes; hourly matching then stores ammonia, not hydrogen."""
+    model = _m18_product("NH3")
+    procs = {r["name"]: r for r in model["processes"]}
+    hb = procs["p2x_synth_NH3"]
+    assert (hb["bus0"], hb["bus1"], hb["bus2"], hb["bus3"]) == ("p2x_bus_h2", "p2x_bus_NH3", "grid", "p2x_bus_n2")
+    assert float(hb["rate0"]) == -1.0
+    assert float(hb["rate1"]) == pytest.approx(1 / 1.1484, abs=1e-8)                        # 0.8708 MWh NH3 per MWh H2
+    assert float(hb["rate2"]) == pytest.approx(-0.2473 / 1.1484, abs=1e-8)                  # -0.2153 MWh_el
+    assert float(hb["rate3"]) == pytest.approx(-0.1597 / 1.1484, abs=1e-8)                  # -0.1391 t N2
+    asu = procs["p2x_asu"]
+    assert (asu["bus0"], asu["bus1"], float(asu["rate0"]), float(asu["rate1"])) == ("grid", "p2x_bus_n2", -1.0, pytest.approx(4.0))
+    assert [r["name"] for r in model["loads"] if r.get("plant") == "p2x"] == ["p2x_load_NH3"]
+    _, hourly, p_h = _m18("hourly", "NH3")
+    _, none, p_n = _m18("none", "NH3")
+    assert _total(hourly) == pytest.approx(2_206_577.0, abs=1.0)
+    assert _total(none) == pytest.approx(2_128_063.0, abs=1.0)
+    lcoa_h, lcoa_n = p_h["products"]["NH3"]["costPerTonne"], p_n["products"]["NH3"]["costPerTonne"]
+    assert (lcoa_h, lcoa_n) == pytest.approx((1_070.4, 989.9), abs=0.05)
+    assert lcoa_h / lcoa_n - 1 == pytest.approx(0.081, abs=0.0005)
+    assert p_h["products"]["NH3"]["producedTonnes"] == pytest.approx(974.85, abs=0.005)      # 30 MW x 168 h / 5.17
+    assert p_h["electrolyser"]["capacityMw"] == pytest.approx(89.35, abs=0.005)
+    assert p_h["electrolyser"]["capacityFactor"] == pytest.approx(0.6197, abs=0.00005)
+    assert p_n["electrolyser"]["capacityMw"] == pytest.approx(58.91, abs=0.005)
+    assert p_n["electrolyser"]["capacityFactor"] == pytest.approx(0.939863, abs=1e-6)
+    assert max(max(_series(none, "stores-e", n)) for n in ("p2x_h2_store", "p2x_store_NH3")) == pytest.approx(0.0, abs=1e-6)
+    stores = {n: max(_series(hourly, "stores-e", n)) for n in ("p2x_h2_store", "p2x_store_NH3")}
+    assert stores == pytest.approx({"p2x_h2_store": 107.8, "p2x_store_NH3": 622.5}, abs=0.05)
+    nh3_tank = float(next(r for r in model["stores"] if r["name"] == "p2x_store_NH3")["overnight_cost"])
+    h2_tank = float(next(r for r in model["stores"] if r["name"] == "p2x_h2_store")["overnight_cost"])
+    assert (nh3_tank, h2_tank) == pytest.approx((211.8256, 60_046.9), abs=1e-6)                # per MWh stored
+    assert h2_tank / nh3_tank == pytest.approx(283.5, abs=0.05)
+    # Switching the product back re-derives exactly the checkpoint's H2 chain.
+    from backend.app.plants import catalog, registry
+
+    back = registry.apply_change(model, catalog.edit_plant(model, "p2x", {"product": "H2"}))
+    checkpoint = _m18_model()
+    for sheet in checkpoint:
+        if sheet.startswith("RAGNAROK_P"):
+            assert [json.loads(r["json"]) for r in back[sheet]] == [json.loads(r["json"]) for r in checkpoint[sheet]], sheet
+        else:
+            assert back.get(sheet) == checkpoint[sheet], sheet
+
+
+def test_module_18_kpi_strip_strings_the_lessons_quote() -> None:
+    expected = {("none", "H2"): "$1,819,359", ("monthly", "H2"): "$1,819,359", ("hourly", "H2"): "$1,898,786",
+                ("hourly", "NH3"): "$2,206,577", ("none", "NH3"): "$2,128,063"}
+    for (matching, product), total in expected.items():
+        model, res, _ = _m18(matching, product)
+        assert _kpis(model, res)["totalCost"] == total, (matching, product)
+
+
+# ── Module 19 — gas + H2 co-firing and CCGT operations ───────────────────────
+#
+# `training_m19_start` is three June days on one bus: 250 MW of solar against a 297 MW
+# evening peak, a 400 MW oil peaker at 160 and an `h2` bus with a 50 MW pipeline at 100
+# per MWh (the plant data file's own H2 price assumption). The module adds the plant
+# picker's CCGT, then its gas + H2 co-firing (fuel network) plant, and edits that plant
+# one field at a time (``catalog.edit_plant`` -> change set, what the card's Edit does).
+# Plant-level numbers come from ``plants.results.plant_results`` (/api/build/plant/results).
+
+_M19_SCENARIO = {"carbonPrice": 0.0, "discountRate": 0.05}
+_M19_COFIRE = {"plantId": "cofire", "pNom": 200, "h2Bus": "h2", "blendMax": 0.3, "blendUnit": "vol",
+               "blendScope": "hourly", "discountRate": 0.05}
+#: The edits the module makes, in order; each run starts from the one before.
+_M19_STEPS: dict[str, tuple[str, dict]] = {
+    "cap": ("", {}),
+    "mandate": ("cap", {"blendMin": 0.3}),
+    "energy": ("mandate", {"blendUnit": "energy"}),
+    "period": ("mandate", {"blendScope": "period"}),
+    "commit": ("mandate", {"committable": True}),
+    "partload": ("commit", {"minLoadEfficiency": 0.52}),
+    "warm": ("partload", {"startCostWarm": 120, "startWarmAfterHours": 5}),
+}
+
+
+def _m19_start() -> dict:
+    return json.loads(_m18_example("training_m19_start"))
+
+
+@functools.lru_cache(maxsize=None)
+def _m19_model_json(step: str, pipeline_mw: float = 50.0, min_down_h: float | None = None) -> str:
+    from backend.app import fragment_merge
+    from backend.app.plants import catalog, registry
+
+    if step == "ccgt":
+        start = _m19_start()
+        model = fragment_merge.merge_fragment(start, catalog.build_plant("ccgt", {"plantId": "ccgt", "pNom": 200, "discountRate": 0.05}, start)["fragment"])
+    elif step == "cap":
+        start = _m19_start()
+        model = fragment_merge.merge_fragment(start, catalog.build_plant("cofiring_network", _M19_COFIRE, start)["fragment"])
+    elif step == "start":
+        model = _m19_start()
+    else:
+        parent, patch = _M19_STEPS[step]
+        model = json.loads(_m19_model_json(parent))
+        model = registry.apply_change(model, catalog.edit_plant(model, "cofire", patch))
+    for g in model["generators"]:
+        if g["name"] == "h2_pipeline":
+            g["p_nom"] = pipeline_mw
+    if min_down_h is not None:
+        for row in model["RAGNAROK_TimeUnits"]:
+            if row["attribute"] == "min_down_time":
+                row["value"] = min_down_h
+    return json.dumps(model)
+
+
+@functools.lru_cache(maxsize=None)
+def _m19_run(step: str, pipeline_mw: float = 50.0, min_down_h: float | None = None) -> str:
+    from backend.pypsa.results import run_pypsa
+
+    return json.dumps(run_pypsa(json.loads(_m19_model_json(step, pipeline_mw, min_down_h)), _M19_SCENARIO, OPTIONS))
+
+
+def _m19(step: str, pipeline_mw: float = 50.0, min_down_h: float | None = None) -> tuple[dict, dict, dict]:
+    """(model, result, plant results of the run's one plant - empty when it has none)."""
+    from backend.app.plants import results as plant_results
+
+    model = json.loads(_m19_model_json(step, pipeline_mw, min_down_h))
+    res = json.loads(_m19_run(step, pipeline_mw, min_down_h))
+    plant: dict = {}
+    if model.get("RAGNAROK_PLANTS"):
+        bundle = {"model": model, "result": res, "options": OPTIONS, "scenario": _M19_SCENARIO}
+        plant = plant_results.plant_results(bundle)["plants"][0]
+    return model, res, plant
+
+
+def _m19_off_hours_by_day(res: dict) -> list[int]:
+    status = _series(res, "links-status", "cofire")
+    return [sum(1 for s in status[24 * d: 24 * d + 24] if s < 0.5) for d in range(3)]
+
+
+def test_module_19_vol_to_energy_share_comes_from_the_lhvs_in_the_data_file() -> None:
+    """Steps 2 and 5: 30 vol% H2 is 11.43% of the energy; 30% of the energy is 58.7 vol%."""
+    from backend.app.plants import cofiring as cf
+    from backend.app.plants import technologies as tech
+
+    cat = tech.catalogue()["constants"]
+    lh, lg = cat["h2_lhv_mj_per_nm3"]["value"], cat["ch4_lhv_mj_per_nm3"]["value"]
+    assert (lh, lg) == (10.78, 35.8)
+    assert (cat["h2_lhv_mj_per_nm3"]["verified"], cat["ch4_lhv_mj_per_nm3"]["verified"]) == ("derived", "literature")
+    assert 0.3 * lh == pytest.approx(3.234) and 0.7 * lg == pytest.approx(25.06)
+    s = cf.vol_to_energy_share(0.3, lh, lg)
+    assert s == pytest.approx(3.234 / (3.234 + 25.06), rel=1e-12)
+    assert round(s * 100, 2) == 11.43
+    assert round(cf.energy_to_vol_share(0.3, lh, lg) * 100, 1) == 58.7
+    assert lh / lg == pytest.approx(0.301, abs=0.0005)                                       # a Nm3 of H2 carries 30% of a Nm3 of CH4
+
+
+def test_module_19_start_system_is_solar_and_a_peaker() -> None:
+    """Step 1: 6 free hours, 66 hours at the peaker's 160."""
+    model, res, _ = _m19("start")
+    assert _total(res) == pytest.approx(1_747_786.0, abs=1.0)
+    price = _series(res, "buses-marginal_price", "grid")
+    assert sum(abs(p) < 1e-6 for p in price) == 6 and sum(abs(p - 160.0) < 1e-6 for p in price) == 66
+    k = _kpis(model, res)
+    assert k["totalCost"] == "$1,747,786" and round(k["avgPrice"], 1) == 148.4
+    assert k["peakLoadMw"] == pytest.approx(297.0, abs=0.05)
+    assert round(k["renewableSharePct"], 1) == 27.5
+    assert float(res["emissionsBreakdown"]["totalTco2"]) == pytest.approx(8_426.82, abs=0.01)
+    assert sum(_series(res, "generators-p", "h2_pipeline")) == pytest.approx(0.0, abs=1e-6)
+
+
+def test_module_19_gas_only_ccgt_from_the_plant_picker() -> None:
+    """Step 2: the CCGT plant is a gas bus, a gas supplier and a gas -> grid Link with the data file's numbers."""
+    from backend.app.plants import technologies as tech
+
+    P = tech.parameter_defaults()
+    assert (P["ccgt"]["efficiency"], P["ccgt"]["capex"], P["ccgt"]["vom"], P["ccgt"]["min_load"]) == (0.58, 1108.7166, 5.6104, 0.4)
+    assert (P["fuels"]["gas_price"], P["fuels"]["gas_co2"], P["fuels"]["h2_price"]) == (28.4158, 0.198, 100.0)
+    assert (P["ccgt"]["fom"], P["ccgt"]["lifetime"], P["ccgt"]["ramp_rate"]) == (3.3494, 25.0, 15.0)
+    assert (P["ccgt"]["start_up_cost"], P["ccgt"]["min_up_time"], P["ccgt"]["min_down_time"]) == (60.0, 4.0, 4.0)
+    assert (P["ccgt"]["warm_start_time"], P["ccgt"]["cold_start_time"]) == (1.0, 2.5)          # start DURATIONS, not offline thresholds
+    ccgt = tech.catalogue()["technologies"]["ccgt"]["parameters"]
+    assert [ccgt[k]["verified"] for k in ("efficiency", "min_load", "start_up_cost", "min_up_time")] == ["file", "file", "assumption", "assumption"]
+    assert tech.catalogue()["fuels"]["h2_price"]["verified"] == "assumption"
+    model, res, plant = _m19("ccgt")
+    link = next(r for r in model["links"] if r["name"] == "ccgt")
+    assert (link["bus0"], link["bus1"], float(link["efficiency"])) == ("ccgt_bus_gas", "grid", 0.58)
+    assert float(link["p_nom"]) == pytest.approx(200 / 0.58, abs=1e-6)                       # 344.8 MW of fuel in
+    assert float(link["marginal_cost"]) == pytest.approx(5.6104 * 0.58, abs=1e-6)            # VOM per MWh of fuel
+    supply = next(r for r in model["generators"] if r["name"] == "ccgt_gas_supply")
+    assert float(supply["marginal_cost"]) == pytest.approx(28.4158)
+    assert _total(res) == pytest.approx(720_242.0, abs=1.0)
+    price = _series(res, "buses-marginal_price", "grid")
+    ccgt_price = 28.4158 / 0.58 + 5.6104
+    assert round(ccgt_price, 2) == 54.60
+    counts = (sum(abs(p) < 1e-6 for p in price), sum(abs(p - ccgt_price) < 1e-3 for p in price), sum(abs(p - 160.0) < 1e-6 for p in price))
+    assert counts == (6, 47, 19)
+    assert plant["generationMwh"] == pytest.approx(9_749.3, abs=0.05)
+    assert plant["capacityFactor"] == pytest.approx(0.677, abs=0.0005)
+    assert (plant["starts"], plant["startsBasis"]) == (3, "counted from dispatch (not committable)")
+    assert float(res["emissionsBreakdown"]["totalTco2"]) == pytest.approx(4_234.15, abs=0.01)
+
+
+def test_module_19_a_blend_cap_alone_burns_no_hydrogen() -> None:
+    """Step 3: Maximum H2 share 30 vol% and nothing else: the solver burns gas, H2 at 100 is dearer than gas at 28.4."""
+    model, res, plant = _m19("cap")
+    from backend.app.plants import catalog
+
+    built = catalog.build_plant("cofiring_network", _M19_COFIRE, _m19_start())
+    counts = [(s, len(v)) for s, v in built["fragment"]["sheets"].items() if not s.startswith("RAGNAROK")]
+    assert counts == [("carriers", 5), ("buses", 2), ("generators", 1), ("links", 3)]      # the preview's "Creates:" line
+    assert sorted(r["name"] for r in model["links"]) == ["cofire", "cofire_gas_feed", "cofire_h2_feed"]
+    assert _total(res) == pytest.approx(720_242.0, abs=1.0)                                  # the gas-only CCGT's answer
+    assert plant["fuel"]["h2MwhTh"] == pytest.approx(0.0, abs=1e-6)
+    assert float(res["emissionsBreakdown"]["totalTco2"]) == pytest.approx(4_234.15, abs=0.01)
+    assert (100.0 - 28.4158) / 0.198 == pytest.approx(361.5, abs=0.05)                         # the CO2 price that would close the gap
+
+
+def test_module_19_a_30_vol_mandate_is_11_4_percent_of_the_energy_every_hour() -> None:
+    """Step 4: minimum = maximum = 30 vol%, hourly. CO2 avoided = 0.198 x the hydrogen burned; 361.5 per tonne."""
+    model, res, plant = _m19("mandate")
+    assert _total(res) == pytest.approx(857_775.0, abs=1.0)
+    fuel = plant["fuel"]
+    assert fuel["h2EnergyShare"] == pytest.approx(0.1143, abs=0.00005) and fuel["h2VolShare"] == pytest.approx(0.30, abs=1e-9)
+    cof = plant["cofiring"]
+    assert (cof["minHourlyVolShare"], cof["maxHourlyVolShare"]) == pytest.approx((0.30, 0.30), abs=1e-6)
+    assert cof["hoursOn"] == 66
+    assert fuel["h2MwhTh"] == pytest.approx(1_921.3, abs=0.05) and fuel["totalMwhTh"] == pytest.approx(16_809.1, abs=0.05)
+    assert fuel["h2KgEquivalent"] == pytest.approx(57_644.0, abs=0.5)
+    em = plant["emissions"]
+    assert em["avoidedT"] == pytest.approx(380.41, abs=0.005)
+    assert em["avoidedT"] == pytest.approx(0.198 * fuel["h2MwhTh"], rel=1e-9)
+    assert em["gasOnlyBaselineT"] == pytest.approx(3_328.2, abs=0.05)
+    system = float(res["emissionsBreakdown"]["totalTco2"])
+    assert system == pytest.approx(3_853.74, abs=0.01)
+    assert 4_234.15 - system == pytest.approx(em["avoidedT"], abs=0.02)                      # same dispatch: plant = system
+    assert plant["generationMwh"] == pytest.approx(9_749.3, abs=0.05)
+    premium = _total(res) - 720_242.0
+    assert premium == pytest.approx(137_533.0, abs=1.0)
+    assert premium / em["avoidedT"] == pytest.approx((100.0 - 28.4158) / 0.198, abs=0.05)    # 361.5 per tonne
+    price = _series(res, "buses-marginal_price", "grid")
+    blend = (0.8857 * 28.4158 + 0.1143 * 100.0) / 0.58 + 5.6104
+    assert round(blend, 1) == 68.7
+    assert sum(abs(p - 68.71) < 0.005 for p in price) == 47
+
+
+def test_module_19_the_same_number_on_the_energy_basis_is_twice_the_hydrogen() -> None:
+    """Step 5: 0.3 typed with Share basis 'energy' is 58.7 vol%; the 50 MW pipeline then caps the turbine."""
+    _, res, plant = _m19("energy")
+    assert _total(res) == pytest.approx(1_367_673.0, abs=1.0)
+    assert plant["fuel"]["h2VolShare"] == pytest.approx(0.5873, abs=0.00005)
+    assert plant["fuel"]["h2MwhTh"] == pytest.approx(2_875.7, abs=0.05)
+    assert max(_series(res, "generators-p", "h2_pipeline")) == pytest.approx(50.0, abs=1e-6)
+    assert plant["generationMwh"] == pytest.approx(5_559.6, abs=0.05)
+    assert plant["capacityFactor"] == pytest.approx(0.386, abs=0.0005)
+    assert 50.0 / 0.3 * 0.58 == pytest.approx(96.7, abs=0.05)                                 # MW_el the pipeline allows
+
+
+def test_module_19_hourly_or_period_with_a_short_pipeline() -> None:
+    """Step 6: a 25 MW pipeline. Hourly derates the turbine and raises system CO2; period burns pure H2 at noon."""
+    _, res_h, plant_h = _m19("mandate", pipeline_mw=25.0)
+    assert _total(res_h) == pytest.approx(1_108_100.0, abs=1.0)
+    assert max(-p for p in _series(res_h, "links-p1", "cofire")) == pytest.approx(126.86, abs=0.005)
+    assert 25.0 / 0.11429985 * 0.58 == pytest.approx(126.86, abs=0.005)
+    assert 200 / 0.58 * 0.11429985 == pytest.approx(39.4, abs=0.05)                            # H2 needed at full load
+    assert plant_h["generationMwh"] == pytest.approx(7_007.2, abs=0.05)
+    assert plant_h["emissions"]["avoidedT"] == pytest.approx(273.42, abs=0.005)
+    system_h = float(res_h["emissionsBreakdown"]["totalTco2"])
+    assert system_h == pytest.approx(5_139.97, abs=0.01)
+    assert system_h - 4_234.15 == pytest.approx(905.8, abs=0.05)                              # above the gas-only CCGT
+    _, res_p, plant_p = _m19("period", pipeline_mw=25.0)
+    assert _total(res_p) == pytest.approx(932_632.0, abs=1.0)
+    assert float(res_p["emissionsBreakdown"]["totalTco2"]) == pytest.approx(4_232.45, abs=0.01)
+    assert plant_p["fuel"]["h2EnergyShare"] == pytest.approx(0.1143, abs=0.00005)             # over the period, exactly
+    assert plant_p["fuel"]["h2MwhTh"] == pytest.approx(1_800.0, abs=1e-3)                    # 25 MW every hour
+    assert all(abs(h - 25.0) < 1e-6 for h in _series(res_p, "links-p0", "cofire_h2_feed"))
+    assert plant_p["cofiring"]["maxHourlyVolShare"] == pytest.approx(1.0, abs=1e-9)           # pure hydrogen in some hours
+    gas = _series(res_p, "links-p0", "cofire_gas_feed")
+    assert sum(1 for g in gas if g < 1e-6) >= 6
+    assert _total(res_h) - _total(res_p) == pytest.approx(175_468.0, abs=1.0)
+    # With the 50 MW pipeline the two scopes cost the same: hydrogen is equally dear in every hour.
+    assert _total(_m19("period")[1]) == pytest.approx(857_775.0, abs=1.0)
+
+
+def test_module_19_commitment_min_load_and_times_stated_in_hours() -> None:
+    """Step 7: Unit commitment on. Minimum load 0.4, a 12,000 start, 4 h up and down, stored in hours."""
+    model, res, plant = _m19("commit")
+    link = next(r for r in model["links"] if r["name"] == "cofire")
+    assert (link["committable"], float(link["p_min_pu"]), float(link["start_up_cost"])) == (True, 0.4, 12_000.0)
+    rows = {r["attribute"]: (float(r["value"]), r["unit"]) for r in model["RAGNAROK_TimeUnits"] if r["name"] == "cofire"}
+    assert rows == {"min_up_time": (4.0, "hours"), "min_down_time": (4.0, "hours"), "up_time_before": (4.0, "hours"),
+                    "ramp_limit_up": (0.15, "per_minute"), "ramp_limit_down": (0.15, "per_minute")}
+    assert _total(res) == pytest.approx(904_948.0, abs=2.0)
+    assert _total(res) - 857_775.0 == pytest.approx(47_173.0, abs=2.0)
+    assert (plant["starts"], plant["startsBasis"]) == (2, "solved (committable)")
+    assert _m19_off_hours_by_day(res) == [5, 0, 5]                                             # stops at noon on the sunny days
+    card = res["commitment"]["generators"][0]                                                  # the Commitment card's row
+    assert (card["name"], card["component"], card["starts"], card["startUpCostTotal"]) == ("cofire", "links", 2, 24_000.0)
+    assert (card["onlineHours"], card["minUpTime"], card["minDownTime"]) == (62.0, 4, 4)
+    out = [-p for p in _series(res, "links-p1", "cofire")]
+    assert min(p for p in out if p > 1e-6) == pytest.approx(80.0, abs=1e-4)                    # 0.4 x 200 MW
+    assert min(out[24:48]) == pytest.approx(80.0, abs=1e-4)                                     # the cloudy day: held at minimum
+    k = _kpis(model, res)
+    assert k["totalCost"] == "$904,948" and (k["minPrice"], k["maxPrice"]) == (0.0, 0.0)       # a MILP has no duals
+    assert float(res["emissionsBreakdown"]["totalTco2"]) == pytest.approx(3_957.62, abs=0.01)
+    # Minimum down time 6 h in the Time units drawer: each noon stop lasts 6 hours.
+    from backend.pypsa.network import time_units as tu
+
+    converted = {r["attribute"]: (r["pypsaValue"], r["blank"]) for r in tu.preview(model, _M19_SCENARIO, OPTIONS)}
+    assert converted == {"min_up_time": (4.0, False), "min_down_time": (4.0, False), "up_time_before": (4.0, False),
+                         "ramp_limit_up": (None, True), "ramp_limit_down": (None, True)}   # 0.15 x 60 > 1: no limit at 1 h
+    _, longer, plant6 = _m19("commit", min_down_h=6.0)
+    assert _total(longer) == pytest.approx(908_725.0, abs=2.0)
+    assert _m19_off_hours_by_day(longer) == [6, 0, 6] and plant6["starts"] == 2
+    assert longer["commitment"]["generators"][0]["minDownTime"] == 6
+
+
+def test_module_19_part_load_efficiency_is_a_piecewise_curve_on_the_link() -> None:
+    """Step 8: 0.52 at minimum load (plant data, not in the file): no-load fuel 26.5 MW_th, 1.5915 MW_th per MW_el."""
+    from backend.app.plants import partload as pl
+
+    curve = pl.heat_rate_curve(200.0, 0.4, 0.58, 0.52)
+    assert curve["fuelFullMw"] == pytest.approx(344.8276, abs=1e-4) and curve["fuelMinMw"] == pytest.approx(153.8462, abs=1e-4)
+    assert curve["noLoadFuelMw"] == pytest.approx(26.5252, abs=1e-4)
+    assert curve["incrementalHeatRate"] == pytest.approx(1.5915, abs=1e-4)
+    assert curve["incrementalEfficiency"] == pytest.approx(0.6283, abs=1e-4)
+    assert curve["minLoadPu"] == pytest.approx(0.446154, abs=1e-6)
+    model, res, plant = _m19("partload")
+    rows = [(r["breakpoint"], float(r["p_pu"]), float(r["efficiency"])) for r in model["links-efficiency-pw"]]
+    assert rows == [(0, 0.0, 0.0), (1, pytest.approx(0.446154, abs=1e-6), 0.52), (2, 1.0, 0.58)]
+    link = next(r for r in model["links"] if r["name"] == "cofire")
+    assert float(link["p_min_pu"]) == pytest.approx(0.446154, abs=1e-6)
+    assert _total(res) == pytest.approx(917_524.0, abs=2.0)
+    assert _total(res) - 904_948.0 == pytest.approx(12_576.0, abs=3.0)
+    assert plant["starts"] == 2 and _m19_off_hours_by_day(res) == [5, 0, 5]
+    assert float(res["emissionsBreakdown"]["totalTco2"]) == pytest.approx(4_012.96, abs=0.01)
+
+
+def test_module_19_a_warm_start_tier_shortens_the_stop_instead_of_being_paid() -> None:
+    """Step 9: warm 120 per MW after 5 h offline; the unit stops for 4 h instead, both starts stay hot."""
+    model, res, plant = _m19("warm")
+    rows = {r["attribute"]: float(r["value"]) for r in model["RAGNAROK_StartCosts"] if r["name"] == "cofire"}
+    assert rows == {"hot_cost": 12_000.0, "warm_cost": 24_000.0, "warm_after": 5.0}
+    assert _total(res) == pytest.approx(926_779.0, abs=2.0)
+    assert _total(res) - 917_524.0 == pytest.approx(9_256.0, abs=3.0)
+    assert _m19_off_hours_by_day(res) == [4, 0, 4]
+    assert res["commitment"]["generators"][0]["onlineHours"] == 64.0
+    _, before, _ = _m19("partload")
+    on_now = _series(res, "links-status", "cofire")
+    on_before = _series(before, "links-status", "cofire")
+    extra = [t for t in range(72) if on_now[t] > 0.5 and on_before[t] < 0.5]
+    assert len(extra) == 2 and all(-_series(res, "links-p1", "cofire")[t] == pytest.approx(80.0, abs=1e-4) for t in extra)
+    sc = plant["startCosts"]
+    assert sc["starts"] == {"hot": 2, "warm": 0}
+    assert (sc["startCost"], sc["tierIncrement"]) == (24_000.0, 0.0)
+    assert sc["thresholdsSnapshots"] == {"warm": 5}
+    assert float(res["emissionsBreakdown"]["totalTco2"]) == pytest.approx(4_052.42, abs=0.01)
+
+
+def test_module_19_checkpoint_is_what_the_steps_build(tmp_path: Path) -> None:
+    """The finished example is the start model after the module's plant edits, row for row."""
+    built = json.loads(_m19_model_json("warm"))
+    checkpoint = _model_from_example("training_m19", tmp_path)
+    assert set(built) == set(checkpoint)
+    for sheet in checkpoint:
+        if sheet == "RAGNAROK_PLANTS":
+            continue
+        assert built[sheet] == checkpoint[sheet], sheet
+    reg_b = json.loads(built["RAGNAROK_PLANTS"][0]["json"])
+    reg_c = json.loads(checkpoint["RAGNAROK_PLANTS"][0]["json"])
+    assert reg_b["spec"] == reg_c["spec"] and reg_b["components"] == reg_c["components"]
+
+
+def test_module_19_kpi_strip_strings_the_lessons_quote() -> None:
+    expected = {("start", 50.0): "$1,747,786", ("ccgt", 50.0): "$720,242", ("cap", 50.0): "$720,242",
+                ("mandate", 50.0): "$857,775", ("energy", 50.0): "$1,367,673", ("mandate", 25.0): "$1,108,100",
+                ("period", 25.0): "$932,632", ("partload", 50.0): "$917,524", ("warm", 50.0): "$926,779"}
+    for (step, pipe), total in expected.items():
+        model, res, _ = _m19(step, pipeline_mw=pipe)
+        assert _kpis(model, res)["totalCost"] == total, (step, pipe)
+
+
 # ── The checkpoints the course references must exist and be loadable ─────────
 
 def test_every_course_checkpoint_is_a_listable_example() -> None:
@@ -2095,7 +2713,8 @@ def test_every_course_checkpoint_is_a_listable_example() -> None:
                        "training_m5", "training_m6", "training_m7_year", "training_m7",
                        "training_m10", "training_m11",
                        "training_m16_start", "training_m16", "training_m17_start", "training_m17",
-                       "training_m17_store"):
+                       "training_m17_store", "training_m18_start", "training_m18", "training_m19_start",
+                       "training_m19"):
         db = EXAMPLES / example_id / "project.db"
         assert db.exists(), f"{example_id}: no project.db"
         con = sqlite3.connect(db)

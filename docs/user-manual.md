@@ -1636,7 +1636,7 @@ show the built MW per candidate, and zero-built candidates are the rejected loca
 ## 15. Training — the power-market modelling course
 
 The **Training** tab (activity bar, *Training*; enable it under Settings > Modules) holds one course,
-*Power market modelling with Ragnarok*: seventeen modules from an empty sheet to a policy-tested investment case. It
+*Power market modelling with Ragnarok*: nineteen modules from an empty sheet to a policy-tested investment case. It
 teaches the modelling idea and the Ragnarok control together, on the real app, and never edits your model for you.
 
 **How a module works.** Each step shows, in order: *where* (the view and control), the *concept* (the modelling idea,
@@ -1655,6 +1655,8 @@ solver or model change moves a number, the test fails before the lesson lies.
 | 1 Foundations to 15 Market design | Beginner to Expert | `training_m1` … `training_m11`, `training_m7_year` (one growing model) |
 | 16 The multi-year pathway | Expert | `training_m16_start`; finished model `training_m16` |
 | 17 Batteries in depth | Expert | `training_m17_start`; finished model `training_m17`; `training_m17_store` for step 10 |
+| 18 Power-to-X | Expert | `training_m18_start`; finished model `training_m18` |
+| 19 Gas + H2 co-firing and CCGT operations | Expert | `training_m19_start`; finished model `training_m19` |
 
 Bundled examples are listed under Welcome > Start with Examples and loadable by id (`/api/examples/{id}/load`). They are
 authored by `backend/scripts/make_examples.py`; regenerate one with
@@ -1709,6 +1711,53 @@ A solar-heavy single bus over three summer days (the middle one overcast): 700 M
 
 Both modules use a short window or representative days; the lessons state where a per-year figure is a three-day (or
 one-day-per-year) sample scaled up.
+
+### Module 18 — Power-to-X
+
+One bus over one March week of 2030: 120 MW of solar and 100 MW of wind (built 2029) and 400 MW of gas at 70 against
+150–205 MW of demand, so gas sets the price in every hour and no renewable output is spare. You read the alkaline
+electrolyser's data in **P2X > Chain designer > Technology parameters** (each row's source on hover, its `verified`
+flag as a chip), add a **P2X chain** from **Build > Generators > Add a plant** (solver-sized electrolyser, tank, a flat
+30 MW hydrogen offtake, solar and wind designated through *Chain spec overrides*), and read **P2X > Results** for three
+runs: no matching, **P2X > RFNBO** monthly, and hourly.
+
+What it establishes, each pinned by a test:
+
+- **The chain is ordinary components** — an H2 bus, the electrolyser Link (efficiency 33.33 / 53.57 = 0.6222), a cyclic
+  tank Store and a Load; the ammonia product adds an air separation unit and Haber-Bosch synthesis as **Processes**.
+- **LCOH is the model's own cost split** — 4.34 per kg with no matching, 3.75 of it electricity (70 × 53.57 kWh/kg).
+- **Hourly matching is paid in hardware** — the electrolyser grows from 51.30 to 66.43 MW, its capacity factor falls from
+  94.0 % to 72.6 %, a 651.5 MWh tank appears and the LCOH rises 12.1 % (4.87). Monthly matching on a one-week window is a
+  volume match and does not bind. With ammonia the storage moves to a 622.5 MWh ammonia tank (LCOA 1,070.4 vs 989.9 per t).
+- **Matching is not emissions** — 9,886.1 tCO2 in all three runs: the designated plant was already fully used by the grid,
+  so every electrolyser MWh is gas at the margin (21.4 kg CO2 per kg H2). Additionality is checked as a date test
+  (36 months), which these plants pass.
+
+Money in the P2X results is in the technology data's EUR2025, labelled with the Settings currency symbol; no exchange rate
+is applied. The RFNBO settings are a session setting and are not in the checkpoint.
+
+### Module 19 — gas + H2 co-firing and CCGT operations
+
+One bus over three June days: 250 MW of solar, a 400 MW oil peaker at 160 and an `h2` bus with a 50 MW pipeline at 100 per
+MWh. You add a **CCGT** from the plant picker (gas-only reference, 720,242), replace it with a **Gas + H2 co-firing (fuel
+network)** plant on the `h2` bus, and change one plant field at a time with the plant card's **Edit**. Plant-level results
+(H2 share per hour, fuel, CO2 avoided, starts) are an API read, `GET /api/build/plant/results/{run}` (MCP
+`get_plant_results`); there is no Analytics card for them.
+
+What it establishes, each pinned by a test:
+
+- **Volume and energy shares** — 30 vol% H2 is 11.43 % of the energy, from the data file's LHVs (10.78 and 35.8 MJ/Nm3);
+  0.3 on the energy basis is 58.7 vol%.
+- **A cap is not a mandate** — a maximum share alone burns no hydrogen at 100 against gas at 28.4; a fixed 30 vol% blend
+  costs 137,533 for 380.41 t avoided, 361.5 per t, the break-even carbon price.
+- **Hourly vs period** — with a 25 MW pipeline the hourly blend derates the turbine to 126.86 MW and system emissions rise
+  above the gas-only plant's; the period share lets the turbine burn pure hydrogen at noon.
+- **Operations** — unit commitment writes minimum load 0.4 and a start cost; minimum up and down times are `RAGNAROK_TimeUnits`
+  rows in hours (**Build > Links > Time units**), converted per run; part-load efficiency (0.52 at minimum load, plant data)
+  becomes a piecewise efficiency curve with 26.5 MW_th of no-load fuel; a warm-start tier of 120 per MW after 5 hours
+  offline makes the unit shorten its noon stop to 4 hours rather than pay it.
+
+The part-load efficiency and the warm-start cost are not in the data file; the module types them as stated assumptions.
 
 ### Adding a module (authors)
 

@@ -1,7 +1,7 @@
 /**
- * The power-market modelling course — 17 modules, complete.
+ * The power-market modelling course — 19 modules, complete.
  *
- * All seventeen are written. The tutorial's summary, `minutes` and `outcomes`
+ * All nineteen are written. The tutorial's summary, `minutes` and `outcomes`
  * describe what is actually there: a learner reading the catalog card should be
  * told the truth about what they are starting, and progress is a percentage of
  * real steps.
@@ -9,10 +9,11 @@
  * One tutorial, not ten, because the course is cumulative: the model built in
  * module 1 is the model policy instruments are applied to in module 8. Modules
  * are `section` headings on the steps, so the rail groups them while progress
- * stays a single track. Modules 16 and 17 are the exception that proves it: each
- * opens from its own small system (a three-period pathway, a solar-heavy day)
- * because the question it asks needs a different shape of model from the one the
- * first fifteen grew.
+ * stays a single track. Modules 16 to 19 are the exception that proves it: each
+ * opens from its own small system (a three-period pathway, a solar-heavy day, a
+ * gas-priced week for an electrolyser, three days for a co-firing turbine) because
+ * the question it asks needs a different shape of model from the one the first
+ * fifteen grew.
  *
  * ── Design decisions this course is built on ─────────────────────────────────
  *
@@ -63,6 +64,8 @@ import { MODULE_14_PARTICIPANT } from './module14Participant';
 import { MODULE_15_MARKET_DESIGN } from './module15MarketDesign';
 import { MODULE_16_PATHWAY } from './module16Pathway';
 import { MODULE_17_BESS } from './module17Bess';
+import { MODULE_18_P2X } from './module18P2X';
+import { MODULE_19_COFIRING } from './module19Cofiring';
 
 /** A module as the catalog holds it: the card a learner picks, and the steps behind it. */
 interface ModuleEntry {
@@ -281,6 +284,30 @@ const COURSE_MODULES: ModuleEntry[] = [
     },
     steps: MODULE_17_BESS,
   },
+  {
+    module: {
+      section: '18 · Power-to-X',
+      title: 'Power-to-X',
+      level: 'Expert',
+      minutes: 120,
+      summary: 'An electrolyser, a hydrogen tank and an ammonia plant from the plant picker, costed per kilogram from a '
+        + 'sourced data file. Hourly RFNBO matching buys more electrolyser and a tank and raises the LCOH 12% — and on '
+        + 'a grid whose renewables were already used, changes the emissions not at all.',
+    },
+    steps: MODULE_18_P2X,
+  },
+  {
+    module: {
+      section: '19 · Gas + H2 co-firing and CCGT operations',
+      title: 'Gas + H2 co-firing and CCGT operations',
+      level: 'Expert',
+      minutes: 130,
+      summary: 'Thirty per cent hydrogen by volume is 11.4% of the energy. A blend cap that burns none, a mandate that '
+        + 'costs the break-even carbon price, a period share that burns pure hydrogen at noon — then a CCGT with a '
+        + 'minimum load, minimum times in hours, a no-load fuel and starts priced by time offline.',
+    },
+    steps: MODULE_19_COFIRING,
+  },
 ];
 
 const MODULES: CourseModule[] = COURSE_MODULES.map((entry) => entry.module);
@@ -299,13 +326,13 @@ export const POWER_MARKET_COURSE: Tutorial = {
   minutes: MODULES.reduce((total, m) => total + m.minutes, 0),
   summary:
     'Build one power-system model from an empty sheet to a policy-tested investment case, learning the '
-    + 'modelling theory and the Ragnarok mechanics together at every step. Seventeen modules: foundations, '
+    + 'modelling theory and the Ragnarok mechanics together at every step. Nineteen modules: foundations, '
     + 'economic dispatch, networks and congestion, storage, sector coupling, time and horizon, '
     + 'investment, policy instruments and turning a result into a decision — then six closing modules '
     + 'on meshed networks and power flow, on unit commitment, on what any of it is worth once plant '
     + 'starts breaking, on where the demand profile itself came from, on the participant\'s side of the '
-    + 'market and on how its price is set — and two deep dives, a multi-year pathway and batteries in '
-    + 'depth. Assumes no prior knowledge of power systems or optimisation, and every answer '
+    + 'market and on how its price is set — and four deep dives: a multi-year pathway, batteries in '
+    + 'depth, power-to-X with RFNBO matching, and gas + H2 co-firing with CCGT operations. Assumes no prior knowledge of power systems or optimisation, and every answer '
     + 'up to module 5 — and all of modules 10 and 11 — is small enough to check by hand.',
   outcomes: [
     'Explain what a power-system optimisation model is: objective, decision variables, constraints',
@@ -328,6 +355,8 @@ export const POWER_MARKET_COURSE: Tutorial = {
     'Set up a multi-period pathway, and say what the objective weight, the years weight, build_year and lifetime each do',
     'Read a period view: inactive assets masked, money weighted, emissions multiplied by years',
     'Choose a battery\'s duration, count its losses and edges correctly, and say what it earns to a price taker, to itself and to the system',
+    'Add a P2X chain, read its LCOH and LCOA, and say what hourly RFNBO matching changes in the electrolyser, the storage and the emissions',
+    'Convert a hydrogen blend between volume and energy shares, choose an hourly or period limit, and operate a CCGT with minimum load, times in hours, part-load efficiency and start tiers',
   ],
   prerequisites: [
     'Ragnarok is running and the top bar shows a status other than a connection error',
