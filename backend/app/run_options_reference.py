@@ -67,7 +67,7 @@ def register_options(entries: list[RunOption]) -> None:
 # ── scenario.* ───────────────────────────────────────────────────────────────
 
 _SCENARIO: list[RunOption] = [
-    RunOption("scenario.carbonPrice", "number", "Flat carbon price added to every emitting generator's marginal cost (carbon price x carriers.co2_emissions). Ignored per snapshot when options.carbonPriceSchedule has a row for that snapshot's year.", 0, "currency/tCO2", reader="backend/pypsa/network/__init__.py (parse_carbon_price_config), backend/pypsa/carbon_price.py", required=True),
+    RunOption("scenario.carbonPrice", "number", "Flat carbon price, handled by the carbon-pricing module: PyPSA gets price x carriers.co2_emissions / efficiency x output as an extra term of the OBJECTIVE (marginal_cost is left as the workbook states it, so n.statistics.opex is the fuel cost and the carbon cost is that term). Ignored per snapshot when options.carbonPriceSchedule has a row for that snapshot's year.", 0, "currency/tCO2", reader="backend/app/carbon_pricing (config_from_run, extra_functionality)", required=True),
     RunOption("scenario.discountRate", "number", "The project discount rate: used by the finance outputs (NPV/IRR) and written into the workbook by Forge -> Fill discount rate. It no longer converts any cost at run time: PyPSA annuitises each overnight_cost row with the row's own discount_rate.", 0.05, "fraction/year (0.05 = 5%)", reader="backend/pypsa/results/finance.py; Forge fill_discount_rate"),
     RunOption("scenario.constraints[]", "object[]", "Standard constraint table rows; only rows with enabled=true are applied (a missing 'enabled' means off). Fields below.", [], reader="backend/pypsa/network/custom_constraints.py (apply_custom_constraints)"),
     RunOption("scenario.constraints[].enabled", "boolean", "Apply this row.", False, reader="custom_constraints.py"),
@@ -98,9 +98,9 @@ _SCALARS: list[RunOption] = [
     RunOption("options.enableLoadShedding", "boolean", "Add a per-bus unserved-energy generator at loadSheddingCost so an infeasible-by-capacity model solves instead of failing.", False, reader="backend/pypsa/network/load_shedding.py"),
     RunOption("options.loadSheddingCost", "number", "Value of lost load for the shedding generators.", 1000, "currency/MWh", reader="backend/pypsa/network/load_shedding.py"),
     RunOption("options.ownerColumn", "string", "Name of the generators/storage column holding the owner/company tag, used by company, merchant, bid-strategy, PPA and asset-swap analyses.", "owner", reader=_RESULTS + ", backend/pypsa/results/company.py"),
-    RunOption("options.carbonPriceSchedule[]", "object[]", "Year -> carbon price curve; overrides scenario.carbonPrice per snapshot (each snapshot takes its year's row; see backend/pypsa/carbon_price.py for the year-resolution rule). Fields: year, price.", [], reader="backend/pypsa/carbon_price.py"),
-    RunOption("options.carbonPriceSchedule[].year", "integer", "Calendar year the price starts to apply.", None, "year", reader="carbon_price.py"),
-    RunOption("options.carbonPriceSchedule[].price", "number", "Carbon price in that year.", None, "currency/tCO2", reader="carbon_price.py"),
+    RunOption("options.carbonPriceSchedule[]", "object[]", "Year -> carbon price curve; overrides scenario.carbonPrice per snapshot (each snapshot takes its year's row; see backend/app/carbon_pricing/config.py for the year-resolution rule). Fields: year, price.", [], reader="backend/app/carbon_pricing/config.py"),
+    RunOption("options.carbonPriceSchedule[].year", "integer", "Calendar year the price starts to apply.", None, "year", reader="carbon_pricing/config.py"),
+    RunOption("options.carbonPriceSchedule[].price", "number", "Carbon price in that year.", None, "currency/tCO2", reader="carbon_pricing/config.py"),
     RunOption("options.modelOverrides[]", "object[]", "Per-run model cell patches applied to the run's model snapshot at submit time (never to the session). Each sets sheet[name].column = value on an EXISTING row; unknown sheet/name rows are skipped.", None, reader="backend/app/scenario_overrides.py"),
     RunOption("options.modelOverrides[].sheet", "string", "Sheet name, e.g. generators.", None, reader="scenario_overrides.py"),
     RunOption("options.modelOverrides[].name", "string", "Row 'name' to patch.", None, reader="scenario_overrides.py"),
@@ -115,7 +115,7 @@ _SCALARS: list[RunOption] = [
     RunOption("options.solverThreads", "integer", "HiGHS threads. 0 = automatic: the queue splits the machine's cores between concurrent solves.", 0, "threads", reader=_RESULTS + " (_build_solver_options), main.py (_resolve_cores)"),
     RunOption("options.solveAcceptance", "string", "lenient also accepts a validated solve whose HiGHS condition is 'unknown' (interior point without crossover); strict needs condition 'optimal'.", "lenient", allowed=["lenient", "strict"], reader=_RESULTS),
     RunOption("options.objectiveAutoScale", "boolean", "Pass HiGHS user_objective_scale=-1 (results-neutral; faster on wide cost ranges). The UI sends true; absent means off.", True, reader=_RESULTS + " (_build_solver_options)"),
-    RunOption("options.buildVersion", "integer", "Cost-basis schema the run was built under (2 = PyPSA cost semantics). Stamped by the server on every stored run; a run without it is re-derived through the legacy-run migration. Not sent by the UI.", None, source="api", reader=_NETWORK),
+    RunOption("options.buildVersion", "integer", "Build schema the run was built under (2 = PyPSA cost semantics; 3 = carbon price as an objective term and e_sum / GlobalConstraint constants as PyPSA horizon totals). Stamped by the server on every stored run; a run without it is re-derived through the legacy-run migration. Not sent by the UI.", None, source="api", reader=_NETWORK),
 ]
 
 # ── nested config blocks: field -> (type, unit, meaning[, allowed]) ──────────

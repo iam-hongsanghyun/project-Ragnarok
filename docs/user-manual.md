@@ -470,9 +470,11 @@ Rolling horizon cannot be combined with stochastic mode or SCLOPF.
 
 #### Carbon price
 
-Applies an economy-wide carbon cost to all generators proportional to their
-carrier's `co2_emissions` factor. The cost is added to each generator's marginal
-cost at build time and reported as a separate "Carbon cost" line in the results.
+Applies an economy-wide carbon cost to all generators: price × the carrier's
+`co2_emissions` ÷ the generator's efficiency × its output. The carbon-pricing module sends it to
+PyPSA as an extra term of the objective; your `marginal_cost` column is **not** changed and stays
+the fuel cost. The results report fuel and carbon as separate lines. Anyone who solves an exported
+PyPSA file will not see the price in it: it is a run setting.
 
 **Scalar price** — enter a flat rate in currency per tonne CO2. This value is
 applied to every snapshot when no schedule is defined.
@@ -486,6 +488,27 @@ automatically kept in ascending year order.
 
 The carbon price is a flat per-tonne adder. There is no ETS permit curve, permit
 banking, or endogenous carbon market clearing.
+
+#### Annual budgets
+
+PyPSA's generator `e_sum_min` / `e_sum_max` and the `constant` of a GlobalConstraint (a CO2 cap, an
+operational limit) are **totals over the modelled horizon**. They are never scaled to it: a cap of
+1,000,000 t typed for a 168 h run is the whole allowance of that week, which is effectively no cap.
+To state a **yearly** budget, add a row here (component, name, attribute, per-year value). The module
+writes `annual × Σw / 8760` into PyPSA, where Σw is the sum of the generators snapshot weighting in
+hours (a 168 h run gets 168/8760 of it; a 4-hourly model with weight 4 counts real hours). The table
+shows the per-year value, the horizon and the value PyPSA gets; **Write into the workbook** puts it
+into the component rows (apply again after changing the snapshots). Each run recomputes it for its
+own window and lists it in the run notes.
+
+*Pathway runs:* a generator `e_sum` is one total for the whole horizon (energy may move between
+periods). A GlobalConstraint with an investment period is that period's total, annual × its hours /
+8760 × its Years weight; without a period it covers all periods, each weighted by its Years. Caps you
+type directly in the Constraints tables are totals and stay as typed. *Rolling horizon:* an `e_sum`
+budget is split across the windows by their share of the hours; a GlobalConstraint budget is refused.
+
+If the timestamps are 4 h apart but the snapshot weighting is 1, the notes and the model check warn
+that every total is a quarter of the real one; nothing is changed for you.
 
 #### Standard Constraints
 

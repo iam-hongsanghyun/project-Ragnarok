@@ -226,10 +226,36 @@ def _check_structure(model: dict[str, Any], out: list[dict[str, str]]) -> None:
         ))
 
 
+def _check_weighting_vs_spacing(model: dict[str, Any], out: list[dict[str, str]]) -> None:
+    """Timestamp spacing versus the snapshot weighting (default 1 when the sheet has no weighting column)."""
+    import pandas as pd
+
+    from .utils.weightings import spacing_mismatch
+
+    rows = [r for r in _rows(model, "snapshots") if str(r.get("snapshot", "")).strip()]
+    if len(rows) < 2:
+        return
+    try:
+        stamps = pd.to_datetime([_norm_snapshot(str(r["snapshot"])) for r in rows])
+    except Exception:  # noqa: BLE001 - labels that are not dates have no spacing
+        return
+    weights: list[float] = []
+    for r in rows:
+        w = next((_num(r.get(c)) for c in ("generators", "objective", "stores") if _num(r.get(c)) is not None), None)
+        weights.append(1.0 if w is None else w)
+    found = spacing_mismatch(stamps, weights)
+    if found:
+        out.append(_finding(
+            WARN, "weighting_spacing", found["message"],
+            "Set the snapshot weightings to the spacing (a 4-hourly model carries weight 4). Nothing is changed for you.",
+        ))
+
+
 def check_model(model: dict[str, Any]) -> dict[str, Any]:
     """Back-brief plus trap findings for a workbook model. Read-only."""
     findings: list[dict[str, str]] = []
     _check_snapshot_alignment(model, findings)
+    _check_weighting_vs_spacing(model, findings)
     _check_generators(model, findings)
     _check_structure(model, findings)
     warnings = [f for f in findings if f["level"] == WARN]

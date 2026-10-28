@@ -123,7 +123,7 @@ backend/
     pathway.py           PathwayConfig, parse_pathway_config
     rolling.py           RollingHorizonConfig, parse_rolling_config
     stochastic.py        StochasticConfig, apply_scenarios, collapse_to_representative_scenario
-    carbon_price.py      CarbonPriceConfig, apply_carbon_price
+    (app/carbon_pricing/  carbon-pricing module: config.py price series, term.py objective term + results; app/annual_budgets/  annual-budgets module)
     constants.py         Carrier/generator colour utilities
     pypsa_schema.py      Schema accessors (runtime schema from pypsa_schema_builder.py; network_import_policy.json)
     network/
@@ -394,8 +394,8 @@ Processing order:
 6. Run `_sanitize_placeholder_bounds` — replaces values >= 1e9 in `*_nom_max`, `*_sum_max`, `*_sum_min`, and `lifetime` columns with `±inf` to prevent HiGHS numerical conditioning issues.
 7. Apply time-series sheets (`<list_name>-<attr>`), aligning each to `network.snapshots`.
 8. Window and downsample snapshots (`snapshotStart`, `snapshotCount`, `snapshotWeight`). For pathway mode, windowing ignores `snapshotStart`/`snapshotCount` and only applies the step (downsampling).
-9. Scale annual energy-sum caps (`*_sum_min`, `*_sum_max`) by the period factor when modelled hours < 8760.
-10. Apply carbon price (scalar or schedule) to generator marginal costs.
+9. **Annual-budgets module** (§5.12): write `annual × Σw/8760` into the `e_sum_*` / GlobalConstraint `constant` of the rows in `RAGNAROK_AnnualBudgets`. Every other `e_sum` / `constant` passes through as PyPSA's total.
+10. **Carbon price: recorded, not converted.** The price is stored in `network.meta` (`carbon_pricing.set_plan`); `marginal_cost` is untouched. The carbon-pricing module adds the term to the objective in `extra_functionality` (§7.5).
 11. **Cost basis: no conversion.** `capital_cost`, `overnight_cost` and `fom_cost` pass to PyPSA unchanged (see §5.11); the builder only refuses an `overnight_cost` row that has no `discount_rate`. Then copy the `plant` annotation column (`serialize.ANNOTATION_COLUMNS`) onto the network frames so a PyPSA export keeps which components form a plant.
 12. Override `committable=False` on all generators if `forceLp` is set.
 13. Emit a warning note for any carrier with `co2_emissions > 5` (likely entered as kg/MWh instead of tCO2/MWh).
@@ -736,6 +736,36 @@ discount rate** (`POST /api/forge/fill-discount-rate`) writes the Settings rate 
 Modules write PyPSA columns (conversion templates, plants, P2X: `overnight_cost`, `lifetime`, `discount_rate`, `fom_cost` = yearly O&M × `horizon_years`; the Siting scan and the Screening promote write their candidates' `overnight_cost` + `lifetime` (25 y, connection 40 y) + the `discount_rate` the caller passes and refuse without one).
 
 
+### 5.12 `annual_budgets` — yearly energy and emission budgets as PyPSA horizon totals
+
+**Module:** `backend/app/annual_budgets/`. PyPSA's `e_sum_min` / `e_sum_max` (generators) and the `constant` of a GlobalConstraint
+(`primary_energy`, `operational_limit`) are totals over the weighted modelled snapshots and are never scaled to the horizon (Ragnarok used to scale
+`e_sum` by `min(1, hours/8760)`, or the smallest period in a pathway, which under-scaled multi-year runs; it never scaled a GlobalConstraint, so an
+annual CO2 cap typed for a 168 h run was non-binding; nothing else scales it: the DSL `emissions` atom and the structured MWh budgets only apportion a
+whole-run literal across ROLLING windows, `window_fraction`). The yearly value now lives in the model sheet `RAGNAROK_AnnualBudgets`
+(`component` generators | global_constraints, `name`, `attribute` e_sum_max | e_sum_min | constant, `annual`).
+
+$$ V = A\,\frac{\sum_{t\in S} w_t\,y_{p(t)}}{8760} $$
+
+ASCII: value = annual * sum_t(w[t] * y[period(t)]) / 8760. $w_t$ is the `generators` snapshot weighting (hours per snapshot: the weighting PyPSA applies in the
+constraint, so a 4-hourly model with weight 4 counts real hours); $y_p$ the investment-period `years` weighting for global constraints (1 for `e_sum`, which
+PyPSA does not weight by years). Single period: `annual × hours / 8760` (168 h → 168/8760; two years → 2×). Pathway: an `e_sum` is one whole-horizon total over
+all periods (energy may move between periods); a global constraint with `investment_period = p` is that period's total (`annual × H_p/8760 × years_p`); without
+one it covers all periods, each weighted by its years. Caps typed as totals (module 16's 10 / 4 / 0.3 Mt per period) have no row and pass through unchanged.
+**Rolling horizon:** PyPSA applies the constant to every window, so a generator `e_sum` is split per window by committed hours (a declared constraint,
+`annual_budgets.extra_functionality`; the column stays unbounded) and a GlobalConstraint budget is refused (400).
+
+Where it runs: `build_network` after windowing (it needs the final weightings), so it is recomputed whenever the window changes; the table is in the run notes, in
+`annualBudgets` of the results and `network.meta`; `POST /api/annual-budgets/apply` writes the values into the workbook rows for the workbook's own horizon (re-apply after
+changing snapshots). The same step warns when the timestamp spacing disagrees with the weightings (`utils/weightings.py`; `model_check` code `weighting_spacing`): it only
+warns, and the notes say which weighting was used. Run option `options.annualBudgets.enabled`. MCP: `get_annual_budgets` (read-only), `set_annual_budget`, `apply_annual_budgets`
+(gated). Routes `/api/annual-budgets[/preview|/set|/apply]`.
+
+**Migration (schema 2 → 3)** (`cost_basis.migrate_cost_basis`, `annual_budgets.migrate_e_sum`): finite generator `e_sum_*` values (annual semantics) move into the sheet and the
+report lists them (`budgets`); inf / ≥1e9 placeholders and PyPSA-native files stay. `buildVersion` / `CURRENT_SCHEMA_VERSION` is 3 (carbon module + budgets). A stored run before 3 re-derives
+unchanged: the carbon price is rebuilt from its `scenario` / `options`, and `legacy_e_sum_scale` applies the old build-time factor to its `e_sum` (`build_stored_network`).
+
+
 ## 6. Result extraction
 
 ### 6.1 `run_pypsa` return value
@@ -768,11 +798,9 @@ Modules write PyPSA columns (conversion templates, plants, P2X: `overnight_cost`
 | `securityConstrained` | `dict \| None` | `enabled`, `branchCount`. Present only when SCLOPF is enabled. |
 | `outputs` | `dict` | Full PyPSA-native output dataset: `{static: {...}, series: {...}}`. See [Section 6.7](#67-full_outputspy). |
 
-**Cost breakdown accounting.** The carbon adder was folded into `marginal_cost`
-by `build_network`. `run_pypsa` backs it out per snapshot:
-`fuel_cost += dispatch * (mc - ef * carbon_price).clip(lower=0)`.
-`carbon_cost += dispatch * ef * carbon_price`. Load-shedding cost is tracked
-separately by the `load_shedding_` name prefix.
+**Cost breakdown accounting.** Fuel cost is `n.statistics.opex(cost_types=["marginal_cost"])` per generator (investment-period weighted),
+load shedding is the `load_shedding_` generators' share of it, and carbon cost is the carbon-pricing module's objective term evaluated at the
+solution (§7.5). `Fuel + Carbon + Load shedding (+ start-up, stand-by, other components, capital)` sums to the objective.
 
 **Line loading.** `lineLoading` covers `network.lines`, `network.links`, and
 `network.transformers`. It is only populated for components with non-empty
@@ -1037,37 +1065,34 @@ The `securityConstrained` key in the result dict reports `enabled: true` and
 
 ### 7.5 Carbon price
 
-**Module:** `backend/pypsa/carbon_price.py`
+**Module:** `backend/app/carbon_pricing/` (`config.py`, `term.py`). PyPSA has no native carbon price (its CO2 instrument is the
+`primary_energy` GlobalConstraint), so the module sends one: the price is **one extra term of the objective**, added by
+`extra_functionality` (`carbon_pricing.extra_functionality`, called first inside `run_pypsa`'s closure and by every study that
+solves a copy). `marginal_cost` stays what the workbook states, so `n.statistics.opex` is the fuel cost.
 
-**`CarbonPriceConfig`** — `scalar: float`, `schedule: tuple[CarbonPriceScheduleEntry, ...]`,
-property `is_scheduled: bool` (True when schedule is non-empty).
+$$ \min \; \ldots + \sum_t w_t\,\omega_{p(t)}\,\pi_t \sum_g \frac{e_{c(g)}}{\eta_{g,t}}\,p_{g,t} $$
 
-**`CarbonPriceScheduleEntry`** — `year: int`, `price: float` (currency/tCO2).
+ASCII: objective += sum_t w[t] * omega[period(t)] * price[t] * sum_g co2[carrier g] / eta[g,t] * p[g,t].
+$w_t$ objective snapshot weighting (h), $\omega_p$ period objective weighting, $\pi_t$ price (currency/tCO2; a schedule supersedes the
+scalar; pathway: the period label is the year), $e_c$ carrier `co2_emissions` (tCO2/MWh fuel), $\eta_{g,t}$ the generator's own
+(static or time-varying) efficiency, $p$ MW. Stochastic runs weight it by the scenario probabilities. Links that convert a fuel bus
+carry no emissions: the fuel generator does, at η = 1 (as `primary_energy`). The LP is identical to the old marginal-cost adder
+(objectives equal to 1e-9 on the module 8 / 16 cases, schedules, time-varying η, rolling, stochastic, MGA).
 
-**`parse_carbon_price_config(scalar, raw_schedule) -> CarbonPriceConfig`**
+* `CarbonPriceConfig`, `parse_carbon_price_config`, `config_from_run(scenario, options)`, `price_series(config, snapshots)`.
+* `set_plan` / `plan_of`: the price a built network carries (`network.meta["ragnarok_carbon_price"]`).
+* `adder_frame(network)`: currency/MWh per emitting generator and snapshot; `effective_marginal_cost`, `add_adder`: what merit order,
+  finance, merchant, bidding and the market simulation price a MWh at (marginal cost + adder).
+* `carbon_cost_by_generator(network)` / `carbon_cost`: the term evaluated at the solution. **Results:** fuel cost = `n.statistics.opex(marginal_cost)`
+  (`stat_metrics.generator_operating_cost`), carbon cost = the term. The cost breakdown, company statement (with each generator's own η_t: the old
+  static-η back-out was wrong when η varies), generator economics, KPIs and finance read these; no back-out arithmetic remains.
+* `write_marginal_cost_adder(copy)`: the module's second form, ONLY on scratch copies of studies that rewrite marginal costs or build the model
+  through a PyPSA entry point with no hook (MGA, strategic bidding / optimal bid). Merchant and asset swap pass the hook.
+* Run options `options.carbonPricing.enabled` (default true). Refused (400): a price with CVaR (the tail constraints cannot see the term) and a
+  price with a piecewise `marginal_cost` curve combined with MGA / bidding. A varying schedule with a piecewise curve now works (the term does not depend on the curve).
+* MCP: `get_carbon_price` (read-only), `set_carbon_price` (writes the scenario preset). Route `POST /api/carbon-price/preview`.
 
-`raw_schedule` is `options["carbonPriceSchedule"]` — a list of `{year, price}`
-dicts. Duplicate years are resolved last-write-wins. Items with non-numeric or
-non-positive years are skipped.
-
-**`build_price_series(network, config) -> pd.Series`**
-
-Per-snapshot carbon price indexed by `network.snapshots`. Constant series when
-`not config.is_scheduled`. For scheduled prices, each snapshot's year is
-resolved via `_snapshot_years` (uses the `period` level for pathway
-MultiIndexes) and the most-recent schedule entry with year <= snapshot year is
-applied.
-
-**`apply_carbon_price(network, config, notes, currency_symbol)`**
-
-Adds the carbon adder to every generator whose carrier has `co2_emissions > 0`.
-
-- **Constant path:** adds `price * emission_factor` to the static
-  `marginal_cost` column and to any existing `generators_t.marginal_cost`
-  time-varying frame.
-- **Varying path** (schedule with multiple distinct values): writes all
-  generators onto `generators_t.marginal_cost` with a per-snapshot adder
-  series, overriding the static column during the solve.
+Anyone solving `build_network`'s output with a bare `n.optimize()` gets no carbon term: pass `extra_functionality=carbon_pricing.extra_functionality`.
 
 ---
 

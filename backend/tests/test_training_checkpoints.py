@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 from backend.app import sqlite_store
+from backend.app import carbon_pricing
 from backend.pypsa.network import build_network
 
 EXAMPLES = Path(__file__).resolve().parent.parent / "data" / "examples"
@@ -54,7 +55,7 @@ def _model_from_example(example_id: str, tmp_path: Path) -> dict:
 def _solved(example_id: str, tmp_path: Path, scenario: dict | None = None):
     model = _model_from_example(example_id, tmp_path)
     n, _notes = build_network(model, scenario or SCENARIO, OPTIONS)
-    n.optimize(solver_name="highs")
+    n.optimize(solver_name="highs", extra_functionality=carbon_pricing.extra_functionality)
     return n
 
 
@@ -122,7 +123,8 @@ def _without(model: dict, *, generators: tuple[str, ...], sheets: tuple[str, ...
 
 def _solve_model(model: dict, scenario: dict | None = None):
     n, _notes = build_network(model, scenario or SCENARIO, OPTIONS)
-    n.optimize(solver_name="highs")
+    # the carbon-pricing module's objective term (a no-op when the scenario's carbonPrice is 0)
+    n.optimize(solver_name="highs", extra_functionality=carbon_pricing.extra_functionality)
     return n
 
 
@@ -1387,7 +1389,8 @@ def _m16_model(tmp_path: Path, example: str = "training_m16_start", *,
 
 def _m16_solve(model: dict, options: dict):
     n, _notes = build_network(model, _M16_SCENARIO, options)
-    n.optimize(solver_name="highs", multi_investment_periods=True, include_objective_constant=False)
+    n.optimize(solver_name="highs", multi_investment_periods=True, include_objective_constant=False,
+               extra_functionality=carbon_pricing.extra_functionality)
     return n
 
 

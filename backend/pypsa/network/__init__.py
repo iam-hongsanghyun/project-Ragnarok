@@ -11,8 +11,8 @@ a new PyPSA version adds attributes or component types, they Just Work.
 After import we apply five small post-load transformations that depend on
 Settings rather than on the workbook:
   * Snapshot windowing & downsampling
-  * Period-factor scaling of ``*_sum_min`` / ``*_sum_max`` annual caps
-  * Carbon-price adder on generator marginal_cost
+  * Annual-budgets module: yearly e_sum / CO2-cap values from RAGNAROK_AnnualBudgets -> PyPSA horizon totals
+  * Carbon price recorded in ``network.meta`` (the module adds it to the objective; marginal_cost is untouched)
   * Annuitisation of capital_cost for extendable assets
   * Force-LP override of committable=True
   * Optional per-bus load shedding generators
@@ -25,8 +25,8 @@ import numpy as np
 import pandas as pd
 import pypsa
 
-from ..carbon_price import apply_carbon_price, parse_carbon_price_config
-from ...app.config import load_system_defaults
+from ...app.carbon_pricing import build_notes as carbon_notes, config_from_run as carbon_config_from_run, set_plan as set_carbon_plan
+from ...app import annual_budgets
 from ..pathway import parse_pathway_config
 from ..rolling import parse_rolling_config
 from ..sampling import average_window_frames, parse_sampling_config, sample_block_indices
@@ -60,7 +60,7 @@ from .components import (
 )
 from .network_sheet import _apply_network_sheet, _peak_load_per_bus
 from .serialize import ANNOTATION_COLUMNS
-from .piecewise import apply_carbon_to_curves, apply_piecewise_sheets
+from .piecewise import apply_piecewise_sheets
 
 __all__ = ["build_components", "build_network", "build_stored_network", "validate_model"]
 
@@ -229,39 +229,6 @@ def _relax_maintenance(network: pypsa.Network, list_name: str) -> int:
         return 0
     frame["maintainable"] = False
     return int(flagged.sum())
-
-
-def _apply_carbon_to_piecewise(network: pypsa.Network, config: Any, notes: list[str]) -> None:
-    """Fold the carbon price into generator ``marginal_cost`` curves.
-
-    ``apply_carbon_price`` writes the adder to the scalar / time-series cost, which
-    PyPSA ignores for a generator that has a curve. A single price is added to
-    every segment; a price schedule cannot be expressed in a time-invariant curve.
-    """
-    from ..carbon_price import build_price_series
-    from ..utils.emissions import per_generator_emission_factor
-
-    if not network.components["generators"].has_piecewise("marginal_cost"):
-        return
-    if "co2_emissions" not in network.carriers.columns:
-        return
-    series = build_price_series(network, config)
-    if (series <= 0).all():
-        return
-    if series.nunique(dropna=False) > 1:
-        from fastapi import HTTPException
-        raise HTTPException(
-            status_code=400,
-            detail="A carbon-price schedule that changes within the run cannot be applied to "
-            "generators with a piecewise marginal_cost curve (a curve is time-invariant). "
-            "Use a single carbon price, or model the fuel cost outside the curve.",
-        )
-    ef_carrier = network.carriers["co2_emissions"]
-    if isinstance(ef_carrier.index, pd.MultiIndex) and "name" in ef_carrier.index.names:
-        ef_carrier = ef_carrier.groupby(level="name").first()
-    ef = per_generator_emission_factor(network, ef_carrier.to_dict())
-    apply_carbon_to_curves(network, float(series.iloc[0]), ef, notes)
-
 
 
 def _carry_plant_ids(network: pypsa.Network, model: dict[str, Any]) -> None:
@@ -451,8 +418,8 @@ def build_components(
 
     Use this for every build whose network is serialised BACK to a workbook (Forge
     transforms, netcdf / hdf5 export). :func:`build_network` is the run builder: it
-    also windows the snapshots, scales annual energy caps, adds the carbon price to
-    marginal costs, load shedding and demand response, relaxes commitment, snaps 1e9
+    also windows the snapshots, records the carbon price for the carbon-pricing module
+    (an objective term, not a cost conversion), runs the annual-budgets module, adds load shedding and demand response, relaxes commitment, snaps 1e9
     placeholders to inf and drops ``v_ang_min`` - each correct for a solve and each
     wrong in a workbook the user keeps. None of that happens here, and no cost is
     ever converted (``capital_cost`` / ``overnight_cost`` / ``fom_cost`` pass through).
@@ -498,10 +465,13 @@ def build_stored_network(
     builder annuitised; it is migrated in memory first (:func:`cost_basis.model_for_stored_run`) so
     PyPSA reproduces the stored numbers. A stamped run goes straight through.
     """
-    from .cost_basis import model_for_stored_run
+    from .cost_basis import build_version_of, legacy_e_sum_scale, model_for_stored_run
 
     current, report = model_for_stored_run(model, scenario, options)
     network, notes = build_network(current, scenario, options)
+    factor = legacy_e_sum_scale(network, build_version_of(model, options))
+    if factor is not None:
+        notes.append(f"Stored run from before build version 3: annual energy-sum caps scaled by {factor:.3f}, as it was solved.")
     if report is not None and report.changed_rows:
         notes.append(
             f"Stored run from before the PyPSA cost basis: {len(report.changed_rows)} capital cost row(s) read as "
@@ -577,7 +547,6 @@ def build_network(
                 "be written as a 500 % discount rate."
             ),
         )
-    carbon_price = number(scenario.get("carbonPrice"), 0.0)
     currency = str(options.get("currencySymbol", "$"))
 
     network, uncovered_by_sheet, authored_weights = _load_model(
@@ -681,35 +650,23 @@ def build_network(
     # Rows outside the modelled window are irrelevant, so check only now.
     _raise_on_uncovered_snapshots(network, uncovered_by_sheet)
 
-    # ── Period-factor scaling of annual energy caps ───────────────────────────
-    sim_cfg = load_system_defaults().get("simulation", {})
-    hours_in_year = float(sim_cfg.get("hours_in_year", 8760.0))
-    if pathway.enabled and isinstance(network.snapshots, pd.MultiIndex):
-        period_sizes = network.snapshot_weightings["objective"].groupby(level="period").sum()
-        period_factor = min(float(period_sizes.min()) / hours_in_year, 1.0) if len(period_sizes) > 0 else 1.0
-    else:
-        # Sum of objective weights == len * step for contiguous runs (identical
-        # to the old len*step form) and == represented window rows for sampled
-        # runs, so annual e_sum caps scale by what the run REPRESENTS.
-        modelled_hours = float(network.snapshot_weightings["objective"].sum())
-        period_factor = min(1.0, modelled_hours / hours_in_year) if modelled_hours > 0 else 1.0
-    if period_factor < 1.0:
-        for frame in (network.generators, network.storage_units, network.stores):
-            for col in list(frame.columns):
-                if col.endswith("_sum_min") or col.endswith("_sum_max"):
-                    frame[col] = frame[col] * period_factor
-        notes.append(f"Scaled annual energy-sum caps by period factor {period_factor:.3f}.")
+    # ── Annual budgets (module): per-year e_sum / CO2-cap values -> PyPSA horizon totals ──
+    # Only rows of RAGNAROK_AnnualBudgets are touched; every other e_sum / constant passes through.
+    try:
+        annual_budget_table = annual_budgets.apply_to_network(network, model, notes, check_spacing=not sampling.enabled, rolling=rolling.enabled, enabled=not (isinstance(options.get("annualBudgets"), dict) and options["annualBudgets"].get("enabled") is False))
+    except ValueError as exc:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    del annual_budget_table
 
-    # ── Carbon-price adder on generator marginal cost ─────────────────────────
-    # A single scalar still works (the legacy path); when the user provides a
-    # year→price schedule, the adder becomes per-snapshot. See
-    # `backend/pypsa/carbon_price.py` for the year-resolution rule.
-    carbon_config = parse_carbon_price_config(
-        carbon_price,
-        options.get("carbonPriceSchedule"),
-    )
-    apply_carbon_price(network, carbon_config, notes, currency)
-    _apply_carbon_to_piecewise(network, carbon_config, notes)
+    # ── Carbon price: declared, not converted ────────────────────────────────
+    # The price is NOT written into marginal_cost. The network records the price it was built for
+    # (network.meta) and the carbon-pricing module adds `price x emissions` to the objective in
+    # `extra_functionality` (backend/app/carbon_pricing). `*_sum_min/max` pass through as PyPSA's
+    # whole-horizon totals; the annual-budgets module writes them (backend/app/annual_budgets).
+    carbon_config = carbon_config_from_run(scenario, options)
+    set_carbon_plan(network, carbon_config)
+    notes.extend(carbon_notes(network, carbon_config, currency))
 
     # ── Cost basis ────────────────────────────────────────────────────────────
     # Nothing is converted here. `capital_cost` is PyPSA's periodised cost per

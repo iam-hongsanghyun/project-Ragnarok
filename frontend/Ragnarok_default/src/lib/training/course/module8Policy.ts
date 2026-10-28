@@ -50,8 +50,9 @@ export const MODULE_8_POLICY: TutorialStep[] = [
       + 'fall out. Everything else — trading schemes, offsets, technology mandates — is a variation on '
       + 'one of those or a combination of both.',
 
-      'In a model the difference is where the policy lands. A price is added to the marginal cost of '
-      + 'anything that emits, so it changes the merit order and the optimiser responds. A limit is a '
+      'In a model the difference is where the policy lands. A price is charged on every tonne an emitting '
+      + 'generator produces (the carbon-pricing module sends it to PyPSA as an extra term of the objective), '
+      + 'so it changes the merit order and the optimiser responds. A limit is a '
       + 'constraint over the whole system, so the optimiser must satisfy it and reports what it cost.',
 
       'They are duals of each other, and this module proves it rather than asserting it: a cap has a '
@@ -132,7 +133,7 @@ export const MODULE_8_POLICY: TutorialStep[] = [
       + 'raw factors suggest, because it is also less efficient. That compounding is why efficiency and '
       + 'emission factor must be kept separate in a model rather than merged into one number.',
 
-      'Now the merit order. Coal costs 20 per MWh plus 0.85 times the carbon price; the CCGT costs 50 '
+      'Now the merit order. What the optimiser weighs is the fuel cost plus the carbon charge: coal costs 20 per MWh plus 0.85 times the carbon price; the CCGT costs 50 '
       + 'plus 0.40 times it. They are equal when 20 + 0.85p = 50 + 0.40p, which is p = 66.67 per tonne. '
       + 'Below that coal runs first; above it, gas does.',
     ],
@@ -194,8 +195,9 @@ export const MODULE_8_POLICY: TutorialStep[] = [
       'A hundred per tonne is comfortably above the 66.67 switching point, so the arithmetic says coal '
       + 'should give way to gas. Watch how much more than that happens.',
 
-      'The carbon price enters as an addition to marginal cost, computed per generator from its carrier '
-      + 'factor and its efficiency. Nothing else about the model changes: the same demand, the same '
+      'The carbon price enters the objective as price x carrier factor / efficiency x output, computed per '
+      + 'generator, by the carbon-pricing module. Your marginal_cost column is NOT changed: it stays the fuel '
+      + 'cost, and the results show fuel and carbon as separate lines. Nothing else about the model changes: the same demand, the same '
       + 'network, the same overnight costs, the same discount_rate on every row.',
 
       'Predict before you run. Coal at 20 + 85 = 105 per MWh is now the most expensive thermal plant in '
@@ -241,7 +243,7 @@ export const MODULE_8_POLICY: TutorialStep[] = [
     verify: [
       'The planning summary reports a carbon price of 100',
       'The run completes and lands in History alongside the baseline',
-      'You predicted coal\'s new marginal cost as 105 per MWh before looking',
+      'You predicted coal\'s all-in cost (fuel 20 plus carbon 85) as 105 per MWh before looking',
     ],
     pitfalls: [
       'Leaving a carbon price set from a previous run. It is a scenario setting and does not appear '
@@ -835,8 +837,8 @@ export const MODULE_8_POLICY: TutorialStep[] = [
       + 'at 100 per tonne on 4,376 tonnes about 438,000. Consumers ultimately pay it, and where it goes '
       + 'depends on whether allowances are auctioned, given away, or the instrument is a tax.',
 
-      'The less obvious part is what happens to electricity prices. A carbon price raises the marginal '
-      + 'cost of whatever is setting the price, so it lifts the price in every hour a fossil plant is '
+      'The less obvious part is what happens to electricity prices. A carbon price raises the all-in cost '
+      + '(fuel plus carbon charge) of whatever is setting the price, so it lifts the price in every hour a fossil plant is '
       + 'marginal — and every zero-carbon generator that was already running earns that higher price on '
       + 'output it was producing anyway. That is a transfer to existing renewables and nuclear, and it is '
       + 'usually far larger than the abatement cost.',

@@ -18,6 +18,18 @@ function money(v: number): string {
 export function formatCostBasisMigration(m: CostBasisMigration): string {
   const n = m.changedRows.length;
   const lines: string[] = [];
+  const budgets = m.budgets ?? [];
+  if (budgets.length > 0) {
+    lines.push(
+      `${budgets.length} energy budget(s) (e_sum) were yearly values that Ragnarok used to scale to the run. PyPSA's e_sum is a total over the `
+      + 'modelled horizon, so they moved to the annual-budgets sheet (RAGNAROK_AnnualBudgets) and the module now writes annual x hours / 8760 into e_sum:',
+    );
+    budgets.slice(0, MAX_ROWS_SHOWN).forEach((b) => lines.push(`  ${b.component} / ${b.name} / ${b.attribute}: ${money(b.annual)} per year`));
+  }
+  if (n === 0 && budgets.length > 0) {
+    m.notes.forEach((note) => lines.push(note));
+    return lines.join('\n');
+  }
   lines.push(
     `This workbook was saved before Ragnarok handed costs to PyPSA unchanged. ${n} row(s) carried an overnight price `
     + 'in capital_cost, which PyPSA would now read as a per-horizon cost. They were moved once to PyPSA\'s '

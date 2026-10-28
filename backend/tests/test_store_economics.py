@@ -61,7 +61,7 @@ def test_store_with_links_counts_in_company_finance_and_statement() -> None:
     assert window_revenue > 0  # the battery really arbitrages
     annualise = 8760 / 8
     stmt = build_company_statement(
-        n, _model("stores"), owner_column="owner", currency="$", emissions_factors={}, carbon_price=0.0,
+        n, _model("stores"), owner_column="owner", currency="$", emissions_factors={},
     )
     assert stmt is not None
     row = stmt["companies"][0]
@@ -89,7 +89,7 @@ def test_finance_and_statement_charge_storage_capex_by_one_rule() -> None:
         n = _network("unit", **kwargs)
         stmt = build_company_statement(
             n, _model("storage_units"), owner_column="owner", currency="$", emissions_factors={},
-            carbon_price=0.0,
+           
         )
         fin = build_company_finance(
             n, _model("storage_units"), owner_column="owner", discount_rate=0.05, currency="$",
@@ -109,7 +109,7 @@ def test_storage_holding_cost_enters_the_variable_cost() -> None:
     soc_hours = float(n.storage_units_t.state_of_charge["st"].sum())  # w = 1 h
     stmt = build_company_statement(
         n, _model("storage_units"), owner_column="owner", currency="$", emissions_factors={},
-        carbon_price=0.0,
+       
     )
     assert stmt is not None
     assert stmt["companies"][0]["fuelVomCost"] == pytest.approx(2.0 * soc_hours * 8760 / 8, rel=1e-9)

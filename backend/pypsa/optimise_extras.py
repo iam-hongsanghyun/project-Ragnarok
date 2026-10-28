@@ -227,6 +227,9 @@ def export_lp_file(
         include_objective_constant=False,
         **kwargs,
     )
+    from ..app import carbon_pricing
+
+    carbon_pricing.extra_functionality(network, network.snapshots)  # the module's objective term is part of the problem
     m.to_file(path, io_api="lp" if path.suffix.lower() == ".lp" else None)
     return {
         "path": str(path),

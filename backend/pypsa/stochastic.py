@@ -33,6 +33,7 @@ import pypsa
 from fastapi import HTTPException
 from pypsa.constants import RE_INVARIANT_ATTRS
 
+from ..app import carbon_pricing
 from .utils.coerce import number
 
 
@@ -264,9 +265,9 @@ def per_scenario_summaries(
     """Compute one summary row per scenario from a solved stochastic network.
 
     ``totalOperatingCost`` prices dispatch at the **dense** marginal cost
-    (``get_switchable_as_dense``): a workbook ``generators-marginal_cost``
-    series or a varying carbon-price adder lives only in the time-varying
-    frame, so the static column alone would misprice it. Falls back to the
+    (``get_switchable_as_dense``) plus the carbon-pricing module's adder: a workbook
+    ``generators-marginal_cost`` series lives only in the time-varying frame, so the
+    static column alone would misprice it. Falls back to the
     static column when the dense read is unavailable.
 
     Algorithm (per scenario s, generators g, snapshots t, weights w):
@@ -283,7 +284,7 @@ def per_scenario_summaries(
     gen_p = network.generators_t.p
     generators_static = network.generators
     try:
-        mc_dense_all = network.get_switchable_as_dense("Generator", "marginal_cost")
+        mc_dense_all = carbon_pricing.add_adder(network, network.get_switchable_as_dense("Generator", "marginal_cost"))
     except Exception:
         mc_dense_all = None
 

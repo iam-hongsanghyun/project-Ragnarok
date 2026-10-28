@@ -223,17 +223,18 @@ def test_carrier_max_gen_budget_applies_unapportioned() -> None:
     assert by_name["G_backup"] == pytest.approx(2400.0, rel=1e-4)
 
 
-def test_e_sum_caps_scale_by_represented_hours() -> None:
-    """An annual e_sum_max budget is scaled by represented/8760, not by
-    modelled/8760, in a sampled run."""
+def test_annual_budget_scales_by_represented_hours() -> None:
+    """The annual-budgets module multiplies by what the sampled run REPRESENTS (sum of weights), like a
+    contiguous 48 h run; a plain e_sum_max is PyPSA's total and passes through."""
     model = _model(48)
-    model["generators"][0]["e_sum_max"] = 8760.0  # annual MWh budget
+    model["generators"][1]["e_sum_max"] = 123.0                    # a plain total: untouched
+    model["RAGNAROK_AnnualBudgets"] = [{"component": "generators", "name": "G_gas", "attribute": "e_sum_max", "annual": 8760.0}]
     n, _ = build_network(model, SCENARIO, {
         "snapshotCount": 48,
         "samplingConfig": {"enabled": True, "mode": "count", "blockSize": 6, "blockCount": 2},
     })
-    # period factor = represented(48)/8760 — same as a contiguous 48 h run
     assert float(n.generators.at["G_gas", "e_sum_max"]) == pytest.approx(8760.0 * 48 / 8760.0)
+    assert float(n.generators.iloc[1]["e_sum_max"]) == 123.0
 
 
 # ── Averaged-profile mode ──────────────────────────────────────────────────────

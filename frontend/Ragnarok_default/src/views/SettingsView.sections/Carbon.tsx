@@ -139,7 +139,7 @@ export function CarbonSection(props: CarbonSectionProps) {
     <section className="constraints-workspace-section">
       <header className="constraints-workspace-section-header">
         <h3>Carbon price</h3>
-        <p>Added to each generator's marginal cost proportional to its carrier's <code>co2_emissions</code> factor. Use a schedule to ramp the price across years (pathway runs apply the price for each investment period; single-period runs use the snapshot timestamp's year).</p>
+        <p>Handled by the carbon-pricing module: PyPSA is sent <code>price x co2_emissions / efficiency x output</code> as an extra term of the objective, so <code>marginal_cost</code> stays the fuel cost you entered and the results show fuel and carbon separately. Use a schedule to ramp the price across years (pathway runs apply the price for each investment period; single-period runs use the snapshot timestamp's year).</p>
       </header>
 
       <div className="sg-setting-row">

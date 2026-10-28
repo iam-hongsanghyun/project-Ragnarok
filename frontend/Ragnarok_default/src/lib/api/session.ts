@@ -49,6 +49,8 @@ export interface CostBasisMigration {
   discountRate: number | null;
   discountRateSource: string;
   changedRows: CostBasisChangedRow[];
+  /** Annual `e_sum_*` values moved into the RAGNAROK_AnnualBudgets sheet (schema 2 -> 3). */
+  budgets?: { component: string; name: string; attribute: string; annual: number }[];
   review: { sheet: string; name: string; reason: string }[];
   notes: string[];
 }

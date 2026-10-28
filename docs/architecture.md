@@ -706,7 +706,7 @@ send it to PyPSA as visible inputs in the workbook. Workbook columns carry PyPSA
 | `overnight_cost` | upfront price; PyPSA computes `overnight × annuity(discount_rate, lifetime) × n.nyears` | passes it through; refuses a row with no `discount_rate` |
 | `fom_cost` | fixed O&M **per horizon**, added unscaled | passes it through |
 
-* `build_network` is the *run* builder (window, e_sum scaling, carbon adder, load shedding, Force-LP ...);
+* `build_network` is the *run* builder (window, load shedding, Force-LP ...; it records the carbon price for the carbon-pricing module and runs the annual-budgets module, neither converts a PyPSA attribute);
   `build_components` is the pure 1:1 hand-over used by every build that is serialised back to a workbook
   (Forge transforms, netcdf / h5 export). Neither converts a cost.
 * Reports read PyPSA: `n.statistics.capex / expanded_capex / installed_capex / overnight_cost / fom`,
@@ -718,10 +718,15 @@ send it to PyPSA as visible inputs in the workbook. Workbook columns carry PyPSA
   `pypsa.costs.annuity`.
 * The discount rate is a column. Settings → Discount rate is a Forge action ("Fill discount_rate") that writes
   it into the rows; nothing is filled in at run time.
+* **Modules that send PyPSA what it lacks** (the carbon price and yearly budgets are not PyPSA features):
+  * `backend/app/carbon_pricing/`: `price × co2 / η × p` as a declared objective term (`extra_functionality`, run option
+    `options.carbonPricing.enabled`); fuel cost is `n.statistics.opex`, carbon cost is the term at the solution.
+  * `backend/app/annual_budgets/`: yearly `e_sum` / GlobalConstraint budgets (`RAGNAROK_AnnualBudgets`) written as `annual × Σw / 8760`
+    into the PyPSA column, visibly; Settings → Policy → Annual budgets.
 * Workbook schema version: the model sheet `RAGNAROK_Schema` (`ragnarok_schema_version`). Schema 1 (implicit)
   held an overnight price in `capital_cost` and annuitised it at run time; it is migrated once, visibly, when
   such a workbook is loaded (`backend/pypsa/network/cost_basis.py`, `docs/backend.md` §5.11). Stored runs carry
-  `options.buildVersion`; a run without it is re-derived through the same migration, in memory.
+  `options.buildVersion` (3 now: carbon module + annual budgets); a run before 2 is re-derived through the cost migration, in memory, and a run before 3 has its annual `e_sum` scaled as it was solved (`legacy_e_sum_scale`). Schema 3: annual `e_sum` values move into `RAGNAROK_AnnualBudgets`.
 
 ## 8. Constraints
 

@@ -1,0 +1,336 @@
+{
+ "_about": "Captured from the code BEFORE the carbon-pricing module (carbon adder folded into marginal_cost), at main 362a9d1. Objective values, cost breakdowns and total tCO2 of each case; see test_policy_modules.py.",
+ "cases": {
+  "m8_c100": {
+   "objective": 28826295.34187175,
+   "costBreakdown": [
+    {
+     "label": "Fuel cost",
+     "value": 547000
+    },
+    {
+     "label": "Carbon cost",
+     "value": 437600
+    },
+    {
+     "label": "Load shedding",
+     "value": 0
+    },
+    {
+     "label": "Capital cost (periodised, modelled horizon)",
+     "value": 27841696
+    }
+   ],
+   "totalTco2": 4376.000965222392
+  },
+  "m8_c3.46": {
+   "objective": 26363709.091230128,
+   "costBreakdown": [
+    {
+     "label": "Fuel cost",
+     "value": 3889963
+    },
+    {
+     "label": "Carbon cost",
+     "value": 519323
+    },
+    {
+     "label": "Load shedding",
+     "value": 0
+    },
+    {
+     "label": "Capital cost (periodised, modelled horizon)",
+     "value": 21954424
+    }
+   ],
+   "totalTco2": 150093.31675370588
+  },
+  "m16_sched": {
+   "objective": 872790016.4509798,
+   "costBreakdown": [
+    {
+     "label": "Fuel cost",
+     "value": 123381510
+    },
+    {
+     "label": "Carbon cost",
+     "value": 129461548
+    },
+    {
+     "label": "Load shedding",
+     "value": 0
+    },
+    {
+     "label": "Capital cost (periodised, investment-period weighted)",
+     "value": 619946958
+    }
+   ],
+   "totalTco2": 6944277.486316291
+  },
+  "ex_capacity_expansion": {
+   "objective": 1232088.773571679,
+   "costBreakdown": [
+    {
+     "label": "Fuel cost",
+     "value": 358320
+    },
+    {
+     "label": "Carbon cost",
+     "value": 34399
+    },
+    {
+     "label": "Load shedding",
+     "value": 0
+    },
+    {
+     "label": "Capital cost (periodised, modelled horizon)",
+     "value": 839371
+    }
+   ],
+   "totalTco2": 859.9671050147506
+  },
+  "ex_company_view": {
+   "objective": 634251.8398091437,
+   "costBreakdown": [
+    {
+     "label": "Fuel cost",
+     "value": 550065
+    },
+    {
+     "label": "Carbon cost",
+     "value": 83275
+    },
+    {
+     "label": "Load shedding",
+     "value": 0
+    },
+    {
+     "label": "Storage unit operating cost",
+     "value": 912
+    }
+   ],
+   "totalTco2": 1665.5049121522857
+  },
+  "ex_three_bus": {
+   "objective": 293738.504672843,
+   "costBreakdown": [
+    {
+     "label": "Fuel cost",
+     "value": 272702
+    },
+    {
+     "label": "Carbon cost",
+     "value": 21037
+    },
+    {
+     "label": "Load shedding",
+     "value": 0
+    }
+   ],
+   "totalTco2": 701.2325045240282
+  },
+  "ex_renewables_storage": {
+   "objective": 370419.522137784,
+   "costBreakdown": [
+    {
+     "label": "Fuel cost",
+     "value": 326975
+    },
+    {
+     "label": "Carbon cost",
+     "value": 41545
+    },
+    {
+     "label": "Load shedding",
+     "value": 0
+    },
+    {
+     "label": "Storage unit operating cost",
+     "value": 1900
+    }
+   ],
+   "totalTco2": 692.4166386722454
+  },
+  "ex_training_m7_year": {
+   "objective": 47134115.847548574,
+   "costBreakdown": [
+    {
+     "label": "Fuel cost",
+     "value": 29980642
+    },
+    {
+     "label": "Carbon cost",
+     "value": 17153474
+    },
+    {
+     "label": "Load shedding",
+     "value": 0
+    }
+   ],
+   "totalTco2": 381188.305372134
+  },
+  "m7_sched": {
+   "objective": 28781503.046358876,
+   "costBreakdown": [
+    {
+     "label": "Fuel cost",
+     "value": 577482
+    },
+    {
+     "label": "Carbon cost",
+     "value": 415787
+    },
+    {
+     "label": "Load shedding",
+     "value": 0
+    },
+    {
+     "label": "Capital cost (periodised, modelled horizon)",
+     "value": 27788235
+    }
+   ],
+   "totalTco2": 4619.852677567784
+  },
+  "eta_t": {
+   "objective": 20261.541125541127,
+   "costBreakdown": [
+    {
+     "label": "Fuel cost",
+     "value": 11958
+    },
+    {
+     "label": "Carbon cost",
+     "value": 8304
+    },
+    {
+     "label": "Load shedding",
+     "value": 0
+    }
+   ],
+   "totalTco2": 164.6923520923521
+  },
+  "eta_t_sched": {
+   "objective": 23555.38816738817,
+   "costBreakdown": [
+    {
+     "label": "Fuel cost",
+     "value": 12483
+    },
+    {
+     "label": "Carbon cost",
+     "value": 11072
+    },
+    {
+     "label": "Load shedding",
+     "value": 0
+    }
+   ],
+   "totalTco2": 164.6923520923521
+  },
+  "piecewise": {
+   "objective": 7600.0,
+   "costBreakdown": [
+    {
+     "label": "Fuel cost",
+     "value": 4800
+    },
+    {
+     "label": "Carbon cost",
+     "value": 2800
+    },
+    {
+     "label": "Load shedding",
+     "value": 0
+    },
+    {
+     "label": "Quadratic / stand-by cost",
+     "value": 2000
+    }
+   ],
+   "totalTco2": 56.0
+  },
+  "stochastic": {
+   "objective": 24757.774891774894,
+   "costBreakdown": [
+    {
+     "label": "Fuel cost",
+     "value": 11958
+    },
+    {
+     "label": "Carbon cost",
+     "value": 8304
+    },
+    {
+     "label": "Load shedding",
+     "value": 0
+    }
+   ],
+   "totalTco2": 164.6923520923521
+  },
+  "rolling": {
+   "objective": 4327.636363636364,
+   "costBreakdown": [
+    {
+     "label": "Fuel cost",
+     "value": 11958
+    },
+    {
+     "label": "Carbon cost",
+     "value": 8304
+    },
+    {
+     "label": "Load shedding",
+     "value": 0
+    }
+   ],
+   "totalTco2": 164.6923520923521
+  },
+  "mga": {
+   "objective": 11232400.0,
+   "costBreakdown": [
+    {
+     "label": "Fuel cost",
+     "value": 27000
+    },
+    {
+     "label": "Carbon cost",
+     "value": 5400
+    },
+    {
+     "label": "Load shedding",
+     "value": 0
+    },
+    {
+     "label": "Capital cost (periodised, modelled horizon)",
+     "value": 11200000
+    }
+   ],
+   "totalTco2": 180.0,
+   "mga": {
+    "optimum": 11232400.0,
+    "alts": [
+     [
+      "wind",
+      "min",
+      12917260.0
+     ],
+     [
+      "wind",
+      "max",
+      12917260.0
+     ],
+     [
+      "solar",
+      "min",
+      12917260.0
+     ],
+     [
+      "solar",
+      "max",
+      12917260.0
+     ]
+    ]
+   }
+  }
+ }
+}

@@ -12,7 +12,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import pypsa
-from ..network.piecewise import overlay_piecewise_marginal_cost, representative_marginal_costs
+from ...app import carbon_pricing
+from ..network.piecewise import representative_marginal_costs
 
 from ..constants import carrier_color, generator_color
 from ..utils.series import weighted_sum
@@ -148,6 +149,10 @@ def build_merit_order(network: pypsa.Network) -> list[dict[str, Any]]:
     capacity = installed_capacity_series(network.generators)
     rows: list[dict[str, Any]] = []
     curve_cost = representative_marginal_costs(network)  # generators priced by a piecewise curve
+    # The carbon-pricing module's adder (time-mean where the price or the efficiency varies): the merit
+    # order is by what a MWh costs including carbon, as before the price left marginal_cost.
+    adder = carbon_pricing.adder_frame(network)
+    carbon_mean = adder.mean(axis=0) if not adder.empty else pd.Series(dtype=float)
     for name in network.generators.index:
         if any(name.startswith(pfx) for pfx in SYSTEM_GEN_PREFIXES):
             continue
@@ -161,7 +166,7 @@ def build_merit_order(network: pypsa.Network) -> list[dict[str, Any]]:
                 "name": name,
                 "carrier": carrier,
                 "bus": str(gen.get("bus", "")),
-                "marginal_cost": round(float(curve_cost.get(name, gen.get("marginal_cost", 0.0))), 2),
+                "marginal_cost": round(float(curve_cost.get(name, gen.get("marginal_cost", 0.0))) + float(carbon_mean.get(name, 0.0)), 2),
                 "p_nom": round(p_nom, 1),
                 "color": generator_color(network, name),
             }
@@ -640,7 +645,7 @@ def build_generator_economics(
     gens: list[dict[str, Any]] = []
     gen_p = network.generators_t.p
     if not gen_p.empty and len(network.generators):
-        mc_dense = overlay_piecewise_marginal_cost(network, network.get_switchable_as_dense("Generator", "marginal_cost"))
+        mc_dense = carbon_pricing.effective_marginal_cost(network)
         p_nom_opt_s = installed_capacity_series(network.generators)
         for name in network.generators.index:
             if any(str(name).startswith(pfx) for pfx in SYSTEM_GEN_PREFIXES):

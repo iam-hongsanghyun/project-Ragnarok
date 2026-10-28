@@ -59,7 +59,7 @@ def other_operating_costs(
     Args:
         network: Solved network.
         generator_explained: Generator operating cost already itemised
-            (fuel + carbon + load shedding + start-up/shut-down), in the same
+            (fuel + load shedding + start-up/shut-down; carbon is not in n.statistics.opex), in the same
             currency and weighting as ``n.statistics.opex``.
 
     Returns:

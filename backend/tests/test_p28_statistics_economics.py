@@ -248,7 +248,7 @@ def test_company_statement_emissions_sum_to_annualised_system_total() -> None:
     n = _mixed()
     total = primary_energy_emissions(n).total
     out = build_company_statement(
-        n, _owner_model(True), owner_column="owner", currency="$", emissions_factors=_factors(n), carbon_price=0.0,
+        n, _owner_model(True), owner_column="owner", currency="$", emissions_factors=_factors(n),
     )
     assert out is not None
     horizon = float(n.snapshot_weightings["objective"].sum())

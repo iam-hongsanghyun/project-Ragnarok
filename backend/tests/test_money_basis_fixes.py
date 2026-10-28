@@ -125,22 +125,25 @@ def test_irr_bracket_expands_beyond_initial_hi() -> None:
 
 def test_statement_flow_lines_annualized_capex_untouched() -> None:
     n, model = _half_year_market(with_capex=True)
+    # the carbon-pricing module's input: the carrier's co2_emissions and the price the network was built for
+    from backend.app import carbon_pricing as cp
+    n.carriers.loc["gas", "co2_emissions"] = 0.4
+    cp.set_plan(n, cp.parse_carbon_price_config(5.0, None))
     res = build_company_statement(
         n, model, owner_column="owner", currency="€",
-        emissions_factors={"gas": 0.4}, carbon_price=5.0,
+        emissions_factors={"gas": 0.4},
     )
     assert res is not None
     acme = next(c for c in res["companies"] if c["company"] == "Acme")
     # Window flows: energy = 80·4380 = 350,400 MWh; revenue = 50·energy;
-    # emissions = 0.4·energy; carbon = emissions·5; fuelVom = 10·energy − carbon.
+    # emissions = 0.4·energy; carbon = emissions·5 (the module's term); fuelVom = 10·energy (PyPSA opex, no carbon in it).
     energy_w = 80.0 * H_HALF_YEAR
     carbon_w = 0.4 * energy_w * 5.0
     np.testing.assert_allclose(acme["energyMWh"], 2.0 * energy_w, rtol=1e-9, atol=1e-2)
     np.testing.assert_allclose(acme["revenue"], 2.0 * 50.0 * energy_w, rtol=1e-9, atol=1e-2)
     np.testing.assert_allclose(acme["emissionsTonnes"], 2.0 * 0.4 * energy_w, rtol=1e-9, atol=1e-2)
     np.testing.assert_allclose(acme["carbonCost"], 2.0 * carbon_w, rtol=1e-9, atol=1e-2)
-    np.testing.assert_allclose(acme["fuelVomCost"], 2.0 * (10.0 * energy_w - carbon_w),
-                               rtol=1e-9, atol=1e-2)
+    np.testing.assert_allclose(acme["fuelVomCost"], 2.0 * 10.0 * energy_w, rtol=1e-9, atol=1e-2)
     # capexAnnual is n.statistics.capex / n.nyears (PER YEAR) and is not rescaled by the window:
     # capital_cost (per horizon) 50,000 × 80 MW = 4,000,000 over 0.5 y = 8,000,000 a year.
     np.testing.assert_allclose(acme["capexAnnual"], 8_000_000.0, rtol=1e-9, atol=1e-2)
@@ -158,7 +161,7 @@ def test_statement_interest_is_rate_times_reconstructed_principal() -> None:
     gearing, i, tenor = 0.4, 0.05, 10.0
     res = build_company_statement(
         n, model, owner_column="owner", currency="€",
-        emissions_factors={}, carbon_price=0.0,
+        emissions_factors={},
         debt={"gearing": gearing, "interestRate": i, "tenorYears": tenor},
     )
     assert res is not None
@@ -175,7 +178,7 @@ def test_statement_interest_zero_without_tenor() -> None:
     n, model = _half_year_market()
     res = build_company_statement(
         n, model, owner_column="owner", currency="€",
-        emissions_factors={}, carbon_price=0.0,
+        emissions_factors={},
         debt={"gearing": 0.4, "interestRate": 0.05},  # no tenorYears
     )
     assert res is not None

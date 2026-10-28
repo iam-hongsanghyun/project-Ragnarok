@@ -35,6 +35,7 @@ from backend.app import run_store
 from backend.app.main import app
 from backend.app.routers import results_derived as rd_router
 from backend.pypsa.network import build_network
+from backend.pypsa.network import cost_basis as cb
 from backend.pypsa.network.serialize import network_to_model
 from backend.pypsa.results import run_pypsa
 from backend.pypsa.results.derive_outputs import (
@@ -270,12 +271,13 @@ def test_solved_netcdf_import_is_a_stored_pathway_run(client: TestClient, solved
 
     analytics = client.get(f"/api/runs/{name}/analytics").json()["result"]
     assert analytics["pathway"]["periods"] == PERIODS
-    # The file carries the carbon adder inside marginal_cost (PyPSA has no carbon price), so fuel
-    # holds fuel + carbon: (50 + 2) * 320 * 1.0 in 2030 and (80 + 2) * 320 * 0.5 in 2040.
+    # The file's marginal_cost is the fuel cost only: the carbon price is the carbon-pricing module's objective term,
+    # a run setting that a PyPSA file does not carry (and this solve here, a bare n.optimize, did not add it).
+    # Fuel: 50 * 320 * 1.0 in 2030 and 80 * 320 * 0.5 in 2040.
     p2030 = client.get(f"/api/runs/{name}/period/2030").json()["result"]
     p2040 = client.get(f"/api/runs/{name}/period/2040").json()["result"]
-    np.testing.assert_allclose(_by_label(p2030["costBreakdown"])["Fuel cost"], 52.0 * 320.0, rtol=1e-9)
-    np.testing.assert_allclose(_by_label(p2040["costBreakdown"])["Fuel cost"], 82.0 * 320.0 * 0.5, rtol=1e-9)
+    np.testing.assert_allclose(_by_label(p2030["costBreakdown"])["Fuel cost"], 50.0 * 320.0, rtol=1e-9)
+    np.testing.assert_allclose(_by_label(p2040["costBreakdown"])["Fuel cost"], 80.0 * 320.0 * 0.5, rtol=1e-9)
     # Emissions stay on the carrier co2_emissions: 320 MWh * 0.2 t/MWh * 10 years.
     np.testing.assert_allclose(p2030["emissionsBreakdown"]["totalTco2"], 640.0, rtol=1e-9)
 
@@ -291,12 +293,12 @@ def test_unsolved_netcdf_import_stores_nothing(client: TestClient, solved: dict[
 
 
 def test_solved_network_to_bundle_is_stamped_as_pypsa_native(solved: dict[str, Any], tmp_path: Path) -> None:
-    """A PyPSA-native file is already on PyPSA's cost semantics: the bundle is stamped buildVersion 2 so a later
+    """A PyPSA-native file is already on PyPSA's cost semantics: the bundle is stamped with the current build version so a later
     re-derivation does not read its capital_cost as a legacy overnight price (and nothing annuitises twice)."""
     network = pypsa.Network()
     network.import_from_netcdf(str(_solved_netcdf(tmp_path, solved)))
     bundle = solved_network_to_bundle(network, "solved.nc")
-    assert bundle["options"]["buildVersion"] == 2
+    assert bundle["options"]["buildVersion"] == cb.CURRENT_SCHEMA_VERSION
     assert [p["period"] for p in bundle["options"]["pathwayConfig"]["periods"]] == PERIODS
     weights = {p["period"]: p["objectiveWeight"] for p in bundle["options"]["pathwayConfig"]["periods"]}
     assert weights == OBJECTIVE

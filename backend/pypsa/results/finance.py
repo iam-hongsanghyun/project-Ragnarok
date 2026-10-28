@@ -39,7 +39,7 @@ from typing import Any
 
 import numpy as np
 import pypsa
-from ..network.piecewise import overlay_piecewise_marginal_cost
+from ...app import carbon_pricing
 
 from .adequacy import electricity_buses, store_link_pairs
 from pypsa.costs import annuity as _pypsa_annuity
@@ -384,7 +384,7 @@ def build_company_finance(
     # Dense marginal cost: a time-varying series (workbook `generators-
     # marginal_cost`, or a varying carbon-price schedule writing its adder to
     # generators_t only) is invisible in the static column.
-    mc_dense = overlay_piecewise_marginal_cost(network, network.get_switchable_as_dense("Generator", "marginal_cost"))
+    mc_dense = carbon_pricing.effective_marginal_cost(network)
 
     for g in network.generators.index:
         company = gen_owner.get(str(g))

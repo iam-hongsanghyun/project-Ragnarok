@@ -92,7 +92,7 @@ Backend:
 - [backend/pypsa/results/__init__.py](backend/pypsa/results/__init__.py): solve + analytics result assembly
 - [backend/pypsa/results/full_outputs.py](backend/pypsa/results/full_outputs.py): schema-driven solved output extraction
 - [backend/pypsa/pypsa_schema.py](backend/pypsa/pypsa_schema.py): backend schema helpers
-- [backend/mcp/](backend/mcp): MCP server (184 tools) for AI agents; see [docs/bifrost-agent.md](docs/bifrost-agent.md)
+- [backend/mcp/](backend/mcp): MCP server (189 tools) for AI agents; see [docs/bifrost-agent.md](docs/bifrost-agent.md)
 
 ## Current User Flows
 

@@ -261,29 +261,31 @@ def test_unknown_component_rows_are_dropped_with_a_note() -> None:
     assert list(net.c.generators.piecewise["marginal_cost"].columns.unique("name")) == ["g"]
 
 
-def test_carbon_price_is_added_to_every_segment_of_an_emitting_curve() -> None:
+def test_carbon_price_is_an_objective_term_independent_of_the_curve() -> None:
+    from backend.app import carbon_pricing as cp
+
     model = _model(CONVEX)
     model["carriers"] = [{"name": "gas", "co2_emissions": 0.2}]
     price = 50.0  # adder = 50 * 0.2 / eta(=1) = 10 per MWh on every segment
     rag, _ = build_network(model, {"carbonPrice": price}, {})
     ys = rag.c.generators.piecewise["marginal_cost"][("g", "marginal_cost")].tolist()
-    assert ys == [0.0, 20.0, 50.0]  # y_0 (ignored by PyPSA) untouched
+    assert ys == [0.0, 10.0, 40.0]  # the curve is exactly as written: the price is not folded into it
+    rag.optimize(solver_name="highs", include_objective_constant=False, extra_functionality=cp.extra_functionality)
     # parity with a native network carrying the already-adjusted curve + h at 35+10
     nat = _native({0.0: 0.0, 0.5: 20.0, 1.0: 50.0}, h_cost=45.0)
-    assert _solve(rag) == pytest.approx(_solve(nat), rel=OBJ_RTOL)
+    assert float(rag.objective) == pytest.approx(_solve(nat), rel=OBJ_RTOL)
 
 
-def test_carbon_schedule_that_varies_cannot_be_applied_to_a_curve() -> None:
+def test_carbon_schedule_that_varies_works_with_a_curve() -> None:
+    from backend.app import carbon_pricing as cp
+
     model = _model(CONVEX)
     model["carriers"] = [{"name": "gas", "co2_emissions": 0.2}]
     opts = {"carbonPriceSchedule": [{"year": 2020, "price": 10}, {"year": 2030, "price": 80}]}
-    # constant within the 2030 snapshots -> allowed; a within-run change is refused
-    build_network(model, {"carbonPrice": 0}, opts)
     model["snapshots"] = [{"snapshot": "2020-06-01T00:00:00"}, {"snapshot": "2031-06-01T00:00:00"}]
     model["loads-p_set"] = [{"snapshot": "2020-06-01T00:00:00", "L": 10}, {"snapshot": "2031-06-01T00:00:00", "L": 10}]
-    with pytest.raises(HTTPException) as exc:
-        build_network(model, {"carbonPrice": 0}, opts)
-    assert "piecewise" in exc.value.detail
+    n, _ = build_network(model, {"carbonPrice": 0}, opts)     # refused before (a curve is time-invariant)
+    assert cp.adder_frame(n)["g"].tolist() == pytest.approx([2.0, 16.0])
 
 
 # ── Results: *_piecewise_opt shown, breakdown matches the objective ───────────

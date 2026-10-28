@@ -41,7 +41,10 @@ from ...app.config import load_system_defaults
 SCHEMA_SHEET = "RAGNAROK_Schema"
 SCHEMA_KEY = "ragnarok_schema_version"
 #: 1 = implicit legacy (Ragnarok annuitised ``capital_cost`` at run time); 2 = PyPSA cost semantics.
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
+#: 2 = PyPSA cost semantics (step 1); 3 adds the carbon-pricing module (no carbon adder in marginal_cost) and the
+#: annual-budgets module (``e_sum_*`` / GlobalConstraint ``constant`` are PyPSA horizon totals, never scaled).
+COST_SCHEMA_VERSION = 2
 LEGACY_SCHEMA_VERSION = 1
 
 #: sheet -> its extendable flag. Only these were annuitised by the old builder.
@@ -109,8 +112,15 @@ class MigrationReport:
     discount_rate: float | None = None
     discount_rate_source: str = ""
     changed_rows: list[dict[str, Any]] = field(default_factory=list)
+    #: annual ``e_sum_*`` values moved into the RAGNAROK_AnnualBudgets sheet (schema 2 -> 3)
+    budgets: list[dict[str, Any]] = field(default_factory=list)
     review: list[dict[str, Any]] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+
+    @property
+    def noteworthy(self) -> bool:
+        """Something was converted or flagged: worth a notice and a journal entry."""
+        return bool(self.changed_rows or self.review or self.budgets)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -120,6 +130,7 @@ class MigrationReport:
             "discountRate": self.discount_rate,
             "discountRateSource": self.discount_rate_source,
             "changedRows": self.changed_rows,
+            "budgets": self.budgets,
             "review": self.review,
             "notes": self.notes,
         }
@@ -237,48 +248,8 @@ def _retarget_scenario_overrides(out: dict[str, Any], report: MigrationReport, r
         report.notes.append(f"{retargeted} saved scenario override(s) of capital_cost now set overnight_cost.")
 
 
-def migrate_cost_basis(
-    model: dict[str, Any],
-    *,
-    discount_rate: float | None = None,
-    pypsa_native: bool = False,
-) -> tuple[dict[str, Any], MigrationReport]:
-    """Return ``(model, report)`` with ``model`` on schema 2; the input is not mutated.
-
-    Already stamped, or ``pypsa_native`` (a netcdf / h5 / PyPSA Excel / CSV / MATPOWER import,
-    already PyPSA-semantic): only (re)stamped, nothing converted.
-
-    Otherwise every component row with a nonzero ``capital_cost`` and no ``overnight_cost``
-    moves to PyPSA's overnight path:
-
-    * ``overnight_cost = capital_cost``, ``capital_cost = 0``;
-    * ``discount_rate`` = the project rate (:func:`resolve_discount_rate`; the app default
-      ``simulation.migration_discount_rate`` when the workbook states none, which the report says);
-    * extendable rows: ``lifetime`` = ``simulation.fallback_lifetime_years`` (20) where it is inf
-      or blank, because PyPSA's ``annuity(r, inf) = r`` would otherwise price the asset as
-      interest-only - the same fallback the old builder used inside its annuity;
-    * NON-extendable rows move too: the old builder left their ``capital_cost`` raw and the LP
-      ignored it, but PyPSA's statistics (``capex`` / ``installed_capex``) report it, and an
-      overnight price read as a per-horizon cost would overstate sunk capex by ``1 / (a * nyears)``.
-      Their ``lifetime`` is NOT touched: it also decides retirement in a multi-period run.
-
-    Components with a piecewise ``capital_cost`` curve are flagged for review and left as they
-    are: PyPSA refuses a curve combined with ``overnight_cost`` and the curve itself must be
-    periodised for the horizon, which is a decision for the user.
-    """
-    out = dict(model)  # shallow: only the component sheets that change are copied (below)
-    report = MigrationReport()
-    current = schema_version(out)
-    if current is not None:
-        report.from_version = current
-    if current is not None and current >= CURRENT_SCHEMA_VERSION:
-        return out, report
-    if pypsa_native:
-        report.from_version = CURRENT_SCHEMA_VERSION
-        report.notes.append("PyPSA-native file: cost columns already follow PyPSA semantics; stamped, not converted.")
-        stamp(out)
-        return out, report
-
+def _migrate_costs(out: dict[str, Any], report: MigrationReport, discount_rate: float | None) -> None:
+    """Schema 1 -> 2: overnight prices out of ``capital_cost`` (mutates ``out`` and ``report``)."""
     rate, source = resolve_discount_rate(out, discount_rate)
     if rate is None:
         rate, source = _fallback_rate(), "the app default (the workbook states no discount rate)"
@@ -348,8 +319,68 @@ def migrate_cost_basis(
             "Multi-period model: PyPSA scales overnight_cost by each period's nyears. The solve is unchanged "
             "while a period represents 8760 h; otherwise it moves by (period hours / 8760)."
         )
+
+
+def migrate_cost_basis(
+    model: dict[str, Any],
+    *,
+    discount_rate: float | None = None,
+    pypsa_native: bool = False,
+    budgets: bool = True,
+) -> tuple[dict[str, Any], MigrationReport]:
+    """Return ``(model, report)`` with ``model`` on the current schema; the input is not mutated.
+
+    Two steps, each skipped when the stamp already covers it: schema 1 -> 2 (costs, below) and 2 -> 3 (annual
+    ``e_sum`` values move to the annual-budgets sheet; ``budgets=False`` stops at 2, for a stored run).
+
+    Already stamped, or ``pypsa_native`` (a netcdf / h5 / PyPSA Excel / CSV / MATPOWER import,
+    already PyPSA-semantic): only (re)stamped, nothing converted.
+
+    Otherwise every component row with a nonzero ``capital_cost`` and no ``overnight_cost``
+    moves to PyPSA's overnight path:
+
+    * ``overnight_cost = capital_cost``, ``capital_cost = 0``;
+    * ``discount_rate`` = the project rate (:func:`resolve_discount_rate`; the app default
+      ``simulation.migration_discount_rate`` when the workbook states none, which the report says);
+    * extendable rows: ``lifetime`` = ``simulation.fallback_lifetime_years`` (20) where it is inf
+      or blank, because PyPSA's ``annuity(r, inf) = r`` would otherwise price the asset as
+      interest-only - the same fallback the old builder used inside its annuity;
+    * NON-extendable rows move too: the old builder left their ``capital_cost`` raw and the LP
+      ignored it, but PyPSA's statistics (``capex`` / ``installed_capex``) report it, and an
+      overnight price read as a per-horizon cost would overstate sunk capex by ``1 / (a * nyears)``.
+      Their ``lifetime`` is NOT touched: it also decides retirement in a multi-period run.
+
+    Components with a piecewise ``capital_cost`` curve are flagged for review and left as they
+    are: PyPSA refuses a curve combined with ``overnight_cost`` and the curve itself must be
+    periodised for the horizon, which is a decision for the user.
+    """
+    out = dict(model)  # shallow: only the component sheets that change are copied (below)
+    report = MigrationReport()
+    current = schema_version(out)
+    if current is not None:
+        report.from_version = current
+    if current is not None and current >= (CURRENT_SCHEMA_VERSION if budgets else COST_SCHEMA_VERSION):
+        return out, report
+    if pypsa_native:
+        report.from_version = CURRENT_SCHEMA_VERSION
+        report.notes.append("PyPSA-native file: cost columns already follow PyPSA semantics; stamped, not converted.")
+        stamp(out)
+        return out, report
+
+    if current is None or current < COST_SCHEMA_VERSION:
+        _migrate_costs(out, report, discount_rate)
+    if budgets:
+        from ...app.annual_budgets import migrate_e_sum
+
+        out, moved = migrate_e_sum(out)
+        report.budgets = moved
+        if moved:
+            report.notes.append(
+                f"{len(moved)} e_sum value(s) had ANNUAL semantics (Ragnarok scaled them to the window); they moved to the "
+                "RAGNAROK_AnnualBudgets sheet and the annual-budgets module writes the horizon total (annual x hours / 8760) into e_sum."
+            )
     report.migrated = True
-    stamp(out)
+    stamp(out, CURRENT_SCHEMA_VERSION if budgets else COST_SCHEMA_VERSION)
     return out, report
 
 
@@ -377,25 +408,61 @@ def model_for_stored_run(
 ) -> tuple[dict[str, Any], MigrationReport | None]:
     """The model to REBUILD a stored run's network from, on the current cost basis.
 
-    A run stamped with ``buildVersion >= 2`` is returned as is. A run without a stamp was solved when
+    A run stamped ``buildVersion >= 2`` is returned as is. A run without a stamp was solved when
     Ragnarok annuitised ``capital_cost`` itself, so its stored workbook holds OVERNIGHT prices. Its
     analytics (statistics_query, derive_outputs, from_outputs, P2X / plant results) are re-derived
     from the stored outputs on a rebuilt network, so that workbook is migrated IN MEMORY - the same
-    :func:`migrate_cost_basis` the loader uses, at the run's OWN ``scenario.discountRate`` - and PyPSA
-    then prices it exactly as the original solve did (``overnight x annuity x n.nyears`` equals the old
-    ``overnight x annuity x hours / 8760``). The stored run is never rewritten and no legacy code path
+    :func:`migrate_cost_basis` the loader uses (cost step only), at the run's OWN ``scenario.discountRate`` -
+    and PyPSA then prices it exactly as the original solve did (``overnight x annuity x n.nyears`` equals the
+    old ``overnight x annuity x hours / 8760``). The stored run is never rewritten and no legacy code path
     survives: a run's numbers are reproduced through PyPSA's own semantics.
+
+    Build version 3 (carbon-pricing and annual-budgets modules) needs no workbook change: the carbon price is
+    rebuilt from the stored ``scenario.carbonPrice`` / ``options.carbonPriceSchedule`` and a run before 3 holds
+    ANNUAL ``e_sum`` values, which :func:`legacy_e_sum_scale` scales after the build (see there).
 
     Returns:
         ``(model, report)``; ``report`` is ``None`` when nothing was migrated.
     """
     version = build_version_of(model, options)
-    if version is not None and version >= CURRENT_SCHEMA_VERSION:
+    if version is not None and version >= COST_SCHEMA_VERSION:
         return model, None
     raw_rate = (scenario or {}).get("discountRate")
     rate = _number(raw_rate)
-    migrated, report = migrate_cost_basis(model, discount_rate=rate)
+    migrated, report = migrate_cost_basis(model, discount_rate=rate, budgets=False)
     return migrated, report
+
+
+def legacy_e_sum_scale(network: Any, version: int | None) -> float | None:
+    """Reproduce a stored run before build version 3: its ``e_sum_*`` were ANNUAL and the old builder scaled them.
+
+    Before version 3 the run builder multiplied every ``*_sum_min`` / ``*_sum_max`` by
+    ``min(1, modelled hours / 8760)`` (a pathway: the SMALLEST period's hours). New runs pass the value to PyPSA
+    as a horizon total (the annual-budgets module writes it). A stored older run is rebuilt with the same factor so
+    its numbers are unchanged. Applied in place, only here, only for ``version < 3``.
+
+    Returns:
+        The factor applied (``None`` when nothing was scaled).
+    """
+    if version is not None and version >= CURRENT_SCHEMA_VERSION:
+        return None
+    import pandas as pd
+
+    hours = float(load_system_defaults().get("simulation", {}).get("hours_in_year", 8760.0))
+    weights = network.snapshot_weightings["objective"]
+    if isinstance(network.snapshots, pd.MultiIndex):
+        sizes = weights.groupby(level="period").sum()
+        factor = min(float(sizes.min()) / hours, 1.0) if len(sizes) else 1.0
+    else:
+        total = float(weights.sum())
+        factor = min(1.0, total / hours) if total > 0 else 1.0
+    if factor >= 1.0:
+        return None
+    for frame in (network.generators, network.storage_units, network.stores):
+        for col in list(frame.columns):
+            if col.endswith("_sum_min") or col.endswith("_sum_max"):
+                frame[col] = frame[col] * factor
+    return factor
 
 
 def horizon_years(model: dict[str, Any]) -> float:

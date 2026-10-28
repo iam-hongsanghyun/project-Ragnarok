@@ -24,7 +24,7 @@ from typing import Any
 
 import pandas as pd
 
-from ..carbon_price import build_price_series, parse_carbon_price_config
+from ...app import carbon_pricing
 from ..constants import carrier_color
 from ..network import build_stored_network
 from ..utils.series import weighted_sum
@@ -268,11 +268,8 @@ def derive_imported_result(
     # Schedule-aware carbon price, mirroring the solve path: a stored
     # ``carbonPrice: null`` coerces to 0.0 and a ``carbonPriceSchedule``
     # supersedes the scalar, so the shadow price matches what was solved.
-    carbon_cfg = parse_carbon_price_config(
-        (scenario or {}).get("carbonPrice") or 0.0,
-        (options or {}).get("carbonPriceSchedule"),
-    )
-    carbon_price_series = build_price_series(network, carbon_cfg)
+    carbon_cfg = carbon_pricing.plan_of(network) or carbon_pricing.config_from_run(scenario, options)
+    carbon_price_series = carbon_pricing.price_series(carbon_cfg, network.snapshots)
     carbon_price = float(carbon_price_series.mean()) if len(carbon_price_series) else 0.0
     co2_shadow = build_co2_shadow(network, carbon_price, currency)
     applied_constraints = build_applied_constraints(network)

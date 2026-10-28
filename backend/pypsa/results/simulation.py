@@ -37,6 +37,7 @@ import numpy as np
 import pandas as pd
 import pypsa
 
+from ...app import carbon_pricing
 from .dispatch import _snapshot_label
 
 DEFAULT_VOLL = 3000.0  # €/MWh price applied to unserved energy
@@ -272,6 +273,11 @@ def run_market_simulation(network: pypsa.Network, config: dict[str, Any] | None 
     G = len(names)
 
     mc = np.array([float(gens.at[g, "marginal_cost"]) for g in gens.index]) if G else np.zeros(0)
+    # The carbon-pricing module's adder (time-mean, as this study clears on one cost per unit): a unit's
+    # bid is its marginal cost including the carbon it pays for.
+    _adder = carbon_pricing.adder_frame(network)
+    if G and not _adder.empty:
+        mc = mc + np.array([float(_adder[g].mean()) if g in _adder.columns else 0.0 for g in gens.index])
     bids = np.array([bid_overrides.get(n, mc[i]) for i, n in enumerate(names)])
     p_nom = np.array([float(gens.at[g, "p_nom"]) for g in gens.index]) if G else np.zeros(0)
     pmax = _as_series(network, network.generators_t, "p_max_pu", names,

@@ -29,6 +29,7 @@ from typing import Any
 import numpy as np
 import pypsa
 
+from ...app import carbon_pricing
 from .adequacy import electricity_buses, store_link_pairs
 from .finance import storage_assets
 from .market import freeze_expansion
@@ -253,6 +254,7 @@ def build_merchant(
             solver_options=solver_options or {},
             io_api=io_api,
             include_objective_constant=False,
+            extra_functionality=carbon_pricing.extra_functionality,
         )
     except Exception as exc:  # noqa: BLE001 — never sink the run over the merchant extra
         _log.warning("merchant optimise failed for owner %r: %s", owner, exc)
@@ -277,7 +279,7 @@ def build_merchant(
     # Dense marginal cost — the LP dispatched on the time-varying cost (series
     # workbook column or varying carbon adder), so the report must price the
     # same way; the static column alone would overstate profit.
-    mc_dense_gen = work.get_switchable_as_dense("Generator", "marginal_cost")
+    mc_dense_gen = carbon_pricing.add_adder(work, work.get_switchable_as_dense("Generator", "marginal_cost"))
     try:
         mc_dense_su = work.get_switchable_as_dense("StorageUnit", "marginal_cost")
     except Exception:  # noqa: BLE001 — no storage marginal_cost registered

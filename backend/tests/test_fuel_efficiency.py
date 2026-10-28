@@ -15,7 +15,8 @@ import pandas as pd
 import pypsa
 import pytest
 
-from backend.pypsa.carbon_price import apply_carbon_price, parse_carbon_price_config
+from backend.app import carbon_pricing as cp
+from backend.app.carbon_pricing import parse_carbon_price_config
 from backend.pypsa.network import build_network
 from backend.pypsa.network.custom_constraints import apply_custom_constraints
 from backend.pypsa.results.emissions import build_emissions_breakdown
@@ -62,9 +63,11 @@ def test_carbon_adder_is_efficiency_aware() -> None:
     n.add("Carrier", "gas", co2_emissions=0.4)
     n.add("Bus", "b")
     n.add("Generator", "g", bus="b", carrier="gas", marginal_cost=20.0, efficiency=0.5)
-    apply_carbon_price(n, parse_carbon_price_config(50.0, None), [], "$")
-    # 20 + 50 × 0.4 / 0.5 = 20 + 40 = 60
-    assert n.generators.at["g", "marginal_cost"] == pytest.approx(60.0)
+    cp.set_plan(n, parse_carbon_price_config(50.0, None))
+    # adder = 50 x 0.4 / 0.5 = 40 on top of the unchanged marginal_cost 20
+    assert float(cp.adder_frame(n)["g"].iloc[0]) == pytest.approx(40.0)
+    assert float(cp.effective_marginal_cost(n)["g"].iloc[0]) == pytest.approx(60.0)
+    assert n.generators.at["g", "marginal_cost"] == pytest.approx(20.0)
 
 
 def test_carbon_adder_efficiency_one_is_unchanged() -> None:
@@ -74,8 +77,8 @@ def test_carbon_adder_efficiency_one_is_unchanged() -> None:
     n.add("Carrier", "gas", co2_emissions=0.4)
     n.add("Bus", "b")
     n.add("Generator", "g", bus="b", carrier="gas", marginal_cost=20.0)  # η = 1
-    apply_carbon_price(n, parse_carbon_price_config(50.0, None), [], "$")
-    assert n.generators.at["g", "marginal_cost"] == pytest.approx(40.0)
+    cp.set_plan(n, parse_carbon_price_config(50.0, None))
+    assert float(cp.effective_marginal_cost(n)["g"].iloc[0]) == pytest.approx(40.0)
 
 
 # ── Emissions breakdown (post-solve reporting) ──────────────────────────────

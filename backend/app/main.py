@@ -1036,6 +1036,8 @@ from .routers import p2x as _p2x_router  # noqa: E402
 app.include_router(_p2x_router.router)
 # Build plants (picker: generator, BESS, CCGT, OCGT, gas + H2 co-firing, P2X chain): one endpoint per action.
 from .routers import plants as _plants_router  # noqa: E402
+from .routers import policy_modules as _policy_modules_router  # noqa: E402
+app.include_router(_policy_modules_router.router)
 app.include_router(_plants_router.router)
 from .routers import screening as _screening_router  # noqa: E402  (statistical site pre-screen)
 app.include_router(_screening_router.router)
@@ -2035,14 +2037,16 @@ async def import_project_load(file: UploadFile) -> dict[str, Any]:
     # stamped model and shows the report). A zip package, or an xlsx with the Ragnarok settings sheet, is a
     # Ragnarok project; a plain PyPSA workbook is not routed through here.
     if (
-        not stored and model and _cb.build_version_of(model, options) is None
-        and (filename.lower().endswith(".zip") or scenario_in.get("discountRate") is not None)
+        not stored and model
+        and (_cb.build_version_of(model, options) or 0) < _cb.CURRENT_SCHEMA_VERSION
+        and (filename.lower().endswith(".zip") or scenario_in.get("discountRate") is not None
+             or (_cb.build_version_of(model, options) or 0) >= _cb.COST_SCHEMA_VERSION)
     ):
         rate = scenario_in.get("discountRate")
         model, report = _cb.migrate_cost_basis(
             model, discount_rate=float(rate) if isinstance(rate, (int, float)) else None
         )
-        if report.changed_rows or report.review:
+        if report.noteworthy:
             migration = report.as_dict()
     return {
         "costBasisMigration": migration,

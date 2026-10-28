@@ -19,6 +19,7 @@ from typing import Any
 import pandas as pd
 import pypsa
 
+from ...app import carbon_pricing
 from .market import freeze_expansion
 
 _log = logging.getLogger("pypsa.solver")
@@ -36,11 +37,11 @@ def _owner_generators(model: dict[str, list[dict[str, Any]]], owner: str, column
 def _true_marginal_cost(network: pypsa.Network, gens: list[str]) -> pd.DataFrame:
     """Per-snapshot TRUE marginal cost (currency/MWh) for ``gens``.
 
-    Dense frame: the time-varying ``generators_t.marginal_cost`` (fuel-price
-    series, carbon-price schedules) where present, else the static column —
-    exactly the cost PyPSA itself dispatches against.
+    Dense frame: PyPSA's ``marginal_cost`` (the time-varying series where
+    present, else the static column) plus the carbon-pricing module's adder —
+    the cost the system was dispatched against.
     """
-    return network.get_switchable_as_dense("Generator", "marginal_cost")[gens]
+    return carbon_pricing.effective_marginal_cost(network)[gens]
 
 
 def _apply_offer(
@@ -136,6 +137,9 @@ def build_bid_strategy(
         # must not be re-decided by the strategic re-solve — see
         # market.freeze_expansion.
         freeze_expansion(work)
+        # The offers below REWRITE marginal_cost (true cost incl. carbon x markup), and the other
+        # owners must still pay the carbon price: the module's scratch-copy form.
+        carbon_pricing.write_marginal_cost_adder(work)
         _apply_offer(work, gens, mc_true, markup_type, markup)
         result = work.optimize(
             solver_name="highs",

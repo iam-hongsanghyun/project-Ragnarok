@@ -8,7 +8,8 @@ import pandas as pd
 import pypsa
 import pytest
 
-from backend.pypsa.carbon_price import apply_carbon_price, parse_carbon_price_config
+from backend.app import carbon_pricing as cp
+from backend.app.carbon_pricing import parse_carbon_price_config
 from backend.pypsa.results import run_pypsa
 
 
@@ -62,33 +63,45 @@ def _net(snapshots: list[str]) -> pypsa.Network:
     return n
 
 
+def _adder(n: pypsa.Network, cfg) -> pd.DataFrame:
+    cp.set_plan(n, cfg)
+    return cp.adder_frame(n)
+
+
 def test_scalar_price_is_factor_times_price() -> None:
-    """marginal_cost += price × co2_emissions; clean generator untouched."""
+    """adder = price x co2_emissions; clean generator unpriced; marginal_cost untouched."""
     n = _net(["2025-01-01"])
-    apply_carbon_price(n, parse_carbon_price_config(50.0, None), [], "$")
-    assert n.generators.at["g", "marginal_cost"] == pytest.approx(20.0 + 50.0 * 0.4)  # 40
+    a = _adder(n, parse_carbon_price_config(50.0, None))
+    assert float(a["g"].iloc[0]) == pytest.approx(50.0 * 0.4)  # 20
+    assert "w" not in a.columns
+    assert n.generators.at["g", "marginal_cost"] == pytest.approx(20.0)  # the price is NOT in marginal_cost
     assert n.generators.at["w", "marginal_cost"] == pytest.approx(0.0)
 
 
 def test_schedule_adder_is_per_snapshot() -> None:
-    """A 2025→30 / 2030→120 schedule prices each snapshot by its year."""
+    """A 2025->30 / 2030->120 schedule prices each snapshot by its year."""
     n = _net(["2025-01-01", "2030-01-01"])
     cfg = parse_carbon_price_config(0.0, [{"year": 2025, "price": 30.0}, {"year": 2030, "price": 120.0}])
-    apply_carbon_price(n, cfg, [], "$")
-    mc = n.generators_t.marginal_cost["g"]
-    # base 20 + price × 0.4  →  [20+12, 20+48]
-    assert list(mc.values) == pytest.approx([32.0, 68.0])
+    a = _adder(n, cfg)
+    assert list(a["g"].values) == pytest.approx([12.0, 48.0])  # price x 0.4
+    assert n.generators_t.marginal_cost.empty or "g" not in n.generators_t.marginal_cost.columns
 
 
-def test_varying_schedule_with_missing_static_cost_is_not_nan() -> None:
-    """Regression: a blank static marginal_cost must coerce to 0, not NaN."""
+def test_blank_static_marginal_cost_does_not_matter() -> None:
+    """The adder never touches marginal_cost, so a blank (NaN) static cost cannot become NaN."""
     n = _net(["2025-01-01", "2030-01-01"])
     n.generators.loc["g", "marginal_cost"] = np.nan
-    cfg = parse_carbon_price_config(0.0, [{"year": 2025, "price": 30.0}, {"year": 2030, "price": 120.0}])
-    apply_carbon_price(n, cfg, [], "$")
-    mc = n.generators_t.marginal_cost["g"]
-    assert mc.notna().all()
-    assert list(mc.values) == pytest.approx([12.0, 48.0])  # 0 + price × 0.4
+    a = _adder(n, parse_carbon_price_config(0.0, [{"year": 2025, "price": 30.0}, {"year": 2030, "price": 120.0}]))
+    assert a["g"].notna().all() and list(a["g"].values) == pytest.approx([12.0, 48.0])
+
+
+def test_scratch_copy_form_writes_the_same_numbers_into_marginal_cost() -> None:
+    n = _net(["2025-01-01", "2030-01-01"])
+    cp.set_plan(n, parse_carbon_price_config(0.0, [{"year": 2025, "price": 30.0}, {"year": 2030, "price": 120.0}]))
+    work = n.copy()
+    assert cp.write_marginal_cost_adder(work) == 1
+    assert list(work.generators_t.marginal_cost["g"].values) == pytest.approx([32.0, 68.0])
+    assert cp.plan_of(work) is None and cp.plan_of(n) is not None
 
 
 def test_scalar_carbon_price_backwards_compatible() -> None:

@@ -21,6 +21,7 @@ from typing import Any
 import pandas as pd
 import pypsa
 
+from ...app import carbon_pricing
 from .dispatch import electricity_bus_scope, system_price_series
 
 _log = logging.getLogger("pypsa.solver")
@@ -65,8 +66,8 @@ def build_price_formation(network: pypsa.Network, *, currency: str) -> dict[str,
 
     # Price-setting carrier: among generators actually running each snapshot, the
     # one with the highest effective marginal cost (the marginal unit in a
-    # merit-order dispatch). marginal_cost already carries any carbon adder.
-    mc = network.get_switchable_as_dense("Generator", "marginal_cost")
+    # merit-order dispatch). the carbon-pricing module's adder is added to marginal_cost here.
+    mc = carbon_pricing.add_adder(network, network.get_switchable_as_dense("Generator", "marginal_cost"))
     mc_running = mc.where(gen_p > _DISPATCH_EPS)  # NaN where the unit is off
     # idxmax(axis=1) raises on all-NaN rows (a snapshot with nothing running, e.g.
     # a window served entirely by storage) in modern pandas — guard per row.

@@ -37,8 +37,9 @@ the curve is a straight line.
 already periodised (per modelled horizon): a curve combined with ``overnight_cost`` is
 refused (pypsa.optimization.optimize). Ragnarok neither annuitises nor window-scales them.
 
-Carbon price is added to every segment price of a ``marginal_cost`` curve on an
-emitting generator: ``y_i += price * co2 / eta`` for ``i >= 1``.
+The carbon price is NOT folded into a curve: the carbon-pricing module adds ``price * co2 / eta * p`` to the
+objective, which is independent of the cost curve (and so also works with a price schedule that changes inside
+the run).
 """
 from __future__ import annotations
 
@@ -381,38 +382,6 @@ def has_piecewise(network: pypsa.Network, list_name: str, attr: str) -> bool:
     if list_name not in network.components.keys():
         return False
     return bool(network.components[list_name].has_piecewise(attr))
-
-
-def apply_carbon_to_curves(
-    network: pypsa.Network,
-    price_per_tonne: float,
-    emission_factor: pd.Series,
-    notes: list[str],
-) -> int:
-    """Add the carbon adder to every segment price of emitting generators' curves.
-
-    ``y_i += price * ef`` for ``i >= 1`` (``ef`` is the electrical-basis factor
-    ``co2 / eta``). ``y_0`` is ignored by PyPSA and left alone.
-    """
-    if price_per_tonne <= 0 or not has_piecewise(network, "generators", "marginal_cost"):
-        return 0
-    frame = network.components["generators"].piecewise["marginal_cost"]
-    touched = 0
-    for name in frame.columns.unique("name"):
-        ef = float(emission_factor.get(name, 0.0) or 0.0)
-        if ef <= 0:
-            continue
-        col = (name, "marginal_cost")
-        values = frame[col].copy()
-        values.iloc[1:] = values.iloc[1:] + price_per_tonne * ef
-        frame[col] = values
-        touched += 1
-    if touched:
-        notes.append(
-            f"Added the carbon price ({price_per_tonne:g}/t) to every segment of {touched} "
-            "generator marginal-cost curve(s)."
-        )
-    return touched
 
 
 # ── Run options ───────────────────────────────────────────────────────────────

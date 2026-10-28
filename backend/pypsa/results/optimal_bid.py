@@ -16,6 +16,7 @@ from typing import Any
 
 import pypsa
 
+from ...app import carbon_pricing
 from .bid_strategy import _apply_offer, _owner_generators, _profit, _true_marginal_cost
 
 _log = logging.getLogger("pypsa.solver")
@@ -83,6 +84,7 @@ def build_optimal_bid(
         markup = max_markup * i / n_steps
         try:
             work = network.copy()
+            carbon_pricing.write_marginal_cost_adder(work)  # scratch-copy form: the offers rewrite marginal_cost
             _apply_offer(work, gens, mc_true, markup_type, markup)
             result = work.optimize(
                 solver_name="highs",

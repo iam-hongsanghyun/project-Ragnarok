@@ -282,9 +282,11 @@ def test_carbon_adder_follows_time_varying_efficiency() -> None:
     m["generators"][0].update(efficiency=1.0, marginal_cost=0)
     m["generators-efficiency"] = [
         {"snapshot": "2025-01-01 00:00", "g": 1.0}, {"snapshot": "2025-01-01 01:00", "g": 0.5}]
+    from backend.app import carbon_pricing as cp
+
     n, _ = build_network(m, {"carbonPrice": 50.0}, {})
-    assert n.generators_t.marginal_cost["g"].to_numpy() == pytest.approx([50.0, 100.0], rel=1e-9)
-    assert float(n.generators.at["g", "marginal_cost"]) == pytest.approx(0.0, abs=1e-12)
+    assert cp.adder_frame(n)["g"].to_numpy() == pytest.approx([50.0, 100.0], rel=1e-9)
+    assert float(n.generators.at["g", "marginal_cost"]) == pytest.approx(0.0, abs=1e-12)   # marginal_cost is left alone
 
 
 def test_carbon_schedule_notes_snapshots_before_the_first_year() -> None:

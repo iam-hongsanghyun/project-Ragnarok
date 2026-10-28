@@ -26,6 +26,18 @@ describe('formatCostBasisMigration', () => {
   });
 });
 
+describe('formatCostBasisMigration budgets', () => {
+  it('reports yearly e_sum values moved to the annual-budgets sheet', () => {
+    const text = formatCostBasisMigration({
+      ...report, fromVersion: 2, toVersion: 3, changedRows: [], review: [], notes: [],
+      budgets: [{ component: 'generators', name: 'gas', attribute: 'e_sum_max', annual: 8000 }],
+    });
+    expect(text).toContain('1 energy budget(s)');
+    expect(text).toContain('generators / gas / e_sum_max: 8,000 per year');
+    expect(text).toContain('RAGNAROK_AnnualBudgets');
+  });
+});
+
 describe('needsCostBasisMigration', () => {
   it('is false for a stamped workbook and for a plain PyPSA workbook', () => {
     expect(needsCostBasisMigration(createEmptyWorkbook())).toBe(false);

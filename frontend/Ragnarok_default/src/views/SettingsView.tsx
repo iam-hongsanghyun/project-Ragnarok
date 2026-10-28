@@ -49,6 +49,7 @@ import { ScenariosSection } from './SettingsView.sections/Scenarios';
 import type { BatchMode } from '../features/scenario/ScenarioDiffTable';
 import { WindowSection } from './SettingsView.sections/Window';
 import { CarbonSection } from './SettingsView.sections/Carbon';
+import { AnnualBudgetsSection } from './SettingsView.sections/AnnualBudgets';
 import { PlanningSection } from './SettingsView.sections/Planning';
 import { RollingSection } from './SettingsView.sections/Rolling';
 import { StochasticSection } from './SettingsView.sections/Stochastic/Stochastic';
@@ -85,6 +86,7 @@ type SectionId =
   | 'scenarios'
   | 'window'
   | 'carbon'
+  | 'annualBudgets'
   | 'planning'
   | 'rolling'
   | 'demandResponse'
@@ -142,6 +144,7 @@ const SECTIONS: Section[] = [
   { id: 'demandResponse', label: 'Demand response',  group: 'Setup' },
   // Policy — economic / regulatory assumptions imposed on the model
   { id: 'carbon',             label: 'Carbon price',          group: 'Policy' },
+  { id: 'annualBudgets',      label: 'Annual budgets',        group: 'Policy' },
   { id: 'constraints',        label: 'Standard Constraints',  group: 'Policy' },
   { id: 'constraintsAdvanced', label: 'Advanced Constraints', group: 'Policy' },
   // Solve — how the optimiser is run
@@ -387,6 +390,7 @@ export function SettingsView(props: SettingsViewProps) {
         {section === 'scenarios'      && <ScenariosSection {...props} />}
         {section === 'window'         && <WindowSection {...props} snapshotTimestamps={snapshotTimestamps(props.model.snapshots)} />}
         {section === 'carbon'         && <CarbonSection {...props} />}
+        {section === 'annualBudgets'  && <AnnualBudgetsSection />}
         {section === 'planning'       && <PlanningSection {...props} />}
         {section === 'rolling'        && <RollingSection {...props} />}
         {section === 'stochastic'     && <StochasticSection {...props} />}

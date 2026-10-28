@@ -103,6 +103,46 @@ def combine_periods(
     return filled.mul(w, axis=1).sum(axis=1)
 
 
+def generator_operating_cost(
+    network: pypsa.Network,
+    *,
+    weighted: bool = True,
+    cost_types: Sequence[str] = ("marginal_cost",),
+) -> pd.Series:
+    """Operating cost of each generator as PyPSA states it: ``n.statistics.opex`` by name.
+
+    ``cost_types=("marginal_cost",)`` is the fuel / variable cost: ``sum_t w_t * marginal_cost_t * p_t``
+    plus the solved piecewise-curve cost, and nothing else (no stand-by or start-up). The carbon
+    price is not in it: it lives in the carbon-pricing module's objective term.
+
+    Args:
+        network: solved (or output-injected) network.
+        weighted: the investment-period ``objective`` weighting PyPSA applies in a pathway run (the basis the
+            optimiser minimised); ``False`` divides it out (a per-modelled-window figure).
+        cost_types: PyPSA ``opex`` cost types.
+
+    Returns:
+        Series indexed by generator name; empty when the statistic is unavailable.
+    """
+    from .pathway_periods import is_pathway, period_objective_weights
+
+    frame = asset_statistic(network, "opex", ["Generator"], cost_types=list(cost_types))
+    if frame.empty:
+        return pd.Series(dtype=float)
+    # In a multi-period solve PyPSA's per-period ``opex`` already carries the investment-period objective
+    # weighting (verified: sum_t w*mc*p x weight), so the weighted total is a plain sum; the per-window figure
+    # divides it out.
+    divisor = None
+    if not weighted and is_pathway(network):
+        pw = period_objective_weights(network)
+        divisor = {k: (v or 1.0) for k, v in pw.items()}
+    filled = frame.fillna(0.0)
+    if divisor is not None:
+        filled = filled.div(pd.Series({c: float(divisor.get(int(c), 1.0)) for c in filled.columns}), axis=1)
+    total = filled.sum(axis=1)
+    return pd.Series(total.to_numpy(dtype=float), index=total.index.get_level_values("name"), dtype=float).groupby(level=0).sum()
+
+
 def asset_value(series: pd.Series, component: str, name: str, default: float = 0.0) -> float:
     """One asset's value from a ``(component, name)`` Series, ``default`` when absent."""
     try:

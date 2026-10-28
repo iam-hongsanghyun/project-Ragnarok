@@ -28,7 +28,8 @@ from ..stochastic import (
     parse_stochastic_config,
     per_scenario_summaries,
 )
-from ..carbon_price import build_price_series, parse_carbon_price_config
+from ...app import annual_budgets, carbon_pricing
+from .stat_metrics import generator_operating_cost
 from ..utils.emissions import per_generator_emission_factor
 from ..utils.series import weighted_sum
 from ..network.custom_constraints import apply_custom_constraints
@@ -495,6 +496,15 @@ def run_pypsa(
     # sent here), so there is no plugin hook in this pipeline.
     _t_build = time.perf_counter()
     network, notes = build_network(model, scenario, options)
+    _carbon_cfg = carbon_pricing.plan_of(network)
+    if _carbon_cfg is not None and _carbon_cfg.is_active:
+        # The carbon term is added to the objective AFTER PyPSA built it. CVaR's tail constraints are built from
+        # PyPSA's own operating-cost terms and cannot see it, so the two cannot be combined; MGA / strategic bidding
+        # re-solve a scratch copy that carries the price in marginal_cost, which a piecewise curve would ignore.
+        if oo.risk_alpha is not None:
+            raise HTTPException(status_code=400, detail="A carbon price cannot be combined with CVaR risk preference: the CVaR tail constraints cannot see the carbon-pricing objective term.")
+        if (mga_enabled or bid_enabled) and network.components["generators"].has_piecewise("marginal_cost"):
+            raise HTTPException(status_code=400, detail="A carbon price with a piecewise marginal_cost curve cannot be combined with MGA or strategic bidding: those studies re-solve a copy with the price in marginal_cost, which a curve ignores.")
     _risk_note = apply_risk_preference(network, oo)  # P21: CVaR (stochastic only)
     if _risk_note:
         notes.append(_risk_note)
@@ -617,6 +627,9 @@ def run_pypsa(
         # `snapshots` is the window being optimised — for rolling horizon it is a
         # single window, not the full run. Pass it through so weights/hours and
         # apportioned budgets are scoped to that window (a no-op single-shot).
+        # The carbon-pricing module's objective term (price x emissions); a no-op without a price.
+        carbon_pricing.extra_functionality(n, snapshots)
+        annual_budgets.extra_functionality(n, snapshots)  # rolling horizon: each window's share of an e_sum budget
         apply_custom_constraints(n, custom_constraints, emissions_factors, notes, snapshots)
         if constraint_specs:
             apply_constraint_specs(n, constraint_specs, emissions_factors, notes, snapshots)
@@ -1211,50 +1224,19 @@ def _build_solved_payload(
     else:
         generator_energy.sort(key=lambda row: row["value"], reverse=True)
 
-    # Cost breakdown. Use the effective per-snapshot marginal cost
-    # (``get_switchable_as_dense`` resolves static vs time-varying inputs) so
-    # the fuel/carbon split is correct even when a generator's marginal_cost is
-    # supplied as a time series. The carbon adder (carbon_price * emission
-    # factor) was folded into marginal_cost by build_network, so we back it out
-    # per snapshot to report the fuel component separately.
-    fuel_cost = 0.0
-    carbon_cost = 0.0
-    shed_cost = 0.0
-    # Back the carbon adder out with the SAME per-snapshot price the solve
-    # folded into marginal_cost — a schedule fully supersedes the scalar there,
-    # so splitting with the scalar alone misreports fuel vs carbon.
-    carbon_cfg = parse_carbon_price_config(
-        scenario.get("carbonPrice") or 0.0, options.get("carbonPriceSchedule")
-    )
-    carbon_price_series = build_price_series(network, carbon_cfg)
-    mc_dense = overlay_piecewise_marginal_cost(network, network.get_switchable_as_dense("Generator", "marginal_cost"))
-    # Cost weights follow the LP objective: the ``objective`` snapshot weighting,
-    # times the investment-period objective weighting in a pathway run, so the
-    # breakdown sums to the same basis the optimiser minimised.
-    cost_weights = network.snapshot_weightings["objective"].reindex(network.snapshots).fillna(1.0)
-    if pathway_run:
-        _period_w = period_objective_weights(network)
-        cost_weights = cost_weights * pd.Series(
-            [_period_w[int(p)] for p in network.snapshots.get_level_values("period")],
-            index=network.snapshots,
-        )
-    # Carbon-cost split uses the electrical-basis factor (co2 / η) the carbon price
-    # folded into marginal_cost; this is a cost back-out, not an emissions total.
-    eff_ef = per_generator_emission_factor(network, emissions_factors)
-    for name in network.generators.index:
-        if name not in generator_dispatch_frame.columns:
-            continue
-        # ef is the per-generator electrical-basis factor (co2 / η) — the SAME
-        # quantity carbon_price folded into marginal_cost, so backing it out here
-        # recovers the fuel component exactly (M3).
-        ef = float(eff_ef.get(name, 0.0))
-        dispatch_pos = generator_dispatch_frame[name].clip(lower=0.0)
-        mc_s = mc_dense[name]
-        if name.startswith("load_shedding_"):
-            shed_cost += weighted_sum(dispatch_pos * mc_s, cost_weights)
-        else:
-            carbon_cost += weighted_sum(dispatch_pos * ef * carbon_price_series, cost_weights)
-            fuel_cost += weighted_sum(dispatch_pos * (mc_s - ef * carbon_price_series).clip(lower=0.0), cost_weights)
+    # Cost breakdown. Fuel (and every other marginal) cost is PyPSA's own `n.statistics.opex`; the
+    # carbon cost is the carbon-pricing module's declared objective term evaluated at the solution
+    # (`carbon_pricing.carbon_cost_by_generator`). Nothing is backed out of a marginal cost: the
+    # carbon price was never written into it. Investment-period objective weights apply to both
+    # (the basis the optimiser minimised).
+    carbon_cfg = carbon_pricing.plan_of(network) or carbon_pricing.config_from_run(scenario, options)
+    carbon_price_series = carbon_pricing.price_series(carbon_cfg, network.snapshots)
+    marginal_cost_by_gen = generator_operating_cost(network, weighted=True)
+    shed_names = [g for g in marginal_cost_by_gen.index if str(g).startswith("load_shedding_")]
+    shed_cost = float(marginal_cost_by_gen.reindex(shed_names).sum())
+    fuel_cost = float(marginal_cost_by_gen.sum()) - shed_cost
+    carbon_by_gen = carbon_pricing.carbon_cost_by_generator(network, carbon_cfg)
+    carbon_cost = float(carbon_by_gen.sum())
 
     # Expansion CAPEX, read from PyPSA (n.statistics.capex per extendable asset): the objective's
     # capital term over the modelled horizon, the same basis as the fuel/carbon/shedding components
@@ -1303,7 +1285,8 @@ def _build_solved_payload(
     cost_breakdown.extend(
         other_operating_costs(
             network,
-            generator_explained=fuel_cost + carbon_cost + shed_cost + commitment_cost,
+            # n.statistics.opex has no carbon term (it is the module's objective term), so it is not 'explained' here
+            generator_explained=fuel_cost + shed_cost + commitment_cost,
         )
     )
     if any(r.get("capex_annual", 0) > 0 for r in expansion_results):
@@ -1807,7 +1790,6 @@ def _build_solved_payload(
         owner_column=owner_column,
         currency=currency,
         emissions_factors=emissions_factors,
-        carbon_price=carbon_price_series,
         debt=options.get("financeConfig") or None,
     )
     # Operating-reserve (spinning reserve) co-optimization results — reads the
@@ -1822,6 +1804,8 @@ def _build_solved_payload(
 
     # ``outputs`` is built last and is already finite-only (see full_outputs).
     payload = {
+        # the annual-budgets module's horizon values (None without a RAGNAROK_AnnualBudgets sheet)
+        "annualBudgets": network.meta.get("ragnarok_annual_budgets") if isinstance(network.meta, dict) else None,
         "summary": summary,
         "dispatchSeries": dispatch_s,
         "curtailmentSeries": curtailment_s,

@@ -64,7 +64,7 @@ def _budget_net(*, window_hours: int = 24, load_mw: float = 100.0, p_nom: float 
                 e_sum_max_scaled: float | None = None) -> pypsa.Network:
     """A window where capacity is ample (p_nom > load) so only the cumulative
     e_sum_max budget can be the structural cause. ``e_sum_max_scaled`` is the
-    value build_network would store, i.e. annual × window_hours/8760."""
+    horizon total PyPSA receives."""
     n = pypsa.Network()
     n.set_snapshots(pd.date_range("2030-01-01", periods=window_hours, freq="h"))
     n.add("Bus", "b")
@@ -75,24 +75,23 @@ def _budget_net(*, window_hours: int = 24, load_mw: float = 100.0, p_nom: float 
     return n
 
 
-def test_flags_window_scaled_annual_budget() -> None:
-    # 8000 MWh/yr on a 24 h window → build stores 8000 × 24/8760 ≈ 21.92 MWh.
-    # Window load = 100 MW × 24 h = 2400 MWh, potential = 200 MW × 24 h = 4800 MWh:
-    # the budget is <1% of both, while the power-based check sees no shortfall.
-    scaled = 8000.0 * 24.0 / 8760.0
-    diag = diagnose_infeasibility(_budget_net(e_sum_max_scaled=scaled))
+def test_flags_a_starved_horizon_budget() -> None:
+    # An e_sum_max of 21.92 MWh on a 24 h horizon (what 8000 MWh/yr becomes in the annual-budgets module).
+    # Load energy = 100 MW x 24 h = 2400 MWh, potential = 200 MW x 24 h = 4800 MWh: the budget is <1% of both,
+    # while the power-based check sees no shortfall.
+    budget = 8000.0 * 24.0 / 8760.0
+    diag = diagnose_infeasibility(_budget_net(e_sum_max_scaled=budget))
     assert diag["shortfalls"] == []  # capacity is NOT the cause here
     assert len(diag["starvedBudgets"]) == 1
     st = diag["starvedBudgets"][0]
     assert st["name"] == "gas_well"
-    assert st["annualBudgetMWh"] == pytest.approx(8000.0, rel=1e-6)
-    assert st["scaledBudgetMWh"] == pytest.approx(scaled, abs=0.01)
-    assert st["windowHours"] == pytest.approx(24.0)
-    assert st["windowLoadMWh"] == pytest.approx(2400.0)
-    line = next(ln for ln in diag["lines"] if "ANNUAL" in ln)
-    assert "gas_well" in line and "8000" in line and "24 h window" in line
+    assert st["budgetMWh"] == pytest.approx(budget, abs=0.01)
+    assert st["horizonHours"] == pytest.approx(24.0)
+    assert st["horizonLoadMWh"] == pytest.approx(2400.0)
+    line = next(ln for ln in diag["lines"] if "gas_well" in ln and "e_sum_max" in ln)
+    assert "24 h horizon" in line
     assert "starved" in diag["headline"]
-    assert any("8760" in s for s in diag["suggestions"])
+    assert any("annual-budgets" in s and "8760" in s for s in diag["suggestions"])
 
 
 def test_ample_budget_not_flagged() -> None:
@@ -102,16 +101,6 @@ def test_ample_budget_not_flagged() -> None:
     assert diag["starvedBudgets"] == []
     # Default e_sum_max (inf) never flags.
     diag = diagnose_infeasibility(_budget_net())
-    assert diag["starvedBudgets"] == []
-
-
-def test_full_year_window_budget_not_scaled() -> None:
-    # When Σ objective weights ≥ 8760 h the build applies NO scaling
-    # (period factor 1.0), so the annual-convention explanation would be
-    # wrong — the check must stay silent even for a tiny budget.
-    n = _budget_net(window_hours=3, e_sum_max_scaled=5.0)
-    n.snapshot_weightings["objective"] = 2920.0  # 3 × 2920 h = 8760 h
-    diag = diagnose_infeasibility(n)
     assert diag["starvedBudgets"] == []
 
 
@@ -136,11 +125,9 @@ def test_end_to_end_infeasible_run_surfaces_diagnosis() -> None:
     assert "load shedding" in detail.lower()
 
 
-def test_end_to_end_starved_budget_explains_annual_convention() -> None:
-    # The motivating gap: e_sum_max=8000 looks generous, capacity (200 MW) covers
-    # the 100 MW load, yet the solve is infeasible because build_network scales
-    # the ANNUAL budget to the 24 h window (≈21.9 MWh ≪ 2400 MWh load energy).
-    # The error detail must now explain the convention with the scaled number.
+def test_end_to_end_starved_budget_names_the_horizon_total() -> None:
+    # e_sum_max passes through as PyPSA's horizon total. An annual 8000 MWh in the annual-budgets sheet becomes
+    # ~21.9 MWh on a 24 h run, far below the 2400 MWh load energy although capacity (200 MW) covers the load.
     from fastapi import HTTPException
 
     from backend.pypsa.results import run_pypsa
@@ -151,16 +138,14 @@ def test_end_to_end_starved_budget_explains_annual_convention() -> None:
         "carriers": [{"name": "gas"}],
         "snapshots": [{"snapshot": s} for s in snaps],
         "loads": [{"name": "L", "bus": "b", "p_set": 100}],
-        "generators": [{"name": "gas_well", "bus": "b", "carrier": "gas",
-                        "p_nom": 200, "marginal_cost": 50, "e_sum_max": 8000}],
+        "generators": [{"name": "gas_well", "bus": "b", "carrier": "gas", "p_nom": 200, "marginal_cost": 50}],
+        "RAGNAROK_AnnualBudgets": [{"component": "generators", "name": "gas_well", "attribute": "e_sum_max", "annual": 8000}],
     }
     with pytest.raises(HTTPException) as ei:
         run_pypsa(model, {"discountRate": 0.0, "carbonPrice": 0.0}, {})
     detail = str(ei.value.detail)
-    assert "gas_well" in detail
-    assert "ANNUAL budget" in detail
-    assert "8000" in detail and "21.9" in detail  # annual figure + scaled figure
-    assert "8760" in detail  # the suggested fix explains the convention
+    assert "gas_well" in detail and "21.9" in detail
+    assert "annual-budgets" in detail and "8760" in detail
 
 
 def test_capacity_shortfall_does_not_blame_the_solver_method() -> None:

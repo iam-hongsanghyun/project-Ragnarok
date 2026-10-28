@@ -2495,3 +2495,6 @@ from . import tools_p2x  # noqa: E402,F401
 
 # Build plant tools (plant-type catalogue, add / edit / remove one plant, results grouped by plant).
 from . import tools_plants  # noqa: E402,F401
+
+# Carbon-pricing and annual-budgets module tools.
+from . import tools_policy_modules  # noqa: E402,F401

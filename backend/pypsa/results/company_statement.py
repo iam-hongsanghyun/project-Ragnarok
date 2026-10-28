@@ -15,17 +15,17 @@ operating statement* an analyst reads top-to-bottom:
 
 This builder produces exactly that line-item statement per company, from the
 solved network — no extra solve. Revenue and dispatch are the competitive
-benchmark (LMP × dispatch), consistent with F0/F1/F2. The carbon component is
-backed out of ``marginal_cost`` the same way the system cost-breakdown does it
-(M3: carbon adder = per-generator emission factor × carbon price), so fuel and
-carbon never double-count.
+benchmark (LMP × dispatch), consistent with F0/F1/F2. The fuel / variable
+cost is PyPSA's ``n.statistics.opex(marginal_cost)`` and the carbon cost is the carbon-pricing module's
+declared objective term evaluated at the solution (with each generator's own, possibly
+time-varying, efficiency), so the two are separate quantities and never double-count.
 
 Algorithm (per company, summed over its assets and snapshots t with weights w):
     $$\\text{rev} = \\frac{8760}{H} \\sum_t w_t\\, \\pi_{b(a),t}\\, p_{a,t}, \\quad
-      \\text{carbon} = \\frac{8760}{H} \\sum_t w_t\\, p_{a,t}\\, e_a\\, P_{CO_2},
-      \\quad \\text{fuelVom} = \\text{opex} - \\text{carbon}$$
-    ASCII: rev = (8760/H)·Σ w·π·p ; carbon = (8760/H)·Σ w·p·ef·co2price ;
-    fuelVom = opex − carbon ; interest = gearing·(capex_annual/CRF(i,tenor))·i.
+      \\text{carbon} = \\frac{8760}{H} \\sum_t w_t\\, p_{a,t}\\, \\frac{e_c}{\\eta_{a,t}}\\, P_{CO_2,t},
+      \\quad \\text{fuelVom} = \\frac{8760}{H}\\,\\text{opex}^{PyPSA}_{marginal\\_cost}$$
+    ASCII: rev = (8760/H)·Σ w·π·p ; carbon = (8760/H)·Σ w·p·(co2/η_t)·co2price_t (the carbon-pricing
+    module's objective term at the solution) ; fuelVom = (8760/H)·n.statistics.opex(marginal_cost) ; interest = gearing·(capex_annual/CRF(i,tenor))·i.
 
     Symbols: π = nodal price [currency/MWh], p = dispatch [MW], e_a = electrical
     emission factor [tCO2/MWh] (co2/η), P_CO2 = carbon price [currency/tCO2],
@@ -48,12 +48,13 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import pypsa
-from ..network.piecewise import overlay_piecewise_marginal_cost
 
-from ..utils.emissions import per_generator_emission_factor, primary_energy_emissions
+from ...app import carbon_pricing
+
+from ..utils.emissions import primary_energy_emissions
 from .finance import _crf, storage_assets
 from .market import HOURS_PER_YEAR
-from .stat_metrics import fixed_cost_of, fixed_cost_table
+from .stat_metrics import fixed_cost_of, fixed_cost_table, generator_operating_cost
 
 _log = logging.getLogger("pypsa.solver")
 
@@ -75,7 +76,6 @@ def build_company_statement(
     owner_column: str,
     currency: str,
     emissions_factors: dict[str, float],
-    carbon_price: float | pd.Series,
     debt: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Per-company annual P&L from the solved network.
@@ -85,10 +85,7 @@ def build_company_statement(
         model: Raw model dict — source of the owner tags.
         owner_column: Which model column holds the owner tag.
         currency: Currency symbol (passthrough).
-        emissions_factors: carrier → tCO2/MWh (fuel basis; divided by η per M3).
-        carbon_price: Carbon price [currency/tCO2] used to split the carbon
-            line — a scalar, or a per-snapshot Series when a schedule was
-            applied to the solve.
+        emissions_factors: carrier → tCO2/MWh (fuel basis), for the emissions line.
         debt: Optional ``{gearing, interestRate, tenorYears}`` for the interest line.
 
     Returns:
@@ -108,17 +105,15 @@ def build_company_statement(
     if H <= 0:
         return None
     annualize = HOURS_PER_YEAR / H
-    eff_ef = per_generator_emission_factor(network, emissions_factors)
-    # Per-snapshot carbon price array (a schedule varies over snapshots); the
-    # reported/logged scalar is its mean. Matches the adder the solve applied.
-    if isinstance(carbon_price, pd.Series):
-        co2_arr = carbon_price.reindex(network.snapshots).fillna(0.0).to_numpy(dtype=float)
-    else:
-        co2_arr = np.full(len(network.snapshots), float(carbon_price or 0.0))
-    co2_price = float(co2_arr.mean()) if len(co2_arr) else 0.0
-    # Dense marginal cost: a varying schedule writes its adder to the
-    # time-varying frame only, so the static column alone would miss it.
-    mc_dense = overlay_piecewise_marginal_cost(network, network.get_switchable_as_dense("Generator", "marginal_cost"))
+    # Fuel / variable cost is PyPSA's `n.statistics.opex` (marginal_cost only); the carbon cost is the
+    # carbon-pricing module's declared objective term evaluated at the solution, with the generator's
+    # OWN (possibly time-varying) efficiency. Both on the modelled-window basis, as every line here.
+    cfg = carbon_pricing.plan_of(network)
+    co2_price = (
+        float(carbon_pricing.price_series(cfg, network.snapshots).mean()) if cfg is not None else 0.0
+    )
+    fuel_by_gen = generator_operating_cost(network, weighted=False)
+    carbon_by_gen = carbon_pricing.carbon_cost_by_generator(network, cfg, period_weighted=False)
     gen_fixed = fixed_cost_table(network, ["Generator"])
 
     gearing = float((debt or {}).get("gearing", 0.0) or 0.0)
@@ -150,17 +145,12 @@ def build_company_statement(
             continue
         b = acc.setdefault(company, _bucket())
         p = network.generators_t.p[g].to_numpy()
-        p_pos = p.clip(min=0.0)
         pi = mp[bus].to_numpy()
-        mc = mc_dense[g].to_numpy(dtype=float)
-        ef = float(eff_ef.get(str(g), 0.0))
         energy = float((p * weights).sum())
-        opex = float((mc * p_pos * weights).sum())
-        carbon = float((p_pos * ef * co2_arr * weights).sum())
         b["revenue"] += float((p * pi * weights).sum())
         b["energyMWh"] += energy
-        b["carbonCost"] += carbon
-        b["fuelVomCost"] += max(0.0, opex - carbon)
+        b["carbonCost"] += float(carbon_by_gen.get(str(g), 0.0))
+        b["fuelVomCost"] += float(fuel_by_gen.get(str(g), 0.0))
         # n.statistics: (capex + fom) / n.nyears, installed and expanded capacity alike.
         b["capexAnnual"] += fixed_cost_of(gen_fixed, "Generator", str(g))["annual"]
 

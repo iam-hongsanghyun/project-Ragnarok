@@ -353,7 +353,7 @@ def test_migration_input_is_not_mutated_and_pypsa_files_are_only_stamped() -> No
     cb.migrate_cost_basis(model, discount_rate=0.05)
     assert json.dumps(model, sort_keys=True, default=str) == snapshot
     out, report = cb.migrate_cost_basis(model, pypsa_native=True)
-    assert out["generators"] == model["generators"] and cb.schema_version(out) == 2 and not report.changed_rows
+    assert out["generators"] == model["generators"] and cb.schema_version(out) == cb.CURRENT_SCHEMA_VERSION and not report.changed_rows
 
 
 def test_migration_flags_piecewise_capital_curves_instead_of_guessing() -> None:
@@ -416,7 +416,7 @@ def test_save_model_stamps_native_models_and_migrates_only_a_declared_old_workbo
         native = {"buses": [{"name": "b"}], "generators": [{"name": "g", "bus": "b", "p_nom_extendable": True, "capital_cost": 42.0}]}
         sqlite_store.save_model("a", native)
         saved = sqlite_store.load_full_model("a")
-        assert saved["generators"][0]["capital_cost"] == 42.0 and cb.schema_version(saved) == 2
+        assert saved["generators"][0]["capital_cost"] == 42.0 and cb.schema_version(saved) == cb.CURRENT_SCHEMA_VERSION
         assert sqlite_store.get_cost_basis_migration("a") is None
         meta = sqlite_store.save_model("b", native, legacy_origin=True, discount_rate=0.06)
         assert meta["costBasisMigration"]["discountRate"] == 0.06
@@ -617,7 +617,7 @@ def test_import_project_load_migrates_an_old_project_at_its_own_rate(client) -> 
     assert body["costBasisMigration"]["discountRate"] == 0.07
     rows = {r["name"]: r for r in body["model"]["generators"]}
     assert rows["ext"]["overnight_cost"] == 1000 and rows["ext"]["discount_rate"] == 0.07 and rows["ext"]["lifetime"] == 20
-    assert cb.schema_version(body["model"]) == 2
+    assert cb.schema_version(body["model"]) == cb.CURRENT_SCHEMA_VERSION
 
 
 def test_promoting_an_old_stored_run_migrates_it_at_the_runs_discount_rate(client) -> None:

@@ -29,6 +29,7 @@ from typing import Any
 
 import pypsa
 
+from ...app import carbon_pricing
 from pypsa.costs import annuity as _pypsa_annuity
 
 from ..utils.emissions import primary_energy_emissions
@@ -253,6 +254,7 @@ def build_asset_swap(
             solver_options=solver_options or {},
             io_api=io_api,
             include_objective_constant=False,
+            extra_functionality=carbon_pricing.extra_functionality,
         )
     except Exception as exc:  # noqa: BLE001 — never sink the run over the what-if
         _log.warning("asset-swap re-solve failed (→%s): %s", add_carrier, exc)

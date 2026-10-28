@@ -20,6 +20,8 @@ from typing import Any
 import pandas as pd
 import pypsa
 
+from ...app import carbon_pricing
+
 _log = logging.getLogger("pypsa.solver")
 
 # Each selected carrier costs two LP solves (min + max). Cap the number of
@@ -35,6 +37,18 @@ def _capacity_by_carrier(network: pypsa.Network) -> dict[str, float]:
         return {}
     grouped = gens.groupby("carrier")["p_nom_opt"].sum()
     return {str(c): round(float(v), 3) for c, v in grouped.items()}
+
+
+def _priced_copy(network: pypsa.Network) -> pypsa.Network:
+    """Scratch copy for an MGA solve, with the carbon price in ``marginal_cost``.
+
+    ``optimize_mga`` builds its own model (no ``extra_functionality`` hook) and bounds the cost with
+    ``n.statistics`` of the copy, so the carbon-pricing module's scratch-copy form is what keeps the price in
+    both the budget and the dispatch. The run's own network is untouched.
+    """
+    work = network.copy()
+    carbon_pricing.write_marginal_cost_adder(work)
+    return work
 
 
 def _solution_cost(network: pypsa.Network) -> float:
@@ -135,7 +149,7 @@ def build_mga_directions(
     keys = list(dimensions)
     table = _direction_table(config, keys)
     max_parallel = max(1, int(config.get("maxParallel", 1) or 1))
-    optimum_cost = _solution_cost(network)
+    optimum_cost = _solution_cost(_priced_copy(network))
     solve_kwargs: dict[str, Any] = {
         "solver_name": solver_name,
         "solver_options": solver_options,
@@ -145,7 +159,7 @@ def build_mga_directions(
     results: list[dict[str, Any]] = []
     failed = 0
     if max_parallel > 1 and len(table) > 1:
-        dirs_df, coords_df = network.optimize.optimize_mga_in_multiple_directions(
+        dirs_df, coords_df = _priced_copy(network).optimize.optimize_mga_in_multiple_directions(
             table,
             dimensions,
             multi_investment_periods=multi_investment_periods,
@@ -164,7 +178,7 @@ def build_mga_directions(
         for _, drow in table.iterrows():
             direction = {k: float(v) for k, v in drow.items()}
             try:
-                work = network.copy()
+                work = _priced_copy(network)
                 with pypsa.option_context("params.optimize.include_objective_constant", True):
                     status, condition, coords = work.optimize.optimize_mga_in_direction(
                         direction=direction,
@@ -266,7 +280,13 @@ def build_mga(
 
     config = config or {}
     min_max = config.get("minMax", True) is not False
-    optimum_cost = _solution_cost(network)
+    # ``network.copy()`` refuses while a solver model is attached; detach it first.
+    try:
+        if network.model is not None:
+            network.model.solver_model = None
+    except Exception:  # noqa: BLE001 — best effort; copy() will report if it still fails
+        pass
+    optimum_cost = _solution_cost(_priced_copy(network))
     optimum_mix = _capacity_by_carrier(network)
 
     # ``network.copy()`` refuses while a solver model is attached; detach it once
@@ -292,7 +312,7 @@ def build_mga(
         }
         for sense in (("min", "max") if min_max else ()):
             try:
-                work = network.copy()
+                work = _priced_copy(network)
                 status, condition = work.optimize.optimize_mga(
                     weights=weights,
                     sense=sense,

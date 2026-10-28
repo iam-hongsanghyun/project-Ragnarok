@@ -323,14 +323,15 @@ def _ingest_cost_basis(
     """
     from ..pypsa.network import cost_basis as cb
 
-    if cb.schema_version(model) is not None:
+    version = cb.schema_version(model)
+    if version is not None and version >= cb.CURRENT_SCHEMA_VERSION:
         return model, None
     # The workbook's OWN rate (its scenario preset / RAGNAROK_Settings sheet) wins over the app's current Settings value.
     file_rate, _source = cb.resolve_discount_rate(model, None) if legacy_origin else (None, "")
     out, report = cb.migrate_cost_basis(
         model, discount_rate=file_rate if file_rate is not None else discount_rate, pypsa_native=not legacy_origin
     )
-    if not (report.changed_rows or report.review):
+    if not report.noteworthy:
         return out, None  # stamped; nothing worth a notice
     return out, report.as_dict()
 
@@ -374,6 +375,15 @@ def _write_static_sheet(
         entry["columns"] = columns
 
 
+def _read_one_sheet(conn: sqlite3.Connection, meta: dict[str, Any], name: str) -> dict[str, list[dict[str, Any]]]:
+    """``{name: rows}`` of one static sheet (empty when absent)."""
+    tables = _kv_get(conn, "tables") or {}
+    tbl = tables.get(name)
+    if tbl is None:
+        return {}
+    return {name: [json.loads(r[0]) for r in conn.execute(f"SELECT d FROM {tbl} ORDER BY __row").fetchall()]}
+
+
 def _ensure_cost_basis(session_id: str) -> None:
     """Migrate a session db written before schema 2 (a bundled example, an old project.db), once.
 
@@ -395,10 +405,13 @@ def _ensure_cost_basis(session_id: str) -> None:
         if not isinstance(meta, dict):
             return
         if any(isinstance(s, dict) and s.get("name") == cb.SCHEMA_SHEET for s in meta.get("sheets", [])):
-            return
+            with _connect(session_id) as conn:
+                current = cb.schema_version(_read_one_sheet(conn, meta, cb.SCHEMA_SHEET))
+            if current is not None and current >= cb.CURRENT_SCHEMA_VERSION:
+                return
         from . import journal
 
-        with journal.migration_scope(session_id, "migrate cost basis to PyPSA semantics (schema 2)") as scope:
+        with journal.migration_scope(session_id, "migrate the model to the current schema (PyPSA cost basis, annual budgets)") as scope:
             with _connect(session_id) as conn:
                 meta = _kv_get(conn, "meta") or meta
                 tables = _kv_get(conn, "tables") or {}
@@ -410,14 +423,14 @@ def _ensure_cost_basis(session_id: str) -> None:
                         _write_static_sheet(conn, meta, tables, name, rows)
                 _kv_set(conn, "meta", meta)
                 _kv_set(conn, "tables", tables)
-                if report.changed_rows or report.review:
+                if report.noteworthy:
                     _kv_set(conn, MIGRATION_KV_KEY, {**report.as_dict(), "acknowledged": False})
                 conn.commit()
             scope["report"] = report.as_dict()
-            scope["changed"] = bool(report.changed_rows or report.review)
+            scope["changed"] = report.noteworthy
         logger.info(
-            "Session %s: cost-basis migration to schema 2 (%d row(s), %d flagged)",
-            session_id, len(report.changed_rows), len(report.review),
+            "Session %s: schema migration (%d cost row(s), %d budget(s), %d flagged)",
+            session_id, len(report.changed_rows), len(report.budgets), len(report.review),
         )
 
 
