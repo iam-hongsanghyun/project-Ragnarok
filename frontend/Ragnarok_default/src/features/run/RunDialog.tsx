@@ -9,6 +9,7 @@
 import React from 'react';
 import { PathwayConfig, RollingHorizonConfig, SamplingConfig } from 'lib/types';
 import { computeSamplingPreview } from 'lib/results/sampling';
+import { RESOLUTION_CHOICES_HOURS, type WorkbookResolution } from 'lib/results/resolution';
 
 export interface RunDialogProps {
   open: boolean;
@@ -20,10 +21,13 @@ export interface RunDialogProps {
   activeConstraintCount: number;
   snapshotStart: number;
   snapshotEnd: number;
-  snapshotWeight: number;
   pathwayConfig: PathwayConfig;
   rollingConfig: RollingHorizonConfig;
   samplingConfig: SamplingConfig;
+  /** The workbook's resolution (weighting of its snapshots); changed only by the visible Resample transform. */
+  resolution?: WorkbookResolution;
+  /** Resample the working workbook to `hours` (writes snapshots, weightings and series; Forge → Temporal). */
+  onApplyResolution?: (hours: number) => Promise<void> | void;
 
   onForceLpChange: (v: boolean) => void;
   onDryRunChange: (v: boolean) => void;
@@ -46,10 +50,11 @@ export function RunDialog({
   activeConstraintCount,
   snapshotStart,
   snapshotEnd,
-  snapshotWeight,
   pathwayConfig,
   rollingConfig,
   samplingConfig,
+  resolution,
+  onApplyResolution,
   onForceLpChange,
   onDryRunChange,
   onRun,
@@ -62,7 +67,7 @@ export function RunDialog({
   const rollingEnabled = rollingConfig.enabled;
   const samplingEnabled = samplingConfig.enabled && !pathwayEnabled && !rollingEnabled;
   const samplingPreview = samplingEnabled
-    ? computeSamplingPreview(Math.max(0, snapshotEnd - snapshotStart), snapshotWeight, samplingConfig)
+    ? computeSamplingPreview(Math.max(0, snapshotEnd - snapshotStart), samplingConfig)
     : null;
 
   return (
@@ -81,9 +86,9 @@ export function RunDialog({
             <div className="sg-scenario-summary">
               <span>{activeScenarioLabel ? `Scenario: ${activeScenarioLabel}` : 'Scenario: ad hoc'}</span>
               <span>{pathwayEnabled ? `${pathwayConfig.periods.length} pathway periods` : 'Single-period solve'}</span>
-              <span>{rollingEnabled ? `Rolling ${rollingConfig.horizonSnapshots}/${rollingConfig.overlapSnapshots}` : 'Full-horizon solve'}</span>
+              <span>{rollingEnabled ? rollingConfig.horizonHours != null ? `Rolling ${rollingConfig.horizonHours}h / ${rollingConfig.overlapHours ?? 0}h overlap` : `Rolling ${rollingConfig.horizonSnapshots}/${rollingConfig.overlapSnapshots} snapshots` : 'Full-horizon solve'}</span>
               <span>{pathwayEnabled ? 'Window comes from sidebar pathway settings' : `Window ${snapshotStart} → ${snapshotEnd}`}</span>
-              <span>{snapshotWeight}h resolution</span>
+              <span>{resolution ? `${resolution.weightingHours}h resolution (workbook)` : 'Workbook resolution'}</span>
               {samplingPreview && samplingConfig.mode === 'average' && (
                 <span>
                   Averaged test run: {samplingPreview.blockCount} periods → one {samplingConfig.blockSize}-step
@@ -98,6 +103,28 @@ export function RunDialog({
               )}
               <span>{activeConstraintCount} active constraints</span>
             </div>
+          </div>
+
+          <div className="validation-section">
+            <p className="validation-section-title">Resolution</p>
+            <div className="sg-btn-row">
+              {RESOLUTION_CHOICES_HOURS.map((n) => (
+                <button
+                  key={n}
+                  data-tour="resolution"
+                  disabled={!onApplyResolution}
+                  className={`tb-btn${resolution && resolution.weightingHours === n ? '' : ' tb-btn--muted'}`}
+                  title={`Resample the workbook to ${n}h (block means; weights ${n})`}
+                  onClick={() => void onApplyResolution?.(n)}
+                >
+                  {n}h
+                </button>
+              ))}
+            </div>
+            <p className="run-config-hint">
+              Resolution is written into the workbook by a visible Resample transform (Forge → Temporal): reduced snapshots,
+              their weightings and block-mean series. The run does not stride the snapshots itself.
+            </p>
           </div>
 
           <div className="validation-section">

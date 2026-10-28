@@ -62,9 +62,18 @@ def test_snapshot_count_wins_over_snapshot_end() -> None:
     assert len(n.snapshots) == 2
 
 
-def test_snapshot_weight_downsamples_and_sets_weightings() -> None:
-    n, _ = build_network(_model(6), SCENARIO, {"snapshotStart": 0, "snapshotCount": 6, "snapshotWeight": 2})
-    assert len(n.snapshots) == 3  # every 2nd row
+def test_resolution_is_a_visible_transform_not_a_run_option() -> None:
+    """Core never strides: ``snapshotWeight`` 2 is refused; the resample transform writes the weights and the run uses them."""
+    from fastapi import HTTPException
+
+    from backend.pypsa.network_ops import temporal_cluster
+
+    with pytest.raises(HTTPException):
+        build_network(_model(6), SCENARIO, {"snapshotStart": 0, "snapshotCount": 6, "snapshotWeight": 2})
+    reduced = temporal_cluster(_model(6), method="resample", offset="2h")["model"]
+    assert all(float(r["objective"]) == 2.0 for r in reduced["snapshots"])
+    n, _ = build_network(reduced, SCENARIO, {})
+    assert len(n.snapshots) == 3
     assert (n.snapshot_weightings["objective"] == 2.0).all()
     n.optimize(solver_name="highs")
     # Weighted energy: 3 modeled rows × 2 h each × 100 MW = 600 MWh.
@@ -75,14 +84,18 @@ def test_snapshot_weight_downsamples_and_sets_weightings() -> None:
 # ── forceLp ────────────────────────────────────────────────────────────────────
 
 
-def test_force_lp_clears_committable_flags() -> None:
-    options = {"snapshotStart": 0, "snapshotCount": 2}
-    n_mip, _ = build_network(_model(2, committable=True), SCENARIO, options)
-    assert bool(n_mip.generators.at["G_gas", "committable"]) is True  # control
+def test_force_lp_is_pypsas_linearized_unit_commitment_and_clears_nothing() -> None:
+    from backend.pypsa.optimise_options import parse_optimise_options
 
-    n_lp, _ = build_network(_model(2, committable=True), SCENARIO, {**options, "forceLp": True})
-    assert not n_lp.generators["committable"].astype(bool).any()
-    n_lp.optimize(solver_name="highs")  # solves as a plain LP
+    options = {"snapshotStart": 0, "snapshotCount": 2}
+    assert parse_optimise_options(options).optimize_kwargs().get("linearized_unit_commitment") is None
+    assert parse_optimise_options({**options, "forceLp": True}).optimize_kwargs()["linearized_unit_commitment"] is True
+
+    n_lp, notes = build_network(_model(2, committable=True), SCENARIO, {**options, "forceLp": True})
+    assert bool(n_lp.generators.at["G_gas", "committable"]) is True  # the model is untouched ...
+    assert float(n_lp.generators.at["G_gas", "p_min_pu"]) == float(build_network(_model(2, committable=True), SCENARIO, options)[0].generators.at["G_gas", "p_min_pu"])
+    assert any("linearized_unit_commitment" in x for x in notes)
+    n_lp.optimize(solver_name="highs", linearized_unit_commitment=True)  # ... and PyPSA relaxes the binaries
     assert float(n_lp.generators_t.p["G_gas"].sum()) == pytest.approx(200.0)
 
 
@@ -98,10 +111,12 @@ def test_load_shedding_serves_excess_load_at_custom_voll() -> None:
         "loadSheddingCost": 1234.0,
     }
     n, _ = build_network(_model(2, load_mw=500.0), SCENARIO, options)
-    assert "load_shedding_b" in n.generators.index
-    assert float(n.generators.at["load_shedding_b", "marginal_cost"]) == pytest.approx(1234.0)
+    shed_name = "b load shedding"  # PyPSA's add_load_shedding naming, identified by carrier
+    assert shed_name in n.generators.index
+    assert n.generators.at[shed_name, "carrier"] == load_system_defaults()["load_shedding"]["carrier"]
+    assert float(n.generators.at[shed_name, "marginal_cost"]) == pytest.approx(1234.0)
     n.optimize(solver_name="highs")
-    shed = float(n.generators_t.p["load_shedding_b"].sum())
+    shed = float(n.generators_t.p[shed_name].sum())
     assert shed == pytest.approx(200.0)  # (500 − 400) MW × 2 h
 
 
@@ -109,12 +124,14 @@ def test_load_shedding_cost_defaults_from_system_defaults() -> None:
     default_voll = float(load_system_defaults()["load_shedding"]["marginal_cost"])
     options = {"snapshotStart": 0, "snapshotCount": 2, "enableLoadShedding": True}
     n, _ = build_network(_model(2), SCENARIO, options)
-    assert float(n.generators.at["load_shedding_b", "marginal_cost"]) == pytest.approx(default_voll)
+    assert float(n.generators.at["b load shedding", "marginal_cost"]) == pytest.approx(default_voll)
 
 
 def test_load_shedding_disabled_adds_no_generators() -> None:
     n, _ = build_network(_model(2), SCENARIO, {"snapshotStart": 0, "snapshotCount": 2})
-    assert not [g for g in n.generators.index if str(g).startswith("load_shedding_")]
+    from backend.pypsa.utils.shedding import shedding_names
+
+    assert not shedding_names(n.generators)
 
 
 # ── Raw customDsl text path ────────────────────────────────────────────────────

@@ -23,7 +23,7 @@
  *   round trip typed twice      877,713 against 872,718 (0.8145 instead of 0.9025)
  *   standing loss 1% an hour    876,704
  *   initial energy 200 MWh      857,518: 15,200 of energy nobody paid for
- *   rolling, terminal SOC       final state of charge 200.0 with it, 0.0 without
+ *   rolling, terminal SOC       final state of charge 200.0 with it (an explicit option, default off), 0.0 without
  *   three answers, one battery  price-taker 159,379 / its own revenue 60,800 / system saving 125,176
  *   ELCC, 100 MW                20.0 / 20.0 / 24.2 / 45.6 / 93.0 % at 1 / 2 / 4 / 6 / 8 h
  *   StorageUnit vs Store+Link   92.96 MW / 371.8 MWh against 401.4 MWh with 53.6 in and 97.9 out
@@ -650,28 +650,30 @@ export const MODULE_17_BESS: TutorialStep[] = [
       + 'its last hour — leftover energy has no value inside the window — and the next window begins empty. '
       + 'The battery is run as if every window were the end of the world.',
 
-      'Ragnarok does two things about the edges. Because a cyclic constraint inside a window would be '
-      + 'infeasible against the carried-over state, it forces storage non-cyclic during a rolling run. And, new '
-      + 'in Ragnarok, it adds a soft TERMINAL STATE OF CHARGE to the last window: the battery must end the '
-      + 'horizon with at least the energy it started with, and any shortfall is charged at a penalty per MWh. '
-      + 'The penalty defaults to twice the dearest marginal cost in the system — here 280, from the 140 peaker '
-      + '— so refilling is always cheaper than paying the shortfall.',
+      'Ragnarok does two things about the edges, and neither is silent. A cyclic constraint inside a window '
+      + 'contradicts the carried-over state, so a rolling run REFUSES cyclic storage and offers the visible '
+      + 'step "Make non-cyclic for rolling", which writes the flags into the workbook. And it offers an '
+      + 'explicit option, off by default: a soft TERMINAL STATE OF CHARGE on the last window. With it on the '
+      + 'battery must end the horizon with at least the energy it started with, and any shortfall is charged '
+      + 'at a penalty per MWh, which defaults to twice the dearest marginal cost in the system — here 280, '
+      + 'from the 140 peaker — so refilling is always cheaper than paying the shortfall.',
 
       'It is a soft constraint and it is only on the LAST window. The earlier windows still empty the battery, '
       + 'and the target is the battery\'s state_of_charge_initial — a battery that starts empty has no target to '
-      + 'return to. The option is on by default, exposed as `rollingConfig.terminalSoc` in the API and by '
-      + 'MCP, and has no switch in Settings.',
+      + 'return to. The option is `rollingConfig.terminalSoc` (API, MCP and Settings → Rolling horizon → Terminal '
+      + 'SOC target), it is OFF unless you turn it on, and the run notes declare it when it is on.',
 
       'The numbers show what it does. Three 24-hour windows over the battery, non-cyclic, starting with 200 '
-      + 'MWh: with the terminal target the run ends with 200.0 MWh and costs 875,602; with it off (the API '
-      + 'option) it ends with 0.0 and costs 858,347 — 17,255 cheaper, because the free energy was simply '
+      + 'MWh: with the terminal target on the run ends with 200.0 MWh and costs 875,602; with it off (the '
+      + 'default) it ends with 0.0 and costs 858,347 — 17,255 cheaper, because the free energy was simply '
       + 'spent rather than held back. The windows before the last both end at 0.0 in either case.',
     ],
     explain: [
-      'Build → Storage. Set `cyclic_state_of_charge` to false and `state_of_charge_initial` to 200 in the form on the right. Settings → '
-      + 'Rolling horizon: turn it On. It arrives with 2 chunks and an overlap of 24, which is 2 windows of 60; set '
-      + 'Overlap 0 first and then Chunks 3. The summary line should read 3 windows, horizon 24, step 24, over 72 '
-      + 'snapshots. Run.',
+      'Build → Storage. Set `cyclic_state_of_charge` to false (or press "Make non-cyclic for rolling" in the '
+      + 'Rolling horizon section) and `state_of_charge_initial` to 200 in the form on the right. Settings → '
+      + 'Rolling horizon: turn it On. It arrives with 2 chunks and an overlap of 24 h, which is 2 windows of 60; set '
+      + 'Overlap 0 first and then Chunks 3, and turn Terminal SOC target On. The summary line should read 3 '
+      + 'windows, horizon 24h, step 24h, over 72 snapshots of 1h. Run.',
 
       'Total cost 875,602. Open the state-of-charge chart: it falls to 0 at the end of day 1 and day 2 — '
       + 'each window drains the battery — and finishes day 3 at exactly 200 MWh, the terminal target. Holding '
@@ -681,9 +683,8 @@ export const MODULE_17_BESS: TutorialStep[] = [
       + 'step 6, and 829 above the joint solve. The terminal condition is silent because there is nothing to '
       + 'return to.',
 
-      'The off-switch is not in Settings. Through the API or MCP, `rollingConfig.terminalSoc: false` '
-      + 'reproduces the run without it: ends at 0.0, cost 858,347. If you ever see a rolling-horizon battery '
-      + 'finish exactly empty, that is what happened.',
+      'Now turn Terminal SOC target Off (its default) and run again: ends at 0.0, cost 858,347. If you ever '
+      + 'see a rolling-horizon battery finish exactly empty, that is what happened.',
 
       'Restore the battery (cyclic on, initial 0) and turn Rolling horizon Off before the next step: the '
       + 'ESS business case cannot run alongside it.',
@@ -716,8 +717,8 @@ export const MODULE_17_BESS: TutorialStep[] = [
       },
       {
         field: 'Settings → Rolling horizon → Mode, Chunks, Overlap',
-        label: 'three non-overlapping windows',
-        value: 'On, 3, 0',
+        label: 'three non-overlapping windows, terminal target on',
+        value: 'On, 3, 0, Terminal SOC On',
         why: 'Each window is 24 snapshots, one day. No overlap means no window sees any of the next, which is '
           + 'what makes each one drain the battery and makes the terminal condition visible.',
       },
@@ -728,7 +729,7 @@ export const MODULE_17_BESS: TutorialStep[] = [
       expect: '875,602 ending at 200 MWh with an initial charge of 200; 873,547 with 0.',
     },
     verify: [
-      'The Rolling horizon summary reads 3 windows, horizon 24, step 24, over 72 snapshots',
+      'The Rolling horizon summary reads 3 windows, horizon 24h, step 24h, over 72 snapshots',
       'With an initial charge of 200 the run costs 875,602 and the state of charge ends at 200 MWh',
       'The state of charge is 0 at the end of the first two days',
       'With an initial charge of 0 the cost is 873,547',

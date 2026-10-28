@@ -55,13 +55,30 @@ export function normalizeRollingConfig(config: RollingHorizonConfig): RollingHor
   };
 }
 
+/** Window and overlap in hours at a snapshot step of `stepHours`: what the UI shows and the backend converts back. */
+export function rollingHours(horizonSnapshots: number, overlapSnapshots: number, stepHours: number): { horizonHours: number; overlapHours: number } {
+  const w = stepHours > 0 ? stepHours : 1;
+  return { horizonHours: horizonSnapshots * w, overlapHours: overlapSnapshots * w };
+}
+
+/** Snapshots a number of hours covers at `stepHours` — ceil(hours / step), the backend's own conversion. */
+export function hoursToSnapshots(hours: number, stepHours: number): number {
+  const w = stepHours > 0 ? stepHours : 1;
+  return Math.max(0, Math.ceil(hours / w - 1e-9));
+}
+
 export function readRollingConfigFromModel(model: WorkbookModel): RollingHorizonConfig {
   const configRow = (model[ROLLING_CONFIG_SHEET] ?? [])[0] ?? {};
+  const horizonHours = primitiveNumber(configRow.horizonHours as Primitive, null);
+  const overlapHours = primitiveNumber(configRow.overlapHours as Primitive, null);
   const next = normalizeRollingConfig({
     enabled: primitiveBoolean(configRow.enabled as Primitive, false),
     horizonSnapshots: clampPositiveInt(primitiveNumber(configRow.horizonSnapshots as Primitive, 168), 168),
     overlapSnapshots: Math.max(0, primitiveNumber(configRow.overlapSnapshots as Primitive, 24) ?? 24),
     stepSnapshots: clampPositiveInt(primitiveNumber(configRow.stepSnapshots as Primitive, 144), 144),
+    ...(horizonHours !== null ? { horizonHours } : {}),
+    ...(overlapHours !== null ? { overlapHours } : {}),
+    terminalSoc: primitiveBoolean(configRow.terminalSoc as Primitive, false),
   });
   return next;
 }
@@ -76,6 +93,9 @@ export function writeRollingConfigToModel(
     horizonSnapshots: normalized.horizonSnapshots,
     overlapSnapshots: normalized.overlapSnapshots,
     stepSnapshots: normalized.stepSnapshots,
+    ...(normalized.horizonHours !== undefined ? { horizonHours: normalized.horizonHours } : {}),
+    ...(normalized.overlapHours !== undefined ? { overlapHours: normalized.overlapHours } : {}),
+    terminalSoc: Boolean(normalized.terminalSoc),
   }];
   return {
     ...model,

@@ -28,6 +28,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import pypsa
+from ..utils.shedding import is_shedding
 
 
 _BIG = 1e12  # placeholder threshold: values at/above this read as "unbounded"
@@ -78,7 +79,7 @@ def _load_by_snapshot(network: pypsa.Network) -> np.ndarray:
 
 
 def _has_load_shedding(network: pypsa.Network) -> bool:
-    return any(str(g).startswith("load_shedding") for g in network.generators.index)
+    return any(is_shedding(g) for g in network.generators.index)
 
 
 def diagnose_infeasibility(network: pypsa.Network) -> dict[str, Any]:
@@ -131,7 +132,7 @@ def diagnose_infeasibility(network: pypsa.Network) -> dict[str, Any]:
     ext = gens.get("p_nom_extendable", pd.Series(False, index=gens.index))
     available = np.zeros(T)
     for g in gens.index:
-        if str(g).startswith("load_shedding"):
+        if is_shedding(g):
             unlimited = True
             continue
         if bool(ext.get(g, False)):
@@ -182,7 +183,7 @@ def diagnose_infeasibility(network: pypsa.Network) -> dict[str, Any]:
     window_load_mwh = float((load * weights).sum())
     if window_load_mwh > 0 and "e_sum_max" in gens.columns:
         for g in gens.index:
-            if str(g).startswith("load_shedding"):
+            if is_shedding(g):
                 continue
             try:
                 budget = float(gens.at[g, "e_sum_max"])

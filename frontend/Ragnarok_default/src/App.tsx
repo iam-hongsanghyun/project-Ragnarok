@@ -80,6 +80,7 @@ import { readCarbonLibraryFromModel, writeCarbonLibraryToModel, sameCarbonLibrar
 import { saveSessionControls, loadSessionControls, clearSession, clearSessionModelOnly } from 'lib/storage/sessionStore';
 import { postSeasonalRating } from 'lib/api/seasonalRating';
 import { postTemporalCluster, type TemporalOptions, type TemporalResult } from 'lib/api/temporal';
+import { resampleOffset, strideNotice, workbookResolution } from 'lib/results/resolution';
 import { ADOPTION_SETTLE_MS, mayPushStaticResync, sessionHasModel } from 'lib/api/sessionAdoption';
 import type { CostBasisMigration } from 'lib/api/session';
 import { acknowledgeCostBasisMigration, clearSessionModel, putSessionModel, putStaticModel, getSessionFullModel, getSessionMeta, getSheetPage, isSeriesSheet, patchSheet, seriesSheetCounts, DEFAULT_SESSION_ID } from 'lib/api/session';
@@ -922,7 +923,10 @@ function AppInner() {
       setSnapshotStart(scenario.snapshotStart);
       setSnapshotEnd(scenario.snapshotEnd);
     }
-    setSnapshotWeight(scenario.snapshotWeight);
+    // A run-time stride no longer exists (core cleanup step 4): the resolution is the workbook's. Say so instead of ignoring it.
+    setSnapshotWeight(1);
+    const strideMessage = strideNotice(scenario.snapshotWeight);
+    if (strideMessage) showToast(strideMessage, 'info');
     setCarbonPrice(scenario.carbonPrice);
     setForceLp(scenario.forceLp);
     setCarbonPriceSchedule((scenario.carbonPriceSchedule ?? []).map((row) => ({ ...row })));
@@ -961,7 +965,7 @@ function AppInner() {
     setDemandResponseConfig(scenario.demandResponseConfig ?? { enabled: false, loads: [], shiftFraction: 0.2, maxShiftHours: 4, elasticEnabled: false, elasticFraction: 0.2, wtpMax: 200 });
     setOwnerColumn(scenario.ownerColumn ?? 'owner');
     setFinanceConfig(scenario.financeConfig ?? { gearing: 0, interestRate: 0.05, tenorYears: 15 });
-  }, [updateSettings]);
+  }, [updateSettings, showToast]);
 
   // ── Cost-basis migration notice ─────────────────────────────────────────
   // An OLD Ragnarok workbook (overnight price in `capital_cost`) is migrated ONCE by the server when it
@@ -1453,6 +1457,74 @@ function AppInner() {
       return data as { rows: number; addedMwh: number; homeMwh: number; workMwh: number };
     },
     [model, prepareModelForBackend, reloadSessionModel, showToast, snapshotWeight],
+  );
+
+  // Run dialog / Settings → Window "resolution": a VISIBLE transform of the workbook, not a run-time stride. It calls the
+  // same temporal resample as Forge → Temporal, which writes the reduced snapshots, the weightings and the block-mean
+  // series into the working model (the user sees them in the sheets).
+  const handleApplyResolution = useCallback(
+    async (hours: number) => {
+      const current = workbookResolution(model.snapshots);
+      if (current.mismatch) {
+        showToast(`The timestamps are ${current.spacingHours}h apart but the weighting is ${current.weightingHours}h: set the weightings from the timestamp spacing first.`, 'error');
+        return;
+      }
+      if (hours === current.weightingHours) return;
+      if (hours < current.weightingHours) {
+        showToast(`The workbook is already at ${current.weightingHours}h; resampling can only coarsen it. Rebuild or reload the finer data first.`, 'error');
+        return;
+      }
+      try {
+        await putStaticModel(prepareModelForBackend(model));
+        const reduced = await postTemporalCluster({ method: 'resample', offset: resampleOffset(hours) });
+        resetForNewModel(reduced.model);
+        setActiveRunName(null);
+        showToast(`Resampled to ${hours}h: ${reduced.before.snapshots} → ${reduced.after.snapshots} snapshots, weights ${hours}h written into the workbook`, 'success');
+      } catch (e) {
+        showToast(e instanceof Error ? e.message : 'Resample failed', 'error');
+      }
+    },
+    [model, prepareModelForBackend, resetForNewModel, showToast],
+  );
+
+  // Visible action: fill objective / stores / generators of the snapshots sheet from the timestamp spacing.
+  const handleSetWeightingsFromSpacing = useCallback(
+    async () => {
+      try {
+        await putStaticModel(prepareModelForBackend(model));
+        const resp = await fetch(`${API_BASE}/api/model/set-weightings-from-spacing`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: DEFAULT_SESSION_ID }),
+        });
+        if (!resp.ok) throw new Error(((await resp.json().catch(() => ({}))) as { detail?: string }).detail || `Set weightings failed (HTTP ${resp.status})`);
+        const report = await resp.json() as { changed: number; rows: number; medianSpacingHours: number | null };
+        await reloadSessionModel();
+        showToast(`Snapshot weightings set from the timestamps: ${report.changed} of ${report.rows} rows changed (median ${report.medianSpacingHours ?? '?'}h)`, 'success');
+      } catch (e) {
+        showToast(e instanceof Error ? e.message : 'Set weightings failed', 'error');
+      }
+    },
+    [model, prepareModelForBackend, reloadSessionModel, showToast],
+  );
+
+  // Rolling horizon refuses cyclic storage; this visible step writes the flags (cyclic_state_of_charge / e_cyclic = false).
+  const handleMakeNonCyclic = useCallback(
+    async () => {
+      try {
+        await putStaticModel(prepareModelForBackend(model));
+        const resp = await fetch(`${API_BASE}/api/model/make-noncyclic`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: DEFAULT_SESSION_ID }),
+        });
+        if (!resp.ok) throw new Error(((await resp.json().catch(() => ({}))) as { detail?: string }).detail || `Make non-cyclic failed (HTTP ${resp.status})`);
+        const out = await resp.json() as { changed: unknown[] };
+        await reloadSessionModel();
+        showToast(out.changed.length ? `${out.changed.length} cyclic storage flag(s) set to false` : 'No cyclic storage in the model', 'success');
+      } catch (e) {
+        showToast(e instanceof Error ? e.message : 'Make non-cyclic failed', 'error');
+      }
+    },
+    [model, prepareModelForBackend, reloadSessionModel, showToast],
   );
 
   // Guard against accidental session loss on browser back / forward / refresh /
@@ -3968,6 +4040,9 @@ function AppInner() {
               onSnapshotStartChange={setSnapshotStart}
               onSnapshotEndChange={setSnapshotEnd}
               onSnapshotWeightChange={setSnapshotWeight}
+              onApplyResolution={handleApplyResolution}
+              onSetWeightingsFromSpacing={handleSetWeightingsFromSpacing}
+              onMakeNonCyclic={handleMakeNonCyclic}
               carbonPrice={carbonPrice}
               onCarbonPriceChange={setCarbonPrice}
               carbonPriceSchedule={carbonPriceSchedule}
@@ -4040,10 +4115,20 @@ function AppInner() {
               requestedStep={guide?.stops[guide.index]?.buildStep ?? null}
               snapshotWeight={snapshotWeight}
               onSnapshotWeightChange={setSnapshotWeight}
-              onGenerateSnapshots={(labels) => {
+              onSetWeightingsFromSpacing={handleSetWeightingsFromSpacing}
+              onGenerateSnapshots={(labels, weightHours) => {
                 // Replace the axis wholesale — the builder has already confirmed
                 // the discard, and a merged axis would misalign every profile.
-                setModel((prev) => ({ ...prev, snapshots: labels.map((snapshot) => ({ snapshot })) }));
+                // With `weightHours` the weightings are written into the sheet's
+                // objective / stores / generators columns (visible, PyPSA's own).
+                setModel((prev) => ({
+                  ...prev,
+                  snapshots: labels.map((snapshot): GridRow => (
+                    weightHours && weightHours > 0
+                      ? { snapshot, objective: weightHours, stores: weightHours, generators: weightHours }
+                      : { snapshot }
+                  )),
+                }));
                 // Widen the run window to the axis just generated when it was
                 // covering everything beforehand. Loading a model already does
                 // this; the builder did not, so generating 3 snapshots into an
@@ -4137,6 +4222,7 @@ function AppInner() {
               onClusterApply={handleClusterApply}
               onTemporalPreview={handleTemporalPreview}
               onTemporalApply={handleTemporalApply}
+              onSetWeightingsFromSpacing={handleSetWeightingsFromSpacing}
               onScaleCarrierCapacity={handleScaleCarrierCapacity}
               onApplySeasonalRating={handleApplySeasonalRating}
               onAttachRenewableProfiles={handleAttachRenewableProfiles}
@@ -4364,10 +4450,11 @@ function AppInner() {
         activeConstraintCount={constraints.filter((row) => row.enabled).length}
         snapshotStart={snapshotStart}
         snapshotEnd={snapshotEnd}
-        snapshotWeight={snapshotWeight}
         pathwayConfig={pathwayConfig}
         rollingConfig={rollingConfig}
         samplingConfig={samplingConfig}
+        resolution={workbookResolution(model.snapshots)}
+        onApplyResolution={handleApplyResolution}
         onForceLpChange={setForceLp}
         onDryRunChange={setDryRun}
         onRun={() => void handleRunModel(false)}

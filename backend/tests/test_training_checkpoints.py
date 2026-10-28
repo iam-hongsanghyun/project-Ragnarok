@@ -440,32 +440,54 @@ def test_module_6_a_day_lets_pumped_hydro_earn(tmp_path: Path) -> None:
     assert worth > 20 * 45.41, "a day should be worth far more than the three-hour figure"
 
 
-def test_module_6_coarsening_error_is_not_monotonic(tmp_path: Path) -> None:
-    """Step 6's centrepiece: the error changes SIGN and jumps.
+def _m6_coarsened(tmp_path: Path, method: str, hours: int) -> float:
+    """Module 6 at ``hours`` through the VISIBLE temporal transform (what Run -> Resolution calls), solved from the written workbook."""
+    from backend.pypsa.network_ops import temporal_cluster
 
-    2h is +0.96%, 4h is -3.24%, 6h is +24.94%. A learner told 'coarser is less
-    accurate' would predict none of that, so the course states it and this pins
-    the figures it states.
+    model = _model_from_example("training_m6", tmp_path)
+    kw = {"offset": f"{hours}h"} if method == "resample" else {"stride": hours}
+    reduced = temporal_cluster(model, method=method, **kw)["model"]
+    n, _notes = build_network(reduced, SCENARIO, OPTIONS)
+    n.optimize(solver_name="highs")
+    return float(n.objective)
+
+
+def test_module_6_coarsening_by_block_means_understates_cost_and_grows_with_the_step(tmp_path: Path) -> None:
+    """Step 6 (re-pinned in core cleanup step 4): the Resolution buttons are the Forge temporal RESAMPLE.
+
+    Before, the buttons were a run-time stride that point-sampled every k-th row; the course's figures (+0.96 %,
+    -3.24 %, +24.94 %, -39.30 %) were the error of that sampling, which is why they changed sign and jumped. A resample
+    takes block MEANS, so the load and the wind keep their daily totals and the only thing lost is the peak: the
+    objective is always below the hourly 52,663.98 and the error grows with the step. The old figures are pinned below
+    as `downsample`, PyPSA's point sampling, because that contrast is now the lesson.
     """
-    base = _solved("training_m6", tmp_path)
-    ref = float(base.objective)
+    ref = float(_solved("training_m6", tmp_path).objective)
+    got = {h: _m6_coarsened(tmp_path, "resample", h) for h in (2, 4, 6, 12)}
+    assert got[2] == pytest.approx(52_489.67, abs=0.01)
+    assert got[4] == pytest.approx(51_630.22, abs=0.01)
+    assert got[6] == pytest.approx(52_489.67, abs=0.01)
+    assert got[12] == pytest.approx(49_190.00, abs=0.01)
+    errors = {h: (v - ref) / ref * 100 for h, v in got.items()}
+    assert errors[2] == pytest.approx(-0.33, abs=0.01) and errors[4] == pytest.approx(-1.96, abs=0.01)
+    assert errors[6] == pytest.approx(-0.33, abs=0.01) and errors[12] == pytest.approx(-6.60, abs=0.01)
+    assert all(e < 0 for e in errors.values())          # block means never see the peak: always an understatement
+    assert errors[12] < errors[4] < errors[2] < 0       # and the coarsest step is the worst
 
-    def at(hours: int) -> float:
-        # Coarsen an UNSOLVED network: PyPSA's copy(snapshots=...) is for
-        # re-scoping a model, not for slicing results off a solved one.
-        model = _model_from_example("training_m6", tmp_path)
-        m, _notes = build_network(model, SCENARIO, OPTIONS)
-        keep = m.snapshots[::hours]
-        m = m.copy(snapshots=keep)
-        m.snapshot_weightings.loc[:, :] = float(hours)
-        m.optimize(solver_name="highs")
-        return (float(m.objective) - ref) / ref * 100
 
-    two, four, six = at(2), at(4), at(6)
+def test_module_6_point_sampling_is_the_dangerous_way_to_coarsen(tmp_path: Path) -> None:
+    """The old stride, now explicit as the Forge `downsample` method: the error changes SIGN and jumps.
+
+    2h is +0.96%, 4h is -3.24%, 6h is +24.94%, 12h is -39.30% (unchanged by step 4: it is PyPSA's own point sampling,
+    weight = stride). A learner told 'coarser is less accurate' would predict none of that.
+    """
+    ref = float(_solved("training_m6", tmp_path).objective)
+    two, four, six, twelve = (
+        (_m6_coarsened(tmp_path, "downsample", h) - ref) / ref * 100 for h in (2, 4, 6, 12)
+    )
     assert two == pytest.approx(0.96, abs=0.05)
     assert four == pytest.approx(-3.24, abs=0.05)
     assert six == pytest.approx(24.94, abs=0.05)
-    # The sign flips, which is the part that makes coarsening dangerous.
+    assert twelve == pytest.approx(-39.30, abs=0.05)
     assert two > 0 > four and six > 0
 
 
@@ -819,17 +841,22 @@ def test_module_11_ramp_limit_costs_1000_in_the_hours_beside_the_dip(tmp_path: P
 
 
 def test_module_11_force_lp_is_a_bound_and_the_only_run_that_prices(tmp_path: Path) -> None:
-    """The relaxation: 7,200, below both committed answers, with usable duals.
+    """The relaxation: 8,640, below the committed 8,800, with usable duals.
 
-    It is also the regression test for the p_min_pu trap — if Force LP left the
-    0.4 floor behind, the "relaxation" would come back at 8,800, ABOVE the MILP
-    it is supposed to bound.
+    Re-pinned in core cleanup step 5 (D12): Force LP is PyPSA's own ``linearized_unit_commitment`` and clears
+    nothing, so the minimum load while running (p_min_pu 0.4), the start-up cost and the times stay in the
+    relaxation as continuous constraints. It used to clear ``committable`` and ``p_min_pu`` and solve a plain
+    dispatch LP: 7,200 and prices 20/20/0/0/20/20, a looser bound that threw the unit's operating limits away.
+    The p_min_pu trap it was written to avoid (a floor left behind turning the bound into 8,800+) cannot occur
+    now: the floor is still a floor only while the unit is committed.
     """
     res = _run(_m11(tmp_path), {"forceLp": True})
-    assert _cost(res, "Fuel cost") == pytest.approx(7_200.0, rel=1e-6)
+    assert _cost(res, "Fuel cost") == pytest.approx(8_640.0, rel=1e-6)
+    assert 7_200.0 < _cost(res, "Fuel cost") < 8_800.0   # between plain dispatch and the committed answer
     assert res["commitment"] is None
     prices = [p["value"] for p in res["systemPriceSeries"]]
-    assert prices == pytest.approx([20.0, 20.0, 0.0, 0.0, 20.0, 20.0], abs=1e-6)
+    assert prices == pytest.approx([20.0, 20.0, 0.0, 0.0, 36.0, 20.0], abs=1e-6)
+    assert any("linearized" in n and "unit commitment" in n for n in res["narrative"])
 
 
 def test_module_11_commitment_run_warns_that_its_prices_are_not_prices(tmp_path: Path) -> None:
@@ -1861,7 +1888,7 @@ def test_module_17_state_of_charge_boundaries_are_free_energy_or_a_forbidden_car
 
 
 def test_module_17_rolling_horizon_terminal_soc_only_governs_the_last_window(tmp_path: Path) -> None:
-    """Step 7: a soft target of the horizon-start energy on the final window (default on)."""
+    """Step 7: a soft target of the horizon-start energy on the final window (an explicit option, default OFF since core cleanup step 5)."""
     from backend.pypsa.results import run_pypsa
     from backend.pypsa.rolling import auto_terminal_penalty
 
@@ -1976,9 +2003,13 @@ def test_module_17_kpi_strip_strings_the_lessons_quote(tmp_path: Path) -> None:
     assert strip("training_m17_start", {"snapshotStart": 0, "snapshotCount": 24})["totalCost"] == "$319,003"
     day2 = strip(options={"snapshotStart": 24, "snapshotCount": 24})
     assert day2["totalCost"] == "$326,985" and prices(day2) == (80.0, 88.6)
-    rolled = strip(options={"rollingConfig": {"enabled": True, "horizonSnapshots": 24, "overlapSnapshots": 0}},
+    rolling = {"enabled": True, "horizonHours": 24, "overlapHours": 0}
+    rolled = strip(options={"rollingConfig": {**rolling, "terminalSoc": True}},
                    cyclic_state_of_charge=False, state_of_charge_initial=200.0)
     assert rolled["totalCost"] == "$875,602"
+    # re-pinned in step 5 (B1): the terminal target is an explicit option, so the default rolling run has none
+    default = strip(options={"rollingConfig": rolling}, cyclic_state_of_charge=False, state_of_charge_initial=200.0)
+    assert default["totalCost"] == "$858,347"
 
 
 def test_module_17_storage_energy_balance_dual_is_the_price_of_the_energy_it_holds(tmp_path: Path) -> None:

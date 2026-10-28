@@ -19,6 +19,8 @@ from ..pathway import parse_pathway_config
 from ..rolling import (
     auto_terminal_penalty,
     parse_rolling_config,
+    resolve_rolling,
+    rolling_cyclic_problem,
     terminal_soc_hook,
     terminal_soc_targets,
 )
@@ -35,7 +37,9 @@ from ..utils.series import weighted_sum
 from ..network.custom_constraints import apply_custom_constraints
 from ..network.constraint_dsl import apply_constraint_specs, apply_dsl_constraints
 from ..network.reserves import apply_reserve_constraints, extract_reserve_results
-from ..network.ramp import apply_ramp_constraints, extract_ramp_results, strip_native_ramp_columns
+from ..network.ramp import extract_ramp_results
+from ..network.time_units import step_hours
+from ..utils.shedding import is_shedding, shedding_mask, shedding_names
 from .dispatch import (
     build_curtailment_series,
     curtailment_mw_by_generator,
@@ -241,7 +245,7 @@ def _rolling_unsupported(network: Any) -> str | None:
             continue
         mask = frame[flag].astype(bool)
         if list_name == "generators":
-            mask = mask & ~frame.index.astype(str).str.startswith("load_shedding_")
+            mask = mask & ~frame.index.isin(shedding_names(frame))
         if bool(mask.any()):
             problems.append(f"{int(mask.sum())} {list_name} with {flag}=true")
     if len(network.global_constraints):
@@ -520,7 +524,8 @@ def run_pypsa(
     snapshot_weight = float(network.snapshot_weightings["objective"].iloc[0]) if snapshot_count else 1.0
 
     if rolling.enabled:
-        rolling_problem = _rolling_unsupported(network)
+        rolling = resolve_rolling(rolling, step_hours(network)[0])  # hours -> snapshot counts (noted in build_network)
+        rolling_problem = _rolling_unsupported(network) or rolling_cyclic_problem(network)
         if rolling_problem:
             raise HTTPException(status_code=400, detail=rolling_problem)
 
@@ -590,16 +595,6 @@ def run_pypsa(
             status_code=400,
             detail="Operating-reserve co-optimization cannot be combined with stochastic scenarios.",
         )
-    ramp_cfg: dict[str, Any] = options.get("rampConfig") or {}
-    ramp_enabled = bool(ramp_cfg.get("enabled"))
-    if ramp_enabled and stochastic.enabled:
-        # Same reason reserve is guarded: stochastic (set_scenarios) adds a
-        # `scenario` dimension to Generator-p, which the ramp constraint
-        # builder can't key its snapshot-shifted variable selection against.
-        raise HTTPException(
-            status_code=400,
-            detail="Ramp-rate limits cannot be combined with stochastic scenarios.",
-        )
     # P2X / RFNBO hourly-or-monthly matching (Delegated Reg. (EU) 2023/1184 Art. 6): resolved
     # BEFORE the solve so a mis-designated chain is a 400 and not a silent zero-electrolyser run.
     from ..network import rfnbo as _rfnbo
@@ -617,12 +612,6 @@ def run_pypsa(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if cofiring_plan and stochastic.enabled:
         raise HTTPException(status_code=400, detail="Co-firing blend-share limits cannot be combined with stochastic scenarios.")
-    if ramp_enabled:
-        # Cache per-generator ramp overrides and blank the native columns BEFORE
-        # the solve, so PyPSA's own (unweighted) ramp constraint doesn't fire on
-        # top of this module's Δt-weighted one. Must precede optimize.
-        strip_native_ramp_columns(network)
-
     def extra_functionality(n, snapshots):
         # `snapshots` is the window being optimised — for rolling horizon it is a
         # single window, not the full run. Pass it through so weights/hours and
@@ -641,11 +630,6 @@ def run_pypsa(
         # mutates existing ones, so ordering is not correctness-critical).
         if reserve_enabled:
             apply_reserve_constraints(n, reserve_cfg, snapshots, notes)
-        # Timestep-weighted ramp-rate limits — added last for the same reason:
-        # it only adds new constraints on the existing Generator-p / p_nom
-        # variables, never mutates anything the constraints above built.
-        if ramp_enabled:
-            apply_ramp_constraints(n, ramp_cfg, snapshots, notes)
         # RFNBO temporal matching: electrolyser electricity <= designated RES output per period.
         if rfnbo_plan:
             _rfnbo.apply_rfnbo_constraints(n, rfnbo_plan, snapshots, notes)
@@ -674,23 +658,6 @@ def run_pypsa(
     _t_solve = time.perf_counter()
     try:
         if rolling.enabled:
-            # Rolling horizon carries storage state between windows via
-            # `state_of_charge_initial` (set from the previous window's end).
-            # Cyclic SOC (soc_end == soc_start within each window) is INCOMPATIBLE:
-            # it ignores the carried state and forces every window — especially the
-            # shorter trailing one — to net-zero storage, which is frequently
-            # infeasible. PyPSA then silently leaves that window's results at zero,
-            # truncating the run. Force non-cyclic so carried state provides
-            # continuity across the full horizon.
-            if not network.storage_units.empty:
-                network.storage_units["cyclic_state_of_charge"] = False
-                if "cyclic_state_of_charge_per_period" in network.storage_units.columns:
-                    network.storage_units["cyclic_state_of_charge_per_period"] = False
-            if not network.stores.empty:
-                if "e_cyclic" in network.stores.columns:
-                    network.stores["e_cyclic"] = False
-                if "e_cyclic_per_period" in network.stores.columns:
-                    network.stores["e_cyclic_per_period"] = False
             rolling_windows = _rolling_window_summaries(
                 network.snapshots,
                 rolling.horizon_snapshots,
@@ -699,6 +666,8 @@ def run_pypsa(
             # RE7: without a terminal condition the last window drains storage to zero.
             # Soft target = horizon-start energy (penalised shortfall, never infeasible).
             rolling_extra = extra_functionality
+            if not rolling.terminal_soc:
+                notes.append("Rolling horizon: terminal SOC target off (rollingConfig.terminalSoc); the last window may end with empty storage.")
             if rolling.terminal_soc and not pathway.enabled and len(network.snapshots):
                 _terminal_targets = terminal_soc_targets(network)
                 if _terminal_targets["StorageUnit"] or _terminal_targets["Store"]:
@@ -1049,6 +1018,7 @@ def _build_solved_payload(
     ess_enabled = bool(ess_cfg.get("enabled", False))
     reserve_cfg = options.get("reserveConfig") or {}
     ramp_cfg = options.get("rampConfig") or {}
+    oo = parse_optimise_options(options)  # Force-LP implies linearized unit commitment
     ppa_cfg = options.get("ppaConfig") or {}
     ppa_enabled = bool(ppa_cfg.get("enabled", False))
 
@@ -1100,7 +1070,7 @@ def _build_solved_payload(
     # System price = nodal prices weighted by nodal load (an unweighted bus mean
     # lets a load-free bus drag it); averages below are snapshot-weighted.
     price_series = system_price_series(network, elec_scope, load_p_set)
-    shed_cols = [n for n in network.generators.index if n.startswith("load_shedding_")]
+    shed_cols = shedding_names(network.generators)  # by carrier; legacy names recognised
     load_shed = dispatch_frame.reindex(columns=shed_cols, fill_value=0.0).sum(axis=1)
     generator_weights = network.snapshot_weightings["generators"].reindex(network.snapshots).fillna(1.0)
     store_weights = network.snapshot_weightings["stores"].reindex(network.snapshots).fillna(1.0)
@@ -1112,7 +1082,7 @@ def _build_solved_payload(
     # its optimised p_nom_opt can be large. The combined total drives the
     # reserve position.
     _gen_installed = installed_capacity_series(network.generators)
-    _real_gen = ~network.generators.index.str.startswith("load_shedding_")
+    _real_gen = ~shedding_mask(network.generators).to_numpy()
     if elec_scope is not None and "bus" in network.generators.columns:
         # Sector-coupled: fuel-supply pseudo-generators on gas/heat/H₂ buses are
         # not electric capacity — count electricity-bus generators only.
@@ -1151,7 +1121,7 @@ def _build_solved_payload(
     # makes the same exclusion by the ``load_shedding_`` name prefix.
     shed_carriers = set(
         network.generators.loc[
-            network.generators.index.str.startswith("load_shedding_"), "carrier"
+            shedding_mask(network.generators).to_numpy(), "carrier"
         ].unique()
     )
 
@@ -1186,7 +1156,7 @@ def _build_solved_payload(
     }
     generator_energy = []
     for gen in generator_dispatch_frame.columns:
-        if str(gen).startswith("load_shedding_"):
+        if is_shedding(gen, generator_carriers.get(gen)):
             continue
         energy = weighted_sum(generator_dispatch_frame[gen].clip(lower=0.0), generator_weights)
         if energy > 0.0:
@@ -1232,7 +1202,8 @@ def _build_solved_payload(
     carbon_cfg = carbon_pricing.plan_of(network) or carbon_pricing.config_from_run(scenario, options)
     carbon_price_series = carbon_pricing.price_series(carbon_cfg, network.snapshots)
     marginal_cost_by_gen = generator_operating_cost(network, weighted=True)
-    shed_names = [g for g in marginal_cost_by_gen.index if str(g).startswith("load_shedding_")]
+    _shed_set = set(shedding_names(network.generators))
+    shed_names = [g for g in marginal_cost_by_gen.index if g in _shed_set]
     shed_cost = float(marginal_cost_by_gen.reindex(shed_names).sum())
     fuel_cost = float(marginal_cost_by_gen.sum()) - shed_cost
     carbon_by_gen = carbon_pricing.carbon_cost_by_generator(network, carbon_cfg)
@@ -1475,10 +1446,11 @@ def _build_solved_payload(
         if "committable" in network.generators.columns else []
     if committable_gens:
         notes.append(
-            f"MIP unit commitment enabled for {len(committable_gens)} generator(s): {', '.join(committable_gens[:5])}"
+            ("LP-relaxed (linearized)" if oo.linearized_unit_commitment else "MIP")
+            + f" unit commitment for {len(committable_gens)} generator(s): {', '.join(committable_gens[:5])}"
             + (" …" if len(committable_gens) > 5 else "") + "."
         )
-        if not bool(options.get("forceLp", False)):
+        if not oo.linearized_unit_commitment:
             # A MILP has no duals. PyPSA still populates buses_t.marginal_price,
             # but the values come from whatever the solver left behind and are
             # routinely a flat zero — which reads as "power was free" rather
@@ -1660,7 +1632,8 @@ def _build_solved_payload(
     # (price-setting) carrier each snapshot. Best-effort; None on non-LP runs.
     price_formation = build_price_formation(network, currency=currency)
     # Unit-commitment view (Tier 1) — starts, start-up costs, on/off patterns.
-    commitment = build_commitment(network, currency=currency)
+    # Force-LP / linearized unit commitment: the status variables are fractions, which are not a schedule.
+    commitment = None if oo.linearized_unit_commitment else build_commitment(network, currency=currency)
     maintenance = build_maintenance(network)
     phase_shifters = build_phase_shifters(network)
     # PPA contract valuation (PP1) — value a fixed-price PPA against the LMP.
@@ -1867,6 +1840,9 @@ def _build_solved_payload(
             "rolling": {
                 "enabled": rolling.enabled,
                 "horizonSnapshots": rolling.horizon_snapshots,
+                "horizonHours": rolling.horizon_hours,
+                "overlapHours": rolling.overlap_hours,
+                "terminalSoc": rolling.terminal_soc,
                 "overlapSnapshots": rolling.overlap_snapshots,
                 "stepSnapshots": rolling.step_snapshots,
                 "windowCount": len(rolling_windows),
@@ -1900,6 +1876,9 @@ def _build_solved_payload(
         "rolling": {
             "enabled": rolling.enabled,
             "horizonSnapshots": rolling.horizon_snapshots,
+            "horizonHours": rolling.horizon_hours,
+            "overlapHours": rolling.overlap_hours,
+            "terminalSoc": rolling.terminal_soc,
             "overlapSnapshots": rolling.overlap_snapshots,
             "stepSnapshots": rolling.step_snapshots,
             "windowCount": len(rolling_windows),

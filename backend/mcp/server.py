@@ -431,7 +431,7 @@ _ANALYTICS_REFERENCE: list[dict[str, Any]] = [
     {
         "optionKey": "rampConfig",
         "resultKey": "ramp",
-        "purpose": "Timestep-weighted ramp-rate limits — bounds how fast each unit's output can change between snapshots (|Δp| ≤ ramp% × p_nom × hours).",
+        "purpose": "Default ramp rate (fraction of p_nom per HOUR) for units without their own: written into RAGNAROK_TimeUnits terms, converted for the run's weights (min(1, rate x hours per snapshot)) and enforced by PyPSA's native ramp constraint (also across rolling windows).",
         "config": {
             "enabled": "bool",
             "rampLimitUp": "max upward ramp, fraction of p_nom per hour (0.5 = 50%/h)",
@@ -2498,3 +2498,4 @@ from . import tools_plants  # noqa: E402,F401
 
 # Carbon-pricing and annual-budgets module tools.
 from . import tools_policy_modules  # noqa: E402,F401
+from . import tools_operations_modules  # noqa: E402,F401

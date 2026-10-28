@@ -93,9 +93,9 @@ _SCALARS: list[RunOption] = [
     RunOption("options.snapshotStart", "integer", "First snapshot row (0-based index into the snapshots sheet) of the modelled window.", 0, "snapshot rows", reader=_NETWORK + " (windowing)"),
     RunOption("options.snapshotEnd", "integer", "End of the window, exclusive. Used as end - start when snapshotCount is absent. end <= start refuses the run.", None, "snapshot rows", reader=_NETWORK),
     RunOption("options.snapshotCount", "integer", "Number of snapshots modelled from snapshotStart. Wins over snapshotEnd. <= 0 refuses the run. Absent (with snapshotEnd) = every snapshot.", None, "snapshot rows", reader=_NETWORK),
-    RunOption("options.snapshotWeight", "integer", "Stride: model every Nth snapshot and weight each by N (a coarse test run). 1 = every snapshot.", 1, "rows per modelled step", reader=_NETWORK),
-    RunOption("options.forceLp", "boolean", "Relax committable=True (unit commitment MIP) to a plain LP, and clear the p_min_pu floors left on de-committed units.", False, reader=_NETWORK + " (Force-LP)"),
-    RunOption("options.enableLoadShedding", "boolean", "Add a per-bus unserved-energy generator at loadSheddingCost so an infeasible-by-capacity model solves instead of failing.", False, reader="backend/pypsa/network/load_shedding.py"),
+    RunOption("options.snapshotWeight", "integer", "REMOVED as a run option (core cleanup step 4): a value above 1 refuses the run (it used to point-sample every Nth row). Resolution is a visible transform: Forge -> Temporal, POST /api/transform/temporal (resample 'Nh' takes block means and writes the snapshots, weightings and series into the workbook). Only 1 is accepted; it is read for stored runs from before build version 4.", 1, "rows per modelled step", reader=_NETWORK),
+    RunOption("options.forceLp", "boolean", "PyPSA's linearized unit commitment: the committable binaries become continuous, every UC constraint stays (nothing is cleared). Refused for maintainable units: run the visible step 'Relax maintenance' (POST /api/model/relax-maintenance) first.", False, reader="backend/pypsa/optimise_options.py (linearized_unit_commitment); " + _NETWORK),
+    RunOption("options.enableLoadShedding", "boolean", "Call PyPSA's n.optimize.add_load_shedding: one generator per bus (\"<bus> load shedding\", carrier LoadShedding) at loadSheddingCost, sized by the system peak of static and time-series loads, so an infeasible-by-capacity model solves instead of failing.", False, reader="backend/pypsa/network/load_shedding.py"),
     RunOption("options.loadSheddingCost", "number", "Value of lost load for the shedding generators.", 1000, "currency/MWh", reader="backend/pypsa/network/load_shedding.py"),
     RunOption("options.ownerColumn", "string", "Name of the generators/storage column holding the owner/company tag, used by company, merchant, bid-strategy, PPA and asset-swap analyses.", "owner", reader=_RESULTS + ", backend/pypsa/results/company.py"),
     RunOption("options.carbonPriceSchedule[]", "object[]", "Year -> carbon price curve; overrides scenario.carbonPrice per snapshot (each snapshot takes its year's row; see backend/app/carbon_pricing/config.py for the year-resolution rule). Fields: year, price.", [], reader="backend/app/carbon_pricing/config.py"),
@@ -115,21 +115,21 @@ _SCALARS: list[RunOption] = [
     RunOption("options.solverThreads", "integer", "HiGHS threads. 0 = automatic: the queue splits the machine's cores between concurrent solves.", 0, "threads", reader=_RESULTS + " (_build_solver_options), main.py (_resolve_cores)"),
     RunOption("options.solveAcceptance", "string", "lenient also accepts a validated solve whose HiGHS condition is 'unknown' (interior point without crossover); strict needs condition 'optimal'.", "lenient", allowed=["lenient", "strict"], reader=_RESULTS),
     RunOption("options.objectiveAutoScale", "boolean", "Pass HiGHS user_objective_scale=-1 (results-neutral; faster on wide cost ranges). The UI sends true; absent means off.", True, reader=_RESULTS + " (_build_solver_options)"),
-    RunOption("options.buildVersion", "integer", "Build schema the run was built under (2 = PyPSA cost semantics; 3 = carbon price as an objective term and e_sum / GlobalConstraint constants as PyPSA horizon totals). Stamped by the server on every stored run; a run without it is re-derived through the legacy-run migration. Not sent by the UI.", None, source="api", reader=_NETWORK),
+    RunOption("options.buildVersion", "integer", "Build schema the run was built under (2 = PyPSA cost semantics; 3 = carbon price as an objective term and e_sum / GlobalConstraint constants as PyPSA horizon totals). 4 = no run-time stride, test-run sampling and rolling in hours as modules, ramps and UC times in RAGNAROK_TimeUnits, PyPSA's own ramp constraint and load shedding. Stamped by the server on every stored run; a run without it is re-derived through the legacy-run migration (including the old stride). Not sent by the UI.", None, source="api", reader=_NETWORK),
 ]
 
 # ── nested config blocks: field -> (type, unit, meaning[, allowed]) ──────────
 
 _BLOCK_INFO: dict[str, tuple[str, str]] = {
     "pathwayConfig": ("Multi-year investment pathway (PyPSA investment periods): capacity is optimised across periods, each weighted. Needs a 'period' column on every snapshots row (snapshotMappingMode explicit_period_column) and enabled=true.", "backend/pypsa/pathway.py (parse_pathway_config), network/validators.py"),
-    "rollingConfig": ("Rolling-horizon dispatch: solve overlapping windows in sequence, carrying storage state across them.", "backend/pypsa/rolling.py"),
+    "rollingConfig": ("Rolling-horizon dispatch: PyPSA solves overlapping windows in sequence, carrying storage state, dispatch and commitment across them. Window and overlap are given in HOURS and converted with the weights the run uses. Cyclic storage is refused (visible step: POST /api/model/make-noncyclic).", "backend/pypsa/rolling.py"),
     "samplingConfig": ("Sampled snapshot blocks ('test run'): solve a reduced, re-weighted snapshot set that represents the full window.", "backend/pypsa/sampling.py"),
-    "stochasticConfig": ("Two-stage stochastic planning: shared investment, per-scenario dispatch under weighted uncertainty overrides. Cannot be combined with custom constraints, reserve or ramp limits.", "backend/pypsa/stochastic.py"),
+    "stochasticConfig": ("Two-stage stochastic planning: shared investment, per-scenario dispatch under weighted uncertainty overrides. Cannot be combined with custom constraints or reserve.", "backend/pypsa/stochastic.py"),
     "securityConstrainedConfig": ("SCLOPF - security-constrained optimal power flow (N-1 line outages inside the solve).", _RESULTS),
     "reserveConfig": ("Operating-reserve co-optimisation: units keep headroom; a reserve price is reported next to the energy price. Not with stochastic.", "backend/pypsa/network/reserves.py"),
     "outageMcConfig": ("Thermal forced-outage Monte Carlo: distribution of LOLE / EUE over synthetic years.", "backend/pypsa/results/outage_mc.py"),
     "correlatedSamplingConfig": ("Correlated multi-driver Monte Carlo: one weather stress factor moves demand up and renewables/inflow down together.", "backend/pypsa/results/correlated_sampling.py"),
-    "rampConfig": ("Timestep-weighted ramp-rate limits: |dp| <= ramp x p_nom x hours per step. Not with stochastic.", "backend/pypsa/network/ramp.py"),
+    "rampConfig": ("Default ramp rate (fraction of p_nom per hour) for generators without their own, written into RAGNAROK_TimeUnits terms and converted for the run's weights; PyPSA's native ramp constraint enforces it (also under rolling horizon and stochastic).", "backend/pypsa/network/time_units.py (ramp_config_rows)"),
     "elccConfig": ("Effective load-carrying capability (capacity credit) of wind/solar/storage via outage-inclusive LOLE.", "backend/pypsa/results/elcc.py"),
     "convergenceConfig": ("Convergence-controlled outage sampling: draw batches until the target metric's standard error is below tolerance; optional maintenance placement.", "backend/pypsa/results/convergence.py"),
     "lmpDecompositionConfig": ("Split each bus's LMP into energy + congestion and report congestion rent. Post-process, does not change the solve.", "backend/pypsa/results/lmp_decomposition.py"),
@@ -164,8 +164,13 @@ _FIELDS: dict[str, dict[str, tuple]] = {
     },
     "rollingConfig": {
         "enabled": (_B, None, "Solve in rolling windows."),
-        "horizonSnapshots": (_I, "snapshots", "Window length."),
-        "overlapSnapshots": (_I, "snapshots", "Overlap between consecutive windows (0 <= overlap < horizon)."),
+        "horizonHours": (_N, "hours", "Window length in hours; converted to snapshots as ceil(hours / step) with the run's weights. Wins over horizonSnapshots."),
+        "overlapHours": (_N, "hours", "Overlap between consecutive windows in hours (0 <= overlap < horizon)."),
+        "terminalSoc": (_B, None, "Soft terminal state of charge on the LAST window (RE7): storage units and stores must end the horizon with at least their horizon-start energy, "
+                        "enforced as soc_end + shortfall >= initial with a penalised shortfall (options.rollingConfig.terminalSocPenalty), so it can never make a window infeasible. "
+                        "An explicit option of the rolling module, default OFF; declared in the run notes when on. Ignored in pathway runs."),
+        "horizonSnapshots": (_I, "snapshots", "Window length in snapshots (old presets; ignored when horizonHours is set)."),
+        "overlapSnapshots": (_I, "snapshots", "Overlap in snapshots (old presets; ignored when overlapHours is set)."),
         "stepSnapshots": (_I, "snapshots", "horizon - overlap; derived and echoed by the UI, the backend recomputes it."),
     },
     "samplingConfig": {
@@ -174,6 +179,7 @@ _FIELDS: dict[str, dict[str, tuple]] = {
         "blockSize": (_I, "snapshots", "Snapshots per block (>= 1)."),
         "blockCount": (_I, "blocks", "Blocks, mode count (>= 1)."),
         "gapSnapshots": (_I, "snapshots", "Skipped snapshots between blocks, mode gap (>= 0)."),
+        "scaleStartUpCosts": (_B, None, "Multiply start_up_cost / shut_down_cost of committable units by the representation factor (PyPSA charges them per event, unweighted). Default true; declared in the run notes."),
     },
     "stochasticConfig": {
         "enabled": (_B, None, "Run stochastic."),
@@ -220,7 +226,7 @@ _FIELDS: dict[str, dict[str, tuple]] = {
         "inflowStd": (_N, "-", "Independent inflow noise, std dev."),
     },
     "rampConfig": {
-        "enabled": (_B, None, "Apply ramp limits."),
+        "enabled": (_B, None, "Fill RAGNAROK_TimeUnits with a default ramp rate for generators that have none of their own; the time-units module converts it for the run's weights and PyPSA's native ramp constraint enforces it."),
         "rampLimitUp": (_N, "fraction of p_nom per hour", "Max upward ramp, 0.5 = 50%/h."),
         "rampLimitDown": (_N, "fraction of p_nom per hour", "Max downward ramp."),
         "appliesTo": (_S, None, "thermal excludes variable renewables.", ["all", "thermal"]),

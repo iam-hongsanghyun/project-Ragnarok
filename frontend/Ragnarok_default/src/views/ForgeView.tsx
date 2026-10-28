@@ -65,6 +65,8 @@ interface Props {
   onTemporalPreview?: (opts: TemporalOptions) => Promise<TemporalResult>;
   /** Replace the working model with a previewed temporally-clustered model. */
   onTemporalApply?: (model: WorkbookModel) => void;
+  /** Visible action: fill the snapshot weightings from the timestamp spacing (POST /api/model/set-weightings-from-spacing). */
+  onSetWeightingsFromSpacing?: () => Promise<void> | void;
   /** P18 — write `lines-s_max_pu` from summer/winter MVA ratings (PyPSA apply_seasonal_rating). */
   onApplySeasonalRating?: (opts: SeasonalRatingOptions) => Promise<SeasonalRatingResult>;
   /** Attach Open-Meteo weather profiles to the existing renewable fleet by
@@ -262,7 +264,7 @@ function SearchableMultiSelect({
   );
 }
 
-export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEditApply, onClusterPreview, onClusterApply, onTemporalPreview, onTemporalApply, onScaleCarrierCapacity, onApplySeasonalRating, onAttachRenewableProfiles, onRetargetSnapshots, onForecastSnapshots, onDriverForecast, onEvDemand, onAttachHydroInflow }: Props) {
+export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEditApply, onClusterPreview, onClusterApply, onTemporalPreview, onTemporalApply, onSetWeightingsFromSpacing, onScaleCarrierCapacity, onApplySeasonalRating, onAttachRenewableProfiles, onRetargetSnapshots, onForecastSnapshots, onDriverForecast, onEvDemand, onAttachHydroInflow }: Props) {
   // Persisted so the chosen tool + validation result survive leaving and
   // returning to the Forge tab (the view unmounts on tab switch). The findings
   // scan the whole model, so these three drivers fully restore the result.
@@ -789,6 +791,7 @@ export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEdi
             <TemporalClusterPanel
               onTemporalPreview={onTemporalPreview}
               onTemporalApply={onTemporalApply}
+              onSetWeightingsFromSpacing={onSetWeightingsFromSpacing}
               onStatus={setStatus}
             />
           ) : (

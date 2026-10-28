@@ -48,6 +48,7 @@ import { snapshotTimestamps } from 'lib/results/snapshotWindow';
 import { ScenariosSection } from './SettingsView.sections/Scenarios';
 import type { BatchMode } from '../features/scenario/ScenarioDiffTable';
 import { WindowSection } from './SettingsView.sections/Window';
+import { workbookResolution } from 'lib/results/resolution';
 import { CarbonSection } from './SettingsView.sections/Carbon';
 import { AnnualBudgetsSection } from './SettingsView.sections/AnnualBudgets';
 import { PlanningSection } from './SettingsView.sections/Planning';
@@ -266,6 +267,12 @@ export interface SettingsViewProps {
   onSnapshotStartChange: (v: number) => void;
   onSnapshotEndChange: (v: number) => void;
   onSnapshotWeightChange: (v: number) => void;
+  /** Resample the working workbook to `hours` (a visible Forge → Temporal transform). */
+  onApplyResolution?: (hours: number) => Promise<void> | void;
+  /** Fill the snapshot weightings from the timestamp spacing (visible workbook action). */
+  onSetWeightingsFromSpacing?: () => Promise<void> | void;
+  /** Rolling horizon: write the cyclic storage flags false (visible workbook step). */
+  onMakeNonCyclic?: () => Promise<void> | void;
   carbonPrice: number;
   onCarbonPriceChange: (v: number) => void;
   carbonPriceSchedule: CarbonPriceScheduleEntry[];
@@ -388,7 +395,7 @@ export function SettingsView(props: SettingsViewProps) {
 
       <main className="settings-section-main">
         {section === 'scenarios'      && <ScenariosSection {...props} />}
-        {section === 'window'         && <WindowSection {...props} snapshotTimestamps={snapshotTimestamps(props.model.snapshots)} />}
+        {section === 'window'         && <WindowSection {...props} snapshotTimestamps={snapshotTimestamps(props.model.snapshots)} resolution={workbookResolution(props.model.snapshots)} />}
         {section === 'carbon'         && <CarbonSection {...props} />}
         {section === 'annualBudgets'  && <AnnualBudgetsSection />}
         {section === 'planning'       && <PlanningSection {...props} />}

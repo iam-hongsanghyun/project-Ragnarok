@@ -139,7 +139,7 @@ by `export_run`), the country GeoJSON and `DELETE /api/log`.
 
 ### 2.7 MCP-only modelling and scenario tools
 
-The MCP server has 189 tools: 116 in `backend/mcp/server.py` (§2.1–§2.6 group most of them, not all) and 73 in
+The MCP server has 196 tools: 116 in `backend/mcp/server.py` (§2.1–§2.6 group most of them, not all) and 80 in
 `backend/mcp/tools_*.py`. The table below covers the 38 added before 2026-10-28; `compare_run_statistics` (tools_results_extra.py, read-only, `GET /api/results/compare?topics=statistics`) compares runs through `pypsa.NetworkCollection` statistics, and `get_metric_options` (same module, read-only, `GET /api/runs/{name}/metrics`), `get_period_results` (same module, read-only, `GET /api/runs/{name}/period/{period}`) and `get_run_analysis` (same module, read-only, `GET /api/runs/{name}/analysis/{topic}`) are listed in the last table below. The GUI reaches the same backend routes through its own
 controls (Forge, the Solver section, the Scenarios panel). This table is a snapshot from 2026-10-28, read from the
 code: the tool name and module from the `@mcp.tool` decorator, the endpoints from the `RagnarokClient` method each
@@ -245,6 +245,16 @@ MCP `list_tools` call returns the full descriptions, and `describe_run_options` 
 | `list_plant_types`, `get_plant_results` | — | Plant types and defaults; per-plant generation, CF, starts, H2 share and CO2 avoided |
 | `add_plant`, `edit_plant`, `remove_plant` | confirm | Add, re-derive or remove a whole plant (Generator, BESS, CCGT/OCGT, co-firing, P2X chain) |
 
+**Operations and temporal modules (`tools_operations_modules.py`)** — PyPSA counts ramps, UC times and rolling windows per snapshot; these tools keep the user's hours and per-hour rates visible and write the per-snapshot values at solve time with the run's weights. See [backend.md](backend.md) §5.13.
+
+| Tool | Gate | What it does |
+|---|---|---|
+| `get_time_units`, `preview_time_units` | — | The stated ramp and UC-time rows (`RAGNAROK_TimeUnits`), and what a run would write for PyPSA from them |
+| `set_time_units` | confirm | Upsert time-unit rows (hours / minutes, per_hour / per_minute) |
+| `set_weightings_from_spacing` | confirm | Fill the snapshot weightings from the timestamp spacing |
+| `sample_workbook` | confirm | Write test-run sampling (snapshots, weights, averaged series) into the workbook |
+| `make_noncyclic_for_rolling`, `relax_maintenance` | confirm | The visible steps rolling horizon and Force-LP ask for: cyclic flags off; `maintainable` off |
+
 ---
 
 ## 3. LLM provider abstraction
@@ -322,7 +332,7 @@ A new **Assistant** tab (activity bar), consistent with the existing view shell:
 
 | Phase | Deliverable | Leans on |
 |---|---|---|
-| **0 · MCP prototype** ✅ *shipped* | An MCP server (`backend/mcp/`) — 189 tools spanning the full surface (§2.7 lists the newest 73): introspect + **schema** (`list_components`/`describe_component`/`describe_run_options` over the live PyPSA registry) · data-in · edit · **generic component CRUD** (`add_component`/`set_component`/`remove_component` cover every PyPSA component + attribute) + typed `add_*` conveniences · series transforms · solve (all modes via free-form scenario/options) · analyse · plugins. Drivable from any MCP client with any model. See §10 to connect a client. | existing API |
+| **0 · MCP prototype** ✅ *shipped* | An MCP server (`backend/mcp/`) — 196 tools spanning the full surface (§2.7 lists the newest 80): introspect + **schema** (`list_components`/`describe_component`/`describe_run_options` over the live PyPSA registry) · data-in · edit · **generic component CRUD** (`add_component`/`set_component`/`remove_component` cover every PyPSA component + attribute) + typed `add_*` conveniences · series transforms · solve (all modes via free-form scenario/options) · analyse · plugins. Drivable from any MCP client with any model. See §10 to connect a client. | existing API |
 | **1 · Embedded agent (L1 shell)** | `LLMProvider` abstraction + Claude API adapter + the plan/act/observe loop + a minimal Assistant chat tab (stream + tool cards). Happy path: "build KOR, solve, report." | Phase 0 tools |
 | **2 · Guardrails & grounding** | confirmation gates, budgets, world-state summarisation, schema retrieval tools, exemplars. | pypsa_schema_builder |
 | **3 · Verification loop** | validate-before-solve, Q2 repair loop, Ember/adequacy sanity, cited report generator. | Q2, I7, A2 |

@@ -68,6 +68,7 @@ import pandas as pd
 import pypsa
 
 from ..constants import carrier_color
+from ..utils.shedding import shedding_names
 
 _log = logging.getLogger("pypsa.solver")
 
@@ -163,8 +164,8 @@ def apply_reserve_constraints(
             use_fraction = True
 
         gens = n.generators
-        supply_gens = [g for g in gens.index if not str(g).startswith("load_shedding_")]
-        shed_gens = [g for g in gens.index if str(g).startswith("load_shedding_")]
+        shed_gens = shedding_names(gens)
+        supply_gens = [g for g in gens.index if g not in set(shed_gens)]
         eligible = _eligible_generators(n, supply_gens, shed_gens, providers)
 
         if not eligible:
@@ -332,8 +333,8 @@ def extract_reserve_results(
             use_fraction = True
 
         gens = n.generators
-        supply_gens = [g for g in gens.index if not str(g).startswith("load_shedding_")]
-        shed_gens = [g for g in gens.index if str(g).startswith("load_shedding_")]
+        shed_gens = shedding_names(gens)
+        supply_gens = [g for g in gens.index if g not in set(shed_gens)]
         eligible = _eligible_generators(n, supply_gens, shed_gens, providers)
 
         load_dense = n.get_switchable_as_dense("Load", "p_set").reindex(snapshots)

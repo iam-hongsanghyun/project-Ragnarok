@@ -23,62 +23,56 @@ const cfg = (patch: Partial<SamplingConfig> = {}): SamplingConfig => ({
 
 describe('computeSamplingPreview (mirrors backend sample_block_indices)', () => {
   test('count mode exact partition: W = N×B', () => {
-    const p = computeSamplingPreview(12, 1, cfg({ mode: 'count', blockSize: 6, blockCount: 2 }));
+    const p = computeSamplingPreview(12, cfg({ mode: 'count', blockSize: 6, blockCount: 2 }));
     expect(p).toEqual({ sampledSnapshots: 12, blockCount: 2, scale: 1 });
   });
 
   test('count mode equally spaced across a larger window', () => {
-    const p = computeSamplingPreview(100, 1, cfg({ mode: 'count', blockSize: 10, blockCount: 3 }));
+    const p = computeSamplingPreview(100, cfg({ mode: 'count', blockSize: 10, blockCount: 3 }));
     expect(p.blockCount).toBe(3);
     expect(p.sampledSnapshots).toBe(30);
     expect(p.scale).toBeCloseTo(100 / 30, 6);
   });
 
   test('count mode clamps block count when N×B > W', () => {
-    const p = computeSamplingPreview(20, 1, cfg({ mode: 'count', blockSize: 8, blockCount: 5 }));
+    const p = computeSamplingPreview(20, cfg({ mode: 'count', blockSize: 8, blockCount: 5 }));
     expect(p.blockCount).toBe(2);
     expect(p.sampledSnapshots).toBe(16);
   });
 
   test('block larger than window degenerates to full window', () => {
-    const p = computeSamplingPreview(10, 1, cfg({ mode: 'count', blockSize: 50, blockCount: 3 }));
+    const p = computeSamplingPreview(10, cfg({ mode: 'count', blockSize: 50, blockCount: 3 }));
     expect(p).toEqual({ sampledSnapshots: 10, blockCount: 1, scale: 1 });
   });
 
   test('gap mode: period B+G with truncated trailing block', () => {
-    const p = computeSamplingPreview(25, 1, cfg({ mode: 'gap', blockSize: 4, gapSnapshots: 6 }));
+    const p = computeSamplingPreview(25, cfg({ mode: 'gap', blockSize: 4, gapSnapshots: 6 }));
     expect(p.blockCount).toBe(3);
     expect(p.sampledSnapshots).toBe(12);
   });
 
-  test('stride applies inside blocks', () => {
-    const p = computeSamplingPreview(24, 3, cfg({ mode: 'count', blockSize: 6, blockCount: 2 }));
-    expect(p.sampledSnapshots).toBe(4);
-    expect(p.scale).toBeCloseTo(6, 6);
+  test('no in-block stride: the blocks are consecutive rows of the workbook as it stands', () => {
+    const p = computeSamplingPreview(24, cfg({ mode: 'count', blockSize: 6, blockCount: 2 }));
+    expect(p.sampledSnapshots).toBe(12);
+    expect(p.scale).toBeCloseTo(2, 6);
   });
 
   test('the headline example: 4×168 of 8760', () => {
-    const p = computeSamplingPreview(8760, 1, cfg({ mode: 'count', blockSize: 168, blockCount: 4 }));
+    const p = computeSamplingPreview(8760, cfg({ mode: 'count', blockSize: 168, blockCount: 4 }));
     expect(p.blockCount).toBe(4);
     expect(p.sampledSnapshots).toBe(672);
     expect(p.scale).toBeCloseTo(8760 / 672, 4);
   });
 
   test('empty window yields a no-op preview', () => {
-    expect(computeSamplingPreview(0, 1, cfg())).toEqual({ sampledSnapshots: 0, blockCount: 0, scale: 1 });
+    expect(computeSamplingPreview(0, cfg())).toEqual({ sampledSnapshots: 0, blockCount: 0, scale: 1 });
   });
 
   test('average mode: one block, blockCount = periods folded', () => {
-    const p = computeSamplingPreview(8760, 1, cfg({ mode: 'average', blockSize: 168 }));
+    const p = computeSamplingPreview(8760, cfg({ mode: 'average', blockSize: 168 }));
     expect(p.sampledSnapshots).toBe(168);
     expect(p.blockCount).toBe(Math.ceil(8760 / 168)); // 53 periods (8760/168 = 52.14)
     expect(p.scale).toBeCloseTo(8760 / 168, 4);
-  });
-
-  test('average mode composes with stride', () => {
-    const p = computeSamplingPreview(8760, 4, cfg({ mode: 'average', blockSize: 168 }));
-    expect(p.sampledSnapshots).toBe(42);
-    expect(p.scale).toBeCloseTo(8760 / 42, 4);
   });
 
   test('normalize accepts average mode', () => {

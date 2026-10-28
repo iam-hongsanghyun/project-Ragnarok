@@ -390,6 +390,20 @@ class DriverForecast(BaseModel):
     sessionId: str = "default"
 
 
+def _row_hours(model: dict, requested: float) -> float:
+    """Hours one snapshot row represents: the workbook's own weighting (the snapshots sheet), else 1 h.
+
+    The request's ``snapshotWeight`` was the run-time stride; there is none any more, so it is only used when the sheet
+    carries no weighting and the request asks for more than the default (an old client).
+    """
+    from ...pypsa.utils.weightings import median_weighting_hours
+
+    authored = median_weighting_hours(model.get("snapshots"))
+    if authored:
+        return authored
+    return requested if requested and requested > 0 else 1.0
+
+
 class EvDemand(BaseModel):
     """Body for ``POST /api/session/snapshots/ev-demand`` (M4, minimal cut).
 
@@ -427,7 +441,7 @@ def ev_demand_snapshots(payload: EvDemand) -> dict:
         home_charging_share=payload.homeChargingShare,
         home_shares=payload.homeShares,
         work_shares=payload.workShares,
-        snapshot_weight=payload.snapshotWeight,
+        snapshot_weight=_row_hours(model, payload.snapshotWeight),
     )
     model[payload.sheet] = new_rows
     model_store.resave_model(payload.sessionId, model)
@@ -465,7 +479,7 @@ def driver_forecast_snapshots(payload: DriverForecast) -> dict:
                 gdp_elasticity=payload.gdpElasticity,
                 heat_added_gwh=payload.heatAddedGWh,
                 ev_added_gwh=payload.evAddedGWh,
-                snapshot_weight=payload.snapshotWeight,
+                snapshot_weight=_row_hours(model, payload.snapshotWeight),
             )
         else:
             # Non-demand series (availability, prices) are re-dated, never grown.

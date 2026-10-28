@@ -225,7 +225,7 @@ _EDIT = ToolAnnotations(
         "Create or update a saved scenario preset — the same record the Scenarios panel in the web UI edits. "
         "'fields' merge over the stored preset (a config block such as pathwayConfig replaces the stored block "
         "whole); a new id starts from the defaults. Allowed fields: label, notes, snapshotStart, snapshotEnd, "
-        "snapshotWeight, carbonPrice, carbonPriceSchedule, discountRate, forceLp, enableLoadShedding, "
+        "snapshotWeight (must stay 1: resolution is the workbook's, see temporal_cluster), carbonPrice, carbonPriceSchedule, discountRate, forceLp, enableLoadShedding, "
         "loadSheddingCost, ownerColumn, constraints, modelOverrides and every *Config block — see "
         "describe_run_options(key='scenario') / (key='options.<block>') for their fields. activate=true makes it "
         "the model's active scenario. Run it with submit_scenario."

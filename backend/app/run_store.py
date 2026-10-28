@@ -35,6 +35,7 @@ import pandas as pd
 
 from . import timeseries
 from backend.app.data_root import data_root
+from ..pypsa.utils.shedding import is_shedding
 
 logger = logging.getLogger("pypsa_gui.run_store")
 
@@ -409,7 +410,7 @@ def _curtailment_fallback(bundle: dict[str, Any]) -> tuple[list[dict[str, Any]],
 
     tv_gens = [
         c for c in (pmax_rows[0] if pmax_rows else {})
-        if c in p_nom_in and not str(c).startswith("load_shedding_")
+        if c in p_nom_in and not is_shedding(c)
     ]
     tv_p_nom = {g: _p_nom(g) for g in tv_gens}
 

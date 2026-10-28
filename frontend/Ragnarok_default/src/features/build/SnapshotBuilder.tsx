@@ -25,16 +25,16 @@ import { useDialog } from '../../shared/components/Dialog';
 interface Props {
   /** Rows already on the `snapshots` sheet — generation replaces them. */
   existingCount: number;
-  /** Replace the axis with these labels. */
-  onGenerate: (labels: string[]) => void;
-  /** Global run resolution, in hours per snapshot (Settings → Simulation window). */
-  snapshotWeight: number;
-  onSnapshotWeightChange: (hours: number) => void;
+  /** Replace the axis with these labels. `weightHours` (when given) is written into the snapshots sheet's
+   *  objective / stores / generators columns - the snapshot weightings, visible in the workbook. */
+  onGenerate: (labels: string[], weightHours?: number) => void;
+  /** The "Set weightings from timestamp spacing" action for the axis already in the workbook (visible; backend). */
+  onSetWeightingsFromSpacing?: () => Promise<void> | void;
 }
 
 const DEFAULT_START = '2030-01-01 00:00';
 
-export function SnapshotBuilder({ existingCount, onGenerate, snapshotWeight, onSnapshotWeightChange }: Props) {
+export function SnapshotBuilder({ existingCount, onGenerate, onSetWeightingsFromSpacing }: Props) {
   const { confirm } = useDialog();
   const [start, setStart] = useState(DEFAULT_START);
   const [resolutionId, setResolutionId] = useState('1h');
@@ -54,7 +54,6 @@ export function SnapshotBuilder({ existingCount, onGenerate, snapshotWeight, onS
   const problem = validateSpec(spec);
   const summary = useMemo(() => summariseSpec(spec), [spec.start, spec.stepHours, spec.count]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const weightMismatch = summary !== null && summary.matchingWeight !== snapshotWeight;
 
   const generate = async () => {
     if (problem) return;
@@ -70,8 +69,7 @@ export function SnapshotBuilder({ existingCount, onGenerate, snapshotWeight, onS
     }
     setBusy(true);
     try {
-      onGenerate(buildSnapshots(spec));
-      if (syncWeight && summary) onSnapshotWeightChange(summary.matchingWeight);
+      onGenerate(buildSnapshots(spec), syncWeight && summary ? summary.matchingWeight : undefined);
     } finally {
       setBusy(false);
     }
@@ -155,10 +153,20 @@ export function SnapshotBuilder({ existingCount, onGenerate, snapshotWeight, onS
       <label className="snapshot-builder__weight" data-tour="snap-weight">
         <input type="checkbox" checked={syncWeight} onChange={(e) => setSyncWeight(e.target.checked)} />
         <span>
-          Also set the run resolution to {resolution.hours} h per snapshot
-          {weightMismatch && <b> (currently {snapshotWeight} h — costs and energy totals scale by this)</b>}
+          Also write the snapshot weightings ({resolution.hours} h per snapshot) into the snapshots sheet
+          <b> (PyPSA books energy, costs and budgets by the weighting, not by the timestamps)</b>
         </span>
       </label>
+      {existingCount > 0 && onSetWeightingsFromSpacing && (
+        <button
+          type="button"
+          className="secondary-button"
+          data-tour="snap-weight-from-spacing"
+          onClick={() => void onSetWeightingsFromSpacing()}
+        >
+          Set weightings from timestamp spacing
+        </button>
+      )}
     </section>
   );
 }

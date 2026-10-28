@@ -257,6 +257,11 @@ def delete_change(model: Model, plant_id: str) -> dict[str, Any]:
                 kept["carriers"].append(name)
                 changed = True
     remove = {s: sorted(n) for s, n in cand.items() if n}
+    # module rows keyed by component (RAGNAROK_TimeUnits: ramps / UC times) leave with their component
+    for sheet in fragment_merge.KEYED_SHEETS:
+        names = {str(r.get("name")) for r in model.get(sheet) or [] if str(r.get("component")) in cand and str(r.get("name")) in cand[str(r.get("component"))]}
+        if names:
+            remove[sheet] = sorted(names)
     release = [{"sheet": s, "name": n} for s in ("buses", "carriers") for n in kept[s]]
     warnings: list[str] = []
     for bus in kept["buses"]:        # a bus that stays because something still draws from it, but nothing feeds it any more

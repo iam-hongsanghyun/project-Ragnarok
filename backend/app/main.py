@@ -1038,6 +1038,8 @@ app.include_router(_p2x_router.router)
 from .routers import plants as _plants_router  # noqa: E402
 from .routers import policy_modules as _policy_modules_router  # noqa: E402
 app.include_router(_policy_modules_router.router)
+from .routers import operations_modules as _operations_modules_router  # noqa: E402
+app.include_router(_operations_modules_router.router)
 app.include_router(_plants_router.router)
 from .routers import screening as _screening_router  # noqa: E402  (statistical site pre-screen)
 app.include_router(_screening_router.router)

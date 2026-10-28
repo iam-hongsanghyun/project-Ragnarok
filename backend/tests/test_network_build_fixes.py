@@ -230,14 +230,14 @@ def _commit_model() -> dict[str, Any]:
     return m
 
 
-def test_force_lp_clears_dynamic_floors_and_decommits_links() -> None:
+def test_force_lp_keeps_floors_and_commitment_and_relaxes_the_binaries_natively() -> None:
+    """Force-LP = PyPSA's linearized unit commitment: nothing is cleared, the status variables are continuous."""
     n, notes = build_network(_commit_model(), {}, {"forceLp": True})
-    assert n.generators_t.p_min_pu["g"].tolist() == [0.0] * 4
-    assert not bool(n.links.at["lk", "committable"])
-    assert float(n.links.at["lk", "p_min_pu"]) == 0.0
-    n.optimize(solver_name="highs")
-    assert "Link-status" not in list(n.model.variables)  # an LP, not a MIP
-    # g would have had a 100 MW floor (0.5 x 200); as an LP it is merit-ordered normally
+    assert n.generators_t.p_min_pu["g"].tolist() != [0.0] * 4  # the floor is still there (a floor WHILE RUNNING)
+    assert bool(n.links.at["lk", "committable"])
+    n.optimize(solver_name="highs", linearized_unit_commitment=True)
+    assert "Link-status" in list(n.model.variables)
+    assert not bool(n.model.variables["Link-status"].attrs.get("binary", False))  # continuous, not binary
     assert n.generators_t.p["g"].tolist() == pytest.approx([100.0] * 4)
 
 
@@ -316,17 +316,19 @@ def test_imported_snapshot_weightings_are_kept() -> None:
     assert energy == pytest.approx(1800.0, rel=1e-9)
 
 
-def test_stride_sums_imported_weightings_over_each_block() -> None:
-    n, _ = build_network(_weighted_model(3.0), {}, {"snapshotWeight": 2})
+def test_stride_is_refused_for_new_runs_and_reproduced_for_stored_runs_before_version_4() -> None:
+    """Core never strides. Only a STORED run from before build version 4 re-derives with the stride it was solved with."""
+    from backend.pypsa.network import build_stored_network
+
+    with pytest.raises(HTTPException):
+        build_network(_weighted_model(3.0), {}, {"snapshotWeight": 2})
+    n, _ = build_stored_network(_weighted_model(3.0), {}, {"snapshotWeight": 2})
     assert len(n.snapshots) == 3
     assert n.snapshot_weightings["objective"].to_numpy() == pytest.approx([6.0] * 3)
     assert float(n.snapshot_weightings["objective"].sum()) == pytest.approx(18.0)
-
-
-def test_unweighted_model_keeps_the_legacy_stride() -> None:
-    n, _ = build_network(_dispatch_model(6), {}, {"snapshotWeight": 2})
-    assert n.snapshot_weightings["objective"].to_numpy() == pytest.approx([2.0] * 3)
-    assert n.snapshot_weightings["stores"].to_numpy() == pytest.approx([2.0] * 3)
+    plain, _ = build_stored_network(_dispatch_model(6), {}, {"snapshotWeight": 2})
+    assert plain.snapshot_weightings["objective"].to_numpy() == pytest.approx([2.0] * 3)
+    assert plain.snapshot_weightings["stores"].to_numpy() == pytest.approx([2.0] * 3)
 
 
 def test_non_uniform_imported_weights_follow_their_rows() -> None:
@@ -335,8 +337,12 @@ def test_non_uniform_imported_weights_follow_their_rows() -> None:
         s["objective"] = w
     n, _ = build_network(m, {}, {})
     assert n.snapshot_weightings["objective"].to_numpy() == pytest.approx([1.0, 2.0, 3.0, 4.0])
-    strided, _ = build_network(m, {}, {"snapshotWeight": 2})
+    from backend.pypsa.network import build_stored_network
+
+    strided, _ = build_stored_network(m, {}, {"snapshotWeight": 2})  # the legacy stride sums the imported weights per block
     assert strided.snapshot_weightings["objective"].to_numpy() == pytest.approx([3.0, 7.0])
+    windowed, _ = build_network(m, {}, {"snapshotStart": 1, "snapshotCount": 2})
+    assert windowed.snapshot_weightings["objective"].to_numpy() == pytest.approx([2.0, 3.0])  # a window keeps its rows' weights
 
 
 def test_weightings_round_trip_through_network_to_model() -> None:

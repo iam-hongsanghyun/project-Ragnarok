@@ -465,9 +465,10 @@ internal sub-modules are not imported directly from outside `network/`.
    `list_name-attr`. Each sheet is converted to a DataFrame aligned to
    `network.snapshots` (including period-broadcast for pathway mode) and stitched onto
    `network.<list_name>_t.<attr>`.
-6. **Snapshot windowing.** `snapshotStart` / `snapshotCount` / `snapshotWeight` slice
-   and downsample `network.snapshots`. For pathway mode the full snapshot set is kept.
-   `snapshot_weightings` columns are set to `float(step)`.
+6. **Snapshot window.** `snapshotStart` / `snapshotCount` slice `network.snapshots` and the workbook's
+   weightings are kept. There is **no stride**: `snapshotWeight` above 1 is refused (resolution is the visible
+   Forge → Temporal transform). The test-run sampling module (`backend/pypsa/sampling.py`) writes sampled snapshots
+   and weightings when `samplingConfig` is on. For pathway mode the full snapshot set is kept.
 7. **Period-factor scaling.** Annual energy caps (`*_sum_min`, `*_sum_max`) are scaled
    by `min(modelled_hours / 8760, 1.0)` so they are proportional to the modelled
    window.
@@ -480,11 +481,13 @@ internal sub-modules are not imported directly from outside `network/`.
    (`pypsa.costs.periodized_cost`). The builder only checks that an `overnight_cost` row carries its own
    `discount_rate` and refuses the run otherwise (Forge → Fill discount rate writes it). See
    [The core is a PyPSA shell](#the-core-is-a-pypsa-shell).
-10. **Force-LP.** If `options["forceLp"]` is true, all `committable=True` flags on
-    generators are set to `False`.
-11. **Load shedding.** `add_load_shedding` adds a `Generator` named
-    `load_shedding_{bus}` per bus when `enableLoadShedding` is true.
-12. **Stochastic expansion.** `apply_scenarios` calls
+10. **Time units.** `RAGNAROK_TimeUnits` (and the `rampConfig` default rate) become PyPSA's per-snapshot ramps and
+    UC times with the weights the solve uses (`backend/pypsa/network/time_units.py`).
+11. **Force-LP** is PyPSA's `linearized_unit_commitment` (set in `optimise_options`); nothing is cleared in the
+    model. A `maintainable` unit refuses the run with the visible step that relaxes it.
+12. **Load shedding.** `n.optimize.add_load_shedding` adds a `"<bus> load shedding"` generator per bus
+    (carrier `LoadShedding`) when `enableLoadShedding` is true.
+13. **Stochastic expansion.** `apply_scenarios` calls
     `network.set_scenarios(weights)` and applies per-scenario overrides to both static
     and dynamic frames.
 
@@ -668,7 +671,11 @@ weight. `kpis`, `companies`, `assets` and `metrics` take the same `period`. The 
 
 ### 7.12 Rolling horizon
 
-`parse_rolling_config` builds a `RollingConfig` from `options.rollingConfig`.
+`parse_rolling_config` builds a `RollingConfig` from `options.rollingConfig`; the window and overlap are given in
+hours (`horizonHours` / `overlapHours`) and `resolve_rolling` converts them to PyPSA's snapshot counts with the weights
+the run uses (`ceil(hours / step)`); old presets with snapshot counts pass unchanged. Cyclic storage is refused
+(visible step `POST /api/model/make-noncyclic`); the terminal-SOC soft target is an explicit option, default off.
+PyPSA carries storage, dispatch and commitment across windows, so ramps and minimum times are coupled natively.
 `_rolling_window_summaries` pre-computes window metadata before the solve so the
 result payload carries it even if the solve raises. The solve is
 `network.optimize.optimize_with_rolling_horizon(horizon, overlap,
@@ -706,7 +713,7 @@ send it to PyPSA as visible inputs in the workbook. Workbook columns carry PyPSA
 | `overnight_cost` | upfront price; PyPSA computes `overnight × annuity(discount_rate, lifetime) × n.nyears` | passes it through; refuses a row with no `discount_rate` |
 | `fom_cost` | fixed O&M **per horizon**, added unscaled | passes it through |
 
-* `build_network` is the *run* builder (window, load shedding, Force-LP ...; it records the carbon price for the carbon-pricing module and runs the annual-budgets module, neither converts a PyPSA attribute);
+* `build_network` is the *run* builder (window, load shedding, time-units conversion ...; it records the carbon price for the carbon-pricing module and runs the annual-budgets module, neither converts a PyPSA attribute);
   `build_components` is the pure 1:1 hand-over used by every build that is serialised back to a workbook
   (Forge transforms, netcdf / h5 export). Neither converts a cost.
 * Reports read PyPSA: `n.statistics.capex / expanded_capex / installed_capex / overnight_cost / fom`,
@@ -723,10 +730,18 @@ send it to PyPSA as visible inputs in the workbook. Workbook columns carry PyPSA
     `options.carbonPricing.enabled`); fuel cost is `n.statistics.opex`, carbon cost is the term at the solution.
   * `backend/app/annual_budgets/`: yearly `e_sum` / GlobalConstraint budgets (`RAGNAROK_AnnualBudgets`) written as `annual × Σw / 8760`
     into the PyPSA column, visibly; Settings → Policy → Annual budgets.
+* **Modules that send PyPSA what it counts in snapshots (steps 4 and 5)** (`docs/backend.md` §5.13). PyPSA weights costs, energy, `e_sum`, storage, maintenance, Link / Process delay,
+  load shedding, multi-period years and all statistics by the snapshot weightings, and counts snapshots in ramps, UC times and the rolling window; core passes the weights through and:
+  * **resolution** is the Forge temporal transform (resample = block means, downsample = PyPSA's point sampling): it writes snapshots, weightings and series into the workbook; the Run dialog's
+    Resolution buttons call it; there is no run-time stride. **Weightings from the spacing** is a visible action (snapshots sheet, import, Forge, offered by the `weighting_spacing` warning);
+  * **test-run sampling** (`sampling.py`) writes sampled snapshots, `objective` / `generators` = window / kept, `stores` physical, and scales start-up costs;
+  * **time units** (`RAGNAROK_TimeUnits`): ramps per hour / minute and UC times in hours, converted at solve time with the actual weights; PyPSA's own constraint enforces them;
+  * **rolling** in hours, cyclic storage refused with a visible fix, terminal SOC an explicit option (default off); **Force-LP** = `linearized_unit_commitment`; **load shedding** = `n.optimize.add_load_shedding`
+    identified by carrier (`utils/shedding.py`, legacy names still read).
 * Workbook schema version: the model sheet `RAGNAROK_Schema` (`ragnarok_schema_version`). Schema 1 (implicit)
   held an overnight price in `capital_cost` and annuitised it at run time; it is migrated once, visibly, when
   such a workbook is loaded (`backend/pypsa/network/cost_basis.py`, `docs/backend.md` §5.11). Stored runs carry
-  `options.buildVersion` (3 now: carbon module + annual budgets); a run before 2 is re-derived through the cost migration, in memory, and a run before 3 has its annual `e_sum` scaled as it was solved (`legacy_e_sum_scale`). Schema 3: annual `e_sum` values move into `RAGNAROK_AnnualBudgets`.
+  `options.buildVersion` (4 now: temporal and operations modules; 3 = carbon module + annual budgets); a run before 2 is re-derived through the cost migration, in memory, and a run before 3 has its annual `e_sum` scaled as it was solved (`legacy_e_sum_scale`). Schema 3: annual `e_sum` values move into `RAGNAROK_AnnualBudgets`. Schema 4: ramps / UC times typed per snapshot by the plant templates (and per-hour ramp overrides of an enabled `rampConfig` preset) move into `RAGNAROK_TimeUnits`; a stored run before 4 is re-derived with the stride and sampled weights it was solved with (`network/legacy_window.py`).
 
 ## 8. Constraints
 

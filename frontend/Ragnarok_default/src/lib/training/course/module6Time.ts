@@ -16,14 +16,21 @@
  * Built on module 5's model. Every figure verified against a real HiGHS solve:
  *
  *   24 snapshots at  1h   52,663.98    the reference
- *   12 snapshots at  2h   53,172.05    +0.96%
- *    6 snapshots at  4h   50,958.74    -3.24%
- *    4 snapshots at  6h   65,797.36   +24.94%
- *    2 snapshots at 12h   31,968.00   -39.30%
+ *                          Resample (block means)     Downsample (every n-th)
+ *   12 snapshots at  2h    52,489.67   -0.33%         53,172.05   +0.96%
+ *    6 snapshots at  4h    51,630.22   -1.96%         50,958.74   -3.24%
+ *    4 snapshots at  6h    52,489.67   -0.33%         65,797.36  +24.94%
+ *    2 snapshots at 12h    49,190.00   -6.60%         31,968.00  -39.30%
  *
- * That error column is the module's centrepiece: it is not monotonic and it does
- * not decay gently. Coarsening looks free until it is catastrophic, and it errs
- * in BOTH directions, so you cannot even sign your own bias.
+ * Core cleanup step 4 removed the run-time stride that used to sit behind the
+ * Resolution buttons. The buttons are now the visible Forge temporal Resample
+ * (block means, weights written into the workbook), so the first column is what
+ * a learner now sees; the second is PyPSA's point sampling, still reachable as
+ * Forge -> Temporal -> Downsample and the module's centrepiece: it is not
+ * monotonic, it changes sign and it does not decay gently. Block means keep the
+ * daily totals and only lose the peak, so they always understate. How you coarsen
+ * matters as much as how far. Both columns are pinned by
+ * backend/tests/test_training_checkpoints.py.
  */
 import { TutorialStep } from '../types';
 
@@ -133,8 +140,9 @@ export const MODULE_6_TIME: TutorialStep[] = [
       + 'to "1 day". The summary should read 24 snapshots covering 24 h, and it will tell you it is about '
       + 'to replace 3 existing rows.',
 
-      'Keep the "also set the run resolution" checkbox ticked, exactly as in module 1 — the weight must '
-      + 'stay at 1 h per snapshot or every cost in the answer rescales.',
+      'Keep the "also write the snapshot weightings" checkbox ticked, exactly as in module 1 — the '
+      + 'snapshots sheet must carry a weight of 1 h per snapshot (its objective / stores / generators '
+      + 'columns) or every cost in the answer rescales.',
 
       'Press Replace axis and confirm. Then go and look at what you have done: Build → Loads, open the '
       + 'time-series panel, click p_set. Three rows against a 24-row axis.',
@@ -158,7 +166,8 @@ export const MODULE_6_TIME: TutorialStep[] = [
         title: 'Keep the weight matched',
         tab: 'Build',
         note: 'Same checkbox as module 1 and the same reason: weight is how many real hours a snapshot '
-          + 'stands for, and it multiplies every cost and energy total in the answer.',
+          + 'stands for, it is written into the snapshots sheet, and it multiplies every cost and energy '
+          + 'total in the answer.',
       },
       {
         selector: '.tables-grid-wrap',
@@ -204,7 +213,7 @@ export const MODULE_6_TIME: TutorialStep[] = [
     ],
     verify: [
       'The `snapshots` sheet has 24 rows running 00:00 to 23:00',
-      'The run resolution is still 1 h per snapshot',
+      'The snapshots sheet still carries 1 h per snapshot',
       '`loads-p_set` still has only 3 rows, and the time-series panel says so',
       'You can say what the model will use for the other 21 hours, for both the load and the wind',
     ],
@@ -535,51 +544,55 @@ export const MODULE_6_TIME: TutorialStep[] = [
     concept: [
       'Resolution is the first lever anyone reaches for when a model is too slow, because it is the '
       + 'easiest: halve the snapshots, halve the solve time. This step measures what it actually costs, '
-      + 'and the numbers are not reassuring.',
+      + 'and it also shows that HOW you coarsen matters as much as how far.',
 
-      'Against the hourly answer of 52,663.98: 2-hourly gives +0.96%, 4-hourly −3.24%, 6-hourly +24.94%, '
-      + '12-hourly −39.30%.',
+      'Resolution is a property of the workbook, so Ragnarok changes it with a visible transform: '
+      + 'Resample takes the mean of each block and writes the fewer snapshots, their weights and the '
+      + 'averaged series into the sheets. Against the hourly answer of 52,663.98: 2-hourly gives -0.33%, '
+      + '4-hourly -1.96%, 6-hourly -0.33%, 12-hourly -6.60%.',
 
-      'Three things in that column matter more than the individual figures. The error is not monotonic — '
-      + '4-hourly is closer than 6-hourly, which is closer than 12-hourly, but 4-hourly is worse than '
-      + '2-hourly in a way that does not simply scale. It changes SIGN, so you cannot even assume your '
-      + 'coarse model is conservative. And it does not decay gently: 2-hourly is almost free and 6-hourly '
-      + 'is catastrophic, with nothing in the output to mark the transition.',
+      'Two things in that column matter. Every error is negative: averaging keeps the daily totals and '
+      + 'loses only the peak, so the coarse model never sees the evening it has to be sized for and always '
+      + 'understates the cost. And the error grows with the step, but gently until the step is a large '
+      + 'part of the day.',
 
-      'The mechanism is averaging. A 6-hour snapshot spanning 15:00–20:00 averages the 130 MW hour with '
-      + 'the 170 MW peak and the 140 MW hour after it, so the peak the system is sized for simply stops '
-      + 'existing. Sometimes that makes the model look cheaper — no peak to serve — and sometimes more '
-      + 'expensive, because the averaged demand no longer lines up with the averaged wind.',
+      'Now coarsen the other way. Forge → Temporal → Downsample keeps every n-th row as it stands '
+      + '(PyPSA\'s point sampling) and weights it n. Same model, same steps: +0.96%, -3.24%, +24.94%, '
+      + '-39.30%. The error changes sign and jumps, because a 6-hour snapshot that happens to land on '
+      + 'the 15:00 hour stands for six hours of that one hour. This is what a run-time stride used to '
+      + 'do silently, and it is why block means are the default.',
     ],
     explain: [
-      'Settings → Simulation window. The Resolution row offers 1h through 24h. Change it to 2h and run; '
-      + 'then 4h; then 6h; then 12h. Four runs, one setting.',
+      'Reload this module\'s checkpoint, then Settings → Simulation window (or the Run dialog). The '
+      + 'Resolution buttons offer 1h to 12h; press 2h. It is a transform of the working workbook, so '
+      + 'look at the snapshots sheet: 12 rows, each with weights of 2, and the loads averaged. Run.',
 
-      'Record each objective as you go. The point of this step is the pattern across them rather than any '
-      + 'one number, and reading the pattern off four rows in History is much more convincing than being '
-      + 'told about it.',
+      'A transform only coarsens. Reload the checkpoint (Open example) and repeat for 4h, 6h and 12h, '
+      + 'recording each objective. The pattern across them is the point, and four rows in History are '
+      + 'more convincing than being told.',
 
-      'Then look at what 6-hourly did to the dispatch. The evening peak is gone — averaged into a block '
-      + 'with the hours either side — so the model never needs the capacity that peak requires and never '
-      + 'prices it.',
+      'Then repeat 4h and 6h with Forge → Temporal → Downsample and compare. Look at what 6-hourly point '
+      + 'sampling did to the dispatch: it kept one arbitrary hour of each block, so the evening peak is '
+      + 'either missing or counted for six hours.',
 
-      'Set the resolution back to 1h before moving on. The rest of the module and module 7 both assume '
+      'Reload the hourly checkpoint before moving on. The rest of the module and module 7 both assume '
       + 'the hourly axis.',
     ],
     spotlights: [
       {
         selector: '.activity-bar-btn[aria-label="Settings"]',
         title: 'Simulation window',
-        note: 'Resolution lives here rather than on the snapshots sheet, because it is a property of the '
-          + 'RUN rather than of the model — the same 24-row axis solved at four different resolutions.',
+        note: 'The Resolution buttons live here and in the Run dialog, but they only call a transform: '
+          + 'the reduced snapshots, their weights and the averaged series are written into the workbook, '
+          + 'so the sheets always show the resolution the run will use.',
       },
       {
         selector: '.sg-scenario-summary',
         title: 'It reports what it used',
         runDialog: 'open',
         note: 'The line you have checked before every run since module 1 now earns its place: it names the '
-          + 'resolution the run actually used, which is the only reliable way to know which of your four '
-          + 'runs is which.',
+          + 'resolution of the workbook the run will use, which is the only reliable way to know which of '
+          + 'your four runs is which.',
       },
       {
         selector: '[data-subtab="Comparison"]',
@@ -595,50 +608,54 @@ export const MODULE_6_TIME: TutorialStep[] = [
         field: 'Settings → Simulation window → Resolution (2h)',
         label: '12 snapshots',
         value: '2h',
-        why: 'Objective 53,172.05, +0.96% against hourly. Half the solve for a percent of error — which is '
-          + 'why coarsening is so tempting, and why it is usually the right first move.',
+        why: 'Objective 52,489.67, -0.33% against hourly (Resample). Half the solve for a third of a percent '
+          + 'of error — which is why coarsening is so tempting, and why it is usually the right first move. '
+          + '(Downsample: 53,172.05, +0.96%.)',
       },
       {
         field: 'Settings → Simulation window → Resolution (4h)',
         label: '6 snapshots',
         value: '4h',
-        why: 'Objective 50,958.74, −3.24%. Note the sign: the model now UNDERSTATES cost, because the '
-          + 'evening peak is being averaged down. A conservative-looking model that is not conservative.',
+        why: 'Objective 51,630.22, -1.96%. Note the sign: the model UNDERSTATES cost, because the '
+          + 'evening peak is being averaged down. A conservative-looking model that is not conservative. '
+          + '(Downsample: 50,958.74, -3.24%.)',
       },
       {
         field: 'Settings → Simulation window → Resolution (6h)',
         label: '4 snapshots',
         value: '6h',
-        why: 'Objective 65,797.36, +24.94%. A quarter out, from a setting that looks like a minor '
-          + 'refinement of the 4h one. There is no warning and no diagnostic — the model simply solves a '
-          + 'different problem.',
+        why: 'Objective 52,489.67, -0.33% — the same as 2h, because these block means happen to carry the '
+          + 'same peak-to-mean structure. Nothing flags that the answer is a coincidence of the blocks. '
+          + '(Downsample: 65,797.36, +24.94%: a quarter out, from a setting that looks like a minor '
+          + 'refinement of the 4h one.)',
       },
       {
         field: 'Settings → Simulation window → Resolution (12h)',
         label: '2 snapshots',
         value: '12h',
-        why: 'Objective 31,968.00, −39.30%. Two snapshots cannot represent a day at all: the peak, the '
-          + 'trough, the ramps and the wind swing all average into two numbers, and the answer is '
-          + 'confidently wrong by a factor approaching two.',
+        why: 'Objective 49,190.00, -6.60%. Two snapshots cannot represent a day at all: the peak, the '
+          + 'trough, the ramps and the wind swing all average into two numbers. (Downsample: 31,968.00, '
+          + '-39.30%, confidently wrong by a factor approaching two.)',
       },
       {
-        field: 'Settings → Simulation window → Resolution (restore)',
+        field: 'Open example → the hourly checkpoint (restore)',
         label: 'back to hourly',
         value: '1h',
-        why: 'The reference the rest of the module and module 7 assume. Leaving it coarse would silently '
-          + 'change every figure from here on.',
+        why: 'The reference the rest of the module and module 7 assume. A coarse workbook would change '
+          + 'every figure from here on, which is why a transform is visible rather than a setting.',
       },
     ],
     verify: [
-      'You have four objectives recorded: 53,172.05, 50,958.74, 65,797.36 and 31,968.00',
-      'You can say which of them understate cost and which overstate it',
-      'You can explain the 6-hourly result in terms of what happens to the 18:00 peak',
-      'You can say why "coarser is less accurate" is too kind a description',
-      'The resolution is back to 1h',
+      'You have four Resample objectives recorded: 52,489.67, 51,630.22, 52,489.67 and 49,190.00',
+      'You can say why every block-mean answer understates cost',
+      'You can explain the Downsample 6-hourly result (+24.94%) in terms of which hour each block kept',
+      'You can say why "coarser is less accurate" is too kind a description of point sampling',
+      'The workbook is back at 1h',
     ],
     pitfalls: [
-      'Assuming error scales with the coarsening factor. It does not, and it changes sign — so a '
-      + 'convergence check needs actual runs rather than a rule of thumb.',
+      'Assuming error scales with the coarsening factor. With block means it nearly does; with point '
+      + 'sampling it does not, and it changes sign — so a convergence check needs actual runs rather '
+      + 'than a rule of thumb.',
       'Choosing a resolution because it solved fast enough. The only defensible way to pick one is to '
       + 'refine until the answer stops moving, which is exactly the exercise you have just done.',
     ],
@@ -679,15 +696,16 @@ export const MODULE_6_TIME: TutorialStep[] = [
       'Then read the app\'s own caveat under the control, because it is the most honest sentence in the '
       + 'settings and it is doing real work: this is a preview, not a storage or adequacy study.',
 
-      'Set Sampling back to "Contiguous window" before you finish. Like resolution, it is a run setting '
-      + 'rather than a model change, so it will silently apply to everything you do next.',
+      'Set Sampling back to "Contiguous window" before you finish. It is a run setting (the run notes '
+      + 'say when it applied), so it will apply to everything you do next until you switch it off.',
     ],
     spotlights: [
       {
         selector: '.activity-bar-btn[aria-label="Settings"]',
         title: 'Sampled blocks',
         note: 'On the same Simulation window section as resolution, because both answer the same question '
-          + '— how much of the axis does the solver actually see — by different means.',
+          + '— how much of the axis does the solver actually see — by different means. Sampling writes '
+          + 'its weights in the run notes; Resolution writes them into the workbook.',
       },
       {
         selector: '.sg-scenario-summary',
@@ -815,9 +833,9 @@ export const MODULE_6_TIME: TutorialStep[] = [
       + 'falls back to a static value and solves. The row count in the time-series panel is the check, '
       + 'and it costs a second.',
 
-      'Coarsening is not a precision dial. The error is non-monotonic, changes sign, and jumps from '
-      + 'negligible to 25% between two adjacent settings. The only defensible way to choose a resolution '
-      + 'is to refine until the answer stops moving.',
+      'Coarsening is not a precision dial. Block means always understate; point sampling changes sign and '
+      + 'jumps from negligible to 25% between two adjacent settings. The only defensible way to choose a '
+      + 'resolution is to refine until the answer stops moving.',
 
       'And the two techniques for a long horizon break different things. Sampling severs the hour-to-hour '
       + 'coupling, so it cannot size storage or test adequacy. Rolling horizon keeps the coupling and '
@@ -869,7 +887,7 @@ export const MODULE_6_TIME: TutorialStep[] = [
     verify: [
       'You can say what module 5 got wrong about pumped hydro and why',
       'You can name the check that catches a stale profile after an axis change',
-      'You can describe the resolution error pattern without looking it up',
+      'You can describe the resolution error pattern (block means vs point sampling) without looking it up',
       'You can say which technique to reach for given a question about storage, about annual energy, and about operation',
       'The model reads 52,663.98 at hourly resolution, contiguous, rolling off — and you have exported it',
     ],

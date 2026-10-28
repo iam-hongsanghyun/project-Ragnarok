@@ -62,8 +62,8 @@ def test_commitment_absent_without_committable() -> None:
 
 
 def test_commitment_absent_when_force_lp() -> None:
-    # Force-LP overrides committable=True → no MILP status → no commitment view.
-    # Drop p_min_pu so the relaxed LP stays feasible at low load.
+    # Force-LP = PyPSA's linearized unit commitment: the status variables are fractions, which are not a schedule,
+    # so there is no commitment view (the units stay committable in the model; nothing is cleared).
     model = _model()
     for g in model["generators"]:
         g.pop("p_min_pu", None)

@@ -5,7 +5,8 @@
  * the backend answers 400 when `tsam` is not installed and that message is shown).
  * Snapshot weightings are carried through so annual energy and cost stay correct.
  * Preview reduces the session copy; Apply replaces the working model, like the
- * network-reduction tool.
+ * network-reduction tool. This is THE way to change the resolution: the run never strides the snapshots. The Run dialog's
+ * Resolution buttons call the same resample. "Set weightings from timestamp spacing" is the companion action.
  */
 import React, { useState } from 'react';
 import type { TemporalMethod, TemporalOptions, TemporalResult } from 'lib/api/temporal';
@@ -14,6 +15,8 @@ import type { WorkbookModel } from 'lib/types';
 interface Props {
   onTemporalPreview?: (opts: TemporalOptions) => Promise<TemporalResult>;
   onTemporalApply?: (model: WorkbookModel) => void;
+  /** Visible action: fill objective / stores / generators of the snapshots sheet from the timestamp spacing. */
+  onSetWeightingsFromSpacing?: () => Promise<void> | void;
   onStatus: (msg: string) => void;
 }
 
@@ -25,7 +28,7 @@ export function temporalInputError(o: TemporalOptions): string | null {
   return null;
 }
 
-export function TemporalClusterPanel({ onTemporalPreview, onTemporalApply, onStatus }: Props) {
+export function TemporalClusterPanel({ onTemporalPreview, onTemporalApply, onSetWeightingsFromSpacing, onStatus }: Props) {
   const [method, setMethod] = useState<TemporalMethod>('resample');
   const [offset, setOffset] = useState('3h');
   const [dropLeapDay, setDropLeapDay] = useState(false);
@@ -122,6 +125,16 @@ export function TemporalClusterPanel({ onTemporalPreview, onTemporalApply, onSta
           </button>
         )}
       </div>
+      {onSetWeightingsFromSpacing && (
+        <div className="forge-adjust-actions">
+          <button type="button" className="secondary-button" onClick={() => void onSetWeightingsFromSpacing()}>
+            Set weightings from timestamp spacing
+          </button>
+          <span className="sg-setting-hint" style={{ margin: 0 }}>
+            fills objective / stores / generators of the snapshots sheet with the gap to the next timestamp
+          </span>
+        </div>
+      )}
       {inputError && <p className="sg-setting-hint">{inputError}</p>}
       {error && <p className="sg-setting-hint" role="alert">{error}</p>}
       {result && (

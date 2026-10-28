@@ -111,6 +111,7 @@ capacity; pmax (dimensionless, 0-1) solved availability signal; hydro_out
    draw across both dimensions in v1.
 """
 from __future__ import annotations
+from ..utils.shedding import is_shedding
 
 import logging
 from typing import Any
@@ -276,7 +277,7 @@ def build_correlated_sampling(
 
     for g in gens.index:
         name = str(g)
-        if name.startswith("load_shedding_"):
+        if is_shedding(name):
             continue
         carrier = str(gens.at[g, "carrier"]) if "carrier" in gens.columns else ""
         cap = float(gens.at[g, cap_col]) if cap_col in gens.columns else 0.0

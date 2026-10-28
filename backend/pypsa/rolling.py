@@ -1,7 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, replace
 from typing import Any
+
+from fastapi import HTTPException
 
 from .utils.coerce import number
 
@@ -12,17 +15,32 @@ class RollingHorizonConfig:
     horizon_snapshots: int
     overlap_snapshots: int
     step_snapshots: int
-    #: Soft terminal-SOC target on the LAST window (see :func:`terminal_soc_hook`).
-    terminal_soc: bool = True
+    #: Soft terminal-SOC target on the LAST window (see :func:`terminal_soc_hook`). A rolling-module OPTION, default OFF:
+    #: it adds a penalised variable to the last window, so it is declared in the run notes when on.
+    terminal_soc: bool = False
     #: Currency per MWh of terminal shortfall; ``None`` = auto (:func:`auto_terminal_penalty`).
     terminal_soc_penalty: float | None = None
+    #: Window and overlap in HOURS (the UI / MCP unit). PyPSA counts snapshots, so :func:`resolve_rolling` converts them
+    #: with the weights the run uses; ``None`` = the snapshot counts above are authoritative (old presets).
+    horizon_hours: float | None = None
+    overlap_hours: float | None = None
 
 
 def parse_rolling_config(raw: dict[str, Any] | None) -> RollingHorizonConfig:
+    """Parse ``rollingConfig``: ``horizonHours`` / ``overlapHours`` (preferred) or the snapshot counts (old presets)."""
     raw = raw or {}
     enabled = bool(raw.get("enabled"))
+    h_hours = None if raw.get("horizonHours") in (None, "") else float(number(raw.get("horizonHours"), 0.0))
+    o_hours = None if raw.get("overlapHours") in (None, "") else float(number(raw.get("overlapHours"), 0.0))
+    if h_hours is not None and h_hours <= 0:
+        raise HTTPException(status_code=400, detail="rollingConfig.horizonHours must be > 0.")
+    if o_hours is not None and (o_hours < 0 or (h_hours is not None and o_hours >= h_hours)):
+        raise HTTPException(status_code=400, detail="rollingConfig.overlapHours must satisfy 0 <= overlap < horizon.")
     horizon = max(1, int(number(raw.get("horizonSnapshots"), 168)))
     overlap = max(0, int(number(raw.get("overlapSnapshots"), 24)))
+    if h_hours is not None:  # provisional counts at a 1 h step; resolve_rolling redoes them with the run's weights
+        horizon = max(1, math.ceil(h_hours - 1e-9))
+        overlap = max(0, math.ceil((o_hours or 0.0) - 1e-9))
     step = max(1, horizon - overlap)
     terminal = raw.get("terminalSoc")
     penalty_raw = raw.get("terminalSocPenalty")
@@ -32,9 +50,35 @@ def parse_rolling_config(raw: dict[str, Any] | None) -> RollingHorizonConfig:
         horizon_snapshots=horizon,
         overlap_snapshots=overlap,
         step_snapshots=step,
-        terminal_soc=True if terminal is None else bool(terminal),
+        terminal_soc=False if terminal is None else bool(terminal),
         terminal_soc_penalty=penalty,
+        horizon_hours=h_hours,
+        overlap_hours=o_hours,
     )
+
+
+def resolve_rolling(cfg: RollingHorizonConfig, step_hours: float, notes: list[str] | None = None) -> RollingHorizonConfig:
+    """Snapshot counts of a window given in hours, at the run's time step (hours between snapshots).
+
+    $$ H_{snap} = \\lceil H_{h} / w \\rceil, \\qquad O_{snap} = \\lceil O_{h} / w \\rceil $$
+
+    ASCII: horizon_snapshots = ceil(horizon_hours / w); overlap_snapshots = ceil(overlap_hours / w), kept below the
+    horizon. ``w`` is the run's smallest ``stores`` weighting. A config given as snapshot counts is returned as is.
+    """
+    if cfg.horizon_hours is None:
+        return cfg
+    w = step_hours if step_hours > 0 else 1.0
+    horizon = max(1, math.ceil(cfg.horizon_hours / w - 1e-9))
+    overlap = max(0, math.ceil((cfg.overlap_hours or 0.0) / w - 1e-9))
+    if overlap >= horizon:
+        overlap = horizon - 1
+    out = replace(cfg, horizon_snapshots=horizon, overlap_snapshots=overlap, step_snapshots=max(1, horizon - overlap))
+    if notes is not None:
+        notes.append(
+            f"Rolling horizon: {cfg.horizon_hours:g} h window / {(cfg.overlap_hours or 0.0):g} h overlap = {horizon} / {overlap} snapshots "
+            f"at a {w:g} h step (ceil(hours / step))."
+        )
+    return out
 
 
 #: Auto penalty = this x the dearest marginal cost, so refilling storage in the last window
@@ -124,3 +168,61 @@ def terminal_soc_hook(
                 )
 
     return hook
+
+
+#: (sheet, flag) pairs that make a storage cyclic: the end state is tied to the start of the window.
+CYCLIC_FLAGS: tuple[tuple[str, str], ...] = (
+    ("storage_units", "cyclic_state_of_charge"),
+    ("storage_units", "cyclic_state_of_charge_per_period"),
+    ("stores", "e_cyclic"),
+    ("stores", "e_cyclic_per_period"),
+)
+
+
+def rolling_cyclic_problem(network: Any) -> str | None:
+    """Why a network with cyclic storage cannot roll, or ``None``.
+
+    PyPSA solves each window on its own and carries the previous window's end state in as the initial state. A cyclic
+    condition (end state = start state) is tied to each window's own start, so it forces every window - the shorter
+    trailing one especially - to net-zero storage and is often infeasible. Ragnarok used to switch the flags off silently;
+    it now refuses, and the visible workbook step :func:`make_noncyclic` (Forge -> Operations; ``POST /api/model/make-noncyclic``)
+    writes the flags.
+    """
+    hits: list[str] = []
+    for sheet, flag in CYCLIC_FLAGS:
+        frame = getattr(network, sheet, None)
+        if frame is None or not len(frame) or flag not in frame.columns:
+            continue
+        n_true = int(frame[flag].astype(bool).sum())
+        if n_true:
+            hits.append(f"{n_true} {sheet} with {flag}=true")
+    if not hits:
+        return None
+    return (
+        "Rolling horizon needs non-cyclic storage: " + "; ".join(hits) + ". Each window starts from the previous window's end "
+        "state, so a cyclic end = start condition inside a window contradicts the carried state. Run the visible step "
+        "'Make non-cyclic for rolling' (Forge -> Operations; POST /api/model/make-noncyclic) to write the flags into the "
+        "workbook, or set them yourself, or run without rolling horizon."
+    )
+
+
+def make_noncyclic(model: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """The workbook step for rolling horizon: every cyclic flag set to False (input not mutated).
+
+    Returns ``(model, changed)`` with ``changed`` = ``[{sheet, name, attribute}]``.
+    """
+    out = dict(model)
+    changed: list[dict[str, Any]] = []
+    truthy = {"true", "1", "yes", "y", "t", "on"}
+    for sheet, flag in CYCLIC_FLAGS:
+        rows = out.get(sheet)
+        if not isinstance(rows, list):
+            continue
+        new_rows = []
+        for row in rows:
+            if isinstance(row, dict) and str(row.get(flag, "")).strip().lower() in truthy | {"1.0"}:
+                row = {**row, flag: False}
+                changed.append({"sheet": sheet, "name": str(row.get("name", "")), "attribute": flag})
+            new_rows.append(row)
+        out[sheet] = new_rows
+    return out, changed

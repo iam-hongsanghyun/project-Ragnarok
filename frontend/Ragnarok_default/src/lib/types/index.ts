@@ -113,6 +113,12 @@ export interface RollingHorizonConfig {
   enabled: boolean;
   horizonSnapshots: number;
   overlapSnapshots: number;
+  /** Window / overlap in HOURS (the unit the UI and MCP use). The backend converts them to PyPSA's snapshot counts with the
+   *  weights the run uses (ceil(hours / step)); when set they win over the snapshot counts. */
+  horizonHours?: number;
+  overlapHours?: number;
+  /** Soft terminal SOC target on the last window. An explicit rolling option, default OFF. */
+  terminalSoc?: boolean;
   /** Derived (horizon - overlap); echoed for display, the backend recomputes it. */
   stepSnapshots: number;
 }
@@ -128,6 +134,8 @@ export interface SamplingConfig {
   blockSize: number;
   blockCount: number;
   gapSnapshots: number;
+  /** API / MCP option (not stored in presets): multiply start_up_cost / shut_down_cost of committable units by the representation factor (PyPSA charges them per event). Backend default true. */
+  scaleStartUpCosts?: boolean;
 }
 
 export interface StochasticScenarioOverride {
@@ -280,9 +288,8 @@ export interface LmpDecompositionConfig {
   referenceBus: string;
 }
 
-/** Timestep-weighted ramp-rate limits — bounds how fast each unit's output can
- *  change between consecutive snapshots: |Δp| ≤ ramp% × p_nom × hours per step
- *  (timestep-weighted, unlike PyPSA's native per-snapshot ramp_limit_up/down). */
+/** Default ramp rate (fraction of p_nom per HOUR) for units without their own. The time-units module writes PyPSA's
+ *  per-snapshot ramp_limit_up/down as min(1, rate × hours per snapshot) at the run's weights; PyPSA's constraint enforces it. */
 export interface RampConfig {
   enabled: boolean;
   /** Max upward ramp, fraction of p_nom per hour (0.5 = 50%/h). */

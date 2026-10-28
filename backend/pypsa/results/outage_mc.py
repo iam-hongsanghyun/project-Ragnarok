@@ -84,6 +84,7 @@ pmax (dimensionless, 0-1) the switchable ``p_max_pu`` availability signal;
 w_t (h) snapshot weight; load_t (MW) system demand.
 """
 from __future__ import annotations
+from ..utils.shedding import is_shedding
 
 import logging
 from typing import Any
@@ -371,7 +372,7 @@ def build_outage_mc(
 
     for g in gens.index:
         name = str(g)
-        if name.startswith("load_shedding_"):
+        if is_shedding(name):
             continue
         carrier = str(gens.at[g, "carrier"]) if "carrier" in gens.columns else ""
         cap = float(gens.at[g, cap_col]) if cap_col in gens.columns else 0.0

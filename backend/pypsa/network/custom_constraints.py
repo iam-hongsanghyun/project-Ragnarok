@@ -7,6 +7,7 @@ import pypsa
 from fastapi import HTTPException
 
 from ..utils.emissions import per_generator_emission_factor
+from ..utils.shedding import shedding_names
 
 
 class ConstraintSkipped(ValueError):
@@ -105,8 +106,8 @@ def build_model_context(
             weights = full_weights.loc[snapshots]
         except Exception:
             weights = full_weights
-    supply_gens = [g for g in n.generators.index if not g.startswith("load_shedding_")]
-    shed_gens = [g for g in n.generators.index if g.startswith("load_shedding_")]
+    shed_gens = shedding_names(n.generators)
+    supply_gens = [g for g in n.generators.index if g not in set(shed_gens)]
     modeled_hours = float(weights.sum())
     full_horizon_hours = float(full_weights.sum())
     committed_hours: float | None = None

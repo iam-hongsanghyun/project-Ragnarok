@@ -18,13 +18,17 @@
  *   start-up 1,000                7,200 fuel + 1,000 start-up = 8,200 · 1 start · online 67%
  *   min_down_time 3               8,800 again — the dip is too short to shut for
  *   ramp_limit 0.3                9,800 · and the cost lands BESIDE the dip, not in it
- *   Force LP                      7,200 · the relaxation, and the only run that prices
+ *   Force LP                      8,640 · PyPSA's linearized unit commitment: a bound, and the only run that prices
  *
- * Two app defects were found and fixed while writing it, both of which would
- * have made the module unteachable: start-up costs were missing from the cost
- * breakdown (so the 1,000 was invisible), and Force LP cleared `committable`
- * while leaving `p_min_pu` behind, which turns a minimum-when-running into an
- * always-on floor and made the "relaxation" cost MORE than the MILP.
+ * Two app defects were found and fixed while writing it: start-up costs were
+ * missing from the cost breakdown (so the 1,000 was invisible), and Force LP
+ * cleared `committable` while leaving `p_min_pu` behind, which turns a
+ * minimum-when-running into an always-on floor and made the "relaxation" cost
+ * MORE than the MILP. Core cleanup step 5 removed the second defect's whole
+ * class: Force LP is now PyPSA's own `linearized_unit_commitment` and clears
+ * nothing, so the relaxation keeps the minimum load, start-up cost and times as
+ * continuous constraints. That is why it now reads 8,640, not 7,200: 7,200 was
+ * the plain dispatch LP with the unit's operating constraints thrown away.
  */
 import { TutorialStep } from '../types';
 
@@ -625,16 +629,20 @@ export const MODULE_11_COMMITMENT: TutorialStep[] = [
     tab: 'Analytics',
     where: 'Run dialog → Force LP',
     concept: [
-      'Force LP drops the integer variables and solves the same fleet as an ordinary linear program. '
-      + 'The unit may then be "60% committed" — which is physically meaningless and analytically very '
-      + 'useful, for three separate reasons.',
+      'Force LP is PyPSA\'s linearized unit commitment: the on/off variable becomes a fraction between 0 '
+      + 'and 1 and every operating constraint stays — minimum load while running, start-up cost, minimum '
+      + 'times. The unit may then be "60% committed", which is physically meaningless and analytically '
+      + 'very useful, for three separate reasons.',
 
       'It is a bound. A relaxation can never cost more than the problem it relaxes, so its objective is '
-      + 'a floor under the true answer. Here it is 7,200 against a committed 8,800: the gap, 1,600, is '
-      + 'the price of the operating constraints, isolated in a single number.',
+      + 'a floor under the true answer. Here it is 8,640 against a committed 8,800: the gap, 160, is '
+      + 'what integrality alone costs, once the minimum load and start-up arithmetic are already in the '
+      + 'relaxation. (It used to read 7,200, a plain dispatch LP with every operating constraint thrown '
+      + 'away; that was a looser bound and a different question.)',
 
       'It prices. With no integers there are duals again, and they are sensible: 20 in the four hours '
-      + 'coal is marginal and 0 in the two dip hours where free wind is. That is a usable price series, '
+      + 'coal is marginal and 0 in the two dip hours where free wind is, with one honest surprise: 36 in hour 5, where an '
+      + 'extra MW also has to bring the part-committed unit back up. That is a usable price series, '
       + 'and pairing it with the MILP\'s commitment decision is the two-solve pattern from the previous '
       + 'step.',
 
@@ -645,17 +653,18 @@ export const MODULE_11_COMMITMENT: TutorialStep[] = [
     explain: [
       'With the shipped model restored, open the Run dialog and turn Force LP on, then run.',
 
-      'The objective is 7,200, with no start-up line, coal free to fall to zero through the dip, and 30 '
-      + 'MW an hour of wind curtailed rather than 70. It is the same fleet answering the question '
-      + '"what if physics did not get in the way?".',
+      'The objective is 8,640, with no integer variables in the solver log and no commitment view: a '
+      + 'fraction of a unit being on is not a schedule. It is the same fleet answering "what if '
+      + 'integrality did not get in the way?".',
 
-      'Read the prices: 20, 20, 0, 0, 20, 20. After a whole module of zeros, prices that mean something.',
+      'Read the prices: 20, 20, 0, 0, 36, 20. After a whole module of zeros, prices that mean something '
+      + '— and the 36 is the relaxation telling you that hour 5 is where the cost of coming back is paid.',
 
-      'And read the run notes again. Force LP reports what it overrode — the committable flags, and '
-      + 'also `p_min_pu` on the units it de-committed. That second override matters more than it '
-      + 'sounds, and the next step is about why.',
+      'And read the run notes again. Force LP says it relaxed the binaries through PyPSA\'s '
+      + 'linearized unit commitment and that nothing in your model was cleared. Its companion step, '
+      + 'Relax maintenance, exists because PyPSA has no such switch for scheduled maintenance.',
 
-      'Finally, hold the three numbers together: 7,200 relaxed, 8,800 committed as shipped, 8,200 '
+      'Finally, hold the three numbers together: 8,640 relaxed, 8,800 committed as shipped, 8,200 '
       + 'committed with a cheaper start. The first is a bound, the other two are answers, and the '
       + 'distance between the bound and an answer is what the operating constraints cost.',
     ],
@@ -671,29 +680,29 @@ export const MODULE_11_COMMITMENT: TutorialStep[] = [
         selector: '[data-card="chart"][data-card-metric="system_price"]',
         title: 'Prices that mean something',
         tab: 'Analytics',
-        note: '20 / 20 / 0 / 0 / 20 / 20 — the marginal unit in each hour, exactly as module 2 taught. '
-          + 'The relaxation is the only run in this module that can tell you this.',
+        note: '20 / 20 / 0 / 0 / 36 / 20 — the marginal cost in each hour, as module 2 taught, plus the '
+          + 'cost of re-committing in hour 5. The relaxation is the only run in this module that can tell you this.',
       },
     ],
     entries: [
       {
         field: 'Run dialog → Force LP',
         value: 'on',
-        why: 'Relaxes every committable flag for this run only — the workbook is untouched. Gives a '
-          + 'lower bound on the committed answer and a usable price series, and solves far faster on a '
-          + 'large fleet.',
+        why: 'PyPSA\'s linearized unit commitment for this run only — the workbook is untouched and nothing '
+          + 'in it is cleared. Gives a lower bound on the committed answer and a usable price series, and '
+          + 'solves far faster on a large fleet.',
       },
     ],
     run: {
       label: 'Run → Force LP on → Run model',
       detail: ['A plain LP again — no branch-and-bound tree in the solver log.'],
-      expect: 'An objective of 7,200 with prices of 20 / 20 / 0 / 0 / 20 / 20 and no start-up cost.',
+      expect: 'An objective of 8,640 with prices of 20 / 20 / 0 / 0 / 36 / 20 and no integer variables in the log.',
     },
     verify: [
-      'The objective reads 7,200 — below both committed answers',
-      'The price series reads 20 / 20 / 0 / 0 / 20 / 20',
-      'The run notes say what Force LP overrode, including p_min_pu',
-      'You can say what the 1,600 gap between 7,200 and 8,800 represents',
+      'The objective reads 8,640 — below both committed answers\' 8,800 and above the 7,200 of plain dispatch',
+      'The price series reads 20 / 20 / 0 / 0 / 36 / 20',
+      'The run notes say Force LP relaxed the binaries natively and cleared nothing',
+      'You can say what the 160 gap between 8,640 and 8,800 represents',
     ],
     pitfalls: [
       'Reporting a Force LP objective as the system cost. It is a bound, and a fleet it describes could '
@@ -716,8 +725,9 @@ export const MODULE_11_COMMITMENT: TutorialStep[] = [
       + 'is welded on at 40 MW for the whole horizon.',
 
       'That model can cost more than the committed one it was meant to simplify, and on a profile with '
-      + 'a deep enough trough it is infeasible outright. Ragnarok\'s validation now names it, and Force '
-      + 'LP clears the floor along with the flag, but a hand-edited workbook will not.',
+      + 'a deep enough trough it is infeasible outright. Ragnarok\'s validation now names it. Force '
+      + 'LP no longer touches the floor (it relaxes the binaries and keeps the constraints), so a '
+      + 'hand-edited workbook is the only way to meet this trap.',
 
       'The other cost of commitment is arithmetic. Each committable unit adds a binary variable per '
       + 'snapshot: one unit over six hours is six binaries and solves at the root node, while thirty '

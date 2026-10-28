@@ -298,7 +298,8 @@ def parse_optimise_options(options: dict[str, Any] | None) -> OptimiseOptions:
         solver_name=solver,
         extra_solver_options=dict(options.get("solverOptions") or {}),
         transmission_losses=_parse_losses(options.get("transmissionLosses")),
-        linearized_unit_commitment=_as_bool(options.get("linearizedUnitCommitment")),
+        # Force-LP IS PyPSA's linearized unit commitment: nothing in the model is cleared for it.
+        linearized_unit_commitment=_as_bool(options.get("linearizedUnitCommitment")) or _as_bool(options.get("forceLp")),
         committable_big_m=big_m,
         cycle_basis_method=cycle or None,
         meshed_thresholds=tuple(int(t) for t in thresholds) if thresholds else None,

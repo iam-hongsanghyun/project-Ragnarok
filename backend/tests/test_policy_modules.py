@@ -175,7 +175,7 @@ def test_old_stored_run_rederives_its_numbers_and_stamps_version_3(tmp_path: Pat
     for label in ("Fuel cost", "Carbon cost", "Load shedding"):
         assert new[label] == pytest.approx(old[label], abs=1.0), label
     assert derived["emissionsBreakdown"]["totalTco2"] == pytest.approx(OLD["m8_c100"]["totalTco2"], rel=1e-9)
-    assert cb.CURRENT_SCHEMA_VERSION == 3
+    assert cb.CURRENT_SCHEMA_VERSION >= 3  # 4 since the temporal and operations modules
 
 
 # ── annual budgets ───────────────────────────────────────────────────────────────
@@ -335,7 +335,7 @@ def test_migration_moves_annual_e_sum_into_the_module_sheet_and_reports_it() -> 
     assert out["RAGNAROK_AnnualBudgets"] == [{"component": "generators", "name": "oil", "attribute": "e_sum_max", "annual": 8000.0}]
     assert "e_sum_max" not in out["generators"][1] and out["generators"][0]["e_sum_max"] == 1e12
     assert report.budgets and report.noteworthy and report.as_dict()["budgets"][0]["annual"] == 8000.0
-    assert cb.schema_version(out) == 3
+    assert cb.schema_version(out) == cb.CURRENT_SCHEMA_VERSION  # 3 -> 4 follows the budget step
     assert m["generators"][1]["e_sum_max"] == 8000.0             # input not mutated
     n, _ = build_network(out, {}, {})
     assert float(n.generators.at["oil", "e_sum_max"]) == pytest.approx(8000.0 * 24 / 8760)

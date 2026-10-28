@@ -67,7 +67,9 @@ export interface BuildViewProps {
    */
   requestedStep?: string | null;
   /** Replace the `snapshots` sheet with a generated axis (Snapshots step). */
-  onGenerateSnapshots?: (labels: string[]) => void;
+  onGenerateSnapshots?: (labels: string[], weightHours?: number) => void;
+  /** Visible action: fill the snapshot weightings from the timestamp spacing. */
+  onSetWeightingsFromSpacing?: () => Promise<void> | void;
   /** Global run resolution in hours per snapshot, so the builder can match it. */
   snapshotWeight?: number;
   onSnapshotWeightChange?: (hours: number) => void;
@@ -543,8 +545,7 @@ export function BuildView(props: BuildViewProps) {
               <SnapshotBuilder
                 existingCount={props.model.snapshots?.length ?? 0}
                 onGenerate={props.onGenerateSnapshots}
-                snapshotWeight={props.snapshotWeight ?? 1}
-                onSnapshotWeightChange={props.onSnapshotWeightChange ?? (() => { /* not wired */ })}
+                onSetWeightingsFromSpacing={props.onSetWeightingsFromSpacing}
               />
             ) : rightColumn}
           </div>

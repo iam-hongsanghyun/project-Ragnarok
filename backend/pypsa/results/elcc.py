@@ -77,6 +77,7 @@ $F$ = candidate/solved firm-MW block (MW), constant across members and
 snapshots by construction (that is precisely what "perfectly firm" means).
 """
 from __future__ import annotations
+from ..utils.shedding import is_shedding
 
 import logging
 from collections.abc import Callable
@@ -295,7 +296,7 @@ def build_elcc(
 
     for g in gens.index:
         name = str(g)
-        if name.startswith("load_shedding_"):
+        if is_shedding(name):
             continue
         carrier = str(gens.at[g, "carrier"]) if "carrier" in gens.columns else ""
         cap = float(gens.at[g, cap_col]) if cap_col in gens.columns else 0.0

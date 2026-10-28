@@ -18,10 +18,11 @@ export function RampSection(props: RampSectionProps) {
       <header className="constraints-workspace-section-header">
         <h3>Ramp-rate limits</h3>
         <p>
-          Limits how fast each unit changes output — Δoutput ≤ ramp% × capacity ×
-          hours per step (timestep-weighted, unlike PyPSA's per-snapshot native
-          limit). Smooths dispatch and raises the value of flexible
-          capacity/reserve.
+          Default ramp rate for units that have none of their own. PyPSA's ramp limit is a fraction of
+          capacity per SNAPSHOT, so the rate you state here (%/hour) is written for the run as
+          min(1, rate × hours per snapshot) using the weights the run uses (blank when ≥ 100 % per snapshot),
+          and PyPSA's own constraint enforces it, including across rolling windows. A unit's own rate lives
+          in the RAGNAROK_TimeUnits sheet (per hour or per minute).
         </p>
       </header>
       <div className="sg-setting-row">

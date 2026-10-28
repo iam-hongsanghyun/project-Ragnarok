@@ -37,11 +37,22 @@ def test_maintenance_results_and_derate():
     assert "generators-maintenance" in build_full_outputs(n)["series"]
 
 
-def test_force_lp_clears_maintainable():
+def test_force_lp_refuses_maintainable_and_the_visible_step_relaxes_it():
+    """Core clears nothing for Force-LP (it is PyPSA's linearized unit commitment); PyPSA has no switch for the
+    maintenance binaries, so the run is refused with the workbook step that writes ``maintainable = False``."""
+    from fastapi import HTTPException
+
+    from backend.pypsa.network.force_lp import relax_maintenance
+
     model = network_to_model(_net())
     assert model["generators"][0]["maintainable"] is True
-    net, notes = build_network(model, {"carbonPrice": 0.0, "discountRate": 0.0}, {"forceLp": True})
+    with pytest.raises(HTTPException) as err:
+        build_network(model, {"carbonPrice": 0.0, "discountRate": 0.0}, {"forceLp": True})
+    assert err.value.status_code == 400 and "Relax maintenance" in str(err.value.detail)
+    relaxed, changed = relax_maintenance(model)
+    assert [c["name"] for c in changed] == ["cheap"] and model["generators"][0]["maintainable"] is True
+    net, notes = build_network(relaxed, {"carbonPrice": 0.0, "discountRate": 0.0}, {"forceLp": True})
     assert not net.generators["maintainable"].any()
-    assert any("maintainable" in x for x in notes)
+    assert any("linearized_unit_commitment" in x for x in notes)
     net2, _ = build_network(model, {"carbonPrice": 0.0, "discountRate": 0.0}, {})
     assert bool(net2.generators.at["cheap", "maintainable"])

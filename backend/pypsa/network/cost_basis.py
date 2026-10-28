@@ -41,10 +41,14 @@ from ...app.config import load_system_defaults
 SCHEMA_SHEET = "RAGNAROK_Schema"
 SCHEMA_KEY = "ragnarok_schema_version"
 #: 1 = implicit legacy (Ragnarok annuitised ``capital_cost`` at run time); 2 = PyPSA cost semantics.
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
 #: 2 = PyPSA cost semantics (step 1); 3 adds the carbon-pricing module (no carbon adder in marginal_cost) and the
-#: annual-budgets module (``e_sum_*`` / GlobalConstraint ``constant`` are PyPSA horizon totals, never scaled).
+#: annual-budgets module (``e_sum_*`` / GlobalConstraint ``constant`` are PyPSA horizon totals, never scaled);
+#: 4 adds the temporal and operations modules: no run-time stride (resolution is a visible transform), test-run sampling
+#: as a module, ramps and unit-commitment times stated in time units (``RAGNAROK_TimeUnits``, converted at solve time
+#: with the actual weights), PyPSA's own ramp constraint, load shedding by PyPSA, rolling terminal SOC off by default.
 COST_SCHEMA_VERSION = 2
+BUDGET_SCHEMA_VERSION = 3
 LEGACY_SCHEMA_VERSION = 1
 
 #: sheet -> its extendable flag. Only these were annuitised by the old builder.
@@ -114,13 +118,15 @@ class MigrationReport:
     changed_rows: list[dict[str, Any]] = field(default_factory=list)
     #: annual ``e_sum_*`` values moved into the RAGNAROK_AnnualBudgets sheet (schema 2 -> 3)
     budgets: list[dict[str, Any]] = field(default_factory=list)
+    #: ramps / UC times typed per snapshot moved into the RAGNAROK_TimeUnits sheet (schema 3 -> 4)
+    time_units: list[dict[str, Any]] = field(default_factory=list)
     review: list[dict[str, Any]] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
 
     @property
     def noteworthy(self) -> bool:
         """Something was converted or flagged: worth a notice and a journal entry."""
-        return bool(self.changed_rows or self.review or self.budgets)
+        return bool(self.changed_rows or self.review or self.budgets or self.time_units)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -131,6 +137,7 @@ class MigrationReport:
             "discountRateSource": self.discount_rate_source,
             "changedRows": self.changed_rows,
             "budgets": self.budgets,
+            "timeUnits": self.time_units,
             "review": self.review,
             "notes": self.notes,
         }
@@ -327,11 +334,14 @@ def migrate_cost_basis(
     discount_rate: float | None = None,
     pypsa_native: bool = False,
     budgets: bool = True,
+    time_units: bool = True,
 ) -> tuple[dict[str, Any], MigrationReport]:
     """Return ``(model, report)`` with ``model`` on the current schema; the input is not mutated.
 
-    Two steps, each skipped when the stamp already covers it: schema 1 -> 2 (costs, below) and 2 -> 3 (annual
-    ``e_sum`` values move to the annual-budgets sheet; ``budgets=False`` stops at 2, for a stored run).
+    Three steps, each skipped when the stamp already covers it: schema 1 -> 2 (costs, below), 2 -> 3 (annual
+    ``e_sum`` values move to the annual-budgets sheet) and 3 -> 4 (ramps and UC times typed per snapshot become
+    ``RAGNAROK_TimeUnits`` rows, :func:`.time_units.migrate_to_time_units`). ``budgets=False`` / ``time_units=False``
+    stop short of that step (a stored run).
 
     Already stamped, or ``pypsa_native`` (a netcdf / h5 / PyPSA Excel / CSV / MATPOWER import,
     already PyPSA-semantic): only (re)stamped, nothing converted.
@@ -359,9 +369,10 @@ def migrate_cost_basis(
     current = schema_version(out)
     if current is not None:
         report.from_version = current
-    if current is not None and current >= (CURRENT_SCHEMA_VERSION if budgets else COST_SCHEMA_VERSION):
+    target = CURRENT_SCHEMA_VERSION if (budgets and time_units) else (BUDGET_SCHEMA_VERSION if budgets else COST_SCHEMA_VERSION)
+    if current is not None and current >= target:
         return out, report
-    if pypsa_native:
+    if pypsa_native and current is None:  # an UNSTAMPED PyPSA file; a stamped Ragnarok workbook of an older schema still migrates
         report.from_version = CURRENT_SCHEMA_VERSION
         report.notes.append("PyPSA-native file: cost columns already follow PyPSA semantics; stamped, not converted.")
         stamp(out)
@@ -369,7 +380,7 @@ def migrate_cost_basis(
 
     if current is None or current < COST_SCHEMA_VERSION:
         _migrate_costs(out, report, discount_rate)
-    if budgets:
+    if budgets and (current is None or current < BUDGET_SCHEMA_VERSION):
         from ...app.annual_budgets import migrate_e_sum
 
         out, moved = migrate_e_sum(out)
@@ -379,8 +390,18 @@ def migrate_cost_basis(
                 f"{len(moved)} e_sum value(s) had ANNUAL semantics (Ragnarok scaled them to the window); they moved to the "
                 "RAGNAROK_AnnualBudgets sheet and the annual-budgets module writes the horizon total (annual x hours / 8760) into e_sum."
             )
+    if time_units and (current is None or current < CURRENT_SCHEMA_VERSION):
+        from .time_units import migrate_to_time_units
+
+        out, moved_units = migrate_to_time_units(out)
+        report.time_units = moved_units
+        if moved_units:
+            report.notes.append(
+                f"{len(moved_units)} ramp / unit-commitment value(s) were stated per snapshot and moved into the RAGNAROK_TimeUnits "
+                "sheet in hours / per hour; the time-units module converts them with the snapshot weights of each run."
+            )
     report.migrated = True
-    stamp(out, CURRENT_SCHEMA_VERSION if budgets else COST_SCHEMA_VERSION)
+    stamp(out, target)
     return out, report
 
 
@@ -425,11 +446,23 @@ def model_for_stored_run(
         ``(model, report)``; ``report`` is ``None`` when nothing was migrated.
     """
     version = build_version_of(model, options)
-    if version is not None and version >= COST_SCHEMA_VERSION:
-        return model, None
-    raw_rate = (scenario or {}).get("discountRate")
-    rate = _number(raw_rate)
-    migrated, report = migrate_cost_basis(model, discount_rate=rate, budgets=False)
+    report: MigrationReport | None = None
+    migrated = model
+    if version is None or version < COST_SCHEMA_VERSION:
+        raw_rate = (scenario or {}).get("discountRate")
+        rate = _number(raw_rate)
+        migrated, report = migrate_cost_basis(model, discount_rate=rate, budgets=False, time_units=False)
+    if version is None or version < CURRENT_SCHEMA_VERSION:
+        # Build version 4 (time units): ramps / UC times typed per snapshot become rows, so the rebuilt network
+        # carries what the stored run was solved with. Stride and sampled weights are re-applied by
+        # ``legacy_window`` (``build_stored_network``), the ramp-rate module's per-hour overrides by this migration.
+        from .time_units import migrate_to_time_units
+
+        fixed, moved = migrate_to_time_units(migrated)
+        if moved:
+            migrated = fixed
+            report = report or MigrationReport(from_version=version or LEGACY_SCHEMA_VERSION)
+            report.time_units = moved
     return migrated, report
 
 
@@ -444,7 +477,7 @@ def legacy_e_sum_scale(network: Any, version: int | None) -> float | None:
     Returns:
         The factor applied (``None`` when nothing was scaled).
     """
-    if version is not None and version >= CURRENT_SCHEMA_VERSION:
+    if version is not None and version >= BUDGET_SCHEMA_VERSION:
         return None
     import pandas as pd
 

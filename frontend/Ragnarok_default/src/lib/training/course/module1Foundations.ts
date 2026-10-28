@@ -260,9 +260,10 @@ export const MODULE_1_FOUNDATIONS: TutorialStep[] = [
       + 'silently misaligns every profile indexed against it. If rows already exist the builder asks '
       + 'first and names how many it is about to discard.',
 
-      'The checkbox underneath sets the run resolution to match. Keep it ticked unless you are '
+      'The checkbox underneath writes the snapshot weightings to match: the snapshots sheet gets '
+      + 'objective / stores / generators columns equal to the resolution. Keep it ticked unless you are '
       + 'deliberately building representative periods — the weight is what scales every energy and cost '
-      + 'total in the answer.',
+      + 'total in the answer, and it lives in the workbook, where you can see it.',
 
       'Settings → Setup → Simulation window narrows what actually gets solved without changing this '
       + 'sheet. Use it to make a first run fast, then widen it. Objective values from different windows '
@@ -311,10 +312,11 @@ export const MODULE_1_FOUNDATIONS: TutorialStep[] = [
       {
         selector: '[data-tour="snap-weight"]',
         buildStep: 'snapshots',
-        title: 'Run resolution',
+        title: 'Snapshot weight',
         tab: 'Build',
         note: 'Weight is not the same as resolution. It is how many real hours each snapshot stands for, '
-          + 'and it scales every energy and cost total. Leaving this ticked keeps the two consistent.',
+          + 'it is written into the snapshots sheet, and it scales every energy and cost total. Leaving '
+          + 'this ticked keeps the two consistent.',
       },
       {
         selector: '.tables-grid-wrap',
@@ -542,10 +544,10 @@ export const MODULE_1_FOUNDATIONS: TutorialStep[] = [
           + 'enough that you can multiply the answer out on paper. Real studies use 8760.',
       },
       {
-        field: 'Snapshots → builder → run resolution checkbox',
+        field: 'Snapshots → builder → snapshot weightings checkbox',
         label: 'snapshot weight = resolution',
         value: 'ticked',
-        why: 'Sets the weight to 1 hour per snapshot. Weight is how many real hours each snapshot stands '
+        why: 'Writes a weight of 1 hour per snapshot into the snapshots sheet. Weight is how many real hours each snapshot stands '
           + 'for, and every energy and cost total is multiplied by it. Leave it unticked and the objective '
           + 'in step 6 will not be 12,000 even though nothing else changed.',
       },
@@ -739,8 +741,8 @@ export const MODULE_1_FOUNDATIONS: TutorialStep[] = [
 
       'If your number differs, the likeliest cause is the snapshot weight — each snapshot standing for '
       + 'more or fewer than one hour rescales the whole objective. The Run dialog\'s summary reports the '
-      + 'resolution it used; it should say 1h. If it does not, the weight checkbox in the snapshot builder '
-      + 'was unticked, and Settings → Simulation window is where to put it right.',
+      + 'resolution of the workbook; it should say 1h. If it does not, the weight checkbox in the snapshot builder '
+      + 'was unticked: Settings → Simulation window → "Set weightings from timestamp spacing" (or ticking it and replacing the axis) puts it right.',
     ],
     spotlights: [
       {

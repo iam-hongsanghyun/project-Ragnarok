@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import numpy as np
 import pandas as pd
 import pypsa
 
@@ -150,61 +149,6 @@ def imported_weightings(
     frame = frame[~frame.index.duplicated(keep="first")]
     out = frame.reindex(snapshots).astype(float)
     return out.fillna(1.0)
-
-
-def rescale_weightings(
-    full_weights: pd.DataFrame,
-    full: pd.Index,
-    windowed: pd.Index,
-    start: int,
-    stop: int,
-    step: int,
-    sampled: bool,
-) -> pd.DataFrame:
-    """Weightings for the modelled snapshots, built from the imported ones.
-
-    Contiguous / strided runs: each kept snapshot carries the SUM of the
-    imported weights of the ``step`` rows it stands for (a stride of 1 keeps its
-    own weight unchanged). Sampled runs: ``objective``/``generators`` keep their
-    own imported weights, scaled so they integrate to the whole window
-    ``[start, stop)`` the sample represents; ``stores`` stays the physical
-    block-sum so the storage SOC recursion is hours-true.
-
-    Algorithm:
-        $$w_i = \\sum_{j=p_i}^{\\min(p_i+s,\\,e_i)-1} w^{imp}_j,\\qquad
-          w^{samp}_i = w^{imp}_{p_i}\\,\\frac{\\sum_{j=a}^{b-1} w^{imp}_j}{\\sum_k w^{imp}_{p_k}}$$
-        ASCII: w_i = sum(w_imp[p_i : min(p_i+s, e_i)]); sampled: w_i = w_imp[p_i]
-        * sum(w_imp[a:b]) / sum(w_imp[kept]).
-        p_i position of kept snapshot i in the full index, s the stride (rows),
-        e_i the end of its investment period (or ``b``), [a, b) the window;
-        weights in hours.
-    """
-    positions = full.get_indexer(windowed)
-    if isinstance(full, pd.MultiIndex) and "period" in (full.names or []):
-        period = np.asarray(full.get_level_values("period"))
-        group_end = np.empty(len(full), dtype=int)
-        end = len(full)
-        for i in range(len(full) - 1, -1, -1):
-            if i + 1 < len(full) and period[i + 1] != period[i]:
-                end = i + 1
-            group_end[i] = end
-        limits = group_end[positions]
-    else:
-        limits = np.full(len(positions), stop, dtype=int)
-    out = pd.DataFrame(index=windowed, columns=list(full_weights.columns), dtype=float)
-    for col in full_weights.columns:
-        w = full_weights[col].to_numpy(dtype=float)
-        csum = np.concatenate([[0.0], np.cumsum(w)])
-        ends = np.minimum(positions + step, np.maximum(limits, positions + 1))
-        block = csum[ends] - csum[positions]
-        if sampled and col != "stores":
-            kept = w[positions]
-            window_total = float(csum[stop] - csum[start])
-            kept_total = float(kept.sum())
-            out[col] = kept * (window_total / kept_total) if kept_total > 0 else block
-        else:
-            out[col] = block
-    return out
 
 
 def _apply_pathway_config(

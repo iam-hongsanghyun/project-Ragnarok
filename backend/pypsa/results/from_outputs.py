@@ -50,6 +50,7 @@ from .market import (
     build_merit_order,
     installed_capacity_series,
 )
+from ..utils.shedding import is_shedding, shedding_mask
 
 
 def _series_to_frame(
@@ -207,7 +208,7 @@ def derive_imported_result(
     # units); the injected load_shedding_ backstop is excluded. Mirrors the
     # solve path in results/__init__.py.
     _gen_installed = installed_capacity_series(network.generators)
-    _real_gen = ~network.generators.index.str.startswith("load_shedding_")
+    _real_gen = ~shedding_mask(network.generators).to_numpy()
     generator_capacity = float(_gen_installed[_real_gen].sum())
     storage_capacity = float(installed_capacity_series(network.storage_units).sum())
     total_load = float(load_dispatch.max()) if len(load_dispatch) else 0.0
@@ -215,7 +216,7 @@ def derive_imported_result(
 
     shed_carriers = set(
         network.generators.loc[
-            network.generators.index.str.startswith("load_shedding_"), "carrier"
+            shedding_mask(network.generators).to_numpy(), "carrier"
         ].unique()
     )
     emission_totals: dict[str, float] = defaultdict(float)
@@ -240,7 +241,7 @@ def derive_imported_result(
     generator_carriers = network.generators["carrier"].to_dict()
     generator_energy: list[dict[str, Any]] = []
     for gen in generator_dispatch_frame.columns:
-        if str(gen).startswith("load_shedding_"):
+        if is_shedding(gen):
             continue
         energy = weighted_sum(generator_dispatch_frame[gen].clip(lower=0.0), generator_weights)
         if energy <= 0.0:

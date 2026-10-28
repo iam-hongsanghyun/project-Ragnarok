@@ -30,11 +30,13 @@ export const P2X_REGISTRY_SHEET = 'RAGNAROK_P2X';
 /** One-row sheet `{ ragnarok_schema_version }` stamping the cost basis the workbook is written for. 2 = PyPSA cost
  *  semantics (`capital_cost` per modelled horizon, `overnight_cost` annuitised by PyPSA); 3 = the carbon price is an
  *  objective term (not in `marginal_cost`) and `e_sum_*` / GlobalConstraint constants are PyPSA horizon totals, with yearly
- *  budgets in `RAGNAROK_AnnualBudgets`. A Ragnarok workbook
+ *  budgets in `RAGNAROK_AnnualBudgets`; 4 = ramps and unit-commitment times are stated in hours / per hour in
+ *  `RAGNAROK_TimeUnits` (converted with the run's weights), resolution is a visible transform (no run-time stride),
+ *  Force-LP / load shedding / rolling are PyPSA's own. A Ragnarok workbook
  *  without it predates that and is migrated once by the backend when it is loaded. */
 export const SCHEMA_SHEET = 'RAGNAROK_Schema';
 export const SCHEMA_VERSION_KEY = 'ragnarok_schema_version';
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 
 export function stampSchema(model: WorkbookModel): WorkbookModel {
   (model as any)[SCHEMA_SHEET] = [{ [SCHEMA_VERSION_KEY]: CURRENT_SCHEMA_VERSION }];

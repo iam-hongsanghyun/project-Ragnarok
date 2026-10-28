@@ -35,6 +35,7 @@ import pandas as pd
 import pypsa
 
 from ..utils.series import weighted_sum
+from ..utils.shedding import is_shedding
 
 _EPS = 1e-9
 
@@ -73,7 +74,7 @@ def _label_grouper(direction: str) -> Any:
         if c == "Generator":
             fuel = static["carrier"].astype(str).replace("", "generation")
             out = "generation" + _SEP + fuel
-            return out.where(~names.str.startswith("load_shedding_"), _SKIP)
+            return out.where(~names.map(is_shedding), _SKIP)
         if c == "Load":
             return pd.Series("load" + _SEP + "Demand", index=static.index)
         if c in ("Link", "Process"):

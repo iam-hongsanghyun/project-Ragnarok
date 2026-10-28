@@ -38,6 +38,9 @@ CARRIERS_SHEET = "carriers"
 SNAPSHOTS_SHEET = "snapshots"
 PROVENANCE_SHEET = "RAGNAROK_Provenance"
 FUEL_PRICES_DB = "fuel_prices"
+#: Module sheets whose rows are keyed by ``(component, name, attribute)``: several rows share one component ``name``, so a
+#: fragment's rows REPLACE rows with the same key and are never renamed by the name-dedupe (RAGNAROK_TimeUnits).
+KEYED_SHEETS: dict[str, tuple[str, str, str]] = {"RAGNAROK_TimeUnits": ("component", "name", "attribute")}
 _BUS_REFS = ("bus", "bus0", "bus1", "bus2", "bus3", "bus4")
 
 
@@ -231,6 +234,18 @@ def merge_fragment(model: Model, fragment: dict[str, Any]) -> Model:
     for sheet in order:
         incoming = sheets.get(sheet) or []
         if not incoming:
+            continue
+        if sheet in KEYED_SHEETS:
+            key = KEYED_SHEETS[sheet]
+            fresh = [dict(r) for r in incoming]
+            for row in fresh:
+                comp = str(row.get("component", ""))
+                renamed = rename.get(f"{comp}::{row.get('name')}")
+                if renamed:
+                    row["name"] = renamed
+            replaced = {tuple(str(r.get(k, "")) for k in key) for r in fresh}
+            kept = [r for r in out.get(sheet) or [] if tuple(str(r.get(k, "")) for k in key) not in replaced]
+            out[sheet] = kept + fresh
             continue
         rewritten = []
         for raw in incoming:

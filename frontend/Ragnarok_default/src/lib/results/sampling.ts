@@ -6,6 +6,12 @@
  * preview that applies the SAME clamp/truncate rules as the backend index
  * builder (backend/pypsa/sampling.py sample_block_indices) so the UI summary
  * matches what the solver will actually do.
+ *
+ * Sampling is the backend "test-run sampling" module: it writes the sampled
+ * snapshots and their weightings (objective/generators = window hours / kept
+ * hours, stores = the physical step). There is no in-block stride any more:
+ * resolution is a visible transform of the workbook (Forge → Temporal), so a
+ * block is B consecutive rows of the workbook as it stands.
  */
 import { GridRow, Primitive, SamplingConfig, WorkbookModel } from '../types';
 
@@ -87,7 +93,7 @@ export function sameSamplingConfig(left: SamplingConfig, right: SamplingConfig):
 }
 
 export interface SamplingPreview {
-  /** Modelled snapshots M (after blocks + in-block stride). */
+  /** Modelled snapshots M (the rows of the sampled blocks). */
   sampledSnapshots: number;
   /** Actual block count after clamping/truncation; for mode 'average', the
    *  number of periods folded into the profile. */
@@ -97,21 +103,19 @@ export interface SamplingPreview {
 }
 
 /** Preview of what the backend will sample over a window of `windowSteps`
- *  rows at stride `step` — same clamp/truncate rules as sample_block_indices
- *  / average_window_frames. */
+ *  rows — same clamp/truncate rules as sample_block_indices /
+ *  average_window_frames. */
 export function computeSamplingPreview(
   windowSteps: number,
-  step: number,
   config: SamplingConfig,
 ): SamplingPreview {
   const cfg = normalizeSamplingConfig(config);
   const W = Math.max(0, Math.floor(windowSteps));
-  const stride = Math.max(1, Math.floor(step) || 1);
   if (W <= 0) return { sampledSnapshots: 0, blockCount: 0, scale: 1 };
   const B = Math.min(cfg.blockSize, W);
 
   if (cfg.mode === 'average') {
-    const sampled = Math.ceil(B / stride);
+    const sampled = B;
     return {
       sampledSnapshots: sampled,
       blockCount: Math.ceil(W / B), // periods folded
@@ -140,7 +144,7 @@ export function computeSamplingPreview(
   }
 
   let sampled = 0;
-  for (const [s, e] of blocks) sampled += Math.ceil((e - s) / stride);
+  for (const [s, e] of blocks) sampled += e - s;
   return {
     sampledSnapshots: sampled,
     blockCount: blocks.length,

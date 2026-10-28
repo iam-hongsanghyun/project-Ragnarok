@@ -29,6 +29,7 @@ import math
 import re
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Callable
+from ..pypsa.utils.shedding import is_shedding
 
 Row = dict[str, Any]
 Model = dict[str, list[Row]]
@@ -1147,7 +1148,7 @@ def installed_capacity(model_static: dict[str, Any] | None, outputs_static: dict
     gen_solved = True
     for r in root.get("generators") or []:
         name = string_value(r.get("name"))
-        if not name or name.startswith("load_shedding_"):
+        if not name or is_shedding(name):
             continue
         mw, ok = _installed_mw(solved_gen.get(name), r)
         gen_solved = gen_solved and ok
@@ -1393,7 +1394,7 @@ def carrier_performance(
     recs: dict[str, dict[str, Any]] = {}
 
     def add(name: str, carrier: str, nameplate: float) -> None:
-        if not name or name.startswith("load_shedding_") or name in recs:
+        if not name or is_shedding(name) or name in recs:
             return
         ge = ge_by_name.get(name)
         curt = ge.get("curtailmentMwh") if ge else None

@@ -3,7 +3,8 @@
  */
 import React, { useState, useEffect } from 'react';
 import { PathwayConfig, RollingHorizonConfig, WorkbookModel } from 'lib/types';
-import { normalizeRollingConfig } from 'lib/results/rolling';
+import { hoursToSnapshots, normalizeRollingConfig, rollingHours } from 'lib/results/rolling';
+import { medianWeightingHours } from 'lib/results/resolution';
 import { formatTimestamp } from 'lib/utils/helpers';
 
 const MIN_CHUNKS = 2;
@@ -17,6 +18,8 @@ export interface RollingSectionProps {
   snapshotEnd: number;
   snapshotWeight: number;
   model: WorkbookModel;
+  /** Visible workbook step: write cyclic_state_of_charge / e_cyclic = false (rolling refuses cyclic storage). */
+  onMakeNonCyclic?: () => Promise<void> | void;
 }
 
 function snapshotTimestamp(model: WorkbookModel, originalIndex: number): string | null {
@@ -64,12 +67,14 @@ export function RollingSection({
   maxSnapshots,
   snapshotStart,
   snapshotEnd,
-  snapshotWeight,
   model,
+  onMakeNonCyclic,
 }: RollingSectionProps) {
   const rawWindow = pathwayConfig.enabled ? maxSnapshots : snapshotEnd - snapshotStart;
-  const weight = Math.max(1, Math.floor(snapshotWeight) || 1);
-  const windowSnapshots = Math.max(1, Math.floor(rawWindow / weight));
+  // Rows are the workbook's snapshots (no run-time stride); each stands for `stepHours` in the solve.
+  const weight = 1;
+  const stepHours = medianWeightingHours(model.snapshots) ?? 1;
+  const windowSnapshots = Math.max(1, Math.floor(rawWindow));
   const maxChunks = Math.max(MIN_CHUNKS, windowSnapshots);
 
   const derivedChunks = Math.max(
@@ -90,10 +95,10 @@ export function RollingSection({
   const windows = computeWindows(windowSnapshots, horizon, overlap);
 
   const [chunksText, setChunksText] = useState<string>(String(derivedChunks));
-  const [overlapText, setOverlapText] = useState<string>(String(overlap));
+  const [overlapText, setOverlapText] = useState<string>(String(overlap * stepHours));
 
   useEffect(() => { setChunksText(String(derivedChunks)); }, [derivedChunks]);
-  useEffect(() => { setOverlapText(String(overlap)); }, [overlap]);
+  useEffect(() => { setOverlapText(String(overlap * stepHours)); }, [overlap, stepHours]);
 
   const commitChunks = (raw: string) => {
     const parsed = Math.max(MIN_CHUNKS, Math.min(maxChunks, parseInt(raw, 10) || MIN_CHUNKS));
@@ -106,18 +111,21 @@ export function RollingSection({
       ...rollingConfig,
       horizonSnapshots: nextHorizon,
       overlapSnapshots: nextOverlap,
+      ...rollingHours(nextHorizon, nextOverlap, stepHours),
     }));
   };
 
   const commitOverlap = (raw: string) => {
-    const parsed = Math.max(0, parseInt(raw, 10) || 0);
-    const cappedOverlap = Math.min(parsed, step - 1);
+    // typed in hours; PyPSA counts snapshots, so it is stored as hours and as ceil(hours / step) snapshots
+    const parsedHours = Math.max(0, parseFloat(raw) || 0);
+    const cappedOverlap = Math.min(hoursToSnapshots(parsedHours, stepHours), step - 1);
     const nextHorizon = horizonFromChunks(windowSnapshots, derivedChunks, cappedOverlap);
-    setOverlapText(String(cappedOverlap));
+    setOverlapText(String(cappedOverlap * stepHours));
     onRollingConfigChange(normalizeRollingConfig({
       ...rollingConfig,
       horizonSnapshots: nextHorizon,
       overlapSnapshots: cappedOverlap,
+      ...rollingHours(nextHorizon, cappedOverlap, stepHours),
     }));
   };
 
@@ -164,13 +172,13 @@ export function RollingSection({
               />
             </div>
             <div className="rolling-input">
-              <label className="sg-setting-label" htmlFor="rs-rolling-overlap">Overlap (snapshots)</label>
+              <label className="sg-setting-label" htmlFor="rs-rolling-overlap">Overlap (hours)</label>
               <input
                 id="rs-rolling-overlap"
                 type="number"
                 min={0}
-                max={Math.max(0, step - 1)}
-                step={1}
+                max={Math.max(0, (step - 1) * stepHours)}
+                step={stepHours}
                 className="sg-num-input"
                 value={overlapText}
                 onChange={(e) => setOverlapText(e.target.value)}
@@ -181,8 +189,39 @@ export function RollingSection({
           </div>
           <div className="sg-setting-row">
             <div className="rolling-summary">
-              {windows.length} window{windows.length === 1 ? '' : 's'} · horizon {horizon} · step {step} · over {windowSnapshots} snapshots
+              {windows.length} window{windows.length === 1 ? '' : 's'} · horizon {horizon * stepHours}h ({horizon} snapshots) · step {step * stepHours}h · over {windowSnapshots} snapshots of {stepHours}h
             </div>
+          </div>
+          <div className="sg-setting-row">
+            <label className="sg-setting-label">Terminal SOC target</label>
+            <div className="sg-btn-row">
+              <button
+                className={`tb-btn sg-solver-btn${!rollingConfig.terminalSoc ? '' : ' tb-btn--muted'}`}
+                onClick={() => onRollingConfigChange({ ...normalizeRollingConfig(rollingConfig), terminalSoc: false })}
+              >
+                Off
+              </button>
+              <button
+                className={`tb-btn sg-solver-btn${rollingConfig.terminalSoc ? '' : ' tb-btn--muted'}`}
+                onClick={() => onRollingConfigChange({ ...normalizeRollingConfig(rollingConfig), terminalSoc: true })}
+              >
+                On
+              </button>
+            </div>
+            <p className="sg-setting-hint">
+              Off by default. On adds a penalised soft target to the last window (storage ends the horizon with at least its
+              starting energy); the run notes declare it.
+            </p>
+          </div>
+          <div className="sg-setting-row">
+            <label className="sg-setting-label">Cyclic storage</label>
+            <p className="sg-setting-hint">
+              Rolling horizon carries each window's end state into the next, so cyclic storage (end = start inside a window) is
+              refused. This visible step writes cyclic_state_of_charge / e_cyclic = false into the workbook.
+            </p>
+            <button className="tb-btn" disabled={!onMakeNonCyclic} onClick={() => void onMakeNonCyclic?.()}>
+              Make non-cyclic for rolling
+            </button>
           </div>
           <RollingTimeline
             windows={windows}

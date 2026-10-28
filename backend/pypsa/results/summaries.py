@@ -6,6 +6,7 @@ import pandas as pd
 import pypsa
 
 from ..utils.emissions import primary_energy_emissions
+from ..utils.shedding import is_shedding
 
 
 
@@ -74,7 +75,7 @@ def _pathway_period_summaries(
     # The injected load_shedding_ backstop is a modelling artifact, not real
     # generation — exclude it from the period energy total, matching the
     # carrier_energy / generator_energy exclusion in the same payload.
-    real_cols = [c for c in dispatch_only.columns if not str(c).startswith("load_shedding_")]
+    real_cols = [c for c in dispatch_only.columns if not is_shedding(c)]
     # Per-snapshot generator emissions on PyPSA's primary_energy basis (RB10): p/eta * co2_emissions
     # (signed, tCO2/h). A period's total is sum_t w_t * rate_t - the run total weights it again by the
     # period's ``yearsWeight``; storage depletion is a whole-horizon stock change and is not split by period.

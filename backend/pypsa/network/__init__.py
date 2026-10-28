@@ -28,8 +28,8 @@ import pypsa
 from ...app.carbon_pricing import build_notes as carbon_notes, config_from_run as carbon_config_from_run, set_plan as set_carbon_plan
 from ...app import annual_budgets
 from ..pathway import parse_pathway_config
-from ..rolling import parse_rolling_config
-from ..sampling import average_window_frames, parse_sampling_config, sample_block_indices
+from ..rolling import parse_rolling_config, resolve_rolling
+from ..sampling import apply_test_run_sampling, parse_sampling_config
 from ..stochastic import apply_scenarios, parse_stochastic_config
 from ..pypsa_schema import (
     input_static_attributes,
@@ -39,10 +39,11 @@ from ..utils.coerce import number
 from .demand_response import apply_demand_response, apply_price_elastic
 from .load_shedding import add_load_shedding
 from .validators import validate_model  # re-export for backend.app.main
+from . import time_units
+from .legacy_window import apply_legacy_window
 from .snapshots import (
     WEIGHTING_COLUMNS,
     imported_weightings,
-    rescale_weightings,
     _snapshots_index,
     _apply_pathway_config,
     _normalize_dynamic_snapshot_index_names,
@@ -163,33 +164,6 @@ def _coerce_numeric_columns(
     return df
 
 
-def _relax_commitment(network: pypsa.Network, list_name: str) -> tuple[int, int]:
-    """De-commit every committable ``list_name`` component and drop its p_min_pu floor.
-
-    Returns ``(components de-committed, components whose positive p_min_pu — static
-    or time-varying — was cleared)``.
-    """
-    frame = network.components[list_name].static
-    if "committable" not in frame.columns:
-        return 0, 0
-    was_committable = frame["committable"].astype(bool)
-    if not was_committable.any():
-        return 0, 0
-    frame["committable"] = False
-    floored: set[str] = set()
-    if "p_min_pu" in frame.columns:
-        static_floor = was_committable & (frame["p_min_pu"].fillna(0.0) > 0.0)
-        floored.update(static_floor.index[static_floor])
-        frame.loc[static_floor, "p_min_pu"] = 0.0
-    # A time-varying p_min_pu takes precedence over the static value.
-    dyn_floor = network.components[list_name].dynamic["p_min_pu"]
-    for name in dyn_floor.columns.intersection(was_committable.index[was_committable]):
-        if bool((dyn_floor[name].fillna(0.0) > 0.0).any()):
-            floored.add(name)
-            dyn_floor[name] = 0.0
-    return int(was_committable.sum()), len(floored)
-
-
 def _drop_deprecated_v_ang_min(network: pypsa.Network, notes: list[str]) -> None:
     """Warn about and clear a finite ``v_ang_min`` (deprecated and ignored in PyPSA 1.4).
 
@@ -211,24 +185,6 @@ def _drop_deprecated_v_ang_min(network: pypsa.Network, notes: list[str]) -> None
                 f"Warning: v_ang_min is deprecated in PyPSA 1.4 and ignored; cleared it on "
                 f"{int(finite.sum())} {list_name}. Use v_ang_max (degrees, symmetric |angle difference| cap)."
             )
-
-
-def _relax_maintenance(network: pypsa.Network, list_name: str) -> int:
-    """Clear ``maintainable`` on ``list_name`` (it adds binary maintenance variables).
-
-    Returns the number of components relaxed. The scheduled-outage binaries make
-    the problem a MILP exactly like ``committable``, so Force-LP must drop them.
-    """
-    if list_name not in network.components.keys():
-        return 0
-    frame = network.components[list_name].static
-    if "maintainable" not in frame.columns:
-        return 0
-    flagged = frame["maintainable"].astype(bool)
-    if not flagged.any():
-        return 0
-    frame["maintainable"] = False
-    return int(flagged.sum())
 
 
 def _carry_plant_ids(network: pypsa.Network, model: dict[str, Any]) -> None:
@@ -468,7 +424,8 @@ def build_stored_network(
     from .cost_basis import build_version_of, legacy_e_sum_scale, model_for_stored_run
 
     current, report = model_for_stored_run(model, scenario, options)
-    network, notes = build_network(current, scenario, options)
+    version = build_version_of(model, options)
+    network, notes = build_network(current, scenario, options, legacy=version is None or version < 4)
     factor = legacy_e_sum_scale(network, build_version_of(model, options))
     if factor is not None:
         notes.append(f"Stored run from before build version 3: annual energy-sum caps scaled by {factor:.3f}, as it was solved.")
@@ -484,8 +441,13 @@ def build_network(
     model: dict[str, list[dict[str, Any]]],
     scenario: dict[str, Any],
     options: dict[str, Any] | None = None,
+    *,
+    legacy: bool = False,
 ) -> tuple[pypsa.Network, list[str]]:
     """Build a solved-ready PyPSA Network from the JSON workbook model.
+
+    ``legacy`` is for re-deriving a STORED run from before build version 4 only (see :mod:`.legacy_window`):
+    it windows with the stride / sampled weights that run was solved with. A new run never sets it.
 
     Args:
         model:      ``{sheet_name: [row_dict, ...]}`` — the GUI workbook.
@@ -553,7 +515,10 @@ def build_network(
         model, pathway, notes, sanitize=True, stochastic_enabled=stochastic.enabled
     )
 
-    # ── Snapshot windowing & downsampling ─────────────────────────────────────
+    # ── Snapshot window ────────────────────────────────────────────────────────
+    # Core slices the window and keeps the workbook's weightings as they are. It never strides: resolution is a
+    # visible transform (Forge -> Temporal, which writes the reduced snapshots, weightings and series). Test-run
+    # sampling is a module (backend/pypsa/sampling.py) that writes sampled snapshots and weightings.
     start = max(0, int(number(options.get("snapshotStart"), 0)))
     # snapshotCount wins when present. Absent, fall back to snapshotEnd —
     # clients naturally describe the window as [start, end) and the Ragnarok
@@ -563,86 +528,37 @@ def build_network(
     if raw_count in (None, "") and options.get("snapshotEnd") not in (None, ""):
         raw_count = number(options.get("snapshotEnd"), 0) - start
     count = max(1, int(number(raw_count, len(network.snapshots) or 1)))
-    step = max(1, int(number(options.get("snapshotWeight"), 1)))
+    stride = max(1, int(number(options.get("snapshotWeight"), 1)))
     full = network.snapshots
-    if len(full) > 0:
+    if stride > 1 and not legacy:
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"snapshotWeight={stride} (a run-time stride) is no longer a run option: it point-sampled every {stride}th row. "
+                f"Reduce the resolution as a visible transform instead - Forge -> Temporal (resample '{stride}h' takes block means "
+                "and writes the snapshots, the weightings and the aggregated series into the workbook; "
+                "POST /api/transform/temporal) - then run at snapshotWeight 1."
+            ),
+        )
+    if len(full) > 0 and legacy:
+        apply_legacy_window(network, options, pathway, sampling, authored_weights, notes)
+        _normalize_dynamic_snapshot_index_names(network)
+    elif len(full) > 0:
         if pathway.enabled:
-            windowed = full
-            if step > 1:
-                if isinstance(full, pd.MultiIndex):
-                    period_levels = list(full.get_level_values("period").unique())
-                    pieces = []
-                    for period in period_levels:
-                        period_index = full[full.get_level_values("period") == period]
-                        pieces.append(period_index[::step])
-                    if pieces:
-                        windowed = pieces[0]
-                        for piece in pieces[1:]:
-                            windowed = windowed.append(piece)
-                else:
-                    windowed = full[::step]
-            stop = len(full)
-            start = 0
+            if sampling.enabled:
+                notes.append("Test-run sampling ignored: a pathway run defines its horizon with investment periods.")
         else:
             stop = min(len(full), start + count)
-            if sampling.enabled and sampling.mode == "average":
-                B = min(max(1, sampling.block_size), max(1, stop - start))
-                averaged_periods = average_window_frames(network, start, stop, B)
-                windowed = full[start:start + B]
-                if step > 1:
-                    windowed = windowed[::step]
-            elif sampling.enabled:
-                idx, sampled_blocks = sample_block_indices(start, stop, sampling, step)
-                windowed = full[idx]
+            if sampling.enabled:
+                apply_test_run_sampling(network, start, stop, sampling, notes)
             else:
                 windowed = full[start:stop]
-                if step > 1:
-                    windowed = windowed[::step]
-        if len(windowed) == 0:
-            windowed = full[:1]
-        full_weights = network.snapshot_weightings.copy()
-        network.set_snapshots(windowed)
-        # Weighting. Contiguous runs: every column = stride hours (unchanged).
-        # Sampled runs: objective/generators carry W/M so totals, costs and
-        # constraint budgets integrate to the FULL window the sample
-        # represents; stores keeps the physical stride so the storage SOC
-        # recursion stays an hours-true integration inside each block.
-        #   w = W / M   (window rows / modelled snapshots; == step when not sampling)
-        sampling_active = sampling.enabled and not pathway.enabled
-        if sampling_active:
-            represented = float(stop - start)
-        else:
-            represented = float(len(windowed) * step)
-        weight = represented / max(1, len(windowed))
-        if authored_weights is not None:
-            rescaled = rescale_weightings(
-                full_weights, full, windowed, start, stop, step, sampling_active
-            )
-            for col in WEIGHTING_COLUMNS:
-                network.snapshot_weightings[col] = rescaled[col].to_numpy()
-        else:
-            for col in ("objective", "generators"):
-                network.snapshot_weightings[col] = weight
-            network.snapshot_weightings["stores"] = float(step)
-        if sampling_active and sampling.mode == "average":
-            notes.append(
-                f"Averaged {averaged_periods} period(s) into one {sampling.block_size}-row profile: "
-                f"{len(windowed)} snapshots modelled of {stop - start} window rows "
-                f"(weight ×{weight:.2f}). Totals represent the full window; "
-                "peaks and variability are smoothed by the averaging."
-            )
-        elif sampling_active:
-            notes.append(
-                f"Sampled {sampled_blocks} block(s) of up to {sampling.block_size} rows: "
-                f"{len(windowed)} snapshots modelled of {stop - start} window rows "
-                f"(weight ×{weight:.2f}, {step}h resolution in-block). "
-                "Totals are scaled to represent the full window."
-            )
-        else:
-            notes.append(
-                f"Modelled {len(windowed)} snapshots at {step}h resolution "
-                f"(rows {start} → {stop} of {len(full)})."
-            )
+                if len(windowed) == 0:
+                    windowed = full[:1]
+                if len(windowed) != len(full):
+                    network.set_snapshots(windowed)
+                notes.append(f"Modelled {len(windowed)} snapshots (rows {start} → {stop} of {len(full)}).")
         _normalize_dynamic_snapshot_index_names(network)
 
     # A time-series sheet that skips snapshots the run actually models leaves NaN
@@ -658,6 +574,16 @@ def build_network(
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     del annual_budget_table
+
+    # ── Time units (module): ramps and UC times in hours -> PyPSA per-snapshot values ──
+    # The weights are final here (window / sampling done), so the conversion uses what the solve will use.
+    try:
+        time_units.apply_to_network(
+            network, time_units.with_rows(model, time_units.ramp_config_rows(model, options.get("rampConfig"))), notes,
+        )
+    except ValueError as exc:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # ── Carbon price: declared, not converted ────────────────────────────────
     # The price is NOT written into marginal_cost. The network records the price it was built for
@@ -675,36 +601,34 @@ def build_network(
     # A row that carries an overnight_cost therefore has to carry its discount_rate.
     _require_discount_rate_for_overnight(network)
 
-    # ── Force-LP override (ignore committable=True flags) ─────────────────────
-    # Generators and Links share the commitment machinery (status / start-up
-    # variables → MIP), so both are relaxed. `p_min_pu` means "minimum output
-    # WHILE RUNNING" only for a committable unit; on a plain LP component it is
-    # an unconditional floor in every snapshot, so leaving it behind would not
-    # relax the MILP — it would replace it with a TIGHTER problem the unit can
-    # never switch off. Static AND time-varying floors are therefore cleared.
+    # ── Force-LP ──────────────────────────────────────────────────────────────
+    # Force-LP is PyPSA's `linearized_unit_commitment` (run_pypsa passes it to n.optimize): the committable
+    # binaries become continuous and every UC constraint stays. Nothing is cleared here. PyPSA has no switch for
+    # the `maintainable` binaries, so a maintainable unit is refused with the visible action that relaxes it.
     if bool(options.get("forceLp", False)):
-        for list_name, label in (
-            ("generators", "generator"), ("links", "link"), ("processes", "process"),
-        ):
-            n_committable, n_floor = _relax_commitment(network, list_name)
-            if n_floor:
-                notes.append(
-                    f"Force-LP: also cleared p_min_pu on {n_floor} de-committed {label}(s) — "
-                    "without commitment it is an always-on floor, not a minimum-when-running."
-                )
-            if n_committable:
-                notes.append(
-                    f"Force-LP enabled: overrode committable=True on {n_committable} {label}(s)."
-                )
-        for list_name, label in (
-            ("generators", "generator"), ("links", "link"), ("processes", "process"),
-        ):
-            n_maint = _relax_maintenance(network, list_name)
-            if n_maint:
-                notes.append(
-                    f"Force-LP enabled: overrode maintainable=True on {n_maint} {label}(s) "
-                    "(scheduled-maintenance binaries removed)."
-                )
+        from fastapi import HTTPException
+
+        maint = [
+            f"{label} {name}"
+            for list_name, label in (("generators", "generator"), ("links", "link"), ("processes", "process"))
+            if list_name in network.components.keys()
+            and "maintainable" in network.components[list_name].static.columns
+            for name in network.components[list_name].static.index[network.components[list_name].static["maintainable"].astype(bool)]
+        ]
+        if maint:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Force-LP cannot relax scheduled maintenance: PyPSA has no switch for the maintainable binaries "
+                    f"({', '.join(maint[:4])}{'...' if len(maint) > 4 else ''}). Run the visible workbook step "
+                    "'Relax maintenance' (Forge -> Operations; POST /api/model/relax-maintenance) to write maintainable = False, "
+                    "or turn Force-LP off."
+                ),
+            )
+        notes.append(
+            "Force-LP: committable binaries relaxed by PyPSA (linearized_unit_commitment); status, start-up and the "
+            "minimum-load / ramp / minimum up-down-time constraints are kept as continuous relaxations."
+        )
 
     # ── Carbon-price emission factor sanity warning ───────────────────────────
     if "co2_emissions" in network.carriers.columns:
@@ -765,6 +689,7 @@ def build_network(
         )
 
     if rolling.enabled:
+        rolling = resolve_rolling(rolling, time_units.step_hours(network)[0], notes)
         # Rows each rolling window COMMITS (horizon - overlap): custom/DSL
         # budgets are apportioned by these hours so overlapping windows do not
         # each spend a full share (see ModelContext.window_fraction).

@@ -27,7 +27,6 @@ from __future__ import annotations
 import math
 from typing import Any
 
-import pandas as pd
 
 from ...pypsa.network import cofiring as cf
 from ...pypsa.network.cost_basis import horizon_years
@@ -36,6 +35,7 @@ from .registry import Ctx, PlantError
 
 _AC = {"", "ac", "dc", "electricity", "elec", "power"}
 TURBINES = {"ccgt": "CCGT", "ocgt": "OCGT"}
+TIME_UNITS_SHEET = "RAGNAROK_TimeUnits"
 
 
 def num(value: Any, default: float = 0.0) -> float:
@@ -49,18 +49,6 @@ def num(value: Any, default: float = 0.0) -> float:
 def opt(value: Any) -> float | None:
     out = num(value, 0.0)
     return out if out > 0 else None
-
-
-def snapshot_hours(model: dict[str, list[dict[str, Any]]]) -> float:
-    """Step between the first two snapshots in hours (1 when there are fewer than two or they do not parse)."""
-    stamps = [r.get("snapshot") for r in model.get("snapshots") or [] if r.get("snapshot") not in (None, "")][:2]
-    if len(stamps) < 2:
-        return 1.0
-    try:
-        dt = (pd.Timestamp(str(stamps[1])) - pd.Timestamp(str(stamps[0]))).total_seconds() / 3600.0
-    except (TypeError, ValueError):
-        return 1.0
-    return dt if dt > 0 else 1.0
 
 
 def default_ac_bus(model: dict[str, list[dict[str, Any]]]) -> str | None:
@@ -84,12 +72,13 @@ def _find_bus(ctx: Ctx, explicit: Any, carriers: tuple[str, ...]) -> str | None:
     return None
 
 
-def uc_fields(P: dict[str, float], dt_h: float, p_el_mw: float, committable: bool, extendable: bool, warnings: list[str]) -> dict[str, Any]:
+def uc_fields(P: dict[str, float], p_el_mw: float, committable: bool, extendable: bool, warnings: list[str]) -> dict[str, Any]:
     """Unit-commitment fields of a thermal unit; empty unless ``committable`` and the size is fixed.
 
     ``p_min_pu`` is a minimum load WHILE RUNNING only for a committable unit (otherwise it is an always-on floor),
-    so none of these are written when the unit is not committable. ``up_time_before`` is set to the minimum up time
-    so the unit is not forced to stay on at the start of the horizon.
+    so none of these are written when the unit is not committable. The ramp and the minimum up / down times are NOT
+    written here: they are stated in hours and per minute in ``RAGNAROK_TimeUnits`` (:func:`add_time_units`) and the
+    time-units module converts them with the snapshot weights of each run.
     """
     if not committable:
         return {}
@@ -98,16 +87,31 @@ def uc_fields(P: dict[str, float], dt_h: float, p_el_mw: float, committable: boo
                         "LP): the commitment fields are NOT written; set a fixed MW to enforce minimum load, ramps, "
                         "minimum up/down time and start-up cost (MIP).")
         return {}
-    up = max(1, math.ceil(P["min_up_time"] / dt_h - 1e-9))
-    down = max(1, math.ceil(P["min_down_time"] / dt_h - 1e-9))
-    out: dict[str, Any] = {
-        "committable": True, "p_min_pu": round(P["min_load"], 6), "start_up_cost": round(P["start_up_cost"] * p_el_mw, 6),
-        "min_up_time": up, "min_down_time": down, "up_time_before": up, "down_time_before": 0,
-    }
-    ramp = P["ramp_rate"] * 60.0 * dt_h / 100.0
-    if ramp < 1.0:
-        out["ramp_limit_up"] = out["ramp_limit_down"] = round(ramp, 6)
-    return out
+    return {"committable": True, "p_min_pu": round(P["min_load"], 6), "start_up_cost": round(P["start_up_cost"] * p_el_mw, 6)}
+
+
+def add_time_units(ctx: Ctx, sheet: str, name: str, P: dict[str, float], committable: bool, extendable: bool) -> None:
+    """Queue the ``RAGNAROK_TimeUnits`` rows of a committable thermal unit: HOURS and a rate PER MINUTE, never snapshots.
+
+    ``min_up_time`` / ``min_down_time`` in hours; ``up_time_before`` = the minimum up time (the unit is not forced to
+    stay on at the start of the horizon); ``ramp_limit_up`` / ``ramp_limit_down`` = the technology's ``ramp_rate`` (percent
+    of capacity per minute) as a fraction per minute. Nothing here depends on the workbook's snapshot spacing.
+    """
+    if not committable or extendable:
+        return
+    rows: list[dict[str, Any]] = [
+        {"component": sheet, "name": name, "attribute": "min_up_time", "value": P["min_up_time"], "unit": "hours"},
+        {"component": sheet, "name": name, "attribute": "min_down_time", "value": P["min_down_time"], "unit": "hours"},
+        {"component": sheet, "name": name, "attribute": "up_time_before", "value": P["min_up_time"], "unit": "hours"},
+        {"component": sheet, "name": name, "attribute": "ramp_limit_up", "value": round(P["ramp_rate"] / 100.0, 9), "unit": "per_minute"},
+        {"component": sheet, "name": name, "attribute": "ramp_limit_down", "value": round(P["ramp_rate"] / 100.0, 9), "unit": "per_minute"},
+    ]
+    ctx.sheets[TIME_UNITS_SHEET].extend(rows)
+    ctx.warnings.append(
+        f"Time units (RAGNAROK_TimeUnits): minimum up / down time {P['min_up_time']:g} h / {P['min_down_time']:g} h and a ramp of {P['ramp_rate']:g} %/min are stored in hours "
+        "and per minute; every run converts them with its own snapshot weights (ramp = min(1, rate per hour x hours per snapshot), times = ceil(hours / step)), so the plant "
+        "is right at any resolution. The run notes and POST /api/time-units/preview show the converted values."
+    )
 
 
 def _turbine_params(spec: dict[str, Any], kind: str) -> dict[str, float]:
@@ -182,7 +186,6 @@ def build_gas_turbine(kind: str, spec: dict[str, Any], ctx: Ctx, ac_bus: str, r:
     P = _turbine_params(spec, kind)
     eta = P["efficiency"]
     ext, p_el, p_max = _size(spec)
-    dt = snapshot_hours(ctx.model)
     gas_bus, info = _gas_supply(ctx, spec, P, ac_bus)
     carrier = TURBINES[kind]
     ctx.carrier(carrier)
@@ -196,8 +199,9 @@ def build_gas_turbine(kind: str, spec: dict[str, Any], ctx: Ctx, ac_bus: str, r:
             link["p_nom_max"] = round(p_max / eta, 6)
     else:
         link["p_nom"] = round(p_el / eta, 6)
-    link.update(uc_fields(P, dt, p_el, bool(spec.get("committable")), ext, ctx.warnings))
+    link.update(uc_fields(P, p_el, bool(spec.get("committable")), ext, ctx.warnings))
     ctx.add("links", link, f"{carrier} turbine")
+    add_time_units(ctx, "links", link["name"], P, bool(link.get("committable")), ext)
     return {"main": {"sheet": "links", "name": link["name"]}, "parameters": P, "efficiency": eta, "gasBus": gas_bus,
             "fuel": info, "turbineCarrier": carrier, "capacityMwEl": None if ext else p_el, "feeders": None,
             "powerSeries": ("links", "p1"), "fuelSeries": ("links", "p0"), "committable": bool(link.get("committable"))}
@@ -231,7 +235,6 @@ def build_cofiring_simple(kind: str, spec: dict[str, Any], ctx: Ctx, ac_bus: str
     price_gas = num(spec.get("gasPrice"), P["fuel_gas_price"]) if spec.get("gasPrice") not in (None, "") else P["fuel_gas_price"]
     ef_g = P["fuel_gas_co2"]
     ext, p_el, p_max = _size(spec)
-    dt = snapshot_hours(ctx.model)
     carrier = f"{ctx.pid} blend"
     co2 = round((1.0 - s) * ef_g + s * P["fuel_h2_co2"], 8)
     ctx.carrier(carrier, co2_emissions=co2)
@@ -246,8 +249,9 @@ def build_cofiring_simple(kind: str, spec: dict[str, Any], ctx: Ctx, ac_bus: str
             gen["p_nom_max"] = round(p_max * cap_factor, 6)
     else:
         gen["p_nom"] = round(p_el * cap_factor, 6)
-    gen.update(uc_fields(P, dt, p_el * cap_factor, bool(spec.get("committable")), ext, ctx.warnings))
+    gen.update(uc_fields(P, p_el * cap_factor, bool(spec.get("committable")), ext, ctx.warnings))
     ctx.add("generators", gen, f"{TURBINES[kind]} gas + H2 generator")
+    add_time_units(ctx, "generators", gen["name"], P, bool(gen.get("committable")), ext)
     return {"main": {"sheet": "generators", "name": gen["name"]}, "parameters": P, "efficiency": eta, "turbineCarrier": TURBINES[kind],
             "blend": {**b, "carrier": carrier, "carrierCo2": co2, "marginalCost": mc, "gasPrice": price_gas, "h2Price": price_h2,
                       "gasCo2": ef_g, "formula": "mc = ((1-s)*c_gas + s*c_h2)/eta + VOM; co2 = (1-s)*e_gas"},
@@ -270,7 +274,6 @@ def build_cofiring_network(kind: str, spec: dict[str, Any], ctx: Ctx, ac_bus: st
     if derate["applied"] and blend["maxShare"] is None:
         ctx.warnings.append("The H2 derate is applied at the maximum blend share, but no maximum share is set: it has no effect.")
     ext, p_el, p_max = _size(spec)
-    dt = snapshot_hours(ctx.model)
     gas_bus, ginfo = _gas_supply(ctx, spec, P, ac_bus)
     price_h2 = num(spec.get("h2Price"), P["fuel_h2_price"]) if spec.get("h2Price") not in (None, "") else P["fuel_h2_price"]
     h2_bus = _find_bus(ctx, spec.get("h2Bus"), ()) if spec.get("h2Bus") else None
@@ -305,8 +308,9 @@ def build_cofiring_network(kind: str, spec: dict[str, Any], ctx: Ctx, ac_bus: st
             link["p_nom_max"] = round(p_max * cap_factor / eta, 6)
     else:
         link["p_nom"] = round(p_el * cap_factor / eta, 6)
-    link.update(uc_fields(P, dt, p_el * cap_factor, bool(spec.get("committable")), ext, ctx.warnings))
+    link.update(uc_fields(P, p_el * cap_factor, bool(spec.get("committable")), ext, ctx.warnings))
     ctx.add("links", link, f"{carrier} turbine (fuel bus -> AC)")
+    add_time_units(ctx, "links", link["name"], P, bool(link.get("committable")), ext)
     return {"main": {"sheet": "links", "name": link["name"]}, "parameters": P, "efficiency": eta, "turbineCarrier": carrier,
             "gasBus": gas_bus, "h2Bus": h2_bus, "fuelBus": fuel_bus, "h2BusCreated": h2_created, "fuel": {**ginfo, "h2Price": price_h2},
             "feeders": {"gas": gas_feed["name"], "h2": h2_feed["name"]}, "blend": blend,

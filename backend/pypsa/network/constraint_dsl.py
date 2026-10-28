@@ -49,6 +49,7 @@ from .custom_constraints import (
     build_model_context,
     raise_on_compile_failures,
 )
+from ..utils.shedding import shedding_names
 
 _FUNC_ATOMS = ("gen", "cap", "cf", "emissions")
 _BARE_ATOMS = ("gen", "cap", "emissions", "load_shed")
@@ -254,7 +255,8 @@ def _selected_gens(ctx: ModelContext, term: Term) -> list[str]:
     matched = n.generators.index[
         n.generators[col].astype(str).isin([str(v) for v in wanted])
     ]
-    return [g for g in matched.tolist() if not str(g).startswith("load_shedding_")]
+    shed = set(shedding_names(n.generators))
+    return [g for g in matched.tolist() if g not in shed]
 
 
 def _gen_expr(ctx: ModelContext, term: Term):

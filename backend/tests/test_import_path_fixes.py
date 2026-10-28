@@ -150,9 +150,11 @@ def test_derive_retains_load_shedding() -> None:
     derived_shed = next(
         r["value"] for r in derived["costBreakdown"] if r["label"] == "Load shedding"
     )
-    # Deriving used to strip enableLoadShedding, drop the load_shedding_* dispatch
+    # Deriving used to strip enableLoadShedding, drop the shedding dispatch
     # columns as "not present in the model", and report zero shed energy.
     np.testing.assert_allclose(derived_shed, fresh_shed, rtol=1e-6, atol=1e-6)
     # The stored shed dispatch column survives the round trip too.
     gen_p = derived["outputs"]["series"]["generators-p"]
-    assert any(k.startswith("load_shedding_") for k in gen_p[0].keys())
+    from backend.pypsa.utils.shedding import is_shedding
+
+    assert any(is_shedding(k) for k in gen_p[0].keys())  # "<bus> load shedding" (PyPSA's add_load_shedding)

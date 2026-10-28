@@ -13,6 +13,7 @@ import pypsa
 
 from ..utils.emissions import primary_energy_emissions
 from ..utils.series import weighted_sum
+from ..utils.shedding import is_shedding
 
 _DEFINITION = (
     "PyPSA primary_energy accounting: generators sum(w*p/efficiency)*co2_emissions; non-cyclic "
@@ -69,7 +70,7 @@ def build_emissions_breakdown(
     carrier_snapshot_emissions: dict[str, float] = defaultdict(float)
 
     for name in gens.index:
-        if name.startswith("load_shedding_") or name not in network.generators_t.p.columns:
+        if is_shedding(name) or name not in network.generators_t.p.columns:
             continue
         carrier = str(gens.at[name, "carrier"])
         energy_mwh = float(weighted_sum(network.generators_t.p[name].clip(lower=0.0), weights))

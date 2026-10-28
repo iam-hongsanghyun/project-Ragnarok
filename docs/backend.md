@@ -35,6 +35,7 @@ integrating with the backend. It does not cover end-user steps (see
    - 5.7 [piecewise.py — piecewise-linear curves](#57-piecewisepy--piecewise-linear-curves)
    - 5.9 [p2x — power-to-X routes, chains, RFNBO, results](#59-p2x--power-to-x-routes-chains-rfnbo-results)
    - 5.10 [plants — Build plant picker, co-firing, results by plant](#510-plants--build-plant-picker-co-firing-results-by-plant)
+   - 5.13 [Temporal and operations modules](#513-temporal-and-operations-modules-core-cleanup-steps-4-and-5)
 6. [Result extraction](#6-result-extraction)
    - 6.1 [run_pypsa return value](#61-run_pypsa-return-value)
    - 6.2 [dispatch.py](#62-dispatchpy)
@@ -183,9 +184,9 @@ The PyPSA 1.4 solve options are in [§7.6](#76-other-pypsa-14-solve-options).
 | `backend` | `str` | `"pypsa"` | Backend name from the registry |
 | `snapshotStart` | `int` | `0` | 0-based index of the first snapshot to model |
 | `snapshotCount` | `int` | all | Number of snapshots to use |
-| `snapshotWeight` | `int` | `1` | Hours per snapshot (downsampling step) |
-| `forceLp` | `bool` | `false` | Override all `committable=True` generators to LP |
-| `enableLoadShedding` | `bool` | `false` | Add per-bus VOLL backstop generators |
+| `snapshotWeight` | `int` | `1` | **Removed as a run option (step 4):** a value above 1 refuses the run (it point-sampled every k-th row). Resolution is a visible transform (Forge → Temporal). Read only to re-derive a stored run from before build version 4 (`network/legacy_window.py`). |
+| `forceLp` | `bool` | `false` | PyPSA's `linearized_unit_commitment` (the binaries become continuous, nothing is cleared); refused for `maintainable` units (visible step `POST /api/model/relax-maintenance`) |
+| `enableLoadShedding` | `bool` | `false` | `n.optimize.add_load_shedding`: one `"<bus> load shedding"` generator per bus, carrier `LoadShedding` |
 | `loadSheddingCost` | `float` | system_defaults | VOLL marginal cost (currency/MWh) |
 | `currencySymbol` | `str` | `"$"` | Symbol for cost strings in results |
 | `solverThreads` | `int` | `0` (auto) | HiGHS thread count |
@@ -393,13 +394,14 @@ Processing order:
 5. Bulk-add every component class in dependency-safe order (carriers and buses first) using PyPSA's `network.add()`. Only `input_static_attributes` columns are kept; others are dropped before `add()`.
 6. Run `_sanitize_placeholder_bounds` — replaces values >= 1e9 in `*_nom_max`, `*_sum_max`, `*_sum_min`, and `lifetime` columns with `±inf` to prevent HiGHS numerical conditioning issues.
 7. Apply time-series sheets (`<list_name>-<attr>`), aligning each to `network.snapshots`.
-8. Window and downsample snapshots (`snapshotStart`, `snapshotCount`, `snapshotWeight`). For pathway mode, windowing ignores `snapshotStart`/`snapshotCount` and only applies the step (downsampling).
+8. Slice the snapshot window (`snapshotStart`, `snapshotCount`); the workbook's weightings are kept as they are. **No stride:** `snapshotWeight` above 1 is refused (resolution is the Forge temporal transform, §5.13). With `samplingConfig.enabled` the **test-run sampling module** (`backend/pypsa/sampling.py`, `apply_test_run_sampling`) writes the sampled snapshots and weightings and the run notes say so; `POST /api/transform/sample` writes the same result into the workbook. Pathway mode ignores the window (and sampling, with a note).
 9. **Annual-budgets module** (§5.12): write `annual × Σw/8760` into the `e_sum_*` / GlobalConstraint `constant` of the rows in `RAGNAROK_AnnualBudgets`. Every other `e_sum` / `constant` passes through as PyPSA's total.
 10. **Carbon price: recorded, not converted.** The price is stored in `network.meta` (`carbon_pricing.set_plan`); `marginal_cost` is untouched. The carbon-pricing module adds the term to the objective in `extra_functionality` (§7.5).
 11. **Cost basis: no conversion.** `capital_cost`, `overnight_cost` and `fom_cost` pass to PyPSA unchanged (see §5.11); the builder only refuses an `overnight_cost` row that has no `discount_rate`. Then copy the `plant` annotation column (`serialize.ANNOTATION_COLUMNS`) onto the network frames so a PyPSA export keeps which components form a plant.
-12. Override `committable=False` on all generators if `forceLp` is set.
+12. **Time-units module** (§5.13): convert `RAGNAROK_TimeUnits` (and the `rampConfig` default rate) to PyPSA's per-snapshot ramps and UC times with the weights now final.
+12b. `forceLp`: nothing is cleared; a note says PyPSA relaxes the binaries (`linearized_unit_commitment`, set in `optimise_options`). A `maintainable` unit refuses the run with the visible workbook step that relaxes it.
 13. Emit a warning note for any carrier with `co2_emissions > 5` (likely entered as kg/MWh instead of tCO2/MWh).
-14. Add per-bus load-shedding generators if `enableLoadShedding`.
+14. Add PyPSA's load-shedding generators if `enableLoadShedding` (§5.5).
 15. Apply stochastic scenario expansion (`apply_scenarios`) if `stochasticConfig.enabled`.
 
 ### 5.2 `components.py`
@@ -436,14 +438,17 @@ Helper functions called by `build_network` during bulk component import.
 
 **`add_load_shedding(network, load_totals, notes, enable_load_shedding, load_shedding_cost, currency)`**
 
-Adds a high-cost generator at each bus (value-of-lost-load, VOLL). When
-`enable_load_shedding` is False this is a no-op and a note is appended
+Calls PyPSA's `n.optimize.add_load_shedding(suffix=" load shedding", sign=1, marginal_cost=VOLL, p_nom=peak)`: one generator per bus
+(value of lost load, VOLL). When `enable_load_shedding` is False this is a no-op and a note is appended
 warning that supply shortfalls will surface as solver infeasibility.
 
-`p_nom` is set to `max(peak_time_series_total, static_load_total, 1.0)` MW so
-the solver can always absorb the full demand shortfall. Generator names use the
-prefix `load_shedding_<bus>` so `run_pypsa`, `emissions.py`, and `market.py`
-can exclude them from energy mix, emission totals, and merit order.
+`p_nom` is the system peak `max(1, max_t Σ_l p_set[l, t])` MW (`system_peak_load`): each load contributes its time series when it has one and its
+static `p_set` otherwise, so a bus with both kinds counts both (audit finding 18; the old size was `max(time-series peak, static sum)`, short by the
+smaller of the two). The generators carry the shedding **carrier** (`system_defaults.json` → `load_shedding.carrier`, `LoadShedding`);
+`backend/pypsa/utils/shedding.py` (`is_shedding`, `shedding_names`, `shedding_mask`) is the one place that tells them from supply, and the ~20
+result paths use it (energy mix, emissions, merit order, adequacy, ELCC, convergence, reserves, custom constraints, DSL, diagnostics, run store,
+derived results). The compat reader still recognises the names `load_shedding_<bus>` of runs stored before build version 4 and the price-elastic
+demand blocks `load_shedding_elastic_*`.
 
 The fallback `marginal_cost` is `system_defaults.json` → `load_shedding.marginal_cost`
 (2000 currency/MWh by default).
@@ -583,7 +588,8 @@ holds the optimised angle, shown by the phase-shifter card. Adequacy uses `maint
 (`results/adequacy.py`). The power-flow study ignores the optimised angles and warns when a
 phase-shifting transformer is present (`results/power_flow.py`).
 
-Force-LP does not relax `maintainable`, so a model with maintenance stays a MIP.
+Force-LP is PyPSA's `linearized_unit_commitment` and does not relax `maintainable` (PyPSA has no switch for it), so a Force-LP run with a maintainable
+unit is refused with the visible workbook step that writes `maintainable = False` (`network/force_lp.py`, `POST /api/model/relax-maintenance`).
 
 ### 5.9 `p2x` — power-to-X routes, chains, RFNBO, results
 
@@ -765,6 +771,41 @@ warns, and the notes say which weighting was used. Run option `options.annualBud
 report lists them (`budgets`); inf / ≥1e9 placeholders and PyPSA-native files stay. `buildVersion` / `CURRENT_SCHEMA_VERSION` is 3 (carbon module + budgets). A stored run before 3 re-derives
 unchanged: the carbon price is rebuilt from its `scenario` / `options`, and `legacy_e_sum_scale` applies the old build-time factor to its `e_sum` (`build_stored_network`).
 
+
+
+### 5.13 Temporal and operations modules (core cleanup steps 4 and 5)
+
+PyPSA 1.4 weights costs, energy, `e_sum`, `primary_energy`, `operational_limit`, storage (standing loss as `(1 - sl)^w`), maintenance duration, Link and
+Process delay, load shedding, multi-period years and every statistic by the snapshot weightings, and **counts snapshots** in the ramp limits, the
+unit-commitment times and the rolling-horizon window (measured, hourly model against its exact 4-hourly aggregate). Core hands those over unchanged; what
+PyPSA lacks is a module that writes visible inputs.
+
+| Module | Code | What it writes | Visible as |
+|---|---|---|---|
+| Resolution | `network_ops.temporal_cluster`, `POST /api/transform/temporal` | reduced snapshots, weightings (block-sum), block-mean series (`resample`) or point samples (`downsample`) | the workbook; the Run dialog's Resolution buttons call it |
+| Weightings from the spacing | `utils/weightings.py` `set_weightings_from_spacing`, `POST /api/model/set-weightings-from-spacing` | `objective` / `stores` / `generators` of the snapshots sheet = the forward gap to the next stamp (irregular spacing and pathway periods handled) | offered from the `weighting_spacing` warning of `model_check` (`finding.action`), the snapshot builder, Settings → Window, MCP |
+| Test-run sampling | `sampling.py` `apply_test_run_sampling`, `sample_model`, `POST /api/transform/sample` | sampled snapshots; `objective` / `generators` = `w_t · Σ_window w / Σ_kept w`, `stores` = `w_t`; `start_up_cost` / `shut_down_cost` × the same factor (`samplingConfig.scaleStartUpCosts`, default on: PyPSA charges them per event, unweighted) | run notes; the transform writes the workbook |
+| Time units | `network/time_units.py`, sheet `RAGNAROK_TimeUnits` (`component, name, attribute, value, unit`) | PyPSA's per-snapshot `ramp_limit_*` and `min_up_time` / `min_down_time` / `up_time_before` / `down_time_before` at **solve** time | run notes; `POST /api/time-units/preview`; MCP `get_time_units` / `preview_time_units` / `set_time_units` |
+| Rolling hours | `rolling.py` `resolve_rolling` | `horizonHours` / `overlapHours` → snapshot counts | run notes; `runMeta.rolling` |
+
+**Time-units equations.** With the solve's time step `w` = the smallest `stores` weighting (the hours between two snapshots; test-run sampling scales `objective` /
+`generators` to the represented window but leaves `stores` physical), a rate `r` in fraction of `p_nom` per hour (a per-minute rate × 60) and a duration `T` in
+hours: `ramp_limit = min(1, r·w)` (blank when `r·w ≥ 1`); `time = ceil(T / w)` (a note when it rounds); `ramp_limit_start_up = ramp_limit_shut_down = min(1, max(r·w, p_min_pu))`.
+PyPSA bounds the output of the snapshot where a unit starts (and of the last running snapshot before it stops) by `limit_start · p_nom` (resp. `limit_shut · p_nom`):
+the convention is the fraction of `p_nom` reachable from standstill within one snapshot, the same linear ramp as `ramp_limit_up`, never below `p_min_pu` (a lower value forbids the
+start altogether; the note says so). Non-uniform weights use the smallest step (no ramp above the physical rate, no minimum time short of the stated duration), with a note. A typed
+number in the component column is PyPSA's per-snapshot value and passes through; a row for the same attribute replaces it (and says so). The `rampConfig` run option is only a default
+rate (per hour) for generators that have neither a row nor a typed value. Ragnarok has **no ramp constraint of its own** any more (`network/ramp.py` only reads the native one back), so the
+window coupling under rolling horizon, the committable formulation and the start / shut-down limits are PyPSA's.
+
+**Operations.** Force-LP = `linearized_unit_commitment` (nothing cleared; Module 11's relaxation reads 8,640, not 7,200, and prices 20/20/0/0/36/20). Rolling horizon refuses cyclic
+storage (`rolling_cyclic_problem`) and offers the visible step `make_noncyclic` (`POST /api/model/make-noncyclic`); the terminal-SOC soft target is `rollingConfig.terminalSoc`, default **off**,
+declared in the run notes when on; PyPSA carries storage, dispatch and commitment across windows. Load shedding is §5.5.
+
+**Schema 4 / buildVersion 4.** `migrate_cost_basis` gains the 3 → 4 step (`time_units.migrate_to_time_units`): plant-template rows (committable, with a `plant` tag) had `ceil(hours/dt)` snapshots and `rate·dt` per
+snapshot written with the workbook's spacing `dt`; they become `hours` and `per_hour` rows; in a workbook with a preset whose `rampConfig` is enabled, a generator's own `ramp_limit_*` was a rate per hour under the old
+module and becomes a `per_hour` row. A stored run before 4 is re-derived through `build_stored_network(legacy=True)`: `network/legacy_window.py` reproduces the stride and the sampled weights it was solved with,
+and its workbook is migrated in memory. Delete both compat paths together with the version-3 one once no stored run predates 4.
 
 ## 6. Result extraction
 
@@ -1134,8 +1175,8 @@ use.
 | `gen_p` | `n.model["Generator-p"]` — the dispatch variable |
 | `dim` | Generator dimension name in the linopy variable |
 | `weights` | `n.snapshot_weightings["generators"]` |
-| `supply_gens` | Generator names without the `load_shedding_` prefix |
-| `shed_gens` | Generator names with the `load_shedding_` prefix |
+| `supply_gens` | Generator names that are not shedding generators (`utils/shedding.py`, by carrier) |
+| `shed_gens` | Generator names of the shedding carrier (legacy `load_shedding_` names included) |
 | `modeled_hours` | `float(weights.sum())` |
 | `cap_var` | `n.model["Generator-p_nom"]` if extendable generators are present, else `None` |
 | `cap_dim` | Dimension name of `cap_var`, or `None` |

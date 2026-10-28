@@ -30,6 +30,8 @@ and explains rather than blocking. It reads the model only; it changes nothing.
 """
 from __future__ import annotations
 
+from .utils.shedding import is_shedding
+
 import math
 from typing import Any
 
@@ -54,8 +56,12 @@ def _num(value: Any) -> float | None:
     return out if math.isfinite(out) else None
 
 
-def _finding(level: str, code: str, message: str, fix: str = "") -> dict[str, str]:
-    return {"level": level, "code": code, "message": message, "fix": fix}
+def _finding(level: str, code: str, message: str, fix: str = "", action: dict[str, str] | None = None) -> dict[str, Any]:
+    """A finding. ``action`` (optional) is a visible workbook step the user can run from it: ``{id, label, endpoint}``."""
+    out: dict[str, Any] = {"level": level, "code": code, "message": message, "fix": fix}
+    if action:
+        out["action"] = action
+    return out
 
 
 def _snapshot_labels(model: dict[str, Any]) -> list[str]:
@@ -117,7 +123,7 @@ def back_brief(model: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _check_snapshot_alignment(model: dict[str, Any], out: list[dict[str, str]]) -> None:
+def _check_snapshot_alignment(model: dict[str, Any], out: list[dict[str, Any]]) -> None:
     axis = set(_snapshot_labels(model))
     if not axis:
         return
@@ -148,7 +154,7 @@ def _check_snapshot_alignment(model: dict[str, Any], out: list[dict[str, str]]) 
             ))
 
 
-def _check_generators(model: dict[str, Any], out: list[dict[str, str]]) -> None:
+def _check_generators(model: dict[str, Any], out: list[dict[str, Any]]) -> None:
     committable = {
         str(g.get("name", "")) for g in _rows(model, "generators") if g.get("committable")
     }
@@ -189,7 +195,7 @@ def _check_generators(model: dict[str, Any], out: list[dict[str, str]]) -> None:
                 ))
 
 
-def _check_structure(model: dict[str, Any], out: list[dict[str, str]]) -> None:
+def _check_structure(model: dict[str, Any], out: list[dict[str, Any]]) -> None:
     buses = {str(b.get("name", "")) for b in _rows(model, "buses")}
     attached: set[str] = set()
     for sheet in ("generators", "loads", "storage_units", "stores"):
@@ -214,7 +220,7 @@ def _check_structure(model: dict[str, Any], out: list[dict[str, str]]) -> None:
         ))
     shedding = [
         str(g.get("name", "")) for g in _rows(model, "generators")
-        if str(g.get("name", "")).startswith("load_shedding")
+        if is_shedding(g.get("name", ""), g.get("carrier"))
         or str(g.get("carrier", "")).lower() in ("load_shedding", "unserved")
     ]
     if shedding:
@@ -226,7 +232,7 @@ def _check_structure(model: dict[str, Any], out: list[dict[str, str]]) -> None:
         ))
 
 
-def _check_weighting_vs_spacing(model: dict[str, Any], out: list[dict[str, str]]) -> None:
+def _check_weighting_vs_spacing(model: dict[str, Any], out: list[dict[str, Any]]) -> None:
     """Timestamp spacing versus the snapshot weighting (default 1 when the sheet has no weighting column)."""
     import pandas as pd
 
@@ -247,13 +253,15 @@ def _check_weighting_vs_spacing(model: dict[str, Any], out: list[dict[str, str]]
     if found:
         out.append(_finding(
             WARN, "weighting_spacing", found["message"],
-            "Set the snapshot weightings to the spacing (a 4-hourly model carries weight 4). Nothing is changed for you.",
+            "Set the snapshot weightings to the spacing (a 4-hourly model carries weight 4). Nothing is changed until you run the action.",
+            {"id": "set_weightings_from_spacing", "label": "Set weightings from timestamp spacing",
+             "endpoint": "POST /api/model/set-weightings-from-spacing"},
         ))
 
 
 def check_model(model: dict[str, Any]) -> dict[str, Any]:
     """Back-brief plus trap findings for a workbook model. Read-only."""
-    findings: list[dict[str, str]] = []
+    findings: list[dict[str, Any]] = []
     _check_snapshot_alignment(model, findings)
     _check_weighting_vs_spacing(model, findings)
     _check_generators(model, findings)

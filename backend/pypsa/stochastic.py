@@ -35,6 +35,7 @@ from pypsa.constants import RE_INVARIANT_ATTRS
 
 from ..app import carbon_pricing
 from .utils.coerce import number
+from .utils.shedding import is_shedding
 
 
 @dataclass(frozen=True)
@@ -333,7 +334,7 @@ def per_scenario_summaries(
         # Unserved energy (the load-shedding backstop) is not supply.
         total_energy = float(
             energy_per_gen[
-                [c for c in energy_per_gen.index if not str(c).startswith("load_shedding_")]
+                [c for c in energy_per_gen.index if not is_shedding(c)]
             ].sum()
         )
         total_emissions = float((energy_per_gen * ef_per_gen.reindex(energy_per_gen.index).fillna(0.0)).sum())
@@ -347,7 +348,7 @@ def per_scenario_summaries(
         else:
             total_operating_cost = float((energy_per_gen * marginal_cost_static.reindex(energy_per_gen.index).fillna(0.0)).sum())
 
-        shed = [c for c in scenario_dispatch.columns if str(c).startswith("load_shedding_")]
+        shed = [c for c in scenario_dispatch.columns if is_shedding(c)]
         load_shed_energy = (
             float(scenario_dispatch[shed].clip(lower=0.0).multiply(weights, axis=0).sum().sum())
             if shed

@@ -1,14 +1,15 @@
 /**
- * Window section — simulation window (snapshot range), resolution weight, and
- * the sampled-blocks test-run mode (solve N blocks of B snapshots weighted to
- * represent the whole window).
+ * Window section — simulation window (snapshot range), the workbook's resolution
+ * (changed by a visible Resample transform), and the sampled-blocks test-run
+ * module (N blocks of B snapshots whose weightings are written to represent the
+ * whole window).
  */
 import React from 'react';
 import { PathwayConfig, SamplingConfig } from 'lib/types';
 import { DualRangeSlider } from '../../shared/components/DualRangeSlider';
 import { NumberDraftInput } from '../../shared/components/NumberDraftInput';
-import { RUN_WINDOW } from 'lib/constants';
 import { computeSamplingPreview } from 'lib/results/sampling';
+import { RESOLUTION_CHOICES_HOURS, type WorkbookResolution } from 'lib/results/resolution';
 import {
   endIndexForTime,
   isDatedAxis,
@@ -26,6 +27,12 @@ export interface WindowSectionProps {
   samplingConfig: SamplingConfig;
   /** Ordered ISO timestamps of the run axis, for the date-range picker. */
   snapshotTimestamps: string[];
+  /** The workbook's own resolution: the weighting of its snapshots and their timestamp spacing. */
+  resolution?: WorkbookResolution;
+  /** Resample the working workbook to `hours` (Forge → Temporal, written into the workbook). */
+  onApplyResolution?: (hours: number) => Promise<void> | void;
+  /** Fill the snapshot weightings from the timestamp spacing (a visible action). */
+  onSetWeightingsFromSpacing?: () => Promise<void> | void;
   onSnapshotStartChange: (v: number) => void;
   onSnapshotEndChange: (v: number) => void;
   onSnapshotWeightChange: (v: number) => void;
@@ -129,22 +136,54 @@ export function WindowSection(props: WindowSectionProps) {
           </>
         )}
       </div>
-      <div className="sg-setting-row">
-        <label className="sg-setting-label">Resolution — every {props.snapshotWeight}h</label>
-        <div className="sg-btn-row">
-          {RUN_WINDOW.weightOptions.map((n) => (
-            <button
-              key={n}
-              className={`tb-btn sg-solver-btn${props.snapshotWeight === n ? '' : ' tb-btn--muted'}`}
-              onClick={() => props.onSnapshotWeightChange(n)}
-            >
-              {n}h
-            </button>
-          ))}
-        </div>
-      </div>
+      <ResolutionRow {...props} />
       <SamplingRow {...props} windowSteps={steps} />
     </section>
+  );
+}
+
+/** Resolution is a property of the workbook (its snapshots and weightings), changed by a visible Resample transform. */
+function ResolutionRow(props: WindowSectionProps) {
+  const res = props.resolution;
+  const [busy, setBusy] = React.useState(false);
+  const run = async (action?: () => Promise<void> | void) => {
+    if (!action || busy) return;
+    setBusy(true);
+    try { await action(); } finally { setBusy(false); }
+  };
+  return (
+    <div className="sg-setting-row">
+      <label className="sg-setting-label">
+        Resolution — {res ? `each snapshot is ${res.weightingHours}h in the solve` : 'from the workbook'}
+        {res?.spacingHours != null && res.spacingHours !== res.weightingHours ? ` (timestamps ${res.spacingHours}h apart)` : ''}
+      </label>
+      <div className="sg-btn-row">
+        {RESOLUTION_CHOICES_HOURS.map((n) => (
+          <button
+            key={n}
+            disabled={busy || !props.onApplyResolution}
+            className={`tb-btn sg-solver-btn${res && res.weightingHours === n ? '' : ' tb-btn--muted'}`}
+            title={`Resample the workbook to ${n}h: block-mean series, weights ${n}, written into the workbook (Forge → Temporal)`}
+            onClick={() => void run(() => props.onApplyResolution?.(n))}
+          >
+            {n}h
+          </button>
+        ))}
+      </div>
+      {res?.mismatch && (
+        <div className="rolling-summary">
+          The timestamps are {res.spacingHours}h apart but the weighting is {res.weightingHours}h, so PyPSA books
+          {' '}{(res.weightingHours / (res.spacingHours ?? 1)).toFixed(2)}× the real energy.{' '}
+          <button className="tb-btn" disabled={busy || !props.onSetWeightingsFromSpacing} onClick={() => void run(props.onSetWeightingsFromSpacing)}>
+            Set weightings from timestamp spacing
+          </button>
+        </div>
+      )}
+      <div className="rolling-summary">
+        Resampling is a visible transform: it writes the reduced snapshots, their weightings and the block-mean series into
+        the workbook. The run never strides the snapshots itself.
+      </div>
+    </div>
   );
 }
 
@@ -155,7 +194,7 @@ function SamplingRow(props: WindowSectionProps & { windowSteps: number }) {
   const cfg = props.samplingConfig;
   const patch = (next: Partial<SamplingConfig>) =>
     props.onSamplingConfigChange({ ...cfg, ...next });
-  const preview = computeSamplingPreview(props.windowSteps, props.snapshotWeight, cfg);
+  const preview = computeSamplingPreview(props.windowSteps, cfg);
   const summary = !cfg.enabled
     ? 'off — the full window is solved contiguously'
     : cfg.mode === 'average'

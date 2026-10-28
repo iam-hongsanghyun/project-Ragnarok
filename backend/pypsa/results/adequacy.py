@@ -35,6 +35,7 @@ import pandas as pd
 import pypsa
 
 from .dispatch import _snapshot_label
+from ..utils.shedding import is_shedding
 
 _log = logging.getLogger("pypsa.solver")
 
@@ -535,7 +536,7 @@ def build_adequacy(
     renewables: list[tuple[str, float, np.ndarray]] = []  # (name, capacity, base CF)
     for g in gens.index:
         name = str(g)
-        if name.startswith("load_shedding_"):
+        if is_shedding(name):
             # Injected VOLL backstop, not a physical resource: counting it as a
             # stochastic renewable (it carries a time-varying p_max_pu column)
             # adds ~peak-load fake capacity per bus and zeroes LOLE/EENS.

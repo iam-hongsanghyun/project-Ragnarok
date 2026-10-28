@@ -17,6 +17,7 @@ from ..network.piecewise import representative_marginal_costs
 
 from ..constants import carrier_color, generator_color
 from ..utils.series import weighted_sum
+from ..utils.shedding import is_shedding
 from .pathway_periods import is_pathway, period_objective_weights
 from .stat_metrics import (
     COMPONENT_LISTS, asset_statistic, asset_value, combine_periods, fixed_cost_of, fixed_cost_table,
@@ -25,7 +26,7 @@ from .stat_metrics import (
 
 # System generators (reliability backstops, not merchant assets) — excluded from
 # the supply stack and the profit analytics by name prefix.
-SYSTEM_GEN_PREFIXES = ("load_shedding_", "system_bess")
+SYSTEM_GEN_PREFIXES = ("load_shedding_", "system_bess")  # + shedding by carrier / PyPSA suffix (utils.shedding.is_shedding)
 
 # Calendar hours per year: turns a modelled-hours total into a per-year figure where one is shown.
 # A unit-conversion constant (not a tunable parameter), so it lives in code rather than .env.
@@ -154,7 +155,7 @@ def build_merit_order(network: pypsa.Network) -> list[dict[str, Any]]:
     adder = carbon_pricing.adder_frame(network)
     carbon_mean = adder.mean(axis=0) if not adder.empty else pd.Series(dtype=float)
     for name in network.generators.index:
-        if any(name.startswith(pfx) for pfx in SYSTEM_GEN_PREFIXES):
+        if is_shedding(name) or any(name.startswith(pfx) for pfx in SYSTEM_GEN_PREFIXES):
             continue
         gen = network.generators.loc[name]
         p_nom = float(capacity.get(name, 0.0))
@@ -648,7 +649,7 @@ def build_generator_economics(
         mc_dense = carbon_pricing.effective_marginal_cost(network)
         p_nom_opt_s = installed_capacity_series(network.generators)
         for name in network.generators.index:
-            if any(str(name).startswith(pfx) for pfx in SYSTEM_GEN_PREFIXES):
+            if is_shedding(name) or any(str(name).startswith(pfx) for pfx in SYSTEM_GEN_PREFIXES):
                 continue
             if name not in gen_p.columns:
                 continue

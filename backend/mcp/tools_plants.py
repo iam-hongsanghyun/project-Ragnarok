@@ -38,7 +38,7 @@ def _trim(res: dict[str, Any]) -> dict[str, Any]:
     annotations=_RO,
     description=(
         "The plant types Build can add as ONE unit: generator, bess (battery StorageUnit), ccgt, ocgt (gas turbines with DEA / technology-data cost, "
-        "efficiency, minimum load, ramp, start-up cost and unit commitment when committable), cofiring_simple (one generator burning a fixed gas / H2 blend: "
+        "efficiency, minimum load, start-up cost and unit commitment when committable; the ramp rate (per minute) and the minimum up / down times (hours) are written to RAGNAROK_TimeUnits and converted for the run's snapshot weights at solve time, see get_time_units), cofiring_simple (one generator burning a fixed gas / H2 blend: "
         "cost and CO2 factor from the share), cofiring_network (gas bus + H2 bus -> fuel bus -> turbine, blend limited by options.cofiringConfig or the plant's "
         "blendMin / blendMax) and p2x (electrolyser chain). Each entry lists its fields (key, label, unit, default, advanced) and defaults. Every plant needs a bus and a "
         "capacity (pNom MW, or extendable=true); the rest defaults from the technology data (value, unit, source, verified flag: file | derived | literature | assumption)."

@@ -9,6 +9,7 @@ import pypsa
 from ..utils.emissions import primary_energy_emissions
 from ..utils.series import safe_series
 from .pathway_periods import snapshot_active_mask
+from ..utils.shedding import is_shedding
 
 
 def _snapshot_parts(snapshot: object) -> tuple[int | None, object]:
@@ -426,7 +427,7 @@ def curtailment_mw_by_generator(
     tv = network.generators_t.p_max_pu
     gens = [
         g for g in tv.columns
-        if not str(g).startswith("load_shedding_") and g in network.generators.index
+        if not is_shedding(g) and g in network.generators.index
     ]
     empty = pd.DataFrame(index=snapshots)
     if not gens or network.generators_t.p.empty:

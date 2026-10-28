@@ -215,8 +215,8 @@ Edit these as ordinary attributes in the Generators, Links, Processes and Transf
 - **Maintenance.** Set `maintainable` to true on a generator, link or process. Then set
   `maintenance_duration` (hours per event), `maintenance_events` (events per horizon) and
   `maintenance_pu` (fraction of capacity out during an event, 0 to 1). The solver places the
-  events. The **Maintenance schedule** card on the Analytics dashboard shows them. Force-LP does not relax
-  maintenance, so a model with it stays a MIP.
+  events. The **Maintenance schedule** card on the Analytics dashboard shows them. Force-LP cannot relax
+  maintenance (PyPSA has no switch): run the visible step **Relax maintenance** first.
 - **Phase shifters.** On a transformer, set `phase_shift_min` and `phase_shift_max` (degrees).
   The solver picks the angle inside that range. The **Phase shifters** card shows the chosen
   angles. The power-flow study does not use them.
@@ -321,7 +321,10 @@ both maps draw **one marker per plant** (a violet ring at its bus) instead of on
 
 **Unit commitment (CCGT, OCGT, co-firing).** Tick *Unit commitment* and the plant's operating characteristics take effect: a
 minimum load (CCGT 40 %, OCGT 20 % of rated output, DEA), minimum up / down time, a start-up cost per start (per MW x the plant's
-MW) and, if the time step is coarse enough for it to bind, ramp limits. The solve becomes a MILP; the Analytics commitment view
+MW) and the ramp limits. The minimum times are stored in **hours** and the ramp as a rate **per minute** in the `RAGNAROK_TimeUnits`
+sheet (edit it as a workbook sheet, through the API or MCP `set_time_units`); each run converts them with the snapshot weights it uses (`ramp = min(1, rate per hour x hours per snapshot)`, blank when
+a snapshot is long enough to reach full output; `snapshots = ceil(hours / hours per snapshot)`), so the same plant is right at 5 minutes and at 4 hours.
+The solve becomes a MILP; the Analytics commitment view
 shows the starts. Unit commitment needs a fixed size: with *Let the solver size it* the fields are not written and the preview says
 so (`committable` and `extendable` cannot be combined on one unit). PyPSA has one start-up cost per unit, so hot / warm / cold
 starts are not distinguished (the data has no such split for a CCGT), and the efficiency is the rated value at every load.
@@ -404,9 +407,22 @@ Controls which portion of the snapshot index is submitted to the solver.
 - **Dual-range slider** — drag the left handle to set the start snapshot index
   and the right handle to set the end index. The label shows how many of the
   total available snapshots are selected.
-- **Resolution buttons** — choose how many hours each snapshot represents: 1h,
-  2h, 3h, 4h, 6h, 8h, 12h, or 24h. A weight of 24h treats each row of your
-  time-series data as one day.
+- **Resolution** — the workbook's own resolution (the hours each snapshot represents, i.e. its
+  snapshot weighting). The buttons (1h, 2h, 3h, 4h, 6h, 12h; also in the Run dialog) are a visible
+  **Resample** transform, the same as Forge → Temporal: the reduced snapshots, their weightings and
+  the block-mean series are written into the workbook (the solver never strides your data). It can only
+  coarsen; to go back to finer data reload it. Block means smooth peaks, so check the answer at two
+  resolutions. A preset saved with an old stride (`snapshotWeight` above 1) shows a notice and runs at
+  the workbook's resolution; a run that still asks for a stride is refused with the way to do it.
+- **Set weightings from timestamp spacing** — shown when the timestamps are further apart than the
+  weighting says (a 4-hourly workbook with weight 1 books a quarter of the energy). It fills the
+  snapshots sheet's `objective` / `stores` / `generators` columns with the gap to the next timestamp
+  (irregular spacing and pathway periods handled). Also in Build → Snapshots and, on a model-check
+  warning, as an action. Nothing is changed until you press it.
+- **Sampled blocks (test run)** — a reduced set of blocks whose weightings represent the whole window.
+  The run applies it and says so in its notes; `POST /api/transform/sample` (MCP `sample_workbook`) writes the
+  same sampled snapshots and weightings into the workbook. `start_up_cost` / `shut_down_cost` of
+  committable units are multiplied by the same factor (PyPSA charges them per start, unweighted).
 
 When pathway mode is enabled, the slider is hidden because the solver uses the
 full horizon defined by the pathway periods.
@@ -456,7 +472,12 @@ backend.
 | Parameter | Description |
 |---|---|
 | Chunks | Number of solve windows to divide the snapshot range into. Minimum 2. |
-| Overlap (snapshots) | Number of snapshots that adjacent windows share. A higher overlap improves accuracy at the boundary between windows. Maximum is step size minus 1. |
+| Overlap (hours) | Hours that adjacent windows share, converted to PyPSA's snapshot count with the weights of the run (`ceil(hours / step)`). A higher overlap improves accuracy at the boundary between windows. |
+| Terminal SOC target | Off by default. On adds a penalised soft target to the last window (storage ends the horizon with at least its starting energy); the run notes declare it. |
+
+PyPSA carries storage, dispatch and commitment from one window to the next, so ramp limits and minimum up / down times are coupled across windows.
+Rolling horizon **refuses cyclic storage** (end = start inside a window contradicts the carried state): press **Make non-cyclic for rolling**
+(or `POST /api/model/make-noncyclic`) to write the flags into the workbook.
 
 A rolling-horizon timeline diagram below the inputs shows each window's start
 and end timestamps, with overlap regions highlighted. The summary line displays
@@ -688,7 +709,7 @@ Settings that affect parsing and display across all sessions.
 | Date format | Auto-detect, YYYY-MM-DD (ISO), DD-MM-YYYY, MM-DD-YYYY | Auto-detect | Declares the format of snapshot timestamps in the input workbook so the parser can resolve ambiguous strings. Display is always canonical ISO. |
 | Currency | Dropdown of common currencies | USD ($) | Sets the symbol shown in KPI strips, carbon price fields, and chart labels. |
 | Discount rate | Fraction (0–1) | 0.05 | The project discount rate (0.05 = 5% WACC). It changes no cost at run time: the buttons beneath it (a Forge action) write it into the `discount_rate` column of every row that has an `overnight_cost`; PyPSA annuitises with the row's own rate, and a run is refused if such a row has none. |
-| Load shedding | Off / On | Off | When On, unmet demand is absorbed by a VOLL (value of lost load) backstop generator at each bus rather than causing solver infeasibility. |
+| Load shedding | Off / On | Off | When On, PyPSA's `add_load_shedding` puts a VOLL (value of lost load) generator (`<bus> load shedding`, carrier `LoadShedding`) at each bus, sized by the system peak of static and time-series loads, rather than causing solver infeasibility. |
 | Value of lost load | Currency/MWh | 2000 | Visible only when load shedding is On. Sets the penalty cost for unserved energy. |
 
 ---
@@ -706,14 +727,16 @@ Click the **Run** button in the top bar. The Run dialog opens.
 - Which scenario preset is active, or "ad hoc" if no preset is selected.
 - Whether the solve is single-period or a multi-year pathway, and how many periods.
 - Whether rolling-horizon mode is enabled, and its horizon and overlap.
-- The snapshot range (`start → end`) and resolution (e.g. "1h resolution").
+- The snapshot range (`start → end`) and the workbook's resolution (e.g. "1h resolution (workbook)"); the Resolution buttons resample the workbook visibly.
 - The number of active custom constraints.
 
 **Optimization settings** — two toggles:
 
-- **Force LP** — when active, forces a linear programming relaxation even if the
-  model contains generators with `committable = True`. Useful for debugging or
-  speeding up large models that do not require unit commitment.
+- **Force LP** — PyPSA's linearized unit commitment: the `committable` on / off variables become
+  continuous (0 to 1) and every operating constraint stays (minimum load while running, start-up cost,
+  minimum times), so it is a bound on the committed answer and the only commitment run that prices.
+  Nothing in the model is cleared. PyPSA cannot relax scheduled maintenance, so a model with
+  `maintainable` units is refused until you run **Relax maintenance** (writes `maintainable = false`).
 - **Dry run** — when active, the action button label changes to **Validate**.
   Clicking it sends the model to the backend's validation endpoint instead of
   the solver. Results appear in the Analytics view under the Validation sub-tab.

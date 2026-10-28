@@ -84,7 +84,7 @@ async def _apply(resp: dict[str, Any]) -> dict[str, Any]:
 
 @mcp.tool(
     annotations=_MUT,
-    description="Reduce the time axis with PyPSA's native temporal clustering and replace the working model. method: resample (offset like '3h' or '1D', optional drop_leap_day, aggregation_rules), downsample (stride >= 2) or segment (num_segments contiguous TSAM segments via tsam 4.1.1, installed in the backend; solver names the MIP solver tsam uses, default highs). Snapshot weightings keep annual energy and cost correct. Applied on confirm.",
+    description="Reduce the time axis with PyPSA's native temporal clustering and replace the working model. method: resample (offset like '3h' or '1D', optional drop_leap_day, aggregation_rules), downsample (stride >= 2) or segment (num_segments contiguous TSAM segments via tsam 4.1.1, installed in the backend; solver names the MIP solver tsam uses, default highs). Snapshot weightings keep annual energy and cost correct. This is the VISIBLE way to change the resolution (the run option snapshotWeight > 1 is refused): resample writes the reduced snapshots, the weightings and block-mean series into the workbook; downsample is PyPSA's point sampling (every stride-th snapshot, weight x stride). Applied on confirm.",
 )
 async def temporal_cluster(
     method: str = "resample",

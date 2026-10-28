@@ -40,24 +40,56 @@ def test_ccgt_row_from_the_data_file() -> None:
     assert all(r.get("plant") == "ccgt" for rows in built["fragment"]["sheets"].values() for r in rows)
 
 
-def test_committable_wires_minimum_load_start_up_cost_and_min_times() -> None:
+def _units(built: dict, name: str) -> dict[str, tuple[float, str]]:
+    return {r["attribute"]: (r["value"], r["unit"]) for r in built["fragment"]["sheets"]["RAGNAROK_TimeUnits"] if r["name"] == name}
+
+
+def test_committable_wires_minimum_load_start_up_cost_and_time_units() -> None:
     _, built = add_plant(grid(), "ccgt", {"pNom": 400, "committable": True})
     link = built["fragment"]["sheets"]["links"][0]
     assert link["committable"] is True
     assert link["p_min_pu"] == pytest.approx(0.40)                                                  # DEA sheet 05
     assert_allclose(link["start_up_cost"], P["ccgt"]["start_up_cost"] * 400, rtol=1e-9)             # EUR per start = EUR/MW x MW_el
-    assert (link["min_up_time"], link["min_down_time"]) == (4, 4)                                    # 4 h at 1 h snapshots
-    assert "ramp_limit_up" not in link                                                               # 15 %/min = 900 %/h: not binding
+    # the template writes HOURS and a rate PER MINUTE (RAGNAROK_TimeUnits), never snapshots and never a per-snapshot ramp
+    assert not {"min_up_time", "min_down_time", "up_time_before", "ramp_limit_up", "ramp_limit_down"} & set(link)
+    u = _units(built, link["name"])
+    assert u["min_up_time"] == (4.0, "hours") and u["min_down_time"] == (4.0, "hours") and u["up_time_before"] == (4.0, "hours")
+    assert u["ramp_limit_up"] == (pytest.approx(0.15), "per_minute")                                # 15 %/min
     # OCGT: 20 % minimum load, DEA start-up cost 43 EUR2015 x 1.3358
     _, o = add_plant(grid(), "ocgt", {"pNom": 100, "committable": True})
     ol = o["fragment"]["sheets"]["links"][0]
     assert ol["p_min_pu"] == pytest.approx(0.20) and ol["start_up_cost"] == pytest.approx(43 * 1108.7166 / 830 * 100, rel=1e-6)
-    # a coarser time step turns the ramp into a limit and the hours into fewer snapshots
-    coarse = grid()
-    coarse["snapshots"] = [{"snapshot": f"2030-01-01T{h:02d}:00:00"} for h in range(0, 24, 3)]
-    _, c = add_plant(coarse, "ccgt", {"pNom": 400, "committable": True, "params": {"ccgt.ramp_rate": 0.2}})
-    cl = c["fragment"]["sheets"]["links"][0]
-    assert cl["min_up_time"] == math.ceil(4 / 3) and cl["ramp_limit_up"] == pytest.approx(0.2 * 60 * 3 / 100)
+
+
+@pytest.mark.parametrize("step_hours,min_up,ramp_blank", [(1.0, 4, False), (3.0, math.ceil(4 / 3), False), (0.25, 16, False), (5 / 60, 48, False)])
+def test_the_run_converts_the_plants_time_units_with_its_own_weights(step_hours: float, min_up: int, ramp_blank: bool) -> None:
+    """The same stored plant is right at every resolution: hours / per-minute become snapshots / per-snapshot at SOLVE time."""
+    import pandas as pd
+
+    model, built = add_plant(grid(), "ccgt", {"pNom": 400, "committable": True, "params": {"ccgt.ramp_rate": 0.2}})
+    stamps = [t.strftime("%Y-%m-%d %H:%M:%S") for t in pd.date_range("2030-01-01", periods=6, freq=pd.Timedelta(hours=step_hours))]
+    model["snapshots"] = [{"snapshot": t, "objective": step_hours, "generators": step_hours, "stores": step_hours} for t in stamps]
+    for sheet in [k for k in model if k.endswith("-p_max_pu") or k.endswith("-p_set")]:
+        model.pop(sheet)
+    net, notes = build_network(model, SCENARIO, {})
+    name = built["fragment"]["sheets"]["links"][0]["name"]
+    assert int(net.links.at[name, "min_up_time"]) == min_up
+    assert int(net.links.at[name, "up_time_before"]) == min_up
+    ramp = net.links.at[name, "ramp_limit_up"]
+    assert (math.isnan(ramp)) is ramp_blank
+    if not ramp_blank:
+        assert ramp == pytest.approx(min(1.0, 0.2 * 60 * step_hours / 100))  # 0.2 %/min = 12 %/h
+    assert any(n.startswith("Time units:") for n in notes)
+
+
+def test_deleting_the_plant_removes_its_time_unit_rows() -> None:
+    from backend.app.plants import registry
+
+    model, built = add_plant(grid(), "ccgt", {"pNom": 400, "committable": True})
+    model = registry.apply_change(model, {"remove": {}, "release": [], "fragment": built["fragment"]})
+    assert model["RAGNAROK_TimeUnits"]
+    gone = registry.apply_change(model, registry.delete_change(model, built["plantId"]))
+    assert not gone.get("RAGNAROK_TimeUnits")
 
 
 def test_committable_and_extendable_is_refused_with_a_warning() -> None:
