@@ -73,7 +73,7 @@ from .full_outputs import build_full_outputs
 from .market import (
     build_applied_constraints,
     build_co2_shadow,
-    build_commitment_cost,
+    commitment_cost_by_component,
     build_generator_economics,
     build_merit_order,
     installed_capacity_series,
@@ -1084,7 +1084,8 @@ def _build_solved_payload(
     # unit commitment — but they are not proportional to energy, so nothing in
     # the fuel/carbon/shedding maths above picks them up. Omitting them made two
     # runs that differ only in start-up cost report an identical breakdown.
-    commitment_cost = build_commitment_cost(network)
+    commitment_by_component = commitment_cost_by_component(network)
+    commitment_cost = float(sum(commitment_by_component.values()))
 
     cost_breakdown = [
         {"label": "Fuel cost", "value": round(fuel_cost)},
@@ -1101,9 +1102,13 @@ def _build_solved_payload(
         other_operating_costs(
             network,
             # n.statistics.opex has no carbon term (it is the module's objective term), so it is not 'explained' here
-            generator_explained=fuel_cost + shed_cost + commitment_cost,
+            generator_explained=fuel_cost + shed_cost,
+            itemised=commitment_by_component,
         )
     )
+    # Objective terms a module added itself (e.g. the plants module's warm / cold start surcharge), evaluated
+    # at the solution by that module's post_solve hook; n.statistics cannot see them.
+    cost_breakdown.extend({"label": t["label"], "value": round(t["value"])} for t in ctx.objective_terms if abs(t["value"]) >= 0.5)
     if any(r.get("capex_annual", 0) > 0 for r in expansion_results):
         # PyPSA's periodised capital cost over the modelled horizon (n.statistics.capex), directly
         # comparable with the window-total fuel/carbon/shedding components. A pathway run reports

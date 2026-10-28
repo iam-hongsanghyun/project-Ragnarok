@@ -716,6 +716,7 @@ a multi-period pathway (the rows look back over adjacent snapshots); **relaxed c
 rows stay valid on the continuous status, the run note says a fractional status can lower the charge. Results: `startCosts` per plant (starts by
 hot / warm / cold from the solved status, `startCost`, `nativeStartUpCost`, `tierIncrement`), `standByCost`, and `commitmentCost` (included in
 `totalCost` only for a plant that uses these fields; the legacy total never contained start-up costs).
+The term at the solution is reported as the cost-breakdown line "Start-up surcharge (warm / cold tiers)" (`startcosts.tier_increment`, a `post_solve` hook), so the reported total equals the objective.
 
 *Start-up / shut-down time* (`startUpMinutes`, `shutDownMinutes`): PyPSA's own `ramp_limit_start_up` / `ramp_limit_shut_down`, written as
 `RAGNAROK_TimeUnits` rows `p_min_pu / minutes` per minute (the rate that reaches the minimum load in that many minutes) and converted at solve time
@@ -874,7 +875,7 @@ module by name. A module that fails to import is skipped and listed in `module_h
 | `build_step` | `fn(ctx)` | inside `build_network`, after load shedding | `demand_response` (rewiring), `stochastic` (scenario overrides), `market_studies` (bid + carbon price + piecewise refusal) |
 | `constraints` | `prepare(ctx) -> fn(n, snapshots) \| None` | once before the solve (a bad plan is a 400); the returned contributions are composed into the one `extra_functionality` | `carbon_pricing`, `annual_budgets`, `constraints`, `reserves`, `p2x` (RFNBO), `plants` (co-firing, start-cost tiers) |
 | `replace_solve` | `fn(ctx) -> payload \| None` | after the build; a payload ends the run | `market_studies` (rule-based market simulation) |
-| `post_solve` | `fn(ctx) -> {key: value}` | right after the solve, before the core reads the network | `stochastic` (collapse to a representative scenario, duals divided by the scenario probability) |
+| `post_solve` | `fn(ctx) -> {key: value}` | right after the solve, before the core reads the network; a module that added its own objective term appends `{label, value}` (the term at the solution) to `ctx.objective_terms`, which the cost breakdown lists | `stochastic` (collapse to a representative scenario, duals divided by the scenario probability), `plants` (start-cost tier surcharge) |
 | `diagnose` | `fn(ctx) -> {headline, text} \| None` | when a solve is unusable | `model_check` (infeasibility diagnosis) |
 | `study` | `fn(ctx) -> {key: value}` | after the core has read the network | `market_studies`, `company`, `adequacy`, `reserves`, `emissions`, `demand_response` |
 

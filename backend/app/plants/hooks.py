@@ -65,3 +65,20 @@ def _prepare_start_costs(ctx: mh.RunContext) -> Callable[[Any, Any], None] | Non
 
 
 mh.register("constraints", "plants-start-costs", _prepare_start_costs, module=MODULE, order=61)
+
+
+def _report_start_costs(ctx: mh.RunContext) -> dict[str, Any]:
+    """The warm / cold surcharge the tiers added to the objective, handed to the cost breakdown (n.statistics cannot see it)."""
+    from . import startcosts
+
+    try:
+        plans = startcosts.read_plans(ctx.model or {})
+    except ValueError:
+        return {}
+    value = startcosts.tier_increment(ctx.network, plans) if plans else None
+    if value:
+        ctx.objective_terms.append({"label": "Start-up surcharge (warm / cold tiers)", "value": value})
+    return {}
+
+
+mh.register("post_solve", "plants-start-costs", _report_start_costs, module=MODULE, order=61)

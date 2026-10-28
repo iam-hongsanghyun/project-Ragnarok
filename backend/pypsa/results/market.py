@@ -115,15 +115,25 @@ def build_commitment_cost(network: pypsa.Network) -> float:
     Returns 0.0 when nothing is committable, when the run relaxed the integers
     (``forceLp``), or when no unit ever changed state.
     """
-    total = 0.0
+    return float(sum(commitment_cost_by_component(network).values()))
+
+
+def commitment_cost_by_component(network: pypsa.Network) -> dict[str, float]:
+    """:func:`build_commitment_cost` split by PyPSA component (``{"Generator": ..., "Link": ...}``).
+
+    ``n.statistics.opex`` books each unit's start-ups under its own component, so the cost breakdown
+    subtracts each figure from that component's opex, not from the generators'.
+    """
+    out: dict[str, float] = {}
     for list_name in COMMITTABLE_LISTS:
         if list_name not in network.components.keys():
             continue
+        component = network.components[list_name].name
         for status_attr in ("start_up", "shut_down"):
             frame = event_cost_frame(network, list_name, status_attr)
             if not frame.empty:
-                total += float(frame.to_numpy().sum())
-    return total
+                out[component] = out.get(component, 0.0) + float(frame.to_numpy().sum())
+    return out
 
 
 # ── Merit order ───────────────────────────────────────────────────────────────

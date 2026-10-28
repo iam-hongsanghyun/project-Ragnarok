@@ -2681,6 +2681,39 @@ def test_module_19_a_warm_start_tier_shortens_the_stop_instead_of_being_paid() -
     assert float(res["emissionsBreakdown"]["totalTco2"]) == pytest.approx(4_052.42, abs=0.01)
 
 
+def test_module_19_link_start_ups_are_booked_once_in_the_cost_breakdown() -> None:
+    """The co-firing link's two hot starts (2 x 12,000) are their own line and are not also inside the link operating cost.
+
+    Before the fix the breakdown read start-ups 24,000, 'Quadratic / stand-by cost' -24,000 and a link operating cost that
+    still held the 24,000 (n.statistics.opex books a Link's start-ups under Link, but they were subtracted from Generator).
+    """
+    _, res, _ = _m19("warm")
+    assert all(r["value"] >= 0 for r in res["costBreakdown"])
+    assert _cost(res, "Quadratic / stand-by cost") == 0.0
+    assert _cost(res, "Start-up / shut-down cost") == pytest.approx(24_000.0, abs=1.0)
+    assert _cost(res, "Link operating cost") == pytest.approx(58_248.0, abs=1.0)
+    assert _total(res) == pytest.approx(926_779.0, abs=2.0)
+
+
+def test_module_19_a_paid_warm_start_is_in_the_reported_total() -> None:
+    """Warm 80 per MW after 5 h: one start is warm, so the tier term adds (80 - 60) x 200 = 4,000 and the total equals the objective.
+
+    Before the fix the breakdown summed to 921,415 against an objective of 925,415.7 (the module's tier term was missing).
+    """
+    from backend.app.plants import catalog, registry
+    from backend.app.plants import results as plant_results
+    from backend.pypsa.results import run_pypsa
+
+    model = json.loads(_m19_model_json("warm"))
+    model = registry.apply_change(model, catalog.edit_plant(model, "cofire", {"startCostWarm": 80}))
+    res = run_pypsa(model, _M19_SCENARIO, OPTIONS)
+    surcharge = _cost(res, "Start-up surcharge (warm / cold tiers)")
+    assert surcharge == pytest.approx(4_000.0, abs=1.0)
+    plant = plant_results.plant_results({"model": model, "result": res, "options": OPTIONS, "scenario": _M19_SCENARIO})["plants"][0]
+    assert plant["startCosts"]["tierIncrement"] == pytest.approx(surcharge, abs=1.0)
+    assert _total(res) == pytest.approx(925_415.7, abs=2.0)
+
+
 def test_module_19_checkpoint_is_what_the_steps_build(tmp_path: Path) -> None:
     """The finished example is the start model after the module's plant edits, row for row."""
     built = json.loads(_m19_model_json("warm"))

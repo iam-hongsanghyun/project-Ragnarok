@@ -202,6 +202,40 @@ def snapshot_thresholds(hours: list[float], step_h: float, name: str, component:
 # ── the constraint rows ────────────────────────────────────────────────────────────────────────────────────
 
 
+def _tier_deltas(plan: Plan) -> list[tuple[str, float]]:
+    """``(label, delta)`` of each tier charged on top of the hot cost: its cost minus the previous tier's (skipped when not higher)."""
+    out: list[tuple[str, float]] = []
+    prev_cost = plan.hot
+    for (_, cost), label in zip(plan.tiers, plan.labels):
+        delta = cost - prev_cost
+        prev_cost = cost
+        if delta > 0:
+            out.append((label, delta))
+    return out
+
+
+def _var_name(plan: Plan, label: str) -> str:
+    return f"startcost-{plan.component}-{plan.name}-{label}"
+
+
+def tier_increment(n: Any, plans: list[Plan]) -> float | None:
+    r"""The tier objective term at the solution, ``sum_j delta_j sum_t y_j[t]`` (currency); ``None`` when the solved model is gone.
+
+    Algorithm: $$C = \sum_j \Delta_j \sum_t y_{j,t}$$ with $\Delta_j$ the cost step of tier j over the previous tier (currency per start)
+    and $y_{j,t} \ge 0$ the solved tier variable. ASCII: C = sum_j delta_j * sum_t y_j[t].
+    """
+    m = getattr(n, "model", None)
+    if m is None:
+        return None
+    total = 0.0
+    for plan in plans:
+        for label, delta in _tier_deltas(plan):
+            name = _var_name(plan, label)
+            if name in m.variables:
+                total += delta * float(m.variables[name].solution.sum())
+    return total
+
+
 def apply_start_cost_tiers(n: Any, plans: list[Plan], snapshots: Any, notes: list[str]) -> None:
     """Add the tier variables, rows and objective term to ``n.model`` (call inside ``extra_functionality``, once per model)."""
     from linopy import merge
@@ -229,15 +263,14 @@ def apply_start_cost_tiers(n: Any, plans: list[Plan], snapshots: Any, notes: lis
         down_b = float(comp.static.at[plan.name, "down_time_before"])
         counts, rounding = snapshot_thresholds([h for h, _ in plan.tiers], step_h, plan.name, plan.component)
         notes.extend(f"Time units: {r}." for r in rounding)
-        prev_cost = plan.hot
-        for j, ((hours, cost), k_j, label) in enumerate(zip(plan.tiers, counts, plan.labels), start=1):
-            delta = cost - prev_cost
-            prev_cost = cost
-            if delta <= 0:
+        deltas = dict(_tier_deltas(plan))
+        for (hours, cost), k_j, label in zip(plan.tiers, counts, plan.labels):
+            if label not in deltas:
                 continue
+            delta = deltas[label]
             hist = pre_horizon_status(up_b, down_b, k_j)                      # lags 1..K_j before the horizon
             before = np.array([hist[: max(k_j - t, 0)].sum() for t in range(len(idx))], dtype=float)
-            y = m.add_variables(lower=0, coords=[idx], name=f"startcost-{plan.component}-{plan.name}-{label}")
+            y = m.add_variables(lower=0, coords=[idx], name=_var_name(plan, label))
             lhs = y - start
             if k_j >= 1:
                 shifted = [status.to_linexpr().shift(snapshot=k).fillna(0) for k in range(1, k_j + 1)]

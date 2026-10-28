@@ -25,7 +25,9 @@ Hook kinds, in the order a run reaches them:
     (rule-based market simulation); ``None`` lets the solve proceed.
 ``post_solve``
     ``fn(ctx) -> dict`` straight after the solve, before the core reads the network (the stochastic
-    collapse to a representative scenario). The returned keys join the payload.
+    collapse to a representative scenario). The returned keys join the payload. A module that added its
+    own objective term appends ``{"label", "value"}`` (the term at the solution) to ``ctx.objective_terms``;
+    the core lists it in the cost breakdown, so the reported total matches the objective.
 ``diagnose``
     ``fn(ctx) -> {"headline": str, "text": str} | None`` when a solve came back unusable (infeasible, or load
     unserved): explain WHY from the built network. The first hook that answers wins; the core words the error.
@@ -90,6 +92,8 @@ class RunContext:
     mga_enabled: bool = False
     # Per-run scratch space a module may use to hand data from its ``constraints`` hook to its ``study`` hook.
     state: dict[str, Any] = field(default_factory=dict)
+    # Module-declared objective terms evaluated at the solution (post_solve): [{"label", "value"}].
+    objective_terms: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def incompatible_modes(self) -> list[str]:

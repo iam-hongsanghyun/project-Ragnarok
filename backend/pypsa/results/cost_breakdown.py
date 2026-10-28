@@ -53,20 +53,27 @@ def other_operating_costs(
     network: pypsa.Network,
     *,
     generator_explained: float,
+    itemised: dict[str, float] | None = None,
 ) -> list[dict[str, Any]]:
     """Cost-breakdown rows for objective terms beyond fuel / carbon / shedding.
 
     Args:
         network: Solved network.
         generator_explained: Generator operating cost already itemised
-            (fuel + load shedding + start-up/shut-down; carbon is not in n.statistics.opex), in the same
+            (fuel + load shedding; carbon is not in n.statistics.opex), in the same
             currency and weighting as ``n.statistics.opex``.
+        itemised: Cost already reported on its own line, by PyPSA component (the start-up /
+            shut-down cost of committable Generators, Links and Processes); subtracted from
+            that component's opex so it is not counted twice.
 
     Returns:
         ``[{"label", "value"}]`` rows: the generator remainder (quadratic and
         stand-by cost) and one row per other component with operating cost.
     """
     by_component = statistics_opex_by_component(network)
+    for component, value in (itemised or {}).items():
+        if component in by_component:
+            by_component[component] -= value
     rows: list[dict[str, Any]] = []
     remainder = by_component.pop("Generator", 0.0) - generator_explained
     if abs(remainder) >= _MIN_TERM:
