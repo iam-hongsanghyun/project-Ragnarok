@@ -20,7 +20,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from ...pypsa.network import cofiring
+from backend.app.plants import cofiring
 from .. import model_store, run_store
 from ..plants import catalog, registry, technologies
 from ..plants import results as plant_results

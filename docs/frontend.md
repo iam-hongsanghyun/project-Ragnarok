@@ -1147,7 +1147,7 @@ carrier growth-limit editor (`.../Constraints/CarrierGrowthEditor.tsx`). The
 growth editor edits `max_growth` (MW of new capacity per investment period) and
 `max_relative_growth` (ratio) on the `carriers` sheet; empty means unlimited. Both
 editors show per-row hints from `lib/constraints/globalConstraintHints.ts`, which mirrors
-the server's `validate_model` checks (`backend/pypsa/network/constraint_checks.py`):
+the server's `validate_model` checks (`backend/app/constraints/constraint_checks.py`):
 `investment_period` on a single-period run for `primary_energy` / `operational_limit`
 (a PyPSA 1.4 `ValueError`), a period outside the configured ones, a
 `tech_capacity_expansion_limit` without a carrier, and growth limits that cannot bind
@@ -1372,7 +1372,7 @@ charts do not use them: `useMetricOptions` reads `GET /api/runs/{name}/metrics`.
 
 Parses the human-friendly Advanced Constraints code box into structured
 `ConstraintSpec` objects (the wire format sent to the backend). Mirrors the
-backend parser in `backend/pypsa/network/constraint_dsl.py`.
+backend parser in `backend/app/constraints/constraint_dsl.py`.
 
 **Grammar (one constraint per line; `#` comments; blank lines ignored):**
 ```

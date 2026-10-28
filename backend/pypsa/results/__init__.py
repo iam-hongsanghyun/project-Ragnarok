@@ -14,7 +14,6 @@ from fastapi import HTTPException
 from ..constants import carrier_color
 from ..network import build_network
 from ..network.piecewise import build_piecewise_results
-from ..network.demand_response import build_demand_response, build_price_elastic
 from ..pathway import parse_pathway_config
 from ..rolling import (
     auto_terminal_penalty,
@@ -25,18 +24,11 @@ from ..rolling import (
     terminal_soc_targets,
 )
 from ..sampling import parse_sampling_config, sample_block_indices
-from ..stochastic import (
-    collapse_to_representative_scenario,
-    parse_stochastic_config,
-    per_scenario_summaries,
-)
-from ...app import annual_budgets, carbon_pricing
+from ...app.stochastic import parse_stochastic_config
+from ...app import carbon_pricing, module_hooks
+from ...app.emissions import carrier_emission_factors, emission_totals_by_carrier
 from .stat_metrics import generator_operating_cost
-from ..utils.emissions import per_generator_emission_factor
 from ..utils.series import weighted_sum
-from ..network.custom_constraints import apply_custom_constraints
-from ..network.constraint_dsl import apply_constraint_specs, apply_dsl_constraints
-from ..network.reserves import apply_reserve_constraints, extract_reserve_results
 from ..network.ramp import extract_ramp_results
 from ..network.time_units import step_hours
 from ..utils.shedding import is_shedding, shedding_mask, shedding_names
@@ -64,7 +56,6 @@ from .pathway_periods import (
     periods as pathway_periods,
     snapshot_active_mask,
 )
-from .emissions import build_emissions_breakdown, emission_totals_by_carrier
 from .energy_balance import build_energy_balance
 from .statistics import build_statistics
 from .mga import build_mga
@@ -75,25 +66,8 @@ from ..optimise_options import (
     merge_solver_options,
     parse_optimise_options,
 )
-from .merchant import build_merchant
-from .adequacy import build_adequacy
-from .outage_mc import build_outage_mc
-from .elcc import build_elcc
-from .correlated_sampling import build_correlated_sampling
-from .convergence import build_convergence
-from .lmp_decomposition import build_lmp_decomposition
-from .company import build_company_breakdown
-from .company_statement import build_company_statement
-from .finance import build_company_finance
-from .price_formation import build_price_formation
 from .commitment import build_commitment, build_maintenance
 from .phase_shift import build_phase_shifters
-from .bid_strategy import build_bid_strategy
-from .optimal_bid import build_optimal_bid
-from .asset_swap import build_asset_swap
-from .ess import build_ess_business_case, ess_cost_kwargs
-from .ppa import build_ppa
-from .ppa_explorer import build_ppa_explorer
 from .expansion import build_expansion_results
 from .full_outputs import build_full_outputs
 from .market import (
@@ -377,25 +351,15 @@ def run_pypsa(
     powerflow_cfg = options.get("powerFlowConfig") or {}
     pf_enabled = bool(powerflow_cfg.get("enabled", False))
     pf_linear = bool(powerflow_cfg.get("linear", False))
-    market_sim_cfg = options.get("marketSimConfig") or {}
-    market_sim_enabled = bool(market_sim_cfg.get("enabled", False))
     contingency_cfg = options.get("contingencyConfig") or {}
     contingency_enabled = bool(contingency_cfg.get("enabled", False))
     mga_cfg = options.get("mgaConfig") or {}
     mga_enabled = bool(mga_cfg.get("enabled", False))
-    merchant_cfg = options.get("merchantConfig") or {}
-    merchant_enabled = bool(merchant_cfg.get("enabled", False))
-    bid_cfg = options.get("bidStrategyConfig") or {}
-    bid_enabled = bool(bid_cfg.get("enabled", False))
-    swap_cfg = options.get("assetSwapConfig") or {}
-    swap_enabled = bool(swap_cfg.get("enabled", False))
-    ess_cfg = options.get("essConfig") or {}
-    ess_enabled = bool(ess_cfg.get("enabled", False))
     # The owner/company column (F1 + B1) is a shared, top-level concern. Fall
     # back to the legacy merchantConfig.ownerColumn for scenarios saved before
     # it was promoted out of the merchant config.
     owner_column = str(
-        options.get("ownerColumn") or merchant_cfg.get("ownerColumn") or "owner"
+        options.get("ownerColumn") or (options.get("merchantConfig") or {}).get("ownerColumn") or "owner"
     )
     if stochastic.enabled and rolling.enabled:
         raise HTTPException(
@@ -449,51 +413,15 @@ def run_pypsa(
             detail="MGA near-optimal exploration cannot be combined with rolling horizon, stochastic, "
             "security-constrained, sampled-block, power-flow, or contingency modes.",
         )
-    # Merchant mode needs the stage-1 optimum's LMPs, so it layers on the normal
-    # optimise like MGA and is incompatible with the modes that skip or reshape
-    # that solve. (Pathway is allowed; a series price source bypasses the LMP.)
-    if merchant_enabled and (
-        rolling.enabled or stochastic.enabled or sclopf_enabled
-        or sampling.enabled or pf_enabled or contingency_enabled
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail="Merchant (price-taker) analysis cannot be combined with rolling horizon, stochastic, "
-            "security-constrained, sampled-block, power-flow, or contingency modes.",
-        )
-    # Bid-strategy re-clears the full market with modified offers, so like
-    # merchant it needs the plain optimise path.
-    if bid_enabled and (
-        rolling.enabled or stochastic.enabled or sclopf_enabled
-        or sampling.enabled or pf_enabled or contingency_enabled
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail="Bid-strategy simulation cannot be combined with rolling horizon, stochastic, "
-            "security-constrained, sampled-block, power-flow, or contingency modes.",
-        )
-    # Asset-swap re-solves the whole system with a carrier swapped, so it needs
-    # the plain optimise path (a cost/emissions LP solution to diff against).
-    if swap_enabled and (
-        rolling.enabled or stochastic.enabled or sclopf_enabled
-        or sampling.enabled or pf_enabled or contingency_enabled
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail="Asset-swap what-if cannot be combined with rolling horizon, stochastic, "
-            "security-constrained, sampled-block, power-flow, or contingency modes.",
-        )
-    # ESS business case prices arbitrage against the base LMP, so it needs the
-    # plain optimise path (marginal prices to arbitrage against).
-    if ess_enabled and (
-        rolling.enabled or stochastic.enabled or sclopf_enabled
-        or sampling.enabled or pf_enabled or contingency_enabled
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail="ESS business case cannot be combined with rolling horizon, stochastic, "
-            "security-constrained, sampled-block, power-flow, or contingency modes.",
-        )
+    # Module guards: the study modules (merchant, bid strategy, asset swap, ESS) layer on the plain optimise
+    # path and refuse the modes that skip or reshape it - see backend/app/module_hooks.py (kind "guard").
+    ctx = module_hooks.RunContext(
+        model=model, scenario=scenario, options=options, notes=[], currency=str(options.get("currencySymbol", "$")),
+        owner_column=owner_column, oo=oo, io_api=_SOLVER_IO_API, pathway=pathway, rolling=rolling,
+        stochastic=stochastic, sampling=sampling, sclopf_enabled=sclopf_enabled, pf_enabled=pf_enabled,
+        contingency_enabled=contingency_enabled, mga_enabled=mga_enabled,
+    )
+    module_hooks.run_guards(ctx)
 
     # The Ragnarok backend is plugin-agnostic: it only ever receives a model,
     # scenario and options and solves them. Plugins live entirely on the
@@ -508,7 +436,7 @@ def run_pypsa(
         # re-solve a scratch copy that carries the price in marginal_cost, which a piecewise curve would ignore.
         if oo.risk_alpha is not None:
             raise HTTPException(status_code=400, detail="A carbon price cannot be combined with CVaR risk preference: the CVaR tail constraints cannot see the carbon-pricing objective term.")
-        if (mga_enabled or bid_enabled) and network.components["generators"].has_piecewise("marginal_cost"):
+        if mga_enabled and network.components["generators"].has_piecewise("marginal_cost"):
             raise HTTPException(status_code=400, detail="A carbon price with a piecewise marginal_cost curve cannot be combined with MGA or strategic bidding: those studies re-solve a copy with the price in marginal_cost, which a curve ignores.")
     _risk_note = apply_risk_preference(network, oo)  # P21: CVaR (stochastic only)
     if _risk_note:
@@ -529,6 +457,9 @@ def run_pypsa(
         rolling_problem = _rolling_unsupported(network) or rolling_cyclic_problem(network)
         if rolling_problem:
             raise HTTPException(status_code=400, detail=rolling_problem)
+    ctx.network, ctx.notes, ctx.rolling = network, notes, rolling
+    ctx.snapshot_count, ctx.snapshot_weight = snapshot_count, snapshot_weight
+    ctx.emissions_factors = carrier_emission_factors(network)  # one carrier factor map, shared with the modules
 
     # Power-flow study mode (pf/lpf) solves network physics, not an LP — none of
     # the cost/price/economics extraction below applies, so delegate to the
@@ -543,21 +474,11 @@ def run_pypsa(
             notes=notes,
             pf_options=powerflow_cfg,  # P34: xTol / useSeed / distributeSlack / slackWeights / skipPre
         )
-    # Market-simulation study mode (B2): rule-based merit-order clearing instead
-    # of an LP — same delegation pattern as the power-flow study.
-    if market_sim_enabled:
-        from .simulation import run_market_sim_study
-
-        return run_market_sim_study(
-            network,
-            market_sim_cfg,
-            currency=str(options.get("currencySymbol", "$")),
-            snapshot_count=snapshot_count,
-            snapshot_weight=snapshot_weight,
-            notes=notes,
-            model=model,
-            owner_column=owner_column,
-        )
+    # A module may take over the run instead of an LP solve (the rule-based market simulation): same delegation
+    # pattern as the power-flow study. See backend/app/module_hooks.py (kind "replace_solve").
+    replaced = module_hooks.run_replace_solve(ctx)
+    if replaced is not None:
+        return replaced
     if contingency_enabled:
         return run_contingency(
             network,
@@ -568,76 +489,12 @@ def run_pypsa(
             config=contingency_cfg,  # P38: snapshot / branchOutages
         )
 
-    # CO₂ emission factors are a static carrier property, shared across
-    # scenarios. Strip any scenario level from the MultiIndex so emission
-    # totals key by carrier name only.
-    if "co2_emissions" in network.carriers.columns:
-        _carriers_ef = network.carriers["co2_emissions"]
-        if isinstance(_carriers_ef.index, pd.MultiIndex) and "name" in _carriers_ef.index.names:
-            _carriers_ef = _carriers_ef.groupby(level="name").first()
-        emissions_factors: dict[str, float] = _carriers_ef.to_dict()
-    else:
-        emissions_factors = {}
-
-    custom_constraints: list[dict] = scenario.get("constraints") or []
-    # Advanced constraints arrive as a structured JSON spec from the frontend
-    # (constraintSpecs). Older payloads may still send the raw DSL text; accept
-    # both, preferring the JSON spec.
-    constraint_specs: list[dict] = scenario.get("constraintSpecs") or []
-    custom_dsl_text: str = str(scenario.get("customDsl") or "")
-    reserve_cfg: dict[str, Any] = options.get("reserveConfig") or {}
-    reserve_enabled = bool(reserve_cfg.get("enabled"))
-    if reserve_enabled and stochastic.enabled:
-        # Stochastic (set_scenarios) adds a `scenario` dimension to Generator-p,
-        # which the reserve builder can't key its variable/constraints against.
-        # Reject explicitly (like the other study-mode guards) rather than
-        # silently dropping reserve.
-        raise HTTPException(
-            status_code=400,
-            detail="Operating-reserve co-optimization cannot be combined with stochastic scenarios.",
-        )
-    # P2X / RFNBO hourly-or-monthly matching (Delegated Reg. (EU) 2023/1184 Art. 6): resolved
-    # BEFORE the solve so a mis-designated chain is a 400 and not a silent zero-electrolyser run.
-    from ..network import rfnbo as _rfnbo
-    try:
-        rfnbo_plan = _rfnbo.resolve_plan(model, options.get("rfnboConfig"))
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if rfnbo_plan and stochastic.enabled:
-        raise HTTPException(status_code=400, detail="RFNBO matching cannot be combined with stochastic scenarios.")
-    # Gas + H2 co-firing blend-share limits (fuel-network plants; backend/pypsa/network/cofiring.py): same pre-solve 400 rule.
-    from ..network import cofiring as _cofiring
-    try:
-        cofiring_plan = _cofiring.resolve_plan(model, options.get("cofiringConfig"))
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if cofiring_plan and stochastic.enabled:
-        raise HTTPException(status_code=400, detail="Co-firing blend-share limits cannot be combined with stochastic scenarios.")
-    def extra_functionality(n, snapshots):
-        # `snapshots` is the window being optimised — for rolling horizon it is a
-        # single window, not the full run. Pass it through so weights/hours and
-        # apportioned budgets are scoped to that window (a no-op single-shot).
-        # The carbon-pricing module's objective term (price x emissions); a no-op without a price.
-        carbon_pricing.extra_functionality(n, snapshots)
-        annual_budgets.extra_functionality(n, snapshots)  # rolling horizon: each window's share of an e_sum budget
-        apply_custom_constraints(n, custom_constraints, emissions_factors, notes, snapshots)
-        if constraint_specs:
-            apply_constraint_specs(n, constraint_specs, emissions_factors, notes, snapshots)
-        elif custom_dsl_text:
-            apply_dsl_constraints(n, custom_dsl_text, emissions_factors, notes, snapshots)
-        # Operating-reserve (spinning reserve) co-optimization — added last so
-        # it sees the final dispatch/capacity variables from the custom/DSL
-        # constraints above (it only adds a new variable + constraints, never
-        # mutates existing ones, so ordering is not correctness-critical).
-        if reserve_enabled:
-            apply_reserve_constraints(n, reserve_cfg, snapshots, notes)
-        # RFNBO temporal matching: electrolyser electricity <= designated RES output per period.
-        if rfnbo_plan:
-            _rfnbo.apply_rfnbo_constraints(n, rfnbo_plan, snapshots, notes)
-        # Co-firing: H2 energy share of each fuel-network plant within [min, max], hourly or over the period.
-        if cofiring_plan:
-            _cofiring.apply_cofiring_constraints(n, cofiring_plan, snapshots, notes)
-
+    emissions_factors = ctx.emissions_factors
+    # Everything PyPSA lacks that adds to the LP is a module's declared constraint contribution (carbon price,
+    # annual budgets, custom constraints / DSL, operating reserves, RFNBO matching, co-firing ...): each module
+    # resolves its plan here (a bad plan is a 400 before the solve) and the composed ``extra_functionality`` is
+    # the one hook PyPSA calls, once per optimised window. See backend/app/module_hooks.py (kind "constraints").
+    extra_functionality = module_hooks.compose_constraints(ctx)
 
     # Currency symbol for formatted output strings
     currency = str(options.get("currencySymbol", "$"))
@@ -804,10 +661,9 @@ def run_pypsa(
                 # the starved budget and the component responsible, so lead with it.
                 diagnosis = ""
                 try:
-                    from .diagnostics import diagnose_infeasibility, diagnosis_text
-
-                    diag = diagnose_infeasibility(network)
-                    diagnosis = f" {diag['headline']}.\n{diagnosis_text(diag)}\n"
+                    diag = module_hooks.run_diagnose(ctx)  # the model-check module's diagnose hook
+                    if diag:
+                        diagnosis = f" {diag['headline']}.\n{diag['text']}\n"
                 except Exception:  # diagnostics must never mask the real error
                     _log.exception("Infeasibility diagnosis failed for the supply-gap gate")
                 # The crossover hypothesis is only worth raising when the solver
@@ -861,10 +717,8 @@ def run_pypsa(
                 detail = f"{base_msg} {rolling_suspect}{strict_hint}"
             elif solve_condition in ("infeasible", "unbounded", "infeasible_or_unbounded"):
                 try:
-                    from .diagnostics import diagnose_infeasibility, diagnosis_text
-
-                    diag = diagnose_infeasibility(network)
-                    detail = f"{base_msg} {diag['headline']}.\n{diagnosis_text(diag)}{strict_hint}"
+                    diag = module_hooks.run_diagnose(ctx)  # the model-check module's diagnose hook
+                    detail = f"{base_msg} {diag['headline']}.\n{diag['text']}{strict_hint}" if diag else base_msg + strict_hint
                     _iis = iis_text(network, oo)  # P19: solver IIS (Gurobi/Xpress) when requested
                     if _iis:
                         detail += f"\nSolver IIS:\n{_iis}"
@@ -874,7 +728,7 @@ def run_pypsa(
                 detail = (
                     base_msg + " The model is likely infeasible or ill-conditioned: "
                     "check for placeholder 1e12 / inf values in p_nom_max, e_sum_min, "
-                    "e_sum_max, lifetime, or for conflicting constraints." + strict_hint
+                    "e_sum_max, or for conflicting constraints." + strict_hint
                 )
             raise HTTPException(status_code=500, detail=detail)
         # The interior-point explanation below does not apply to the rolling
@@ -1020,41 +874,21 @@ def _build_solved_payload(
     # copies for the pre-solve mutual-exclusion guards).
     mga_cfg = options.get("mgaConfig") or {}
     mga_enabled = bool(mga_cfg.get("enabled", False))
-    merchant_cfg = options.get("merchantConfig") or {}
-    merchant_enabled = bool(merchant_cfg.get("enabled", False))
-    bid_cfg = options.get("bidStrategyConfig") or {}
-    bid_enabled = bool(bid_cfg.get("enabled", False))
-    bid_mode = str(bid_cfg.get("mode", "fixed") or "fixed")
-    swap_cfg = options.get("assetSwapConfig") or {}
-    swap_enabled = bool(swap_cfg.get("enabled", False))
-    ess_cfg = options.get("essConfig") or {}
-    ess_enabled = bool(ess_cfg.get("enabled", False))
-    reserve_cfg = options.get("reserveConfig") or {}
     ramp_cfg = options.get("rampConfig") or {}
     oo = parse_optimise_options(options)  # Force-LP implies linearized unit commitment
-    ppa_cfg = options.get("ppaConfig") or {}
-    ppa_enabled = bool(ppa_cfg.get("enabled", False))
 
-    # ── Stochastic post-processing ──────────────────────────────────────────
-    # After the stochastic solve, every static / dynamic frame is indexed by
-    # (scenario, name). Summarise per-scenario totals for the new GUI card,
-    # then collapse to the highest-weighted scenario so the existing
-    # deterministic result-extraction pipeline keeps working unchanged.
-    stochastic_result: dict[str, Any] | None = None
-    if stochastic.enabled:
-        scenario_summaries = per_scenario_summaries(
-            network, stochastic, emissions_factors, currency
-        )
-        representative_scenario = collapse_to_representative_scenario(network, stochastic)
-        stochastic_result = {
-            "enabled": True,
-            "representativeScenario": representative_scenario,
-            "scenarios": scenario_summaries,
-        }
-        notes.append(
-            f"Showing scenario \"{representative_scenario}\" for detailed analytics; "
-            "expected values across all scenarios are available in the Stochastic scenarios card."
-        )
+    # Modules read the solved network through one context (backend/app/module_hooks.py). ``post_solve`` hooks run
+    # first - the stochastic module collapses the scenario-indexed solution to a representative scenario so the
+    # single-scenario extraction below keeps working unchanged - then the core reads the network, then the
+    # ``study`` hooks (market studies, company views, adequacy Monte Carlo, reserves ...) add their result blocks.
+    ctx = module_hooks.RunContext(
+        model=model, scenario=scenario, options=options, notes=notes, network=network, currency=currency,
+        owner_column=owner_column, emissions_factors=emissions_factors, snapshot_count=snapshot_count,
+        snapshot_weight=snapshot_weight, solver_options=solver_options, oo=oo, io_api=_SOLVER_IO_API,
+        pathway=pathway, rolling=rolling, stochastic=stochastic, sampling=sampling,
+        sclopf_enabled=sclopf_enabled, mga_enabled=mga_enabled,
+    )
+    module_payload = module_hooks.run_post_solve(ctx)
 
     # One copy (decouples from the network); both frames below are read-only,
     # so dispatch_frame can alias it when there are no storage units.
@@ -1243,10 +1077,7 @@ def _build_solved_payload(
     applied_constraints = build_applied_constraints(network)
     generator_economics = build_generator_economics(network, currency)
     statistics = build_statistics(network)
-    emissions_breakdown = build_emissions_breakdown(network, emissions_factors)
     energy_balance = build_energy_balance(network)  # per-carrier; None if single-carrier
-    demand_response = build_demand_response(network)  # shiftable-load outcome; None if no DR
-    price_elastic = build_price_elastic(network)  # elastic-demand outcome; None if none
 
     # Commitment costs (start-up / shut-down). These are real objective terms —
     # deciding whether to stop a plant for two cheap hours is the whole point of
@@ -1531,160 +1362,11 @@ def _build_solved_payload(
         else None
     )
 
-    # Merchant / price-taker analysis — like MGA, runs last on a copy of the
-    # solved optimum (it reads stage-1 LMPs and detaches the solver model).
-    merchant = (
-        build_merchant(
-            network,
-            model,
-            owner=str(merchant_cfg.get("owner", "") or ""),
-            owner_column=owner_column,
-            price_source=str(merchant_cfg.get("priceSource", "lmp") or "lmp"),
-            flat_price=float(merchant_cfg.get("flatPrice", 0.0) or 0.0),
-            price_series=merchant_cfg.get("priceSeries") or None,
-            currency=currency,
-            solver_options=solver_options if solver_options else {},
-            io_api=_SOLVER_IO_API,
-        )
-        if merchant_enabled
-        else None
-    )
-
-    # Bid-strategy simulator (Tier 2) — raise one owner's offers by a markup,
-    # re-clear the market, and compare profit to the price-taker baseline.
-    bid_strategy = (
-        build_bid_strategy(
-            network,
-            model,
-            owner=str(bid_cfg.get("owner", "") or ""),
-            owner_column=owner_column,
-            markup_type=str(bid_cfg.get("markupType", "percent") or "percent"),
-            markup=float(bid_cfg.get("markup", 0.0) or 0.0),
-            currency=currency,
-            solver_options=solver_options if solver_options else {},
-            io_api=_SOLVER_IO_API,
-        )
-        if bid_enabled and bid_mode != "optimal"
-        else None
-    )
-    # Optimal-bid finder (Tier 3a) — sweep the markup for the profit-max bid.
-    optimal_bid = (
-        build_optimal_bid(
-            network,
-            model,
-            owner=str(bid_cfg.get("owner", "") or ""),
-            owner_column=owner_column,
-            markup_type=str(bid_cfg.get("markupType", "percent") or "percent"),
-            max_markup=float(bid_cfg.get("maxMarkup", 2.0) or 2.0),
-            steps=int(bid_cfg.get("steps", 8) or 8),
-            currency=currency,
-            solver_options=solver_options if solver_options else {},
-            io_api=_SOLVER_IO_API,
-        )
-        if bid_enabled and bid_mode == "optimal"
-        else None
-    )
-
-    # Asset-swap / repowering what-if (DW2) — retire a carrier, add a
-    # replacement (fixed 1:1, or LP-sized up to the ratio when sizeReplacement
-    # is set), re-solve, and report the before-vs-after delta.
-    asset_swap = (
-        build_asset_swap(
-            network,
-            model,
-            scenario,
-            options,
-            build_network,
-            remove_filters=swap_cfg.get("removeFilters") or None,
-            remove_carrier=str(swap_cfg.get("removeCarrier", "") or ""),
-            add_carrier=str(swap_cfg.get("addCarrier", "") or ""),
-            add_capital_cost=float(swap_cfg.get("addCapitalCost", 0.0) or 0.0),
-            add_marginal_cost=float(swap_cfg.get("addMarginalCost", 0.0) or 0.0),
-            replace_ratio=float(swap_cfg.get("replaceRatio", 1.0) or 1.0),
-            size_replacement=bool(swap_cfg.get("sizeReplacement", False)),
-            add_storage_mw=float(swap_cfg.get("addStorageMW", 0.0) or 0.0),
-            add_storage_hours=float(swap_cfg.get("addStorageHours", 4.0) or 4.0),
-            add_storage_capex_per_mw=float(swap_cfg.get("addStorageCapexPerMW", 0.0) or 0.0),
-            currency=currency,
-            emissions_factors=emissions_factors,
-            solver_options=solver_options if solver_options else {},
-            io_api=_SOLVER_IO_API,
-        )
-        if swap_enabled
-        else None
-    )
-
-    # ESS business-case builder (DW3) — size sweep of a price-taker battery.
-    ess_business_case = (
-        build_ess_business_case(
-            network,
-            bus=str(ess_cfg.get("bus", "") or ""),
-            max_hours=float(ess_cfg.get("maxHours", 4.0) or 4.0),
-            capital_cost_per_mw=float(ess_cfg.get("capitalCostPerMW", 0.0) or 0.0),
-            min_size_mw=float(ess_cfg.get("minSizeMW", 0.0) or 0.0),
-            max_size_mw=float(ess_cfg.get("maxSizeMW", 0.0) or 0.0),
-            steps=int(ess_cfg.get("steps", 6) or 6),
-            round_trip_efficiency=float(ess_cfg.get("roundTripEfficiency", 0.9) or 0.9),
-            discount_rate=float(scenario.get("discountRate", 0.0) or 0.0),
-            currency=currency,
-            solver_options=solver_options if solver_options else {},
-            io_api=_SOLVER_IO_API,
-            **ess_cost_kwargs(ess_cfg),
-        )
-        if ess_enabled
-        else None
-    )
-
-    # Company / owner dimension (F1) — per-company KPIs whenever assets carry an
-    # owner tag. Independent of merchant mode; reads only solved dataframes.
-    company_breakdown = build_company_breakdown(
-        network, model,
-        owner_column=owner_column, currency=currency, emissions_factors=emissions_factors,
-    )
-    # Price-formation view (Tier 0) — price vs residual demand & the marginal
-    # (price-setting) carrier each snapshot. Best-effort; None on non-LP runs.
-    price_formation = build_price_formation(network, currency=currency)
     # Unit-commitment view (Tier 1) — starts, start-up costs, on/off patterns.
     # Force-LP / linearized unit commitment: the status variables are fractions, which are not a schedule.
     commitment = None if oo.linearized_unit_commitment else build_commitment(network, currency=currency)
     maintenance = build_maintenance(network)
     phase_shifters = build_phase_shifters(network)
-    # PPA contract valuation (PP1) — value a fixed-price PPA against the LMP.
-    ppa = (
-        build_ppa(
-            network, model,
-            owner=str(ppa_cfg.get("owner", "") or ""),
-            owner_column=owner_column,
-            volume_type=str(ppa_cfg.get("volumeType", "generation") or "generation"),
-            flat_mw=float(ppa_cfg.get("flatMW", 0.0) or 0.0),
-            strike_price=float(ppa_cfg.get("strikePrice", 0.0) or 0.0),
-            currency=currency,
-        )
-        if ppa_enabled
-        else None
-    )
-    # PPA opportunity explorer (DW4) — rank alternative contract shapes at the
-    # same strike; a companion read to PP1, so it reuses the PPA config.
-    ppa_explorer = (
-        build_ppa_explorer(
-            network, model,
-            owner=str(ppa_cfg.get("owner", "") or ""),
-            owner_column=owner_column,
-            flat_mw=float(ppa_cfg.get("flatMW", 0.0) or 0.0),
-            strike_price=float(ppa_cfg.get("strikePrice", 0.0) or 0.0),
-            currency=currency,
-        )
-        if ppa_enabled
-        else None
-    )
-    # Company-level financial model (F2) — NPV / IRR / payback / DSCR per owner.
-    company_finance = build_company_finance(
-        network, model,
-        owner_column=owner_column,
-        discount_rate=float(scenario.get("discountRate", 0.0) or 0.0),
-        currency=currency,
-        debt=options.get("financeConfig") or None,
-    )
     # PyPSA >= 1.3 piecewise curves: the curve plus its solved *_piecewise_opt (P30).
     piecewise: dict[str, Any] | None = None
     try:
@@ -1692,101 +1374,15 @@ def _build_solved_payload(
     except Exception as exc:  # noqa: BLE001 - a reporting extra must not sink the run
         notes.append(f"Piecewise-curve results could not be computed: {exc}")
         _log.warning("piecewise results failed: %s", exc)
-    # Resource adequacy (A1 ensemble + A2 LOLE) — stochastic renewable ensemble
-    # vs load. None when the run has no time-varying renewable generator.
-    # Never raises into the solve: any failure (e.g. pathway snapshots are
-    # (period, timestep) tuples) degrades to a run note, like the MC extras below.
-    adequacy: dict[str, Any] | None = None
-    try:
-        adequacy = build_adequacy(network)
-    except Exception as exc:  # noqa: BLE001 — never sink the run over an adequacy extra
-        notes.append(f"Resource adequacy could not be computed: {exc}")
-        _log.warning("adequacy failed: %s", exc)
-    # Thermal forced-outage Monte Carlo — outage-aware LOLE/EUE WITH A
-    # DISTRIBUTION across members, evaluated post-solve (pure post-process,
-    # reuses the adequacy kernel). None when disabled/absent, unsolved, or no
-    # thermal generators. Never raises into the solve — any failure degrades
-    # to a run note, mirroring build_adequacy's robustness.
-    outage_mc_cfg = options.get("outageMcConfig") or {}
-    outage_mc: dict[str, Any] | None = None
-    if bool(outage_mc_cfg.get("enabled")):
-        try:
-            outage_mc = build_outage_mc(network, options)
-        except Exception as exc:  # noqa: BLE001 — never sink the run over an MC extra
-            notes.append(f"Thermal outage Monte Carlo could not be computed: {exc}")
-            _log.warning("outage_mc failed: %s", exc)
-    # ELCC / capacity credit (post-process reliability accreditation) — the
-    # firm-MW-equivalent of each target carrier's contribution to system
-    # reliability, found by bisecting on the same outage-inclusive
-    # availability ensemble / LOLE kernel as outage_mc. None when
-    # disabled/absent, unsolved, or no target carrier has nameplate capacity.
-    # Never raises into the solve — any failure degrades to a run note.
-    elcc_cfg = options.get("elccConfig") or {}
-    elcc: dict[str, Any] | None = None
-    if bool(elcc_cfg.get("enabled")):
-        try:
-            elcc = build_elcc(network, options)
-        except Exception as exc:  # noqa: BLE001 — never sink the run over an MC extra
-            notes.append(f"ELCC / capacity credit could not be computed: {exc}")
-            _log.warning("elcc failed: %s", exc)
-    # Correlated multi-driver Monte Carlo (one-factor stress model) — a
-    # complementary post-process reliability study to outage_mc: this one
-    # perturbs weather/load/inflow (demand, renewable CF, hydro inflow) via a
-    # shared stress factor rather than unit availability. Same guard pattern:
-    # never raises into the solve; None when disabled/absent or unsolved.
-    correlated_sampling_cfg = options.get("correlatedSamplingConfig") or {}
-    correlated_sampling: dict[str, Any] | None = None
-    if bool(correlated_sampling_cfg.get("enabled")):
-        try:
-            correlated_sampling = build_correlated_sampling(network, options)
-        except Exception as exc:  # noqa: BLE001 — never sink the run over an MC extra
-            notes.append(f"Correlated multi-driver Monte Carlo could not be computed: {exc}")
-            _log.warning("correlated_sampling failed: %s", exc)
-    # Convergence-controlled outage Monte Carlo + maintenance placement — draws
-    # outage_mc's Markov sampler in incremental batches until the running
-    # EUE/LOLE estimate's relative standard error stabilises (rather than a
-    # fixed member count), optionally scheduling planned maintenance into the
-    # lowest-net-load window per unit first. Same guard pattern: never raises
-    # into the solve; None when disabled/absent or unsolved.
-    convergence_cfg = options.get("convergenceConfig") or {}
-    convergence_sampling: dict[str, Any] | None = None
-    if bool(convergence_cfg.get("enabled")):
-        try:
-            convergence_sampling = build_convergence(network, options)
-        except Exception as exc:  # noqa: BLE001 — never sink the run over an MC extra
-            notes.append(f"Convergence-controlled sampling could not be computed: {exc}")
-            _log.warning("convergence failed: %s", exc)
-    # LMP decomposition — post-process split of solved nodal prices
-    # (buses_t.marginal_price) into an energy component + a per-bus congestion
-    # residual, plus congestion rent per line/link derived from price spread x
-    # flow (PyPSA's default LOPF does not attach line flow-limit duals). Same
-    # guard pattern: never raises into the solve; None when disabled/absent.
-    lmp_cfg = options.get("lmpDecompositionConfig") or {}
-    lmp_decomposition: dict[str, Any] | None = None
-    if bool(lmp_cfg.get("enabled")):
-        try:
-            lmp_decomposition = build_lmp_decomposition(network, options)
-        except Exception as exc:  # noqa: BLE001 — never sink the run over a reporting extra
-            notes.append(f"LMP decomposition could not be computed: {exc}")
-            _log.warning("lmp_decomposition failed: %s", exc)
-    # Consolidated per-company annual P&L (revenue → carbon/fuel → margin → EBIT
-    # → net). Reads only solved dataframes; independent of any config.
-    company_statement = build_company_statement(
-        network, model,
-        owner_column=owner_column,
-        currency=currency,
-        emissions_factors=emissions_factors,
-        debt=options.get("financeConfig") or None,
-    )
-    # Operating-reserve (spinning reserve) co-optimization results — reads the
-    # in-solve Generator-r variable and the reserve_requirement dual straight
-    # off n.model; None-safe when reserves weren't enabled or n.model is
-    # unavailable (e.g. the X1 derive-from-outputs path, which never re-solves).
-    reserve = extract_reserve_results(network, reserve_cfg)
     # Timestep-weighted ramp-rate limit results — reads solved dispatch deltas
     # against the same per-generator rate/Δt used to build the constraint;
     # None-safe (returns enabled: False) when ramp wasn't configured.
     ramp = extract_ramp_results(network, ramp_cfg)
+
+    # Study modules (market studies, company views, adequacy Monte Carlo, operating reserves, emissions
+    # breakdown, demand-response outcome): each reads the solved network and returns its payload keys; every
+    # declared key is present (None when the study did not run). See backend/app/module_hooks.py (kind "study").
+    module_payload.update(module_hooks.run_studies(ctx))
 
     # ``outputs`` is built last and is already finite-only (see full_outputs).
     payload = {
@@ -1813,33 +1409,12 @@ def _build_solved_payload(
         "generatorEconomics": generator_economics,
         "statistics": statistics,
         "nearOptimal": near_optimal,
-        "merchant": merchant,
-        "companies": company_breakdown,
-        "companyFinance": company_finance,
-        "companyStatement": company_statement,
-        "adequacy": adequacy,
         "piecewise": piecewise,
-        "outageMc": outage_mc,
-        "elcc": elcc,
-        "correlatedSampling": correlated_sampling,
-        "convergenceSampling": convergence_sampling,
-        "lmpDecomposition": lmp_decomposition,
-        "priceFormation": price_formation,
         "commitment": commitment,
         "maintenance": maintenance,
         "phaseShifters": phase_shifters,
-        "ppa": ppa,
-        "ppaExplorer": ppa_explorer,
-        "bidStrategy": bid_strategy,
-        "optimalBid": optimal_bid,
-        "assetSwap": asset_swap,
-        "essBusinessCase": ess_business_case,
-        "reserve": reserve,
         "ramp": ramp,
-        "emissionsBreakdown": emissions_breakdown,
         "energyBalance": energy_balance,
-        "demandResponse": demand_response,
-        "priceElastic": price_elastic,
         "narrative": notes,
         "metricDefinitions": metric_definitions(currency),
         "runMeta": {
@@ -1900,7 +1475,6 @@ def _build_solved_payload(
             "windowCount": len(rolling_windows),
             "windows": rolling_windows,
         } if rolling.enabled else None,
-        "stochastic": stochastic_result,
         "securityConstrained": (
             {
                 "enabled": True,
@@ -1917,6 +1491,7 @@ def _build_solved_payload(
         # detail records (`assetDetails`) locally and uses the same cache for
         # Export-Project, so the backend stays a stateless solver.
     }
+    payload.update(module_payload)  # the modules' result blocks (see the study / post_solve hooks)
     payload = _sanitize_nonfinite(payload)
     payload["outputs"] = build_full_outputs(network)
     return payload

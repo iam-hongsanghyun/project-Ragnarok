@@ -20,7 +20,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from ...pypsa.network import rfnbo
+from backend.app.p2x import rfnbo
 from .. import fragment_merge, model_store, run_store
 from ..p2x import chains, config_store, technologies
 from ..p2x import results as p2x_results

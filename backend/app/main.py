@@ -32,7 +32,7 @@ from .log_capture import (
     install as _install_log_capture,
 )
 from .models import ExportProjectPayload, RunPayload
-from . import model_store, run_store
+from . import model_store, module_hooks, run_store
 from ..pypsa.network import validate_model
 from ..pypsa.network.serialize import network_to_model as _network_to_model_json
 from backend.app.data_root import data_root
@@ -1176,7 +1176,6 @@ def _resolve_payload_model(payload: RunPayload) -> RunPayload:
     so a later edit to the session never mutates an already-submitted or queued
     run. A legacy payload carrying an inline ``model`` is returned unchanged.
     """
-    overrides = (payload.options or {}).get("modelOverrides") or []
     if payload.model is not None:
         model = payload.model
     elif payload.sessionId:
@@ -1189,29 +1188,13 @@ def _resolve_payload_model(payload: RunPayload) -> RunPayload:
         raise HTTPException(
             status_code=400, detail="Run payload must include a model or a sessionId."
         )
-    # Per-scenario model overrides (capacity, etc.) — applied to the snapshot now
-    # so the solved + stored run reflects them (batch scenario runs differ here).
-    if overrides:
-        from . import scenario_overrides
-        model = scenario_overrides.apply_model_overrides(model, overrides)
     data = _payload_to_dict(payload)
     data["model"] = model
-    # DSL precedence (WA3): scenario.constraintSpecs > scenario.customDsl > the
-    # model's RAGNAROK_CustomDSL sheet. Resolved HERE, at submit time, so the
-    # queued snapshot carries the text it will solve with.
-    from . import run_guards
-    data["scenario"] = run_guards.apply_model_dsl_fallback(model, data.get("scenario"))
-    # Opt-in physical-risk -> forced-outage-rate coupling: if
-    # options.outageMcConfig.physicalRiskUplift is set, look up the
-    # referenced physical-risk session's latest completed run and inject
-    # options.outageMcConfig.forRateUplift before the snapshot is frozen, so
-    # /api/queue and /api/validate (both call this) pick it up. No-op unless
-    # the config opts in; never raises.
-    from . import physical_risk_uplift
-    data["options"] = physical_risk_uplift.apply_physical_risk_uplift(data.get("options"))
-    # P2X: the RFNBO matching settings chosen in the P2X tab ride with a run that sets none itself.
-    from .p2x import config_store as _p2x_config
-    data["options"] = _p2x_config.apply_session_rfnbo(payload.sessionId, data.get("options"))
+    # Module submit hooks (backend/app/module_hooks.py, kind "submit"), in declared order: the scenario cell
+    # overrides, the DSL precedence (constraintSpecs > customDsl > the RAGNAROK_CustomDSL sheet), the opt-in
+    # physical-risk outage uplift and the session's P2X RFNBO settings. They run HERE, at submit time, so the
+    # queued snapshot carries exactly what it will solve with; /api/queue and /api/validate both call this.
+    data = module_hooks.run_submit(data)
     return RunPayload(**data)
 
 
@@ -1279,7 +1262,7 @@ def model_check_case(payload: RunPayload) -> dict[str, Any]:
     Answers "did I build what I meant?" from the workbook rather than from anyone's
     account of it — see :mod:`backend.pypsa.model_check`.
     """
-    from ..pypsa.model_check import check_model
+    from backend.app.model_check.checks import check_model
 
     # The resolved payload, not the payload itself: check_model reads the workbook's sheets.
     model = _resolve_payload_model(payload).model

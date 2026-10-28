@@ -28,7 +28,7 @@ from .. import model_store, run_store
 from ..data_root import data_root
 from ..run_options_reference import RunOption, register_options
 from ...pypsa import network_ops
-from ...pypsa.network.constraint_checks import consistency_report
+from backend.app.constraints.constraint_checks import consistency_report
 from ...pypsa.optimise_options import optimise_option_catalogue, parse_optimise_options
 
 router = APIRouter(tags=["optimise"])

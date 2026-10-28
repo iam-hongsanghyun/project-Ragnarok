@@ -26,6 +26,10 @@ workspace shows, and for writing your own module.
 
 ---
 
+> **Backend half.** A module may also carry server-side code in `backend/app/<module>/`, plugged into a run through
+> declared hooks (constraint contributions, build steps, studies) rather than imports from the core. The hook kinds
+> and the guards are in [backend.md §5.14](./backend.md#514-backend-modules-and-the-hook-registry-core-cleanup-step-7).
+
 ## 1. Core vs module
 
 **Core** is everything the modelling loop needs: the workbook you edit, the run

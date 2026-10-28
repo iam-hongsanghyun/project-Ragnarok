@@ -23,7 +23,7 @@ from typing import Any
 
 import numpy as np
 
-from ...pypsa.network import cofiring as cf
+from backend.app.plants import cofiring as cf
 from ..p2x.results import P2XResultsError, _f, _Run
 from .registry import plant_ids, plant_rows, registry_map
 

@@ -543,7 +543,7 @@ multiprocessing queue.
 | `lineLoading` | Peak `\|p0\| / s_nom_opt * 100` for lines, links, transformers (a peak ratio; `n.statistics.transmission` is net MWh and does not replace it) |
 | `meritOrder` | `build_merit_order` in `results/market.py` |
 | `co2Shadow` | `build_co2_shadow` in `market.py` |
-| `emissionsBreakdown` | `build_emissions_breakdown` in `results/emissions.py`, on PyPSA's `primary_energy` accounting (`primary_energy_emissions` in `utils/emissions.py`): generators `sum(w * p / efficiency) * co2_emissions` (signed, investment-period `years` weight in a multi-period solve), plus non-cyclic StorageUnits/Stores `co2_emissions * (initial - final stock)`. `totalTco2` equals the left-hand side of a `primary_energy` GlobalConstraint. **Link and Process flows are deliberately not counted**: PyPSA does not count them, and the fuel-supply generator already carries the fuel's emissions, so emissions stay at the fuel generator. Per-owner emissions (`companyBreakdown`, `companyStatement`) allocate the same terms to owners (`unassignedEmissionsTonnes` = untagged remainder), so they sum to the total. |
+| `emissionsBreakdown` | `build_emissions_breakdown` in `backend/app/emissions/breakdown.py`, on PyPSA's `primary_energy` accounting (`primary_energy_emissions` in `backend/app/emissions/accounting.py`): generators `sum(w * p / efficiency) * co2_emissions` (signed, investment-period `years` weight in a multi-period solve), plus non-cyclic StorageUnits/Stores `co2_emissions * (initial - final stock)`. `totalTco2` equals the left-hand side of a `primary_energy` GlobalConstraint. **Link and Process flows are deliberately not counted**: PyPSA does not count them, and the fuel-supply generator already carries the fuel's emissions, so emissions stay at the fuel generator. Per-owner emissions (`companyBreakdown`, `companyStatement`) allocate the same terms to owners (`unassignedEmissionsTonnes` = untagged remainder), so they sum to the total. |
 | `generatorEconomics` | `build_generator_economics` in `results/market.py`: generators, storage units and **Processes** (`processes`: net port value at nodal prices, `marginal_cost * p`, capex of extendable ones). Revenue, supply/withdrawal and capacity factor are `n.statistics.revenue/supply/withdrawal/capacity_factor` per asset and investment period (`results/stat_metrics.py`; money x period objective weight; inactive assets 0); `capturePrice` = revenue / supply (`market_value`); variable cost stays on the dense marginal cost (carbon adder, piecewise overlay). Company finance (`results/finance.py`) takes Process owners through the same `process_assets` rule |
 | `expansionResults` | `build_expansion_results` in `results/expansion.py`: `capex_horizon` = `n.statistics.capex` over the modelled horizon, `capex_annual` = that / `n.nyears` (per year, the only conversion), plus `capex_expanded` / `capex_installed` (new vs sunk), `overnight_total`, `fom_total`, `capital_cost` = `c.capital_cost`; every field is read from PyPSA |
 | `pathway.summaries` | `_pathway_period_summaries` in `results/summaries.py` |
@@ -742,6 +742,11 @@ send it to PyPSA as visible inputs in the workbook. Workbook columns carry PyPSA
   * **time units** (`RAGNAROK_TimeUnits`): ramps per hour / minute and UC times in hours, converted at solve time with the actual weights; PyPSA's own constraint enforces them;
   * **rolling** in hours, cyclic storage refused with a visible fix, terminal SOC an explicit option (default off); **Force-LP** = `linearized_unit_commitment`; **load shedding** = `n.optimize.add_load_shedding`
     identified by carrier (`utils/shedding.py`, legacy names still read).
+* **Everything else PyPSA lacks is a module behind the hook registry (step 7)**: `run_pypsa` is build, optimise, store. Operating reserves, custom constraints and the DSL,
+  RFNBO and co-firing matching, stochastic overrides and collapse, demand response, the market studies (simulation, merchant, bidding, PPA, LMP split), the company views, the adequacy
+  Monte Carlo, emissions accounting and the infeasibility diagnosis each live in `backend/app/<module>/` and plug in through `backend/app/module_hooks.py`: a declared constraint
+  contribution, a build step, or a study that reads the solved network. The core imports no module by name and the host runs with zero modules. The hook kinds, the module list and
+  the guards that keep the boundary are in `docs/backend.md` §5.14 (one home for the contract).
 * Workbook schema version: the model sheet `RAGNAROK_Schema` (`ragnarok_schema_version`). Schema 1 (implicit)
   held an overnight price in `capital_cost` and annuitised it at run time; it is migrated once, visibly, when
   such a workbook is loaded (`backend/pypsa/network/cost_basis.py`, `docs/backend.md` §5.11). Stored runs carry
@@ -765,7 +770,7 @@ The Constraints workspace tab exposes a text-based DSL. Before submission, the f
 compiles the DSL text into a `constraintSpecs` JSON array via `dslToSpecs()` in
 `src/lib/constraints/dsl.ts`. The `constraintSpecs` array is sent inside
 `scenario.constraintSpecs` in the `RunPayload`. The backend applies them via
-`apply_constraint_specs()` in `backend/pypsa/network/constraint_dsl.py` inside
+`apply_constraint_specs()` in `backend/app/constraints/constraint_dsl.py` inside
 `extra_functionality`. Older payloads that still contain raw DSL text in
 `scenario.customDsl` are accepted as a fallback; the backend prefers `constraintSpecs`
 when both are present.
@@ -961,7 +966,7 @@ aggregated by `src/modules/registry.ts`:
 (buses, carriers, Links, `Process`es for the synthesis, ASU and CO2-capture steps, Stores, Loads and a `RAGNAROK_P2X` registry row) that goes through
 the same fragment merge as the Build conversions, so the core solve, run store and every analytics view
 see plain PyPSA components. RFNBO matching is one more `extra_functionality` fragment in the solve
-(`backend/pypsa/network/rfnbo.py`, enabled by `options.rfnboConfig`), and the P2X results
+(`backend/app/p2x/rfnbo.py`, enabled by `options.rfnboConfig`), and the P2X results
 (`backend/app/p2x/results.py`) are a read of a stored run, like the report perspectives.
 
 **Where Build plants sit.** The plant-type picker in Build -> Generators (`features/build/PlantPicker.tsx`, `PlantList.tsx`) is
@@ -969,7 +974,7 @@ presentation over `/api/build/plant*` (`backend/app/routers/plants.py`, code in 
 components that share a `plant` column plus one `RAGNAROK_PLANTS` registry row; add, edit (re-derive) and delete all return one
 *change set* (`remove`, `release`, `fragment`) that the browser applies to its model (`lib/build/plants.ts`, one undoable edit) and the session
 applies identically, so MCP (`tools_plants.py`) and the UI share the code. The P2X chain in the picker is built by `p2x/chains.py`. The gas + H2
-blend-share limit is one more `extra_functionality` fragment (`backend/pypsa/network/cofiring.py`, `options.cofiringConfig`) next to the RFNBO one;
+blend-share limit is one more `extra_functionality` fragment (`backend/app/plants/cofiring.py`, `options.cofiringConfig`) next to the RFNBO one;
 the results (`plants/results.py`) are a read of a stored run grouped by plant id.
 
 Users compose the workspace in **Settings → Modules**: toggling a module adds/removes

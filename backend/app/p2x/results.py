@@ -35,7 +35,7 @@ from typing import Any
 
 import numpy as np
 
-from ...pypsa.network import rfnbo as rf
+from backend.app.p2x import rfnbo as rf
 from .. import results_derived as rd
 from . import technologies as tech
 from .chains import PRODUCTS, REGISTRY_SHEET

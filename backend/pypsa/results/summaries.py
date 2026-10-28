@@ -5,7 +5,7 @@ from typing import Any
 import pandas as pd
 import pypsa
 
-from ..utils.emissions import primary_energy_emissions
+from backend.app.emissions.accounting import primary_energy_emissions
 from ..utils.shedding import is_shedding
 
 

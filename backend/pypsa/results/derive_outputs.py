@@ -276,7 +276,7 @@ def derive_results_from_outputs(
     from ..pathway import parse_pathway_config
     from ..rolling import parse_rolling_config
     from ..sampling import parse_sampling_config
-    from ..stochastic import parse_stochastic_config
+    from backend.app.stochastic.scenarios import parse_stochastic_config
 
     scenario = dict(scenario or {})
     options = dict(options or {})

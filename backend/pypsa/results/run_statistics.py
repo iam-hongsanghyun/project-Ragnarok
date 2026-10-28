@@ -25,7 +25,7 @@ import pandas as pd
 import pypsa
 
 from ...app import carbon_pricing
-from ..utils.emissions import primary_energy_emissions
+from ...app.emissions import carrier_emission_factors, primary_energy_emissions
 from ..utils.shedding import is_shedding
 from .dispatch import curtailment_mw_by_generator
 from .stat_metrics import asset_statistic, combine_periods, generator_operating_cost
@@ -64,7 +64,7 @@ def run_statistics(network: pypsa.Network) -> dict[str, Any]:
     curtailment = (
         curtailment_mw_by_generator(network).mul(weights, axis=0).sum(axis=0) if has_gens else pd.Series(dtype=float)
     )
-    factors = network.carriers["co2_emissions"].to_dict() if "co2_emissions" in network.carriers.columns else {}
+    factors = carrier_emission_factors(network)
     emissions = primary_energy_emissions(network, factors).generators if has_gens else pd.Series(dtype=float)
 
     generators: dict[str, dict[str, float]] = {}

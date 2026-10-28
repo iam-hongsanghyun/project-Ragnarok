@@ -752,7 +752,7 @@ def parse_constraint_dsl(text: str) -> list[dict[str, Any]]:
     Uses the solver's own parser (``backend.pypsa.network.constraint_dsl``), so the
     text the browser would accept is exactly the text the solver accepts.
     """
-    from ..pypsa.network.constraint_dsl import DslParseError, parse_line
+    from backend.app.constraints.constraint_dsl import DslParseError, parse_line
 
     out: list[dict[str, Any]] = []
     for idx, raw_line in enumerate(re.split(r"\r?\n", text or ""), start=1):

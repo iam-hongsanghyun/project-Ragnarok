@@ -6,7 +6,7 @@ from typing import Any
 import pandas as pd
 import pypsa
 
-from ..utils.emissions import primary_energy_emissions
+from backend.app.emissions.accounting import primary_energy_emissions
 from ..utils.series import safe_series
 from .pathway_periods import snapshot_active_mask
 from ..utils.shedding import is_shedding

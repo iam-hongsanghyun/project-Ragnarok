@@ -41,7 +41,7 @@ from .dispatch import (
     electricity_dispatch_by_carrier,
     system_price_series,
 )
-from .emissions import build_emissions_breakdown, emission_totals_by_carrier
+from backend.app.emissions.breakdown import build_emissions_breakdown, emission_totals_by_carrier
 from .expansion import build_expansion_results
 from .market import (
     build_applied_constraints,

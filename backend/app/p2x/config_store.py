@@ -19,7 +19,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from ...pypsa.network import rfnbo as rf
+from backend.app.p2x import rfnbo as rf
 from ..data_root import data_root
 
 _SAFE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")

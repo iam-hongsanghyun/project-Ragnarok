@@ -36,6 +36,7 @@ integrating with the backend. It does not cover end-user steps (see
    - 5.9 [p2x — power-to-X routes, chains, RFNBO, results](#59-p2x--power-to-x-routes-chains-rfnbo-results)
    - 5.10 [plants — Build plant picker, co-firing, results by plant](#510-plants--build-plant-picker-co-firing-results-by-plant)
    - 5.13 [Temporal and operations modules](#513-temporal-and-operations-modules-core-cleanup-steps-4-and-5)
+   - 5.14 [Backend modules and the hook registry](#514-backend-modules-and-the-hook-registry-core-cleanup-step-7)
 6. [Result extraction](#6-result-extraction)
    - 6.1 [run_pypsa return value](#61-run_pypsa-return-value)
    - 6.2 [dispatch.py](#62-dispatchpy)
@@ -123,7 +124,7 @@ backend/
     adapter.py           PypsaBackend — wraps run_pypsa behind the Backend protocol
     pathway.py           PathwayConfig, parse_pathway_config
     rolling.py           RollingHorizonConfig, parse_rolling_config
-    stochastic.py        StochasticConfig, apply_scenarios, collapse_to_representative_scenario
+    stochastic.py        shim -> app/stochastic/ (see 5.14)
     (app/carbon_pricing/  carbon-pricing module: config.py price series, term.py objective term + results; app/annual_budgets/  annual-budgets module)
     constants.py         Carrier/generator colour utilities
     pypsa_schema.py      Schema accessors (runtime schema from pypsa_schema_builder.py; network_import_policy.json)
@@ -132,14 +133,13 @@ backend/
       components.py      Bulk-add helpers (_ordered_component_sheets, _apply_ts_sheet, …)
       network_sheet.py   _apply_network_sheet, _peak_load_per_bus
       snapshots.py       _snapshots_index, _apply_pathway_config
-      custom_constraints.py  apply_custom_constraints, build_model_context, ModelContext
-      constraint_dsl.py  DSL parser/compiler, apply_dsl_constraints, apply_constraint_specs
+      (custom_constraints / constraint_dsl / reserves / rfnbo / cofiring / demand_response: shims -> the modules of 5.14)
       load_shedding.py   add_load_shedding
       validators.py      validate_model
     results/
       __init__.py        run_pypsa — the complete solve-and-extract pipeline
       dispatch.py        dispatch_by_carrier, build_dispatch_series, build_storage_series
-      emissions.py       build_emissions_breakdown
+      (merchant, adequacy, company, ... study files: shims -> app/market_studies, app/company, app/adequacy)
       expansion.py       build_expansion_results
       full_outputs.py    build_full_outputs
       market.py          build_merit_order, build_co2_shadow, build_applied_constraints
@@ -348,13 +348,10 @@ All paths pass `solver_name` (from `options.solverName`, default `highs`),
 `solverThreads` and `solverType`. For another solver only its thread key is mapped, and
 `options.solverOptions` is merged last (`backend/pypsa/optimise_options.py`).
 
-**`extra_functionality(n, snapshots)`** is a closure defined inside
-`run_pypsa`. It is called by PyPSA/linopy after the LP model is assembled but
-before it is solved. It applies constraints in this order:
-
-1. `apply_custom_constraints(n, scenario["constraints"], ...)` — structured UI metrics.
-2. `apply_constraint_specs(n, scenario["constraintSpecs"], ...)` if `constraintSpecs` is non-empty.
-3. `apply_dsl_constraints(n, scenario["customDsl"], ...)` as a fallback if no `constraintSpecs` but `customDsl` is present.
+**`extra_functionality(n, snapshots)`** is composed by `module_hooks.compose_constraints` from the modules' `constraints` hooks (§5.14). It is called by
+PyPSA/linopy after the LP model is assembled but before it is solved, and applies, in the declared order: the carbon-pricing term (10), the annual-budgets
+window share (20), the constraints module (30: `scenario.constraints`, then `constraintSpecs`, or `customDsl` when there are no specs), operating reserves (40),
+RFNBO matching (50) and co-firing (60).
 
 **Stage 4 — Status check.**
 Any `condition != "optimal"` raises HTTP 500 with a diagnostic message naming
@@ -585,7 +582,7 @@ maintainable unit) and `_check_phase_shift_bounds` (`phase_shift_min <= phase_sh
 Results: `generators_t.maintenance` and `maintenance_start` are extracted by
 `full_outputs.py`; the analytics maintenance card reads them. `transformers-phase_shift_opt`
 holds the optimised angle, shown by the phase-shifter card. Adequacy uses `maintenance_pu`
-(`results/adequacy.py`). The power-flow study ignores the optimised angles and warns when a
+(`backend/app/adequacy/adequacy.py`). The power-flow study ignores the optimised angles and warns when a
 phase-shifting transformer is present (`results/power_flow.py`).
 
 Force-LP is PyPSA's `linearized_unit_commitment` and does not relax `maintainable` (PyPSA has no switch for it), so a Force-LP run with a maintainable
@@ -595,7 +592,7 @@ unit is refused with the visible workbook step that writes `maintainable = False
 
 A use-case surface over the core model; no separate engine. Code: `backend/app/p2x/`
 (`technologies.json` + `technologies.py`, `chains.py`, `config_store.py`, `results.py`), the router
-`backend/app/routers/p2x.py` and the solve fragment `backend/pypsa/network/rfnbo.py`.
+`backend/app/routers/p2x.py` and the solve fragment `backend/app/p2x/rfnbo.py` (a `constraints` hook, §5.14).
 
 | Route | Purpose |
 |---|---|
@@ -652,7 +649,7 @@ is gone). A period slice takes its share of the stored window.
 
 One plant-type picker over the core model; no separate engine. Code: `backend/app/plants/` (`technologies.json` +
 `technologies.py`, `thermal.py`, `catalog.py`, `registry.py`, `results.py`), the router `backend/app/routers/plants.py`, the MCP tools
-`backend/mcp/tools_plants.py` and the solve fragment `backend/pypsa/network/cofiring.py`. The P2X chain is built by
+`backend/mcp/tools_plants.py` and the solve fragment `backend/app/plants/cofiring.py` (a `constraints` hook, §5.14). The P2X chain is built by
 `p2x/chains.py` (not duplicated).
 
 | Route | Purpose |
@@ -806,6 +803,54 @@ declared in the run notes when on; PyPSA carries storage, dispatch and commitmen
 snapshot written with the workbook's spacing `dt`; they become `hours` and `per_hour` rows; in a workbook with a preset whose `rampConfig` is enabled, a generator's own `ramp_limit_*` was a rate per hour under the old
 module and becomes a `per_hour` row. A stored run before 4 is re-derived through `build_stored_network(legacy=True)`: `network/legacy_window.py` reproduces the stride and the sampled weights it was solved with,
 and its workbook is migrated in memory. Delete both compat paths together with the version-3 one once no stored run predates 4.
+
+### 5.14 Backend modules and the hook registry (core cleanup step 7)
+
+The core `run_pypsa` is **build, optimise, store**. What PyPSA lacks is a module package `backend/app/<module>/` that either hands PyPSA a *declared*
+constraint or reads the solved network back as a study. A module declares what it contributes in `<module>/hooks.py` through
+`backend/app/module_hooks.py`; the core discovers those files by scanning `backend/app` (a subpackage with a `hooks` submodule is a module) and never imports a
+module by name. A module that fails to import is skipped and listed in `module_hooks.diagnostics()`; with **zero** modules a run still builds, solves and stores
+(no constraints, no study blocks; `test_module_hooks.py`).
+
+| Hook kind | Signature | Called | Used by |
+|---|---|---|---|
+| `submit` | `fn(data) -> data` | `_resolve_payload_model`, before the run is queued | `scenario_overrides` (cell overrides), `constraints` (DSL precedence), `physical_risk` (outage uplift), `p2x` (session RFNBO settings) |
+| `guard` | `fn(ctx)` | `run_pypsa`, before the build | `market_studies` (merchant, bid strategy), `company` (asset swap, ESS): refuse modes that skip or reshape the solve (HTTP 400) |
+| `build_step` | `fn(ctx)` | inside `build_network`, after load shedding | `demand_response` (rewiring), `stochastic` (scenario overrides), `market_studies` (bid + carbon price + piecewise refusal) |
+| `constraints` | `prepare(ctx) -> fn(n, snapshots) \| None` | once before the solve (a bad plan is a 400); the returned contributions are composed into the one `extra_functionality` | `carbon_pricing`, `annual_budgets`, `constraints`, `reserves`, `p2x` (RFNBO), `plants` (co-firing) |
+| `replace_solve` | `fn(ctx) -> payload \| None` | after the build; a payload ends the run | `market_studies` (rule-based market simulation) |
+| `post_solve` | `fn(ctx) -> {key: value}` | right after the solve, before the core reads the network | `stochastic` (collapse to a representative scenario, duals divided by the scenario probability) |
+| `diagnose` | `fn(ctx) -> {headline, text} \| None` | when a solve is unusable | `model_check` (infeasibility diagnosis) |
+| `study` | `fn(ctx) -> {key: value}` | after the core has read the network | `market_studies`, `company`, `adequacy`, `reserves`, `emissions`, `demand_response` |
+
+Rules (kept in the module docstring of `module_hooks.py`): order comes from the declared `order` and the hook id, never import order; a second claim on a hook id or a
+result key is an error at declaration; every declared `payload_keys` entry is present in the payload (`None` when the study did not run); a module sees only
+`RunContext`. `module_hooks.registered()` returns the declared surface as data; `test_module_hooks.py` pins its hash (a change is a deliberate edit), enforces the
+core-to-module import allowlist in both directions (a stale row fails), and fails any production import of a compatibility shim.
+
+| Module package | Contents | Note |
+|---|---|---|
+| `reserves/` | spinning-reserve variable, headroom and requirement constraints; the `reserve` block | `options.reserveConfig` |
+| `constraints/` | custom constraints, the DSL, `constraintSpecs`, `constraint_checks` | declared linopy constraints; **not routed to native `GlobalConstraint`** (see below) |
+| `stochastic/` | scenario overrides, collapse to the representative scenario, duals divided by the probability, `GlobalConstraint.mu` recovery | `set_scenarios` / `set_risk_preference` stay native |
+| `demand_response/` | shiftable and price-elastic rewiring (DR bus + Link + Store), `demandResponse` / `priceElastic` blocks | a declared, reported build step (the `dr_*` components are not yet written to the workbook) |
+| `p2x/rfnbo.py`, `plants/cofiring.py` | RFNBO matching and co-firing blend share | `constraints` hooks of the p2x and plants modules |
+| `emissions/` | `thermal_basis_factor` (carrier `co2_emissions` / efficiency: the one factor function), `carrier_emission_factors`, `primary_energy_emissions`, `emissionsBreakdown` | `results_derived` and `run_statistics` call these |
+| `market_studies/` | market simulation, strategic bidding, merchant, bid strategy, optimal bid, PPA + explorer, price formation, LMP decomposition | study and `replace_solve` hooks |
+| `company/` | company breakdown, statement, finance, asset swap, ESS business case | study hooks |
+| `adequacy/` | adequacy / LOLE, outage Monte Carlo, ELCC, correlated sampling, convergence sampling | study hooks; never raise into the solve |
+| `model_check/` | `checks.py` (`/api/model-check`), `diagnostics.py` (infeasibility) | `diagnose` hook |
+| `procurement/` | the CVaR procurement LP behind `/api/procurement/*` | stand-alone (not a network) |
+| `demand/` | demand growth and snapshot retargeting (`growth.py`) | `timeseries` re-exports |
+| `forge_clustering/` | busmap by column, conflict-aware strategies, parallel-link merge | `routers/transforms.py` calls it |
+
+The old paths (`backend/pypsa/results/<study>.py`, `network/{reserves,rfnbo,cofiring,custom_constraints,constraint_dsl,constraint_checks,demand_response}.py`,
+`stochastic.py`, `model_check.py`, `utils/emissions.py`, `results/{emissions,diagnostics}.py`) are one-line `sys.modules` shims onto the new modules, kept for plugins, MCP and
+older tests; new code imports the real module. Not moved: `forge_helpers.py` (already a visible Forge module), MGA (a native `optimize_mga` path), power flow and contingency (native solves).
+
+**Constraint kinds PyPSA could express** (`tech_capacity_expansion_limit`, per-bus-carrier nominal limits, `operational_limit`, `primary_energy`) are **not** routed to
+`global_constraints` rows: routing moves the reported dual from the constraint name (`appliedConstraints`) to `global_constraints.mu` and changes the rolling-window
+apportioning. That is a follow-up with its own dual-parity test, not part of this mechanical step.
 
 ## 6. Result extraction
 
@@ -1039,7 +1084,7 @@ with stochastic or SCLOPF.
 
 ### 7.3 Stochastic
 
-**Module:** `backend/pypsa/stochastic.py`
+**Module:** `backend/app/stochastic/scenarios.py` (hooks in `stochastic/hooks.py`; `backend/pypsa/stochastic.py` is a shim)
 
 **Data classes (all frozen):**
 

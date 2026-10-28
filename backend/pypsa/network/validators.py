@@ -403,7 +403,7 @@ def validate_model(payload: RunPayload) -> dict[str, Any]:
     )
 
     # P27: PyPSA 1.4 global-constraint / growth-limit rules, before the build.
-    from .constraint_checks import check_global_constraints, check_growth_limits, consistency_report
+    from backend.app.constraints.constraint_checks import check_global_constraints, check_growth_limits, consistency_report
 
     glc_errors, glc_warnings = check_global_constraints(
         model, pathway_enabled=pathway.enabled, periods=[row.period for row in pathway.periods],

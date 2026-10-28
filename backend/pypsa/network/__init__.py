@@ -30,13 +30,13 @@ from ...app import annual_budgets
 from ..pathway import parse_pathway_config
 from ..rolling import parse_rolling_config, resolve_rolling
 from ..sampling import apply_test_run_sampling, parse_sampling_config
-from ..stochastic import apply_scenarios, parse_stochastic_config
+from ...app import module_hooks
+from ...app.stochastic import parse_stochastic_config
 from ..pypsa_schema import (
     input_static_attributes,
     input_temporal_attributes,
 )
 from ..utils.coerce import number
-from .demand_response import apply_demand_response, apply_price_elastic
 from .load_shedding import add_load_shedding
 from .validators import validate_model  # re-export for backend.app.main
 from . import time_units
@@ -572,40 +572,15 @@ def build_network(
         currency=currency,
     )
 
-    # ── Demand response (shiftable load) — rewire tagged loads into the DR
-    # bus + Link + Store pattern before stochastic broadcasting ────────────────
-    dr_cfg = options.get("demandResponseConfig") or {}
-    if dr_cfg.get("enabled"):
-        apply_demand_response(
-            network,
-            notes,
-            enabled=True,
-            loads=dr_cfg.get("loads") or None,
-            shift_fraction=float(dr_cfg.get("shiftFraction", 0.2) or 0.0),
-            max_shift_hours=float(dr_cfg.get("maxShiftHours", 4.0) or 0.0),
+    # ── Module build steps — demand response (shiftable / price-elastic load rewiring) and the stochastic
+    # scenario overrides. They run after every deterministic setup is in place so the scenario dimension
+    # can broadcast over the final values. See backend/app/module_hooks.py (kind "build_step").
+    module_hooks.run_build_steps(
+        module_hooks.RunContext(
+            model=model, scenario=scenario, options=options, notes=notes, network=network, currency=currency,
+            stochastic=stochastic, rolling=rolling, pathway=pathway,
         )
-    if dr_cfg.get("elasticEnabled"):
-        apply_price_elastic(
-            network,
-            notes,
-            enabled=True,
-            loads=dr_cfg.get("loads") or None,
-            fraction=float(dr_cfg.get("elasticFraction", 0.2) or 0.0),
-            wtp_max=float(dr_cfg.get("wtpMax", 200.0) or 0.0),
-        )
-
-    # ── Stochastic scenarios (must run after every deterministic setup is in
-    # place so the scenario dimension can broadcast over the final values) ──
-    if stochastic.enabled:
-        apply_scenarios(network, stochastic)
-        notes.append(
-            "Enabled stochastic mode with "
-            + ", ".join(
-                f"{s.name} (w={s.weight:.2f}, {len(s.overrides)} override{'s' if len(s.overrides) != 1 else ''})"
-                for s in stochastic.scenarios
-            )
-            + "."
-        )
+    )
 
     if rolling.enabled:
         rolling = resolve_rolling(rolling, time_units.step_hours(network)[0], notes)

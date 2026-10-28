@@ -28,7 +28,7 @@ import math
 from typing import Any
 
 
-from ...pypsa.network import cofiring as cf
+from backend.app.plants import cofiring as cf
 from ...pypsa.network.cost_basis import horizon_years
 from . import technologies as tech
 from .registry import Ctx, PlantError

@@ -31,6 +31,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from collections.abc import Mapping, Sequence
 from typing import Any, Callable
 from ..pypsa.utils.shedding import is_shedding
+from .emissions import thermal_basis_factor
 
 Row = dict[str, Any]
 Model = dict[str, list[Row]]
@@ -304,9 +305,10 @@ def generator_efficiency(row: Row) -> float:
 
 
 def generator_emission_factor(row: Row, carrier_static: dict[str, Row]) -> float:
-    """Thermal-basis factor, tCO2 per MWh electrical: carrier co2_emissions / efficiency."""
+    """Thermal-basis factor, tCO2 per MWh electrical: the emissions module's one factor function
+    (:func:`backend.app.emissions.thermal_basis_factor`) on the stored row's carrier and efficiency."""
     carrier = string_value(row.get("carrier")) or "Other"
-    return number_value((carrier_static.get(carrier) or {}).get("co2_emissions")) / generator_efficiency(row)
+    return thermal_basis_factor(number_value((carrier_static.get(carrier) or {}).get("co2_emissions")), number_value(row.get("efficiency")))
 
 
 # ── per-asset builders ───────────────────────────────────────────────────────
