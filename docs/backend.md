@@ -64,7 +64,7 @@ integrating with the backend. It does not cover end-user steps (see
     - 12.1 [run_store.py](#121-run_storepy)
     - 12.2 [Run and export endpoints](#122-run-and-export-endpoints)
 13. [Project workbook](#13-project-workbook)
-14. [External-data importers — /api/import/*](#14-external-data-importers--apiimport)
+14. [External-data importers — /api/import/*](#14-external-data-importers--apiimport) (incl. [14.1 Demand database](#141-demand-database--apidemand-db-d2))
 15. [Boot config — /api/config](#15-boot-config--apiconfig)
 
 ---
@@ -109,6 +109,7 @@ backend/
       plugins.py         /api/plugins/* — backend-plugin lifecycle + hooks
       tab_modules.py     /api/modules/* — tab-module install/list/enable/remove
       importers.py       /api/import/* — external-data importer subsystem (Data view)
+      demand_db.py       /api/demand-db/* — self-hosted hourly demand snapshot (coverage, slice)
       config.py          /api/config — the boot bundle the frontend fetches at startup
       reports.py         /api/reports/* — report documents (policy maker, investor, …)
     importers/           importer implementations used by routers/importers.py
@@ -240,8 +241,11 @@ called it.
 |---|---|---|---|
 | `POST` | `/api/export/netcdf` | `RunPayload` | `application/x-netcdf` bytes (`ragnarok_network.nc`) |
 | `POST` | `/api/export/hdf5` | `RunPayload` | `application/x-hdf5` bytes (`ragnarok_network.h5`) |
-| `POST` | `/api/import/netcdf` | `UploadFile` (.nc) | `{"model": {sheet: rows[]}}` |
-| `POST` | `/api/import/hdf5` | `UploadFile` (.h5) | `{"model": {sheet: rows[]}}` |
+| `POST` | `/api/import/netcdf` | `UploadFile` (.nc) | `{"model": {sheet: rows[]}, "runName": str \| null}` (`runName` = the run stored from a SOLVED file, `origin="netcdf_import"`) |
+| `POST` | `/api/import/hdf5` | `UploadFile` (.h5) | `{"model": {sheet: rows[]}, "runName": str \| null}` |
+| `POST` | `/api/import/project/load` | `UploadFile` (.zip / .xlsx) | `{model, scenario, options, result, runName, conversation, filename}`; a file with solved results is stored as a run (`runName`, then `result` is `{}`) |
+| `GET` | `/api/runs/{name}/period/{period}` | query `currency`, `fields` | `{run, period, result}`: one investment period of a pathway run from that period's slice of `n.statistics` (400 for a single-period run or an unknown period) |
+| `GET` | `/api/runs/{name}/analysis/{topic}` | query `period`, `currency`; topic `duration-curve`: `source`; topic `transition-risk`: `baseYear`, `years`, `basePrice`, `escalationPct`, `strandedThreshold`, `demandGrowthPct`, `fuelGrowthPct` | Analytics-card metrics the browser no longer computes (P28): `load-analysis`, `carrier-performance`, `transition-risk`, `duration-curve`, `setpoint-duals`, `totals` (sums over result rows). `{run, topic, period, ...}`; 400 for an unknown topic. MCP `get_run_analysis` |
 
 Export endpoints build the network without solving, from the posted `model` with
 its time-series re-attached from `sessionId` (see `_model_with_session_series` —
@@ -1560,6 +1564,77 @@ failure → 502.
 keys typed into Settings → API keys are stored in
 `backend/data/secrets.json` (gitignored, chmod 0600) and win over env; a key
 sent in a request body (BYOK) overrides both for that one request only.
+
+### 14.1 Demand database — `/api/demand-db/*` (D2)
+
+A Ragnarok-owned, offline snapshot of historical hourly load, so users pull demand without
+per-user API calls or keys. Code: `backend/app/importers/demand_db/` (catalogue, parsers, store,
+refresh CLI), the Data-view importer `importers/databases/demand_db/` (dataset id `demand_db`,
+category demand), the router `routers/demand_db.py`, and the MCP tools in
+`backend/mcp/tools_demand_db.py` (`list_demand_db`, `get_demand_db_slice`, gated
+`import_demand_db`; see [bifrost-agent.md](./bifrost-agent.md) §2.7).
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/demand-db/coverage` | Manifest view: sources (definition, licence), slices (key, area, ISO-3, years, coverage, rows, sha256, retrieved date) |
+| `GET` | `/api/demand-db/slice?series=opsd/DE&year_from=2019&year_to=2020` | One series as column arrays (`timestamps`, `load_mw`) + stats, definition, licence, source URLs. `country=DEU` instead of `series` picks the best national series. At most 12 years. Unknown series 404, bad window 400 |
+
+Loading into a model goes through the normal importer: `POST /api/import/run` with
+`dataset_ids: ["demand_db"]`, `country_iso`, and filters `series` (`auto` or `source/area`),
+`year_from`, `year_to`, `fill_gaps`. It returns a national bus, a Load, an hourly `loads-p_set`
+series and snapshot labels `YYYY-MM-DD HH:00`, like `entsoe_load` / `eia_demand`; interior gaps
+are linearly interpolated (count shown in the preview), edge gaps are trimmed, never invented.
+The dataset is listed `available: false` (503 on run) until a snapshot exists; its series list and
+year bounds come from the manifest on every request, so a refresh needs no restart.
+
+**Series and what they measure.** Every series is MW, UTC, timestamp = start of the hour.
+
+| Source | Series key | Measures | Licence |
+|---|---|---|---|
+| Open Power System Data, `time_series_60min_singleindex.csv`, release 2020-10-06 | `opsd/<area>` (`DE`, `FR`, `GB_GBN`, `GB_UKM`, `IE_sem`, ... 30+ countries and sub-zones) | `<area>_load_actual_entsoe_transparency`: ENTSO-E *Actual Total Load* (6.1.A) cleaned and re-published by OPSD (net generation + imports - exports - pumping; includes grid losses); not the day-ahead forecast. DE is OPSD's sum of the TSO areas; `DE_LU` is the bidding zone. Data 2015-01 to 2020-09 only (OPSD's last release) | MIT for OPSD processing; underlying ENTSO-E Transparency data reusable with attribution |
+| EIA Form-930 bulk balance files (`.../gridmonitor/sixMonthFiles/EIA930_BALANCE_<year>_<Jan_Jun\|Jul_Dec>.csv`) | `eia930/<BA code>` (`ERCO`, `PJM`, `CISO`, ... every BA in the files) | `Demand (MW) (Adjusted)` of a balancing authority (EIA's reported demand with gaps imputed and outliers corrected), falling back to `(Imputed)` then raw. Files are labelled *UTC Time at End of Hour*; shifted back one hour (RI4, same rule as `eia_demand`). Files are cut by local-time half-years, so one UTC year has a few edge hours in its neighbours. From 2015-07 | Public domain (US federal work) |
+| ENTSO-E Transparency API (optional) | `entsoe/<ISO-3>` | Same *Actual Total Load* definition, national bidding zone (DE = DE-LU), sub-hourly points averaged to the hour. Only refreshed when a token is configured (`RAGNAROK_SECRET_ENTSOE_KEY` or the stored `entsoe_key`) | Free reuse with acknowledgement; token required |
+
+**Refresh.**
+
+```bash
+python -m backend.app.importers.demand_db.refresh --countries DE FR GB --sources opsd
+python -m backend.app.importers.demand_db.refresh --countries ERCO PJM CISO --sources eia930 --years 2023
+python -m backend.app.importers.demand_db.refresh --countries DEU FRA --years 2021-2023 --sources entsoe   # needs a token
+python -m backend.app.importers.demand_db.refresh --dry-run        # print the plan, touch nothing
+```
+
+`--countries` takes area codes (`DE`, `GB_GBN`, `ERCO`) or country codes (`DEU`, `GB` expands to
+`GB_*`, `US`/`USA` = every BA); default all. `--years` takes years or ranges (default: all for OPSD,
+the last three for EIA and ENTSO-E). `--force` re-downloads; `--dir` overrides the folder. Exit
+status 1 when any source failed; the other sources still run.
+
+**Layout** (folder `RAGNAROK_DEMAND_DB_DIR`, default `<RAGNAROK_DATA_DIR>/demand_db`, gitignored):
+
+```
+manifest.json                   one entry per slice: source, area, measure, licence, attribution, unit/tz/convention,
+                                coverage_start/end, years, rows, bytes, sha256, retrieved_at, raw_files[url,sha256,bytes,fetched_at],
+                                rejected_rows, schema_version
+refresh_log.jsonl               append-only: per write, rows added and existing values changed (revisions)
+slices/<source>/<area>.parquet  timestamp (UTC), load_mw, source_url   (~0.1 MB per BA-year span, ~0.6 MB per OPSD area)
+raw/<source>/...                untouched downloads + .meta.json sidecar (url, sha256, etag, previous vintages)
+```
+
+**Failure behaviour.** Downloads stream to `.part` and are renamed on success; every JSON/parquet
+write is temp + `os.replace`, so an interrupted run leaves the previous state and the next run
+resumes (raw files whose size/ETag still match are reused; slices are rewritten only if content
+changed). Retries: exponential backoff with jitter, `Retry-After` honoured, 5 attempts, one
+download at a time. An HTTP 200 carrying an HTML page (EIA does this for files that do not exist,
+e.g. `2015_Jan_Jun`) is treated as "not published", never parsed as data; an ENTSO-E
+`Acknowledgement` document raises instead of reading as an empty series; the OPSD CSV is verified
+against the sha256 in its `datapackage.json`. Rows failing validation (non-finite, negative,
+> 1 TW, off the hour, duplicate timestamp) are dropped and counted per reason in the manifest; if
+more than 20 % of a slice is rejected the write fails as schema drift. Re-runs are idempotent
+(identical content: no file change, `retrieved_at` kept); a revised upstream figure replaces the
+stored one and is counted under `changed` in `refresh_log.jsonl`.
+
+Tests: `backend/tests/test_demand_db.py` (fixtures in `backend/tests/fixtures/demand_db/`, no
+network). The live OPSD check is marked `integration`: `RAGNAROK_INTEGRATION=1 pytest -m integration`.
 
 ---
 

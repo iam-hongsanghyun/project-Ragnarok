@@ -1,7 +1,9 @@
 """Tests for the History import split (H1 / H2).
 
 H1 — "Import Project" is *opening a file*: ``POST /api/import/project/load``
-returns the parsed bundle and creates NO History entry.
+returns the model side to the editor. P28: a file that carries SOLVED RESULTS is also
+stored as a run (``runName``), so the browser reads every result from the run routes
+and never derives a metric; an inputs-only file still creates no History entry.
 H2 — "Import result" is *persisting an external result*:
 ``POST /api/import/result`` writes a History entry tagged
 ``origin="xlsx_import"``.
@@ -86,10 +88,13 @@ def test_store_run_records_explicit_origin(_runs_dir: Path) -> None:
     assert listed[meta["name"]]["origin"] == "xlsx_import"
 
 
-# ── H1: project load does NOT touch History ─────────────────────────────────
+# ── H1: project load returns the model; its results become a stored run (P28) ──
 
 
-def test_import_project_load_returns_bundle_without_storing(_runs_dir: Path) -> None:
+def test_import_project_load_stores_results_as_a_run(_runs_dir: Path) -> None:
+    # Re-baselined for P28: this used to assert that History stays empty (the results rode
+    # back to the browser, which re-derived them). The results are now stored as a run and the
+    # response names it; `result` is empty because the browser reads the run, not the upload.
     client = TestClient(app)
     data = pw.bundle_to_workbook(_sample_bundle(), include_bundle=True)
     files = {"file": ("demo.xlsx", io.BytesIO(data), _XLSX_MIME)}
@@ -98,13 +103,31 @@ def test_import_project_load_returns_bundle_without_storing(_runs_dir: Path) -> 
     assert resp.status_code == 200, resp.text
     body = resp.json()
 
-    # The bundle round-trips back to the editor …
+    # The model side still round-trips back to the editor ...
     assert {row["name"] for row in body["model"]["generators"]} == {"wind", "gas"}
-    assert body["result"]["outputs"]["static"]["generators"]["wind"]["p_nom_opt"] == 120.0
     assert body["scenario"]["carbonPrice"] == 50.0
     assert body["filename"] == "demo.xlsx"
 
-    # … but NOTHING is persisted: History is still empty.
+    # ... and the solved results are a stored run, with the outputs intact.
+    assert body["result"] == {}
+    runs = run_store.list_runs()
+    assert [m["name"] for m in runs] == [body["runName"]]
+    assert runs[0]["origin"] == "xlsx_import"
+    bundle = run_store.get_run(body["runName"])
+    assert bundle is not None
+    assert bundle["result"]["outputs"]["static"]["generators"]["wind"]["p_nom_opt"] == 120.0
+
+
+def test_import_project_load_without_results_stores_nothing(_runs_dir: Path) -> None:
+    client = TestClient(app)
+    bundle = _sample_bundle()
+    bundle["result"] = {}
+    data = pw.bundle_to_workbook(bundle, include_bundle=True)
+    files = {"file": ("inputs.xlsx", io.BytesIO(data), _XLSX_MIME)}
+
+    resp = client.post("/api/import/project/load", files=files)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["runName"] is None
     assert run_store.list_runs() == []
 
 
@@ -249,3 +272,29 @@ def test_import_result_xlsx_stores_derived_analytics(_runs_dir: Path) -> None:
     assert len(meta["summary"]) > 0
     assert len(meta["carrierMix"]) == 2
     assert meta["componentCounts"]["generators"] == 2
+
+
+def test_importing_the_same_file_twice_returns_the_existing_run(_runs_dir: Path) -> None:
+    """The same bytes (content hash) never create a second run, on either import route."""
+    client = TestClient(app)
+    data = pw.bundle_to_workbook(_sample_bundle(), include_bundle=True)
+
+    def upload(route: str, filename: str = "demo.xlsx") -> dict[str, Any]:
+        resp = client.post(route, files={"file": (filename, io.BytesIO(data), _XLSX_MIME)})
+        assert resp.status_code == 200, resp.text
+        return resp.json()
+
+    first = upload("/api/import/result")["name"]
+    assert upload("/api/import/result")["name"] == first
+    assert upload("/api/import/result", "renamed.xlsx")["name"] == first  # content, not file name
+    assert upload("/api/import/project/load")["runName"] == first
+    assert [m["name"] for m in run_store.list_runs()] == [first]
+    assert run_store.list_runs()[0]["contentHash"]
+
+    # A different file is a different run; deleting the run lets the same file import again.
+    other = pw.bundle_to_workbook({**_sample_bundle(), "scenario": {"carbonPrice": 99.0}}, include_bundle=True)
+    resp = client.post("/api/import/result", files={"file": ("other.xlsx", io.BytesIO(other), _XLSX_MIME)})
+    assert resp.json()["name"] != first
+    assert run_store.delete_run(first)
+    upload("/api/import/result")
+    assert len(run_store.list_runs()) == 2  # re-imported as a new run (the name may repeat within a second)

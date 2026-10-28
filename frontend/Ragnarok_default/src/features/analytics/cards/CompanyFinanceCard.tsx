@@ -28,23 +28,24 @@ function years(v: number | null): string {
 
 interface Props {
   data: CompanyFinanceResult;
+  /** Server sum of the companies' NPV (`analysis/totals`); null while loading. */
+  totalNpv?: number | null;
 }
 
-export function CompanyFinanceCard({ data }: Props) {
+export function CompanyFinanceCard({ data, totalNpv = null }: Props) {
   const { currency, companies } = data;
   if (!companies.length) {
     return <p className="dashboard-cell-missing">No financeable companies in this run.</p>;
   }
   const hasDebt = companies.some((c) => c.dscr != null);
-  const totalNpv = companies.reduce((s, c) => s + c.npv, 0);
 
   return (
     <div className="econ-card">
       <div className="econ-kpi-row">
         <div className="econ-kpi">
           <div className="econ-kpi-label">Total NPV</div>
-          <div className={`econ-kpi-value ${totalNpv >= 0 ? 'econ-recovered' : 'econ-shortfall'}`}>
-            {compactMoney(totalNpv, currency)}
+          <div className={`econ-kpi-value ${totalNpv === null ? '' : totalNpv >= 0 ? 'econ-recovered' : 'econ-shortfall'}`}>
+            {totalNpv !== null ? compactMoney(totalNpv, currency) : '—'}
           </div>
           <div className="econ-kpi-unit">across {companies.length} compan{companies.length === 1 ? 'y' : 'ies'}</div>
         </div>

@@ -16,10 +16,8 @@
  */
 import React from 'react';
 import { RunResults } from 'lib/types';
-import { fetchRunOutputSeriesWindows } from 'lib/api/runs';
-import {
-  DUAL_LABEL, DualRow, dualSheetsOf, parseDualSheet, summariseDualSheet,
-} from 'lib/results/dualViews';
+import { fetchRunAnalysis } from 'lib/api/resultsDerived';
+import { DUAL_LABEL, dualSheetsOf, parseDualSheet } from 'lib/results/dualViews';
 import { useAsync } from '../../../shared/hooks/useAsync';
 import { Strip } from './MaintenanceCard';
 
@@ -27,40 +25,28 @@ const num = (v: number, d = 2) => v.toLocaleString(undefined, { maximumFractionD
 
 interface Props {
   results: RunResults;
-  /** Stored run to fetch light-bundle series from. */
+  /** Stored run the summary is read from (`GET /api/runs/{name}/analysis/setpoint-duals`). */
   runName?: string | null;
+  /** Pathway investment period; null = the whole horizon. */
+  period?: number | null;
   currencySymbol?: string;
 }
 
-export function SetpointDualsCard({ results, runName, currencySymbol = '' }: Props) {
+export function SetpointDualsCard({ results, runName, period = null, currencySymbol = '' }: Props) {
   const sheets = React.useMemo(() => dualSheetsOf(results), [results]);
-  const inMemory = results.outputs?.series;
-  const missing = sheets.filter((s) => !(inMemory && Array.isArray(inMemory[s]) && inMemory[s].length > 0));
-  const fetched = useAsync(
-    runName && missing.length > 0 ? `${runName}|${missing.join(',')}` : null,
-    () => fetchRunOutputSeriesWindows(runName as string, missing.map((sheet) => ({ sheet, end: null }))),
+  const { data, loading, error } = useAsync(
+    runName && sheets.length > 0 ? `${runName}|setpoint-duals|${period ?? ''}` : null,
+    () => fetchRunAnalysis(runName as string, 'setpoint-duals', { period }),
   );
-
-  const weight = results.runMeta?.snapshotWeight || 1;
-  const rows: DualRow[] = [];
-  let assetsChecked = 0;
-  let totalSnapshots = 0;
-  for (const sheet of sheets) {
-    const data = (inMemory && inMemory[sheet]?.length ? inMemory[sheet] : fetched.data?.[sheet]) ?? [];
-    const summary = summariseDualSheet(sheet, data, weight);
-    rows.push(...summary.rows);
-    assetsChecked += summary.assetsChecked;
-    totalSnapshots = Math.max(totalSnapshots, data.length);
-  }
-  rows.sort((a, b) => Math.abs(b.peakShadowPrice) - Math.abs(a.peakShadowPrice));
 
   if (sheets.length === 0) {
     return <p className="dashboard-cell-missing">No ramp or set-point duals in this run (set <code>ramp_limit_up</code> / <code>ramp_limit_down</code> on a generator, link or process).</p>;
   }
-  if (fetched.error) return <p className="dashboard-cell-missing" role="alert">Could not load the dual series: {fetched.error}</p>;
-  if (missing.length > 0 && !fetched.data) return <p className="dashboard-cell-missing" aria-busy="true">Loading dual series…</p>;
+  if (!runName) return <p className="dashboard-cell-missing">Set-point duals need a stored run.</p>;
+  if (error) return <p className="dashboard-cell-missing" role="alert">Could not load the dual series: {error}</p>;
+  if (loading || !data) return <p className="dashboard-cell-missing" aria-busy="true">Loading dual series…</p>;
 
-  const bindingHours = rows.reduce((a, r) => a + r.bindingHours, 0);
+  const { rows, assetsChecked, totalSnapshots, bindingHours } = data;
   return (
     <div className="econ-card">
       <div className="econ-kpi-row">
@@ -100,8 +86,8 @@ export function SetpointDualsCard({ results, runName, currencySymbol = '' }: Pro
               {rows.map((r) => (
                 <tr key={`${r.component}-${r.attribute}-${r.asset}`}>
                   <td>{r.asset} <span className="econ-sub">{r.component}</span></td>
-                  <td>{DUAL_LABEL[r.attribute]}</td>
-                  <td style={{ width: '30%' }}><Strip segments={r.segments} total={r.totalSnapshots} label={`${r.asset} ${DUAL_LABEL[r.attribute]} binding pattern`} /></td>
+                  <td>{DUAL_LABEL[r.attribute as keyof typeof DUAL_LABEL] ?? r.attribute}</td>
+                  <td style={{ width: '30%' }}><Strip segments={r.segments} total={r.totalSnapshots} label={`${r.asset} ${r.attribute} binding pattern`} /></td>
                   <td className="num">{num(r.bindingHours, 1)}</td>
                   <td className="num">{num(r.peakShadowPrice)}</td>
                   <td>{r.peakAt}</td>

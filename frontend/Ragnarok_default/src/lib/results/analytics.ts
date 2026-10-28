@@ -1,6 +1,14 @@
 import { MetricOption, RunResults, SeriesPoint, StatisticsResult, TimeframeOption, TimeSeriesRow } from '../types';
 import { numberValue } from 'lib/utils/helpers';
 
+/** `RunResults.assetDetails` with no assets - what a result carries until the server's
+ *  per-asset details (`GET /api/runs/{name}/assets`) are loaded. */
+export function emptyAssetDetails(): RunResults['assetDetails'] {
+  return {
+    generators: {}, buses: {}, storageUnits: {}, stores: {}, branches: {}, processes: {}, shuntImpedances: {},
+  };
+}
+
 export function normalizeSeriesPoint(point: SeriesPoint): TimeSeriesRow {
   const fallbackValues = Object.fromEntries(
     Object.entries(point as unknown as Record<string, unknown>).filter(
@@ -58,63 +66,6 @@ export function statisticsForPeriod(
   if (!stats || period === null || period === undefined) return stats;
   if (!stats.rows.some((r) => r.period !== undefined && r.period !== null)) return stats;
   return { ...stats, rows: stats.rows.filter((r) => r.period === undefined || r.period === null || Number(r.period) === period) };
-}
-
-export function buildRowsFromGeneratorDetails(
-  generators: Record<string, { carrier: string; name: string; outputSeries: Array<{ label: string; timestamp: string; output: number }> }>,
-  mode: 'generator' | 'carrier',
-): TimeSeriesRow[] {
-  const buckets = new Map<string, TimeSeriesRow>();
-  Object.values(generators).forEach((generator) => {
-    generator.outputSeries.forEach((point) => {
-      const key = mode === 'carrier' ? generator.carrier : generator.name;
-      const row = buckets.get(point.timestamp) || { label: point.label, timestamp: point.timestamp };
-      row[key] = numberValue(row[key] as string | number | undefined) + Math.max(point.output, 0);
-      buckets.set(point.timestamp, row);
-    });
-  });
-  return Array.from(buckets.values()).sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp)));
-}
-
-/** Carrier-grouped curtailment rows from per-generator details — fallback for
- *  bundles predating the backend `curtailmentSeries` aggregate. Restricted to
- *  `timeVaryingNames` (generators with an input p_max_pu series): thermal units
- *  at static availability are part-loaded, not curtailed. */
-export function buildCurtailmentRowsFromGeneratorDetails(
-  generators: Record<string, { carrier: string; name: string; curtailmentSeries: Array<{ label: string; timestamp: string; curtailment: number }> }>,
-  timeVaryingNames: Set<string>,
-): TimeSeriesRow[] {
-  const buckets = new Map<string, TimeSeriesRow>();
-  Object.values(generators).forEach((generator) => {
-    if (!timeVaryingNames.has(generator.name)) return;
-    generator.curtailmentSeries.forEach((point) => {
-      const row = buckets.get(point.timestamp) || { label: point.label, timestamp: point.timestamp };
-      row[generator.carrier] = numberValue(row[generator.carrier] as string | number | undefined) + Math.max(point.curtailment, 0);
-      buckets.set(point.timestamp, row);
-    });
-  });
-  return Array.from(buckets.values()).sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp)));
-}
-
-export function buildSystemLoadRows(results: RunResults | null): TimeSeriesRow[] {
-  if (!results) return [];
-  const dispatchRows = (results.dispatchSeries || []).map((point) => ({
-    label: point.label,
-    timestamp: point.timestamp,
-    load: numberValue((point as unknown as Record<string, unknown>).total as number | string | undefined),
-  }));
-  const hasPositiveDispatchLoad = dispatchRows.some((row) => numberValue(row.load as string | number | undefined) > 0);
-  if (hasPositiveDispatchLoad) return dispatchRows;
-
-  const buckets = new Map<string, TimeSeriesRow>();
-  Object.values(results.assetDetails.buses || {}).forEach((bus) => {
-    bus.netSeries.forEach((point) => {
-      const row = buckets.get(point.timestamp) || { label: point.label, timestamp: point.timestamp, load: 0 };
-      row.load = numberValue(row.load as string | number | undefined) + point.load;
-      buckets.set(point.timestamp, row);
-    });
-  });
-  return Array.from(buckets.values()).sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp)));
 }
 
 /** Reduce per-snapshot values over a time bucket.

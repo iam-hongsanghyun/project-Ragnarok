@@ -4,6 +4,7 @@ import {
   AnalyticsFocus, AnalyticsSubTab, ChartSectionConfig, GridRow, PathwayConfig, RunResults, TimeSeriesRow, TimeSeriesSeries, WorkbookModel,
 } from 'lib/types';
 import { AnalyticsDashboard } from '../../views/AnalyticsView.features/Dashboard/AnalyticsDashboard';
+import type { AssetKind } from 'lib/api/resultsDerived';
 import { buildResultPreset } from 'lib/dashboard/resultPreset';
 import { PRESETS } from 'lib/dashboard/presets';
 
@@ -19,8 +20,6 @@ interface Props {
   setChartSections: React.Dispatch<React.SetStateAction<ChartSectionConfig[]>>;
   dispatchRows: TimeSeriesRow[];
   dispatchSeries: TimeSeriesSeries[];
-  systemLoadRows: TimeSeriesRow[];
-  systemPriceRows: TimeSeriesRow[];
   storageRows: TimeSeriesRow[];
   subTab: AnalyticsSubTab;
   currencySymbol: string;
@@ -30,6 +29,9 @@ interface Props {
    *  charts need, each at the max snapshot count requested (light "View"
    *  bundles strip them). */
   onNeedSeries?: (windows: Record<string, number>) => void;
+  onNeedAssets?: (kinds: Partial<Record<AssetKind, number>>) => void;
+  /** Loading / error state of the selected investment period's server payload. */
+  periodStatus?: { period: number | null; loading: boolean; error: string | null };
   /** Stored-run name backing these results (for parametrised statistics queries); null when unsaved. */
   runName?: string | null;
 }
@@ -53,12 +55,14 @@ export function AnalyticsPane({
   results, model, bounds, busIndex,
   analyticsFocus, setAnalyticsFocus,
   dispatchRows, dispatchSeries,
-  systemLoadRows, systemPriceRows, storageRows,
+  storageRows,
   subTab,
   currencySymbol,
   pathwayConfig,
   onSelectedPeriodChange,
   onNeedSeries,
+  onNeedAssets,
+  periodStatus,
   runName,
 }: Props) {
   return (
@@ -73,7 +77,16 @@ export function AnalyticsPane({
             <div className="chart-card-header">
               <div>
                 <h3>Pathway period</h3>
-                <p>Detailed charts and asset analytics use the selected investment period.</p>
+                <p>
+                  Every figure below is read from the server for the selected investment period
+                  (inactive assets masked, costs weighted by the period's objective weight).
+                </p>
+                {periodStatus?.loading && <p aria-busy="true">Loading {periodStatus.period}…</p>}
+                {periodStatus?.error && (
+                  <p role="alert" className="sg-error-text">
+                    Could not load {periodStatus.period}: {periodStatus.error}. Showing the whole horizon.
+                  </p>
+                )}
               </div>
               <div className="period-pill-row">
                 {results.pathway.periods.map((period) => (
@@ -104,8 +117,6 @@ export function AnalyticsPane({
           busIndex={busIndex}
           dispatchRows={dispatchRows}
           dispatchSeries={dispatchSeries}
-          systemLoadRows={systemLoadRows}
-          systemPriceRows={systemPriceRows}
           storageRows={storageRows}
           currencySymbol={currencySymbol}
           analyticsFocus={analyticsFocus}
@@ -117,6 +128,7 @@ export function AnalyticsPane({
           initialLayout={subTab === 'Result' ? buildResultPreset(results) : PRESETS[0].build()}
           showPresets={subTab === 'Analytics'}
           onNeedSeries={onNeedSeries}
+          onNeedAssets={onNeedAssets}
           runName={runName}
         />
       )}

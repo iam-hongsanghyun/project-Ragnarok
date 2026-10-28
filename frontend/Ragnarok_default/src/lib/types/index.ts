@@ -1460,6 +1460,8 @@ export interface GeneratorDetail {
 
 export interface BusDetail {
   name: string;
+  /** Mean marginal price over the snapshots (currency/MWh), computed by the server. */
+  averageSmp: number;
   summary: SummaryItem[];
   netSeries: Array<{
     label: string;
@@ -1603,10 +1605,8 @@ export interface Co2Shadow {
 // under the least-cost LP, optimal dispatch is the perfectly-competitive
 // profit-max equilibrium. Money columns are on the modeled-horizon basis;
 // `recoveryPct` is scale-invariant. Backend-provided (see market.py) and
-// preserved through the client deriveRunResults merge; present whenever the
-// backend supplied it (solve, stored/light view, pathway, result-import).
-// deriveRunResults does not recompute it, so a bundle fully re-derived from bare
-// outputs with no backend economics (e.g. a pre-F0 export re-opened) lacks it.
+// server-provided in every result (solve, stored/light view, pathway period view,
+// result import): the browser derives none of it.
 
 /** One entry of `RunResults.metricDefinitions`. */
 export interface MetricDefinition {
@@ -1614,13 +1614,16 @@ export interface MetricDefinition {
   definition: string;
 }
 
-/** `POST /api/import/project/load` response. `conversation` is the package's
- *  embedded agent chat sidecar (`{events, model, autonomy}`), null without one. */
+/** `POST /api/import/project/load` response. `runName` names the run the server stored
+ *  for a file that carries solved results (then `result` is `{}`: read the run); null for
+ *  an inputs-only file. `conversation` is the package's embedded agent chat sidecar
+ *  (`{events, model, autonomy}`), null without one. */
 export interface ProjectLoadResponse {
   model?: WorkbookModel;
   scenario?: { constraints?: CustomConstraint[]; carbonPrice?: number; discountRate?: number; carbonPriceSchedule?: CarbonPriceScheduleEntry[] };
   options?: { snapshotStart?: number; snapshotEnd?: number; snapshotWeight?: number; carbonPriceSchedule?: CarbonPriceScheduleEntry[] };
   result?: RunResults;
+  runName?: string | null;
   conversation: Record<string, unknown> | null;
   filename?: string;
 }
@@ -1910,9 +1913,8 @@ export interface RunResults {
   expansionResults?: ExpansionAsset[];
   meritOrder?: MeritOrderEntry[];
   co2Shadow?: Co2Shadow;
-  /** Per-asset competitive-benchmark economics (F0). Backend-provided and
-   *  preserved through the deriveRunResults merge; see the GeneratorEconomics
-   *  doc comment for when it is present. */
+  /** Per-asset competitive-benchmark economics (F0). Server-provided; see
+   *  the GeneratorEconomics doc comment. */
   generatorEconomics?: GeneratorEconomics;
   /** Present only when the run was a power-flow study (pf/lpf), not an LP. */
   powerFlow?: PowerFlowResult;
@@ -2159,8 +2161,9 @@ export interface BackendRunMeta {
   /** Short chips for non-standard / notable settings (carbon price, force-LP,
    *  load-shed, custom solver, pathway, stochastic, N-1, constraint count). */
   tags?: string[];
-  /** How this entry entered History: a normal solve (`'solve'`) or an imported
-   *  external results file (`'xlsx_import'`). Absent on legacy entries → treat
+  /** How this entry entered History: a normal solve (`'solve'`) or imported
+   *  results (`'xlsx_import'` for a project / workbook file, `'netcdf_import'` for a
+   *  solved PyPSA network). Absent on legacy entries → treat
    *  as `'solve'`. Drives the History "imported" chip. */
   origin?: string;
 }
@@ -2247,6 +2250,8 @@ export interface ChartSectionConfig {
   startIndex: number;
   endIndex: number;
   stacked: boolean;
+  /** Dispatch / output charts: stack curtailed MW on top in a lighter shade (default off). */
+  showCurtailment?: boolean;
   // ── Appearance (all optional; undefined = sensible default) ──
   xAxisTitle?: string;       // custom x-axis caption ('' / undefined = none)
   yAxisTitle?: string;       // custom y-axis caption ('' / undefined = none)

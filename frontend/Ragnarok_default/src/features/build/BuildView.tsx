@@ -440,7 +440,7 @@ export function BuildView(props: BuildViewProps) {
   return (
     <div className="build-view">
       <ViewPaneHeader>
-      <nav className="subnav build-step-strip" aria-label="Build steps">
+      <nav className="subnav build-step-strip" data-tour="build-steps" aria-label="Build steps">
         {BUILD_STEPS.map((s, i) => {
           const complete = completionByIndex[i];
           const errorCount = errorCountByIndex[i];

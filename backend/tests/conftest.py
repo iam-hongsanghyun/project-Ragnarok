@@ -17,6 +17,13 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    """Register custom marks so ``-W error`` / strict-markers runs stay clean."""
+    config.addinivalue_line(
+        "markers", "integration: live network / external-service test, opt in with RAGNAROK_INTEGRATION=1"
+    )
+
+
 @pytest.fixture(autouse=True)
 def _pin_climada_worker_off(monkeypatch: pytest.MonkeyPatch) -> None:
     """Force the physical-risk STUB engine in tests by default.
@@ -30,6 +37,16 @@ def _pin_climada_worker_off(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     if not os.environ.get("RAGNAROK_CLIMADA_WORKER_TEST_REAL"):
         monkeypatch.setenv("RAGNAROK_CLIMADA_WORKER", "off")
+
+@pytest.fixture(autouse=True)
+def _pandapower_autosetup_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Never build the pandapower venv as a side effect of a test.
+
+    The first pandapower import starts a background pip build when the environment is
+    absent. Tests must not do that; the setup-state tests opt back in explicitly.
+    """
+    monkeypatch.setenv("RAGNAROK_PANDAPOWER_AUTOSETUP", "off")
+
 
 @pytest.fixture(autouse=True)
 def _isolated_journal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

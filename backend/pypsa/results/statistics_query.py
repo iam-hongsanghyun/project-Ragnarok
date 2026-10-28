@@ -76,6 +76,9 @@ def network_from_outputs(
         if not len(comp.static):
             continue
         comp.dynamic[attr] = _series_to_frame(rows, snaps, list(comp.static.index))
+    from .derive_outputs import mark_solved
+
+    mark_solved(network)
     return network
 
 

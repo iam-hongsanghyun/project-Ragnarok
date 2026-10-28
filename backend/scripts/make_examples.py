@@ -9,7 +9,7 @@ metadata embedded in the db's ``_kv`` (key "example") — no JSON/xlsx sidecars.
 Re-runnable; regenerates every example. Add one by writing a ``build_*``
 function and appending it to ``EXAMPLES``.
 
-    .venv-pypsa/bin/python -m backend.scripts.make_examples
+    .venv-pypsa/bin/python -m backend.scripts.make_examples [example_id ...]
 """
 from __future__ import annotations
 
@@ -38,6 +38,9 @@ class Example:
     description: str
     order: int
     build: Callable[[], pypsa.Network]
+    # Optional hook run on the converted model JSON, for columns PyPSA itself has no attribute
+    # for (the `owner` tag the Company views group on).
+    tag: Callable[[dict], None] | None = None
 
 
 # ── Builders ────────────────────────────────────────────────────────────────
@@ -121,6 +124,64 @@ def build_capacity_expansion() -> pypsa.Network:
     return n
 
 
+# Company views group assets on an `owner` column of generators / storage_units / stores. PyPSA has
+# no such attribute, so it is written onto the converted rows rather than into the network.
+COMPANY_OWNERS: dict[str, dict[str, str]] = {
+    "generators": {
+        "wind_north": "Northwind Energy",
+        "gas_north": "Northwind Energy",
+        "gas_central": "Central Thermal",
+        "solar_south": "Southern Solar",
+    },
+    "storage_units": {"battery_south": "Southern Solar"},
+}
+
+
+def tag_company_owners(model: dict) -> None:
+    """Write the owner column. `gas_south` stays untagged: its emissions are the Unassigned row."""
+    for sheet, owners in COMPANY_OWNERS.items():
+        for row in model.get(sheet, []):
+            row["owner"] = owners.get(str(row.get("name")), "")
+
+
+def build_company_view() -> pypsa.Network:
+    """Three-bus grid with a constrained north-central line and four owners' assets.
+
+    Prices split across buses once the line binds, so each company earns a different capture
+    price; one untagged gas unit leaves a non-empty Unassigned row.
+    """
+    n = pypsa.Network()
+    n.name = "Three companies"
+    hours = 48
+    n.set_snapshots(pd.date_range("2030-06-01", periods=hours, freq="h"))
+    n.add("Carrier", "AC")
+    n.add("Carrier", "gas", co2_emissions=0.18)
+    n.add("Carrier", "wind", co2_emissions=0.0)
+    n.add("Carrier", "solar", co2_emissions=0.0)
+    n.add("Carrier", "battery", co2_emissions=0.0)
+    n.add("Bus", "north", v_nom=380, carrier="AC", x=127.05, y=37.80)
+    n.add("Bus", "central", v_nom=380, carrier="AC", x=127.30, y=36.60)
+    n.add("Bus", "south", v_nom=380, carrier="AC", x=128.60, y=35.20)
+    n.add("Line", "north-central", bus0="north", bus1="central", x=0.10, r=0.01, s_nom=250)
+    n.add("Line", "central-south", bus0="central", bus1="south", x=0.10, r=0.01, s_nom=2000)
+    hour = np.arange(hours) % 24
+    n.add("Generator", "wind_north", bus="north", carrier="wind", p_nom=500, marginal_cost=0.0,
+          p_max_pu=0.35 + 0.30 * np.sin(np.linspace(0.0, 4 * np.pi, hours)) ** 2)
+    n.add("Generator", "gas_north", bus="north", carrier="gas", p_nom=200, marginal_cost=95)
+    n.add("Generator", "gas_central", bus="central", carrier="gas", p_nom=700, marginal_cost=70)
+    # Deliberately left without an owner: its emissions are the Unassigned row.
+    n.add("Generator", "gas_south", bus="south", carrier="gas", p_nom=150, marginal_cost=55)
+    n.add("Generator", "solar_south", bus="south", carrier="solar", p_nom=450, marginal_cost=0.0,
+          p_max_pu=np.clip(np.sin((hour - 6) / 12 * np.pi), 0, 1) * 0.85)
+    n.add("StorageUnit", "battery_south", bus="south", carrier="battery", p_nom=120, max_hours=4,
+          efficiency_store=0.95, efficiency_dispatch=0.95, cyclic_state_of_charge=True, marginal_cost=1.0)
+    shape = 0.70 + 0.30 * np.sin((hour - 9) / 24 * 2 * np.pi)
+    n.add("Load", "load_north", bus="north", p_set=150 * shape)
+    n.add("Load", "load_central", bus="central", p_set=350 * shape)
+    n.add("Load", "load_south", bus="south", p_set=300 * shape)
+    return n
+
+
 EXAMPLES: list[Example] = [
     Example(
         id="three_bus",
@@ -143,6 +204,15 @@ EXAMPLES: list[Example] = [
         order=3,
         build=build_capacity_expansion,
     ),
+    Example(
+        id="company_view",
+        label="Three companies",
+        description="Three-bus grid whose generators and a battery are tagged with an owner column, so Analytics shows the "
+                    "company breakdown, income statement and comparison, plus an Unassigned row for the one untagged gas unit.",
+        order=4,
+        build=build_company_view,
+        tag=tag_company_owners,
+    ),
 ]
 
 
@@ -158,6 +228,9 @@ def author(ex: Example) -> None:
     for required in ("buses", "generators", "loads", "carriers", "snapshots"):
         assert required in model and model[required], f"{ex.id}: converter dropped {required}"
 
+    if ex.tag is not None:
+        ex.tag(model)
+
     model_store.save_model(AUTHOR_SESSION, model, filename=ex.label)
     src = session_store.SESSION_DIR / AUTHOR_SESSION / "project.db"
     sqlite_store.write_kv(src, EXAMPLE_KV_KEY, {"label": ex.label, "description": ex.description, "order": ex.order})
@@ -168,11 +241,17 @@ def author(ex: Example) -> None:
     print(f"  ✓ {ex.id}: objective={probe.objective:,.0f}, sheets={sorted(model.keys())}")
 
 
-def main() -> None:
+def main(only: list[str] | None = None) -> None:
+    """Regenerate every example, or just those named on the command line."""
+    import sys
+
+    only = only if only is not None else sys.argv[1:]
     for ex in EXAMPLES:
+        if only and ex.id not in only:
+            continue
         print(f"authoring {ex.id}…")
         author(ex)
-    print(f"done — {len(EXAMPLES)} examples")
+    print("done")
 
 
 if __name__ == "__main__":

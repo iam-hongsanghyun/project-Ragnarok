@@ -12,26 +12,22 @@ import { StochasticResult } from 'lib/types';
 interface Props {
   stochastic: StochasticResult;
   currencySymbol: string;
+  /** Server probability-weighted totals (`analysis/totals`); null while loading. */
+  expected?: {
+    expectedEnergyMwh: number;
+    expectedEmissionsTco2: number;
+    expectedOperatingCost: number;
+    expectedLoadShedMwh: number;
+  } | null;
 }
 
 function fmt(n: number, digits = 0): string {
   return n.toLocaleString(undefined, { maximumFractionDigits: digits });
 }
 
-export function StochasticScenariosCard({ stochastic, currencySymbol }: Props) {
+export function StochasticScenariosCard({ stochastic, currencySymbol, expected = null }: Props) {
   const { scenarios, representativeScenario } = stochastic;
   if (!scenarios.length) return null;
-
-  const expected = scenarios.reduce(
-    (acc, s) => {
-      acc.energy += s.totalEnergyMwh * s.weight;
-      acc.emissions += s.totalEmissionsTco2 * s.weight;
-      acc.cost += s.totalOperatingCost * s.weight;
-      acc.shed += s.loadShedEnergyMwh * s.weight;
-      return acc;
-    },
-    { energy: 0, emissions: 0, cost: 0, shed: 0 },
-  );
 
   return (
     <div className="stochastic-card">
@@ -82,10 +78,10 @@ export function StochasticScenariosCard({ stochastic, currencySymbol }: Props) {
             <td>Expected (probability-weighted)</td>
             <td>—</td>
             <td>—</td>
-            <td>{fmt(expected.energy)}</td>
-            <td>{fmt(expected.emissions)}</td>
-            <td>{fmt(expected.cost)} {currencySymbol}</td>
-            <td>{fmt(expected.shed)}</td>
+            <td>{expected ? fmt(expected.expectedEnergyMwh) : '—'}</td>
+            <td>{expected ? fmt(expected.expectedEmissionsTco2) : '—'}</td>
+            <td>{expected ? `${fmt(expected.expectedOperatingCost)} ${currencySymbol}` : '—'}</td>
+            <td>{expected ? fmt(expected.expectedLoadShedMwh) : '—'}</td>
           </tr>
         </tbody>
       </table>

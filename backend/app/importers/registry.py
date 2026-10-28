@@ -42,6 +42,7 @@ def _factories() -> list[Callable[[], Database]]:
     from .databases.openmeteo_demand import build as build_openmeteo_demand
     from .databases.fuel_prices import build as build_fuel_prices
     from .databases.ember_history import build as build_ember
+    from .databases.demand_db import build as build_demand_db
 
     return [
         build_osm, build_osm_pp, build_wri, build_wb,
@@ -51,7 +52,7 @@ def _factories() -> list[Callable[[], Database]]:
         build_elexon_demand, build_elexon_renewable,
         build_ninja, build_cw_policy,
         build_openmeteo, build_pvgis, build_nasa_power, build_openmeteo_demand,
-        build_fuel_prices, build_ember,
+        build_fuel_prices, build_ember, build_demand_db,
     ]
 
 

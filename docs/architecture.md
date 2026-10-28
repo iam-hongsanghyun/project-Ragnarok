@@ -566,15 +566,12 @@ demand, reserve position, peak price, system emissions, transmission stress.
 **`displayResults` memo** in `App.tsx` is the single transformation point from raw
 `results` to display-ready data.
 
-- For non-pathway results: `withDerivedAssetDetails(analyticsModel, results,
-  currencySymbol)` walks `results.outputs` to build `assetDetails.generators`,
-  `assetDetails.storageUnits`, `assetDetails.buses`, `assetDetails.branches`, and
-  `assetDetails.stores` records with per-asset output series attached.
-- For pathway results: `deriveRunResults(analyticsModel, results.outputs,
-  derivationContext)` re-derives carrier mix, cost breakdown, dispatch series, nodal
-  balance, and all other KPIs from `outputs.static` and `outputs.series` for the
-  selected pathway period, applying the frozen `carbonPrice`, `snapshotWeight`, and
-  `discountRate` values.
+- The stored run's analytics payload is the base. The browser computes no metric.
+- For pathway results the selected period's payload (`GET /api/runs/{name}/period/{period}`,
+  produced from that period's slice of `n.statistics`, see 7.11) is spread over it, with
+  loading and error state shown next to the period selector.
+- `assetDetails` is the server's per-asset record set (`GET /api/runs/{name}/assets`), loaded
+  for the asset kinds the dashboard layout needs.
 
 **`analyticsModel`** is `resultsModel ?? model`. When `resultsModel` is set (after a
 run or after restoring a history entry), analytics use the frozen topology snapshot
@@ -625,7 +622,25 @@ Both formats require a backend round-trip because the browser has no native pars
 - Import: the frontend uploads the file to `POST /api/import/netcdf` or
   `/api/import/hdf5`. The backend reads it via `pypsa.Network().import_from_netcdf`
   or `import_from_hdf5`, then serialises the network back into the `{sheet: rows[]}`
-  format via `_network_to_model_json`.
+  format via `_network_to_model_json`. A file written after a solve carries its solution:
+  the server lifts it into a stored run (`solved_network_to_bundle` in
+  `results/derive_outputs.py`: `network_to_model` + `build_full_outputs`, `pathwayConfig` read
+  from `investment_period_weightings`, `skipCapexAnnuitisation` because a PyPSA-native
+  `capital_cost` is already annual) with `origin="netcdf_import"`, and the response carries
+  `runName`. An unsolved file returns `runName: null`.
+
+**Imported results are stored runs**
+
+Every result-bearing import (`POST /api/import/project/load`, `/api/import/result`,
+`/api/import/netcdf`, `/api/import/hdf5`) ends in `_store_bundle_as_run` (`main.py`): the
+bundle's analytics are kept verbatim when it carries them, else derived from its outputs
+(`derive_results_from_outputs`, then `derive_imported_result`, then the raw outputs), and
+the run goes through `run_store.store_run`. Why a stored run and not a stateless "derive
+this upload" endpoint: one code path serves solved and imported results (KPIs, companies,
+assets, metrics, period views, statistics, comparison, export, the Bifrost / MCP tools all
+take a run name); the upload is parsed and derived once; the result survives a refresh and
+appears in History; and the browser holds no raw outputs, so it computes no metric. The
+cost is one History entry per imported results file.
 
 ### 7.11 Pathway (multi-year) planning
 
@@ -637,8 +652,17 @@ and `investment_period_weightings` are populated from the pathway period objects
 `network.optimize(multi_investment_periods=True)` lets PyPSA handle investment-period
 coupling natively. `_pathway_period_summaries` groups the snapshot MultiIndex by
 `period` and computes per-period total dispatch, emissions, average price, peak load,
-and objective weight. The frontend's `deriveRunResults` re-derives all KPIs for the
-selected period from `outputs.static` and `outputs.series`.
+and objective weight.
+
+A single period's view is a server payload: `GET /api/runs/{name}/period/{period}` rebuilds
+the stored run's network from its model and outputs (`network_from_outputs` semantics,
+multi-period rows keyed on `(period, timestep)`), takes the period's slice
+(`period_view_network`: `Network.copy(snapshots=, investment_periods=[p])`) and runs the same
+`_build_solved_payload` extraction as a solve. The rules are those of `results/stat_metrics.py`:
+assets outside their build/lifetime window are masked, money (fuel, carbon, CAPEX, revenue) is
+weighted by the period's `objective` weight, energy is summed, emissions carry the `years`
+weight. `kpis`, `companies`, `assets` and `metrics` take the same `period`. The MCP tool is
+`get_period_results`.
 
 ### 7.12 Rolling horizon
 

@@ -11,22 +11,24 @@
 import React, { useState } from 'react';
 import { CarrierEmission, EmissionsBreakdown, GeneratorEmission } from 'lib/types';
 import { carrierColor } from 'lib/utils/helpers';
+import type { ResultTotals } from 'lib/api/resultsDerived';
 
 interface Props {
   data: EmissionsBreakdown;
+  /** Server totals and carrier shares (`analysis/totals`); null while loading. */
+  totals?: ResultTotals['emissions'];
 }
 
 // ── Carrier bar chart ─────────────────────────────────────────────────────────
 
-function CarrierBars({ carriers }: { carriers: CarrierEmission[] }) {
+function CarrierBars({ carriers, sharePct }: { carriers: CarrierEmission[]; sharePct: Map<string, number> }) {
   const maxEms = Math.max(...carriers.map((c) => c.emissions_tco2), 1);
-  const totalEms = carriers.reduce((s, c) => s + c.emissions_tco2, 0);
 
   return (
     <div className="ems-carrier-chart">
       {carriers.map((c) => {
         const pct = (c.emissions_tco2 / maxEms) * 100;
-        const share = totalEms > 0 ? (c.emissions_tco2 / totalEms) * 100 : 0;
+        const share = sharePct.get(c.carrier) ?? 0;
         const color = carrierColor(c.carrier);
         return (
           <div key={c.carrier} className="ems-bar-row">
@@ -134,10 +136,10 @@ function GeneratorTable({ generators }: { generators: GeneratorEmission[] }) {
 
 // ── Main card ─────────────────────────────────────────────────────────────────
 
-export function EmissionsBreakdownCard({ data }: Props) {
-  const totalTco2 = data.byCarrier.reduce((s, c) => s + c.emissions_tco2, 0);
-  const totalEnergy = data.byCarrier.reduce((s, c) => s + c.energy_mwh, 0);
-  const avgIntensity = totalEnergy > 0 ? (totalTco2 / totalEnergy) * 1000 : 0;
+export function EmissionsBreakdownCard({ data, totals = null }: Props) {
+  const totalTco2 = totals?.totalTco2 ?? null;
+  const avgIntensity = totals?.averageIntensityKgPerMwh ?? null;
+  const sharePct = new Map((totals?.byCarrier ?? []).map((c) => [c.carrier, c.sharePct]));
   const emittingCarriers = data.byCarrier.filter((c) => c.emissions_tco2 > 0);
   const zeroCarriers = data.byCarrier.filter((c) => c.emissions_tco2 === 0);
 
@@ -147,14 +149,14 @@ export function EmissionsBreakdownCard({ data }: Props) {
       <div className="ems-kpi-row">
         <div className="ems-kpi">
           <span className="ems-kpi-value">
-            {totalTco2 >= 1000
+            {totalTco2 === null ? '—' : totalTco2 >= 1000
               ? `${(totalTco2 / 1000).toFixed(1)} ktCO₂e`
               : `${totalTco2.toFixed(0)} tCO₂e`}
           </span>
           <span className="ems-kpi-label">Total emissions</span>
         </div>
         <div className="ems-kpi">
-          <span className="ems-kpi-value">{avgIntensity.toFixed(0)} kg CO₂e/MWh</span>
+          <span className="ems-kpi-value">{avgIntensity !== null ? `${avgIntensity.toFixed(0)} kg CO₂e/MWh` : '—'}</span>
           <span className="ems-kpi-label">System average intensity</span>
         </div>
         <div className="ems-kpi">
@@ -173,7 +175,7 @@ export function EmissionsBreakdownCard({ data }: Props) {
       {emittingCarriers.length > 0 && (
         <div className="ems-section">
           <h4 className="ems-section-title">By carrier</h4>
-          <CarrierBars carriers={emittingCarriers} />
+          <CarrierBars carriers={emittingCarriers} sharePct={sharePct} />
         </div>
       )}
 

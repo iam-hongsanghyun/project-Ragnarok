@@ -111,13 +111,12 @@ function ExpansionTable({ assets, currencySymbol = '$' }: { assets: ExpansionAss
 interface Props {
   assets: ExpansionAsset[];
   currencySymbol?: string;
+  /** Server sums over `assets` (`analysis/totals`); null while loading. */
+  totals?: { newBuildCount: number; totalCapexAnnual: number; totalNewBuildMw: number } | null;
 }
 
-export function CapacityExpansionCard({ assets, currencySymbol = '$' }: Props) {
+export function CapacityExpansionCard({ assets, currencySymbol = '$', totals = null }: Props) {
   if (!assets.length) return null;
-
-  const totalCapex = assets.reduce((s, a) => s + a.capex_annual, 0);
-  const totalNewBuild = assets.reduce((s, a) => s + Math.max(0, a.delta_mw), 0);
 
   const barRows: BarRow[] = assets.map((a) => ({
     name: a.name,
@@ -131,17 +130,17 @@ export function CapacityExpansionCard({ assets, currencySymbol = '$' }: Props) {
       <div className="expansion-kpi-row">
         <div className="expansion-kpi">
           <div className="expansion-kpi-label">New builds</div>
-          <div className="expansion-kpi-value">{assets.filter((a) => a.delta_mw > 0).length}</div>
+          <div className="expansion-kpi-value">{totals ? totals.newBuildCount : '—'}</div>
           <div className="expansion-kpi-unit">assets</div>
         </div>
         <div className="expansion-kpi">
           <div className="expansion-kpi-label">Total new capacity</div>
-          <div className="expansion-kpi-value">{Math.round(totalNewBuild).toLocaleString()}</div>
+          <div className="expansion-kpi-value">{totals ? Math.round(totals.totalNewBuildMw).toLocaleString() : '—'}</div>
           <div className="expansion-kpi-unit">MW</div>
         </div>
         <div className="expansion-kpi">
           <div className="expansion-kpi-label">Annual CAPEX</div>
-          <div className="expansion-kpi-value">{currencySymbol}{Math.round(totalCapex / 1e6).toLocaleString()}M</div>
+          <div className="expansion-kpi-value">{totals ? `${currencySymbol}${Math.round(totals.totalCapexAnnual / 1e6).toLocaleString()}M` : '—'}</div>
           <div className="expansion-kpi-unit">{currencySymbol}/yr</div>
         </div>
       </div>

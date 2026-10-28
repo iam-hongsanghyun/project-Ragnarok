@@ -68,10 +68,15 @@ def _series_to_frame(
     assignment (both sides are written in snapshot order). Columns are reindexed
     to the component index so a frame missing a component is zero-filled and an
     extra column is dropped.
+
+    Multi-period (pathway) rows carry a ``period`` column; with a
+    ``(period, timestep)`` ``snapshots`` MultiIndex they are aligned on both
+    levels, because the same timestep repeats in every investment period.
     """
     if not rows:
         return _named(pd.DataFrame(0.0, index=snapshots, columns=columns), snapshots)
     df = pd.DataFrame(rows)
+    period_col = df["period"] if "period" in df.columns else None
     for meta_col in ("timestamp", "period"):
         if meta_col in df.columns:
             df = df.drop(columns=[meta_col])
@@ -80,6 +85,14 @@ def _series_to_frame(
     df = df.apply(pd.to_numeric, errors="coerce")
     aligned = df.copy()
     aligned.index = pd.to_datetime(df.index, errors="coerce")
+    if isinstance(snapshots, pd.MultiIndex) and period_col is not None:
+        # Multi-period (pathway) rows: the same timestep repeats in every
+        # investment period, so the timestamp alone is not a key - align on
+        # (period, timestamp), the index the network was built with.
+        aligned.index = pd.MultiIndex.from_arrays(
+            [pd.to_numeric(period_col, errors="coerce").to_numpy(), aligned.index],
+            names=list(snapshots.names),
+        )
     reindexed = aligned.reindex(snapshots)
     # Timestamp alignment found nothing but the lengths match → positional.
     if reindexed.notna().to_numpy().sum() == 0 and len(df) == len(snapshots):
@@ -96,7 +109,8 @@ def _named(frame: pd.DataFrame, snapshots: pd.Index) -> pd.DataFrame:
     (P39), though the same statistic on one network tolerates it.
     """
     frame.columns.name = "name"
-    frame.index.name = snapshots.name or "snapshot"
+    if not isinstance(frame.index, pd.MultiIndex):
+        frame.index.name = snapshots.name or "snapshot"
     return frame
 
 

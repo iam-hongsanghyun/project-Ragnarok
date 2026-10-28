@@ -115,12 +115,11 @@ export function AnalyticsMapCard({
   );
   const hasLineLoading = results.lineLoading.length > 0;
 
+  // Mean nodal price per bus: a server value on each bus detail (`averageSmp`, /assets).
   const busAvgSmp = useMemo(() => {
     const out: Record<string, number> = {};
     for (const [name, detail] of Object.entries(results.assetDetails.buses)) {
-      const pts = detail.netSeries;
-      if (pts.length === 0) continue;
-      out[name] = pts.reduce((s, p) => s + p.smp, 0) / pts.length;
+      if (typeof detail.averageSmp === 'number') out[name] = detail.averageSmp;
     }
     return out;
   }, [results.assetDetails.buses]);

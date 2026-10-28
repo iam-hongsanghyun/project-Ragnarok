@@ -236,7 +236,7 @@ def merge_fragment_endpoint(req: MergeFragmentRequest) -> dict[str, Any]:
         "applied": False,
     }
     if req.apply:
-        out["meta"] = model_store.save_model(req.sessionId, merged)
+        out["meta"] = model_store.resave_model(req.sessionId, merged)
         out["applied"] = True
     else:
         out["model"] = merged

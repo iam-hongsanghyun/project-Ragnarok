@@ -21,9 +21,11 @@ function fullMoney(v: number, currency: string): string {
 
 interface Props {
   data: CompanyBreakdownResult;
+  /** Server sum: owners' plus unassigned emissions (`analysis/totals`); null while loading. */
+  systemEmissionsTonnes?: number | null;
 }
 
-export function CompanyBreakdownCard({ data }: Props) {
+export function CompanyBreakdownCard({ data, systemEmissionsTonnes = null }: Props) {
   const { currency, companies } = data;
   if (!companies.length) {
     return <p className="dashboard-cell-missing">No owner-tagged assets in this run.</p>;
@@ -33,7 +35,6 @@ export function CompanyBreakdownCard({ data }: Props) {
   // Emissions of assets with no owner; owners + unassigned = the system total.
   const unassigned = data.unassignedEmissionsTonnes ?? 0;
   const showUnassigned = data.unassignedEmissionsTonnes != null && unassigned !== 0;
-  const ownerEmissions = companies.reduce((s, c) => s + c.emissionsTonnes, 0);
   const kt = (t: number): string => (t / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 });
 
   return (
@@ -105,7 +106,7 @@ export function CompanyBreakdownCard({ data }: Props) {
                     <td className="num" />
                     <td className="num" />
                     {hasRevenue && <td className="num" />}
-                    <td className="num">{kt(ownerEmissions + unassigned)}</td>
+                    <td className="num">{systemEmissionsTonnes !== null ? kt(systemEmissionsTonnes) : '—'}</td>
                     <td className="num" />
                   </tr>
                 </tfoot>

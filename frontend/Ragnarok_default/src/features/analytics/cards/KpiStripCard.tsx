@@ -1,14 +1,12 @@
 /**
  * KPI strip card — Bloomberg-style terminal row with 9 headline
- * metrics for a finished run. A stored run reads them from the server
- * (`GET /api/runs/{name}/kpis`, WA7); a result with no stored run (an imported
- * project) or a pathway run (period-specific view) derives them locally via
- * `kpisFromResults`. Both produce the same `RunKpis`.
+ * metrics for a finished run. Every figure is read from the server
+ * (`GET /api/runs/{name}/kpis`, with `period` for one investment period of a pathway
+ * run); the browser derives none of them. Results imported from a file are stored as
+ * runs, so they take the same route.
  */
 import React from 'react';
-import { RunResults, WorkbookModel } from 'lib/types';
 import { fetchRunKpis, RunKpis } from 'lib/api/resultsDerived';
-import { kpisFromResults } from 'lib/results/kpis';
 import { useAsync } from '../../../shared/hooks/useAsync';
 
 interface KpiCardProps {
@@ -29,11 +27,11 @@ function KpiCard({ label, value, unit, green }: KpiCardProps) {
 }
 
 interface Props {
-  results: RunResults;
-  model: WorkbookModel;
   currencySymbol?: string;
-  /** Stored run to read the KPIs from; null/absent derives them locally. */
+  /** Stored run to read the KPIs from. */
   runName?: string | null;
+  /** Pathway investment period; null/absent = the whole horizon. */
+  period?: number | null;
 }
 
 export function KpiStrip({ kpis }: { kpis: RunKpis }) {
@@ -54,22 +52,13 @@ export function KpiStrip({ kpis }: { kpis: RunKpis }) {
   );
 }
 
-function ServerKpis({ runName, currencySymbol }: { runName: string; currencySymbol: string }) {
+export function KpiStripCard({ currencySymbol = '$', runName, period = null }: Props) {
   const { data, loading, error } = useAsync(
-    `${runName}|${currencySymbol}`,
-    () => fetchRunKpis(runName, currencySymbol),
+    runName ? `${runName}|${currencySymbol}|${period ?? ''}` : null,
+    () => fetchRunKpis(runName as string, currencySymbol, period),
   );
+  if (!runName) return <p className="dashboard-cell-missing">KPIs are read from a stored run; this result has none.</p>;
   if (error) return <p className="dashboard-cell-missing" role="alert">Could not load KPIs: {error}</p>;
   if (loading || !data) return <p className="dashboard-cell-missing" aria-busy="true">Loading KPIs…</p>;
   return <KpiStrip kpis={data.kpis} />;
-}
-
-export function KpiStripCard({ results, model, currencySymbol = '$', runName }: Props) {
-  const local = !runName || !!results.pathway?.enabled;
-  const localKpis = React.useMemo(
-    () => (local ? kpisFromResults(results, model, currencySymbol) : null),
-    [local, results, model, currencySymbol],
-  );
-  if (localKpis) return <KpiStrip kpis={localKpis} />;
-  return <ServerKpis runName={runName as string} currencySymbol={currencySymbol} />;
 }

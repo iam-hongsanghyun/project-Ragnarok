@@ -12,6 +12,8 @@ import { CompanyStatementResult, CompanyStatementEntry } from 'lib/types';
 
 interface Props {
   data: CompanyStatementResult;
+  /** Server sum: owners' plus unassigned emissions (`analysis/totals`); null while loading. */
+  systemEmissionsTonnes?: number | null;
 }
 
 type Line = {
@@ -37,7 +39,7 @@ const fmt = (v: number, cur: string): string => {
   return `${sign}${cur}${Math.abs(Math.round(v)).toLocaleString()}`;
 };
 
-export function CompanyStatementCard({ data }: Props) {
+export function CompanyStatementCard({ data, systemEmissionsTonnes = null }: Props) {
   const cur = data.currency || '';
   const companies = data.companies;
   if (companies.length === 0) {
@@ -92,7 +94,7 @@ export function CompanyStatementCard({ data }: Props) {
                 <tr className="stmt-subtotal">
                   <td>System emissions (tCO2e/yr)</td>
                   {companies.map((c) => <td key={c.company} className="num" />)}
-                  <td className="num total-col">{Math.round(data.totals.emissionsTonnes + unassignedT).toLocaleString()}</td>
+                  <td className="num total-col">{systemEmissionsTonnes !== null ? Math.round(systemEmissionsTonnes).toLocaleString() : '—'}</td>
                 </tr>
               </>
             )}

@@ -14,11 +14,15 @@ import { useEChart } from '../../../shared/echarts/useEChart';
 
 interface Props {
   entries: MeritOrderEntry[];
-  systemLoad?: number; // peak system load in MW — draws a vertical demand line
+  systemLoad?: number; // peak system load in MW (server value) — draws a vertical demand line
+  /** Server sum of the entries' p_nom (`analysis/totals`); null while loading. */
+  totalMw?: number | null;
+  /** Server min / max of the entries' marginal cost; null while loading. */
+  marginalCostRange?: { min: number; max: number } | null;
   currencySymbol?: string;
 }
 
-export function MeritOrderCard({ entries, systemLoad, currencySymbol = '$' }: Props) {
+export function MeritOrderCard({ entries, systemLoad, totalMw = null, marginalCostRange = null, currencySymbol = '$' }: Props) {
   const option = useMemo(() => {
     if (!entries.length) return null;
     return buildMeritOrderOption({ entries, systemLoad, currencySymbol, theme: readChartTheme() });
@@ -32,8 +36,6 @@ export function MeritOrderCard({ entries, systemLoad, currencySymbol = '$' }: Pr
       </div>
     );
   }
-
-  const totalMW = entries.reduce((s, e) => s + e.p_nom, 0);
 
   return (
     <div className="merit-card">
@@ -59,11 +61,12 @@ export function MeritOrderCard({ entries, systemLoad, currencySymbol = '$' }: Pr
 
       {/* Summary stats */}
       <div className="merit-stats">
-        <span>Total installed: <strong>{Math.round(totalMW).toLocaleString()} MW</strong></span>
+        <span>Total installed: <strong>{totalMw !== null ? `${Math.round(totalMw).toLocaleString()} MW` : '—'}</strong></span>
         <span>Generators: <strong>{entries.length}</strong></span>
         <span>Price range: <strong>
-          {currencySymbol}{Math.min(...entries.map((e) => e.marginal_cost)).toLocaleString()} –
-          {currencySymbol}{Math.max(...entries.map((e) => e.marginal_cost)).toLocaleString()} /MWh
+          {marginalCostRange
+            ? `${currencySymbol}${marginalCostRange.min.toLocaleString()} – ${currencySymbol}${marginalCostRange.max.toLocaleString()} /MWh`
+            : '—'}
         </strong></span>
       </div>
     </div>

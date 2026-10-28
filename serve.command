@@ -10,9 +10,27 @@
 # uvicorn worker serves the committed web build at ./build together with the API
 # — no reload (a reload mid-solve kills the worker), single worker (the SQLite
 # stores are single-writer). The web build is committed, so no Node.js is needed.
+cd "$(dirname "$0")" || exit 1
+# A double-clicked .command gets a minimal PATH: no Homebrew, and no /sbin or /usr/sbin
+# (md5, lsof and ipconfig live there). Put the usual locations back first.
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 set -euo pipefail
-cd "$(dirname "$0")"
 ROOT="$PWD"
+LOG_DIR="$ROOT/logs"
+mkdir -p "$LOG_DIR"
+
+# Keep the Terminal window open on every exit (error, Ctrl-C, or the server stopping),
+# so the one line that says what went wrong stays on screen.
+MCP_PID=""
+on_exit() {
+  local rc=$?
+  [ -n "$MCP_PID" ] && kill "$MCP_PID" 2>/dev/null || true
+  echo ""
+  echo "Ragnarok has stopped (exit code $rc). Server log: $LOG_DIR/serve.log"
+  read -r -p "Press Return to close this window. " _ 2>/dev/null < /dev/tty || true
+}
+trap on_exit EXIT
+trap 'exit 130' INT TERM
 
 MODE="${1:-server}"
 case "$MODE" in
@@ -103,9 +121,7 @@ if [ "${RAGNAROK_MCP:-on}" != "off" ]; then
     RAGNAROK_MCP_TRANSPORT=streamable-http RAGNAROK_MCP_HOST="$HOST" RAGNAROK_MCP_PORT="$MCP_PORT" \
       RAGNAROK_API_BASE="http://127.0.0.1:$PORT" PYTHONPATH="$ROOT" \
       "$PY" -m backend.mcp &
-    MCP_PID=$!
-    # Stop the MCP child when this script exits (Ctrl+C / terminal close).
-    trap '[ -n "$MCP_PID" ] && kill "$MCP_PID" 2>/dev/null' EXIT INT TERM
+    MCP_PID=$!  # on_exit stops this child when the script exits (Ctrl+C / window closed)
   else
     echo "NOTE: MCP deps unavailable — starting the app without the agent bridge."
   fi
@@ -135,4 +151,6 @@ echo ""
 
 # Foreground (not exec) so the trap can stop the MCP child on exit.
 free_port "$PORT"
-"$PY" -m uvicorn backend.app.main:app --host "$HOST" --port "$PORT"
+# Output also goes to logs/serve.log (tracebacks survive a closed window). pipefail keeps uvicorn's exit code.
+export PYTHONUNBUFFERED=1
+"$PY" -m uvicorn backend.app.main:app --host "$HOST" --port "$PORT" 2>&1 | tee -a "$LOG_DIR/serve.log"

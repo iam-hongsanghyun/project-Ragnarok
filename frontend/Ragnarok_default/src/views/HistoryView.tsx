@@ -472,10 +472,10 @@ function BackendHistoryRow({
       <span className="history-row-time" title={new Date(meta.savedAt).toLocaleString()}>
         {formatRelTime(meta.savedAt)}
       </span>
-      {meta.origin === 'xlsx_import' && (
+      {meta.origin !== undefined && meta.origin !== 'solve' && (
         <span
           className="history-row-chip history-row-chip--imported"
-          title="Imported from an external Excel results file (not a solve)"
+          title="Imported results (an Excel / project file or a solved PyPSA network), not a solve"
         >
           imported
         </span>

@@ -68,9 +68,25 @@ def merge_static(payload: SessionModelPayload) -> dict:
     without clobbering the heavy time-series it doesn't hold.
     """
     meta = model_store.merge_static_model(payload.sessionId, payload.model)
-    if meta is None:
-        raise HTTPException(status_code=400, detail="No session to merge into.")
-    return meta
+    if meta is not None:
+        return meta
+    # No session yet (first load, or a run opened with no editor session). Seed it from this
+    # model rather than failing the client's sync. A model with no network components (a fresh
+    # editor holds only config sheets such as scenarios) is nothing to seed: answer the
+    # empty-session shape ``{}`` and create nothing, so "is anything loaded?" stays false.
+    from ..session_store import _COMPONENT_SHEETS
+
+    if not any(isinstance(payload.model.get(sheet), list) and payload.model[sheet] for sheet in _COMPONENT_SHEETS):
+        return {}
+    try:
+        return model_store.save_model(
+            payload.sessionId,
+            payload.model,
+            filename=payload.filename,
+            scenario_name=payload.scenarioName,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/meta")
@@ -317,7 +333,7 @@ def retarget_snapshots(payload: SnapshotRetarget) -> dict:
         retargeted.append(sheet)
     model["snapshots"] = [{"snapshot": s} for s in new_snaps]
 
-    model_store.save_model(payload.sessionId, model)
+    model_store.resave_model(payload.sessionId, model)
     return {"snapshots": len(new_snaps), "retargeted": retargeted}
 
 
@@ -402,7 +418,7 @@ def ev_demand_snapshots(payload: EvDemand) -> dict:
         snapshot_weight=payload.snapshotWeight,
     )
     model[payload.sheet] = new_rows
-    model_store.save_model(payload.sessionId, model)
+    model_store.resave_model(payload.sessionId, model)
     return {"rows": len(new_rows), **meta}
 
 
@@ -454,7 +470,7 @@ def driver_forecast_snapshots(payload: DriverForecast) -> dict:
 
     if new_snaps:
         model["snapshots"] = [{"snapshot": s} for s in new_snaps]
-    model_store.save_model(payload.sessionId, model)
+    model_store.resave_model(payload.sessionId, model)
     return {"snapshots": len(new_snaps), **meta}
 
 
@@ -518,7 +534,7 @@ def forecast_snapshots(payload: SnapshotForecast) -> dict:
         {**s, "snapshot": timeseries.shift_snapshot_year(str(s.get("snapshot")), delta)} for s in kept
     ]
 
-    model_store.save_model(payload.sessionId, model)
+    model_store.resave_model(payload.sessionId, model)
     return {"toYear": to_year, "growthFactor": round(factor, 4), "grown": grown, "method": method, "note": note}
 
 

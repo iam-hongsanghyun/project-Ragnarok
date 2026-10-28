@@ -965,3 +965,46 @@
 
 .training-start-state__prebuilt input { margin-top: 2px; }
 .training-start-state__prebuilt em { color: var(--muted); font-style: normal; }
+
+/* ── Guided tour (src/features/tour) ──
+   Reuses the .spotlight-* ring and callout above. Only what the tour adds is here. */
+.tour-layer { z-index: var(--z-tour); }
+
+.tour-dim {
+  position: fixed;
+  inset: 0;
+  background: rgba(16, 20, 28, 0.55);
+  pointer-events: none;
+}
+
+.tour-action {
+  margin: 8px 0 0;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+  line-height: 1.45;
+}
+
+.tour-action--done {
+  background: var(--panel);
+  color: var(--text-secondary);
+}
+
+.tour-offer {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: var(--z-tour);
+  width: 320px;
+  max-width: calc(100vw - 40px);
+  padding: 14px 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--panel-strong);
+  box-shadow: 0 8px 28px rgba(16, 20, 28, 0.28);
+}
+
+.tour-offer__title { margin: 0 0 6px; font-size: var(--fs-md); }
+.tour-offer__body { margin: 0; line-height: 1.55; color: var(--text-secondary); }
+.tour-offer__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }

@@ -71,7 +71,7 @@ Frontend (paths below are relative to `frontend/Ragnarok_default/`):
 - [src/App.tsx](frontend/Ragnarok_default/src/App.tsx): app shell, run flow (`POST /api/queue`), workbook open/save/import/export, run history
 - [src/lib/constants/pypsa_schema.ts](frontend/Ragnarok_default/src/lib/constants/pypsa_schema.ts): PyPSA schema adapter; filled from `GET /api/config` at boot
 - [src/lib/workbook/workbook.ts](frontend/Ragnarok_default/src/lib/workbook/workbook.ts): workbook parse/save/project round-trip
-- [src/lib/results/runResults.ts](frontend/Ragnarok_default/src/lib/results/runResults.ts): `deriveRunResults` rebuilds `RunResults` from imported workbook outputs
+- [src/lib/api/resultsDerived.ts](frontend/Ragnarok_default/src/lib/api/resultsDerived.ts): clients of the server result routes (period views, KPIs, companies, per-asset details); the browser derives no metric
 - [src/lib/utils/helpers.ts](frontend/Ragnarok_default/src/lib/utils/helpers.ts): `normalizeDateToIso` (input date parser), `isoDate`/`isoTime` (canonical display helpers), `formatTimestamp`
 
 ### Date handling
@@ -92,7 +92,7 @@ Backend:
 - [backend/pypsa/results/__init__.py](backend/pypsa/results/__init__.py): solve + analytics result assembly
 - [backend/pypsa/results/full_outputs.py](backend/pypsa/results/full_outputs.py): schema-driven solved output extraction
 - [backend/pypsa/pypsa_schema.py](backend/pypsa/pypsa_schema.py): backend schema helpers
-- [backend/mcp/](backend/mcp): MCP server (156 tools) for AI agents; see [docs/bifrost-agent.md](docs/bifrost-agent.md)
+- [backend/mcp/](backend/mcp): MCP server (161 tools) for AI agents; see [docs/bifrost-agent.md](docs/bifrost-agent.md)
 
 ## Current User Flows
 

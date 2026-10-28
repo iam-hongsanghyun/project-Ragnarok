@@ -148,11 +148,54 @@ def test_derive_notes_flag_no_resolve() -> None:
     assert any("re-derived server-side" in n for n in derived["narrative"])
 
 
-def test_derive_rejects_pathway_outputs() -> None:
-    outputs = {"series": {"generators-p": [{"period": 2030, "snapshot": "2030-01-01T00:00:00", "g": 1.0}]},
-               "static": {}}
-    with pytest.raises(ValueError, match="Multi-period"):
-        derive_results_from_outputs(_dispatch_model(), outputs, SCENARIO, dict(OPTIONS))
+@pytest.mark.parametrize("kind", ["none", "storage_unit", "store", "both"])
+def test_derive_equals_fresh_solve_for_pathway_outputs(kind: str) -> None:
+    """Re-baselined for P28: multi-period outputs used to raise ("Multi-period ... not supported",
+    the browser derived them). Rows keyed on (period, timestep) now rebuild the network, and the
+    derived payload equals the solve's - the same identity the single-period cases pin."""
+    from backend.tests.test_pathway_storage import _OPTIONS as PATHWAY_OPTIONS
+    from backend.tests.test_pathway_storage import _model as pathway_model
+
+    model = pathway_model(kind)
+    options = {**PATHWAY_OPTIONS, **OPTIONS}
+    scenario = {"carbonPrice": 0.0, "discountRate": 0.05}
+    fresh = run_pypsa(model, scenario, dict(options))
+    derived = derive_results_from_outputs(model, fresh["outputs"], scenario, dict(options))
+    for field in PARITY_FIELDS:
+        _approx_equal(derived.get(field), fresh.get(field), f"pathway-{kind}.{field}")
+    _approx_equal(derived["pathway"], fresh["pathway"], f"pathway-{kind}.pathway")
+
+
+def test_store_carrier_label_matches_between_solve_and_rebuild_on_a_non_ac_bus() -> None:
+    """PyPSA 1.4 rewrites a Store's blank carrier to its bus carrier during create_model();
+    a rebuilt network keeps "". Both must label the Store's SoC alike ("AC" = blank)."""
+    snaps = [f"2030-01-01T{h:02d}:00:00" for h in range(4)]
+    model = {
+        "buses": [{"name": "h", "carrier": "heat"}],
+        "carriers": [{"name": "heat"}, {"name": "gas"}],
+        "snapshots": [{"snapshot": s} for s in snaps],
+        "loads": [{"name": "L", "bus": "h", "p_set": 50}],
+        "loads-p_set": [{"snapshot": s, "L": v} for s, v in zip(snaps, [20, 80, 80, 20])],
+        "generators": [{"name": "boiler", "bus": "h", "carrier": "gas", "p_nom": 60, "marginal_cost": 30}],
+        "stores": [{"name": "tank", "bus": "h", "e_nom": 100, "e_cyclic": True}],
+    }
+    fresh = run_pypsa(model, SCENARIO, dict(OPTIONS))
+    derived = derive_results_from_outputs(model, fresh["outputs"], SCENARIO, dict(OPTIONS))
+    labels = {k for row in fresh["storageSocSeries"] for k in row["values"]}
+    assert labels, "the Store must carry state of charge for this test to mean anything"
+    assert labels == {"AC"}
+    _approx_equal(derived["storageSocSeries"], fresh["storageSocSeries"], "storageSocSeries")
+
+
+def test_derive_rebuilds_a_bare_pathway_config_from_the_rows() -> None:
+    """Outputs with a ``period`` column and no stored options still derive: the periods come from the rows."""
+    from backend.tests.test_pathway_storage import _OPTIONS as PATHWAY_OPTIONS
+    from backend.tests.test_pathway_storage import _model as pathway_model
+
+    model = pathway_model("none")
+    fresh = run_pypsa(model, {"carbonPrice": 0.0, "discountRate": 0.05}, dict(PATHWAY_OPTIONS))
+    derived = derive_results_from_outputs(model, fresh["outputs"], {"discountRate": 0.05}, {"enableLoadShedding": False})
+    assert derived["pathway"]["periods"] == [2030, 2040]
 
 
 def test_derive_rejects_empty_outputs() -> None:

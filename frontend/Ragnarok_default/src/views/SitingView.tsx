@@ -22,6 +22,8 @@ import { useToast } from '../shared/components/Toast';
 import { ExpansionAsset, WorkbookModel } from 'lib/types';
 import { WorkbookFragment } from 'lib/api/databases';
 import { SitingCandidate, runSitingScan } from 'lib/api/siting';
+import { fetchRunAnalysis } from 'lib/api/resultsDerived';
+import { useAsync } from '../shared/hooks/useAsync';
 import { numberValue, stringValue } from 'lib/utils/helpers';
 import { Bbox, SitingMap } from '../features/siting/SitingMap';
 
@@ -31,6 +33,10 @@ interface Props {
   onApplyFragment: (fragment: WorkbookFragment, databaseName: string, countryName: string) => void;
   expansionResults: ExpansionAsset[] | null;
   currencySymbol: string;
+  /** Stored run the siting totals are read from (`analysis/totals`); null = none yet. */
+  runName?: string | null;
+  /** Pathway investment period; null = the whole horizon. */
+  period?: number | null;
 }
 
 const WEATHER_SOURCES = [
@@ -39,7 +45,7 @@ const WEATHER_SOURCES = [
   { value: 'nasa-power', label: 'NASA POWER (MERRA-2)' },
 ];
 
-export function SitingView({ model, bounds, onApplyFragment, expansionResults, currencySymbol }: Props) {
+export function SitingView({ model, bounds, onApplyFragment, expansionResults, currencySymbol, runName = null, period = null }: Props) {
   const { showToast } = useToast();
 
   // ── Scan configuration ────────────────────────────────────────────────
@@ -83,16 +89,14 @@ export function SitingView({ model, bounds, onApplyFragment, expansionResults, c
     () => (expansionResults ?? []).filter((a) => a.name.startsWith('siting_')),
     [expansionResults],
   );
-  const builtMwBySiteBus = useMemo(() => {
-    const out: Record<string, number> = {};
-    for (const a of sitingAssets) {
-      if (a.component !== 'Generator' || a.delta_mw <= 0) continue;
-      out[a.bus] = (out[a.bus] ?? 0) + a.delta_mw;
-    }
-    return out;
-  }, [sitingAssets]);
-  const builtTotalMw = Object.values(builtMwBySiteBus).reduce((s, v) => s + v, 0);
-  const sitingCapexAnnual = sitingAssets.reduce((s, a) => s + (a.delta_mw > 0 ? a.capex_annual : 0), 0);
+  // MW built per site bus, the total and the annual capex are server sums over those rows.
+  const totals = useAsync(
+    runName && sitingAssets.length > 0 ? `${runName}|siting-totals|${period ?? ''}` : null,
+    () => fetchRunAnalysis(runName as string, 'totals', { period }),
+  );
+  const builtMwBySiteBus = useMemo(() => totals.data?.siting?.builtMwBySiteBus ?? {}, [totals.data]);
+  const builtTotalMw = totals.data?.siting?.builtTotalMw ?? 0;
+  const sitingCapexAnnual = totals.data?.siting?.capexAnnual ?? 0;
 
   // Land candidate profiles on the model's EXISTING snapshots (tiled) so the
   // solve window keeps its demand data; importing the weather window as new

@@ -131,7 +131,7 @@ function StartChooser({ onStartScratch, onLoadExample, onLoadStarterPack }: {
   };
 
   return (
-    <section className="welcome-section welcome-start">
+    <section className="welcome-section welcome-start" data-tour="start-example">
       <h2>Get started</h2>
       {picking === null ? (
         <div className="welcome-start-choices">

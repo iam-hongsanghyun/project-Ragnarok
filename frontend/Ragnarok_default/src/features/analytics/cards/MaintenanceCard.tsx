@@ -45,13 +45,14 @@ export function Strip({ segments, total, label }: { segments: CommitmentSegment[
 
 interface Props {
   data: MaintenanceResult;
+  /** Server sum of the units' maintenance hours (`analysis/totals`); null while loading. */
+  hoursInMaintenance?: number | null;
 }
 
-export function MaintenanceCard({ data }: Props) {
+export function MaintenanceCard({ data, hoursInMaintenance = null }: Props) {
   const { units, totals } = data;
   if (!units.length) return <p className="dashboard-cell-missing">No maintainable units in this run.</p>;
   const total = Math.max(...units.map((u) => segmentTotal(u.segments)), 1);
-  const hours = units.reduce((a, u) => a + u.hoursInMaintenance, 0);
   return (
     <div className="econ-card">
       <div className="econ-kpi-row">
@@ -65,7 +66,7 @@ export function MaintenanceCard({ data }: Props) {
         </div>
         <div className="econ-kpi">
           <div className="econ-kpi-label">Hours in maintenance</div>
-          <div className="econ-kpi-value">{num(hours, 0)}</div>
+          <div className="econ-kpi-value">{hoursInMaintenance !== null ? num(hoursInMaintenance, 0) : '—'}</div>
           <div className="econ-kpi-unit">summed over units</div>
         </div>
       </div>

@@ -4,26 +4,22 @@
  * Joins the three per-company result blocks by company name — F1 breakdown
  * (capacity / energy / revenue / emissions), F2 finance (NPV / IRR / payback),
  * and the consolidated statement (net margin) — into one sortable table with an
- * inline bar for the selected metric. A stored run reads the join and the sort
- * from the server (`GET /api/runs/{name}/companies`, WA7); a result with no
- * stored run (an imported project) joins the blocks locally (`joinCompanies`).
+ * inline bar for the selected metric. The join and the sort come from the server
+ * (`GET /api/runs/{name}/companies`, with `period` for one investment period of a
+ * pathway run); the browser joins nothing. Results imported from a file are stored
+ * as runs, so they take the same route.
  */
 import React from 'react';
-import {
-  CompanyBreakdownResult,
-  CompanyFinanceResult,
-  CompanyStatementResult,
-} from 'lib/types';
-import { CompanyRow, fetchRunCompanies } from 'lib/api/resultsDerived';
-import { CompanyComparisonData, joinCompanies } from 'lib/results/companies';
+import { CompanyComparison, CompanyRow, fetchRunCompanies } from 'lib/api/resultsDerived';
 import { useAsync } from '../../../shared/hooks/useAsync';
 
+type CompanyComparisonData = Pick<CompanyComparison, 'currency' | 'sortedBy' | 'metrics' | 'items'>;
+
 interface Props {
-  breakdown?: CompanyBreakdownResult;
-  finance?: CompanyFinanceResult;
-  statement?: CompanyStatementResult;
-  /** Stored run to read the comparison from; null/absent joins the blocks locally. */
+  /** Stored run to read the comparison from. */
   runName?: string | null;
+  /** Pathway investment period; null/absent = the whole horizon. */
+  period?: number | null;
 }
 
 const money = (v: number, cur: string) => `${v < 0 ? '−' : ''}${cur}${Math.abs(Math.round(v)).toLocaleString()}`;
@@ -124,24 +120,14 @@ function ComparisonTable({ data, sortKey, onSort, busy }: {
   );
 }
 
-function ServerComparison({ runName }: { runName: string }) {
+export function CompanyComparisonCard({ runName, period = null }: Props) {
   const [sortKey, setSortKey] = React.useState<string | undefined>(undefined);
-  const { data, loading, error } = useAsync(`${runName}|${sortKey ?? ''}`, () => fetchRunCompanies(runName, sortKey));
+  const { data, loading, error } = useAsync(
+    runName ? `${runName}|${sortKey ?? ''}|${period ?? ''}` : null,
+    () => fetchRunCompanies(runName as string, sortKey, period),
+  );
+  if (!runName) return <p className="dashboard-cell-missing">The company comparison is read from a stored run; this result has none.</p>;
   if (error) return <p className="dashboard-cell-missing" role="alert">Could not load the company comparison: {error}</p>;
   if (!data) return <p className="dashboard-cell-missing" aria-busy="true">Loading company comparison…</p>;
   return <ComparisonTable data={data} sortKey={sortKey ?? data.sortedBy} onSort={setSortKey} busy={loading} />;
-}
-
-function LocalComparison({ breakdown, finance, statement }: Omit<Props, 'runName'>) {
-  const [sortKey, setSortKey] = React.useState<string | undefined>(undefined);
-  const data = React.useMemo(
-    () => joinCompanies(breakdown, finance, statement, sortKey),
-    [breakdown, finance, statement, sortKey],
-  );
-  return <ComparisonTable data={data} sortKey={sortKey ?? data.sortedBy} onSort={setSortKey} busy={false} />;
-}
-
-export function CompanyComparisonCard({ breakdown, finance, statement, runName }: Props) {
-  if (runName) return <ServerComparison runName={runName} />;
-  return <LocalComparison breakdown={breakdown} finance={finance} statement={statement} />;
 }

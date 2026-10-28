@@ -55,8 +55,8 @@ an architecture overview (see `architecture.md`).
    - 7.3 [csvFolder.ts](#73-csvfolderts)
    - 7.4 [helpers.ts](#74-helpersts)
    - 7.5 [analytics.ts](#75-analyticsts)
-   - 7.6 [deriveRunResults.ts](#76-deriverunresultsts)
-   - 7.7 [deriveAssetDetails.ts](#77-deriveassetdetailsts)
+   - 7.6 [resultsDerived.ts](#76-resultsderivedts)
+   - 7.7 [Per-asset details](#77-per-asset-details)
    - 7.8 [constraintDsl.ts](#78-constraintdslts)
    - 7.9 [customDsl.ts](#79-customdslts)
    - 7.10 [usePersistedState.ts](#710-usepersistedstatets)
@@ -158,11 +158,16 @@ handler down to view components as props.
 
 Type: `RunResults | null`. The processed result fed to all analytics components.
 
-- Non-pathway runs: calls `withDerivedAssetDetails(analyticsModel, results, currencySymbol)`.
-- Pathway runs: calls `deriveRunResults(analyticsModel, outputs, {carbonPrice, currencySymbol, discountRate, snapshotWeight, selectedPeriod, pathway, rolling})` then merges pathway, merit order, plugin analytics, and CO2 shadow price back from the raw result.
+The browser derives nothing here. The stored run's analytics payload is the base;
+for a pathway run the selected period's server payload (`GET /api/runs/{name}/period/{period}`,
+`fetchRunPeriod`) is spread over it, and `assetDetails` is the server's per-asset detail
+records (see 7.7). While the period request is in flight, or if it fails, the whole-horizon
+payload stays on screen and the Pathway period card shows the loading or error state
+(`periodStatus`). A payload left over from another period is never shown under this
+period's label.
 
-Recomputes when `results`, `analyticsModel`, currency, carbon price, discount
-rate, snapshot weight, or `pathwayConfig` change.
+Recomputes when `results`, the hydrated pivot series, the active run, the period payload,
+the selected period, or the loaded asset details change.
 
 #### `analyticsModel`
 
@@ -271,7 +276,7 @@ Uses `window.showSaveFilePicker` when present; falls back to a programmatic
 
 | Handler | Notes |
 |---|---|
-| `handleImportProject(event)` | Calls `parseProjectFile`, then `resetForNewModel`. Restores settings, constraints, run-state sliders, pathway and rolling config, and (when outputs are present) results via `deriveRunResults` and `handleRestoreRun`. Opening a project is like File > Open: it does not create a History entry. |
+| `handleImportProject(event)` | Calls `parseProjectFile`, then `resetForNewModel`. Restores settings, constraints, run-state sliders, pathway and rolling config. When the file carries solved results the server stores them as a run (`runName`) and the handler opens it the way History's "Import project" does (`handleOpenBackendRun(name, {asProject: true})`); an inputs-only file creates no History entry. |
 | `handleExportProject()` | Serialises the currently displayed run (not run history) via `projectWorkbookToArrayBuffer`. Uses `analyticsModel` so the file is self-consistent with the active result. |
 
 ### 2.8 Result Workbook Export
@@ -625,8 +630,9 @@ client in `lib/api/resultsDerived.ts`, router `backend/app/routers/results_deriv
 | `ServerDurationCurveCard` (system price and load) | `GET /api/runs/{name}/derived/{metric}` |
 | `SetpointDualsCard` (light bundle) | `GET /api/runs/{name}/series/{sheet}` |
 
-A result with no stored run (an imported project) or a pathway run's period view keeps
-the in-browser derivation (`kpisFromResults`, `joinCompanies`, `deriveAssetDetails`).
+Every one of these takes `period` for a pathway run. Results imported from a file are
+stored as runs by the server, so there is no result without a run behind it and no
+in-browser derivation.
 
 ### 4.5 PluginsView
 
@@ -1338,41 +1344,28 @@ Utility functions for chart data preparation and aggregation.
 | `aggregateMetricRows` | `(metric, startIndex, endIndex, timeframe) -> TimeSeriesRow[]` | Slices and groups by time bucket; applies `aggregateValues` per series key |
 | `buildDonutFromMetric` | `(metric, startIndex, endIndex) -> Array<{label, value, color}>` | Aggregates to one total per series key; filters zeros; sorts descending |
 
-### 7.6 deriveRunResults.ts
+### 7.6 resultsDerived.ts
 
-Derives a full `RunResults` object from `(model, outputs)` without a backend
-call. Used on the project-import path.
+Clients of the server's result routes (`lib/api/resultsDerived.ts`); the browser renders
+what they return and derives none of it.
 
-#### `deriveRunResults(model, outputs, options?) -> RunResults`
+| Function | Route | Notes |
+|---|---|---|
+| `fetchRunPeriod(run, period, currency?)` | `GET /api/runs/{name}/period/{period}` | One investment period of a pathway run: `{run, period, result}`; `result` has the shape of the run's analytics `result` without `outputs`. Every figure is the period's slice of `n.statistics` (inactive assets masked, money x the period's objective weight, energy summed) |
+| `fetchRunKpis(run, currency, period?)` | `GET /api/runs/{name}/kpis` | KPI strip |
+| `fetchRunCompanies(run, sortBy?, period?)` | `GET /api/runs/{name}/companies` | Company comparison |
+| `fetchRunAssets(run, kind, names, currency, period?)` | `GET /api/runs/{name}/assets` | Named assets with series |
+| `fetchRunAssetKind(run, kind, currency, {period, end})` | `GET /api/runs/{name}/assets?series=true` | Every asset of a kind, paged; `end` = first N snapshots |
+| `fetchRunMetrics(run, query)` | `GET /api/runs/{name}/metrics` | Per-asset chart metrics, `period` and `end` |
+| `fetchRunAnalysis(run, topic, query)` | `GET /api/runs/{name}/analysis/{topic}` | Typed by topic (`AnalysisTopics`): `load-analysis`, `carrier-performance`, `transition-risk`, `duration-curve`, `setpoint-duals`, `totals`. The cards print these values and compute nothing; `period` selects a pathway period |
 
-**Params:**
-- `model` — `WorkbookModel`: input topology.
-- `outputs` — `{static, series}`: raw PyPSA output from the backend or imported project.
-- `options` — `DeriveRunResultsOptions`: optional overrides for `carbonPrice`, `currencySymbol`, `discountRate`, `snapshotWeight`, `narrative`, `selectedPeriod`, `pathway`, `rolling`.
+### 7.7 Per-asset details
 
-**Returns:** Complete `RunResults` including dispatch series, system price and
-emissions series, storage series, nodal price series, carrier mix, cost
-breakdown, nodal balance, line loading, expansion results, merit order,
-emissions breakdown by generator and carrier, CO2 shadow price (always
-`found: false` — duals are only available from a fresh solve), and asset
-details. Multi-period runs filter `outputs.series` to `activePeriod` before
-derivation. CAPEX annualisation uses `annuityFactor(rate, lifetime)` matching
-the backend Python formula.
-
-### 7.7 deriveAssetDetails.ts
-
-#### `withDerivedAssetDetails(model, results, currencySymbol?) -> RunResults`
-
-Returns a new `RunResults` with `assetDetails` populated. Used on the
-non-pathway run path in `App.tsx`.
-
-#### `deriveAssetDetails(model, outputs, currencySymbol?, snapshotWeight?) -> AssetDetails`
-
-Builds `{generators, buses, storageUnits, stores, branches, processes, shuntImpedances}`
-maps from output series and static data. Each entry carries a `name`,
-`outputSeries`/`netSeries`/`flowSeries`/`stateSeries` array, KPI scalars
-(total energy, average output, capital cost, etc.), and display metadata
-(carrier, bus, color).
+`RunResults.assetDetails` holds the server's per-asset records for the cards that still read
+them (the map's nodal prices and the load analysis). The dashboard reports the kinds its layout
+needs (`onNeedAssets`); `App.tsx` loads them with `fetchRunAssetKind` for the selected period
+and `emptyAssetDetails()` (`lib/results/analytics.ts`) is the value until they arrive. Per-asset
+charts do not use them: `useMetricOptions` reads `GET /api/runs/{name}/metrics`.
 
 ### 7.8 constraintDsl.ts
 

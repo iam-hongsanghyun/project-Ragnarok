@@ -268,6 +268,7 @@ def build_run_meta(name: str, bundle: dict[str, Any], size_bytes: int = 0) -> di
         # imported external results file ("xlsx_import"). Legacy entries lack
         # this key — readers default to "solve".
         "origin": bundle.get("origin") or "solve",
+        **({"contentHash": bundle["contentHash"]} if bundle.get("contentHash") else {}),
         "snapshotStart": options.get("snapshotStart"),
         "snapshotEnd": options.get("snapshotEnd"),
         "snapshotWeight": options.get("snapshotWeight"),
@@ -813,6 +814,7 @@ def store_run(
     result: dict[str, Any],
     *,
     origin: str = "solve",
+    content_hash: str | None = None,
 ) -> dict[str, Any] | None:
     """Persist a finished run as a JSON bundle plus a lightweight meta sidecar.
 
@@ -823,9 +825,14 @@ def store_run(
             ``runLabel`` / ``filename``).
         result: The solver result dict returned by ``backend.run(...)``.
         origin: How this entry enters History — ``"solve"`` (a normal run) or
-            ``"xlsx_import"`` (an external Excel results file imported via
-            ``POST /api/import/result/xlsx``). Recorded in the meta so History
-            can visually distinguish imported results from solved runs.
+            ``"xlsx_import"`` (a project / Excel results file imported via
+            ``POST /api/import/result`` or ``/api/import/project/load``) or
+            ``"netcdf_import"`` (a solved PyPSA netCDF / HDF5 file). Recorded in
+            the meta so History can visually distinguish imported results from
+            solved runs.
+        content_hash: SHA-256 of the uploaded file an import came from, recorded in the
+            meta so importing the same file again returns this run
+            (:func:`find_run_by_content_hash`) instead of creating a second one.
 
     Returns:
         The meta dict that was written to disk, or ``None`` if storage failed
@@ -846,6 +853,7 @@ def store_run(
             "label": label,
             "filename": filename,
             "origin": origin,
+            **({"contentHash": content_hash} if content_hash else {}),
             "snapshotStart": options.get("snapshotStart"),
             "snapshotEnd": options.get("snapshotEnd"),
             "snapshotWeight": options.get("snapshotWeight"),
@@ -872,6 +880,13 @@ def store_run(
     except Exception:  # noqa: BLE001 — storage must never fail the solve
         logger.exception("Failed to store run in backend")
         return None
+
+
+def find_run_by_content_hash(content_hash: str) -> dict[str, Any] | None:
+    """The newest stored run imported from a file with this SHA-256, or ``None``."""
+    if not content_hash:
+        return None
+    return next((m for m in list_runs() if m.get("contentHash") == content_hash), None)
 
 
 def list_runs() -> list[dict[str, Any]]:

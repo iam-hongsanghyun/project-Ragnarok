@@ -853,9 +853,10 @@ def _fill_derived_analytics(bundle: dict[str, Any]) -> dict[str, Any]:
     A bundle whose ``result`` carries outputs but no ``summary`` (the
     sheet-reconstruction path) historically forced the browser to re-derive
     everything. Fill it here via :func:`derive_results_from_outputs` — the same
-    payload assembly as a fresh solve. Best-effort: on any failure (multi-period
-    outputs, malformed series) the bundle is returned untouched and the client
-    derivation path applies exactly as before.
+    payload assembly as a fresh solve, single- or multi-period. Best-effort: on any
+    failure (malformed series) the bundle is returned untouched and
+    ``POST /api/import/*`` falls back to ``derive_imported_result``, then to storing
+    the raw outputs; the browser derives nothing.
     """
     result = bundle.get("result")
     if not isinstance(result, dict):

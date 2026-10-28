@@ -1,16 +1,15 @@
 /**
- * Client for backend-stored RUN analytics series.
+ * Client for backend-stored RUN output series.
  *
  * "View result" loads the LIGHT analytics bundle, which strips the heavy
  * per-component output series (`outputs.series = null`) and lists their sheet
- * names in `outputs.seriesSheets`. Per-asset analytics — the generator /
- * storage / bus / branch charts and the map asset-detail popups — all derive
- * from those series (`deriveAssetDetails`), so they stay blank until the series
- * are fetched back. This module pulls them from the run db on demand; the
- * caller splices them into `outputs.series` and re-derives `assetDetails`.
+ * names in `outputs.seriesSheets`. The cards that read raw series (the pivot and
+ * the set-point duals) pull them from the run db on demand through this module;
+ * per-asset metrics and details are NOT derived from them in the browser - the
+ * server serves those (`lib/api/resultsDerived.ts`).
  *
- * Mirror of the session-series client in `session.ts`, but scoped to a stored
- * run (`/api/runs/{name}/series/{sheet}`) instead of the live editor session.
+ * Mirror of the session-series client in `session.ts`, but scoped to a stored run
+ * (`/api/runs/{name}/series/{sheet}`) instead of the live editor session.
  */
 import { API_BASE } from 'lib/constants';
 import type { GridRow, RunResults } from 'lib/types';
@@ -72,23 +71,6 @@ export function effectiveEndIndex(
   return Math.max(0, Math.min(endIndex, totalSnaps - 1));
 }
 
-/**
- * Output series sheets `deriveAssetDetails` reads for a given non-`system`
- * focus type. Used to scope on-demand hydration to ONLY the sheets the
- * displayed per-asset charts need — fetching (and client-deriving) the whole
- * bundle on every result view froze the tab on large runs. Keys mirror
- * `AnalyticsFocus['type']`; system charts read inline aggregates and need none.
- */
-export const OUTPUT_SHEETS_FOR_FOCUS: Record<string, string[]> = {
-  generator:      ['generators-p'],
-  bus:            ['generators-p', 'buses-marginal_price', 'buses-v_mag_pu', 'buses-v_ang'],
-  storageUnit:    ['storage_units-p', 'storage_units-state_of_charge'],
-  store:          ['stores-e', 'stores-p'],
-  branch:         ['lines-p0', 'lines-p1', 'links-p0', 'links-p1', 'transformers-p0', 'transformers-p1'],
-  process:        ['processes-p0', 'processes-p1'],
-  shuntImpedance: ['shunt_impedances-p', 'shunt_impedances-q'],
-};
-
 /** A windowed slice of a stored run's output time-series sheet. Same wire shape
  *  as the session window — both are served by `run_store.run_series_window`. */
 export async function getRunSeriesWindow(
@@ -111,8 +93,8 @@ export async function getRunSeriesWindow(
 }
 
 /**
- * Normalise a series window's rows for `deriveAssetDetails`, which reads each
- * row's `snapshot` index. Canonical runs already use `snapshot`; remap
+ * Normalise a series window's rows to the shape the pivot and duals read: each
+ * row carries a `snapshot` index. Canonical runs already use `snapshot`; remap
  * defensively when the stored index column is named differently (older
  * `name` / `datetime` indices).
  */
@@ -128,7 +110,7 @@ export function seriesRowsFromWindow(window: Pick<SeriesWindow, 'indexCol' | 'ro
 /**
  * Fetch a set of output series sheets, each windowed to its own first-`end`
  * snapshots (`end` null = whole run), and assemble the `outputs.series` map
- * `deriveAssetDetails` expects: sheet name → rows, each keyed by component name
+ * the pivot expects: sheet name → rows, each keyed by component name
  * plus a `snapshot` index. FULL resolution WITHIN each window so donut/sum
  * totals stay exact. Per-sheet windows let different charts pull different
  * lengths of the same sheet (the caller requests the max each sheet needs).

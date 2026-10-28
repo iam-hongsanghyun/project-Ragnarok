@@ -23,6 +23,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .client import RagnarokSettingUp
 from .server import (
     _BUILD_ANN,
     _EXPORT_ANN,
@@ -122,6 +123,9 @@ _KIND_BY_SUFFIX = {".xlsx": "pypsa-excel", ".xls": "pypsa-excel", ".zip": "pypsa
         "overwrite_zero_s_nom replaces zero branch ratings), 'pandapower' (.json net from pandapower.to_json; read by "
         "pandapower in an isolated venv - see pypsa_io_capabilities.pandapowerInstalled; extra_line_data and "
         "use_pandapower_index map to PyPSA's import_from_pandapower_net). replace=true swaps the working model, false merges sheets over it. "
+        "pandapower is set up automatically on first use (one-time, about a minute): while that runs the call returns "
+        "status='setting_up' with retry_after_seconds and the working model is NOT changed - wait that many seconds and "
+        "call again with the same arguments (confirm=true included). status='applied' means the import is in the model. "
         "Gates like a model swap - re-call with confirm=true."
     ),
 )
@@ -157,7 +161,11 @@ async def import_pypsa_native(
             params["extraLineData"] = "true"
         if use_pandapower_index:
             params["usePandapowerIndex"] = "true"
-    model = await client.import_pypsa_file(kind, src.read_bytes(), src.name, params)
+    try:
+        model = await client.import_pypsa_file(kind, src.read_bytes(), src.name, params)
+    except RagnarokSettingUp as exc:
+        return {"status": "setting_up", "kind": kind, "source": src.name, "model_changed": False,
+                "retry_after_seconds": exc.retry_after_s, "message": exc.message, "setup": exc.setup}
     if replace:
         await client.save_model(model)
     else:
@@ -196,7 +204,12 @@ async def export_pypsa_native(
 
 @mcp.tool(
     annotations=_RO,
-    description="Which PyPSA-native import/export paths the backend offers, the netCDF export option keys, and whether the isolated pandapower environment (.venv-pandapower) is available for the pandapower import.",
+    description=(
+        "Which PyPSA-native import/export paths the backend offers, the netCDF export option keys, and the state of the "
+        "isolated pandapower environment (.venv-pandapower): pandapowerSetup.state is ready | setting_up | absent | failed | disabled. "
+        "setting_up means the first pandapower import is building it (about a minute) - wait retry_after_seconds, then retry the import; "
+        "failed means read pandapowerSetup.error and pandapowerSetup.log."
+    ),
 )
 async def pypsa_io_capabilities() -> Any:
     return await get_client().pypsa_io_capabilities()

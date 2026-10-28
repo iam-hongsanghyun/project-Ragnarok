@@ -1,0 +1,9 @@
+# pandapower, kept OUT of backend/requirements.txt: pandapower 3.x pins pandas~=2.3,
+# while the backend runs PyPSA 1.4 on pandas 3. It lives in its own venv
+# (<repo>/.venv-pandapower) and is driven through backend/scripts/pandapower_dump.py.
+#
+# Nobody installs this by hand: the first pandapower import builds the venv in the
+# background (backend/pypsa/network/pandapower_env.py). Editing this file makes the
+# next import rebuild the venv, the same way editing backend/requirements.txt does
+# for the main venv.
+pandapower>=3.5,<4

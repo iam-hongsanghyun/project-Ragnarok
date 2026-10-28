@@ -60,9 +60,7 @@ import { getBounds, getBusIndex, carrierColor, numberValue, orderByCarrierRows, 
 import { filenameMatchesScenario, scenarioFilename } from 'lib/utils/scenarioFilename';
 import { usePersistedState } from 'shared/hooks/usePersistedState';
 import { RagnarokLogo } from 'shared/components/RagnarokLogo';
-import { buildRowsFromGeneratorDetails, buildSystemLoadRows, normalizeSeriesPoint, statisticsForPeriod } from 'lib/results/analytics';
-import { withDerivedAssetDetails } from 'lib/results/assetDetails';
-import { deriveRunResults } from 'lib/results/runResults';
+import { emptyAssetDetails, normalizeSeriesPoint, statisticsForPeriod } from 'lib/results/analytics';
 import { defaultPathwayConfig, getDefaultSelectedPeriod, readPathwayConfigFromModel, samePathwayConfig, writePathwayConfigToModel } from 'lib/results/pathway';
 import { defaultRollingConfig, normalizeRollingConfig, readRollingConfigFromModel, sameRollingConfig, writeRollingConfigToModel } from 'lib/results/rolling';
 import { defaultSamplingConfig, normalizeSamplingConfig, readSamplingConfigFromModel, sameSamplingConfig, writeSamplingConfigToModel } from 'lib/results/sampling';
@@ -88,6 +86,8 @@ import { forgeQueryApply, forgeQueryPreview } from 'lib/api/forge';
 import type { QueryEditRequest } from 'lib/forge/queryEdit';
 import type { SheetEditOp } from 'lib/api/session';
 import { fetchRunOutputSeriesWindows } from 'lib/api/runs';
+import { fetchRunAssetKind, fetchRunPeriod, type AssetKind } from 'lib/api/resultsDerived';
+import { useAsync } from 'shared/hooks/useAsync';
 import { loadExample } from 'lib/api/examples';
 import { buildStarterPack } from 'lib/api/starterPacks';
 import { RunDialog } from './features/run/RunDialog';
@@ -110,6 +110,9 @@ import { SitingView } from './views/SitingView';
 import { ReportingView } from './views/ReportingView';
 import { TrainingView } from './views/TrainingView';
 import { SpotlightOverlay } from './features/training/SpotlightOverlay';
+import { TourHost } from './features/tour/TourHost';
+import { hasNetwork } from './features/tour/engine';
+import { TourButton } from './features/tour/TourButton';
 import type { Spotlight, TutorialProgress } from 'lib/training/types';
 import { findTutorial } from 'lib/training/catalog';
 import {
@@ -456,13 +459,6 @@ function AppInner() {
   // Analytics (map, asset derivation) must reflect the run that owns the
   // displayed results, not the live model the user may have since edited.
   const [resultsModel, setResultsModel] = useState<WorkbookModel | null>(null);
-  // Derivation inputs frozen at the moment `results` were produced/restored.
-  // Pathway analytics re-derive per-period KPIs from these; without freezing,
-  // restoring an old run while the live sliders differ would recompute its
-  // charts with the current carbon price / resolution / discount rate.
-  const [resultsContext, setResultsContext] = useState<
-    { carbonPrice: number; snapshotWeight: number; discountRate: number; carbonPriceSchedule: CarbonPriceScheduleEntry[] } | null
-  >(null);
   const [maxSnapshots, setMaxSnapshots] = useState<number>(RUN_WINDOW.initialMaxSnapshots);
   const [snapshotStart, setSnapshotStart] = useState(RUN_WINDOW.initialSnapshotStart);
   const [snapshotEnd, setSnapshotEnd] = useState(RUN_WINDOW.defaultSnapshotEnd);
@@ -677,102 +673,85 @@ function AppInner() {
     () => (resultsModel ? { ...createEmptyWorkbook(), ...resultsModel } : model),
     [resultsModel, model],
   );
-  // Derivation inputs that own the displayed results: frozen run-time values
-  // when available, else the live sliders (e.g. before any run).
-  const analyticsCarbonPrice = resultsContext?.carbonPrice ?? carbonPrice;
-  const analyticsSnapshotWeight = resultsContext?.snapshotWeight ?? snapshotWeight;
-  const analyticsDiscountRate = resultsContext?.discountRate ?? settings.discountRate;
-  // The schedule is frozen with the run like the scalar: a frozen context with
-  // no schedule means the run solved with the scalar only.
-  // Source order: the frozen context, then the schedule the backend recorded in
-  // `runMeta` (older stored runs), and only with no frozen context the live editor.
-  const analyticsCarbonSchedule = useMemo(() => (resultsContext
-    ? (resultsContext.carbonPriceSchedule.length > 0
-      ? resultsContext.carbonPriceSchedule
-      : (results?.runMeta?.carbonPriceSchedule ?? []))
-    : carbonPriceSchedule), [resultsContext, results?.runMeta?.carbonPriceSchedule, carbonPriceSchedule]);
+  // The period shown belongs to the DISPLAYED result: the editor's selection is
+  // honoured only when this result has that period, so viewing a stored run never
+  // depends on (or needs to rewrite) the editor's pathway config.
+  const selectedPeriod: number | null = useMemo(() => {
+    const pathway = results?.pathway?.enabled ? results.pathway : null;
+    if (!pathway) return null;
+    const preferred = pathwayConfig.selectedPeriod ?? pathway.selectedPeriod;
+    if (preferred !== null && pathway.periods.includes(preferred)) return preferred;
+    return pathway.periods[0] ?? null;
+  }, [results?.pathway, pathwayConfig.selectedPeriod]);
+
+  // One investment period of a pathway run is a SERVER payload: the period's slice of
+  // n.statistics (inactive assets masked, money x the period's objective weight, energy
+  // summed), `GET /api/runs/{name}/period/{period}`. The browser derives nothing; it shows
+  // the loading and error state of that request next to the period selector.
+  const periodQuery = useAsync(
+    activeRunName && selectedPeriod !== null
+      ? `${activeRunName}|${selectedPeriod}|${settings.currencySymbol}`
+      : null,
+    () => fetchRunPeriod(activeRunName as string, selectedPeriod as number, settings.currencySymbol),
+  );
+  const periodStatus = useMemo(
+    () => ({ period: selectedPeriod, loading: periodQuery.loading, error: periodQuery.error }),
+    [selectedPeriod, periodQuery.loading, periodQuery.error],
+  );
+
+  // Per-asset detail records (`results.assetDetails`) the cards that still read them need
+  // (the map's nodal prices), served by `GET /api/runs/{name}/assets`.
+  // The dashboard reports which asset kinds its layout needs and how many snapshots.
+  const [neededAssetKinds, setNeededAssetKinds] = useState<Partial<Record<AssetKind, number>>>({});
+  const assetKindsKey = JSON.stringify(neededAssetKinds);
+  const assetDetailsQuery = useAsync(
+    activeRunName && Object.keys(neededAssetKinds).length > 0
+      ? `${activeRunName}|${selectedPeriod ?? ''}|${settings.currencySymbol}|${assetKindsKey}`
+      : null,
+    async () => {
+      const details = emptyAssetDetails();
+      const record = details as unknown as Record<string, Record<string, unknown>>;
+      for (const [kind, end] of Object.entries(neededAssetKinds) as Array<[AssetKind, number]>) {
+        const items = await fetchRunAssetKind(activeRunName as string, kind, settings.currencySymbol, { period: selectedPeriod, end });
+        for (const item of items) record[kind][(item as { name: string }).name] = item;
+      }
+      return details;
+    },
+  );
 
   const displayResults = useMemo(() => {
     if (!results) return null;
     // In the light "View" bundle the per-component output series are stripped
     // (`outputs.series === null`) and fetched back on demand. Splice in any
-    // we've hydrated for THIS run so per-asset analytics (assetDetails) derive
-    // with data; the system charts read inline aggregates and don't need this.
+    // we've hydrated for THIS run (the pivot and set-point cards read them); the
+    // system charts read inline aggregates and need none.
     const baseOutputs = results.outputs;
     const canHydrate =
       !!baseOutputs && !baseOutputs.series &&
       !!hydratedRunSeries && hydratedRunSeries.runName === activeRunName &&
       Object.keys(hydratedRunSeries.series).length > 0;
-    const effResults = canHydrate
+    const stored: RunResults = canHydrate
       ? { ...results, outputs: { ...baseOutputs!, series: hydratedRunSeries!.series } }
       : results;
-    // A normal solved run arrives with the full backend-derived analytics
-    // (summary, carrierMix, …) attached; trust them as-is. A *reconstructed*
-    // bundle — an imported project — carries only `outputs` and re-derives its
-    // analytics on the client, so it must fall through to deriveRunResults even
-    // when it isn't a pathway run. (Without this, KPI/summary cards read
-    // `undefined.reduce` and crash.)
-    const hasDerivedSummary = Array.isArray(effResults.summary) && effResults.summary.length > 0;
-    const activePathway = effResults.pathway?.enabled ? effResults.pathway : null;
-    // The period shown belongs to the DISPLAYED result: the editor's selection
-    // is honoured only when this result has that period, so viewing a stored run
-    // never depends on (or needs to rewrite) the editor's pathway config.
-    const selectedPeriod: number | null = activePathway
-      ? (() => {
-        const preferred = pathwayConfig.selectedPeriod ?? activePathway.selectedPeriod;
-        if (preferred !== null && activePathway.periods.includes(preferred)) return preferred;
-        return activePathway.periods[0] ?? null;
-      })()
+    const activePathway = stored.pathway?.enabled ? stored.pathway : null;
+    // A pathway run shows the SELECTED period's server payload. While it loads (or if it
+    // fails) the whole-horizon payload stays on screen and the status says so; a payload
+    // left over from another period is not shown under this period's label.
+    const period = activePathway && periodQuery.data?.result.pathway?.selectedPeriod === selectedPeriod
+      ? periodQuery.data.result
       : null;
-    // Backend aggregates are authoritative whenever the client has no complete
-    // series to re-derive them from: a light (History/View) bundle ships
-    // `outputs.series = null`, and re-deriving from that (or from a partially
-    // hydrated window) overwrote the backend's pathway KPIs and charts with
-    // empty/zero values. Only per-asset details are derived — from the
-    // hydrated series, filtered to the selected period.
-    const lightBundle = !!baseOutputs && !baseOutputs.series;
-    const hasSeriesRows = !!effResults.outputs?.series
-      && Object.values(effResults.outputs.series).some((rows) => Array.isArray(rows) && rows.length > 0);
-    if (!effResults.outputs || (hasDerivedSummary && (!activePathway || lightBundle || !hasSeriesRows))) {
-      const withDetails = withDerivedAssetDetails(analyticsModel, effResults, settings.currencySymbol, selectedPeriod);
-      return activePathway
-        ? {
-          ...withDetails,
-          pathway: { ...activePathway, selectedPeriod },
-          statistics: statisticsForPeriod(withDetails.statistics, selectedPeriod),
-        }
-        : withDetails;
-    }
-    const derived = deriveRunResults(analyticsModel, effResults.outputs, {
-      carbonPrice: analyticsCarbonPrice,
-      carbonPriceSchedule: analyticsCarbonSchedule,
-      sampling: effResults.runMeta?.sampling,
-      currencySymbol: settings.currencySymbol,
-      discountRate: analyticsDiscountRate,
-      snapshotWeight: analyticsSnapshotWeight,
-      narrative: effResults.narrative,
-      selectedPeriod,
-      pathway: activePathway ? { ...activePathway, selectedPeriod } : null,
-      rolling: effResults.rolling,
-    });
+    const base: RunResults = period
+      ? { ...stored, ...period, outputs: stored.outputs, pluginAnalytics: stored.pluginAnalytics }
+      : stored;
     return {
-      ...effResults,
-      ...derived,
-      pluginAnalytics: effResults.pluginAnalytics,
-      meritOrder: effResults.meritOrder,
-      co2Shadow: effResults.co2Shadow,
-      // Backend-provided (deriveRunResults doesn't recompute it); preserve it
-      // through the merge like meritOrder/co2Shadow so it survives for pathway
-      // and reconstructed bundles that carry it.
-      generatorEconomics: effResults.generatorEconomics,
-      appliedConstraints: effResults.appliedConstraints,
-      emissionsBreakdown: effResults.emissionsBreakdown,
-      outputs: effResults.outputs,
-      pathway: derived.pathway,
-      statistics: statisticsForPeriod(effResults.statistics, selectedPeriod),
-      runMeta: derived.runMeta,
+      ...base,
+      assetDetails: assetDetailsQuery.data ?? emptyAssetDetails(),
+      ...(activePathway ? {
+        pathway: { ...(base.pathway ?? activePathway), selectedPeriod },
+        statistics: statisticsForPeriod(base.statistics, selectedPeriod),
+      } : {}),
     };
-  }, [results, analyticsModel, settings.currencySymbol, analyticsDiscountRate, analyticsCarbonPrice, analyticsCarbonSchedule, analyticsSnapshotWeight, pathwayConfig, hydratedRunSeries, activeRunName]);
+  }, [results, hydratedRunSeries, activeRunName, periodQuery.data, selectedPeriod, assetDetailsQuery.data]);
 
   // Hydrate the active run's stripped per-component output series ON DEMAND.
   // The light "View" bundle ships `outputs.series = null` to render instantly;
@@ -1048,7 +1027,6 @@ function AppInner() {
     setModel(stripSeriesSheets(nextModel));
     setResults(null);
     setResultsModel(null);
-    setResultsContext(null);
     setHydratedRunSeries(null);
     // Run history is session-scoped: it survives model swaps (new/demo/workbook/
     // project open) so prior runs stay available for comparison, and is only
@@ -1839,6 +1817,16 @@ function AppInner() {
         throw new Error((await resp.text()) || `Import failed (HTTP ${resp.status})`);
       }
       const bundle = (await resp.json()) as ProjectLoadResponse;
+      // A file that carries solved results is stored as a run by the server (`runName`):
+      // open it exactly like History's "Import project" (model into the editor, results
+      // read from the run routes), so the browser never derives a metric from the upload.
+      if (bundle.runName) {
+        await refreshBackendRuns();
+        await handleOpenBackendRun(bundle.runName, { asProject: true, restoreConstraints: true });
+        setStatus(`Imported project: ${file.name} — model loaded into the editor, results stored in History.`);
+        showToast(`Project loaded (${file.name})`, 'success');
+        return;
+      }
       const importedModel = bundle.model;
       // Input dates land canonical (ISO) for Ragnarok-exported projects; a
       // hand-built workbook may not — normalise before loading, as the CSV /
@@ -2056,10 +2044,21 @@ function AppInner() {
         const detail = await resp.text();
         throw new Error(detail || `Import failed (HTTP ${resp.status})`);
       }
-      const json = await resp.json();
-      const nextModel = json.model as WorkbookModel;
+      const json = (await resp.json()) as { model: WorkbookModel; runName?: string | null };
+      const nextModel = json.model;
       normalizeInputDatesToIso(nextModel, settings.dateFormat);
       resetForNewModel(nextModel, file.name.replace(/\.(nc|h5|hdf5)$/i, '.xlsx'));
+      // A network written after a solve carries its solution: the server stored it as a run,
+      // so show it through the run routes like any solved run.
+      if (json.runName) {
+        await refreshBackendRuns();
+        await handleOpenBackendRun(json.runName);
+        setTab('Analytics');
+        setAnalyticsSubTab('Result');
+        setStatus(`Imported ${file.name} with its results — stored in History.`);
+        showToast(`Imported ${file.name} with its results`, 'success');
+        return;
+      }
       setStatus(`Imported ${file.name}`);
       showToast(`Imported ${file.name}`, 'success');
     } catch (error) {
@@ -2500,15 +2499,6 @@ function AppInner() {
     // (saved before per-run topology snapshots) carry no model → fall back to
     // the live model, preserving prior behaviour.
     setResultsModel(entry.model ?? null);
-    // Pin pathway derivation inputs to this run's stored values so re-derived
-    // KPIs match the run, not the live sliders. discountRate is optional on
-    // older entries → fall back to the current setting.
-    setResultsContext({
-      carbonPrice: entry.carbonPrice,
-      snapshotWeight: entry.snapshotWeight,
-      discountRate: entry.discountRate ?? settings.discountRate,
-      carbonPriceSchedule: (entry.carbonPriceSchedule ?? []).map((row) => ({ ...row })),
-    });
     // VIEW vs IMPORT. Plain "View results" must NOT clone the run's model into
     // the live editable state: that structuredClone (a full workbook) plus the
     // pushHistory() it triggers is the dominant browser-memory sink — viewing
@@ -2559,7 +2549,7 @@ function AppInner() {
     }
     // RF5: these are the EDITOR's run settings (what the next solve uses). Plain
     // "View result" must leave them alone — the displayed result is pinned by
-    // `resultsContext` / its own pathway periods above — so they are applied only
+    // its own pathway periods above — so they are applied only
     // when the run is loaded into the editor.
     if (opts?.loadIntoEditor) {
       setSnapshotWeight(entry.snapshotWeight);
@@ -3603,14 +3593,9 @@ function AppInner() {
   // ── Metric series derived data ────────────────────────────────────────────
 
   const rawSystemDispatchRows: TimeSeriesRow[] = (displayResults?.dispatchSeries || []).map(normalizeSeriesPoint);
-  const systemDispatchRows: TimeSeriesRow[] =
-    rawSystemDispatchRows.some((row) =>
-      Object.keys(row).some((key) => !['label', 'timestamp', 'total'].includes(key) && Math.abs(numberValue(row[key] as string | number | undefined)) > 1e-6),
-    )
-      ? rawSystemDispatchRows
-      : buildRowsFromGeneratorDetails(displayResults?.assetDetails.generators || {}, 'carrier');
+  const systemDispatchRows: TimeSeriesRow[] = rawSystemDispatchRows;
   const inferredDispatchKeys = Array.from(
-    new Set(systemDispatchRows.flatMap((row) => Object.keys(row).filter((key) => !['label', 'timestamp', 'total'].includes(key)))),
+    new Set(systemDispatchRows.flatMap((row) => Object.keys(row).filter((key) => !['label', 'timestamp', 'total', 'period'].includes(key)))),
   );
   const dispatchKeys =
     inferredDispatchKeys.length > 0
@@ -3618,9 +3603,7 @@ function AppInner() {
       : (displayResults?.carrierMix || []).map((item) => item.label).filter(Boolean);
   const systemDispatchSeries: TimeSeriesSeries[] = dispatchKeys.map((key) => ({ key, label: key, color: carrierColor(key) }));
 
-  const systemPriceRows: TimeSeriesRow[] = (displayResults?.systemPriceSeries || []).map((point) => ({ label: point.label, timestamp: point.timestamp, price: point.value }));
   const storageRows: TimeSeriesRow[] = (displayResults?.storageSeries || []).map((point) => ({ label: point.label, timestamp: point.timestamp, charge: point.charge, discharge: point.discharge, state: point.state }));
-  const systemLoadRows: TimeSeriesRow[] = buildSystemLoadRows(displayResults);
 
   // Seed a default chart card when results first arrive; don't reset on map-focus changes.
   useEffect(() => {
@@ -3674,6 +3657,7 @@ function AppInner() {
           </button>
           <button
             className="run-button"
+            data-tour="run-button"
             onClick={() => setRunDialogOpen(true)}
             disabled={modelPushesInFlight > 0}
             title={modelPushesInFlight > 0
@@ -3802,6 +3786,7 @@ function AppInner() {
               )}
             </button>
           )}
+          <TourButton />
           <span className="topbar-file" title={filename}>{filename}</span>
           {/* runMeta is absent on reconstructed bundles (imported projects /
               light restored runs) — an unguarded read here crashed the whole
@@ -3839,7 +3824,7 @@ function AppInner() {
               onNavigateExternal={handleSettingsNavigate}
               model={model}
               priceSeries={results?.systemPriceSeries ?? null}
-              loadShape={results?.dispatchSeries?.map((p) => p.total ?? Object.values(p.values ?? {}).reduce((a, b) => a + b, 0)) ?? null}
+              loadShape={results?.dispatchSeries?.map((p) => p.total ?? 0) ?? null}
               scenarioCatalog={scenarioCatalog}
               activeScenarioLabel={activeScenario?.label ?? null}
               scenarioDirty={scenarioDirty}
@@ -4112,13 +4097,13 @@ function AppInner() {
               setChartSections={setChartSections}
               dispatchRows={systemDispatchRows}
               dispatchSeries={systemDispatchSeries}
-              systemLoadRows={systemLoadRows}
-              systemPriceRows={systemPriceRows}
               storageRows={storageRows}
               currencySymbol={settings.currencySymbol}
               pathwayConfig={pathwayConfig}
               onSelectedPeriodChange={(period) => setPathwayConfig((current) => ({ ...current, selectedPeriod: period }))}
               onNeedSeries={setNeededRunWindows}
+              onNeedAssets={setNeededAssetKinds}
+              periodStatus={periodStatus}
               backendRuns={backendRuns}
               activeRunName={activeRunName}
             />
@@ -4138,6 +4123,8 @@ function AppInner() {
               onApplyFragment={handleApplyImportedFragment}
               expansionResults={displayResults?.expansionResults ?? null}
               currencySymbol={settings.currencySymbol}
+              runName={activeRunName}
+              period={selectedPeriod}
             />
           )}
 
@@ -4307,6 +4294,16 @@ function AppInner() {
           onComplete={completeGuide}
         />
       )}
+
+      {/* Guided tour: offers itself on first run, driven by features/tour/steps.ts. */}
+      <TourHost
+        ctx={{
+          tab, hasModel: hasNetwork(model), runDialogOpen,
+          activeJobs: activeQueueJobs.length, runCount: backendRuns.length, hasResults: !!displayResults,
+        }}
+        ready={sessionBootChecked}
+        onNavigate={(t) => setTab(t)}
+      />
 
       {/* ── Master model dialog (import multi-year master → derive by filter) ── */}
       <MasterModelDialog

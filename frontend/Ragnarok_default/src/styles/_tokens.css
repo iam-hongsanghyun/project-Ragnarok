@@ -107,6 +107,7 @@
   --z-overlay: 9000;    /* modal backdrops (chart settings, etc.) */
   --z-popover: 9500;    /* dropdowns, context menus, filter popovers, selects */
   --z-toast: 9800;      /* toast notifications */
+  --z-tour: 9850;       /* guided tour card: above toasts so Next is never covered, below tooltips */
   --z-tooltip: 9900;    /* hover tooltips */
   --z-dialog: 10050;    /* blocking alert/confirm/prompt — above everything */
 }

@@ -18,11 +18,11 @@ import asyncio
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from .. import model_store
-from ...pypsa.network import pypsa_io
+from ...pypsa.network import pandapower_env, pypsa_io
 from ..models import RunPayload
 from ..run_options_reference import RunOption, register_options
 
@@ -51,10 +51,23 @@ register_options(
 )
 
 
-async def _import(builder, data: bytes, label: str) -> dict[str, Any]:
+async def _import(builder, data: bytes, label: str) -> Any:
     try:
         network = await asyncio.to_thread(builder, data)
         model = await asyncio.to_thread(pypsa_io.model_from_network, network)
+    except pandapower_env.PandapowerSettingUp as exc:
+        # 202, not an error: the isolated pandapower env is being built (first use, ~1 min).
+        # The model is untouched; the client retries the same request.
+        return JSONResponse(
+            status_code=202,
+            content={
+                "detail": str(exc),
+                "status": "setting_up",
+                "retryAfterSeconds": exc.retry_after_s,
+                "pandapowerSetup": exc.status,
+            },
+            headers={"Retry-After": str(exc.retry_after_s)},
+        )
     except pypsa_io.PandapowerUnavailable as exc:
         raise HTTPException(status_code=501, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
@@ -96,7 +109,13 @@ async def import_pandapower(
     extraLineData: bool = Query(False),
     usePandapowerIndex: bool = Query(False),
 ) -> dict[str, Any]:
-    """Import a pandapower JSON net via ``Network.import_from_pandapower_net`` (optional dep)."""
+    """Import a pandapower JSON net via ``Network.import_from_pandapower_net``.
+
+    The first call builds the isolated pandapower environment in the background and
+    answers 202 ``{"status": "setting_up", "retryAfterSeconds": N}``; retry the same
+    request after N seconds. 501 means setup failed or is disabled (``detail`` says
+    why and names the log).
+    """
     data = await file.read()
     return await _import(
         lambda d: pypsa_io.network_from_pandapower_json(
@@ -116,6 +135,7 @@ async def pypsa_io_capabilities() -> dict[str, Any]:
         "import": ["pypsa-excel", "pypsa-csv", "matpower", "pandapower"],
         "export": ["netcdf", "hdf5", "pypsa-excel", "pypsa-csv"],
         "pandapowerInstalled": pypsa_io.pandapower_available(),
+        "pandapowerSetup": pandapower_env.status(),
         "exportOptions": ["exportStandardTypes", "netcdfCompression", "netcdfFloat32"],
     }
 

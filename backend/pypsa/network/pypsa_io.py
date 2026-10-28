@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import io
 import json
-import os
 import re
 import subprocess
 import tempfile
@@ -30,6 +29,8 @@ import numpy as np
 import pandas as pd
 import pypsa
 
+from . import pandapower_env
+from .pandapower_env import PandapowerSettingUp, PandapowerUnavailable
 from .serialize import network_to_model
 from .snapshots import parse_snapshot_labels
 
@@ -218,29 +219,18 @@ def network_from_matpower(
     return network_from_ppc(ppc, overwrite_zero_s_nom=overwrite_zero_s_nom)
 
 
-class PandapowerUnavailable(RuntimeError):
-    """No usable pandapower interpreter (neither in-process nor the isolated venv)."""
-
-
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _DUMP_SCRIPT = _REPO_ROOT / "backend" / "scripts" / "pandapower_dump.py"
 _PANDAPOWER_TIMEOUT_S = 120
 
 
 def pandapower_python() -> Path | None:
-    """Interpreter of the isolated pandapower venv, or ``None``.
+    """Interpreter of the pandapower environment when it is ready, else ``None``.
 
-    ``RAGNAROK_PANDAPOWER_PYTHON`` overrides; default ``<repo>/.venv-pandapower``
-    (create with ``backend/scripts/setup_pandapower_env.sh``).
+    Never starts a build; see :mod:`backend.pypsa.network.pandapower_env`.
     """
-    override = os.environ.get("RAGNAROK_PANDAPOWER_PYTHON", "").strip()
-    cands = [Path(override)] if override else []
-    cands += [_REPO_ROOT / ".venv-pandapower" / "bin" / "python",
-              _REPO_ROOT / ".venv-pandapower" / "Scripts" / "python.exe"]
-    for c in cands:
-        if c.is_file():
-            return c
-    return None
+    st = pandapower_env.status()
+    return Path(st["python"]) if st["state"] == "ready" else None
 
 
 def _net_from_dump(dump: dict[str, Any]) -> SimpleNamespace:
@@ -263,15 +253,14 @@ def _net_from_dump(dump: dict[str, Any]) -> SimpleNamespace:
 
 
 def pandapower_dump_via_subprocess(text: str) -> dict[str, Any]:
-    """Run the pandapower JSON net through the isolated venv and return the table dump."""
-    py = pandapower_python()
-    if py is None:
-        raise PandapowerUnavailable(
-            "pandapower is not available: it pins pandas~=2.3, which conflicts with PyPSA 1.4 "
-            "(pandas 3). Create the isolated environment with backend/scripts/setup_pandapower_env.sh "
-            "(-> .venv-pandapower) or set RAGNAROK_PANDAPOWER_PYTHON, or export the net to MATPOWER "
-            "and use the MATPOWER import."
-        )
+    """Run the pandapower JSON net through the isolated venv and return the table dump.
+
+    Raises:
+        PandapowerSettingUp: the environment is being built (retry shortly).
+        PandapowerUnavailable: the environment cannot be built or is disabled.
+        ValueError: pandapower could not read the net.
+    """
+    py = pandapower_env.require_python()
     proc = subprocess.run(  # noqa: S603 - fixed argv, no shell, input over stdin
         [str(py), str(_DUMP_SCRIPT)], input=text, capture_output=True, text=True,
         timeout=_PANDAPOWER_TIMEOUT_S, check=False,
@@ -292,7 +281,8 @@ def network_from_pandapower_json(
     ``import_from_pandapower_net`` applied to the rebuilt tables.
 
     Raises:
-        PandapowerUnavailable: no pandapower interpreter is configured.
+        PandapowerSettingUp: the isolated environment is being built (retry shortly).
+        PandapowerUnavailable: the isolated environment is missing and cannot be built.
         ValueError: pandapower could not parse the JSON.
     """
     dump = pandapower_dump_via_subprocess(text)
@@ -305,7 +295,7 @@ def network_from_pandapower_json(
 
 
 def pandapower_available() -> bool:
-    """True when the isolated pandapower interpreter exists."""
+    """True when the isolated pandapower environment is ready to use."""
     return pandapower_python() is not None
 
 

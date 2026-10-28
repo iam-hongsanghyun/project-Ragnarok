@@ -29,7 +29,7 @@ def test_registry_lists_expected_modules():
         "openelectricity_demand", "openelectricity_renewable",
         "elexon_demand", "elexon_renewable", "renewables_ninja", "climatewatch_policy",
         "openmeteo_renewable", "pvgis_renewable", "nasa_power_renewable",
-        "openmeteo_demand", "fuel_prices", "ember_history",
+        "openmeteo_demand", "fuel_prices", "ember_history", "demand_db",
     }
 
 

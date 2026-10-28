@@ -139,8 +139,8 @@ by `export_run`), the country GeoJSON and `DELETE /api/log`.
 
 ### 2.7 MCP-only modelling and scenario tools
 
-The MCP server has 156 tools: 116 in `backend/mcp/server.py` (§2.1–§2.6 group most of them, not all) and 40 in
-`backend/mcp/tools_*.py`. The table below covers the 38 added before 2026-10-28; `compare_run_statistics` (tools_results_extra.py, read-only, `GET /api/results/compare?topics=statistics`) compares runs through `pypsa.NetworkCollection` statistics, and `get_metric_options` (same module, read-only, `GET /api/runs/{name}/metrics`) is listed in the last table below. The GUI reaches the same backend routes through its own
+The MCP server has 161 tools: 116 in `backend/mcp/server.py` (§2.1–§2.6 group most of them, not all) and 45 in
+`backend/mcp/tools_*.py`. The table below covers the 38 added before 2026-10-28; `compare_run_statistics` (tools_results_extra.py, read-only, `GET /api/results/compare?topics=statistics`) compares runs through `pypsa.NetworkCollection` statistics, and `get_metric_options` (same module, read-only, `GET /api/runs/{name}/metrics`), `get_period_results` (same module, read-only, `GET /api/runs/{name}/period/{period}`) and `get_run_analysis` (same module, read-only, `GET /api/runs/{name}/analysis/{topic}`) are listed in the last table below. The GUI reaches the same backend routes through its own
 controls (Forge, the Solver section, the Scenarios panel). This table is a snapshot from 2026-10-28, read from the
 code: the tool name and module from the `@mcp.tool` decorator, the endpoints from the `RagnarokClient` method each
 tool calls, the gate from the `confirm` argument, and the purpose from the first sentence of the description. The
@@ -164,6 +164,8 @@ MCP `list_tools` call returns the full descriptions, and `describe_run_options` 
 | Tool | Endpoint(s) | Gate | What it does |
 |---|---|---|---|
 | `get_metric_options` | `GET /api/runs/{name}/metrics` | — | Chart-ready metrics (rows, series, colours) of one per-asset focus (generator, bus, storageUnit, store, branch, process, shuntImpedance) of a stored run - the options the Analytics chart card offers; narrow by `keys`, `group_by`, `bus_filter`, `carrier_filter`, `period`, `end`. Returns `{run, focus, items, total}` |
+| `get_period_results` | `GET /api/runs/{name}/period/{period}` | — | The result payload of ONE investment period of a pathway run, from that period's slice of `n.statistics` (inactive assets masked, money x the period's objective weight, energy summed); compact sections by default, `fields` for others. Returns `{run, period, result}`. `get_kpis`, `compare_companies`, `get_asset_details` and `get_metric_options` take the same `period` |
+| `get_run_analysis` | `GET /api/runs/{name}/analysis/{topic}` | — | The Analytics-card metrics the browser no longer computes (P28), by `topic`: `load-analysis` (system peak / energy, load factor, coincidence, per-bus shares), `carrier-performance` (nameplate / generated MW, energy, shares, `n.statistics` capacity factor and curtailment, totals), `transition-risk` (company net margin while the carbon price rises; `base_year`, `years`, `base_price`, `escalation_pct`, `stranded_threshold`, `demand_growth_pct`, `fuel_growth_pct`), `duration-curve` (`source` price or load, ranked descending) and `totals` (sums over result rows). `period` picks a pathway investment period. Mean nodal price per bus is `get_asset_details(kind='buses')` field `averageSmp` |
 
 **Analysis and Forge edits (`tools_analysis.py`)**
 
@@ -214,6 +216,14 @@ MCP `list_tools` call returns the full descriptions, and `describe_run_options` 
 | `set_piecewise_curve` | `GET /api/piecewise/catalog`; `POST /api/piecewise/check`; `PATCH /api/session/sheet/{name}` | confirm | Set (replace) the piecewise curve of ONE component: component 'Generator'\|'Link'\|'Process'\|'StorageUnit'\|'Store' (capital_cost also 'Line'\|'Transformer'), name, attribute ('marginal_cost' \| … |
 | `clear_piecewise_curve` | `GET /api/piecewise/catalog`; `PATCH /api/session/sheet/{name}` | confirm | Remove the piecewise curve of one component (the scalar cost / efficiency applies again). attribute omitted = every curve of that component |
 | `check_piecewise_options` | `POST /api/piecewise/options/check` | — | Validate and normalise the piecewise run option |
+
+**Self-hosted demand database (`tools_demand_db.py`, D2)**
+
+| Tool | Endpoint(s) | Gate | What it does |
+|---|---|---|---|
+| `list_demand_db` | `GET /api/demand-db/coverage` | — | What the offline hourly-demand snapshot holds: per series (`opsd/DE`, `eia930/ERCO`, ...) the years, coverage, rows, retrieved date, licence, and what each source measures. MW, UTC, hour-beginning |
+| `get_demand_db_slice` | `GET /api/demand-db/slice` | — | One series for `year_from..year_to` (by `series` or `country`): full-window stats (hours, TWh, peak/mean MW) plus up to `max_values` hourly values |
+| `import_demand_db` | `POST /api/import/run` (`demand_db`); `POST /api/session/merge-fragment` | confirm | Put a series into the working model as a national bus, a Load and an hourly `loads-p_set` with snapshots; reads the local snapshot only, no network or key |
 
 ---
 
@@ -292,7 +302,7 @@ A new **Assistant** tab (activity bar), consistent with the existing view shell:
 
 | Phase | Deliverable | Leans on |
 |---|---|---|
-| **0 · MCP prototype** ✅ *shipped* | An MCP server (`backend/mcp/`) — 156 tools spanning the full surface (§2.7 lists the newest 40): introspect + **schema** (`list_components`/`describe_component`/`describe_run_options` over the live PyPSA registry) · data-in · edit · **generic component CRUD** (`add_component`/`set_component`/`remove_component` cover every PyPSA component + attribute) + typed `add_*` conveniences · series transforms · solve (all modes via free-form scenario/options) · analyse · plugins. Drivable from any MCP client with any model. See §10 to connect a client. | existing API |
+| **0 · MCP prototype** ✅ *shipped* | An MCP server (`backend/mcp/`) — 161 tools spanning the full surface (§2.7 lists the newest 45): introspect + **schema** (`list_components`/`describe_component`/`describe_run_options` over the live PyPSA registry) · data-in · edit · **generic component CRUD** (`add_component`/`set_component`/`remove_component` cover every PyPSA component + attribute) + typed `add_*` conveniences · series transforms · solve (all modes via free-form scenario/options) · analyse · plugins. Drivable from any MCP client with any model. See §10 to connect a client. | existing API |
 | **1 · Embedded agent (L1 shell)** | `LLMProvider` abstraction + Claude API adapter + the plan/act/observe loop + a minimal Assistant chat tab (stream + tool cards). Happy path: "build KOR, solve, report." | Phase 0 tools |
 | **2 · Guardrails & grounding** | confirmation gates, budgets, world-state summarisation, schema retrieval tools, exemplars. | pypsa_schema_builder |
 | **3 · Verification loop** | validate-before-solve, Q2 repair loop, Ember/adequacy sanity, cited report generator. | Q2, I7, A2 |

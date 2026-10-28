@@ -44,6 +44,20 @@ class RagnarokAPIError(RuntimeError):
         super().__init__(f"{method} {path} → HTTP {status}: {detail}")
 
 
+class RagnarokSettingUp(RuntimeError):
+    """The backend is still building the isolated pandapower environment (HTTP 202).
+
+    Nothing was imported and the working model is unchanged: retry the same call
+    after ``retry_after_s`` seconds.
+    """
+
+    def __init__(self, body: dict[str, Any]) -> None:
+        self.message = str(body.get("detail") or "pandapower is being set up; retry shortly.")
+        self.retry_after_s = int(body.get("retryAfterSeconds") or 15)
+        self.setup = body.get("pandapowerSetup") or {}
+        super().__init__(self.message)
+
+
 @dataclass(frozen=True)
 class Config:
     api_base: str
@@ -903,14 +917,20 @@ class RagnarokClient:
             {"runs": ",".join(runs), "topics": ",".join(topics) if topics else None},
         )
 
-    async def get_kpis(self, run_name: str, currency: str | None = None) -> Any:
-        return await self._get(f"/api/runs/{run_name}/kpis", {"currency": currency})
+    async def get_kpis(self, run_name: str, currency: str | None = None, period: int | None = None) -> Any:
+        return await self._get(f"/api/runs/{run_name}/kpis", {"currency": currency, "period": period})
+
+    async def get_run_period(self, run_name: str, period: int, **params: Any) -> Any:
+        return await self._get(f"/api/runs/{run_name}/period/{period}", params)
+
+    async def get_run_analysis(self, run_name: str, topic: str, **params: Any) -> Any:
+        return await self._get(f"/api/runs/{run_name}/analysis/{topic}", params)
 
     async def get_metric_options(self, run_name: str, focus: str, **params: Any) -> Any:
         return await self._get(f"/api/runs/{run_name}/metrics", {"focus": focus, **params})
 
-    async def compare_companies(self, run_name: str, sort_by: str | None = None) -> Any:
-        return await self._get(f"/api/runs/{run_name}/companies", {"sort_by": sort_by})
+    async def compare_companies(self, run_name: str, sort_by: str | None = None, period: int | None = None) -> Any:
+        return await self._get(f"/api/runs/{run_name}/companies", {"sort_by": sort_by, "period": period})
 
     async def get_asset_details(self, run_name: str, **params: Any) -> Any:
         return await self._get(f"/api/runs/{run_name}/assets", params)
@@ -1047,8 +1067,14 @@ class RagnarokClient:
     async def import_pypsa_file(
         self, kind: str, data: bytes, filename: str, params: dict[str, Any] | None = None
     ) -> dict[str, list[dict[str, Any]]]:
-        """Upload a PyPSA Excel / CSV-zip / MATPOWER / pandapower file; returns the model JSON."""
+        """Upload a PyPSA Excel / CSV-zip / MATPOWER / pandapower file; returns the model JSON.
+
+        Raises:
+            RagnarokSettingUp: the backend answered 202 (pandapower env being built).
+        """
         out = await self._upload(f"/api/import/{kind}", data, filename, params)
+        if isinstance(out, dict) and out.get("status") == "setting_up":
+            raise RagnarokSettingUp(out)
         return (out or {}).get("model") or {}
 
     async def export_pypsa_native(
@@ -1131,6 +1157,22 @@ class RagnarokClient:
     async def merge_network(self, **kw: Any) -> Any:
         return await self._post("/api/transform/merge", self._sid_body(kw))
     # ── END optimise block ──────────────────────────────────────────────────────
+
+    # ── BEGIN demand-db block (D2): self-hosted hourly demand snapshot ───────────
+    # Used by backend/mcp/tools_demand_db.py.
+    async def demand_db_coverage(self) -> Any:
+        """``GET /api/demand-db/coverage`` - series, years, licences, definitions."""
+        return await self._get("/api/demand-db/coverage")
+
+    async def demand_db_slice(
+        self, series: str | None, country: str | None, year_from: int, year_to: int | None
+    ) -> Any:
+        """``GET /api/demand-db/slice`` - one series' hourly load for a year window."""
+        return await self._get(
+            "/api/demand-db/slice",
+            {"series": series, "country": country, "year_from": year_from, "year_to": year_to},
+        )
+    # ── END demand-db block ─────────────────────────────────────────────────────
 
 
 def _clean(params: dict[str, Any] | None) -> dict[str, Any] | None:

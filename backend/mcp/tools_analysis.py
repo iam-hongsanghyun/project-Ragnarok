@@ -59,11 +59,12 @@ async def compare_runs(run_names: list[str], topics: list[str] | None = None) ->
     description=(
         "The KPI strip of a stored run: total cost, dispatch MWh, load-weighted average price (n.statistics.prices), min/max price, peak load MW, "
         "load factor, renewable share % (zero-emission carriers excluding nuclear and storage), emissions, "
-        "snapshot count and weight. Numbers match the Analytics KPI card."
+        "snapshot count and weight. Numbers match the Analytics KPI card. 'period' picks one investment period "
+        "of a pathway run (money x the period's objective weight, inactive assets masked); omitted = the whole horizon."
     ),
 )
-async def get_kpis(run_name: str, currency: str | None = None) -> Any:
-    return await get_client().get_kpis(run_name, currency)
+async def get_kpis(run_name: str, currency: str | None = None, period: int | None = None) -> Any:
+    return await get_client().get_kpis(run_name, currency, period)
 
 
 @mcp.tool(
@@ -72,11 +73,12 @@ async def get_kpis(run_name: str, currency: str | None = None) -> Any:
         "Company comparison for a stored run: the per-owner breakdown (capacity, energy, revenue, emissions), "
         "project finance (NPV, IRR, payback) and P&L (net margin) joined by company and ranked by 'sort_by' "
         "(npv, netMargin, irr, revenue, capacityMW, emissionsTonnes; default the first available). Needs "
-        "owner-tagged assets (see the run's ownerColumn option)."
+        "owner-tagged assets (see the run's ownerColumn option). 'period' picks one investment period of a "
+        "pathway run; omitted = the whole horizon."
     ),
 )
-async def compare_companies(run_name: str, sort_by: str | None = None) -> Any:
-    return await get_client().compare_companies(run_name, sort_by)
+async def compare_companies(run_name: str, sort_by: str | None = None, period: int | None = None) -> Any:
+    return await get_client().compare_companies(run_name, sort_by, period)
 
 
 @mcp.tool(

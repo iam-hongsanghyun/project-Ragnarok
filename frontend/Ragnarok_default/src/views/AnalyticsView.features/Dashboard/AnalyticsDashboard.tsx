@@ -27,7 +27,6 @@ import { useDialog } from '../../../shared/components/Dialog';
 import { UserDefinedChartCard } from '../../../features/analytics/cards/UserDefinedChartCard';
 import { AnalyticsMapCard } from '../../../features/analytics/AnalyticsMapCard';
 import { KpiStripCard } from '../../../features/analytics/cards/KpiStripCard';
-import { DurationCurveCard } from '../../../features/analytics/cards/DurationCurveCard';
 import { MeritOrderCard } from '../../../features/analytics/cards/MeritOrderCard';
 import { Co2ShadowCard } from '../../../features/analytics/cards/Co2ShadowCard';
 import { GeneratorEconomicsCard } from '../../../features/analytics/cards/GeneratorEconomicsCard';
@@ -76,12 +75,13 @@ import { CapacityByPeriodCard } from '../../../features/analytics/cards/Capacity
 import { CarrierAnalysisCard } from '../../../features/analytics/cards/CarrierAnalysisCard';
 import { LoadAnalysisCard } from '../../../features/analytics/cards/LoadAnalysisCard';
 import { StochasticScenariosCard } from '../../../features/analytics/cards/StochasticScenariosCard';
-import { numberValue } from 'lib/utils/helpers';
 import { Dashboard, newId } from './Dashboard';
 import { Card, DashboardLayout, PivotChartConfig } from 'lib/dashboard/types';
 import { useDashboardLayout } from './useDashboardLayout';
 import { PRESETS } from 'lib/dashboard/presets';
-import { effectiveEndIndex, fullRunTimeline, OUTPUT_SHEETS_FOR_FOCUS } from 'lib/api/runs';
+import { effectiveEndIndex, fullRunTimeline } from 'lib/api/runs';
+import { fetchRunAnalysis, type AssetKind } from 'lib/api/resultsDerived';
+import { useAsync } from '../../../shared/hooks/useAsync';
 import { PivotChartCard } from '../../../features/analytics/cards/PivotChartCard';
 import { pivotSeriesSheet } from 'lib/results/pivot';
 
@@ -193,6 +193,12 @@ function createCard(kind: string): Card {
   }
 }
 
+/** Card kinds that show a total over result rows (served by `analysis/totals`). */
+const TOTALS_CARDS: ReadonlySet<string> = new Set([
+  'merit-order', 'company-breakdown', 'company-finance', 'company-statement', 'maintenance', 'emissions-breakdown',
+  'capacity-expansion', 'stochastic-scenarios',
+]);
+
 interface Props {
   results: RunResults;
   model: WorkbookModel;
@@ -202,8 +208,6 @@ interface Props {
    *  App.tsx already computes them once. Saves recomputing here. */
   dispatchRows?: TimeSeriesRow[];
   dispatchSeries?: TimeSeriesSeries[];
-  systemLoadRows?: TimeSeriesRow[];
-  systemPriceRows?: TimeSeriesRow[];
   storageRows?: TimeSeriesRow[];
   currencySymbol: string;
   analyticsFocus: AnalyticsFocus;
@@ -220,51 +224,42 @@ interface Props {
    *  the parent hydrates only those sheets at the length needed. Empty {} when
    *  the layout is system-only. */
   onNeedSeries?: (windows: Record<string, number>) => void;
+  /** Report which per-asset detail kinds the layout's cards read from `results.assetDetails`
+   *  (kind -> snapshots needed); the parent loads them from `GET /api/runs/{name}/assets`. */
+  onNeedAssets?: (kinds: Partial<Record<AssetKind, number>>) => void;
   /** Stored-run name behind `results` (enables parametrised statistics queries). */
   runName?: string | null;
 }
 
 export function AnalyticsDashboard({
   results, model, bounds, busIndex,
-  systemLoadRows = [],
-  systemPriceRows = [],
   currencySymbol,
   analyticsFocus, onFocusChange,
   storageKey,
   initialLayout = DEFAULT_LAYOUT,
   showPresets = true,
   onNeedSeries,
+  onNeedAssets,
   runName,
 }: Props) {
   const { layout, setLayout, editing, setEditing, resetToDefault } =
     useDashboardLayout(initialLayout, storageKey);
   const { alert: alertDialog } = useDialog();
+  // The pathway investment period the displayed result is evaluated for (server payload).
+  const selectedPeriod = results.pathway?.enabled ? results.pathway.selectedPeriod ?? null : null;
 
-  // Tell the parent, per output-series sheet, the MAX snapshot count the
-  // layout's per-asset charts need loaded (each chart's slider right edge), so
-  // it hydrates only those sheets at that length. Runs on layout change (chart
-  // added / slider moved / preset loaded), not every render. A system-only
-  // layout reports {} → no fetch → the common result view is instant.
+  // Tell the parent, per output-series sheet, the MAX snapshot count the layout's
+  // pivot cards need loaded, so it hydrates only those sheets at that length. Runs
+  // on layout change (card added / slider moved / preset loaded), not every render.
+  // Per-asset CHARTS of a stored run are derived by the server (`/metrics`) and need
+  // nothing hydrated; a layout without a pivot reports {} -> no fetch.
   useEffect(() => {
     if (!onNeedSeries) return;
     const totalSnaps = fullRunTimeline(results).length;
     const weight = results.runMeta?.snapshotWeight ?? 1;
     const windows: Record<string, number> = {};
-    // A per-asset chart of a stored run is derived by the server (`/metrics`), so it
-    // needs nothing hydrated here. The map's nodal-price colouring and the load
-    // analysis still read `results.assetDetails` in the browser; for a layout that
-    // has them, the charts keep requesting windows as before.
-    const serverCharts = !!runName
-      && !layout.cards.some((c) => c.kind === 'map' || c.kind === 'load-analysis');
     for (const card of layout.cards) {
-      if (card.kind === 'chart' && card.config.focusType !== 'system') {
-        if (serverCharts) continue;
-        const end = effectiveEndIndex(card.config.focusType, card.config.endIndex, totalSnaps, weight);
-        const snaps = end + 1;
-        for (const sheet of OUTPUT_SHEETS_FOR_FOCUS[card.config.focusType] ?? []) {
-          windows[sheet] = Math.max(windows[sheet] ?? 0, snaps);
-        }
-      } else if (card.kind === 'pivot') {
+      if (card.kind === 'pivot') {
         // A pivot whose value is an output series needs that one sheet hydrated,
         // up to the chart's window right-edge. Static / input values need none.
         const sheet = pivotSeriesSheet(card.config.sheet, card.config.valueAttribute);
@@ -274,7 +269,13 @@ export function AnalyticsDashboard({
       }
     }
     onNeedSeries(windows);
-  }, [layout, onNeedSeries, results, runName]);
+  }, [layout, onNeedSeries, results]);
+  // The map (nodal prices) reads per-bus detail records.
+  useEffect(() => {
+    if (!onNeedAssets) return;
+    const needsBuses = layout.cards.some((c) => c.kind === 'map');
+    onNeedAssets(needsBuses ? { buses: fullRunTimeline(results).length || 1 } : {});
+  }, [layout, onNeedAssets, results]);
   const [openMenu, setOpenMenu] = useState<'presets' | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const presetsMenuRef = useRef<HTMLDivElement | null>(null);
@@ -382,14 +383,13 @@ export function AnalyticsDashboard({
     setOpenMenu(null);
   };
 
-  // Sorted load / price for duration curves and merit-order systemLoad.
-  const sortedLoad = systemLoadRows
-    .map((r) => numberValue(r['load'] as number | string | undefined))
-    .filter((v: number) => v > 0)
-    .sort((a: number, b: number) => b - a);
-  const sortedPrice = systemPriceRows
-    .map((r) => numberValue(r['price'] as number | string | undefined))
-    .sort((a: number, b: number) => b - a);
+  // Sums over result rows (expansion, emissions, companies, merit order, stochastic expectation,
+  // maintenance hours) are server values: one request serves every card that shows a total.
+  const needsTotals = layout.cards.some((c) => TOTALS_CARDS.has(c.kind));
+  const totals = useAsync(
+    runName && needsTotals ? `${runName}|totals|${selectedPeriod ?? ''}` : null,
+    () => fetchRunAnalysis(runName as string, 'totals', { period: selectedPeriod }),
+  );
 
   const renderCard = (card: Card): React.ReactNode => {
     try {
@@ -444,30 +444,20 @@ export function AnalyticsDashboard({
             </ul>
           );
         case 'kpi-strip':
-          return <KpiStripCard results={results} model={model} currencySymbol={currencySymbol} runName={runName} />;
+          return <KpiStripCard currencySymbol={currencySymbol} runName={runName} period={selectedPeriod} />;
         case 'duration-curve':
-          // A stored (non-pathway) run derives the curve server-side; otherwise from the in-memory rows.
-          if (runName && !results.pathway?.enabled) {
-            return <ServerDurationCurveCard runName={runName} source={card.source} currencySymbol={currencySymbol} />;
-          }
-          return (
-            <DurationCurveCard
-              title={card.source === 'price' ? `Marginal price (${currencySymbol}/MWh)` : 'Load (MW)'}
-              data={[{
-                key: card.source,
-                label: card.source === 'price' ? 'Marginal price' : 'Load',
-                color: card.source === 'price' ? 'var(--text)' : 'var(--warm)',
-                values: card.source === 'price' ? sortedPrice : sortedLoad,
-              }]}
-              unit={card.source === 'price' ? `${currencySymbol}/MWh` : 'MW'}
-              showLegend={false}
-            />
-          );
+          return runName
+            ? <ServerDurationCurveCard runName={runName} source={card.source} currencySymbol={currencySymbol} period={selectedPeriod} />
+            : <p className="dashboard-cell-missing">The duration curve needs a stored run.</p>;
         case 'merit-order':
           return (
             <MeritOrderCard
               entries={results.meritOrder ?? []}
-              systemLoad={sortedLoad.length > 0 ? sortedLoad[0] : undefined}
+              systemLoad={totals.data?.meritOrder?.systemPeakLoadMw ?? undefined}
+              totalMw={totals.data?.meritOrder?.totalMw ?? null}
+              marginalCostRange={totals.data?.meritOrder
+                ? { min: totals.data.meritOrder.minMarginalCost, max: totals.data.meritOrder.maxMarginalCost }
+                : null}
               currencySymbol={currencySymbol}
             />
           );
@@ -504,23 +494,23 @@ export function AnalyticsDashboard({
             : <p className="dashboard-cell-missing">This run did not include merchant (price-taker) analysis.</p>;
         case 'company-breakdown':
           return results.companies
-            ? <CompanyBreakdownCard data={results.companies} />
+            ? <CompanyBreakdownCard data={results.companies} systemEmissionsTonnes={totals.data?.companies?.systemEmissionsTonnes ?? null} />
             : <p className="dashboard-cell-missing">No owner-tagged assets in this run.</p>;
         case 'company-finance':
           return results.companyFinance
-            ? <CompanyFinanceCard data={results.companyFinance} />
+            ? <CompanyFinanceCard data={results.companyFinance} totalNpv={totals.data?.companies?.totalNpv ?? null} />
             : <p className="dashboard-cell-missing">No company finance for this run (needs owner tags and an LP run).</p>;
         case 'company-statement':
           return results.companyStatement
-            ? <CompanyStatementCard data={results.companyStatement} />
+            ? <CompanyStatementCard data={results.companyStatement} systemEmissionsTonnes={totals.data?.statement?.systemEmissionsTonnes ?? null} />
             : <p className="dashboard-cell-missing">No company P&amp;L for this run (needs owner tags and an LP run).</p>;
         case 'company-comparison':
           return (results.companies || results.companyFinance || results.companyStatement)
-            ? <CompanyComparisonCard breakdown={results.companies} finance={results.companyFinance} statement={results.companyStatement} runName={runName} />
+            ? <CompanyComparisonCard runName={runName} period={selectedPeriod} />
             : <p className="dashboard-cell-missing">No owner-tagged companies to compare.</p>;
         case 'transition-risk':
           return results.companyStatement
-            ? <TransitionRiskCard data={results.companyStatement} />
+            ? <TransitionRiskCard data={results.companyStatement} runName={runName} period={selectedPeriod} />
             : <p className="dashboard-cell-missing">No company P&amp;L for this run (needs owner tags and an LP run).</p>;
         case 'adequacy':
           return results.adequacy
@@ -544,14 +534,14 @@ export function AnalyticsDashboard({
             : <p className="dashboard-cell-missing">No piecewise curves in this run (add a &lt;component&gt;-&lt;attribute&gt;-pw sheet in Forge).</p>;
         case 'maintenance':
           return results.maintenance
-            ? <MaintenanceCard data={results.maintenance} />
+            ? <MaintenanceCard data={results.maintenance} hoursInMaintenance={totals.data?.maintenance?.hoursInMaintenance ?? null} />
             : <p className="dashboard-cell-missing">No maintainable units in this run (set <code>maintainable</code> on a generator, link or process).</p>;
         case 'phase-shifters':
           return results.phaseShifters
             ? <PhaseShiftersCard data={results.phaseShifters} />
             : <p className="dashboard-cell-missing">No optimised phase shifters in this run (set <code>phase_shift_min</code> &lt; <code>phase_shift_max</code> on a transformer).</p>;
         case 'setpoint-duals':
-          return <SetpointDualsCard results={results} runName={runName} currencySymbol={currencySymbol} />;
+          return <SetpointDualsCard results={results} runName={runName} period={selectedPeriod} currencySymbol={currencySymbol} />;
         case 'bid-strategy':
           return results.bidStrategy
             ? <BidStrategyCard data={results.bidStrategy} />
@@ -642,23 +632,23 @@ export function AnalyticsDashboard({
             : <p className="dashboard-cell-missing">LMP decomposition was not enabled for this run.</p>;
         case 'emissions-breakdown':
           return results.emissionsBreakdown
-            ? <EmissionsBreakdownCard data={results.emissionsBreakdown} />
+            ? <EmissionsBreakdownCard data={results.emissionsBreakdown} totals={totals.data?.emissions ?? null} />
             : <p className="dashboard-cell-missing">No emissions breakdown available.</p>;
         case 'capacity-expansion':
           return results.expansionResults && results.expansionResults.length > 0
-            ? <CapacityExpansionCard assets={results.expansionResults} currencySymbol={currencySymbol} />
+            ? <CapacityExpansionCard assets={results.expansionResults} currencySymbol={currencySymbol} totals={totals.data?.expansion ?? null} />
             : <p className="dashboard-cell-missing">No capacity expansion in this run.</p>;
         case 'capacity-by-period':
           return results.pathway?.enabled
             ? <CapacityByPeriodCard model={model} results={results} />
             : <p className="dashboard-cell-missing">Pathway not enabled.</p>;
         case 'carrier-analysis':
-          return <CarrierAnalysisCard results={results} currencySymbol={currencySymbol} model={model} />;
+          return <CarrierAnalysisCard runName={runName} period={selectedPeriod} currencySymbol={currencySymbol} />;
         case 'load-analysis':
-          return <LoadAnalysisCard results={results} currencySymbol={currencySymbol} />;
+          return <LoadAnalysisCard runName={runName} period={selectedPeriod} currencySymbol={currencySymbol} />;
         case 'stochastic-scenarios':
           return results.stochastic?.enabled
-            ? <StochasticScenariosCard stochastic={results.stochastic} currencySymbol={currencySymbol} />
+            ? <StochasticScenariosCard stochastic={results.stochastic} currencySymbol={currencySymbol} expected={totals.data?.stochastic ?? null} />
             : <p className="dashboard-cell-missing">Stochastic mode not enabled.</p>;
       }
     } catch (err) {

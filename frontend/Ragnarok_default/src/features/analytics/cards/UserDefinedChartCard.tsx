@@ -11,6 +11,7 @@ import {
 } from 'lib/types';
 import { clamp, numberValue, stringValue } from 'lib/utils/helpers';
 import { aggregateMetricRows, buildDonutFromMetric } from 'lib/results/analytics';
+import { curtailmentFor, withCurtailment } from 'lib/results/curtailOverlay';
 import { EMPTY_METRIC_KEY } from 'lib/constants';
 import { effectiveEndIndex, fullRunTimeline } from 'lib/api/runs';
 import { exportChartToExcel } from 'lib/export/chart';
@@ -176,7 +177,12 @@ export function UserDefinedChartCard({
 
   // `metricRows` holds only the loaded prefix [0, loaded), so display clamps to it
   // until a wider window finishes loading.
-  const metric     = metricOptions.find((m) => m.key === active.metricKey);
+  const baseMetric = metricOptions.find((m) => m.key === active.metricKey);
+  // A dispatch/output chart can carry its curtailment on top (no donut: the
+  // donut is a share of dispatch, and curtailed energy is not part of it).
+  const curtailment = curtailmentFor(baseMetric, metricOptions);
+  const overlayCurtailment = Boolean(active.showCurtailment && curtailment && active.chartType !== 'donut');
+  const metric     = overlayCurtailment ? withCurtailment(baseMetric!, curtailment!) : baseMetric;
   const hasMetric  = Boolean(metric);
   const metricRows = metric?.rows || [];
 
@@ -371,6 +377,18 @@ export function UserDefinedChartCard({
                 { value: 'normal', label: 'Normal' },
               ]}
               onChange={(v) => patch({ ...active, stacked: v === 'stacked' })}
+            />
+          </label>
+        )}
+
+        {/* Curtailment overlay — only where this focus has a curtailment metric */}
+        {curtailment && active.chartType !== 'donut' && (
+          <label className="chart-control">
+            <span>Curtailment</span>
+            <SearchableSelect
+              value={active.showCurtailment ? 'show' : 'hide'}
+              options={[{ value: 'hide', label: 'Hide' }, { value: 'show', label: 'Show (stacked on top)' }]}
+              onChange={(v) => patch({ ...active, showCurtailment: v === 'show' })}
             />
           </label>
         )}

@@ -26,6 +26,27 @@ import pypsa
 _ROUND = 12
 
 
+def name_dynamic_axes(network: pypsa.Network) -> None:
+    """Give every per-component time-series frame PyPSA's axis names (``name`` columns).
+
+    PyPSA's own solve names the column axis ``name``, and ``n.statistics.revenue``
+    relies on it (``static["bus"][df.columns]`` then ``.droplevel("name")``). A
+    frame written by hand or from stored outputs has an *unnamed* column axis.
+    pandas 3.1 keeps the Series' own index name when selecting with an unnamed
+    ``Index``; pandas 3.0.5 takes the key's (``None``), so ``droplevel("name")``
+    raises ``KeyError`` — which PyPSA swallows into an empty result
+    (``pass_empty_series_if_keyerror``), so revenue silently reads as nothing.
+    Naming the axis makes both versions identical. Idempotent; renames labels only.
+
+    Args:
+        network: network whose ``*_t`` frames may carry unnamed axes.
+    """
+    for component in network.components.values():
+        for frame in component.dynamic.values():
+            if isinstance(frame, pd.DataFrame) and frame.columns.name is None:
+                frame.columns.name = "name"
+
+
 def asset_statistic(
     network: pypsa.Network,
     name: str,
@@ -45,6 +66,7 @@ def asset_statistic(
         **kwargs: forwarded to the statistic (``at_port``, ``direction`` ...).
     """
     method = getattr(network.statistics, name)
+    name_dynamic_axes(network)
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")

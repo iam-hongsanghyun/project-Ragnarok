@@ -74,7 +74,7 @@ export function ModelView(props: ModelViewProps) {
             seriesSheetCounts={props.seriesSheetCounts}
           />
         </section>
-        <section className="model-column model-column-table">
+        <section className="model-column model-column-table" data-tour="model-table">
           <TablesPane
             model={props.model}
             sel={sel}

@@ -1,8 +1,11 @@
 #!/bin/bash
+cd "$(dirname "$0")" || exit 1
+# A double-clicked .command gets a minimal PATH: no Homebrew, and no /sbin or /usr/sbin
+# (md5 and lsof live there). Put the usual locations back first.
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$ROOT_DIR"
+ROOT_DIR="$PWD"
 
 VENV_DIR=".venv-pypsa"
 REQ_HASH_FILE="$VENV_DIR/.req_hash"
@@ -18,7 +21,7 @@ need_cmd() { command -v "$1" >/dev/null 2>&1 || die "$1 not found. $2"; }
 # ── Dependency checks ─────────────────────────────────────────────────────────
 
 need_cmd npm "Install Node.js (includes npm) from https://nodejs.org"
-need_cmd git "Install Git from https://git-scm.com (required for the PyPSA dependency)"
+# git is not needed: every dependency installs from PyPI.
 
 # Find Python 3.11+
 PREFERRED_PYTHON=""
@@ -142,7 +145,17 @@ cleanup() {
     [ -n "$pid" ] && kill "$pid" >/dev/null 2>&1 || true
   done
 }
-trap cleanup EXIT INT TERM
+# Stop the children on every exit, then keep the Terminal window open so the last
+# message (what failed, where the log is) stays on screen.
+on_exit() {
+  local rc=$?
+  cleanup
+  echo ""
+  echo "Ragnarok has stopped (exit code $rc)."
+  read -r -p "Press Return to close this window. " _ 2>/dev/null < /dev/tty || true
+}
+trap on_exit EXIT
+trap 'exit 130' INT TERM
 
 # Dev-mode launcher: enable uvicorn --reload so backend Python edits are
 # picked up without manually restarting run.command (the source of last

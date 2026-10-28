@@ -5,15 +5,18 @@
  * of re-deriving them from raw output series.
  *
  *   GET /api/results/compare?runs=a,b&topics=...   -> {items, total, topics}
- *   GET /api/runs/{name}/kpis?currency=            -> {run, kpis}
- *   GET /api/runs/{name}/companies?sort_by=        -> {run, items, total, currency, sortedBy, metrics}
- *   GET /api/runs/{name}/assets?kind=&names=&series=  -> {run, items, total, offset, limit}
+ *   GET /api/runs/{name}/kpis?currency=&period=    -> {run, period, kpis}
+ *   GET /api/runs/{name}/companies?sort_by=&period= -> {run, period, items, total, currency, sortedBy, metrics}
+ *   GET /api/runs/{name}/assets?kind=&names=&series=&period=&end=  -> {run, items, total, offset, limit}
+ *   GET /api/runs/{name}/period/{period}?currency= -> {run, period, result}  (one investment period of a pathway run)
  *   GET /api/runs/{name}/metrics?focus=&keys=&groupBy=...  -> {run, focus, items: MetricOption[], total}
+ *   GET /api/runs/{name}/analysis/{topic}?period=...  -> card analytics (load, carrier performance,
+ *       transition risk, duration curve, totals); see `fetchRunAnalysis`
  */
 import { API_BASE } from 'lib/constants';
 import type {
   AnalyticsFocus, BranchDetail, BusDetail, GeneratorDetail, GroupByOption, MetricOption, ProcessDetail,
-  ShuntImpedanceDetail, StorageUnitDetail, StoreDetail, SummaryItem,
+  RunResults, ShuntImpedanceDetail, StorageUnitDetail, StoreDetail, SummaryItem,
 } from 'lib/types';
 
 async function getJson<T>(path: string, what: string): Promise<T> {
@@ -78,8 +81,23 @@ export interface RunKpis {
   currencySymbol: string;
 }
 
-export const fetchRunKpis = (run: string, currency: string): Promise<{ run: string; kpis: RunKpis }> =>
-  getJson(`/api/runs/${enc(run)}/kpis?currency=${enc(currency)}`, 'KPIs');
+export const fetchRunKpis = (
+  run: string, currency: string, period?: number | null,
+): Promise<{ run: string; period: number | null; kpis: RunKpis }> =>
+  getJson(`/api/runs/${enc(run)}/kpis?currency=${enc(currency)}${period != null ? `&period=${period}` : ''}`, 'KPIs');
+
+// ── One investment period of a pathway run ───────────────────────────────────
+
+/** The result payload of one investment period (same shape as the run's analytics `result`,
+ *  without `outputs`): every figure in it is `n.statistics` on that period's slice. */
+export interface PeriodResponse {
+  run: string;
+  period: number;
+  result: RunResults;
+}
+
+export const fetchRunPeriod = (run: string, period: number, currency?: string): Promise<PeriodResponse> =>
+  getJson(`/api/runs/${enc(run)}/period/${period}${currency ? `?currency=${enc(currency)}` : ''}`, 'Period results');
 
 // ── Company comparison ────────────────────────────────────────────────────────
 
@@ -99,6 +117,7 @@ export interface CompanyMetricDef { key: string; label: string; higherBetter: bo
 
 export interface CompanyComparison {
   run: string;
+  period?: number | null;
   items: CompanyRow[];
   total: number;
   currency: string;
@@ -106,8 +125,13 @@ export interface CompanyComparison {
   metrics: CompanyMetricDef[];
 }
 
-export const fetchRunCompanies = (run: string, sortBy?: string): Promise<CompanyComparison> =>
-  getJson(`/api/runs/${enc(run)}/companies${sortBy ? `?sort_by=${enc(sortBy)}` : ''}`, 'Company comparison');
+export const fetchRunCompanies = (run: string, sortBy?: string, period?: number | null): Promise<CompanyComparison> => {
+  const params = new URLSearchParams();
+  if (sortBy) params.set('sort_by', sortBy);
+  if (period != null) params.set('period', String(period));
+  const qs = params.toString();
+  return getJson(`/api/runs/${enc(run)}/companies${qs ? `?${qs}` : ''}`, 'Company comparison');
+};
 
 // ── Per-asset details ─────────────────────────────────────────────────────────
 
@@ -143,6 +167,24 @@ export const fetchRunAssets = (
     'Asset details',
   );
 
+/** Details (with series) of EVERY asset of one kind, paged; `end` = first N snapshots of the period. */
+export async function fetchRunAssetKind(
+  run: string, kind: AssetKind, currency: string, opts: { period?: number | null; end?: number | null } = {},
+): Promise<AssetItem[]> {
+  const out: AssetItem[] = [];
+  const limit = 500;
+  for (let offset = 0; ; offset += limit) {
+    const page = await getJson<AssetsResponse>(
+      `/api/runs/${enc(run)}/assets?kind=${kind}&series=true&currency=${enc(currency)}&offset=${offset}&limit=${limit}`
+        + (opts.period != null ? `&period=${opts.period}` : '')
+        + (opts.end != null ? `&end=${opts.end}` : ''),
+      'Asset details',
+    );
+    out.push(...page.items);
+    if (offset + limit >= page.total) return out;
+  }
+}
+
 // ── Per-asset chart metrics ───────────────────────────────────────────────────
 
 export interface MetricsQuery {
@@ -176,3 +218,199 @@ export const fetchRunMetrics = (run: string, q: MetricsQuery): Promise<MetricsRe
   if (q.end != null) params.set('end', String(q.end));
   return getJson(`/api/runs/${enc(run)}/metrics?${params.toString()}`, 'Chart metrics');
 };
+
+// ── Card analytics (load factor, carrier performance, transition risk, duration curve, totals) ──
+
+export interface LoadAnalysisBus {
+  name: string;
+  peakMw: number;
+  energyMwh: number;
+  /** mean / peak, null when the bus never draws power. */
+  loadFactor: number | null;
+  /** Fraction of the system energy (0..1). */
+  share: number;
+}
+
+export interface LoadAnalysis {
+  run: string;
+  topic: 'load-analysis';
+  period: number | null;
+  systemPeakMw: number;
+  systemEnergyMwh: number;
+  systemLoadFactor: number | null;
+  coincidenceFactor: number | null;
+  /** Buses with energy, largest first. */
+  buses: LoadAnalysisBus[];
+  total: number;
+}
+
+export interface CarrierPerformanceRow {
+  carrier: string;
+  color: string;
+  generatorCount: number;
+  nameplateMw: number;
+  capacityShare: number;
+  generatedMw: number;
+  energyMwh: number;
+  generationShare: number;
+  capacityFactor: number | null;
+  curtailmentMwh: number | null;
+}
+
+export interface CarrierPerformance {
+  run: string;
+  topic: 'carrier-performance';
+  period: number | null;
+  rows: CarrierPerformanceRow[];
+  total: number;
+  totals: {
+    generatorCount: number;
+    nameplateMw: number;
+    generatedMw: number;
+    energyMwh: number;
+    curtailmentMwh: number | null;
+  } | null;
+}
+
+export interface TransitionRiskQuery {
+  baseYear: number;
+  years: number;
+  basePrice: number;
+  escalationPct: number;
+  strandedThreshold: number;
+  demandGrowthPct: number;
+  fuelGrowthPct: number;
+}
+
+export interface TransitionYearPoint {
+  year: number;
+  price: number;
+  carbonCost: number;
+  netMargin: number;
+  stranded: boolean;
+}
+
+export interface CompanyRisk {
+  company: string;
+  baseNetMargin: number;
+  emissionsTonnes: number;
+  byYear: TransitionYearPoint[];
+  strandedYear: number | null;
+  marginErosion: number;
+}
+
+export interface TransitionRisk {
+  run: string;
+  topic: 'transition-risk';
+  period: number | null;
+  baseYear: number;
+  strandedThreshold: number;
+  currency: string;
+  trajectory: Array<{ year: number; price: number }>;
+  companies: CompanyRisk[];
+  summary: {
+    companyCount: number;
+    strandedCount: number;
+    earliestStrandedYear: number | null;
+    totalMarginAtRisk: number;
+  };
+}
+
+export interface DurationCurve {
+  run: string;
+  topic: 'duration-curve';
+  period: number | null;
+  source: 'price' | 'load';
+  /** Ranked descending (the load curve omits non-positive snapshots). */
+  values: number[];
+  total: number;
+}
+
+/** Sums over result rows; every block is null when the run has no such section. */
+export interface ResultTotals {
+  run: string;
+  topic: 'totals';
+  period: number | null;
+  expansion: { newBuildCount: number; totalCapexAnnual: number; totalNewBuildMw: number } | null;
+  /** Candidates a siting scan added (`siting_*` expansion assets): MW built per site bus and the annual capex. */
+  siting: {
+    builtMwBySiteBus: Record<string, number>;
+    builtTotalMw: number;
+    capexAnnual: number;
+    assets: string[];
+  } | null;
+  emissions: {
+    totalTco2: number;
+    totalEnergyMwh: number;
+    averageIntensityKgPerMwh: number;
+    byCarrier: Array<{ carrier: string; sharePct: number }>;
+  } | null;
+  companies: { ownerEmissionsTonnes: number; systemEmissionsTonnes: number; totalNpv: number } | null;
+  /** Company P&L statement: owners' emissions plus the unassigned emissions. */
+  statement: { systemEmissionsTonnes: number } | null;
+  meritOrder: {
+    totalMw: number;
+    systemPeakLoadMw: number | null;
+    minMarginalCost: number;
+    maxMarginalCost: number;
+  } | null;
+  stochastic: {
+    expectedEnergyMwh: number;
+    expectedEmissionsTco2: number;
+    expectedOperatingCost: number;
+    expectedLoadShedMwh: number;
+  } | null;
+  maintenance: { hoursInMaintenance: number } | null;
+}
+
+export interface DualRow {
+  component: string;
+  attribute: string;
+  asset: string;
+  /** Snapshots where |dual| exceeds the tolerance. */
+  bindingSnapshots: number;
+  /** Binding snapshots weighted by the snapshot weighting. */
+  bindingHours: number;
+  totalSnapshots: number;
+  /** Dual (currency/MWh) of largest magnitude, signed. */
+  peakShadowPrice: number;
+  peakAt: string;
+  /** Mean |dual| over the binding snapshots (currency/MWh). */
+  meanShadowPrice: number;
+  /** Run-length encoding of the binding pattern, for a strip chart. */
+  segments: Array<{ on: boolean; length: number }>;
+}
+
+/** Ramp-limit / set-point duals: assets that bind at least once, strongest peak first. */
+export interface SetpointDuals {
+  run: string;
+  topic: 'setpoint-duals';
+  period: number | null;
+  sheets: string[];
+  rows: DualRow[];
+  total: number;
+  /** Assets that carry the dual at all (binding or slack). */
+  assetsChecked: number;
+  totalSnapshots: number;
+  /** Binding hours summed over the listed constraints. */
+  bindingHours: number;
+}
+
+export interface AnalysisTopics {
+  'load-analysis': LoadAnalysis;
+  'carrier-performance': CarrierPerformance;
+  'transition-risk': TransitionRisk;
+  'duration-curve': DurationCurve;
+  'setpoint-duals': SetpointDuals;
+  totals: ResultTotals;
+}
+
+/** One analysis topic of a stored run, evaluated on the server (one pathway period with `period`). */
+export function fetchRunAnalysis<T extends keyof AnalysisTopics>(
+  run: string, topic: T, query: Record<string, string | number | null | undefined> = {},
+): Promise<AnalysisTopics[T]> {
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(query)) if (v !== null && v !== undefined) params.set(k, String(v));
+  const qs = params.toString();
+  return getJson(`/api/runs/${enc(run)}/analysis/${topic}${qs ? `?${qs}` : ''}`, `Analysis ${topic}`);
+}

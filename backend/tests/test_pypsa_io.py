@@ -94,7 +94,19 @@ def test_netcdf_options_compression_float32_standard_types(tmp_path):
     small, _, _ = pypsa_io.export_network_bytes(
         n, "netcdf", {"netcdfCompression": True, "netcdfFloat32": True}
     )
-    assert len(small) < len(plain)
+    # The 4-snapshot toy is all HDF5 container overhead (+-30 bytes either way, and
+    # it flips with the process/pandas state), so a size claim needs real data. PyPSA 1.4
+    # already zlib-compresses by default, so what shrinks the file is float32: use
+    # incompressible random loads (seeded) where halving the width must show.
+    big = _net()
+    big.set_snapshots(pd.date_range("2030-01-01", periods=2000, freq="h"))
+    loads = np.random.default_rng(0).uniform(10.0, 40.0, 2000)
+    big.loads_t.p_set = pd.DataFrame({"L": loads}, index=big.snapshots)
+    big_plain, _, _ = pypsa_io.export_network_bytes(big, "netcdf")
+    big_small, _, _ = pypsa_io.export_network_bytes(
+        big, "netcdf", {"netcdfCompression": True, "netcdfFloat32": True}
+    )
+    assert len(big_small) < len(big_plain) - 4000
     p = tmp_path / "x.nc"
     p.write_bytes(small)
     back = pypsa.Network()

@@ -10,6 +10,7 @@
  * no browser-side history rail anymore.
  */
 import React from 'react';
+import type { AssetKind } from 'lib/api/resultsDerived';
 import { LatLngBoundsExpression } from 'leaflet';
 import {
   AnalyticsFocus,
@@ -63,8 +64,6 @@ export interface AnalyticsViewProps {
   setChartSections: React.Dispatch<React.SetStateAction<ChartSectionConfig[]>>;
   dispatchRows: TimeSeriesRow[];
   dispatchSeries: TimeSeriesSeries[];
-  systemLoadRows: TimeSeriesRow[];
-  systemPriceRows: TimeSeriesRow[];
   storageRows: TimeSeriesRow[];
   currencySymbol: string;
   pathwayConfig: PathwayConfig;
@@ -72,6 +71,9 @@ export interface AnalyticsViewProps {
   /** Lazily hydrate the per-asset output-series sheets the dashboard needs,
    *  each at the max snapshot count requested (the chart's slider right edge). */
   onNeedSeries?: (windows: Record<string, number>) => void;
+  onNeedAssets?: (kinds: Partial<Record<AssetKind, number>>) => void;
+  /** Loading / error state of the selected investment period's server payload. */
+  periodStatus?: { period: number | null; loading: boolean; error: string | null };
 
   // Comparison — backend metas are the single source of truth.
   backendRuns: BackendRunMeta[];
@@ -83,7 +85,7 @@ export function AnalyticsView(props: AnalyticsViewProps) {
 
   return (
     <div className="analytics-view">
-      <div className="analytics-view-main">
+      <div className="analytics-view-main" data-tour="analytics-view">
       <ViewPaneHeader variant="analytics">
         <AnalyticsSubnav
           subTab={analyticsSubTab}
@@ -143,14 +145,14 @@ export function AnalyticsView(props: AnalyticsViewProps) {
             setChartSections={props.setChartSections}
             dispatchRows={props.dispatchRows}
             dispatchSeries={props.dispatchSeries}
-            systemLoadRows={props.systemLoadRows}
-            systemPriceRows={props.systemPriceRows}
             storageRows={props.storageRows}
             subTab={analyticsSubTab}
             currencySymbol={props.currencySymbol}
             pathwayConfig={props.pathwayConfig}
             onSelectedPeriodChange={props.onSelectedPeriodChange}
             onNeedSeries={props.onNeedSeries}
+            onNeedAssets={props.onNeedAssets}
+            periodStatus={props.periodStatus}
             runName={props.activeRunName}
           />
         )

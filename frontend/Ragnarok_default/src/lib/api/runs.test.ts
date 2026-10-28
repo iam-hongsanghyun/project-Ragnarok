@@ -2,7 +2,7 @@ import { describe, it, expect } from '@jest/globals';
 import { seriesRowsFromWindow } from './runs';
 
 // `seriesRowsFromWindow` normalises a stored-run series window into the row
-// shape `deriveAssetDetails` reads: each row keyed by component name plus a
+// shape the pivot and duals cards read: each row keyed by component name plus a
 // `snapshot` index. The light "View" bundle strips these series; hydration
 // fetches them back, so this reshape is the seam between the two.
 describe('seriesRowsFromWindow', () => {

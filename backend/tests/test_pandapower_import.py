@@ -47,10 +47,12 @@ def test_garbage_json_is_400() -> None:
 
 
 def test_missing_env_is_501(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(pypsa_io, "pandapower_python", lambda: None)
+    """An override that points nowhere is a failed state: 501 with the reason and the log."""
+    monkeypatch.setenv("RAGNAROK_PANDAPOWER_PYTHON", "/nonexistent/ragnarok-test/python")
     r = client.post("/api/import/pandapower", files={"file": ("n.json", b"{}")})
     assert r.status_code == 501
-    assert "setup_pandapower_env" in r.json()["detail"]
+    assert "pandapower is not available" in r.json()["detail"]
+    assert "pandapower-setup.log" in r.json()["detail"]
 
 
 def test_duplicate_and_null_names_are_made_unique() -> None:

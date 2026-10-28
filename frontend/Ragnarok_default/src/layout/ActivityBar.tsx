@@ -135,6 +135,7 @@ export function ActivityBar({ tab, onTabChange, validateResult, pluginCount, ena
           <button
             key={e.id}
             className={`activity-bar-btn${tab === e.id ? ' is-active' : ''}`}
+            data-tour={`nav-${e.id.toLowerCase()}`}
             onClick={() => onTabChange(e.id)}
             aria-label={e.label}
             aria-current={tab === e.id ? 'page' : undefined}

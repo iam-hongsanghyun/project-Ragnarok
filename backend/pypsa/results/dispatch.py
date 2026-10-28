@@ -576,7 +576,8 @@ def build_storage_soc_series(network: pypsa.Network) -> list[dict]:
         units = [u for u in soc.columns if u in static.index]
         if not units:
             continue
-        carriers = static.loc[units, "carrier"].astype(str)
+        # Blank carrier = the default electrical carrier, as everywhere else (dispatch, energy balance).
+        carriers = static.loc[units, "carrier"].astype(str).replace("", "AC")
         frames.append(soc[units].T.groupby(carriers).sum().T)  # snapshots x carriers
     if not frames:
         return [

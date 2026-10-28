@@ -447,6 +447,7 @@ def _build_buses(c: _Ctx, names: set[str] | None) -> dict[str, Any]:
         price_avg = price_avg / price_count if price_count else 0.0
         out[name] = {
             "name": name,
+            "averageSmp": price_avg,
             "summary": [
                 {"label": "Average load", "value": f"{fmt(load_avg)} MW", "detail": f"{len(loads)} load(s) attached"},
                 {"label": "Average generation", "value": f"{fmt(gen_avg)} MW", "detail": f"{len(gens)} generator(s) attached"},
@@ -1094,11 +1095,19 @@ def compare_companies(result: dict[str, Any], sort_by: str | None = None) -> dic
     for c in (finance or {}).get("companies") or []:
         r = get(c["company"])
         r.update(npv=c.get("npv"), irr=c.get("irr"), paybackYears=c.get("paybackYears"))
+    # The breakdown's revenue/energy/emissions are modelled-window sums; the statement's
+    # are the same flows annualised (x 8760/H). With a statement, take the annual ones so
+    # the row sits on one basis beside "Net margin/yr"; without it, say "window".
+    annual = bool(statement)
     for c in (statement or {}).get("companies") or []:
-        get(c["company"])["netMargin"] = c.get("netMargin")
+        r = get(c["company"])
+        r["netMargin"] = c.get("netMargin")
+        r.update(revenue=c.get("revenue"), energyMWh=c.get("energyMWh"), emissionsTonnes=c.get("emissionsTonnes"))
 
+    window_labels = {"revenue": "Revenue (window)", "emissionsTonnes": "Emissions (window)"}
+    annual_labels = {"revenue": "Revenue/yr", "emissionsTonnes": "Emissions/yr"}
     metrics = [
-        {"key": k, "label": lbl, "higherBetter": hb}
+        {"key": k, "label": (annual_labels if annual else window_labels).get(k, lbl), "higherBetter": hb}
         for k, lbl, hb, needs in _COMPANY_METRICS
         if needs is None or (needs == "finance" and finance) or (needs == "statement" and statement)
     ]
@@ -1235,3 +1244,417 @@ def run_comparison_entry(name: str, analytics: dict[str, Any], topics: list[str]
         entry["dispatchSeries"] = series[::stride]
         entry["dispatchStride"] = stride
     return entry
+
+
+# ── card analytics moved off the browser (P28 close) ─────────────────────────
+# One home per metric: the Analytics cards below used to compute these from
+# per-snapshot series in TypeScript. They are served by
+# ``GET /api/runs/{name}/analysis/{topic}`` and the MCP tool ``get_run_analysis``.
+
+ANALYSIS_TOPICS = (
+    "load-analysis", "carrier-performance", "transition-risk", "duration-curve", "setpoint-duals", "totals",
+)
+
+DUAL_ATTRIBUTES = ("mu_ramp_limit_up", "mu_ramp_limit_down", "mu_p_set", "mu_state_of_charge_set")
+_DUAL_SHEET = re.compile(rf"^([a-z_]+)-({'|'.join(DUAL_ATTRIBUTES)})$")
+_DUAL_INDEX_COLUMNS = {"snapshot", "period", "timestep", "name"}
+
+
+def _num(value: Any) -> float:
+    """A finite float, 0 for anything else (a JSON ``null`` / string / NaN)."""
+    n = number_value(value)
+    return n if math.isfinite(n) else 0.0
+
+
+def _js_round2(x: float) -> float:
+    """``Math.round(x * 100) / 100`` (round half up), as the TS card displayed it."""
+    return math.floor(x * 100 + 0.5) / 100
+
+
+def load_analysis(buses: dict[str, Any], snapshot_weight: float) -> dict[str, Any]:
+    """System and per-bus demand utilisation from the buses' ``netSeries``.
+
+    Algorithm:
+        $$LF = \\frac{\\bar P}{P_{peak}},\\quad
+          CF = \\frac{\\max_t \\sum_b P_{b,t}}{\\sum_b \\max_t P_{b,t}},\\quad
+          E_b = w \\sum_t P_{b,t},\\quad s_b = E_b / \\sum_b E_b$$
+        ASCII: LF = mean(P) / max(P); CF = system peak / sum of bus peaks;
+        E_b = w * sum_t P_bt; share_b = E_b / sum E.
+        $P_{b,t}$ = non-negative load of bus $b$ at snapshot $t$ (MW); $w$ = snapshot weight (h).
+
+    Peak, load factor and coincidence have no ``n.statistics`` counterpart; the
+    per-bus energy equals ``n.statistics.withdrawal(components="Load", groupby="bus")``
+    for fixed loads (pinned in ``test_p28_card_analysis``).
+
+    Returns:
+        ``{systemPeakMw, systemEnergyMwh, systemLoadFactor, coincidenceFactor, buses, total}``;
+        ``buses`` lists only buses with energy, largest first. Ratios are ``None`` when undefined.
+    """
+    details = list(buses.values())
+    rows: list[dict[str, Any]] = []
+    for d in details:
+        loads = [max(0.0, _num(p.get("load"))) for p in d.get("netSeries") or []]
+        if not loads:
+            rows.append({"name": d["name"], "peakMw": 0.0, "energyMwh": 0.0, "loadFactor": None, "share": 0.0})
+            continue
+        peak = max(loads)
+        total = sum(loads)
+        rows.append({
+            "name": d["name"], "peakMw": peak, "energyMwh": total * snapshot_weight,
+            "loadFactor": (total / len(loads)) / peak if peak > 0 else None, "share": 0.0,
+        })
+    total_energy = sum(r["energyMwh"] for r in rows)
+    for r in rows:
+        r["share"] = r["energyMwh"] / total_energy if total_energy > 0 else 0.0
+    rows.sort(key=lambda r: -r["energyMwh"])
+    n = len(details[0].get("netSeries") or []) if details else 0
+    system_at_t = [
+        sum(max(0.0, _num((d["netSeries"][i] if i < len(d.get("netSeries") or []) else {}).get("load"))) for d in details)
+        for i in range(n)
+    ]
+    system_peak = max(system_at_t, default=0.0)
+    system_avg = sum(system_at_t) / n if n else 0.0
+    sum_bus_peaks = sum(r["peakMw"] for r in rows)
+    kept = [r for r in rows if r["energyMwh"] > 0] if total_energy > 0 else []
+    return {
+        "systemPeakMw": system_peak,
+        "systemEnergyMwh": total_energy,
+        "systemLoadFactor": system_avg / system_peak if system_peak > 0 else None,
+        "coincidenceFactor": system_peak / sum_bus_peaks if sum_bus_peaks > 0 else None,
+        "buses": kept,
+        "total": len(kept),
+    }
+
+
+def select_generator_energy(entries: list[Row] | None, period: int | None) -> list[Row]:
+    """One family of ``generatorEnergy`` entries (``lib/results/analytics.ts``): the period's own
+    rows when present, else the period-less whole-horizon rows (mixing them double counts)."""
+    entries = entries or []
+
+    def has_period(e: Row) -> bool:
+        return e.get("period") is not None
+
+    if period is not None:
+        own = [e for e in entries if has_period(e) and int(_num(e.get("period"))) == int(period)]
+        if own:
+            return own
+    return [e for e in entries if not has_period(e)]
+
+
+def _active_in_period(row: Row, period: int) -> bool:
+    """Whether an asset exists in an investment period: ``build_year <= period < build_year + lifetime``.
+
+    The rule of ``pypsa.Network.get_active_assets`` (and of ``stat_metrics``, which counts an asset
+    outside it as 0); an ``active`` flag of false switches the asset off in every period. A blank
+    ``build_year`` is 0 and a blank or non-finite ``lifetime`` is unlimited.
+    """
+    flag = row.get("active")
+    if flag is False or string_value(flag).lower() in ("false", "0"):
+        return False
+    build_year = _num(row.get("build_year"))
+    lifetime = number_value(row.get("lifetime"))
+    if not math.isfinite(lifetime) or lifetime <= 0:
+        lifetime = math.inf
+    return build_year <= period < build_year + lifetime
+
+
+def carrier_performance(
+    result: dict[str, Any],
+    model_static: dict[str, Any] | None,
+    outputs_static: dict[str, Any] | None,
+    period: int | None = None,
+) -> dict[str, Any]:
+    """The Carrier performance table: nameplate, generated capacity, energy, shares, CF, curtailment.
+
+    Nameplate is the solved ``p_nom_opt`` of every installed generator (input ``p_nom`` when no
+    solved value); *generated* capacity is the nameplate of units that produced energy.
+    Capacity factor is ``generatorEconomics.byCarrier[].capacityFactor`` (``n.statistics.capacity_factor``,
+    capacity-weighted); energy and curtailment are ``generatorEnergy`` (``n.statistics.supply`` /
+    ``curtailment``). The load-shedding backstop is excluded.
+
+    In a pathway period view (``period`` given) a generator not yet built or already retired in that
+    period is left out: it contributes 0 to the count and the nameplate, the rule every other period
+    view applies (:func:`_active_in_period`). The whole-horizon view keeps every installed unit.
+    """
+    meta = result.get("runMeta") or {}
+    weight = _num(meta.get("snapshotWeight")) or 1.0
+    empty = {"rows": [], "total": 0, "totals": None}
+    if _num(meta.get("snapshotCount")) * weight <= 0:
+        return empty
+    gen_energy = select_generator_energy(result.get("generatorEnergy"), period)
+    ge_by_name = {str(g["name"]): g for g in gen_energy if g.get("name")}
+    static_gens = ((outputs_static or {}).get("generators") or {})
+    carriers = (model_static or {}).get("carriers")
+
+    def nameplate_of(name: str, p_nom_in: float) -> float:
+        opt = _num((static_gens.get(name) or {}).get("p_nom_opt"))
+        return opt if opt > 0 else p_nom_in
+
+    recs: dict[str, dict[str, Any]] = {}
+
+    def add(name: str, carrier: str, nameplate: float) -> None:
+        if not name or name.startswith("load_shedding_") or name in recs:
+            return
+        ge = ge_by_name.get(name)
+        curt = ge.get("curtailmentMwh") if ge else None
+        recs[name] = {
+            "carrier": carrier or "Other", "nameplate": nameplate,
+            "energy": _num(ge.get("value")) if ge else 0.0,
+            "curt": _num(curt), "hasCurt": curt is not None,
+        }
+
+    gens = (model_static or {}).get("generators") or []
+    if gens:
+        for r in gens:
+            name = string_value(r.get("name"))
+            if period is not None and not _active_in_period(r, int(period)):
+                continue
+            add(name, string_value(r.get("carrier")), nameplate_of(name, _num(r.get("p_nom"))))
+    else:
+        for name in dict.fromkeys([*static_gens, *ge_by_name]):
+            add(name, string_value((ge_by_name.get(name) or {}).get("carrier")) or "Other",
+                nameplate_of(name, _num((static_gens.get(name) or {}).get("p_nom"))))
+    if not recs:
+        return empty
+    buckets: dict[str, dict[str, Any]] = {}
+    for r in recs.values():
+        b = buckets.setdefault(r["carrier"], {"count": 0, "nameplate": 0.0, "generated": 0.0, "energy": 0.0, "curt": 0.0, "hasCurt": False})
+        b["count"] += 1
+        b["nameplate"] += r["nameplate"]
+        if r["energy"] > 0:
+            b["generated"] += r["nameplate"]
+        b["energy"] += r["energy"]
+        if r["hasCurt"]:
+            b["curt"] += r["curt"]
+            b["hasCurt"] = True
+    total_name = sum(b["nameplate"] for b in buckets.values())
+    total_energy = sum(b["energy"] for b in buckets.values())
+    cf = {
+        c.get("carrier"): c.get("capacityFactor")
+        for c in (result.get("generatorEconomics") or {}).get("byCarrier") or []
+    }
+    rows = sorted(
+        (
+            {
+                "carrier": c, "color": carrier_color(c, carriers), "generatorCount": b["count"],
+                "nameplateMw": b["nameplate"], "capacityShare": b["nameplate"] / total_name if total_name > 0 else 0.0,
+                "generatedMw": b["generated"], "energyMwh": b["energy"],
+                "generationShare": b["energy"] / total_energy if total_energy > 0 else 0.0,
+                "capacityFactor": cf.get(c), "curtailmentMwh": b["curt"] if b["hasCurt"] else None,
+            }
+            for c, b in buckets.items()
+        ),
+        key=lambda r: -r["energyMwh"],
+    )
+    totals = {
+        "generatorCount": sum(r["generatorCount"] for r in rows), "nameplateMw": total_name,
+        "generatedMw": sum(r["generatedMw"] for r in rows), "energyMwh": total_energy,
+        "curtailmentMwh": sum(r["curtailmentMwh"] or 0.0 for r in rows) if any(r["curtailmentMwh"] is not None for r in rows) else None,
+    }
+    return {"rows": rows, "total": len(rows), "totals": totals}
+
+
+def transition_risk(
+    statement: dict[str, Any], *, base_year: int = 2030, years: int = 20, base_price: float = 50.0,
+    escalation_pct: float = 5.0, stranded_threshold: float = 0.0, demand_growth_pct: float = 0.0,
+    fuel_growth_pct: float = 0.0,
+) -> dict[str, Any]:
+    """Reprice carbon over a forward trajectory (R2), holding dispatch and revenue at the solved outcome.
+
+    Algorithm:
+        Per company and year $i = 0..N$ (all in currency/yr):
+        $$m_i = R\\,d_i - V\\,d_i f_i - E\\,d_i\\,P_i - (K + I),\\quad
+          P_i = P_0 (1+e)^i,\\; d_i = (1+g_d)^i,\\; f_i = (1+g_f)^i$$
+        ASCII: margin_i = R*d_i - V*d_i*f_i - E*d_i*P_i - (K + I).
+        $R$ revenue, $V$ fuel+VOM cost, $E$ emissions (t), $K$ annualised capex, $I$ interest,
+        $P_0$ base carbon price (currency/t), $e$ escalation, $g_d$ demand and $g_f$ fuel-price growth.
+        A company is stranded in the first year $m_i \\le$ threshold; margin-at-risk is
+        $\\sum_i \\max(0, m_{base} - m_i)$.
+
+    Returns:
+        ``{baseYear, strandedThreshold, currency, trajectory, companies, summary}`` with
+        ``summary = {companyCount, strandedCount, earliestStrandedYear, totalMarginAtRisk}``.
+    """
+    n_years = max(1, math.floor(float(years) + 0.5))
+    esc, demand_rate, fuel_rate = escalation_pct / 100, demand_growth_pct / 100, fuel_growth_pct / 100
+    trajectory = [{"year": base_year + i, "price": base_price * (1 + esc) ** i} for i in range(n_years + 1)]
+    companies: list[dict[str, Any]] = []
+    for c in statement.get("companies") or []:
+        emissions = _num(c.get("emissionsTonnes"))
+        fixed = _num(c.get("capexAnnual")) + _num(c.get("interest"))
+        revenue0, fuel0 = _num(c.get("revenue")), _num(c.get("fuelVomCost"))
+        stranded_year: int | None = None
+        base_margin = revenue0 - fuel0 - fixed
+        by_year: list[dict[str, Any]] = []
+        for i, pt in enumerate(trajectory):
+            d, f = (1 + demand_rate) ** i, (1 + fuel_rate) ** i
+            carbon = emissions * d * pt["price"]
+            margin = revenue0 * d - fuel0 * d * f - carbon - fixed
+            stranded = margin <= stranded_threshold
+            if pt["year"] == base_year:
+                base_margin = margin
+            if stranded and stranded_year is None:
+                stranded_year = pt["year"]
+            by_year.append({
+                "year": pt["year"], "price": _js_round2(pt["price"]), "carbonCost": _js_round2(carbon),
+                "netMargin": _js_round2(margin), "stranded": stranded,
+            })
+        erosion = sum(max(0.0, base_margin - p["netMargin"]) for p in by_year)
+        companies.append({
+            "company": c.get("company"), "baseNetMargin": _js_round2(base_margin), "emissionsTonnes": emissions,
+            "byYear": by_year, "strandedYear": stranded_year, "marginErosion": _js_round2(erosion),
+        })
+    companies.sort(key=lambda r: -r["marginErosion"])
+    stranded_years = [c["strandedYear"] for c in companies if c["strandedYear"] is not None]
+    return {
+        "baseYear": base_year, "strandedThreshold": stranded_threshold, "currency": statement.get("currency") or "",
+        "trajectory": [{"year": t["year"], "price": _js_round2(t["price"])} for t in trajectory],
+        "companies": companies,
+        "summary": {
+            "companyCount": len(companies), "strandedCount": len(stranded_years),
+            "earliestStrandedYear": min(stranded_years) if stranded_years else None,
+            "totalMarginAtRisk": sum(c["marginErosion"] for c in companies),
+        },
+    }
+
+
+def duration_curve(values: list[float], *, drop_non_positive: bool) -> list[float]:
+    """Values ranked descending (the load curve drops non-positive snapshots)."""
+    kept = [v for v in values if v > 0] if drop_non_positive else list(values)
+    return sorted(kept, reverse=True)
+
+
+def result_totals(result: dict[str, Any], system_peak_load_mw: float | None = None) -> dict[str, Any]:
+    """Totals the cards used to sum over server rows, from one result payload (run or period).
+
+    Every block is ``None`` when the payload has no such section.
+    """
+    out: dict[str, Any] = {}
+    exp = result.get("expansionResults") or []
+    out["expansion"] = {
+        "newBuildCount": sum(1 for a in exp if _num(a.get("delta_mw")) > 0),
+        "totalCapexAnnual": sum(_num(a.get("capex_annual")) for a in exp),
+        "totalNewBuildMw": sum(max(0.0, _num(a.get("delta_mw"))) for a in exp),
+    } if exp else None
+    sited = [a for a in exp if string_value(a.get("name")).startswith("siting_")]
+    built_by_bus: dict[str, float] = {}
+    for a in sited:
+        if a.get("component") == "Generator" and _num(a.get("delta_mw")) > 0:
+            bus = string_value(a.get("bus"))
+            built_by_bus[bus] = built_by_bus.get(bus, 0.0) + _num(a.get("delta_mw"))
+    out["siting"] = {
+        "builtMwBySiteBus": built_by_bus, "builtTotalMw": sum(built_by_bus.values()),
+        "capexAnnual": sum(_num(a.get("capex_annual")) for a in sited if _num(a.get("delta_mw")) > 0),
+        "assets": [a.get("name") for a in sited],
+    } if sited else None
+    eb = result.get("emissionsBreakdown")
+    if eb:
+        carriers = eb.get("byCarrier") or []
+        total_t = sum(_num(c.get("emissions_tco2")) for c in carriers)
+        total_e = sum(_num(c.get("energy_mwh")) for c in carriers)
+        out["emissions"] = {
+            "totalTco2": total_t, "totalEnergyMwh": total_e,
+            "averageIntensityKgPerMwh": total_t / total_e * 1000 if total_e > 0 else 0.0,
+            "byCarrier": [
+                {"carrier": c.get("carrier"), "sharePct": _num(c.get("emissions_tco2")) / total_t * 100 if total_t > 0 else 0.0}
+                for c in carriers
+            ],
+        }
+    else:
+        out["emissions"] = None
+    breakdown = result.get("companies") or {}
+    companies = breakdown.get("companies") or []
+    finance = (result.get("companyFinance") or {}).get("companies") or []
+    owner_t = sum(_num(c.get("emissionsTonnes")) for c in companies)
+    unassigned_t = _num(breakdown.get("unassignedEmissionsTonnes"))
+    out["companies"] = {
+        "ownerEmissionsTonnes": owner_t,
+        # Owners + assets with no owner = the system total (the breakdown card's last row).
+        "systemEmissionsTonnes": owner_t + unassigned_t,
+        "totalNpv": sum(_num(c.get("npv")) for c in finance),
+    } if (companies or finance) else None
+    statement = result.get("companyStatement") or {}
+    out["statement"] = {
+        "systemEmissionsTonnes": _num((statement.get("totals") or {}).get("emissionsTonnes"))
+        + _num(statement.get("unassignedEmissionsTonnes")),
+    } if statement else None
+    merit = result.get("meritOrder") or []
+    out["meritOrder"] = {
+        "totalMw": sum(_num(e.get("p_nom")) for e in merit), "systemPeakLoadMw": system_peak_load_mw,
+        "minMarginalCost": min(_num(e.get("marginal_cost")) for e in merit),
+        "maxMarginalCost": max(_num(e.get("marginal_cost")) for e in merit),
+    } if merit else None
+    scenarios = (result.get("stochastic") or {}).get("scenarios") or []
+    out["stochastic"] = {
+        "expectedEnergyMwh": sum(_num(s.get("totalEnergyMwh")) * _num(s.get("weight")) for s in scenarios),
+        "expectedEmissionsTco2": sum(_num(s.get("totalEmissionsTco2")) * _num(s.get("weight")) for s in scenarios),
+        "expectedOperatingCost": sum(_num(s.get("totalOperatingCost")) * _num(s.get("weight")) for s in scenarios),
+        "expectedLoadShedMwh": sum(_num(s.get("loadShedEnergyMwh")) * _num(s.get("weight")) for s in scenarios),
+    } if scenarios else None
+    units = (result.get("maintenance") or {}).get("units") or []
+    out["maintenance"] = {"hoursInMaintenance": sum(_num(u.get("hoursInMaintenance")) for u in units)} if units else None
+    return out
+
+
+def summarise_dual_sheet(sheet: str, rows: list[Row], snapshot_weight: float, tolerance: float = 1e-6) -> dict[str, Any]:
+    """Which assets bind in one ``<list>-mu_*`` dual sheet, when and at what shadow price.
+
+    A dual with $|\\mu| > tolerance$ (currency/MWh) marks a binding snapshot. Per asset: binding
+    snapshots, binding hours = snapshots x weight, the signed dual of largest magnitude and when it
+    occurred, the mean $|\\mu|$ over the binding snapshots and a run-length strip of the pattern.
+
+    Returns:
+        ``{rows, assetsChecked}``; ``rows`` lists only assets that bind at least once, strongest peak first.
+    """
+    parsed = _DUAL_SHEET.match(sheet)
+    if not parsed or not rows:
+        return {"rows": [], "assetsChecked": 0}
+    assets = [k for k in dict.fromkeys(k for r in rows for k in r) if k not in _DUAL_INDEX_COLUMNS]
+    out: list[dict[str, Any]] = []
+    for asset in assets:
+        binding, peak, peak_at, abs_sum = 0, 0.0, "", 0.0
+        segments: list[dict[str, Any]] = []
+        for row in rows:
+            raw = row.get(asset)
+            try:
+                v = float(raw)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                v = math.nan
+            on = math.isfinite(v) and abs(v) > tolerance
+            if segments and segments[-1]["on"] == on:
+                segments[-1]["length"] += 1
+            else:
+                segments.append({"on": on, "length": 1})
+            if not on:
+                continue
+            binding += 1
+            abs_sum += abs(v)
+            if abs(v) > abs(peak):
+                peak, peak_at = v, string_value(row.get("snapshot"))
+        if binding == 0:
+            continue
+        out.append({
+            "component": parsed.group(1), "attribute": parsed.group(2), "asset": asset,
+            "bindingSnapshots": binding, "bindingHours": binding * snapshot_weight, "totalSnapshots": len(rows),
+            "peakShadowPrice": peak, "peakAt": peak_at, "meanShadowPrice": abs_sum / binding, "segments": segments,
+        })
+    out.sort(key=lambda r: -abs(r["peakShadowPrice"]))
+    return {"rows": out, "assetsChecked": len(assets)}
+
+
+def setpoint_duals(series: Series, snapshot_weight: float) -> dict[str, Any]:
+    """Ramp-limit / set-point duals (P30) over every dual sheet of ``series`` (one run or period)."""
+    sheets = sorted(k for k, rows in series.items() if _DUAL_SHEET.match(k) and rows)
+    rows: list[dict[str, Any]] = []
+    checked = 0
+    snapshots = 0
+    for sheet in sheets:
+        summary = summarise_dual_sheet(sheet, series[sheet], snapshot_weight)
+        rows.extend(summary["rows"])
+        checked += summary["assetsChecked"]
+        snapshots = max(snapshots, len(series[sheet]))
+    rows.sort(key=lambda r: -abs(r["peakShadowPrice"]))
+    return {
+        "sheets": sheets, "rows": rows, "total": len(rows), "assetsChecked": checked, "totalSnapshots": snapshots,
+        "bindingHours": sum(r["bindingHours"] for r in rows),
+    }

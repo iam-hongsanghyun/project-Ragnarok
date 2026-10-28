@@ -33,6 +33,8 @@ node_modules/
 .venv-pypsa/
 .venv-pandapower/
 venv/
+# Launcher / setup logs (pandapower-setup.log, lock) written next to the app
+/logs/
 # CLIMADA worker conda prefix env (built by scripts/setup_climada_worker.sh)
 .climada-env/
 
@@ -59,6 +61,8 @@ coverage.xml
 
 # Importer runtime cache (downloaded datasets) + root-level data dumps
 backend/data/cache/
+# Self-hosted demand snapshot (D2): downloaded + derived data, rebuilt by the refresh CLI
+backend/data/demand_db/
 # Server-side stored runs (Store-in-backend run option)
 backend/data/runs/
 # Server-side working-model session + serial run queue (runtime data)

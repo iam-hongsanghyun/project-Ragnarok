@@ -137,7 +137,7 @@ export function RunDialog({
               Queue next Run
             </button>
           )}
-          <button className="run-button" onClick={onRun}>
+          <button className="run-button" data-tour="run-submit" onClick={onRun}>
             {dryRun ? 'Validate' : 'Run model'}
           </button>
         </div>

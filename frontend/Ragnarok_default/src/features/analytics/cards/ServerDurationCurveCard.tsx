@@ -1,37 +1,27 @@
 /**
- * Duration curve of the system price or load, derived on the server
- * (`GET /api/runs/{name}/derived/{metric}`, WA7) from the stored run's output
- * series, so a light (stored) bundle needs no per-asset hydration to draw it.
- * Values are sorted descending here; the load curve drops non-positive snapshots,
- * as the in-memory version does.
+ * Duration curve of the system price or load, ranked on the server
+ * (`GET /api/runs/{name}/analysis/duration-curve`) from the stored run's output series: values
+ * arrive sorted descending (the load curve omits non-positive snapshots) and, for a pathway run,
+ * for the selected investment period only. The card plots them as given.
  */
 import React from 'react';
-import { fetchDerivedSeries } from 'lib/api/derivedSeries';
+import { fetchRunAnalysis } from 'lib/api/resultsDerived';
 import { useAsync } from '../../../shared/hooks/useAsync';
 import { DurationCurveCard } from './DurationCurveCard';
-
-// Above any realistic snapshot count so the server does not downsample (a duration
-// curve needs every snapshot, like the in-memory one).
-const NO_DOWNSAMPLE = 100_000_000;
 
 interface Props {
   runName: string;
   source: 'price' | 'load';
   currencySymbol: string;
+  /** Pathway investment period; null = the whole horizon. */
+  period?: number | null;
 }
 
-export function ServerDurationCurveCard({ runName, source, currencySymbol }: Props) {
-  const metric = source === 'price' ? 'system_price' : 'load';
+export function ServerDurationCurveCard({ runName, source, currencySymbol, period = null }: Props) {
   const { data, loading, error } = useAsync(
-    `${runName}|${metric}`,
-    () => fetchDerivedSeries(runName, metric, { maxPoints: NO_DOWNSAMPLE }),
+    `${runName}|duration|${source}|${period ?? ''}`,
+    () => fetchRunAnalysis(runName, 'duration-curve', { source, period }),
   );
-  const values = React.useMemo(() => {
-    const raw = data?.series[0]?.values ?? [];
-    const kept = source === 'load' ? raw.filter((v) => v > 0) : raw;
-    return [...kept].sort((a, b) => b - a);
-  }, [data, source]);
-
   if (error) return <p className="dashboard-cell-missing" role="alert">Could not load the {source} duration curve: {error}</p>;
   if (loading || !data) return <p className="dashboard-cell-missing" aria-busy="true">Loading {source} duration curve…</p>;
   return (
@@ -41,7 +31,7 @@ export function ServerDurationCurveCard({ runName, source, currencySymbol }: Pro
         key: source,
         label: source === 'price' ? 'Marginal price' : 'Load',
         color: source === 'price' ? 'var(--text)' : 'var(--warm)',
-        values,
+        values: data.values,
       }]}
       unit={source === 'price' ? `${currencySymbol}/MWh` : 'MW'}
       showLegend={false}

@@ -65,7 +65,7 @@ interface Props {
   onClose: () => void;
   currencySymbol?: string;
   /** Stored run to read the asset's details from (`GET /api/runs/{name}/assets`,
-   *  WA7). Without one (an imported project) the card reads `results.assetDetails`. */
+   *  WA7). Imported results are stored as runs, so a run is always present; without one the card reads `results.assetDetails` (records the server supplied). */
   runName?: string | null;
 }
 
@@ -90,7 +90,7 @@ export function MapDetailCard({ focus, results, onClose, currencySymbol = '$', r
   if (focus.type === 'system' || kind === null) return null;
 
   const key = focus.key;
-  // Server detail when a stored run backs the view, else the in-memory derivation.
+  // Server detail when a stored run backs the view, else the server-supplied `results.assetDetails`.
   const detailOf = <K extends AssetKind>(k: K): RunResults['assetDetails'][K][string] | undefined =>
     runName
       ? (server.data?.kind === k ? (server.data as unknown as RunResults['assetDetails'][K][string]) : undefined)

@@ -633,6 +633,10 @@ def run_pypsa(
     rolling_suspect: str | None = None
     solve_status: str = "unknown"
     solve_condition: str = "unknown"
+    # PyPSA 1.4's create_model() rewrites a Store's blank carrier to its bus's carrier
+    # ("AC", "heat" ...). A network rebuilt from stored outputs keeps "", so restore the
+    # modelled value after the solve: solved and re-derived runs then label alike.
+    _stores_carrier = network.stores["carrier"].copy() if len(network.stores) else None
     _t_solve = time.perf_counter()
     try:
         if rolling.enabled:
@@ -759,6 +763,8 @@ def run_pypsa(
             else:
                 result = network.optimize(**_plain_kwargs)
                 solve_status, solve_condition = _coerce_solve_status(result)
+        if _stores_carrier is not None:
+            network.stores["carrier"] = _stores_carrier.reindex(network.stores.index).fillna("")
         _log.info(
             "solve finished in %.2fs — status=%s condition=%s",
             time.perf_counter() - _t_solve,

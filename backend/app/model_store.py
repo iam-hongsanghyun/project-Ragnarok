@@ -38,6 +38,22 @@ has_model = _impl.has_model
 is_series_sheet = _impl.is_series_sheet
 
 
+def resave_model(session_id: str, model: dict) -> dict:
+    """Replace the session's model, KEEPING its filename and scenario name.
+
+    ``save_model`` rebuilds the meta from its arguments, so a bare call (as merge-fragment
+    and the transform endpoints made) turned the header from the loaded file's name into
+    "Untitled model". Use this whenever the model is an edit of the current session.
+    """
+    current = get_meta(session_id) or {}
+    return save_model(
+        session_id,
+        model,
+        filename=str(current.get("filename") or ""),
+        scenario_name=str(current.get("scenarioName") or ""),
+    )
+
+
 def distinct_values(session_id: str, sheet: str, column: str) -> list[str] | None:
     """Distinct non-empty string values of ``column`` in ``sheet`` (sorted).
 
@@ -66,5 +82,5 @@ __all__ = [
     "USE_SQLITE", "save_model", "merge_static_model", "get_meta", "get_sheet_page",
     "get_series_window", "load_full_model", "save_controls", "get_controls",
     "patch_sheet", "transform_series", "clear", "has_model", "is_series_sheet",
-    "distinct_values",
+    "distinct_values", "resave_model",
 ]

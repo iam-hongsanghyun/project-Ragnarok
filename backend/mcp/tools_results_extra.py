@@ -10,6 +10,13 @@ Read-only:
   in one ``pypsa.NetworkCollection`` (``GET /api/results/compare?topics=statistics``).
 * ``get_metric_options`` - chart-ready metrics (rows + series + colours) of one per-asset
   focus of a stored run (``GET /api/runs/{name}/metrics``).
+* ``get_run_analysis`` - the Analytics-card metrics the browser no longer computes: load factor /
+  coincidence / per-bus shares, carrier performance, transition risk, duration curves and totals
+  (``GET /api/runs/{name}/analysis/{topic}``).
+* ``get_period_results`` - the result payload of ONE investment period of a pathway run, from
+  that period's slice of ``n.statistics`` (``GET /api/runs/{name}/period/{period}``).
+  ``get_kpis``, ``compare_companies``, ``get_asset_details`` and ``get_metric_options`` take the
+  same ``period`` argument.
 
 The other changes of that work need no new tool: the PyPSA-basis emissions
 (``emissionsBreakdown.totalTco2`` / ``byStorage``), the Process rows of
@@ -85,4 +92,73 @@ async def get_metric_options(
         period=period,
         end=end,
         currency=currency,
+    )
+
+
+#: The compact sections ``get_period_results`` returns unless ``fields`` names others - the
+#: per-snapshot series are the bulk of a payload and rarely what an agent wants for one period.
+_PERIOD_DEFAULT_FIELDS = (
+    "summary", "carrierMix", "costBreakdown", "emissionsBreakdown", "expansionResults",
+    "generatorEconomics", "companies", "pathway", "runMeta", "metricDefinitions",
+)
+
+
+@mcp.tool(
+    annotations=_RO,
+    description=(
+        "The result payload of ONE investment period of a stored pathway (multi-period) run, extracted from that "
+        "period's slice of n.statistics: assets outside their build/lifetime window are masked, money (fuel, carbon, "
+        "capex, revenue) is weighted by the period's objective weight, energy is summed, emissions carry the years "
+        "weight. Same shape as the analytics 'result'. By default returns the compact sections (summary, carrierMix, "
+        "costBreakdown, emissionsBreakdown, expansionResults, generatorEconomics, companies, pathway, runMeta, "
+        "metricDefinitions); 'fields' names other top-level keys (e.g. dispatchSeries, systemPriceSeries, "
+        "companyFinance, companyStatement) - the series are large. Errors when the run is single-period or 'period' "
+        "is not one of its investment periods (the message lists them). Returns {run, period, result}."
+    ),
+)
+async def get_period_results(
+    run_name: str,
+    period: int,
+    fields: list[str] | None = None,
+    currency: str | None = None,
+) -> Any:
+    return await get_client().get_run_period(
+        run_name, period, fields=",".join(fields or _PERIOD_DEFAULT_FIELDS), currency=currency,
+    )
+
+
+@mcp.tool(
+    annotations=_RO,
+    description=(
+        "Analytics-card metrics of a stored run, computed on the server (the UI cards show the same numbers). "
+        "'topic' is one of: load-analysis (system peak MW, energy MWh, load factor = mean/peak, coincidence = system peak / "
+        "sum of bus peaks, per-bus peak / energy / load factor / share), carrier-performance (per carrier: generator count, "
+        "nameplate MW, generated MW, energy MWh, shares, capacity factor from n.statistics.capacity_factor, curtailment MWh, plus "
+        "totals), transition-risk (each company's net margin year by year while the carbon price rises; set base_year, years, "
+        "base_price, escalation_pct, stranded_threshold, demand_growth_pct, fuel_growth_pct; returns stranded year and margin at "
+        "risk per company plus a summary), duration-curve (system 'source' price or load, ranked descending; load drops "
+        "non-positive snapshots) and totals (sums over result rows: capacity expansion, emissions, company NPV and owner "
+        "emissions, merit-order MW, stochastic expectation, maintenance hours). 'period' picks a pathway investment period; "
+        "omitted = the whole horizon. An unknown topic returns the valid ones. Mean nodal price per bus is "
+        "get_asset_details(kind='buses') field averageSmp."
+    ),
+)
+async def get_run_analysis(
+    run_name: str,
+    topic: str,
+    period: int | None = None,
+    source: str | None = None,
+    base_year: int | None = None,
+    years: int | None = None,
+    base_price: float | None = None,
+    escalation_pct: float | None = None,
+    stranded_threshold: float | None = None,
+    demand_growth_pct: float | None = None,
+    fuel_growth_pct: float | None = None,
+    currency: str | None = None,
+) -> Any:
+    return await get_client().get_run_analysis(
+        run_name, topic, period=period, source=source, baseYear=base_year, years=years, basePrice=base_price,
+        escalationPct=escalation_pct, strandedThreshold=stranded_threshold, demandGrowthPct=demand_growth_pct,
+        fuelGrowthPct=fuel_growth_pct, currency=currency,
     )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import multiprocessing as mp
@@ -950,6 +951,8 @@ app.include_router(_config_router.router)
 # filter blob to /api/import/run; fetch + convert run server-side.
 from .routers import importers as _importers_router  # noqa: E402
 app.include_router(_importers_router.router)
+from .routers import demand_db as _demand_db_router  # noqa: E402  (D2: self-hosted hourly demand snapshot)
+app.include_router(_demand_db_router.router)
 from .routers import transforms as _transforms_router  # noqa: E402
 app.include_router(_transforms_router.router)
 
@@ -1892,40 +1895,123 @@ def export_workbook(payload: ExportProjectPayload) -> Response:
     )
 
 
+def _content_hash(raw: bytes) -> str:
+    """SHA-256 of an uploaded file: importing the same bytes again returns the existing run."""
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _store_bundle_as_run(
+    bundle: dict[str, Any], filename: str, origin: str = "xlsx_import", content_hash: str | None = None
+) -> dict[str, Any] | None:
+    """Persist an imported bundle (model + results) as a stored run; return its meta.
+
+    The one place an imported result becomes a run, so every server route (KPIs,
+    companies, assets, metrics, period views, statistics, comparison) and History
+    work on it exactly as on a solved run and the browser never derives a metric.
+
+    * A Ragnarok project package already carries the derived analytics (summary,
+      carrierMix, ...): kept verbatim.
+    * A bare results workbook / network arrives with raw outputs only; the analytics
+      are DERIVED from them (network rebuilt, outputs injected, the same extraction
+      helpers a solve uses). Best-effort: on failure the raw outputs are still
+      stored (openable, just sparser).
+
+    ``content_hash`` (SHA-256 of the uploaded file) de-duplicates: a file already
+    imported returns its existing run's meta and stores nothing.
+    """
+    if content_hash:
+        existing = run_store.find_run_by_content_hash(content_hash)
+        if existing is not None:
+            return existing
+    model = bundle.get("model") or {}
+    scenario = bundle.get("scenario") or {}
+    options = bundle.get("options") or {}
+    options.setdefault("filename", filename)
+    result = bundle.get("result") or {}
+    outputs = result.get("outputs") or bundle.get("outputs") or {}
+    has_derived = isinstance(result.get("summary"), list) and bool(result.get("summary"))
+    if not has_derived and (outputs.get("series") or outputs.get("static")):
+        from ..pypsa.results.derive_outputs import derive_results_from_outputs
+        from ..pypsa.results.from_outputs import derive_imported_result
+
+        log = logging.getLogger("pypsa_gui.import")
+        # The full re-extraction first (pathway-capable, identical to a solve's
+        # payload); the older injection-based derivation next (it also supplies a
+        # default discount rate for extendable assets of a rate-less file).
+        for derive in (
+            lambda: derive_results_from_outputs(model, outputs, scenario, options),
+            lambda: derive_imported_result(model, scenario, options, outputs),
+        ):
+            try:
+                derived = derive()
+                result = {**result, **derived, "outputs": outputs}
+                break
+            except Exception:  # noqa: BLE001
+                log.exception("Analytics derivation failed for imported result %s", filename)
+        else:
+            log.error("Could not derive analytics for imported result %s; storing raw outputs", filename)
+            result = {**result, "outputs": outputs}
+    return run_store.store_run(model, scenario, options, result, origin=origin, content_hash=content_hash)
+
+
+def _bundle_has_results(bundle: dict[str, Any]) -> bool:
+    """Whether an imported bundle carries solved results (outputs or a derived summary)."""
+    result = bundle.get("result") or {}
+    outputs = result.get("outputs") or {}
+    return bool(result.get("summary")) or bool(outputs.get("series") or outputs.get("static"))
+
+
 @app.post("/api/import/project/load")
 async def import_project_load(file: UploadFile) -> dict[str, Any]:
-    """Parse an uploaded project file into a bundle and RETURN it — no History.
+    """Parse an uploaded project file; store its results as a run; return the model side.
 
-    This is the default "Import Project" path. Importing a project is *opening a
-    file*: the browser loads the returned model + its solved results into the
-    editor (like File→Open), and nothing is persisted. History stays an audit
-    trail of solves and explicit result imports
-    (:func:`import_result_xlsx`) — re-run the loaded model to create a History
-    entry. Accepts a Ragnarok Project ``.zip`` (canonical JSON + readable xlsx)
-    or a bare ``.xlsx``; returns ``{model, scenario, options, result, conversation, filename}``
-    (``conversation`` is the package's Bifrost chat sidecar, ``null`` without one).
+    Importing a project opens a file: the browser loads the returned model,
+    scenario and options into the editor. When the file carries SOLVED RESULTS they
+    are stored as a run (see :func:`_store_bundle_as_run`) and ``runName`` names it:
+    the browser then reads every result from the run routes. Design choice for
+    results with no run behind them: a stored run rather than a stateless
+    "derive this upload" endpoint, because (a) one code path serves solved and
+    imported results - KPIs, companies, assets, metrics, period views, statistics,
+    comparison, exports and the Bifrost / MCP tools all take a run name, (b) the
+    upload is parsed and derived once instead of on every request, (c) the result
+    survives a refresh, appears in History and can be compared, and (d) the
+    browser holds no raw output series, so it cannot (and does not) compute a
+    metric. The cost is one History entry per imported results file.
+
+    An inputs-only file stores nothing (``runName`` is ``null``, ``result`` is ``{}``).
+    Accepts a Ragnarok Project ``.zip`` (canonical JSON + readable xlsx) or a bare
+    ``.xlsx``; returns ``{model, scenario, options, result, runName, conversation,
+    filename}``. ``result`` is ``{}`` whenever ``runName`` is set (read the run).
     """
     from . import project_workbook
 
     raw = await file.read()
     filename = file.filename or "imported_project.zip"
 
-    # Parsing the workbook is heavy, synchronous CPU work — run it off the event
+    def _parse_and_store() -> tuple[dict[str, Any], dict[str, Any] | None]:
+        bundle = project_workbook.import_bundle_from_upload(raw, filename)
+        meta = (
+            _store_bundle_as_run(bundle, filename, content_hash=_content_hash(raw))
+            if _bundle_has_results(bundle) else None
+        )
+        return bundle, meta
+
+    # Parsing the workbook is heavy, synchronous CPU work - run it off the event
     # loop so a large import never blocks other requests (incl. the boot poll).
     try:
-        bundle = await asyncio.to_thread(
-            project_workbook.import_bundle_from_upload, raw, filename
-        )
+        bundle, meta = await asyncio.to_thread(_parse_and_store)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"Project import failed: {exc}") from exc
 
     options = bundle.get("options") or {}
     options.setdefault("filename", filename)
+    stored = meta is not None
     return {
         "model": bundle.get("model") or {},
         "scenario": bundle.get("scenario") or {},
         "options": options,
-        "result": bundle.get("result") or {},
+        "result": {} if stored else (bundle.get("result") or {}),
+        "runName": meta.get("name") if meta else None,
         # The package's Bifrost chat sidecar (``<stem>.conversation.json``), or None.
         "conversation": bundle.get("conversation"),
         "filename": filename,
@@ -1983,6 +2069,9 @@ async def import_result(file: UploadFile) -> dict[str, Any]:
       bundle) — the full model **and** its solved results round-trip verbatim
       from the canonical bundle, so summary / carrier mix / dispatch are
       preserved exactly as they were exported (no re-derivation);
+    * a **solved PyPSA network** (``.nc`` / ``.h5``): the model and the stored solution
+      (``p_nom_opt``, ``generators_t.p``, prices ...) become a run, single- or
+      multi-period;
     * a **bare results ``.xlsx``** (third-party model, plugin output,
       hand-assembled table) — sheets are mapped to the canonical result schema
       (``outputs.static`` / ``outputs.series``) and the analytics the Result
@@ -1999,39 +2088,23 @@ async def import_result(file: UploadFile) -> dict[str, Any]:
 
     raw = await file.read()
     filename = file.filename or "imported_result.xlsx"
-    if not filename.lower().endswith((".xlsx", ".xls", ".zip")):
+    if not filename.lower().endswith((".xlsx", ".xls", ".zip", ".nc", ".h5", ".hdf5")):
         raise HTTPException(
-            status_code=400, detail="Result import expects an .xlsx / .xls / .zip file."
+            status_code=400, detail="Result import expects an .xlsx / .xls / .zip / .nc / .h5 file."
         )
 
     def _parse_and_store() -> dict[str, Any] | None:
-        # Handles both a project package (.zip / embedded-bundle .xlsx → full
+        digest = _content_hash(raw)
+        existing = run_store.find_run_by_content_hash(digest)
+        if existing is not None:  # same file again: return its run, store nothing
+            return existing
+        if filename.lower().endswith((".nc", ".h5", ".hdf5")):
+            return _store_network_file(raw, filename)
+        # Handles both a project package (.zip / embedded-bundle .xlsx -> full
         # model+results verbatim) and a bare workbook (reconstruct outputs).
-        bundle = project_workbook.import_bundle_from_upload(raw, filename)
-        model = bundle.get("model") or {}
-        scenario = bundle.get("scenario") or {}
-        options = bundle.get("options") or {}
-        options.setdefault("filename", filename)
-        result = bundle.get("result") or {}
-        outputs = result.get("outputs") or {}
-        # A project package already carries the derived analytics (summary,
-        # carrierMix, …) — keep them verbatim. Only a bare results workbook
-        # arrives with raw outputs and no derived analytics; rebuild + inject +
-        # extract so the Result view populates. Best-effort: on failure the raw
-        # outputs are still stored (openable, just sparser).
-        has_derived = isinstance(result.get("summary"), list) and bool(result.get("summary"))
-        if not has_derived and (outputs.get("series") or outputs.get("static")):
-            try:
-                from ..pypsa.results.from_outputs import derive_imported_result
-
-                derived = derive_imported_result(model, scenario, options, outputs)
-                result = {**result, **derived, "outputs": outputs}
-            except Exception:  # noqa: BLE001
-                logging.getLogger("pypsa_gui.import").exception(
-                    "Could not derive analytics for imported result %s; storing raw outputs",
-                    filename,
-                )
-        return run_store.store_run(model, scenario, options, result, origin="xlsx_import")
+        return _store_bundle_as_run(
+            project_workbook.import_bundle_from_upload(raw, filename), filename, content_hash=digest
+        )
 
     try:
         meta = await asyncio.to_thread(_parse_and_store)
@@ -2205,42 +2278,82 @@ async def export_hdf5(payload: RunPayload) -> Response:
 # the clustering transform. Imported under the old name to keep call sites stable.
 
 
-@app.post("/api/import/netcdf")
-async def import_netcdf(file: UploadFile) -> dict[str, Any]:
-    """Accept a PyPSA-native netCDF upload and return the in-memory model JSON."""
+def _read_network_file(raw: bytes, filename: str) -> Any:
+    """Read an uploaded PyPSA netCDF / HDF5 file into a ``pypsa.Network``."""
     import pypsa
 
-    data = await file.read()
-    with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as tmp:
-        tmp.write(data)
+    suffix = ".h5" if filename.lower().endswith((".h5", ".hdf5")) else ".nc"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(raw)
         path = Path(tmp.name)
     try:
         network = pypsa.Network()
-        network.import_from_netcdf(str(path))
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"netCDF import failed: {exc}") from exc
+        if suffix == ".h5":
+            network.import_from_hdf5(str(path))
+        else:
+            network.import_from_netcdf(str(path))
+        return network
     finally:
         path.unlink(missing_ok=True)
-    return {"model": _network_to_model_json(network)}
+
+
+def _store_network_file(raw: bytes, filename: str) -> dict[str, Any] | None:
+    """Store a SOLVED PyPSA network file as a run (see :func:`_store_bundle_as_run`)."""
+    return _store_network(_read_network_file(raw, filename), filename, _content_hash(raw))
+
+
+def _store_network(network: Any, filename: str, content_hash: str | None = None) -> dict[str, Any] | None:
+    """Store a solved ``pypsa.Network`` as a run; ``ValueError`` when it has no solution."""
+    from ..pypsa.results.derive_outputs import solved_network_to_bundle
+
+    bundle = solved_network_to_bundle(network, filename)
+    return _store_bundle_as_run(
+        {k: bundle[k] for k in ("model", "scenario", "options")} | {"result": {"outputs": bundle["outputs"]}},
+        filename,
+        origin="netcdf_import",
+        content_hash=content_hash,
+    )
+
+
+async def _import_network(file: UploadFile, kind: str) -> dict[str, Any]:
+    raw = await file.read()
+    filename = file.filename or f"imported_network.{kind}"
+
+    def _load() -> tuple[dict[str, Any], dict[str, Any] | None]:
+        network = _read_network_file(raw, filename)
+        model = _network_to_model_json(network)
+        # A network written after a solve carries its solution: store it as a run so
+        # the results are served by the run routes (see `_store_bundle_as_run`).
+        # One without a solution is an input-only case and stores nothing.
+        try:
+            meta = _store_network(network, filename, _content_hash(raw))
+        except ValueError:
+            meta = None
+        return model, meta
+
+    label = "netCDF" if kind == "nc" else "HDF5"
+    try:
+        model, meta = await asyncio.to_thread(_load)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"{label} import failed: {exc}") from exc
+    return {"model": model, "runName": meta.get("name") if meta else None}
+
+
+@app.post("/api/import/netcdf")
+async def import_netcdf(file: UploadFile) -> dict[str, Any]:
+    """Accept a PyPSA-native netCDF upload; return the model JSON (+ ``runName`` if solved).
+
+    A file written after ``optimize`` carries its solution; that is stored as a run
+    (``origin="netcdf_import"``) and ``runName`` names it - the browser reads the
+    results from the run routes. An unsolved file returns ``runName: null``.
+    """
+    return await _import_network(file, "nc")
 
 
 @app.post("/api/import/hdf5")
 async def import_hdf5(file: UploadFile) -> dict[str, Any]:
-    """Accept a PyPSA-native HDF5 upload and return the in-memory model JSON."""
-    import pypsa
-
-    data = await file.read()
-    with tempfile.NamedTemporaryFile(suffix=".h5", delete=False) as tmp:
-        tmp.write(data)
-        path = Path(tmp.name)
-    try:
-        network = pypsa.Network()
-        network.import_from_hdf5(str(path))
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"HDF5 import failed: {exc}") from exc
-    finally:
-        path.unlink(missing_ok=True)
-    return {"model": _network_to_model_json(network)}
+    """Accept a PyPSA-native HDF5 upload; same contract as :func:`import_netcdf`."""
+    return await _import_network(file, "h5")
 
 
 # Note: the external-data importer subsystem (Data view) lives in the

@@ -11,7 +11,12 @@ highspy>=1.8
 scikit-learn>=1.4  # k-means / HAC bus clustering (pypsa.clustering.spatial) — Forge "Reduce network"
 statsmodels>=0.14  # ARIMA multi-year demand forecast (T1 "Forecast to future year")
 prophet>=1.1       # Prophet multi-year demand forecast (T1); bundles a prebuilt Stan backend
-tsam==4.1.1  # n.cluster.temporal.segment (P35). tsam declares numpy<=2.4.6 / pandas<=3.0.5 and pyomo, but segment() is verified on numpy 2.5.4 / pandas 3.1.0 installed with `pip install --no-deps tsam==4.1.1` (pyomo is only needed by tsam's optimal-clustering solvers, which Ragnarok does not use). A plain `pip install -r` resolves numpy/pandas down to those caps, which also works.
+# tsam is installed normally (no --no-deps). Its caps decide the resolved numpy/pandas:
+# tsam 4.1.1 declares numpy<=2.4.6 / pandas<=3.0.5, so `pip install -r` resolves numpy 2.4.6 /
+# pandas 3.0.5 and `pip check` is clean. The backend suite passes on that resolution AND on
+# numpy 2.5.4 / pandas 3.1.0 (installed past tsam's caps); results are identical on both
+# (pandas 3.0.5 vs 3.1.0 differ in Series[Index] naming, handled in results/stat_metrics.py).
+tsam==4.1.1  # n.cluster.temporal.segment (P35). Pulls pyomo, which only tsam's optimal-clustering solvers use.
 openpyxl>=3.1
 python-calamine>=0.2  # PyPSA's preferred excel engine for import_from_excel
 xarray>=2025.12,<2027  # was <2026; PyPSA 1.4 solves on 2026.9.0 (suite-verified)

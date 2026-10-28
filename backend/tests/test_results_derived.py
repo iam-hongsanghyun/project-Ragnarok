@@ -158,6 +158,26 @@ def test_companies_join_and_sort() -> None:
     assert [m["key"] for m in out["metrics"]] == ["npv", "irr", "revenue", "capacityMW", "emissionsTonnes"]
     assert [c["company"] for c in rd.compare_companies(result, "emissionsTonnes")["companies"]] == ["A", "B"]  # lower first
     assert [c["company"] for c in rd.compare_companies(result, "capacityMW")["companies"]] == ["B", "A"]
+    labels = {m["key"]: m["label"] for m in out["metrics"]}
+    assert labels["revenue"] == "Revenue (window)" and labels["emissionsTonnes"] == "Emissions (window)"
+
+
+def test_companies_take_annual_flows_from_the_statement() -> None:
+    """With a statement, revenue/emissions are its annualised values (x 8760/H), not the window sums.
+
+    Before this, "Revenue/yr" showed the breakdown's window revenue beside an annualised net margin.
+    """
+    result = {
+        "companies": {"currency": "$", "companies": [
+            {"company": "A", "capacityMW": 10, "energyMWh": 5, "revenue": 100, "emissionsTonnes": 1}]},
+        "companyStatement": {"companies": [
+            {"company": "A", "netMargin": 900, "revenue": 18250, "energyMWh": 912.5, "emissionsTonnes": 182.5}]},
+    }
+    out = rd.compare_companies(result)
+    row = out["companies"][0]
+    assert (row["revenue"], row["emissionsTonnes"], row["energyMWh"]) == (18250, 182.5, 912.5)
+    labels = {m["key"]: m["label"] for m in out["metrics"]}
+    assert labels["revenue"] == "Revenue/yr" and labels["emissionsTonnes"] == "Emissions/yr"
 
 
 # ── comparison ───────────────────────────────────────────────────────────────
