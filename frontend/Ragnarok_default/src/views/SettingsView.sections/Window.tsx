@@ -282,6 +282,26 @@ function SamplingRow(props: WindowSectionProps & { windowSteps: number }) {
               </label>
             )}
           </div>
+          <label className="sg-setting-label">Start-up and shut-down costs</label>
+          <div className="sg-btn-row">
+            <button
+              className={`tb-btn sg-solver-btn${cfg.scaleStartUpCosts !== false ? '' : ' tb-btn--muted'}`}
+              onClick={() => patch({ scaleStartUpCosts: undefined })}
+            >
+              Scaled to the window
+            </button>
+            <button
+              className={`tb-btn sg-solver-btn${cfg.scaleStartUpCosts === false ? '' : ' tb-btn--muted'}`}
+              onClick={() => patch({ scaleStartUpCosts: false })}
+            >
+              As written
+            </button>
+          </div>
+          <p className="sg-setting-hint">
+            PyPSA charges start_up_cost and shut_down_cost of committable units once per event, unweighted. Scaled (the default)
+            multiplies them by the factor that makes the sampled blocks represent the full window, like every other cost; the run
+            notes declare it. As written charges only the events inside the sampled blocks.
+          </p>
           <div className="rolling-summary">
             {cfg.mode === 'average'
               ? 'Every period of the window is averaged into one synthetic profile: annual '

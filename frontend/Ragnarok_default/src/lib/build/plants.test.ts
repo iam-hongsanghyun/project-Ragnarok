@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 import type { GridRow, WorkbookModel } from 'lib/types';
-import { applyPlantChange, inPlant, plantCards, plantMarkers, PLANT_SHEET } from './plants';
+import { applyPlantChange, derivedLines, inPlant, plantCards, plantMarkers, PLANT_SHEET } from './plants';
 
 const reg = (id: string, extra: Record<string, unknown> = {}): GridRow => ({
   name: id, plant: id, json: JSON.stringify({ plantId: id, type: 'ccgt', label: `CCGT ${id}`, bus: 'grid', capacityMwEl: 400, extendable: false, spec: { pNom: 400 }, components: [{ sheet: 'links', name: id, role: 'turbine' }, { sheet: 'generators', name: `${id}_gas_supply`, role: 'gas supply' }], ...extra }),
@@ -58,5 +58,33 @@ describe('plantMarkers', () => {
   });
   it('draws none when the bus has no coordinates', () => {
     expect(plantMarkers(model(), { grid: { name: 'grid' } } as Record<string, GridRow>)).toEqual([]);
+  });
+});
+
+describe('derivedLines', () => {
+  const partLoad = { route: 'piecewise-link', noLoadFuelMw: 7.692308, incrementalHeatRate: 1.591512, incrementalEfficiency: 0.628333, fuelMinMw: 44.615385, fuelFullMw: 100, etaMin: 0.52, etaFull: 0.58, minLoadPu: 0.446154 };
+  it('is empty for a plant that uses neither option', () => {
+    expect(derivedLines(null)).toEqual([]);
+    expect(derivedLines({})).toEqual([]);
+  });
+  it('states the heat-rate line, the way it is written and the start costs, with units', () => {
+    const lines = derivedLines({ partLoad, startCosts: { hot: 3480, nativeStartUpCost: 3480, warm: 6960, warmAfterHours: 8, cold: 11600, coldAfterHours: 48 } });
+    expect(lines[0]).toContain('no-load fuel 7.6923 MW_th');
+    expect(lines[0]).toContain('MW_th/MW_el');
+    expect(lines[1]).toContain('piecewise efficiency curve');
+    expect(lines[1]).toContain('p_min_pu = 0.446154');
+    expect(lines[2]).toContain('hot 3,480');
+    expect(lines[2]).toContain('warm 6,960 after 8 h offline');
+    expect(lines[2]).toContain('cold 11,600 after 48 h offline');
+  });
+  it('the generator route names stand_by_cost and marginal_cost', () => {
+    const lines = derivedLines({ partLoad: { ...partLoad, route: 'stand-by-generator', written: { stand_by_cost: 230.8, marginal_cost: 47.7 } } });
+    expect(lines[1]).toContain('stand_by_cost = 230.8 per hour committed');
+    expect(lines[1]).toContain('marginal_cost = 47.7 per MWh_el');
+  });
+  it('plantCards carries the registry values to the card', () => {
+    const m = model();
+    m[PLANT_SHEET] = [reg('c', { partLoad })];
+    expect(plantCards(m)[0].derived?.partLoad?.noLoadFuelMw).toBe(7.692308);
   });
 });

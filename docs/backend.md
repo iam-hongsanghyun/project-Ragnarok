@@ -648,7 +648,7 @@ is gone). A period slice takes its share of the stored window.
 ### 5.10 `plants` — Build plant picker, co-firing, results by plant
 
 One plant-type picker over the core model; no separate engine. Code: `backend/app/plants/` (`technologies.json` +
-`technologies.py`, `thermal.py`, `catalog.py`, `registry.py`, `results.py`), the router `backend/app/routers/plants.py`, the MCP tools
+`technologies.py`, `thermal.py`, `catalog.py`, `registry.py`, `results.py`, `partload.py`, `startcosts.py`), the router `backend/app/routers/plants.py`, the MCP tools
 `backend/mcp/tools_plants.py` and the solve fragment `backend/app/plants/cofiring.py` (a `constraints` hook, §5.14). The P2X chain is built by
 `p2x/chains.py` (not duplicated).
 
@@ -674,8 +674,8 @@ of rows whose `plant` column equals its id plus one `RAGNAROK_PLANTS` row (type,
 2030 column; `inputs/technology_data_catalogue_for_energy_storage.xlsx`). CCGT: efficiency 0.58, 1108.7 EUR2025/kW, FOM 3.35 %, VOM
 5.61 EUR/MWh, 25 a, minimum load 40 %, secondary regulation 15 %/min. OCGT: 0.41, 581.4 EUR/kW, 1.78 %, 6.01 EUR/MWh, 25 a, 20 %, 30 %/min,
 start-up 43 EUR2015/MW (x 1.3358 = 57.4). Gas: 0.198 tCO2/MWh_th, 28.42 EUR/MWh_th. Assumptions (flagged `assumption`): CCGT start-up cost
-60 EUR/MW, minimum up / down 4 h (OCGT 1 h), the H2 price (100 EUR/MWh_LHV), the H2 derate (0, off). Part-load efficiency is not modelled
-(`notModelled` in the file). LHV per Nm3: H2 10.78 (derived from 119.96 MJ/kg x 0.08988 kg/Nm3), CH4 35.8 (literature, recalled).
+60 EUR/MW, minimum up / down 4 h (OCGT 1 h), the H2 price (100 EUR/MWh_LHV), the H2 derate (0 = a documented placeholder, see below). Part-load efficiency
+is off by default (opt-in per plant, below). LHV per Nm3: H2 10.78 (derived from 119.96 MJ/kg x 0.08988 kg/Nm3), CH4 35.8 (literature, recalled).
 
 **Formulation.** Simple co-firing generator: `mc = ((1-s) c_g + s c_h)/eta + v`, carrier `co2_emissions = (1-s) e_g` (the app divides a
 generator's carrier factor by its efficiency). Turbine Link: `p_nom = P_el/eta`, `capital_cost = k_el eta`, `marginal_cost = v eta`,
@@ -684,12 +684,58 @@ only for a committable unit). Blend share: `vol_to_energy_share`, and per plant 
 `s_min g_t - (1 - s_min) h_t <= 0` per snapshot (hourly) or summed with the snapshot weights (period), added in `extra_functionality`
 beside the RFNBO hook (`cofiring_<plant>_<min|max>_<hourly|period>`).
 
+**Unit-commitment extras (opt-in, 2026-10-29).** Spec keys of a committable, fixed-size CCGT / OCGT / co-firing plant, all blank = off (a plant
+without them is byte-for-byte the legacy rows; `test_defaults_do_not_change_an_existing_plant`). Not applied (warning) for a unit that is not
+committable or is extendable.
+
+*Part-load efficiency* (`minLoadEfficiency` = eta_m, `partload.py`). With rated P, minimum load m (technology `min_load`), full-load eta_f:
+$$F_f=\frac{P}{\eta_f},\; F_m=\frac{mP}{\eta_m},\; b=\frac{F_f-F_m}{(1-m)P},\; F_0=F_f-bP,\; F(P)=F_0+bP$$
+ASCII: `F_f = P/eta_f; F_m = m*P/eta_m; b = (F_f-F_m)/((1-m)*P); F0 = F_f - b*P; F(P) = F0 + b*P` (MW_th; b = incremental heat rate, F0 = fuel
+while committed at zero output). Requires `m*eta_f < eta_m <= eta_f` (else the build is refused). Two routes, by component: a **Link** (CCGT / OCGT,
+the fuel-network turbine) gets PyPSA 1.4's own piecewise `efficiency` curve (sheet `links-efficiency-pw`, breakpoints `p_pu` = 0, `m eta_f/eta_m`,
+1 with efficiency 0, eta_m, eta_f; `p_min_pu` = `m eta_f/eta_m`; PyPSA ties the curve to `status`), because then the no-load fuel is a real flow on
+the gas bus: the supplier's cost, the gas flow, the CO2 and the co-firing blend rows all see it, whereas `stand_by_cost` + `marginal_cost` prices the
+same line only in money. A **Generator** (simple co-firing, fuel price `c` inside `marginal_cost`) gets PyPSA's `stand_by_cost = c F0` (currency per
+hour committed) and `marginal_cost = c b + v` (PyPSA's Generator piecewise efficiency only feeds primary-energy constraints, not cost); the no-load
+fuel is then priced but not counted in the carrier's CO2. The curve makes the run a MIP (it already is: committable) and PyPSA refuses it with
+stochastic scenarios. The VOM of a Link stays per MWh of fuel (x full-load efficiency). The derived values are in the plant preview
+(`summary[].partLoad`, `registry.partLoad`) and in the plant card.
+
+*Hot / warm / cold start costs* (`startCostHot`, `startCostWarm`, `startCostCold`, `startWarmAfterHours`, `startColdAfterHours`; EUR/MW_el per
+start; hot blank = the technology `start_up_cost`; `startcosts.py`, `hooks.py` `plants-start-costs`, order 61). Rows go to the visible sheet
+`RAGNAROK_StartCosts` (`component, name, attribute, value, unit`; costs absolute per start, durations in hours). **PyPSA's native `start_up_cost` is set to
+the HOT cost**, so every start already pays it and the hook adds only the increments (nothing is double counted; with the hook off the unit pays the
+hot cost on every start). For a unit with status u, start-up v, tiers j = 1.. (thresholds T_j hours, costs c_0 <= c_1 <= ...), K_j = ceil(T_j / w)
+snapshots with w the run's step from the time-units module (`time_units.convert` / `step_hours`):
+$$y^j_t\ge v_t-\sum_{k=1}^{K_j}u_{t-k},\quad y^j_t\ge 0,\qquad \text{objective} \mathrel{+}= \sum_j (c_j-c_{j-1})\sum_t y^j_t$$
+ASCII: `y[j,t] >= v[t] - sum_{k=1..K_j} u[t-k]; obj += sum_j (c_j - c_(j-1)) * sum_t y[j,t]`. The y are continuous: the increments are >= 0, so the
+cost pins each y to its bound (1 exactly when the unit was off for all K_j snapshots before the start). Snapshots before the horizon follow PyPSA's
+`up_time_before` / `down_time_before` rule. Costs rising with the offline time are required (else the build / sheet is refused). The term is
+unweighted like PyPSA's `start_up_cost` and is declared in the run notes. **Refused (400)** with stochastic scenarios, rolling horizon, sampled blocks and
+a multi-period pathway (the rows look back over adjacent snapshots); **relaxed consistently** under Force-LP (`linearized_unit_commitment`): the
+rows stay valid on the continuous status, the run note says a fractional status can lower the charge. Results: `startCosts` per plant (starts by
+hot / warm / cold from the solved status, `startCost`, `nativeStartUpCost`, `tierIncrement`), `standByCost`, and `commitmentCost` (included in
+`totalCost` only for a plant that uses these fields; the legacy total never contained start-up costs).
+
+*Start-up / shut-down time* (`startUpMinutes`, `shutDownMinutes`): PyPSA's own `ramp_limit_start_up` / `ramp_limit_shut_down`, written as
+`RAGNAROK_TimeUnits` rows `p_min_pu / minutes` per minute (the rate that reaches the minimum load in that many minutes) and converted at solve time
+(`min(1, rate x w)`, never below `p_min_pu`). PyPSA bounds the output of the start (shut-down) snapshot only, so it bites only when the step is longer
+than the minutes stated; otherwise the bound equals the minimum load and the time-units run note says so. No constraint of Ragnarok's own.
+
+*H2 derate:* no citable source (document + table / page + retrieval date) for a gas-turbine output or efficiency derate versus H2 volume share was
+available to this build, so none is entered: `fuels.h2_derate_efficiency_per_share` and `fuels.h2_derate_capacity_per_share` stay `0` (documented
+placeholders in `technologies.json`, 2026-10-29). Override per plant with an OEM or peer-reviewed figure and record its source there.
+
+Merge / delete: `links-efficiency-pw` rows (several breakpoints per component) are exempt from the name-dedupe in `fragment_merge`, replaced by name on
+a merge and removed with their plant (`registry.delete_change`); `RAGNAROK_StartCosts` is a keyed sheet like `RAGNAROK_TimeUnits`. Tests:
+`backend/tests/test_plants_extras.py`.
+
 **Run option `options.cofiringConfig`** (documented by `describe_run_options`): `{enabled, plants, minShare, maxShare, unit: energy|vol,
 scope: hourly|period, perPlant}`. A run that sets none takes each plant's stored `blendMax` / `blendMin`; an explicit value, even
 `{enabled: false}`, wins. A limit naming no fuel-network plant, or `minShare > maxShare`, is refused (400) before the solve.
 
 **Results** (`plants/results.py`): per plant generation, capacity factor, full-load hours, starts (solved `start_up` for committable units,
-else counted from dispatch and labelled), operating / fixed (PyPSA's effective capital cost read from the rebuilt network + `fom_cost` x window years) / fuel cost, revenue at the bus price; for gas plants the gas and H2 use (MWh_th),
+else counted from dispatch and labelled; `startCosts` by hot / warm / cold for a tiered plant), operating / fixed (PyPSA's effective capital cost read from the rebuilt network + `fom_cost` x window years) / fuel cost, revenue at the bus price; for gas plants the gas and H2 use (MWh_th),
 the H2 share per hour (energy and vol), emissions and the emissions avoided against the same dispatch burnt as 100 % gas
 (`e_g x H2 energy`); BESS charge / discharge and cycles; P2X LCOH. Fuel supplier rows are shared and not booked on a plant; fuel is valued
 at the nodal price of the plant's fuel bus.
@@ -764,6 +810,15 @@ changing snapshots). The same step warns when the timestamp spacing disagrees wi
 warns, and the notes say which weighting was used. Run option `options.annualBudgets.enabled`. MCP: `get_annual_budgets` (read-only), `set_annual_budget`, `apply_annual_budgets`
 (gated). Routes `/api/annual-budgets[/preview|/set|/apply]`.
 
+**Budget against achieved (results read-back).** `GET /api/runs/{name}/annual-budgets` (`routers/results_derived.py`, `annual_budgets/report.py`
+`budget_report`) rebuilds the stored run's network from its outputs and adds, to each row of `result.annualBudgets`, what the solve achieved: a
+generator `e_sum` = `n.statistics.supply` of that generator (weighted by the `generators` weighting, the one `e_sum` uses); a CO2 `primary_energy`
+GlobalConstraint = `primary_energy_emissions(...).total`, the constraint's left-hand side (only the period's rows when it has an `investment_period`);
+`dual` = `global_constraints.mu` (none for `e_sum`: PyPSA stores no dual); `binding` = the achieved value sits on the written bound (relative
+tolerance 1e-4). Any other target reports `achieved: null` with the reason in `achievedUnit`; nothing is estimated. Response `{run, items, total}`;
+empty for a run without budgets or without stored outputs. Test `test_annual_budgets_report.py` (hand-checkable 4 h models: gas held to 100 MWh, a
+80 t cap with dual 150 = (80 - 20) / 0.4). The Analytics card `annual-budgets` shows it.
+
 **Migration (schema 2 → 3)** (`cost_basis.migrate_cost_basis`, `annual_budgets.migrate_e_sum`): finite generator `e_sum_*` values (annual semantics) move into the sheet and the
 report lists them (`budgets`); inf / ≥1e9 placeholders and PyPSA-native files stay. `buildVersion` / `CURRENT_SCHEMA_VERSION` is 3 (carbon module + budgets). A stored run before 3 re-derives
 unchanged: the carbon price is rebuilt from its `scenario` / `options`, and `legacy_e_sum_scale` applies the old build-time factor to its `e_sum` (`build_stored_network`).
@@ -782,7 +837,7 @@ PyPSA lacks is a module that writes visible inputs.
 | Resolution | `network_ops.temporal_cluster`, `POST /api/transform/temporal` | reduced snapshots, weightings (block-sum), block-mean series (`resample`) or point samples (`downsample`) | the workbook; the Run dialog's Resolution buttons call it |
 | Weightings from the spacing | `utils/weightings.py` `set_weightings_from_spacing`, `POST /api/model/set-weightings-from-spacing` | `objective` / `stores` / `generators` of the snapshots sheet = the forward gap to the next stamp (irregular spacing and pathway periods handled) | offered from the `weighting_spacing` warning of `model_check` (`finding.action`), the snapshot builder, Settings → Window, MCP |
 | Test-run sampling | `sampling.py` `apply_test_run_sampling`, `sample_model`, `POST /api/transform/sample` | sampled snapshots; `objective` / `generators` = `w_t · Σ_window w / Σ_kept w`, `stores` = `w_t`; `start_up_cost` / `shut_down_cost` × the same factor (`samplingConfig.scaleStartUpCosts`, default on: PyPSA charges them per event, unweighted) | run notes; the transform writes the workbook |
-| Time units | `network/time_units.py`, sheet `RAGNAROK_TimeUnits` (`component, name, attribute, value, unit`) | PyPSA's per-snapshot `ramp_limit_*` and `min_up_time` / `min_down_time` / `up_time_before` / `down_time_before` at **solve** time | run notes; `POST /api/time-units/preview`; MCP `get_time_units` / `preview_time_units` / `set_time_units` |
+| Time units | `network/time_units.py`, sheet `RAGNAROK_TimeUnits` (`component, name, attribute, value, unit`) | PyPSA's per-snapshot `ramp_limit_*` and `min_up_time` / `min_down_time` / `up_time_before` / `down_time_before` at **solve** time | run notes; `POST /api/time-units/preview`; MCP `get_time_units` / `preview_time_units` / `set_time_units`; the Build **Time units** drawer (`GET /api/time-units` also returns the vocabulary: `components`, `attributes`, `units`) |
 | Rolling hours | `rolling.py` `resolve_rolling` | `horizonHours` / `overlapHours` → snapshot counts | run notes; `runMeta.rolling` |
 
 **Time-units equations.** With the solve's time step `w` = the smallest `stores` weighting (the hours between two snapshots; test-run sampling scales `objective` /
@@ -817,7 +872,7 @@ module by name. A module that fails to import is skipped and listed in `module_h
 | `submit` | `fn(data) -> data` | `_resolve_payload_model`, before the run is queued | `scenario_overrides` (cell overrides), `constraints` (DSL precedence), `physical_risk` (outage uplift), `p2x` (session RFNBO settings) |
 | `guard` | `fn(ctx)` | `run_pypsa`, before the build | `market_studies` (merchant, bid strategy), `company` (asset swap, ESS): refuse modes that skip or reshape the solve (HTTP 400) |
 | `build_step` | `fn(ctx)` | inside `build_network`, after load shedding | `demand_response` (rewiring), `stochastic` (scenario overrides), `market_studies` (bid + carbon price + piecewise refusal) |
-| `constraints` | `prepare(ctx) -> fn(n, snapshots) \| None` | once before the solve (a bad plan is a 400); the returned contributions are composed into the one `extra_functionality` | `carbon_pricing`, `annual_budgets`, `constraints`, `reserves`, `p2x` (RFNBO), `plants` (co-firing) |
+| `constraints` | `prepare(ctx) -> fn(n, snapshots) \| None` | once before the solve (a bad plan is a 400); the returned contributions are composed into the one `extra_functionality` | `carbon_pricing`, `annual_budgets`, `constraints`, `reserves`, `p2x` (RFNBO), `plants` (co-firing, start-cost tiers) |
 | `replace_solve` | `fn(ctx) -> payload \| None` | after the build; a payload ends the run | `market_studies` (rule-based market simulation) |
 | `post_solve` | `fn(ctx) -> {key: value}` | right after the solve, before the core reads the network | `stochastic` (collapse to a representative scenario, duals divided by the scenario probability) |
 | `diagnose` | `fn(ctx) -> {headline, text} \| None` | when a solve is unusable | `model_check` (infeasibility diagnosis) |
@@ -834,7 +889,7 @@ core-to-module import allowlist in both directions (a stale row fails), and fail
 | `constraints/` | custom constraints, the DSL, `constraintSpecs`, `constraint_checks` | declared linopy constraints; **not routed to native `GlobalConstraint`** (see below) |
 | `stochastic/` | scenario overrides, collapse to the representative scenario, duals divided by the probability, `GlobalConstraint.mu` recovery | `set_scenarios` / `set_risk_preference` stay native |
 | `demand_response/` | shiftable and price-elastic rewiring (DR bus + Link + Store), `demandResponse` / `priceElastic` blocks | a declared, reported build step (the `dr_*` components are not yet written to the workbook) |
-| `p2x/rfnbo.py`, `plants/cofiring.py` | RFNBO matching and co-firing blend share | `constraints` hooks of the p2x and plants modules |
+| `p2x/rfnbo.py`, `plants/cofiring.py`, `plants/startcosts.py` | RFNBO matching, co-firing blend share, hot / warm / cold start-cost tiers | `constraints` hooks of the p2x and plants modules |
 | `emissions/` | `thermal_basis_factor` (carrier `co2_emissions` / efficiency: the one factor function), `carrier_emission_factors`, `primary_energy_emissions`, `emissionsBreakdown` | `results_derived` and `run_statistics` call these |
 | `market_studies/` | market simulation, strategic bidding, merchant, bid strategy, optimal bid, PPA + explorer, price formation, LMP decomposition | study and `replace_solve` hooks |
 | `company/` | company breakdown, statement, finance, asset swap, ESS business case | study hooks |

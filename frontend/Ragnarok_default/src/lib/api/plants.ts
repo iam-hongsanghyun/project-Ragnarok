@@ -22,10 +22,30 @@ export interface PlantField {
 }
 export interface PlantType { id: string; label: string; description: string; fields: PlantField[]; defaults: Record<string, unknown>; technology: string | null }
 
+/** Part-load heat-rate line the backend derived (MW_th, MW_el; see `backend/app/plants/partload.py`). */
+export interface PlantPartLoad {
+  route: 'piecewise-link' | 'stand-by-generator';
+  pElMw: number; minLoad: number; etaFull: number; etaMin: number;
+  fuelFullMw: number; fuelMinMw: number; noLoadFuelMw: number; incrementalHeatRate: number; incrementalEfficiency: number; minLoadPu: number;
+  written?: { stand_by_cost: number; marginal_cost: number };
+  formula: string;
+}
+/** Start cost per start (currency): `hot` is PyPSA's start_up_cost; warm / cold are added by the plants module. */
+export interface PlantStartCosts {
+  hot: number; hotPerMw: number; nativeStartUpCost: number;
+  warm?: number; warmPerMw?: number; warmAfterHours?: number | null;
+  cold?: number; coldPerMw?: number; coldAfterHours?: number | null;
+  unit: string;
+}
+/** The registry fields a form shows as derived values (absent when the plant does not use the option). */
+export interface PlantDerived { partLoad?: PlantPartLoad; startCosts?: PlantStartCosts }
+
 export interface PlantPreview {
   plantId: string;
   type: string;
   label: string;
+  /** Registry row of the plant about to be written: the derived part-load line and start costs are in it. */
+  registry?: PlantDerived & Record<string, unknown>;
   summary: Array<Record<string, unknown>>;
   warnings: string[];
   rowCounts: Record<string, number>;
@@ -48,7 +68,9 @@ const post = async <T,>(path: string, body: unknown): Promise<T> =>
   readJson<T>(await fetch(`${API_BASE}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }));
 
 /** The sheets the backend reads to name, place and wire a plant (names, buses, carriers, snapshots, both registries). */
-const MODEL_SHEETS = ['buses', 'carriers', 'generators', 'loads', 'links', 'processes', 'stores', 'storage_units', 'lines', 'transformers', 'snapshots', 'RAGNAROK_PLANTS', 'RAGNAROK_P2X'];
+const MODEL_SHEETS = ['buses', 'carriers', 'generators', 'loads', 'links', 'processes', 'stores', 'storage_units', 'lines', 'transformers', 'snapshots', 'RAGNAROK_PLANTS', 'RAGNAROK_P2X',
+  // module rows keyed by plant component: edit / delete must see them to remove them with the plant
+  'RAGNAROK_TimeUnits', 'RAGNAROK_StartCosts', 'links-efficiency-pw'];
 
 export function modelForPlants(model: WorkbookModel): Record<string, GridRow[]> {
   const m = model as Record<string, GridRow[]>;

@@ -200,9 +200,9 @@ export const MODULE_8_POLICY: TutorialStep[] = [
       + 'cost, and the results show fuel and carbon as separate lines. Nothing else about the model changes: the same demand, the same '
       + 'network, the same overnight costs, the same discount_rate on every row.',
 
-      'Predict before you run. Coal at 20 + 85 = 105 per MWh is now the most expensive thermal plant in '
-      + 'the fleet, above the CCGT at 90 and only just below the oil peaker at 148. Something has to '
-      + 'replace 316 GWh of it.',
+      'Predict before you run. Coal at 20 + 85 = 105 per MWh now costs more than the CCGT at 90 (25 / 0.5 '
+      + 'plus 0.4 x 100), and only the oil peaker is dearer, at 197 (120 plus 0.27 / 0.35 x 100). Something '
+      + 'has to replace 316 GWh of coal.',
     ],
     explain: [
       'Market & Policy → Carbon price. Set the scalar price to 100 and run. About a minute.',
@@ -353,17 +353,17 @@ export const MODULE_8_POLICY: TutorialStep[] = [
       'A cap does not price anything. It states that total emissions must not exceed a number, and lets '
       + 'the optimiser find the cheapest way to comply.',
 
-      'Ragnarok offers two routes and they are not equivalent for our purposes. The `global_constraints` '
-      + 'sheet — reachable from Build → Constraints or Market & Policy → Standard Constraints — writes a native '
-      + 'PyPSA global constraint, which is the conventional way to express a cap. The Advanced '
-      + 'Constraints box takes a small constraint language instead: `emissions <= 150000` is a complete '
-      + 'and valid line.',
+      'Ragnarok offers two routes to a cap. The `global_constraints` sheet — edited under Market & Policy → '
+      + 'Standard Constraints; the Build strip\'s Constraints step only lists it — writes a native PyPSA '
+      + 'GlobalConstraint, the conventional way to express a cap, and PyPSA reports its dual as the '
+      + 'constraint\'s `mu`. The Advanced Constraints box takes a small constraint language instead: '
+      + '`emissions <= 150000` is a complete and valid line, added to the same model as a declared constraint.',
 
-      'Use the constraint language here, for one specific reason: Ragnarok reports the SHADOW PRICE of '
-      + 'constraints written this way and not of native PyPSA ones. Since the next two steps are entirely '
-      + 'about reading that shadow price, the route that surfaces it is the one to learn. It is worth '
-      + 'knowing as a property of the tool — a cap written the other way solves identically and tells you '
-      + 'nothing about what it cost.',
+      'Use the constraint language here: a one-line cap is the quickest to type, and its dual is listed in one '
+      + 'place, under the box. The route does not change the answer. The native row solves to the same system '
+      + 'with the same shadow price, 3.46 (the course\'s test suite solves both), and reports it on the CO₂ '
+      + 'shadow card in Analytics instead of in the list under the DSL box. The next two steps are about '
+      + 'reading that shadow price, so know where each route shows it.',
 
       'The cap you are about to set is 150,000 tonnes — a 45% cut from the 272,288 baseline, which is a '
       + 'plausible national target for a decade out. Deliberately not near-zero, because the interesting '
@@ -394,8 +394,8 @@ export const MODULE_8_POLICY: TutorialStep[] = [
         title: 'Advanced Constraints',
         note: 'Market & Policy holds the whole policy layer: Carbon price, Standard Constraints — which edits the '
           + 'global_constraints table — and Advanced '
-          + 'Constraints takes the constraint language. Both cap emissions; only the second reports what '
-          + 'the cap cost.',
+          + 'Constraints takes the constraint language. Both cap emissions and both report what the cap '
+          + 'cost: the first on the CO₂ shadow card, the second under its DSL box.',
       },
       {
         selector: '[data-build-step="constraints"]',
@@ -403,8 +403,9 @@ export const MODULE_8_POLICY: TutorialStep[] = [
         title: 'The other route',
         tab: 'Build',
         note: 'The Build strip has carried a Constraints step since module 1 and this course has never '
-          + 'filled it. It edits the same global_constraints sheet as Market & Policy → Standard Constraints — '
-          + 'the conventional route, and the one whose shadow price is not surfaced.',
+          + 'filled it. It is a read-only summary of the global_constraints sheet, with a button to the '
+          + 'editor, Market & Policy → Standard Constraints: the conventional route, which reports the same '
+          + 'shadow price on the CO₂ shadow card.',
       },
     ],
     entries: [
@@ -421,23 +422,24 @@ export const MODULE_8_POLICY: TutorialStep[] = [
           + 'co2_emissions factor over the fuel burnt — the column typed in module 1 and unused until '
           + 'now. 150,000 tonnes is a 45% cut from the 272,288 baseline: a plausible national target, and '
           + 'deliberately not near-zero, because what a MODERATE cap costs is the more commonly asked '
-          + 'question. Written this way rather than as a global_constraints row because Ragnarok reports '
-          + 'the shadow price of DSL constraints and not of native PyPSA ones.',
+          + 'question. Written this way rather than as a global_constraints row because it is one line and its '
+          + 'dual is listed right under the box; a native row gives the same shadow price on the CO₂ shadow card.',
       },
     ],
     verify: [
       'The carbon price is back to 0',
       'The DSL box holds one line reading `emissions <= 150000` with no error beneath it',
       'You can write a line that caps emissions per MWh rather than in total',
-      'You can say why this route was chosen over the global_constraints sheet',
+      'You can say how the two routes differ: a declared constraint with its dual in the applied list, or a native GlobalConstraint with its dual on the CO₂ shadow card',
     ],
     pitfalls: [
       'Leaving the carbon price at 100. The cap would then be slack — emissions are already 4,376 — and '
       + 'the run would tell you nothing.',
       'Setting the cap above the baseline. A non-binding constraint changes nothing and reports no shadow '
       + 'price, which looks like a broken model rather than a slack limit.',
-      'Writing the cap in the global_constraints sheet and then looking for its shadow price. It solves '
-      + 'correctly and the dual is never reported — which is exactly why this step uses the DSL.',
+      'Looking for the dual in the wrong place. A DSL cap\'s dual is in "Applied constraints (last run)" under '
+      + 'the DSL box; a global_constraints cap\'s is on the CO₂ shadow card (Analytics sub-tab → Edit layout → '
+      + 'add it), and is not in the applied list.',
     ],
   },
 
@@ -469,7 +471,7 @@ export const MODULE_8_POLICY: TutorialStep[] = [
       'Read the emissions first and confirm they are exactly 150,000 — a binding constraint sits on its '
       + 'limit, and a model reporting 149,000 would mean the cap was not the thing constraining you.',
 
-      'Then find the shadow price, which is not on the dashboard. Market & Policy → Advanced '
+      'Then find the shadow price, which is not on the default dashboard. Market & Policy → Advanced '
       + 'Constraints, under the DSL box: "Applied constraints (last run)" lists every custom, DSL and '
       + 'plugin constraint from the last solve with its dual beside it. Yours should read `dsl_1` with '
       + 'λ −3.46.',
@@ -491,7 +493,7 @@ export const MODULE_8_POLICY: TutorialStep[] = [
       {
         selector: '[data-tour="applied-constraints"]',
         title: 'The shadow price',
-        note: 'Under the DSL box in Market & Policy → Advanced Constraints, and nowhere else in the app. `dsl_1` '
+        note: 'Under the DSL box in Market & Policy → Advanced Constraints: that is where a DSL cap\'s dual is listed. `dsl_1` '
           + 'with λ −3.46: the marginal abatement cost, and the carbon price that would produce the same '
           + 'system with no cap at all. The sign is the convention for a <= constraint; read the magnitude.',
       },

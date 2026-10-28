@@ -8,7 +8,7 @@
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import type { WorkbookModel } from 'lib/types';
-import type { PlantCard, PlantChange } from 'lib/build/plants';
+import { derivedLines, type PlantCard, type PlantChange } from 'lib/build/plants';
 import {
   fetchPlantTypes,
   previewPlant,
@@ -201,6 +201,12 @@ export function PlantPicker({ model, busNames, carrierNames, onApply, editing, o
         </details>
       )}
       {preview && <p className="plant-picker__preview">{editing ? 'Re-creates' : 'Creates'}: {counts}.</p>}
+      {preview && derivedLines(preview.registry).length > 0 && (
+        <div className="plant-picker__derived" data-testid="plant-derived">
+          <strong>Derived values (written to the rows)</strong>
+          {derivedLines(preview.registry).map((l) => <p key={l}>{l}</p>)}
+        </div>
+      )}
       {preview?.warnings.map((w) => <p key={w} className="plant-picker__warn">{w}</p>)}
       {error && <p className="plant-picker__error">{error}</p>}
       <div className="plant-picker__actions">

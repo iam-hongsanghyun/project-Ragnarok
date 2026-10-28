@@ -40,7 +40,13 @@ PROVENANCE_SHEET = "RAGNAROK_Provenance"
 FUEL_PRICES_DB = "fuel_prices"
 #: Module sheets whose rows are keyed by ``(component, name, attribute)``: several rows share one component ``name``, so a
 #: fragment's rows REPLACE rows with the same key and are never renamed by the name-dedupe (RAGNAROK_TimeUnits).
-KEYED_SHEETS: dict[str, tuple[str, str, str]] = {"RAGNAROK_TimeUnits": ("component", "name", "attribute")}
+KEYED_SHEETS: dict[str, tuple[str, str, str]] = {
+    "RAGNAROK_TimeUnits": ("component", "name", "attribute"),
+    "RAGNAROK_StartCosts": ("component", "name", "attribute"),        # hot / warm / cold start costs of the plants module
+}
+#: PyPSA piecewise-curve sheets (``<list>-<attr>-pw``, long form): several rows (breakpoints) share one component ``name``, so they are
+#: never renamed by the name-dedupe; a fragment's curve REPLACES the rows of the same name and follows a renamed component.
+PW_SUFFIX = "-pw"
 _BUS_REFS = ("bus", "bus0", "bus1", "bus2", "bus3", "bus4")
 
 
@@ -231,9 +237,20 @@ def merge_fragment(model: Model, fragment: dict[str, Any]) -> Model:
     order = (["buses"] if "buses" in static else []) + [
         s for s in static if s not in ("buses", CARRIERS_SHEET, SNAPSHOTS_SHEET)
     ]
+    order = [s for s in order if not s.endswith(PW_SUFFIX)] + [s for s in order if s.endswith(PW_SUFFIX)]  # curves last: they follow renames
     for sheet in order:
         incoming = sheets.get(sheet) or []
         if not incoming:
+            continue
+        if sheet.endswith(PW_SUFFIX):
+            list_name = sheet.partition("-")[0]
+            curves = [dict(r) for r in incoming]
+            for row in curves:
+                renamed = rename.get(f"{list_name}::{row.get('name')}")
+                if renamed:
+                    row["name"] = renamed
+            replaced_names = {r.get("name") for r in curves}
+            out[sheet] = [r for r in out.get(sheet) or [] if r.get("name") not in replaced_names] + curves
             continue
         if sheet in KEYED_SHEETS:
             key = KEYED_SHEETS[sheet]

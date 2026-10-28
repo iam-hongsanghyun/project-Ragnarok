@@ -24,6 +24,7 @@ import {
   GeoJSONFeatureCollection,
 } from 'lib/api/databases';
 import { CountrySearch } from './CountrySearch';
+import { BASEMAP_ATTRIBUTION, BASEMAP_MAX_NATIVE_ZOOM, BASEMAP_URL } from 'lib/map/basemap';
 
 interface Props {
   countriesGeoJSON: GeoJSONFeatureCollection | null;
@@ -139,11 +140,7 @@ export function WorldMap({
         worldCopyJump
         style={{ height: '100%', width: '100%' }}
       >
-        <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-          subdomains="abcd"
-        />
+        <TileLayer url={BASEMAP_URL} attribution={BASEMAP_ATTRIBUTION} maxNativeZoom={BASEMAP_MAX_NATIVE_ZOOM} />
         {countriesGeoJSON && (
           <GeoJSON
             data={countriesGeoJSON as GeoJsonObject}

@@ -139,3 +139,20 @@ describe('effectiveSpanMs (chart x-label granularity for sparse blocks)', () => 
     expect(effectiveSpanMs([{ timestamp: '2030-01-01T00:00:00Z' }])).toBe(0);
   });
 });
+
+describe('scaleStartUpCosts (sparse: only OFF is carried)', () => {
+  test('the default (on) leaves the key out, so an untouched preset is unchanged', () => {
+    expect('scaleStartUpCosts' in normalizeSamplingConfig(cfg())).toBe(false);
+    expect('scaleStartUpCosts' in normalizeSamplingConfig(cfg({ scaleStartUpCosts: true }))).toBe(false);
+  });
+
+  test('off survives the normaliser and the workbook sheet round trip', () => {
+    const off = cfg({ scaleStartUpCosts: false });
+    expect(normalizeSamplingConfig(off).scaleStartUpCosts).toBe(false);
+    const model = writeSamplingConfigToModel({} as WorkbookModel, off);
+    expect(readSamplingConfigFromModel(model).scaleStartUpCosts).toBe(false);
+    const on = writeSamplingConfigToModel({} as WorkbookModel, cfg());
+    expect('scaleStartUpCosts' in (on.RAGNAROK_Sampling[0] ?? {})).toBe(false);
+    expect(readSamplingConfigFromModel(on).scaleStartUpCosts).toBeUndefined();
+  });
+});

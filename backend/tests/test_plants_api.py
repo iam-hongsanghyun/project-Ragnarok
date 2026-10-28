@@ -274,3 +274,25 @@ def test_mcp_get_plant_results_is_read_only_and_drops_series_by_default(wired: R
         assert_allclose(max(full["plants"][0]["series"]["h2VolShare"]), 0.30, rtol=1e-6)
 
     asyncio.run(go())
+
+
+def test_extras_apply_edit_and_delete_through_the_session(client: TestClient) -> None:
+    """Part-load curve rows, start-cost rows and time-units rows are written with the plant, replaced by an edit and removed by a delete."""
+    _load(client, grid())
+    spec = {"pNom": 58, "committable": True, "minLoadEfficiency": 0.52, "startCostWarm": 120, "startWarmAfterHours": 8, "startCostCold": 200,
+            "startColdAfterHours": 48, "startUpMinutes": 30}
+    done = client.post("/api/build/plant", json={"sessionId": SID, "type": "ccgt", "spec": spec, "apply": True}).json()
+    assert done["applied"] is True and done["registry"]["partLoad"]["route"] == "piecewise-link"
+    assert next(s for s in done["summary"] if s["sheet"] == "links")["partLoad"]["noLoadFuelMw"] > 0        # derived values in the preview
+    assert [r["breakpoint"] for r in _rows(client, "links-efficiency-pw")] == [0, 1, 2]
+    assert {r["attribute"] for r in _rows(client, "RAGNAROK_StartCosts")} == {"hot_cost", "warm_cost", "warm_after", "cold_cost", "cold_after"}
+    assert "ramp_limit_start_up" in {r["attribute"] for r in _rows(client, "RAGNAROK_TimeUnits")}
+    edited = client.post("/api/build/plant/edit", json={"sessionId": SID, "plantId": "ccgt", "spec": {"minLoadEfficiency": 0.5, "startCostCold": None, "startColdAfterHours": None}, "apply": True})
+    assert edited.status_code == 200, edited.text
+    assert [r["efficiency"] for r in _rows(client, "links-efficiency-pw")][1] == 0.5
+    assert {r["attribute"] for r in _rows(client, "RAGNAROK_StartCosts")} == {"hot_cost", "warm_cost", "warm_after"}
+    off = client.post("/api/build/plant/edit", json={"sessionId": SID, "plantId": "ccgt", "spec": {"minLoadEfficiency": None}, "apply": True})
+    assert off.status_code == 200 and _rows(client, "links-efficiency-pw") == []                              # the curve is removed, not orphaned
+    gone = client.post("/api/build/plant/delete", json={"sessionId": SID, "plantId": "ccgt", "apply": True})
+    assert gone.status_code == 200
+    assert _rows(client, "RAGNAROK_StartCosts") == [] and _rows(client, "RAGNAROK_TimeUnits") == [] and _names(client, "links") == set()

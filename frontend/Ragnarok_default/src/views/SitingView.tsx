@@ -19,7 +19,7 @@
  * its own (the Screening tab, `modules/screening/`); this tab is only the
  * expansion-based flow.
  */
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { LatLngBoundsExpression } from 'leaflet';
 import { ViewPaneHeader } from '../shared/components/primitives';
 import { useToast } from '../shared/components/Toast';
@@ -30,6 +30,7 @@ import { fetchRunAnalysis } from 'lib/api/resultsDerived';
 import { useAsync } from '../shared/hooks/useAsync';
 import { numberValue, stringValue } from 'lib/utils/helpers';
 import { Bbox, SitingMap } from '../features/siting/SitingMap';
+import type { SitingHandoff } from 'lib/screening/screening';
 
 interface Props {
   model: WorkbookModel;
@@ -43,6 +44,10 @@ interface Props {
   runName?: string | null;
   /** Pathway investment period; null = the whole horizon. */
   period?: number | null;
+  /** Sites carried from the Screening tab ("Open in Siting"); null = none. */
+  handoff?: SitingHandoff | null;
+  /** Drop the carried sites (the Siting tab keeps its own region and settings). */
+  onClearHandoff?: () => void;
 }
 
 const WEATHER_SOURCES = [
@@ -88,7 +93,7 @@ export function SitingView(props: Props) {
   );
 }
 
-function OptimiseStep({ model, bounds, onApplyFragment, expansionResults, currencySymbol, discountRate, runName = null, period = null }: Props) {
+function OptimiseStep({ model, bounds, onApplyFragment, expansionResults, currencySymbol, discountRate, runName = null, period = null, handoff = null, onClearHandoff }: Props) {
   const { showToast } = useToast();
 
   // ── Scan configuration ────────────────────────────────────────────────
@@ -113,6 +118,20 @@ function OptimiseStep({ model, bounds, onApplyFragment, expansionResults, curren
   const [applied, setApplied] = useState(false);
 
   const connectableBuses = useMemo(() => connectableBusesOf(model.buses), [model.buses]);
+
+  // A hand-off from Screening sets the candidate region to the sites' envelope and the technologies to those they use.
+  // Applied once per hand-off object; the user's later edits to the region or technologies stand.
+  useEffect(() => {
+    if (!handoff) return;
+    setBbox(handoff.bbox);
+    if (handoff.technologies.length > 0) {
+      setSolarOn(handoff.technologies.includes('solar'));
+      setWindOn(handoff.technologies.includes('wind'));
+    }
+    setCandidates(null);
+    setFragment(null);
+    setApplied(false);
+  }, [handoff]);
 
   // Candidates already merged into the workbook (an earlier apply, possibly a
   // previous session) — lets the results table work without a fresh scan.
@@ -188,6 +207,18 @@ function OptimiseStep({ model, bounds, onApplyFragment, expansionResults, curren
       <div style={{ display: 'flex', gap: 16, padding: 16, flex: 1, minHeight: 0, overflow: 'hidden' }}>
         {/* ── Left rail: goal → candidate set → costs ── */}
         <aside style={{ width: 300, flexShrink: 0, overflowY: 'auto', paddingRight: 4 }}>
+          {handoff && (
+            <div className="sg-setting-row" data-tour="siting-handoff">
+              <label className="sg-setting-label">From Screening · {handoff.sites.length} site(s)</label>
+              <p className="sg-setting-hint">
+                {handoff.sites.map((s) => `${s.name} (${s.technology})`).join(', ')}. The candidate region below is their
+                envelope plus a margin, and the technologies are the ones these sites use; the scan samples candidates over
+                that region, and the screened sites are the dots on the map.
+                {handoff.withoutLocation.length > 0 && ` Left behind, no location: ${handoff.withoutLocation.join(', ')}.`}
+              </p>
+              {onClearHandoff && <button className="tb-btn tb-btn--muted" onClick={onClearHandoff}>Clear screened sites</button>}
+            </div>
+          )}
           <div className="sg-setting-row">
             <label className="sg-setting-label">1 · Candidate region</label>
             <p className="sg-setting-hint">
@@ -352,6 +383,7 @@ function OptimiseStep({ model, bounds, onApplyFragment, expansionResults, curren
             candidates={candidates}
             builtMwBySiteBus={builtMwBySiteBus}
             currencySymbol={currencySymbol}
+            screenedSites={handoff?.sites ?? null}
           />
 
           {candidates && candidates.length > 0 && (

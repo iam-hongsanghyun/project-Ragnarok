@@ -34,6 +34,7 @@ import { PlantPicker } from './PlantPicker';
 import { PlantList } from './PlantList';
 import { plantCards, type PlantCard, type PlantChange } from 'lib/build/plants';
 import { SnapshotBuilder } from './SnapshotBuilder';
+import { TimeUnitsPanel } from './TimeUnitsPanel';
 import type { WorkbookFragment } from 'lib/api/databases';
 import { ResizablePanels } from '../../layout/ResizablePanels';
 import { ViewPaneHeader } from '../../shared/components/primitives';
@@ -80,7 +81,12 @@ export interface BuildViewProps {
   onApplyPlantChange?: (change: PlantChange, label: string) => void | Promise<void>;
   /** Settings -> Discount rate, passed to the plant picker. */
   discountRate?: number;
+  /** Push the working model to the session (the time-units preview is computed by the server from the session). */
+  onSessionSync?: () => Promise<void>;
 }
+
+/** Build steps whose component sheet carries ramp limits / unit-commitment times (the `RAGNAROK_TimeUnits` components). */
+const TIME_UNIT_SHEETS = new Set(['generators', 'links', 'processes']);
 
 /** Short, sheet-appropriate base for auto-generated component names. */
 const NAME_BASE: Record<string, string> = {
@@ -204,6 +210,10 @@ export function BuildView(props: BuildViewProps) {
   const [editingPlant, setEditingPlant] = useState<PlantCard | null>(null);
   const step: BuildStep = BUILD_STEPS[stepIndex];
   const geo = isGeoSheet(step.primarySheet);
+  // Ramp limits / minimum times: stated in time units, converted per snapshot by the run (the Time units drawer).
+  const [timeUnitsOpen, setTimeUnitsOpen] = useState(false);
+  const timeUnitsAvailable = TIME_UNIT_SHEETS.has(step.primarySheet) && !!props.onSessionSync;
+  const timeUnitRows = (props.model.RAGNAROK_TimeUnits ?? []).filter((r) => r.component === step.primarySheet).length;
 
   // Open a step requested from outside (the Training walkthrough). Depends on
   // `requestedStep` alone, so it fires on change only — manual navigation
@@ -505,7 +515,29 @@ export function BuildView(props: BuildViewProps) {
           strip above; adding components uses the editor's Add button.) */}
       <div className="build-step-guide">
         <p className="build-step-guide__desc">{step.description}</p>
+        {timeUnitsAvailable && (
+          <button
+            type="button"
+            className="tb-btn"
+            data-tour="time-units-open"
+            aria-expanded={timeUnitsOpen}
+            onClick={() => setTimeUnitsOpen(!timeUnitsOpen)}
+          >
+            Time units ({timeUnitRows})
+          </button>
+        )}
       </div>
+      {timeUnitsAvailable && timeUnitsOpen && props.onSessionSync && (
+        <TimeUnitsPanel
+          model={props.model}
+          sheet={step.primarySheet}
+          onUpdateRow={props.onUpdateRow}
+          onDeleteRow={props.onDeleteRow}
+          onBulkPaste={props.onBulkPaste}
+          onSessionSync={props.onSessionSync}
+          onClose={() => setTimeUnitsOpen(false)}
+        />
+      )}
 
       {step.id === 'constraints' ? (
         <ResizablePanels id="build" direction="horizontal" className="build-body" initialSizes={[72, 28]} minSize={220}>
@@ -575,8 +607,8 @@ function ConstraintsStepPanel({ model, onOpenConstraintsWorkspace }: Constraints
   return (
     <div className="build-constraints-panel">
       <p>
-        Global constraints (CO₂ caps, expansion limits, primary-energy budgets) are edited
-        in the dedicated Constraints workspace. This step is a summary.
+        Global constraints (CO₂ caps, expansion limits, primary-energy budgets) are edited under
+        Market &amp; Policy, Standard Constraints. This step is a read-only summary of the sheet.
       </p>
       <div className="build-constraints-summary">
         <span className="build-constraints-count">
@@ -584,7 +616,7 @@ function ConstraintsStepPanel({ model, onOpenConstraintsWorkspace }: Constraints
         </span>
         {onOpenConstraintsWorkspace && (
           <button className="ghost-button sm" onClick={onOpenConstraintsWorkspace} type="button">
-            Open Constraints workspace →
+            Open Standard Constraints (Market &amp; Policy)
           </button>
         )}
       </div>

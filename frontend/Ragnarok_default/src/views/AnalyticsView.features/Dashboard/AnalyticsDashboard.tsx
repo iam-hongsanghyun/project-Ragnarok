@@ -72,6 +72,8 @@ import { LmpDecompositionCard } from '../../../features/analytics/cards/LmpDecom
 import { EmissionsBreakdownCard } from '../../../features/analytics/cards/EmissionsBreakdownCard';
 import { CapacityExpansionCard } from '../../../features/analytics/cards/CapacityExpansionCard';
 import { CapacityByPeriodCard } from '../../../features/analytics/cards/CapacityByPeriodCard';
+import { PathwayOverviewCard } from '../../../features/analytics/cards/PathwayOverviewCard';
+import { AnnualBudgetsCard } from '../../../features/analytics/cards/AnnualBudgetsCard';
 import { CarrierAnalysisCard } from '../../../features/analytics/cards/CarrierAnalysisCard';
 import { LoadAnalysisCard } from '../../../features/analytics/cards/LoadAnalysisCard';
 import { StochasticScenariosCard } from '../../../features/analytics/cards/StochasticScenariosCard';
@@ -642,6 +644,12 @@ export function AnalyticsDashboard({
           return results.pathway?.enabled
             ? <CapacityByPeriodCard model={model} results={results} />
             : <p className="dashboard-cell-missing">Pathway not enabled.</p>;
+        case 'pathway-overview':
+          return results.pathway?.enabled
+            ? <PathwayOverviewCard results={results} runName={runName} currencySymbol={currencySymbol} />
+            : <p className="dashboard-cell-missing">Pathway not enabled.</p>;
+        case 'annual-budgets':
+          return <AnnualBudgetsCard runName={runName} />;
         case 'carrier-analysis':
           return <CarrierAnalysisCard runName={runName} period={selectedPeriod} currencySymbol={currencySymbol} />;
         case 'load-analysis':
@@ -725,6 +733,8 @@ export function AnalyticsDashboard({
       case 'emissions-breakdown': return 'Emissions by generator / carrier';
       case 'capacity-expansion': return 'Capacity expansion';
       case 'capacity-by-period': return 'Capacity by period';
+      case 'pathway-overview': return 'Pathway: all periods';
+      case 'annual-budgets': return 'Annual budgets (budget, achieved, dual)';
       case 'carrier-analysis': return 'Carrier performance';
       case 'load-analysis': return 'Load analysis';
       case 'stochastic-scenarios': return 'Stochastic scenarios';

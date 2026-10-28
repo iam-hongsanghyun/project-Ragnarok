@@ -61,3 +61,15 @@ describe('PlantList', () => {
     expect(html).toContain('disabled');
   });
 });
+
+describe('PlantList derived values', () => {
+  it('shows the part-load line and the start costs of an expanded card', () => {
+    const reg = { plantId: 'c', type: 'ccgt', label: 'CCGT c', bus: 'grid', capacityMwEl: 58, extendable: false, spec: {},
+      components: [{ sheet: 'links', name: 'c', role: 'turbine' }],
+      partLoad: { route: 'piecewise-link', noLoadFuelMw: 7.7, incrementalHeatRate: 1.59, incrementalEfficiency: 0.63, fuelMinMw: 44.6, fuelFullMw: 100, etaMin: 0.52, etaFull: 0.58, minLoadPu: 0.446 },
+      startCosts: { hot: 3480, nativeStartUpCost: 3480, warm: 6960, warmAfterHours: 8 } };
+    const m = { ...model, RAGNAROK_PLANTS: [{ name: 'c', plant: 'c', json: JSON.stringify(reg) }] } as unknown as WorkbookModel;
+    // collapsed by default: the derived lines are behind the toggle, like the components
+    expect(staticMarkup(<PlantList model={m} onApply={jest.fn()} />)).not.toContain('no-load fuel');
+  });
+});

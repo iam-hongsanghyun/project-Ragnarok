@@ -438,14 +438,17 @@
         "preserveTerminalState": false,
         "selectedWindow": null,
         "stepPolicy": "derived",
-        "stepSnapshots": 1
+        "stepSnapshots": 1,
+        "terminalSoc": true,
+        "terminalSocPenalty": 12.5
        },
        "samplingConfig": {
         "blockCount": 4,
         "blockSize": 24,
         "enabled": true,
         "gapSnapshots": 0,
-        "mode": "count"
+        "mode": "count",
+        "scaleStartUpCosts": false
        },
        "securityConstrainedConfig": {
         "enabled": false
@@ -1695,14 +1698,17 @@
         "preserveTerminalState": false,
         "selectedWindow": null,
         "stepPolicy": "derived",
-        "stepSnapshots": 1
+        "stepSnapshots": 1,
+        "terminalSoc": true,
+        "terminalSocPenalty": 12.5
        },
        "samplingConfig": {
         "blockCount": 4,
         "blockSize": 24,
         "enabled": true,
         "gapSnapshots": 0,
-        "mode": "count"
+        "mode": "count",
+        "scaleStartUpCosts": false
        },
        "scenarioLabel": "Rich",
        "securityConstrainedConfig": {
@@ -1894,7 +1900,7 @@
      {
       "active": true,
       "id": "scenario-rich",
-      "json": "{\"snapshotStart\": 24, \"snapshotEnd\": \"72\", \"snapshotWeight\": 2, \"carbonPrice\": 55.5, \"carbonPriceSchedule\": [{\"year\": 2030, \"price\": 80}, {\"year\": 2025, \"price\": 40}], \"discountRate\": 0.07, \"forceLp\": \"yes\", \"enableLoadShedding\": true, \"loadSheddingCost\": 5000, \"pathwayConfig\": {\"planningMode\": \"pathway\", \"enabled\": true, \"snapshotMappingMode\": \"explicit_period_column\", \"overridePolicy\": \"reuse_base_inputs\", \"periods\": [{\"period\": 2030, \"objectiveWeight\": 1, \"yearsWeight\": 5}, {\"period\": 2035, \"objectiveWeight\": 0.8, \"yearsWeight\": 5}], \"selectedPeriod\": 2099}, \"rollingConfig\": {\"enabled\": true, \"horizonSnapshots\": 100.7, \"overlapSnapshots\": 250, \"stepPolicy\": \"derived\", \"stepSnapshots\": 1, \"preserveTerminalState\": false, \"selectedWindow\": null}, \"samplingConfig\": {\"enabled\": 1, \"mode\": \"weird\", \"blockSize\": \"24\", \"blockCount\": 0, \"gapSnapshots\": -5}, \"stochasticConfig\": {\"enabled\": true, \"scenarios\": [{\"id\": \"s1\", \"name\": \"dry\", \"weight\": 0.5, \"overrides\": [{\"id\": \"o1\", \"sheet\": \"generators\", \"attribute\": \"p_max_pu\", \"scopeType\": \"carrier\", \"scopeValue\": \"hydro\", \"operation\": \"multiply\", \"value\": 0.7}]}, {\"id\": \"s2\", \"name\": \"wet\", \"weight\": 0.5}]}, \"marketSimConfig\": {\"enabled\": true, \"pricing\": \"payAsBid\"}, \"essConfig\": {\"enabled\": true, \"bus\": \"b1\", \"maxHours\": 2, \"capitalCostPerMW\": 1, \"minSizeMW\": 1, \"maxSizeMW\": 2, \"steps\": 3, \"roundTripEfficiency\": 0.8, \"capitalCostPerMWh\": 9000, \"lifetimeYears\": 12}, \"merchantConfig\": {\"enabled\": true, \"owner\": \"Acme\", \"priceSource\": \"series\", \"flatPrice\": 40, \"priceSeries\": [1, 2, 3], \"ownerColumn\": \"company\"}, \"assetSwapConfig\": {\"enabled\": true, \"removeFilters\": [{\"field\": \"carrier\", \"values\": [\"coal\"]}], \"addCarrier\": \"solar\"}, \"elccConfig\": {\"enabled\": true, \"carriers\": [\"wind\"]}, \"demandResponseConfig\": {\"enabled\": true, \"loads\": [\"L1\"]}, \"financeConfig\": {\"gearing\": 0.6, \"interestRate\": 0.04, \"tenorYears\": 12}, \"constraints\": [{\"id\": \"c1\", \"enabled\": true, \"label\": \"Coal cap\", \"metric\": \"carrier_max_gen\", \"carrier\": \"coal\", \"value\": 1000, \"unit\": \"MWh\"}, {\"id\": \"c2\", \"enabled\": false, \"label\": \"off\", \"metric\": \"co2_cap\", \"carrier\": \"\", \"value\": 0.3, \"unit\": \"tCO2/MWh\"}], \"modelOverrides\": [{\"sheet\": \"generators\", \"name\": \"g1\", \"column\": \"p_nom\", \"value\": 500}, {\"sheet\": \"\", \"name\": \"x\", \"column\": \"y\", \"value\": 1}, {\"sheet\": \"generators\", \"name\": \"g2\", \"column\": \"p_nom\"}]}",
+      "json": "{\"snapshotStart\": 24, \"snapshotEnd\": \"72\", \"snapshotWeight\": 2, \"carbonPrice\": 55.5, \"carbonPriceSchedule\": [{\"year\": 2030, \"price\": 80}, {\"year\": 2025, \"price\": 40}], \"discountRate\": 0.07, \"forceLp\": \"yes\", \"enableLoadShedding\": true, \"loadSheddingCost\": 5000, \"pathwayConfig\": {\"planningMode\": \"pathway\", \"enabled\": true, \"snapshotMappingMode\": \"explicit_period_column\", \"overridePolicy\": \"reuse_base_inputs\", \"periods\": [{\"period\": 2030, \"objectiveWeight\": 1, \"yearsWeight\": 5}, {\"period\": 2035, \"objectiveWeight\": 0.8, \"yearsWeight\": 5}], \"selectedPeriod\": 2099}, \"rollingConfig\": {\"enabled\": true, \"horizonSnapshots\": 100.7, \"overlapSnapshots\": 250, \"stepPolicy\": \"derived\", \"stepSnapshots\": 1, \"preserveTerminalState\": false, \"selectedWindow\": null, \"terminalSoc\": true, \"terminalSocPenalty\": 12.5}, \"samplingConfig\": {\"enabled\": 1, \"mode\": \"weird\", \"blockSize\": \"24\", \"blockCount\": 0, \"gapSnapshots\": -5, \"scaleStartUpCosts\": false}, \"stochasticConfig\": {\"enabled\": true, \"scenarios\": [{\"id\": \"s1\", \"name\": \"dry\", \"weight\": 0.5, \"overrides\": [{\"id\": \"o1\", \"sheet\": \"generators\", \"attribute\": \"p_max_pu\", \"scopeType\": \"carrier\", \"scopeValue\": \"hydro\", \"operation\": \"multiply\", \"value\": 0.7}]}, {\"id\": \"s2\", \"name\": \"wet\", \"weight\": 0.5}]}, \"marketSimConfig\": {\"enabled\": true, \"pricing\": \"payAsBid\"}, \"essConfig\": {\"enabled\": true, \"bus\": \"b1\", \"maxHours\": 2, \"capitalCostPerMW\": 1, \"minSizeMW\": 1, \"maxSizeMW\": 2, \"steps\": 3, \"roundTripEfficiency\": 0.8, \"capitalCostPerMWh\": 9000, \"lifetimeYears\": 12}, \"merchantConfig\": {\"enabled\": true, \"owner\": \"Acme\", \"priceSource\": \"series\", \"flatPrice\": 40, \"priceSeries\": [1, 2, 3], \"ownerColumn\": \"company\"}, \"assetSwapConfig\": {\"enabled\": true, \"removeFilters\": [{\"field\": \"carrier\", \"values\": [\"coal\"]}], \"addCarrier\": \"solar\"}, \"elccConfig\": {\"enabled\": true, \"carriers\": [\"wind\"]}, \"demandResponseConfig\": {\"enabled\": true, \"loads\": [\"L1\"]}, \"financeConfig\": {\"gearing\": 0.6, \"interestRate\": 0.04, \"tenorYears\": 12}, \"constraints\": [{\"id\": \"c1\", \"enabled\": true, \"label\": \"Coal cap\", \"metric\": \"carrier_max_gen\", \"carrier\": \"coal\", \"value\": 1000, \"unit\": \"MWh\"}, {\"id\": \"c2\", \"enabled\": false, \"label\": \"off\", \"metric\": \"co2_cap\", \"carrier\": \"\", \"value\": 0.3, \"unit\": \"tCO2/MWh\"}], \"modelOverrides\": [{\"sheet\": \"generators\", \"name\": \"g1\", \"column\": \"p_nom\", \"value\": 500}, {\"sheet\": \"\", \"name\": \"x\", \"column\": \"y\", \"value\": 1}, {\"sheet\": \"generators\", \"name\": \"g2\", \"column\": \"p_nom\"}]}",
       "label": "  Rich  ",
       "notes": "all the knobs"
      },

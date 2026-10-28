@@ -54,6 +54,9 @@ export function normalizeSamplingConfig(config: SamplingConfig): SamplingConfig 
     blockSize: Math.max(1, Math.floor(Number(config.blockSize) || 168)),
     blockCount: Math.max(1, Math.floor(Number(config.blockCount) || 4)),
     gapSnapshots: Math.max(0, Math.floor(Number(config.gapSnapshots) || 0)),
+    // The backend default is true, so the key is carried only to turn it OFF (sparse). Same rule in
+    // backend/app/scenario_presets.py normalize_sampling_config; the parity fixture pins both.
+    ...(config.scaleStartUpCosts === false ? { scaleStartUpCosts: false } : {}),
   };
 }
 
@@ -70,6 +73,7 @@ export function readSamplingConfigFromModel(model: WorkbookModel): SamplingConfi
     blockSize: primitiveNumber(row.blockSize as Primitive, 168),
     blockCount: primitiveNumber(row.blockCount as Primitive, 4),
     gapSnapshots: primitiveNumber(row.gapSnapshots as Primitive, 672),
+    ...(primitiveBoolean(row.scaleStartUpCosts as Primitive, true) ? {} : { scaleStartUpCosts: false }),
   });
 }
 
@@ -84,6 +88,7 @@ export function writeSamplingConfigToModel(
     blockSize: normalized.blockSize,
     blockCount: normalized.blockCount,
     gapSnapshots: normalized.gapSnapshots,
+    ...(normalized.scaleStartUpCosts === false ? { scaleStartUpCosts: false } : {}),
   }];
   return { ...model, [SAMPLING_CONFIG_SHEET]: configRows };
 }

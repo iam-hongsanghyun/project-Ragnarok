@@ -128,6 +128,7 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
     (results.assetDetails && Object.values(results.assetDetails.storageUnits || {}).length > 0) ||
     (results.storageSeries?.some((p) => p.charge > 0 || p.discharge > 0 || p.state > 0) ?? false);
   const hasPathway   = !!results.pathway?.enabled;
+  const hasAnnualBudgets = !!(results.annualBudgets && results.annualBudgets.length > 0);
   const hasExpansion = !!(results.expansionResults && results.expansionResults.length > 0);
   const hasStoch     = !!results.stochastic?.enabled;
   const hasEmissionsBd = !!(results.emissionsBreakdown && (
@@ -309,6 +310,15 @@ export function buildResultPreset(results: RunResults): DashboardLayout {
   if (hasPathway) {
     const cbp: Card = { id: id('cbp'), kind: 'capacity-by-period' };
     rows.push(row({ cards: [{ card: cbp }] }));
+    // 8b. The whole pathway across its periods: capacity, generation, cost, emissions per period and in total.
+    const po: Card = { id: id('po'), kind: 'pathway-overview' };
+    rows.push(row({ height: 210, cards: [{ card: po }] }));
+  }
+
+  // 8c. Annual budgets against what the solve achieved (conditional on the module having written any).
+  if (hasAnnualBudgets) {
+    const ab: Card = { id: id('ab'), kind: 'annual-budgets' };
+    rows.push(row({ height: 200, cards: [{ card: ab }] }));
   }
 
   // 9. Capacity expansion (conditional)

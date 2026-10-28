@@ -262,6 +262,12 @@ def delete_change(model: Model, plant_id: str) -> dict[str, Any]:
         names = {str(r.get("name")) for r in model.get(sheet) or [] if str(r.get("component")) in cand and str(r.get("name")) in cand[str(r.get("component"))]}
         if names:
             remove[sheet] = sorted(names)
+    for sheet in model:                 # piecewise curves (<list>-<attr>-pw rows share the component name) leave with their component
+        comp = sheet.partition("-")[0]
+        if sheet.endswith("-pw") and comp in cand and isinstance(model.get(sheet), list):
+            curve_names = sorted({str(r.get("name")) for r in model[sheet] if str(r.get("name")) in cand[comp]})
+            if curve_names:
+                remove[sheet] = curve_names
     release = [{"sheet": s, "name": n} for s in ("buses", "carriers") for n in kept[s]]
     warnings: list[str] = []
     for bus in kept["buses"]:        # a bus that stays because something still draws from it, but nothing feeds it any more

@@ -67,6 +67,22 @@ _THERMAL = [
     _f("efficiency", "Rated efficiency", "number", None, unit="per unit (LHV)", advanced=True, help="Blank = the data-file value."),
     _f("params", "Parameter overrides", "json", {}, advanced=True,
        help="{'ccgt.min_load': 0.35, 'ccgt.start_up_cost': 90, 'fuels.h2_price': 80, ...}; keys in GET /api/build/plant/technologies."),
+    # Opt-in unit-commitment refinements (blank = off: the plant keeps the single rated efficiency and the single start cost). Committable, fixed size only.
+    _f("minLoadEfficiency", "Efficiency at minimum load", "number", None, unit="per unit (LHV)", advanced=True, minimum=0,
+       help="Part-load efficiency. With the rated efficiency it gives a two-point heat-rate line (no-load fuel + incremental heat rate); a gas turbine Link gets "
+            "PyPSA's piecewise efficiency curve, a co-firing generator a stand_by_cost + marginal_cost. Blank = one efficiency at every load."),
+    _f("startCostHot", "Hot start cost", "number", None, unit="EUR/MW per start", advanced=True, minimum=0,
+       help="Blank = the technology start-up cost. It becomes PyPSA's start_up_cost; warm / cold starts add the difference."),
+    _f("startCostWarm", "Warm start cost", "number", None, unit="EUR/MW per start", advanced=True, minimum=0,
+       help="Charged when the unit was offline at least 'warm after' hours; needs startWarmAfterHours; at least the hot cost."),
+    _f("startWarmAfterHours", "Warm start after", "number", None, unit="h offline", advanced=True, minimum=0),
+    _f("startCostCold", "Cold start cost", "number", None, unit="EUR/MW per start", advanced=True, minimum=0,
+       help="Charged when the unit was offline at least 'cold after' hours; needs startColdAfterHours; at least the warm cost."),
+    _f("startColdAfterHours", "Cold start after", "number", None, unit="h offline", advanced=True, minimum=0),
+    _f("startUpMinutes", "Start-up time to minimum load", "number", None, unit="min", advanced=True, minimum=0,
+       help="PyPSA's ramp_limit_start_up as minimum load / minutes per minute (RAGNAROK_TimeUnits). Bounds the start snapshot only; blank = no limit."),
+    _f("shutDownMinutes", "Shut-down time from minimum load", "number", None, unit="min", advanced=True, minimum=0,
+       help="PyPSA's ramp_limit_shut_down, same convention; blank = no limit."),
 ]
 _BLEND_SIMPLE = [
     _f("turbine", "Turbine", "select", "ccgt", options=list(TURBINES)),

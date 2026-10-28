@@ -46,6 +46,8 @@ const KEY_FILTERS = 'ragnarok:data-import:filters-by-source';
 
 interface Props {
   applyFragment: (fragment: WorkbookFragment, databaseName: string, countryName: string) => void;
+  /** Shown under the "added to the workbook" banner: the model-check findings of what the import produced. */
+  afterImport?: React.ReactNode;
 }
 
 /** The union of all a source's datasets' filters, de-duped by id (common
@@ -86,7 +88,7 @@ function runKey(run: Run): string {
   return JSON.stringify(run.parts.map((p) => [p.sourceId, p.datasetIds, p.filtersJson]));
 }
 
-export function DataImportView({ applyFragment }: Props) {
+export function DataImportView({ applyFragment, afterImport }: Props) {
   const [sources, setSources] = useState<Source[]>([]);
   // One-click build lives in a module store so its busy/result state survives
   // tab switches (the Data view unmounts when you navigate away).
@@ -412,6 +414,7 @@ export function DataImportView({ applyFragment }: Props) {
               <b>{lastAdded.countryName}</b>. Switch to <b>Model</b> or <b>Build</b> to review.
             </div>
           )}
+          {afterImport}
         </main>
         {pypsaEarthFocused ? (
           <PypsaEarthPanel

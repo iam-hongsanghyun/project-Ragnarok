@@ -5,6 +5,7 @@
  * gets the result back; nothing here writes the session.
  */
 import { API_BASE } from 'lib/constants';
+import { DEFAULT_SESSION_ID } from 'lib/api/session';
 import type { GridRow, WorkbookModel } from 'lib/types';
 import type { WorkbookFragment } from 'lib/api/databases';
 import type { SnapResult } from 'lib/forge/snap';
@@ -132,5 +133,5 @@ export interface CleanPlaceholderBoundsResult {
 export async function cleanPlaceholderBounds(
   opts: { apply?: boolean } = {},
 ): Promise<CleanPlaceholderBoundsResult> {
-  return postJson<CleanPlaceholderBoundsResult>('/api/forge/clean-placeholder-bounds', { apply: opts.apply ?? false });
+  return postJson<CleanPlaceholderBoundsResult>('/api/forge/clean-placeholder-bounds', { sessionId: DEFAULT_SESSION_ID, apply: opts.apply ?? false });
 }

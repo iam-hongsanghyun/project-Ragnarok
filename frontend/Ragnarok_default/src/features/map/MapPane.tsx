@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { CircleMarker, MapContainer, Polyline, TileLayer, Tooltip } from 'react-leaflet';
+import { BASEMAP_ATTRIBUTION, BASEMAP_MAX_NATIVE_ZOOM, BASEMAP_URL } from 'lib/map/basemap';
 import { LatLngBoundsExpression } from 'leaflet';
 import { GridRow, WorkbookModel } from 'lib/types';
 import { numberValue, stringValue, resolvedColor } from 'lib/utils/helpers';
@@ -108,11 +109,7 @@ export function MapPane({ model, bounds, busIndex }: Props) {
       <div className="map-frame" style={{ position: 'relative' }}>
         <MapContainer center={[36.35, 127.9]} zoom={7} className="leaflet-map" scrollWheelZoom zoomAnimation={false} zoomSnap={0.25} zoomDelta={0.25} wheelPxPerZoomLevel={120}>
           <NoZoomAnimation />
-          <TileLayer
-            url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-            subdomains="abcd"
-          />
+          <TileLayer url={BASEMAP_URL} attribution={BASEMAP_ATTRIBUTION} maxNativeZoom={BASEMAP_MAX_NATIVE_ZOOM} />
           <FitToBounds bounds={bounds} />
           {visibleLayers.lines && lineGeometries.map((line) => (
             <Polyline key={line.name} positions={line.positions} pathOptions={{ color: '#0f766e', weight: 2, opacity: 0.72 }}>

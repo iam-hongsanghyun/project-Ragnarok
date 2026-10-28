@@ -112,6 +112,7 @@ import { AnalyticsView } from './views/AnalyticsView';
 import { PhysicalRiskView, PhysicalRiskSubTab } from './views/PhysicalRiskView';
 import { SitingView } from './views/SitingView';
 import { ScreeningView } from './views/ScreeningView';
+import type { SitingHandoff } from 'lib/screening/screening';
 import { P2XView } from './modules/p2x/P2XView';
 import { ReportingView } from './views/ReportingView';
 import { TrainingView } from './views/TrainingView';
@@ -1505,6 +1506,20 @@ function AppInner() {
       }
     },
     [model, prepareModelForBackend, reloadSessionModel, showToast],
+  );
+
+  // Screening -> Siting: the ticked sites become the Siting tab's candidate region and shortlist. Nothing in the model changes.
+  const [sitingHandoff, setSitingHandoff] = useState<SitingHandoff | null>(null);
+  const handleOpenInSiting = useCallback((handoff: SitingHandoff) => {
+    setSitingHandoff(handoff);
+    setTab('Siting');
+  }, []);
+
+  // Server-side visible actions (model-check fixes, Forge clean-ups) read the SESSION workbook: push the browser's working
+  // model first, and pull the session back after the server wrote sheets (reloadSessionModel).
+  const handleSessionSync = useCallback(
+    async () => { await putStaticModel(prepareModelForBackend(model)); },
+    [model, prepareModelForBackend],
   );
 
   // Rolling horizon refuses cyclic storage; this visible step writes the flags (cyclic_state_of_charge / e_cyclic = false).
@@ -3611,7 +3626,7 @@ function AppInner() {
       const first = dslErrors[0];
       showToast(
         `${dslErrors.length} custom-constraint line(s) have syntax errors and are NOT applied `
-        + `(line ${first.lineNo}: ${first.error}). Fix them in Settings → Constraints → Advanced.`,
+        + `(line ${first.lineNo}: ${first.error}). Fix them in Market & Policy → Advanced Constraints.`,
         'error',
       );
     }
@@ -4109,6 +4124,8 @@ function AppInner() {
               currencySymbol={settings.currencySymbol}
               dateFormat={settings.dateFormat}
               onOpenRunSetup={() => { setDryRun(false); setRunDialogOpen(true); }}
+              onOpenConstraintsWorkspace={() => handleSettingsNavigate('constraints')}
+              onSessionSync={handleSessionSync}
               onApplyConversion={handleApplyConversion}
               onApplyPlantChange={handleApplyPlantChange}
               discountRate={settings.discountRate}
@@ -4207,7 +4224,15 @@ function AppInner() {
             />
           )}
 
-          {tab === 'Data' && enabledModules.has('Data') && <DataView onApplyFragment={handleApplyImportedFragment} />}
+          {tab === 'Data' && enabledModules.has('Data') && (
+            <DataView
+              onApplyFragment={handleApplyImportedFragment}
+              model={model}
+              onSessionSync={handleSessionSync}
+              onSessionReload={reloadSessionModel}
+              onSetWeightingsFromSpacing={handleSetWeightingsFromSpacing}
+            />
+          )}
 
           {tab === 'Forge' && enabledModules.has('Forge') && (
             <ForgeView
@@ -4223,6 +4248,8 @@ function AppInner() {
               onTemporalPreview={handleTemporalPreview}
               onTemporalApply={handleTemporalApply}
               onSetWeightingsFromSpacing={handleSetWeightingsFromSpacing}
+              onSessionSync={handleSessionSync}
+              onSessionReload={reloadSessionModel}
               onScaleCarrierCapacity={handleScaleCarrierCapacity}
               onApplySeasonalRating={handleApplySeasonalRating}
               onAttachRenewableProfiles={handleAttachRenewableProfiles}
@@ -4286,6 +4313,8 @@ function AppInner() {
               discountRate={settings.discountRate}
               runName={activeRunName}
               period={selectedPeriod}
+              handoff={sitingHandoff}
+              onClearHandoff={() => setSitingHandoff(null)}
             />
           )}
 
@@ -4296,6 +4325,7 @@ function AppInner() {
               currencySymbol={settings.currencySymbol}
               discountRate={settings.discountRate}
               runName={activeRunName}
+              onOpenInSiting={enabledModules.has('Siting') ? handleOpenInSiting : undefined}
             />
           )}
 

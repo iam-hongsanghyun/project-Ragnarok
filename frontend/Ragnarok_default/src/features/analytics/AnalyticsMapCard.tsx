@@ -28,6 +28,7 @@ import { FitToBounds } from '../map/FitToBounds';
 import { NoZoomAnimation } from '../map/NoZoomAnimation';
 import { MapLegend, SmpLegend } from '../map/MapLegend';
 import { MapDetailCard } from './MapDetailCard';
+import { BASEMAP_ATTRIBUTION, BASEMAP_MAX_NATIVE_ZOOM, BASEMAP_URL } from 'lib/map/basemap';
 
 /**
  * Leaflet measures its container once on mount. Inside a dashboard cell the
@@ -150,10 +151,7 @@ export function AnalyticsMapCard({
       <MapContainer center={[36.35, 127.9]} zoom={7} className="leaflet-map" scrollWheelZoom zoomAnimation={false} zoomSnap={0.25} zoomDelta={0.25} wheelPxPerZoomLevel={120}>
         <NoZoomAnimation />
         <InvalidateOnResize />
-        <TileLayer
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        />
+        <TileLayer url={BASEMAP_URL} attribution={BASEMAP_ATTRIBUTION} maxNativeZoom={BASEMAP_MAX_NATIVE_ZOOM} />
         <FitToBounds bounds={bounds} />
 
         {lineGeometries.map((line) => {

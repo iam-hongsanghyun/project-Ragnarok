@@ -245,6 +245,24 @@ All file operations are in the file toolbar at the top of the Model view.
 
 ---
 
+### Model check findings (Data and Forge views)
+
+The **Data** and **Forge** views show a *Model check* box above their tools when the model in the session has something
+that very likely differs from what you meant (it reads the workbook; it changes nothing by itself). Each finding names
+the problem, says what to do and, where there is a visible workbook step for it, offers that step as a button:
+
+- **Set weightings from timestamp spacing**: the timestamps are further apart than the snapshot weighting says (a 4-hourly
+  import with weight 1 books a quarter of the energy). The button fills the snapshots sheet's `objective` / `stores` /
+  `generators` columns with the gap to the next timestamp.
+- **Clean placeholder bounds**: a bound cell such as `p_nom_max` or `e_sum_max` holds a finite `1e9` or more (`1e12` standing
+  for "no limit"), which PyPSA uses as written (a huge right-hand side, poor conditioning). The button opens a preview of the
+  cells; **Apply clean-up** blanks them so the row takes PyPSA's default (`inf`). A genuine finite cap is never touched. The same
+  clean-up is **Forge > Numeric > Clean placeholder bounds**.
+
+Press **Check again** after editing the model by hand.
+
+---
+
 ## 4. Build view — guided model construction
 
 Click **B** in the activity bar. The Build view is a step-by-step wizard that
@@ -271,7 +289,21 @@ The wizard has the following steps:
 | Review | network | Validate the model before solving. |
 
 Each step shows a table editor scoped to that step's sheet on the left and an
-issue detail pane on the right.
+issue detail pane on the right. The **Constraints** step is a read-only summary of the
+`global_constraints` sheet; its button opens **Market & Policy > Standard Constraints**, where the table is edited.
+
+#### Time units (ramps and minimum times)
+
+On the **Generators**, **Links** and **Processes** steps the **Time units (n)** button in the guidance bar opens the time-units
+editor. PyPSA counts *snapshots* in `ramp_limit_up` / `_down` / `_start_up` / `_shut_down` (a fraction of `p_nom` per snapshot) and in
+`min_up_time` / `min_down_time` / `up_time_before` / `down_time_before`, so a number typed in those columns is right for one snapshot
+length only. State the value here instead: a ramp **per hour** or **per minute** (fraction of `p_nom`), a time in **hours** or
+**minutes**. Pick the component, the attribute, type the value and press **Add row**; change a value or unit in the table, or **Remove**
+a row. The rows are the `RAGNAROK_TimeUnits` sheet (visible in the Model view, saved with the project). A row replaces the value typed in
+the component column; the run converts it with the weights it uses (ramp = min(1, rate × step), blank when 1 or more; times =
+ceil(hours / step)), says so in its notes, and PyPSA enforces the result. **Preview per-snapshot values** shows what the server would
+write at the workbook's own weightings (the step in hours, the PyPSA value, a note where a time was rounded up); a run with another
+resolution, window or sampling converts at its own step.
 
 ### Placing buses on the map
 
@@ -326,8 +358,21 @@ sheet (edit it as a workbook sheet, through the API or MCP `set_time_units`); ea
 a snapshot is long enough to reach full output; `snapshots = ceil(hours / hours per snapshot)`), so the same plant is right at 5 minutes and at 4 hours.
 The solve becomes a MILP; the Analytics commitment view
 shows the starts. Unit commitment needs a fixed size: with *Let the solver size it* the fields are not written and the preview says
-so (`committable` and `extendable` cannot be combined on one unit). PyPSA has one start-up cost per unit, so hot / warm / cold
-starts are not distinguished (the data has no such split for a CCGT), and the efficiency is the rated value at every load.
+so (`committable` and `extendable` cannot be combined on one unit). Out of the box a plant has one start-up cost and the rated
+efficiency at every load; the three options below are **off until you fill their fields** (Advanced, committable and fixed size only).
+
+- **Efficiency at minimum load** (per unit, LHV). With the rated efficiency it defines a heat-rate line through the two points: fuel at
+  minimum load and at full load are reproduced exactly, and the plant burns a *no-load fuel* while it is on plus an *incremental* amount per MWh.
+  The form shows the derived values (no-load fuel in MW_th, incremental heat rate in MW_th/MW_el) and how they are written: a gas turbine gets PyPSA's
+  piecewise efficiency curve (its fuel is a real gas flow, so cost and CO2 include it); a co-firing generator gets a stand-by cost per hour on
+  and a marginal cost per MWh. The efficiency at minimum load cannot exceed the rated one. Enter plant data: the data file has no value.
+- **Hot / warm / cold start costs** (EUR per MW per start, and the hours offline after which a start counts as warm / cold). PyPSA's start-up
+  cost becomes the hot cost and a start after a long outage adds the difference to the objective (nothing is counted twice). The costs must not
+  fall with the offline time. The run notes list the term; the thresholds are converted to snapshots with the run's step. Needs one contiguous
+  single-period run (refused with rolling horizon, stochastic, sampled blocks or a pathway); under Force-LP it is a relaxation. Results by
+  plant show the starts by type and their cost. The rows are the sheet `RAGNAROK_StartCosts`.
+- **Start-up / shut-down time** (minutes to go between standstill and minimum load): PyPSA's start-up and shut-down ramp limit, stored per
+  minute in `RAGNAROK_TimeUnits`. It limits the output of the start (shut-down) step only, so it matters when the step is longer than these minutes.
 
 #### Gas + H2 co-firing
 
@@ -348,8 +393,9 @@ vol % or energy %, hourly or over the period) and they are enforced in every sol
 A run option overrides the stored limits: `options.cofiringConfig` (`describe_run_options` documents it; `{enabled: false}`
 switches them off). With rolling horizon the period is each window.
 
-An H2 derate of the turbine (efficiency or capacity) is **off by default** and has no source in the data files: it is an
-assumption you can switch on with the parameter overrides (`fuels.h2_derate_efficiency_per_share`) for a sensitivity only.
+An H2 derate of the turbine (efficiency or capacity) is **off (zero)**: no citable source was available, so no number is entered. You
+can switch it on for a sensitivity with the parameter overrides (`fuels.h2_derate_efficiency_per_share`) using an OEM or peer-reviewed figure,
+and the preview then says it is an assumption.
 
 *Results* (MCP `get_plant_results`, `GET /api/build/plant/results/{run}`): per plant the generation, capacity factor, full-load
 hours, starts (solved for committable units), costs, and for the gas plants the gas and H2 use, the **H2 share per hour (energy %
@@ -422,7 +468,10 @@ Controls which portion of the snapshot index is submitted to the solver.
 - **Sampled blocks (test run)** — a reduced set of blocks whose weightings represent the whole window.
   The run applies it and says so in its notes; `POST /api/transform/sample` (MCP `sample_workbook`) writes the
   same sampled snapshots and weightings into the workbook. `start_up_cost` / `shut_down_cost` of
-  committable units are multiplied by the same factor (PyPSA charges them per start, unweighted).
+  committable units are multiplied by the same factor (PyPSA charges them per start, unweighted). The
+  **Start-up and shut-down costs** switch under the sampling buttons chooses *Scaled to the window* (the default) or
+  *As written* (only the events inside the sampled blocks are charged). It is part of the scenario preset and is
+  saved only when switched to *As written*.
 
 When pathway mode is enabled, the slider is hidden because the solver uses the
 full horizon defined by the pathway periods.
@@ -474,6 +523,7 @@ backend.
 | Chunks | Number of solve windows to divide the snapshot range into. Minimum 2. |
 | Overlap (hours) | Hours that adjacent windows share, converted to PyPSA's snapshot count with the weights of the run (`ceil(hours / step)`). A higher overlap improves accuracy at the boundary between windows. |
 | Terminal SOC target | Off by default. On adds a penalised soft target to the last window (storage ends the horizon with at least its starting energy); the run notes declare it. |
+| Terminal SOC penalty | Shown when the target is on. The price, in currency per MWh, of one MWh of shortfall against the starting energy. Blank = automatic: twice the highest generator marginal cost (floor 1). It steers the solver only; reported costs exclude it. |
 
 PyPSA carries storage, dispatch and commitment from one window to the next, so ramp limits and minimum up / down times are coupled across windows.
 Rolling horizon **refuses cyclic storage** (end = start inside a window contradicts the carried state): press **Make non-cyclic for rolling**
@@ -804,6 +854,19 @@ A curated KPI dashboard for the current run.
 The full Result dashboard below the KPI strip shows an overview of the run in a
 fixed layout. The layout is saved in your browser's local storage and persists
 between sessions.
+
+Two cards appear when the run has the thing they read:
+
+- **Pathway: all periods** (a multi-period run). One row per investment period and a *Whole run* row: the Years weight,
+  generator and storage capacity active in the period (build year and lifetime applied, so capacity is a level and has no
+  whole-run figure), generation, total cost (each period carries its objective weight), emissions (each carries its Years
+  weight), average price and peak load. The periods add up to the whole-run row for cost, emissions and generation. Every figure is
+  the server's: the same numbers as the KPI strip with the period selector on each period in turn.
+- **Annual budgets (budget, achieved, dual)** (a run that applied budgets from **Market & Policy > Annual budgets**). Per budget:
+  the per-year figure, the horizon total written into PyPSA, the **achieved** value read back from the solved network (a generator's
+  energy for an `e_sum`, the constraint's left-hand side for a CO2 cap; *not reported* for other constraint types), whether it is
+  *Binding* or *Slack*, and the **dual** of a GlobalConstraint (its price per tonne; negative on a cap, zero when slack). PyPSA stores
+  no dual for an `e_sum`, so that column is blank for generator budgets.
 
 ---
 
@@ -1449,7 +1512,8 @@ pre-screen of solar and wind sites, and of the regions they sit in, on the histo
 **Siting** (scan candidate locations, add them to the model and let the capacity-expansion solve choose).
 Screening answers *which sites and regions repeat each other*; Siting answers *where the solve builds*.
 Screening hands sites to the model through **Add selected sites to model**, which can add them as
-zero-capacity expansion candidates, the same candidates Siting then works with.
+zero-capacity expansion candidates, the same candidates Siting then works with, and hands them to the Siting tab
+through **Open in Siting**.
 
 ### 14.1 Screening
 
@@ -1553,9 +1617,17 @@ how many snapshots matched exactly, by the same calendar hour of another year, b
 not at all, with warnings; **Add to model** merges them (the same rules as Data > Add to workbook). Then run
 the model as usual.
 
+**Open in Siting.** With sites ticked in the table (site level; a region series has no place to site), the
+button next to *Select all* opens the Siting tab with those sites carried over: the candidate region becomes
+their envelope plus about 0.25 degrees on every side, the Solar / Wind switches follow the technologies the
+sites use, and the sites are drawn on the Siting map as the screened shortlist (listed in the left rail, with
+*Clear screened sites*). Siting still samples its candidates over that region, so the screened sites are
+context for the scan, not forced candidates; nothing in the model changes until you scan and add candidates.
+Ticked sites without coordinates are left behind and named.
+
 ### 14.2 Siting
 
-Open **Siting** in the activity bar: draw a candidate region on the map, scan it (keyless weather per grid
+Open **Siting** in the activity bar: draw a candidate region on the map (or arrive with one from Screening's **Open in Siting**), scan it (keyless weather per grid
 point), add the extendable candidates to the model and run the capacity-expansion solve; the map and table then
 show the built MW per candidate, and zero-built candidates are the rejected locations.
 
@@ -1594,7 +1666,7 @@ A one-bus system over 2030, 2040 and 2050, each period one representative day (2
 year. Existing coal retires through `build_year` + `lifetime`; wind, solar and a 4-hour battery are offered as one
 *vintage* per period at falling overnight cost; demand grows 20 % a decade. You set up **Settings > Multi-year
 planning** (objective weights 8.1078 / 4.9775 / 3.0558, Years 10), read the period selector in **Analytics > Result**, and
-then add a carbon-price schedule (**Market & Policy > Carbon price**) and a per-period CO2 cap (**Build > Constraints**,
+then add a carbon-price schedule (**Market & Policy > Carbon price**) and a per-period CO2 cap (**Market & Policy > Standard Constraints**,
 one `global_constraints` row per period with `investment_period`).
 
 What it establishes, each pinned by a test:
@@ -1624,8 +1696,8 @@ A solar-heavy single bus over three summer days (the middle one overcast): 700 M
 - **Efficiency** — the round trip is the product of the two legs; typing a round-trip figure into both legs double-counts.
 - **Standing loss** — a per-hour fraction of the stock (`standing_loss` 0.01 is 21.4 % a day).
 - **State-of-charge edges** — non-cyclic with initial energy is free energy; short cyclic windows forbid carrying energy;
-  rolling horizon carries a soft **terminal state of charge** on its last window (default on, `rollingConfig.terminalSoc`
-  and `terminalSocPenalty` in the API/MCP, no Settings switch).
+  rolling horizon carries a soft **terminal state of charge** on its last window (default off; **Settings > Rolling horizon >
+  Terminal SOC target**, with its penalty beside it; `rollingConfig.terminalSoc` and `terminalSocPenalty` in the API/MCP).
 - **What a battery earns** — **Market & Policy > ESS business case** is a price-taker sweep on the base run's prices
   (equivalent full cycles, throughput, average charge and discharge price, spread, NPV/IRR); inside the model the same
   battery earns less at the prices it makes and saves the system something in between. Storage energy-balance duals are in

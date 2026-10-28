@@ -16,7 +16,7 @@
  */
 import { API_BASE } from 'lib/constants';
 import type {
-  AnalyticsFocus, BranchDetail, BusDetail, GeneratorDetail, GroupByOption, MetricOption, ProcessDetail,
+  AnalyticsFocus, AnnualBudgetEntry, BranchDetail, BusDetail, GeneratorDetail, GroupByOption, MetricOption, ProcessDetail,
   RunResults, ShuntImpedanceDetail, StorageUnitDetail, StoreDetail, SummaryItem,
 } from 'lib/types';
 
@@ -86,6 +86,23 @@ export const fetchRunKpis = (
   run: string, currency: string, period?: number | null,
 ): Promise<{ run: string; period: number | null; kpis: RunKpis }> =>
   getJson(`/api/runs/${enc(run)}/kpis?currency=${enc(currency)}${period != null ? `&period=${period}` : ''}`, 'KPIs');
+
+// ── Annual budgets vs achieved ────────────────────────────────────────────────
+
+/** `GET /api/runs/{name}/annual-budgets`: a budget the run applied, with what the solve achieved. */
+export interface AnnualBudgetRow extends AnnualBudgetEntry {
+  /** What PyPSA's statistics (e_sum) or the constraint's left-hand side (CO2 cap) came to; null where nothing is read back. */
+  achieved: number | null;
+  /** `MWh`, `tCO2`, or the reason `achieved` is missing. */
+  achievedUnit: string;
+  /** `global_constraints.mu` (currency per unit of the budget); null where PyPSA stores none (e_sum). */
+  dual: number | null;
+  /** True when `achieved` sits on the written bound; null when unknown. */
+  binding: boolean | null;
+}
+
+export const fetchRunAnnualBudgets = (run: string): Promise<{ run: string; items: AnnualBudgetRow[]; total: number }> =>
+  getJson(`/api/runs/${enc(run)}/annual-budgets`, 'Annual budgets');
 
 // ── One investment period of a pathway run ───────────────────────────────────
 

@@ -640,3 +640,59 @@ export function parseRegionCaps(text: string): Record<string, number> | undefine
   }
   return out;
 }
+
+// ── hand-off to the Siting tab ───────────────────────────────────────────────
+
+/** A screened site carried into the Siting tab (only sites that have a location). */
+export interface SitingHandoffSite {
+  name: string;
+  technology: string;
+  lat: number;
+  lon: number;
+  capacityMw: number | null;
+}
+
+/**
+ * What "Open in Siting" carries: the selected sites, the candidate region that encloses them and the technologies they
+ * use. Siting scans a grid of candidates over a region, so the region is the sites' envelope grown by `HANDOFF_MARGIN_DEG`
+ * on every side (a single site, or sites on one parallel, still enclose an area); the sites themselves are shown on the
+ * Siting map as the screened shortlist.
+ */
+export interface SitingHandoff {
+  sites: SitingHandoffSite[];
+  /** `[minLon, minLat, maxLon, maxLat]` (WGS84), the envelope plus the margin. */
+  bbox: [number, number, number, number];
+  /** The solar / wind technologies present (the scan models only these two). */
+  technologies: Array<'solar' | 'wind'>;
+  /** Selected units left behind because they have no coordinates (a region series, an uploaded site without lat / lon). */
+  withoutLocation: string[];
+}
+
+/** Margin added around the sites' envelope, in degrees (about 28 km of latitude). */
+export const HANDOFF_MARGIN_DEG = 0.25;
+
+/** The Siting hand-off of `units`; `null` when none of them has a location. */
+export function buildSitingHandoff(units: ScreeningUnit[]): SitingHandoff | null {
+  const sites: SitingHandoffSite[] = [];
+  const withoutLocation: string[] = [];
+  for (const u of units) {
+    if (u.lat === null || u.lon === null || !Number.isFinite(u.lat) || !Number.isFinite(u.lon)) {
+      withoutLocation.push(u.name);
+    } else {
+      sites.push({ name: u.name, technology: u.technology, lat: u.lat, lon: u.lon, capacityMw: u.capacityMw ?? null });
+    }
+  }
+  if (sites.length === 0) return null;
+  const lats = sites.map((s) => s.lat);
+  const lons = sites.map((s) => s.lon);
+  const technologies = (['solar', 'wind'] as const).filter((t) => sites.some((s) => s.technology === t));
+  return {
+    sites,
+    bbox: [
+      Math.min(...lons) - HANDOFF_MARGIN_DEG, Math.min(...lats) - HANDOFF_MARGIN_DEG,
+      Math.max(...lons) + HANDOFF_MARGIN_DEG, Math.max(...lats) + HANDOFF_MARGIN_DEG,
+    ],
+    technologies: [...technologies],
+    withoutLocation,
+  };
+}

@@ -45,7 +45,7 @@ CORE_TO_MODULE_ALLOWLIST: dict[str, dict[str, str]] = {
 }
 
 #: pinned sha256 of ``json.dumps(module_hooks.registered(), sort_keys=True)``: the registered-surface anchor.
-REGISTERED_SURFACE_ANCHOR = "b73a34f06cc1e1b1a8f4a192ae4889d850baf4c2b17dff736a3bc01f3a21c128"
+REGISTERED_SURFACE_ANCHOR = "0e57dc7a0e86836a9471b1ffc0d3cc91738fc650bd78d0e7070cf00b3ba8b1fd"
 
 
 def _anchor() -> str:

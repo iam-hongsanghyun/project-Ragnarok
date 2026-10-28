@@ -6,7 +6,7 @@
  */
 import React, { useMemo, useState } from 'react';
 import type { WorkbookModel } from 'lib/types';
-import { plantCards, type PlantCard, type PlantChange } from 'lib/build/plants';
+import { derivedLines, plantCards, type PlantCard, type PlantChange } from 'lib/build/plants';
 import { previewPlantDelete } from 'lib/api/plants';
 import { useDialog } from '../../shared/components/Dialog';
 import './plants.css';
@@ -56,6 +56,7 @@ export function PlantList({ model, onEdit, onApply, compact }: Props) {
             {onEdit && <button type="button" className="ghost-button sm" disabled={!card.editable} title={card.editable ? 'Re-derive the components' : 'No registry row: delete and add it again'} onClick={() => onEdit(card)}>Edit</button>}
             <button type="button" className="ghost-button sm" onClick={() => remove(card)}>Delete</button>
           </div>
+          {open[card.plantId] && derivedLines(card.derived).map((l) => <p key={l} className="plant-card__derived">{l}</p>)}
           {open[card.plantId] && (
             <ul className="plant-card__components">
               {card.components.map((c) => (

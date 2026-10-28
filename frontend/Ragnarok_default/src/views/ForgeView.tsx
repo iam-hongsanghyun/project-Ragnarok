@@ -24,6 +24,8 @@ import { nonEmptySheets, roundFindings, snapFindings, type ForgeFinding } from '
 import { CostCurvePanel } from './ForgeView.features/CostCurvePanel';
 import { CapacityTargetPanel, type ScaleCarrierCapacityResult } from './ForgeView.features/CapacityTargetPanel';
 import { TemporalClusterPanel } from './ForgeView.features/TemporalClusterPanel';
+import { PlaceholderBoundsPanel } from '../features/validation/PlaceholderBoundsPanel';
+import { ModelCheckPanel } from '../features/validation/ModelCheckPanel';
 import type { TemporalOptions, TemporalResult } from 'lib/api/temporal';
 import { SeasonalRatingPanel, type SeasonalRatingOptions, type SeasonalRatingResult } from './ForgeView.features/SeasonalRatingPanel';
 import { AdjustQueryPanel } from './ForgeView.features/AdjustQueryPanel';
@@ -67,6 +69,9 @@ interface Props {
   onTemporalApply?: (model: WorkbookModel) => void;
   /** Visible action: fill the snapshot weightings from the timestamp spacing (POST /api/model/set-weightings-from-spacing). */
   onSetWeightingsFromSpacing?: () => Promise<void> | void;
+  /** Server-side clean-ups read the session workbook: push the working model first, pull the session back after. */
+  onSessionSync?: () => Promise<void>;
+  onSessionReload?: () => Promise<void>;
   /** P18 — write `lines-s_max_pu` from summer/winter MVA ratings (PyPSA apply_seasonal_rating). */
   onApplySeasonalRating?: (opts: SeasonalRatingOptions) => Promise<SeasonalRatingResult>;
   /** Attach Open-Meteo weather profiles to the existing renewable fleet by
@@ -110,7 +115,7 @@ export interface AttachProfilesResult {
   sites: number;
 }
 
-type Operation = 'round' | 'adjust' | 'costcurve' | 'snap' | 'cluster' | 'capacityTarget' | 'seasonalRating' | 'renewable' | 'hydroInflow' | 'retarget' | 'forecast' | 'driverForecast' | 'evDemand' | 'temporalCluster';
+type Operation = 'round' | 'adjust' | 'costcurve' | 'snap' | 'cluster' | 'capacityTarget' | 'seasonalRating' | 'renewable' | 'hydroInflow' | 'retarget' | 'forecast' | 'driverForecast' | 'evDemand' | 'temporalCluster' | 'placeholderBounds';
 type OpGroup = 'Numeric' | 'Economics' | 'Geospatial' | 'Topology' | 'Temporal';
 
 /** Catalog of Forge tools, grouped. Add a new tool by adding an entry here
@@ -118,6 +123,7 @@ type OpGroup = 'Numeric' | 'Economics' | 'Geospatial' | 'Topology' | 'Temporal';
 const OPERATIONS: Array<{ id: Operation; label: string; group: OpGroup }> = [
   { id: 'round', label: 'Round / Ceil / Floor', group: 'Numeric' },
   { id: 'adjust', label: 'Adjust values', group: 'Numeric' },
+  { id: 'placeholderBounds', label: 'Clean placeholder bounds', group: 'Numeric' },
   { id: 'costcurve', label: 'Marginal cost curve', group: 'Economics' },
   { id: 'snap', label: 'Snap to nearest bus', group: 'Geospatial' },
   { id: 'renewable', label: 'Attach renewable profiles', group: 'Geospatial' },
@@ -264,7 +270,7 @@ function SearchableMultiSelect({
   );
 }
 
-export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEditApply, onClusterPreview, onClusterApply, onTemporalPreview, onTemporalApply, onSetWeightingsFromSpacing, onScaleCarrierCapacity, onApplySeasonalRating, onAttachRenewableProfiles, onRetargetSnapshots, onForecastSnapshots, onDriverForecast, onEvDemand, onAttachHydroInflow }: Props) {
+export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEditApply, onClusterPreview, onClusterApply, onTemporalPreview, onTemporalApply, onSetWeightingsFromSpacing, onSessionSync, onSessionReload, onScaleCarrierCapacity, onApplySeasonalRating, onAttachRenewableProfiles, onRetargetSnapshots, onForecastSnapshots, onDriverForecast, onEvDemand, onAttachHydroInflow }: Props) {
   // Persisted so the chosen tool + validation result survive leaving and
   // returning to the Forge tab (the view unmounts on tab switch). The findings
   // scan the whole model, so these three drivers fully restore the result.
@@ -671,6 +677,14 @@ export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEdi
             )}
           </div>
         )}
+        {sheetsWithRows.length > 0 && onSessionSync && onSessionReload && (
+          <ModelCheckPanel
+            refreshKey={model}
+            onSessionSync={onSessionSync}
+            onSessionReload={onSessionReload}
+            onSetWeightingsFromSpacing={onSetWeightingsFromSpacing}
+          />
+        )}
         {sheetsWithRows.length === 0 ? (
           <div className="view-empty">
             <p>No model loaded. Import data first, then return to Forge to clean it up.</p>
@@ -768,6 +782,22 @@ export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEdi
             />
           ) : (
             <div className="view-empty"><p>Adjust values needs a live backend session.</p></div>
+          )
+        ) : operation === 'placeholderBounds' ? (
+          onSessionSync && onSessionReload ? (
+            <section className="forge-section">
+              <header className="forge-section-header">
+                <h3>Clean placeholder bounds</h3>
+                <p>
+                  A bound that holds a finite <code>1e9</code> or more (<code>1e12</code> standing for "no limit") reaches PyPSA as
+                  written and gives the LP a huge right-hand side. The clean-up blanks those cells, so the row takes PyPSA's own default
+                  (<code>inf</code>). A genuine finite cap is never touched. The model check flags the same cells.
+                </p>
+              </header>
+              <PlaceholderBoundsPanel onSessionSync={onSessionSync} onSessionReload={onSessionReload} />
+            </section>
+          ) : (
+            <div className="view-empty"><p>Cleaning placeholder bounds needs a live backend session.</p></div>
           )
         ) : operation === 'costcurve' ? (
           <CostCurvePanel

@@ -119,6 +119,9 @@ export interface RollingHorizonConfig {
   overlapHours?: number;
   /** Soft terminal SOC target on the last window. An explicit rolling option, default OFF. */
   terminalSoc?: boolean;
+  /** Price of one MWh of terminal-SOC shortfall (currency/MWh). Absent = automatic: 2 x the highest generator marginal
+   *  cost, floor 1.0 (backend `auto_terminal_penalty`). Only read when `terminalSoc` is on. */
+  terminalSocPenalty?: number;
   /** Derived (horizon - overlap); echoed for display, the backend recomputes it. */
   stepSnapshots: number;
 }
@@ -134,7 +137,8 @@ export interface SamplingConfig {
   blockSize: number;
   blockCount: number;
   gapSnapshots: number;
-  /** API / MCP option (not stored in presets): multiply start_up_cost / shut_down_cost of committable units by the representation factor (PyPSA charges them per event). Backend default true. */
+  /** Multiply start_up_cost / shut_down_cost of committable units by the representation factor (PyPSA charges them per
+   *  event, unweighted). Backend default true; a preset carries the key only when it is turned OFF (`false`). */
   scaleStartUpCosts?: boolean;
 }
 
@@ -1413,6 +1417,26 @@ export interface PathwayPeriodSummary {
   peakLoad: number;
   objectiveWeight: number;
   yearsWeight: number;
+  /** Generator MW active in the period (build year / lifetime applied); absent in runs stored before it was served. */
+  installedCapacityMw?: number | null;
+  /** Storage-unit MW active in the period. */
+  storageCapacityMw?: number | null;
+  /** Annuity of the extendable assets active in the period, before the investment-period weighting. */
+  capexAnnual?: number | null;
+}
+
+/** One row of the annual-budgets module's table (`result.annualBudgets`): what it wrote into PyPSA. */
+export interface AnnualBudgetEntry {
+  component: string;
+  name: string;
+  attribute: string;
+  /** The per-year figure that was typed. */
+  annual: number;
+  /** Equivalent years of the horizon the total spans. */
+  horizonYears: number;
+  /** The horizon total written into the PyPSA column. */
+  value: number;
+  scope: string;
 }
 
 // ── Result types ──────────────────────────────────────────────────────────────
@@ -1907,6 +1931,8 @@ export interface ConstraintSpec {
 
 export interface RunResults {
   pluginAnalytics?: Record<string, PluginAnalyticsEntry>;
+  /** Annual budgets the run applied (null / absent when it had none). */
+  annualBudgets?: AnnualBudgetEntry[] | null;
   summary: SummaryItem[];
   dispatchSeries: SeriesPoint[];
   /** Per-carrier curtailed power (MW) per snapshot — renewables (time-varying

@@ -13,6 +13,7 @@ import type { ScreeningSite } from 'lib/api/screening';
 import { correlationColor, fmt, fmtPct } from 'lib/screening/screening';
 import { FitToBounds } from '../map/FitToBounds';
 import { NoZoomAnimation } from '../map/NoZoomAnimation';
+import { BASEMAP_ATTRIBUTION, BASEMAP_MAX_NATIVE_ZOOM, BASEMAP_URL } from 'lib/map/basemap';
 
 export type MapColorMode = 'technology' | 'cluster' | 'correlation';
 
@@ -52,11 +53,7 @@ export function ScreeningMap({ sites, baseColors, mode, focus, focusCorr, select
         wheelPxPerZoomLevel={120}
       >
         <NoZoomAnimation />
-        <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-          subdomains="abcd"
-        />
+        <TileLayer url={BASEMAP_URL} attribution={BASEMAP_ATTRIBUTION} maxNativeZoom={BASEMAP_MAX_NATIVE_ZOOM} />
         <FitToBounds bounds={bounds} />
 
         {showCorr && focusSite && sites.filter((s) => s.name !== focusSite.name).map((s) => {

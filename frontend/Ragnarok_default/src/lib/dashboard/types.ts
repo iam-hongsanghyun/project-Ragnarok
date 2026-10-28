@@ -65,6 +65,8 @@ export type CardKind =
   | 'emissions-breakdown'
   | 'capacity-expansion'
   | 'capacity-by-period'
+  | 'pathway-overview'
+  | 'annual-budgets'
   | 'carrier-analysis'
   | 'load-analysis'
   | 'stochastic-scenarios';
@@ -339,6 +341,14 @@ export interface CapacityByPeriodCardData extends CardBase {
   kind: 'capacity-by-period';
 }
 
+export interface PathwayOverviewCardData extends CardBase {
+  kind: 'pathway-overview';
+}
+
+export interface AnnualBudgetsCardData extends CardBase {
+  kind: 'annual-budgets';
+}
+
 export interface CarrierAnalysisCardData extends CardBase {
   kind: 'carrier-analysis';
 }
@@ -402,6 +412,8 @@ export type Card =
   | EmissionsBreakdownCardData
   | CapacityExpansionCardData
   | CapacityByPeriodCardData
+  | PathwayOverviewCardData
+  | AnnualBudgetsCardData
   | CarrierAnalysisCardData
   | LoadAnalysisCardData
   | StochasticScenariosCardData;

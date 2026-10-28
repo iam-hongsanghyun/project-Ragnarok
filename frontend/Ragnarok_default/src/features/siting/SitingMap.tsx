@@ -10,6 +10,7 @@
  */
 import React, { useMemo, useState } from 'react';
 import { CircleMarker, MapContainer, Polyline, Rectangle, TileLayer, Tooltip, useMapEvents } from 'react-leaflet';
+import { BASEMAP_ATTRIBUTION, BASEMAP_MAX_NATIVE_ZOOM, BASEMAP_URL } from 'lib/map/basemap';
 import { LatLngBoundsExpression } from 'leaflet';
 import { GridRow } from 'lib/types';
 import { numberValue, stringValue } from 'lib/utils/helpers';
@@ -28,6 +29,8 @@ interface Props {
   /** Built MW per candidate site bus (from expansionResults), post-solve. */
   builtMwBySiteBus: Record<string, number>;
   currencySymbol: string;
+  /** Sites carried from the Screening tab: drawn as the screened shortlist. */
+  screenedSites?: Array<{ name: string; technology: string; lat: number; lon: number }> | null;
 }
 
 /** Mean-CF color ramp: muted slate at 0 to saturated green at 0.5+. */
@@ -61,7 +64,7 @@ function RegionDraw({ pending, onCorner }: {
 }
 
 export function SitingMap({
-  buses, bounds, bbox, onBboxChange, candidates, builtMwBySiteBus, currencySymbol,
+  buses, bounds, bbox, onBboxChange, candidates, builtMwBySiteBus, currencySymbol, screenedSites,
 }: Props) {
   const [pendingCorner, setPendingCorner] = useState<[number, number] | null>(null);
 
@@ -115,11 +118,7 @@ export function SitingMap({
         wheelPxPerZoomLevel={120}
       >
         <NoZoomAnimation />
-        <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-          subdomains="abcd"
-        />
+        <TileLayer url={BASEMAP_URL} attribution={BASEMAP_ATTRIBUTION} maxNativeZoom={BASEMAP_MAX_NATIVE_ZOOM} />
         <FitToBounds bounds={bounds} />
         <RegionDraw pending={pendingCorner} onCorner={handleCorner} />
 
@@ -156,6 +155,17 @@ export function SitingMap({
             </React.Fragment>
           );
         })}
+
+        {(screenedSites ?? []).map((s) => (
+          <CircleMarker
+            key={`screened-${s.name}`}
+            center={[s.lat, s.lon]}
+            radius={5}
+            pathOptions={{ color: '#0f172a', fillColor: s.technology === 'wind' ? '#2563eb' : s.technology === 'solar' ? '#f59e0b' : '#64748b', fillOpacity: 0.95, weight: 1.5 }}
+          >
+            <Tooltip>screened: {s.name} · {s.technology}</Tooltip>
+          </CircleMarker>
+        ))}
 
         {(candidates ?? []).map((c) => {
           const grid = busByName[c.gridBus];

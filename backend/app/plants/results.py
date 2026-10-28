@@ -24,6 +24,7 @@ from typing import Any
 import numpy as np
 
 from backend.app.plants import cofiring as cf
+from backend.app.plants import startcosts as sc
 from ..p2x.results import P2XResultsError, _f, _Run
 from .registry import plant_ids, plant_rows, registry_map
 
@@ -72,6 +73,10 @@ def _component(run: _Run, comp: dict[str, str]) -> dict[str, Any]:
         op = _f(row.get("marginal_cost")) * thr
         ext = _truthy(row.get("p_nom_extendable"))
         out["operatingCost"], out["fixedCost"], out["extendable"] = op, _fixed(run, sheet, name, row, cap, ext), ext
+        stand_by = _f(row.get("stand_by_cost"))
+        status = run.series.get(f"{sheet}-status")
+        if stand_by > 0 and status and name in status[0]:        # part-load (Generator route): currency per hour committed x committed hours
+            out["standByCost"] = stand_by * _energy(run, _series(run, sheet, "status", name))
     elif sheet == "stores":
         cap = run.capacity(sheet, name)
         out.update({"capacity": cap, "capacityUnit": "MWh", "throughputMwh": 0.0, "operatingCost": 0.0})
@@ -88,6 +93,38 @@ def _starts(run: _Run, sheet: str, name: str, power: np.ndarray) -> tuple[int, s
         return round(float(np.sum([_f(r.get(name)) for r in su]))), "solved (committable)"
     on = power > TOL
     return int(np.sum(on[1:] & ~on[:-1]) + (1 if on.size and on[0] else 0)), "counted from dispatch (not committable)"
+
+
+def _start_costs(run: _Run, sheet: str, name: str) -> dict[str, Any] | None:
+    """Starts by type (hot / warm / cold) and what they cost, from the solved ``status`` and the unit's ``RAGNAROK_StartCosts`` rows.
+
+    Algorithm: a start at t is of the highest tier j whose threshold ``K_j`` (snapshots, from hours with the run's step) it follows with the unit
+    off in all of them; the charge is that tier's cost (the hot cost is PyPSA's ``start_up_cost``). ASCII: tier_t = #{j : sum_{k=1..K_j} u[t-k] = 0}.
+    ``None`` for a unit without tier rows or a run without a stored status series. Under Force-LP the status is fractional and rounded at 0.5.
+    """
+    from ...pypsa.network import time_units as tu
+
+    try:
+        plans = sc.read_plans(run.model)
+    except ValueError:
+        return None
+    plan = next((p for p in plans if p.component == sheet and p.name == name), None)
+    st = run.series.get(f"{sheet}-status")
+    if plan is None or not st or name not in st[0]:
+        return None
+    net = run.network()
+    step, _ = tu.step_hours(net)
+    counts, _ = sc.snapshot_thresholds([h for h, _ in plan.tiers], step, name, sheet)
+    static = net.components[sheet].static
+    tiers = sc.classify_starts(run.col(f"{sheet}-status", name), counts, float(static.at[name, "up_time_before"]), float(static.at[name, "down_time_before"]))
+    costs = [plan.hot, *(c for _, c in plan.tiers)]
+    labels = ["hot", *plan.labels]
+    by_type = {lab: int(sum(1 for t in tiers if t == i)) for i, lab in enumerate(labels)}
+    total = float(sum(costs[t] for t in tiers))
+    native = plan.hot * len(tiers)
+    return {"starts": by_type, "startCost": total, "nativeStartUpCost": native, "tierIncrement": total - native,
+            "thresholdsSnapshots": dict(zip(plan.labels, counts)), "stepHours": step,
+            "basis": "tier of each start from the solved status: off for all of the tier's snapshots before it; cost per start from RAGNAROK_StartCosts"}
 
 
 def _gas_ef(run: _Run, reg: dict[str, Any]) -> float:
@@ -159,6 +196,12 @@ def _plant(run: _Run, pid: str, reg: dict[str, Any] | None, include_series: bool
     if ptype in ("ccgt", "ocgt", "cofiring_simple", "cofiring_network") and main:
         starts, basis = _starts(run, main["sheet"], main["name"], gen)
         out["starts"], out["startsBasis"] = starts, basis
+        tiers_out = _start_costs(run, main["sheet"], main["name"])
+        if tiers_out is not None:
+            out["startCosts"] = tiers_out
+        main_comp = next((p for p in parts if p["name"] == main["name"] and p["sheet"] == main["sheet"]), {})
+        if "standByCost" in main_comp:
+            out["standByCost"] = main_comp["standByCost"]
         ef = _gas_ef(run, reg or {})
         K = (reg or {}).get("lhvMjPerNm3") or (reg.get("blend") or {}).get("lhvMjPerNm3") or {}
         lh, lg = float(K.get("H2", 10.78)), float(K.get("CH4", 35.8))
@@ -205,7 +248,12 @@ def _plant(run: _Run, pid: str, reg: dict[str, Any] | None, include_series: bool
             if include_series:
                 out["series"] = {"snapshots": run.snapshots, "generationMw": gen.tolist(), "h2Mw": h.tolist(), "gasMw": g.tolist(),
                                  "h2EnergyShare": sh["energy"].tolist(), "h2VolShare": sh["vol"].tolist()}
-    out["totalCost"] = out["operatingCost"] + out["fixedCost"] + out["fuelCost"]
+    # An opted-in plant (part-load stand-by cost, hot / warm / cold start tiers) carries its commitment cost in the total; a plant without
+    # them keeps the legacy total (operating + fixed + fuel), which has never included start-up costs.
+    commitment = out.get("standByCost", 0.0) + (out["startCosts"]["startCost"] if "startCosts" in out else 0.0)
+    if commitment:
+        out["commitmentCost"] = commitment
+    out["totalCost"] = out["operatingCost"] + out["fixedCost"] + out["fuelCost"] + commitment
     if ptype == "p2x":
         from ..p2x import results as p2x_results
         try:

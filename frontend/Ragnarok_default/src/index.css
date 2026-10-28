@@ -5,6 +5,7 @@
      _tokens.css        — design tokens (:root) + base resets + body
      _validation.css    — Analytics → Validation pane
      _plugin-tables.css — plugin result cards / subtables / metric cards
+     _operations.css    — time-units editor, model-check findings, pathway and annual-budget result cards
 
    The rest still lives below in section-marked blocks (grep for
    `/* ──` to navigate). Further per-component extraction is a
@@ -20,6 +21,7 @@
 @import "./styles/_training.css";
 @import "./styles/_reporting.css";
 @import "./styles/_screening.css";
+@import "./styles/_operations.css";
 
 
 .sidebar {

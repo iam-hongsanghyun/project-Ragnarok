@@ -12,6 +12,7 @@
  */
 import React, { useMemo } from 'react';
 import { CircleMarker, MapContainer, Popup, TileLayer, Tooltip } from 'react-leaflet';
+import { BASEMAP_ATTRIBUTION, BASEMAP_MAX_NATIVE_ZOOM, BASEMAP_URL } from 'lib/map/basemap';
 import { LatLngBoundsExpression } from 'leaflet';
 import { FitToBounds } from '../map/FitToBounds';
 import { NoZoomAnimation } from '../map/NoZoomAnimation';
@@ -61,11 +62,7 @@ export function AssetRiskMap({ assets, eaiByAsset, perilFilter, currency }: Prop
     <div className="map-frame" style={{ position: 'relative' }}>
       <MapContainer center={[20, 15]} zoom={2} className="leaflet-map" scrollWheelZoom zoomAnimation={false} zoomSnap={0.25} zoomDelta={0.25} wheelPxPerZoomLevel={120}>
         <NoZoomAnimation />
-        <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-          subdomains="abcd"
-        />
+        <TileLayer url={BASEMAP_URL} attribution={BASEMAP_ATTRIBUTION} maxNativeZoom={BASEMAP_MAX_NATIVE_ZOOM} />
         <FitToBounds bounds={bounds} />
         {assets.map((asset) => {
           const eai = eaiOf(asset.id);

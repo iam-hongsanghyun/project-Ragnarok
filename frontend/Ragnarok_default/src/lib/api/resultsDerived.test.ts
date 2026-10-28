@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globals';
-import { fetchRunAssetKind, fetchRunCompanies, fetchRunKpis, fetchRunPeriod } from './resultsDerived';
+import { fetchRunAnnualBudgets, fetchRunAssetKind, fetchRunCompanies, fetchRunKpis, fetchRunPeriod } from './resultsDerived';
 
 // The pathway period views and the KPI / company strips are server payloads: these tests pin
 // the requests the browser makes (the `period` argument reaches every route) and the paging of
@@ -35,6 +35,11 @@ describe('period-aware result requests', () => {
     expect(calls[2]).toContain('sort_by=npv');
     expect(calls[2]).toContain('period=2030');
     expect(calls[3]).toMatch(/\/companies$/);
+  });
+
+  test('annual budgets are read from the run\'s own route', async () => {
+    await fetchRunAnnualBudgets('run 1');
+    expect(calls[0]).toMatch(/\/api\/runs\/run%201\/annual-budgets$/);
   });
 
   test('fetchRunAssetKind pages until total, windowed by period and end', async () => {

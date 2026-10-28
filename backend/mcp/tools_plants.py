@@ -38,7 +38,7 @@ def _trim(res: dict[str, Any]) -> dict[str, Any]:
     annotations=_RO,
     description=(
         "The plant types Build can add as ONE unit: generator, bess (battery StorageUnit), ccgt, ocgt (gas turbines with DEA / technology-data cost, "
-        "efficiency, minimum load, start-up cost and unit commitment when committable; the ramp rate (per minute) and the minimum up / down times (hours) are written to RAGNAROK_TimeUnits and converted for the run's snapshot weights at solve time, see get_time_units), cofiring_simple (one generator burning a fixed gas / H2 blend: "
+        "efficiency, minimum load, start-up cost and unit commitment when committable, plus opt-in advanced fields for a committable unit of fixed size: minLoadEfficiency (part-load efficiency: no-load fuel + incremental heat rate), startCostHot / startCostWarm / startCostCold with startWarmAfterHours / startColdAfterHours (start cost by offline time, run through a plants-module constraint) and startUpMinutes / shutDownMinutes (PyPSA ramp_limit_start_up / _shut_down); the ramp rate (per minute) and the minimum up / down times (hours) are written to RAGNAROK_TimeUnits and converted for the run's snapshot weights at solve time, see get_time_units), cofiring_simple (one generator burning a fixed gas / H2 blend: "
         "cost and CO2 factor from the share), cofiring_network (gas bus + H2 bus -> fuel bus -> turbine, blend limited by options.cofiringConfig or the plant's "
         "blendMin / blendMax) and p2x (electrolyser chain). Each entry lists its fields (key, label, unit, default, advanced) and defaults. Every plant needs a bus and a "
         "capacity (pNom MW, or extendable=true); the rest defaults from the technology data (value, unit, source, verified flag: file | derived | literature | assumption)."
@@ -56,7 +56,7 @@ async def list_plant_types(include_technologies: bool = False) -> Any:
     annotations=_MUT,
     description=(
         "Add one plant to the working model: type (see list_plant_types), bus, capacity and the type's fields in a flat spec, e.g. "
-        "{'plantId': 'unit1', 'bus': 'grid', 'pNom': 400, 'committable': true} for a ccgt, or {'turbine': 'ccgt', 'h2Share': 0.3, 'h2ShareUnit': 'vol'} for cofiring_simple, "
+        "{'plantId': 'unit1', 'bus': 'grid', 'pNom': 400, 'committable': true} for a ccgt, or {'pNom': 400, 'committable': true, 'minLoadEfficiency': 0.52, 'startCostWarm': 90, 'startWarmAfterHours': 8, 'startCostCold': 130, 'startColdAfterHours': 48} for a ccgt with part-load efficiency and hot / warm / cold start costs (the preview lists the derived values), or {'turbine': 'ccgt', 'h2Share': 0.3, 'h2ShareUnit': 'vol'} for cofiring_simple, "
         "or {'turbine': 'ccgt', 'blendMax': 0.3, 'blendUnit': 'vol', 'blendScope': 'hourly'} for cofiring_network. Every component it creates carries the plant id in its "
         "`plant` column. Without confirm=true it returns the preview of what would be merged."
     ),
@@ -101,7 +101,7 @@ async def remove_plant(plant_id: str, confirm: bool = False) -> Any:
     annotations=_RO,
     description=(
         "Results of a stored run grouped by plant id (server-side groupby): per plant the generation, capacity factor, full-load hours, starts (solved for committable units), "
-        "operating / fixed / total cost, revenue at the bus price and, for gas turbines and co-firing, the gas and H2 fuel use, the H2 share per hour (energy % and vol % "
+        "operating / fixed / total cost (plus startCosts: starts by hot / warm / cold and what they cost, and standByCost, for a plant that uses those fields), revenue at the bus price and, for gas turbines and co-firing, the gas and H2 fuel use, the H2 share per hour (energy % and vol % "
         "equivalent), the CO2 emitted and the CO2 avoided against the same dispatch on 100 % gas; BESS charge / discharge and cycles; P2X LCOH. plant_id narrows to one. "
         "Per-snapshot series are omitted unless include_series=true."
     ),

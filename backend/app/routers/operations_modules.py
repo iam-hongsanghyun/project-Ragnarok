@@ -60,6 +60,7 @@ def time_units_get(session_id: str = "default") -> dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"sheet": time_units.SHEET, "rows": [{**r.__dict__} for r in rows],
+            "components": list(time_units.COMPONENTS),
             "attributes": {"ramps": list(time_units.RAMP_ATTRS), "times": list(time_units.TIME_ATTRS)},
             "units": {"ramps": list(time_units.RATE_UNITS), "times": list(time_units.TIME_UNITS)}}
 

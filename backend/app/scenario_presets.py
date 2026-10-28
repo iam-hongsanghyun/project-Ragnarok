@@ -361,13 +361,18 @@ def normalize_sampling_config(config: dict[str, Any]) -> dict[str, Any]:
         return n if (_is_finite(n) and n != 0) else fallback
 
     mode = config.get("mode")
-    return {
+    out = {
         "enabled": _truthy(config.get("enabled")),
         "mode": mode if mode in ("gap", "average") else "count",
         "blockSize": _js_floor(max(1, math.floor(num_or(config.get("blockSize", _MISSING), 168)))),
         "blockCount": _js_floor(max(1, math.floor(num_or(config.get("blockCount", _MISSING), 4)))),
         "gapSnapshots": _js_floor(max(0, math.floor(num_or(config.get("gapSnapshots", _MISSING), 0)))),
     }
+    # `scaleStartUpCosts` defaults to true in the backend, so a preset carries the key only to turn it OFF (sparse: an
+    # untouched preset is byte-identical to one saved before the option existed). Same rule in sampling.ts.
+    if config.get("scaleStartUpCosts") is False:
+        out["scaleStartUpCosts"] = False
+    return out
 
 
 def get_default_selected_period(config: dict[str, Any]) -> Any:

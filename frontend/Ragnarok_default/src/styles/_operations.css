@@ -1,0 +1,82 @@
+/* Operations UI: the generic `.sg-table`, the Build time-units editor, model-check findings and the
+   result cards of the pathway and annual-budget views. Colours and sizes come from _tokens.css only. */
+
+.sg-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+.sg-table th,
+.sg-table td {
+  padding: 4px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.sg-table th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: var(--fs-xs);
+}
+.sg-table td.sg-table__num,
+.sg-table th.sg-table__num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.sg-table tr.sg-table__total td {
+  font-weight: 600;
+  border-top: 1px solid var(--border-strong);
+}
+
+/* Build: time-units editor, a drawer over the right of the step (the step's own right column is too crowded to host it) */
+.time-units-drawer {
+  position: fixed;
+  top: 96px;
+  right: 0;
+  bottom: 0;
+  width: min(760px, 92vw);
+  z-index: var(--z-popover);
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-strong);
+  border-left: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-pop);
+  overflow-y: auto;
+}
+.time-units-drawer__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.time-units { display: flex; flex-direction: column; gap: 8px; padding: 8px 12px; overflow-x: auto; }
+.time-units__table input.sg-num-input { width: 84px; }
+.time-units__table select { max-width: 130px; }
+.time-units__add,
+.time-units__preview { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; }
+.time-units__add input.sg-num-input { width: 150px; }
+.time-units__notes { margin: 0; padding-left: 16px; }
+
+/* Model check */
+.model-check-panel {
+  margin: 8px 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--warn);
+  background: var(--warn-soft);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-md);
+  color: var(--text);
+}
+.model-check-panel__head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.model-check-panel__list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.model-check-finding { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.placeholder-bounds { display: flex; flex-direction: column; gap: 8px; }
+
+/* Result cards: pathway periods and annual budgets */
+.result-table-card { display: flex; flex-direction: column; gap: 8px; padding: 12px; overflow: auto; }
+.result-table-card__note { margin: 0; font-size: var(--fs-xs); color: var(--muted); line-height: 1.5; }
+.result-table-card .budget-status--binding { color: var(--warn-text); font-weight: 600; }
+.result-table-card .budget-status--slack { color: var(--muted); }

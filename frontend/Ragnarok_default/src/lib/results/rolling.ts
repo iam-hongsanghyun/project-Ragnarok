@@ -71,6 +71,8 @@ export function readRollingConfigFromModel(model: WorkbookModel): RollingHorizon
   const configRow = (model[ROLLING_CONFIG_SHEET] ?? [])[0] ?? {};
   const horizonHours = primitiveNumber(configRow.horizonHours as Primitive, null);
   const overlapHours = primitiveNumber(configRow.overlapHours as Primitive, null);
+  // A blank cell is "automatic", not 0 (Number('') is 0).
+  const penalty = configRow.terminalSocPenalty === '' ? null : primitiveNumber(configRow.terminalSocPenalty as Primitive, null);
   const next = normalizeRollingConfig({
     enabled: primitiveBoolean(configRow.enabled as Primitive, false),
     horizonSnapshots: clampPositiveInt(primitiveNumber(configRow.horizonSnapshots as Primitive, 168), 168),
@@ -79,6 +81,7 @@ export function readRollingConfigFromModel(model: WorkbookModel): RollingHorizon
     ...(horizonHours !== null ? { horizonHours } : {}),
     ...(overlapHours !== null ? { overlapHours } : {}),
     terminalSoc: primitiveBoolean(configRow.terminalSoc as Primitive, false),
+    ...(penalty !== null && penalty >= 0 ? { terminalSocPenalty: penalty } : {}),
   });
   return next;
 }
@@ -96,6 +99,7 @@ export function writeRollingConfigToModel(
     ...(normalized.horizonHours !== undefined ? { horizonHours: normalized.horizonHours } : {}),
     ...(normalized.overlapHours !== undefined ? { overlapHours: normalized.overlapHours } : {}),
     terminalSoc: Boolean(normalized.terminalSoc),
+    ...(normalized.terminalSocPenalty !== undefined ? { terminalSocPenalty: normalized.terminalSocPenalty } : {}),
   }];
   return {
     ...model,

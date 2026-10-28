@@ -7,6 +7,7 @@
 * ``GET /api/runs/{name}/metrics``   chart metrics of a per-asset focus (the chart card's options)
 * ``GET /api/runs/{name}/period/{period}``  the result payload of ONE investment period of a pathway run
 * ``GET /api/runs/{name}/derived``   weighted per-asset totals and the snapshot weights, from ``n.statistics``
+* ``GET /api/runs/{name}/annual-budgets``  each annual budget the run applied against the value it achieved and its dual
 
 ``kpis``, ``companies``, ``assets`` and ``metrics`` all take ``period`` (a pathway
 run's investment period); omitted = the whole horizon. KPIs and companies read the
@@ -280,6 +281,30 @@ def get_run_derived(name: str, period: int | None = Query(None, description="Pat
     if stats is None:
         raise HTTPException(status_code=404, detail="This run stores no outputs to derive statistics from.")
     return {"run": name, "period": period, **stats}
+
+
+@router.get("/api/runs/{name}/annual-budgets")
+def get_run_annual_budgets(name: str) -> dict[str, Any]:
+    """The annual budgets a stored run applied (``result.annualBudgets``) against what the solve achieved.
+
+    Per row: ``annual`` (the per-year figure typed), ``value`` (the horizon total written into PyPSA), ``achieved`` (read
+    back from the network: ``n.statistics.supply`` for a generator ``e_sum``, the ``primary_energy`` left-hand side for a
+    CO2 constraint; ``None`` where PyPSA has no such statistic), ``dual`` (``global_constraints.mu``) and ``binding``.
+    ``items`` is empty for a run without budgets, or a run that stores no outputs to read back from.
+    """
+    from ...app.annual_budgets.report import budget_report
+    from ...pypsa.results.statistics_query import network_from_outputs
+
+    _analytics(name)  # 404 before any work
+    bundle = _bundle(name)
+    result = bundle.get("result") or {}
+    table = [t for t in (result.get("annualBudgets") or []) if isinstance(t, dict)]
+    outputs = result.get("outputs") or {}
+    if not table or not outputs.get("series"):
+        return {"run": name, "items": [], "total": 0}
+    network = network_from_outputs(bundle.get("model") or {}, bundle.get("scenario") or {}, bundle.get("options") or {}, outputs)
+    items = budget_report(network, table)
+    return {"run": name, "items": items, "total": len(items)}
 
 
 @router.get("/api/runs/{name}/assets")

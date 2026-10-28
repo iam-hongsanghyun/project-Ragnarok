@@ -20,6 +20,11 @@ Algorithm (turbine Link, fuel network):
     The turbine Link takes fuel at ``bus0`` (MW_th) and delivers ``eta`` of it at ``bus1`` (MW_el): ``p_nom = P_el / eta``,
     ``overnight_cost = k_el * eta`` and ``fom_cost = f k_el eta`` (EUR per MW_th), ``marginal_cost = v * eta``, ``start_up_cost = u * P_el`` (EUR per start).
     ASCII: p_nom_th = P_el/eta; overnight_cost_th = capex_el*eta; fom_cost_th = fom%*capex_el*eta; marginal_cost_th = vom_el*eta.
+
+Opt-in extras of a committable fixed-size unit (:func:`uc_extras`, all blank = off, no existing number changes): part-load efficiency
+(:mod:`.partload`: piecewise ``efficiency`` curve on a Link, ``stand_by_cost`` + incremental ``marginal_cost`` on a Generator), hot / warm / cold
+start costs (:mod:`.startcosts`: native ``start_up_cost`` = hot cost, increments by the plants ``constraints`` hook) and start-up / shut-down time
+(native ``ramp_limit_start_up`` / ``_shut_down`` through ``RAGNAROK_TimeUnits``).
 """
 
 from __future__ import annotations
@@ -30,6 +35,8 @@ from typing import Any
 
 from backend.app.plants import cofiring as cf
 from ...pypsa.network.cost_basis import horizon_years
+from . import partload as pl
+from . import startcosts as sc
 from . import technologies as tech
 from .registry import Ctx, PlantError
 
@@ -90,12 +97,19 @@ def uc_fields(P: dict[str, float], p_el_mw: float, committable: bool, extendable
     return {"committable": True, "p_min_pu": round(P["min_load"], 6), "start_up_cost": round(P["start_up_cost"] * p_el_mw, 6)}
 
 
-def add_time_units(ctx: Ctx, sheet: str, name: str, P: dict[str, float], committable: bool, extendable: bool) -> None:
+def add_time_units(ctx: Ctx, sheet: str, name: str, P: dict[str, float], committable: bool, extendable: bool,
+                   spec: dict[str, Any] | None = None, p_min_pu: float | None = None) -> None:
     """Queue the ``RAGNAROK_TimeUnits`` rows of a committable thermal unit: HOURS and a rate PER MINUTE, never snapshots.
 
     ``min_up_time`` / ``min_down_time`` in hours; ``up_time_before`` = the minimum up time (the unit is not forced to
     stay on at the start of the horizon); ``ramp_limit_up`` / ``ramp_limit_down`` = the technology's ``ramp_rate`` (percent
     of capacity per minute) as a fraction per minute. Nothing here depends on the workbook's snapshot spacing.
+
+    Opt-in (spec ``startUpMinutes`` / ``shutDownMinutes``, blank = no row): PyPSA's own ``ramp_limit_start_up`` / ``ramp_limit_shut_down``,
+    written as the rate that takes the unit between standstill and its minimum load ``p_min_pu`` in that many minutes,
+    ``p_min_pu / minutes`` per minute. The time-units module converts them with the run's step ``w`` (``min(1, rate x w)``, never below
+    ``p_min_pu``); PyPSA bounds the output of the start (shut-down) snapshot with it, so it only bites when the step is longer than
+    the minutes stated; at a shorter step the bound equals the minimum load and the module's run note says so.
     """
     if not committable or extendable:
         return
@@ -106,12 +120,110 @@ def add_time_units(ctx: Ctx, sheet: str, name: str, P: dict[str, float], committ
         {"component": sheet, "name": name, "attribute": "ramp_limit_up", "value": round(P["ramp_rate"] / 100.0, 9), "unit": "per_minute"},
         {"component": sheet, "name": name, "attribute": "ramp_limit_down", "value": round(P["ramp_rate"] / 100.0, 9), "unit": "per_minute"},
     ]
+    pmin = P["min_load"] if p_min_pu is None else p_min_pu
+    for key, attr in (("startUpMinutes", "ramp_limit_start_up"), ("shutDownMinutes", "ramp_limit_shut_down")):
+        minutes = _maybe((spec or {}).get(key))
+        if minutes is None:
+            continue
+        if minutes <= 0:
+            raise PlantError(f"{key} must be > 0 minutes, got {minutes!r}.")
+        rows.append({"component": sheet, "name": name, "attribute": attr, "value": round(pmin / minutes, 12), "unit": "per_minute"})
+        ctx.warnings.append(f"{attr} {name} = p_min_pu {pmin:.6g} / {minutes:g} min = {pmin / minutes:.6g} of p_nom per minute (RAGNAROK_TimeUnits): PyPSA's native "
+                            "start / shut-down limit; it bounds the output of the start (shut-down) snapshot only, and is never set below the minimum load.")
     ctx.sheets[TIME_UNITS_SHEET].extend(rows)
     ctx.warnings.append(
         f"Time units (RAGNAROK_TimeUnits): minimum up / down time {P['min_up_time']:g} h / {P['min_down_time']:g} h and a ramp of {P['ramp_rate']:g} %/min are stored in hours "
         "and per minute; every run converts them with its own snapshot weights (ramp = min(1, rate per hour x hours per snapshot), times = ceil(hours / step)), so the plant "
         "is right at any resolution. The run notes and POST /api/time-units/preview show the converted values."
     )
+
+
+def _maybe(value: Any) -> float | None:
+    """``None`` for blank / non-numeric, else the float (zero is a value here, unlike :func:`opt`)."""
+    if value is None or isinstance(value, bool) or value == "":
+        return None
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return out if math.isfinite(out) else None
+
+
+UC_EXTRA_KEYS = ("minLoadEfficiency", "startCostHot", "startCostWarm", "startCostCold", "startWarmAfterHours", "startColdAfterHours",
+                 "startUpMinutes", "shutDownMinutes")
+
+
+def uc_extras(ctx: Ctx, spec: dict[str, Any], sheet: str, row: dict[str, Any], P: dict[str, float], p_el: float, eta: float,
+              eta_rated: float, *, fuel_price: float | None = None) -> dict[str, Any]:
+    """Opt-in refinements of a committable unit, applied to ``row`` in place; returns what to show in the preview and registry.
+
+    * ``minLoadEfficiency``: part-load efficiency (:mod:`.partload`): a Link gets PyPSA's piecewise ``efficiency`` curve (sheet
+      ``links-efficiency-pw``) and ``p_min_pu`` = fuel at minimum load per unit of ``p_nom``; a Generator gets ``stand_by_cost`` and an
+      incremental ``marginal_cost`` from the fuel price ``fuel_price`` of its blend.
+    * ``startCostHot`` / ``startCostWarm`` / ``startCostCold`` (+ ``startWarmAfterHours`` / ``startColdAfterHours``): per-start costs in EUR/MW_el;
+      the native ``start_up_cost`` becomes the hot cost, the warm / cold increments are the plants module's constraint hook
+      (:mod:`.startcosts`, sheet ``RAGNAROK_StartCosts``).
+
+    Nothing is written for a unit that is not committable with a fixed size (the keys are ignored with a warning), and nothing changes
+    unless a key is set.
+    """
+    extras: dict[str, Any] = {}
+    asked = [k for k in UC_EXTRA_KEYS if _maybe(spec.get(k)) is not None]
+    if not asked:
+        return extras
+    if not row.get("committable"):
+        ctx.warnings.append(f"{', '.join(asked)} need a fixed-size unit with unit commitment (committable): not applied.")
+        return extras
+    eta_min_in = _maybe(spec.get("minLoadEfficiency"))
+    if eta_min_in is not None:
+        eta_min = eta_min_in * eta / eta_rated        # a derate (off by default) scales both points alike
+        curve = pl.heat_rate_curve(p_el, P["min_load"], eta, eta_min)
+        if sheet == "links":
+            row.update({"efficiency": round(eta, pl.DIGITS), "p_nom": round(p_el / eta, pl.DIGITS), "p_min_pu": round(curve["minLoadPu"], pl.DIGITS)})
+            ctx.sheets["links-efficiency-pw"].extend(pl.link_curve_rows(str(row["name"]), curve))
+            route = "piecewise-link"
+            ctx.warnings.append(
+                f"Part-load efficiency {eta_min_in:g} at {P['min_load']:g} of {p_el:g} MW_el (full load {eta:g}): PyPSA piecewise efficiency curve "
+                f"(sheet links-efficiency-pw, p_pu 0 / {curve['minLoadPu']:.6g} / 1) tied to the unit's status; no-load fuel F0 = {curve['noLoadFuelMw']:.6g} MW_th, "
+                f"incremental heat rate b = {curve['incrementalHeatRate']:.6g} MW_th/MW_el (efficiency {curve['incrementalEfficiency']:.4f}); p_min_pu = {curve['minLoadPu']:.6g}. "
+                "The curve makes the run a MIP and cannot be combined with stochastic scenarios; the variable O&M stays per MWh of fuel (x full-load efficiency).")
+        else:
+            if fuel_price is None:
+                raise PlantError("Part-load efficiency on a Generator needs the fuel price of its blend.")
+            row.update(pl.generator_terms(curve, fuel_price, P["vom"]))
+            route = "stand-by-generator"
+            ctx.warnings.append(
+                f"Part-load efficiency {eta_min_in:g} at {P['min_load']:g} of {p_el:g} MW_el (full load {eta:g}): stand_by_cost = {row['stand_by_cost']:.6g} per hour committed "
+                f"(= fuel price {fuel_price:g} x no-load fuel {curve['noLoadFuelMw']:.6g} MW_th) and marginal_cost = {row['marginal_cost']:.6g} per MWh_el "
+                f"(= {fuel_price:g} x b {curve['incrementalHeatRate']:.6g} + VOM). The no-load fuel is priced but not counted in the carrier's CO2 (which is per MWh_th at the full-load efficiency).")
+        extras["partLoad"] = pl.describe(curve, route, None if sheet == "links" else {"stand_by_cost": row["stand_by_cost"], "marginal_cost": row["marginal_cost"]})
+    hot_in, warm, cold = _maybe(spec.get("startCostHot")), _maybe(spec.get("startCostWarm")), _maybe(spec.get("startCostCold"))
+    if hot_in is not None or warm is not None or cold is not None:
+        hot = P["start_up_cost"] if hot_in is None else hot_in
+        w_after, c_after = _maybe(spec.get("startWarmAfterHours")), _maybe(spec.get("startColdAfterHours"))
+        try:
+            sc.check_spec(hot, warm, cold, w_after, c_after)
+        except ValueError as exc:
+            raise PlantError(str(exc)) from exc
+        row["start_up_cost"] = round(hot * p_el, 6)          # PyPSA's single start cost = the hot cost; the hook adds the warm / cold increments
+        tiers: dict[str, Any] = {"hotPerMw": hot, "hot": row["start_up_cost"], "nativeStartUpCost": row["start_up_cost"], "unit": "per start"}
+        if warm is not None or cold is not None:
+            ctx.sheets[sc.SHEET].extend(sc.rows_for(sheet, str(row["name"]), hot=row["start_up_cost"],
+                                                    warm=None if warm is None else round(warm * p_el, 6),
+                                                    cold=None if cold is None else round(cold * p_el, 6),
+                                                    warm_after_h=w_after, cold_after_h=c_after))
+            if warm is not None:
+                tiers.update({"warmPerMw": warm, "warm": round(warm * p_el, 6), "warmAfterHours": w_after})
+            if cold is not None:
+                tiers.update({"coldPerMw": cold, "cold": round(cold * p_el, 6), "coldAfterHours": c_after})
+            ctx.warnings.append(
+                f"Start costs by offline time (RAGNAROK_StartCosts): hot {tiers['hot']:g}"
+                + (f", warm {tiers['warm']:g} after {w_after:g} h off" if warm is not None else "")
+                + (f", cold {tiers['cold']:g} after {c_after:g} h off" if cold is not None else "")
+                + " per start. The native start_up_cost is the hot cost; the plants module adds the warm / cold increment to the objective at solve time "
+                  "(hours -> snapshots with the run's weights; run notes list it). Needs a contiguous single-period run; under Force-LP it is a relaxation.")
+        extras["startCosts"] = tiers
+    return extras
 
 
 def _turbine_params(spec: dict[str, Any], kind: str) -> dict[str, float]:
@@ -200,11 +312,12 @@ def build_gas_turbine(kind: str, spec: dict[str, Any], ctx: Ctx, ac_bus: str, r:
     else:
         link["p_nom"] = round(p_el / eta, 6)
     link.update(uc_fields(P, p_el, bool(spec.get("committable")), ext, ctx.warnings))
-    ctx.add("links", link, f"{carrier} turbine")
-    add_time_units(ctx, "links", link["name"], P, bool(link.get("committable")), ext)
+    extras = uc_extras(ctx, spec, "links", link, P, p_el, eta, eta)
+    ctx.add("links", link, f"{carrier} turbine", **extras)
+    add_time_units(ctx, "links", link["name"], P, bool(link.get("committable")), ext, spec, link.get("p_min_pu"))
     return {"main": {"sheet": "links", "name": link["name"]}, "parameters": P, "efficiency": eta, "gasBus": gas_bus,
             "fuel": info, "turbineCarrier": carrier, "capacityMwEl": None if ext else p_el, "feeders": None,
-            "powerSeries": ("links", "p1"), "fuelSeries": ("links", "p0"), "committable": bool(link.get("committable"))}
+            "powerSeries": ("links", "p1"), "fuelSeries": ("links", "p0"), "committable": bool(link.get("committable")), **extras}
 
 
 # ── simple co-firing: one Generator with a blend carrier ─────────────────────────
@@ -250,9 +363,11 @@ def build_cofiring_simple(kind: str, spec: dict[str, Any], ctx: Ctx, ac_bus: str
     else:
         gen["p_nom"] = round(p_el * cap_factor, 6)
     gen.update(uc_fields(P, p_el * cap_factor, bool(spec.get("committable")), ext, ctx.warnings))
-    ctx.add("generators", gen, f"{TURBINES[kind]} gas + H2 generator")
-    add_time_units(ctx, "generators", gen["name"], P, bool(gen.get("committable")), ext)
-    return {"main": {"sheet": "generators", "name": gen["name"]}, "parameters": P, "efficiency": eta, "turbineCarrier": TURBINES[kind],
+    extras = uc_extras(ctx, spec, "generators", gen, P, p_el * cap_factor, eta, P["efficiency"],
+                       fuel_price=(1.0 - s) * price_gas + s * price_h2)
+    ctx.add("generators", gen, f"{TURBINES[kind]} gas + H2 generator", **extras)
+    add_time_units(ctx, "generators", gen["name"], P, bool(gen.get("committable")), ext, spec, gen.get("p_min_pu"))
+    return {**extras, "main": {"sheet": "generators", "name": gen["name"]}, "parameters": P, "efficiency": eta, "turbineCarrier": TURBINES[kind],
             "blend": {**b, "carrier": carrier, "carrierCo2": co2, "marginalCost": mc, "gasPrice": price_gas, "h2Price": price_h2,
                       "gasCo2": ef_g, "formula": "mc = ((1-s)*c_gas + s*c_h2)/eta + VOM; co2 = (1-s)*e_gas"},
             "derate": derate, "capacityMwEl": None if ext else p_el * cap_factor, "feeders": None,
@@ -309,9 +424,10 @@ def build_cofiring_network(kind: str, spec: dict[str, Any], ctx: Ctx, ac_bus: st
     else:
         link["p_nom"] = round(p_el * cap_factor / eta, 6)
     link.update(uc_fields(P, p_el * cap_factor, bool(spec.get("committable")), ext, ctx.warnings))
-    ctx.add("links", link, f"{carrier} turbine (fuel bus -> AC)")
-    add_time_units(ctx, "links", link["name"], P, bool(link.get("committable")), ext)
-    return {"main": {"sheet": "links", "name": link["name"]}, "parameters": P, "efficiency": eta, "turbineCarrier": carrier,
+    extras = uc_extras(ctx, spec, "links", link, P, p_el * cap_factor, eta, P["efficiency"])
+    ctx.add("links", link, f"{carrier} turbine (fuel bus -> AC)", **extras)
+    add_time_units(ctx, "links", link["name"], P, bool(link.get("committable")), ext, spec, link.get("p_min_pu"))
+    return {**extras, "main": {"sheet": "links", "name": link["name"]}, "parameters": P, "efficiency": eta, "turbineCarrier": carrier,
             "gasBus": gas_bus, "h2Bus": h2_bus, "fuelBus": fuel_bus, "h2BusCreated": h2_created, "fuel": {**ginfo, "h2Price": price_h2},
             "feeders": {"gas": gas_feed["name"], "h2": h2_feed["name"]}, "blend": blend,
             "lhvMjPerNm3": {"H2": K["h2_lhv_mj_per_nm3"], "CH4": K["ch4_lhv_mj_per_nm3"]}, "derate": derate,

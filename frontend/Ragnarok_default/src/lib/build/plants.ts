@@ -16,6 +16,34 @@ const NOT_COMPONENTS = new Set(['snapshots', 'network']);
 const REGISTRY_SHEETS = new Set(['RAGNAROK_PLANTS', 'RAGNAROK_P2X']);
 
 export interface PlantComponent { sheet: string; name: string; role: string; present: boolean }
+
+/** Derived values stored in a plant's registry row (part-load line, start costs); same shape as `PlantDerived` in `lib/api/plants.ts`. */
+export interface PlantDerivedValues {
+  partLoad?: { route: string; noLoadFuelMw: number; incrementalHeatRate: number; incrementalEfficiency: number; fuelMinMw: number; fuelFullMw: number; etaMin: number; etaFull: number; minLoadPu: number; written?: { stand_by_cost: number; marginal_cost: number } };
+  startCosts?: { hot: number; nativeStartUpCost: number; warm?: number; warmAfterHours?: number | null; cold?: number; coldAfterHours?: number | null };
+}
+
+const num = (v: number, digits = 4): string => v.toLocaleString(undefined, { maximumFractionDigits: digits });
+
+/** Plain-language lines for the derived values of a plant (preview and card); empty when the plant uses neither option. Units are stated. */
+export function derivedLines(d: PlantDerivedValues | null | undefined): string[] {
+  const out: string[] = [];
+  const pl = d?.partLoad;
+  if (pl) {
+    out.push(`Part-load: fuel ${num(pl.fuelMinMw)} MW_th at minimum load (efficiency ${num(pl.etaMin)}), ${num(pl.fuelFullMw)} MW_th at full load (${num(pl.etaFull)}); no-load fuel ${num(pl.noLoadFuelMw)} MW_th, incremental heat rate ${num(pl.incrementalHeatRate)} MW_th/MW_el (incremental efficiency ${num(pl.incrementalEfficiency)}).`);
+    out.push(pl.route === 'piecewise-link'
+      ? `Written as PyPSA's piecewise efficiency curve on the Link (sheet links-efficiency-pw), with p_min_pu = ${num(pl.minLoadPu, 6)}.`
+      : `Written as stand_by_cost = ${num(pl.written?.stand_by_cost ?? 0)} per hour committed and marginal_cost = ${num(pl.written?.marginal_cost ?? 0)} per MWh_el.`);
+  }
+  const sc = d?.startCosts;
+  if (sc) {
+    const tiers = [`hot ${num(sc.hot, 2)}`];
+    if (sc.warm !== undefined) tiers.push(`warm ${num(sc.warm, 2)} after ${num(sc.warmAfterHours ?? 0)} h offline`);
+    if (sc.cold !== undefined) tiers.push(`cold ${num(sc.cold, 2)} after ${num(sc.coldAfterHours ?? 0)} h offline`);
+    out.push(`Start costs per start: ${tiers.join(', ')}. PyPSA's start_up_cost is the hot cost (${num(sc.nativeStartUpCost, 2)}); warm and cold add the difference at solve time.`);
+  }
+  return out;
+}
 export interface PlantCard {
   plantId: string;
   type: string | null;
@@ -27,6 +55,7 @@ export interface PlantCard {
   spec: Record<string, unknown> | null;
   components: PlantComponent[];
   rowCount: number;
+  derived: PlantDerivedValues | null;
 }
 
 /** What the backend returns for add / edit / delete (`change` in the response). */
@@ -87,6 +116,7 @@ export function plantCards(model: WorkbookModel): PlantCard[] {
       spec: (reg?.spec as Record<string, unknown> | undefined) ?? null,
       components: regComps.filter((c) => c.sheet !== PLANT_SHEET).map((c) => ({ sheet: c.sheet, name: c.name, role: c.role ?? '', present: live.has(`${c.sheet}\u0000${c.name}`) })),
       rowCount: Array.from(bySheet.values()).reduce((n, s) => n + s.size, 0),
+      derived: reg && (reg.partLoad || reg.startCosts) ? { partLoad: reg.partLoad as PlantDerivedValues['partLoad'], startCosts: reg.startCosts as PlantDerivedValues['startCosts'] } : null,
     };
   });
 }

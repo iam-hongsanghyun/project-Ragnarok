@@ -98,23 +98,23 @@
    "value": 0.0,
    "unit": "efficiency points (per unit) lost per unit energy share of H2",
    "source": {
-    "document": "Ragnarok assumption (no value in the pinned data files)",
-    "locator": "OFF by default; no value in the pinned data files",
+    "document": "none: no citable source for an H2 derate of gas turbines was available to this build (2026-10-29)",
+    "locator": "Zero is a documented placeholder, not a finding. Manufacturer and peer-reviewed figures exist but were not available as exact, citable values (document, table / page, retrieval date); none is invented here.",
     "year": 2030
    },
    "verified": "assumption",
-   "note": "Switch-on parameter for a sensitivity: efficiency = rated - this x H2 energy share (simple mode: the fixed share; fuel network: the maximum share). Do not enable without an OEM figure."
+   "note": "PLACEHOLDER = 0 (derate off). No citable source for the efficiency derate of a gas turbine versus H2 volume share was found, so no number is entered (2026-10-29). To run a sensitivity, override this key per plant (params: {'fuels.h2_derate_efficiency_per_share': value}) with an OEM or peer-reviewed figure and record its source (document, table / page, retrieval date) here. Effect when set: efficiency = rated - this x H2 energy share (simple mode: the fixed share; fuel network: the maximum share)."
   },
   "h2_derate_capacity_per_share": {
    "value": 0.0,
    "unit": "per unit of rated MW_el lost per unit energy share of H2",
    "source": {
-    "document": "Ragnarok assumption (no value in the pinned data files)",
-    "locator": "OFF by default; no value in the pinned data files",
+    "document": "none: no citable source for an H2 derate of gas turbines was available to this build (2026-10-29)",
+    "locator": "Zero is a documented placeholder, not a finding. Manufacturer and peer-reviewed figures exist but were not available as exact, citable values (document, table / page, retrieval date); none is invented here.",
     "year": 2030
    },
    "verified": "assumption",
-   "note": "Same use as the efficiency derate, on p_nom."
+   "note": "PLACEHOLDER = 0 (derate off). No citable source for the capacity derate of a gas turbine versus H2 volume share was found, so no number is entered (2026-10-29). To run a sensitivity, override this key per plant (params: {'fuels.h2_derate_capacity_per_share': value}) with an OEM or peer-reviewed figure and record its source (document, table / page, retrieval date) here. Effect when set: p_nom is multiplied by 1 - this x H2 energy share (same share convention)."
   }
  },
  "technologies": {
@@ -216,7 +216,7 @@
       "year": 2030
      },
      "verified": "file",
-     "note": "Informational: PyPSA 1.4 has one start_up_cost per unit, no hot / warm / cold distinction and no start-up duration."
+     "note": "Start-up DURATION (not an offline threshold). Informational: use it as the spec key startUpMinutes (PyPSA ramp_limit_start_up through RAGNAROK_TimeUnits) to apply it. Hot / warm / cold start COSTS are the spec keys startCostHot / startCostWarm / startCostCold (no values in the data file)."
     },
     "cold_start_time": {
      "value": 2.5,
@@ -227,7 +227,7 @@
       "year": 2030
      },
      "verified": "file",
-     "note": "Informational, see warm_start_time."
+     "note": "Start-up DURATION (not an offline threshold). Informational: use it as the spec key startUpMinutes (PyPSA ramp_limit_start_up through RAGNAROK_TimeUnits) to apply it. Hot / warm / cold start COSTS are the spec keys startCostHot / startCostWarm / startCostCold (no values in the data file)."
     },
     "start_up_cost": {
      "value": 60.0,
@@ -238,7 +238,7 @@
       "year": 2030
      },
      "verified": "assumption",
-     "note": "Single value (PyPSA has no hot / warm / cold split and the data does not support one). Replace with plant data.",
+     "note": "Single value (this is the HOT cost when a plant sets warm / cold costs (spec startCostWarm / startCostCold; the data does not support a split, so none is defaulted)). Replace with plant data.",
      "costYear": 2025,
      "currency": "EUR"
     },
@@ -273,7 +273,7 @@
       "locator": "sheet '05 Gas turb. CC, steam extract.', 2030 column, note A 'Low efficiency at low loads'",
       "year": 2030
      },
-     "note": "the efficiency is the rated value at every load. PyPSA committable units have p_min_pu and stand_by_cost but no efficiency curve here."
+     "note": "Off by default: the efficiency is the rated value at every load. Opt in per plant with the spec key minLoadEfficiency (no value in the data file: enter plant data); the heat-rate line, its PyPSA terms and the preview values are in docs/backend.md section 5.10."
     }
    ]
   },
@@ -374,7 +374,7 @@
       "year": 2030
      },
      "verified": "file",
-     "note": "Informational."
+     "note": "Start-up DURATION (not an offline threshold). Informational: use it as the spec key startUpMinutes (PyPSA ramp_limit_start_up through RAGNAROK_TimeUnits) to apply it. Hot / warm / cold start COSTS are the spec keys startCostHot / startCostWarm / startCostCold (no values in the data file)."
     },
     "cold_start_time": {
      "value": 0.16666666666666666,
@@ -385,7 +385,7 @@
       "year": 2030
      },
      "verified": "file",
-     "note": "Informational."
+     "note": "Start-up DURATION (not an offline threshold). Informational: use it as the spec key startUpMinutes (PyPSA ramp_limit_start_up through RAGNAROK_TimeUnits) to apply it. Hot / warm / cold start COSTS are the spec keys startCostHot / startCostWarm / startCostCold (no values in the data file)."
     },
     "start_up_cost": {
      "value": 57.4395,
@@ -434,7 +434,7 @@
       "locator": "sheet '52 OCGT - Natural gas', 2030 column, note B 'The efficiency is drastically reduced at part-load'",
       "year": 2030
      },
-     "note": "rated efficiency at every load."
+     "note": "Off by default: rated efficiency at every load. Opt in per plant with the spec key minLoadEfficiency (no value in the data file: enter plant data)."
     }
    ]
   },

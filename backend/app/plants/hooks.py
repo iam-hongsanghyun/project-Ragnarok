@@ -1,4 +1,4 @@
-"""Plants module hooks (see :mod:`backend.app.module_hooks`): gas + H2 co-firing blend-share limits."""
+"""Plants module hooks (see :mod:`backend.app.module_hooks`): gas + H2 co-firing blend-share limits and hot / warm / cold start costs."""
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -32,3 +32,36 @@ def _prepare(ctx: mh.RunContext) -> Callable[[Any, Any], None] | None:
 
 
 mh.register("constraints", "plants-cofiring", _prepare, module=MODULE, order=60)
+
+
+def _prepare_start_costs(ctx: mh.RunContext) -> Callable[[Any, Any], None] | None:
+    """Hot / warm / cold start-cost tiers (``RAGNAROK_StartCosts``): refuse what the rows cannot honour, else add them to the objective."""
+    from . import startcosts
+
+    try:
+        plans = startcosts.read_plans(ctx.model or {})
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not plans:
+        return None
+    modes = [m for m in ctx.incompatible_modes if m in ("rolling horizon", "stochastic", "sampled-block")]
+    if ctx.pathway is not None and bool(getattr(ctx.pathway, "enabled", False)):
+        modes.append("multi-period pathway")
+    if modes:
+        raise HTTPException(
+            status_code=400,
+            detail=("Hot / warm / cold start costs (RAGNAROK_StartCosts) look back over the snapshots before each start, so they need one contiguous "
+                    f"single-period run; this run uses {', '.join(modes)}. Remove the RAGNAROK_StartCosts rows (the plant's single start_up_cost, the hot "
+                    "cost, then applies) or turn that mode off."),
+        )
+
+    def contribute(n: Any, snapshots: Any) -> None:
+        try:
+            startcosts.apply_start_cost_tiers(n, plans, snapshots, ctx.notes)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return contribute
+
+
+mh.register("constraints", "plants-start-costs", _prepare_start_costs, module=MODULE, order=61)

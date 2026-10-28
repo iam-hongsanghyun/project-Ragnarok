@@ -17,6 +17,7 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { CircleMarker, MapContainer, Polyline, TileLayer, Tooltip, useMap, useMapEvents } from 'react-leaflet';
+import { BASEMAP_ATTRIBUTION, BASEMAP_MAX_NATIVE_ZOOM, BASEMAP_URL } from 'lib/map/basemap';
 import type { Map as LeafletMap } from 'leaflet';
 import { GridRow, WorkbookModel } from 'lib/types';
 import { numberValue, stringValue, resolvedColor } from 'lib/utils/helpers';
@@ -338,11 +339,7 @@ export function BuildNetworkMap({
         <MapRef mapRef={mapRef} />
         {draggable && <DragController drag={drag} onMove={(lat, lng) => setDrag((d) => (d ? { ...d, lat, lng } : d))} onEnd={endDrag} />}
         {onAddAtLocation && <MapContextMenu targets={clickTargets} onContext={openMenu} />}
-        <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-          subdomains="abcd"
-        />
+        <TileLayer url={BASEMAP_URL} attribution={BASEMAP_ATTRIBUTION} maxNativeZoom={BASEMAP_MAX_NATIVE_ZOOM} />
 
         {/* Context branches — every branch class except the active one, faint
             and non-interactive so they read as background topology. */}

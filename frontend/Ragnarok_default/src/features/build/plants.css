@@ -20,3 +20,6 @@
 .plant-card__components { margin: 0; padding-left: 18px; font-size: var(--fs-sm); display: flex; flex-direction: column; gap: 2px; }
 .plant-card__components code { font-size: inherit; }
 .plant-card__missing { color: var(--danger, #b91c1c); }
+.plant-picker__derived { font-size: var(--fs-sm); border-left: 3px solid var(--border); padding: 2px 8px; display: flex; flex-direction: column; gap: 2px; }
+.plant-picker__derived p, .plant-card__derived { margin: 0; color: var(--text-muted, var(--muted)); }
+.plant-card__derived { font-size: var(--fs-sm); padding-left: 22px; }

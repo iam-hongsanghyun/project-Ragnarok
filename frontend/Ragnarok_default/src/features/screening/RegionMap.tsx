@@ -16,6 +16,7 @@ import { correlationColor, fmt, fmtPct } from 'lib/screening/screening';
 import { FitToBounds } from '../map/FitToBounds';
 import { NoZoomAnimation } from '../map/NoZoomAnimation';
 import type { MapColorMode } from './ScreeningMap';
+import { BASEMAP_ATTRIBUTION, BASEMAP_MAX_NATIVE_ZOOM, BASEMAP_URL } from 'lib/map/basemap';
 
 interface Props {
   regions: RegionRow[];
@@ -82,11 +83,7 @@ export function RegionMap({ regions, baseColors, mode, focus, focusCorr, selecte
         zoomSnap={0.25} zoomDelta={0.25} wheelPxPerZoomLevel={120}
       >
         <NoZoomAnimation />
-        <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-          subdomains="abcd"
-        />
+        <TileLayer url={BASEMAP_URL} attribution={BASEMAP_ATTRIBUTION} maxNativeZoom={BASEMAP_MAX_NATIVE_ZOOM} />
         <FitToBounds bounds={bounds} />
 
         {regions.filter((r) => r.geometry).map((r) => {

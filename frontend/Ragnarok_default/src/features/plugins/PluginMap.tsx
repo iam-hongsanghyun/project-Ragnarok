@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { CircleMarker, MapContainer, Marker, Polyline, TileLayer, Tooltip } from 'react-leaflet';
+import { BASEMAP_ATTRIBUTION, BASEMAP_MAX_NATIVE_ZOOM, BASEMAP_URL } from 'lib/map/basemap';
 import { LatLngBoundsExpression, divIcon } from 'leaflet';
 import { PluginChartSpec } from 'lib/types';
 import { chartSpecToMapEdges, chartSpecToMapNodes, MapNodePoint } from 'lib/plugins/chartSpec';
@@ -82,11 +83,7 @@ export function PluginMap({ spec, title }: { spec: PluginChartSpec; title?: stri
       <div style={{ height: 360, width: '100%', overflow: 'hidden' }}>
         <MapContainer center={[36.35, 127.9]} zoom={7} className="leaflet-map" style={{ height: '100%', width: '100%' }} scrollWheelZoom zoomAnimation={false} zoomSnap={0.25} zoomDelta={0.25} wheelPxPerZoomLevel={120}>
           <NoZoomAnimation />
-          <TileLayer
-            url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-            subdomains="abcd"
-          />
+          <TileLayer url={BASEMAP_URL} attribution={BASEMAP_ATTRIBUTION} maxNativeZoom={BASEMAP_MAX_NATIVE_ZOOM} />
           <FitToBounds bounds={bounds} />
           {edges.map((e) => (
             <Polyline

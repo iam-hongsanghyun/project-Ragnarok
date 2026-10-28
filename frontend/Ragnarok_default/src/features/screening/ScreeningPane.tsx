@@ -52,6 +52,7 @@ import {
   buildHeatmapOption,
   buildLaggedOption,
   buildProfileOption,
+  buildSitingHandoff,
   categoryColors,
   fmt,
   fmtPct,
@@ -63,6 +64,7 @@ import {
   regionToUnit,
   reorderMatrix,
   siteToUnit,
+  type SitingHandoff,
 } from 'lib/screening/screening';
 import { useAsync } from '../../shared/hooks/useAsync';
 import { usePersistedState } from '../../shared/hooks/usePersistedState';
@@ -82,6 +84,8 @@ interface Props {
   /** Stored run whose system price can serve as the reference series. */
   runName: string | null;
   onApplyFragment: (fragment: WorkbookFragment, databaseName: string, countryName: string) => void;
+  /** "Open in Siting": carry the selected sites into the Siting tab (absent = no Siting tab to open). */
+  onOpenInSiting?: (handoff: SitingHandoff) => void;
 }
 
 const BASES: Array<{ value: Basis; label: string }> = [
@@ -99,7 +103,7 @@ type Scope = 'all' | 'selected' | 'solar' | 'wind' | 'other';
 type TechFilter = 'all' | Technology;
 type RefChoice = 'none' | 'load' | 'price' | `dataset:${string}`;
 
-export function ScreeningPane({ buses, targetSnapshots, currencySymbol, discountRate, runName, onApplyFragment }: Props) {
+export function ScreeningPane({ buses, targetSnapshots, currencySymbol, discountRate, runName, onApplyFragment, onOpenInSiting }: Props) {
   const { showToast } = useToast();
   const theme = useMemo(() => readChartTheme(), []);
 
@@ -297,6 +301,11 @@ export function ScreeningPane({ buses, targetSnapshots, currencySymbol, discount
     setSelected((cur) => (cur.includes(name) ? cur.filter((s) => s !== name) : [...cur, name]));
   }, []);
   const selectedSet = useMemo(() => new Set(selected), [selected]);
+  // The ticked SITES (a region series has no place to site) with their envelope, for "Open in Siting".
+  const selectedHandoff = useMemo(
+    () => (regionLevel ? null : buildSitingHandoff(units.filter((u) => selectedSet.has(u.name)))),
+    [regionLevel, units, selectedSet],
+  );
   const refCorr = corr.data?.reference?.correlations ?? {};
 
   const onDelete = async (id: string) => {
@@ -554,6 +563,18 @@ export function ScreeningPane({ buses, targetSnapshots, currencySymbol, discount
               {Object.keys(clusterColors).map((c) => (
                 <button key={c} className="tb-btn" onClick={() => setSelected(units.filter((s) => clusterOf[s.name] === Number(c)).map((s) => s.name))}>Select cluster {c}</button>
               ))}
+              {onOpenInSiting && (
+                <button
+                  className="tb-btn"
+                  disabled={selectedHandoff === null}
+                  title={selectedHandoff === null
+                    ? (regionLevel ? 'Siting works on sites: switch to the Site level and tick sites.' : 'Tick at least one site that has a location.')
+                    : 'Carry the ticked sites into the Siting tab: its candidate region becomes their envelope.'}
+                  onClick={() => selectedHandoff && onOpenInSiting(selectedHandoff)}
+                >
+                  Open in Siting
+                </button>
+              )}
               {corr.data?.reference && <span className="scr-hint">{corr.data.reference.label}: {corr.data.reference.nOverlap} overlapping observation(s).</span>}
             </div>
           </div>

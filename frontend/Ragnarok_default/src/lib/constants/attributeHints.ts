@@ -84,7 +84,7 @@ export function getAttributeHint(sheet: string, attribute: string): AttributeHin
       note:
         'Caps NEW capacity per investment period (max_growth in MW; max_relative_growth as a ratio of the '
         + 'previous period). Binds only in multi-period (pathway) runs. Edit all carriers together in '
-        + 'Settings > Standard Constraints.',
+        + 'Market & Policy > Standard Constraints.',
     };
   }
   return null;

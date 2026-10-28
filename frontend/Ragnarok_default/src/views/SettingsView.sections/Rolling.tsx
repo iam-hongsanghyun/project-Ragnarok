@@ -100,6 +100,24 @@ export function RollingSection({
   useEffect(() => { setChunksText(String(derivedChunks)); }, [derivedChunks]);
   useEffect(() => { setOverlapText(String(overlap * stepHours)); }, [overlap, stepHours]);
 
+  // Terminal-SOC penalty: blank = automatic (the key is dropped), a number >= 0 is the price per MWh of shortfall.
+  const [penaltyText, setPenaltyText] = useState<string>(rollingConfig.terminalSocPenalty === undefined ? '' : String(rollingConfig.terminalSocPenalty));
+  useEffect(() => {
+    setPenaltyText(rollingConfig.terminalSocPenalty === undefined ? '' : String(rollingConfig.terminalSocPenalty));
+  }, [rollingConfig.terminalSocPenalty]);
+
+  const commitPenalty = (raw: string) => {
+    const { terminalSocPenalty: _previous, ...rest } = rollingConfig;
+    const value = parseFloat(raw);
+    if (raw.trim() === '' || !Number.isFinite(value) || value < 0) {
+      setPenaltyText('');
+      onRollingConfigChange(normalizeRollingConfig(rest));
+      return;
+    }
+    setPenaltyText(String(value));
+    onRollingConfigChange(normalizeRollingConfig({ ...rest, terminalSocPenalty: value }));
+  };
+
   const commitChunks = (raw: string) => {
     const parsed = Math.max(MIN_CHUNKS, Math.min(maxChunks, parseInt(raw, 10) || MIN_CHUNKS));
     const nextStep = stepForChunks(windowSnapshots, parsed);
@@ -213,6 +231,28 @@ export function RollingSection({
               starting energy); the run notes declare it.
             </p>
           </div>
+          {rollingConfig.terminalSoc && (
+            <div className="sg-setting-row">
+              <label className="sg-setting-label" htmlFor="rs-rolling-terminal-penalty">Terminal SOC penalty (currency per MWh)</label>
+              <input
+                id="rs-rolling-terminal-penalty"
+                type="number"
+                min={0}
+                step="any"
+                className="sg-num-input"
+                placeholder="automatic"
+                value={penaltyText}
+                onChange={(e) => setPenaltyText(e.target.value)}
+                onBlur={(e) => commitPenalty(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+              />
+              <p className="sg-setting-hint">
+                Price of one MWh of shortfall against the starting energy. Blank = automatic: twice the highest generator
+                marginal cost (above the replacement cost of the energy, so the last window refills when it can), never below 1.
+                The penalty steers the solver only; reported costs exclude it.
+              </p>
+            </div>
+          )}
           <div className="sg-setting-row">
             <label className="sg-setting-label">Cyclic storage</label>
             <p className="sg-setting-hint">

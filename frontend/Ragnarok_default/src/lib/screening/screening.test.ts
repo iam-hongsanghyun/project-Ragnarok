@@ -13,7 +13,10 @@ import {
   buildHeatmapOption,
   buildLaggedOption,
   buildProfileOption,
+  buildSitingHandoff,
   buildWithinBetweenOption,
+  HANDOFF_MARGIN_DEG,
+  type ScreeningUnit,
   categoryColors,
   correlationColor,
   equalWeights,
@@ -333,5 +336,35 @@ describe('region level', () => {
     const evil = { ...structure, within: [{ region: '<b>x</b>', nSites: 2, ...pair(1, 0.5, 0.5, 0.5) }], between: [] };
     const opt = buildWithinBetweenOption(evil, theme) as { tooltip: { formatter: (p: { dataIndex: number }) => string } };
     expect(opt.tooltip.formatter({ dataIndex: 0 })).not.toContain('<b>x');
+  });
+});
+
+describe('buildSitingHandoff (Screening -> Siting)', () => {
+  const unit = (name: string, technology: string, lat: number | null, lon: number | null, capacityMw?: number): ScreeningUnit =>
+    ({ name, technology, region: 'r', lat, lon, capacityMw });
+
+  test('the region is the sites\' envelope plus the margin, the technologies are those present', () => {
+    const h = buildSitingHandoff([unit('a', 'solar', 35, 127, 50), unit('b', 'wind', 37, 129)]);
+    expect(h).not.toBeNull();
+    expect(h!.bbox).toEqual([127 - HANDOFF_MARGIN_DEG, 35 - HANDOFF_MARGIN_DEG, 129 + HANDOFF_MARGIN_DEG, 37 + HANDOFF_MARGIN_DEG]);
+    expect(h!.technologies).toEqual(['solar', 'wind']);
+    expect(h!.sites.map((s) => s.name)).toEqual(['a', 'b']);
+    expect(h!.sites[0].capacityMw).toBe(50);
+    expect(h!.sites[1].capacityMw).toBeNull();
+  });
+
+  test('a single site still encloses an area', () => {
+    const h = buildSitingHandoff([unit('only', 'wind', 36, 128)])!;
+    expect(h.bbox[2] - h.bbox[0]).toBeCloseTo(2 * HANDOFF_MARGIN_DEG);
+    expect(h.bbox[3] - h.bbox[1]).toBeCloseTo(2 * HANDOFF_MARGIN_DEG);
+    expect(h.technologies).toEqual(['wind']);
+  });
+
+  test('units without coordinates are left behind and named; none located gives null; other technologies are not scanned', () => {
+    const h = buildSitingHandoff([unit('nowhere', 'solar', null, null), unit('hydro', 'other', 36, 128)])!;
+    expect(h.withoutLocation).toEqual(['nowhere']);
+    expect(h.technologies).toEqual([]);
+    expect(buildSitingHandoff([unit('x', 'solar', null, 128)])).toBeNull();
+    expect(buildSitingHandoff([])).toBeNull();
   });
 });

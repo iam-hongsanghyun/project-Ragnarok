@@ -119,7 +119,7 @@ export const BUILD_STEPS: BuildStep[] = [
     label: 'Constraints',
     primarySheet: 'global_constraints',
     extraSheets: [],
-    description: 'Global constraints (CO₂ caps, expansion limits). Edit details in the Constraints workspace.',
+    description: 'Global constraints (CO₂ caps, expansion limits): a read-only summary. Edit them in Market & Policy, Standard Constraints.',
     isComplete: () => true,
   },
   {

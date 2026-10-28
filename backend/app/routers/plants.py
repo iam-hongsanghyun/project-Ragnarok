@@ -108,7 +108,7 @@ def _row_counts(fragment: dict[str, Any] | None) -> dict[str, int]:
 
 
 def _has_series(fragment: dict[str, Any] | None) -> bool:
-    return any("-" in s for s in ((fragment or {}).get("sheets") or {}))
+    return any(model_store.is_series_sheet(s) for s in ((fragment or {}).get("sheets") or {}))        # a piecewise `<list>-<attr>-pw` curve table is static
 
 
 def _commit(req_session: str, base_static: dict[str, list[dict[str, Any]]], change: dict[str, Any]) -> dict[str, Any]:

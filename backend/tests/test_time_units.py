@@ -290,3 +290,29 @@ def test_a_pypsa_default_is_not_reported_as_a_typed_value_that_was_replaced() ->
     """``up_time_before`` defaults to 1 in PyPSA: replacing the default is not 'replaced a number typed directly'."""
     _, notes = _built(_model(4, 1.0, committable=True), _rows(("min_up_time", 4, "hours"), ("up_time_before", 4, "hours"), ("ramp_limit_up", 0.1, "per_hour")))
     assert not any("replaced a number typed directly" in x for x in notes)
+
+
+def test_time_units_endpoints_serve_the_editor_and_its_preview() -> None:
+    """The Build editor's three calls: GET lists the vocabulary (components, attributes, units) and the rows, POST set
+    upserts a row into the session sheet, POST preview returns the converted per-snapshot table at the run's step."""
+    from fastapi.testclient import TestClient
+
+    from backend.app import model_store
+    from backend.app.main import app
+
+    c = TestClient(app)
+    sid = "test-time-units-editor"
+    model_store.save_model(sid, _model(n=8, step_hours=4.0))
+    try:
+        got = c.get("/api/time-units", params={"session_id": sid}).json()
+        assert got["components"] == list(tu.COMPONENTS) and got["rows"] == []
+        assert got["attributes"]["ramps"] == list(tu.RAMP_ATTRS) and got["units"]["times"] == list(tu.TIME_UNITS)
+        row = {"component": "generators", "name": "g1", "attribute": "ramp_limit_up", "value": 0.1, "unit": "per_hour"}
+        assert c.post("/api/time-units/set", json={"sessionId": sid, "rows": [row]}).json()["rows"] == [row]
+        table = c.post("/api/time-units/preview", json={"sessionId": sid}).json()
+        assert table["stepHours"] == 4.0
+        assert table["table"][0]["pypsaValue"] == pytest.approx(0.4)  # min(1, 0.1 per hour x 4 h)
+        bad = c.post("/api/time-units/set", json={"sessionId": sid, "rows": [{**row, "unit": "per_year"}]})
+        assert bad.status_code == 400 and "per_year" in bad.json()["detail"]
+    finally:
+        model_store.clear(sid)

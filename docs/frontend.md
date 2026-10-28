@@ -481,6 +481,17 @@ reset the model.
 | `currencySymbol` | `string` | For CAPEX / cost columns |
 | `dateFormat` | `DateFormat` | For snapshot parsing |
 | `onOpenRunSetup` | `() => void \| undefined` | Open the run dialog |
+| `onOpenConstraintsWorkspace` | `() => void \| undefined` | The Constraints step's button: App routes it to Market & Policy, Standard Constraints (`handleSettingsNavigate('constraints')`); the step itself is a read-only summary |
+| `onSessionSync` | `() => Promise<void> \| undefined` | Push the working model to the session (the time-units preview is computed by the server from the session); absent = no Time units button |
+
+**Time units drawer.** On the Generators, Links and Processes steps (`TIME_UNIT_SHEETS`) a **Time units (n)** button in the
+step guidance bar opens `features/build/TimeUnitsPanel.tsx`, a drawer that edits the `RAGNAROK_TimeUnits` sheet through the same
+`onUpdateRow` / `onBulkPaste` / `onDeleteRow` handlers as any sheet (so edits are undoable and synced to the session by
+`patchSheet`). The vocabulary (components, ramp / time attributes, units) comes from `GET /api/time-units`
+(`lib/api/timeUnits.ts`), never from the browser; a row is added only with a non-negative value, so the sheet never holds a
+half-written row. **Preview per-snapshot values** pushes the model (`onSessionSync`) and calls `POST /api/time-units/preview`;
+the converted table (`stepHours`, `pypsaValue`, `blank`, `note`) is displayed as the server returned it and is dropped as soon as
+a row changes. The preview is at the workbook's own weightings; a run converts at its own step.
 
 ### 4.2 ModelView
 
@@ -568,10 +579,10 @@ with initial sizes `[20, 80]`.
 | File | Section ID |
 |---|---|
 | `Scenarios.tsx` | `scenarios` |
-| `Window.tsx` | `window` |
+| `Window.tsx` | `window`; under *Sampled blocks* the **Start-up and shut-down costs** switch (`samplingConfig.scaleStartUpCosts`; the preset carries the key only when it is `false`, in both normalisers: `normalizeSamplingConfig` and `scenario_presets.normalize_sampling_config`, pinned by the shared parity fixture) |
 | `Carbon.tsx` | `carbon` |
 | `Planning.tsx` | `planning` |
-| `Rolling.tsx` | `rolling` |
+| `Rolling.tsx` | `rolling`; the Terminal SOC target switch and, when on, the **Terminal SOC penalty** field (blank = automatic: the backend's 2 x the highest marginal cost, floor 1; the key is dropped from `rollingConfig` when blank) |
 | `Stochastic/Stochastic.tsx` | `stochastic` |
 | `Sclopf.tsx` | `sclopf` |
 | `Constraints.tsx` | `constraints` and `constraintsAdvanced` (exports `StandardConstraintsSection` and `AdvancedConstraintsSection`) |
@@ -625,6 +636,8 @@ client in `lib/api/resultsDerived.ts`, router `backend/app/routers/results_deriv
 |---|---|
 | `ComparisonPane` / `ComparisonMatrix` | `GET /api/results/compare?runs=&topics=` |
 | `KpiStripCard` | `GET /api/runs/{name}/kpis` |
+| `PathwayOverviewCard` (all periods of a pathway run) | `GET /api/runs/{name}/kpis` once for the whole run and once per `period`; capacity from `result.pathway.summaries[].installedCapacityMw` / `storageCapacityMw` |
+| `AnnualBudgetsCard` | `GET /api/runs/{name}/annual-budgets` |
 | `CompanyComparisonCard` | `GET /api/runs/{name}/companies` |
 | `MapDetailCard` (per-asset popup) | `GET /api/runs/{name}/assets?kind=&names=` |
 | `ServerDurationCurveCard` (system price and load) | `GET /api/runs/{name}/derived/{metric}` |
@@ -665,6 +678,17 @@ view falls back to `installed[0]`.
   available.
 
 ---
+
+### 4.6 Screening to Siting hand-off
+
+`ScreeningPane` takes an optional `onOpenInSiting(handoff)`; its **Open in Siting** button (next to *Select all* in the site table,
+site level only) builds the hand-off with the pure `buildSitingHandoff(units)` in `lib/screening/screening.ts` and App stores it
+(`sitingHandoff`) and switches to the Siting tab. A `SitingHandoff` is `{sites, bbox, technologies, withoutLocation}`: the located
+selected sites, their envelope grown by `HANDOFF_MARGIN_DEG` (0.25 degrees), the solar / wind technologies they use, and the ticked
+units left behind for lack of coordinates. `SitingView` applies it once per hand-off (candidate region = `bbox`, Solar / Wind
+switches = `technologies`, any earlier scan cleared), lists the sites in the left rail with *Clear screened sites*, and passes them to
+`SitingMap` (`screenedSites`), which draws them as the shortlist. The backend scan is unchanged: it still samples a grid of candidates
+over the region, so the screened sites are context for the scan, not forced candidates. Nothing in the model changes.
 
 ## 5. Features
 
@@ -1057,6 +1081,13 @@ as polylines. Togglable layers per component type. Results-agnostic.
 | `bounds` | `LatLngBoundsExpression \| null` | Auto-fit viewport |
 | `busIndex` | `Record<string, GridRow>` | Bus coordinate lookup |
 
+#### Basemap
+
+Every Leaflet map takes its tile layer from `lib/map/basemap.ts` (`BASEMAP_URL`, `BASEMAP_ATTRIBUTION`, `BASEMAP_MAX_NATIVE_ZOOM`):
+Esri World Light Gray Base, keyless. The CARTO `basemaps.cartocdn.com` raster tiles replaced earlier now answer every request with an
+"API KEY REQUIRED" image, so they are not used. The layer has no place names, and its detail is not uniform (outside cities the service
+answers with a "Map data not yet available" tile from zoom 14), so tiles are requested to zoom 13 and stretched beyond.
+
 #### `FitToBounds`
 
 Leaflet child component that calls `map.fitBounds(bounds)` whenever `bounds`
@@ -1070,6 +1101,21 @@ Static legend overlay labelling each component type with its colour.
 
 Disables Leaflet's CSS zoom animation (`zoomAnimation: false`) for programmatic
 bounds fitting.
+
+### 5.8b Model check and clean-ups
+
+`features/validation/ModelCheckPanel.tsx` runs `POST /api/model-check` (`lib/api/modelCheck.ts`) on the session's workbook
+(debounced when the model changes; **Check again**) and lists the warnings with their visible actions. It is mounted by the Data
+view (`DataView` passes `afterImport` to `DataImportView`, under the "added to the workbook" banner) and by the Forge view. A finding
+whose `code` the panel knows gets its button: `weighting_spacing` runs App's `handleSetWeightingsFromSpacing`;
+`placeholder_bounds` opens `PlaceholderBoundsPanel`. A finding with an unknown code is listed without a button. The panel renders
+nothing when the session holds no model or no warning.
+
+`PlaceholderBoundsPanel` is the preview-then-apply form of `POST /api/forge/clean-placeholder-bounds`
+(`cleanPlaceholderBounds` in `lib/api/forgeBuild.ts`): **Preview clean-up** lists the cells, **Apply clean-up** writes. It is also the
+Forge tool *Clean placeholder bounds* (group Numeric). Both take `onSessionSync` (App `handleSessionSync`: push the working model to
+the session, the server reads the session) and `onSessionReload` (`reloadSessionModel`: pull the session back after the server wrote
+sheets).
 
 ### 5.9 Validation
 
@@ -1358,6 +1404,7 @@ what they return and derives none of it.
 | `fetchRunAssetKind(run, kind, currency, {period, end})` | `GET /api/runs/{name}/assets?series=true` | Every asset of a kind, paged; `end` = first N snapshots |
 | `fetchRunMetrics(run, query)` | `GET /api/runs/{name}/metrics` | Per-asset chart metrics, `period` and `end` |
 | `fetchRunDerived(run, period?)` | `GET /api/runs/{name}/derived` | PyPSA's weighted per-asset totals and the per-snapshot weights (`n.statistics`) |
+| `fetchRunAnnualBudgets(run)` | `GET /api/runs/{name}/annual-budgets` | `{run, items, total}`; each item is the module's table row (`annual`, `horizonYears`, `value`, `scope`) with `achieved` / `achievedUnit` (generator energy from `n.statistics.supply`, or the CO2 `primary_energy` left-hand side; `null` where nothing is read back), `dual` (`global_constraints.mu`) and `binding` |
 | `fetchRunAnalysis(run, topic, query)` | `GET /api/runs/{name}/analysis/{topic}` | Typed by topic (`AnalysisTopics`): `load-analysis`, `carrier-performance`, `transition-risk`, `duration-curve`, `setpoint-duals`, `totals`. The cards print these values and compute nothing; `period` selects a pathway period |
 
 ### 7.7 Per-asset details
@@ -1436,8 +1483,8 @@ Rolling-horizon config serialisation.
 | Function | Signature | Effect |
 |---|---|---|
 | `defaultRollingConfig` | `() -> RollingHorizonConfig` | `enabled: false`, `horizonSnapshots: 168`, `overlapSnapshots: 24`, `stepSnapshots: 144` |
-| `readRollingConfigFromModel` | `(model) -> RollingHorizonConfig` | Reads `RAGNAROK_Rolling` first row |
-| `writeRollingConfigToModel` | `(model, config) -> WorkbookModel` | Overwrites `RAGNAROK_Rolling` |
+| `readRollingConfigFromModel` | `(model) -> RollingHorizonConfig` | Reads `RAGNAROK_Rolling` first row, including `terminalSoc` and the optional `terminalSocPenalty` (a blank cell is automatic, not 0) |
+| `writeRollingConfigToModel` | `(model, config) -> WorkbookModel` | Overwrites `RAGNAROK_Rolling`; `terminalSocPenalty` is written only when set |
 | `normalizeRollingConfig` | `(config) -> RollingHorizonConfig` | Clamps snapshot counts to positive integers; derives `stepSnapshots` as `horizon - overlap` |
 | `sameRollingConfig` | `(a, b) -> boolean` | JSON-equality check |
 
