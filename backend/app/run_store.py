@@ -856,6 +856,13 @@ def store_run(
     try:
         options = options or {}
         scenario = scenario or {}
+        # Stamp the cost basis the run was built under. A fresh solve and a PyPSA-native file are on PyPSA's
+        # cost semantics; an imported Ragnarok project keeps whatever stamp it carries, and one without a
+        # stamp is re-derived through the legacy-run migration (see cost_basis.model_for_stored_run).
+        if origin in ("solve", "netcdf_import") and "buildVersion" not in options:
+            from ..pypsa.network.cost_basis import BUILD_VERSION_KEY, CURRENT_SCHEMA_VERSION
+
+            options = {**options, BUILD_VERSION_KEY: CURRENT_SCHEMA_VERSION}
         RUNS_DIR.mkdir(parents=True, exist_ok=True)
 
         name = _reserve_name(_derive_name(scenario, options))
@@ -872,6 +879,7 @@ def store_run(
             "snapshotStart": options.get("snapshotStart"),
             "snapshotEnd": options.get("snapshotEnd"),
             "snapshotWeight": options.get("snapshotWeight"),
+            **({"buildVersion": options["buildVersion"]} if "buildVersion" in options else {}),
             "model": model,
             "scenario": scenario,
             "options": options,

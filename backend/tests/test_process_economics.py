@@ -5,7 +5,7 @@ With internal power p (MW):
 
     revenue        R = sum_t w * (-p0 * pi_el  - p1 * pi_h2)    # inputs cost, outputs earn
     variable cost  C = sum_t w * marginal_cost * p
-    capex (annual) K = capital_cost * p_nom_opt                  # extendable only
+    capex (horizon) K = capital_cost * p_nom_opt                 # n.statistics.capex; per year = K / n.nyears
 
 Emissions are NOT attributed to the Process: they stay at the fuel generator.
 """
@@ -60,7 +60,10 @@ def test_generator_economics_lists_process_with_analytic_values() -> None:
     np.testing.assert_allclose(row["revenue"], expected_revenue, rtol=1e-6, atol=1.0)  # payload rounds to 1 currency unit
     np.testing.assert_allclose(row["variableCost"], expected_cost, rtol=1e-6, atol=1.0)
     np.testing.assert_allclose(row["grossMargin"], expected_revenue - expected_cost, rtol=1e-6, atol=1.0)
-    np.testing.assert_allclose(row["fixedCostAnnual"], CAPITAL * p_nom_opt, rtol=1e-6, atol=1.0)
+    # capital_cost is PyPSA's cost per modelled HORIZON: the fixed charge over it is capital_cost x p_nom_opt
+    # (n.statistics.capex) and the per-year display figure is that over n.nyears
+    np.testing.assert_allclose(row["fixedCostHorizon"], CAPITAL * p_nom_opt, rtol=1e-6, atol=1.0)
+    np.testing.assert_allclose(row["fixedCostAnnual"], CAPITAL * p_nom_opt / float(n.nyears), rtol=1e-4, atol=1.0)
     np.testing.assert_allclose(row["capacityMw"], p_nom_opt, rtol=1e-6, atol=0.05)
     assert p_nom_opt > 0 and expected_revenue > expected_cost > 0  # the case is non-trivial
 

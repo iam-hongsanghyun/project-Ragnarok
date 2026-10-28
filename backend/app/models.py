@@ -32,6 +32,11 @@ class SessionModelPayload(BaseModel):
     filename: str = ""
     scenarioName: str = ""
     sessionId: str = "default"
+    # "legacy" = the browser opened an OLD Ragnarok workbook (no ``ragnarok_schema_version``): run the
+    # one-off cost-basis migration. Anything else is stamped as already on PyPSA's cost semantics.
+    origin: str = ""
+    # The app's Settings -> Discount rate, used only by that migration when the workbook states none.
+    discountRate: float | None = None
 
 
 class ExportProjectPayload(BaseModel):

@@ -30,6 +30,7 @@ from typing import Any
 import pandas as pd
 
 from ...pypsa.network import cofiring as cf
+from ...pypsa.network.cost_basis import horizon_years
 from . import technologies as tech
 from .registry import Ctx, PlantError
 
@@ -126,11 +127,15 @@ def _size(spec: dict[str, Any]) -> tuple[bool, float, float | None]:
     return ext, num(spec.get("pNom")), opt(spec.get("pNomMax"))
 
 
-def _cost(P: dict[str, float], r: float, per_mw: float) -> dict[str, float]:
-    """PyPSA's own cost split for ``per_mw`` overnight EUR per MW: ``overnight_cost``, ``fom_cost`` (EUR/MW/yr) and ``discount_rate`` ``r``
-    (the scenario / Settings rate the caller passes; PyPSA refuses an ``overnight_cost`` row without one). ``capital_cost`` stays blank;
-    ``lifetime`` is set on the row."""
-    return {"overnight_cost": round(per_mw, 6), "fom_cost": round(per_mw * P["fom"] / 100.0, 6), "discount_rate": r}
+def _cost(P: dict[str, float], r: float, per_mw: float, years: float) -> dict[str, float]:
+    """PyPSA's own cost split for ``per_mw`` overnight EUR per MW: ``overnight_cost``, ``fom_cost`` and ``discount_rate`` ``r`` (the
+    scenario / Settings rate the caller passes; PyPSA refuses an ``overnight_cost`` row without one). ``capital_cost`` stays blank;
+    ``lifetime`` is set on the row.
+
+    ``fom_cost`` is PyPSA's column: per MW per MODELLED HORIZON, added to the objective unscaled. The module's input is per year, so it
+    writes ``fom_cost = per_mw x fom% x years`` with ``years`` = the workbook's horizon (:func:`...cost_basis.horizon_years`); the build
+    shows both numbers. Change the snapshots and re-apply the plant to refresh it."""
+    return {"overnight_cost": round(per_mw, 6), "fom_cost": round(per_mw * P["fom"] / 100.0 * years, 6), "discount_rate": r}
 
 
 def _derated(spec: dict[str, Any], P: dict[str, float], share: float, warnings: list[str]) -> tuple[float, float, dict[str, Any]]:
@@ -183,7 +188,7 @@ def build_gas_turbine(kind: str, spec: dict[str, Any], ctx: Ctx, ac_bus: str, r:
     ctx.carrier(carrier)
     link: dict[str, Any] = {
         "name": ctx.nm(), "bus0": gas_bus, "bus1": ac_bus, "carrier": carrier, "efficiency": round(eta, 8),
-        **_cost(P, r, P["capex"] * 1000.0 * eta), "marginal_cost": round(P["vom"] * eta, 6), "lifetime": P["lifetime"],
+        **_cost(P, r, P["capex"] * 1000.0 * eta, horizon_years(ctx.model)), "marginal_cost": round(P["vom"] * eta, 6), "lifetime": P["lifetime"],
     }
     if ext:
         link.update({"p_nom_extendable": True, "p_nom": 0.0})
@@ -233,7 +238,7 @@ def build_cofiring_simple(kind: str, spec: dict[str, Any], ctx: Ctx, ac_bus: str
     mc = ((1.0 - s) * price_gas + s * price_h2) / eta + P["vom"]
     gen: dict[str, Any] = {
         "name": ctx.nm(), "bus": ac_bus, "carrier": carrier, "efficiency": round(eta, 8), "marginal_cost": round(mc, 6),
-        **_cost(P, r, P["capex"] * 1000.0), "lifetime": P["lifetime"],
+        **_cost(P, r, P["capex"] * 1000.0, horizon_years(ctx.model)), "lifetime": P["lifetime"],
     }
     if ext:
         gen.update({"p_nom_extendable": True, "p_nom": 0.0})
@@ -292,7 +297,7 @@ def build_cofiring_network(kind: str, spec: dict[str, Any], ctx: Ctx, ac_bus: st
     ctx.carrier(carrier)
     link: dict[str, Any] = {
         "name": ctx.nm(), "bus0": fuel_bus, "bus1": ac_bus, "carrier": carrier, "efficiency": round(eta, 8),
-        **_cost(P, r, P["capex"] * 1000.0 * eta), "marginal_cost": round(P["vom"] * eta, 6), "lifetime": P["lifetime"],
+        **_cost(P, r, P["capex"] * 1000.0 * eta, horizon_years(ctx.model)), "marginal_cost": round(P["vom"] * eta, 6), "lifetime": P["lifetime"],
     }
     if ext:
         link.update({"p_nom_extendable": True, "p_nom": 0.0})

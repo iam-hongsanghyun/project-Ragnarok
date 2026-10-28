@@ -1,0 +1,111 @@
+{
+ "capacity_expansion": {
+  "objective": null,
+  "expansion": [
+   {
+    "name": "gas",
+    "p_nom_opt_mw": 543.1,
+    "capital_cost": 4814.35,
+    "capex_annual": 2614604
+   },
+   {
+    "name": "solar",
+    "p_nom_opt_mw": 796.9,
+    "capital_cost": 3610.89,
+    "capex_annual": 2877419
+   },
+   {
+    "name": "wind",
+    "p_nom_opt_mw": 4947.8,
+    "capital_cost": 7221.79,
+    "capex_annual": 35732482
+   }
+  ],
+  "capitalLine": [
+   {
+    "label": "Capital cost (annuity, pro-rated to window)",
+    "value": 790607
+   }
+  ],
+  "geFixed": [
+   {
+    "name": "wind",
+    "fixedCostAnnual": 35732482,
+    "fixedCostHorizon": 685280,
+    "netHorizon": 0,
+    "recoveryPct": 100.0
+   },
+   {
+    "name": "solar",
+    "fixedCostAnnual": 2877419,
+    "fixedCostHorizon": 55183,
+    "netHorizon": 0,
+    "recoveryPct": 100.0
+   },
+   {
+    "name": "gas",
+    "fixedCostAnnual": 2614604,
+    "fixedCostHorizon": 50143,
+    "netHorizon": 0,
+    "recoveryPct": 100.0
+   }
+  ],
+  "geSystem": {
+   "fixedCostAnnual": 41224505,
+   "fixedCostHorizon": 790607,
+   "netHorizon": 0
+  }
+ },
+ "training_m16": {
+  "expansion": [
+   {
+    "name": "solar_2030",
+    "p_nom_opt_mw": 89.3,
+    "capex_annual": 5700376,
+    "capex_weighted": 92010339
+   },
+   {
+    "name": "wind_2040",
+    "p_nom_opt_mw": 200.0,
+    "capex_annual": 18447639,
+    "capex_weighted": 148195418
+   },
+   {
+    "name": "solar_2040",
+    "p_nom_opt_mw": 154.6,
+    "capex_annual": 7129753,
+    "capex_weighted": 57275445
+   },
+   {
+    "name": "wind_2050",
+    "p_nom_opt_mw": 200.0,
+    "capex_annual": 14190491,
+    "capex_weighted": 43363302
+   },
+   {
+    "name": "solar_2050",
+    "p_nom_opt_mw": 41.6,
+    "capex_annual": 1329228,
+    "capex_weighted": 4061855
+   },
+   {
+    "name": "batt_2040",
+    "p_nom_opt_mw": 89.0,
+    "capex_annual": 3002589,
+    "capex_weighted": 24120698
+   },
+   {
+    "name": "batt_2050",
+    "p_nom_opt_mw": 100.0,
+    "capex_annual": 2408557,
+    "capex_weighted": 7360068
+   }
+  ],
+  "capitalLine": [
+   {
+    "label": "Capital cost (annuity \u00d7 investment-period weighting)",
+    "value": 376387125
+   }
+  ]
+ }
+}

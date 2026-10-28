@@ -20,7 +20,7 @@ Two halves:
   - ``p_min_pu`` without unit commitment: an unconditional floor, not a
     minimum-when-running
   - extendable capacity with no capital cost: it builds free, up to its bound
-  - ``lifetime`` left at inf on an extendable asset: annuitises to NaN → 0
+  - ``lifetime`` left at inf on an overnight_cost asset: PyPSA's annuity is then only r
   - a bus with nothing attached, or a model with no load at all
   - load shedding present: feasibility bought by not serving load
 
@@ -171,20 +171,20 @@ def _check_generators(model: dict[str, Any], out: list[dict[str, str]]) -> None:
                 "Set committable=True for a minimum-when-running, or clear p_min_pu.",
             ))
         if g.get("p_nom_extendable"):
-            capex = _num(g.get("capital_cost"))
+            capex = _num(g.get("capital_cost")) or _num(g.get("overnight_cost"))
             if not capex:
                 out.append(_finding(
                     WARN, "free_expansion",
                     f"{name} is extendable with no capital cost: it builds FREE up to its "
                     "bound, so the 'optimal' capacity is meaningless.",
-                    "Give it a capital_cost, or fix its capacity.",
+                    "Give it a capital_cost (per horizon) or an overnight_cost, or fix its capacity.",
                 ))
             lifetime = _num(g.get("lifetime"))
-            if lifetime is None and "lifetime" in g:
+            if _num(g.get("overnight_cost")) and (lifetime is None or lifetime == float("inf")):
                 out.append(_finding(
                     WARN, "infinite_lifetime",
-                    f"{name}: lifetime is not finite, so its annuity factor is NaN and its "
-                    "CAPEX annuitises to zero.",
+                    f"{name}: overnight_cost with an infinite lifetime: PyPSA's annuity(r, inf) is "
+                    "just r, so the cost is the interest on the overnight price and never repaid.",
                     "Set a finite lifetime in years.",
                 ))
 

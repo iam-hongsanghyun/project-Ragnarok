@@ -53,7 +53,8 @@ import {
 import { isEmbedded, listenForShowRequests } from 'lib/embedHost';
 import { useSessionSync } from 'shared/hooks/useSessionSync';
 import { API_BASE, DEFAULT_CONSTRAINTS, getDefaultRowForSheet, getNewRowDefaults, RUN_WINDOW, SHEETS } from 'lib/constants';
-import { canonicalizeOutputSeries, canonicalizeTemporalRows, createEmptyWorkbook, normalizeInputDatesToIso, parseWorkbook } from 'lib/workbook/workbook';
+import { canonicalizeOutputSeries, canonicalizeTemporalRows, createEmptyWorkbook, needsCostBasisMigration, normalizeInputDatesToIso, parseWorkbook, SCHEMA_SHEET } from 'lib/workbook/workbook';
+import { formatCostBasisMigration } from 'lib/settings/costBasisMigration';
 import { mergeWorkbookFragmentRemote } from 'lib/workbook/mergeFragment';
 import { applyPlantChange, type PlantChange } from 'lib/build/plants';
 import type { WorkbookFragment } from 'lib/api/databases';
@@ -80,7 +81,8 @@ import { saveSessionControls, loadSessionControls, clearSession, clearSessionMod
 import { postSeasonalRating } from 'lib/api/seasonalRating';
 import { postTemporalCluster, type TemporalOptions, type TemporalResult } from 'lib/api/temporal';
 import { ADOPTION_SETTLE_MS, mayPushStaticResync, sessionHasModel } from 'lib/api/sessionAdoption';
-import { clearSessionModel, putSessionModel, putStaticModel, getSessionFullModel, getSessionMeta, getSheetPage, isSeriesSheet, patchSheet, seriesSheetCounts, DEFAULT_SESSION_ID } from 'lib/api/session';
+import type { CostBasisMigration } from 'lib/api/session';
+import { acknowledgeCostBasisMigration, clearSessionModel, putSessionModel, putStaticModel, getSessionFullModel, getSessionMeta, getSheetPage, isSeriesSheet, patchSheet, seriesSheetCounts, DEFAULT_SESSION_ID } from 'lib/api/session';
 import type { SessionSheetMeta } from 'lib/api/session';
 import type { ClusterResult } from 'lib/forge/transforms';
 import { forgeQueryApply, forgeQueryPreview } from 'lib/api/forge';
@@ -159,6 +161,9 @@ function projectBaseName(filename: string): string {
  */
 function stripSeriesSheets(model: WorkbookModel): WorkbookModel {
   const out: WorkbookModel = createEmptyWorkbook();
+  // The empty workbook is stamped as current; a model that carries no stamp (an OLD workbook the
+  // server has not migrated yet) must not inherit one.
+  if (!(model as Record<string, unknown>)[SCHEMA_SHEET]) delete (out as Record<string, unknown>)[SCHEMA_SHEET];
   for (const [sheet, rows] of Object.entries(model)) {
     (out as Record<string, unknown>)[sheet] = isSeriesSheet(sheet) ? [] : rows;
   }
@@ -248,7 +253,7 @@ function countComponentRows(model: WorkbookModel): number {
 
 function AppInner() {
   const { showToast } = useToast();
-  const { confirm: confirmDialog, prompt: promptDialog } = useDialog();
+  const { alert: alertDialog, confirm: confirmDialog, prompt: promptDialog } = useDialog();
   const [model, setModel] = useState<WorkbookModel>(() => createEmptyWorkbook());
   // Cell-level undo/redo. Each entry is a full (immutable) model snapshot;
   // since every mutation already builds a fresh object this is cheap to retain.
@@ -958,6 +963,26 @@ function AppInner() {
     setFinanceConfig(scenario.financeConfig ?? { gearing: 0, interestRate: 0.05, tenorYears: 15 });
   }, [updateSettings]);
 
+  // ── Cost-basis migration notice ─────────────────────────────────────────
+  // An OLD Ragnarok workbook (overnight price in `capital_cost`) is migrated ONCE by the server when it
+  // is loaded: the number moves to PyPSA's `overnight_cost`. Show what changed, once, then acknowledge
+  // it so the server stops returning it. `refresh` re-reads the migrated static sheets: the copy the
+  // browser holds was parsed before the migration and would otherwise be pushed back over it.
+  const refreshFromSessionRef = useRef<() => Promise<void>>(async () => undefined);
+  const presentedMigrationRef = useRef('');
+  const presentCostBasisMigration = useCallback(async (
+    report: CostBasisMigration | undefined,
+    opts?: { refresh?: boolean },
+  ) => {
+    if (!report) return;
+    const key = JSON.stringify([report.changedRows.length, report.discountRate, report.changedRows[0]?.name ?? '']);
+    if (presentedMigrationRef.current === key) return;
+    presentedMigrationRef.current = key;
+    if (opts?.refresh) await refreshFromSessionRef.current();
+    await alertDialog(formatCostBasisMigration(report), { title: 'Costs moved to PyPSA semantics' });
+    await acknowledgeCostBasisMigration();
+  }, [alertDialog]);
+
   const resetForNewModel = useCallback((
     nextModel: WorkbookModel,
     name?: string,
@@ -1005,6 +1030,13 @@ function AppInner() {
       void trackModelPush(putSessionModel(nextModel, {
         filename: builtFilename,
         scenarioName: activeImportedScenario?.label ?? '',
+        // A workbook with Ragnarok's own sheets but no schema stamp is an OLD Ragnarok file: the server
+        // migrates it once. A plain PyPSA workbook is already on PyPSA's cost semantics.
+        origin: needsCostBasisMigration(nextModel) ? 'legacy' : undefined,
+        discountRate: settings.discountRate,
+      }).then((meta) => {
+        void presentCostBasisMigration(meta.costBasisMigration, { refresh: true });
+        return meta;
       }));
     }
     const snapshotMax = snapshotMaxFromWorkbook(nextModel.snapshots);
@@ -1146,6 +1178,7 @@ function AppInner() {
     setAnalyticsFocus,
     clearHistory,
     trackModelPush,
+    presentCostBasisMigration,
     applyScenarioConfigs,
   ]);
 
@@ -1311,6 +1344,7 @@ function AppInner() {
     setCarbonLibrary(readCarbonLibraryFromModel(saved));
     await refreshSeriesCounts();
   }, [settings.dateFormat, clearHistory, refreshSeriesCounts]);
+  refreshFromSessionRef.current = refreshStaticFromSession;
 
   // Someone ELSE changed the session — an agent over MCP, or Bifrost loading a
   // conversation's project. The browser's static workbook is a mirror, and until
@@ -1576,6 +1610,7 @@ function AppInner() {
             const sessionMeta = await getSessionMeta();
             sessionFilename = sessionMeta?.filename;
             if (!cancelled) setSessionSeriesCounts(seriesSheetCounts(sessionMeta));
+            if (!cancelled) void presentCostBasisMigration(sessionMeta?.costBasisMigration);
           } catch { /* tree just won't list series until next load */ }
           if (controls) {
             setCarbonPrice(controls.carbonPrice);
@@ -1868,6 +1903,8 @@ function AppInner() {
       }
       setStatus(`Imported project: ${file.name} — loaded into the editor.`);
       showToast(`Project loaded (${file.name})`, 'success');
+      // An old project's overnight capital_cost was moved to overnight_cost by the server: say what changed.
+      void presentCostBasisMigration(bundle.costBasisMigration ?? undefined);
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Project import failed.';
       setStatus(msg);
@@ -2828,10 +2865,12 @@ function AppInner() {
       await refreshSeriesCounts();
       if (!opts?.stayOnTab) setTab('Build');
       showToast(`Loaded "${label}"`, 'success');
+      // A bundled / older example written before the cost-basis schema is migrated on read.
+      void getSessionMeta().then((meta) => presentCostBasisMigration(meta.costBasisMigration)).catch(() => undefined);
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to load example.', 'error');
     }
-  }, [resetForNewModel, setTab, showToast, refreshSeriesCounts]);
+  }, [resetForNewModel, setTab, showToast, refreshSeriesCounts, presentCostBasisMigration]);
 
   // Master dialog → "Derive working model": the backend has already filtered the
   // master into the session (source of truth); rehydrate the editor from there,
@@ -2937,6 +2976,7 @@ function AppInner() {
           return;
         }
         const promoted = (await promoteResp.json()) as {
+          meta?: { costBasisMigration?: CostBasisMigration };
           scenario?: { constraints?: CustomConstraint[]; carbonPrice?: number; discountRate?: number; label?: string };
           snapshotStart?: number; snapshotEnd?: number; snapshotWeight?: number; filename?: string;
         };
@@ -2984,6 +3024,8 @@ function AppInner() {
         // the static model; selecting one pages its rows from the session).
         // Kept last — it awaits, and nothing above should wait on the network.
         await refreshSeriesCounts();
+        // A run stored before the cost basis was stamped was migrated as it became the working model.
+        await presentCostBasisMigration(promoted.meta?.costBasisMigration, { refresh: true });
         return;
       }
 
@@ -3948,6 +3990,7 @@ function AppInner() {
               onCurrencyChange={(code, symbol) => updateSettings({ currencyCode: code, currencySymbol: symbol })}
               discountRate={settings.discountRate}
               onDiscountRateChange={(v) => updateSettings({ discountRate: v })}
+              onWorkbookChanged={() => { void refreshStaticFromSession(); }}
               enableLoadShedding={settings.enableLoadShedding}
               onEnableLoadSheddingChange={(v) => updateSettings({ enableLoadShedding: v })}
               loadSheddingCost={settings.loadSheddingCost}
@@ -4154,6 +4197,7 @@ function AppInner() {
               onApplyFragment={handleApplyImportedFragment}
               expansionResults={displayResults?.expansionResults ?? null}
               currencySymbol={settings.currencySymbol}
+              discountRate={settings.discountRate}
               runName={activeRunName}
               period={selectedPeriod}
             />
@@ -4164,6 +4208,7 @@ function AppInner() {
               model={model}
               onApplyFragment={handleApplyImportedFragment}
               currencySymbol={settings.currencySymbol}
+              discountRate={settings.discountRate}
               runName={activeRunName}
             />
           )}

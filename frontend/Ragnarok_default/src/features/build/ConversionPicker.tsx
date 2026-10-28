@@ -21,10 +21,12 @@ import {
 interface Props {
   model: WorkbookModel;
   busNames: string[];
+  /** Settings -> Discount rate: written to an extendable conversion as `discount_rate`. */
+  discountRate?: number;
   onApply: (fragment: WorkbookFragment, label: string) => void;
 }
 
-export function ConversionPicker({ model, busNames, onApply }: Props) {
+export function ConversionPicker({ model, busNames, discountRate, onApply }: Props) {
   const [catalog, setCatalog] = useState<ConversionList | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [templateId, setTemplateId] = useState('');
@@ -50,14 +52,14 @@ export function ConversionPicker({ model, busNames, onApply }: Props) {
   const [resolvedAnchor, setResolvedAnchor] = useState('');
   const anchor = busNames.includes(anchorBus) ? anchorBus : resolvedAnchor;
 
-  const options: ConversionOptions = { anchorBus: anchor, name, pNom, extendable };
+  const options: ConversionOptions = { anchorBus: anchor, name, pNom, extendable, discountRate };
 
   // Live preview of what will be created (also validates the anchor), from the backend.
   useEffect(() => {
     if (!template || busNames.length === 0) { setPreview(null); return undefined; }
     let live = true;
     const timer = window.setTimeout(() => {
-      buildConversion(template.id, { anchorBus: busNames.includes(anchorBus) ? anchorBus : undefined, name, pNom, extendable }, model)
+      buildConversion(template.id, { anchorBus: busNames.includes(anchorBus) ? anchorBus : undefined, name, pNom, extendable, discountRate }, model)
         .then((built) => {
           if (!live) return;
           setResolvedAnchor(built.anchorBus);
@@ -66,7 +68,7 @@ export function ConversionPicker({ model, busNames, onApply }: Props) {
         .catch(() => { if (live) setPreview(null); });
     }, 150);
     return () => { live = false; window.clearTimeout(timer); };
-  }, [template, anchorBus, busNames, name, pNom, extendable, model]);
+  }, [template, anchorBus, busNames, name, pNom, extendable, model, discountRate]);
 
   const apply = async () => {
     if (!anchor || !template || busy) return;

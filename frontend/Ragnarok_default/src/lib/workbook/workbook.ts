@@ -27,6 +27,27 @@ export const PROVENANCE_SHEET = 'RAGNAROK_Provenance';
 /** Build plant registry (one JSON row per plant: type, spec, components) and the P2X chain registry. Both must travel with the workbook, or a plant could not be edited after a reload. */
 export const PLANT_REGISTRY_SHEET = 'RAGNAROK_PLANTS';
 export const P2X_REGISTRY_SHEET = 'RAGNAROK_P2X';
+/** One-row sheet `{ ragnarok_schema_version }` stamping the cost basis the workbook is written for. 2 = PyPSA cost
+ *  semantics (`capital_cost` per modelled horizon, `overnight_cost` annuitised by PyPSA). A Ragnarok workbook
+ *  without it predates that and is migrated once by the backend when it is loaded. */
+export const SCHEMA_SHEET = 'RAGNAROK_Schema';
+export const SCHEMA_VERSION_KEY = 'ragnarok_schema_version';
+export const CURRENT_SCHEMA_VERSION = 2;
+
+export function stampSchema(model: WorkbookModel): WorkbookModel {
+  (model as any)[SCHEMA_SHEET] = [{ [SCHEMA_VERSION_KEY]: CURRENT_SCHEMA_VERSION }];
+  return model;
+}
+
+/** True for a workbook that came from an OLD Ragnarok: no schema stamp, but Ragnarok's own RAGNAROK_* config
+ *  sheets. A plain PyPSA workbook (no RAGNAROK_* sheet) is already on PyPSA's semantics and is not migrated. */
+export function needsCostBasisMigration(model: WorkbookModel): boolean {
+  const m = model as unknown as Record<string, unknown>;
+  const stamp = m[SCHEMA_SHEET];
+  if (Array.isArray(stamp) && stamp.length > 0) return false;
+  return Object.entries(m).some(([key, rows]) => key.startsWith('RAGNAROK_') && key !== SCHEMA_SHEET && Array.isArray(rows) && rows.length > 0);
+}
+
 // Backend-only human-readable landing sheet in exported workbooks. Carries no
 // data the parser needs, so it's skipped on import (never absorbed as a model
 // sheet). The frontend never writes it.
@@ -372,11 +393,14 @@ export function createEmptyWorkbook(): WorkbookModel {
     [ROLLING_CONFIG_SHEET]: [],
     [SCENARIO_SHEET]: [],
     [CARBON_LIBRARY_SHEET]: [],
+    [SCHEMA_SHEET]: [{ [SCHEMA_VERSION_KEY]: CURRENT_SCHEMA_VERSION }],
   } as WorkbookModel;
 }
 
 export function parseSheets(workbook: ReturnType<typeof XLSX.read>): WorkbookModel {
   const model = createEmptyWorkbook();
+  // A parsed file carries ITS OWN stamp (or none): never inherit the empty workbook's.
+  delete (model as any)[SCHEMA_SHEET];
   workbook.SheetNames.forEach((sheetName) => {
     const canonical = normalizeSheetName(sheetName);
     const ws = workbook.Sheets[sheetName];
@@ -440,7 +464,7 @@ export function buildWorkbook(model: WorkbookModel, dateFormat: DateFormat = 'au
     XLSX.utils.book_append_sheet(workbook, ws, sheet);
   });
   appendPiecewiseSheets(workbook, model);
-  [PATHWAY_CONFIG_SHEET, PATHWAY_PERIODS_SHEET, ROLLING_CONFIG_SHEET, SCENARIO_SHEET, CARBON_LIBRARY_SHEET, PLANT_REGISTRY_SHEET, P2X_REGISTRY_SHEET].forEach((sheet) => {
+  [PATHWAY_CONFIG_SHEET, PATHWAY_PERIODS_SHEET, ROLLING_CONFIG_SHEET, SCENARIO_SHEET, CARBON_LIBRARY_SHEET, PLANT_REGISTRY_SHEET, P2X_REGISTRY_SHEET, SCHEMA_SHEET].forEach((sheet) => {
     const rows = (model as any)[sheet] as GridRow[] | undefined;
     if (!rows || rows.length === 0) return;
     const ws = XLSX.utils.json_to_sheet(rows);
@@ -625,7 +649,7 @@ export function buildProjectWorkbook(
     XLSX.utils.book_append_sheet(workbook, ws, sheet);
   });
 
-  [PATHWAY_CONFIG_SHEET, PATHWAY_PERIODS_SHEET, ROLLING_CONFIG_SHEET, SCENARIO_SHEET, CARBON_LIBRARY_SHEET, PLANT_REGISTRY_SHEET, P2X_REGISTRY_SHEET].forEach((sheet) => {
+  [PATHWAY_CONFIG_SHEET, PATHWAY_PERIODS_SHEET, ROLLING_CONFIG_SHEET, SCENARIO_SHEET, CARBON_LIBRARY_SHEET, PLANT_REGISTRY_SHEET, P2X_REGISTRY_SHEET, SCHEMA_SHEET].forEach((sheet) => {
     const rows = (model as any)[sheet] as GridRow[] | undefined;
     if (!rows || rows.length === 0) return;
     const ws = XLSX.utils.json_to_sheet(rows);
@@ -713,6 +737,7 @@ export function parseProjectWorkbook(
 ): { model: WorkbookModel; outputs: ProjectOutputs; metadata: ProjectMetadata } {
   const wb = readWorkbookRaw(arrayBuffer);
   const model = createEmptyWorkbook();
+  delete (model as any)[SCHEMA_SHEET]; // the file's own stamp, or none: never the empty workbook's
   const outputs: ProjectOutputs = { static: {}, series: {} };
   const metadata: ProjectMetadata = {};
 

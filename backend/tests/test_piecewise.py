@@ -149,11 +149,10 @@ def test_piecewise_options_validation() -> None:
 # ── Capital cost curve (annuitised exactly like the scalar capital_cost) ───────
 
 
-def test_capital_cost_curve_is_annuitised_like_the_scalar() -> None:
-    rate, life, hours = 0.05, 20.0, float(len(LOAD))
-    af = rate / (1 - (1 + rate) ** -life)
-    scale = af * hours / 8760.0
-    overnight = {0.0: 0.0, 50.0: 1.0e6, 200.0: 1.0e7}  # per-MW price on each segment
+def test_capital_cost_curve_is_passed_to_pypsa_as_written() -> None:
+    """D5: a capital_cost curve must already be periodised (per modelled horizon); Ragnarok neither annuitises nor
+    window-scales it, so Ragnarok and native PyPSA solve the same problem from the same numbers."""
+    horizon_price = {0.0: 0.0, 50.0: 800.0, 200.0: 8000.0}  # per-MW price on each segment, for the modelled window
 
     nat = pypsa.Network()
     nat.set_snapshots(pd.to_datetime(SNAPS))
@@ -163,29 +162,27 @@ def test_capital_cost_curve_is_annuitised_like_the_scalar() -> None:
     nat.add("Generator", "peak", bus="n1", carrier="gas", p_nom=200, marginal_cost=100)
     nat.add(
         "Generator", "g", bus="n1", carrier="gas", p_nom_extendable=True, p_nom_max=200,
-        capital_cost={x: y * scale for x, y in overnight.items()},
+        capital_cost=horizon_price,
     )
     obj_nat = _solve(nat)
 
     model = _model(CONVEX)
     model["generators"] = [
         {"name": "peak", "bus": "n1", "carrier": "gas", "p_nom": 200, "marginal_cost": 100},
-        {"name": "g", "bus": "n1", "carrier": "gas", "p_nom_extendable": True, "p_nom_max": 200,
-         "lifetime": life},
+        {"name": "g", "bus": "n1", "carrier": "gas", "p_nom_extendable": True, "p_nom_max": 200},
     ]
     model["loads-p_set"] = [{"snapshot": s, "L": 80.0} for s in SNAPS]
     del model["generators-marginal_cost-pw"]
     model["generators-capital_cost-pw"] = [
-        {"name": "g", "p_nom": x, "capital_cost": y} for x, y in overnight.items()
+        {"name": "g", "p_nom": x, "capital_cost": y} for x, y in horizon_price.items()
     ]
-    rag, _ = build_network(model, {"discountRate": rate}, {})
+    rag, _ = build_network(model, {}, {})                       # no discount rate is read or needed
     obj_rag = _solve(rag)
     assert obj_rag == pytest.approx(obj_nat, rel=OBJ_RTOL)
     assert rag.generators.at["g", "p_nom_opt"] == pytest.approx(nat.generators.at["g", "p_nom_opt"], abs=P_ATOL)
     assert obj_rag > 0.0
-    # sanity: pw y was scaled by AF x window, not left overnight
     y1 = rag.c.generators.piecewise["capital_cost"][("g", "capital_cost")].iloc[1]
-    assert y1 == pytest.approx(1.0e6 * scale, rel=1e-12)
+    assert y1 == 800.0                                          # untouched
 
 
 # ── Link efficiency curve + extendable / validation errors ─────────────────────

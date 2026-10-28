@@ -16,7 +16,7 @@ from backend.app.plants import registry
 from backend.app.routers import results_derived as rd_router
 from backend.mcp import server, tools_plants
 from backend.mcp.client import Config, RagnarokClient
-from backend.pypsa.network import build_network
+from backend.pypsa.network import build_components
 from backend.pypsa.network.pypsa_io import export_network_bytes, network_from_csv_zip
 from backend.pypsa.network.serialize import network_to_model
 from backend.pypsa.results import run_pypsa
@@ -160,7 +160,7 @@ def test_plant_column_survives_a_pypsa_export_and_import(fmt: str, tmp_path: Pat
     import pypsa
 
     model, _ = add_plant(grid(), "cofiring_network", {"pNom": 100, "plantId": "hyb"})
-    net, _ = build_network(model, SCENARIO, {"skipCapexAnnuitisation": True})
+    net, _ = build_components(model)
     data, _m, _n = export_network_bytes(net, fmt)
     if fmt == "csv":
         back = network_from_csv_zip(data)

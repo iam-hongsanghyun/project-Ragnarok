@@ -389,6 +389,8 @@ export interface PromoteRequest {
   pNomMw?: Record<string, number>;
   extendable: boolean;
   capitalCost?: Record<string, number>;
+  /** Settings -> Discount rate; written to extendable sites as `discount_rate`. */
+  discountRate?: number;
   marginalCost: number;
   busOverrides?: Record<string, string>;
   buses?: Array<{ name: string; x: number; y: number }>;

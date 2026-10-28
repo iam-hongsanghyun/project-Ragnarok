@@ -19,7 +19,7 @@ import pandas as pd
 import pypsa
 from fastapi import HTTPException
 
-from .network import build_network
+from .network import build_components
 from .network.serialize import network_to_model
 
 TEMPORAL_METHODS = ("resample", "downsample", "segment")
@@ -33,10 +33,8 @@ def has_tsam() -> bool:
 
 
 def _build(model: dict[str, list[dict[str, Any]]], scenario: dict[str, Any] | None, options: dict[str, Any] | None) -> pypsa.Network:
-    """Build the network the way structural transforms do (whole time axis, no annuitisation)."""
-    from ..app.routers.transforms import _transform_build_options
-
-    network, _ = build_network(dict(model), dict(scenario or {}), _transform_build_options(options))
+    """Build the network the way structural transforms do: 1:1, whole time axis, no run-time steps."""
+    network, _ = build_components(dict(model), options)
     return network
 
 

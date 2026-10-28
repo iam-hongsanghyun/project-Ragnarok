@@ -84,6 +84,35 @@ def snap(req: SnapRequest) -> dict[str, Any]:
     return result
 
 
+# ── Forge: fill discount_rate ────────────────────────────────────────────────
+
+
+class FillDiscountRateRequest(BaseModel):
+    sessionId: str = "default"
+    discountRate: float = Field(..., description="Fraction per year (0.05 = 5 %), from Settings -> Discount rate.")
+    overwrite: bool = Field(False, description="Also replace a discount_rate a row already carries.")
+    apply: bool = Field(False, description="Write the changed sheets into the session (preview when false).")
+
+
+@router.post("/api/forge/fill-discount-rate")
+def fill_discount_rate(req: FillDiscountRateRequest) -> dict[str, Any]:
+    """Write ``discount_rate`` into every row with an ``overnight_cost`` (PyPSA's own annuity column).
+
+    The Settings -> Discount rate action. A preview (counts only) unless ``apply``.
+    """
+    model = _session_model(req.sessionId)
+    try:
+        result = fh.fill_discount_rate(model, req.discountRate, overwrite=req.overwrite)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    result["applied"] = False
+    if req.apply and result["sheets"]:
+        _write_sheets(req.sessionId, model, result["sheets"])
+        result["applied"] = True
+    result["sheets"] = {s: len(rows) for s, rows in result["sheets"].items()}
+    return result
+
+
 # ── Forge: adjust / revert ───────────────────────────────────────────────────
 
 
@@ -173,6 +202,7 @@ class ConversionRequest(BaseModel):
     name: str | None = None
     pNom: float = 100.0
     extendable: bool = False
+    discountRate: float | None = Field(None, description="Written to the new row as discount_rate (PyPSA annuitises overnight_cost with it). Required when extendable; the UI sends Settings -> Discount rate.")
     model: dict[str, list[dict[str, Any]]] | None = None
     apply: bool = Field(False, description="Merge the fragment into the session model.")
 
@@ -193,6 +223,7 @@ def build_conversion(req: ConversionRequest) -> dict[str, Any]:
     try:
         fragment = fh.build_conversion_fragment(
             template, anchor_bus=anchor, p_nom=req.pNom, extendable=req.extendable, name=req.name, model=model,
+            discount_rate=req.discountRate,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -42,6 +42,8 @@ export interface SitingScanRequest {
   siteCapacityMw: number;
   capitalCostPerMw: Record<string, number>;
   connectionCostPerMwKm: number;
+  /** Settings -> Discount rate; written to the candidates as `discount_rate`. Required by the server. */
+  discountRate?: number;
   marginalCost: number;
   /**
    * The model's existing snapshot labels. When given, CF series are tiled

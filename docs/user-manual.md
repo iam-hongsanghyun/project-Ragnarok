@@ -201,8 +201,8 @@ scalar value of the same attribute on that row.
 
 The sheet layout (one row per breakpoint, and what y means for each attribute) is in
 [backend.md §5.7](backend.md#57-piecewisepy--piecewise-linear-curves). `capital_cost`
-curves use absolute `p_nom` / `e_nom` / `s_nom` on the x axis and overnight prices; the run
-annuitises them like the single capital cost. After a solve, the **Piecewise cost curves** card in
+curves use absolute `p_nom` / `e_nom` / `s_nom` on the x axis and PERIODISED prices (per modelled
+horizon, like `capital_cost`); PyPSA takes them as written and refuses a curve on a row that also has an `overnight_cost`. After a solve, the **Piecewise cost curves** card in
 Analytics shows each curve and the average cost the optimiser realised on it. The curves round-trip
 through netCDF, HDF5, the CSV-folder zip (PyPSA's own layout) and project workbooks. **Settings → Solver →
 Advanced → Piecewise formulation** chooses how PyPSA formulates each curve.
@@ -428,8 +428,9 @@ In **Pathway** mode, you define a table of investment periods. Each row has:
 | Years | Calendar years the period stands for. PyPSA multiplies a period's energy-sum constraints by it — a CO2 cap on a period is a cap on its annual emissions times Years — but not its costs. A cap constant and the Years value are one decision. |
 
 Clicking **Pathway** pre-fills 2030 and 2040 with weight 1 and Years 5 and 10; **Add period** appends a row 10 years later with weight 1 and Years 10. Treat these as
-placeholders. Ragnarok annuitises capital costs with the project discount rate
-(Settings → Project defaults) and charges the annual figure in every period an
+placeholders. PyPSA annuitises each row's `overnight_cost` with that row's `discount_rate`
+and `lifetime` (Settings → Project defaults → Fill discount_rate writes the project rate into the rows)
+and charges the annual figure in every period an
 asset is active (`build_year` ≤ period < `build_year` + `lifetime`); the objective
 weights are separate numbers you type and are not derived from that rate. The solve
 is one perfect-foresight problem; there is no myopic (period by period) mode.
@@ -626,6 +627,26 @@ combined with rolling horizon, stochastic mode, SCLOPF, pathway or sampled block
 
 ---
 
+### Cost columns (PyPSA semantics)
+
+Ragnarok passes the cost columns to PyPSA unchanged, and they mean what PyPSA says:
+
+| Column | Meaning |
+|---|---|
+| `capital_cost` | Cost per MW (MWh, MVA) for the **modelled horizon** (your snapshots), as is. A year of snapshots makes it a yearly cost; three hours makes it a three-hour cost. No annuity, no scaling. |
+| `overnight_cost` | The upfront price. PyPSA turns it into the horizon cost: `overnight × annuity(discount_rate, lifetime) × years in the horizon`. Needs the row's `discount_rate`; a blank `lifetime` is infinite (the annuity is then just the rate). When both columns are filled, `overnight_cost` wins. |
+| `fom_cost` | Fixed O&M per MW for the modelled horizon, added as is. |
+| `discount_rate`, `lifetime` | Read from the row. **Settings → Discount rate → Fill discount_rate** writes the project rate into the rows that have an `overnight_cost`. |
+
+The Capacity Expansion card reads these back from PyPSA's own statistics: CAPEX over the horizon, split into
+new build and already built (sunk), the overnight cost and the fixed O&M; "CAPEX per year" is the horizon figure divided
+by the years in the horizon.
+
+**Older workbooks.** A workbook saved before this basis (no `ragnarok_schema_version`) kept an overnight price in
+`capital_cost` and Ragnarok annuitised it when it ran. Opening one moves those numbers once to `overnight_cost`
+(setting `discount_rate`, and a 20-year `lifetime` where it was blank) so the result is unchanged, and shows you the list of rows it
+changed; a piecewise capital curve is flagged for you to review, and a saved scenario that overrides `capital_cost` now overrides `overnight_cost`. Older stored runs are re-read the same way.
+
 ### 5.4 App group
 
 #### Appearance
@@ -643,7 +664,7 @@ Settings that affect parsing and display across all sessions.
 |---|---|---|---|
 | Date format | Auto-detect, YYYY-MM-DD (ISO), DD-MM-YYYY, MM-DD-YYYY | Auto-detect | Declares the format of snapshot timestamps in the input workbook so the parser can resolve ambiguous strings. Display is always canonical ISO. |
 | Currency | Dropdown of common currencies | USD ($) | Sets the symbol shown in KPI strips, carbon price fields, and chart labels. |
-| Discount rate | Fraction (0–1) | 0.05 | Used to annuitize capital costs for extendable assets. 0.05 equals a 5% WACC. |
+| Discount rate | Fraction (0–1) | 0.05 | The project discount rate (0.05 = 5% WACC). It changes no cost at run time: the buttons beneath it (a Forge action) write it into the `discount_rate` column of every row that has an `overnight_cost`; PyPSA annuitises with the row's own rate, and a run is refused if such a row has none. |
 | Load shedding | Off / On | Off | When On, unmet demand is absorbed by a VOLL (value of lost load) backstop generator at each bus rather than causing solver infeasibility. |
 | Value of lost load | Currency/MWh | 2000 | Visible only when load shedding is On. Sets the penalty cost for unserved energy. |
 
@@ -1324,8 +1345,8 @@ working model as ordinary components and reads the results from the P2X angle; t
 
 **Preview** shows the components that would be added, with sizes, efficiencies and overnight costs. **Apply to model**
 merges them (it is enabled only for the inputs you previewed). Costs use PyPSA's own split: each priced component carries an
-`overnight_cost`, a `fom_cost` (per year), a `lifetime` and a `discount_rate` (from Settings), and PyPSA annualises the overnight cost, pro-rated to the
-modelled window.
+`overnight_cost`, a `fom_cost` (PyPSA's per-horizon column: yearly O&M × the horizon of the workbook's snapshots, shown in the preview), a `lifetime` and a `discount_rate` (from Settings), and PyPSA annualises the overnight cost and scales it by the
+modelled horizon (`n.nyears`). `capital_cost` stays blank.
 
 The synthesis steps (Haber-Bosch, methanolisation, Fischer-Tropsch), the air separation unit and the CO2 capture are PyPSA 1.4
 **Process** components (`rate0 = -1` on the H2 or electricity input, `rate1..3` the product and the other inputs); the
@@ -1538,8 +1559,9 @@ What it establishes, each pinned by a test:
 - **Period views** mask assets that are not active, sum energy, weight money by the period's objective weight (so the
   period totals add to the run) and report emissions as annual × Years. Served by `GET /api/runs/{name}/period/{period}`
   and `/api/runs/{name}/kpis?period=`.
-- **Annuity vs overnight.** `capital_cost` is overnight; Ragnarok annuitises it and charges the annual figure in every
-  active period. Entering an annual cost would annuitise it twice.
+- **Annuity vs overnight.** `overnight_cost` is the upfront price; PyPSA annuitises it (with the row's `lifetime` and
+  `discount_rate`) and charges the annual figure in every active period. `capital_cost` is PyPSA's other column: already
+  periodised, left alone. Entering an annual cost in `overnight_cost` would annuitise it twice.
 - **Retirement** is an input: extending `coal_old` to 60 years raises 2040 emissions and lowers the unconstrained cost, and
   changes nothing under a binding cap.
 - **Perfect foresight.** A cap that applies only in 2050 changes what is built in 2040. There is no myopic mode.
@@ -1565,7 +1587,7 @@ A solar-heavy single bus over three summer days (the middle one overcast): 700 M
 - **Capacity value** — the 100 MW battery's ELCC (**Settings > Solve > ELCC**) rises with duration: 20.0 / 20.0 / 24.2 /
   45.6 / 93.0 % at 1 / 2 / 4 / 6 / 8 hours.
 - **Sizing** — an extendable StorageUnit fixes energy = `p_nom` × `max_hours`; a Store with two Links sizes charging power,
-  discharging power and energy separately. Changing `max_hours` without changing `capital_cost` changes the price of energy.
+  discharging power and energy separately. Changing `max_hours` without changing the cost (`overnight_cost`) changes the price of energy.
 
 Both modules use a short window or representative days; the lessons state where a per-year figure is a three-day (or
 one-day-per-year) sample scaled up.

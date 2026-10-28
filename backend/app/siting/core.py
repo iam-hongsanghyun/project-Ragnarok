@@ -33,6 +33,11 @@ _EARTH_RADIUS_KM = 6371.0
 _TECHS = ("solar", "wind")
 
 
+#: ``lifetime`` written on the candidate rows (years). Module defaults, visible in the workbook.
+GENERATOR_LIFETIME_YEARS = 25.0
+CONNECTION_LIFETIME_YEARS = 40.0
+
+
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Great-circle distance between two WGS84 points, in km.
 
@@ -182,6 +187,9 @@ def build_siting_fragment(
     marginal_cost: float = 0.0,
     target_snapshots: list[str] | None = None,
     filters: dict[str, Any] | None = None,
+    discount_rate: float | None = None,
+    lifetime_years: float = GENERATOR_LIFETIME_YEARS,
+    connection_lifetime_years: float = CONNECTION_LIFETIME_YEARS,
 ) -> tuple[WorkbookFragment, list[dict[str, Any]]]:
     """Convert fetched per-site weather into extendable candidate assets.
 
@@ -198,10 +206,15 @@ def build_siting_fragment(
         performance_ratio: flat solar derate η (see ``solar_cf``).
         site_capacity_mw: per-site build ceiling (``p_nom_max``, MW). Without
             a cap the LP dumps everything at the single best site.
-        capital_cost_per_mw: per-technology generator capex (currency/MW),
-            written to ``capital_cost``; missing technologies default to 0.
-        connection_cost_per_mw_km: grid-connection capex rate
-            (currency/MW·km); the Link's ``capital_cost`` is this × distance.
+        capital_cost_per_mw: per-technology generator OVERNIGHT capex (currency/MW),
+            written to ``overnight_cost``; missing technologies default to 0.
+        connection_cost_per_mw_km: grid-connection overnight capex rate
+            (currency/MW·km); the Link's ``overnight_cost`` is this × distance.
+        discount_rate: written to every priced row as ``discount_rate``; PyPSA annuitises
+            ``overnight_cost`` with it (and ``lifetime``) and scales by the horizon. Required:
+            nothing here converts a cost and PyPSA refuses an overnight cost without a rate.
+        lifetime_years / connection_lifetime_years: the ``lifetime`` written on the generator
+            and connection rows (years).
         marginal_cost: generator operating cost (currency/MWh), usually 0.
         target_snapshots: the model's EXISTING snapshot labels (local time).
             When given, CF series are aligned onto these labels BY TIMESTAMP
@@ -229,6 +242,13 @@ def build_siting_fragment(
     candidates: list[dict[str, Any]] = []
     if not kept:
         return frag, candidates
+    if discount_rate is None:
+        raise ValueError(
+            "A discount rate is required: the candidates carry PyPSA's overnight_cost, which PyPSA annuitises with the "
+            "row's discount_rate. Pass the project rate (Settings -> Discount rate)."
+        )
+    if not 0.0 <= float(discount_rate) < 1.0:
+        raise ValueError(f"discount rate must be a fraction in [0, 1) (0.05 = 5 %), got {discount_rate!r}.")
 
     times = kept[0]["time"]
     if target_snapshots:
@@ -271,7 +291,8 @@ def build_siting_fragment(
             gen_rows.append({
                 "name": gen, "bus": site_bus, "carrier": tech,
                 "p_nom": 0.0, "p_nom_extendable": True, "p_nom_max": cap,
-                "capital_cost": float(costs.get(tech) or 0.0),
+                "overnight_cost": float(costs.get(tech) or 0.0),
+                "discount_rate": float(discount_rate), "lifetime": float(lifetime_years),
                 "marginal_cost": float(marginal_cost),
                 "x": lon, "y": lat,
             })
@@ -282,7 +303,8 @@ def build_siting_fragment(
         link_rows.append({
             "name": f"siting_conn_{idx}", "bus0": site_bus, "bus1": grid_bus,
             "carrier": "AC", "p_nom": 0.0, "p_nom_extendable": True,
-            "p_nom_max": cap, "capital_cost": conn_cost, "efficiency": 1.0,
+            "p_nom_max": cap, "overnight_cost": conn_cost, "discount_rate": float(discount_rate),
+            "lifetime": float(connection_lifetime_years), "efficiency": 1.0,
             "length": dist_km, "x": lon, "y": lat,
         })
         candidates.append({

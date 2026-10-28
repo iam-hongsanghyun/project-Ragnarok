@@ -468,11 +468,11 @@ def test_module_6_coarsening_error_is_not_monotonic(tmp_path: Path) -> None:
 
 
 # ── Module 7 — investment and capacity expansion, on a full year ─────────────
-# A year is what makes the capital arithmetic honest: Ragnarok annuitises the
-# workbook's OVERNIGHT cost and the results layer pro-rates the annual figure by
-# modelled_hours/8760, so only at 8760 do the objective and the reported total
-# agree. These solves take ~a minute each, so the module is covered by three
-# tests rather than one per figure.
+# A year is what makes the capital arithmetic honest: the workbook holds PyPSA's
+# `overnight_cost`, which PyPSA annuitises as overnight x annuity(r, L) x n.nyears, so
+# on a full year (nyears = 1) the objective's capital term is the annuity itself. These
+# solves take ~a minute each, so the module is covered by three tests rather than one
+# per figure.
 EXPANSION = {"carbonPrice": 0.0, "discountRate": 0.05}
 
 
@@ -493,18 +493,19 @@ def test_module_7_year_checkpoint_builds_three_of_four(tmp_path: Path) -> None:
 
 
 def test_module_7_capital_costs_are_overnight_and_unscaled(tmp_path: Path) -> None:
-    """A full year is the only window where the overnight cost needs no fudge.
+    """The sheet holds exactly what a cost database quotes, in PyPSA's own column.
 
-    Module 6 (time) exists partly for this: on a shorter horizon the optimiser
-    needs capital pre-scaled and the display pro-rates it a second time. Here the
-    sheet holds exactly what a cost database quotes.
+    `overnight_cost` is the upfront price; PyPSA annuitises it (annuity(discount_rate, lifetime) x
+    n.nyears), so the workbook needs no pre-scaling and `capital_cost` stays 0. Module 6 (time) exists
+    partly for this: on a shorter horizon PyPSA's nyears does the scaling, not the learner.
     """
     model = _model_from_example("training_m7", tmp_path)
     wind = next(g for g in model["generators"] if g["name"] == "wind_1")
     solar = next(g for g in model["generators"] if g["name"] == "solar_1")
-    assert wind["capital_cost"] == 1_200_000.0 and wind["lifetime"] == 25.0
-    assert solar["capital_cost"] == 500_000.0 and solar["lifetime"] == 25.0
-    assert model["lines"][0]["capital_cost"] == 600_000.0
+    assert wind["overnight_cost"] == 1_200_000.0 and wind["lifetime"] == 25.0 and wind["capital_cost"] == 0
+    assert solar["overnight_cost"] == 500_000.0 and solar["lifetime"] == 25.0 and solar["capital_cost"] == 0
+    assert model["lines"][0]["overnight_cost"] == 600_000.0 and model["lines"][0]["capital_cost"] == 0
+    assert wind["discount_rate"] == 0.05
     assert len(model["snapshots"]) == 8760
 
 
@@ -1520,9 +1521,9 @@ def test_module_16_period_views_mask_inactive_assets_and_weight_money(tmp_path: 
 def test_module_16_capital_is_an_annuity_charged_in_every_active_period(tmp_path: Path) -> None:
     """Step 7: overnight 1.3M -> 92,238/yr; wind_2040 is active 2040 AND 2050, so it is paid twice."""
     from backend.pypsa.results import run_pypsa
-    from backend.pypsa.utils.annuity import annuity_factor
+    from pypsa.costs import annuity
 
-    af25, af15 = annuity_factor(0.05, 25.0), annuity_factor(0.05, 15.0)
+    af25, af15 = annuity(0.05, 25.0), annuity(0.05, 15.0)
     assert af25 == pytest.approx(0.0709525, abs=1e-7)
     assert af15 == pytest.approx(0.0963423, abs=1e-7)
     res = run_pypsa(_m16_model(tmp_path), _M16_SCENARIO, _m16_options())
@@ -1666,23 +1667,23 @@ def test_module_16_kpi_strip_strings_the_lessons_quote(tmp_path: Path) -> None:
         return out
 
     base = strip(_m16_model(tmp_path), _m16_options())
-    assert base["whole"]["totalCost"] == "$589,565,223"
+    assert base["whole"]["totalCost"] == "$589,565,227"
     assert [base[p]["emissions"] for p in _M16_PERIODS] == ["11,893 ktCO2e", "9,673 ktCO2e", "591 ktCO2e"]
     assert base[2040]["totalCost"] == "$205,870,256"
     life = strip(_m16_model(tmp_path, coal_old_lifetime=60.0), _m16_options())
-    assert life["whole"]["totalCost"] == "$581,972,355"
+    assert life["whole"]["totalCost"] == "$581,972,357"
     assert [life[p]["emissions"] for p in _M16_PERIODS] == ["11,893 ktCO2e", "13,372 ktCO2e", "2,562 ktCO2e"]
     price = strip(_m16_model(tmp_path), _m16_options(price={2030: 20.0, 2040: 60.0, 2050: 120.0}))
-    assert price["whole"]["totalCost"] == "$872,790,029"
+    assert price["whole"]["totalCost"] == "$872,790,016"
     assert [price[p]["emissions"] for p in _M16_PERIODS] == ["5,709 ktCO2e", "1,235 ktCO2e", "0 ktCO2e"]
     cap = strip(_m16_model(tmp_path, "training_m16"), _m16_options())
-    assert cap["whole"]["totalCost"] == "$626,611,124"
+    assert cap["whole"]["totalCost"] == "$626,611,134"
     assert [cap[p]["emissions"] for p in _M16_PERIODS] == ["10,000 ktCO2e", "4,000 ktCO2e", "300 ktCO2e"]
     loose = strip(_m16_model(tmp_path, "training_m16"), _m16_options(years=1.0))
-    assert loose["whole"]["totalCost"] == "$589,565,223"
+    assert loose["whole"]["totalCost"] == "$589,565,227"
     assert [loose[p]["emissions"] for p in _M16_PERIODS] == ["1,189 ktCO2e", "967 ktCO2e", "59 ktCO2e"]
     tight = strip(_m16_model(tmp_path, "training_m16", caps={2030: 1e6, 2040: 4e5, 2050: 3e4}), _m16_options())
-    assert tight["whole"]["totalCost"] == "$907,496,651"
+    assert tight["whole"]["totalCost"] == "$907,496,654"
     assert [tight[p]["emissions"] for p in _M16_PERIODS] == ["1,000 ktCO2e", "400 ktCO2e", "30 ktCO2e"]
 
 
@@ -2024,7 +2025,7 @@ def test_module_17_storage_unit_versus_store_and_links_sizing(tmp_path: Path) ->
         model["storage_units"] = [{
             "name": "batt", "bus": "grid", "carrier": "battery", "p_nom": 0.0, "p_nom_extendable": True,
             "p_nom_min": 0.0, "p_nom_max": 400.0, "max_hours": hours, "efficiency_store": 0.95,
-            "efficiency_dispatch": 0.95, "cyclic_state_of_charge": True, "capital_cost": capital_cost,
+            "efficiency_dispatch": 0.95, "cyclic_state_of_charge": True, "overnight_cost": capital_cost, "discount_rate": 0.05,
             "lifetime": 15.0,
         }]
         return model

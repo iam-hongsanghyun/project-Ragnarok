@@ -36,7 +36,7 @@ export interface AppSettings {
   currencySymbol: string; // display symbol, e.g. "$"
   enableLoadShedding: boolean;
   loadSheddingCost: number; // VOLL in the currently-selected currency, per MWh
-  discountRate: number; // Used to annualise CAPEX for extendable assets
+  discountRate: number; // Project discount rate; written into the workbook's discount_rate column by Forge -> Fill discount rate (PyPSA annuitises overnight_cost with the row's own rate)
   queuePollSeconds: number; // How often the Queue tab polls while a run is active
   /** Comma-separated TabModuleIds shown on the activity bar (Settings →
    *  Modules). A plain string — not an array — so the value survives the

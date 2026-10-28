@@ -8,6 +8,7 @@ from backend.app import fragment_merge
 from backend.app.p2x import chains
 from backend.app.p2x import technologies as tech
 from backend.pypsa.network import rfnbo as rf
+from backend.pypsa.network.cost_basis import horizon_years
 from backend.pypsa.results import run_pypsa
 
 from ._p2x_fixtures import H2_SPEC, SCENARIO, night_gas_network, series, with_chain
@@ -28,7 +29,10 @@ def test_electrolyser_link_efficiency_and_costs_from_the_data_file() -> None:
     assert ely["bus0"] == "grid" and ely["efficiency"] == pytest.approx(33.33 / P["specific_energy"], abs=1e-7)
     # PyPSA's own split: overnight cost (EUR/MW_el), FOM (EUR/MW_el/yr), lifetime and the chain's discount rate; no folded capital_cost
     assert_allclose(ely["overnight_cost"], P["capex"] * 1000, rtol=1e-9)
-    assert_allclose(ely["fom_cost"], P["capex"] * 1000 * P["fom"] / 100, rtol=1e-9)
+    # fom_cost is PyPSA's per-HORIZON column: yearly fixed O&M x the workbook's horizon in years, written visibly
+    years = horizon_years(night_gas_network())
+    assert 0 < years < 1
+    assert_allclose(ely["fom_cost"], P["capex"] * 1000 * P["fom"] / 100 * years, rtol=1e-9)
     assert ely["lifetime"] == P["lifetime"] and ely["discount_rate"] == 0.05 and "capital_cost" not in ely
     wear = P["stack_capex"] * 1000 / P["stack_lifetime_hours"]
     water = P["water_use"] / 1000 * tech.parameter_defaults()["water"]["supply_cost"]

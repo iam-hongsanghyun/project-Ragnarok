@@ -48,9 +48,12 @@ class SitingScanRequest(BaseModel):
     buses: list[GridBus] = Field(..., description="Existing grid buses (connection targets).")
     siteCapacityMw: float = Field(100.0, description="Per-site build ceiling (p_nom_max, MW).")
     capitalCostPerMw: dict[str, float] = Field(
-        default_factory=dict, description="Generator capex per technology (currency/MW)."
+        default_factory=dict, description="Generator OVERNIGHT capex per technology (currency/MW), written as overnight_cost."
     )
-    connectionCostPerMwKm: float = Field(0.0, description="Grid-connection capex rate (currency/MW·km).")
+    connectionCostPerMwKm: float = Field(0.0, description="Grid-connection overnight capex rate (currency/MW·km), written as overnight_cost.")
+    discountRate: float | None = Field(
+        None, description="Written to the candidate rows as discount_rate (PyPSA annuitises overnight_cost with it). Required; the UI sends Settings -> Discount rate."
+    )
     marginalCost: float = 0.0
     targetSnapshots: list[str] | None = Field(
         None,
@@ -110,6 +113,7 @@ async def scan(req: SitingScanRequest) -> dict[str, Any]:
             marginal_cost=float(req.marginalCost),
             target_snapshots=req.targetSnapshots,
             filters=filters,
+            discount_rate=req.discountRate,
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc

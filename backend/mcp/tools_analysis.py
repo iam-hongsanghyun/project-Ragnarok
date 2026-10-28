@@ -191,7 +191,8 @@ async def revert_adjustments(
         "Build: add one conversion technology to the working model - the Link plus any missing carrier bus, carriers "
         "and (for gas-fed templates) a fuel-supply generator, reusing existing ones. 'template_id' from "
         "list_conversions; 'anchor_bus' is the electricity bus (default: first electricity bus); p_nom is MW of "
-        "input capacity unless extendable=true (the solver sizes it, template capital cost). Without confirm=true "
+        "input capacity unless extendable=true (the solver sizes it: the row carries PyPSA's overnight_cost, "
+        "fom_cost, lifetime and discount_rate, capital_cost blank; pass discount_rate, e.g. 0.07). Without confirm=true "
         "returns the fragment that would be merged."
     ),
 )
@@ -201,12 +202,13 @@ async def add_conversion(
     name: str | None = None,
     p_nom: float = 100.0,
     extendable: bool = False,
+    discount_rate: float | None = None,
     confirm: bool = False,
 ) -> Any:
     gated = _needs_confirm(cheap=False) and not confirm
     res = await get_client().build_conversion(
         templateId=template_id, anchorBus=anchor_bus, name=name, pNom=p_nom,
-        extendable=extendable, apply=not gated,
+        extendable=extendable, discountRate=discount_rate, apply=not gated,
     )
     return _gated_preview(res) if gated else res
 

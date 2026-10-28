@@ -49,9 +49,10 @@ function ExpansionBarChart({ rows }: { rows: BarRow[] }) {
 // ── Summary table ─────────────────────────────────────────────────────────────
 
 /** Optional server columns (n.statistics.*): shown only when some row carries the field. */
-const EXTRA_COLUMNS: { key: 'capex_expanded' | 'capex_installed' | 'overnight_total' | 'fom_total'; label: string }[] = [
-  { key: 'capex_expanded', label: 'Expanded CAPEX' },
-  { key: 'capex_installed', label: 'Installed CAPEX' },
+const EXTRA_COLUMNS: { key: 'capex_horizon' | 'capex_expanded' | 'capex_installed' | 'overnight_total' | 'fom_total'; label: string }[] = [
+  { key: 'capex_horizon', label: 'CAPEX (modelled horizon)' },
+  { key: 'capex_expanded', label: 'of which new build' },
+  { key: 'capex_installed', label: 'of which already built (sunk)' },
   { key: 'overnight_total', label: 'Overnight cost' },
   { key: 'fom_total', label: 'Fixed O&M (horizon)' },
 ];
@@ -72,7 +73,7 @@ function ExpansionTable({ assets, currencySymbol = '$' }: { assets: ExpansionAss
             <th className="num">Installed</th>
             <th className="num">Optimised</th>
             <th className="num">New build</th>
-            <th className="num">Annual CAPEX ({currencySymbol})</th>
+            <th className="num" title="n.statistics.capex divided by n.nyears: the same cost PER YEAR">CAPEX per year ({currencySymbol})</th>
             {extras.map((c) => <th key={c.key} className="num">{c.label} ({currencySymbol})</th>)}
           </tr>
         </thead>
@@ -139,7 +140,7 @@ export function CapacityExpansionCard({ assets, currencySymbol = '$', totals = n
           <div className="expansion-kpi-unit">MW</div>
         </div>
         <div className="expansion-kpi">
-          <div className="expansion-kpi-label">Annual CAPEX</div>
+          <div className="expansion-kpi-label">CAPEX per year</div>
           <div className="expansion-kpi-value">{totals ? `${currencySymbol}${Math.round(totals.totalCapexAnnual / 1e6).toLocaleString()}M` : '—'}</div>
           <div className="expansion-kpi-unit">{currencySymbol}/yr</div>
         </div>

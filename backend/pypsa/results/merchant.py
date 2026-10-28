@@ -31,7 +31,8 @@ import pypsa
 
 from .adequacy import electricity_buses, store_link_pairs
 from .finance import storage_assets
-from .market import HOURS_PER_YEAR, capex_window_scale, freeze_expansion
+from .market import freeze_expansion
+from .stat_metrics import fixed_cost_of, fixed_cost_table
 
 _log = logging.getLogger("pypsa.solver")
 
@@ -122,16 +123,12 @@ def build_merchant(
 
     Basis: the reported economics are a **window P&L** over the modelled
     ``H = Σ_t w_t`` represented hours. Revenue and operating cost are window
-    totals; the annualised capital charge (``capital_cost · p_nom_opt``,
-    currency/yr) is pro-rated onto the window by ``× H / 8760`` so ``profit``
+    totals; the capital charge is what PyPSA charged over the same horizon
+    (``n.statistics.capex + n.statistics.fom``, read before the freeze), so ``profit``
     subtracts like from like:
 
-    $$\\text{profit} = R_H - O_H - K \\cdot H / 8760$$
-    ASCII: profit = revenue_H - opex_H - capital_cost*p_nom_opt*H/8760.
-
-    Note the merchant LP's *build* decision itself still weighs window revenue
-    against PyPSA's full annual capex in the objective (a known bias on
-    sub-annual windows); only the reported P&L is corrected here.
+    $$\\text{profit} = R_H - O_H - (\\text{capex}^{stat}_H + \\text{fom}^{stat}_H)$$
+    ASCII: profit = revenue_H - opex_H - (statistics.capex + statistics.fom).
     """
     if not getattr(network, "is_solved", False):
         return None
@@ -180,12 +177,6 @@ def build_merchant(
     H = float(weights.sum())
     if H <= 0:
         return None
-    # Basis of the annualised capital charge. When the network builder already
-    # scaled capital_cost to the window (network.meta), capital_cost x p_nom_opt
-    # IS the window share: multiply by 1. Otherwise (pathway, imported solved
-    # network) it is annual and is pro-rated by H/8760.
-    window_years = 1.0 if capex_window_scale(network) is not None else H / HOURS_PER_YEAR
-
     # ``copy()`` refuses with a solver model attached; the app reads every number
     # from solved dataframes, so detaching is side-effect-free downstream.
     try:
@@ -194,26 +185,24 @@ def build_merchant(
     except Exception:  # noqa: BLE001
         pass
 
-    # Annualised capital charge, read from the SOLVED system network before the
-    # freeze below clears p_nom_extendable — that flag is what marks an asset as
-    # carrying a capital charge at all, so the reading has to happen first.
-    capex_annual: dict[tuple[str, str], float] = {}
-    for comp, attr in (("Generator", "generators"), ("StorageUnit", "storage_units")):
-        df = getattr(network, attr)
-        if not len(df) or "p_nom_extendable" not in df.columns or "capital_cost" not in df.columns:
-            continue
-        for name in df.index[df["p_nom_extendable"].astype(bool)]:
-            capex_annual[(comp, str(name))] = (
-                float(df.at[name, "capital_cost"]) * float(df.at[name, "p_nom_opt"])
-            )
+    # Fixed charge (capex + fom) over the modelled horizon, read from n.statistics on the SOLVED
+    # system network before the freeze below: installed and expanded capacity alike, exactly what
+    # PyPSA charged. No pro-rating - the statistics are already on the horizon.
+    fixed = fixed_cost_table(network, ["Generator", "StorageUnit"])
+    capex_horizon: dict[tuple[str, str], float] = {}
+    for comp in ("Generator", "StorageUnit"):
+        for name in (n_ for (c_, n_) in fixed.index if c_ == comp):
+            fc = fixed_cost_of(fixed, comp, str(name))
+            capex_horizon[(comp, str(name))] = fc["capex_horizon"] + fc["fom_horizon"]
 
     def _price_of(bus: str) -> np.ndarray | None:
         return np.asarray(price[bus], dtype=float) if bus in price else None
 
     # Store capex (energy + its links) from the same rule finance uses, read
-    # off the solved system network before the freeze.
+    # off the solved system network before the freeze. That rule reports per YEAR, so
+    # n.nyears (PyPSA's horizon) turns it back into the horizon charge.
     store_capex = {
-        a.name: a.capex_annual
+        a.name: a.capex_annual * float(network.nyears)
         for a in storage_assets(network, _price_of, weights, stores=own_stores)
     }
 
@@ -279,11 +268,11 @@ def build_merchant(
     def _capex(comp: str, name: str) -> float:
         """Window share of the annualised capital charge (× H/8760).
 
-        Sourced from ``capex_annual``, captured off the system network before
-        the assets were frozen — a brownfield asset the system did not build
-        carries no charge and is simply absent from the map.
+        Sourced from ``n.statistics`` (capex + fom over the horizon), captured off the system network before
+        the assets were frozen. Installed (sunk) capacity carries its charge too:
+        PyPSA's ``capex`` statistic includes ``p_nom``.
         """
-        return capex_annual.get((comp, str(name)), 0.0) * window_years
+        return capex_horizon.get((comp, str(name)), 0.0)
 
     # Dense marginal cost — the LP dispatched on the time-varying cost (series
     # workbook column or varying carbon adder), so the report must price the
@@ -353,8 +342,7 @@ def build_merchant(
 
     # Stores (+ Links) on the shared storage rule; capex from the pre-freeze read.
     for a in storage_assets(work, _price_of, weights, stores=own_stores):
-        # storage_assets returns the ANNUAL charge, so always pro-rate to the window.
-        capex = store_capex.get(a.name, 0.0) * (H / HOURS_PER_YEAR)
+        capex = store_capex.get(a.name, 0.0)
         asset_rows.append({
             "name": a.name, "type": "storage", "bus": a.bus, "carrier": a.carrier,
             "capacityMW": round(a.capacity_mw, 3),

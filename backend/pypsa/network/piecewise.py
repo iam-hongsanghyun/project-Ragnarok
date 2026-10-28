@@ -33,9 +33,9 @@ other shape needs binaries/SOS2 (a MIP). ``efficiency`` / ``rate`` curves give t
 operating value at each breakpoint and are an equality, so they are a MIP unless
 the curve is a straight line.
 
-``capital_cost`` curves are OVERNIGHT per-unit prices in the workbook, exactly like
-the scalar ``capital_cost``: the build annuitises them (x annuity factor, x window
-pro-rating) in the same step. PyPSA requires the curve it receives to be annual.
+``capital_cost`` curves go to PyPSA exactly as written, and PyPSA requires them to be
+already periodised (per modelled horizon): a curve combined with ``overnight_cost`` is
+refused (pypsa.optimization.optimize). Ragnarok neither annuitises nor window-scales them.
 
 Carbon price is added to every segment price of a ``marginal_cost`` curve on an
 emitting generator: ``y_i += price * co2 / eta`` for ``i >= 1``.
@@ -293,8 +293,7 @@ def apply_piecewise_sheets(
 ) -> int:
     """Attach every ``<list>-<attr>-pw`` sheet of ``model`` to ``network``.
 
-    Must run after the components exist (curves are keyed by component name) and
-    before the capital-cost annuitisation (see :func:`scale_capital_curves`).
+    Must run after the components exist (curves are keyed by component name).
 
     Returns:
         The number of curves attached.
@@ -382,31 +381,6 @@ def has_piecewise(network: pypsa.Network, list_name: str, attr: str) -> bool:
     if list_name not in network.components.keys():
         return False
     return bool(network.components[list_name].has_piecewise(attr))
-
-
-def scale_capital_curves(network: pypsa.Network, list_name: str, factors: pd.Series) -> int:
-    """Multiply the y of every ``capital_cost`` curve by a per-component factor.
-
-    Used by the build to turn overnight curve prices into annual ones with the
-    SAME annuity factor (and window pro-rating) as the scalar ``capital_cost``.
-
-    Args:
-        network: network whose curves are scaled in place.
-        list_name: component list (``generators``, ``links`` ...).
-        factors: ``name -> factor`` (annuity factor x window scale).
-
-    Returns:
-        Number of curves scaled.
-    """
-    if not has_piecewise(network, list_name, "capital_cost"):
-        return 0
-    frame = network.components[list_name].piecewise["capital_cost"]
-    scaled = 0
-    for name in frame.columns.unique("name"):
-        if name in factors.index and not math.isnan(float(factors[name])):
-            frame[(name, "capital_cost")] = frame[(name, "capital_cost")] * float(factors[name])
-            scaled += 1
-    return scaled
 
 
 def apply_carbon_to_curves(

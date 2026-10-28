@@ -124,10 +124,10 @@ def _extendable_model() -> dict[str, list[Any]]:
         if gen["name"] == "wind1":
             gen["p_nom_extendable"] = True
             gen["p_nom_max"] = 400.0
-            # Overnight cost. build_network annuitises it (20 y fallback, r = 0 ->
-            # 5000/20 = 250 per MW-year) and pro-rates that to the 6 h window
-            # (x 6/8760), so the LP charges 0.171 per MW for the window.
-            gen["capital_cost"] = 5000.0
+            # Overnight cost. PyPSA annuitises it (20 y, r = 0 -> 5000/20 = 250 per
+            # MW-year) and scales it by n.nyears (6/8760), so the LP charges 0.171 per
+            # MW for the window.
+            gen.update({"overnight_cost": 5000.0, "discount_rate": 0.0, "lifetime": 20.0})
     return model
 
 

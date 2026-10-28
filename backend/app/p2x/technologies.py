@@ -29,7 +29,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from ...pypsa.utils.annuity import annuity_factor
+from pypsa.costs import annuity as _pypsa_annuity
 
 BUNDLED_FILE = Path(__file__).with_name("technologies.json")
 ENV_FILE = "RAGNAROK_P2X_TECHNOLOGIES_FILE"
@@ -123,6 +123,11 @@ def catalogue(overrides: dict[str, Any] | None = None) -> dict[str, Any]:
 # ── conversions (every function states its units) ───────────────────────────────
 
 
+def _annuity(discount_rate: float, lifetime_years: float) -> float:
+    """PyPSA's own ``pypsa.costs.annuity(r, L)`` (1/a); a non-positive lifetime has no annuity and reads as 1."""
+    return 1.0 if float(lifetime_years) <= 0 else float(_pypsa_annuity(float(discount_rate), float(lifetime_years)))
+
+
 def overnight_equivalent(capex: float, fom_pct: float, lifetime_years: float, discount_rate: float) -> float:
     """Overnight cost that, annualised by the app, equals ``capex * (a + fom)`` per year.
 
@@ -135,13 +140,13 @@ def overnight_equivalent(capex: float, fom_pct: float, lifetime_years: float, di
     Returns:
         ``K_eq`` in the same unit as ``capex`` (see the module docstring).
     """
-    a = annuity_factor(discount_rate, lifetime_years)
+    a = _annuity(discount_rate, lifetime_years)
     return float(capex) * (1.0 + (float(fom_pct) / 100.0) / a)
 
 
 def fom_share(fom_pct: float, lifetime_years: float, discount_rate: float) -> float:
     """Fraction of the annual fixed charge that is FOM: ``f / (a + f)`` (dimensionless)."""
-    a = annuity_factor(discount_rate, lifetime_years)
+    a = _annuity(discount_rate, lifetime_years)
     f = float(fom_pct) / 100.0
     return f / (a + f)
 

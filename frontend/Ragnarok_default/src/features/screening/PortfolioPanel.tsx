@@ -52,10 +52,11 @@ interface Props {
   buses: Array<{ name: string; x: number; y: number }>;
   targetSnapshots: string[];
   currencySymbol: string;
+  discountRate?: number;
   onApplyFragment: (fragment: WorkbookFragment, databaseName: string, countryName: string) => void;
 }
 
-export function PortfolioPanel({ params, sites, level, selected, siteColors, theme, buses, targetSnapshots, currencySymbol, onApplyFragment }: Props) {
+export function PortfolioPanel({ params, sites, level, selected, siteColors, theme, buses, targetSnapshots, currencySymbol, discountRate, onApplyFragment }: Props) {
   const { showToast } = useToast();
   const regionLevel = level === 'region';
   const noun = regionLevel ? 'region' : 'site';
@@ -271,6 +272,7 @@ export function PortfolioPanel({ params, sites, level, selected, siteColors, the
         <PromoteDialog
           params={params} selected={selected} sites={sites} buses={buses} targetSnapshots={targetSnapshots}
           currencySymbol={currencySymbol}
+          discountRate={discountRate}
           onClose={() => setPromoteOpen(false)}
           onConfirm={(fragment, resp) => {
             onApplyFragment(fragment, 'Siting screening', `${resp.generators.length} site(s)`);
@@ -325,12 +327,13 @@ interface DialogProps {
   buses: Array<{ name: string; x: number; y: number }>;
   targetSnapshots: string[];
   currencySymbol: string;
+  discountRate?: number;
   onClose: () => void;
   onConfirm: (fragment: WorkbookFragment, resp: PromoteResponse) => void;
 }
 
 /** Preview of the generators and of how their profiles align with the model's snapshots, before the merge. */
-function PromoteDialog({ params, selected, sites, buses, targetSnapshots, currencySymbol, onClose, onConfirm }: DialogProps) {
+function PromoteDialog({ params, selected, sites, buses, targetSnapshots, currencySymbol, discountRate, onClose, onConfirm }: DialogProps) {
   const [utcOffset, setUtcOffset] = useState(params.utcOffsetHours);
   const [extendable, setExtendable] = useState(false);
   const [capex, setCapex] = useState<Record<string, number>>({});
@@ -351,7 +354,7 @@ function PromoteDialog({ params, selected, sites, buses, targetSnapshots, curren
       const pn = Object.fromEntries(Object.entries(pNom).filter(([, v]) => Number(v) > 0).map(([k, v]) => [k, Number(v)]));
       setResp(await promotePreview({
         datasetId: params.datasetId, sites: selected, utcOffset: Math.round(utcOffset), pNomMw: pn, extendable,
-        capitalCost: capex, marginalCost: marginal, buses, targetSnapshots,
+        capitalCost: capex, discountRate, marginalCost: marginal, buses, targetSnapshots,
       }));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -385,7 +388,7 @@ function PromoteDialog({ params, selected, sites, buses, targetSnapshots, curren
           <div className="scr-field-row">
             {techs.map((t) => (
               <div className="scr-field" key={t}>
-                <span className="scr-label">{t} capex ({currencySymbol}/MW)</span>
+                <span className="scr-label">{t} overnight capex ({currencySymbol}/MW)</span>
                 <input className="scr-input" type="number" min={0} aria-label={`${t} capex`} value={capex[t] ?? 0} onChange={(e) => setCapex({ ...capex, [t]: Math.max(0, Number(e.target.value) || 0) })} />
               </div>
             ))}

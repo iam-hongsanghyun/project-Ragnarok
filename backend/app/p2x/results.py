@@ -11,11 +11,11 @@ Algorithm (levelised cost of hydrogen):
       \\pi_{PPA}E_{matched}+\\sum_t w_t\\,(p_t-m_t)^+\\lambda_t\\ \\text{(PPA)}$$
     $$M_{H_2}=\\frac{1000}{LHV_{H_2}}\\sum_t w_t\\,(-p^{1}_{ely,t})$$
     ASCII: LCOH = (C_ely + C_comp + C_stor + C_elec + C_water + C_wear) / M_H2.
-    C_x = P_x * (k_hat_x + y * f_x): installed capacity P_x (MW or MWh, ``p_nom_opt`` / ``e_nom_opt``), k_hat_x = PyPSA's effective
+    C_x = P_x * (k_hat_x + f_x): installed capacity P_x (MW or MWh, ``p_nom_opt`` / ``e_nom_opt``), k_hat_x = PyPSA's effective
     capital cost per unit over the run window (``n.components[..].capital_cost`` of the network rebuilt from the stored model:
-    overnight_cost x annuity(r, L) x window years at the RUN's discount rate; not recomputed here), f_x = the row's ``fom_cost``
-    (per MW or MWh per year) and y = sum(w)/8760 window years. A chain saved with a folded ``capital_cost`` (older sessions) is
-    split into capex and FOM with f / (a + f) instead.
+    overnight_cost x annuity(r, L) x n.nyears with the row's own discount_rate; not recomputed here) and f_x = the row's
+    ``fom_cost`` per unit per modelled horizon, which PyPSA adds UNSCALED (``n.statistics.fom``). A chain saved with a folded
+    ``capital_cost`` (older sessions) is split into capex and FOM with f / (a + f) instead.
     C_elec: nodal = sum_t w_t p_t lambda_t (lambda = marginal price of the AC bus, EUR/MWh);
     PPA = pi_PPA * E_matched + nodal price on the unmatched energy, where
     pi_PPA = (annualised cost + operating cost of the designated generators) / their energy, and
@@ -93,9 +93,9 @@ class _Run:
         if self._network is None:
             from fastapi import HTTPException
 
-            from ...pypsa.network import build_network
+            from ...pypsa.network import build_stored_network
             try:
-                self._network, _ = build_network(self.model, self.scenario, self.options)
+                self._network, _ = build_stored_network(self.model, self.scenario, self.options)
             except HTTPException as exc:
                 raise P2XResultsError(f"Could not rebuild the run's network to read its effective costs: {exc.detail}") from exc
         return self._network
@@ -103,11 +103,19 @@ class _Run:
     def effective_capital(self, sheet: str, name: str) -> float:
         """PyPSA's effective capital cost of one component, per unit of nominal capacity, over the run window (currency per MW / MWh), times the share of the stored window a period slice covers.
 
-        Read from ``n.components[<sheet>].capital_cost`` of the rebuilt network, i.e. ``overnight_cost x annuity(r, L) x years`` for a
-        native-cost row and the app-annuitised, window-scaled ``capital_cost`` for an older row. FOM is not in it.
+        Read from ``n.components[<sheet>].capital_cost`` of the rebuilt network, i.e. PyPSA's ``periodized_cost`` without fom:
+        ``overnight_cost x annuity(r, L) x n.nyears`` for an overnight row and the row's ``capital_cost`` as is otherwise.
         """
         try:
             return _f(self.network().components[sheet].capital_cost[name]) * self.window_share
+        except KeyError:
+            return 0.0
+
+    def effective_fom(self, sheet: str, name: str) -> float:
+        """The row's ``fom_cost`` as PyPSA charges it: per unit of capacity per MODELLED HORIZON, NOT scaled by the window years
+        (``n.statistics.fom`` = ``fom_cost x p_nom_opt``), times the share of the stored window a period slice covers."""
+        try:
+            return _f(self.network().components[sheet].static["fom_cost"][name]) * self.window_share
         except KeyError:
             return 0.0
 
@@ -153,8 +161,8 @@ def _fixed_charge(run: _Run, reg: dict[str, Any], role: str) -> dict[str, float]
     """Window capex and FOM of one chain component (see the module docstring).
 
     Capex = capacity x PyPSA's effective capital cost (read from the rebuilt network, never recomputed from the workbook).
-    FOM: ``fom_cost`` x capacity x window years for a native row; for a chain saved with a folded ``capital_cost`` the
-    charge is split with ``f / (a + f)``.
+    FOM: ``fom_cost`` x capacity - PyPSA's per-horizon charge (``n.statistics.fom``), not pro-rated by the window years; for a chain
+    saved with a folded ``capital_cost`` the charge is split with ``f / (a + f)``.
     """
     comp = reg["components"].get(role)
     if not comp or not run.active(comp["sheet"], comp["name"]):
@@ -163,7 +171,7 @@ def _fixed_charge(run: _Run, reg: dict[str, Any], role: str) -> dict[str, float]
     capacity = run.capacity(comp["sheet"], comp["name"])
     total = capacity * run.effective_capital(comp["sheet"], comp["name"])
     if _native(row):
-        return {"capacity": capacity, "capex": total, "fom": capacity * _f(row.get("fom_cost")) * run.years}
+        return {"capacity": capacity, "capex": total, "fom": capacity * run.effective_fom(comp["sheet"], comp["name"])}
     fc = reg["fixedCosts"][role]
     share = tech.fom_share(fc["fomPct"], fc["lifetimeYears"], float(reg["discountRate"]))
     return {"capacity": capacity, "capex": total * (1 - share), "fom": total * share}
@@ -250,7 +258,7 @@ def _chain_costs(run: _Run, reg: dict[str, Any], mode: str, cfg: dict[str, Any])
             if run.active("generators", g):
                 if _f(row.get("p_nom_extendable")) or str(row.get("p_nom_extendable")).lower() in ("true", "1"):
                     cap_g = run.capacity("generators", g)
-                    cost += cap_g * (run.effective_capital("generators", g) + (_f(row.get("fom_cost")) * run.years if _native(row) else 0.0))
+                    cost += cap_g * (run.effective_capital("generators", g) + (run.effective_fom("generators", g) if _native(row) else 0.0))
             cost += _f(row.get("marginal_cost")) * _energy(run, run.col("generators-p", g))
         e_des = _energy(run, des_mw)
         pi = cost / e_des if e_des > 0 else float("nan")

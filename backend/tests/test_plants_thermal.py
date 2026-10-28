@@ -26,7 +26,11 @@ def test_ccgt_row_from_the_data_file() -> None:
     assert_allclose(link["marginal_cost"], P["ccgt"]["vom"] * eta, rtol=1e-6)                      # EUR per MWh_th
     # PyPSA's own split: overnight cost per MW_th and FOM per MW_th per year; no folded / annualised capital_cost, no discount_rate
     assert_allclose(link["overnight_cost"], P["ccgt"]["capex"] * 1000 * eta, rtol=1e-7)
-    assert_allclose(link["fom_cost"], link["overnight_cost"] * P["ccgt"]["fom"] / 100, rtol=1e-6)
+    # fom_cost is PyPSA's per-HORIZON column: yearly fixed O&M x the workbook's horizon in years (written visibly)
+    from backend.pypsa.network.cost_basis import horizon_years
+    years = horizon_years(grid())
+    assert 0 < years < 1
+    assert_allclose(link["fom_cost"], link["overnight_cost"] * P["ccgt"]["fom"] / 100 * years, rtol=1e-6)
     assert link["lifetime"] == 25 and "capital_cost" not in link and link["discount_rate"] == 0.05
     assert "committable" not in link and "p_min_pu" not in link          # not committable: no always-on floor, no start-up fields
     gas_c = next(c for c in model["carriers"] if c["name"] == "gas")
@@ -108,13 +112,14 @@ def test_unit_commitment_case_starts_once_and_respects_the_minimum_load() -> Non
 def test_bess_extendable_cost_restates_the_inverter_at_the_storage_lifetime() -> None:
     model, built = add_plant(grid(), "bess", {"extendable": True})
     su = model["storage_units"][0]
-    from backend.pypsa.utils.annuity import annuity_factor
+    from pypsa.costs import annuity as annuity_factor
 
     B = P["bess"]
     a_i, a_s = annuity_factor(0.05, B["inverter_lifetime"]), annuity_factor(0.05, B["storage_lifetime"])
     # one lifetime per row (the storage's): the inverter's overnight cost is restated at that lifetime, K_inv a(r, 10) / a(r, 25)
     assert_allclose(su["overnight_cost"], B["inverter_capex"] * 1000 * a_i / a_s + B["storage_capex"] * 1000 * B["max_hours"], rtol=1e-9)
-    assert_allclose(su["fom_cost"], B["inverter_capex"] * 1000 * B["inverter_fom"] / 100, rtol=1e-9)
+    from backend.pypsa.network.cost_basis import horizon_years
+    assert_allclose(su["fom_cost"], B["inverter_capex"] * 1000 * B["inverter_fom"] / 100 * horizon_years(grid()), rtol=1e-6)
     assert su["lifetime"] == 25 and "capital_cost" not in su
     assert su["max_hours"] == 4.0 and su["efficiency_store"] == pytest.approx(0.96) and su["cyclic_state_of_charge"] is True
 

@@ -21,7 +21,7 @@ from backend.pypsa.results.asset_swap import _emissions
 from backend.pypsa.results.company import build_company_breakdown
 from backend.pypsa.results.company_statement import build_company_statement
 from backend.pypsa.results.expansion import build_expansion_results
-from backend.pypsa.results.market import CAPEX_WINDOW_SCALE_KEY, build_generator_economics
+from backend.pypsa.results.market import build_generator_economics
 from backend.pypsa.results.summaries import _pathway_period_summaries
 from backend.pypsa.utils.emissions import primary_energy_emissions
 
@@ -167,17 +167,19 @@ def test_expansion_capex_is_statistics_and_matches_capital_cost_times_opt() -> N
     n = _mixed()
     row = {r["name"]: r for r in build_expansion_results(n)}["peak"]
     opt = float(n.generators.at["peak", "p_nom_opt"])
-    np.testing.assert_allclose(row["capex_annual"], 100.0 * opt, rtol=RTOL, atol=1.0)
+    # capital_cost is PyPSA's cost per modelled horizon: the horizon CAPEX is capital_cost x p_nom_opt, as is
+    np.testing.assert_allclose(row["capex_horizon"], 100.0 * opt, rtol=RTOL, atol=1.0)
     stat = n.statistics.capex(components=["Generator"], groupby=False, round=12)
-    np.testing.assert_allclose(row["capex_annual"], float(stat[("Generator", "peak")]), rtol=RTOL, atol=1.0)
-    np.testing.assert_allclose(row["capex_expanded"] + row["capex_installed"], row["capex_annual"], atol=1.0)
+    np.testing.assert_allclose(row["capex_horizon"], float(stat[("Generator", "peak")]), rtol=RTOL, atol=1.0)
+    # the per-year figure is that / n.nyears and nothing else
+    np.testing.assert_allclose(row["capex_annual"], 100.0 * opt / float(n.nyears), rtol=1e-4, atol=1.0)
+    np.testing.assert_allclose(row["capex_expanded"] + row["capex_installed"], row["capex_horizon"], atol=1.0)
 
 
-def test_expansion_capex_window_scaled_run_reports_annual() -> None:
+def test_expansion_capex_of_a_short_window_reports_per_year_by_dividing_n_nyears() -> None:
     n = pypsa.Network()
     n.set_snapshots(pd.date_range("2030-01-01", periods=24, freq="h"))
-    scale = 24 / 8760
-    n.meta[CAPEX_WINDOW_SCALE_KEY] = scale
+    scale = 24 / 8760          # capital_cost is PyPSA's cost per MODELLED HORIZON (24 h)
     n.add("Bus", "b")
     n.add("Load", "L", bus="b", p_set=50)
     n.add("Generator", "g", bus="b", p_nom_extendable=True, capital_cost=1000 * scale, marginal_cost=1)

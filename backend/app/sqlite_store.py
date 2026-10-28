@@ -27,6 +27,7 @@ import os
 import re
 import shutil
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,6 +41,16 @@ from . import timeseries
 logger = logging.getLogger("pypsa_gui.sqlite_store")
 
 _SAFE_COL = re.compile(r"^[A-Za-z0-9_]+$")
+
+#: ``_kv`` key holding the cost-basis migration report of a session (see :mod:`...pypsa.network.cost_basis`).
+MIGRATION_KV_KEY = "cost_basis_migration"
+_migration_locks: dict[str, threading.RLock] = {}
+_migration_locks_guard = threading.Lock()
+
+
+def _migration_lock(session_id: str) -> threading.RLock:
+    with _migration_locks_guard:
+        return _migration_locks.setdefault(session_id, threading.RLock())
 
 
 def _db_path(session_id: str) -> Path:
@@ -138,11 +149,13 @@ def _ensure_migrated(session_id: str) -> None:
     model = ss.load_full_model(session_id)
     if not model:
         return
+    model, report = _ingest_cost_basis(model, legacy_origin=True)
     _build_db(
         session_id,
         model,
         filename=str(legacy_meta.get("filename", "")),
         scenario_name=str(legacy_meta.get("scenarioName", "")),
+        migration_report=report,
     )
     controls = ss.get_controls(session_id)
     if controls is not None:
@@ -163,6 +176,7 @@ def _raw_meta(session_id: str) -> dict[str, Any] | None:
     _ensure_migrated(session_id)
     if not _db_path(session_id).exists():
         return None
+    _ensure_cost_basis(session_id)
     try:
         with _connect(session_id) as conn:
             return _kv_get(conn, "meta")
@@ -179,10 +193,20 @@ def save_model(
     *,
     filename: str = "",
     scenario_name: str = "",
+    legacy_origin: bool = False,
+    discount_rate: float | None = None,
 ) -> dict[str, Any]:
-    """Persist a full model into the session's project.db, replacing any current one."""
+    """Persist a full model into the session's project.db, replacing any current one.
+
+    A model carrying no ``ragnarok_schema_version`` is stamped as current - it was written by
+    something that follows PyPSA's cost semantics (an importer, a plugin, an agent). Only a
+    caller that knows it holds an OLD Ragnarok workbook (``legacy_origin=True``: the browser
+    opening a file, a project import) gets the one-off cost-basis migration, whose report is
+    stored with the session and returned in the meta as ``costBasisMigration``.
+    """
     if not ss._is_safe_id(session_id):
         raise ValueError(f"Unsafe session id: {session_id!r}")
+    model, report = _ingest_cost_basis(model, legacy_origin=legacy_origin, discount_rate=discount_rate)
     # Build the replacement beside the live db and swap it in with an atomic
     # os.replace. Clearing first (as this used to) destroyed the session whenever
     # the rebuild then failed — an unserialisable cell, a full disk — leaving the
@@ -192,7 +216,8 @@ def save_model(
     _discard_db_files(building)
     try:
         meta = _build_db(
-            session_id, model, filename=filename, scenario_name=scenario_name, db_path=building
+            session_id, model, filename=filename, scenario_name=scenario_name, db_path=building,
+            migration_report=report,
         )
     except BaseException:
         _discard_db_files(building)
@@ -222,6 +247,7 @@ def _build_db(
     filename: str = "",
     scenario_name: str = "",
     db_path: Path | None = None,
+    migration_report: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create a fresh ``project.db`` (or ``db_path``) and populate it. Assumes no db exists there yet.
 
@@ -274,9 +300,151 @@ def _build_db(
         }
         _kv_set(conn, "meta", meta)
         _kv_set(conn, "tables", tables)
+        if migration_report is not None:
+            _kv_set(conn, MIGRATION_KV_KEY, {**migration_report, "acknowledged": False})
         conn.commit()
+    if migration_report is not None:
+        meta = {**meta, "costBasisMigration": migration_report}
     logger.info("Session %s (sqlite): stored %d sheets, %d snapshots", session_id, len(sheets_meta), len(labels))
     return meta
+
+
+# ── cost-basis schema (PyPSA semantics) ───────────────────────────────────────────
+
+def _ingest_cost_basis(
+    model: dict[str, list[dict[str, Any]]],
+    *,
+    legacy_origin: bool,
+    discount_rate: float | None = None,
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any] | None]:
+    """Stamp (or, for an old Ragnarok workbook, migrate) ``model``; returns ``(model, report | None)``.
+
+    ``report`` is the migration report dict when something was converted or flagged, else ``None``.
+    """
+    from ..pypsa.network import cost_basis as cb
+
+    if cb.schema_version(model) is not None:
+        return model, None
+    # The workbook's OWN rate (its scenario preset / RAGNAROK_Settings sheet) wins over the app's current Settings value.
+    file_rate, _source = cb.resolve_discount_rate(model, None) if legacy_origin else (None, "")
+    out, report = cb.migrate_cost_basis(
+        model, discount_rate=file_rate if file_rate is not None else discount_rate, pypsa_native=not legacy_origin
+    )
+    if not (report.changed_rows or report.review):
+        return out, None  # stamped; nothing worth a notice
+    return out, report.as_dict()
+
+
+def _read_static_sheets(conn: sqlite3.Connection, meta: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    tables = _kv_get(conn, "tables") or {}
+    model: dict[str, list[dict[str, Any]]] = {}
+    for entry in meta.get("sheets", []):
+        if not isinstance(entry, dict) or entry.get("kind") == "series":
+            continue
+        tbl = tables.get(str(entry.get("name")))
+        if tbl is None:
+            continue
+        model[str(entry["name"])] = [
+            json.loads(r[0]) for r in conn.execute(f"SELECT d FROM {tbl} ORDER BY __row").fetchall()
+        ]
+    return model
+
+
+def _write_static_sheet(
+    conn: sqlite3.Connection, meta: dict[str, Any], tables: dict[str, str], name: str, rows: list[dict[str, Any]]
+) -> None:
+    tbl = tables.get(name)
+    if tbl is None:
+        tbl = f"sheet_{len(tables)}"
+        while tbl in tables.values():
+            tbl += "_"
+        tables[name] = tbl
+    conn.execute(f"CREATE TABLE IF NOT EXISTS {tbl} (__row INTEGER PRIMARY KEY AUTOINCREMENT, d TEXT)")
+    conn.execute(f"DELETE FROM {tbl}")
+    conn.executemany(
+        f"INSERT INTO {tbl}(d) VALUES(?)",
+        [(json.dumps(row, ensure_ascii=False, default=ss.json_default),) for row in rows if isinstance(row, dict)],
+    )
+    columns = ss.columns_of_rows(rows)
+    entry = next((s for s in meta.get("sheets", []) if isinstance(s, dict) and s.get("name") == name), None)
+    if entry is None:
+        meta.setdefault("sheets", []).append({"name": name, "kind": "static", "rowCount": len(rows), "columns": columns})
+    else:
+        entry["rowCount"] = len(rows)
+        entry["columns"] = columns
+
+
+def _ensure_cost_basis(session_id: str) -> None:
+    """Migrate a session db written before schema 2 (a bundled example, an old project.db), once.
+
+    Cheap when the db carries ``RAGNAROK_Schema``. Otherwise the static sheets are migrated in
+    place, the report is stored in ``_kv`` (shown to the user once; see :func:`get_cost_basis_migration`)
+    and one journal entry (with an undo snapshot) records it.
+    """
+    from ..pypsa.network import cost_basis as cb
+
+    db = _db_path(session_id)
+    if not db.exists():
+        return
+    with _migration_lock(session_id):
+        try:
+            with _connect(session_id) as conn:
+                meta = _kv_get(conn, "meta")
+        except Exception:  # noqa: BLE001
+            return
+        if not isinstance(meta, dict):
+            return
+        if any(isinstance(s, dict) and s.get("name") == cb.SCHEMA_SHEET for s in meta.get("sheets", [])):
+            return
+        from . import journal
+
+        with journal.migration_scope(session_id, "migrate cost basis to PyPSA semantics (schema 2)") as scope:
+            with _connect(session_id) as conn:
+                meta = _kv_get(conn, "meta") or meta
+                tables = _kv_get(conn, "tables") or {}
+                static = _read_static_sheets(conn, meta)
+                migrated, report = cb.migrate_cost_basis(static, pypsa_native=False)
+                before = {k: v for k, v in static.items()}
+                for name, rows in migrated.items():
+                    if name == cb.SCHEMA_SHEET or before.get(name) != rows:
+                        _write_static_sheet(conn, meta, tables, name, rows)
+                _kv_set(conn, "meta", meta)
+                _kv_set(conn, "tables", tables)
+                if report.changed_rows or report.review:
+                    _kv_set(conn, MIGRATION_KV_KEY, {**report.as_dict(), "acknowledged": False})
+                conn.commit()
+            scope["report"] = report.as_dict()
+            scope["changed"] = bool(report.changed_rows or report.review)
+        logger.info(
+            "Session %s: cost-basis migration to schema 2 (%d row(s), %d flagged)",
+            session_id, len(report.changed_rows), len(report.review),
+        )
+
+
+def get_cost_basis_migration(session_id: str, *, include_acknowledged: bool = False) -> dict[str, Any] | None:
+    """The session's cost-basis migration report, ``None`` when there is none or it was acknowledged."""
+    if not ss._is_safe_id(session_id) or not _db_path(session_id).exists():
+        return None
+    _ensure_cost_basis(session_id)
+    with _connect(session_id) as conn:
+        value = _kv_get(conn, MIGRATION_KV_KEY)
+    if not isinstance(value, dict):
+        return None
+    if value.get("acknowledged") and not include_acknowledged:
+        return None
+    return value
+
+
+def acknowledge_cost_basis_migration(session_id: str) -> bool:
+    """Mark the migration notice as seen. Returns whether there was one to acknowledge."""
+    if not ss._is_safe_id(session_id) or not _db_path(session_id).exists():
+        return False
+    with _connect(session_id) as conn:
+        value = _kv_get(conn, MIGRATION_KV_KEY)
+        if not isinstance(value, dict):
+            return False
+        _kv_set(conn, MIGRATION_KV_KEY, {**value, "acknowledged": True})
+    return True
 
 
 def merge_static_model(session_id: str, model: dict[str, list[dict[str, Any]]]) -> dict[str, Any] | None:

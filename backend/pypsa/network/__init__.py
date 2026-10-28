@@ -35,7 +35,6 @@ from ..pypsa_schema import (
     input_static_attributes,
     input_temporal_attributes,
 )
-from ..utils.annuity import annuity_factor
 from ..utils.coerce import number
 from .demand_response import apply_demand_response, apply_price_elastic
 from .load_shedding import add_load_shedding
@@ -61,9 +60,9 @@ from .components import (
 )
 from .network_sheet import _apply_network_sheet, _peak_load_per_bus
 from .serialize import ANNOTATION_COLUMNS
-from .piecewise import apply_carbon_to_curves, apply_piecewise_sheets, scale_capital_curves
+from .piecewise import apply_carbon_to_curves, apply_piecewise_sheets
 
-__all__ = ["build_network", "validate_model"]
+__all__ = ["build_components", "build_network", "build_stored_network", "validate_model"]
 
 # Any finite value with absolute magnitude beyond this threshold is treated as
 # a placeholder for "no limit". Workbooks exported by upstream tooling often
@@ -284,76 +283,23 @@ def _carry_plant_ids(network: pypsa.Network, model: dict[str, Any]) -> None:
             if tags:
                 frame[col] = [tags.get(str(i), "") for i in frame.index]
 
-def build_network(
+def _load_model(
     model: dict[str, list[dict[str, Any]]],
-    scenario: dict[str, Any],
-    options: dict[str, Any] | None = None,
-) -> tuple[pypsa.Network, list[str]]:
-    """Build a solved-ready PyPSA Network from the JSON workbook model.
+    pathway: Any,
+    notes: list[str],
+    *,
+    sanitize: bool,
+    stochastic_enabled: bool = False,
+) -> tuple[pypsa.Network, dict[str, pd.Index], pd.DataFrame | None]:
+    """Hand the workbook to PyPSA 1:1: the network sheet, snapshots, every component and time series.
 
-    Args:
-        model:      ``{sheet_name: [row_dict, ...]}`` — the GUI workbook.
-        scenario:   ``{carbonPrice, discountRate, constraints, ...}``.
-                    ``discountRate`` is required only when the run has extendable
-                    capacity carrying a capital cost — it annuitises that cost, and
-                    nothing else reads it. Dispatch-only runs may omit it.
-        options:    ``{snapshotStart, snapshotCount, snapshotWeight, forceLp,
-                    enableLoadShedding, loadSheddingCost, currencySymbol, …}``
+    No run-time conversion happens here: values go in exactly as the workbook holds them.
+    ``sanitize`` additionally snaps 1e9+ placeholder bounds to ±inf and clears a deprecated
+    ``v_ang_min`` - a run-time convenience that a build serialised back to a workbook must not apply.
 
     Returns:
-        ``(network, notes)``
+        ``(network, uncovered_by_sheet, authored_weights)``.
     """
-    notes: list[str] = []
-    options = options or {}
-    pathway = parse_pathway_config(options.get("pathwayConfig"))
-    sampling = parse_sampling_config(options.get("samplingConfig"))
-    stochastic = parse_stochastic_config(options.get("stochasticConfig"))
-    rolling = parse_rolling_config(options.get("rollingConfig"))
-
-    # RS6: the custom-constraint compilers index ``Generator-p`` by (snapshot,
-    # name); under stochastic mode linopy adds a scenario level, so they would
-    # crash mid-solve with a tuple-index error. Refuse up front, clearly.
-    if stochastic.enabled:
-        active = [
-            what for what, present in (
-                ("custom constraints", any(
-                    isinstance(c, dict) and c.get("enabled", False)
-                    for c in scenario.get("constraints") or []
-                )),
-                ("constraint specs", bool(scenario.get("constraintSpecs"))),
-                ("DSL constraints", bool(str(scenario.get("customDsl") or "").strip())),
-            ) if present
-        ]
-        if active:
-            from fastapi import HTTPException
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Stochastic scenarios cannot be combined with {' / '.join(active)}: "
-                    "they are not scenario-aware yet and would be built on the wrong "
-                    "variable dimensions. Disable them, or turn stochastic mode off."
-                ),
-            )
-
-    # `discountRate` is consumed by exactly one thing: CAPEX annuitisation below.
-    # So it is REQUIRED THERE, when there is CAPEX to annuitise, and not here —
-    # a dispatch run cannot be affected by it, and demanding it anyway teaches
-    # callers to supply a placeholder that then looks like a study input.
-    raw_rate = scenario.get("discountRate")
-    discount_rate = None if raw_rate is None or raw_rate == "" else number(raw_rate)
-    if discount_rate is not None and not (0.0 <= discount_rate < 1.0):
-        from fastapi import HTTPException
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"discountRate must be a fraction with 0 <= r < 1 (e.g. 0.05 for 5 %), "
-                f"got {discount_rate:g}. A percentage typed as a whole number (5) would "
-                "annuitise capital cost at 500 %."
-            ),
-        )
-    carbon_price = number(scenario.get("carbonPrice"), 0.0)
-    currency = str(options.get("currencySymbol", "$"))
-
     network = pypsa.Network()
 
     _apply_network_sheet(network, model, notes)
@@ -416,11 +362,12 @@ def build_network(
         network.add(cls, df.index.tolist(), **kwargs)
 
     # PyPSA >= 1.3 piecewise-linear curves (`<list>-<attr>-pw` sheets), attached
-    # once every component exists; capital curves are annuitised further down.
-    apply_piecewise_sheets(network, model, notes, stochastic=stochastic.enabled)
+    # once every component exists.
+    apply_piecewise_sheets(network, model, notes, stochastic=stochastic_enabled)
 
-    _sanitize_placeholder_bounds(network, notes)
-    _drop_deprecated_v_ang_min(network, notes)
+    if sanitize:
+        _sanitize_placeholder_bounds(network, notes)
+        _drop_deprecated_v_ang_min(network, notes)
 
     _carry_plant_ids(network, model)
 
@@ -464,6 +411,178 @@ def build_network(
         if len(gaps) > 0:
             uncovered_by_sheet[sheet_name] = gaps
     _normalize_dynamic_snapshot_index_names(network)
+
+    return network, uncovered_by_sheet, authored_weights
+
+
+def _require_discount_rate_for_overnight(network: pypsa.Network) -> None:
+    """Refuse a run whose ``overnight_cost`` rows lack a ``discount_rate``.
+
+    PyPSA annuitises ``overnight_cost`` with the row's own ``discount_rate`` and refuses to
+    guess one (``check_cost_consistency``). Ragnarok does not fill it in at run time either:
+    the column has to be in the workbook (Forge -> Fill discount rate).
+    """
+    from fastapi import HTTPException
+
+    for comp in network.components.values():
+        frame = comp.static
+        if frame.empty or "overnight_cost" not in frame.columns or "discount_rate" not in frame.columns:
+            continue
+        overnight = pd.to_numeric(frame["overnight_cost"], errors="coerce").notna()
+        missing = overnight & pd.to_numeric(frame["discount_rate"], errors="coerce").isna()
+        if bool(missing.any()):
+            names = ", ".join(map(str, frame.index[missing][:5])) + ("..." if int(missing.sum()) > 5 else "")
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"{int(missing.sum())} {comp.name} row(s) carry an overnight_cost but no discount_rate "
+                    f"({names}). PyPSA annuitises overnight_cost with the row's own discount_rate and does "
+                    "not guess one. Write it into the workbook: Forge -> Fill discount rate "
+                    "(or set a discount_rate per asset)."
+                ),
+            )
+
+
+def build_components(
+    model: dict[str, list[dict[str, Any]]],
+    options: dict[str, Any] | None = None,
+) -> tuple[pypsa.Network, list[str]]:
+    """The workbook as a PyPSA network, 1:1 and nothing else.
+
+    Use this for every build whose network is serialised BACK to a workbook (Forge
+    transforms, netcdf / hdf5 export). :func:`build_network` is the run builder: it
+    also windows the snapshots, scales annual energy caps, adds the carbon price to
+    marginal costs, load shedding and demand response, relaxes commitment, snaps 1e9
+    placeholders to inf and drops ``v_ang_min`` - each correct for a solve and each
+    wrong in a workbook the user keeps. None of that happens here, and no cost is
+    ever converted (``capital_cost`` / ``overnight_cost`` / ``fom_cost`` pass through).
+
+    Only ``options["pathwayConfig"]`` is read: it decides whether the snapshots carry
+    investment periods. The whole time axis is built.
+
+    Returns:
+        ``(network, notes)``.
+    """
+    notes: list[str] = []
+    pathway = parse_pathway_config((options or {}).get("pathwayConfig"))
+    network, uncovered_by_sheet, _weights = _load_model(model, pathway, notes, sanitize=False)
+    _raise_on_uncovered_snapshots(network, uncovered_by_sheet)
+    return network, notes
+
+
+def _raise_on_uncovered_snapshots(network: pypsa.Network, uncovered_by_sheet: dict[str, pd.Index]) -> None:
+    """A time-series sheet that skips snapshots the build uses would read NaN there (an unbounded bound)."""
+    for sheet_name, gaps in uncovered_by_sheet.items():
+        missing = gaps.intersection(network.snapshots)
+        if len(missing) > 0:
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Time-series sheet '{sheet_name}' has no row for {len(missing)} of the "
+                    f"{len(network.snapshots)} modelled snapshot(s) (first: {missing[0]}). "
+                    "A missing value would drop that bound in the LP, so the run is refused — "
+                    "add the missing rows, or remove the sheet to use the static value."
+                ),
+            )
+
+
+def build_stored_network(
+    model: dict[str, list[dict[str, Any]]],
+    scenario: dict[str, Any],
+    options: dict[str, Any] | None = None,
+) -> tuple[pypsa.Network, list[str]]:
+    """:func:`build_network` for a STORED run's inputs (re-derivation of analytics, no solve).
+
+    A run solved before ``buildVersion`` was stamped holds an overnight ``capital_cost`` that the old
+    builder annuitised; it is migrated in memory first (:func:`cost_basis.model_for_stored_run`) so
+    PyPSA reproduces the stored numbers. A stamped run goes straight through.
+    """
+    from .cost_basis import model_for_stored_run
+
+    current, report = model_for_stored_run(model, scenario, options)
+    network, notes = build_network(current, scenario, options)
+    if report is not None and report.changed_rows:
+        notes.append(
+            f"Stored run from before the PyPSA cost basis: {len(report.changed_rows)} capital cost row(s) read as "
+            f"overnight_cost at the run's discount rate ({report.discount_rate:g}) - the same figures it was solved with."
+        )
+    return network, notes
+
+
+def build_network(
+    model: dict[str, list[dict[str, Any]]],
+    scenario: dict[str, Any],
+    options: dict[str, Any] | None = None,
+) -> tuple[pypsa.Network, list[str]]:
+    """Build a solved-ready PyPSA Network from the JSON workbook model.
+
+    Args:
+        model:      ``{sheet_name: [row_dict, ...]}`` — the GUI workbook.
+        scenario:   ``{carbonPrice, discountRate, constraints, ...}``.
+                    ``discountRate`` is required only when the run has extendable
+                    capacity carrying a capital cost — it annuitises that cost, and
+                    nothing else reads it. Dispatch-only runs may omit it.
+        options:    ``{snapshotStart, snapshotCount, snapshotWeight, forceLp,
+                    enableLoadShedding, loadSheddingCost, currencySymbol, …}``
+
+    Returns:
+        ``(network, notes)``
+    """
+    notes: list[str] = []
+    options = options or {}
+    pathway = parse_pathway_config(options.get("pathwayConfig"))
+    sampling = parse_sampling_config(options.get("samplingConfig"))
+    stochastic = parse_stochastic_config(options.get("stochasticConfig"))
+    rolling = parse_rolling_config(options.get("rollingConfig"))
+
+    # RS6: the custom-constraint compilers index ``Generator-p`` by (snapshot,
+    # name); under stochastic mode linopy adds a scenario level, so they would
+    # crash mid-solve with a tuple-index error. Refuse up front, clearly.
+    if stochastic.enabled:
+        active = [
+            what for what, present in (
+                ("custom constraints", any(
+                    isinstance(c, dict) and c.get("enabled", False)
+                    for c in scenario.get("constraints") or []
+                )),
+                ("constraint specs", bool(scenario.get("constraintSpecs"))),
+                ("DSL constraints", bool(str(scenario.get("customDsl") or "").strip())),
+            ) if present
+        ]
+        if active:
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Stochastic scenarios cannot be combined with {' / '.join(active)}: "
+                    "they are not scenario-aware yet and would be built on the wrong "
+                    "variable dimensions. Disable them, or turn stochastic mode off."
+                ),
+            )
+
+    # `discountRate` no longer converts anything: costs go to PyPSA as the workbook holds
+    # them, and each overnight_cost row carries its own discount_rate. The scenario value
+    # is the project setting Forge writes INTO the workbook (Fill discount rate); it is
+    # still range-checked so a percentage typed as 5 cannot be written as 500 %.
+    raw_rate = scenario.get("discountRate")
+    discount_rate = None if raw_rate is None or raw_rate == "" else number(raw_rate)
+    if discount_rate is not None and not (0.0 <= discount_rate < 1.0):
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"discountRate must be a fraction with 0 <= r < 1 (e.g. 0.05 for 5 %), "
+                f"got {discount_rate:g}. A percentage typed as a whole number (5) would "
+                "be written as a 500 % discount rate."
+            ),
+        )
+    carbon_price = number(scenario.get("carbonPrice"), 0.0)
+    currency = str(options.get("currencySymbol", "$"))
+
+    network, uncovered_by_sheet, authored_weights = _load_model(
+        model, pathway, notes, sanitize=True, stochastic_enabled=stochastic.enabled
+    )
 
     # ── Snapshot windowing & downsampling ─────────────────────────────────────
     start = max(0, int(number(options.get("snapshotStart"), 0)))
@@ -560,19 +679,7 @@ def build_network(
     # A time-series sheet that skips snapshots the run actually models leaves NaN
     # there, which PyPSA/linopy reads as "no bound" (an unbounded generator).
     # Rows outside the modelled window are irrelevant, so check only now.
-    for sheet_name, gaps in uncovered_by_sheet.items():
-        missing = gaps.intersection(network.snapshots)
-        if len(missing) > 0:
-            from fastapi import HTTPException
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Time-series sheet '{sheet_name}' has no row for {len(missing)} of the "
-                    f"{len(network.snapshots)} modelled snapshot(s) (first: {missing[0]}). "
-                    "A missing value would drop that bound in the LP, so the run is refused — "
-                    "add the missing rows, or remove the sheet to use the static value."
-                ),
-            )
+    _raise_on_uncovered_snapshots(network, uncovered_by_sheet)
 
     # ── Period-factor scaling of annual energy caps ───────────────────────────
     sim_cfg = load_system_defaults().get("simulation", {})
@@ -604,132 +711,12 @@ def build_network(
     apply_carbon_price(network, carbon_config, notes, currency)
     _apply_carbon_to_piecewise(network, carbon_config, notes)
 
-    # ── Annuitise CAPEX for extendable assets ─────────────────────────────────
-    # The extendable flag column name varies by component (p_nom_extendable,
-    # s_nom_extendable, e_nom_extendable). Find it via PyPSA's defaults.
-    #
-    # A workbook `capital_cost` is an OVERNIGHT cost; the network carries the
-    # annuitised one. So a caller that builds a network only to serialise it
-    # BACK to a workbook (`network_to_model` — the Forge reduce/cluster
-    # transform) must opt out: otherwise the reduced workbook stores an
-    # already-annuitised cost, the next run annuitises it a second time, and
-    # extendable CAPEX collapses to ~AF² of its real value (≈0.6% at r=5%,
-    # 20 y), which makes capacity expansion effectively free.
-    fallback_lifetime = float(sim_cfg.get("fallback_lifetime_years", 20.0))
-    annuitisable: tuple[str, ...] = (
-        () if bool(options.get("skipCapexAnnuitisation", False))
-        else ("generators", "storage_units", "stores", "lines", "links", "processes")
-    )
-    # RS1: the LP compares capital cost against operating cost over the modelled
-    # window, so the ANNUAL annuity must be pro-rated to that window or a 168 h
-    # run builds nothing that an 8760 h run builds. Single-period only: pathway
-    # runs weight periods through investment_period_weightings instead. The
-    # factor is published in network.meta so reporting does not pro-rate twice.
-    modelled_hours_total = float(network.snapshot_weightings["objective"].sum())
-    capex_window_scale = 1.0
-    window_scaled = 0
-    if annuitisable and not pathway.enabled and modelled_hours_total > 0:
-        capex_window_scale = modelled_hours_total / hours_in_year
-    for list_name in annuitisable:
-        comp = network.components[list_name]
-        frame = comp.static
-        ext_cols = [c for c in frame.columns if c.endswith("_nom_extendable")]
-        if not ext_cols or "capital_cost" not in frame.columns:
-            continue
-        ext = frame[ext_cols[0]].astype(bool)
-        if not ext.any():
-            continue
-        # P15: a finite PyPSA-native `overnight_cost` takes precedence over
-        # `capital_cost` and PyPSA annuitises it itself (discount_rate, lifetime,
-        # window pro-rating and fom_cost). Those rows must NOT be annuitised or
-        # window-scaled a second time here; they only need a discount rate.
-        if "overnight_cost" in frame.columns:
-            native = ext & pd.to_numeric(frame["overnight_cost"], errors="coerce").notna()
-            if native.any():
-                if "discount_rate" in frame.columns:
-                    dr_col = pd.to_numeric(frame["discount_rate"], errors="coerce")
-                    missing = native & dr_col.isna()
-                    if missing.any():
-                        if discount_rate is None:
-                            from fastapi import HTTPException
-                            raise HTTPException(
-                                status_code=400,
-                                detail=(
-                                    f"discountRate is required for THIS run: {int(missing.sum())} extendable "
-                                    f"{comp.name}(s) carry overnight_cost but no discount_rate. Put "
-                                    "scenario={\"discountRate\": 0.05} (or a per-asset discount_rate)."
-                                ),
-                            )
-                        frame.loc[missing, "discount_rate"] = float(discount_rate)
-                notes.append(
-                    f"{int(native.sum())} extendable {comp.name}(s) use PyPSA-native overnight_cost "
-                    "(annuitised by PyPSA with discount_rate/lifetime, plus fom_cost); capital_cost ignored."
-                )
-                ext = ext & ~native
-                if not ext.any():
-                    continue
-        # 0 × AF is 0 at every rate, so free extendable capacity needs no rate.
-        costs = pd.to_numeric(frame.loc[ext, "capital_cost"], errors="coerce").fillna(0.0)
-        if not bool(costs.abs().gt(0).any()) and not comp.has_piecewise("capital_cost"):
-            continue
-        if discount_rate is None:
-            from fastapi import HTTPException
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"discountRate is required for THIS run: {int(ext.sum())} "
-                    f"extendable {comp.name}(s) carry a capital cost, and the "
-                    "discount rate is what turns that overnight cost into the "
-                    "annual one the objective compares against fuel. It belongs in "
-                    "`scenario`, not `options` — e.g. "
-                    "scenario={\"discountRate\": 0.05}. (In the GUI: Settings -> "
-                    "Discount rate.) No default is applied on purpose: a low rate "
-                    "makes new capacity look cheap and a high one makes it look "
-                    "expensive, so how much gets built depends on this number. "
-                    "A run with no expandable capacity needs no rate at all."
-                ),
-            )
-        if "lifetime" in frame.columns:
-            # PyPSA DEFAULTS lifetime to +inf, which has no finite annuity factor
-            # (annuity_factor(rate, inf) → NaN). Without this guard the extendable
-            # asset's capital_cost annuitises to NaN → 0 in the objective, so it
-            # builds for FREE up to its max. Treat inf / NaN / ≤0 as the system-default
-            # fallback lifetime (noted) so CAPEX is actually priced.
-            lifetimes = pd.to_numeric(frame.loc[ext, "lifetime"], errors="coerce")
-            usable = (lifetimes > 0) & (lifetimes < float("inf"))
-            if not bool(usable.all()):
-                notes.append(
-                    f"{int((~usable).sum())} extendable {comp.name}(s) have no finite lifetime — "
-                    f"annuitised over the system default of {fallback_lifetime:g} years "
-                    "(simulation.fallback_lifetime_years)."
-                )
-            lifetimes = lifetimes.where(usable, fallback_lifetime)
-        else:
-            lifetimes = pd.Series(fallback_lifetime, index=frame.index[ext])
-            notes.append(
-                f"{int(ext.sum())} extendable {comp.name}(s) carry no lifetime column — "
-                f"annuitised over the system default of {fallback_lifetime:g} years."
-            )
-        afs = lifetimes.apply(lambda L: annuity_factor(discount_rate, float(L)))
-        frame.loc[ext, "capital_cost"] = frame.loc[ext, "capital_cost"].fillna(0.0) * afs
-        scale_capital_curves(network, list_name, afs)  # piecewise capital curves: same annuity
-        notes.append(
-            f"Annualised CAPEX for {int(ext.sum())} extendable {comp.name}(s) "
-            f"at discount rate {discount_rate:.3f}."
-        )
-        if capex_window_scale != 1.0:
-            frame.loc[ext, "capital_cost"] = frame.loc[ext, "capital_cost"] * capex_window_scale
-            scale_capital_curves(
-                network, list_name, pd.Series(capex_window_scale, index=frame.index[ext])
-            )
-            window_scaled += int(ext.sum())
-    if window_scaled:
-        network.meta["ragnarok_capex_window_scale"] = float(capex_window_scale)
-        notes.append(
-            f"Scaled annualised CAPEX of {window_scaled} extendable asset(s) to the modelled "
-            f"window (x{capex_window_scale:.4g} = {modelled_hours_total:g} h / "
-            f"{hours_in_year:g} h) so expansion trades against the energy it serves."
-        )
+    # ── Cost basis ────────────────────────────────────────────────────────────
+    # Nothing is converted here. `capital_cost` is PyPSA's periodised cost per
+    # modelled horizon and `overnight_cost` is annuitised by PyPSA itself
+    # (annuity(discount_rate, lifetime) x nyears, plus `fom_cost`; pypsa.costs).
+    # A row that carries an overnight_cost therefore has to carry its discount_rate.
+    _require_discount_rate_for_overnight(network)
 
     # ── Force-LP override (ignore committable=True flags) ─────────────────────
     # Generators and Links share the commitment machinery (status / start-up

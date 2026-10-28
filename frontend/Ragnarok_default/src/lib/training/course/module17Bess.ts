@@ -974,11 +974,11 @@ export const MODULE_17_BESS: TutorialStep[] = [
     where: 'Build → Storage, then load the Store + Link checkpoint',
     concept: [
       'Every step so far fixed the battery and read the result. The model can also choose its size. A '
-      + 'StorageUnit can be extendable: set p_nom_extendable, a capital_cost and a p_nom_max, and the '
+      + 'StorageUnit can be extendable: set p_nom_extendable, an overnight_cost and a p_nom_max, and the '
       + 'optimiser buys the power. The energy follows automatically, because a StorageUnit holds energy = '
       + 'p_nom x max_hours — the duration is a number YOU fixed, and it does not get chosen.',
 
-      'That is the limitation, and it has a price. Give the unit a capital cost of 1,000,000 per MW and four '
+      'That is the limitation, and it has a price. Give the unit an overnight cost of 1,000,000 per MW and four '
       + 'hours and the model buys 92.96 MW and 371.8 MWh; Total cost 950,780. Cost per MW includes the '
       + 'energy: spread over 4 hours that is 250,000 per MWh. Change max_hours to 2 without changing the cost and '
       + 'the energy is suddenly 500,000 a MWh; the model buys 95.4 MW, 190.7 MWh, and Total cost is 997,308 — '
@@ -1001,12 +1001,12 @@ export const MODULE_17_BESS: TutorialStep[] = [
     ],
     explain: [
       'Put the model in its module state: batt at 100 MW, 4 h, cyclic. Build → Storage. Make the unit extendable: '
-      + 'set `p_nom_extendable` on, `p_nom` 0, `p_nom_min` 0, `p_nom_max` 400, `capital_cost` 1000000, `lifetime` 15. '
+      + 'set `p_nom_extendable` on, `p_nom` 0, `p_nom_min` 0, `p_nom_max` 400, `overnight_cost` 1000000, `lifetime` 15, `discount_rate` 0.05 (Settings → Project defaults → "Fill discount_rate" writes it). '
       + 'Total cost reads 950,780 and the Capacity Expansion card shows batt at 93.0 MW.',
 
-      'Note the arithmetic. Ragnarok annuitises the overnight 1,000,000 at 5% over 15 years — factor 0.0963423, '
-      + 'so 96,342 a MW-year — and pro-rates it to the 72-hour window, 72/8760. The cost breakdown (Analytics → Comparison, '
-      + 'or the run\'s costBreakdown in the API) reads "Capital cost (annuity, pro-rated to window)": 73,611. That pro-rating is why a three-day window '
+      'Note the arithmetic. PyPSA annuitises the overnight 1,000,000 at 5% over 15 years — factor 0.0963423, '
+      + 'so 96,342 a MW-year — and scales it by n.nyears, 72/8760 for the 72-hour window. The cost breakdown (Analytics → Comparison, '
+      + 'or the run\'s costBreakdown in the API) reads "Capital cost (periodised, modelled horizon)": 73,611 — PyPSA\'s own n.statistics.capex. That scaling is why a three-day window '
       + 'still prices a battery against three days of savings, and why those savings are not a year\'s.',
 
       'Now the trap. Change `max_hours` to 2 and run (997,308), then to 8 (882,154), each time with the same '
@@ -1056,11 +1056,11 @@ export const MODULE_17_BESS: TutorialStep[] = [
           + 'a zero capital cost would be free unbounded storage; the bound is what makes the answer finite.',
       },
       {
-        field: 'storage_units.capital_cost and lifetime',
+        field: 'storage_units.overnight_cost and lifetime',
         label: 'overnight cost per MW, at four hours, and life',
         value: '1000000 and 15',
         unit: 'per MW; years',
-        why: 'Overnight, as a cost database quotes it; Ragnarok annuitises it. At four hours it contains 250,000 '
+        why: 'Overnight, as a cost database quotes it; PyPSA annuitises it. At four hours it contains 250,000 '
           + 'per MWh of energy, a figure that silently changes if you change max_hours.',
       },
       {
@@ -1079,7 +1079,7 @@ export const MODULE_17_BESS: TutorialStep[] = [
     },
     verify: [
       'With the extendable StorageUnit the Capacity Expansion card shows batt at 93.0 MW and Total cost reads 950,780',
-      'At max_hours 2 and 8 the cost is 997,308 and 882,154 with the same capital_cost',
+      'At max_hours 2 and 8 the cost is 997,308 and 882,154 with the same overnight_cost',
       'The Store checkpoint reads Total cost 948,727 with 401.4 MWh, 53.6 MW in and 97.9 MW out',
       'You can say why the charging link is smaller than the discharging one',
       'You can say two situations where a StorageUnit is the wrong component',

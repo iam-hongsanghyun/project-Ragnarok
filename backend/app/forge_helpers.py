@@ -255,12 +255,16 @@ def get_template(template_id: str) -> dict[str, Any] | None:
 
 def build_conversion_fragment(
     template: dict[str, Any], *, anchor_bus: str, p_nom: float, extendable: bool,
-    name: str | None, model: Model,
+    name: str | None, model: Model, discount_rate: float | None = None,
 ) -> dict[str, Any]:
     """Fragment (``{"sheets": ...}``) adding one conversion technology to ``model``.
 
     Reuses existing carrier buses / fuel supplies / carriers and emits only
-    genuinely-new rows. Raises ``ValueError`` if the anchor bus is unknown.
+    genuinely-new rows. An extendable conversion carries PyPSA's own cost columns: ``overnight_cost``
+    (the template's price), ``fom_cost`` (per modelled horizon: ``fomPct`` % of it per year x the
+    workbook's horizon in years), ``lifetime`` and ``discount_rate``, with ``capital_cost`` left
+    blank - PyPSA annuitises it. Raises ``ValueError`` if the anchor bus is unknown, or an extendable
+    conversion is asked for without a ``discount_rate`` (PyPSA refuses an overnight_cost without one).
     """
     buses = model.get("buses") or []
     anchor = next((b for b in buses if _str(b.get("name")) == anchor_bus), None)
@@ -332,8 +336,19 @@ def build_conversion_fragment(
         link["bus2"] = bus2
         link["efficiency2"] = template.get("efficiency2") or 0
     if extendable:
+        if discount_rate is None:
+            raise ValueError(
+                "An extendable conversion needs a discount rate: its overnight_cost is annuitised by PyPSA "
+                "with the row's own discount_rate. Set Settings -> Discount rate (or pass discount_rate)."
+            )
+        from ..pypsa.network.cost_basis import horizon_years
+
         link["p_nom_extendable"] = True
-        link["capital_cost"] = template["capitalCost"]
+        link["overnight_cost"] = template["capitalCost"]
+        link["fom_cost"] = round(
+            float(template["capitalCost"]) * float(template.get("fomPct") or 0.0) / 100.0 * horizon_years(model), 6
+        )
+        link["discount_rate"] = float(discount_rate)
     else:
         link["p_nom"] = p_nom
     if template.get("marginalCost"):
@@ -349,6 +364,51 @@ def build_conversion_fragment(
     if new_gens:
         sheets["generators"] = new_gens
     return {"sheets": sheets}
+
+
+# ── Forge: fill discount_rate ────────────────────────────────────────────────
+
+#: Component sheets whose rows can carry PyPSA's cost columns.
+_COST_SHEETS = ("generators", "storage_units", "stores", "lines", "links", "processes", "transformers")
+
+
+def fill_discount_rate(model: Model, rate: float, *, overwrite: bool = False) -> dict[str, Any]:
+    """Write ``discount_rate`` into every row that carries an ``overnight_cost``.
+
+    PyPSA annuitises ``overnight_cost`` with the ROW's own ``discount_rate`` and refuses a row that has
+    none; Ragnarok no longer fills it in at run time. This is the visible action that does: the
+    Settings -> Discount rate value lands in the workbook column, where it can be read and edited
+    per asset. Rows that already carry a rate are left alone unless ``overwrite``.
+
+    Returns:
+        ``{sheets, filled, overwritten, skipped}``; ``sheets`` holds only the changed sheets' rows.
+
+    Raises:
+        ValueError: ``rate`` is not a fraction in [0, 1) (a percentage typed as 5 would be 500 %).
+    """
+    if not 0.0 <= float(rate) < 1.0:
+        raise ValueError(f"discount rate must be a fraction in [0, 1) (0.05 = 5 %), got {rate!r}.")
+    changed: dict[str, list[Row]] = {}
+    filled = overwritten = skipped = 0
+    for sheet in _COST_SHEETS:
+        rows = _copy_rows(model, sheet)
+        touched = False
+        for row in rows:
+            if _str(row.get("overnight_cost")).strip() in ("", "nan", "NaN", "None"):
+                continue
+            have = _str(row.get("discount_rate")).strip() not in ("", "nan", "NaN", "None")
+            if have and not overwrite:
+                skipped += 1
+                continue
+            row["discount_rate"] = float(rate)
+            touched = True
+            if have:
+                overwritten += 1
+            else:
+                filled += 1
+        if touched:
+            changed[sheet] = rows
+    return {"sheets": changed, "filled": filled, "overwritten": overwritten, "skipped": skipped}
 
 
 # ── Forge: bulk adjust / revert ──────────────────────────────────────────────

@@ -81,8 +81,8 @@ def test_store_with_links_counts_in_company_finance_and_statement() -> None:
 
 
 def test_finance_and_statement_charge_storage_capex_by_one_rule() -> None:
-    # Extendable: both charge capital_cost x p_nom_opt. Fixed size: neither does,
-    # whatever capital_cost says (the solve never charged it).
+    # Both read n.statistics.capex (capital_cost x capacity over the horizon) / n.nyears, installed or
+    # built alike: a fixed 25 MW unit carries its sunk capital cost, an extendable one the capacity built.
     for extendable in (True, False):
         kwargs: dict[str, Any] = {"capital_cost": 3.0, "max_hours": 4.0}
         kwargs.update({"p_nom_extendable": True, "p_nom_max": 30.0} if extendable else {"p_nom": 25.0})
@@ -97,13 +97,11 @@ def test_finance_and_statement_charge_storage_capex_by_one_rule() -> None:
         assert stmt is not None
         statement_capex = stmt["companies"][0]["capexAnnual"]
         finance_capex = fin["companies"][0]["overnightCapex"] * _crf(0.05, 25.0) if fin else 0.0
-        if extendable:
-            built = float(n.storage_units.at["st", "p_nom_opt"])
-            assert built > 0
-            assert statement_capex == pytest.approx(3.0 * built, rel=1e-9)
-            assert finance_capex == pytest.approx(statement_capex, rel=1e-4)  # overnight is rounded to 0.01
-        else:
-            assert statement_capex == 0.0 and finance_capex == 0.0
+        size = float(n.storage_units.at["st", "p_nom_opt"])
+        assert size > 0 and (extendable or size == 25.0)
+        expected = 3.0 * size / float(n.nyears)
+        assert statement_capex == pytest.approx(expected, rel=1e-9)
+        assert finance_capex == pytest.approx(statement_capex, rel=1e-4)  # overnight is rounded to 0.01
 
 
 def test_storage_holding_cost_enters_the_variable_cost() -> None:

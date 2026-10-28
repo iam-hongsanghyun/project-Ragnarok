@@ -43,11 +43,15 @@ H_HALF_YEAR = 4380.0  # 2 snapshots × 2190 h → annualise = 8760/4380 = 2
 # ── Shared half-year fixture (finance + company statement) ────────────────────
 
 
-def _half_year_market(*, time_varying_cost: bool = False) -> tuple[pypsa.Network, dict[str, list[dict[str, Any]]]]:
+def _half_year_market(
+    *, time_varying_cost: bool = False, with_capex: bool = False,
+) -> tuple[pypsa.Network, dict[str, list[dict[str, Any]]]]:
     """Load 100 MW: Acme's g_own (80 MW @ 10) runs flat; g_price (200 MW @ 50)
     covers the residual 20 MW and sets the LMP at 50 in both snapshots.
 
-    Two snapshots, each weighted 2190 h → H = 4380 (half a year)."""
+    Two snapshots, each weighted 2190 h → H = 4380 (half a year, n.nyears = 0.5).
+    ``with_capex`` gives g_own a ``capital_cost`` of 50,000 per MW: PyPSA's cost for the modelled
+    HORIZON, i.e. 100,000 per MW-year, so the per-year charge is 100,000 x 80 MW = 8,000,000."""
     n = pypsa.Network()
     n.set_snapshots(pd.date_range("2030-01-01", periods=2, freq="h"))
     n.snapshot_weightings.loc[:, :] = 2190.0
@@ -56,7 +60,7 @@ def _half_year_market(*, time_varying_cost: bool = False) -> tuple[pypsa.Network
     n.add("Carrier", "peak")
     n.add("Load", "L", bus="b", p_set=100.0)
     n.add("Generator", "g_own", bus="b", carrier="gas", p_nom=80.0,
-          marginal_cost=10.0, capital_cost=100_000.0)
+          marginal_cost=10.0, capital_cost=50_000.0 if with_capex else 0.0)
     n.add("Generator", "g_price", bus="b", carrier="peak", p_nom=200.0,
           marginal_cost=50.0)
     if time_varying_cost:
@@ -83,7 +87,7 @@ def test_finance_annual_margin_is_window_margin_times_two() -> None:
     window_margin = (50.0 - 10.0) * 80.0 * H_HALF_YEAR
     np.testing.assert_allclose(acme["annualMargin"], 2.0 * window_margin,
                                rtol=1e-9, atol=1e-2)
-    # r = 0, default 25-yr life, no capex (g_own is not extendable):
+    # r = 0, default 25-yr life, no capex (g_own carries no cost):
     # NPV = 25 × annual margin — the annualised margin flows into the cashflow.
     assert acme["horizonYears"] == 25
     np.testing.assert_allclose(acme["overnightCapex"], 0.0, rtol=0, atol=1e-9)
@@ -120,7 +124,7 @@ def test_irr_bracket_expands_beyond_initial_hi() -> None:
 
 
 def test_statement_flow_lines_annualized_capex_untouched() -> None:
-    n, model = _half_year_market()
+    n, model = _half_year_market(with_capex=True)
     res = build_company_statement(
         n, model, owner_column="owner", currency="€",
         emissions_factors={"gas": 0.4}, carbon_price=5.0,
@@ -137,8 +141,8 @@ def test_statement_flow_lines_annualized_capex_untouched() -> None:
     np.testing.assert_allclose(acme["carbonCost"], 2.0 * carbon_w, rtol=1e-9, atol=1e-2)
     np.testing.assert_allclose(acme["fuelVomCost"], 2.0 * (10.0 * energy_w - carbon_w),
                                rtol=1e-9, atol=1e-2)
-    # capexAnnual is ALREADY annual — it must NOT be rescaled:
-    # capital_cost × p_nom_opt = 100,000 × 80 = 8,000,000.
+    # capexAnnual is n.statistics.capex / n.nyears (PER YEAR) and is not rescaled by the window:
+    # capital_cost (per horizon) 50,000 × 80 MW = 4,000,000 over 0.5 y = 8,000,000 a year.
     np.testing.assert_allclose(acme["capexAnnual"], 8_000_000.0, rtol=1e-9, atol=1e-2)
     # And the statement stays internally consistent on the annual basis.
     np.testing.assert_allclose(
@@ -150,7 +154,7 @@ def test_statement_flow_lines_annualized_capex_untouched() -> None:
 
 
 def test_statement_interest_is_rate_times_reconstructed_principal() -> None:
-    n, model = _half_year_market()
+    n, model = _half_year_market(with_capex=True)
     gearing, i, tenor = 0.4, 0.05, 10.0
     res = build_company_statement(
         n, model, owner_column="owner", currency="€",
@@ -202,7 +206,7 @@ def test_merchant_profit_prorates_annual_capex_onto_window() -> None:
     n.add("Generator", "sys", bus="b", carrier="gas", p_nom=200.0, marginal_cost=50.0)
     n.add("Generator", "m_own", bus="b", carrier="own", p_nom=0.0,
           p_nom_extendable=True, p_nom_max=60.0,
-          capital_cost=100_000.0, marginal_cost=10.0)
+          capital_cost=50_000.0, marginal_cost=10.0)   # per HORIZON (0.5 y): 100,000 per MW-year
     n.optimize(solver_name="highs")
 
     res = build_merchant(
@@ -218,7 +222,7 @@ def test_merchant_profit_prorates_annual_capex_onto_window() -> None:
     np.testing.assert_allclose(res["totals"]["energyMWh"], energy, rtol=1e-9, atol=1e-2)
     np.testing.assert_allclose(res["totals"]["revenue"], 50.0 * energy, rtol=1e-9, atol=1e-2)
     np.testing.assert_allclose(res["totals"]["operatingCost"], 10.0 * energy, rtol=1e-9, atol=1e-2)
-    # Annual capex 100,000·60 = 6,000,000 pro-rated × H/8760 = ×0.5 → 3,000,000.
+    # n.statistics.capex over the horizon: 50,000·60 = 3,000,000 (no pro-rating by the module).
     np.testing.assert_allclose(res["totals"]["capex"], 3_000_000.0, rtol=1e-9, atol=1e-2)
     # Profit subtracts like from like: revenue − opex − window capex share.
     np.testing.assert_allclose(

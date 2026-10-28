@@ -43,6 +43,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from ..pypsa import pypsa_schema as ps
+from ..pypsa.network.cost_basis import SCHEMA_SHEET
 
 logger = logging.getLogger("pypsa_gui.project_workbook")
 
@@ -689,6 +690,9 @@ def workbook_to_bundle(data: bytes, filename: str = "") -> dict[str, Any]:
 
         if sheet == RESULT_META_SHEET:
             result.update(_reassemble_meta(rows))
+            continue
+        if sheet == SCHEMA_SHEET:
+            model[sheet] = rows  # the cost-basis schema stamp travels with the workbook
             continue
         if sheet == CONSTRAINTS_SHEET:
             if rows:

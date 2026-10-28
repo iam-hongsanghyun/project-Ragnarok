@@ -13,7 +13,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...pypsa.utils.annuity import annuity_factor
+from pypsa.costs import annuity as _pypsa_annuity
+
+from ...pypsa.network.cost_basis import horizon_years
 from ..p2x import chains as p2x_chains
 from . import technologies as tech
 from .registry import (
@@ -168,9 +170,13 @@ def _build_bess(spec: dict[str, Any], ctx: Ctx, bus: str, r: float) -> dict[str,
     hours = P["max_hours"]
     # One lifetime per row: the storage lifetime. The inverter (shorter life) is expressed as the overnight cost that has the same annual
     # charge over that lifetime, K_inv a(r, L_inv) / a(r, L_st), at the plant's discount rate (the only place a rate enters a template).
-    a_i, a_s = annuity_factor(r, P["inverter_lifetime"]), annuity_factor(r, P["storage_lifetime"])
+    # This is a module-side data conversion; the annuity is PyPSA's own (pypsa.costs.annuity).
+    a_i, a_s = float(_pypsa_annuity(r, P["inverter_lifetime"])), float(_pypsa_annuity(r, P["storage_lifetime"]))
     overnight = P["inverter_capex"] * 1000.0 * a_i / a_s + P["storage_capex"] * 1000.0 * hours
-    fom = P["inverter_capex"] * 1000.0 * P["inverter_fom"] / 100.0
+    # fom_cost is PyPSA's per-HORIZON column: the yearly O&M x the workbook's horizon in years (shown in the preview warning).
+    years = horizon_years(ctx.model)
+    fom = P["inverter_capex"] * 1000.0 * P["inverter_fom"] / 100.0 * years
+
     ext = bool(spec.get("extendable"))
     ctx.carrier("battery")
     row: dict[str, Any] = {
@@ -275,8 +281,12 @@ def build_plant(type_id: str, spec_in: dict[str, Any] | None, model: dict[str, l
         raise
     except ValueError as exc:                      # bad parameter key / value from the technology loader or a share conversion
         raise PlantError(str(exc)) from exc
+    years = horizon_years(model)
+    if any(r.get("fom_cost") for rows in ctx.sheets.values() for r in rows if isinstance(r, dict)):
+        ctx.warnings.append(f"fom_cost is written per modelled HORIZON, as PyPSA charges it: fixed O&M per year x {years:g} years "
+                            "(the workbook's snapshots). Re-apply the plant after changing the snapshots to refresh it.")
     registry = {
-        "version": SPEC_VERSION, "plantId": pid, "type": type_id, "label": f"{TYPES[type_id]['label']} {pid}", "bus": str(bus),
+        "horizonYears": years, "version": SPEC_VERSION, "plantId": pid, "type": type_id, "label": f"{TYPES[type_id]['label']} {pid}", "bus": str(bus),
         "spec": spec, "extendable": bool(spec.get("extendable")), "discountRate": r, "components": list(ctx.components), **extra,
     }
     ctx.sheets[REGISTRY_SHEET].append(registry_row(registry))

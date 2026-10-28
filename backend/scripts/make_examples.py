@@ -25,6 +25,9 @@ from backend.app import model_store, session_store, sqlite_store
 from backend.app.main import _network_to_model_json
 
 AUTHOR_SESSION = "__example_author__"
+#: Cost columns follow PyPSA: overnight_cost + discount_rate + lifetime, annuitised by PyPSA itself.
+EXAMPLE_DISCOUNT = 0.05
+EXAMPLE_LIFETIME = 20
 EXAMPLE_KV_KEY = "example"  # matches routers/examples.py
 # Non-input catalogs / computed components the converter may emit; an example
 # carries only user-authored input sheets.
@@ -110,14 +113,15 @@ def build_capacity_expansion() -> pypsa.Network:
     n.add("Carrier", "solar", co2_emissions=0.0)
     n.add("Carrier", "wind", co2_emissions=0.0)
     n.add("Bus", "zone", v_nom=380, carrier="AC", x=127.0, y=37.5)
-    # Annualised capital costs (currency/MW) + marginal costs → a real trade-off.
+    # Overnight capital costs (currency/MW) + marginal costs -> a real trade-off. PyPSA annuitises
+    # overnight_cost with the row's own discount_rate and lifetime (x n.nyears for the 168 h horizon).
     n.add("Generator", "gas", bus="zone", carrier="gas", p_nom_extendable=True,
-          capital_cost=60000, marginal_cost=75)
+          overnight_cost=60000, discount_rate=EXAMPLE_DISCOUNT, lifetime=EXAMPLE_LIFETIME, marginal_cost=75)
     n.add("Generator", "solar", bus="zone", carrier="solar", p_nom_extendable=True,
-          capital_cost=45000, marginal_cost=0.0,
+          overnight_cost=45000, discount_rate=EXAMPLE_DISCOUNT, lifetime=EXAMPLE_LIFETIME, marginal_cost=0.0,
           p_max_pu=np.clip(np.sin((np.arange(hours) % 24 - 6) / 12 * np.pi), 0, 1) * 0.9)
     n.add("Generator", "wind", bus="zone", carrier="wind", p_nom_extendable=True,
-          capital_cost=90000, marginal_cost=0.0,
+          overnight_cost=90000, discount_rate=EXAMPLE_DISCOUNT, lifetime=EXAMPLE_LIFETIME, marginal_cost=0.0,
           p_max_pu=0.30 + 0.25 * np.sin(np.linspace(0.0, 10 * np.pi, hours)))
     shape = 0.70 + 0.30 * np.sin((np.arange(hours) % 24) / 24 * 2 * np.pi)
     n.add("Load", "demand", bus="zone", p_set=800 * shape)
@@ -260,12 +264,12 @@ def build_pathway(with_caps: bool = False) -> pypsa.Network:
     batt_cost = {2030: 500_000, 2040: 350_000, 2050: 250_000}
     for p in PATHWAY_PERIODS:
         n.add("Generator", f"wind_{p}", bus="grid", carrier="wind", p_nom_extendable=True, p_nom_max=200,
-              capital_cost=wind_cost[p], lifetime=25, build_year=p, p_max_pu=np.tile(wind, len(PATHWAY_PERIODS)))
+              overnight_cost=wind_cost[p], discount_rate=PATHWAY_DISCOUNT, lifetime=25, build_year=p, p_max_pu=np.tile(wind, len(PATHWAY_PERIODS)))
         n.add("Generator", f"solar_{p}", bus="grid", carrier="solar", p_nom_extendable=True, p_nom_max=250,
-              capital_cost=solar_cost[p], lifetime=25, build_year=p, p_max_pu=np.tile(solar, len(PATHWAY_PERIODS)))
+              overnight_cost=solar_cost[p], discount_rate=PATHWAY_DISCOUNT, lifetime=25, build_year=p, p_max_pu=np.tile(solar, len(PATHWAY_PERIODS)))
         n.add("StorageUnit", f"batt_{p}", bus="grid", carrier="battery", p_nom_extendable=True, p_nom_max=100,
               max_hours=4, efficiency_store=0.92, efficiency_dispatch=0.92, cyclic_state_of_charge=True,
-              capital_cost=batt_cost[p], lifetime=15, build_year=p)
+              overnight_cost=batt_cost[p], discount_rate=PATHWAY_DISCOUNT, lifetime=15, build_year=p)
     if with_caps:
         for p, tonnes in PATHWAY_CO2_CAPS.items():
             n.add("GlobalConstraint", f"co2_cap_{p}", type="primary_energy", carrier_attribute="co2_emissions",
@@ -327,11 +331,11 @@ def build_bess_system(battery: str = "none") -> pypsa.Network:
         # Overnight costs per MW / MWh; Ragnarok annuitises them and pro-rates to the 72 h window.
         n.add("Bus", "batt_bus", carrier="battery", v_nom=0.0, x=127.0, y=37.6)
         n.add("Store", "batt_store", bus="batt_bus", carrier="battery", e_nom_extendable=True, e_nom_max=3200,
-              e_cyclic=True, capital_cost=200_000, lifetime=15)
+              e_cyclic=True, overnight_cost=200_000, discount_rate=EXAMPLE_DISCOUNT, lifetime=15)
         n.add("Link", "batt_charge", bus0="grid", bus1="batt_bus", carrier="battery", efficiency=0.95,
-              p_nom_extendable=True, p_nom_max=400, capital_cost=100_000, lifetime=15)
+              p_nom_extendable=True, p_nom_max=400, overnight_cost=100_000, discount_rate=EXAMPLE_DISCOUNT, lifetime=15)
         n.add("Link", "batt_discharge", bus0="batt_bus", bus1="grid", carrier="battery", efficiency=0.95,
-              p_nom_extendable=True, p_nom_max=400, capital_cost=100_000, lifetime=15)
+              p_nom_extendable=True, p_nom_max=400, overnight_cost=100_000, discount_rate=EXAMPLE_DISCOUNT, lifetime=15)
     return n
 
 

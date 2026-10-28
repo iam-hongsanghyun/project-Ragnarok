@@ -718,13 +718,21 @@ def metric_definitions(currency: str = "$") -> dict[str, dict[str, str]]:
                 "asset exists in; a carrier value is capacity-weighted."
             ),
         },
+        "expansionResults.capex_horizon": {
+            "unit": currency,
+            "definition": (
+                "n.statistics.capex over the modelled horizon (PyPSA's periodised investment cost, excluding fom_cost; "
+                "installed + expanded). capex_expanded / capex_installed are n.statistics.expanded_capex / installed_capex "
+                "(new build vs already-built, sunk capacity); overnight_total is n.statistics.overnight_cost and fom_total "
+                "is n.statistics.fom, both as PyPSA charged them. capital_cost is the component's periodised cost per unit "
+                "for the horizon (capital_cost, or overnight_cost x annuity x nyears)."
+            ),
+        },
         "expansionResults.capex_annual": {
             "unit": f"{currency}/yr",
             "definition": (
-                "n.statistics.capex (PyPSA 1.3+: periodised investment cost excluding fom_cost; installed + expanded) "
-                "converted to a per-year charge; capex_expanded / capex_installed are n.statistics.expanded_capex / "
-                "installed_capex on the same basis, overnight_total is n.statistics.overnight_cost and fom_total is "
-                "n.statistics.fom (per modelled horizon)."
+                "capex_horizon / n.nyears: the same n.statistics.capex shown PER YEAR. The only conversion made; "
+                "a display basis, not a PyPSA quantity."
             ),
         },
         "lineLoading": {

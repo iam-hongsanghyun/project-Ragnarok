@@ -78,6 +78,7 @@ interface Props {
   buses: Array<{ name: string; x: number; y: number }>;
   targetSnapshots: string[];
   currencySymbol: string;
+  discountRate?: number;
   /** Stored run whose system price can serve as the reference series. */
   runName: string | null;
   onApplyFragment: (fragment: WorkbookFragment, databaseName: string, countryName: string) => void;
@@ -98,7 +99,7 @@ type Scope = 'all' | 'selected' | 'solar' | 'wind' | 'other';
 type TechFilter = 'all' | Technology;
 type RefChoice = 'none' | 'load' | 'price' | `dataset:${string}`;
 
-export function ScreeningPane({ buses, targetSnapshots, currencySymbol, runName, onApplyFragment }: Props) {
+export function ScreeningPane({ buses, targetSnapshots, currencySymbol, discountRate, runName, onApplyFragment }: Props) {
   const { showToast } = useToast();
   const theme = useMemo(() => readChartTheme(), []);
 
@@ -616,7 +617,7 @@ export function ScreeningPane({ buses, targetSnapshots, currencySymbol, runName,
         {dataId && baseParams && (regionLevel ? units.length > 0 : true) && (
           <PortfolioPanel
             params={baseParams} sites={units} selected={selected} siteColors={lineColors} theme={theme} level={level}
-            buses={buses} targetSnapshots={targetSnapshots} currencySymbol={currencySymbol} onApplyFragment={onApplyFragment}
+            buses={buses} targetSnapshots={targetSnapshots} currencySymbol={currencySymbol} discountRate={discountRate} onApplyFragment={onApplyFragment}
           />
         )}
       </main>

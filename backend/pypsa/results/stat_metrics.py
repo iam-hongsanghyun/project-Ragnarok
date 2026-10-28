@@ -134,3 +134,96 @@ def period_hours_mean(
     num = frame.fillna(0.0).mul(h, axis=1).sum(axis=1)
     den = frame.notna().mul(h, axis=1).sum(axis=1)
     return num, den
+
+
+# ── fixed cost (CAPEX + fom) as PyPSA charges it ──────────────────────────────
+
+#: PyPSA component class <-> its components list name.
+COMPONENT_LISTS = {
+    "Generator": "generators", "StorageUnit": "storage_units", "Store": "stores",
+    "Link": "links", "Process": "processes", "Line": "lines", "Transformer": "transformers",
+}
+
+_FIXED_COLUMNS = ["capex_horizon", "fom_horizon", "capex_sunk", "capex_expanded", "annual"]
+
+
+def nyears_by_period(network: pypsa.Network) -> dict[int, float]:
+    """PyPSA's ``n.nyears`` per investment period (``{0: nyears}`` for a single-period run)."""
+    ny = network.nyears
+    if hasattr(ny, "items"):
+        return {int(k): float(v) for k, v in ny.items()}
+    return {0: float(ny)}
+
+
+def fixed_cost_table(
+    network: pypsa.Network,
+    components: Sequence[str] = tuple(COMPONENT_LISTS),
+) -> pd.DataFrame:
+    """Per-asset fixed cost read from ``n.statistics`` - nothing is converted here.
+
+    Index ``(component, name)``; columns, all currency:
+
+    * ``capex_horizon`` / ``fom_horizon`` - ``n.statistics.capex`` / ``.fom`` over the modelled
+      horizon, as the objective charges them (a pathway run: summed over periods with the
+      investment-period ``objective`` weight PyPSA applies);
+    * ``capex_sunk`` / ``capex_expanded`` - the ``installed_capex`` / ``expanded_capex`` parts of
+      ``capex_horizon`` (already-built ``p_nom`` vs. new build);
+    * ``annual`` - ``(capex + fom) / n.nyears`` PER YEAR, the one conversion made here, for display
+      (a pathway run: one active period, weight divided out).
+
+    Empty when the statistics are unavailable (an unsolved network).
+
+    Args:
+        network: solved (or output-injected) network.
+        components: component class names to read.
+    """
+    comps = list(components)
+    frames = {k: asset_statistic(network, k, comps) for k in ("capex", "fom", "installed_capex", "expanded_capex")}
+    if frames["capex"].empty and frames["fom"].empty:
+        return pd.DataFrame(columns=_FIXED_COLUMNS)
+    from .pathway_periods import is_pathway, period_objective_weights
+
+    pathway = is_pathway(network)
+    weights = period_objective_weights(network) if pathway else {}
+    ny = nyears_by_period(network)
+    index = frames["capex"].index.union(frames["fom"].index)
+    out = pd.DataFrame(0.0, index=index, columns=_FIXED_COLUMNS)
+    for key, col in (("capex", "capex_horizon"), ("fom", "fom_horizon"),
+                     ("installed_capex", "capex_sunk"), ("expanded_capex", "capex_expanded")):
+        total = combine_periods(frames[key])
+        common = total.index.intersection(index)
+        out.loc[common, col] = total.loc[common]
+    for key in ("capex", "fom"):
+        for idx, row in frames[key].iterrows():
+            vals = row.dropna()
+            if vals.empty:
+                continue
+            col = int(vals.index[0])
+            value = float(vals.iloc[0])
+            if pathway:
+                value = value / (weights.get(col, 1.0) or 1.0)
+            out.at[idx, "annual"] += value / (ny.get(col, 1.0) or 1.0)
+    return out
+
+
+def fixed_cost_of(table: pd.DataFrame, component: str, name: str) -> dict[str, float]:
+    """One asset's row of :func:`fixed_cost_table` (all zero when absent)."""
+    if table.empty or (component, name) not in table.index:
+        return dict.fromkeys(_FIXED_COLUMNS, 0.0)
+    return {k: float(v) for k, v in table.loc[(component, name)].items()}
+
+
+def overnight_capex_table(
+    network: pypsa.Network,
+    components: Sequence[str] = tuple(COMPONENT_LISTS),
+) -> pd.Series:
+    """``n.statistics.overnight_cost`` per asset (currency, not periodised), index ``(component, name)``.
+
+    PyPSA returns ``overnight_cost x capacity`` where the row has an ``overnight_cost`` and
+    back-calculates it from ``capital_cost`` where it can (needs ``discount_rate`` and ``lifetime``).
+    Empty when PyPSA cannot resolve it for the network.
+    """
+    frame = asset_statistic(network, "overnight_cost", list(components))
+    if frame.empty:
+        return pd.Series(dtype=float)
+    return frame.bfill(axis=1).iloc[:, 0].astype(float)

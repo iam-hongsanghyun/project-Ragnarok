@@ -91,21 +91,8 @@ CASES = [
 
 
 def _solve(n: pypsa.Network) -> None:
-    """Solve the native reference under Ragnarok's capex-window convention.
-
-    ``build_network`` pro-rates the ANNUAL capital cost of extendable assets to
-    the modelled window (x sum(objective weights) / 8760, RS1), so the LP trades
-    capex against the energy actually served. Native PyPSA does not, so the
-    reference carries the same factor; call this AFTER ``network_to_model`` (which
-    must read the unscaled cost). With no extendable asset it is a no-op.
-    """
-    window = float(n.snapshot_weightings["objective"].sum()) / 8760.0
-    for list_name in ("generators", "storage_units", "stores", "lines", "links"):
-        static = n.components[list_name].static
-        ext = [c for c in static.columns if c.endswith("_nom_extendable")]
-        if static.empty or not ext or "capital_cost" not in static.columns:
-            continue
-        static.loc[static[ext[0]].astype(bool), "capital_cost"] *= window
+    """Solve the native reference. Nothing is adjusted: Ragnarok passes ``capital_cost`` to PyPSA
+    unchanged (it is PyPSA's cost per modelled horizon), so native and Ragnarok trade the same costs."""
     n.optimize(solver_name="highs")
 
 
@@ -116,7 +103,7 @@ def test_build_solve_parity_with_native_pypsa(name: str, factory) -> None:
     rag, _notes = build_network(model, SCENARIO, OPTIONS)
 
     _solve(native)
-    rag.optimize(solver_name="highs")  # already window-scaled by build_network
+    rag.optimize(solver_name="highs")
 
     # Objective — the single most important parity signal.
     assert rag.objective == pytest.approx(native.objective, rel=RTOL), (

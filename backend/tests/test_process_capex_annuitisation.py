@@ -1,9 +1,9 @@
-"""An extendable PyPSA ``Process`` carries an annuitised, window-scaled ``capital_cost``, exactly like a ``Link``.
+"""An extendable PyPSA ``Process`` is priced by PyPSA's ``overnight_cost`` path exactly like a ``Link``.
 
-Regression: ``annuitisable`` in ``build_network`` listed generators, storage units, stores, lines and links
-only, so an extendable Process was charged its OVERNIGHT cost against one modelled window.
+Ragnarok converts nothing: PyPSA annuitises the row's ``overnight_cost`` with its own ``discount_rate`` and
+``lifetime`` and scales it by ``n.nyears``, for a Process as for a Link (``c.capital_cost`` of each component).
 
-Algorithm (annualisation, window scaling):
+Algorithm (PyPSA's periodised cost):
     $$k_{LP} = k\\, a(r, L)\\, \\frac{H}{8760},\\qquad a(r,L)=\\frac{r(1+r)^L}{(1+r)^L-1}$$
     ASCII: k_LP = k * a(r, L) * H / 8760
     k = overnight cost (currency/MW), r = discount rate (1/a), L = lifetime (a), H = modelled hours (h).
@@ -27,7 +27,7 @@ HOURS = 24
 def _model(component: str) -> dict[str, Any]:
     snaps = [f"2030-01-01T{h:02d}:00:00" for h in range(HOURS)]
     row: dict[str, Any] = {"name": "conv", "bus0": "el", "bus1": "h2", "p_nom_extendable": True, "p_nom_max": 500,
-                           "capital_cost": CAPEX, "lifetime": LIFE, "marginal_cost": 1.0}
+                           "overnight_cost": CAPEX, "discount_rate": RATE, "lifetime": LIFE, "marginal_cost": 1.0}
     row.update({"efficiency": 0.7} if component == "links" else {"rate0": -1.0, "rate1": 0.7})
     return {
         "snapshots": [{"snapshot": s} for s in snaps],
@@ -40,16 +40,17 @@ def _model(component: str) -> dict[str, Any]:
 
 
 def test_process_capital_cost_matches_link_with_identical_parameters() -> None:
-    net_l, _ = build_network(_model("links"), {"discountRate": RATE}, {})
-    net_p, notes = build_network(_model("processes"), {"discountRate": RATE}, {})
+    net_l, _ = build_network(_model("links"), {}, {})
+    net_p, _notes = build_network(_model("processes"), {}, {})
     a = RATE / (1.0 - (1.0 + RATE) ** -LIFE)
     scale = HOURS / 8760.0
     expected = CAPEX * a * scale
-    np.testing.assert_allclose(float(net_l.links.at["conv", "capital_cost"]), expected, rtol=RTOL)
-    np.testing.assert_allclose(float(net_p.processes.at["conv", "capital_cost"]), expected, rtol=RTOL)
-    np.testing.assert_allclose(float(net_p.processes.at["conv", "capital_cost"]),
-                               float(net_l.links.at["conv", "capital_cost"]), rtol=RTOL)
-    assert any("Process" in n or "process" in n for n in notes if "Annualised CAPEX" in n)
+    cost_l = float(net_l.components.links.capital_cost["conv"])
+    cost_p = float(net_p.components.processes.capital_cost["conv"])
+    np.testing.assert_allclose(cost_l, expected, rtol=RTOL)
+    np.testing.assert_allclose(cost_p, expected, rtol=RTOL)
+    np.testing.assert_allclose(cost_p, cost_l, rtol=RTOL)
+    assert float(net_p.processes.at["conv", "capital_cost"]) == 0.0      # the column itself is untouched
 
 
 def test_process_and_link_solve_to_the_same_expansion() -> None:

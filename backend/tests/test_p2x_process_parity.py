@@ -69,7 +69,7 @@ def test_link_and_process_have_the_same_objective_sizes_and_dispatch() -> None:
     cb_l, cb_p = by_kind(rl), by_kind(rp)
     assert cb_l.keys() == cb_p.keys()
     assert_allclose(total(rp), total(rl), rtol=1e-6, atol=1.0)          # costBreakdown values are rounded to 1 currency unit
-    capital = "Capital cost (annuity, pro-rated to window)"
+    capital = "Capital cost (periodised, modelled horizon)"
     assert_allclose(cb_p[capital], cb_l[capital], rtol=1e-6, atol=1.0)
     for sheet_l, sheet_p in (("links-p0", "processes-p0"), ("links-p1", "processes-p1"), ("links-p2", "processes-p2"), ("links-p3", "processes-p3")):
         for name in ("x_synth_NH3", "x_synth_MeOH", "x_synth_eFuel"):
@@ -159,7 +159,7 @@ def test_process_chain_survives_a_pypsa_export_import_round_trip(fmt: str, tmp_p
     """Workbook -> PyPSA file -> workbook keeps the Process ports, sizing flags and (un-annuitised) capital cost."""
     import pypsa
 
-    from backend.pypsa.network import build_network
+    from backend.pypsa.network import build_components
     from backend.pypsa.network.pypsa_io import (
         export_network_bytes,
         network_from_csv_zip,
@@ -167,7 +167,7 @@ def test_process_chain_survives_a_pypsa_export_import_round_trip(fmt: str, tmp_p
     from backend.pypsa.network.serialize import network_to_model
 
     model, _ = _solve("process")
-    net, _ = build_network(model, SCENARIO, {"skipCapexAnnuitisation": True})
+    net, _ = build_components(model)
     data, _media, _name = export_network_bytes(net, fmt)
     if fmt == "csv":
         back = network_from_csv_zip(data)

@@ -290,13 +290,13 @@ def test_unsolved_netcdf_import_stores_nothing(client: TestClient, solved: dict[
     assert run_store.list_runs() == []
 
 
-def test_solved_network_to_bundle_does_not_annuitise_twice(solved: dict[str, Any], tmp_path: Path) -> None:
-    """A PyPSA-native file stores the ANNUAL capital cost. The browser derivation re-annuitised it
-    (about 0.1x of the true capex at 5 %, 20 years); the bundle opts out of build_network's annuity."""
+def test_solved_network_to_bundle_is_stamped_as_pypsa_native(solved: dict[str, Any], tmp_path: Path) -> None:
+    """A PyPSA-native file is already on PyPSA's cost semantics: the bundle is stamped buildVersion 2 so a later
+    re-derivation does not read its capital_cost as a legacy overnight price (and nothing annuitises twice)."""
     network = pypsa.Network()
     network.import_from_netcdf(str(_solved_netcdf(tmp_path, solved)))
     bundle = solved_network_to_bundle(network, "solved.nc")
-    assert bundle["options"]["skipCapexAnnuitisation"] is True
+    assert bundle["options"]["buildVersion"] == 2
     assert [p["period"] for p in bundle["options"]["pathwayConfig"]["periods"]] == PERIODS
     weights = {p["period"]: p["objectiveWeight"] for p in bundle["options"]["pathwayConfig"]["periods"]}
     assert weights == OBJECTIVE

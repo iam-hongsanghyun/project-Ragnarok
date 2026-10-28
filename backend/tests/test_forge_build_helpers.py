@@ -95,8 +95,9 @@ def test_second_electrolyser_reuses_bus_and_dedupes_name() -> None:
 
 
 def test_extendable_and_unknown_anchor() -> None:
-    link = _frag("heat_pump", extendable=True)["links"][0]
-    assert link["p_nom_extendable"] is True and link["capital_cost"] == 60000 and "p_nom" not in link and link["efficiency"] == 3.0
+    link = _frag("heat_pump", extendable=True, discount_rate=0.05)["links"][0]
+    assert link["p_nom_extendable"] is True and link["overnight_cost"] == 60000 and "p_nom" not in link and link["efficiency"] == 3.0
+    assert link["discount_rate"] == 0.05 and link["lifetime"] == 20 and "capital_cost" not in link
     with pytest.raises(ValueError):
         _frag("electrolyser", anchor_bus="nope")
 

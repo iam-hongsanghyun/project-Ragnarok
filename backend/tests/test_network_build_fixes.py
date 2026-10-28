@@ -7,7 +7,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import numpy as np
 import pytest
 from fastapi import HTTPException
 
@@ -38,33 +37,31 @@ def _dispatch_model(hours: int = 8) -> dict[str, Any]:
 # ── RS1: capex pro-rated to the modelled window in the LP ────────────────────
 
 
-def test_capex_is_scaled_to_the_window_and_expansion_no_longer_depends_on_length() -> None:
-    """Analytical. Annuity 500 000 /MW/yr (5e6 overnight, 10 y, r = 0); building
-    saves (100 - 10) /MWh. Over H hours the capex is 500 000·H/8760 /MW, which is
-    below 90·H for every H, so 100 MW must be built for ANY window length. The
-    unscaled LP compared 500 000 against 90·24 and built nothing."""
+def test_overnight_cost_is_scaled_to_the_window_by_pypsa_so_expansion_does_not_depend_on_length() -> None:
+    """Analytical. Overnight 5e6 over 10 y at r = 0 is 500 000 /MW/yr; building saves (100 - 10) /MWh.
+    PyPSA scales an overnight_cost by n.nyears, so over H hours the capex is 500 000·H/8760 /MW, which is
+    below 90·H for every H: 100 MW is built for ANY window length. Ragnarok does none of that scaling."""
     m = _dispatch_model(24)
     m["generators"] = [
         {"name": "new", "bus": "b", "carrier": "gas", "p_nom": 0, "p_nom_extendable": True,
-         "capital_cost": 5_000_000, "lifetime": 10, "marginal_cost": 10},
+         "overnight_cost": 5_000_000, "discount_rate": 0.0, "lifetime": 10, "marginal_cost": 10},
         {"name": "peaker", "bus": "b", "carrier": "dear", "p_nom": 200, "marginal_cost": 100},
     ]
-    n, notes = build_network(m, {"discountRate": 0.0}, {})
-    scale = n.meta["ragnarok_capex_window_scale"]
-    assert scale == pytest.approx(24.0 / 8760.0, rel=1e-12)
-    assert n.generators.at["new", "capital_cost"] == pytest.approx(500_000 * scale, rel=1e-9)
-    assert any("window" in x and "CAPEX" in x for x in notes)
+    n, notes = build_network(m, {}, {})
+    assert "ragnarok_capex_window_scale" not in n.meta
+    assert float(n.nyears) == pytest.approx(24.0 / 8760.0, rel=1e-12)
+    assert float(n.components.generators.capital_cost["new"]) == pytest.approx(500_000 * 24.0 / 8760.0, rel=1e-9)
+    assert not any("CAPEX" in x for x in notes)
     n.optimize(solver_name="highs")
     assert n.generators.at["new", "p_nom_opt"] == pytest.approx(100.0, abs=1e-6)
 
 
-def test_capex_window_scale_absent_when_nothing_is_scaled() -> None:
+def test_no_window_scale_is_recorded_and_capital_cost_stays_raw() -> None:
     m = _dispatch_model(4)
-    n, _ = build_network(m, {}, {})
-    assert "ragnarok_capex_window_scale" not in n.meta
     m["generators"][0].update(p_nom_extendable=True, capital_cost=1000, lifetime=10)
-    skipped, _ = build_network(m, {"discountRate": 0.05}, {"skipCapexAnnuitisation": True})
-    assert "ragnarok_capex_window_scale" not in skipped.meta  # Forge round-trip stays raw
+    n, _ = build_network(m, {"discountRate": 0.05}, {})
+    assert "ragnarok_capex_window_scale" not in n.meta
+    assert float(n.generators.at["g", "capital_cost"]) == 1000
 
 
 # ── RS2: DSL / spec constraints apportioned like the structured path ─────────
@@ -268,17 +265,15 @@ def test_discount_rate_must_be_a_fraction(rate: float) -> None:
     assert exc.value.status_code == 400 and "0 <= r < 1" in exc.value.detail
 
 
-def test_missing_lifetime_falls_back_to_the_system_default_with_a_note() -> None:
-    from backend.app.config import load_system_defaults
-    from backend.pypsa.utils.annuity import annuity_factor
+def test_missing_lifetime_is_pypsas_infinity_and_no_fallback_is_applied() -> None:
+    from pypsa.costs import annuity
 
     m = _dispatch_model(24)
-    m["generators"][0].update(p_nom=0, p_nom_extendable=True, capital_cost=1_000_000)
-    n, notes = build_network(m, {"discountRate": 0.05}, {})
-    life = load_system_defaults()["simulation"]["fallback_lifetime_years"]
-    expected = 1_000_000 * annuity_factor(0.05, life) * 24.0 / 8760.0
-    assert n.generators.at["g", "capital_cost"] == pytest.approx(expected, rel=1e-9)
-    assert any("lifetime" in x and "system default" in x for x in notes)
+    m["generators"][0].update(p_nom=0, p_nom_extendable=True, overnight_cost=1_000_000, discount_rate=0.05)
+    n, notes = build_network(m, {}, {})
+    expected = 1_000_000 * float(annuity(0.05, float("inf"))) * 24.0 / 8760.0       # annuity(r, inf) = r
+    assert float(n.components.generators.capital_cost["g"]) == pytest.approx(expected, rel=1e-9)
+    assert not any("system default" in x for x in notes)
 
 
 def test_carbon_adder_follows_time_varying_efficiency() -> None:

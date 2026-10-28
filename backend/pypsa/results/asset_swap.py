@@ -29,10 +29,11 @@ from typing import Any
 
 import pypsa
 
-from ..utils.annuity import annuity_factor
+from pypsa.costs import annuity as _pypsa_annuity
+
 from ..utils.emissions import primary_energy_emissions
-from .finance import _crf
 from .market import HOURS_PER_YEAR
+from .stat_metrics import fixed_cost_of, fixed_cost_table, nyears_by_period, overnight_capex_table
 
 _log = logging.getLogger("pypsa.solver")
 
@@ -147,34 +148,24 @@ def build_asset_swap(
 
     # Inherit the target carrier's cost/profile from an existing unit if present.
     existing_add = next((r for r in gens if str(r.get("carrier", "")) == add_carrier), None)
-    cap_cost = float(existing_add.get("capital_cost", add_capital_cost)) if existing_add else add_capital_cost
     marg_cost = float(existing_add.get("marginal_cost", add_marginal_cost)) if existing_add else add_marginal_cost
     profile_ref = _profile_ref(model, add_carrier)
 
-    # CAPEX convention. ``build_network`` annuitises ``capital_cost`` for
-    # EXTENDABLE rows only, so the same sheet number means overnight $/MW on an
-    # extendable row and annual $/MW/yr on a fixed one. Keep the LP seeing an
-    # annual cost in both modes:
-    #   fixed  → write the annual value (never annuitised);
-    #   sized  → write annual/AF with an explicit lifetime, which build_network
-    #            multiplies back by AF.
-    # When the cost was inherited from an extendable unit the sheet value is
-    # already overnight, so it passes through untouched and the *reported*
-    # annual figure is value × AF instead.
+    # CAPEX. The panel's cost inputs are PER YEAR (/MW/yr), a module input; the rows this module
+    # sends to PyPSA are PyPSA's own columns, written visibly into the "after" model:
+    #   * the replacement's capital_cost = the yearly input x n.nyears (PyPSA's per-horizon basis);
+    #   * a target carrier that already exists in the model is inherited as is - its
+    #     overnight_cost / discount_rate / lifetime / fom_cost, or its per-horizon capital_cost.
+    # Nothing is annuitised here; the reported annual figures are read back from n.statistics.
     discount_rate = float(scenario.get("discountRate", 0.0) or 0.0)
-    af = annuity_factor(discount_rate, _DEFAULT_LIFETIME)
-    inherited_overnight = size_replacement and existing_add is not None and _truthy(
-        existing_add.get("p_nom_extendable")
-    )
-    if inherited_overnight:
-        row_capital_cost = cap_cost
-        cap_cost_annual = cap_cost * af
-    elif size_replacement:
-        row_capital_cost = cap_cost / af if af > 0 else cap_cost
-        cap_cost_annual = cap_cost
+    nyears = float(sum(nyears_by_period(base_network).values()) / max(1, len(nyears_by_period(base_network))))
+    if existing_add:
+        inherited_cost = {
+            k: existing_add[k] for k in ("capital_cost", "overnight_cost", "discount_rate", "lifetime", "fom_cost")
+            if k in existing_add and existing_add[k] not in (None, "")
+        }
     else:
-        row_capital_cost = cap_cost
-        cap_cost_annual = cap_cost
+        inherited_cost = {"capital_cost": add_capital_cost * nyears}
 
     # Build the "after" model: drop the matched gens, add replacements sized at
     # `replace_ratio` × the retired capacity (renewables often need oversizing).
@@ -198,7 +189,7 @@ def build_asset_swap(
             "bus": r.get("bus"),
             "carrier": add_carrier,
             "p_nom": new_p,
-            "capital_cost": row_capital_cost,
+            **inherited_cost,
             "marginal_cost": marg_cost,
         }
         if size_replacement:
@@ -208,8 +199,8 @@ def build_asset_swap(
                 "p_nom_extendable": True,
                 "p_nom_min": 0.0,
                 "p_nom_max": new_p,
-                "lifetime": _DEFAULT_LIFETIME,
             })
+            row.setdefault("lifetime", _DEFAULT_LIFETIME)
         else:
             added_capacity += new_p
         replacements.append(row)
@@ -224,7 +215,6 @@ def build_asset_swap(
     # across the retired buses in proportion to the capacity retired there.
     storage_mw = max(0.0, float(add_storage_mw or 0.0))
     added_storage_mw = 0.0
-    storage_capex = 0.0
     if storage_mw > 0 and removed_capacity > 0:
         if not any(str(c.get("name", "")) == "battery" for c in carriers):
             carriers.append({"name": "battery"})
@@ -241,10 +231,9 @@ def build_asset_swap(
                 "p_nom": mw,
                 "max_hours": max(0.5, float(add_storage_hours or 4.0)),
                 "marginal_cost": 0.0,
-                "capital_cost": float(add_storage_capex_per_mw or 0.0),
+                "capital_cost": float(add_storage_capex_per_mw or 0.0) * nyears,
                 "cyclic_state_of_charge": True,
             })
-        storage_capex = added_storage_mw * float(add_storage_capex_per_mw or 0.0)
 
     # Copy the target carrier's availability profile onto the replacements.
     replacement_firm = True
@@ -294,10 +283,25 @@ def build_asset_swap(
         "emissionsTonnes": round(after_m["emissionsTonnes"] - before["emissionsTonnes"], 2),
     }
 
-    annualised_capex = cap_cost_annual * added_capacity + storage_capex
-    overnight_capex = (
-        annualised_capex / _crf(discount_rate, _DEFAULT_LIFETIME) if annualised_capex > 0 else 0.0
+    # The fixed charge of what the swap added, from n.statistics (per YEAR = / n.nyears).
+    added_names = [r["name"] for r in replacements]
+    added_ess = [r["name"] for r in after.get("storage_units", []) if str(r.get("name", "")).startswith("__swap_ess_")]
+    fixed = fixed_cost_table(after_net, ["Generator", "StorageUnit"])
+    annualised_capex = sum(fixed_cost_of(fixed, "Generator", n)["annual"] for n in added_names) + sum(
+        fixed_cost_of(fixed, "StorageUnit", n)["annual"] for n in added_ess
     )
+    overnight_all = overnight_capex_table(after_net, ["Generator", "StorageUnit"])
+    resolved = [overnight_all.get(("Generator", n), float("nan")) for n in added_names] + [
+        overnight_all.get(("StorageUnit", n), float("nan")) for n in added_ess
+    ]
+    if resolved and all(v == v for v in resolved):
+        overnight_capex = float(sum(resolved))
+    else:
+        # PyPSA cannot back out an overnight cost from a per-horizon capital_cost without a
+        # discount_rate / lifetime: use PyPSA's annuity at the run's rate over the default life.
+        overnight_capex = (
+            annualised_capex / float(_pypsa_annuity(discount_rate, _DEFAULT_LIFETIME)) if annualised_capex > 0 else 0.0
+        )
     # ``statistics.opex()`` integrates over the modelled window of H represented
     # hours, so the saving is a window total; a payback in YEARS needs the
     # annual saving: × 8760/H.

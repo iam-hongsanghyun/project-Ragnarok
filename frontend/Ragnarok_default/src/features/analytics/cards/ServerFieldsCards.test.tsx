@@ -48,7 +48,7 @@ describe('expansion card reads server values', () => {
     const html = toMarkup(
       <CapacityExpansionCard assets={[{ ...base, capex_expanded: 60, capex_installed: 40, overnight_total: 900, fom_total: 7 }]} />,
     );
-    for (const label of ['Expanded CAPEX', 'Installed CAPEX', 'Overnight cost', 'Fixed O&amp;M']) expect(html).toContain(label);
+    for (const label of ['of which new build', 'of which already built (sunk)', 'Overnight cost', 'Fixed O&amp;M']) expect(html).toContain(label);
     expect(html).toContain('$900');
   });
 });

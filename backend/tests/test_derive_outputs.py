@@ -22,7 +22,7 @@ from backend.pypsa.results import run_pypsa
 from backend.pypsa.results.derive_outputs import derive_results_from_outputs
 
 SCENARIO = {"carbonPrice": 25.0, "discountRate": 0.05}
-OPTIONS = {"currencySymbol": "$", "ownerColumn": "owner"}
+OPTIONS = {"currencySymbol": "$", "ownerColumn": "owner", "buildVersion": 2}   # a stored run carries its build stamp
 
 # Every payload field that must survive the round trip exactly. Excluded:
 # narrative (solve vs derive notes legitimately differ), outputs (identity in →
@@ -187,14 +187,21 @@ def test_store_carrier_label_matches_between_solve_and_rebuild_on_a_non_ac_bus()
     _approx_equal(derived["storageSocSeries"], fresh["storageSocSeries"], "storageSocSeries")
 
 
-def test_derive_rebuilds_a_bare_pathway_config_from_the_rows() -> None:
-    """Outputs with a ``period`` column and no stored options still derive: the periods come from the rows."""
+def test_derive_rebuilds_a_bare_pathway_config_from_the_rows_and_the_stored_weights() -> None:
+    """Outputs with a ``period`` column and no stored options still derive: the periods come from the rows and
+    their weights from the model's RAGNAROK_PathwayPeriods sheet (D19: never an invented 1.0)."""
     from backend.tests.test_pathway_storage import _OPTIONS as PATHWAY_OPTIONS
     from backend.tests.test_pathway_storage import _model as pathway_model
 
     model = pathway_model("none")
     fresh = run_pypsa(model, {"carbonPrice": 0.0, "discountRate": 0.05}, dict(PATHWAY_OPTIONS))
-    derived = derive_results_from_outputs(model, fresh["outputs"], {"discountRate": 0.05}, {"enableLoadShedding": False})
+    base = {"enableLoadShedding": False, "buildVersion": 2}
+    with pytest.raises(ValueError, match="no stored investment-period weights"):
+        derive_results_from_outputs(model, fresh["outputs"], {"discountRate": 0.05}, dict(base))
+    stored = {**model, "RAGNAROK_PathwayPeriods": [
+        {"period": p["period"], "objectiveWeight": p["objectiveWeight"], "yearsWeight": p["yearsWeight"]}
+        for p in PATHWAY_OPTIONS["pathwayConfig"]["periods"]]}
+    derived = derive_results_from_outputs(stored, fresh["outputs"], {"discountRate": 0.05}, dict(base))
     assert derived["pathway"]["periods"] == [2030, 2040]
 
 

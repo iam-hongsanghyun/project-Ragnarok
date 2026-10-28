@@ -306,7 +306,7 @@ export const MODULE_13_DEMAND: TutorialStep[] = [
       + 'demand is the standard planning question: what has to be built to serve the load we expect?',
 
       'With wind, solar, the battery and the line all extendable at their capital costs, the projected '
-      + 'year solves at 31,848,292 — about 6.6 million of fuel and 25.3 million of annuitised capital. '
+      + 'year solves at 31,848,292 — about 6.6 million of fuel and 25.3 million of capital (PyPSA\'s annuity of each overnight_cost, on a one-year horizon). '
       + 'To get there it builds wind from 60 to 202.8 MW and solar from nothing to 50.0 MW, and leaves '
       + 'the battery where it is.',
 

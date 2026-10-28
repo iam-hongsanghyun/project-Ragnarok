@@ -845,7 +845,7 @@ export const MODULE_6_TIME: TutorialStep[] = [
       + 'storage or the seasonal variability of run-of-river at all.',
 
       'Export the project. Module 7 finally asks what to build — and it needs a FULL year rather than this '
-      + 'day, because an annual capital cost can only be weighed against an annual fuel bill. It ships one '
+      + 'day, because PyPSA charges an overnight cost for the modelled horizon, and only on a year is that the annuity itself, to be weighed against an annual fuel bill. It ships one '
       + 'prebuilt, since 8,760 rows of profile are not something anyone types; what you take forward from '
       + 'here is the technique for making one and the judgement about when a shortcut is safe.',
     ],

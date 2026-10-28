@@ -41,7 +41,7 @@ from ..importers.databases.openmeteo_renewable.attach import (
 from ..importers.databases.openmeteo_renewable.cache import snap
 from ..importers.databases.openmeteo_renewable.fetch import fetch_point
 from ..importers.http import AsyncClientWrapper
-from ...pypsa.network import build_network
+from ...pypsa.network import build_components
 from ...pypsa.network.serialize import network_to_model
 from ...pypsa.pypsa_schema import component_sheets
 
@@ -499,33 +499,6 @@ def _restore_shapes(
         reduced["shapes"] = restored
 
 
-def _transform_build_options(options: dict[str, Any] | None) -> dict[str, Any]:
-    """Run options for a build whose network is serialised straight back to a workbook.
-
-    Two corrections, both because a transform's output becomes the user's model
-    rather than a solve:
-
-    * ``skipCapexAnnuitisation`` — otherwise the reduced workbook stores an
-      annuitised ``capital_cost`` that the next run annuitises AGAIN (extendable
-      CAPEX ≈ AF² of its real value, so capacity expansion builds almost for free).
-    * the snapshot window, the ``snapshotWeight`` stride and representative
-      ``samplingConfig`` are NEUTRALISED. ``build_network`` applies all three to
-      ``network.snapshots``, and serialising that back would rewrite the user's
-      model with a truncated, downsampled time axis. A transform rewrites the whole
-      model, so it has to see the whole time axis.
-
-    ``pathwayConfig`` is kept: it decides whether the network is built with an
-    investment-period MultiIndex, and dropping it collapses per-period profiles
-    into one shared profile.
-    """
-    out = {**(options or {}), "skipCapexAnnuitisation": True}
-    for key in ("snapshotStart", "snapshotEnd", "snapshotCount"):
-        out.pop(key, None)
-    out["snapshotWeight"] = 1
-    out["samplingConfig"] = {"enabled": False}
-    return out
-
-
 def _require_cluster_count(busmap: "pd.Series", n_clusters: int) -> None:
     """Fail loudly when clustering could not reach the requested cluster count.
 
@@ -593,13 +566,10 @@ def cluster_model(
     reduced workbook model and ``busmap`` maps each original bus to its cluster.
     """
     scenario = dict(scenario or {})
-    # No discountRate is invented here: `skipCapexAnnuitisation` means nothing reads
-    # one, and a fabricated 0.05 was only ever satisfying a guard that no longer
-    # demands a rate the run cannot use.
-    # See `_transform_build_options`: no CAPEX annuitisation (the reduced workbook
-    # would be annuitised twice) and no run window / sampling (it would truncate
-    # the user's time axis).
-    network, _notes = build_network(model, scenario, _transform_build_options(options))
+    # `build_components` is the 1:1 builder: no run-time conversions, no run window or
+    # sampling. The network is serialised straight back to the user's workbook, so a carbon
+    # adder, load shedding, e_sum scaling or a snapped 1e9 bound would leak into it.
+    network, _notes = build_components(model, options)
 
     n_buses = len(network.buses)
     if n_buses < 2:

@@ -691,11 +691,8 @@ class RagnarokClient:
         the session (server-side working model) and posted to the matching
         converter endpoint, which builds a ``pypsa.Network`` and serialises it.
 
-        netCDF/HDF5 go through ``build_network``, which **requires**
-        ``scenario.discountRate`` (it raises HTTP 400 without it — the GUI
-        supplies it from Settings). We default it the same way the cluster
-        transform does, so an export never fails on a field that only affects
-        derived annuities.
+        netCDF/HDF5 go through ``build_components`` (the 1:1 builder): costs land in the
+        file exactly as the workbook holds them and no discount rate is needed or read.
 
         Every format resolves the model from ``sessionId`` server-side rather
         than shipping it inline: the session store IS the working model, so this

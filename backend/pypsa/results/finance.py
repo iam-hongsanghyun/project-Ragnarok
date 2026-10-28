@@ -42,7 +42,10 @@ import pypsa
 from ..network.piecewise import overlay_piecewise_marginal_cost
 
 from .adequacy import electricity_buses, store_link_pairs
-from .market import HOURS_PER_YEAR, capex_window_scale, process_assets
+from pypsa.costs import annuity as _pypsa_annuity
+
+from .market import HOURS_PER_YEAR, process_assets
+from .stat_metrics import fixed_cost_of, fixed_cost_table, overnight_capex_table
 
 _log = logging.getLogger("pypsa.solver")
 
@@ -52,12 +55,10 @@ _MAX_HORIZON = 60  # cap the cashflow horizon (years) to bound the arithmetic
 
 
 def _crf(rate: float, life: float) -> float:
-    """Capital recovery factor — annuity payment per unit of present capital."""
+    """Capital recovery factor — PyPSA's own ``annuity(rate, life)`` (debt service, fallback overnight)."""
     if life <= 0:
         return 1.0
-    if abs(rate) < 1e-9:
-        return 1.0 / life
-    return rate / (1.0 - (1.0 + rate) ** (-life))
+    return float(_pypsa_annuity(float(rate), float(life)))
 
 
 def _npv(rate: float, cashflows: list[float]) -> float:
@@ -125,9 +126,11 @@ class StorageAsset:
     """One storage resource's window economics, on the single shared rule.
 
     ``revenue`` and ``op_cost`` are window totals (currency, weighted by the
-    snapshot weights); ``capex_annual`` is the annualised capital charge the
-    solve itself paid (currency/yr) — nonzero only for extendable components,
-    exactly as in the PyPSA objective.
+    snapshot weights); ``capex_annual`` is the fixed charge PER YEAR that ``n.statistics`` reports
+    (``(capex + fom) / n.nyears``, currency/yr; installed and expanded capacity alike) and
+    ``overnight`` the ``n.statistics.overnight_cost`` of the asset (currency; NaN when PyPSA cannot
+    resolve it). ``capex_sunk`` / ``capex_expanded`` split the horizon capex into what was already
+    built and what the solve added.
     """
 
     name: str
@@ -142,6 +145,9 @@ class StorageAsset:
     op_cost: float
     discharged_mwh: float
     charged_mwh: float
+    overnight: float = float("nan")
+    capex_sunk: float = 0.0
+    capex_expanded: float = 0.0
 
 
 _STATIC_FRAME = {"StorageUnit": "storage_units", "Store": "stores", "Link": "links"}
@@ -184,16 +190,15 @@ def storage_assets(
       dischargers (a Store sitting on an electricity bus is injected directly);
       cost = Σ w (marginal_cost·p + marginal_cost_storage·e) plus the links'
       ``marginal_cost · p0``. Links serving several stores are split pro rata.
-    * Capex is ``capital_cost × size`` for **extendable** components only (store
-      energy ``e_nom_opt``; links ``p_nom_opt``), the amount the solve charged.
+    * Capex and overnight cost are read from ``n.statistics`` (store: its own plus its links' pro-rata
+      share), never recomputed from ``capital_cost``.
 
     Assets whose market bus has no price (``price_of`` returns ``None``) are skipped.
     """
     T = len(network.snapshots)
     out: list[StorageAsset] = []
-    # capital_cost may already be window-scaled by the network builder; the
-    # annual charge is recovered by dividing the scale back out.
-    cost_unscale = 1.0 / (capex_window_scale(network) or 1.0)
+    fixed = fixed_cost_table(network, ["StorageUnit", "Store", "Link"])
+    overnight_all = overnight_capex_table(network, ["StorageUnit", "Store", "Link"])
 
     su = network.storage_units
     for s in storage_units:
@@ -211,15 +216,16 @@ def storage_assets(
         spill_cost = _component_series(network, "StorageUnit", "spill_cost", str(s))
         soc = _flow(t.state_of_charge, s, T)
         spill = _flow(t.spill, s, T)
-        ext = "p_nom_extendable" in su.columns and bool(su.at[s, "p_nom_extendable"])
-        cap_cost = float(su.at[s, "capital_cost"]) if "capital_cost" in su.columns else 0.0
+        fc = fixed_cost_of(fixed, "StorageUnit", str(s))
         power = float(su.at[s, "p_nom_opt"]) if "p_nom_opt" in su.columns else float(su.at[s, "p_nom"])
         hours = float(su.at[s, "max_hours"]) if "max_hours" in su.columns else 1.0
         out.append(StorageAsset(
             name=str(s), sheet="storage_units", bus=bus,
             carrier=str(su.at[s, "carrier"]) if "carrier" in su.columns else "",
             capacity_mw=power, energy_mwh=power * hours,
-            capex_annual=cap_cost * power * cost_unscale if ext else 0.0,
+            capex_annual=fc["annual"],
+            overnight=float(overnight_all.get(("StorageUnit", str(s)), float("nan"))),
+            capex_sunk=fc["capex_sunk"], capex_expanded=fc["capex_expanded"],
             lifetime=_lifetime(su, s),
             revenue=float(((pd_ - pc) * pi * weights).sum()),
             op_cost=float(((mc * pd_ + mcs * soc + spill_cost * spill) * weights).sum()),
@@ -242,9 +248,10 @@ def storage_assets(
             e_flow = _flow(network.stores_t.e, s, T)
             p_store = _flow(network.stores_t.p, s, T)
             op = float(((mc * p_store + mcs * e_flow) * weights).sum())
-            ext = "e_nom_extendable" in st.columns and bool(st.at[s, "e_nom_extendable"])
-            cap_cost = float(st.at[s, "capital_cost"]) if "capital_cost" in st.columns else 0.0
-            capex = cap_cost * e_nom * cost_unscale if ext else 0.0
+            fc = fixed_cost_of(fixed, "Store", str(s))
+            capex = fc["annual"]
+            sunk, expanded = fc["capex_sunk"], fc["capex_expanded"]
+            over = float(overnight_all.get(("Store", str(s)), float("nan")))
             revenue = discharged = charged = capacity = 0.0
             market_bus = bus
             pair = pairs.get(str(s))
@@ -255,11 +262,13 @@ def storage_assets(
                     p1 = _flow(network.links_t.p1, ln, T)
                     link_mc = _component_series(network, "Link", "marginal_cost", ln)
                     op += float((link_mc * p0 * weights).sum()) * pair.share
-                    l_ext = "p_nom_extendable" in links.columns and bool(links.at[ln, "p_nom_extendable"])
-                    l_cap = float(links.at[ln, "capital_cost"]) if "capital_cost" in links.columns else 0.0
+                    lfc = fixed_cost_of(fixed, "Link", str(ln))
                     l_size = float(links.at[ln, "p_nom_opt"]) if "p_nom_opt" in links.columns else float(links.at[ln, "p_nom"])
-                    if l_ext:
-                        capex += l_cap * l_size * pair.share * cost_unscale
+                    capex += lfc["annual"] * pair.share
+                    sunk += lfc["capex_sunk"] * pair.share
+                    expanded += lfc["capex_expanded"] * pair.share
+                    l_over = float(overnight_all.get(("Link", str(ln)), float("nan")))
+                    over = (0.0 if over != over else over) + (0.0 if l_over != l_over else l_over) * pair.share
                     if ln in pair.discharge:
                         pi_l = price_of(str(links.at[ln, "bus1"]))
                         if pi_l is None:
@@ -289,6 +298,7 @@ def storage_assets(
                 capacity_mw=capacity, energy_mwh=e_nom * e_max,
                 capex_annual=capex, lifetime=_lifetime(st, s),
                 revenue=revenue, op_cost=op, discharged_mwh=discharged, charged_mwh=charged,
+                overnight=over, capex_sunk=sunk, capex_expanded=expanded,
             ))
     return out
 
@@ -357,9 +367,18 @@ def build_company_finance(
 
     # company -> list of (overnight_capex, annual_margin, lifetime)
     assets: dict[str, list[tuple[float, float, float]]] = {}
+    gen_fixed = fixed_cost_table(network, ["Generator", "Process"])
+    overnight_gp = overnight_capex_table(network, ["Generator", "Process"])
 
-    def _add(company: str, annualised_capex: float, margin: float, life: float) -> None:
-        c = annualised_capex / _crf(r, life) if annualised_capex > 0 else 0.0
+    def _add(company: str, annual_capex: float, margin: float, life: float, overnight: float = float("nan")) -> None:
+        """Overnight capex is PyPSA's ``n.statistics.overnight_cost``. Where PyPSA cannot resolve it
+        (a capital_cost row with no discount_rate / lifetime) it is the per-year charge over the
+        finance annuity ``annuity(r, life)`` - the only place a conversion is made, and the one that
+        needs the PROJECT discount rate."""
+        if overnight == overnight:
+            c = overnight
+        else:
+            c = annual_capex / _crf(r, life) if annual_capex > 0 else 0.0
         assets.setdefault(company, []).append((c, margin, life))
 
     # Dense marginal cost: a time-varying series (workbook `generators-
@@ -381,9 +400,9 @@ def build_company_finance(
         revenue = float((p * pi * weights).sum())
         mc = mc_dense[g].to_numpy(dtype=float)
         opex = float((mc * p * weights).sum())
-        ext = bool(network.generators.at[g, "p_nom_extendable"]) if "p_nom_extendable" in network.generators.columns else False
-        a = float(network.generators.at[g, "capital_cost"]) * float(network.generators.at[g, "p_nom_opt"]) / (capex_window_scale(network) or 1.0) if ext else 0.0
-        _add(company, a, (revenue - opex) * annualize, _lifetime(network.generators, g))
+        a = fixed_cost_of(gen_fixed, "Generator", str(g))["annual"]
+        _add(company, a, (revenue - opex) * annualize, _lifetime(network.generators, g),
+             float(overnight_gp.get(("Generator", str(g)), float("nan"))))
 
     # Storage (StorageUnit and Store + Link) through the one shared rule.
     def _price(bus: str) -> np.ndarray | None:
@@ -394,16 +413,17 @@ def build_company_finance(
     ):
         company = (sto_owner if a.sheet == "storage_units" else store_owner).get(a.name)
         if company:
-            _add(company, a.capex_annual, (a.revenue - a.op_cost) * annualize, a.lifetime)
+            _add(company, a.capex_annual, (a.revenue - a.op_cost) * annualize, a.lifetime, a.overnight)
 
-    # Processes (P29): net port value at the nodal prices less marginal cost; capex
-    # for extendable ones only — the same rule as generator economics.
+    # Processes (P29): net port value at the nodal prices less marginal cost; capex from
+    # n.statistics — the same rule as generator economics.
     if process_owner:
         for pa in process_assets(network, _price, weights, names=list(process_owner)):
             _add(
                 process_owner[pa.name], pa.capex_annual,
                 (pa.revenue - pa.variable_cost) * annualize,
                 _lifetime(network.processes, pa.name),
+                float(overnight_gp.get(("Process", pa.name), float("nan"))),
             )
 
     companies: list[dict[str, Any]] = []

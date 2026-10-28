@@ -315,7 +315,7 @@ export const POWER_MARKET_COURSE: Tutorial = {
     'Model storage and say why the same asset is worth three times more in one place than another',
     'Give a fuel its own bus, price it, store it, and convert it with a Link',
     'Choose a time resolution and horizon you can defend, and say what each shortcut breaks',
-    'Turn a dispatch model into an investment model on an annuitised, window-matched cost basis',
+    'Turn a dispatch model into an investment model on PyPSA\'s overnight-cost basis (annuity x horizon)',
     'Apply a carbon price or an emissions cap, and explain why they are the same instrument',
     'Produce a range with its conditions, a sensitivity ranking and an honest statement of limits',
     'Read a meshed network: why flows divide by reactance, and why a nodal price can exceed every offer',

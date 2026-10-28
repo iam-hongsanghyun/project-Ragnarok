@@ -386,6 +386,7 @@ export function BuildView(props: BuildViewProps) {
         <ConversionPicker
           model={props.model}
           busNames={busNames}
+          discountRate={props.discountRate}
           onApply={props.onApplyConversion}
         />
       )}

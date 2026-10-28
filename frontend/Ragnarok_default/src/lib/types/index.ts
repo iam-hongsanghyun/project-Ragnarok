@@ -1626,6 +1626,9 @@ export interface ProjectLoadResponse {
   runName?: string | null;
   conversation: Record<string, unknown> | null;
   filename?: string;
+  /** An OLD project (no ragnarok_schema_version) whose overnight `capital_cost` the server moved to `overnight_cost`
+   *  before returning `model`; null when nothing needed converting. */
+  costBasisMigration?: import('lib/api/session').CostBasisMigration | null;
 }
 
 export interface GeneratorEconomicsEntry {
@@ -1715,10 +1718,16 @@ export interface ExpansionAsset {
   p_nom_mw: number;
   p_nom_opt_mw: number;
   delta_mw: number;
+  /** PyPSA's periodised cost per unit for the modelled horizon (`capital_cost`, or overnight x annuity x nyears). */
   capital_cost: number;
+  /** n.statistics.capex over the modelled horizon (installed + expanded, no fom). */
+  capex_horizon?: number;
+  /** `capex_horizon / n.nyears`: the same cost per YEAR (a display basis, the only conversion made). */
   capex_annual: number;
-  /** n.statistics.expanded_capex / installed_capex on the same per-year basis;
-   *  they sum to `capex_annual`. Absent when the statistics could not resolve the row. */
+  /** The horizon in years `capex_horizon` refers to (n.nyears). */
+  nyears?: number;
+  /** n.statistics.expanded_capex (new build) / installed_capex (already built, sunk) over the horizon;
+   *  they sum to `capex_horizon`. Absent when the statistics could not resolve the row. */
   capex_expanded?: number;
   capex_installed?: number;
   /** n.statistics.overnight_cost (currency, not periodised). */

@@ -474,7 +474,7 @@ async def siting_region_structure(
         "the model's snapshots (exact timestamp, else the same calendar hour of another year, else the hour-of-day "
         "mean) and merged through the GUI's 'Add to workbook' rules. Each site attaches to the nearest bus unless "
         "bus_overrides {site: bus}; p_nom_mw {site: MW} (default the site capacity, else 100); extendable=true makes "
-        "them zero-capacity expansion candidates (p_nom_max = p_nom_mw, capital_cost_per_mw {tech: cost}). "
+        "them zero-capacity expansion candidates (p_nom_max = p_nom_mw, capital_cost_per_mw {tech: OVERNIGHT cost}, written as overnight_cost with discount_rate - pass it, e.g. 0.07). "
         "utc_offset is hours from UTC to the model clock. Without confirm=true returns the alignment report "
         "(per-site exact/calendar/unaligned counts, warnings, ok) and applies nothing; with confirm it merges, "
         "refusing (409) when the profiles do not align unless force=true."
@@ -487,6 +487,7 @@ async def promote_siting_sites(
     p_nom_mw: dict[str, float] | None = None,
     extendable: bool = False,
     capital_cost_per_mw: dict[str, float] | None = None,
+    discount_rate: float | None = None,
     marginal_cost: float = 0.0,
     bus_overrides: dict[str, str] | None = None,
     force: bool = False,
@@ -495,7 +496,7 @@ async def promote_siting_sites(
     gated = _needs_confirm(cheap=False) and not confirm
     res = await get_client().screening_post("promote", _opts(
         datasetId=dataset_id, sites=sites, utcOffset=utc_offset, pNomMw=p_nom_mw, extendable=extendable,
-        capitalCost=capital_cost_per_mw, marginalCost=marginal_cost, busOverrides=bus_overrides, force=force,
+        capitalCost=capital_cost_per_mw, discountRate=discount_rate, marginalCost=marginal_cost, busOverrides=bus_overrides, force=force,
         apply=not gated, includeFragment=False))
     if gated:
         return _preview("Add the sites to the working model as generators with p_max_pu profiles.",

@@ -91,13 +91,11 @@ from .ppa_explorer import build_ppa_explorer
 from .expansion import build_expansion_results
 from .full_outputs import build_full_outputs
 from .market import (
-    HOURS_PER_YEAR,
     build_applied_constraints,
     build_co2_shadow,
     build_commitment_cost,
     build_generator_economics,
     build_merit_order,
-    capex_window_scale,
     installed_capacity_series,
 )
 from .summaries import _rolling_window_summaries, _pathway_period_summaries
@@ -1258,28 +1256,16 @@ def _build_solved_payload(
             carbon_cost += weighted_sum(dispatch_pos * ef * carbon_price_series, cost_weights)
             fuel_cost += weighted_sum(dispatch_pos * (mc_s - ef * carbon_price_series).clip(lower=0.0), cost_weights)
 
-    # Expansion CAPEX. `capex_annual` is the full annual annuity
-    # (capital_cost × p_nom_opt, per year); the fuel/carbon/shedding components
-    # above are snapshot-weighted totals over the modelled window of
-    # H = Σ_t w_obj(t) hours. Pro-rate the annuity onto the same window
-    # (× H/8760) so every cost-breakdown component shares one basis — the same
-    # convention as market.py's fixedCostHorizon.
+    # Expansion CAPEX, read from PyPSA (n.statistics.capex per extendable asset): the objective's
+    # capital term over the modelled horizon, the same basis as the fuel/carbon/shedding components
+    # above. `capex_annual` is that figure / n.nyears, kept for the per-year display only.
     expansion_results = build_expansion_results(network)
-    total_capex_annual = sum(r["capex_annual"] for r in expansion_results)
-    _H_window = float(network.snapshot_weightings["objective"].sum())
-    _capex_scale = capex_window_scale(network)
     if pathway_run:
-        # Objective CAPEX: each extendable asset's annuity in every period it is
-        # active, weighted by that period's objective weighting. Not pro-rated to
-        # hours — pathway periods are annual representatives.
+        # Each extendable asset's periodised cost in every period it is active, weighted by that
+        # period's objective weighting - the statistic as PyPSA weights it.
         total_capex_window = float(sum(r.get("capex_weighted", 0.0) for r in expansion_results))
-    elif _capex_scale is not None:
-        # The solve already scaled capital_cost to the modelled window.
-        total_capex_window = total_capex_annual * _capex_scale
     else:
-        total_capex_window = (
-            total_capex_annual * (_H_window / HOURS_PER_YEAR) if _H_window > 0 else total_capex_annual
-        )
+        total_capex_window = float(sum(r.get("capex_horizon", 0.0) for r in expansion_results))
 
     # PyPSA-native `fom_cost` (per MW, added to the objective unscaled) — an
     # objective term nothing above sees; surface it on its own line.
@@ -1320,15 +1306,15 @@ def _build_solved_payload(
             generator_explained=fuel_cost + carbon_cost + shed_cost + commitment_cost,
         )
     )
-    if total_capex_annual > 0:
-        # Annual annuity pro-rated to the modelled window (× H/8760) so it is
-        # comparable with the window-total fuel/carbon/shedding components. A
-        # pathway run reports the investment-period-weighted annuity instead.
+    if any(r.get("capex_annual", 0) > 0 for r in expansion_results):
+        # PyPSA's periodised capital cost over the modelled horizon (n.statistics.capex), directly
+        # comparable with the window-total fuel/carbon/shedding components. A pathway run reports
+        # it with the investment-period weighting.
         cost_breakdown.append({
             "label": (
-                "Capital cost (annuity × investment-period weighting)"
+                "Capital cost (periodised, investment-period weighted)"
                 if pathway_run
-                else "Capital cost (annuity, pro-rated to window)"
+                else "Capital cost (periodised, modelled horizon)"
             ),
             "value": round(total_capex_window),
         })

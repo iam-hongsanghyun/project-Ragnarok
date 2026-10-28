@@ -33,7 +33,7 @@ from .log_capture import (
 )
 from .models import ExportProjectPayload, RunPayload
 from . import model_store, run_store
-from ..pypsa.network import build_network, validate_model
+from ..pypsa.network import validate_model
 from ..pypsa.network.serialize import network_to_model as _network_to_model_json
 from backend.app.data_root import data_root
 
@@ -1646,9 +1646,16 @@ def promote_run_to_session(name: str, body: PromoteRunRequest) -> dict[str, Any]
     scenario = data.get("scenario") or {}
     options = data.get("options") or {}
     filename = str(options.get("filename") or data.get("filename") or f"{name}.xlsx")
+    from ..pypsa.network.cost_basis import build_version_of
+
     try:
+        # A run stored before the cost basis was stamped holds an OVERNIGHT capital_cost: migrate it once, at
+        # the run's own discount rate, as it becomes the editable working model (the notice is in meta).
+        raw_rate = scenario.get("discountRate")
         meta = model_store.save_model(
             body.sessionId, model, filename=filename, scenario_name=str(scenario.get("label") or ""),
+            legacy_origin=build_version_of(model, options) is None,
+            discount_rate=float(raw_rate) if isinstance(raw_rate, (int, float)) else None,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -2018,8 +2025,28 @@ async def import_project_load(file: UploadFile) -> dict[str, Any]:
     options = bundle.get("options") or {}
     options.setdefault("filename", filename)
     stored = meta is not None
+    model = bundle.get("model") or {}
+    migration: dict[str, Any] | None = None
+    scenario_in = bundle.get("scenario") or {}
+    from ..pypsa.network import cost_basis as _cb
+
+    # An inputs-only project written before the cost basis was stamped: its capital_cost is an OVERNIGHT price.
+    # Migrate it once, here, at the project's own discount rate (the browser then loads an already-converted,
+    # stamped model and shows the report). A zip package, or an xlsx with the Ragnarok settings sheet, is a
+    # Ragnarok project; a plain PyPSA workbook is not routed through here.
+    if (
+        not stored and model and _cb.build_version_of(model, options) is None
+        and (filename.lower().endswith(".zip") or scenario_in.get("discountRate") is not None)
+    ):
+        rate = scenario_in.get("discountRate")
+        model, report = _cb.migrate_cost_basis(
+            model, discount_rate=float(rate) if isinstance(rate, (int, float)) else None
+        )
+        if report.changed_rows or report.review:
+            migration = report.as_dict()
     return {
-        "model": bundle.get("model") or {},
+        "costBasisMigration": migration,
+        "model": model,
         "scenario": bundle.get("scenario") or {},
         "options": options,
         "result": {} if stored else (bundle.get("result") or {}),
@@ -2187,57 +2214,23 @@ def download_backend_run_package(name: str) -> Response:
 # pure format converters.
 
 
-# Run options that bake a *run* (not the authored model) into the built network:
-# the snapshot window / stride / sampled blocks, the scenario expansions and the
-# solve-mode rewrites. They are dropped for a format export.
-_EXPORT_STRIPPED_OPTIONS = (
-    "snapshotStart", "snapshotEnd", "snapshotCount", "snapshotWeight",
-    "samplingConfig", "stochasticConfig", "rollingConfig",
-    "forceLp", "loadSheddingCost", "carbonPriceSchedule",
-)
-
-
 def _model_payload_to_network(payload: RunPayload):
     """Build the AUTHORED `pypsa.Network` from a RunPayload, without solving.
 
-    ``build_network`` bakes run-time processing into the network it returns:
-    annualised ``capital_cost``, the carbon-price adder in ``marginal_cost``,
-    injected ``load_shedding_*`` generators, the snapshot window/stride and the
-    sub-annual scaling of ``e_sum_min`` / ``e_sum_max``. Exporting that and
-    re-importing it annuitises and adds carbon a second time. So the export
-    builds with the processing switched off (overnight capital cost, no carbon
-    adder, no shedding backstop, whole snapshot axis at its authored weighting)
-    and undoes the one scaling that has no switch — the result is the model the
-    user authored, suitable for sharing with downstream PyPSA tooling.
+    Uses :func:`build_components` - the 1:1 hand-over to PyPSA with none of the run-time
+    steps (snapshot window, carbon adder, load shedding, e_sum scaling, Force-LP, ...). So
+    ``capital_cost`` / ``overnight_cost`` / ``fom_cost`` / ``discount_rate`` / ``lifetime``
+    land in the file exactly as the workbook holds them, and a downstream PyPSA tool reads the
+    same costs Ragnarok solves.
 
-    The model's time-series sheets are re-attached from the session first — the
+    The model's time-series sheets are re-attached from the session first - the
     editor posts static sheets only, so without this the exported .nc / .h5
     carries the topology and no profiles at all.
     """
-    import pandas as pd
-
-    from .config import load_system_defaults
+    from ..pypsa.network import build_components
 
     model = _model_with_session_series(payload.model, payload.sessionId)
-    options = {k: v for k, v in (payload.options or {}).items() if k not in _EXPORT_STRIPPED_OPTIONS}
-    options.update({"skipCapexAnnuitisation": True, "enableLoadShedding": False})
-    scenario = {**(payload.scenario or {}), "carbonPrice": 0.0}
-    network, _notes = build_network(model, scenario, options)
-
-    # build_network scales annual energy caps by (modelled hours / 8760) for a
-    # sub-annual axis; divide it back out so the caps read as authored.
-    hours_in_year = float(load_system_defaults().get("simulation", {}).get("hours_in_year", 8760.0))
-    weights = network.snapshot_weightings["objective"]
-    if isinstance(network.snapshots, pd.MultiIndex) and "period" in network.snapshots.names:
-        modelled_hours = float(weights.groupby(level="period").sum().min())
-    else:
-        modelled_hours = float(weights.sum())
-    factor = min(1.0, modelled_hours / hours_in_year) if modelled_hours > 0 else 1.0
-    if factor < 1.0:
-        for frame in (network.generators, network.storage_units, network.stores):
-            for col in frame.columns:
-                if col.endswith("_sum_min") or col.endswith("_sum_max"):
-                    frame[col] = frame[col] / factor
+    network, _notes = build_components(model, payload.options or {})
     return network
 
 

@@ -111,6 +111,7 @@ def _build(**overrides):
         site_capacity_mw=400.0,
         capital_cost_per_mw={"solar": 35000.0, "wind": 60000.0},
         connection_cost_per_mw_km=100.0,
+        discount_rate=0.05,
     )
     kwargs.update(overrides)
     return build_siting_fragment([_site(37.4, 127.1), _site(35.2, 128.9)], _buses(), **kwargs)
@@ -126,8 +127,9 @@ def test_fragment_candidates_are_extendable_from_zero() -> None:
         assert g["p_nom_extendable"] is True
         assert g["p_nom_max"] == 400.0
     by_carrier = {g["carrier"]: g for g in gens}
-    assert by_carrier["solar"]["capital_cost"] == 35000.0
-    assert by_carrier["wind"]["capital_cost"] == 60000.0
+    assert by_carrier["solar"]["overnight_cost"] == 35000.0 and by_carrier["solar"]["discount_rate"] == 0.05
+    assert by_carrier["solar"]["lifetime"] == 25.0 and "capital_cost" not in by_carrier["solar"]
+    assert by_carrier["wind"]["overnight_cost"] == 60000.0
 
 
 def test_fragment_connection_capex_scales_with_distance() -> None:
@@ -138,7 +140,8 @@ def test_fragment_connection_capex_scales_with_distance() -> None:
         assert link["bus0"] == c["siteBus"]
         assert link["bus1"] == c["gridBus"]
         assert link["p_nom_extendable"] is True
-        assert link["capital_cost"] == pytest.approx(100.0 * c["distanceKm"], abs=0.51)
+        assert link["overnight_cost"] == pytest.approx(100.0 * c["distanceKm"], abs=0.51)
+        assert link["discount_rate"] == 0.05 and link["lifetime"] == 40.0
     # site 1 is near Seoul, site 2 near Busan — nearest-bus wiring is per site
     assert candidates[0]["gridBus"] == "seoul"
     assert candidates[1]["gridBus"] == "busan"
@@ -172,7 +175,7 @@ def test_fragment_tiles_cf_onto_target_snapshots() -> None:
     frag, _ = build_siting_fragment(
         [_site(37.4, 127.1)], _buses(),
         technologies=["solar"], performance_ratio=1.0,
-        capital_cost_per_mw={"solar": 1000.0},
+        capital_cost_per_mw={"solar": 1000.0}, discount_rate=0.05,
         target_snapshots=target,
     )
     assert frag.snapshots == target
@@ -201,7 +204,7 @@ def test_target_snapshot_mode_honours_utc_offset_and_aligns_by_timestamp() -> No
     target = [f"2023-06-01 {h:02d}:00" for h in range(24)]
     frag, _ = build_siting_fragment(
         [_day_site()], _buses(), technologies=["solar"], performance_ratio=1.0,
-        capital_cost_per_mw={"solar": 1000.0}, target_snapshots=target, utc_offset=9,
+        capital_cost_per_mw={"solar": 1000.0}, discount_rate=0.05, target_snapshots=target, utc_offset=9,
     )
     rows = frag.sheets["generators-p_max_pu"]
     cf = [r["siting_solar_1"] for r in rows]
@@ -213,7 +216,7 @@ def test_target_snapshot_mode_matches_other_year_by_month_day_hour() -> None:
     target = [f"2030-06-01 {h:02d}:00" for h in range(24)]
     frag, _ = build_siting_fragment(
         [_day_site()], _buses(), technologies=["solar"], performance_ratio=1.0,
-        capital_cost_per_mw={"solar": 1000.0}, target_snapshots=target, utc_offset=9,
+        capital_cost_per_mw={"solar": 1000.0}, discount_rate=0.05, target_snapshots=target, utc_offset=9,
     )
     cf = [r["siting_solar_1"] for r in frag.sheets["generators-p_max_pu"]]
     assert cf == pytest.approx([1.0 if 12 <= h <= 19 else 0.0 for h in range(24)])
@@ -223,7 +226,7 @@ def test_fragment_skips_sites_without_weather() -> None:
     empty = {"lat": 1.0, "lon": 1.0, "time": [], "ghi": [], "wind_ms": []}
     frag, candidates = build_siting_fragment(
         [empty, _site(37.4, 127.1)], _buses(),
-        technologies=["solar"], capital_cost_per_mw={"solar": 1000.0},
+        technologies=["solar"], capital_cost_per_mw={"solar": 1000.0}, discount_rate=0.05,
     )
     assert len(candidates) == 1
     assert candidates[0]["gridBus"] == "seoul"
@@ -267,6 +270,7 @@ def _payload(**overrides) -> dict:
         "buses": [{"name": "seoul", "x": 127.0, "y": 37.5}],
         "siteCapacityMw": 200.0,
         "capitalCostPerMw": {"solar": 40000.0},
+        "discountRate": 0.05,
         "connectionCostPerMwKm": 50.0,
     }
     payload.update(overrides)
@@ -307,7 +311,7 @@ def test_siting_solve_prefers_near_site_over_far_site() -> None:
         grid,
         technologies=["wind"],
         site_capacity_mw=400.0,
-        capital_cost_per_mw={"wind": 5000.0},
+        capital_cost_per_mw={"wind": 5000.0}, discount_rate=0.05,
         connection_cost_per_mw_km=100.0,
     )
     near, far = candidates
@@ -339,3 +343,8 @@ def test_scan_rejects_bad_inputs(client) -> None:
     assert client.post("/api/siting/scan", json=_payload(weatherSource="nope")).status_code == 422
     assert client.post("/api/siting/scan", json=_payload(siteCapacityMw=0)).status_code == 422
     assert client.post("/api/siting/scan", json=_payload(bbox=[128.0, 34.0, 126.0, 38.0])).status_code == 422
+
+
+def test_a_siting_scan_without_a_discount_rate_is_refused_not_defaulted() -> None:
+    with pytest.raises(ValueError, match="discount rate is required"):
+        build_siting_fragment([_site(37.4, 127.1)], _buses(), technologies=["solar"], capital_cost_per_mw={"solar": 1000.0})

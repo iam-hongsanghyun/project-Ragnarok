@@ -17,13 +17,13 @@
  * through the app's own build path at a 5% discount rate:
  *
  *   weights (discounted decades)    8.1078 / 4.9775 / 3.0558, ratio 1.05^-10 = 0.6139
- *   no policy                       total cost 589,565,223; builds nothing in 2030;
+ *   no policy                       total cost 589,565,227; builds nothing in 2030;
  *                                   emissions 11,893 / 9,673 / 591 kt per period
  *   coal_old kept to 2045           2040 emissions 13,372 kt; cap plan unchanged
- *   carbon price 20 / 60 / 120      emissions 5,709 / 1,235 / 0 kt; total cost 872,790,029
- *   cap 10 / 4 / 0.3 Mt a period    total cost 626,611,124; shadow price 12.0533
- *   years weight left at 1          the caps are 10x too loose and never bind: 589,565,223
- *   annual tonnes, years = 10       caps 10x too tight: 907,496,651 (+45%)
+ *   carbon price 20 / 60 / 120      emissions 5,709 / 1,235 / 0 kt; total cost 872,790,016
+ *   cap 10 / 4 / 0.3 Mt a period    total cost 626,611,134; shadow price 12.0533
+ *   years weight left at 1          the caps are 10x too loose and never bind: 589,565,227
+ *   annual tonnes, years = 10       caps 10x too tight: 907,496,654 (+45%)
  *   only a 2050 cap                 2040 battery 39.6 -> 97.7 MW: perfect foresight
  *
  * Ragnarok solves one perfect-foresight problem. It has no myopic mode (each
@@ -163,9 +163,11 @@ export const MODULE_16_PATHWAY: TutorialStep[] = [
       + 'column, so every snapshot already knows its decade.',
 
       'Then Settings → Project defaults and confirm Discount rate reads 0.05, as it has since '
-      + 'module 7. It does two jobs here and they are separate: it annuitises overnight capital cost (step '
-      + '7), and — in the weights you just typed — it discounts the future. Ragnarok does not tie the two '
-      + 'together; if you change the rate, recompute the three weights yourself.',
+      + 'module 7. It does two jobs here and they are separate: it is the rate written into each row\'s `discount_rate`, '
+      + 'which PyPSA annuitises `overnight_cost` with (step 7), and — in the weights you just typed — it '
+      + 'discounts the future. Ragnarok does not tie the two together; if you change the rate, recompute the '
+      + 'three weights yourself and refill the rows.',
+
 
       'Open the Run dialog and check the planning summary: it should read 3 pathway periods rather than '
       + 'a snapshot window, and the simulation-window slider disappears — a pathway runs every snapshot of '
@@ -184,8 +186,9 @@ export const MODULE_16_PATHWAY: TutorialStep[] = [
         selector: '[data-settings-section="projectDefaults"]',
         title: 'The discount rate',
         tab: 'Settings',
-        note: 'Still 0.05. It annuitises capital cost in step 7; the weights you typed already contain the '
-          + 'same 5% as a discount. They are two uses of one number that Ragnarok does not link.',
+        note: 'Still 0.05. It is written into each row\'s discount_rate, which PyPSA annuitises overnight_cost with '
+          + '(step 7); the weights you typed already contain the same 5% as a discount. They are two uses of one '
+          + 'number that Ragnarok does not link.',
       },
       {
         selector: '.sg-scenario-summary',
@@ -349,7 +352,7 @@ export const MODULE_16_PATHWAY: TutorialStep[] = [
       'The run is queued: when it finishes, History → tick the run → View result opens Analytics → Result. '
       + 'The page shows ONE period at a time and opens on 2030 — the KPI strip there reads Total cost 226,889,583 and '
       + 'Emissions 11,893 ktCO2e. Click 2040 and 2050 for the others. Throughout this module the RUN TOTAL means the '
-      + 'three period views added: 226,889,583 + 205,870,256 + 156,805,384 = 589,565,223, and 11,893 + 9,673 + 591 = '
+      + 'three period views added: 226,889,583 + 205,870,256 + 156,805,389 = 589,565,228 (the run reads 589,565,227: each view is rounded to a whole unit on its own), and 11,893 + 9,673 + 591 = '
       + '22,158 ktCO2e. The API gives the same sums directly: /api/runs/{run name}/kpis, with the run name from '
       + 'History. That emissions total is NOT 22 million tonnes a year — it is the three decades added together, '
       + 'each multiplied by its ten years. Step 5 takes it apart.',
@@ -369,8 +372,8 @@ export const MODULE_16_PATHWAY: TutorialStep[] = [
         title: 'Reconcile the three periods',
         tab: 'Analytics',
         runDialog: 'closed',
-        note: 'The period views add to a run total of 589,565,223, in 2030 money: fuel 365,027,989 plus capital '
-          + '224,537,234. It is a present value of three decades, not a year — so it is much larger than any '
+        note: 'The period views add to a run total of 589,565,227, in 2030 money: fuel 365,027,989 plus capital '
+          + '224,537,238. It is a present value of three decades, not a year — so it is much larger than any '
           + 'single-period number in this course, and cannot be compared with them.',
       },
       {
@@ -395,16 +398,16 @@ export const MODULE_16_PATHWAY: TutorialStep[] = [
         'A pathway run solves three periods of 24 snapshots jointly — about a second.',
         'Nothing outside the pathway settings has changed since the checkpoint.',
       ],
-      expect: 'Run total 589,565,223; nothing built in 2030; wind_2040 183.4 MW and wind_2050 200 MW; emissions 22,158 ktCO2e.',
+      expect: 'Run total 589,565,227; nothing built in 2030; wind_2040 183.4 MW and wind_2050 200 MW; emissions 22,158 ktCO2e.',
     },
     verify: [
-      'The three period views read Total cost 226,889,583, 205,870,256 and 156,805,384 (run total 589,565,223)',
+      'The three period views read Total cost 226,889,583, 205,870,256 and 156,805,389 (run total 589,565,227)',
       'Nothing with a 2030 name has a non-zero build; wind_2040 is about 183 MW and wind_2050 is 200 MW',
       'solar_2050 and batt_2050 sit at their p_nom_max (250 and 100 MW)',
       'You can say why the optimiser builds nothing in 2030',
     ],
     pitfalls: [
-      'A total cost near 589,565,223 but a build in 2030. Check the objective weights: with weight 1 on '
+      'A total cost near 589,565,227 but a build in 2030. Check the objective weights: with weight 1 on '
       + 'every period the future is undiscounted and early builds look better than they should.',
       'An error about periods not matching. The period numbers in the Settings table must be exactly the '
       + 'values in the snapshots period column — 2030, not 2031.',
@@ -446,7 +449,7 @@ export const MODULE_16_PATHWAY: TutorialStep[] = [
       'Capacity is on the capacity-by-period card, which stacks every period at once: hover each stack for '
       + '450 MW in 2030, 491 MW in 2040 and 791 MW in 2050 — against 641 MW in 2040 if coal_old were wrongly '
       + 'counted. The KPI strip\'s Total cost for the three views reads 226,889,583, 205,870,256 and '
-      + '156,805,384, which add to 589,565,223.',
+      + '156,805,389, which add to 589,565,227 (give or take a unit of rounding).',
 
       'Emissions: 11,893, 9,673 and 591 ktCO2e. Renewable share: 0%, 33.8%, 92.5%. The price range shows '
       + 'the fuel on the margin changing — 20 flat in 2030 (coal), up to 34 in 2040, and 8 to 55 in 2050, when '
@@ -469,8 +472,8 @@ export const MODULE_16_PATHWAY: TutorialStep[] = [
         selector: '[data-card="kpi-strip"]',
         title: 'Per-period totals add up',
         tab: 'Analytics',
-        note: 'Total cost reads 226,889,583 in 2030, 205,870,256 in 2040 and 156,805,384 in 2050 — these '
-          + 'sum to the whole run\'s 589,565,223. Emissions are years-weighted: 11,893 kt in 2030, not 1,189.',
+        note: 'Total cost reads 226,889,583 in 2030, 205,870,256 in 2040 and 156,805,389 in 2050 — these '
+          + 'sum to the whole run\'s 589,565,227. Emissions are years-weighted: 11,893 kt in 2030, not 1,189.',
       },
       {
         selector: '[data-card="capacity-by-period"]',
@@ -483,7 +486,7 @@ export const MODULE_16_PATHWAY: TutorialStep[] = [
     ],
     verify: [
       'The capacity-by-period card stacks 450, 491 and 791 MW for 2030, 2040 and 2050',
-      'The three Total cost figures add up to 589,565,223',
+      'The three Total cost figures add up to 589,565,227, give or take a unit of rounding',
       'Emissions read 11,893, 9,673 and 591 ktCO2e in the three views',
       'You can say why the 2040 capacity is 491 MW and not 641 MW',
       'You can say why a period\'s Total cost is not that decade\'s annual spend',
@@ -511,7 +514,7 @@ export const MODULE_16_PATHWAY: TutorialStep[] = [
 
       'With no policy in the model, the effect is large and a little perverse. 2040 emissions rise from '
       + '9,673 to 13,372 kt, because 150 MW of cheap coal is back and the system builds almost nothing in '
-      + '2040 (42 MW of solar, no wind, no battery) to replace it. The total cost FALLS, from 589,565,223 to 581,972,355 — keeping the old '
+      + '2040 (42 MW of solar, no wind, no battery) to replace it. The total cost FALLS, from 589,565,227 to 581,972,357 — keeping the old '
       + 'plant is cheaper, which is exactly why plants are not retired just because a table says they '
       + 'should be.',
 
@@ -524,7 +527,7 @@ export const MODULE_16_PATHWAY: TutorialStep[] = [
       'Build → Generators: click the coal_old row and, in the form on the right, change its `lifetime` from 50 to 60. Run again. Read period 2040 on '
       + 'the selector: coal_old is back in the capacity-by-period stack (492 MW in all), the Capacity '
       + 'Expansion card shows no battery built, and Emissions read 13,372 ktCO2e. The run total (the three period views '
-      + 'added, as in step 4) is 581,972,355 and its Emissions 27,827 ktCO2e.',
+      + 'added, as in step 4) is 581,972,357 and its Emissions 27,827 ktCO2e.',
 
       'Check 2050 too: emissions 2,562 kt against 591 before. Delaying the build-out in 2040 means less '
       + 'renewable capacity is alive in 2050, and gas covers more of the evening.',
@@ -549,7 +552,7 @@ export const MODULE_16_PATHWAY: TutorialStep[] = [
         title: '13,372 kt, and a cheaper pathway',
         tab: 'Analytics',
         note: 'In the 2040 view, Emissions reads 13,372 ktCO2e against 9,673 before and Total cost 166,349,676. '
-          + 'The whole run is cheaper (581,972,355) and dirtier (27,827 kt). Retiring a plant early is '
+          + 'The whole run is cheaper (581,972,357) and dirtier (27,827 kt). Retiring a plant early is '
           + 'something the optimiser has no reason to do on cost alone.',
       },
     ],
@@ -577,12 +580,12 @@ export const MODULE_16_PATHWAY: TutorialStep[] = [
       detail: [
         'Each run is about a second. Use Analytics → Comparison to put the two side by side.',
       ],
-      expect: 'At lifetime 60: run total 581,972,355, 2040 emissions 13,372 kt. At 50: back to 589,565,223.',
+      expect: 'At lifetime 60: run total 581,972,357, 2040 emissions 13,372 kt. At 50: back to 589,565,227.',
     },
     verify: [
       'At lifetime 60 the 2040 stack in the capacity-by-period card reads 492 MW and the 2040 view 13,372 ktCO2e',
-      'The run total reads 581,972,355 and Emissions 27,827 ktCO2e',
-      'After restoring 50 the run is 589,565,223 again',
+      'The run total reads 581,972,357 and Emissions 27,827 ktCO2e',
+      'After restoring 50 the run is 589,565,227 again',
       'You can say why a longer-lived coal plant makes the pathway cheaper and dirtier',
     ],
     pitfalls: [
@@ -600,18 +603,21 @@ export const MODULE_16_PATHWAY: TutorialStep[] = [
     tab: 'Analytics',
     where: 'Analytics → Result → Capacity Expansion card',
     concept: [
-      'A workbook capital_cost is an OVERNIGHT cost — what building a megawatt costs up front. The '
-      + 'objective needs an annual figure it can set against fuel, so Ragnarok converts it to an annuity: '
-      + 'overnight x r / (1 - (1 + r)^-L), with L the asset\'s lifetime. At 5% a 25-year wind farm at 1.3 '
-      + 'million per MW becomes 92,238 per MW per year; the factor is 0.0709525.',
+      'The workbook\'s `overnight_cost` is what building a megawatt costs up front. The objective needs a '
+      + 'figure it can set against fuel, so PyPSA converts it to an annuity: overnight x r / (1 - (1 + r)^-L), '
+      + 'with L the asset\'s `lifetime` and r its `discount_rate`, times n.nyears for each period (1 here: each '
+      + 'period is one representative year). At 5% a 25-year wind farm at 1.3 million per MW becomes 92,238 per '
+      + 'MW per year; the factor is 0.0709525. `capital_cost` is the other column: PyPSA takes it as already '
+      + 'periodised and does nothing to it.',
+
 
       'The annual charge is then applied in EVERY period the asset is active, each time multiplied by that '
       + 'period\'s objective weight. wind_2040 is active in 2040 and 2050, so it is charged twice — 92,238 '
       + 'per MW-year x 183.4 MW = 16.9 million a year, in each of two periods. A battery of lifetime 15 uses '
       + 'a different factor, 0.0963423, so 350,000 overnight is 33,720 a year.',
 
-      'Two traps follow. The first is entering a cost that is already annual: Ragnarok would annuitise it '
-      + 'again and the asset would look about 14 times too cheap (1 / 0.0709525). The second is subtler. '
+      'Two traps follow. The first is entering a cost that is already annual into `overnight_cost`: PyPSA would '
+      + 'annuitise it again and the asset would look about 14 times too cheap (1 / 0.0709525). The second is subtler. '
       + 'Charging whole periods means an asset is paid for in every period it touches: solar built in 2030 with '
       + 'a 25-year life is active in 2030, 2040 and 2050 and is charged for thirty years of annuity — five more '
       + 'than it lives. Granularity has a price, and the price is biggest for assets whose life is not a '
@@ -619,17 +625,17 @@ export const MODULE_16_PATHWAY: TutorialStep[] = [
     ],
     explain: [
       'Analytics → Result. The Capacity Expansion card covers every period at once. In its Asset detail table, find wind_2040: '
-      + 'Optimised 183.4 MW and Annual CAPEX 16,915,470. Divide: 16,915,470 / 183.4 = 92,238 per MW-year, which '
+      + 'Optimised 183.4 MW and CAPEX per year 16,915,470. Divide: 16,915,470 / 183.4 = 92,238 per MW-year, which '
       + 'is 1,300,000 x 0.0709525. That annual charge is levied in each of the two periods the asset is alive, '
       + 'so the objective carries 16,915,470 x (4.9775 + 3.0558), about 135.9 million, for this one vintage.',
 
-      'Compare batt_2040: Annual CAPEX 1,334,226 on 39.6 MW is 33,720 per MW-year (350,000 x 0.0963423), also '
+      'Compare batt_2040: CAPEX per year 1,334,226 on 39.6 MW is 33,720 per MW-year (350,000 x 0.0963423), also '
       + 'alive in 2040 and 2050. And wind_2050, alive only in 2050 and charged once: 14,190,491 on 200 MW is '
       + '70,952 per MW-year — 1.0 million x 0.0709525.',
 
-      'Total cost in each period view is fuel plus a line the cost breakdown labels "Capital cost (annuity x '
-      + 'investment-period weighting)": nothing in 2030 (nothing was built), 92,583,128 in the 2040 view and '
-      + '131,954,106 in 2050 — 224,537,234 over the run. The split is on Analytics → Comparison\'s cost panel '
+      'Total cost in each period view is fuel plus a line the cost breakdown labels "Capital cost (periodised, '
+      + 'investment-period weighted)": nothing in 2030 (nothing was built), 92,583,128 in the 2040 view and '
+      + '131,954,111 in 2050 — 224,537,238 over the run. The split is on Analytics → Comparison\'s cost panel '
       + '(with two runs) and at /api/runs/{name}/period/2040?fields=costBreakdown.',
 
       'The end-of-horizon effect is the one thing no card shows. Everything built in 2050 lasts past '
@@ -641,7 +647,7 @@ export const MODULE_16_PATHWAY: TutorialStep[] = [
         selector: '[data-card="capacity-expansion"]',
         title: 'Annuity, active periods, weighted capex',
         tab: 'Analytics',
-        note: 'wind_2040: Optimised 183.4 MW, Annual CAPEX 16,915,470 — that is 92,238 a MW-year, 1.3 million x '
+        note: 'wind_2040: Optimised 183.4 MW, CAPEX per year 16,915,470 — that is 92,238 a MW-year, 1.3 million x '
           + '0.0709525. The same figure is charged in every period the asset is alive, which is how a lump-sum '
           + 'investment becomes a stream the objective can add up.',
       },
@@ -655,15 +661,16 @@ export const MODULE_16_PATHWAY: TutorialStep[] = [
       },
     ],
     verify: [
-      'wind_2040\'s Annual CAPEX divided by its 183.4 MW is about 92,238 per MW-year',
-      'wind_2050\'s Annual CAPEX divided by its 200 MW is about 70,952 per MW-year, charged in one period only',
+      'wind_2040\'s CAPEX per year divided by its 183.4 MW is about 92,238 per MW-year',
+      'wind_2050\'s CAPEX per year divided by its 200 MW is about 70,952 per MW-year, charged in one period only',
       'You can say why 350,000 overnight for a 15-year battery annualises to 33,720 and not 24,833',
-      'You can say what would go wrong if a pre-annualised cost were typed into capital_cost',
+      'You can say what would go wrong if a pre-annualised cost were typed into overnight_cost',
     ],
     pitfalls: [
-      'Typing an annualised cost into capital_cost. Ragnarok annuitises whatever it finds there; a '
+      'Typing an annualised cost into overnight_cost. PyPSA annuitises whatever it finds there; a '
       + 'cost already annual comes out roughly fourteen times too small and the optimiser builds '
       + 'everything it is allowed to.',
+
       'Expecting the capital charge to stop at the battery\'s 15-year life. Periods are ten years wide, '
       + 'so a 15-year asset is charged in the second period it touches in full — the model has no half-periods.',
     ],
@@ -692,7 +699,7 @@ export const MODULE_16_PATHWAY: TutorialStep[] = [
       + 'Which policy is "tighter" depends on the number you wrote, not the instrument.',
 
       'And the cost is not comparable. The objective now INCLUDES the carbon payments — 129.5 million of '
-      + 'them — so the run\'s Total cost, 872,790,029, is not a resource cost. Module 8 made the same point '
+      + 'them — so the run\'s Total cost, 872,790,016, is not a resource cost. Module 8 made the same point '
       + 'for a single period: a price moves money between the emitter and the treasury.',
     ],
     explain: [
@@ -704,7 +711,7 @@ export const MODULE_16_PATHWAY: TutorialStep[] = [
       + 'confirms the schedule will price those generators. Then run.',
 
       'Read the three periods. 2030: Emissions 5,709 ktCO2e, renewable share 52%. 2040: 1,235 kt, 91%. '
-      + '2050: 0 kt, 100%. The run total reads 872,790,029 and Emissions 6,944 kt.',
+      + '2050: 0 kt, 100%. The run total reads 872,790,016 and Emissions 6,944 kt.',
 
       'Now remove the schedule — delete the three points — so the next steps start from no price. A '
       + 'cap and a price at once is a different experiment from the one step 9 sets up.',
@@ -755,7 +762,7 @@ export const MODULE_16_PATHWAY: TutorialStep[] = [
     run: {
       label: 'Run dialog → Run model',
       detail: ['One pathway solve. The schedule is read at build time, so no validation is needed beyond Apply to model.'],
-      expect: 'Emissions 5,709 / 1,235 / 0 kt by period; run total 872,790,029 (it includes carbon payments).',
+      expect: 'Emissions 5,709 / 1,235 / 0 kt by period; run total 872,790,016 (it includes carbon payments).',
     },
     verify: [
       'The schedule has three points: 2030 at 20, 2040 at 60, 2050 at 120, and the scalar box is greyed out',
@@ -792,7 +799,7 @@ export const MODULE_16_PATHWAY: TutorialStep[] = [
       + 'period. Against the no-policy pathway\'s 1.19, 0.97 and 0.06 Mt a year that is a 16% cut in 2030, a '
       + '59% cut in 2040 and a 49% cut in 2050 — the last one small only because 2050 is nearly clean already.',
 
-      'What the cap costs shows up in two places: the total (626,611,124, up 37 million from no policy) and the '
+      'What the cap costs shows up in two places: the total (626,611,134, up 37 million from no policy) and the '
       + 'shadow price of the binding constraint. The CO2 shadow card reports one number, the '
       + 'largest in magnitude — 2030\'s, 12.05 — and it is in DISCOUNTED currency per period-tonne. In '
       + '2030 money per annual tonne that is 12.0533 x 10 / 8.1078 = 14.87. Compare it with a price '
@@ -806,7 +813,7 @@ export const MODULE_16_PATHWAY: TutorialStep[] = [
       + 'carrier_attribute co2_emissions already filled, and sense set to ==: change it to <= from its drop-down. '
       + 'The investment_period box suggests your configured periods once pathway mode is on.',
 
-      'Check the carbon schedule from step 8 is gone, then run. Run total 626,611,124. Read the period '
+      'Check the carbon schedule from step 8 is gone, then run. Run total 626,611,134. Read the period '
       + 'views: Emissions are exactly 10,000, 4,000 and 300 ktCO2e — each cap binds to the tonne, because '
       + 'emitting less costs more and nothing rewards it.',
 
@@ -836,7 +843,7 @@ export const MODULE_16_PATHWAY: TutorialStep[] = [
         title: 'Binding to the tonne',
         tab: 'Analytics',
         note: 'Per-period Emissions read 10,000, 4,000 and 300 ktCO2e — exactly the caps. The three Total costs add '
-          + 'to 626,611,124, 37 million above the no-policy run: the price of the 16%, 59% and 49% cuts.',
+          + 'to 626,611,134, 37 million above the no-policy run: the price of the 16%, 59% and 49% cuts.',
       },
       {
         selector: '[data-card="co2-shadow"]',
@@ -883,12 +890,12 @@ export const MODULE_16_PATHWAY: TutorialStep[] = [
     run: {
       label: 'Run dialog → Run model',
       detail: ['One pathway solve with three extra constraints — about a second.'],
-      expect: 'Run total 626,611,124; period emissions exactly 10,000 / 4,000 / 300 kt; shadow price about 12.05.',
+      expect: 'Run total 626,611,134; period emissions exactly 10,000 / 4,000 / 300 kt; shadow price about 12.05.',
     },
     verify: [
       'global_constraints has three rows, each with its own investment_period and the constants above',
       'The period views read Emissions of 10,000, 4,000 and 300 ktCO2e',
-      'Run total reads 626,611,124, and solar_2030 is built at about 89 MW',
+      'Run total reads 626,611,134, and solar_2030 is built at about 89 MW',
       'The CO2 shadow card (added from the Analytics sub-tab) reads binding, co2_cap_2030, about 12.05',
       'You can convert that shadow price to 2030 dollars per tonne',
     ],
@@ -916,14 +923,14 @@ export const MODULE_16_PATHWAY: TutorialStep[] = [
 
       'There are two mistakes, and they are mirror images. Set the years weight to 1 with the per-period '
       + 'constants still in place and the model sees annual emissions against a ten-year constant: the caps '
-      + 'are ten times too loose, none of them binds, and the run is the no-policy run — run total 589,565,223, '
+      + 'are ten times too loose, none of them binds, and the run is the no-policy run — run total 589,565,227, '
       + 'period emissions 1,189 / 967 / 59 kt.',
 
       'The other is the more expensive one. Type the ANNUAL tonnes (1,000,000 / 400,000 / 30,000) with a '
       + 'years weight of 10, and the caps are ten times too tight. The model complies — it builds heavily in '
       + 'every period (wind_2030 and wind_2040 at their 200 MW limit, a 100 MW battery in all three) and emits '
       + '100,000 t a year in 2030 — at a '
-      + 'Run total of 907,496,651, forty-five per cent more than the intended plan\'s 626,611,124. Both '
+      + 'Run total of 907,496,654, forty-five per cent more than the intended plan\'s 626,611,134. Both '
       + 'runs solve. Neither warns.',
 
       'The remedy is to read the result against what you meant: the period views show the cap as emissions '
@@ -932,12 +939,12 @@ export const MODULE_16_PATHWAY: TutorialStep[] = [
     ],
     explain: [
       'First the loose direction. Settings → Multi-year planning: set the Years column to 1 in all three '
-      + 'rows and run, with the caps from step 9 still in the model. Run total 589,565,223 — exactly the '
+      + 'rows and run, with the caps from step 9 still in the model. Run total 589,565,227 — exactly the '
       + 'no-policy number. The period views read Emissions 1,189 / 967 / 59 kt and the CO2 shadow card '
       + 'says the constraint is slack.',
 
       'Put Years back to 10 in all three rows. Then the tight direction: Market & Policy → Standard Constraints, retype the three '
-      + 'constants as annual tonnes — 1000000, 400000, 30000 — and run. Run total 907,496,651; period '
+      + 'constants as annual tonnes — 1000000, 400000, 30000 — and run. Run total 907,496,654; period '
       + 'Emissions 1,000, 400 and 30 kt (which is 100,000, 40,000 and 3,000 tonnes a year). Renewables are '
       + '88%, 96% and 99.6% of generation.',
 
@@ -985,11 +992,11 @@ export const MODULE_16_PATHWAY: TutorialStep[] = [
     run: {
       label: 'Run dialog → Run model (three runs)',
       detail: ['Years 1 with the module caps; Years 10 with annual caps; then restore everything.'],
-      expect: 'Years 1: run total 589,565,223 (cap slack). Annual caps at Years 10: 907,496,651.',
+      expect: 'Years 1: run total 589,565,227 (cap slack). Annual caps at Years 10: 907,496,654.',
     },
     verify: [
-      'With Years 1 and the module caps, run total reads 589,565,223 and period emissions 1,189 / 967 / 59 kt',
-      'With Years 10 and annual caps, run total reads 907,496,651 and period emissions 1,000 / 400 / 30 kt',
+      'With Years 1 and the module caps, run total reads 589,565,227 and period emissions 1,189 / 967 / 59 kt',
+      'With Years 10 and annual caps, run total reads 907,496,654 and period emissions 1,000 / 400 / 30 kt',
       'You have restored Years 10 and the constants 10000000 / 4000000 / 300000',
       'You can say which direction of error is more expensive, and why neither is flagged',
     ],
@@ -1031,7 +1038,7 @@ export const MODULE_16_PATHWAY: TutorialStep[] = [
       'Now set all three to 10 and run again: run total 1,286,820,624, ten times the previous '
       + 'and with identical builds. The plan depends on the weights\' ratios only.',
 
-      'Finally restore 8.1078, 4.9775 and 3.0558 and confirm 626,611,124 returns. The discounted plan is '
+      'Finally restore 8.1078, 4.9775 and 3.0558 and confirm 626,611,134 returns. The discounted plan is '
       + 'the only one of the three whose Total cost is a present value in 2030 money.',
     ],
     spotlights: [
@@ -1077,12 +1084,12 @@ export const MODULE_16_PATHWAY: TutorialStep[] = [
     run: {
       label: 'Run dialog → Run model (three runs)',
       detail: ['Weights 1 / 1 / 1, then 10 / 10 / 10, then restore.'],
-      expect: '128,682,062 at 1 / 1 / 1; 1,286,820,624 at 10 / 10 / 10 with the same builds; 626,611,124 restored.',
+      expect: '128,682,062 at 1 / 1 / 1; 1,286,820,624 at 10 / 10 / 10 with the same builds; 626,611,134 restored.',
     },
     verify: [
       'At 1 / 1 / 1 the run total is 128,682,062 and at 10 / 10 / 10 it is 1,286,820,624',
       'Capacities are identical across those two runs, and solar_2030 is 85.9 MW, not 89.3',
-      'After restoring the weights the run total is 626,611,124 again',
+      'After restoring the weights the run total is 626,611,134 again',
       'You can say why the weights\' size is a convention and their ratios are a decision',
     ],
     pitfalls: [
@@ -1210,7 +1217,7 @@ export const MODULE_16_PATHWAY: TutorialStep[] = [
       + 'policy has already chosen. Period views mask inactive assets, weight money and sum energy.',
 
       'And capital is an annuity charged in every period an asset is active — so an overnight cost must '
-      + 'go in as overnight, and a 25-year asset built in 2030 is charged thirty years in a three-decade model.',
+      + 'go into `overnight_cost`, and a 25-year asset built in 2030 is charged thirty years in a three-decade model.',
     ],
     explain: [
       'Three limits to name.',
@@ -1235,7 +1242,7 @@ export const MODULE_16_PATHWAY: TutorialStep[] = [
         selector: '[data-card="kpi-strip"]',
         title: 'Where the model ended up',
         tab: 'Analytics',
-        note: 'With three caps in force: run total 626,611,124 and period emissions 10,000, 4,000 and 300 '
+        note: 'With three caps in force: run total 626,611,134 and period emissions 10,000, 4,000 and 300 '
           + 'ktCO2e. It is the discounted cost of the cheapest schedule that meets a tightening cap with '
           + 'every decision seen in advance.',
       },
@@ -1248,7 +1255,7 @@ export const MODULE_16_PATHWAY: TutorialStep[] = [
     ],
     verify: [
       'The model reads: pathway on, weights 8.1078 / 4.9775 / 3.0558, years 10, caps 10 / 4 / 0.3 Mt, coal_old life 50',
-      'Run total reads 626,611,124',
+      'Run total reads 626,611,134',
       'You can say what the years weight does that the objective weight does not',
       'You can name two things a three-representative-day pathway cannot see',
       'You have exported the project',

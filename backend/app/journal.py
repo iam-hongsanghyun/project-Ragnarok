@@ -35,6 +35,7 @@ warning and never blocks the edit. NaN-vs-NaN and None-vs-NaN compare as equal
 """
 from __future__ import annotations
 
+import contextlib
 import gzip
 import json
 import logging
@@ -551,10 +552,10 @@ def _model_replace_entry(session_id: str, summary_prefix: str, fn: Callable[[], 
         return result
 
 
-def _journaled_save_model(session_id: str, model, *, filename: str = "", scenario_name: str = ""):
+def _journaled_save_model(session_id: str, model, *, filename: str = "", scenario_name: str = "", **kwargs):
     return _model_replace_entry(
         session_id, "replace model",
-        lambda: _orig["save_model"](session_id, model, filename=filename, scenario_name=scenario_name),
+        lambda: _orig["save_model"](session_id, model, filename=filename, scenario_name=scenario_name, **kwargs),
     )
 
 
@@ -615,6 +616,36 @@ def wrap_model_store() -> None:
     model_store.transform_series = _journaled_transform_series  # type: ignore[assignment]
     model_store.clear = _journaled_clear  # type: ignore[assignment]
     logger.info("journal: model_store facade wrapped")
+
+
+@contextlib.contextmanager
+def migration_scope(session_id: str, summary: str):
+    """Journal an in-place migration of the session db (the cost-basis schema upgrade).
+
+    Appends one ``model-replace`` entry afterwards when the body set ``scope["changed"]``, with
+    the full report in its ``detail``. The entry is NOT undoable: restoring the old file would
+    only be migrated again on its next read. Takes no session lock - it runs from inside store
+    reads, which can already be under a journaled mutation's lock. Best-effort like the rest of
+    the journal: a failure here never blocks the migration.
+    """
+    scope: dict[str, Any] = {}
+    yield scope
+    try:
+        if not scope.get("changed"):
+            return
+        report = scope.get("report") or {}
+        changed_sheets = sorted({str(r.get("sheet")) for r in report.get("changedRows", [])})
+        _record(
+            session_id,
+            kind="model-replace",
+            sheets=[{"name": n, "kind": "static"} for n in changed_sheets],
+            summary=f"{summary}: {len(report.get('changedRows', []))} row(s) converted, "
+                    f"{len(report.get('review', []))} flagged for review",
+            undo={"strategy": "none"},
+            detail={"costBasisMigration": report},
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("journal record failed (migration %s)", session_id, exc_info=True)
 
 
 def record_external_replace(session_id: str, summary: str, fn: Callable[[], Any]):

@@ -101,7 +101,7 @@ export const MODULE_14_PARTICIPANT: TutorialStep[] = [
         field: 'generators.owner (wind_1, solar_1)',
         label: 'who owns this asset',
         value: 'Nordwind',
-        why: 'The two assets module 7 built. They carry an annualised capital cost, which is what makes '
+        why: 'The two assets module 7 built. They carry an overnight cost that PyPSA annuitises, which is what makes '
           + 'their profit an interesting number rather than an obvious one.',
       },
       {
@@ -240,8 +240,8 @@ export const MODULE_14_PARTICIPANT: TutorialStep[] = [
       'Confirm the equality yourself on both assets rather than taking it on trust — revenue minus '
       + 'operating cost minus capital charge, to the unit.',
 
-      'Then notice what it depends on. The capital charge is `capital_cost × p_nom_opt`, pro-rated to '
-      + 'the modelled window, which is exactly the term module 7 put in the objective. The revenue is '
+      'Then notice what it depends on. The capital charge is PyPSA\'s n.statistics.capex — overnight_cost × '
+      + 'annuity × n.nyears × p_nom_opt — which is exactly the term module 7 put in the objective. The revenue is '
       + 'the capture price times the energy. The equality between them is the envelope theorem, and it '
       + 'holds only because the optimiser was free to choose the capacity.',
 

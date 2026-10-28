@@ -8,7 +8,7 @@ duplicated the backend's analytics code and made large imports heavy client-side
 
 This derives them on the server instead, with **zero re-implementation**:
 
-  1. ``build_network(model, scenario, options)`` — the same builder a fresh
+  1. ``build_stored_network(model, scenario, options)`` — the same builder a fresh
      solve uses, so every coefficient (incl. the carbon adder folded into
      ``marginal_cost``) matches the original run;
   2. ``_attach_outputs`` — write the stored output series/statics back onto the
@@ -32,7 +32,7 @@ from typing import Any
 
 import pandas as pd
 
-from ..network import build_network
+from ..network import build_stored_network
 from .stat_metrics import name_dynamic_axes
 
 _log = logging.getLogger("pypsa.solver")
@@ -109,12 +109,16 @@ def _attach_outputs(network: Any, outputs: dict[str, Any]) -> list[str]:
 def _pathway_options(
     options: dict[str, Any], outputs: dict[str, Any], model: dict[str, list[dict[str, Any]]]
 ) -> dict[str, Any]:
-    """The run's ``pathwayConfig``, reconstructed when a bare import lacks one.
+    """The run's ``pathwayConfig``, reconstructed from STORED weights when a bare import lacks one.
 
-    A stored solve keeps ``options.pathwayConfig``. A bare multi-period result
-    (outputs rows with a ``period`` column, no options) does not; its periods are
-    read from the rows and given unit weights, the neutral choice - the explicit
-    weights live in the options that produced the run.
+    A stored solve keeps ``options.pathwayConfig``. A bare multi-period result (outputs rows with a
+    ``period`` column, no options) has its periods read from the rows and their weights from the
+    model's ``RAGNAROK_PathwayPeriods`` sheet (objectiveWeight / yearsWeight). No weight is invented:
+    a period the model does not state a weight for makes the derivation refuse, because a made-up
+    1.0 would silently re-weight every money and emissions figure of the run.
+
+    Raises:
+        ValueError: the outputs are multi-period and the model carries no stored weights for them.
     """
     cfg = options.get("pathwayConfig")
     if isinstance(cfg, dict) and (cfg.get("enabled") or cfg.get("planningMode") == "pathway"):
@@ -130,11 +134,36 @@ def _pathway_options(
             break
     if not found:
         return {}
+    stored: dict[int, dict[str, Any]] = {}
+    for row in (model or {}).get("RAGNAROK_PathwayPeriods") or []:
+        try:
+            stored[int(float(row["period"]))] = row
+        except (KeyError, TypeError, ValueError):
+            continue
+    missing = sorted(found - set(stored))
+    unweighted = [
+        p for p in sorted(found & set(stored))
+        if stored[p].get("objectiveWeight") in (None, "") or stored[p].get("yearsWeight") in (None, "")
+    ]
+    if missing or unweighted:
+        raise ValueError(
+            "This multi-period result carries no stored investment-period weights for period(s) "
+            f"{', '.join(str(p) for p in missing + unweighted)} (no pathwayConfig in its options and no "
+            "objectiveWeight / yearsWeight in the model's RAGNAROK_PathwayPeriods sheet). Re-deriving it would "
+            "have to invent them, so it is refused: import the project file the run came from, or add the weights."
+        )
     return {
         "enabled": True,
         "planningMode": "pathway",
         "snapshotMappingMode": "explicit_period_column",
-        "periods": [{"period": p, "objectiveWeight": 1.0, "yearsWeight": 1.0} for p in sorted(found)],
+        "periods": [
+            {
+                "period": p,
+                "objectiveWeight": float(stored[p]["objectiveWeight"]),
+                "yearsWeight": float(stored[p]["yearsWeight"]),
+            }
+            for p in sorted(found)
+        ],
     }
 
 
@@ -158,9 +187,11 @@ def solved_network_to_bundle(network: Any, filename: str = "") -> dict[str, Any]
 
     if network.generators_t.p.empty and network.loads_t.p.empty:
         raise ValueError("The network carries no results (no dispatch series).")
-    # A PyPSA-native file stores the ANNUALISED capital cost; build_network must not
-    # annuitise it a second time (and then needs no discount rate).
-    options: dict[str, Any] = {"skipCapexAnnuitisation": True}
+    # A PyPSA-native file is already on PyPSA's cost semantics: stamp the run as such, so a later
+    # re-derivation does not treat its capital_cost as a legacy overnight price.
+    from ..network.cost_basis import BUILD_VERSION_KEY, CURRENT_SCHEMA_VERSION
+
+    options: dict[str, Any] = {BUILD_VERSION_KEY: CURRENT_SCHEMA_VERSION}
     if filename:
         options["filename"] = filename
     if isinstance(network.snapshots, pd.MultiIndex) and "period" in network.snapshots.names:
@@ -273,7 +304,7 @@ def derive_results_from_outputs(
     # rebuilt the full-window axis with unit weights, so every energy / cost
     # total of a sampled run came out 1/weight too small.
 
-    network, notes = build_network(model, scenario, options)
+    network, notes = build_stored_network(model, scenario, options)
     attach_notes = _attach_outputs(network, outputs)
     if network.generators_t.p.empty and network.loads_t.p.empty:
         raise ValueError("Outputs contain no dispatch series to derive analytics from.")

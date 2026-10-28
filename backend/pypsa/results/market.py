@@ -16,39 +16,21 @@ from ..network.piecewise import overlay_piecewise_marginal_cost, representative_
 
 from ..constants import carrier_color, generator_color
 from ..utils.series import weighted_sum
-from .pathway_periods import active_assets, is_pathway, period_objective_weights, periods
-from .stat_metrics import asset_statistic, asset_value, combine_periods, period_hours_mean
+from .pathway_periods import is_pathway, period_objective_weights
+from .stat_metrics import (
+    COMPONENT_LISTS, asset_statistic, asset_value, combine_periods, fixed_cost_of, fixed_cost_table,
+    period_hours_mean,
+)
 
 # System generators (reliability backstops, not merchant assets) — excluded from
 # the supply stack and the profit analytics by name prefix.
 SYSTEM_GEN_PREFIXES = ("load_shedding_", "system_bess")
 
-# Calendar hours per year. Converts an annualised ``capital_cost`` ($/MW/yr) onto
-# the modeled-horizon basis for capex recovery. A unit-conversion constant (not a
-# tunable parameter), so it lives in code rather than .env.
+# Calendar hours per year: turns a modelled-hours total into a per-year figure where one is shown.
+# A unit-conversion constant (not a tunable parameter), so it lives in code rather than .env.
 HOURS_PER_YEAR = 8760.0
 
-# ``network.meta`` key under which the solve records the factor it multiplied
-# the annualised ``capital_cost`` by (sum of objective snapshot weights / 8760)
-# so the LP's capital term matches the modelled window.
-CAPEX_WINDOW_SCALE_KEY = "ragnarok_capex_window_scale"
-
-
-def capex_window_scale(network: pypsa.Network) -> float | None:
-    """The solve's capital-cost window factor, or ``None`` when it did not scale.
-
-    When present, ``capital_cost x p_nom_opt`` on the solved network is already
-    the share of annual CAPEX falling inside the modelled window, so reports
-    must not pro-rate it again. Pathway runs are not scaled (no key).
-    """
-    meta = getattr(network, "meta", None)
-    if not isinstance(meta, dict):
-        return None
-    try:
-        scale = float(meta.get(CAPEX_WINDOW_SCALE_KEY))
-    except (TypeError, ValueError):
-        return None
-    return scale if scale > 0 else None
+_COMPONENT_OF = {lst: comp for comp, lst in COMPONENT_LISTS.items()}
 
 
 # ── Counterfactual re-solves ──────────────────────────────────────────────────
@@ -408,8 +390,10 @@ class ProcessAsset:
 
     ``revenue`` is the net value of the ports at the nodal prices (outputs earn,
     inputs cost); ``variable_cost`` is ``marginal_cost x p`` (internal power). ``capacity_mw`` is
-    ``p_nom_opt`` and ``capex_annual`` the annual charge the solve paid
-    (extendable processes only, window scaling removed).
+    ``p_nom_opt`` and ``capex_annual`` the fixed charge PER YEAR that PyPSA's statistics
+    report (``(capex + fom) / n.nyears``; installed and expanded capacity alike), with
+    ``capex_sunk`` / ``capex_expanded`` the horizon split of the capex part. ``capital_cost`` is
+    PyPSA's periodised cost per MW for the horizon (``c.capital_cost``).
     """
 
     name: str
@@ -422,6 +406,8 @@ class ProcessAsset:
     capital_cost: float
     extendable: bool
     capex_annual: float
+    capex_sunk: float = 0.0
+    capex_expanded: float = 0.0
 
 
 def process_assets(
@@ -442,9 +428,9 @@ def process_assets(
     Algorithm:
         $$R = \\sum_t w_t \\sum_i -p_i(t)\\,\\pi_{b_i}(t), \\qquad
           C = \\sum_t w_t\\,c(t)\\,p(t), \\qquad
-          K = \\text{capital\\_cost}\\cdot P^{opt}$$
+          K = \\frac{\\text{capex}^{stat} + \\text{fom}^{stat}}{n_{years}}$$
         ASCII: R = sum_t w * sum_i(-p_i * price_i) ; C = sum_t w*mc*p ;
-        K = capital_cost * p_nom_opt (extendable only, per year).
+        K = n.statistics.capex (+ fom) / n.nyears  (per year).
 
     Symbols: w_t weight (h; objective or objective x period weighting), p_i port
     flow (MW), pi nodal price (currency/MWh), c marginal cost (currency/MWh of
@@ -465,7 +451,11 @@ def process_assets(
         int(c[3:]) for c in procs.columns
         if c.startswith("bus") and c[3:].isdigit()
     )
-    cost_unscale = 1.0 / (capex_window_scale(network) or 1.0)
+    fixed = fixed_cost_table(network, ["Process"])
+    try:
+        periodised = network.components.processes.capital_cost
+    except Exception:  # noqa: BLE001
+        periodised = procs["capital_cost"] if "capital_cost" in procs.columns else pd.Series(dtype=float)
     wanted = set(procs.index) if names is None else {str(n) for n in names}
     out: list[ProcessAsset] = []
     for name in procs.index:
@@ -486,7 +476,8 @@ def process_assets(
             revenue += float((-frame[name].to_numpy(dtype=float) * pi * weights).sum())
         mc = mc_dense[name].to_numpy(dtype=float) if name in mc_dense.columns else np.zeros(T)
         ext = bool(procs.at[name, "p_nom_extendable"]) if "p_nom_extendable" in procs.columns else False
-        cap_cost = float(procs.at[name, "capital_cost"]) if "capital_cost" in procs.columns else 0.0
+        cap_cost = float(periodised.get(name, 0.0)) if hasattr(periodised, "get") else 0.0
+        fc = fixed_cost_of(fixed, "Process", str(name))
         p_nom_opt = float(installed_capacity_series(procs).get(name, 0.0))
         out.append(ProcessAsset(
             name=str(name),
@@ -498,7 +489,9 @@ def process_assets(
             variable_cost=float((mc * p_int * weights).sum()),
             capital_cost=cap_cost,
             extendable=ext,
-            capex_annual=cap_cost * p_nom_opt * cost_unscale if ext else 0.0,
+            capex_annual=fc["annual"],
+            capex_sunk=fc["capex_sunk"],
+            capex_expanded=fc["capex_expanded"],
         ))
     return out
 
@@ -561,23 +554,23 @@ def build_generator_economics(
         $$ M_i = R_i - \\sum_t w(t)\\,c_i(t)\\,p_i(t) $$
         $$ \\text{capture}_i = R_i \\big/ \\sum_t w(t)\\,p_i(t) $$
 
-        The annual fixed cost is K_i = capital_cost_i · p_nom_opt_i ($/yr). To
-        compare it with a margin earned over H = Σ_t w(t) hours, pro-rate it onto
-        the window (H/8760 years):
+        The fixed cost F_i is what PyPSA charged over the modelled horizon:
+        n.statistics.capex + n.statistics.fom (periodised capital_cost, or overnight x
+        annuity x nyears, plus fom_cost). It is compared with the margin earned over the same
+        horizon; ``fixedCostAnnual`` is F_i / n.nyears (a per-year display figure):
 
-        $$ F_i = K_i \\cdot H / 8760, \\qquad \\text{recovery}_i = 100\\,M_i / F_i $$
+        $$ F_i = \\text{capex}^{stat}_i + \\text{fom}^{stat}_i, \\qquad \\text{recovery}_i = 100\\,M_i / F_i $$
 
         ASCII: R = sum_t w*price*p ; M = R - sum_t w*mc*p ;
-        capture = R / sum_t w*p ; recovery% = 100 * M / (capital_cost *
-        p_nom_opt * H/8760).
+        capture = R / sum_t w*p ; recovery% = 100 * M / (n.statistics.capex + n.statistics.fom).
 
     Symbols/units: π, c, capture in {currency}/MWh; p in MW; w, H in h; R, M, F
-    in {currency}; capital_cost in {currency}/MW/yr; recovery dimensionless (%).
+    in {currency}; capex / fom are PyPSA's per-horizon statistics; recovery dimensionless (%).
 
     The recovery ratio is scale-invariant in H, so a sub-annual window still
     reports a meaningful "did the margin cover the fixed cost?" figure; every
     absolute money column is on the modeled-horizon basis (``fixedCostAnnual`` is
-    additionally exposed on the native annual basis). Storage revenue is the net
+    additionally exposed per year). Storage revenue is the net
     arbitrage value (Σ w·π·p, negative while charging). System generators
     (``load_shedding_*``, ``system_bess*``) are excluded as reliability backstops.
 
@@ -592,12 +585,9 @@ def build_generator_economics(
     modeled_hours = float(weights.sum())
     horizon_years = modeled_hours / HOURS_PER_YEAR if HOURS_PER_YEAR > 0 else 0.0
 
-    # Fixed-cost basis. Single period: annual annuity x H/8760 (or, when the
-    # solve already scaled capital_cost to the window, capital_cost x p_nom_opt
-    # as is). Pathway: the LP objective weights each period's annuity by the
-    # investment-period weighting and only counts periods an asset is active
-    # in, so revenue/variable cost take the same weighting to share one basis.
-    scale = capex_window_scale(network)
+    # Fixed-cost basis: n.statistics.capex + n.statistics.fom, i.e. exactly what PyPSA's objective
+    # charges over the modelled horizon (a pathway run: per period, with the investment-period
+    # weighting, only while the asset is active). The per-year figure divides by n.nyears.
     pathway = is_pathway(network)
     period_weight = period_objective_weights(network)
     period_level = network.snapshots.get_level_values("period") if pathway else None
@@ -606,20 +596,12 @@ def build_generator_economics(
         econ_weights = weights * pd.Series(
             [period_weight[int(p)] for p in period_level], index=network.snapshots
         )
+    fixed_table = fixed_cost_table(network, ["Generator", "StorageUnit", "Process"])
 
-    def fixed_costs(list_name: str, name: str, capital_cost: float, p_nom_opt: float) -> tuple[float, float]:
-        """``(annual, modelled-horizon)`` fixed cost of one asset."""
-        base = capital_cost * p_nom_opt
-        if pathway:
-            weight = sum(
-                period_weight[p]
-                for p in periods(network)
-                if bool(active_assets(network, list_name, p).get(name, True))
-            )
-            return base, base * weight
-        if scale is not None:
-            return base / scale, base
-        return base, base * horizon_years
+    def fixed_costs(list_name: str, name: str, *_unused: float) -> tuple[float, float]:
+        """``(per-year, modelled-horizon)`` fixed cost (capex + fom) of one asset, from n.statistics."""
+        fc = fixed_cost_of(fixed_table, _COMPONENT_OF[list_name], name)
+        return fc["annual"], fc["capex_horizon"] + fc["fom_horizon"]
 
     mp = network.buses_t.marginal_price
     have_prices = not mp.empty

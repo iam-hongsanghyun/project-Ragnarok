@@ -7,7 +7,7 @@ import pytest
 from numpy.testing import assert_allclose
 
 from backend.app.p2x import technologies as tech
-from backend.pypsa.utils.annuity import annuity_factor
+from pypsa.costs import annuity as annuity_factor
 
 VERIFIED = {"file", "derived", "literature-recalled", "assumption"}
 

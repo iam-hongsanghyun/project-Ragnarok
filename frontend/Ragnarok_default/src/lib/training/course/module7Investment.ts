@@ -7,19 +7,20 @@
  * this fleet be".
  *
  * Built on a full year — 8,760 hourly snapshots — and that is not only realism.
- * Ragnarok annuitises a workbook `capital_cost` and the results layer pro-rates
- * that annual figure by modelled_hours/8760 for display. On any shorter window
- * the optimiser needs the cost pre-scaled and the display then scales it again,
- * so the pre-scaled cost is scaled twice and the displayed capital is nonsense.
- * At 8,760 the factor is 1, the overnight cost goes in exactly as a cost
- * database quotes it, and the capital reported is the capital charged. Module 6
- * is what makes this module honest.
+ * Ragnarok hands the cost columns to PyPSA unchanged, and PyPSA gives them two
+ * meanings: `capital_cost` is already a cost for the MODELLED HORIZON, while
+ * `overnight_cost` is annuitised by PyPSA itself — overnight x annuity(discount_rate,
+ * lifetime) x n.nyears. The learner types the overnight price (with `lifetime` and
+ * `discount_rate`) and PyPSA does the arithmetic, so on a full year (nyears = 1)
+ * the objective's capital term is the annuity itself and nothing is scaled by hand.
+ * Module 6 is what makes this module honest.
  *
  * One difference survives, and step 9 teaches it rather than hiding it: the KPI
- * reports 25,611,302 (fuel plus the annuity on the WHOLE fleet) while the solver
- * minimised 18,115,684 (fuel plus the annuity on what it BUILDS). Sunk capital
- * cannot be changed by a decision, so it belongs in a tariff and not in a
- * comparison between decisions. Both numbers are right for different questions.
+ * reports 25,611,302 (fuel plus n.statistics.capex on the WHOLE fleet) while the
+ * solver minimised 18,115,684 (fuel plus n.statistics.expanded_capex, what it
+ * BUILDS). `installed_capex` is the sunk part. Sunk capital cannot be changed by a
+ * decision, so it belongs in a tariff and not in a comparison between decisions.
+ * Both numbers are right for different questions.
  *
  * Four assets compete. Every figure verified against a real HiGHS solve through
  * the app's own build path, at the default 5% discount rate:
@@ -137,27 +138,30 @@ export const MODULE_7_INVESTMENT: TutorialStep[] = [
       'Module 6 showed that a horizon decides which questions a model can answer. For investment there '
       + 'is a second, sharper reason, and it is about units rather than physics.',
 
-      'An annuitised capital cost is a cost per YEAR. If the objective covers a year, the two match and '
-      + 'nothing needs adjusting. If it covers three hours, the capital charge is 2,920 times too large '
+      'An annuitised capital cost is a cost per YEAR. PyPSA\'s `capital_cost` column is a cost for the '
+      + 'MODELLED HORIZON: whatever your snapshots add up to. If the horizon is a year, the two match. If '
+      + 'it is three hours and you typed an annual figure, the capital charge is 2,920 times too large '
       + 'against the fuel bill, the optimiser builds nothing, and the "no" looks considered rather than '
       + 'dimensionally wrong.',
 
-      'You can compensate by scaling the overnight cost down by the fraction of the year modelled — and '
-      + 'that works for the OPTIMISER. But Ragnarok also pro-rates capital by modelled_hours/8760 when it '
-      + 'reports cost, so a pre-scaled cost gets scaled a second time and the reported total no longer '
-      + 'equals the objective the solver minimised. There is no setting where both are right.',
+      'PyPSA offers a second column that removes the trap. `overnight_cost` is the price a database '
+      + 'quotes; PyPSA turns it into the cost for the horizon itself — overnight × annuity(discount_rate, '
+      + 'lifetime) × n.nyears, where n.nyears is the sum of the snapshot weights over 8,760. Ragnarok adds '
+      + 'nothing to this: it passes the columns to PyPSA exactly as the workbook holds them, and reads the '
+      + 'costs back from PyPSA\'s own statistics.',
 
-      'At 8,760 hours the factor is 1 and the problem evaporates. The overnight cost goes into the sheet '
-      + 'exactly as a cost database quotes it, the objective and the reported total agree, and nothing '
-      + 'needs explaining in a footnote. That is why this module comes after module 6 rather than before.',
+      'On 8,760 hours n.nyears is 1, so the objective\'s capital term is the annuity, the reported capital '
+      + 'is the capital charged, and nothing needs explaining in a footnote. On a shorter window PyPSA '
+      + 'scales an `overnight_cost` down for you; a `capital_cost` you typed would not be. That is why '
+      + 'this module comes after module 6, and why it uses `overnight_cost`.',
     ],
     explain: [
       'Nothing to change. Open Settings → Simulation window and confirm the window covers all 8,760 '
       + 'snapshots at 1h resolution, because everything from here depends on it.',
 
       'Resist the temptation to narrow it for speed. A shorter window is not a faster version of this '
-      + 'study — it is a different study whose capital arithmetic no longer lines up, and the numbers it '
-      + 'produces cannot be compared with the ones in this module.',
+      + 'study — it is a different study whose capital charge is a different fraction of a year, and the '
+      + 'numbers it produces cannot be compared with the ones in this module.',
 
       'If you do want a faster preview, module 6 gave you the honest tools: coarsen the resolution or '
       + 'sample blocks, and report that you did. Both change the answer, and both change it less than '
@@ -172,24 +176,25 @@ export const MODULE_7_INVESTMENT: TutorialStep[] = [
         title: 'The window, checked one last time',
         runDialog: 'open',
         note: 'It should read 8,760 snapshots at 1h. The habit of checking this line before every run '
-          + 'started in module 1 as good practice; here it is what keeps the capital costs meaningful.',
+          + 'started in module 1 as good practice; here it is what makes n.nyears equal 1.',
       },
       {
         selector: '.activity-bar-btn[aria-label="Settings"]',
         title: 'Leave the window alone',
         note: 'Simulation window and Sampling both change what the solver sees. Either would make this '
-          + 'module\'s capital arithmetic wrong in a way nothing on screen would flag.',
+          + 'module\'s horizon, and with it every capital figure, different in a way nothing on screen would flag.',
       },
     ],
     verify: [
       'The simulation window covers all 8,760 snapshots at 1h',
-      'You can say why an annualised capital cost and a three-hour objective cannot be compared',
-      'You can say why pre-scaling the cost fixes the optimiser and breaks the reported total',
-      'You can say why a full year makes both correct at once',
+      'You can say why an annual cost and a three-hour objective cannot be compared',
+      'You can say what `capital_cost` is in PyPSA (a cost for the modelled horizon) and what `overnight_cost` adds',
+      'You can say why n.nyears is 1 on a full year',
     ],
     pitfalls: [
-      'Narrowing the window to save time and keeping the same capital costs. The optimiser then sees a '
-      + 'year of capital against a fraction of a year of fuel and builds nothing.',
+      'Narrowing the window and typing an annual figure into `capital_cost`. The optimiser then sees a '
+      + 'year of capital against a fraction of a year of fuel and builds nothing. With `overnight_cost` '
+      + 'PyPSA scales it by n.nyears for you.',
       'Assuming the app will warn you. It cannot: on a model with weighted representative periods a short '
       + 'window is entirely correct, so there is no rule it could apply.',
     ],
@@ -213,20 +218,22 @@ export const MODULE_7_INVESTMENT: TutorialStep[] = [
       'CRF = r(1+r)^n / ((1+r)^n − 1). At 5% over 25 years that is 0.0710, so 1,200,000 per MW becomes '
       + '85,150 per MW per year — the figure that belongs beside a fuel bill.',
 
-      'Ragnarok does this for you, and knowing that is the point of this step. The `capital_cost` column '
-      + 'holds the OVERNIGHT cost; the app multiplies by CRF using the row\'s `lifetime` and the discount '
-      + 'rate from Settings. PyPSA used directly expects the annuitised figure instead, so a cost that is '
-      + 'right in one is twelve times wrong in the other. Always establish which convention you are in '
-      + 'before trusting a number.',
+      'PyPSA does this for you, and knowing which column triggers it is the point of this step. '
+      + '`overnight_cost` holds the OVERNIGHT cost; PyPSA multiplies by the annuity of the row\'s '
+      + '`discount_rate` and `lifetime`, and by n.nyears. `capital_cost` is the OTHER column: PyPSA takes '
+      + 'it as already periodised for the horizon and does nothing to it. A number that is right in one '
+      + 'column is about twelve times wrong in the other, so always establish which column you are in '
+      + 'before trusting a figure. (When both are filled, `overnight_cost` wins and `capital_cost` is ignored.)',
     ],
     explain: [
       'Nothing to enter yet — find the columns. On the Generators step, scroll right past `efficiency` '
-      + 'and you reach `p_nom_extendable`, `p_nom_min`, `p_nom_max`, `capital_cost` and `lifetime`. Use '
-      + 'the Columns button if scrolling is awkward.',
+      + 'and you reach `p_nom_extendable`, `p_nom_min`, `p_nom_max`, `overnight_cost`, `discount_rate`, '
+      + '`lifetime` and the blank `capital_cost`. Use the Columns button if scrolling is awkward.',
 
-      '`lifetime` matters more than it looks. Left blank, PyPSA defaults it to infinity, which has no '
-      + 'finite annuity — so Ragnarok substitutes 20 years rather than letting the cost annuitise to '
-      + 'nothing. A blank lifetime is not neutral; it is a 20-year assumption you did not make.',
+      '`lifetime` matters more than it looks. Left blank, PyPSA defaults it to infinity, and its annuity '
+      + 'for an infinite life is just the discount rate: you pay interest on the overnight price for '
+      + 'ever and never repay it. At 5% that is 0.0500 against 0.0710 over 25 years — about 30% too '
+      + 'little capital charge, from a cell you never filled in. A blank lifetime is not neutral.',
 
       'The four figures this module uses, all overnight and all plausible for 2030: wind 1,200,000 per MW '
       + 'over 25 years, solar 500,000 over 25, transmission 600,000 per MW over 40, and a two-hour '
@@ -242,21 +249,21 @@ export const MODULE_7_INVESTMENT: TutorialStep[] = [
         buildStep: 'generators',
         title: 'The columns that have been waiting',
         tab: 'Build',
-        note: 'p_nom_extendable, p_nom_min, p_nom_max, capital_cost, lifetime. Every model in this course '
-          + 'has carried them empty — expansion adds attributes, not components.',
+        note: 'p_nom_extendable, p_nom_min, p_nom_max, overnight_cost, discount_rate, lifetime. Every model in '
+          + 'this course has carried them empty — expansion adds attributes, not components.',
       },
     ],
     verify: [
       'You can state the CRF formula and say what each symbol means',
       'You can compute the annual cost of a 1,200,000/MW asset over 25 years at 5%',
-      'You can say which convention Ragnarok uses for `capital_cost`, and why it matters',
+      'You can say what PyPSA does with `capital_cost` and what it does with `overnight_cost`, and why it matters',
       'You can say what happens when `lifetime` is left blank',
     ],
     pitfalls: [
-      'Entering an already-annuitised cost. Ragnarok annuitises what you give it, so it gets annuitised '
-      + 'twice and comes out about twelve times too small — which makes new capacity look nearly free.',
-      'Leaving `lifetime` blank. It becomes 20 years, which is wrong for almost everything and moves the '
-      + 'annual cost by a third.',
+      'Entering an already-annuitised cost in `overnight_cost`. PyPSA annuitises it again, so it comes out '
+      + 'about twelve times too small — which makes new capacity look nearly free.',
+      'Leaving `lifetime` blank. PyPSA reads it as infinite, so the annual cost is only the interest on the '
+      + 'price, about 30% too low at 5%.',
     ],
   },
 
@@ -277,22 +284,25 @@ export const MODULE_7_INVESTMENT: TutorialStep[] = [
       + 'MIX, not just the total, which is why two studies can disagree about which technology to build '
       + 'while agreeing about everything physical.',
 
-      'Ragnarok puts the number in front of you — Settings → Project defaults → Discount rate, with the '
-      + 'app\'s own note explaining what it does — and ships it at 0.05. Treat that default as a hazard '
+      'PyPSA reads the rate from each ROW\'s `discount_rate` column — there is no global rate inside the '
+      + 'solver. Ragnarok keeps one project value in Settings → Project defaults → Discount rate (0.05) and '
+      + 'gives you a visible Forge action that writes it into the column. Treat that default as a hazard '
       + 'rather than a convenience: an assumption you inherit silently is more dangerous than one you are '
       + 'forced to supply, because nothing prompts you to defend it.',
 
-      'The API is stricter. A run submitted without a rate, while extendable assets carry capital costs, '
-      + 'is refused outright with a message naming them — so an agent or a script cannot author this '
-      + 'assumption by omission. The GUI gives you 0.05 and expects you to look at it.',
+      'A row that has an `overnight_cost` and no `discount_rate` is refused at run time, with a message '
+      + 'naming it — PyPSA\'s own consistency check says the same. So an agent or a script cannot author '
+      + 'this assumption by omission, and nothing is filled in behind your back.',
     ],
     explain: [
       'Settings → Project defaults. Confirm Discount rate reads 0.05 and leave it — every figure in this '
       + 'module assumes it, so a learner who never opens Settings still matches the course.',
 
-      'Read the app\'s note under the field: "used to annualise capital costs for extendable assets, 0.05 '
-      + '= 5% WACC". That is the whole mechanism, and it explains why the setting did nothing for six '
-      + 'modules — until something is extendable, there is no capital to annualise.',
+      'Read the app\'s note under the field and the two buttons beneath it. The rate does not change any '
+      + 'cost at run time: "Fill discount_rate in rows that lack it" writes it into the `discount_rate` '
+      + 'column of every row with an `overnight_cost`, where you can read and edit it per asset. That is the '
+      + 'whole mechanism, and it explains why the setting did nothing for six modules — until something has '
+      + 'an overnight cost, there is nothing to annuitise. You will press the button when you make the assets extendable.',
 
       'Make a deliberate note that you have looked at this number and accepted it. In a real study that '
       + 'is the difference between an assumption and an accident, and it is the first thing a reviewer '
@@ -303,7 +313,7 @@ export const MODULE_7_INVESTMENT: TutorialStep[] = [
         selector: '.activity-bar-btn[aria-label="Settings"]',
         title: 'Project defaults',
         note: 'The rate lives with the project defaults because it is a scenario-level assumption rather '
-          + 'than a component attribute — one number applied to every capital cost in the model.',
+          + 'than a component attribute — one number you then write into every overnight_cost row.',
       },
     ],
     entries: [
@@ -312,21 +322,21 @@ export const MODULE_7_INVESTMENT: TutorialStep[] = [
         value: '0.05',
         why: 'The app default, kept so every figure here matches what you see out of the box. Five per '
           + 'cent is a plausible weighted average cost of capital for a regulated utility. It sets the '
-          + 'capital recovery factor for every extendable asset, so it decides not only how much capital '
+          + 'annuity for every overnight_cost row it is written into, so it decides not only how much capital '
           + 'the model commits but which technologies it commits it to — step 13 measures exactly that.',
       },
     ],
     verify: [
       'Settings → Project defaults → Discount rate reads 0.05',
       'You can say which technologies a low rate favours, and why',
-      'You can say what the GUI does about a missing rate and what the API does instead',
+      'You can say where PyPSA reads the rate from, and what a run does about a row that lacks one',
       'You can say why the setting did nothing in modules 1 to 6',
     ],
     pitfalls: [
       'Accepting the default without deciding it is right. It is still your assumption once you publish '
       + 'the answer, and it is the one most likely to be challenged.',
-      'Confusing it with inflation or a project IRR. Here it is the rate at which capital is annuitised, '
-      + 'and it should reflect the cost of capital of whoever is doing the building.',
+      'Confusing it with inflation or a project IRR. Here it is the rate PyPSA annuitises `overnight_cost` '
+      + 'at, and it should reflect the cost of capital of whoever is doing the building.',
     ],
   },
 
@@ -342,7 +352,8 @@ export const MODULE_7_INVESTMENT: TutorialStep[] = [
       + 'more than a MW that runs 16% of the time.',
 
       'The levelised cost is the annuitised capital divided by the energy that capacity actually '
-      + 'delivers: overnight × CRF / (capacity factor × 8760).',
+      + 'delivers: overnight × annuity / (capacity factor × 8760) — the annuity being what PyPSA computes '
+      + 'from `discount_rate` and `lifetime`.',
 
       'On this year, at 5%: wind has a capacity factor of 0.46, so 1,200,000 × 0.0710 / (0.46 × 8760) is '
       + 'about 21 per MWh. Solar has a capacity factor of 0.165, so 500,000 × 0.0710 / (0.165 × 8760) is '
@@ -405,8 +416,9 @@ export const MODULE_7_INVESTMENT: TutorialStep[] = [
       + 'generators, lines, links and storage.',
 
       '`p_nom_extendable` says the optimiser may choose the capacity. `p_nom_min` and `p_nom_max` bound '
-      + 'the choice. `capital_cost` prices it. On a line the names are `s_nom_*`, because a line is rated '
-      + 'in apparent power, and nothing else differs.',
+      + 'the choice. `overnight_cost` prices it, with `lifetime` and `discount_rate` telling PyPSA how to '
+      + 'annuitise it. On a line the names are `s_nom_*`, because a line is rated in apparent power, and '
+      + 'nothing else differs.',
 
       '`p_nom_min` is where brownfield modelling lives, and it is the most consequential of the four. Set '
       + 'it to what already exists and the model may add but never remove — correct, because a standing '
@@ -418,10 +430,15 @@ export const MODULE_7_INVESTMENT: TutorialStep[] = [
     ],
     explain: [
       'Build → Generators, on wind_1: tick `p_nom_extendable`, set `p_nom_min` to 60 — what already '
-      + 'stands — `p_nom_max` to 300, `capital_cost` to 1200000 and `lifetime` to 25.',
+      + 'stands — `p_nom_max` to 300, `overnight_cost` to 1200000 and `lifetime` to 25. Leave `capital_cost` '
+      + 'blank: PyPSA derives the cost for the horizon from the overnight price.',
 
       'Then Build → Lines, on line_1: tick `s_nom_extendable`, `s_nom_min` 60, `s_nom_max` 300, '
-      + '`capital_cost` 600000, `lifetime` 40.',
+      + '`overnight_cost` 600000, `lifetime` 40.',
+
+      'Finally Settings → Project defaults and press "Fill discount_rate in rows that lack it": it writes 0.05 '
+      + 'into `discount_rate` on every row that has an `overnight_cost` (or type 0.05 into the column '
+      + 'yourself). PyPSA refuses an overnight cost with no rate.',
 
       'The maxima are siting limits, not modelling conveniences. 300 MW of wind is what the site could '
       + 'physically host; 300 MW is what the transmission corridor could carry given its right of way. An '
@@ -476,21 +493,30 @@ export const MODULE_7_INVESTMENT: TutorialStep[] = [
           + 'and the limit is part of describing the world honestly.',
       },
       {
-        field: 'generators.capital_cost (wind_1)',
+        field: 'generators.overnight_cost (wind_1)',
         label: 'overnight cost',
         value: '1200000',
         unit: 'currency per MW',
-        why: 'The overnight cost exactly as a database quotes it, with no scaling — which is only correct '
-          + 'because the model covers a whole year. Ragnarok applies CRF(5%, 25 y) itself, giving about '
-          + '85,150 per MW per year in the objective.',
+        why: 'The overnight cost exactly as a database quotes it, with no scaling. PyPSA applies '
+          + 'annuity(5%, 25 y) × n.nyears itself — about 85,150 per MW in the objective on this one-year '
+          + 'horizon.',
       },
       {
         field: 'generators.lifetime (wind_1)',
         label: 'economic life',
         value: '25',
         unit: 'years',
-        why: 'How long the capital is repaid over, which sets the annuity factor. Blank would mean 20 '
-          + 'years and a 15% higher annual charge, applied without telling you.',
+        why: 'How long the capital is repaid over, which sets the annuity factor. Blank would be infinite '
+          + 'to PyPSA, whose annuity is then just the 5% rate: about 30% too little charge, applied without '
+          + 'telling you.',
+      },
+      {
+        field: 'generators.discount_rate (wind_1)',
+        label: 'rate PyPSA annuitises at',
+        value: '0.05',
+        why: 'PyPSA reads the rate from the row, not from a global setting. Settings → Project defaults → '
+          + '"Fill discount_rate in rows that lack it" writes the project rate here so it is visible and '
+          + 'editable per asset.',
       },
       {
         field: 'lines.s_nom_extendable (line_1)',
@@ -517,12 +543,12 @@ export const MODULE_7_INVESTMENT: TutorialStep[] = [
           + 'happily solve congestion with unlimited wire.',
       },
       {
-        field: 'lines.capital_cost (line_1)',
+        field: 'lines.overnight_cost (line_1)',
         label: 'overnight cost',
         value: '600000',
         unit: 'currency per MW',
         why: 'Half the wind figure per MW, and cheaper still per year because it is repaid over 40 years '
-          + 'rather than 25 — CRF 0.058 against 0.071. Long asset life is a real and underrated advantage '
+          + 'rather than 25 — annuity 0.058 against 0.071. Long asset life is a real and underrated advantage '
           + 'of network investment.',
       },
       {
@@ -530,19 +556,20 @@ export const MODULE_7_INVESTMENT: TutorialStep[] = [
         label: 'economic life',
         value: '40',
         unit: 'years',
-        why: 'Transmission outlives generation by a wide margin. The 20-year default would overstate its '
-          + 'annual cost by about a quarter and could flip the decision.',
+        why: 'Transmission outlives generation by a wide margin. A blank (infinite) life would understate its '
+          + 'annual cost, and a 20-year guess would overstate it by about a quarter; either could flip the '
+          + 'decision.',
       },
     ],
     verify: [
-      'wind_1 has p_nom_extendable ticked, min 60, max 300, capital_cost 1200000, lifetime 25',
-      'line_1 has s_nom_extendable ticked, min 60, max 300, capital_cost 600000, lifetime 40',
-      'No capital cost has been scaled by anything',
+      'wind_1 has p_nom_extendable ticked, min 60, max 300, overnight_cost 1200000, lifetime 25, discount_rate 0.05',
+      'line_1 has s_nom_extendable ticked, min 60, max 300, overnight_cost 600000, lifetime 40, discount_rate 0.05',
+      'capital_cost is blank on both and no price has been scaled by anything',
       'You can say what p_nom_min would mean if it were 0',
     ],
     pitfalls: [
-      'Scaling the capital costs. That was a workaround for a short horizon and it is wrong here — a full '
-      + 'year needs the raw overnight figure.',
+      'Scaling the overnight costs. PyPSA already multiplies by n.nyears; on a full year that is 1 and the '
+      + 'raw overnight figure is exactly right.',
       'Leaving p_nom_min at 0 by accident. The model may then choose LESS wind than exists, which is not '
       + 'a decision anyone can act on.',
     ],
@@ -571,7 +598,7 @@ export const MODULE_7_INVESTMENT: TutorialStep[] = [
     ],
     explain: [
       'Build → Generators, on solar_1. Tick `p_nom_extendable`, set `p_nom_min` to 0, `p_nom_max` to 400, '
-      + '`capital_cost` to 500000 and `lifetime` to 25.',
+      + '`overnight_cost` to 500000, `lifetime` to 25 and `discount_rate` to 0.05.',
 
       'The minimum is 0 rather than 60 because nothing is built yet — this is a greenfield option inside '
       + 'an otherwise brownfield study, which is the normal situation. Brownfield and greenfield are '
@@ -620,7 +647,7 @@ export const MODULE_7_INVESTMENT: TutorialStep[] = [
           + 'rather than a ceiling you chose.',
       },
       {
-        field: 'generators.capital_cost (solar_1)',
+        field: 'generators.overnight_cost (solar_1)',
         label: 'overnight cost',
         value: '500000',
         unit: 'currency per MW',
@@ -638,7 +665,7 @@ export const MODULE_7_INVESTMENT: TutorialStep[] = [
       },
     ],
     verify: [
-      'solar_1 is extendable with min 0, max 400, capital_cost 500000, lifetime 25',
+      'solar_1 is extendable with min 0, max 400, overnight_cost 500000, lifetime 25, discount_rate 0.05',
       'You can say why its minimum is 0 while wind\'s is 60',
       'You can say how its output shape differs from wind on this year',
       'Your prediction from step 5 still says wind wins on levelised cost',
@@ -661,7 +688,7 @@ export const MODULE_7_INVESTMENT: TutorialStep[] = [
       'Storage expands exactly like everything else, and the attributes sit on the storage unit rather '
       + 'than needing a new component.',
 
-      'One subtlety worth knowing: `capital_cost` on a StorageUnit is per MW of POWER, while its energy '
+      'One subtlety worth knowing: the cost on a StorageUnit is per MW of POWER, while its energy '
       + 'capacity comes from `max_hours`. So a 2-hour battery at 150,000 per MW is really 75,000 per MWh, '
       + 'and doubling `max_hours` without changing the capital cost gives you twice the energy for '
       + 'nothing. That is a modelling error, not a bargain — a real longer-duration battery costs more '
@@ -676,13 +703,14 @@ export const MODULE_7_INVESTMENT: TutorialStep[] = [
     ],
     explain: [
       'Build → Storage, on batt_1 in the `storage_units` sheet. Tick `p_nom_extendable`, set `p_nom_min` '
-      + 'to 20 — what exists — `p_nom_max` to 300, `capital_cost` to 150000 and `lifetime` to 15.',
+      + 'to 20 — what exists — `p_nom_max` to 300, `overnight_cost` to 150000, `lifetime` to 15 and '
+      + '`discount_rate` to 0.05.',
 
       'Leave `max_hours` at 2 and both efficiencies where they are. You are asking whether to build more '
       + 'of the same battery, not a different one.',
 
       'Fifteen years is right for lithium-ion and shorter than everything else here, which raises its '
-      + 'annual charge: CRF(5%, 15 y) is 0.0963 against wind\'s 0.0710. Short-lived assets carry their '
+      + 'annual charge: annuity(5%, 15 y) is 0.0963 against wind\'s 0.0710. Short-lived assets carry their '
       + 'capital heavily, and that is part of why storage has to be genuinely useful to be worth building.',
 
       'Now run it. About a minute.',
@@ -731,7 +759,7 @@ export const MODULE_7_INVESTMENT: TutorialStep[] = [
           + 'plenty of headroom means the answer is economics rather than a ceiling.',
       },
       {
-        field: 'storage_units.capital_cost (batt_1)',
+        field: 'storage_units.overnight_cost (batt_1)',
         label: 'overnight cost, per MW of power',
         value: '150000',
         unit: 'currency per MW',
@@ -744,12 +772,12 @@ export const MODULE_7_INVESTMENT: TutorialStep[] = [
         label: 'economic life',
         value: '15',
         unit: 'years',
-        why: 'Shorter than everything else here, which matters: CRF(5%, 15 y) is 0.0963 against wind\'s '
+        why: 'Shorter than everything else here, which matters: annuity(5%, 15 y) is 0.0963 against wind\'s '
           + '0.0710, so the same capital costs 36% more per year. Short-lived assets have to earn faster.',
       },
     ],
     verify: [
-      'batt_1 is extendable with min 20, max 300, capital_cost 150000, lifetime 15',
+      'batt_1 is extendable with min 20, max 300, overnight_cost 150000, lifetime 15, discount_rate 0.05',
       'max_hours is still 2 and the efficiencies are unchanged',
       'All four options — wind, solar, line, battery — are now extendable',
       'You can say why a 2-hour battery at 150,000 per MW is 75,000 per MWh',
@@ -775,11 +803,11 @@ export const MODULE_7_INVESTMENT: TutorialStep[] = [
       + 'new capital charges.',
 
       'Two different totals appear on screen and it is worth knowing which is which. The objective is '
-      + 'fuel plus the annuity on what you BUILD, because capital already spent cannot be changed by a '
-      + 'decision and so does not belong in a comparison between decisions. The KPI strip reports '
-      + '25,611,302 instead — fuel plus the annuity on the ENTIRE fleet, existing assets included. That '
-      + 'is the total cost of owning and running the system: the right number for a tariff, the wrong one '
-      + 'for choosing what to build next.',
+      + 'fuel plus PyPSA\'s expanded_capex — the capital on what you BUILD — because capital already spent '
+      + 'cannot be changed by a decision and so does not belong in a comparison between decisions. The KPI '
+      + 'strip reports 25,611,302 instead — fuel plus n.statistics.capex on the ENTIRE fleet, existing '
+      + 'assets included (installed_capex plus expanded_capex). That is the total cost of owning and '
+      + 'running the system: the right number for a tariff, the wrong one for choosing what to build next.',
 
       'What got built: wind from 60 to 150.15 MW, solar from 0 to 24.12 MW, the line from 60 to 141.04 '
       + 'MW. What did not: the battery, which sits at 20 MW — its floor. Three of four.',
@@ -796,8 +824,8 @@ export const MODULE_7_INVESTMENT: TutorialStep[] = [
       + 'at 1h before you commit to the wait.',
 
       'Read the cost breakdown rather than only the headline. Fuel 6,750,551 and capital 18,860,751 sum '
-      + 'to the 25,611,302 the KPI shows. Subtract the annuity on capacity that already existed and you '
-      + 'are back to the 18,115,684 the solver minimised. Both are correct; they answer different '
+      + 'to the 25,611,302 the KPI shows. Subtract the part the expansion card labels already built (sunk, '
+      + 'PyPSA\'s installed_capex) and you are back to the 18,115,684 the solver minimised. Both are correct; they answer different '
       + 'questions, and confusing them is how a cost saving gets reported that nobody can find in a budget.',
 
       'Then find the built capacities — the expansion card reports each asset\'s starting capacity, its '
@@ -818,9 +846,9 @@ export const MODULE_7_INVESTMENT: TutorialStep[] = [
         title: 'Two totals, both correct',
         tab: 'Analytics',
         runDialog: 'closed',
-        note: 'The KPI reports 25,611,302 — fuel plus the annuity on the whole fleet. The solver '
-          + 'minimised 18,115,684 — fuel plus the annuity on what it BUILDS, because sunk capital cannot '
-          + 'be changed by a decision. Know which one you are quoting.',
+        note: 'The KPI reports 25,611,302 — fuel plus n.statistics.capex on the whole fleet. The solver '
+          + 'minimised 18,115,684 — fuel plus expanded_capex, what it BUILDS, because sunk (installed) '
+          + 'capital cannot be changed by a decision. Know which one you are quoting.',
       },
       {
         selector: '[data-card="capacity-expansion"]',
@@ -1148,9 +1176,10 @@ export const MODULE_7_INVESTMENT: TutorialStep[] = [
       + '— turn any component into an investment question, and the same mechanism works identically on '
       + 'generators, lines, links and storage.',
 
-      'Capital costs must be annuitised and matched to the modelled window. Ragnarok annuitises the '
-      + 'overnight cost using the lifetime and the discount rate; matching the window is why this module '
-      + 'needs a year, and getting it wrong produces a confident "build nothing" that is a unit error.',
+      'Capital costs must be on the basis of the modelled horizon. PyPSA annuitises an `overnight_cost` '
+      + 'using the row\'s lifetime and discount_rate and scales it by n.nyears; a `capital_cost` it takes as '
+      + 'already periodised. Ragnarok adds nothing of its own — which is why this module uses a full year, and '
+      + 'why a unit mistake gives a confident "build nothing".',
 
       'Levelised cost is a screening tool, not a decision rule. Solar lost on LCOE and got built, because '
       + 'LCOE cannot see location, timing, or what is already there. The right question is always what '
@@ -1208,7 +1237,7 @@ export const MODULE_7_INVESTMENT: TutorialStep[] = [
     ],
     verify: [
       'You can name the attributes that make a component extendable, and say which one encodes brownfield',
-      'You can say what Ragnarok does with `capital_cost` and what it leaves to you',
+      'You can say what PyPSA does with `overnight_cost` and `capital_cost`, and which one this module used',
       'You can explain why levelised cost got solar wrong',
       'You can say what a greenfield run tells you that a brownfield run cannot',
       'You can list three assumptions this answer depends on that were never tested',

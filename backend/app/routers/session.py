@@ -55,6 +55,8 @@ def put_model(payload: SessionModelPayload) -> dict:
             payload.model,
             filename=payload.filename,
             scenario_name=payload.scenarioName,
+            legacy_origin=payload.origin == "legacy",
+            discount_rate=payload.discountRate,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -104,7 +106,17 @@ def get_meta(session_id: str = Query("default", alias="session_id")) -> dict:
     meta = model_store.get_meta(session_id)
     if meta is None:
         return {}
-    return {**meta, "version": journal.current_version(session_id)}
+    out = {**meta, "version": journal.current_version(session_id)}
+    migration = model_store.get_cost_basis_migration(session_id)
+    if migration is not None:
+        out["costBasisMigration"] = migration
+    return out
+
+
+@router.post("/migration/ack")
+def acknowledge_migration(session_id: str = Query("default", alias="session_id")) -> dict:
+    """The user has seen the cost-basis migration notice; stop returning it in the meta."""
+    return {"acknowledged": model_store.acknowledge_cost_basis_migration(session_id)}
 
 
 @router.get("/model/full")

@@ -29,8 +29,34 @@ export interface SessionSheetMeta {
   columns: string[];
 }
 
+/** One row the cost-basis migration converted (an OLD workbook's overnight `capital_cost` moved to
+ *  PyPSA's `overnight_cost`). */
+export interface CostBasisChangedRow {
+  sheet: string;
+  name: string;
+  extendable: boolean;
+  capital_cost_was: number;
+  overnight_cost: number;
+  discount_rate: number;
+  lifetime: number | null;
+  lifetimeDefaulted: boolean;
+}
+
+/** The one-off cost-basis migration of a workbook written before schema 2, shown to the user once. */
+export interface CostBasisMigration {
+  fromVersion: number;
+  toVersion: number;
+  discountRate: number | null;
+  discountRateSource: string;
+  changedRows: CostBasisChangedRow[];
+  review: { sheet: string; name: string; reason: string }[];
+  notes: string[];
+}
+
 export interface SessionMeta {
   sessionId?: string;
+  /** Present until the user acknowledges the migration notice. */
+  costBasisMigration?: CostBasisMigration;
   filename?: string;
   scenarioName?: string;
   savedAt?: string;
@@ -82,7 +108,16 @@ async function asJson<T>(resp: Response): Promise<T> {
 /** Ingest a full model into the session; returns meta only (model stays server-side). */
 export async function putSessionModel(
   model: WorkbookModel,
-  opts: { filename?: string; scenarioName?: string; sessionId?: string } = {},
+  opts: {
+    filename?: string;
+    scenarioName?: string;
+    sessionId?: string;
+    /** 'legacy' = an OLD Ragnarok workbook (no ragnarok_schema_version): the server runs the one-off
+     *  cost-basis migration and answers with `costBasisMigration`. Anything else is stamped as current. */
+    origin?: 'legacy';
+    /** Settings -> Discount rate; used by that migration only when the workbook states none. */
+    discountRate?: number;
+  } = {},
 ): Promise<SessionMeta> {
   const resp = await fetch(`${API_BASE}/api/session/model`, {
     method: 'POST',
@@ -92,9 +127,16 @@ export async function putSessionModel(
       filename: opts.filename ?? '',
       scenarioName: opts.scenarioName ?? '',
       sessionId: opts.sessionId ?? DEFAULT_SESSION_ID,
+      origin: opts.origin ?? '',
+      discountRate: opts.discountRate ?? null,
     }),
   });
   return asJson<SessionMeta>(resp);
+}
+
+/** The user has seen the cost-basis migration notice. */
+export async function acknowledgeCostBasisMigration(sessionId = DEFAULT_SESSION_ID): Promise<void> {
+  await fetch(`${API_BASE}/api/session/migration/ack?session_id=${encodeURIComponent(sessionId)}`, { method: 'POST' });
 }
 
 /** Merge the model's STATIC sheets into the session, keeping the backend's

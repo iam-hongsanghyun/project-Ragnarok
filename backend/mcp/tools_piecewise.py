@@ -32,8 +32,8 @@ _COST_NOTE = (
     "Cost curves: y at breakpoint i is the price per unit of x on (x[i-1], x[i]], y[0] is ignored; "
     "non-decreasing y = convex = LP, otherwise binaries (MIP). Per-unit curves (marginal_cost, "
     "efficiency, rate) must start at x=0, end at x=1 and need a fixed, finite nominal size "
-    "(p_nom_extendable=false). capital_cost curves take the OVERNIGHT price per MW (MWh, MVA) on x in "
-    "absolute units; the build annuitises them like the scalar capital_cost. A scalar marginal_cost / "
+    "(p_nom_extendable=false). capital_cost curves take the PERIODISED price per MW (MWh, MVA) per modelled horizon on x in "
+    "absolute units, passed to PyPSA unchanged (not combinable with overnight_cost). A scalar marginal_cost / "
     "capital_cost on a component with a curve is ignored."
 )
 

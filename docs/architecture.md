@@ -112,8 +112,7 @@ pypsa_gui/
 │   │   └── utils/
 │   │       ├── coerce.py            number(), text(), bool_value() — safe type coercion
 │   │       ├── workbook.py          workbook_rows(), apply_scaled_static_attributes()
-│   │       ├── series.py            weighted_sum() and pandas series helpers
-│   │       └── annuity.py           capital-recovery factor for expansion cost annualisation
+│   │       └── series.py            weighted_sum() and pandas series helpers
 │   ├── config/                      JSON config consumed by backend/app/config.py
 │   └── tests/                       pytest suite
 │
@@ -475,11 +474,12 @@ internal sub-modules are not imported directly from outside `network/`.
 8. **Carbon price.** `apply_carbon_price` adds `price × emission_factor` to each
    emitting generator's marginal cost in both static and `_t` frames. A varying
    schedule is always written to `_t`.
-9. **CAPEX annuitisation.** For extendable generators, storage units, stores, lines, links
-   and processes, `capital_cost` is multiplied by
-   `annuity_factor(discount_rate, lifetime)` from `utils/annuity.py` and pro-rated to the
-   modelled window (a `Process` is annuitised exactly like a `Link`: before this it carried its
-   overnight cost against one window). Lifetime defaults to 20 years when absent.
+9. **Cost basis: nothing is converted.** `capital_cost` (PyPSA's periodised cost per modelled horizon),
+   `overnight_cost` (annuitised by PyPSA: `overnight × annuity(discount_rate, lifetime) × n.nyears`) and
+   `fom_cost` (per horizon, unscaled) reach PyPSA exactly as the workbook holds them
+   (`pypsa.costs.periodized_cost`). The builder only checks that an `overnight_cost` row carries its own
+   `discount_rate` and refuses the run otherwise (Forge → Fill discount rate writes it). See
+   [The core is a PyPSA shell](#the-core-is-a-pypsa-shell).
 10. **Force-LP.** If `options["forceLp"]` is true, all `committable=True` flags on
     generators are set to `False`.
 11. **Load shedding.** `add_load_shedding` adds a `Generator` named
@@ -540,7 +540,7 @@ multiprocessing queue.
 | `co2Shadow` | `build_co2_shadow` in `market.py` |
 | `emissionsBreakdown` | `build_emissions_breakdown` in `results/emissions.py`, on PyPSA's `primary_energy` accounting (`primary_energy_emissions` in `utils/emissions.py`): generators `sum(w * p / efficiency) * co2_emissions` (signed, investment-period `years` weight in a multi-period solve), plus non-cyclic StorageUnits/Stores `co2_emissions * (initial - final stock)`. `totalTco2` equals the left-hand side of a `primary_energy` GlobalConstraint. **Link and Process flows are deliberately not counted**: PyPSA does not count them, and the fuel-supply generator already carries the fuel's emissions, so emissions stay at the fuel generator. Per-owner emissions (`companyBreakdown`, `companyStatement`) allocate the same terms to owners (`unassignedEmissionsTonnes` = untagged remainder), so they sum to the total. |
 | `generatorEconomics` | `build_generator_economics` in `results/market.py`: generators, storage units and **Processes** (`processes`: net port value at nodal prices, `marginal_cost * p`, capex of extendable ones). Revenue, supply/withdrawal and capacity factor are `n.statistics.revenue/supply/withdrawal/capacity_factor` per asset and investment period (`results/stat_metrics.py`; money x period objective weight; inactive assets 0); `capturePrice` = revenue / supply (`market_value`); variable cost stays on the dense marginal cost (carbon adder, piecewise overlay). Company finance (`results/finance.py`) takes Process owners through the same `process_assets` rule |
-| `expansionResults` | `build_expansion_results` in `results/expansion.py`: `capex_annual` = `n.statistics.capex` on the annual basis (+ `capex_expanded`, `capex_installed`, `overnight_total`, `fom_total`); pathway rows with a native `overnight_cost` keep the annuity figure |
+| `expansionResults` | `build_expansion_results` in `results/expansion.py`: `capex_horizon` = `n.statistics.capex` over the modelled horizon, `capex_annual` = that / `n.nyears` (per year, the only conversion), plus `capex_expanded` / `capex_installed` (new vs sunk), `overnight_total`, `fom_total`, `capital_cost` = `c.capital_cost`; every field is read from PyPSA |
 | `pathway.summaries` | `_pathway_period_summaries` in `results/summaries.py` |
 | `outputs` | `build_full_outputs(network)` in `results/full_outputs.py` |
 
@@ -627,8 +627,8 @@ Both formats require a backend round-trip because the browser has no native pars
   format via `_network_to_model_json`. A file written after a solve carries its solution:
   the server lifts it into a stored run (`solved_network_to_bundle` in
   `results/derive_outputs.py`: `network_to_model` + `build_full_outputs`, `pathwayConfig` read
-  from `investment_period_weightings`, `skipCapexAnnuitisation` because a PyPSA-native
-  `capital_cost` is already annual) with `origin="netcdf_import"`, and the response carries
+  from `investment_period_weightings`, `buildVersion` 2 because a PyPSA-native file is already on
+  PyPSA's cost semantics) with `origin="netcdf_import"`, and the response carries
   `runName`. An unsolved file returns `runName: null`.
 
 **Imported results are stored runs**
@@ -693,6 +693,35 @@ adding line-loading constraints for each passive branch. SCLOPF cannot be combin
 rolling horizon, stochastic mode, or pathway mode.
 
 ---
+
+### The core is a PyPSA shell
+
+Ragnarok's core hands data to PyPSA and receives and presents the results. **It never reimplements
+something PyPSA does.** Features PyPSA lacks live in modules or plugins, which process the user's data and
+send it to PyPSA as visible inputs in the workbook. Workbook columns carry PyPSA's semantics exactly:
+
+| Column | Meaning (`pypsa/costs.py`) | What Ragnarok does |
+|---|---|---|
+| `capital_cost` | periodised cost per unit **for the modelled horizon** | passes it through as is: no annuity, no scaling |
+| `overnight_cost` | upfront price; PyPSA computes `overnight × annuity(discount_rate, lifetime) × n.nyears` | passes it through; refuses a row with no `discount_rate` |
+| `fom_cost` | fixed O&M **per horizon**, added unscaled | passes it through |
+
+* `build_network` is the *run* builder (window, e_sum scaling, carbon adder, load shedding, Force-LP ...);
+  `build_components` is the pure 1:1 hand-over used by every build that is serialised back to a workbook
+  (Forge transforms, netcdf / h5 export). Neither converts a cost.
+* Reports read PyPSA: `n.statistics.capex / expanded_capex / installed_capex / overnight_cost / fom`,
+  `c.capital_cost` / `c.periodized_cost` / `c.annuity`. The one arithmetic left is `/ n.nyears` where a per-year
+  figure is shown, and the field says so (`capex_annual`).
+* A module that needs a conversion does it on its own input and writes the result visibly: the plant and
+  P2X templates write `overnight_cost`, `lifetime`, `discount_rate` and `fom_cost` (= yearly O&M × the
+  workbook's horizon in years, shown in the preview), and leave `capital_cost` blank. Their annuities are
+  `pypsa.costs.annuity`.
+* The discount rate is a column. Settings → Discount rate is a Forge action ("Fill discount_rate") that writes
+  it into the rows; nothing is filled in at run time.
+* Workbook schema version: the model sheet `RAGNAROK_Schema` (`ragnarok_schema_version`). Schema 1 (implicit)
+  held an overnight price in `capital_cost` and annuitised it at run time; it is migrated once, visibly, when
+  such a workbook is loaded (`backend/pypsa/network/cost_basis.py`, `docs/backend.md` §5.11). Stored runs carry
+  `options.buildVersion`; a run without it is re-derived through the same migration, in memory.
 
 ## 8. Constraints
 

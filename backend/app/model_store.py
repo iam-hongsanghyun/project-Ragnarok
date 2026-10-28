@@ -38,6 +38,18 @@ has_model = _impl.has_model
 is_series_sheet = _impl.is_series_sheet
 
 
+def get_cost_basis_migration(session_id: str):
+    """The session's un-acknowledged cost-basis migration report (SQLite store), else ``None``."""
+    fn = getattr(_impl, "get_cost_basis_migration", None)
+    return fn(session_id) if fn else None
+
+
+def acknowledge_cost_basis_migration(session_id: str) -> bool:
+    """Mark the migration notice as seen (SQLite store)."""
+    fn = getattr(_impl, "acknowledge_cost_basis_migration", None)
+    return bool(fn(session_id)) if fn else False
+
+
 def resave_model(session_id: str, model: dict) -> dict:
     """Replace the session's model, KEEPING its filename and scenario name.
 
@@ -82,5 +94,5 @@ __all__ = [
     "USE_SQLITE", "save_model", "merge_static_model", "get_meta", "get_sheet_page",
     "get_series_window", "load_full_model", "save_controls", "get_controls",
     "patch_sheet", "transform_series", "clear", "has_model", "is_series_sheet",
-    "distinct_values", "resave_model",
+    "distinct_values", "resave_model", "get_cost_basis_migration", "acknowledge_cost_basis_migration",
 ]

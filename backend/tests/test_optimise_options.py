@@ -148,7 +148,9 @@ def test_risk_preference_requires_stochastic() -> None:
 def _expandable_model() -> dict[str, list[dict[str, Any]]]:
     m = _three_bus_model()
     for line in m["lines"]:
-        line.update({"s_nom": 50.0, "s_nom_extendable": True, "capital_cost": 100.0, "s_nom_max": 500.0})
+        # capital_cost is PyPSA's cost per modelled HORIZON (a few hours here): 1.0 per MW keeps the expansion worth building
+        # (the old fixture's 100 was an overnight price that Ragnarok annuitised and scaled down to ~0.1).
+        line.update({"s_nom": 50.0, "s_nom_extendable": True, "capital_cost": 1.0, "s_nom_max": 500.0})
     return m
 
 

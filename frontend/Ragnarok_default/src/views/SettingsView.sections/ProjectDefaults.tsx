@@ -1,7 +1,8 @@
 /**
  * Project defaults section — date format, currency, discount rate, load shedding.
  */
-import React from 'react';
+import React, { useState } from 'react';
+import { fillDiscountRate } from 'lib/api/forgeBuild';
 import { DateFormat } from '../../features/settings/useSettings';
 import { CURRENCIES, SETTINGS_CONFIG } from 'lib/constants';
 import { NumberDraftInput } from '../../shared/components/NumberDraftInput';
@@ -17,6 +18,7 @@ export interface ProjectDefaultsSectionProps {
   onCurrencyChange: (code: string, symbol: string) => void;
   discountRate: number;
   onDiscountRateChange: (v: number) => void;
+  onWorkbookChanged?: () => void;
   enableLoadShedding: boolean;
   onEnableLoadSheddingChange: (v: boolean) => void;
   loadSheddingCost: number;
@@ -27,12 +29,33 @@ export function ProjectDefaultsSection(props: ProjectDefaultsSectionProps) {
   const settingsRanges = SETTINGS_CONFIG.ranges;
   const loadSheddingOptions = SETTINGS_CONFIG.loadSheddingOptions as Array<{ value: boolean; label: string }>;
   const currencies: Currency[] = CURRENCIES;
+  // Forge action: write the rate into the workbook's discount_rate column (PyPSA annuitises
+  // overnight_cost with the ROW's rate; nothing is filled in at run time).
+  const [fillNote, setFillNote] = useState('');
+  const [filling, setFilling] = useState(false);
+  const runFill = async (overwrite: boolean) => {
+    setFilling(true);
+    try {
+      const out = await fillDiscountRate(props.discountRate, { overwrite, apply: true });
+      setFillNote(
+        out.filled + out.overwritten === 0
+          ? `No row needed it (${out.skipped} already carry a discount_rate).`
+          : `Wrote discount_rate ${props.discountRate} into ${out.filled + out.overwritten} row(s)`
+            + (out.skipped ? `; ${out.skipped} already had one.` : '.'),
+      );
+      props.onWorkbookChanged?.();
+    } catch (e) {
+      setFillNote(e instanceof Error ? e.message : 'Could not fill the discount rate.');
+    } finally {
+      setFilling(false);
+    }
+  };
 
   return (
     <section className="constraints-workspace-section">
       <header className="constraints-workspace-section-header">
         <h3>Project defaults</h3>
-        <p>Date parsing, currency, capital cost annuitisation, and load-shedding backstop.</p>
+        <p>Date parsing, currency, the discount rate written into the workbook, and load-shedding backstop.</p>
       </header>
 
       <div className="sg-setting-row">
@@ -82,8 +105,20 @@ export function ProjectDefaultsSection(props: ProjectDefaultsSectionProps) {
           <span className="sg-carbon-unit">(fraction)</span>
         </div>
         <p className="sg-setting-hint">
-          Used to annualise capital costs for extendable assets. 0.05 = 5% WACC.
+          The project discount rate (0.05 = 5% WACC). It does not change any cost at run time: PyPSA annuitises each
+          row's <code>overnight_cost</code> with that row's own <code>discount_rate</code> and <code>lifetime</code>.
+          Use the Forge action below to write this rate into the workbook column; a row with an overnight cost and no
+          rate is refused at run time.
         </p>
+        <div className="sg-btn-row">
+          <button className="tb-btn sg-solver-btn" disabled={filling} onClick={() => { void runFill(false); }}>
+            Fill discount_rate in rows that lack it
+          </button>
+          <button className="tb-btn sg-solver-btn tb-btn--muted" disabled={filling} onClick={() => { void runFill(true); }}>
+            Overwrite every row
+          </button>
+        </div>
+        {fillNote && <p className="sg-setting-hint">{fillNote}</p>}
       </div>
 
       <div className="sg-setting-divider" />

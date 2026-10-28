@@ -196,7 +196,7 @@ export const MODULE_8_POLICY: TutorialStep[] = [
 
       'The carbon price enters as an addition to marginal cost, computed per generator from its carrier '
       + 'factor and its efficiency. Nothing else about the model changes: the same demand, the same '
-      + 'network, the same capital costs, the same discount rate.',
+      + 'network, the same overnight costs, the same discount_rate on every row.',
 
       'Predict before you run. Coal at 20 + 85 = 105 per MWh is now the most expensive thermal plant in '
       + 'the fleet, above the CCGT at 90 and only just below the oil peaker at 148. Something has to '

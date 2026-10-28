@@ -29,8 +29,8 @@ Algorithm (per company, summed over its assets and snapshots t with weights w):
 
     Symbols: π = nodal price [currency/MWh], p = dispatch [MW], e_a = electrical
     emission factor [tCO2/MWh] (co2/η), P_CO2 = carbon price [currency/tCO2],
-    opex = (8760/H)·Σ w·mc·p [currency/yr], capex_annual = capital_cost ×
-    p_nom_opt [currency/yr], H = Σ w [h], i = interest rate [-].
+    opex = (8760/H)·Σ w·mc·p [currency/yr], capex_annual = (n.statistics.capex +
+    n.statistics.fom) / n.nyears [currency/yr], H = Σ w [h], i = interest rate [-].
 
 Basis: the solve covers a window of H represented hours, not a year, so every
 flow line (revenue, carbon, fuel/VOM, energy, emissions) is annualised by
@@ -52,7 +52,8 @@ from ..network.piecewise import overlay_piecewise_marginal_cost
 
 from ..utils.emissions import per_generator_emission_factor, primary_energy_emissions
 from .finance import _crf, storage_assets
-from .market import HOURS_PER_YEAR, capex_window_scale
+from .market import HOURS_PER_YEAR
+from .stat_metrics import fixed_cost_of, fixed_cost_table
 
 _log = logging.getLogger("pypsa.solver")
 
@@ -118,6 +119,7 @@ def build_company_statement(
     # Dense marginal cost: a varying schedule writes its adder to the
     # time-varying frame only, so the static column alone would miss it.
     mc_dense = overlay_piecewise_marginal_cost(network, network.get_switchable_as_dense("Generator", "marginal_cost"))
+    gen_fixed = fixed_cost_table(network, ["Generator"])
 
     gearing = float((debt or {}).get("gearing", 0.0) or 0.0)
     interest = float((debt or {}).get("interestRate", 0.0) or 0.0)
@@ -155,14 +157,12 @@ def build_company_statement(
         energy = float((p * weights).sum())
         opex = float((mc * p_pos * weights).sum())
         carbon = float((p_pos * ef * co2_arr * weights).sum())
-        capacity = float(network.generators.at[g, "p_nom_opt"])
-        cap_cost = float(network.generators.at[g, "capital_cost"]) if "capital_cost" in network.generators.columns else 0.0
         b["revenue"] += float((p * pi * weights).sum())
         b["energyMWh"] += energy
         b["carbonCost"] += carbon
         b["fuelVomCost"] += max(0.0, opex - carbon)
-        # capital_cost may be window-scaled by the builder: recover the annual charge.
-        b["capexAnnual"] += cap_cost * capacity / (capex_window_scale(network) or 1.0)
+        # n.statistics: (capex + fom) / n.nyears, installed and expanded capacity alike.
+        b["capexAnnual"] += fixed_cost_of(gen_fixed, "Generator", str(g))["annual"]
 
     # Storage: StorageUnit and Store + Link on the same rule finance.py uses —
     # capex only for extendable components, marginal_cost_storage and spill_cost

@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 import pypsa
 
-from ..network import build_network
+from ..network import build_stored_network
 from .from_outputs import _series_to_frame
 
 #: Statistics metrics exposed (all are methods of ``n.statistics``).
@@ -50,10 +50,7 @@ def network_from_outputs(
     Returns:
         A network whose ``*_t`` frames and ``*_opt`` columns equal the solved ones.
     """
-    scenario = dict(scenario or {})
-    if scenario.get("discountRate") in (None, ""):
-        scenario["discountRate"] = 0.05  # only annuitises extendable capex; solved values are injected
-    network, _ = build_network(model, scenario, options or {})
+    network, _ = build_stored_network(model, dict(scenario or {}), options or {})
     snaps = network.snapshots
     for list_name, by_name in ((outputs or {}).get("static") or {}).items():
         if list_name not in network.components.keys():

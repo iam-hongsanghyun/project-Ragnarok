@@ -176,15 +176,15 @@ def test_process_flows_through_run_payload_analytics() -> None:
         "loads-p_set": [{"snapshot": s, "L": 100} for s in snaps],
         "generators": [{"name": "well", "bus": "gas", "carrier": "gas", "p_nom": 1000, "marginal_cost": 5}],
         "processes": [{"name": "proc", "bus0": "gas", "bus1": "elec", "rate0": -1.0, "rate1": 0.5,
-                       "carrier": "CCGTp", "p_nom_extendable": True, "capital_cost": 1000}],
+                       "carrier": "CCGTp", "p_nom_extendable": True, "overnight_cost": 1000, "discount_rate": 0.0,
+                       "lifetime": 20}],
     }
     res = run_pypsa(model, {"discountRate": 0.0}, {})
     mix = {m["label"]: m["value"] for m in res["carrierMix"]}
     assert mix["CCGTp"] == pytest.approx(400.0, abs=1e-3)
     row = next(e for e in res["expansionResults"] if e["name"] == "proc")
     assert row["component"] == "Process" and row["p_nom_opt_mw"] == pytest.approx(200.0, abs=0.11)
-    # An extendable Process is annuitised like a Link (it was charged its overnight cost before): rate 0 over the 20 a fallback lifetime
-    # is 1/20 of the overnight 1000 per MW, on the annual basis.
+    # An extendable Process is priced like a Link by PyPSA: rate 0 over 20 a is 1/20 of the overnight 1000 per MW, on the per-year basis.
     assert row["capex_annual"] == pytest.approx(200.0 * 1000 / 20.0, rel=1e-6)
     bal = {c["carrier"]: c for c in res["energyBalance"]["carriers"]}
     assert bal["gas"]["sinks"][0]["energyMWh"] == pytest.approx(800.0, abs=0.11)

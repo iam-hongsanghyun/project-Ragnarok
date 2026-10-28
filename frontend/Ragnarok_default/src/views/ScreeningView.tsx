@@ -17,11 +17,13 @@ interface Props {
   model: WorkbookModel;
   onApplyFragment: (fragment: WorkbookFragment, databaseName: string, countryName: string) => void;
   currencySymbol: string;
+  /** Settings -> Discount rate, written to extendable candidates as `discount_rate`. */
+  discountRate?: number;
   /** Stored run whose system price can serve as the reference series; null = none yet. */
   runName?: string | null;
 }
 
-export function ScreeningView({ model, onApplyFragment, currencySymbol, runName = null }: Props) {
+export function ScreeningView({ model, onApplyFragment, currencySymbol, discountRate, runName = null }: Props) {
   const buses = useMemo(() => connectableBusesOf(model.buses), [model.buses]);
   const snapshots = useMemo(() => snapshotLabelsOf(model.snapshots), [model.snapshots]);
   return (
@@ -38,6 +40,7 @@ export function ScreeningView({ model, onApplyFragment, currencySymbol, runName 
             buses={buses}
             targetSnapshots={snapshots}
             currencySymbol={currencySymbol}
+            discountRate={discountRate}
             runName={runName}
             onApplyFragment={onApplyFragment}
           />

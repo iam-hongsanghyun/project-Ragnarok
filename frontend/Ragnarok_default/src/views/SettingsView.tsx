@@ -295,6 +295,9 @@ export interface SettingsViewProps {
   onCurrencyChange: (code: string, symbol: string) => void;
   discountRate: number;
   onDiscountRateChange: (v: number) => void;
+  /** Called after a Forge action changed the working model on the server (e.g. Fill discount rate), so the
+   *  editor re-reads it. */
+  onWorkbookChanged?: () => void;
   enableLoadShedding: boolean;
   onEnableLoadSheddingChange: (v: boolean) => void;
   loadSheddingCost: number;

@@ -8,8 +8,8 @@ Algorithm (per plant, over the run window; ``w_t`` snapshot weighting in h, ``p`
       s_t=\\frac{h_t}{h_t+g_t},\\qquad x_t=\\frac{s_t/L_H}{s_t/L_H+(1-s_t)/L_G}$$
     $$M^{act}=e_g\\sum_t w_t\\,g_t + e_h\\sum_t w_t\\,h_t,\\qquad
       M^{gas}=e_g\\sum_t w_t\\,(g_t+h_t),\\qquad M^{avoided}=M^{gas}-M^{act}$$
-    Fixed charge of an extendable component: ``P (k_eff + y f)``, ``k_eff`` = PyPSA's effective capital cost per unit over the window (read from
-    the rebuilt network), ``f`` = ``fom_cost`` per year, ``y`` = window years.
+    Fixed charge of an extendable component: ``P (k_eff + f)``, ``k_eff`` = PyPSA's effective capital cost per unit over the window (read from
+    the rebuilt network), ``f`` = ``fom_cost`` per unit per modelled horizon (PyPSA adds it unscaled).
     ASCII: E_el = sum w*p_el; CF = E_el/(P_el*sum w); s_t = h/(h+g); x_t = (s/L_H)/(s/L_H+(1-s)/L_G);
     avoided = e_g*sum w*(g+h) - (e_g*sum w*g + e_h*sum w*h) = (e_g - e_h) * sum w*h.
     ``g`` and ``h`` are the gas and H2 fuel flows (MW_th, LHV), ``e_g`` = 0.198 and ``e_h`` = 0 tCO2/MWh_th, ``L_*`` MJ/Nm3.
@@ -48,13 +48,10 @@ def _series(run: _Run, sheet: str, attr: str, name: str) -> np.ndarray:
 
 def _fixed(run: _Run, sheet: str, name: str, row: dict[str, Any], capacity: float, extendable: bool) -> float:
     """Capital charge of an extendable component over the window: capacity x PyPSA's effective capital cost (read from the network rebuilt
-    from the stored model, never recomputed) + ``fom_cost`` x capacity x window years when the row carries PyPSA's cost split."""
+    from the stored model, never recomputed) + ``fom_cost`` x capacity, which PyPSA charges per modelled horizon (not scaled by the years)."""
     if not extendable:
         return 0.0
-    total = capacity * run.effective_capital(sheet, name)
-    if row.get("overnight_cost") not in (None, ""):
-        total += capacity * _f(row.get("fom_cost")) * run.years
-    return total
+    return capacity * (run.effective_capital(sheet, name) + run.effective_fom(sheet, name))
 
 
 def _component(run: _Run, comp: dict[str, str]) -> dict[str, Any]:
@@ -256,4 +253,4 @@ def plant_results(bundle: dict[str, Any], *, plant_id: str | None = None, period
     })
     return {"currency": str(run.options.get("currencySymbol") or "EUR"), "windowYears": run.years, "hoursPerRow": run.row_hours,
             "period": period, "plants": plants, "totals": totals,
-            "basis": "Costs in the model currency; fixed charge = capacity x PyPSA's effective capital cost (rebuilt network, run's discount rate, window-scaled) + fom_cost x capacity x window years; extendable components only."}
+            "basis": "Costs in the model currency; fixed charge = capacity x PyPSA's effective capital cost (rebuilt network: PyPSA's periodised cost per horizon) + fom_cost x capacity (PyPSA charges it per horizon, unscaled); extendable components only."}

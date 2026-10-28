@@ -84,13 +84,15 @@ def _bus_coords(model: dict[str, list[dict[str, Any]]]) -> dict[str, tuple[float
 def _asset_value(row: dict[str, Any], default_value_per_mw: float) -> float:
     """Asset value at risk.
 
-    ``capital_cost * p_nom`` when both present and > 0, else
-    ``default_value_per_mw * p_nom``. Falls back to 0 when p_nom is missing or
+    ``overnight_cost * p_nom`` (the upfront price, PyPSA's own column) when present and > 0, else
+    ``capital_cost * p_nom``, else ``default_value_per_mw * p_nom``. Falls back to 0 when p_nom is missing or
     negative (a negative rating is meaningless for value-at-risk, and a negative
     value would violate ``Asset.value``'s ``ge=0`` bound).
     """
     p_nom = max(0.0, _num(row.get("p_nom")) or 0.0)
-    capital_cost = _num(row.get("capital_cost"))
+    capital_cost = _num(row.get("overnight_cost"))
+    if not capital_cost:
+        capital_cost = _num(row.get("capital_cost"))
     if capital_cost is not None and capital_cost > 0 and p_nom > 0:
         return round(capital_cost * p_nom, 2)
     return round(max(0.0, default_value_per_mw) * p_nom, 2)

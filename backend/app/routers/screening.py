@@ -701,7 +701,8 @@ class PromoteRequest(BaseModel):
     utcOffset: int = Field(0, description="Hours from UTC to the model's clock.")
     pNomMw: dict[str, float] | None = None
     extendable: bool = False
-    capitalCost: dict[str, float] = Field(default_factory=dict, description="currency/MW per technology (extendable only).")
+    capitalCost: dict[str, float] = Field(default_factory=dict, description="OVERNIGHT currency/MW per technology (extendable only), written as overnight_cost.")
+    discountRate: float | None = Field(None, description="Written as discount_rate on extendable sites (PyPSA annuitises overnight_cost with it). Required when extendable.")
     marginalCost: float = 0.0
     busOverrides: dict[str, str] | None = None
     buses: list[dict[str, Any]] | None = Field(None, description="Override of the model's buses (name, x, y); default the session's.")
@@ -730,6 +731,7 @@ def promote(req: PromoteRequest) -> dict[str, Any]:
             series, meta["sites"], req.sites, step_minutes=meta.get("stepMinutes"), target_snapshots=snaps, buses=buses,
             existing_generators=existing, utc_offset=req.utcOffset, p_nom_mw=req.pNomMw, extendable=req.extendable,
             capital_cost=req.capitalCost, marginal_cost=req.marginalCost, bus_overrides=req.busOverrides, dataset_id=req.datasetId,
+            discount_rate=req.discountRate,
         )
     except ValueError as exc:
         raise _bad(422, exc) from exc

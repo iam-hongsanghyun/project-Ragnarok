@@ -7,7 +7,7 @@ from numpy.testing import assert_allclose
 from backend.app.p2x import chains
 from backend.app.p2x import results as pr
 from backend.pypsa.results import run_pypsa
-from backend.pypsa.utils.annuity import annuity_factor
+from pypsa.costs import annuity as annuity_factor
 
 from ._p2x_fixtures import H2_SPEC, SCENARIO, night_gas_network, stamps, with_chain
 

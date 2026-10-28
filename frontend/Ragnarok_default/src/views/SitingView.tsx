@@ -37,6 +37,8 @@ interface Props {
   onApplyFragment: (fragment: WorkbookFragment, databaseName: string, countryName: string) => void;
   expansionResults: ExpansionAsset[] | null;
   currencySymbol: string;
+  /** Settings -> Discount rate: written to every candidate row as `discount_rate` (PyPSA annuitises `overnight_cost` with it). */
+  discountRate?: number;
   /** Stored run the siting totals are read from (`analysis/totals`); null = none yet. */
   runName?: string | null;
   /** Pathway investment period; null = the whole horizon. */
@@ -86,7 +88,7 @@ export function SitingView(props: Props) {
   );
 }
 
-function OptimiseStep({ model, bounds, onApplyFragment, expansionResults, currencySymbol, runName = null, period = null }: Props) {
+function OptimiseStep({ model, bounds, onApplyFragment, expansionResults, currencySymbol, discountRate, runName = null, period = null }: Props) {
   const { showToast } = useToast();
 
   // ── Scan configuration ────────────────────────────────────────────────
@@ -153,6 +155,7 @@ function OptimiseStep({ model, bounds, onApplyFragment, expansionResults, curren
         siteCapacityMw,
         capitalCostPerMw: { solar: solarCapex, wind: windCapex },
         connectionCostPerMwKm: connCostPerMwKm,
+        discountRate,
         marginalCost: 0,
         targetSnapshots: targetSnapshots.length > 0 ? targetSnapshots : undefined,
       });
@@ -305,10 +308,9 @@ function OptimiseStep({ model, bounds, onApplyFragment, expansionResults, curren
               mediocre resource next to it.
             </p>
             <p className="sg-setting-hint">
-              Annuitised capex is weighed against fuel savings over the solve window: if
-              the window is a short sample, set the snapshot weight (run options) to about
-              8760 divided by the window hours, or capex will dwarf one sample&apos;s savings
-              and nothing will build.
+              The prices above are OVERNIGHT: each candidate carries PyPSA&apos;s overnight_cost with a
+              25-year life (40 for the connection) and the discount rate from Settings, and PyPSA annuitises it
+              and scales it by the modelled horizon, so a short sample is priced against its own share of the year.
             </p>
           </div>
 

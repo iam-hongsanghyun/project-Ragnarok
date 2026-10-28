@@ -76,22 +76,44 @@ export async function fetchConversionTemplates(): Promise<ConversionList> {
   return readJson<ConversionList>(await fetch(`${API_BASE}/api/build/conversions`));
 }
 
-/** `anchorBus` is optional: the backend then picks the default electricity bus of `model`. */
-export interface ConversionOptions { anchorBus?: string; name?: string; pNom: number; extendable: boolean }
+/** `anchorBus` is optional: the backend then picks the default electricity bus of `model`.
+ *  `discountRate` is written to an extendable row as PyPSA's `discount_rate` (Settings -> Discount rate). */
+export interface ConversionOptions { anchorBus?: string; name?: string; pNom: number; extendable: boolean; discountRate?: number }
 
 export interface ConversionBuild { fragment: WorkbookFragment; anchorBus: string }
 
 /** The fragment adding one conversion technology to `model` (only buses, carriers,
- *  generators and links are read, so only those sheets are sent). */
+ *  generators, links and the snapshots - which give the horizon `fom_cost` is written for - are read,
+ *  so only those sheets are sent). */
 export async function buildConversion(
   templateId: string,
   options: ConversionOptions,
   model: WorkbookModel,
 ): Promise<ConversionBuild> {
   const m = model as unknown as Record<string, unknown>;
-  const subset = Object.fromEntries(['buses', 'carriers', 'generators', 'links'].map((s) => [s, m[s] ?? []]));
+  const subset = Object.fromEntries(['buses', 'carriers', 'generators', 'links', 'snapshots'].map((s) => [s, m[s] ?? []]));
   return postJson<ConversionBuild>('/api/build/conversion', {
     templateId, anchorBus: options.anchorBus || undefined, name: options.name, pNom: options.pNom,
-    extendable: options.extendable, model: subset,
+    extendable: options.extendable, discountRate: options.discountRate, model: subset,
+  });
+}
+
+/** Result of the Forge "Fill discount rate" action. */
+export interface FillDiscountRateResult {
+  filled: number;
+  overwritten: number;
+  skipped: number;
+  sheets: Record<string, number>;
+  applied: boolean;
+}
+
+/** Forge action behind Settings -> Discount rate: write `discount_rate` into every row that carries an
+ *  `overnight_cost` (PyPSA annuitises it with the row's own rate). Previews unless `apply`. */
+export async function fillDiscountRate(
+  discountRate: number,
+  opts: { overwrite?: boolean; apply?: boolean } = {},
+): Promise<FillDiscountRateResult> {
+  return postJson<FillDiscountRateResult>('/api/forge/fill-discount-rate', {
+    discountRate, overwrite: opts.overwrite ?? false, apply: opts.apply ?? false,
   });
 }

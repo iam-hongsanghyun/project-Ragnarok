@@ -18,7 +18,6 @@ from backend.pypsa.results import run_pypsa
 from backend.pypsa.results.derived_series import derive_series
 from backend.pypsa.results.dispatch import system_price_series, weighted_mean
 from backend.pypsa.results.expansion import build_expansion_results
-from backend.pypsa.results.market import CAPEX_WINDOW_SCALE_KEY
 from backend.pypsa.network.serialize import network_to_model
 
 logging.disable(logging.WARNING)
@@ -210,9 +209,9 @@ def test_pathway_curtailment_masks_inactive_assets(pathway_result: dict[str, Any
     assert all(r["values"] == {} and r["period"] == 2030 for r in first_period)
 
 
-def test_capex_window_scale_is_not_prorated_again() -> None:
-    """capital_cost x p_nom_opt is the window share when the solve scaled it:
-    with scale 0.25 the annual figure is that / 0.25."""
+def test_capex_annual_is_the_horizon_statistic_over_n_nyears() -> None:
+    """capital_cost x p_nom_opt is PyPSA's capex over the modelled horizon (2 h here);
+    the per-year display figure divides by n.nyears and nothing else."""
     n = pypsa.Network()
     n.set_snapshots(pd.date_range("2025-01-01", periods=2, freq="h"))
     n.add("Bus", "b")
@@ -220,10 +219,9 @@ def test_capex_window_scale_is_not_prorated_again() -> None:
     n.add("Generator", "g", bus="b", p_nom_extendable=True, capital_cost=2.0)
     n.optimize(solver_name="highs", include_objective_constant=False)
     plain = build_expansion_results(n)[0]
-    np.testing.assert_allclose(plain["capex_annual"], 2.0 * 10.0, atol=1.0)
-    n.meta[CAPEX_WINDOW_SCALE_KEY] = 0.25
-    scaled = build_expansion_results(n)[0]
-    np.testing.assert_allclose(scaled["capex_annual"], 2.0 * 10.0 / 0.25, atol=1.0)
+    nyears = 2.0 / 8760.0
+    np.testing.assert_allclose(plain["capex_horizon"], 2.0 * 10.0, atol=1.0)
+    np.testing.assert_allclose(plain["capex_annual"], 2.0 * 10.0 / nyears, rtol=1e-3)
 
 
 def test_rb10_generator_economics_recovery_uses_unrounded_values() -> None:
@@ -235,11 +233,12 @@ def test_rb10_generator_economics_recovery_uses_unrounded_values() -> None:
     n.set_snapshots(pd.date_range("2025-01-01", periods=1, freq="h"))
     n.add("Carrier", "x")
     n.add("Bus", "b")
-    n.add("Generator", "g", bus="b", carrier="x", p_nom=1.0, marginal_cost=0.0, capital_cost=8760.0 * 0.5)
+    n.add("Generator", "g", bus="b", carrier="x", p_nom=1.0, marginal_cost=0.0, capital_cost=0.5)
+    n.generators.at["g", "p_nom_opt"] = 1.0                  # what a solve (or the stored outputs) provides
     n.generators_t.p = pd.DataFrame({"g": [1.0]}, index=n.snapshots)
     n.buses_t.marginal_price = pd.DataFrame({"b": [0.4]}, index=n.snapshots)
     econ = build_generator_economics(n)
-    # margin 0.4; fixed horizon = 4380 x 1/8760 = 0.5 -> 80 %
+    # margin 0.4; fixed cost over the horizon = capital_cost 0.5 x 1 MW (n.statistics.capex) -> 80 %
     np.testing.assert_allclose(econ["byCarrier"][0]["recoveryPct"], 80.0, atol=0.05)
     np.testing.assert_allclose(econ["system"]["recoveryPct"], 80.0, atol=0.05)
 

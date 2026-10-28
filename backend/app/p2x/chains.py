@@ -43,6 +43,7 @@ import math
 import re
 from typing import Any
 
+from ...pypsa.network.cost_basis import horizon_years
 from . import technologies as tech
 
 Row = dict[str, Any]
@@ -256,10 +257,15 @@ def build_chain(spec_in: dict[str, Any] | None, model: Model) -> dict[str, Any]:
         bus_names[role] = bname
         return bname
 
+    horizon = horizon_years(model)
+    warnings.append(f"fom_cost is written per modelled HORIZON as PyPSA charges it: fixed O&M per year x {horizon:g} years "
+                    "(the workbook's snapshots). Re-apply the chain after changing the snapshots to refresh it.")
+
     def cost(per_unit: float, fom_pct: float) -> dict[str, float]:
-        """PyPSA's own cost split: ``overnight_cost`` (per MW or MWh; the build annualises it with the run's discount rate and the
-        row's ``lifetime`` and ``discount_rate``) and ``fom_cost`` (per MW or MWh per year). ``capital_cost`` stays blank: no annuity is folded in here."""
-        return {"overnight_cost": round(per_unit, 6), "fom_cost": round(per_unit * fom_pct / 100.0, 6), "discount_rate": r_disc}
+        """PyPSA's own cost split: ``overnight_cost`` (per MW or MWh; PyPSA annualises it with the row's ``lifetime`` and
+        ``discount_rate``) and ``fom_cost`` (per MW or MWh per modelled HORIZON = fixed O&M per year x ``horizon`` years, added unscaled by
+        PyPSA). ``capital_cost`` stays blank: no annuity is folded in here."""
+        return {"overnight_cost": round(per_unit, 6), "fom_cost": round(per_unit * fom_pct / 100.0 * horizon, 6), "discount_rate": r_disc}
 
     def register(role: str, label: str, sheet: str, row: Row, overnight: float, fom_pct: float, life: float, unit: str) -> None:
         components[role] = {"sheet": sheet, "name": str(row["name"])}

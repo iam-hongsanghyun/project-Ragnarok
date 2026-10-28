@@ -453,12 +453,13 @@ def test_promote_overrides_extendable_errors_and_empty_model(client: TestClient)
     assert r.status_code == 422 and "bus" in r.json()["detail"]  # an empty session has no bus to attach to
     own = client.post("/api/screening/promote", json={
         "datasetId": meta["id"], "sites": ["S1", "S2"], "buses": [{"name": "hub", "x": 128.0, "y": 36.0}], "targetSnapshots": [],
-        "extendable": True, "capitalCost": {"solar": 55000}, "pNomMw": {"S1": 250}, "busOverrides": {"S2": "elsewhere"},
+        "extendable": True, "capitalCost": {"solar": 55000}, "discountRate": 0.06, "pNomMw": {"S1": 250}, "busOverrides": {"S2": "elsewhere"},
     }).json()
     assert own["report"]["mode"] == "own-snapshots" and own["report"]["snapshots"] == HOURS
     gens = {g["name"]: g for g in own["fragment"]["sheets"]["generators"]}
     s1 = gens["screen_solar_S1"]
-    assert s1["p_nom"] == 0.0 and s1["p_nom_extendable"] is True and s1["p_nom_max"] == 250.0 and s1["capital_cost"] == 55000.0
+    assert s1["p_nom"] == 0.0 and s1["p_nom_extendable"] is True and s1["p_nom_max"] == 250.0 and s1["overnight_cost"] == 55000.0
+    assert s1["discount_rate"] == 0.06 and s1["lifetime"] == 25.0 and "capital_cost" not in s1
     assert gens["screen_solar_S2"]["bus"] == "elsewhere"
     assert any("no snapshots" in w for w in own["report"]["warnings"])
     assert client.post("/api/screening/promote", json={"datasetId": meta["id"], "sites": []}).status_code == 422

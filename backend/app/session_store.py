@@ -190,14 +190,23 @@ def save_model(
     *,
     filename: str = "",
     scenario_name: str = "",
+    legacy_origin: bool = False,
+    discount_rate: float | None = None,
 ) -> dict[str, Any]:
     """Persist a full model into the session, replacing any current one.
+
+    ``legacy_origin`` / ``discount_rate`` belong to the SQLite store's cost-basis migration and are
+    ignored here (the JSON/Parquet escape-hatch store does not migrate).
 
     Static sheets are written as JSON, time-series sheets as Parquet. Returns the
     lightweight ``meta`` (the only thing the frontend keeps in memory).
     """
     if not _is_safe_id(session_id):
         raise ValueError(f"Unsafe session id: {session_id!r}")
+    from ..pypsa.network import cost_basis as _cb
+
+    if _cb.schema_version(model) is None:
+        model = _cb.stamp(dict(model))  # same stamp the SQLite store writes (this store does not migrate)
 
     # Replace wholesale: a new import clears the previous working model.
     clear(session_id)

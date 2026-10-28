@@ -17,7 +17,6 @@ from numpy.testing import assert_allclose
 from backend.app.run_options_reference import documented_paths
 from backend.pypsa.network import rfnbo as rf
 from backend.pypsa.results import run_pypsa
-from backend.pypsa.utils.annuity import annuity_factor
 
 from ._p2x_fixtures import H2_SPEC, SCENARIO, night_gas_network, series, with_chain
 

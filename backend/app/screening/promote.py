@@ -76,6 +76,8 @@ def build_promotion(
     marginal_cost: float = 0.0,
     bus_overrides: dict[str, str] | None = None,
     dataset_id: str = "",
+    discount_rate: float | None = None,
+    lifetime_years: float = 25.0,
 ) -> tuple[WorkbookFragment, dict[str, Any]]:
     """Build the generator fragment for the selected sites and the alignment report.
 
@@ -112,6 +114,11 @@ def build_promotion(
         raise ValueError(f"Unknown site(s) in this dataset: {unknown}.")
     overrides = bus_overrides or {}
     costs = capital_cost or {}
+    if extendable and discount_rate is None:
+        raise ValueError(
+            "An extendable site needs a discount rate: it carries PyPSA's overnight_cost, which PyPSA annuitises with the "
+            "row's discount_rate. Pass the project rate (Settings -> Discount rate)."
+        )
     warnings: list[str] = []
     hourly, note = _hourly(series[selected], step_minutes)
     if note:
@@ -168,7 +175,11 @@ def build_promotion(
             "name": gen, "bus": bus, "carrier": tech,
             "p_nom": 0.0 if extendable else cap,
             "p_nom_extendable": bool(extendable),
-            **({"p_nom_max": cap, "capital_cost": float(costs.get(tech) or 0.0)} if extendable else {}),
+            **(
+                {"p_nom_max": cap, "overnight_cost": float(costs.get(tech) or 0.0),
+                 "discount_rate": float(discount_rate), "lifetime": float(lifetime_years)}
+                if extendable else {}
+            ),
             "marginal_cost": float(marginal_cost),
             "x": float(site["lon"]), "y": float(site["lat"]),
         })

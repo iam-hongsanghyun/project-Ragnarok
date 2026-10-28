@@ -794,7 +794,7 @@ async def add_bus(
 
 @mcp.tool(
     annotations=_BUILD_ANN,
-    description="Add a generator on a bus. Set p_nom_extendable=true for capacity expansion. extra passes any other PyPSA generator attribute.",
+    description="Add a generator on a bus. Set p_nom_extendable=true for capacity expansion. capital_cost is PyPSA's periodised cost per MW for the MODELLED HORIZON, used as is; to give an upfront price that PyPSA annuitises, pass overnight_cost, lifetime and discount_rate in extra (leave capital_cost blank). extra passes any other PyPSA generator attribute.",
 )
 async def add_generator(
     name: str,
@@ -889,7 +889,7 @@ async def add_line(
 
 @mcp.tool(
     annotations=_BUILD_ANN,
-    description="Add a storage unit on a bus (battery, PHS, …). max_hours = energy/power ratio. extra passes efficiency_store/dispatch, standing_loss, etc.",
+    description="Add a storage unit on a bus (battery, PHS, …). max_hours = energy/power ratio. capital_cost is PyPSA's per-horizon cost per MW of power, used as is; pass overnight_cost, lifetime and discount_rate in extra for PyPSA to annuitise. extra passes efficiency_store/dispatch, standing_loss, etc.",
 )
 async def add_storage(
     name: str,
@@ -2094,7 +2094,8 @@ async def install_tab_module_zip(path: str, confirm: bool = False) -> Any:
     description=(
         "Siting scan: sample candidate solar/wind sites in a bbox [minLon, minLat, maxLon, maxLat], fetch their weather "
         "(open-meteo | pvgis | nasa-power, keyless) and build extendable candidate generators + grid-connection links "
-        "to the nearest existing buses; the capacity-expansion solve then picks the winners. Buses and target snapshots "
+        "to the nearest existing buses (capital_cost_per_mw / connection_cost_per_mw_km are OVERNIGHT prices, written as PyPSA's "
+        "overnight_cost with lifetime and the discount_rate you pass, e.g. 0.07 - required); the capacity-expansion solve then picks the winners. Buses and target snapshots "
         "default to the working model's, so CF series land on its window. apply=false (default) only returns the "
         "candidates; apply=true merges them into the model like the GUI's 'Add candidates to model' (needs confirm=true)."
     ),
@@ -2110,6 +2111,7 @@ async def siting_scan(
     site_capacity_mw: float = 100.0,
     capital_cost_per_mw: dict[str, float] | None = None,
     connection_cost_per_mw_km: float = 0.0,
+    discount_rate: float | None = None,
     marginal_cost: float = 0.0,
     performance_ratio: float = 0.9,
     use_model_snapshots: bool = True,
@@ -2138,6 +2140,7 @@ async def siting_scan(
         "siteCapacityMw": site_capacity_mw,
         "capitalCostPerMw": capital_cost_per_mw or {},
         "connectionCostPerMwKm": connection_cost_per_mw_km,
+        "discountRate": discount_rate,
         "marginalCost": marginal_cost,
     }
     if use_model_snapshots:

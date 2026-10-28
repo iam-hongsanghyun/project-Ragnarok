@@ -587,7 +587,7 @@ export const MODULE_9_DECISION: TutorialStep[] = [
       + 'costs. Who pays and who gains is usually what an argument is actually about, and it is outside '
       + 'the objective function by construction.',
 
-      'Reversibility. A model treats a 25-year wind farm and a 15-year battery as comparable annuities. '
+      'Reversibility. A model treats a 25-year wind farm and a 15-year battery as comparable annuities (PyPSA\'s annuity of each overnight_cost). '
       + 'A decision-maker facing genuine uncertainty may rationally prefer the shorter-lived, more '
       + 'expensive option because it can be changed — and least-cost optimisation cannot express that '
       + 'preference at all.',

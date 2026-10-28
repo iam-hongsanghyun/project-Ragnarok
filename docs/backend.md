@@ -144,7 +144,6 @@ backend/
       market.py          build_merit_order, build_co2_shadow, build_applied_constraints
       summaries.py       _rolling_window_summaries, _pathway_period_summaries
     utils/
-      annuity.py         annuity_factor
       coerce.py          number, text
       series.py          safe_series, weighted_sum
       workbook.py        workbook_rows
@@ -397,7 +396,7 @@ Processing order:
 8. Window and downsample snapshots (`snapshotStart`, `snapshotCount`, `snapshotWeight`). For pathway mode, windowing ignores `snapshotStart`/`snapshotCount` and only applies the step (downsampling).
 9. Scale annual energy-sum caps (`*_sum_min`, `*_sum_max`) by the period factor when modelled hours < 8760.
 10. Apply carbon price (scalar or schedule) to generator marginal costs.
-11. Annuitise `capital_cost` for extendable assets (generators, storage units, stores, lines, links and **processes**) using `annuity_factor(discountRate, lifetime)`, pro-rated to the modelled window (`ragnarok_capex_window_scale`). Default lifetime is 20 years when not specified. A Process carries the same cost as a Link with identical parameters. Then copy the `plant` annotation column (`serialize.ANNOTATION_COLUMNS`) onto the network frames so a PyPSA export keeps which components form a plant.
+11. **Cost basis: no conversion.** `capital_cost`, `overnight_cost` and `fom_cost` pass to PyPSA unchanged (see §5.11); the builder only refuses an `overnight_cost` row that has no `discount_rate`. Then copy the `plant` annotation column (`serialize.ANNOTATION_COLUMNS`) onto the network frames so a PyPSA export keeps which components form a plant.
 12. Override `committable=False` on all generators if `forceLp` is set.
 13. Emit a warning note for any carrier with `co2_emissions > 5` (likely entered as kg/MWh instead of tCO2/MWh).
 14. Add per-bus load-shedding generators if `enableLoadShedding`.
@@ -516,7 +515,7 @@ CSV folder is interchangeable), in long form with one row per breakpoint:
 | `generators/links/processes-marginal_cost-pw` | `p_pu` | price per unit of x on the segment ending at the breakpoint |
 | `storage_units-marginal_cost-pw` | `p_dispatch_pu` | same |
 | `stores-marginal_cost-pw` | `p_pu` | same |
-| `<list>-capital_cost-pw` (also lines, transformers) | `p_nom` / `e_nom` / `s_nom` (absolute) | overnight price per unit of x on the segment |
+| `<list>-capital_cost-pw` (also lines, transformers) | `p_nom` / `e_nom` / `s_nom` (absolute) | periodised price per unit of x on the segment (per modelled horizon, as `capital_cost`) |
 | `generators/links-efficiency-pw`, `processes-rate<k>-pw` | `p_pu` | efficiency (rate) at the breakpoint |
 
 Cost of operating at `x`: `C(x) = sum_i y_i * (min(x, x_i) - x_{i-1})+` (y at the first breakpoint
@@ -528,9 +527,8 @@ that has a curve is ignored by PyPSA.
 
 **Build** (`network/__init__.py`): after the components exist, `apply_piecewise_sheets` parses each
 `-pw` sheet (`rows_to_frame`), validates it and calls PyPSA's `_import_piecewise_from_df`; every
-refusal is a 400 naming the sheet and component. Three build steps treat curves like the scalars
-they replace: `capital_cost` curves are multiplied by the same annuity factor and window pro-rating
-as the scalar capital cost; the carbon price is added to every segment price of an emitting
+refusal is a 400 naming the sheet and component. Two build steps treat curves like the scalars
+they replace: a `capital_cost` curve goes to PyPSA exactly as written (it must already be periodised for the horizon; PyPSA refuses a curve combined with `overnight_cost`, and the migration flags such curves for review); the carbon price is added to every segment price of an emitting
 generator's `marginal_cost` curve (a price schedule that changes within the run is refused, since
 a curve is time-invariant); and curves cannot be combined with stochastic scenarios (PyPSA limit).
 
@@ -613,13 +611,11 @@ PyPSA 1.4 `Process`es (`conversion_row` in `chains.py`; `spec.componentType` = `
 `Process` has `rate0 = -1` at `bus0` (H2, `p_nom` in MW_H2, LHV), `rate1 = 1/h` at the product bus and negative `rate2` (electricity) and
 `rate3` (N2 or CO2); the Link form carries the same numbers as `efficiency` / `efficiency2` / `efficiency3`. Flows have the same sign
 convention (`p_i = -rate_i p`, positive = drawn from the bus), so the two forms are the same LP: identical objective, series, sizes,
-LCOH / LCOA / LCOM (`tests/test_p2x_process_parity.py`). Processes were only usable once `build_network` annualised their
-`capital_cost` (`annuitisable` now includes `processes`, with the same annuity factor and `capex_window_scale` as a Link;
-`tests/test_process_capex_annuitisation.py`). The registry (`RAGNAROK_P2X`, version 2) records `componentType` and each component's
+LCOH / LCOA / LCOM (`tests/test_p2x_process_parity.py`). A Process carries the same PyPSA cost columns as a Link
+(`tests/test_process_capex_annuitisation.py`). The registry (`RAGNAROK_P2X`, version 2) records `componentType` and each component's
 `sheet`; the results read series from `processes-pN` or `links-pN` by that field, so a chain stored with Links (version 1)
 reads unchanged. Costs follow PyPSA's own split: each priced component carries `overnight_cost` (EUR per MW or MWh), `fom_cost` (EUR per MW
-or MWh per year), `lifetime` and `discount_rate` (the chain's rate; the UI sets it from Settings); `capital_cost` is blank. `build_network` takes
-the native-cost path (PyPSA annualises `overnight_cost` with the row's rate and lifetime; the app pro-rates to the window). The registry row
+or MWh **per modelled horizon**: yearly fixed O&M × the workbook's horizon in years, `cost_basis.horizon_years`, written visibly and refreshed by re-applying the chain), `lifetime` and `discount_rate` (the chain's rate; the UI sets it from Settings); `capital_cost` is blank. PyPSA annualises `overnight_cost` with the row's rate and lifetime and scales it by `n.nyears`. The registry row
 (`RAGNAROK_P2X`) lets the results find the components. Stack replacement is a marginal cost per MWh_el (stack cost / stack life in hours).
 Chains saved before this change carry a folded `capital_cost` and are still read (the split into capex and FOM uses `f / (a + f)`).
 
@@ -642,10 +638,9 @@ produced in kg. LCOA, LCOM and the e-fuel cost add the synthesis link, the hydro
 its share of the N2 or CO2 supply and the product tank.
 
 The fixed charge is read from PyPSA, not recomputed: the results rebuild the network from the stored model, scenario and options (no solve) and take
-`n.components[..].capital_cost` (overnight x annuity at the row's rate x window years; FOM is not in it) times the installed capacity, plus
-`fom_cost` x capacity x window years. A period slice takes its share of the stored window. FOM note: the LP objective adds `fom_cost x p_nom`
-**unscaled** (a full year of FOM whatever the window), so on a window shorter than a year the objective's FOM is larger than the pro-rated FOM the
-results report; this is how the app / PyPSA native-cost path behaves and is not changed here.
+`n.components[..].capital_cost` (overnight x annuity at the row's rate x `n.nyears`; FOM is not in it) times the installed capacity, plus
+`fom_cost` x capacity: PyPSA charges `fom_cost` per modelled horizon, **unscaled**, so the results report exactly that (the earlier pro-rating by window years
+is gone). A period slice takes its share of the stored window.
 
 ### 5.10 `plants` — Build plant picker, co-firing, results by plant
 
@@ -701,6 +696,45 @@ at the nodal price of the plant's fuel bus.
 
 **Run list.** `GET /api/runs` entries carry `isPathway` and `pathwayPeriods` (derived from the stored pathway block for runs saved before
 the flag existed); the P2X results panel offers a period picker only for a pathway run.
+
+### 5.11 `cost_basis.py` — PyPSA cost semantics, workbook schema version and the migration
+
+`capital_cost` is PyPSA's periodised cost per modelled horizon, `overnight_cost` is annuitised by PyPSA
+(`overnight × annuity(discount_rate, lifetime) × n.nyears`, plus `fom_cost`; `pypsa/costs.py`). Ragnarok passes both
+through. Schema 1 (every workbook before 2026-10-28) held an OVERNIGHT price in `capital_cost` and annuitised it itself
+(× `hours / 8760` for a single period); schema 2 is the PyPSA basis. The version is the one-row model sheet
+`RAGNAROK_Schema` (`ragnarok_schema_version`), so it travels with the session store, a project xlsx / zip and a
+transform's output.
+
+**Migration (`migrate_cost_basis`)**, once, when an old workbook is loaded. A row with a nonzero `capital_cost` and no
+`overnight_cost` becomes `overnight_cost = capital_cost`, `capital_cost = 0`, `discount_rate` = the project rate (the
+caller's setting, else the active scenario preset, else `RAGNAROK_Settings`, else `simulation.migration_discount_rate`, 0.05, and
+the report says which); extendable rows with an infinite or blank `lifetime` get 20 (`simulation.fallback_lifetime_years`)
+because `annuity(r, inf) = r`. Non-extendable rows move too (their old `capital_cost` was ignored by the LP but PyPSA's
+statistics report it; read as per-horizon it would overstate sunk capex by `1 / (annuity × nyears)`); their `lifetime` is left
+alone because it also decides retirement in a multi-period run. Transformers were never converted by the old builder
+and are left alone. Components with a piecewise `capital_cost` curve are **flagged for review** and untouched. Saved scenario presets (`RAGNAROK_Scenarios`) whose `modelOverrides` set `capital_cost` are retargeted to `overnight_cost` (the project rate is added as a `discount_rate` override for a row that has none, and reported). The solve is
+unchanged because the old window factor equals `n.nyears`: the three audited objectives (capacity_expansion 1,194,599.23;
+training_m17_store 948,727.73; training_m16 626,611,133.65) are bit-identical before and after
+(`tests/test_cost_basis.py`, from the pre-change workbooks in `tests/fixtures/legacy_cost_basis`).
+Multi-period models: PyPSA scales `overnight_cost` by each period's `nyears`; equal to the old figures while a period represents 8760 h.
+
+Where it runs: `sqlite_store._ensure_cost_basis` (any session `project.db` without the sheet - a bundled or older example - is migrated on
+first read; one journal entry records it, the report is kept in `_kv` and returned in `GET /api/session/meta` as
+`costBasisMigration` until `POST /api/session/migration/ack`), and `save_model(..., legacy_origin=True)` (the browser opening an old
+Ragnarok workbook: `POST /api/session/model` with `origin: "legacy"`, `discountRate`). Any other `save_model` (an importer, a plugin, an
+agent, a PyPSA file) is stamped as current and not converted.
+
+**Stored runs.** Every new run is stamped `options.buildVersion` (and `bundle.buildVersion`). A run without it is re-derived
+(`statistics_query`, `derive_outputs`, `from_outputs`, P2X / plant results: `build_stored_network`) through
+`model_for_stored_run`: the stored workbook is migrated **in memory** at the run's own `scenario.discountRate`, and PyPSA then prices it
+as the original solve did. No legacy code path is kept; the stored run is never rewritten.
+
+**`build_components`** is the 1:1 builder (network sheet, snapshots, components, time series, nothing else) used by every build that is
+serialised back to a workbook: Forge transforms (`transforms.py`, `network_ops.py`) and the netcdf / h5 export. **Forge → Fill
+discount rate** (`POST /api/forge/fill-discount-rate`) writes the Settings rate into `discount_rate` for rows with an `overnight_cost`.
+Modules write PyPSA columns (conversion templates, plants, P2X: `overnight_cost`, `lifetime`, `discount_rate`, `fom_cost` = yearly O&M × `horizon_years`; the Siting scan and the Screening promote write their candidates' `overnight_cost` + `lifetime` (25 y, connection 40 y) + the `discount_rate` the caller passes and refuse without one).
+
 
 ## 6. Result extraction
 
@@ -800,8 +834,11 @@ Lines. Each dict:
 | `p_nom_mw` | Workbook installed/fixed capacity (MW; MWh for Stores; MVA for Lines) |
 | `p_nom_opt_mw` | Optimised capacity from PyPSA (`p_nom_opt` or `e_nom_opt`) |
 | `delta_mw` | `p_nom_opt - p_nom` (positive = new build) |
-| `capital_cost` | Annualised capital cost (currency/MW/yr; already annuitised by `build_network`) |
-| `capex_annual` | `capital_cost * p_nom_opt` |
+| `capital_cost` | PyPSA's periodised cost per unit for the modelled horizon (`c.capital_cost`: `capital_cost`, or `overnight_cost x annuity x n.nyears`) |
+| `capex_horizon` | `n.statistics.capex` over the horizon (installed + expanded; no fom) |
+| `capex_annual` | `capex_horizon / n.nyears`: the same cost PER YEAR (display basis; the only conversion) |
+| `capex_expanded` / `capex_installed` | `n.statistics.expanded_capex` (new build) / `installed_capex` (already built, sunk) |
+| `overnight_total`, `fom_total`, `nyears` | `n.statistics.overnight_cost`, `n.statistics.fom`, `n.nyears` |
 | `unit` | `"MWh"` for Stores, `"MVA"` for Lines; absent otherwise |
 
 ### 6.5 `market.py`
@@ -1218,20 +1255,9 @@ cf(Solar) <= 0.4
 | `safe_series` | `(frame, name) -> pd.Series` | Returns `frame[name]` or a zero-filled Series with the same index if the column is absent. |
 | `weighted_sum` | `(series, weights) -> float` | Computes `(series * aligned_weights).sum()`. Reindexes weights to `series.index` with fill=1.0 to handle post-collapse index mismatches. Used for all MWh energy integrals. |
 
-### `backend/pypsa/utils/annuity.py`
+### `backend/pypsa/utils/annuity.py` (removed)
 
-**`annuity_factor(discount_rate, lifetime_years) -> float`**
-
-Capital recovery factor (CRF):
-
-```
-CRF = r * (1 + r)^n / ((1 + r)^n - 1)
-```
-
-where `r = discount_rate` and `n = lifetime_years`.
-
-Special cases: `lifetime_years <= 0` returns `1.0`; `discount_rate <= 0`
-returns `1.0 / lifetime_years` (straight-line, no time-value-of-money).
+Deleted: Ragnarok no longer annuitises anything. Use `pypsa.costs.annuity(discount_rate, lifetime)` (PyPSA's own; `annuity(r, inf) = r`) wherever a module needs an annuity of its own input.
 
 ### `backend/pypsa/constants.py`
 

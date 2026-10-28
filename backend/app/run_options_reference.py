@@ -68,7 +68,7 @@ def register_options(entries: list[RunOption]) -> None:
 
 _SCENARIO: list[RunOption] = [
     RunOption("scenario.carbonPrice", "number", "Flat carbon price added to every emitting generator's marginal cost (carbon price x carriers.co2_emissions). Ignored per snapshot when options.carbonPriceSchedule has a row for that snapshot's year.", 0, "currency/tCO2", reader="backend/pypsa/network/__init__.py (parse_carbon_price_config), backend/pypsa/carbon_price.py", required=True),
-    RunOption("scenario.discountRate", "number", "Rate used to annuitise the overnight capital_cost of extendable assets (and NPV/IRR in the finance outputs).", 0.05, "fraction/year (0.05 = 5%)", reader=_NETWORK + " (CAPEX annuitisation)", required=True),
+    RunOption("scenario.discountRate", "number", "The project discount rate: used by the finance outputs (NPV/IRR) and written into the workbook by Forge -> Fill discount rate. It no longer converts any cost at run time: PyPSA annuitises each overnight_cost row with the row's own discount_rate.", 0.05, "fraction/year (0.05 = 5%)", reader="backend/pypsa/results/finance.py; Forge fill_discount_rate"),
     RunOption("scenario.constraints[]", "object[]", "Standard constraint table rows; only rows with enabled=true are applied (a missing 'enabled' means off). Fields below.", [], reader="backend/pypsa/network/custom_constraints.py (apply_custom_constraints)"),
     RunOption("scenario.constraints[].enabled", "boolean", "Apply this row.", False, reader="custom_constraints.py"),
     RunOption("scenario.constraints[].metric", "string", "Which constraint (see 'metrics' in the reference for units and whether a carrier is needed).", None, allowed=sorted(["co2_cap", "max_load_shed", "carrier_max_gen", "carrier_min_gen", "carrier_max_share", "carrier_min_share", "carrier_max_cf", "carrier_min_cf", "carrier_max_cap", "carrier_min_cap", "carrier_max_cap_share", "carrier_min_cap_share"]), reader="custom_constraints.py"),
@@ -115,7 +115,7 @@ _SCALARS: list[RunOption] = [
     RunOption("options.solverThreads", "integer", "HiGHS threads. 0 = automatic: the queue splits the machine's cores between concurrent solves.", 0, "threads", reader=_RESULTS + " (_build_solver_options), main.py (_resolve_cores)"),
     RunOption("options.solveAcceptance", "string", "lenient also accepts a validated solve whose HiGHS condition is 'unknown' (interior point without crossover); strict needs condition 'optimal'.", "lenient", allowed=["lenient", "strict"], reader=_RESULTS),
     RunOption("options.objectiveAutoScale", "boolean", "Pass HiGHS user_objective_scale=-1 (results-neutral; faster on wide cost ranges). The UI sends true; absent means off.", True, reader=_RESULTS + " (_build_solver_options)"),
-    RunOption("options.skipCapexAnnuitisation", "boolean", "Do not annuitise capital_cost (the workbook already holds annuitised costs). Used by transforms that round-trip a network; not sent by the UI.", False, source="api", reader=_NETWORK),
+    RunOption("options.buildVersion", "integer", "Cost-basis schema the run was built under (2 = PyPSA cost semantics). Stamped by the server on every stored run; a run without it is re-derived through the legacy-run migration. Not sent by the UI.", None, source="api", reader=_NETWORK),
 ]
 
 # ── nested config blocks: field -> (type, unit, meaning[, allowed]) ──────────
