@@ -153,8 +153,14 @@ def slice_model(
         if isinstance(start, int) or isinstance(end, int) or (start is None and end is None):
             sns = slice(start if isinstance(start, int) else None, end if isinstance(end, int) else None)
         else:
-            lo = snaps.get_loc(pd.Timestamp(start)) if start is not None else 0
-            hi = snaps.get_loc(pd.Timestamp(end)) + 1 if end is not None else len(snaps)
+            try:
+                lo = snaps.get_loc(pd.Timestamp(start)) if start is not None else 0
+                hi = snaps.get_loc(pd.Timestamp(end)) + 1 if end is not None else len(snaps)
+            except (KeyError, ValueError) as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Window end is not one of the model's snapshots ({snaps[0]} to {snaps[-1]}): {exc}",
+                ) from exc
             sns = slice(lo, hi)
     try:
         sliced = network.slice_network(buses=buses or None, snapshots=sns)

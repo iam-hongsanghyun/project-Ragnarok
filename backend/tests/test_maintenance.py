@@ -56,3 +56,24 @@ def test_force_lp_refuses_maintainable_and_the_visible_step_relaxes_it():
     assert any("linearized_unit_commitment" in x for x in notes)
     net2, _ = build_network(model, {"carbonPrice": 0.0, "discountRate": 0.0}, {})
     assert bool(net2.generators.at["cheap", "maintainable"])
+
+
+def test_relax_maintenance_endpoint_previews_without_writing_then_applies(tmp_path, monkeypatch):
+    """``apply: false`` lists the rows and leaves the session workbook alone; the default still writes (MCP relies on it)."""
+    from fastapi.testclient import TestClient
+
+    from backend.app import session_store
+    from backend.app.main import app
+
+    monkeypatch.setattr(session_store, "SESSION_DIR", tmp_path / "session")
+    monkeypatch.setenv("RAGNAROK_DATA_DIR", str(tmp_path))
+    client = TestClient(app)
+    model = network_to_model(_net())
+    assert client.post("/api/session/model", json={"sessionId": "m", "model": model, "filename": "x.xlsx", "scenarioName": "s"}).status_code == 200
+    preview = client.post("/api/model/relax-maintenance", json={"sessionId": "m", "apply": False}).json()
+    assert preview == {"changed": [{"sheet": "generators", "name": "cheap"}], "sheetsWritten": [], "applied": False}
+    again = client.post("/api/model/relax-maintenance", json={"sessionId": "m", "apply": False}).json()
+    assert again["changed"] == preview["changed"]  # nothing was written
+    applied = client.post("/api/model/relax-maintenance", json={"sessionId": "m"}).json()
+    assert applied["applied"] is True and applied["sheetsWritten"] == ["generators"]
+    assert client.post("/api/model/relax-maintenance", json={"sessionId": "m", "apply": False}).json()["changed"] == []

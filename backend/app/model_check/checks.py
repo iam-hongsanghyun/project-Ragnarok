@@ -166,6 +166,7 @@ def _check_generators(model: dict[str, Any], out: list[dict[str, Any]]) -> None:
             "result — the optimiser cannot move them.",
             "Clear p_set unless you meant to fix that injection.",
         ))
+    fuel_suppliers = _composite_fuel_suppliers(model)
     for g in _rows(model, "generators"):
         name = str(g.get("name", ""))
         floor = _num(g.get("p_min_pu"))
@@ -178,7 +179,7 @@ def _check_generators(model: dict[str, Any], out: list[dict[str, Any]]) -> None:
             ))
         if g.get("p_nom_extendable"):
             capex = _num(g.get("capital_cost")) or _num(g.get("overnight_cost"))
-            if not capex:
+            if not capex and name not in fuel_suppliers:
                 out.append(_finding(
                     WARN, "free_expansion",
                     f"{name} is extendable with no capital cost: it builds FREE up to its "
@@ -297,4 +298,21 @@ def check_model(model: dict[str, Any]) -> dict[str, Any]:
             if not warnings
             else f"{len(warnings)} thing(s) very likely differ from what you intended."
         ),
+    }
+
+
+def _composite_fuel_suppliers(model: dict[str, Any]) -> set[str]:
+    """Generators a composite added as its gas / H2 supplier: extendable at zero capital cost ON PURPOSE (a fuel market priced
+    by its marginal cost), so the free-expansion warning does not apply to them."""
+    from backend.app.plants.registry import registry_map
+
+    try:
+        registry = registry_map(model)
+    except Exception:  # noqa: BLE001 - a malformed registry must not break the model check
+        return set()
+    return {
+        str(c.get("name"))
+        for reg in registry.values()
+        for c in reg.get("components") or []
+        if c.get("sheet") == "generators" and c.get("role") in ("gas supply", "H2 supply")
     }

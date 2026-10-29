@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from backend.app import run_options_reference as ref
+from backend.app import main as _app  # noqa: F401 - importing the app imports every router, which registers its options
 from backend.app import scenario_presets as sp
 
 SRC = Path(__file__).resolve().parents[2] / "frontend" / "Ragnarok_default" / "src"

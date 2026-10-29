@@ -22,6 +22,7 @@
 @import "./styles/_reporting.css";
 @import "./styles/_screening.css";
 @import "./styles/_operations.css";
+@import "./styles/_data_io.css";
 
 
 .sidebar {

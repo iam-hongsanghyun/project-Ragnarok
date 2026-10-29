@@ -41,3 +41,38 @@ export function button(container: HTMLElement, label: string | RegExp): HTMLButt
   const match = (t: string) => (typeof label === 'string' ? t.trim() === label : label.test(t));
   return Array.from(container.querySelectorAll('button')).find((b) => match(b.textContent ?? '')) ?? null;
 }
+
+/** Set a text / number input or a select the way a user would, so React's onChange fires. */
+export async function setValue(node: HTMLInputElement | HTMLSelectElement | null, value: string): Promise<void> {
+  if (!node) throw new Error('setValue: element not found');
+  const proto = node instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+  const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+  await act(async () => {
+    setter?.call(node, value);
+    node.dispatchEvent(new Event(node instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }));
+  });
+  await settle();
+}
+
+/** Put a file into a file input and fire change. */
+export async function chooseFile(node: HTMLInputElement | null, file: File): Promise<void> {
+  if (!node) throw new Error('chooseFile: element not found');
+  Object.defineProperty(node, 'files', { value: [file], configurable: true });
+  await act(async () => { node.dispatchEvent(new Event('change', { bubbles: true })); });
+  await settle();
+}
+
+/** Replace `fetch` with a stub answering `reply(url, body)` as JSON; returns the recorded calls. */
+export function stubFetch(
+  reply: (url: string, body: Record<string, unknown>) => { status?: number; json: unknown },
+): Array<{ url: string; body: Record<string, unknown> }> {
+  const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+  (globalThis as { fetch: unknown }).fetch = async (input: unknown, init?: { body?: unknown }) => {
+    const url = String(input);
+    const body = typeof init?.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : {};
+    calls.push({ url, body });
+    const { status = 200, json } = reply(url, body);
+    return { ok: status >= 200 && status < 300, status, json: async () => json } as Response;
+  };
+  return calls;
+}

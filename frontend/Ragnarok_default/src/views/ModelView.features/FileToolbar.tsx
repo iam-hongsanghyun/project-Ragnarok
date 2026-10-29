@@ -19,6 +19,8 @@ export interface FileToolbarProps {
   onExportNetcdf: () => void;
   onImportHdf5: () => void;
   onExportHdf5: () => void;
+  /** PyPSA Excel / CSV / MATPOWER / pandapower import and PyPSA Excel / CSV export. */
+  onOpenPypsaIo: () => void;
 }
 
 export function FileToolbar(props: FileToolbarProps) {
@@ -59,6 +61,8 @@ export function FileToolbar(props: FileToolbarProps) {
           <button className="tb-btn" onClick={props.onExportCsvFolder}>Export CSV folder</button>
           <button className="tb-btn" onClick={props.onExportNetcdf}>Export netCDF</button>
           <button className="tb-btn" onClick={props.onExportHdf5}>Export HDF5</button>
+          <div className="view-toolbar-more-sep" />
+          <button className="tb-btn" onClick={props.onOpenPypsaIo} title="Import PyPSA Excel, PyPSA CSV, MATPOWER or pandapower files; export PyPSA Excel or CSV">PyPSA I/O…</button>
         </div>
       </details>
     </ViewPaneHeader>

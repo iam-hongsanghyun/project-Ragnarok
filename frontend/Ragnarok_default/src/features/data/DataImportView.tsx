@@ -34,6 +34,7 @@ import { usePersistedState } from 'shared/hooks/usePersistedState';
 import { CategoryDatabaseList } from './CategoryDatabaseList';
 import { FilterPanel, SourceEntry } from './FilterPanel';
 import { PypsaEarthPanel } from './PypsaEarthPanel';
+import { ImportStatusPanel } from './ImportStatusPanel';
 import { WorldMap } from './WorldMap';
 import { dataImportStore, runStatus, type Run } from 'lib/data/store';
 import { oneClickStore } from 'lib/data/oneClickStore';
@@ -415,6 +416,7 @@ export function DataImportView({ applyFragment, afterImport }: Props) {
             </div>
           )}
           {afterImport}
+          <ImportStatusPanel />
         </main>
         {pypsaEarthFocused ? (
           <PypsaEarthPanel

@@ -9,6 +9,9 @@
 * ``POST /api/build/composite/sync``       re-expand composites whose RAGNAROK_Composites sheet row was edited (preview / apply)
 * ``POST /api/build/plant/place``          one composite on several buses: N independent instances (preview / apply)
 * ``POST /api/build/plant/detach``         turn a composite into plain rows (preview / apply)
+* ``GET  /api/build/plant/templates``      the saved composite templates (RAGNAROK_CompositeTemplates)
+* ``POST /api/build/plant/template/save``  keep a composite's spec as a template (preview / apply)
+* ``POST /api/build/plant/template/delete`` delete a template (preview / apply)
 * ``GET  /api/build/plant/results/{run}``  results of a stored run grouped by plant id (generation, fuel, H2 share, avoided CO2, starts)
 
 Every write returns a *change set* (``remove`` / ``release`` / ``fragment``, see ``backend/app/plants/registry.py``). With an
@@ -40,7 +43,7 @@ def _o(path: str, type_: str, meaning: str, default: Any = None, *, allowed: lis
 
 register_options([
     _o("options.cofiringConfig", "object",
-       "Gas + H2 co-firing blend-share limits for the fuel-network plants (Build -> Generators -> 'Gas + H2 co-firing (fuel network)'). The H2 share of the fuel "
+       "Gas + H2 co-firing blend-share limits for the fuel-network plants (Composites -> Add a composite -> 'Gas + H2 co-firing (fuel network)'). The H2 share of the fuel "
        "burned, h/(h+g) on an LHV basis, is held within [minShare, maxShare] in every snapshot (hourly) or over the run (period, snapshot-weighted). "
        "Shares are entered as vol% or energy% (vol is converted with the LHV per Nm3 in the plant data file: 30 vol% = 11.4 % energy). A run that sets no "
        "cofiringConfig takes the limits stored with each plant (its blendMax / blendMin); an explicit value, even {enabled: false}, always wins. "
@@ -194,7 +197,9 @@ class SyncRequest(BaseModel):
 
 class PlaceRequest(BaseModel):
     sessionId: str = "default"
-    type: str
+    type: str | None = Field(None, description="Plant type with `spec`; or give `fromPlant` / `template` instead (exactly one source).")
+    fromPlant: str | None = Field(None, description="Copy the stored spec of this existing composite.")
+    template: str | None = Field(None, description="Place a saved template (RAGNAROK_CompositeTemplates name).")
     spec: dict[str, Any] = Field(default_factory=dict, description="The template spec; `bus` and `plantId` are set per instance.")
     buses: list[str] = Field(default_factory=list, description="Electricity buses to place on: one instance each, named <prefix>_<bus>.")
     prefix: str | None = None
@@ -227,7 +232,8 @@ def place_plants(req: PlaceRequest) -> dict[str, Any]:
     _inline_guard(req)
     model = req.model if req.model is not None else _session_model(req.sessionId, full=False)
     try:
-        placed = catalog.place_plants(req.type, req.spec, req.buses, model, prefix=req.prefix, share_ports=req.sharePorts)
+        type_id, spec, default_prefix = catalog.place_source(model, req.type, req.spec, req.fromPlant, req.template)
+        placed = catalog.place_plants(type_id, spec, req.buses, model, prefix=req.prefix or default_prefix, share_ports=req.sharePorts)
     except registry.PlantError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     change = {"remove": {}, "release": [], "fragment": placed["fragment"], "kept": {"buses": [], "carriers": []}}
@@ -248,6 +254,61 @@ def detach_plant(req: DeleteRequest) -> dict[str, Any]:
     except registry.PlantError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     out = {"plantId": req.plantId, "change": change, "applied": False}
+    if req.apply:
+        out["write"] = _commit(req.sessionId, model, change)
+        out["applied"] = True
+    return out
+
+
+class TemplateSaveRequest(BaseModel):
+    sessionId: str = "default"
+    plantId: str
+    name: str | None = Field(None, description="Template name (default <plantId>_template; an existing one is replaced).")
+    model: dict[str, list[dict[str, Any]]] | None = None
+    apply: bool = False
+
+
+class TemplateDeleteRequest(BaseModel):
+    sessionId: str = "default"
+    name: str
+    model: dict[str, list[dict[str, Any]]] | None = None
+    apply: bool = False
+
+
+@router.get("/api/build/plant/templates")
+def get_templates(session_id: str = "default") -> dict[str, Any]:
+    """The saved composite templates of the session model."""
+    templates = catalog.list_templates(model_store.load_full_model(session_id, static_only=True) or {})
+    return {"templates": templates, "total": len(templates)}
+
+
+@router.post("/api/build/plant/template/save")
+def save_template(req: TemplateSaveRequest) -> dict[str, Any]:
+    """Keep a composite's spec (without its id and bus) as a reusable template; preview unless ``apply``."""
+    _inline_guard(req)
+    model = req.model if req.model is not None else _session_model(req.sessionId, full=False)
+    try:
+        change = catalog.save_template_change(model, req.plantId, req.name)
+    except registry.PlantError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    out = {"plantId": req.plantId, "template": change["template"], "replaced": change["replaced"], "change": change,
+           "rowCounts": _row_counts(change["fragment"]), "applied": False}
+    if req.apply:
+        out["write"] = _commit(req.sessionId, model, change)
+        out["applied"] = True
+    return out
+
+
+@router.post("/api/build/plant/template/delete")
+def delete_template(req: TemplateDeleteRequest) -> dict[str, Any]:
+    """Delete a saved template; composites already placed from it are untouched."""
+    _inline_guard(req)
+    model = req.model if req.model is not None else _session_model(req.sessionId, full=False)
+    try:
+        change = catalog.delete_template_change(model, req.name)
+    except registry.PlantError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    out = {"template": req.name, "change": change, "applied": False}
     if req.apply:
         out["write"] = _commit(req.sessionId, model, change)
         out["applied"] = True

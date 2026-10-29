@@ -7,6 +7,7 @@ import { SETTINGS_CONFIG } from 'lib/constants';
 import { NumberDraftInput } from '../../shared/components/NumberDraftInput';
 import type { AdvancedSolveOptions } from 'lib/settings/advancedSolve';
 import { SolverAdvanced } from './SolverAdvanced';
+import { RelaxMaintenancePanel } from 'features/validation/RelaxMaintenancePanel';
 
 export interface SolverSectionProps {
   solverThreads: number;
@@ -21,6 +22,9 @@ export interface SolverSectionProps {
   onSolveAcceptanceChange: (v: SolveAcceptance) => void;
   onObjectiveAutoScaleChange: (v: boolean) => void;
   onQueuePollSecondsChange: (v: number) => void;
+  /** Visible workbook steps read and write the session: push the working model first, pull it back after. */
+  onSessionSync?: () => Promise<void>;
+  onSessionReload?: () => Promise<void>;
 }
 
 export function SolverSection(props: SolverSectionProps) {
@@ -139,6 +143,16 @@ export function SolverSection(props: SolverSectionProps) {
         </p>
       </div>
       <SolverAdvanced value={props.advancedSolve} onChange={props.onAdvancedSolveChange} />
+      {props.onSessionSync && props.onSessionReload && (
+        <div className="sg-setting-row">
+          <label className="sg-setting-label">Relax maintenance (Force LP companion)</label>
+          <p className="sg-setting-hint">
+            Force LP and linearised unit commitment are refused for units that carry maintenance windows. This visible step sets
+            maintainable to false on those generators, links and processes. Preview lists the rows; nothing is written until you apply.
+          </p>
+          <RelaxMaintenancePanel onSessionSync={props.onSessionSync} onSessionReload={props.onSessionReload} />
+        </div>
+      )}
     </section>
   );
 }

@@ -39,6 +39,10 @@ export interface RunDialogProps {
   /** "Add as Scenario" — save the current run configuration as a named scenario
    *  (compare + batch-run them from Settings → Scenarios). */
   onAddScenario: () => void;
+  /** "Export LP" - write the problem this run would hand the solver to an LP file and download it, without solving. */
+  onExportLp?: () => void;
+  /** An export is in progress (the button is disabled). */
+  exportLpBusy?: boolean;
 }
 
 export function RunDialog({
@@ -60,6 +64,8 @@ export function RunDialog({
   onRun,
   onQueueNext,
   onAddScenario,
+  onExportLp,
+  exportLpBusy,
 }: RunDialogProps) {
   if (!open) return null;
 
@@ -154,6 +160,14 @@ export function RunDialog({
 
         <div className="modal-actions">
           <button className="secondary-button" onClick={onClose}>Cancel</button>
+          {onExportLp && (
+            <button
+              className="secondary-button" data-tour="export-lp" disabled={exportLpBusy} onClick={onExportLp}
+              title="Build the model exactly as a run would and download its LP file, without solving"
+            >
+              Export LP
+            </button>
+          )}
           {!dryRun && (
             <button className="secondary-button" onClick={onAddScenario} title="Save this run configuration as a named scenario — compare and batch-run them in Settings → Scenarios">
               Add as Scenario

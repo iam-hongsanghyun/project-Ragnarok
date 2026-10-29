@@ -12,6 +12,7 @@ import { CarbonScheduleChart } from 'features/carbon/CarbonScheduleChart';
 import { CarbonScenarioPicker } from 'features/carbon/CarbonScenarioPicker';
 import { cloneSchedule, createCarbonProfileId } from 'lib/results/carbonLibrary';
 import { NumberDraftInput } from '../../shared/components/NumberDraftInput';
+import { CarbonPreviewPanel } from 'features/carbon/CarbonPreviewPanel';
 
 export interface CarbonSectionProps {
   carbonPrice: number;
@@ -22,6 +23,8 @@ export interface CarbonSectionProps {
   onCarbonLibraryChange: (next: CarbonScheduleProfile[]) => void;
   carbonCheck: { emittingGenerators: number; hasCo2Column: boolean; totalGenerators: number };
   currencySymbol: string;
+  /** Push the working model to the session; the server-side preview reads the session. */
+  onSessionSync?: () => Promise<void>;
 }
 
 // Distinct overlay colours, indexed by the profile's position in the library
@@ -234,6 +237,18 @@ export function CarbonSection(props: CarbonSectionProps) {
           </p>
         )}
       </div>
+
+      {props.onSessionSync && (
+        <>
+          <div className="sg-setting-divider" />
+          <CarbonPreviewPanel
+            carbonPrice={props.carbonPrice}
+            carbonPriceSchedule={schedule}
+            currencySymbol={props.currencySymbol}
+            onSessionSync={props.onSessionSync}
+          />
+        </>
+      )}
     </section>
   );
 }

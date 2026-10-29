@@ -10,6 +10,8 @@ Tools:
 * ``add_plant``        - WRITE (gated, confirm=true): build a plant (bus + capacity + a few fields) into the working model.
 * ``edit_plant``       - WRITE (gated, confirm=true): re-derive a plant's components from its stored spec plus a patch.
 * ``remove_plant``     - WRITE (gated, confirm=true): delete all of a plant's components and nothing else.
+* ``place_composite`` / ``detach_composite`` / ``sync_composites`` / ``save_composite_template`` / ``delete_composite_template`` - WRITE (gated);
+  ``list_composite_templates`` - read-only.
 * ``get_plant_results``- read-only: results of a stored run grouped by plant (generation, capacity factor, fuel, H2 share, avoided CO2, starts).
 
 The H2 blend-share limits of the fuel-network plants are a run option (``options.cofiringConfig``): pass it to ``submit_solve``;
@@ -115,6 +117,100 @@ async def get_plant_results(run_name: str, plant_id: str | None = None, period: 
     return res
 
 
+_KEEP_COMPOSITE = ("applied", "plantId", "plantIds", "instances", "template", "replaced", "rowCounts", "patches", "added", "warnings")
+
+
+def _trim_composite(res: dict[str, Any]) -> dict[str, Any]:
+    return {k: res.get(k) for k in _KEEP_COMPOSITE if k in res}
+
+
+@mcp.tool(
+    annotations=_MUT,
+    description=(
+        "Place a composite (CCGT, OCGT, BESS, co-firing plant, P2X chain) on several buses at once (copy-paste a plant onto N buses): one independent instance per bus, named <prefix>_<bus>, each a row of RAGNAROK_Composites. "
+        "Give exactly ONE source: type + spec (as add_plant), from_plant (copy an existing composite's stored spec) or template (a saved template name, see list_composite_templates). "
+        "buses = electricity bus names, each once, all in the model. share_ports=false (default) gives every instance its own fuel / H2 / product buses; true makes them share one set. "
+        "A bad bus, a name clash or an unknown source returns an error sentence naming the valid choices. Without confirm=true it returns the preview of the instances."
+    ),
+)
+async def place_composite(buses: list[str], type: str | None = None, spec: dict[str, Any] | None = None, from_plant: str | None = None,
+                          template: str | None = None, prefix: str | None = None, share_ports: bool = False, confirm: bool = False) -> Any:
+    body = {"type": type, "spec": spec or {}, "fromPlant": from_plant, "template": template, "buses": buses, "prefix": prefix, "sharePorts": share_ports}
+    if _needs_confirm(cheap=False) and not confirm:
+        prev = await _post("/api/build/plant/place", {**body, "apply": False})
+        return _preview(f"Place a composite on {len(buses)} bus(es) as independent instances.", _trim_composite(prev))
+    return _trim_composite(await _post("/api/build/plant/place", {**body, "apply": True}))
+
+
+@mcp.tool(
+    annotations=_MUT,
+    description=(
+        "Detach a composite into ordinary rows: its generators, links, stores and buses stay with every value but are no longer one asset (the plant tag, the registry row and the RAGNAROK_Composites row are removed), "
+        "so edit_plant / remove_plant and editing the sheet row no longer apply to them. Cannot be undone by a tool (re-add the plant to rebuild it). Without confirm=true it returns the preview of the rows released."
+    ),
+)
+async def detach_composite(plant_id: str, confirm: bool = False) -> Any:
+    if _needs_confirm(cheap=False) and not confirm:
+        prev = await _post("/api/build/plant/detach", {"plantId": plant_id, "apply": False})
+        change = prev.get("change") or {}
+        return _preview(f"Detach composite {plant_id!r} into plain rows.", {"plantId": plant_id, "released": len(change.get("release") or []), "removed": {s: len(n) for s, n in (change.get("remove") or {}).items()}})
+    return _trim_composite(await _post("/api/build/plant/detach", {"plantId": plant_id, "apply": True}))
+
+
+@mcp.tool(
+    annotations=_RO,
+    description=(
+        "List the saved composite templates (RAGNAROK_CompositeTemplates): name, plant type and the stored spec of each. Templates are what place_composite(template=...) places on several buses; "
+        "save_composite_template creates one from an existing composite."
+    ),
+)
+async def list_composite_templates() -> Any:
+    client = get_client()
+    return await client._get("/api/build/plant/templates", {"session_id": client.session_id})
+
+
+@mcp.tool(
+    annotations=_MUT,
+    description=(
+        "Save an existing composite as a reusable template (its spec without plantId and bus) in RAGNAROK_CompositeTemplates. name defaults to <plant_id>_template; an existing template of that name is replaced. "
+        "The composite must have been built by add_plant / the GUI (an imported plant has no stored spec). Without confirm=true it returns the preview."
+    ),
+)
+async def save_composite_template(plant_id: str, name: str | None = None, confirm: bool = False) -> Any:
+    body = {"plantId": plant_id, "name": name}
+    if _needs_confirm(cheap=False) and not confirm:
+        prev = await _post("/api/build/plant/template/save", {**body, "apply": False})
+        return _preview(f"Save composite {plant_id!r} as template {prev.get('template')!r}.", _trim_composite(prev))
+    return _trim_composite(await _post("/api/build/plant/template/save", {**body, "apply": True}))
+
+
+@mcp.tool(
+    annotations=_MUT,
+    description=(
+        "Delete a saved composite template by name (see list_composite_templates). Composites already placed from it are untouched. An unknown name returns an error listing the saved templates. Without confirm=true it returns the preview."
+    ),
+)
+async def delete_composite_template(name: str, confirm: bool = False) -> Any:
+    if _needs_confirm(cheap=False) and not confirm:
+        prev = await _post("/api/build/plant/template/delete", {"name": name, "apply": False})
+        return _preview(f"Delete composite template {name!r}.", {"template": prev.get("template")})
+    return _trim_composite(await _post("/api/build/plant/template/delete", {"name": name, "apply": True}))
+
+
+@mcp.tool(
+    annotations=_MUT,
+    description=(
+        "Sync composites with their sheet rows: after RAGNAROK_Composites cells (bus, p_nom, build_year, lifetime, ports ...) were edited, re-expand every composite whose row differs from its stored spec so all its child rows follow; "
+        "a composite whose row was added by hand is built too. Nothing to do returns an empty plantIds list. Without confirm=true it returns the preview (which composites change, with the cell patches)."
+    ),
+)
+async def sync_composites(confirm: bool = False) -> Any:
+    if _needs_confirm(cheap=False) and not confirm:
+        prev = await _post("/api/build/composite/sync", {"apply": False})
+        return _preview("Re-expand composites whose RAGNAROK_Composites row was edited.", _trim_composite(prev))
+    return _trim_composite(await _post("/api/build/composite/sync", {"apply": True}))
+
+
 # Tool areas (see catalogue.py).
 declare_areas({
     "list_plant_types": "composites",
@@ -122,4 +218,10 @@ declare_areas({
     "edit_plant": "composites",
     "remove_plant": "composites",
     "get_plant_results": "composites",
+    "place_composite": "composites",
+    "detach_composite": "composites",
+    "list_composite_templates": "composites",
+    "save_composite_template": "composites",
+    "delete_composite_template": "composites",
+    "sync_composites": "composites",
 })

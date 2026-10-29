@@ -253,5 +253,26 @@
    "get_p2x_results",
    "build_p2x_chain"
   ]
+ },
+ {
+  "request": "copy the CCGT onto buses KR-1, KR-2 and KR-3",
+  "expect": [
+   "place_composite",
+   "add_plant",
+   "list_composite_templates"
+  ]
+ },
+ {
+  "request": "keep this composite as a reusable template",
+  "expect": [
+   "save_composite_template",
+   "list_composite_templates"
+  ]
+ },
+ {
+  "request": "detach the battery composite into ordinary rows",
+  "expect": [
+   "detach_composite"
+  ]
  }
 ]

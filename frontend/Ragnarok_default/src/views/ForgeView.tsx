@@ -12,7 +12,7 @@
  * logic lives in `lib/forge/*` so it is unit-tested independently.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import type { GridRow, WorkbookModel } from 'lib/types';
+import type { BackendRunMeta, GridRow, WorkbookModel } from 'lib/types';
 import { usePersistedState } from 'shared/hooks/usePersistedState';
 import { FORGE_CONFIG, VALIDATION_CONFIG } from 'lib/constants';
 import { LeftRail, ViewPanel } from 'shared/components/primitives';
@@ -25,9 +25,13 @@ import { CostCurvePanel } from './ForgeView.features/CostCurvePanel';
 import { CapacityTargetPanel, type ScaleCarrierCapacityResult } from './ForgeView.features/CapacityTargetPanel';
 import { TemporalClusterPanel } from './ForgeView.features/TemporalClusterPanel';
 import { PlaceholderBoundsPanel } from '../features/validation/PlaceholderBoundsPanel';
+import { HacOptions, DEFAULT_HAC, type HacOptionsValue } from './ForgeView.features/HacOptions';
 import { ModelCheckPanel } from '../features/validation/ModelCheckPanel';
 import type { TemporalOptions, TemporalResult } from 'lib/api/temporal';
 import { SeasonalRatingPanel, type SeasonalRatingOptions, type SeasonalRatingResult } from './ForgeView.features/SeasonalRatingPanel';
+import { SliceNetworkPanel } from './ForgeView.features/SliceNetworkPanel';
+import { MergeNetworkPanel } from './ForgeView.features/MergeNetworkPanel';
+import { WriteSamplePanel } from './ForgeView.features/WriteSamplePanel';
 import { AdjustQueryPanel } from './ForgeView.features/AdjustQueryPanel';
 import type { QueryApplyResult, QueryEditRequest, QueryPreview } from 'lib/forge/queryEdit';
 
@@ -50,6 +54,10 @@ interface Props {
     conflictStrategy: string;
     groupByColumn?: string;
     aggregateComponents?: string[];
+    /** method `hac`: feature columns, distance metric, linkage. */
+    hacFeatures?: string[];
+    hacAffinity?: string;
+    hacLinkage?: string;
   }) => Promise<ClusterResult>;
   /** Replace the working model with a previewed clustered model. */
   onClusterApply?: (model: WorkbookModel) => void;
@@ -69,6 +77,10 @@ interface Props {
   onTemporalApply?: (model: WorkbookModel) => void;
   /** Visible action: fill the snapshot weightings from the timestamp spacing (POST /api/model/set-weightings-from-spacing). */
   onSetWeightingsFromSpacing?: () => Promise<void> | void;
+  /** Replace the working model with a model a session-side transform returned (slice, merge, written sample). */
+  onReplaceModel?: (model: WorkbookModel, message: string) => void;
+  /** Stored runs (History): the sources the merge tool can read a network from. */
+  backendRuns?: BackendRunMeta[];
   /** Server-side clean-ups read the session workbook: push the working model first, pull the session back after. */
   onSessionSync?: () => Promise<void>;
   onSessionReload?: () => Promise<void>;
@@ -115,7 +127,7 @@ export interface AttachProfilesResult {
   sites: number;
 }
 
-type Operation = 'round' | 'adjust' | 'costcurve' | 'snap' | 'cluster' | 'capacityTarget' | 'seasonalRating' | 'renewable' | 'hydroInflow' | 'retarget' | 'forecast' | 'driverForecast' | 'evDemand' | 'temporalCluster' | 'placeholderBounds';
+type Operation = 'round' | 'adjust' | 'costcurve' | 'snap' | 'cluster' | 'capacityTarget' | 'seasonalRating' | 'renewable' | 'hydroInflow' | 'retarget' | 'forecast' | 'driverForecast' | 'evDemand' | 'temporalCluster' | 'placeholderBounds' | 'sliceNetwork' | 'mergeNetwork' | 'writeSample';
 type OpGroup = 'Numeric' | 'Economics' | 'Geospatial' | 'Topology' | 'Temporal';
 
 /** Catalog of Forge tools, grouped. Add a new tool by adding an entry here
@@ -131,8 +143,11 @@ const OPERATIONS: Array<{ id: Operation; label: string; group: OpGroup }> = [
   { id: 'cluster', label: 'Reduce / cluster network', group: 'Topology' },
   { id: 'capacityTarget', label: 'Set carrier capacity target', group: 'Topology' },
   { id: 'seasonalRating', label: 'Seasonal line ratings', group: 'Topology' },
+  { id: 'sliceNetwork', label: 'Slice window / buses', group: 'Topology' },
+  { id: 'mergeNetwork', label: 'Merge another network', group: 'Topology' },
   { id: 'retarget', label: 'Retarget snapshot window', group: 'Temporal' },
   { id: 'temporalCluster', label: 'Temporal clustering', group: 'Temporal' },
+  { id: 'writeSample', label: 'Write sample', group: 'Temporal' },
   { id: 'forecast', label: 'Forecast to future year', group: 'Temporal' },
   { id: 'driverForecast', label: 'Driver-based demand forecast', group: 'Temporal' },
   { id: 'evDemand', label: 'EV fleet demand', group: 'Temporal' },
@@ -270,7 +285,7 @@ function SearchableMultiSelect({
   );
 }
 
-export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEditApply, onClusterPreview, onClusterApply, onTemporalPreview, onTemporalApply, onSetWeightingsFromSpacing, onSessionSync, onSessionReload, onScaleCarrierCapacity, onApplySeasonalRating, onAttachRenewableProfiles, onRetargetSnapshots, onForecastSnapshots, onDriverForecast, onEvDemand, onAttachHydroInflow }: Props) {
+export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEditApply, onClusterPreview, onClusterApply, onTemporalPreview, onTemporalApply, onSetWeightingsFromSpacing, onReplaceModel, backendRuns, onSessionSync, onSessionReload, onScaleCarrierCapacity, onApplySeasonalRating, onAttachRenewableProfiles, onRetargetSnapshots, onForecastSnapshots, onDriverForecast, onEvDemand, onAttachHydroInflow }: Props) {
   // Persisted so the chosen tool + validation result survive leaving and
   // returning to the Forge tab (the view unmounts on tab switch). The findings
   // scan the whole model, so these three drivers fully restore the result.
@@ -359,7 +374,8 @@ export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEdi
   const busCount = rowsOf(model, 'buses').length;
   const defaultClusterN = Math.max(1, Math.min(Math.max(busCount - 1, 1), Math.round(busCount / 2)));
   const [clusterN, setClusterN] = useState<number | null>(null);
-  const [clusterMethod, setClusterMethod] = useState<'modularity' | 'kmeans' | 'column' | 'single'>('modularity');
+  const [clusterMethod, setClusterMethod] = useState<'modularity' | 'kmeans' | 'hac' | 'column' | 'single'>('modularity');
+  const [clusterHac, setClusterHac] = useState<HacOptionsValue>(DEFAULT_HAC);
   const [clusterResolveConflicts, setClusterResolveConflicts] = useState(true);
   const [clusterConflictStrategy, setClusterConflictStrategy] = useState<'mean' | 'max' | 'min' | 'zero' | 'default'>('mean');
   const [clusterBusy, setClusterBusy] = useState(false);
@@ -400,6 +416,7 @@ export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEdi
           conflictStrategy: clusterConflictStrategy,
           groupByColumn: clusterMethod === 'column' ? effClusterColumn : undefined,
           aggregateComponents,
+          ...(clusterMethod === 'hac' ? { hacFeatures: clusterHac.features, hacAffinity: clusterHac.affinity, hacLinkage: clusterHac.linkage } : {}),
         }),
       );
     } catch (e) {
@@ -827,6 +844,24 @@ export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEdi
           ) : (
             <div className="view-empty"><p>Temporal clustering needs a live backend session.</p></div>
           )
+        ) : operation === 'sliceNetwork' ? (
+          onSessionSync && onReplaceModel ? (
+            <SliceNetworkPanel model={model} onSessionSync={onSessionSync} onReplaceModel={onReplaceModel} onStatus={setStatus} />
+          ) : (
+            <div className="view-empty"><p>Slicing needs a live backend session.</p></div>
+          )
+        ) : operation === 'mergeNetwork' ? (
+          onSessionSync && onReplaceModel ? (
+            <MergeNetworkPanel runs={backendRuns ?? []} onSessionSync={onSessionSync} onReplaceModel={onReplaceModel} onStatus={setStatus} />
+          ) : (
+            <div className="view-empty"><p>Merging needs a live backend session.</p></div>
+          )
+        ) : operation === 'writeSample' ? (
+          onSessionSync && onReplaceModel ? (
+            <WriteSamplePanel onSessionSync={onSessionSync} onReplaceModel={onReplaceModel} onStatus={setStatus} />
+          ) : (
+            <div className="view-empty"><p>Writing a sample needs a live backend session.</p></div>
+          )
         ) : operation === 'seasonalRating' ? (
           onApplySeasonalRating ? (
             <SeasonalRatingPanel
@@ -1227,6 +1262,12 @@ export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEdi
                   k-means (spatial)
                 </button>
                 <button
+                  className={`tb-btn sg-solver-btn${clusterMethod === 'hac' ? '' : ' tb-btn--muted'}`}
+                  onClick={() => setClusterMethod('hac')}
+                >
+                  Hierarchical (HAC)
+                </button>
+                <button
                   className={`tb-btn sg-solver-btn${clusterMethod === 'column' ? '' : ' tb-btn--muted'}`}
                   onClick={() => setClusterMethod('column')}
                 >
@@ -1246,11 +1287,15 @@ export function ForgeView({ model, onApplySheets, onQueryEditPreview, onQueryEdi
                   ? 'Groups electrically-connected regions by network topology — no coordinates needed.'
                   : clusterMethod === 'kmeans'
                     ? 'Groups geographically-near buses — needs bus x/y and scikit-learn on the server.'
+                    : clusterMethod === 'hac'
+                      ? 'Merges the buses closest in a feature space (default x/y) bottom-up; pick the features, metric and linkage below.'
                     : clusterMethod === 'single'
                       ? 'Collapses the entire network onto one bus. Always reaches a single node — even when Modularity or k-means can’t.'
                       : 'Merges buses that share a value in the chosen column (e.g. province, country). Blank-valued buses stay on their own.'}
               </p>
             </div>
+
+            {clusterMethod === 'hac' && <HacOptions busRows={rowsOf(model, 'buses')} value={clusterHac} onChange={setClusterHac} />}
 
             {clusterMethod === 'column' ? (
               <div className="sg-setting-row">

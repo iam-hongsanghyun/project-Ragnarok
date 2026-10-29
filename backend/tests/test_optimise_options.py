@@ -357,6 +357,12 @@ def test_slice_window_and_buses() -> None:
         network_ops.slice_model(_three_bus_model(), scenario=SC, start=5, end=6)
 
 
+def test_slice_label_outside_the_snapshots_is_a_400_not_a_500() -> None:
+    with pytest.raises(HTTPException) as exc:
+        network_ops.slice_model(_three_bus_model(), scenario=SC, start="1999-01-01", end="1999-02-01")
+    assert exc.value.status_code == 400
+
+
 def test_merge_two_disjoint_models_and_name_clash() -> None:
     a = _three_bus_model()
     b = {"buses": [{"name": "Z"}], "snapshots": a["snapshots"], "carriers": [{"name": "oil", "co2_emissions": 0.3}],
@@ -411,6 +417,10 @@ def test_endpoints(api: TestClient, tmp_path: Any) -> None:
     r = api.post("/api/optimise/export-lp", json={"sessionId": "t", "scenario": SC, "fileName": "a.lp"})
     assert r.status_code == 200 and r.json()["variables"] > 0
     assert (tmp_path / "exports" / "lp" / "a.lp").exists()
+    dl = api.get("/api/optimise/export-lp/file", params={"fileName": "a.lp"})
+    assert dl.status_code == 200 and len(dl.content) == r.json()["bytes"]
+    assert api.get("/api/optimise/export-lp/file", params={"fileName": "../a.lp"}).status_code == 200  # basename only
+    assert api.get("/api/optimise/export-lp/file", params={"fileName": "missing.lp"}).status_code == 404
     assert api.post("/api/analysis/consistency", json={"sessionId": "t", "scenario": SC}).json()["valid"] is True
     net = api.post("/api/analysis/network", json={"sessionId": "t", "scenario": SC, "include": ["subnetworks"]}).json()
     assert net["subNetworks"][0]["slackBus"] == "A"
@@ -422,3 +432,15 @@ def test_endpoints(api: TestClient, tmp_path: Any) -> None:
     assert api.post("/api/statistics/query", json={"runName": "does-not-exist"}).status_code == 404
     v = api.post("/api/validate", json={"sessionId": "t", "scenario": SC, "options": {"consistencyCheck": True}})
     assert v.status_code == 200 and v.json()["valid"] is True, v.json()
+
+
+def test_run_option_reference_documents_the_editor_fields() -> None:
+    """The Settings editors read units and help from the reference: every nested field they render is documented."""
+    from backend.app.run_options_reference import documented_paths
+
+    paths = documented_paths()
+    for p in ("options.riskPreference.alpha", "options.riskPreference.omega", "options.twoStage.enabled",
+              "options.iterativeExpansion.msqThreshold", "options.iterativeExpansion.lineUnitSize",
+              "options.iterativeExpansion.linkUnitSize", "options.securityConstrainedConfig.branchOutages",
+              "options.cofiringConfig.perPlant"):
+        assert p in paths, p

@@ -19,9 +19,11 @@ from __future__ import annotations
 
 import re
 import time
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from .. import model_store, run_store
@@ -35,6 +37,7 @@ router = APIRouter(tags=["optimise"])
 
 _OO = "backend/pypsa/optimise_options.py (parse_optimise_options)"
 _RES = "backend/pypsa/results/__init__.py (run_pypsa)"
+_IT = "backend/pypsa/optimise_extras.py (run_iterative_expansion)"
 
 
 def _o(path: str, type_: str, meaning: str, default: Any = None, *, allowed: list[Any] | None = None,
@@ -64,6 +67,18 @@ register_options([
     _o("options.logToConsole", "boolean", "Forward the solver log to the console.", None),
     _o("options.riskPreference", "object", "CVaR in stochastic mode: {alpha: 0<a<1, omega: 0..1} (n.set_risk_preference). 400 without stochasticConfig.", None, reader=_OO + ", " + _RES),
     _o("options.iterativeExpansion", "object", "Iterative transmission expansion: {enabled, msqThreshold=0.05, minIterations=1, maxIterations=10, lineUnitSize, lineThreshold, fractionalLastUnitSize, linkUnitSize{}, linkThreshold{}}.", None, reader="backend/pypsa/optimise_extras.py (run_iterative_expansion)"),
+    _o("options.riskPreference.alpha", "number", "CVaR confidence level: the objective weighs the worst (1 - alpha) share of scenario probability. 0 < alpha < 1.", 0.95, unit="probability 0-1", reader=_OO + " (apply_risk_preference)"),
+    _o("options.riskPreference.omega", "number", "Weight of the CVaR term against the expected cost: 0 = risk-neutral expected cost, 1 = pure CVaR. 0 <= omega <= 1.", 0.5, unit="weight 0-1", reader=_OO + " (apply_risk_preference)"),
+    _o("options.iterativeExpansion.enabled", "boolean", "Re-solve until the extendable lines' s_nom_opt settles (line reactances are rescaled after each LP).", False, reader=_IT),
+    _o("options.iterativeExpansion.msqThreshold", "number", "Stop when the mean-square change of s_nom_opt between iterations is below this.", 0.05, unit="MVA^2", reader=_IT),
+    _o("options.iterativeExpansion.minIterations", "integer", "Iterations always run before the threshold is tested.", 1, unit="iterations", reader=_IT),
+    _o("options.iterativeExpansion.maxIterations", "integer", "Hard cap on iterations.", 10, unit="iterations", reader=_IT),
+    _o("options.iterativeExpansion.lineUnitSize", "number", "Discrete line module size: expansion is rounded to whole units of this size. Empty = continuous expansion.", None, unit="MVA", reader=_IT),
+    _o("options.iterativeExpansion.lineThreshold", "number", "Share of one unit (0-1) above which a fractional line unit is rounded up (needs lineUnitSize).", None, unit="fraction of a unit 0-1", reader=_IT),
+    _o("options.iterativeExpansion.fractionalLastUnitSize", "boolean", "Allow the last unit to be a fraction of lineUnitSize in the final iteration.", False, reader=_IT),
+    _o("options.iterativeExpansion.linkUnitSize", "object", "Discrete link module size per link name: {linkName: MW}.", {}, unit="MW", reader=_IT),
+    _o("options.iterativeExpansion.linkThreshold", "object", "Rounding threshold per link name: {linkName: fraction of a unit 0-1}.", {}, unit="fraction of a unit 0-1", reader=_IT),
+    _o("options.twoStage.enabled", "boolean", "Two-stage solve: size capacities on the LP relaxation, fix them, re-solve the dispatch.", False, reader="backend/pypsa/optimise_extras.py (run_two_stage)"),
     _o("options.twoStage", "object", "{enabled}: size capacities on the LP relaxation, fix_optimal_capacities, re-solve dispatch (restores extendable flags).", None, reader="backend/pypsa/optimise_extras.py (run_two_stage)"),
     _o("options.nonLinearPowerFlowAfterOptimise", "object", "{enabled, distributeSlack, slackWeights, xTol, useSeed, skipPre}: AC power flow on a copy of the solved dispatch; result in payload.acFeasibility.", None, reader="backend/pypsa/optimise_extras.py (run_ac_feasibility)"),
     _o("options.securityConstrainedConfig.branchOutages", "string[]", "SCLOPF: secure only these passive branches ('L1', 'Transformer:T1'); empty = all. SCLOPF + pathway is allowed.", [], reader=_OO + " (parse_branch_outages)"),
@@ -134,6 +149,16 @@ def export_lp(req: ExportLpRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=f"LP export failed: {exc}") from exc
     info["seconds"] = round(time.perf_counter() - t0, 2)
     return info
+
+
+@router.get("/api/optimise/export-lp/file")
+def export_lp_file_download(fileName: str) -> FileResponse:
+    """Stream a file previously written by ``POST /api/optimise/export-lp`` (the browser's Download)."""
+    stem = re.sub(r"[^A-Za-z0-9_.-]", "_", Path(fileName).name)
+    path = data_root() / "exports" / "lp" / stem
+    if not stem or not path.is_file():
+        raise HTTPException(status_code=404, detail=f"No exported LP file named {stem!r}; export it first.")
+    return FileResponse(path, filename=stem, media_type="application/octet-stream")
 
 
 class ConsistencyRequest(_SessionBody):

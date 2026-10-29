@@ -583,3 +583,87 @@ def detach_change(model: dict[str, list[dict[str, Any]]], plant_id: str) -> dict
     remove = {s: [plant_id] for s in (REG, COMPOSITES_SHEET) if plant_id in rows.get(s, [])}
     release = [{"sheet": s, "name": n} for s, names in rows.items() if s not in remove for n in names]
     return {"plantId": plant_id, "remove": remove, "release": release, "fragment": None, "kept": {"buses": [], "carriers": []}, "warnings": []}
+
+
+# ── templates: a composite's settings kept as a reusable row of RAGNAROK_CompositeTemplates ──────────────────────
+
+_TEMPLATE_DROP = ("plantId", "bus")          # a template is placed per bus under a new name, so it carries neither
+
+
+def list_templates(model: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    """The saved templates: ``{name, type, spec}`` per ``RAGNAROK_CompositeTemplates`` row (a row whose spec is unreadable is listed with ``spec: None``)."""
+    import json
+
+    out = []
+    for row in model.get(TEMPLATES_SHEET) or []:
+        try:
+            spec = json.loads(str(row.get("spec") or ""))
+        except (TypeError, ValueError):
+            spec = None
+        out.append({"name": str(row.get("name") or ""), "type": str(row.get("type") or ""), "spec": spec if isinstance(spec, dict) else None})
+    return out
+
+
+def save_template_change(model: dict[str, list[dict[str, Any]]], plant_id: str, name: str | None = None) -> dict[str, Any]:
+    """Change set that stores composite ``plant_id``'s spec as template ``name`` (default ``<plant_id>_template``; an existing row of that name is replaced).
+
+    Raises:
+        PlantError: no such composite, or one imported without a registry row (no spec to keep).
+    """
+    import json
+
+    from .registry import registry_map
+
+    reg = registry_map(model).get(plant_id)
+    if reg is None:
+        raise PlantError(f"No editable composite {plant_id!r} (a template needs the stored spec of a composite built here)..")
+    tname = (name or f"{plant_id}_template").strip()
+    if not tname:
+        raise PlantError("Template name is empty.")
+    spec = {k: v for k, v in (reg.get("spec") or {}).items() if k not in _TEMPLATE_DROP}
+    replaced = any(str(r.get("name")) == tname for r in model.get(TEMPLATES_SHEET) or [])
+    return {"template": tname, "replaced": replaced, "remove": {TEMPLATES_SHEET: [tname]} if replaced else {}, "release": [],
+            "fragment": {"sheets": {TEMPLATES_SHEET: [{"name": tname, "type": reg["type"], "spec": json.dumps(spec, sort_keys=True)}]}},
+            "kept": {"buses": [], "carriers": []}, "warnings": []}
+
+
+def delete_template_change(model: dict[str, list[dict[str, Any]]], name: str) -> dict[str, Any]:
+    """Change set that deletes template ``name``; composites already placed from it are untouched.
+
+    Raises:
+        PlantError: no template of that name (the message lists the saved ones).
+    """
+    have = [str(r.get("name")) for r in model.get(TEMPLATES_SHEET) or []]
+    if name not in have:
+        raise PlantError(f"No template {name!r}; saved templates: {have or 'none'}.")
+    return {"template": name, "remove": {TEMPLATES_SHEET: [name]}, "release": [], "fragment": None, "kept": {"buses": [], "carriers": []}, "warnings": []}
+
+
+def place_source(model: dict[str, list[dict[str, Any]]], type_id: str | None, spec: dict[str, Any] | None,
+                 from_plant: str | None, template: str | None) -> tuple[str, dict[str, Any], str | None]:
+    """Resolve what to place: an existing composite's stored spec, a saved template, or an explicit ``type_id`` + ``spec``.
+
+    Returns:
+        ``(type, spec, default_prefix)``; exactly one source must be given.
+
+    Raises:
+        PlantError: none or several sources, or an unknown composite / template.
+    """
+    from .registry import registry_map
+
+    given = [x for x, v in (("type", type_id), ("fromPlant", from_plant), ("template", template)) if v]
+    if len(given) != 1:
+        raise PlantError(f"Give exactly one source of what to place: type (+ spec), fromPlant or template; got {given or 'none'}.")
+    if from_plant:
+        reg = registry_map(model).get(from_plant)
+        if reg is None:
+            raise PlantError(f"No editable composite {from_plant!r} to copy; valid: {sorted(registry_map(model))}.")
+        return reg["type"], {k: v for k, v in (reg.get("spec") or {}).items() if k not in _TEMPLATE_DROP}, from_plant
+    if template:
+        found = next((t for t in list_templates(model) if t["name"] == template), None)
+        if found is None:
+            raise PlantError(f"No template {template!r}; saved templates: {[t['name'] for t in list_templates(model)] or 'none'}.")
+        if found["spec"] is None:
+            raise PlantError(f"Template {template!r} has an unreadable spec (RAGNAROK_CompositeTemplates.spec must be JSON).")
+        return found["type"], found["spec"], template.removesuffix("_template")
+    return str(type_id), dict(spec or {}), None

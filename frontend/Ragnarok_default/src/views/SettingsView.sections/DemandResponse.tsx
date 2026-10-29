@@ -9,11 +9,15 @@
 import React from 'react';
 import { DemandResponseConfig, WorkbookModel } from 'lib/types';
 import { SearchableMultiSelect } from '../../shared/components/SearchableMultiSelect';
+import { DemandResponseApply } from './DemandResponseApply';
 
 export interface DemandResponseSectionProps {
   demandResponseConfig: DemandResponseConfig;
   onDemandResponseConfigChange: (config: DemandResponseConfig) => void;
   model: WorkbookModel;
+  /** Push the working model to the session / pull it back: the rows panel reads and writes the session workbook. */
+  onSessionSync?: () => Promise<void>;
+  onSessionReload?: () => Promise<void>;
 }
 
 export function DemandResponseSection(props: DemandResponseSectionProps) {
@@ -126,6 +130,10 @@ export function DemandResponseSection(props: DemandResponseSectionProps) {
             <p className="sg-setting-hint">Top of the demand curve; willingness-to-pay ramps down to ~0 across the elastic share.</p>
           </div>
         </>
+      )}
+
+      {props.onSessionSync && props.onSessionReload && (
+        <DemandResponseApply config={cfg} onSessionSync={props.onSessionSync} onSessionReload={props.onSessionReload} />
       )}
     </section>
   );

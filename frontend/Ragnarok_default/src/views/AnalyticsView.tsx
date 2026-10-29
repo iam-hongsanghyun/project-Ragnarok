@@ -51,6 +51,8 @@ export interface AnalyticsViewProps {
   onValidate: () => void;
   onRun: () => void;
   onNavigateToTable: (sheet: string, rowIndex: number) => void;
+  /** Push the working model to the session before the network analysis reads it. */
+  onSessionSync?: () => Promise<void>;
 
   // Results
   displayResults: RunResults | null;
@@ -116,6 +118,7 @@ export function AnalyticsView(props: AnalyticsViewProps) {
           onValidate={props.onValidate}
           onRun={props.onRun}
           onNavigate={props.onNavigateToTable}
+          onSessionSync={props.onSessionSync}
         />
       )}
 

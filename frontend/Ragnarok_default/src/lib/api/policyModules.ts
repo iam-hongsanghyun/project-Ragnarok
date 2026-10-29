@@ -39,3 +39,17 @@ export function setAnnualBudget(row: BudgetRow): Promise<{ rows: BudgetRow[] }> 
 export function applyAnnualBudgets(): Promise<BudgetPreview & { sheetsWritten: string[] }> {
   return call('/api/annual-budgets/apply', {});
 }
+
+/** One schedule of the model's carbon library (`RAGNAROK_CarbonSchedules`). */
+export interface ServerCarbonSchedule { id: string; name: string; schedule: { year: number; price: number }[] }
+
+/** `GET /api/scenarios/carbon-schedules`: the carbon library stored in the session workbook. */
+export async function getServerCarbonSchedules(sessionId: string): Promise<ServerCarbonSchedule[]> {
+  const resp = await fetch(`${API_BASE}/api/scenarios/carbon-schedules?session_id=${encodeURIComponent(sessionId)}`);
+  if (!resp.ok) {
+    let detail = resp.statusText;
+    try { detail = (await resp.json())?.detail ?? detail; } catch { /* non-JSON */ }
+    throw new Error(`${resp.status}: ${detail}`);
+  }
+  return ((await resp.json()) as { schedules: ServerCarbonSchedule[] }).schedules;
+}

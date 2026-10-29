@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ModelIssue } from './useModelIssues';
+import { NetworkAnalysisPanel } from './NetworkAnalysisPanel';
 
 interface ValidationResult {
   valid: boolean;
@@ -16,6 +17,7 @@ interface Props {
   onValidate: () => void;
   onRun: () => void;
   onNavigate: (sheet: string, rowIndex: number) => void;
+  onSessionSync?: () => Promise<void>;
 }
 
 // ── Issue list ────────────────────────────────────────────────────────────────
@@ -40,7 +42,7 @@ function IssueItem({ issue, onNavigate }: { issue: ModelIssue; onNavigate: (shee
 
 // ── Main pane ─────────────────────────────────────────────────────────────────
 
-export function ValidationPane({ validateResult, issues, onValidate, onRun, onNavigate }: Props) {
+export function ValidationPane({ validateResult, issues, onValidate, onRun, onNavigate, onSessionSync }: Props) {
   const [showAll, setShowAll] = useState(false);
 
   const errors = issues.filter((i) => i.severity === 'error');
@@ -163,6 +165,8 @@ export function ValidationPane({ validateResult, issues, onValidate, onRun, onNa
           </p>
         </div>
       )}
+
+      <NetworkAnalysisPanel onSessionSync={onSessionSync} />
     </div>
   );
 }

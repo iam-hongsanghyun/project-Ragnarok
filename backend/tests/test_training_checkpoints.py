@@ -2718,7 +2718,7 @@ def test_module_19_checkpoint_is_what_the_steps_build(tmp_path: Path) -> None:
     """The finished example is the start model after the module's plant edits, row for row."""
     built = json.loads(_m19_model_json("warm"))
     checkpoint = _model_from_example("training_m19", tmp_path)
-    assert set(built) - {"RAGNAROK_Composites"} == set(checkpoint)       # the bundled example predates the instance sheet (sync adds the row)
+    assert set(built) == set(checkpoint)
     for sheet in checkpoint:
         if sheet == "RAGNAROK_PLANTS":
             continue

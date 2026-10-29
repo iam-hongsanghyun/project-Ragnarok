@@ -86,6 +86,15 @@ export function modelForPlants(model: WorkbookModel): Record<string, GridRow[]> 
   return Object.fromEntries(MODEL_SHEETS.map((s) => [s, m[s] ?? []]));
 }
 
+/** One plant card of `GET /api/build/plants` (only what a run-option editor needs). */
+export interface PlantSummary { plantId: string; type: string | null; label: string }
+
+/** The plants of the session model. */
+export async function fetchPlants(sessionId: string): Promise<PlantSummary[]> {
+  const body = await readJson<{ plants: PlantSummary[] }>(await fetch(`${API_BASE}/api/build/plants?session_id=${encodeURIComponent(sessionId)}`));
+  return body.plants;
+}
+
 export async function fetchPlantTypes(): Promise<PlantType[]> {
   return (await readJson<{ types: PlantType[] }>(await fetch(`${API_BASE}/api/build/plant/types`))).types;
 }

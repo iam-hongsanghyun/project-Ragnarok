@@ -10,7 +10,7 @@ endpoints of those modules (each one changes the session workbook and says what 
   timestamps (irregular spacing and investment periods handled).
 * ``POST /api/transform/sample`` - test-run sampling written into the workbook (sampled snapshots, weightings, series).
 * ``POST /api/model/make-noncyclic`` - the rolling-horizon step: every cyclic storage flag False.
-* ``POST /api/model/relax-maintenance`` - the Force-LP companion step: ``maintainable`` False.
+* ``POST /api/model/relax-maintenance`` - the Force-LP companion step: ``maintainable`` False (``apply: false`` previews).
 * ``POST /api/demand-response/preview`` - the ``dr_*`` rows the demand-response module would write. Read-only.
 * ``POST /api/demand-response/apply`` - write them (buses / links / stores / loads / generators / carriers);
   a disabled config removes the module's rows.
@@ -142,14 +142,18 @@ def make_noncyclic_step(body: SessionBody) -> dict[str, Any]:
     return {"changed": changed, "sheetsWritten": sorted(sheets)}
 
 
+class RelaxMaintenanceBody(SessionBody):
+    apply: bool = True  # false = preview: report what would change, write nothing
+
+
 @router.post("/api/model/relax-maintenance")
-def relax_maintenance_step(body: SessionBody) -> dict[str, Any]:
+def relax_maintenance_step(body: RelaxMaintenanceBody) -> dict[str, Any]:
     model = _model(body.sessionId)
     out, changed = relax_maintenance(model)
     sheets = {sheet: out[sheet] for sheet in {c["sheet"] for c in changed}}
-    if sheets:
+    if sheets and body.apply:
         model_store.merge_static_model(body.sessionId, sheets)
-    return {"changed": changed, "sheetsWritten": sorted(sheets)}
+    return {"changed": changed, "sheetsWritten": sorted(sheets) if body.apply else [], "applied": body.apply}
 
 
 # ── demand response (rows written into the workbook) ─────────────────────────────────────

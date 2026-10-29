@@ -889,7 +889,7 @@ core-to-module import allowlist in both directions (a stale row fails), and fail
 | `reserves/` | spinning-reserve variable, headroom and requirement constraints; the `reserve` block | `options.reserveConfig` |
 | `constraints/` | custom constraints, the DSL, `constraintSpecs`, `constraint_checks` | kinds PyPSA's `GlobalConstraint` expresses exactly are written as native rows (`native_routing.py`, §8.5); the rest are declared linopy constraints |
 | `stochastic/` | scenario overrides, collapse to the representative scenario, duals divided by the probability, `GlobalConstraint.mu` recovery | `set_scenarios` / `set_risk_preference` stay native |
-| `demand_response/` | shiftable and price-elastic rewiring (DR bus + Link + Store), `demandResponse` / `priceElastic` blocks | a declared, reported build step (the `dr_*` components are not yet written to the workbook) |
+| `demand_response/` | shiftable and price-elastic rewiring (DR bus + Link + Store), `demandResponse` / `priceElastic` blocks | a declared, reported build step; `rows.py` writes the `dr_*` components into the workbook as visible rows (`/api/demand-response/apply`) |
 | `p2x/rfnbo.py`, `plants/cofiring.py`, `plants/startcosts.py` | RFNBO matching, co-firing blend share, hot / warm / cold start-cost tiers | `constraints` hooks of the p2x and plants modules |
 | `emissions/` | `thermal_basis_factor` (carrier `co2_emissions` / efficiency: the one factor function), `carrier_emission_factors`, `primary_energy_emissions`, `emissionsBreakdown` | `results_derived` and `run_statistics` call these |
 | `market_studies/` | market simulation, strategic bidding, merchant, bid strategy, optimal bid, PPA + explorer, price formation, LMP decomposition | study and `replace_solve` hooks |

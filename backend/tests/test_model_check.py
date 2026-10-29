@@ -95,6 +95,18 @@ def test_extendable_without_capital_cost_builds_free() -> None:
     assert result["warnCount"] >= 1
 
 
+def test_a_composite_fuel_supplier_is_not_flagged_as_free_expansion() -> None:
+    """A CCGT composite's gas supplier is extendable at zero capital cost on purpose (a fuel market priced by marginal cost)."""
+    from backend.app.plants import catalog, registry
+
+    model = _base()
+    built = catalog.build_plant("ccgt", {"bus": model["buses"][0]["name"], "p_nom": 100}, model)
+    model = registry.apply_change(model, {"remove": {}, "release": [], "fragment": built["fragment"]})
+    suppliers = [g["name"] for g in model["generators"] if g.get("p_nom_extendable") and not g.get("capital_cost")]
+    assert suppliers, "the composite should add an extendable, zero-capex gas supplier"
+    assert "free_expansion" not in _codes(check_model(model))
+
+
 def test_isolated_bus_and_missing_load_are_reported() -> None:
     model = _base()
     model["buses"].append({"name": "orphan"})

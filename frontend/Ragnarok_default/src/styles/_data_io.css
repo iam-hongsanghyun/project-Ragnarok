@@ -1,0 +1,38 @@
+/* ── PyPSA I/O dialog, network analysis, forge network tools, importer status ─────────────
+   Layout only; colours, type sizes and radii come from the :root tokens. */
+.modal-card.pypsa-io-dialog {
+  width: min(720px, 100%);
+  max-height: min(80vh, 760px);
+  overflow-y: auto;
+}
+.pypsa-io-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.pypsa-io-preview { margin-top: 12px; }
+.pypsa-io-preview .data-table { max-width: 360px; }
+
+.net-analysis-parts {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.net-analysis-method { display: flex; align-items: center; gap: 8px; }
+.net-analysis-matrix { margin-top: 8px; }
+.net-analysis-scroll { overflow: auto; max-height: 280px; }
+.net-tool-text { width: 100%; max-width: 320px; }
+
+.import-status {
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-md);
+}
+.import-status > summary { padding: 8px 12px; cursor: pointer; font-weight: 500; }
+.import-status__body { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 8px; }
+.import-status__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.import-status__scroll { overflow: auto; max-height: 220px; }

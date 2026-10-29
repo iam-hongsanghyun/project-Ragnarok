@@ -92,9 +92,9 @@ AREAS: dict[str, Area] = {
             "Plants and composite builders (CCGT, OCGT, BESS, co-firing, P2X, hydrogen)",
             "Add one plant as a unit (CCGT/OCGT with part-load and start costs, gas+H2 co-firing, BESS battery) or a "
             "power-to-X hydrogen/ammonia/methanol chain, then read plant-level results (LCOH, H2 share, CO2 avoided).",
-            ("list_plant_types", "add_plant", "build_p2x_chain", "get_plant_results"),
+            ("list_plant_types", "add_plant", "place_composite", "build_p2x_chain", "get_plant_results"),
             "ccgt ocgt gas turbine combined cycle bess battery cofiring co-firing hydrogen h2 electrolyser ammonia "
-            "methanol lcoh rfnbo conversion heat pump chp "
+            "methanol lcoh rfnbo conversion heat pump chp composite template place copy paste detach sync "
             "가스터빈 복합 배터리 수소 전해조 암모니아 혼소 생산 단가 플랜트 발전소",
             (
                 (
@@ -352,6 +352,25 @@ AREAS: dict[str, Area] = {
                         "get_journal_diff",
                         "undo_journal_entry",
                         "undo_journal_entry(confirm=true)",
+                    ),
+                ),
+                (
+                    "put a composite on several buses, or keep it as a template",
+                    (
+                        "list_composite_templates",
+                        "save_composite_template",
+                        "save_composite_template(confirm=true)",
+                        "place_composite",
+                        "place_composite(confirm=true)",
+                    ),
+                ),
+                (
+                    "detach a composite into plain rows, or re-sync edited sheet rows",
+                    (
+                        "detach_composite",
+                        "detach_composite(confirm=true)",
+                        "sync_composites",
+                        "sync_composites(confirm=true)",
                     ),
                 ),
                 (

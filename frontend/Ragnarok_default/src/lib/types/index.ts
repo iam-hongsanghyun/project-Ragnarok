@@ -178,6 +178,8 @@ export interface CarbonScheduleProfile {
 
 export interface SecurityConstrainedConfig {
   enabled: boolean;
+  /** Secure only these passive branches: a line name, or `Transformer:<name>`. Absent or empty = every line and transformer. */
+  branchOutages?: string[];
 }
 
 /** Operating-reserve co-optimization — units keep headroom so the system can

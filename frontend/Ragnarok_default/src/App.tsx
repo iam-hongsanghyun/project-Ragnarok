@@ -58,6 +58,7 @@ import { formatCostBasisMigration } from 'lib/settings/costBasisMigration';
 import { mergeWorkbookFragmentRemote } from 'lib/workbook/mergeFragment';
 import { applyPlantChange, type PlantChange } from 'lib/build/plants';
 import { previewDetach } from 'lib/api/plants';
+import { exportAndDownloadLp } from 'lib/api/optimise';
 import type { WorkbookFragment } from 'lib/api/databases';
 import { getBounds, getBusIndex, carrierColor, numberValue, orderByCarrierRows, setCarrierColorOverrides, snapshotMaxFromWorkbook, stringValue } from 'lib/utils/helpers';
 import { filenameMatchesScenario, scenarioFilename } from 'lib/utils/scenarioFilename';
@@ -97,6 +98,8 @@ import { loadExample } from 'lib/api/examples';
 import { buildStarterPack } from 'lib/api/starterPacks';
 import { RunDialog } from './features/run/RunDialog';
 import { MasterModelDialog } from './views/ModelView.features/MasterModelDialog';
+import { PypsaIoDialog } from './views/ModelView.features/PypsaIoDialog';
+import { EXPORT_ENDPOINT, type PypsaExportKind } from 'lib/api/pypsaIo';
 import type { DeriveReport } from 'lib/api/master';
 import { SettingsView } from './views/SettingsView';
 import { PluginsView } from './views/PluginsView';
@@ -492,6 +495,7 @@ function AppInner() {
   // Master-model dialog (Model toolbar → Master…): import a multi-year master
   // and derive a filtered working model from it.
   const [masterDialogOpen, setMasterDialogOpen] = useState(false);
+  const [pypsaIoOpen, setPypsaIoOpen] = useState(false);
   const [dryRun, setDryRun] = useState(false);
   const [backendRuns, setBackendRuns] = useState<BackendRunMeta[]>([]);
   // Temporal sheet name → row count in the backend session. Time-series sheets
@@ -1210,6 +1214,9 @@ function AppInner() {
       conflictStrategy: string;
       groupByColumn?: string;
       aggregateComponents?: string[];
+      hacFeatures?: string[];
+      hacAffinity?: string;
+      hacLinkage?: string;
     }): Promise<ClusterResult> => {
       await putStaticModel(prepareModelForBackend(model));
       const resp = await fetch(`${API_BASE}/api/transform/cluster`, {
@@ -1223,6 +1230,7 @@ function AppInner() {
           conflictStrategy: opts.conflictStrategy,
           groupByColumn: opts.groupByColumn ?? null,
           aggregateComponents: opts.aggregateComponents ?? [],
+          ...(opts.method === 'hac' ? { hacFeatures: opts.hacFeatures, hacAffinity: opts.hacAffinity, hacLinkage: opts.hacLinkage } : {}),
         }),
       });
       if (!resp.ok) {
@@ -2123,7 +2131,7 @@ function AppInner() {
   const netcdfImportInputRef = useRef<HTMLInputElement | null>(null);
   const hdf5ImportInputRef = useRef<HTMLInputElement | null>(null);
 
-  async function exportViaBackend(endpoint: string, filenameOut: string): Promise<void> {
+  async function exportViaBackend(endpoint: string, filenameOut: string, exportOptions: Record<string, unknown> = {}): Promise<void> {
     const scenarioForExport = {
       constraints: constraints.filter((c) => c.enabled),
       constraintSpecs: dslToSpecs(customDsl),
@@ -2144,7 +2152,7 @@ function AppInner() {
           sessionId: DEFAULT_SESSION_ID,
           model: modelForBackend,
           scenario: scenarioForExport,
-          options: {},
+          options: exportOptions,
         }),
       });
       if (!resp.ok) {
@@ -2200,6 +2208,28 @@ function AppInner() {
       showToast(msg, 'error');
     }
   }
+
+  // PyPSA I/O dialog: the importers answer the converted workbook (the session is untouched), the dialog shows what it
+  // will create and calls this only after the user confirms.
+  const handlePypsaIoImported = (nextModel: WorkbookModel, importedName: string) => {
+    normalizeInputDatesToIso(nextModel, settings.dateFormat);
+    resetForNewModel(nextModel, importedName.replace(/\.[^.]+$/, '.xlsx'));
+    setActiveRunName(null);
+    setStatus(`Imported ${importedName}`);
+    showToast(`Imported ${importedName}`, 'success');
+  };
+  const handlePypsaIoExport = (kind: PypsaExportKind, exportOptions: Record<string, unknown>) =>
+    exportViaBackend(EXPORT_ENDPOINT[kind], `${projectBaseName(filename)}${kind === 'pypsa-excel' ? '_pypsa.xlsx' : '_pypsa_csv.zip'}`, exportOptions);
+
+  // Forge session-side transforms (slice, merge, written sample) return a whole model: a full replace, like clustering.
+  const handleReplaceModel = useCallback(
+    (next: WorkbookModel, message: string) => {
+      resetForNewModel(next);
+      setActiveRunName(null);
+      showToast(message, 'success');
+    },
+    [resetForNewModel, showToast],
+  );
 
   const handleExportNetcdf = () =>
     exportViaBackend('/api/export/netcdf', `${projectBaseName(filename)}.nc`);
@@ -3779,6 +3809,32 @@ function AppInner() {
     }
   };
 
+  // "Export LP" in the Run dialog: the same run body as a run, written to an LP file on the server and downloaded; nothing is solved.
+  const [exportLpBusy, setExportLpBusy] = useState(false);
+  const handleExportLp = async () => {
+    setExportLpBusy(true);
+    try {
+      if (!(await modelPushRef.current)) throw new Error('The model has not reached the backend session. Reload the model and retry.');
+      const constraintSpecs = parseConstraintDsl(customDsl).map((line) => line.spec).filter((s): s is ConstraintSpec => !!s);
+      const { scenario, options } = buildRunPayload(
+        captureCurrentScenario(),
+        {
+          scenarioLabel: activeScenario?.label ?? null, filename, dateFormat: settings.dateFormat,
+          solverThreads: settings.solverThreads, solverType: settings.solverType, solveAcceptance: settings.solveAcceptance,
+          objectiveAutoScale: settings.objectiveAutoScale, advancedSolve: settings.advancedSolve, currencySymbol: settings.currencySymbol,
+        },
+        constraintSpecs,
+      );
+      await putStaticModel(prepareModelForBackend(model));
+      const info = await exportAndDownloadLp({ scenario, options }, `${(activeScenario?.label ?? 'model').replace(/[^A-Za-z0-9_.-]+/g, '_')}.lp`);
+      showToast(`LP exported: ${info.variables} variables, ${info.constraints} constraints, ${Math.round(info.bytes / 1024)} KB`, 'success');
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'LP export failed', 'error');
+    } finally {
+      setExportLpBusy(false);
+    }
+  };
+
   // ── Metric series derived data ────────────────────────────────────────────
 
   const rawSystemDispatchRows: TimeSeriesRow[] = (displayResults?.dispatchSeries || []).map(normalizeSeriesPoint);
@@ -4090,6 +4146,8 @@ function AppInner() {
               onApplyResolution={handleApplyResolution}
               onSetWeightingsFromSpacing={handleSetWeightingsFromSpacing}
               onMakeNonCyclic={handleMakeNonCyclic}
+              onSessionSync={handleSessionSync}
+              onSessionReload={reloadSessionModel}
               carbonPrice={carbonPrice}
               onCarbonPriceChange={setCarbonPrice}
               carbonPriceSchedule={carbonPriceSchedule}
@@ -4248,6 +4306,7 @@ function AppInner() {
               onExportNetcdf={handleExportNetcdf}
               onImportHdf5={() => hdf5ImportInputRef.current?.click()}
               onExportHdf5={handleExportHdf5}
+              onOpenPypsaIo={() => setPypsaIoOpen(true)}
             />
           )}
 
@@ -4284,6 +4343,8 @@ function AppInner() {
               onTemporalPreview={handleTemporalPreview}
               onTemporalApply={handleTemporalApply}
               onSetWeightingsFromSpacing={handleSetWeightingsFromSpacing}
+              onReplaceModel={handleReplaceModel}
+              backendRuns={backendRuns}
               onSessionSync={handleSessionSync}
               onSessionReload={reloadSessionModel}
               onScaleCarrierCapacity={handleScaleCarrierCapacity}
@@ -4305,6 +4366,7 @@ function AppInner() {
               modelIssues={modelIssues}
               onValidate={() => { setDryRun(true); setRunDialogOpen(true); }}
               onRun={() => { setDryRun(false); setRunDialogOpen(true); }}
+              onSessionSync={handleSessionSync}
               onNavigateToTable={(sheet, rowIndex) => {
                 setTab('Model');
                 setJumpTo({ sheet, rowIndex });
@@ -4540,6 +4602,8 @@ function AppInner() {
         onRun={() => void handleRunModel(false)}
         onQueueNext={() => void handleRunModel(true)}
         onAddScenario={() => void handleAddScenarioFromConsole()}
+        onExportLp={() => void handleExportLp()}
+        exportLpBusy={exportLpBusy}
       />
 
       {/* ── Training walkthrough overlay ──
@@ -4566,6 +4630,14 @@ function AppInner() {
       />
 
       {/* ── Master model dialog (import multi-year master → derive by filter) ── */}
+      <PypsaIoDialog
+        open={pypsaIoOpen}
+        onClose={() => setPypsaIoOpen(false)}
+        onImported={handlePypsaIoImported}
+        onExport={handlePypsaIoExport}
+        showToast={showToast}
+      />
+
       <MasterModelDialog
         open={masterDialogOpen}
         onClose={() => setMasterDialogOpen(false)}

@@ -82,6 +82,9 @@ import { SolverSection } from './SettingsView.sections/Solver';
 import type { AdvancedSolveOptions } from 'lib/settings/advancedSolve';
 import { ApiKeysSection } from './SettingsView.sections/ApiKeys';
 import { ModulesSection } from './SettingsView.sections/Modules';
+import { RiskTwoStageSection } from './SettingsView.sections/RiskTwoStage';
+import { IterativeExpansionSection } from './SettingsView.sections/IterativeExpansion';
+import { CofiringSection } from './SettingsView.sections/Cofiring';
 
 type SectionId =
   | 'scenarios'
@@ -93,6 +96,9 @@ type SectionId =
   | 'demandResponse'
   | 'stochastic'
   | 'sclopf'
+  | 'riskTwoStage'
+  | 'iterativeExpansion'
+  | 'cofiring'
   | 'reserve'
   | 'outageMc'
   | 'correlatedSampling'
@@ -151,6 +157,9 @@ const SECTIONS: Section[] = [
   // Solve — how the optimiser is run
   { id: 'stochastic', label: 'Stochastic',                    group: 'Solve' },
   { id: 'sclopf',     label: 'Security-constrained (SCLOPF)',  group: 'Solve' },
+  { id: 'riskTwoStage', label: 'Risk (CVaR) and two-stage',     group: 'Solve' },
+  { id: 'iterativeExpansion', label: 'Iterative expansion',    group: 'Solve' },
+  { id: 'cofiring',   label: 'Gas + H2 co-firing',             group: 'Solve' },
   { id: 'reserve',    label: 'Operating reserve',              group: 'Solve' },
   { id: 'outageMc',   label: 'Outage Monte Carlo',             group: 'Solve' },
   { id: 'correlatedSampling', label: 'Correlated sampling',    group: 'Solve' },
@@ -273,6 +282,10 @@ export interface SettingsViewProps {
   onSetWeightingsFromSpacing?: () => Promise<void> | void;
   /** Rolling horizon: write the cyclic storage flags false (visible workbook step). */
   onMakeNonCyclic?: () => Promise<void> | void;
+  /** Visible server-side steps (demand-response rows, relax maintenance, carbon preview) read and write the SESSION
+   *  workbook: push the working model first (`onSessionSync`), pull it back after a write (`onSessionReload`). */
+  onSessionSync?: () => Promise<void>;
+  onSessionReload?: () => Promise<void>;
   carbonPrice: number;
   onCarbonPriceChange: (v: number) => void;
   carbonPriceSchedule: CarbonPriceScheduleEntry[];
@@ -402,6 +415,9 @@ export function SettingsView(props: SettingsViewProps) {
         {section === 'rolling'        && <RollingSection {...props} />}
         {section === 'stochastic'     && <StochasticSection {...props} />}
         {section === 'sclopf'         && <SclopfSection {...props} />}
+        {section === 'riskTwoStage'   && <RiskTwoStageSection {...props} />}
+        {section === 'iterativeExpansion' && <IterativeExpansionSection {...props} />}
+        {section === 'cofiring'       && <CofiringSection {...props} />}
         {section === 'reserve'        && <ReserveSection {...props} />}
         {section === 'outageMc'       && <OutageMcSection {...props} />}
         {section === 'correlatedSampling' && <CorrelatedSamplingSection {...props} />}

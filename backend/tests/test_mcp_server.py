@@ -249,7 +249,7 @@ def _install(monkeypatch, autonomy: str = "guided") -> FakeClient:
 def test_tool_catalog_and_annotations() -> None:
     tools = asyncio.run(mcp.list_tools())
     by_name = {t.name: t for t in tools}
-    assert len(tools) == 199, f"expected 199 tools, got {len(tools)}"
+    assert len(tools) == 205, f"expected 205 tools, got {len(tools)}"
     # check_model: reads the model back so "is this what I asked for?" can be
     # answered against the model rather than against the agent's account of it.
     assert "check_model" in by_name
@@ -353,7 +353,7 @@ def test_tool_catalog_and_annotations() -> None:
         "get_carbon_price", "get_annual_budgets",
         "get_time_units", "preview_time_units", "get_demand_response",
         "list_p2x_technologies", "preview_p2x_chain", "get_p2x_results",
-        "list_plant_types", "get_plant_results",
+        "list_plant_types", "get_plant_results", "list_composite_templates",
         "get_kpis",
         "compare_companies",
         "get_asset_details",
