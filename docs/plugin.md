@@ -1624,6 +1624,25 @@ def analyze(result: dict, config: dict) -> dict:
 A plugin may export any subset. Raising inside a hook is safe — the router
 surfaces the message as a clean `400`.
 
+**Turning an edited network back into a workbook.** A plugin that builds or edits a `pypsa.Network` (n.add(...), a PyPSA-Eur
+network, a netCDF read) hands it back to Ragnarok as a workbook with the public converter
+`backend.pypsa.network.serialize.network_to_model(network) -> dict[str, list[dict]]`:
+
+```python
+from backend.pypsa.network.serialize import network_to_model
+
+def transform(model: dict, config: dict) -> dict:
+    n = ...                       # a pypsa.Network the plugin edited
+    return network_to_model(n)    # {sheet: rows}: static component sheets, `<list>-<attr>` series, snapshots
+```
+
+It is the inverse of `build_network`: one row per component (schema input columns only; a column left at its infinite
+default, e.g. `p_nom_max`, is not emitted), one `<list>-<attr>` sheet per non-empty time-varying frame, a `snapshots`
+sheet that carries non-unit weightings, `(period, timestep)` snapshots as `period` + `snapshot` columns, and `-pw`
+piecewise sheets. It emits only what PyPSA knows: Ragnarok config sheets (`RAGNAROK_*`) are not in a network, so carry
+them over from the incoming `model` yourself. Round trip and idempotence are pinned by `backend/tests/test_model_io.py`.
+`backend.app.main._network_to_model_json` is the same function under its old private name.
+
 **Vendoring a library: load it under a plugin-unique alias.** `plugin.py`
 itself is imported by the host under a synthetic per-id module name, so two
 installed plugins never collide on `plugin.py`. A plugin that ships its own

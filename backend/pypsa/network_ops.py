@@ -38,13 +38,24 @@ def _build(model: dict[str, list[dict[str, Any]]], scenario: dict[str, Any] | No
     return network
 
 
-def _to_model(network: pypsa.Network, source: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, Any]]]:
-    """Serialise back to a workbook and carry the Ragnarok config sheets across."""
+def _to_model(
+    network: pypsa.Network, source: dict[str, list[dict[str, Any]]], *, time_axis: str = "same"
+) -> dict[str, list[dict[str, Any]]]:
+    """Serialise back to a workbook and carry the Ragnarok config sheets across.
+
+    ``time_axis`` says how the snapshots changed, so a module's own temporal sheet stays aligned: ``same`` (structural
+    transform), ``filter`` (a slice / merge keeps a subset of the labels) or ``blocks`` (a temporal reduction).
+    """
+    from ..app.constraints import carrier_output_cap as coc
     from ..app.routers.transforms import _preserved_config_sheets
 
     reduced = network_to_model(network)
     for sheet, rows in _preserved_config_sheets(source).items():
         reduced.setdefault(sheet, rows)
+    if time_axis != "same" and reduced.get(coc.SHEET):
+        labels = [str(r.get("snapshot", "")) for r in reduced.get("snapshots", [])]
+        if isinstance(network.snapshots, pd.DatetimeIndex):
+            reduced[coc.SHEET] = coc.realign(reduced[coc.SHEET], labels, network.snapshots, mode=time_axis)
     return reduced
 
 
@@ -123,7 +134,7 @@ def temporal_cluster(
         raise HTTPException(status_code=400, detail=f"Temporal clustering failed: {exc}") from exc
     reduced = getattr(reduced, "n", reduced)
     return {
-        "model": _to_model(reduced, model),
+        "model": _to_model(reduced, model, time_axis="blocks"),
         "method": method,
         "before": before,
         "after": _counts(reduced),
@@ -168,7 +179,7 @@ def slice_model(
         raise HTTPException(status_code=400, detail=f"slice failed: {exc}") from exc
     if not len(sliced.snapshots):
         raise HTTPException(status_code=400, detail="The requested window contains no snapshots.")
-    return {"model": _to_model(sliced, model), "before": before, "after": _counts(sliced)}
+    return {"model": _to_model(sliced, model, time_axis="filter"), "before": before, "after": _counts(sliced)}
 
 
 def merge_models(
@@ -193,7 +204,7 @@ def merge_models(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"merge failed: {exc}") from exc
     return {
-        "model": _to_model(merged, model),
+        "model": _to_model(merged, model, time_axis="filter"),
         "before": before,
         "after": _counts(merged),
         "merged": _counts(extra),

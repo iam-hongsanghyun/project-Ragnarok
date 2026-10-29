@@ -232,12 +232,18 @@ export async function getSeriesWindow(
   return asJson<SeriesWindow>(resp);
 }
 
+/** Module-owned wide temporal sheets whose names carry no dash. Mirrors `timeseries.MODULE_SERIES_SHEETS`
+ *  (backend/app/timeseries.py): `RAGNAROK_CarrierOutputCap` = snapshot + one MW cap column per carrier. */
+export const MODULE_SERIES_SHEETS: ReadonlySet<string> = new Set(['RAGNAROK_CarrierOutputCap']);
+
 /** A PyPSA time-series sheet is ``<component>-<attribute>`` (e.g. generators-p_max_pu);
  *  ``snapshots`` is the time axis, treated as static. Mirrors the backend rule. */
 export function isSeriesSheet(name: string): boolean {
+  if (MODULE_SERIES_SHEETS.has(name)) return true;
   // `<list>-<attr>-pw` is a piecewise-curve table (one row per breakpoint): static.
   return name !== 'snapshots' && name.includes('-') && !name.endsWith('-pw');
 }
+
 
 /** Map of `<series sheet> → row count` from a session meta. Time-series sheets
  *  aren't held in the in-memory model (they page on demand), so this is what

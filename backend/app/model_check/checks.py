@@ -154,6 +154,36 @@ def _check_snapshot_alignment(model: dict[str, Any], out: list[dict[str, Any]]) 
             ))
 
 
+def _check_carrier_output_cap(model: dict[str, Any], out: list[dict[str, Any]]) -> None:
+    """RAGNAROK_CarrierOutputCap: a carrier column with no generators, or a snapshot label off the axis, binds nothing."""
+    from backend.app.constraints.carrier_output_cap import SHEET
+
+    rows = _rows(model, SHEET)
+    if not rows:
+        return
+    carriers = {str(r.get("carrier", "")) for r in _rows(model, "generators")}
+    cols = [k for r in rows for k in r if k != "snapshot"]
+    capped = {c for c in cols if any(r.get(c) not in (None, "") for r in rows)}
+    for c in sorted(capped - carriers):
+        out.append(_finding(
+            WARN, "carrier_cap_no_generators",
+            f"{SHEET}: carrier '{c}' has caps but no generator carries it - the cap binds nothing.",
+            "Fix the column name to a generator carrier, or remove the column.",
+        ))
+    axis = set(_snapshot_labels(model))
+    if axis:
+        off = {
+            _norm_snapshot(str(r.get("snapshot", ""))) for r in rows if str(r.get("snapshot", "")).strip()
+        } - axis
+        if off:
+            out.append(_finding(
+                WARN, "carrier_cap_off_axis",
+                f"{SHEET}: {len(off)} row(s) carry a snapshot that is not on the model's axis (e.g. {', '.join(sorted(off)[:3])}); "
+                "those caps never bind.",
+                "Match the labels to the snapshots sheet.",
+            ))
+
+
 def _check_generators(model: dict[str, Any], out: list[dict[str, Any]]) -> None:
     committable = {
         str(g.get("name", "")) for g in _rows(model, "generators") if g.get("committable")
@@ -284,6 +314,7 @@ def check_model(model: dict[str, Any]) -> dict[str, Any]:
     _check_snapshot_alignment(model, findings)
     _check_weighting_vs_spacing(model, findings)
     _check_generators(model, findings)
+    _check_carrier_output_cap(model, findings)
     _check_placeholder_bounds(model, findings)
     _check_structure(model, findings)
     warnings = [f for f in findings if f["level"] == WARN]

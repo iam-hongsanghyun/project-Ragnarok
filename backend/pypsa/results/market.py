@@ -236,6 +236,11 @@ def build_applied_constraints(network: pypsa.Network) -> list[dict[str, Any]]:
     for name in names:
         if name.startswith(_NATIVE_CONSTRAINT_PREFIXES):
             continue
+        if name.startswith("carrier_output_cap_"):
+            # A per-snapshot constraint (RAGNAROK_CarrierOutputCap): one dual per capped hour. shadowPrice is the
+            # largest-magnitude hourly dual (currency per MW per snapshot weighting); bindingHours counts the hours with a nonzero dual.
+            out.append({"name": name, "source": "carrier_output_cap", **_linopy_vector_dual(network, name)})
+            continue
         if name.startswith("cc_"):
             source = "custom"
         elif name.startswith("dsl_") or name.startswith("spec_"):
@@ -295,6 +300,19 @@ def _linopy_dual(network: pypsa.Network, cname: str) -> float:
         return val if not (val != val) else 0.0  # guard NaN
     except Exception:
         return 0.0
+
+
+def _linopy_vector_dual(network: pypsa.Network, cname: str) -> dict[str, Any]:
+    """``{shadowPrice, bindingHours}`` of a per-snapshot linopy constraint (masked hours are NaN and ignored)."""
+    try:
+        vals = np.asarray(network.model.constraints[cname].dual.values, dtype=float).ravel()
+    except Exception:
+        return {"shadowPrice": 0.0, "bindingHours": 0}
+    vals = vals[np.isfinite(vals)]
+    if not vals.size:
+        return {"shadowPrice": 0.0, "bindingHours": 0}
+    nonzero = np.abs(vals) > 1e-9
+    return {"shadowPrice": float(vals[int(np.argmax(np.abs(vals)))]), "bindingHours": int(nonzero.sum())}
 
 
 def build_co2_shadow(

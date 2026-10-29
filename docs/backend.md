@@ -1336,6 +1336,34 @@ not routed. `build_applied_constraints` reads `mu` for routed rows and the linop
 `emissions` cap is a CO2 `GlobalConstraint`, so `co2Shadow` (which looks at global constraints first) now reports it (in kt, as for any CO2 budget); before it reported
 only `co2_cap` intensity rows. Test: `test_native_constraint_routing.py` (each routed kind solved both ways: equal objective and equal dual, to 1e-9).
 
+### 8.6 Per-snapshot carrier output cap (`constraints/carrier_output_cap.py`)
+
+Sheet `RAGNAROK_CarrierOutputCap`: a wide **temporal** sheet, first column `snapshot` (the labels of the `snapshots` sheet), then one column per carrier
+name, values in **MW**; a blank cell is no cap at that hour. For every snapshot `t` and carrier `c` with a cap, the fleet's summed dispatch is bounded
+(power, not energy: no weighting):
+
+$$\sum_{g:\,\mathrm{carrier}(g)=c} p_{g,t} \le \bar P_{c,t}$$
+
+ASCII: `sum(Generator-p[g, t] for g with carrier c) <= cap[c, t]`. It is a **fleet** bound, not a per-unit `p_max_pu`: the units share it by merit order.
+
+* **linopy name** `carrier_output_cap_<carrier>`, one constraint per carrier over its capped snapshots (blank hours are masked out). Its duals are in
+  `appliedConstraints` as `{name, source: "carrier_output_cap", shadowPrice, bindingHours}` (`shadowPrice` = largest-magnitude hourly dual, `bindingHours` =
+  hours with a nonzero dual).
+* **Run paths.** Hooks `carrier-output-cap-guard` (`guard`) and `carrier-output-cap` (`constraints`, order 35). Supported: single-period optimise
+  (including security-constrained) and rolling horizon (the hook runs once per window and reads the sheet at that window's snapshots; nothing is
+  apportioned). **Refused with HTTP 400** when the sheet holds a cap: multi-investment-period pathway, stochastic, power-flow and contingency modes.
+  A non-numeric or negative cell, a duplicate or missing `snapshot` label is a 400 as well (a mis-read cap must not loosen the study).
+* **Alignment.** Cells are matched to the run's snapshots by label (after the snapshot window / sampling), so a window or a sampled run uses its own rows.
+  Registered as a series sheet by name in `timeseries.MODULE_SERIES_SHEETS` (the session / run stores, the frontend `isSeriesSheet`): kind `series`,
+  windowed reads, retarget. Forge slice / merge keep the rows still on the axis; a temporal reduction (resample / downsample / segment) writes the
+  block-mean cap of the original hours each kept snapshot stands for, and leaves a block with any blank hour uncapped (`carrier_output_cap.realign`).
+* **Model check** warns `carrier_cap_no_generators` (a capped carrier no generator carries) and `carrier_cap_off_axis` (a snapshot label not in `snapshots`).
+* **Delivery by a backend plugin.** A `contribute` hook returning `{"sheets": {"RAGNAROK_CarrierOutputCap": rows}}` is stored as a series sheet
+  (`routers/plugins.py::contribute_plugin` sends registered series sheets through `model_store.merge_series_sheets`; `merge_static_model` leaves series alone).
+
+Tests: `backend/tests/test_carrier_output_cap.py` (analytical, parity with a hand-written `extra_functionality` at rtol 1e-9, rolling window count, refused
+modes, Forge alignment, model check, plugin delivery then a run).
+
 ### 8.2 `apply_constraint_specs` — JSON spec wire format
 
 Reads `scenario["constraintSpecs"]` — the canonical wire format the frontend

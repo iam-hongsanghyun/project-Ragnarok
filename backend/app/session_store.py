@@ -147,10 +147,9 @@ def is_series_sheet(name: str, rows: list[dict[str, Any]] | None = None) -> bool
     ``loads-p_set``). The ``snapshots`` sheet is the time *axis*, not a series, and
     is stored as static. ``rows`` is accepted for symmetry but the name is decisive.
     """
-    if name == "snapshots":
-        return False
-    # `<list>-<attr>-pw` is a piecewise-curve table (one row per breakpoint), static.
-    return "-" in name and not name.endswith("-pw")
+    # `<list>-<attr>-pw` is a piecewise-curve table (one row per breakpoint), static; a module's wide temporal
+    # sheet (timeseries.MODULE_SERIES_SHEETS) is a series although its name has no dash.
+    return timeseries.is_series_sheet_name(name)
 
 
 # ── save / ingest ────────────────────────────────────────────────────────────────
@@ -288,6 +287,32 @@ def merge_static_model(session_id: str, model: dict[str, list[dict[str, Any]]]) 
             entry["columns"] = columns
     if isinstance(model.get("snapshots"), list):
         meta["snapshotCount"] = len(model["snapshots"])
+    _meta_path(session_id).write_text(json.dumps(meta, ensure_ascii=False, default=json_default), encoding="utf-8")
+    return meta
+
+
+def merge_series_sheets(session_id: str, model: dict[str, list[dict[str, Any]]]) -> dict[str, Any] | None:
+    """Write (replace) whole SERIES sheets of ``model`` into the session (Parquet); static sheets are untouched.
+
+    See :func:`backend.app.sqlite_store.merge_series_sheets`: the path for a temporal sheet that arrives as a fragment.
+    """
+    if not _is_safe_id(session_id):
+        return None
+    meta = get_meta(session_id)
+    if meta is None:
+        return None
+    (_session_dir(session_id) / "series").mkdir(parents=True, exist_ok=True)
+    existing = {s["name"]: s for s in meta.get("sheets", []) if isinstance(s, dict)}
+    for name, rows in model.items():
+        if not isinstance(rows, list) or not is_series_sheet(name) or not _is_safe_sheet(name):
+            continue
+        pd.DataFrame(rows).to_parquet(_series_path(session_id, name), index=False)
+        columns = columns_of_rows(rows)
+        entry = existing.get(name)
+        if entry is None:
+            meta.setdefault("sheets", []).append({"name": name, "kind": "series", "rowCount": len(rows), "columns": columns})
+        else:
+            entry.update(kind="series", rowCount=len(rows), columns=columns)
     _meta_path(session_id).write_text(json.dumps(meta, ensure_ascii=False, default=json_default), encoding="utf-8")
     return meta
 

@@ -337,10 +337,15 @@ def contribute_plugin(plugin_id: str, body: TransformRequest) -> dict[str, Any]:
         if meta is None:
             raise HTTPException(status_code=400, detail="No session to contribute into.")
         return meta
+    # A temporal sheet (a `<list>-<attr>` series or a registered module sheet such as RAGNAROK_CarrierOutputCap) goes
+    # to the series store: merge_static_model leaves series alone, so it would otherwise be dropped silently.
+    series_fragment = {k: v for k, v in fragment.items() if model_store.is_series_sheet(k)}
     meta = model_store.merge_static_model(body.sessionId, fragment)
     if meta is None:
         # No existing session — fall back to a full save of the fragment.
         return _save_transformed(plugin_id, body, fragment)
+    if series_fragment:
+        meta = model_store.merge_series_sheets(body.sessionId, series_fragment) or meta
     return meta
 
 

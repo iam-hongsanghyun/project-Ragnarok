@@ -6,6 +6,7 @@ from typing import Any
 
 from backend.app import module_hooks as mh
 
+from . import carrier_output_cap
 from .constraint_dsl import apply_constraint_specs, apply_dsl_constraints
 from .custom_constraints import apply_custom_constraints
 from .native_routing import dsl_candidates, routed_keys, route_native, spec_candidates, structured_candidates
@@ -78,3 +79,7 @@ def _dsl_fallback(data: dict[str, Any]) -> dict[str, Any]:
 
 mh.register("constraints", "constraints", _prepare, module=MODULE, order=30)
 mh.register("submit", "constraints-dsl-fallback", _dsl_fallback, module=MODULE, order=20)
+# The per-snapshot carrier output cap (sheet RAGNAROK_CarrierOutputCap): refused in modes it cannot honour, then a
+# linopy constraint per carrier. Ordered after the custom constraints.
+mh.register("guard", "carrier-output-cap-guard", carrier_output_cap.guard, module=MODULE, order=30)
+mh.register("constraints", "carrier-output-cap", carrier_output_cap.prepare, module=MODULE, order=35)

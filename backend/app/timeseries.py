@@ -19,6 +19,23 @@ import pandas as pd
 # row is ``{<index>: <timestamp>, <assetA>: value, …}``.
 INDEX_KEYS = ("snapshot", "name", "datetime", "period")
 
+#: Module-owned temporal sheets whose names do not follow the PyPSA ``<component>-<attribute>`` convention.
+#: They are wide, one row per snapshot (``snapshot`` + one column per entity), and are stored, windowed,
+#: retargeted and read as series like any ``<list>-<attr>`` sheet. One home for the list: the stores
+#: (``session_store`` / ``sqlite_store`` / ``run_store``), the fragment merge and the frontend mirror
+#: (``isSeriesSheet`` in ``lib/api/session.ts``) all read it.
+MODULE_SERIES_SHEETS = frozenset({"RAGNAROK_CarrierOutputCap"})
+
+
+def is_series_sheet_name(name: str) -> bool:
+    """True for a temporal sheet by name: ``<component>-<attribute>`` (not ``-pw``, not ``snapshots``) or a registered module sheet."""
+    if name == "snapshots":
+        return False
+    if name in MODULE_SERIES_SHEETS:
+        return True
+    return "-" in name and not name.endswith("-pw")  # -pw = piecewise table
+
+
 Agg = Literal["mean", "point", "max", "min"]
 VALID_AGG = ("mean", "point", "max", "min")
 

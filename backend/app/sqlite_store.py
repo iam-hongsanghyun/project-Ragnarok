@@ -502,6 +502,34 @@ def merge_static_model(session_id: str, model: dict[str, list[dict[str, Any]]]) 
     return meta
 
 
+def merge_series_sheets(session_id: str, model: dict[str, list[dict[str, Any]]]) -> dict[str, Any] | None:
+    """Write (replace) whole SERIES sheets of ``model`` into the session; static sheets and other series are untouched.
+
+    The path for a sheet that reaches the server as a fragment (a backend plugin's ``contribute``): :func:`merge_static_model`
+    leaves series alone, so without this a contributed temporal sheet would be dropped. The sheet is stored with
+    ``kind: "series"`` so windowed reads, retargeting and the thin client treat it as temporal. Returns the meta, or ``None``
+    when there is no session.
+    """
+    if not ss._is_safe_id(session_id):
+        return None
+    meta = _raw_meta(session_id)
+    if meta is None:
+        return None
+    with _connect(session_id) as conn:
+        tables = _kv_get(conn, "tables") or {}
+        for name, rows in model.items():
+            if not isinstance(rows, list) or not ss.is_series_sheet(name) or not ss._is_safe_sheet(name):
+                continue
+            _write_static_sheet(conn, meta, tables, name, rows)
+            for entry in meta["sheets"]:
+                if isinstance(entry, dict) and entry.get("name") == name:
+                    entry["kind"] = "series"
+        _kv_set(conn, "meta", meta)
+        _kv_set(conn, "tables", tables)
+        conn.commit()
+    return meta
+
+
 # ── reads ───────────────────────────────────────────────────────────────────────
 
 def get_meta(session_id: str) -> dict[str, Any] | None:

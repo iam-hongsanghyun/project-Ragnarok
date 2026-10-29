@@ -25,6 +25,7 @@ _impl = sqlite_store if USE_SQLITE else session_store
 # ── delegated public API (identical surface in both backends) ───────────────────
 save_model = _impl.save_model
 merge_static_model = _impl.merge_static_model
+merge_series_sheets = _impl.merge_series_sheets
 get_meta = _impl.get_meta
 get_sheet_page = _impl.get_sheet_page
 get_series_window = _impl.get_series_window
@@ -91,7 +92,7 @@ def distinct_values(session_id: str, sheet: str, column: str) -> list[str] | Non
 
 
 __all__ = [
-    "USE_SQLITE", "save_model", "merge_static_model", "get_meta", "get_sheet_page",
+    "USE_SQLITE", "save_model", "merge_static_model", "merge_series_sheets", "get_meta", "get_sheet_page",
     "get_series_window", "load_full_model", "save_controls", "get_controls",
     "patch_sheet", "transform_series", "clear", "has_model", "is_series_sheet",
     "distinct_values", "resave_model", "get_cost_basis_migration", "acknowledge_cost_basis_migration",

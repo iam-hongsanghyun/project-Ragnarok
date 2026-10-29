@@ -566,6 +566,13 @@ def _journaled_merge_static_model(session_id: str, model):
     )
 
 
+def _journaled_merge_series_sheets(session_id: str, model):
+    return _model_replace_entry(
+        session_id, "merge series sheets",
+        lambda: _orig["merge_series_sheets"](session_id, model),
+    )
+
+
 def _journaled_clear(session_id: str) -> bool:
     with _lock(session_id):
         entry_id = None
@@ -604,6 +611,7 @@ def wrap_model_store() -> None:
     _orig.update({
         "save_model": model_store.save_model,
         "merge_static_model": model_store.merge_static_model,
+        "merge_series_sheets": model_store.merge_series_sheets,
         "patch_sheet": model_store.patch_sheet,
         "transform_series": model_store.transform_series,
         "clear": model_store.clear,
@@ -612,6 +620,7 @@ def wrap_model_store() -> None:
     })
     model_store.save_model = _journaled_save_model  # type: ignore[assignment]
     model_store.merge_static_model = _journaled_merge_static_model  # type: ignore[assignment]
+    model_store.merge_series_sheets = _journaled_merge_series_sheets  # type: ignore[assignment]
     model_store.patch_sheet = _journaled_patch_sheet  # type: ignore[assignment]
     model_store.transform_series = _journaled_transform_series  # type: ignore[assignment]
     model_store.clear = _journaled_clear  # type: ignore[assignment]

@@ -310,7 +310,7 @@ def build_run_meta(name: str, bundle: dict[str, Any], size_bytes: int = 0) -> di
 def _is_series_sheet(name: str) -> bool:
     """A PyPSA time-series sheet is ``<component>-<attribute>``; ``snapshots`` is
     the time axis (static). Mirrors session_store.is_series_sheet."""
-    return name != "snapshots" and "-" in name and not name.endswith("-pw")  # -pw = piecewise table
+    return timeseries.is_series_sheet_name(name)  # -pw = piecewise table; module sheets are registered by name
 
 
 def _model_static(model: Any) -> dict[str, Any]:
