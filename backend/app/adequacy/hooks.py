@@ -13,11 +13,14 @@ MODULE = "adequacy"
 def _adequacy(ctx: mh.RunContext) -> dict[str, Any]:
     """Stochastic renewable ensemble vs load (A1 + A2 LOLE); None when no time-varying renewable generator.
 
+    ``options.adequacyReadout = false`` skips it (the payload key is then None, as when the study does not run).
     Never raises into the solve: any failure (e.g. pathway snapshots are (period, timestep) tuples) degrades
     to a run note, like the Monte Carlo extras below.
     """
     from .adequacy import build_adequacy
 
+    if ctx.options.get("adequacyReadout", True) is False:
+        return {"adequacy": None}
     try:
         return {"adequacy": build_adequacy(ctx.network)}
     except Exception as exc:  # noqa: BLE001 - never sink the run over an adequacy extra

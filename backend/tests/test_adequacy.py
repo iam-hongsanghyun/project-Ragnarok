@@ -154,3 +154,14 @@ def test_adequacy_and_simulation_survive_pathway_snapshots() -> None:
     assert len(band) == 8
     assert band[0]["timestamp"].startswith("2025-01-01T00:00:00")
     assert band[4]["timestamp"].startswith("2030-01-01T00:00:00")
+
+
+def test_the_default_adequacy_readout_can_be_switched_off() -> None:
+    """options.adequacyReadout = false skips the LOLE / EENS readout (a study that excludes adequacy indices)."""
+    from backend.app import module_hooks as mh
+    from backend.app.adequacy.hooks import _adequacy
+
+    on = _adequacy(mh.RunContext(network=_tight_network(False), options={}))
+    off = _adequacy(mh.RunContext(network=_tight_network(False), options={"adequacyReadout": False}))
+    assert on["adequacy"] is not None and on["adequacy"]["lole"] > 0.0
+    assert off == {"adequacy": None}
